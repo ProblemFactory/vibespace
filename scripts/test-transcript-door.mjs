@@ -85,8 +85,13 @@ const srcFiles = (() => { const out = []; out.push('server.js');   // the hub's 
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (rel !== 'src/public' && rel !== 'src/lib') walk(rel); } else if (e.name.endsWith('.js')) out.push(rel); } }; walk('src'); return out.filter((rel) => fs.existsSync(path.join(REPO, rel))); })();
 const KW = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'else']);
 const FN = /^\s*(?:async\s+)?function\s+(\w+)\s*\(|^\s{2}(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{\s*$|^\s*(?:const|let)\s+(\w+)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>/;
-const fnOf = (L, i) => { for (let j = i; j >= 0; j--) { const m = FN.exec(L[j]); if (m) { const n = m[1] || m[2] || m[3]; if (!KW.has(n)) return n; } } return null; };
+// line 782's form on a570e01a8 (lane mask-value-shape, 主开发 r3991): a ONE-LINE function ABOVE the call, closed on its own line (its
+// braces balance there), never encloses the call — the scan goes on past it (src/codex-session-store.js _ensureParsed's `fpOf`)
+const closedOnItsLine = (l) => { const o = (l.match(/\{/g) || []).length; return o > 0 && o === (l.match(/\}/g) || []).length; };
+const fnOf = (L, i) => { for (let j = i; j >= 0; j--) { const m = FN.exec(L[j]); if (m) { const n = m[1] || m[2] || m[3]; if (!KW.has(n) && !(j < i && closedOnItsLine(L[j]))) return n; } } return null; };
+const fnOfAsWritten = (L, i) => { for (let j = i; j >= 0; j--) { const m = FN.exec(L[j]); if (m) { const n = m[1] || m[2] || m[3]; if (!KW.has(n)) return n; } } return null; };   // the red control's
 const isCode = (l) => !/^\s*(\/\/|\*|\/\*)/.test(l);
+const fnOfDefault = fnOf;
 // a worker thread's file reads where it runs — never the hub's loop
 const OFF_LOOP_FILES = new Set(['src/transcript-worker.js', 'src/search-index-worker.js', 'src/sessions-sweep-worker.js', 'src/safe-fs-worker.js']);
 const SYNC_PARSE = /\b(parseSessionJsonl|parseCodexSessionJsonl|readJsonlTail|readJsonlBounded)\(/g;
@@ -104,7 +109,7 @@ const SYNC_CALLERS = {
 };
 // a reader's MAKERS (the readers they make are judged where they are read); a harness descriptor's `createReader:` is one too
 const FACTORIES = { 'src/agentd/agentd.js|getTranscriptService': 'the device agent\'s service', 'src/server/mounts-plugins-wiring.js|createSessionMessages': 'the hub\'s reader factory', 'src/transcript-service.js|readerFor': 'the service\'s own maker' };
-function census(files) {   // {rel: text} → { sync, unnamedSync, doorless, sites }
+function census(files, fnOf = fnOfDefault) {   // {rel: text} → { sync, unnamedSync, doorless, sites }
   const sync = [], unnamedSync = [], doorless = [], sites = [];
   for (const [rel, text] of Object.entries(files)) {
     if (OFF_LOOP_FILES.has(rel)) continue;
@@ -150,6 +155,11 @@ const planted = { ...files,
 const p = census(planted);
 ok(p.doorless.some((d) => d.includes('sm → sm.chatStatus(')) && p.unnamedSync.some((d) => d.includes('plantedParse')),
   `RED CONTROLS (a planted read with no door, a planted caller of the synchronous parse): each named — ${[...p.doorless, ...p.unnamedSync].join(' · ')}`, p);
+// line 782's form on a570e01a8: a caller is named by the function that ENCLOSES it, never by a one-line helper above it
+const nestedSrc = { 'src/session-store.js': 'function _ensureParsed() {\n  const fpOf = (id) => { return id; };\n  return parseSessionJsonl(fpOf(\'x\'), \'/w\');\n}\n' };
+const nested = census(nestedSrc), nestedRed = census(nestedSrc, fnOfAsWritten);
+ok(nested.unnamedSync.length === 0 && nested.sync.join() === 'src/session-store.js|_ensureParsed' && nestedRed.sync.join() === 'src/session-store.js|fpOf' && nestedRed.unnamedSync.length === 1,
+  `a caller is named by its ENCLOSING function, never by a one-line helper closed above it (${nested.sync.join()}); RED CONTROL, the finder as first written: ${nestedRed.sync.join()}`, { nested, nestedRed });
 console.log('F) the warm\'s read is never thrown away (主开发 r1524): a tail the cache does not admit is handed to its reader\'s parse');
 {
   const small = (n) => { const id = `7d7d7d7d-0000-4000-8000-0000000001${String(n).padStart(2, '0')}`, fp = path.join(PROJ, `${id}.jsonl`); fs.writeFileSync(fp, lines.map((l) => l.replaceAll(ID, id)).join('\n') + '\n'); return { id, fp }; };
