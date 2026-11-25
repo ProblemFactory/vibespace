@@ -94,6 +94,7 @@ function sfs(req) {
 // err.message + roMountHint) that still carries the refusal is re-said: the storage by name, why, the way on — code
 // storage_sync_refused (the client's fsErrorText words it in the reader's language; `error` = the English for agents).
 const GUARD_REFUSAL = require('../server/sync-fs-witness').REFUSAL;
+const FC = require('../fd-close.js');   // B-ddf3 unit 3 (r4634): a sync the file system does not do lands, said once (syncUnsupportedLands)
 const SP = require('../storage-path');
 function syncRefusedBody(req) {
   let row = null;
@@ -1564,8 +1565,9 @@ async function crossHostTransfer(req, res, { move }) {
         await new Promise((resolve, reject) => { const w = fs.createWriteStream(part); w.on('error', reject); w.on('finish', resolve); reader.on('error', reject); reader.pipe(w); });   // ckpt61 cure 3: the listeners before the pipe
         if (srcSize != null && fs.statSync(part).size !== srcSize) throw new Error('transfer truncated (source changed or connection dropped)');
         // B-ddf3 (lane bl-vault, r4361): the copy's bytes are on disk before its name points at them — the partial synced ONCE at its
-        // end through the thread pool (never on the hub's loop); a failed sync is a failed copy, said by name (the partial removed below)
-        { let h = null, fault = null; try { h = await fs.promises.open(part, 'r+'); await h.sync(); } catch (se) { fault = se; } if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; } if (fault) throw new Error(`${path.basename(dPath)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved, nothing was replaced`); }
+        // end through the thread pool (never on the hub's loop); a failed sync is a failed copy, said by name (the partial removed below);
+        // r4634: a file system that does not do a sync at all lands, said once (src/fd-close.js syncUnsupportedLands); the open its own try
+        { let h = null, fault = null; try { h = await fs.promises.open(part, 'r+'); } catch (oe) { fault = oe; } if (h) { try { await h.sync(); } catch (se) { if (!FC.syncUnsupportedLands(se, 'a copy between machines', (l) => console.warn(`[files] ${l}`))) fault = se; } const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; } if (fault) throw new Error(`${path.basename(dPath)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved, nothing was replaced`); }
         fs.renameSync(part, dPath);
       } catch (e) { try { fs.rmSync(part, { force: true }); } catch {} throw e; }
     }

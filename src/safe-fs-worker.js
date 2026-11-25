@@ -19,6 +19,7 @@
 'use strict';
 
 const fs = require('fs');
+const FC = require('./fd-close.js');   // B-ddf3 unit 3 (r4634): a sync the file system does not do lands, said once (syncUnsupportedLands)
 const path = require('path');
 const { StringDecoder } = require('string_decoder');
 
@@ -97,7 +98,8 @@ function stageCopy(src, dest) {
       if (lst.isDirectory()) { for (const n of fs.readdirSync(p)) stack.push(path.join(p, n)); continue; }
       if (!lst.isFile()) continue;
       let fd = null, fault = null;
-      try { fd = fs.openSync(p, 'r'); fs.fsyncSync(fd); } catch (se) { fault = se; }
+      try { fd = fs.openSync(p, 'r'); } catch (oe) { fault = oe; }   // the open its own try: only the sync's answer may read «no sync» (r4634)
+      if (fd != null) { try { fs.fsyncSync(fd); } catch (se) { if (!FC.syncUnsupportedLands(se, 'a copy across devices', (l) => console.warn(`[safe-fs] ${l}`))) fault = se; } }
       if (fd != null) { try { fs.closeSync(fd); } catch (ce) { if (!fault) fault = ce; } }
       if (fault) throw Object.assign(new Error(`${path.basename(dest)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved, nothing was replaced`), { code: (fault && fault.code) || 'EIO' });
     }

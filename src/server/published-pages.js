@@ -18,6 +18,7 @@
 // XSS against the owner's own session. The canvas payload's own nested
 // preview iframes keep working (postMessage-only by design).
 const fs = require('fs');
+const FC = require('../fd-close.js');   // B-ddf3 unit 3 (r4634): a sync the file system does not do lands, said once (syncUnsupportedLands)
 const path = require('path');
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const SR = require('../store-read.js');
@@ -236,7 +237,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     if (!key) return { error: 'missing srcKey' };
     const mt = normalizeMediaType(mediaType);
     let rec = store.pages.find((p) => p.srcKey === key);
-    const replaced = !!rec;
+    let replaced = !!rec, adopted = false;
     const draft = rec || { id: mintId(), srcKey: key, srcPath: String(srcPath || '') || key.replace(/^[^:]*:/, ''), public: false, createdAt: Date.now() };
     const prevExt = snapExt(rec);
     const fp = path.join(pagesDir, draft.id + (mt ? '.bin' : '.html'));
@@ -244,7 +245,8 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
       await fs.promises.mkdir(pagesDir, { recursive: true });
       const tmp = fp + '.tmp';
       let h = null, fault = null;
-      try { h = await fs.promises.open(tmp, 'w'); await h.writeFile(buf); await h.sync(); } catch (e) { fault = e; }
+      try { h = await fs.promises.open(tmp, 'w'); await h.writeFile(buf); } catch (e) { fault = e; }
+      if (h && !fault) { try { await h.sync(); } catch (se) { if (!FC.syncUnsupportedLands(se, 'a published page', (l) => console.warn(`[pages] ${l}`))) fault = se; } }   // r4634: no sync at all lands, said once
       if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; }
       if (fault) { await fs.promises.unlink(tmp).catch(() => { }); return { error: `the page could not be put on disk (${(fault && fault.code) || 'failed'}) — not published, nothing was replaced` }; }
       await fs.promises.rename(tmp, fp);
@@ -256,10 +258,21 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
       const cur = store.pages.find((p) => p.id === rec.id);
       if (!cur) { await fs.promises.unlink(fp).catch(() => { }); return { error: 'the page was taken down while it was being published — not published' }; }
       rec = cur;
+    } else {
+      // r4634 MUST 1: ONE SOURCE, ONE PAGE, WHOEVER PUBLISHES. A row of this source that appeared while the content was written (the person's
+      // own Publish, which is not in this order; a lift's new read of the list) IS the page: ADOPTED — the written, synced file renamed onto
+      // that row's file, its other-kind twin removed — and this publish answers as a replace of it, never a second row of one source
+      const appeared = store.pages.find((p) => p.srcKey === key);
+      if (appeared) {
+        const ext = mt ? '.bin' : '.html', into = path.join(pagesDir, appeared.id + ext);
+        try { await fs.promises.rename(fp, into); } catch (e) { await fs.promises.unlink(fp).catch(() => { }); return { error: 'store failed: ' + e.message }; }
+        if (snapExt(appeared) !== ext) await fs.promises.unlink(path.join(pagesDir, appeared.id + snapExt(appeared))).catch(() => { });
+        rec = appeared; replaced = true; adopted = true;
+      }
     }
     // A re-publish that CHANGES kind (html ⇄ binary) must not leave the old snapshot behind under the other extension — serveRaw picks
     // the file by the record's current mediaType, so a stale twin would be dead bytes on disk that a later flip would silently serve.
-    if (rec && prevExt !== (mt ? '.bin' : '.html')) await fs.promises.unlink(path.join(pagesDir, draft.id + prevExt)).catch(() => { });
+    if (rec && !adopted && prevExt !== (mt ? '.bin' : '.html')) await fs.promises.unlink(path.join(pagesDir, draft.id + prevExt)).catch(() => { });
     if (!rec) { rec = draft; store.pages.push(rec); }
     if (mt) rec.mediaType = mt; else delete rec.mediaType;
     rec.name = String(name || rec.name || path.basename(rec.srcPath || 'page', path.extname(rec.srcPath || ''))).slice(0, 120);

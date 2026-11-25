@@ -72,6 +72,7 @@ function unreadNoticeWords(u) {
   return { text: fillWords(T, p), detail: fillWords(D, p), i18n: { text: { key: T, params: p }, detail: [{ key: D, params: p }] } };
 }
 const crypto = require('crypto');
+const FC = require('./fd-close.js');   // B-ddf3 unit 3 (r4634): a sync the file system does not do lands, said once (syncUnsupportedLands)
 const os = require('os');
 const TC = require('./task-context.js'); // PURE: the Context table's rows, resolution, derivations, budget plan (lane task-group-context)
 const { pickColorSeq } = require('./task-color-seq');
@@ -3584,9 +3585,10 @@ class TaskGroupManager {
     if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
     const text = this.renderRepoFile(t);
     await fs.promises.mkdir(path.dirname(absPath), { recursive: true });
-    const tmp = absPath + '.tmp';
+    const tmp = `${absPath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;   // its OWN temp a call (r4634 small a: two exports to one path at once never share one)
     let h = null, fault = null;
-    try { h = await fs.promises.open(tmp, 'w'); await h.writeFile(text); await h.sync(); } catch (e) { fault = e; }
+    try { h = await fs.promises.open(tmp, 'wx'); await h.writeFile(text); } catch (e) { fault = e; }
+    if (h && !fault) { try { await h.sync(); } catch (se) { if (!FC.syncUnsupportedLands(se, 'a Task Group export', (l) => console.warn(`[task-groups] ${l}`))) fault = se; } }   // r4634: no sync at all lands, said once
     if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; }
     if (fault) { await fs.promises.unlink(tmp).catch(() => { }); throw new Error(`${path.basename(absPath)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not exported, nothing was replaced`); }
     await fs.promises.rename(tmp, absPath);

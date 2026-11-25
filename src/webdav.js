@@ -25,6 +25,7 @@ const fsp = require('fs').promises;
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const FC = require('./fd-close.js');   // B-ddf3 unit 3 (r4634): a sync the file system does not do lands, said once (syncUnsupportedLands)
 const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const SR = require('./store-read.js');
 const HOLD = require('./store-read-hold.js');   // B-f276 family unit 1: mount-tokens.json under the store-read law
@@ -208,13 +209,17 @@ function bearerOf(req) {
 // B-ddf3 unit 3 (lane bl-vault, r4361): A DAV UPLOAD LANDS SYNCED — the temp synced ONCE at its end through the thread pool, then renamed
 // over its name; a failed sync is a failed upload, said by name (a 500 whose text body names it), the temp removed. Its own function at
 // the module's level: its rename is judged in its own scope (the MOVE verb's rename in the route stays a move)
-async function landUpload(tmp, target, existed, res) {
+// r4634: a file system that does not do a sync at all lands, said once (src/fd-close.js syncUnsupportedLands). ONE ANSWER (small c): the
+// stream's own error (a close that fails after its finish) may have answered already — then nothing more is sent, and nothing renamed
+async function landUpload(tmp, target, existed, res, streamFailed = () => null) {
   let h = null, fault = null;
-  try { h = await fsp.open(tmp, 'r+'); await h.sync(); } catch (se) { fault = se; }
+  try { h = await fsp.open(tmp, 'r+'); } catch (oe) { fault = oe; }
+  if (h) { try { await h.sync(); } catch (se) { if (!FC.syncUnsupportedLands(se, 'a WebDAV upload', (l) => console.warn(`[webdav] ${l}`))) fault = se; } }
   if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; }
-  if (fault) { fsp.unlink(tmp).catch(() => {}); return res.status(500).type('text/plain').send(`${path.basename(target)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved`); }
-  return fsp.rename(tmp, target).then(() => res.status(existed ? 204 : 201).end(),
-    () => { fsp.unlink(tmp).catch(() => {}); res.status(500).end(); });
+  if (!fault && streamFailed()) fault = streamFailed();   // the stream's own write or close failed meanwhile: a failed upload
+  if (fault) { await fsp.unlink(tmp).catch(() => {}); if (res.headersSent) return; return res.status(500).type('text/plain').send(`${path.basename(target)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved`); }
+  return fsp.rename(tmp, target).then(() => { if (!res.headersSent) res.status(existed ? 204 : 201).end(); },
+    async () => { await fsp.unlink(tmp).catch(() => {}); if (!res.headersSent) res.status(500).end(); });
 }
 
 function registerWebdav(app, { tokens }) {
@@ -333,8 +338,9 @@ function registerWebdav(app, { tokens }) {
           const tmp = target + '.vsdav-' + crypto.randomBytes(4).toString('hex');
           const w = fs.createWriteStream(tmp, { mode: 0o644 });
           req.pipe(w);
-          w.on('finish', () => { landUpload(tmp, target, !!st, res); });   // B-ddf3 unit 3: synced, then renamed (landUpload, above)
-          w.on('error', () => { fsp.unlink(tmp).catch(() => {}); res.status(500).end(); });
+          let wFailed = null;   // the stream's own failure (r4634 small c): one answer, and nothing renamed after it
+          w.on('finish', () => { w.landing = landUpload(tmp, target, !!st, res, () => wFailed); });   // B-ddf3 unit 3: synced, then renamed (landUpload, above); its own promise kept on the stream (its end is a fact a reader can wait for)
+          w.on('error', (e) => { wFailed = wFailed || e || new Error('write failed'); fsp.unlink(tmp).catch(() => {}); if (!res.headersSent) res.status(500).end(); });
           req.on('aborted', () => { try { w.destroy(); } catch {} fsp.unlink(tmp).catch(() => {}); });
           return;
         }

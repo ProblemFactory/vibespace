@@ -8095,6 +8095,11 @@ await section(async () => {
   // B-82b8 (主开发 r654): the harness settings' WORDS (a person's — shown only by the hub's Settings window) never ride the device bundle;
   // the table of machine facts does (the descriptors read its keys, types, defaults and apply road)
   ok(in107.some((k) => /src\/harness-settings\.js$/.test(k)) && !in107.some((k) => /src\/harness-settings-words\.js$/.test(k)), `§107 B-82b8: the device bundle carries src/harness-settings.js (the machine facts) but NOT src/harness-settings-words.js (a person's words) — the bundle is ${size107} bytes`, in107.filter((k) => /harness-settings/.test(k)));
+  // B-ddf3 unit 3's cure (lane bl-vault, 主开发 r4635): src/design-fs.js asks src/fd-close.js (the one no-sync door: node's fs only), so
+  // the device bundle CARRIES it — a named input of the cut. Read from this build's own input list: who asks it, its bytes in the output
+  const fc107 = in107.find((k) => /(^|\/)src\/fd-close\.js$/.test(k)), fcBy107 = in107.filter((k) => (r107.metafile.inputs[k].imports || []).some((i) => /(^|\/)src\/fd-close\.js$/.test(i.path)));
+  const fcOut107 = Object.values(r107.metafile.outputs || {}).map((o) => (o.inputs && fc107 && o.inputs[fc107] ? o.inputs[fc107].bytesInOutput : 0)).reduce((a, b) => a + b, 0);
+  ok(!!fc107 && fcBy107.some((k) => /src\/design-fs\.js$/.test(k)), `§107 B-ddf3: the device bundle carries src/fd-close.js, asked by ${fcBy107.join(', ') || 'nothing'} (${fcOut107} bytes of esbuild's output before the strip) — the bundle is ${size107} bytes, ${in107.length} inputs`, fcBy107);
   // 主开发 r2660 (B): THE HUB'S FILE POOL NEVER RIDES THE DEVICE BUNDLE. src/safe-fs.js (about 23 KB as shipped) reached it through the
   // lazy requires of three files the device carries (the codex adapter, the transcript service, the agy backfill), each asked only when
   // its worker script exists, so no pool was ever built on a machine. They ask src/hub-pool.js now, whose require is a computed path the
