@@ -988,13 +988,22 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
   // runner at load 2.5–2.8: the exit first ⇒ nothing uncaught ⇒ the control's hub lived). The fake ssh now KEEPS ITS PROCESS for
   // LINGER7_S after closing stdin (its stderr line first, as ssh prints it): the write fails while the child lives. The release's
   // shape stays as BIN7_NOW, only for the race's own control below (a stall placed in its window).
+  // THE MIRROR OF 2.369.419 (run 45633627765, Node 24): the RED CONTROL lived once — exit null, no write error, the next request
+  // 200: the linger is a CLOCK, and a hub whose loop came back to the write after it saw the child's exit first. THE CONTROLS NOW
+  // HOLD THE CHILD (BIN7_HELD): it closes its stdin and stays alive until the scene RELEASES it, after the hub's death was looked
+  // for — the write meets EPIPE while the child lives, whatever the box's timing; the old linger stays for the fixed hub and for
+  // its own placement below (red at will under the old wait).
   const LINGER7_S = 3;
+  const HOLD7 = path.join(ROOT, 'dead-ssh-release');   // the held ssh exits only once this file exists (bounded at 120 s: never a stray)
   const CALLS7 = path.join(ROOT, 'dead-ssh-calls.log');
-  const deadSsh = (dir, linger) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'ssh'), `#!/bin/sh\nexec 0<&-\necho x >> '${CALLS7}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\n${linger ? `sleep ${linger}\n` : ''}exit 255\n`, { mode: 0o755 }); return dir; };
+  const deadSsh = (dir, linger, held = false) => { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'ssh'), `#!/bin/sh\nexec 0<&-\necho x >> '${CALLS7}'\necho "ssh: Could not resolve hostname mac.example.test: Name or service not known" >&2\n${held ? `i=0; while [ ! -e '${HOLD7}' ] && [ $i -lt 1200 ]; do sleep 0.1; i=$((i+1)); done\n` : linger ? `sleep ${linger}\n` : ''}exit 255\n`, { mode: 0o755 }); return dir; };
   const BIN7 = deadSsh(path.join(ROOT, 'dead-ssh-bin'), LINGER7_S), BIN7_NOW = deadSsh(path.join(ROOT, 'dead-ssh-bin-now'), 0);
+  const BIN7_HELD = deadSsh(path.join(ROOT, 'dead-ssh-bin-held'), 0, true);   // the controls' ssh: alive until released
   const PAD7 = 6 << 20;           // the tools tar's padding: far past any socket buffer, under installAgentTools' 8 MB tar bound
   const WRITE_ERR7 = /write (?:EPIPE|ECONNRESET)|ERR_STREAM_DESTROYED/;
   const deadHub = async (tag, hostsSrc, { expectDeath = false, bin = BIN7 } = {}) => {
+    const held = bin === BIN7_HELD;
+    if (held) { try { fs.rmSync(HOLD7, { force: true }); } catch { } }   // the held ssh waits for THIS scene's release
     const wt = path.join(ROOT, 'wt-dead-' + tag);
     worktrees.add(wt);
     execFileSync('git', ['-C', REPO, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' });
@@ -1015,14 +1024,16 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     const call = async (p, body) => { try { const c = new AbortController(); const tm = setTimeout(() => c.abort(), 15000); const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: c.signal }); clearTimeout(tm); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; } catch (e) { return { status: 'NO ANSWER', err: String(e.message || e) }; } };
     const steps = {};
     steps.install = await call('/api/hosts/h-dead/agent-tools/install', {});
-    { const t1 = Date.now(); while (exited == null && Date.now() - t1 < (expectDeath ? 15000 : 800)) await sleep(100); } // the control's death is AT this road
+    let deathWaitMs = 0;
+    { const t1 = Date.now(); while (exited == null && Date.now() - t1 < (expectDeath ? 15000 : 800)) await sleep(100); deathWaitMs = Date.now() - t1; } // the control's death is AT this road
     const exitedAfterInstall = exited;
+    if (held) fs.writeFileSync(HOLD7, '');   // the death was looked for: the held child may go now
     steps.harvest = await call('/api/usage-stats/harvest-hosts', { host: 'h-dead', force: true }); await sleep(800);
     steps.slice = await call(`/api/hosts/h-dead/dir-complete?path=Doc&bases=${encodeURIComponent('["~"]')}&probe=%5B%5D&q=Doc&kind=folder`);
     steps.recent = await call('/api/hosts/h-dead/recent-cwds');
     steps.home = await call('/api/home?host=h-dead');
     steps.next = await call('/api/home');
-    const r = { steps, exited, exitedAfterInstall, bootMs, ready: out.includes('Ready.'), writeErr: (out.match(WRITE_ERR7) || [''])[0], journal: () => out };
+    const r = { steps, exited, exitedAfterInstall, deathWaitMs, held, bootMs, ready: out.includes('Ready.'), writeErr: (out.match(WRITE_ERR7) || [''])[0], journal: () => out };
     try { srv.kill('SIGKILL'); } catch { }
     return r;
   };
@@ -1037,10 +1048,10 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     ok(s.next.status === 200 && fixed.exited == null && !fixed.writeErr, '§7 …and the hub answers the NEXT request (alive, no stream write error in its journal)', JSON.stringify({ next: s.next.status, exited: fixed.exited, writeErr: fixed.writeErr, tail: fixed.journal().slice(-400) }));
     const src7 = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
     const preFix7 = src7.replace("  stdin.on('error', (e) => { if (!fed.error) fed.error = e; });\n", '');
-    const ctl = await deadHub('prefix', preFix7, { expectDeath: true });
+    const ctl = await deadHub('prefix', preFix7, { expectDeath: true, bin: BIN7_HELD });
     ok(preFix7 !== src7 && ctl.ready, `§7 RED CONTROL setup: the copy without the listener took its edit and its hub booted (${ctl.bootMs} ms — «did not boot» is this red, never «survived»)`, ctl.journal().slice(-600));
     ok(ctl.exitedAfterInstall != null && ctl.exitedAfterInstall.code === 1 && !!ctl.writeErr && ctl.steps.next.status === 'NO ANSWER',
-      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of the first stdin road (exit ${JSON.stringify(ctl.exitedAfterInstall)} right after the tools install, «${ctl.writeErr}» in its journal, the next request ${ctl.steps.next.status})`, ctl.journal().slice(-600));
+      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of the first stdin road, its ssh HELD alive (exit ${JSON.stringify(ctl.exitedAfterInstall)} right after the tools install, looked for ${ctl.deathWaitMs} ms, «${ctl.writeErr}» in its journal, the next request ${ctl.steps.next.status})`, ctl.journal().slice(-600));
     // B-1217: THE RACE, PLACED (a stall in its window, never load). The pre-fix copy with its tar write HELD: (a) until the child's
     // exit — the order the runner hit, forced: Node has destroyed the child's stdin by then, no 'error' comes and the hub LIVES on
     // the release's fake ssh; (b) 300 ms, well inside the linger — on the lingering ssh the held write still meets EPIPE with the
@@ -1051,21 +1062,32 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     const BODY7 = 'try { if (bytes == null) stdin.end(); else stdin.end(bytes); } catch (e) { if (!fed.error) fed.error = e; }';
     const EXIT_FORM7 = `  child.once('exit', () => { ${BODY7} }); /* B-1217: the stall placed — the write only after the child's exit */\n`;
     const LATE_FORM7 = `  setTimeout(() => { ${BODY7} }, 300); /* B-1217: the stall placed — the write 300 ms late */\n`;
+    const PAST_FORM7 = `  setTimeout(() => { ${BODY7} }, ${LINGER7_S * 1000 + 500}); /* the mirror's miss placed — the write held past the old linger */\n`;
     const afterExit7 = preFix7.includes(STALL7) ? preFix7.replace(STALL7, EXIT_FORM7) : null;
     const stalled7 = preFix7.includes(STALL7) ? preFix7.replace(STALL7, LATE_FORM7) : null;
+    const pastLinger7 = preFix7.includes(STALL7) ? preFix7.replace(STALL7, PAST_FORM7) : null;
     const compiles7 = (src) => { try { new (require('node:vm').Script)('(function (exports, require, module, __filename, __dirname) {' + src + '\n})', { filename: 'hosts-copy.js' }); return true; } catch (e) { return String(e && e.message); } };
     ok(!!afterExit7 && !!stalled7 && afterExit7.includes(EXIT_FORM7) && stalled7.includes(LATE_FORM7) && !afterExit7.includes(STALL7) && !stalled7.includes(STALL7),
       '§7 the race\'s stall finds its line in the pre-fix copy (the one write of feedStdin) and each form is written whole');
-    ok(compiles7(afterExit7) === true && compiles7(stalled7) === true, '§7 …and both stalled copies of src/hosts.js COMPILE (a copy that does not parse is red here, by name — never a hub that silently never boots)',
-      { exitForm: compiles7(afterExit7), lateForm: compiles7(stalled7) });
+    ok(compiles7(afterExit7) === true && compiles7(stalled7) === true && !!pastLinger7 && pastLinger7.includes(PAST_FORM7) && compiles7(pastLinger7) === true, '§7 …and the stalled copies of src/hosts.js COMPILE (a copy that does not parse is red here, by name — never a hub that silently never boots)',
+      { exitForm: compiles7(afterExit7), lateForm: compiles7(stalled7), pastLinger: pastLinger7 ? compiles7(pastLinger7) : 'no copy' });
     const broken7 = preFix7.replace(STALL7, `  child.once('exit', (() => { ${BODY7} }); /* the form 3837f878c wrote */\n`);
     ok(compiles7(broken7) !== true, `§7 CONTROL of the compile check: the form 3837f878c wrote (its exit call never closed) does NOT compile — «${compiles7(broken7)}»`);
     const raceNow = await deadHub('race-now', afterExit7, { expectDeath: true, bin: BIN7_NOW });
     ok(raceNow.ready && raceNow.exitedAfterInstall == null,
       `§7 THE RACE (RED on the release's fake ssh): the write held until the child's exit meets a stdin Node already destroyed — no 'error', the pre-fix hub LIVES (exit ${JSON.stringify(raceNow.exitedAfterInstall)}, next ${raceNow.steps.next.status})`, raceNow.journal().slice(-400));
-    const raceCure = await deadHub('race-cure', stalled7, { expectDeath: true });
+    const raceCure = await deadHub('race-cure', stalled7, { expectDeath: true, bin: BIN7_HELD });
     ok(raceCure.ready && raceCure.exitedAfterInstall != null && raceCure.exitedAfterInstall.code === 1 && !!raceCure.writeErr,
-      `§7 …and on the lingering ssh the SAME held write meets EPIPE while the child lives: the pre-fix hub DIES (exit ${JSON.stringify(raceCure.exitedAfterInstall)}, «${raceCure.writeErr}»)`, raceCure.journal().slice(-400));
+      `§7 …and on the HELD ssh the SAME held write meets EPIPE while the child lives: the pre-fix hub DIES (exit ${JSON.stringify(raceCure.exitedAfterInstall)}, «${raceCure.writeErr}»)`, raceCure.journal().slice(-400));
+    // THE MIRROR's MISS, PLACED (a hold in its window, never load): the pre-fix write held PAST the old linger — on the lingering ssh the
+    // child has exited and Node destroyed its stdin, no 'error' comes, the hub LIVES (the control's red lost at will under the OLD wait);
+    // on the HELD ssh the same late write meets EPIPE while the child lives and the hub DIES (the control's red kept under the new one)
+    const pastOld = await deadHub('past-linger', pastLinger7, { expectDeath: true });
+    ok(pastOld.ready && pastOld.exitedAfterInstall == null,
+      `§7 THE MIRROR's MISS AT WILL (the old wait, a linger of ${LINGER7_S} s): the pre-fix write held past it meets a destroyed stdin — the pre-fix hub LIVES (exit ${JSON.stringify(pastOld.exitedAfterInstall)}, next ${pastOld.steps.next.status})`, pastOld.journal().slice(-400));
+    const pastHeld = await deadHub('past-held', pastLinger7, { expectDeath: true, bin: BIN7_HELD });
+    ok(pastHeld.ready && pastHeld.exitedAfterInstall != null && pastHeld.exitedAfterInstall.code === 1 && !!pastHeld.writeErr,
+      `§7 …and with the ssh HELD the same late write meets EPIPE while the child lives: the pre-fix hub DIES (exit ${JSON.stringify(pastHeld.exitedAfterInstall)}, looked for ${pastHeld.deathWaitMs} ms, «${pastHeld.writeErr}»)`, pastHeld.journal().slice(-400));
   } catch (e) { ok(false, '§7 the dead-machine leg ran', String((e && e.stack) || e).slice(0, 600)); }
 }
 
