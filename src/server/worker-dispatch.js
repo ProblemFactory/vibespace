@@ -53,6 +53,20 @@ const dispatchKey = (from, to, text, attempt = '') => crypto.createHash('sha256'
 function create({ activeSessions, getGroups = () => null, getSendUserInput = () => null, authorizeSpend = null, noteSpend = null, releaseSpend = null, log = () => { }, waitMs = M.COMPACT_WAIT_MS, awaitEnd = awaitCompactionEnd, now = Date.now } = {}) {
   const inFlight = new Set();   // target conversation ids with a dispatch's compaction running (two dispatches never compact twice)
   const owedCompactions = new Map();   // B-ef83 unit 1 (i): ledger key → { from, to, name, why, since, gid, rec } — a compaction the gate could not judge
+  // 主开发 r4557: THE OWED SET HAS A BOUND OF ITS OWN (a hold that never lifts in this process kept every held brief's record until
+  // the stop). At most ONE record waits a worker — at the lift only one compaction a worker is made (the pace's per-worker floor and
+  // `inFlight` end the rest), so a newer brief's record REPLACES an older one for the same worker (the older brief, posted, rides
+  // the same woken turn's report) — and a record past its sixty minutes (OWED_COMPACT_MAX_MS) is dropped when another is added.
+  // → the set never holds more than one record per worker dispatched to in the last hour
+  function owe(key, rec) {
+    const at = now();
+    for (const [k, o] of [...owedCompactions]) {
+      if (k === key) continue;
+      if (o.to === rec.to) { owedCompactions.delete(k); log(`[dispatch] ${String(o.from).slice(0, 8)} → ${String(o.to).slice(0, 8)}: an owed compaction is REPLACED by a newer brief's for the same worker (one waits a worker; the older brief rides the same turn)`); }
+      else if (at - Number(o.since || 0) > OWED_COMPACT_MAX_MS) { owedCompactions.delete(k); log(`[dispatch] ${String(o.from).slice(0, 8)} → ${String(o.to).slice(0, 8)}: the owed compaction ends — past its bound (${OWED_COMPACT_MAX_MS / 60000} min since the brief), dropped at a later brief's add`); }
+    }
+    owedCompactions.set(key, rec);
+  }
   function liveOf(cid) {
     try { for (const [wid, s] of activeSessions) if (s && addressableId(s) === cid) return { wid, s }; } catch { }
     return { wid: null, s: null };
@@ -124,7 +138,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     // r4410 (c): an owed compaction's RECORD stands BEFORE the awaited send — in MEMORY ONLY (主开发 r4473: no owed mark goes to
     // disk) — so a lift during the send finds it (marked lifted, asked once the brief is posted)
     const owedHere = spend !== true && spend && spend.held && compactFirst === true;
-    if (owedHere) owedCompactions.set(key, { from, to: cid, name, why: spend.held, since: now(), mayWake: typeof mayWake === 'function' ? mayWake : null, pending: true });
+    if (owedHere) owe(key, { from, to: cid, name, why: spend.held, since: now(), mayWake: typeof mayWake === 'function' ? mayWake : null, pending: true });
     if (pace === true && verdict.steps[0] === 'stash' && typeof mayWake === 'function' && typeof mayWake.refund === 'function') {
       try { mayWake.refund(cid, { attempted: false }); } catch { }   // the reservation never reached the ladder
     }
@@ -218,7 +232,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     try { v = authorizeSpend ? authorizeSpend({ reason: 'peer-compact', session: s, cid: o.to }) : { ok: true }; }
     catch (e) { v = { ok: false, why: 'authorizer-failed', detail: 'spend authorizer failed: ' + (e && e.message) }; }
     if (v && v.ok === false) {
-      if (SA.isHeldWhy(v.why)) { giveBack({ attempted: false }); owedCompactions.set(key, { ...o, why: v.why }); log(`[dispatch] ${String(o.to).slice(0, 8)}: the owed compaction is held again (${v.why}) — asked once more when that hold lifts`); return; }
+      if (SA.isHeldWhy(v.why)) { giveBack({ attempted: false }); owe(key, { ...o, why: v.why }); log(`[dispatch] ${String(o.to).slice(0, 8)}: the owed compaction is held again (${v.why}) — asked once more when that hold lifts`); return; }
       return end(`the spend ceiling refused the compaction (${v.detail || v.why})`);
     }
     const sendUserInput = getSendUserInput();

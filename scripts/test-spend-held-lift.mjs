@@ -417,8 +417,8 @@ const nine = Array.from({ length: 9 }, (_, k) => [k, 'brief ' + k]);
   ok(!!(W.asked.length === asks1 && W.typed.length === 8), '…a second lift asks nothing'); W.close(); }
 { const W = await owedMany(WD, 1, [[0, 'brief a'], [0, 'brief b']]);
   W.setRefuse(null); const asks0 = W.asked.length;
-  await liftD(W, 2);
-  ok(!!(W.owed === 2 && W.pace.refusals.length === 1 && W.pace.refusals[0].rule === 'target' && W.asked.length - asks0 === 1 && W.typed.length === 1 && W.wakes.length === 1), 'two owed to ONE worker at one lift: the pace refuses the second (the worker\'s own floor) before the spend gate — one compaction, one wake', JSON.stringify({ owed: W.owed, refusals: W.pace.refusals, spendAsks: W.asked.length - asks0, typed: W.typed.length })); W.close(); }
+  await liftD(W, 1);
+  ok(!!(W.owed === 1 && W.asked.length - asks0 === 1 && W.typed.length === 1 && W.wakes.length === 1 && W.wakes[0].r === 'rec-2' && W.pace.refusals.length === 0), 'two owed to ONE worker: the set keeps ONE (the newer brief\'s, r4557) — at the lift one compaction and one wake for the newer brief; the older (posted) rides that turn', JSON.stringify({ owed: W.owed, spendAsks: W.asked.length - asks0, typed: W.typed.length, wake: W.wakes[0] && W.wakes[0].r })); W.close(); }
 { const W = await owedMany(WD, 1, [[0, 'brief c']], { wakeAnswer: { ok: false, reason: 'refused by its own gate' } });
   W.setRefuse(null);
   await liftD(W, 1);
@@ -438,18 +438,50 @@ const nine = Array.from({ length: 9 }, (_, k) => [k, 'brief ' + k]);
   ok(!!(W.typed.length === 0 && W.wakes.length === 0 && W.releases.length === 1 && W.pace.live() === 0 && W.D._owedCompactions.size === 0), 'the typing path THROWS at the lift (the round\'s should): the hold released and the pace grant given back — the frame never left; no wake; the owed compaction ends, said', JSON.stringify({ releases: W.releases.length, live: W.pace.live() })); W.close(); }
 console.log('§9b the REAL pacer\'s refund (the groups engine\'s pacerFor over its own store): attempted:true keeps the sender\'s minute, attempted:false returns it');
 const paceOfStore = (W) => { const x = W.E.store.pace.live() || {}; return { pairs: x.pairs || {}, senders: x.senders || {} }; };
-{ const W = dispatchWorld(WD, { wakeAnswer: { ok: false, reason: 'refused by its own gate' } }); const P = W.E.eng.pacerFor(W.FROM); W.setRefuse(HELD);
+async function realWakeRefused(Mod = WD) {   // compacted at the lift, its wake refused
+  const W = dispatchWorld(Mod, { wakeAnswer: { ok: false, reason: 'refused by its own gate' } }); const P = W.E.eng.pacerFor(W.FROM); W.setRefuse(HELD);
   await BRIEF(W, 0, 'brief r', P);
-  const p0 = paceOfStore(W), pair = W.FROM + '|' + W.TO;
-  ok(!!(!(pair in p0.pairs) && !(p0.senders[W.FROM] || []).length), 'the held dispatch\'s grant went back WHOLE (the dispatch\'s attempted:false): no pair stamp, no minute', JSON.stringify(p0));
+  W.p0 = paceOfStore(W); W.pair = W.FROM + '|' + W.TO;
   W.setRefuse(null); await liftD(W, 1);
-  const p1 = paceOfStore(W);
-  ok(!!(W.typed.length === 1 && W.wakes.length === 1 && !(pair in p1.pairs) && (p1.senders[W.FROM] || []).length === 1), 'at the lift: compacted, its wake refused ⇒ the real refund (attempted:true) gives the PAIR back and KEEPS the sender\'s minute (one stamp)', JSON.stringify(p1)); W.close(); }
-{ const W = dispatchWorld(WD, {}); const P = W.E.eng.pacerFor(W.FROM); W.setRefuse(HELD);
+  W.p1 = paceOfStore(W);
+  return W;
+}
+async function realHeldAgain(Mod = WD) {   // held again at the lift
+  const W = dispatchWorld(Mod, {}); const P = W.E.eng.pacerFor(W.FROM); W.setRefuse(HELD);
   await BRIEF(W, 0, 'brief s', P);
   W.setRefuse('ledger-unreadable'); await liftD(W, 1);
-  const p1 = paceOfStore(W), pair = W.FROM + '|' + W.TO;
-  ok(!!(W.typed.length === 0 && !(pair in p1.pairs) && !(p1.senders[W.FROM] || []).length && W.D._owedCompactions.size === 1), 'held AGAIN at the lift: the real refund (attempted:false) gives back the pair AND the minute; still owed to that hold', JSON.stringify(p1)); W.close(); }
+  W.p1 = paceOfStore(W); W.pair = W.FROM + '|' + W.TO;
+  return W;
+}
+{ const W = await realWakeRefused();
+  ok(!!(!(W.pair in W.p0.pairs) && !(W.p0.senders[W.FROM] || []).length), 'the held dispatch\'s grant went back WHOLE (the dispatch\'s attempted:false): no pair stamp, no minute', JSON.stringify(W.p0));
+  ok(!!(W.typed.length === 1 && W.wakes.length === 1 && !(W.pair in W.p1.pairs) && (W.p1.senders[W.FROM] || []).length === 1), 'at the lift: compacted, its wake refused ⇒ the real refund (attempted:true) gives the PAIR back and KEEPS the sender\'s minute (one stamp)', JSON.stringify(W.p1)); W.close(); }
+{ const W = await realHeldAgain();
+  ok(!!(W.typed.length === 0 && !(W.pair in W.p1.pairs) && !(W.p1.senders[W.FROM] || []).length && W.D._owedCompactions.size === 1), 'held AGAIN at the lift: the real refund (attempted:false) gives back the pair AND the minute; still owed to that hold', JSON.stringify(W.p1)); W.close(); }
+{ const RED = copyOfAll('src/server/worker-dispatch.js', [
+    ['    if (!(woke && woke.ok)) giveBack({ attempted: true }); else paced = false;', '    if (!(woke && woke.ok)) giveBack({ attempted: false }); else paced = false;'],
+    ['      if (SA.isHeldWhy(v.why)) { giveBack({ attempted: false }); owe(key, { ...o, why: v.why });', '      if (SA.isHeldWhy(v.why)) { giveBack({ attempted: true }); owe(key, { ...o, why: v.why });']], 'the owed road\'s refund flags swapped');
+  ok(!!(!RED.err), 'RED CONTROL built (r4557): the owed road\'s two refund flags swapped', RED.err);
+  if (!RED.err) { const A = await realWakeRefused(RED), Hh = await realHeldAgain(RED);
+    ok(!!((A.p1.senders[A.FROM] || []).length === 0 && (Hh.p1.senders[Hh.FROM] || []).length === 1), 'RED: through the REAL pacer the swapped flags show — a refused wake hands the sender\'s minute back (an unbounded re-ask), a held-again ask keeps a minute nothing spent', JSON.stringify({ wakeRefused: A.p1.senders, heldAgain: Hh.p1.senders })); A.close(); Hh.close(); } }
+console.log('§9c (主开发 r4557) THE OWED SET HAS A BOUND OF ITS OWN: one record a worker, and none past its sixty minutes');
+{ const W = await owedMany(WD, 1, Array.from({ length: 20 }, (_, k) => [0, 'brief ' + k]));
+  const rec = [...W.D._owedCompactions.values()][0] || {};
+  ok(!!(W.posts.length === 20 && W.D._owedCompactions.size === 1 && rec.rec && rec.rec.id === 'rec-20' && W.logs.filter((l) => /REPLACED by a newer brief/.test(l)).length === 19), 'COUNTED: twenty held briefs to ONE worker during a hold that does not lift ⇒ the set holds ONE record (the twentieth brief\'s), nineteen replaced, said', JSON.stringify({ size: W.D._owedCompactions.size, rec: rec.rec && rec.rec.id }));
+  W.setRefuse(null); await liftD(W, 1);
+  ok(!!(W.typed.length === 1 && W.wakes.length === 1 && W.wakes[0].r === 'rec-20'), '…at the lift ONE compaction and ONE wake, for the newest brief', JSON.stringify(W.wakes)); W.close(); }
+{ const W = await owedMany(WD, 3, Array.from({ length: 12 }, (_, k) => [k % 3, 'brief ' + k]));
+  ok(!!(W.posts.length === 12 && W.D._owedCompactions.size === 3 && new Set([...W.D._owedCompactions.values()].map((o) => o.to)).size === 3), 'COUNTED: twelve held briefs to three workers ⇒ three records, one a worker', JSON.stringify({ size: W.D._owedCompactions.size })); W.close(); }
+{ let t = Date.now(); const W = dispatchWorld(WD, { workers: 2, clock: () => t }); W.setRefuse(HELD);
+  await BRIEF(W, 0, 'brief old');
+  t += 61 * 60_000;   // PLACED: the world's own clock steps past the sixty minutes
+  await BRIEF(W, 1, 'brief new');
+  const left = [...W.D._owedCompactions.values()];
+  ok(!!(left.length === 1 && left[0].to === W.TOs[1] && W.logs.some((l) => /dropped at a later brief.s add/.test(l))), 'COUNTED: a record past its sixty minutes is DROPPED when another is added (no lift needed), said', JSON.stringify({ left: left.map((o) => o.to.slice(-2)) })); W.close(); }
+{ const RED = copyOf('src/server/worker-dispatch.js', '  function owe(key, rec) {\n', '  function owe(key, rec) { owedCompactions.set(key, rec); return;\n', 'the owed set with no bound (1779072b8)');
+  ok(!!(!RED.err), 'RED CONTROL built: the owed set with no bound of its own', RED.err);
+  if (!RED.err) { const W = await owedMany(RED, 1, Array.from({ length: 20 }, (_, k) => [0, 'brief ' + k]));
+    ok(!!(W.D._owedCompactions.size === 20), 'RED (1779072b8): twenty held briefs to one worker keep TWENTY records until the stop', JSON.stringify({ size: W.D._owedCompactions.size })); W.close(); } }
 console.log('§10 (r4410 (c)) the owed record is honest across the SEND (memory only, 主开发 r4473)');
 async function sendHeldWorld(Mod = WD) {
   let open; const gate = new Promise((r) => { open = r; });   // PLACED: the brief's send held open by the test, no clock
