@@ -8,6 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A browser profile's ⋯ menu has «Environment…» to set the time zone, the language and the location its browser tells the sites it opens.
 - With a place set, only the sites on the profile's list read it; every other site is denied the location, with no prompt.
 - A Claude pool can name fallback providers for when every member is out (Members & placement…); Ask me first is the default, Move without asking bills them.
+- A machine reached through a jump host can now pin the jump host's key too: one press pins both, and a changed jump host key is refused.
 
 ### Changed
 - A usage history VibeSpace had kept for two different accounts as one is set apart, and each account learns its own usage again.
