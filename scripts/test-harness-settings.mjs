@@ -24,7 +24,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { scratch, withoutVendorKeys } from './scratch.mjs';
+import { scratch, withoutVendorKeys, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -358,7 +359,17 @@ console.log('§5b symlinked configs (dotfiles), file modes, unreadable files');
   r = HC.applyConfigPlan(fullPlan(36500), { home });
   const dg = r.receipts.find((x) => x.key === 'historyPersistence');
   ok('a dangling symlink is refused by name — never replaced by a regular file', dg?.state === 'refused' && /symlink whose target does not exist/.test(dg.reason) && fs.lstatSync(cf).isSymbolicLink() && !fs.existsSync(ct), r.receipts);
-  ok('…and reads as missing (read-only, no guess)', HC.readConfigPlan(fullPlan(0), { home })[0].state === 'missing');
+  // B-ddf3 unit 2 (r3064, its round w9xxaxn8a's (d)): a link to nowhere is THERE and cannot be read — the reader says so by its own
+  // name («a link to nowhere»: the chip words it «… is a link to nowhere — not touched»), never «missing», whose chip offers «will be
+  // created — or press Apply» while Apply refuses it by name (the leg above). The release's «missing» is the red below.
+  const dgr = HC.readConfigPlan(fullPlan(0), { home })[0];
+  ok('…and reads as UNREADABLE by its own name, «a link to nowhere» (read-only, no guess; never «missing»)', dgr?.state === 'unreadable' && dgr.reason === 'a link to nowhere', dgr);
+  {
+    const MCH = mutantCopies('harness-settings', repo);
+    const OLD = require(MCH.write('src/harness-config.js', anchored(fs.readFileSync(path.join(repo, 'src/harness-config.js'), 'utf8'), "    if (text == null && code === 'ENOENT') { try { if (fs.lstatSync(file).isSymbolicLink()) code = 'EDANGLING'; } catch { } }\n", '', 'the release\'s read of a link to nowhere'), 'hc-release-dangling'));
+    const old = OLD.readConfigPlan(fullPlan(0), { home })[0];
+    ok('RED (the release\'s read: a link to nowhere taken for «missing»): its chip would offer «will be created — or press Apply»', old?.state === 'missing', old);
+  }
   // a directory where the file should be: refused, not "created over"
   const home4 = path.join(root, 'home-dir'); fs.mkdirSync(path.join(home4, '.codex', 'config.toml'), { recursive: true });
   r = HC.applyConfigPlan(fullPlan(0), { home: home4 });
