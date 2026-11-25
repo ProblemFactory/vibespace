@@ -14,6 +14,8 @@
 //     RED CONTROL: the release's stylesheet (the trailing bar at right 0, no inset)
 //   ⑤b THE COLUMN (B-78db slice 1b): global things only, the conversation's at the bottom; the law — it never overflows — at the
 //     simulator's real column heights; RED CONTROLS: the release's eleven overflow, the slice-1 stylesheet, a bar without the law's call
+//   ⑤c THE FOUR EDGES, EVERY iPHONE SHAPE (B-78db slice 2): the audit's cures pinned, the audit's table in kb-features; RED CONTROL:
+//     the stylesheets before the block
 // Run: node scripts/test-viewport-class.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -208,6 +210,33 @@ console.log('⑤b the column holds global things only, and never overflows (B-78
   const door = CSB.slice(CSB.indexOf("const setEl = e.target.closest('.chat-status-settings');"), CSB.indexOf('// ── the doors end ──'));
   ok(/const mineWin = columnShape\(\) \?/.test(door) && /act\('chat-status-col-search', t\('Search this conversation'\), \(\) => view\._search\.open\(\)\)/.test(door) && /if \(held\) act\('chat-status-col-window', t\('This window'\), \(\) => this\._app\?\._mobileNav\?\.bar\?\.windowMenuAt\?\.\(held\.id, setEl\)\)/.test(door) && /held = this\._app\?\.wm\?\.windows\?\.get\?\.\(mineWin\[0\]\);/.test(door) && /windowMenuAt, fitColumn/.test(BAR),
     '⑤b AT THE BOTTOM: in the column, the strip\'s «Conversation settings» door ends with this conversation\'s search and its window\'s menu (opened above the door)');
+}
+
+console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the audit of the 32 edge-pinned rules)');
+{
+  const CSS = read('public/style.css'), CHAT = read('public/chat.css');
+  const i = CSS.indexOf('THE FOUR EDGES, EVERY iPHONE SHAPE (B-78db slice 2'), j = CHAT.indexOf('THE FOUR EDGES (B-78db slice 2');
+  const edges4 = (css, chat) => {
+    const B = css.slice(css.indexOf('THE FOUR EDGES, EVERY iPHONE SHAPE')), C = chat.slice(chat.indexOf('THE FOUR EDGES (B-78db slice 2'));
+    const pad4 = 'padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);';
+    return {
+      layers: css.includes('THE FOUR EDGES, EVERY iPHONE SHAPE') && B.includes(`.dialog-overlay, #welcome.onboarding, .palette-overlay { box-sizing: border-box; ${pad4} }`) && B.includes('.dialog-overlay > .dialog { max-width: 100% !important; }')
+        && B.includes('.dialog-overlay > .dialog:is(.pf-picker, .desktop-adopt) { height: 100% !important; max-height: 100% !important; }') && B.includes('.palette { max-width: 100%; }'),
+      list: /html\[data-vc="regular"\] \.sidebar \{ padding-top: env\(safe-area-inset-top, 0px\); padding-left: env\(safe-area-inset-left, 0px\); \}/.test(B) && /html\[data-vc="regular"\] #list-column-toggle \{ top: env\(safe-area-inset-top, 0px\); \}/.test(B),
+      bars: /html\[data-vc="regular"\]:not\(\[data-sidecol\]\) #mobile-nav \{ padding-top: max\(8px, env\(safe-area-inset-top, 0px\)\); \}/.test(B) && /html\[data-vc="regular"\] #mobile-nav \{ height: calc\(44px \+ env\(safe-area-inset-top, 0px\)\); padding-top: env\(safe-area-inset-top, 0px\); \}/.test(B)
+        && /html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right: env\(safe-area-inset-right, 0px\); \}/.test(B),
+      chat: chat.includes('THE FOUR EDGES (B-78db slice 2') && C.includes(`.chat-img-overlay { box-sizing: border-box; ${pad4} }`) && /\.voice-preview-back \{ padding: calc\(12px \+ env\(safe-area-inset-top, 0px\)\)/.test(C)
+        && /\.chat-status-dropdown\.chat-artifacts-panel \{ padding-left: env\(safe-area-inset-left, 0px\); padding-right: env\(safe-area-inset-right, 0px\); \}/.test(C),
+      last: !/\n[^\n]*#mobile-nav[^\n]*\{[^}]*\bpadding-top:\s*8px/.test(B),
+    };
+  };
+  const E = edges4(CSS, CHAT);
+  ok(i > 0 && j > 0 && Object.values(E).every(Boolean), '⑤c every iPhone shape\'s edges: the full-screen layers (dialogs, the tour, the palette, a picture, the voice preview, the Artifacts sheet) inside the four insets; the regular class\'s list column and its ☰ clear of a top and a leading inset; the trailing bar under a top inset, the portrait top bar under a status bar, the laptop bar clear of a trailing inset', E);
+  const R = edges4(CSS.slice(0, i), CHAT.slice(0, j));
+  ok(!R.layers && !R.list && !R.bars && !R.chat, '⑤c RED CONTROL: the stylesheets before the block (slice 1b) leave a notched iPhone\'s dialogs, list column and top bars under its status bar and sensor housing', R);
+  const pinned = fs.existsSync(path.join(REPO, 'docs/kb-features.md')) ? read('docs/kb-features.md') : '';
+  ok(/THE SYSTEM's EDGES — the four-edge audit \(B-78db slice 2\)/.test(pinned) && (pinned.match(/^\| \d+ \| (public\/)?(style|chat|viewers)\.css:/gm) || []).length === 32,
+    '⑤c the audit is written down: docs/kb-features.md holds the 32 edge-pinned rules, each with its verdict (cured, or left as it is with why)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

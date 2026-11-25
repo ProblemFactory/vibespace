@@ -10384,3 +10384,33 @@ html[data-vc="compact"][data-sidecol] .window.window-active > .window-titlebar .
 html[data-vc="compact"][data-sidecol]:is(:has(#mobile-nav-viewer-close.on), :not([data-onshow="chat"]):has(#mobile-nav-more.on)) .window.window-active > .window-titlebar { padding-right: 60px; }
 html[data-vc="compact"][data-sidecol]:has(#mobile-nav-viewer-close.on):not([data-onshow="chat"]):has(#mobile-nav-more.on) .window.window-active > .window-titlebar { padding-right: 104px; }
 html[data-vc="compact"][data-sidecol] .mobile-win-switcher { right: max(56px, env(safe-area-inset-right, 0px)) !important; } /* the switcher from the head: the conversation's width, the column clear */
+
+/* ── THE FOUR EDGES, EVERY iPHONE SHAPE (B-78db slice 2 — the audit of the 32 rules that pin an element to a screen edge; the
+   verdicts in docs/kb-features.md «The system's edges»). Cover is set for EVERY home-screen copy (side-column.js), so a notched
+   iPhone's copy draws under its status bar (portrait) or its sensor housing (landscape — the regular class), an iPad mini's under
+   its status bar. env() is 0 in a Safari tab and on a desktop: nothing below changes there. Left as they are, with why: a scrim
+   (it covers the whole screen on purpose), a row sticky inside a scroller (its top is the scroller's), the desktop's taskbar and
+   hot zone (the window manager — an iPad held landscape is that class: UNPROVEN, not read), the book's seam (decoration). */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
+  /* the full-screen layers: their ground covers the screen, their content stands inside the four insets */
+  .dialog-overlay, #welcome.onboarding, .palette-overlay { box-sizing: border-box; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+  .dialog-overlay > .dialog { max-width: 100% !important; }
+  .dialog-overlay > .dialog:is(.pf-picker, .desktop-adopt) { height: 100% !important; max-height: 100% !important; }
+  .dialog-overlay > .dialog:is(.design-sheet, .design-composer-sheet) { left: env(safe-area-inset-left, 0px); right: env(safe-area-inset-right, 0px); bottom: env(safe-area-inset-bottom, 0px); width: auto !important; }
+  .palette { max-width: 100%; }
+  #welcome.onboarding .welcome-content { max-width: min(520px, 100%); }
+  /* the regular class: the list column's rows clear of a top inset and of a leading one (an iPhone held landscape: its sensor
+     housing — the column keeps its 320 px, its rows start after the housing); its ☰ follows */
+  html[data-vc="regular"] .sidebar { padding-top: env(safe-area-inset-top, 0px); padding-left: env(safe-area-inset-left, 0px); }
+  html[data-vc="regular"] #list-column-toggle { top: env(safe-area-inset-top, 0px); }
+  html[data-vc="regular"].vs-list-hidden #list-column-toggle { left: env(safe-area-inset-left, 0px); }
+  html[data-vc="regular"][data-fold="laptop"] #mobile-nav { padding-right: env(safe-area-inset-right, 0px); }
+}
+@media (orientation: landscape) {
+  /* the trailing bar's first button under a top inset (the side column keeps its own measured room: the rule above it) */
+  html[data-vc="regular"]:not([data-sidecol]) #mobile-nav { padding-top: max(8px, env(safe-area-inset-top, 0px)); }
+}
+@media (orientation: portrait) {
+  /* the regular class's portrait top bar (an iPad mini; the Duo's inner display held portrait — UNPROVEN, not read) under a status bar */
+  html[data-vc="regular"] #mobile-nav { height: calc(44px + env(safe-area-inset-top, 0px)); padding-top: env(safe-area-inset-top, 0px); }
+}

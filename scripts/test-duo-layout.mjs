@@ -29,6 +29,11 @@
 //   ⑤ THE TRAILING BAR'S DOORS (951×585, touch): Files opens the explorer in the conversation column (selected, the ✕
 //     shown), ✕ brings the conversation back, Channels / Background Work open theirs, Task Groups turns the list column
 //     to its board, ⋯ opens the window's menu INTO the conversation column with no window-manager verb and no Close
+//   ④b THE SYSTEM's SIDE COLUMN (B-78db — the Duo's home-screen copy): insets PLACED by Emulation.setSafeAreaInsetsOverride
+//     (right 84, bottom 34 — the simulator's reading): inner 951×648 and outer 466×657 — the bar IN the column, global things
+//     only in their order, under the clock's room and above the bottom inset; the conversation's search and menu at the
+//     strip's «Conversation settings» door; a viewer's ✕ at its head; the never-overflow law at 951×360 (yields → ⚙'s rows);
+//     the outer's own head = the name's row. RED CONTROL: the release's stylesheet (the bar at right 0, 56 px) is red
 //   ⑦ THE POSTURE LADDER (slice 4 — SPEC-v3 §1.6 / §3 / §5, research-v4 B.5; CDP: setDevicePostureOverride drives
 //     (device-posture: folded), setDeviceMetricsOverride's displayFeature drives the segments — offset 475 / mask 0 =
 //     Safari's seamless pair): folded alone on the inner display = pending, NOTHING moves, back to none after 1.5 s;
@@ -482,6 +487,67 @@ try {
     const closeRow = (deskRows || []).find((x) => /Close/.test(x.t));
     check('⑤ int355: one Close row, two picks — regular: no Close, Terminate red; 951 with a mouse: «✕ Close window — it keeps running», not red, Terminate red',
       !(regRows || []).some((x) => /Close/.test(x.t)) && term(regRows)?.red === true && closeRow?.t === '✕ Close window — it keeps running' && closeRow.red === false && term(deskRows)?.red === true, { regRows, deskRows });
+  }
+  // ④b THE SYSTEM's SIDE COLUMN (bl-phone-ui, B-78db — 主开发 r3933 / r3948 / r3949): the iPhone Duo's home-screen copy draws under
+  // the system's column (int359/duo-probe/RESULT.md: cover, right 84, bottom 34 on both displays). Chrome places those insets through
+  // Emulation.setSafeAreaInsetsOverride({ insets: SafeAreaInsets }) — read from the kit's live /json/protocol (Chrome 154.0.8037.92,
+  // probe b214928c8): insets MANDATORY; top / topMax / left / leftMax / bottom / bottomMax / right / rightMax optional integers; an
+  // unset one leaves env() undefined (its fallback); env() follows it with or without viewport-fit=cover (the product's own cover
+  // and column verdicts are test-viewport-class ⑤ / ⑤b). RED CONTROL: the release's stylesheet (the bar at right 0, 56 px).
+  console.log('④b THE SYSTEM\'s SIDE COLUMN (B-78db: insets PLACED — right 84, bottom 34 — inner 951×648, outer 466×657, touch)');
+  {
+    const place = (insets) => cdp('Emulation.setSafeAreaInsetsOverride', { insets });
+    const COL = `(() => { const nav = document.getElementById('mobile-nav'), r = nav.getBoundingClientRect();
+      const kids = [...nav.children].filter((e) => e.getClientRects().length && getComputedStyle(e).position !== 'fixed' && !e.classList.contains('mnav-gap'))
+        .map((e) => { const b = e.getBoundingClientRect(); return { id: e.id, top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right) }; }).sort((a, b) => a.top - b.top);
+      const shown = (id) => { const e = document.getElementById(id); return !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none'; };
+      return { sidecol: document.documentElement.dataset.sidecol || null, onshow: document.documentElement.dataset.onshow || null, left: Math.round(r.left), width: Math.round(r.width), w: innerWidth, h: innerHeight,
+        kids, yielded: nav.dataset.colYield || '', out: ['mobile-nav-artifacts', 'mobile-nav-more', 'mobile-nav-live', 'mobile-nav-search', 'mobile-nav-dest-browser', 'mobile-nav-dest-jobs', 'mobile-nav-overflow', 'mobile-nav-close', 'mobile-nav-title'].filter(shown) }; })()`;
+    const want = (c, ids, top) => { const got = c.kids.map((k) => k.id), exp = ids.filter((id) => id !== 'mobile-nav-desktops' || got.includes(id));
+      return c.sidecol === 'right' && c.width === 84 && c.left === c.w - 84 && JSON.stringify(got) === JSON.stringify(exp) && c.kids.length > 0 && c.kids[0].top >= top && c.kids.at(-1).bottom <= c.h - 34 && c.kids.every((k) => k.left >= c.w - 84 && k.right <= c.w) && !c.out.length; };
+    const INNER = ['mobile-nav-todos', 'mobile-nav-dest-tasks', 'mobile-nav-files', 'mobile-nav-dest-channels', 'mobile-nav-desktops', 'mobile-nav-gear'];
+    const OUTER = ['mobile-nav-menu', 'mobile-nav-todos', 'mobile-nav-new', 'mobile-nav-dest-tasks', 'mobile-nav-files', 'mobile-nav-dest-channels', 'mobile-nav-desktops', 'mobile-nav-gear'];
+    await device(951, 648); await place({ right: 84, rightMax: 84, bottom: 34, bottomMax: 34 }); await load(); await attachBoth();
+    await waitFor(`document.documentElement.dataset.sidecol === 'right' && document.documentElement.dataset.onshow === 'chat'`, 5000); await sleep(300);
+    const inner = await evalJs(COL);
+    check('④b inner 951×648: the bar stands IN the column (84 wide at its edge), global things only — For you · Task Groups · Files · Channels · Desktops · ⚙ — under the clock\'s room (112) and above the bottom inset; nothing of the conversation in it', want(inner, INNER, 112), inner);
+    // AT THE BOTTOM: the strip's «Conversation settings» door ends with the search and the window's menu; the menu opens above the door
+    await tap('.window.window-active .chat-status-settings');
+    const rows = await evalJs(`[...document.querySelectorAll('.chat-status-settings-row')].map((r) => r.className.match(/chat-status-col-[a-z]+/)?.[0] || '')`);
+    await tap('.chat-status-col-window'); await sleep(300);
+    const menu = await evalJs(`(() => { const m = document.querySelector('.taskbar-context-menu'), d = document.querySelector('.window.window-active .chat-status-settings'); if (!m || !d) return null; const b = m.getBoundingClientRect(); return { bottom: Math.round(b.bottom), doorTop: Math.round(d.getBoundingClientRect().top), right: Math.round(b.right), rows: [...m.querySelectorAll('.taskbar-context-menu-item')].map((r) => r.textContent.trim()) }; })()`);
+    await evalJs(`document.querySelectorAll('.context-menu, .chat-status-dropdown').forEach((m) => m.remove()); 1`);
+    check('④b inner: the conversation\'s search and its window\'s menu are the «Conversation settings» door\'s last rows; the menu (Rename…) opens ABOVE the door, left of the column',
+      rows.slice(-2).join() === 'chat-status-col-search,chat-status-col-window' && !!menu && menu.bottom <= menu.doorTop && menu.right <= 951 - 84 && menu.rows.some((x) => /Rename/.test(x)), { rows, menu });
+    // a viewer: its ✕ at its own head's end (left of the column), never in the column
+    await tap('#mobile-nav-files'); await sleep(300);
+    const x = await evalJs(`(() => { const b = document.getElementById('mobile-nav-viewer-close').getBoundingClientRect(); return { onshow: document.documentElement.dataset.onshow, top: Math.round(b.top), right: Math.round(b.right), w: Math.round(b.width) }; })()`);
+    check('④b inner: a viewer (Files) wears its ✕ at its head\'s end — top 0, its right edge at the column\'s', x.onshow === 'viewer' && x.top === 0 && x.right === 951 - 84 && x.w === 44, x);
+    await tap('#mobile-nav-viewer-close'); await sleep(300);
+    // THE LAW: a short column yields in the stated order into rows of Global settings, never past the bottom inset
+    await device(951, 360); await sleep(600);
+    const short = await evalJs(COL);
+    await tap('#mobile-nav-gear'); await sleep(400);
+    const gs = await evalJs(`[...document.querySelectorAll('.gs-menu .gs-menu-item')].map((r) => r.textContent.trim())`);
+    await evalJs(`document.querySelectorAll('.context-menu, .global-settings-popover, .gs-menu').forEach((m) => m.remove()); 1`);
+    const yl = short.yielded.split(' ').filter(Boolean), hasDesk = inner.kids.some((k) => k.id === 'mobile-nav-desktops');
+    const ORDER = ['desktops', 'channels', 'files', 'tasks', 'todos'].filter((k) => k !== 'desktops' || hasDesk);
+    check('④b the law at 951×360: the column yields Desktops then Channels (the stated order — 214 px of room for 308), ⚙ last above the bottom inset; each yielded one a row of Global settings',
+      yl.length >= 1 && ORDER.slice(0, yl.length).join() === yl.join() && short.kids.at(-1).id === 'mobile-nav-gear' && short.kids.at(-1).bottom <= 360 - 34 && gs.some((x) => /Channels/.test(x)), { short, gs });
+    // the outer display: the compact bar becomes the column; the window's own head is the name's row
+    await device(466, 657); await load(); await attachBoth();
+    await waitFor(`document.documentElement.dataset.vc === 'compact' && document.documentElement.dataset.sidecol === 'right'`, 5000); await sleep(400);
+    const outer = await evalJs(COL);
+    const head = await evalJs(`(() => { const t = document.querySelector('.window.window-active > .window-titlebar'); if (!t) return null; const b = t.getBoundingClientRect(); return { display: getComputedStyle(t).display, top: Math.round(b.top), right: Math.round(b.right), h: Math.round(b.height), name: t.querySelector('.window-title')?.dataset.name || '' }; })()`);
+    check('④b outer 466×657: the bar is the column (☰ · For you · + · Task Groups · Files · Channels · Desktops · ⚙) under the clock\'s room (166), above the bottom inset; the window\'s own head is the name\'s row, clear of the column',
+      want(outer, OUTER, 166) && !!head && head.display === 'flex' && head.top === 0 && head.h === 44 && head.right <= 466 - 84 && !!head.name, { outer, head });
+    // RED CONTROL: the release's stylesheet (everything from «THE SYSTEM's EDGES (B-78db» cut) — the bar at right 0, the conversation's buttons in it
+    await device(951, 648); await load(); await attachBoth(); await sleep(300);
+    await evalJs(`(async () => { const l = [...document.querySelectorAll('link[rel=stylesheet]')].find((x) => /\\/style\\.css/.test(x.href)); const css = await (await fetch(l.href)).text(); const cut = css.slice(0, css.indexOf('/* ── THE SYSTEM\\'s EDGES (B-78db')); const s = document.createElement('style'); s.textContent = cut; l.after(s); l.disabled = true; window.dispatchEvent(new Event('resize')); return cut.length; })()`);
+    await sleep(800);
+    const red = await evalJs(COL);
+    check('④b RED CONTROL: under the release\'s stylesheet the same predicate is RED (the bar at right 0, 56 px — its buttons from 8 px, under the system\'s clock; the conversation\'s buttons in it)', !want(red, INNER, 112), red);
+    await place({}); await load();
   }
   console.log('⑧ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the Duo\'s inner display: «如何在这个界面下切换桌面？»; 951×585 + 382×580, touch) + the landscape list column\'s ☰');
   {

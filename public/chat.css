@@ -2397,3 +2397,12 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-sub-link { cursor: pointer; }
 .chat-sub-link.chat-sub-unknown { cursor: help; text-decoration-style: dotted; }
 .chat-sub-chip { display: inline-block; padding: 0 5px; border-radius: var(--radius-sm); font-size: 10px; line-height: 15px; background: var(--bg-hover); color: var(--text-dim); }
+
+/* ── THE FOUR EDGES (B-78db slice 2 — public/style.css «THE FOUR EDGES, EVERY iPHONE SHAPE»): a picture's full-screen view, the
+   voice preview and the Artifacts sheet stand inside the four safe-area insets of a home-screen copy (env() is 0 elsewhere) */
+.chat-img-overlay { box-sizing: border-box; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+.chat-img-overlay img { max-width: min(calc(90vw / var(--ui-scale, 1)), 100%); max-height: min(calc(90vh / var(--ui-scale, 1)), 100%); }
+.voice-preview-back { padding: calc(12px + env(safe-area-inset-top, 0px)) calc(12px + env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) calc(12px + env(safe-area-inset-left, 0px)); }
+@media (max-width: 480px), (pointer: coarse) and (max-width: 1023px) {
+  .chat-status-dropdown.chat-artifacts-panel { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+}
