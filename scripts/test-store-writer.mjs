@@ -416,7 +416,7 @@ if (mode === 'scene') {
 `);
     const ticks = (pid) => { try { const t = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); const a = t.slice(t.lastIndexOf(')') + 2).split(' '); return Number(a[11]) + Number(a[12]); } catch { return null; } };
     // the DRIVER: one child at a time; `killAt` = the manager's kill (ms after «ready»), `termAt` = a stop asked by signal
-    const runScene = (sc, { killAt = null, termAt = null, env = {}, tag = '', cpuAfterLine = false } = {}) => new Promise((resolve) => {
+    const runScene = (sc, { killAt = null, termAt = null, env = {}, tag = '', cpuAfterLine = false, onLine = null } = {}) => new Promise((resolve) => {   // r4456: + onLine (opt-in, the leg's: once, when the keeper's line is seen)
       const dir = path.join(ROOT, 'scene-' + (tag || `${sc.road}-${sc.side || 'tree'}-${Math.random().toString(36).slice(2, 7)}`)); fs.mkdirSync(dir, { recursive: true });
       const ch = spawn(process.execPath, [CHILD, dir, 'scene'], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, VS_SLOW_MS: String(sc.movedMs || 0), ...env, VS_SCENE: JSON.stringify(sc) } });
       let buf = '', readyAt = null, lineAt = null, cpu = null, killedByDriver = false; const timers = [];
@@ -429,6 +429,7 @@ if (mode === 'scene') {
         }
         if (lineAt == null && /\[store-write\] exit(?: after the crash)?: [\d.]+ s after/.test(buf)) {
           lineAt = now;
+          if (onLine) { try { onLine(); } catch { } }
           if (cpuAfterLine) { timers.push(setTimeout(() => { const a = ticks(ch.pid); timers.push(setTimeout(() => { cpu = { at100: a, at1100: ticks(ch.pid) }; }, 1000)); }, 100)); }
         }
       };
@@ -522,9 +523,25 @@ if (mode === 'scene') {
         `the install tree AND the data directory hanging from the signal — the line still came after the stop (${ih.lineMs} ms; the manager's kill); after the crash the keeper still ENDED it at the grace (${ihc.ms} ms)`, { ih: ih.lines, ihc: { sig: ihc.sig, ms: ihc.ms, lines: ihc.lines } }); }
     // THE MUTANT: a keeper that KILLS after a stop signal (round 4's law) — red by name: it cuts the manager's time short
     { const KM = path.join(ROOT, 'keeper-kills.js');
-      writeScript(KM, fs.readFileSync(path.join(REPO, 'src/store-exit-keeper.js'), 'utf8').replace("if (kind === 'crash') process.kill(process.pid, 'SIGKILL');", "process.kill(process.pid, 'SIGKILL');").replace("require('./store-pace.js')", `require(${JSON.stringify(path.join(REPO, 'src/store-pace.js'))})`));
-      const km = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 900, env: { VS_KEEPER_PATH: KM }, tag: 'mutant-kills' });
-      ok(!km.killedByDriver && km.sig === 'SIGKILL' && km.ms < 3000, `MUTANT «the keeper kills after a stop signal» is RED by name: the process died ${km.ms} ms after the stop — before the manager's grace (the driver kills at 3.9 s)`, { sig: km.sig, ms: km.ms, killed: km.killedByDriver }); }
+      const KM_SRC = fs.readFileSync(path.join(REPO, 'src/store-exit-keeper.js'), 'utf8').replace("if (kind === 'crash') process.kill(process.pid, 'SIGKILL');", "process.kill(process.pid, 'SIGKILL');").replace("require('./store-pace.js')", `require(${JSON.stringify(path.join(REPO, 'src/store-pace.js'))})`);
+      writeScript(KM, KM_SRC);
+      // r4456 (the flake census, round 2): judged on WHO killed — its own keeper's SIGKILL, never the driver's — with the driver's kill
+      // held generously late (18 s), never by WHEN (the keeper's grace-less-slack timer ran late on a loaded box: past the driver's
+      // old 3.9 s kill the mutant read green)
+      const km = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 15000, env: { VS_KEEPER_PATH: KM }, tag: 'mutant-kills' });
+      ok(!km.killedByDriver && km.sig === 'SIGKILL', `MUTANT «the keeper kills after a stop signal» is RED by name: its own keeper KILLED the process (SIGKILL, ${km.ms} ms after the stop; not the driver's, whose kill waits to 18 s) — the manager's time cut short`, { sig: km.sig, ms: km.ms, killed: km.killedByDriver });
+      // r4456 (1) PLACED: the mutant's own kill HELD (the leg's hold, let go by removing its file) — under the driver's old 3.9 s kill the
+      // old verdict misses the fault at will (the driver kills first); the verdict on who killed, the driver's kill held late, reads it
+      // once the hold is let go at the keeper's line
+      const { anchored } = await import('./scratch.mjs');
+      const HOLDK = path.join(ROOT, 'keeper-kills-hold'), KMH = path.join(ROOT, 'keeper-kills-held.js');
+      writeScript(KMH, anchored(KM_SRC, "  process.kill(process.pid, 'SIGKILL');", "  { const __h = new Int32Array(new SharedArrayBuffer(4)); while (fs.existsSync(" + JSON.stringify(HOLDK) + ")) Atomics.wait(__h, 0, 0, 5); }\n  process.kill(process.pid, 'SIGKILL');", 'the mutant\'s kill, held by the leg'));
+      fs.writeFileSync(HOLDK, '1');
+      const kOld = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 900, env: { VS_KEEPER_PATH: KMH }, tag: 'mutant-kills-held-old' });
+      fs.writeFileSync(HOLDK, '1');
+      const kNew = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 15000, env: { VS_KEEPER_PATH: KMH }, tag: 'mutant-kills-held-new', onLine: () => { try { fs.unlinkSync(HOLDK); } catch { } } });
+      const oldV = !kOld.killedByDriver && kOld.sig === 'SIGKILL' && kOld.ms < 3000, newV = !kNew.killedByDriver && kNew.sig === 'SIGKILL';
+      ok(kOld.killedByDriver && !oldV && newV, 'PLACED (r4456): the mutant\'s own kill HELD — under the driver\'s old 3.9 s kill the old verdict misses the fault (the driver killed first); the verdict on who killed, the driver\'s kill held late, reads it once the hold is let go at the keeper\'s line', { old: { killed: kOld.killedByDriver, sig: kOld.sig, ms: kOld.ms }, now: { killed: kNew.killedByDriver, sig: kNew.sig, ms: kNew.ms } }); }
     // E3 (c): A PROCESS THAT USES THE STORES IS NOT THE SERVER — no keeper thread (the server's boot starts it by name)
     { const dir = path.join(ROOT, 'threads'); fs.mkdirSync(dir);
       const r = spawnSync(process.execPath, [CHILD, dir, 'keeperThreads'], { encoding: 'utf8', timeout: 20000 });
