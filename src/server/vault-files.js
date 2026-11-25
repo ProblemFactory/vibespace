@@ -10,9 +10,10 @@
  *     the folder (a crash leaves the old file or the new one, never half of one);
  *   · `open` is proven by the seal itself (AES-GCM under the entry's OWN key, the id its additional data) and the size the box
  *     carries — a file that is not the one sealed is `file_damaged`; NO digest of the bytes is kept anywhere (RULE 5′);
- *   · `shred` overwrites the bytes in place (random, same length, fsync) and unlinks — never through a link; `sweep(live)`
- *     shreds every `.vfile` no entry points at (the boot's: a put that died between the file and the record) and every
- *     stale temp file;
+ *   · `shred` overwrites the bytes in place (random, same length, fsync) and unlinks — never through a link; `sweep(live,
+ *     { dropped })` (a start's) shreds ONLY a `.vfile` the record names as DROPPED and its own stale temp files — a sealed file
+ *     the record says nothing of (a put that died between the file and the record, or a record restored from an older copy)
+ *     is KEPT and counted (主开发 r4625: nothing removes a person's file because a record is silent about it);
  *   · OFF THE MAIN LOOP (the cure of the acceptance read, 主开发 11-18: «nothing of a file holds the hub's main loop» — the data
  *     folder may sit on a network mount): every read, write, fsync, rename, shred and the sweep go through fs.promises, in the
  *     same order and with the same crash points as before; the caller awaits each. The boot sweep asks the engine whether an
@@ -39,14 +40,17 @@ const err = (code, why) => Object.assign(new Error(why || code), { code });
 const OP_MS = 30000;   // round 4: a sealed-file operation that has not come back by then is answered `files_stuck` (the queue moves on)
 const SHRED_CHUNK = 64 * 1024;   // round 7: the shred's one buffer, refilled per chunk
 
-function create({ dataDir, opMs = OP_MS, log = console }) {
+function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.randomBytes(5).toString('hex') }) {
   if (!dataDir) throw new TypeError('vault-files: dataDir is required');
   // round 7 (test-fd-close-census): a close that fails is SAID, never swallowed — the operation's own answer stands
   const said = (what) => (e) => { try { (log && (log.warn || log.log) || (() => {})).call(log, `vault-files: ${what}: ${(e && e.code) || e}`); } catch { /* a logger that throws changes no answer */ } };
   const DIR = path.join(dataDir, VF.FILE_DIR);
   const fileOf = (id) => { if (!VF.ID_RE.test(String(id))) throw err('bad_file_id'); return path.join(DIR, `${id}${VF.FILE_SUFFIX}`); };
-  /** A new file id (10 hex) and its file key (32 random bytes — the caller seals the key as the entry's value, then zeroes it). */
-  const mintId = () => crypto.randomBytes(5).toString('hex');
+  /** A new file id — 10 hex from 5 random bytes (crypto.randomBytes) — drawn again while `taken(id)` says it is in use (主开发 r4628:
+   *  an id named by an entry, on the record's list of DROPPED files, or a put's in flight is NEVER used again — so a record
+   *  restored from an older copy, whose list is stale, can never name a file that is live under it); and its file key (32 random
+   *  bytes — the caller seals the key as the entry's value, then zeroes it). */
+  const mintId = (taken = () => false) => { for (let i = 0; i < 64; i++) { const id = String(randomId()); if (VF.ID_RE.test(id) && !taken(id)) return id; } throw err('file_id_unavailable', 'no free file id could be drawn'); };
   const mintKey = () => crypto.randomBytes(32);
   async function ensureDir() {
     await fsp.mkdir(DIR, { recursive: true, mode: 0o700 });
@@ -60,6 +64,8 @@ function create({ dataDir, opMs = OP_MS, log = console }) {
   async function write(id, key, bytes) {
     const file = fileOf(id);
     await ensureDir();
+    // 主开发 r4625 (the MUST): a sealed file the record says nothing of is KEPT — an id whose file is already on disk is never written over
+    if (await fsp.lstat(file).then(() => true, () => false)) throw err('file_id_taken', 'a sealed file of that id is already kept');
     const iv = crypto.randomBytes(12);
     const c = crypto.createCipheriv('aes-256-gcm', key, iv);
     c.setAAD(Buffer.from(String(id), 'latin1'));
@@ -90,12 +96,15 @@ function create({ dataDir, opMs = OP_MS, log = console }) {
     if (!sized) throw err('file_damaged', 'the sealed file is not the one the entry names');
     if (blob.length < MAGIC.length + 28 || !blob.subarray(0, MAGIC.length).equals(MAGIC)) throw err('file_damaged', 'the sealed file is not one this vault wrote');
     const iv = blob.subarray(MAGIC.length, MAGIC.length + 12), tag = blob.subarray(MAGIC.length + 12, MAGIC.length + 28), ct = blob.subarray(MAGIC.length + 28);
-    let out;
+    // 主开发 r4625 (2): THE BYTES ARE ZEROED WHERE THEY ARE DECRYPTED — one buffer of the file's own size made for them (Buffer.alloc:
+    // never a slice of the shared pool, whose whole slab a message to the run's worker would copy); the update and final pieces zeroed
+    let out, a = null, b = null;
     try {
       const d = crypto.createDecipheriv('aes-256-gcm', key, iv);
       d.setAAD(Buffer.from(String(id), 'latin1')); d.setAuthTag(tag);
-      out = Buffer.concat([d.update(ct), d.final()]);
-    } catch { throw err('file_damaged', 'the sealed file does not open with its key'); }
+      a = d.update(ct); b = d.final();
+      out = Buffer.alloc(a.length + b.length); a.copy(out, 0); b.copy(out, a.length);
+    } catch { throw err('file_damaged', 'the sealed file does not open with its key'); } finally { if (a) a.fill(0); if (b) b.fill(0); }
     if (facts.size != null && out.length !== Number(facts.size)) { out.fill(0); throw err('file_damaged', 'the sealed file is not the one the entry names'); }   // the GCM tag under the entry's own key (the id its AAD) proved the bytes; the size is the box's
     return out;
   }
@@ -120,29 +129,35 @@ function create({ dataDir, opMs = OP_MS, log = console }) {
   }
   /** → (a promise of) true when the sealed file of `id` was there and is gone. */
   const shred = (id) => (VF.ID_RE.test(String(id)) ? shredPath(fileOf(id)) : Promise.resolve(false));
-  /** Shred every `.vfile` no entry names and every STALE temp file → (a promise of) the count shredded. `live` = a Set of ids
-   *  or a function id → bool, asked at the moment a file would go (the sweep runs beside puts now): the engine's says TRUE for
-   *  a put in flight too (its id from mint to record — round 2: no age rule, a crash orphan goes at the next boot whatever its
-   *  age, and this process's own temp in flight is never touched); a temp file of another LIVE process newer than a minute is
-   *  its put in flight (the vault.json sweep's rule, sweepStaleVaultTmp). */
-  async function sweep(live, at = Date.now()) {
+  /** THE START's SWEEP (主开发 r4625, the MUST: NOTHING REMOVES A PERSON's FILE AT A START BECAUSE A RECORD IS SILENT ABOUT IT) — it
+   *  shreds only (i) its own unfinished TEMP files past their age and (ii) a sealed file the record NAMES as dropped (`dropped`:
+   *  a Set of ids or a function id → bool — a re-put and a drop write that name down in the same record write that stops naming
+   *  the file, before its shred). A sealed file no entry names and no list drops is KEPT and counted. `live` = a Set of ids or
+   *  a function id → bool, asked at the moment a file would go (the sweep runs beside puts): TRUE for a put in flight too; a temp
+   *  file of another LIVE process newer than a minute is its put in flight (the vault.json sweep's rule, sweepStaleVaultTmp).
+   *  → (a promise of) { shredded, kept } */
+  async function sweep(live, { at = Date.now(), dropped = () => false } = {}) {
     const isLive = typeof live === 'function' ? live : (id) => !!(live && live.has(id));
+    const isDropped = typeof dropped === 'function' ? dropped : (id) => !!(dropped && dropped.has(id));
     let names;
-    try { names = await listQ(); } catch { return 0; }
-    let n = 0;
+    try { names = await listQ(); } catch { return { shredded: 0, kept: 0 }; }
+    let shredded = 0, kept = 0;
     for (const name of names) {   // round 4: each file is its OWN queued operation (a long sweep on a slow mount never holds the queue whole)
       const m = VFILE_RE.exec(name), tm = !m && TMP_RE.exec(name);
       if (!m && !tm) continue;
       if (m && isLive(m[1])) continue;
-      try { if (await sweepOneQ(name, m, tm, isLive, at)) n++; } catch { /* stuck or gone: the next boot sweeps */ }
+      if (m && !isDropped(m[1])) { kept++; continue; }
+      let gone = false;
+      try { gone = await sweepOneQ(name, m, tm, isLive, isDropped, at); } catch { /* stuck or gone: the next start sweeps */ }
+      if (gone) shredded++; else if (m && !isLive(m[1])) kept++;
     }
-    return n;
+    return { shredded, kept };
   }
-  /** One name of the sweep: asked again at its own turn (an entry may have been written meanwhile), then shredded. */
-  async function sweepOne(name, m, tm, isLive, at) {
+  /** One name of the sweep: asked again at its own turn (an entry may have been written, or the record gone, meanwhile), then shredded. */
+  async function sweepOne(name, m, tm, isLive, isDropped, at) {
     let st = null; try { st = await fsp.lstat(path.join(DIR, name)); } catch { return false; }
     if (tm) { if (isLive(tm[1])) return false; const pid = Number(tm[2]); if (pid !== process.pid && pidAlive(pid) && at - st.mtimeMs < 60_000) return false; }
-    if (m && isLive(m[1])) return false;
+    if (m && (isLive(m[1]) || !isDropped(m[1]))) return false;
     return shredPath(path.join(DIR, name));
   }
   // ONE AT A TIME (round 3): each public operation waits for the one before it; the sweep's own shreds run inside its turn.

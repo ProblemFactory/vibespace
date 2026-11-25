@@ -287,8 +287,7 @@ for the entry. The answer then says `by: grant` / `by: policy`. Another host, or
   Provenance: *agent minted · never shown.*
 - **put `<name>`** — seal a value you **already have** (a key a vendor page handed you). It rides a **0600 file**
   (`--from-file`) or **stdin** (`--stdin`) — **never the command line** (`value_in_argv`). Provenance: *agent stored · the
-  agent saw the plaintext* — the copy in this transcript is **not** protected, so rotate the value when you can. A TEXT
-  value holds up to 8192 characters (`value_too_long`) — anything longer is a file.
+  agent saw the plaintext* — the copy in this transcript is **not** protected, so rotate the value when you can.
 - **put `<name>` `--file <0600 file>`** — seal a FILE you already have: an SSH private key, a certificate or a chain, a
   kubeconfig, a service-account JSON, an app's licence file (up to **1 MB**, any bytes, read as bytes, its name kept). The
   answer names it (name, size, kind) and tells you the copy on your disk is still there — **delete it yourself** (VibeSpace
@@ -301,7 +300,8 @@ for the entry. The answer then says `by: grant` / `by: policy`. Another host, or
   file in 64-character pieces of its base64 and hex (a small file whole, folded too), every distinct line of 16 bytes or more
   (up to 4 096 lines and 256 KiB of lines; a PEM BEGIN / END line is the format's, not masked) and its whole text trimmed when
   it is short (a token file). **What is not masked:** a line of the file printed in ANOTHER encoding (that line's base64, its
-  JSON escape) — the lines as they are, the file's own base64 and hex, and a small file whole in every spelling, are; and a
+  JSON escape) — the lines as they are, the file's own base64 and hex, and a small file whole in every spelling, are; a line
+  SHORTER than 16 bytes of a file over 2 KiB printed alone (a short `.env` line such as `grep DB_PASS .env`); and a
   field you DECODE and print (`jq -r .private_key`, a kubeconfig's base64 `client-key-data`) is no line of the file — do not
   print it. A run carries files of up to **24 KB** in all (every file it names,
   together): a larger one stays in the vault and the run is refused `file_too_large_for_a_run` before any card, the file and

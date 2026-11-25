@@ -1050,13 +1050,18 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  $VAULT{…}, a command-line value) | null — the file goes to a run as a 0600 file, never as text (design q-058 §1 use ③). */
   /** 主开发 r4378: the FILE a run names that takes it past what a run carries (every file's bytes counted together; the largest
    *  named) | null — the facts only (names and sizes), no byte read */
-  function fileTooLargeOf(spec) {
+  //  主开发 r4625 (1)(4): `isFileRef(r)` says which references are files HERE — at the verdict, a file the caller already has the
+  //  use of (its facts); after the read, a reference whose value IS a file's bytes (then `sizeOf` is the bytes' own length)
+  function fileTooLargeOf(spec, isFileRef = (r) => !!fileFactsOf(r), sizeOf = (r) => Number((fileFactsOf(r) || {}).size) || 0) {
     let total = 0, largest = null;
-    for (const r of spec.refs) { const ff = fileFactsOf(r); if (!ff) continue; total += Number(ff.size) || 0; if (!largest || ff.size > largest.size) largest = { ref: r.ref, name: ff.name, size: Number(ff.size) || 0, lines: Number.isInteger(ff.lines) ? ff.lines : null }; }
+    for (const r of spec.refs) { if (!isFileRef(r)) continue; const ff = fileFactsOf(r) || {}, size = sizeOf(r); total += size; if (!largest || size > largest.size) largest = { ref: r.ref, name: ff.name || 'file', size, lines: Number.isInteger(ff.lines) ? ff.lines : null }; }
     return largest && total > VF.RUN_FILE_BYTES_MAX ? largest : null;
   }
-  function fileMisuseOf(spec) {
-    const isFile = (x) => { const r = spec.refs.find((y) => y.ref === x); return !!(r && fileFactsOf(r)); };
+  /** the two refusals' answers — the same at the verdict and after the read (主开发 r4625 (1): «refused by the same name») */
+  const misuseAnswerOf = (ref) => ({ ref, use: `--file KEY=${ref} -- <command> … '$VAULT_FILE{KEY}'`, words: `${VF.WORDS.file_needs_file} — use: --file KEY=${ref} -- <command> … '$VAULT_FILE{KEY}' (the path of that file)` });   // the exact flag (主开发 00:58Z)
+  const tooLargeAnswerOf = (x) => ({ ref: x.ref, file: x.name, lines: x.lines, size: x.size, figure: VF.RUN_FILE_BYTES_MAX, words: VF.tooLargeForARunWords(x.name, x.lines, x.size) });
+  function fileMisuseOf(spec, isFileRef = (r) => !!fileFactsOf(r)) {
+    const isFile = (x) => { const r = spec.refs.find((y) => y.ref === x); return !!(r && isFileRef(r)); };
     for (const e of spec.env) if (isFile(e.ref)) return e.ref;
     if (spec.stdin && isFile(spec.stdin)) return spec.stdin;
     for (const f of spec.files) if (f.template != null) for (const x of VR.scanRefs(f.text).refs) if (isFile(x.ref)) return x.ref;
@@ -2594,12 +2599,6 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // run answers alike); with no grant door at all it is refused here, before anything is read
     const foreignRefs = spec.refs.filter((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
     if (foreignRefs.length && !useGrants) { note('use_not_granted', { ...head, ref: foreignRefs[0].ref }); return named('use_not_granted', { ref: foreignRefs[0].ref }); }
-    const misused = fileMisuseOf(spec);   // lane lg-vault-file: a FILE entry rides a run as a file only — refused before any card is drawn
-    if (misused) { note('file_needs_file', { ...head, ref: misused }); return named('file_needs_file', { ref: misused, use: `--file KEY=${misused} -- <command> … '$VAULT_FILE{KEY}'`, words: `${VF.WORDS.file_needs_file} — use: --file KEY=${misused} -- <command> … '$VAULT_FILE{KEY}' (the path of that file)` }); }   // the exact flag (主开发 00:58Z)
-    // 主开发 r4378 (a) + (c): the files a run names, TOGETHER, are within what a run can carry (THE FILE FIGURE, src/vault-file.js) —
-    // a larger one is refused BY NAME before any card is drawn: the file, its line count, the figure and what still works said at once
-    const tooLarge = fileTooLargeOf(spec);
-    if (tooLarge) { note('file_too_large_for_a_run', { ...head, ref: tooLarge.ref }); return named('file_too_large_for_a_run', { ref: tooLarge.ref, file: tooLarge.name, lines: tooLarge.lines, size: tooLarge.size, figure: VF.RUN_FILE_BYTES_MAX, words: VF.tooLargeForARunWords(tooLarge.name, tooLarge.lines, tooLarge.size) }); }
     const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
     // lane vault-standing-request: where NO host can be read (an interpreter + its script, a program outside the tool table), the
     // run's COMMAND TOKEN — what a standing grant on «this command» names (the program's real path, the script's real path + the
@@ -2648,6 +2647,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (row && (open || own)) { const ff = fileFactsOf(r); if (ff) bytes = ff.size; else { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } } }   // lane lg-vault-file: a file's size from its facts (never opened for a length)
       entries.push({ id: r.id, exists: !!row, open, bytes, on: sw, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}), ...(ended ? { ended: { by: ended.endedBy, at: new Date(ended.endedAt).toISOString(), ...(suspended ? { off: true } : {}) } } : {}) });   // r13 should: `off` — the owner had switched the entry OFF before this approval, and it still is
     }
+    // lane lg-vault-file (主开发 r4378 (a)(c), r4625 (4)): A FILE rides a run as a file only, and the files a run names, TOGETHER, are
+    // within what a run can carry (THE FILE FIGURE) — refused BY NAME before any card, but only over the files the caller already
+    // has the USE of (its own, an open switch, a grant, a share: the release's own gate for an entry's size on the card); any other
+    // reference meets the release's own answer first, and after the owner's word the same two checks are asked again after the read
+    const usable = new Set(entries.filter((e) => e.exists && (e.open || e.own)).map((e) => e.id));
+    const usableFile = (r) => usable.has(r.id) && !!fileFactsOf(r);
+    const misused = fileMisuseOf(spec, usableFile);
+    if (misused) { note('file_needs_file', { ...head, ref: misused }); return named('file_needs_file', misuseAnswerOf(misused)); }
+    const tooLarge = fileTooLargeOf(spec, usableFile);
+    if (tooLarge) { note('file_too_large_for_a_run', { ...head, ref: tooLarge.ref }); return named('file_too_large_for_a_run', tooLargeAnswerOf(tooLarge)); }
     // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
     // says pressing «Always» (with 验证是你) ALSO opens it for agent runs — the switch flips in the same act (option b).
     const switchNote = useGrants && (shape.always || cmdToken) && entries.some((e) => e.exists && !e.on) ? ALWAYS_SWITCH_LINE : null;   // int361: joined to the card where it is drawn (vault-agent-own r19) —   // round 5 (item 3) + round 6 (MINOR item 3): ONE key, localized by the client through t() (zh + ja); round 6 (MAJOR item 4): it opens the entry for THIS conversation — the grants the owner paused stay paused
@@ -2895,7 +2904,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
       const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed',
-        'file_missing', 'file_damaged', 'file_unreadable', 'file_moved', 'caller_gone']);   // lane lg-vault-file cure (round 2): a sealed file that could not be read, or a caller gone while its file was read — nothing ran: the once-grant comes back
+        'file_missing', 'file_damaged', 'file_unreadable', 'file_moved', 'caller_gone', 'file_needs_file', 'file_too_large_for_a_run']);   // lane lg-vault-file cure (round 2): a sealed file that could not be read, or a caller gone while its file was read — nothing ran: the once-grant comes back
       // round 3 (the cure's second read, BLOCKER): `caller_gone` is burned only when NOTHING RAN — a child that ran and was stopped
       // because its caller left answers it `killed` (as a lock's does), and its once-grant ENDS as used: an agent that kills its own
       // CLI after the work never gets the owner's «Allow once» back for 8 hours. A spent grant that a LOCK ended before its child
@@ -2966,6 +2975,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const stopIf = () => { if (lockGen !== lg0 || vaultState() !== 'unlocked') throw Object.assign(new Error('locked'), { code: 'vault_locked' }); if (signal && signal.aborted) throw Object.assign(new Error('gone'), { code: 'caller_gone' }); };
     const stopped = (e) => { dropValues(); closeTool(); if (e.code === 'vault_locked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } } note(e.code, { ...head }); return named(e.code); };
     try { stopIf(); } catch (e) { return stopped(e); }
+    // 主开发 r4625 (1): THE CHECKS ASKED AGAIN AFTER THE READ — an entry re-put under the same name while the run waited (its scan
+    // worker, a card, the read) can turn a text reference into a file, or a file past the figure; refused by the same names, nothing
+    // materialized (both codes are BURNED: nothing ran, a once-grant comes back)
+    const late = fileMisuseOf(spec, (r) => Buffer.isBuffer(values.get(r.ref)));
+    if (late) { dropValues(); closeTool(); note('file_needs_file', { ...head, ref: late }); return named('file_needs_file', misuseAnswerOf(late)); }
+    const lateLarge = fileTooLargeOf(spec, (r) => Buffer.isBuffer(values.get(r.ref)), (r) => values.get(r.ref).length);
+    if (lateLarge) { dropValues(); closeTool(); note('file_too_large_for_a_run', { ...head, ref: lateLarge.ref }); return named('file_too_large_for_a_run', tooLargeAnswerOf(lateLarge)); }
     const secrets = spec.refs.map((r) => { const v = values.get(r.ref); return Buffer.isBuffer(v) ? { ref: r, file: v } : { ref: r, value: v }; });
     // lane lg-vault-file: a FILE lands as `f<slot>-<its name>` (a tool that wants its extension gets it), its slot's other files as before
     const fileNames = new Map(spec.files.filter((f) => f.template == null && Buffer.isBuffer(values.get(f.ref))).map((f) => { const r = spec.refs.find((y) => y.ref === f.ref); const ff = r && fileFactsOf(r); return [f.slot, VF.diskNameOf(ff ? ff.name : 'file')]; }));   // the shell-safe spelling of its name (adversarial read r1)

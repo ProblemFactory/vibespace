@@ -430,7 +430,6 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const isFile = bytes !== undefined;   // lane lg-vault-file: `put <name> --file <0600 file>` — the file's bytes, its name, its size and digest
     if (isFile && value !== undefined) return agentErr(res, { code: 'value_and_file' });
     if (!isFile && (typeof value !== 'string' || value === '')) return agentErr(res, { code: 'value_required' });
-    if (!isFile && value.length > VF.TEXT_PUT_MAX) return res.status(400).json({ ok: false, code: 'value_too_long', error: VF.WORDS.value_too_long });   // lane lg-vault-file: before it put had NO bound (a 100 KB --from-file sealed as text)
     const nw = typeof b.note === 'string' && b.note.trim() ? PW.wordsOf({ note: b.note }) : { ok: true };   // lane vault-entry-description: `put --note`
     if (!nw.ok) return res.status(400).json({ ok: false, code: nw.code, error: nw.words });
     let r;

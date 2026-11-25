@@ -680,7 +680,7 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
   ok(JSON.stringify(names) === JSON.stringify(['agent:conv-NINE/signup-pw', 'agent:conv-NINE/vendor', 'agent:job-j9/token']), 'every entry landed under the caller\'s OWN scope (conv-NINE / job-j9) — the agent chose none of them', names);
   // lane lg-vault-file (B-0830): `put <name> --file <0600 file>` — the FILE's bytes ride the body (base64) with its name, size
   // and digest, taken off the request like `value`; the answer is facts (the file's name, size, kind), the road to use it, the
-  // copy on disk the agent must delete itself — never a byte. And THE CAP put never had: a text value is 8192 characters.
+  // copy on disk the agent must delete itself — never a byte. A TEXT put keeps the release's road: no bound of this unit's (主开发 r4625 (3)).
   {
     const VF = require(path.join(REPO, 'src/vault-file.js'));
     const u32 = (x) => { const b = Buffer.alloc(4); b.writeUInt32BE(x); return b; };
@@ -702,15 +702,16 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
       [{ name: 'f1', bytes: KEY.toString('base64'), value: 'both', filename: 'k' }, 400, 'value_and_file', 'a value AND a file'],
       [{ name: 'vendor', bytes: KEY.toString('base64'), filename: 'k' }, 409, 'not_a_file', 'a file over a TEXT entry (never upgraded)'],
       [{ name: 'deploy-key', value: 'a text value now' }, 409, 'is_a_file', 'a text value over a FILE entry'],
-      [{ name: 'long', value: 'v'.repeat(VF.TEXT_PUT_MAX + 1) }, 400, 'value_too_long', 'a text value over 8192 characters (put had no bound)'],
     ];
     const got = [];
     for (const [b, st, code] of tries) { const r = await H('/api/agent/vault/put', { body: b }); got.push([r.status, r.json.code, r.json.error]); }
-    ok(got.every(([st, code, err], i) => st === tries[i][1] && code === tries[i][2] && typeof err === 'string' && err.length > 15) && /--file/.test(got[7][2]) && !v2.fileOf('agent:conv-NINE/f1') && !v2.secretNames().some((x) => x.name === 'agent:conv-NINE/long'),
+    ok(got.every(([st, code, err], i) => st === tries[i][1] && code === tries[i][2] && typeof err === 'string' && err.length > 15) && !v2.fileOf('agent:conv-NINE/f1'),
       `each refused BY NAME, in words, nothing stored: ${tries.map((t) => t[3]).join(' · ')}`, got);
-    const ok8192 = await H('/api/agent/vault/put', { body: { name: 'long', value: 'v'.repeat(VF.TEXT_PUT_MAX) } });
+    const long = 'L' + crypto.randomBytes(7500).toString('base64').slice(0, 9999);   // built at run time: 10 000 characters
+    const okLong = await H('/api/agent/vault/put', { body: { name: 'long', value: long } });
     const bq = await H('/api/agent/vault/put', { query: '?bytes=QUJDREVGR0g', body: { name: 'q' } });
-    ok(ok8192.status === 200 && bq.status === 400 && bq.json.code === 'value_in_argv', 'exactly 8192 characters is kept; a file\'s bytes in the URL ⇒ value_in_argv (argv-readable)', [ok8192.status, bq.json]);
+    ok(okLong.status === 200 && String(v2.secretGet('agent:conv-NINE/long').value) === long && bq.status === 400 && bq.json.code === 'value_in_argv',
+      'a TEXT value of 10 000 characters is stored as at the release (主开发 r4625 (3): the unit\'s lower cap taken out); a file\'s bytes in the URL ⇒ value_in_argv (argv-readable)', [okLong.status, bq.json]);
   }
   // lane vault-agent-own: a conversation with a DURABLE id (its CLI session id — a resume keeps it) names a NEW entry by it, so a
   // conversation that ended and came back still owns it; a pending fork (it borrows its parent's id) falls back to its own

@@ -28,7 +28,6 @@ const KF = require('./ssh-key-format.js');
 
 const FILE_MAX = 1024 * 1024;        // the owner's D1 (2026-11-03): a key, a certificate chain, a kubeconfig, a licence file are far under it
 const FILE_MIN = 8;                  // = src/vault-run.js MIN_MASK_BYTES: a shorter value cannot be masked in a run's output
-const TEXT_PUT_MAX = 8192;           // a TEXT put's bound (characters) — the paste door's own (src/vault-paste.js); before this lane put had none
 const NAME_MAX = 120;
 const LINE_MIN = 16;                 // a line shorter than this is ordinary text (`}`, `apiVersion: v1`) — never masked on its own
 const LINES_MAX = 4096;
@@ -55,7 +54,6 @@ const WORDS = Object.freeze({
   file_too_small: `a file under ${FILE_MIN} bytes cannot be masked in a run's output — store it as a text value (put --from-file)`,
   file_too_large: `the vault keeps files up to 1 MB (${FILE_MAX} bytes) — it is not a file store; nothing was stored`,
   file_name_bad: 'give the file a name (letters, digits, dots — no folder, no control character)',
-  value_too_long: `a text value holds up to ${TEXT_PUT_MAX} characters — a longer one is a FILE under a NEW name: put <new name> --file <0600 file> (a name that holds text never becomes a file)`,   // the cure: the road that is open (the same name answers not_a_file)
   bytes_bad: 'the file did not arrive whole (its size or its digest differs from what was sent) — nothing was stored',
   file_needs_file: 'that entry is a FILE — a run gets it as a 0600 file only, never as --env, --stdin, inside a template or on the command line',
   not_a_file: 'that entry holds a text value, not a file — a text value is never turned into a file; put the file under a new name',
@@ -229,5 +227,5 @@ function factsOf(f) {
 const publicFactsOf = (f) => (f && typeof f === 'object' ? { name: cleanName(f.name) || 'file', size: Math.max(0, Math.floor(Number(f.size) || 0)), kind: KINDS.includes(f.kind) ? f.kind : 'generic', encrypted: f.encrypted === true,
   lines: Number.isInteger(f.lines) && f.lines >= 0 ? f.lines : null, forRun: runFitOf(f) } : null);   // 主开发 r4378 (b): the row says at once whether a run can carry it
 
-module.exports = { FILE_MAX, TEXT_PUT_MAX, NAME_MAX, LINES_MAX, LINE_BYTES_MAX, ID_RE, KEYFILE_RE, KEYFILE_PREFIX, FILE_DIR, FILE_SUFFIX, KINDS, WORDS, runValuesOf, RUN_FILE_BYTES_MAX, runFitOf, tooLargeForARunWords,
+module.exports = { FILE_MAX, NAME_MAX, LINES_MAX, LINE_BYTES_MAX, ID_RE, KEYFILE_RE, KEYFILE_PREFIX, FILE_DIR, FILE_SUFFIX, KINDS, WORDS, runValuesOf, RUN_FILE_BYTES_MAX, runFitOf, tooLargeForARunWords,
   cleanName, kindOf, encryptedOf, fileVerdict, maskSetOf, wireBytesOf, factsOf, publicFactsOf, diskNameOf };   // only what another file reads (test-architecture §78: no dead export)
