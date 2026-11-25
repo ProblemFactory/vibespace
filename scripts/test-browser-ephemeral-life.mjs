@@ -30,7 +30,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, CHROME_QUIET, driverArgs } from './scratch.mjs';
+import { scratch, freePort, CHROME_QUIET, driverArgs, DRIVER_NAMES } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -249,8 +249,17 @@ await Promise.all([runArm(W.law, keeperArm), runArm(W.ctl, keeperArm), runArm(W.
 {
   // B-9dd0 unit 2 (line 107): the Chrome each daemon launches is quiet — its config's `args` carry CHROME_QUIET (this world's own user config)
   const argsOf = (w) => { const a = w.r.config && w.r.config.args; return Array.isArray(a) ? a.map(String) : String(a || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean); };
-  const quiet = ARMS.map((w) => ({ arm: w.tag, has: CHROME_QUIET.filter((q) => argsOf(w).includes(q)).length, of: CHROME_QUIET.length }));
-  ok(quiet.every((x) => x.has === x.of), `the quiet switches ride every launch: each daemon's config carries scripts/scratch.mjs CHROME_QUIET (${quiet.map((x) => `${x.arm} ${x.has}/${x.of}`).join(', ')})`, quiet);
+  // B-8695 (主开发 r4458): THE LAW IS WHAT THE BUILDER HANDS, read as the driver reads the line — every entry of scripts/scratch.mjs
+  // driverArgs(...CHROME_QUIET) (the quiet switches; CHROME_QUIET's own names rule swapped for the driver's ONE rule, DRIVER_NAMES) present
+  // in each daemon's config, each by name. Counting CHROME_QUIET's ten was red under any driver line: its tenth, chromeNames(), holds «, »
+  // and never reaches the driver whole (the joined line of 2.369.419 cut it into pieces as well)
+  const WANT = argsOf({ r: { config: { args: driverArgs(...CHROME_QUIET) } } });
+  const carried = (got) => ({ has: WANT.filter((x) => got.includes(x)).length, of: WANT.length, names: got.includes(DRIVER_NAMES), missing: WANT.filter((x) => !got.includes(x)) });
+  const quiet = ARMS.map((w) => ({ arm: w.tag, ...carried(argsOf(w)) }));
+  ok(WANT.includes(DRIVER_NAMES) && WANT.length === CHROME_QUIET.length && quiet.every((x) => x.has === x.of && x.names), `the quiet switches and the driver's ONE names rule ride every launch: each daemon's config carries what scripts/scratch.mjs driverArgs hands (${quiet.map((x) => `${x.arm} ${x.has}/${x.of}`).join(', ')}; DRIVER_NAMES in each: ${quiet.every((x) => x.names)})`, quiet);
+  // CONTROL (the same check, no clock): a line built with ANY one of the builder's entries cut — the names rule among them — is red
+  const cuts = WANT.map((e) => carried(WANT.filter((x) => x !== e)));
+  ok(cuts.length === WANT.length && cuts.every((c) => c.has === c.of - 1 && c.missing.length === 1) && !carried(WANT.filter((x) => x !== DRIVER_NAMES)).names, `CONTROL: a config whose line lacks any one of the builder's ${WANT.length} entries (the names rule among them) is red by the same check`, cuts.map((c) => c.missing[0]));
 }
 ok(!!(!W.law.r.threw && W.law.r.state === 'ready' && W.law.r.aliveAtVerb && W.law.r.verb && W.law.r.verb.ok),
   `law: the REAL keeper started the conversation's browser on the production road (rung ${W.law.r.variant}), its daemon ${idText(W.law.daemon)} recorded, the agent's verb ran`, W.law.r);
