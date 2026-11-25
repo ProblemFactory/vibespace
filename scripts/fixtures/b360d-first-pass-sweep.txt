@@ -1,0 +1,53 @@
+  // the 2.369.420 first pass's sweep (179edf1e1: the release's, with line 924's held-settings rule — B-50e7), planted back whole as the red copies' sweep — row B-360d's legs
+  function rewriteIndex(scope, entries) {
+    indexes.set(scope, entries);
+    try { const f = path.join(scopeDir(scope), INDEX_FILE); const tmp = f + '.tmp-' + crypto.randomBytes(4).toString('hex'); fs.writeFileSync(tmp, entries.map((e) => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : ''), { mode: FILE_MODE }); fs.renameSync(tmp, f); }
+    catch (e) { log.warn?.(`[browser-trace] index rewrite failed (${scope}): ${e && e.message}`); }
+  }  /** The plan's input for one scope: its sessions, each with its entries' frame and list bytes. */
+  function scopeForPlan(sc) {
+    const entries = loadIndex(sc);
+    const ss = BS.pairSessions({ markers: loadMarkers(sc), entries, now: now() });
+    const byS = new Map(ss.map((x) => [x.id, { id: x.id, startAt: x.startAt, open: x.open, entries: [] }]));
+    const loose = { id: null, startAt: 0, open: false, entries: [] };
+    for (const e of entries) { const sid = BS.sessionOfEntry(e, ss); (byS.get(sid) || loose).entries.push({ id: e.id, at: e.at, frameBytes: T.entryFrameBytes(e), listBytes: T.entryListBytes(e), fit: T.isFitEntry(e) }); } // lane trace-fits: the plan drops page-size frames first
+    return { key: sc, sessions: [...byS.values(), ...(loose.entries.length ? [loose] : [])] };
+  }
+  let sweepHeldSaid = false;
+  function sweep() {
+    const t = now();
+    // B-50e7 (r3747, the census of readers): the frames' size bound unread (the settings held, nothing known) ⇒ that part WAITS — no
+    // frame is removed on a default bound; the recordings below keep their own bound (a constant, no setting)
+    const unread = boundUnread();
+    if (unread) { if (!sweepHeldSaid) { sweepHeldSaid = true; log.warn?.('[browser-trace] the frames\' size sweep waits while VibeSpace\'s settings cannot be read (its bound is unread) — said once a hold'); } } else sweepHeldSaid = false;   // r3941: once a hold, never once a pass
+    const limit = bytesLimit();
+    const plan = unread ? { removeFrames: [], bytesRemoved: 0, kept: [] } : T.traceSizePlan({ scopes: scopes().map(scopeForPlan), bytesPerScope: limit });
+    for (const sc of new Set(plan.removeFrames.map((r) => r.key))) {
+      const gone = new Map(plan.removeFrames.filter((r) => r.key === sc).map((r) => [r.id, r]));
+      const list = loadIndex(sc);
+      for (const e of list) {
+        const r = gone.get(e.id);
+        if (!r) continue;
+        const files = new Set([e.before && e.before.file, e.after && e.after.file].filter(Boolean));
+        for (const f of files) { try { fs.unlinkSync(path.join(scopeDir(sc), f)); } catch { /* gone already */ } }
+        // the ACTION LIST stays: the entry keeps everything but its pictures, and says why they went
+        e.before = null; e.after = null;
+        e.framesRemoved = { at: t, why: 'size', limit };
+        try { fs.writeFileSync(path.join(scopeDir(sc), `${e.id}.json`), JSON.stringify(e), { mode: FILE_MODE }); } catch { /* the index line is the record */ }
+      }
+      rewriteIndex(sc, list);
+    }
+    // recordings: their own bound, per profile (src/browser-recording-retention.js), over the files themselves
+    const recRemoved = [];
+    let recDirs = [];
+    try { recDirs = fs.readdirSync(recRoot).filter((n) => B.isProfileId(n)); } catch { recDirs = []; }
+    for (const pid of recDirs) {
+      const files = recordingsOf(pid).filter((f) => !f.live).map((f) => ({ id: f.file, at: f.mtime, bytes: f.bytes }));
+      const rp = RR.recordingRetentionPlan({ groups: [{ key: pid, entries: files }], now: t });
+      for (const r of rp.remove) { try { fs.unlinkSync(path.join(recRoot, pid, r.id)); recRemoved.push({ profileId: pid, file: r.id, why: r.why, bytes: r.bytes }); } catch { /* */ } }
+    }
+    const framesRemoved = plan.removeFrames.length;
+    lastSweep = { at: t, removed: framesRemoved, framesRemoved, bytesRemoved: plan.bytesRemoved, limit, ...(unread ? { held: true } : {}), recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((n, r) => n + r.bytes, 0), kept: plan.kept };
+    if (framesRemoved || recRemoved.length) log.log?.(`[browser-trace] sweep: the frames of ${framesRemoved} action(s) (${Math.round(plan.bytesRemoved / 1024)} KB) + ${recRemoved.length} recording(s) removed — ${[...plan.removeFrames, ...recRemoved].slice(0, 3).map((r) => r.why).join('; ')}${framesRemoved + recRemoved.length > 3 ? '; …' : ''} (every action list kept)`);
+    bc({ type: 'browser-housekeeping-updated', sweep: lastSweep });
+    return { ...lastSweep, plan, recordings: recRemoved };
+  }

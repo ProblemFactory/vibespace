@@ -482,7 +482,7 @@ const DELETION_CALLS = Object.freeze({
   // file that write put there: its inode), and a crash's leftover temp reaped at the folder's next write (r3961); r4094 +1 — that take-back when
   // the temp's inode could not be read (only a note still holding this write's own three fields) — none keeps a list
   'src/server/browser-kept-note.js': 6,
-  'src/server/browser-trace.js': 4, 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
+  'src/server/browser-trace.js': 6, /* row B-360d (r4522) +2: the index rewrite's OWN temp file removed when the rewrite fails, and at the hub's stop — never a store's file */ 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
   'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/csp-reports.js': 1 /* r4828: the re-judge's temp removed on a failed rewrite */, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
   'src/server/engine-distribution.js': 15, 'src/server/handed-sweep.js': 1, 'src/server/home-rename.js': 2, 'src/server/hook-root-watch.js': 1, 'src/server/host-tokens.js': 3,
   'src/server/hub-tmp.js': 1, 'src/server/incident-wiring.js': 2, 'src/server/job-secrets-door.js': 2, 'src/server/jobs-wiring.js': 1,

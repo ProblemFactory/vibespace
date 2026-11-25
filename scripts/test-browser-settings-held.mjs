@@ -198,7 +198,7 @@ console.log('B7 the action trace: held ⇒ the last choice known; nothing known 
   const TR = require('../src/server/browser-trace.js');
   const mk = (held, settings) => { const W = path.join(ROOT, 'trace-' + (++worlds)); fs.mkdirSync(path.join(W, 'home', '.agent-browser'), { recursive: true }); const st = { held, settings: { ...settings } }; return { tr: TR.create({ dataDir: path.join(W, 'data'), homeDir: path.join(W, 'home'), serverSetting: heldView(st), log: quiet, sweepEveryMs: 0 }), st }; };
   const a = mk(HELD, { 'browser.actionTrace': false, 'browser.traceBytesPerProfile': 2048 });
-  const sw = a.tr.sweep();
+  const sw = await a.tr.sweep();   // row B-360d (r4522): the trace's sweep is off the loop — awaited
   let hk = null; try { hk = await a.tr.housekeeping(); } catch (e) { hk = { threw: String(e && e.message).slice(0, 120) }; }
   ok(!!(a.tr.enabled() === false), 'B7 — THE LAW (held at a start, nothing known): the trace records NOTHING — never the default «on» for a person who may have turned it off — RED: on', { enabled: a.tr.enabled() });
   ok(!!(sw && sw.held === true && sw.framesRemoved === 0), 'B7 — THE LAW: the frames\' size sweep WAITS (no frame removed on the default bound) — RED: it runs on the default 1 GB', sw && { held: sw.held, framesRemoved: sw.framesRemoved, limit: sw.limit });
@@ -377,9 +377,9 @@ console.log('B15 the two sweeps say their wait once a hold, not once a pass; the
   const W = path.join(ROOT, 'trace-once-' + worlds); fs.mkdirSync(path.join(W, 'home', '.agent-browser'), { recursive: true });
   const tr = TR.create({ dataDir: path.join(W, 'data'), homeDir: path.join(W, 'home'), serverSetting: heldView(st), log: { log() { }, warn: (l) => tl.push(String(l)), error() { } }, sweepEveryMs: 0 });
   const said = (a, re) => a.filter((l) => re.test(l)).length;
-  for (let i = 0; i < 3; i++) { await kept.sweep(); tr.sweep(); }
+  for (let i = 0; i < 3; i++) { await kept.sweep(); await tr.sweep(); }   // row B-360d: one sweep at a time — each pass awaited (an un-awaited one would answer the next ask)
   const k1 = said(kl, /settings cannot be read/), t1 = said(tl, /settings cannot be read/);
-  st.held = null; await kept.sweep(); tr.sweep(); st.held = HELD; await kept.sweep(); tr.sweep();
+  st.held = null; await kept.sweep(); await tr.sweep(); st.held = HELD; await kept.sweep(); await tr.sweep();
   const k2 = said(kl, /settings cannot be read/), t2 = said(tl, /settings cannot be read/);
   // (the trace's next hold KNOWS its bound from the read pass — its memo — so its sweep runs on the person's value and has nothing to say;
   // the kept sweep reads the door itself, so its next hold waits again and says it once more)

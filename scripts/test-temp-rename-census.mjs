@@ -250,7 +250,7 @@ const ROWS = [
   ["src/server/browser-keeper.js", "synced", "self-synced", "a browser profile's own Preferences and the person's kept geolocation values beside it (B-9584 U2c, r1897): each temp synced before its rename, awaited", "create > geoStoreAt > writeAtomic"],
   ["src/server/browser-keeper.js", "move", "move", "", "create > adoptScratch"],
   ["src/server/browser-kept.js", "move", "move", "", "create > moveAside"],   // the sweep's fail-closed law (lane bl-windows, 主开发 r3006): the load renames nothing (a store that could not be read stays where it is)
-  ["src/server/browser-trace.js", "unsynced", "store", "", "writeJsonAtomic", "create > rewriteIndex"],
+  ["src/server/browser-trace.js", "unsynced", "store", "", "writeJsonAtomic", "create > rewriteIndexAsync"],   // row B-360d (r4522): the sweep's index rewrite, async now (a temp file, then the rename) — still unsynced, the same family
   ["src/server/browser-trace.js", "move", "move", "", "create > forgetProfile > moveAside", "create > forgetOrphan"],
   ["src/server/channel-api-cards.js", "unsynced", "store", "", "create > save"],
   ["src/server/channel-api.js", "unsynced", "store", "", "create > save"],

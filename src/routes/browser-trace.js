@@ -346,13 +346,13 @@ router.get('/api/browser/housekeeping', async (req, res) => {
     res.json({ ...h, conversations: convs.map(({ pinned, lastActive, ...c }) => c) });
   } catch (e) { fail(res, e); }
 });
-router.post('/api/browser/housekeeping/sweep', (req, res) => {
+router.post('/api/browser/housekeeping/sweep', async (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
   // lane browser-resume (§3.9): the panel's Sweep also runs the kept browsers' (ends + the size bound) — it answers by its own broadcast
   let keptHeld = false;   // r3941: the press's own reply says the settings' hold (the kept sweep waits; its bounds are unread)
   try { const ks = ctx?.keeper && typeof ctx.keeper.keptStore === 'function' ? ctx.keeper.keptStore() : null; if (ks) { try { keptHeld = !!(typeof ks.limits === 'function' && ks.limits().unread); } catch { keptHeld = false; } } if (ks) ks.sweep().catch((e) => console.warn('[browser-kept] sweep failed: ' + (e && e.message))); } catch (e) { console.warn('[browser-kept] sweep failed: ' + (e && e.message)); }
-  try { const r = tr.sweep(); res.json({ ok: true, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed, bytesRemoved: r.bytesRemoved, recordingsRemoved: r.recordingsRemoved, recordingBytesRemoved: r.recordingBytesRemoved, plan: r.plan, recordings: r.recordings, at: r.at }); }
+  try { const r = await tr.sweep(); res.json({ ok: true, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed, bytesRemoved: r.bytesRemoved, recordingsRemoved: r.recordingsRemoved, recordingBytesRemoved: r.recordingBytesRemoved, plan: r.plan, recordings: r.recordings, at: r.at }); }
   catch (e) { fail(res, e); }
 });
 /** "Who can use it" as the dialog draws it — FRESH from the registry (mirror-193: never the panel's broadcast copy), with
