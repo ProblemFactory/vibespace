@@ -3,23 +3,7 @@
  "rows": {
   "B-0d3e": {
    "why": "B-0d3e slice 8 (lane lg-text-legs-2, 主开发 r2677 / r2678): THE SECOND LIST, born at the live count when it landed — the red controls scripts/lib/param-text-census.mjs paramTextEdits counts and unanchoredEdits cannot see: a plain edit whose TEXT is a helper's parameter or a loop's variable (not a name bound to a product read), whose result is the text a loader runs or writes. Each falls as the row's next slices send it through its suite's editAnchor (or scripts/scratch.mjs anchored()); none rises: a unit that must add one adds a NEW row under its own backlog id.",
-   "files": {
-    "test-agentd-dial.mjs": 1,
-    "test-channel-census.mjs": 1,
-    "test-channel-outbox-window.mjs": 1,
-    "test-channel-store.mjs": 2,
-    "test-channels-accounts.mjs": 1,
-    "test-channels-aggregate.mjs": 3,
-    "test-channels-e2e.mjs": 1,
-    "test-channels-engine.mjs": 2,
-    "test-exit-access-ui.mjs": 2,
-    "test-exit-forensics.mjs": 1,
-    "test-jobs-engine.mjs": 2,
-    "test-layout-dup-storm-loop.mjs": 1,
-    "test-new-session-dialog.mjs": 1,
-    "test-pair-dialog-ui.mjs": 1,
-    "test-readings-attribution.mjs": 2
-   }
+   "files": {}
   }
  }
 }

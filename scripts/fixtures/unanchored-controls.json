@@ -14,8 +14,7 @@
     "test-integration-registry.mjs": 1,
     "test-layout-dup-storm-loop.mjs": 2,
     "test-may-use.mjs": 1,
-    "test-mount-starting.mjs": 1,
-    "test-peer-text-census.mjs": 1
+    "test-mount-starting.mjs": 1
    }
   },
   "B-7f0b": {

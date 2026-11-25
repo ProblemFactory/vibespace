@@ -2,7 +2,7 @@
  "//": "B-0d3e (lane lg-leak-census, 主开发's read 2026-11-19 01:11Z): THE FOUNDING ROW IS FALL-ONLY. Each count fixture's founding row (B-0d3e, the list the census brought) is pinned here — its total and each file's count as they stood when the rows were made (2.369.412's block, int411 279706636). test-suite-files-parse §3 reds a founding count above its pin: a rise enters only as a NEW row under the raising unit's own backlog id. A pin is only ever LOWERED (when a founding count falls, lower both).",
  "unanchored-controls": {
   "row": "B-0d3e",
-  "total": 12,
+  "total": 11,
   "files": {
    "test-browser-orphans.mjs": 1,
    "test-browser-passkey-chrome.mjs": 1,
@@ -12,8 +12,7 @@
    "test-integration-registry.mjs": 1,
    "test-layout-dup-storm-loop.mjs": 2,
    "test-may-use.mjs": 1,
-   "test-mount-starting.mjs": 1,
-   "test-peer-text-census.mjs": 1
+   "test-mount-starting.mjs": 1
   }
  },
  "anchor-helpers": {
@@ -23,23 +22,7 @@
  },
  "param-text-edits": {
   "row": "B-0d3e",
-  "total": 22,
-  "files": {
-   "test-agentd-dial.mjs": 1,
-   "test-channel-census.mjs": 1,
-   "test-channel-outbox-window.mjs": 1,
-   "test-channel-store.mjs": 2,
-   "test-channels-accounts.mjs": 1,
-   "test-channels-aggregate.mjs": 3,
-   "test-channels-e2e.mjs": 1,
-   "test-channels-engine.mjs": 2,
-   "test-exit-access-ui.mjs": 2,
-   "test-exit-forensics.mjs": 1,
-   "test-jobs-engine.mjs": 2,
-   "test-layout-dup-storm-loop.mjs": 1,
-   "test-new-session-dialog.mjs": 1,
-   "test-pair-dialog-ui.mjs": 1,
-   "test-readings-attribution.mjs": 2
-  }
+  "total": 0,
+  "files": {}
  }
 }
