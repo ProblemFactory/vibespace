@@ -12,6 +12,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A notice about a refused agent action now names the conversation or browser it was about, while the agent itself still learns nothing more.
 - When the list of plugins you turned on and trusted cannot be read, VibeSpace keeps it: no plugin is turned off, removed or asked to consent again.
 - An account whose weekly window is exactly another account's now shows as unknown until its own usage is read; press refresh on its row.
+- A very large page in an agent's browser no longer freezes VibeSpace while the vault's values are taken out of it; what cannot be checked in time is held back.
 
 ## 2.369.418 — 2026-11-24
 
