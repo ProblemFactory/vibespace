@@ -279,10 +279,14 @@ const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,-
       'lane idle-paint-default-on: the default\'s reason is dated beside it — the fleet image: a dashboard\'s GPU process 99.8 % → frozen 0 %, 0 frames; back in 31–43 ms at 60 fps', P);
     // r4176 (b): while a viewer watches, the sweep asks the watch to try the failed shows again (owedShows) — never without a viewer, never
     // when nothing is owed; RED: the keeper without that branch (the person waits for the agent's next verb)
-    const RETRY_LINE = "        else if (vw.n > 0 && f.owedShows > 0 && typeof paintWatch.retryOwedShows === 'function') await paintWatch.retryOwedShows(rec.profileId);";
+    const RETRY_LINE = "        else if (vw.n > 0 && f.owedShows > 0 && !f.busy && typeof paintWatch.retryOwedShows === 'function') { const pid = rec.profileId, pr = paintWatch.retryOwedShows(pid); if (pr && typeof pr.catch === 'function') pr.catch((e) => log.warn?.(`[browser] ${pid}: idle paint retry of a failed show failed: ${e && e.message}`)); }";
     const rtry = (x) => x.split(',').includes('retry bp-000000c1');
-    const rw = { watched: await idleSweep(K0, true, { owedShows: 1 }, { viewers: 1 }), alone: await idleSweep(K0, true, { owedShows: 1, lastVerbAt: NOW_I - 5000 }), none: await idleSweep(K0, true, {}, { viewers: 1 }) };
-    ok(ksrc0.includes(RETRY_LINE) && rtry(rw.watched) && !rtry(rw.alone) && !rtry(rw.none), 'r4176 (b): a viewer watching a browser with a failed show owed ⇒ the sweep asks retryOwedShows; no viewer, or nothing owed ⇒ never', rw);
+    const rw = { watched: await idleSweep(K0, true, { owedShows: 1 }, { viewers: 1 }), alone: await idleSweep(K0, true, { owedShows: 1, lastVerbAt: NOW_I - 5000 }), none: await idleSweep(K0, true, {}, { viewers: 1 }), busy: await idleSweep(K0, true, { owedShows: 1, busy: true }, { viewers: 1 }) };
+    ok(ksrc0.includes(RETRY_LINE) && rtry(rw.watched) && !rtry(rw.alone) && !rtry(rw.none) && !rtry(rw.busy), 'r4176 (b) / r4186 (1): a viewer watching a browser with a failed show owed ⇒ the sweep asks retryOwedShows; no viewer, nothing owed, or the browser BUSY (a verb running, a dialog open) ⇒ never', rw);
+    // r4186 (1)'s red: the keeper's line as it stood at 6ed465256 (no busy test) asks the retry in the middle of the agent's verb
+    const BUSY_CUT = '&& f.owedShows > 0 && !f.busy &&';
+    const Kbz = ksrc0.includes(BUSY_CUT) ? MI.load('src/server/browser-keeper.js', editAnchor(ksrc0, BUSY_CUT, '&& f.owedShows > 0 &&', 'src/server/browser-keeper.js'), 'r4186-retry-when-busy') : null;
+    if (Kbz) { const bz = await idleSweep(Kbz, true, { owedShows: 1, busy: true }, { viewers: 1 }); ok(rtry(bz), 'CONTROL (6ed465256: the sweep\'s retry blind to a running verb): asked while the agent\'s verb runs — RED', bz); }
     const Knr = ksrc0.includes(RETRY_LINE) ? MI.load('src/server/browser-keeper.js', editAnchor(ksrc0, RETRY_LINE, '', 'src/server/browser-keeper.js'), 'r4176-no-retry') : null;
     if (Knr) { const rc = await idleSweep(Knr, true, { owedShows: 1 }, { viewers: 1 }); ok(!rtry(rc), 'CONTROL (3ae970836: the sweep never retries a failed show): the person watching waits for the agent\'s next verb — RED', rc); }
     const ksrc1 = ksrc0, readLine = "setting('browser.idlePaintFreeze', BIdle.IDLE_PAINT_DEFAULT) === true";

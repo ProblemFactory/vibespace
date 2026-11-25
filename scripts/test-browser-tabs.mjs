@@ -788,7 +788,9 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       if (m.method === 'Target.getTargetInfo') return st.urls.has(p.targetId) ? re({ targetInfo: { targetId: p.targetId, type: 'page', url: st.urls.get(p.targetId) } }) : re({});
       return re({});
     }));
-    return { url: `ws://127.0.0.1:${wss.address().port}/devtools/browser/stand-in`, st, close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); wss.close(() => r()); }) };
+    // r4186: `bring(t)` — the agent (or the person) brings tab t forward in its window: t visible, every other tab of that window hidden
+    const bring = (t) => { for (const [x, wv] of winOf) if (x !== t && wv === winOf.get(t)) vis.set(x, 'hidden'); vis.set(t, 'visible'); st.hid.delete(t); };
+    return { url: `ws://127.0.0.1:${wss.address().port}/devtools/browser/stand-in`, st, bring, close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); wss.close(() => r()); }) };
   };
   const watchLeg = async (Dmod, holders, { blindAtFreeze = [] } = {}) => {
     const SI = await standIn(); const PID = 'bp-0000c23a';
@@ -954,7 +956,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     const DDs2 = dsrc.includes(SANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, SANCH, '    // 3623606d5: never said', 'src/server/browser-dialogs.js'), 'r4095-never-said') : null;
     const DDa2 = dsrc.includes(AANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, AANCH, "w.unthawed = null; w.paint = 'active'; w.thawedAt = now(); } // 3623606d5: «active» whatever the replies", 'src/server/browser-dialogs.js'), 'r4095-active-anyway') : null;
     const DDo2 = dsrc.includes(OANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, OANCH, 'if (s) shown.push(s); /* 3623606d5: forgotten before it is shown */', 'src/server/browser-dialogs.js'), 'r4095-forgot-first') : null;
-    const mkD = (Dmod, SI, said, bounds = 1) => Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: { ...quiet, warn: (m) => said.push(String(m)) }, leaseCountOf: () => 2, boundScale: bounds,
+    const mkD = (Dmod, SI, said, bounds = 1, clock = null) => Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: { ...quiet, warn: (m) => said.push(String(m)) }, leaseCountOf: () => 2, boundScale: bounds, ...(clock ? { now: () => clock.t } : {}),
       tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) });
     const ids2 = (x) => (x && Array.isArray(x.shown) ? x.shown.map((s2) => s2.targetId) : null);
     const hA2 = (PID) => ({ ...H.a, profileId: PID });
@@ -1044,6 +1046,59 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
         return { opened, failed1: th1 && th1.failed ? th1.failed.map((x) => [x.targetId, x.failed]) : [], already2: th2 && th2.already, shown2: ids2(th2), flips: SI.st.creates.filter((c) => !c.newWindow).length, hidden2: (D.paintFacts(PID) || {}).hidden };
       } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
     };
+    // r4186 (its must, law 2): a failed show leaves A's front owed; the agent's verb then brings TA0 forward in A's window. On the sweep's
+    // retry AND on a verb's thaw, A is no longer its window's front: forgotten, never activated over TA0; an unanswered read keeps it owed,
+    // nothing shown. RED: 6ed465256 (A's own visibility only — A activated over the agent's tab)
+    const MVANCH = "    if (winA != null && near.some((x) => x.win === winA && x.vis === 'visible')) return 'moved';";
+    if (!dsrc.includes(MVANCH)) ok(false, 'the anchor of the control «an owed front shown over the tab brought forward» is not in the source (src/server/browser-dialogs.js)');
+    const DDmv = dsrc.includes(MVANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, MVANCH, '    // 6ed465256: only its own visibility read', 'src/server/browser-dialogs.js'), 'r4186-shown-over-moved') : null;
+    const movedLeg = async (Dmod, road, { muteNear = false } = {}) => {
+      const SI = await standIn({ failCreate: (n) => n === 2 }); const PID = road === 'retry' ? 'bp-0000c247' : 'bp-0000c248'; const said = []; const D = mkD(Dmod, SI, said, 0.3);
+      try {
+        await D.arm(PID, { budgetMs: 3000 });
+        const opened = await until(() => !!D.paintFacts(PID), 3000);
+        const fz = opened ? await D.freezePaint(PID) : null;
+        const th1 = fz && fz.ok ? await D.thawPaint(PID, { holder: hA2(PID) }) : null;
+        SI.bring(TA0); if (muteNear) SI.st.muteVis.add(TA0);
+        const a0 = SI.st.acts.length;
+        const r = road === 'retry' ? await D.retryOwedShows(PID) : await D.thawPaint(PID, { holder: hA2(PID) });
+        const f = D.paintFacts(PID) || {};
+        const th3 = muteNear ? null : await D.thawPaint(PID, { holder: hA2(PID) });
+        return { opened, failed1: th1 && th1.failed ? th1.failed.length : 0, moved: r && r.moved, unread: r && r.unread, shown: ids2(r), actsOfA: SI.st.acts.slice(a0).filter((t) => t === TA).length, owed: f.owedShows, hidden: f.hidden, after: th3 && { thawed: th3.thawed, shown: ids2(th3) } };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    // r4186 (law 3): the sweep's retry backs off on a placed clock — tried at 0 s, then after 5, 10, 20, 40, 60 s; reset when shown
+    const backLeg = async (Dmod) => {
+      let failing = true; const clock = { t: 1795100000000 };
+      const SI = await standIn({ failCreate: (n) => n >= 2 && failing }); const PID = 'bp-0000c249'; const said = []; const D = mkD(Dmod, SI, said, 1, clock);
+      try {
+        await D.arm(PID, { budgetMs: 3000 });
+        const opened = await until(() => !!D.paintFacts(PID), 3000);
+        const fz = opened ? await D.freezePaint(PID) : null;
+        if (fz && fz.ok) await D.thawPaint(PID, { holder: hA2(PID) });
+        const t0 = clock.t, tried = [], skipped = [];
+        for (const at of [0, 1, 5, 9, 15, 34, 35, 75, 76, 140]) { clock.t = t0 + at * 1000; const r = await D.retryOwedShows(PID); (r && r.retried ? tried : skipped).push(at); }
+        failing = false; clock.t = t0 + 200 * 1000;
+        const back = await D.retryOwedShows(PID); const f = D.paintFacts(PID) || {};
+        return { opened, tried, skipped, back: back && { retried: back.retried, shown: ids2(back) }, owed: f.owedShows };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    // the round's should: «four failed creates never give a front up» gets a red of its own — every reason counted toward the cap, as at 3ae970836
+    const RANCH = "    if (why !== 'another window') { w.showOwed.add(tid); w.otherWin.delete(tid); return true; }";
+    if (!dsrc.includes(RANCH)) ok(false, 'the anchor of the control «every reason counted toward the cap» is not in the source (src/server/browser-dialogs.js)');
+    const DDrc = dsrc.includes(RANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, RANCH, '    // 3ae970836: every reason counted toward the cap', 'src/server/browser-dialogs.js'), 'r4186-every-reason-capped') : null;
+    const [mvR, mvV, mvC, mvU, bk, slowC] = await Promise.all([movedLeg(DD, 'retry'), movedLeg(DD, 'verb'), DDmv ? movedLeg(DDmv, 'retry') : Promise.resolve(null), movedLeg(DD, 'retry', { muteNear: true }), backLeg(DD),
+      DDrc ? capLeg(DDrc, { failCreate: (n) => n >= 2 && n <= 5 }, 5, 'bp-0000c24a') : Promise.resolve(null)]);
+    ok(mvR.failed1 === 1 && J(mvR.moved) === J([TA]) && mvR.actsOfA === 0 && mvR.owed === 0 && mvR.hidden === 1 && !!mvR.after && mvR.after.thawed === false,
+      'r4186 (its must, law 2) on the SWEEP\'s retry: A\'s owed front, its window now showing the tab the agent brought forward, is forgotten — never activated over it; the next verb\'s thaw has nothing to show (B\'s front still owed to B)', mvR);
+    ok(mvV.failed1 === 1 && J(mvV.moved) === J([TA]) && mvV.actsOfA === 0 && mvV.owed === 0 && mvV.hidden === 1,
+      'r4186 (law 2) on a VERB\'s thaw: the same — A forgotten, never activated over the tab brought forward', mvV);
+    if (DDmv) ok(!!mvC && mvC.actsOfA >= 1 && J(mvC.shown) === J([TA]), 'CONTROL (6ed465256: an owed front read by its own visibility only): A is activated over the agent\'s tab — the moved tab, the live view jumps — RED', mvC);
+    ok(J(mvU.unread) === J([TA]) && mvU.actsOfA === 0 && mvU.owed === 1,
+      'r4186 (law 2): a read that decides it does not answer (the tab brought forward is silent) — A kept owed, nothing shown (unknown is never «not»)', mvU);
+    ok(J(bk.tried) === J([0, 5, 15, 35, 75, 140]) && J(bk.skipped) === J([1, 9, 34, 76]) && !!bk.back && bk.back.retried === 1 && J(bk.back.shown) === J([TA]) && bk.owed === 0,
+      'r4186 (law 3): the sweep\'s retry of a show that keeps failing backs off — tried at 0, 5, 15, 35, 75 and 140 s (the wait doubling 5 → 60 s), and shown when Chrome answers', bk);
+    if (DDrc) ok(!!slowC && slowC.said.length === 1 && slowC.hidden[2] === 1, 'CONTROL (3ae970836: every reason counted toward the cap): three failed creates on a loaded Chrome give the front up for good — RED', slowC);
     const [sv, sv2, ss2, av, ac2, ov, oc2, slow5, other4, otherC, rt, al] = await Promise.all([sayLeg(DD), DDv2 ? sayLeg(DDv2) : Promise.resolve(null), DDs2 ? sayLeg(DDs2) : Promise.resolve(null),
       actLeg(DD), DDa2 ? actLeg(DDa2) : Promise.resolve(null), showLeg(DD), DDo2 ? showLeg(DDo2) : Promise.resolve(null),
       capLeg(DD, { failCreate: (n) => n >= 2 && n <= 5 }, 5, 'bp-0000c242'), capLeg(DD, { flipWin: (n) => (n >= 2 ? 9 : null) }, 4, 'bp-0000c245'), DDn2 ? capLeg(DDn2, { flipWin: (n) => (n >= 2 ? 9 : null) }, 4, 'bp-0000c246') : Promise.resolve(null),

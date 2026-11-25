@@ -6567,8 +6567,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       try {
         if (v.act === 'freeze') { const r = await paintWatch.freezePaint(rec.profileId); if (r && r.ok) log.info?.(`[browser] ${rec.profileId}: nobody watches or drives it for ${Math.round(BIdle.IDLE_PAINT_MS / 1000)} s — its ${r.tabs} tab(s) stop drawing until the next verb or viewer`); }
         else if (v.act === 'thaw') await paintWatch.thawPaint(rec.profileId);
-        else if (vw.n > 0 && f.owedShows > 0 && typeof paintWatch.retryOwedShows === 'function') await paintWatch.retryOwedShows(rec.profileId); // r4176 (b): a viewer watching a front whose show failed — tried again now, not at the agent's next verb
-      } catch (e) { log.warn?.(`[browser] ${rec.profileId}: idle paint ${v.act} failed: ${e && e.message}`); }
+        else if (vw.n > 0 && f.owedShows > 0 && !f.busy && typeof paintWatch.retryOwedShows === 'function') { const pid = rec.profileId, pr = paintWatch.retryOwedShows(pid); if (pr && typeof pr.catch === 'function') pr.catch((e) => log.warn?.(`[browser] ${pid}: idle paint retry of a failed show failed: ${e && e.message}`)); } // r4176 (b) / r4186 (1): a viewer watching a front whose show failed — tried again, never while a verb runs or a dialog is open (busy), never awaited by the tick
+      } catch (e) { log.warn?.(`[browser] ${rec.profileId}: idle paint ${v.act || 'retry'} failed: ${e && e.message}`); }
     }
   }
   function idleReleaseAfterMs() { return B.idleReleaseMs(setting('browser.idleReleaseAfterTurnMs', B.DEFAULT_IDLE_RELEASE_MS, 0)); }   // B-50e7: held, nothing known ⇒ 0 — no release by the clock

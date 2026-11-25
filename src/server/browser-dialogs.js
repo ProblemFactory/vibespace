@@ -120,6 +120,8 @@ let BIm = null;
 const BI = () => BIm || (BIm = require('../browser-idle.js'));
 const FLIP_RECHECK_MS = 60 * 1000;   // r4058: an UNREAD flip-tab birth is asked again at the first freeze this long after
 const FLIP_LATE_MS = 60 * 1000;      // r4058 (1): a flip create with no reply owes its late tab's close this long
+const RETRY_FIRST_MS = 5 * 1000;    // r4186 (3): the sweep's retry of a failed show waits this after its first failure — doubled at each
+const RETRY_MAX_MS = 60 * 1000;     // failure, to this at most; reset when the front is shown
 const SHOW_TRIES = 3;                // r4176: a frozen front whose flip tab lands in ANOTHER window is tried this many thaws in a row, then left
 const PROMPT_FY_KEY = 'prompt-auth:'; // B-ebb7: a sign-in's For-you item is keyed — a past hub life's open ones are swept when a watch starts
 const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this — doubled at each failed try (acceptance r1: a refused port looped every 2 s)
@@ -1205,29 +1207,62 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  and the next thaw shows it, with NO cap (主开发 r4176: it ends when it is shown or its tab is gone) — but for the ONE reason the hub
    *  measures itself at that show: the flip tab landed in ANOTHER window than the front's, both known (a front in a popup window, as
    *  the measure shows it). SHOW_TRIES of that in a row for one front and it is left as it is, said once a watch. A front whose earlier
-   *  show failed is read first (r4176, the round's should): «visible» ⇒ that show did happen — forgotten, never flipped again. */
+   *  show failed is read first (r4176, the round's should; r4186 (2), on every road that shows it — a verb's thaw and the sweep's retry):
+   *  «visible» ⇒ that show did happen; ANOTHER tab of its window reads «visible» ⇒ it is no longer its window's front (the agent or the
+   *  person brought that tab forward since) — either way forgotten, never shown over it; an unanswered read ⇒ kept owed, nothing shown. */
   async function showNeed(w, need) {
-    const shown = [], failed = [], already = [];
+    const shown = [], failed = [], already = [], moved = [], unread = [];
     for (const tid of need) {
-      if (w.targets.has(tid) && w.showOwed && w.showOwed.has(tid) && (await visibilityOf(w, tid)) === 'visible') { already.push(tid); forgetFront(w, tid); continue; }
+      if (w.targets.has(tid) && w.showOwed && w.showOwed.has(tid)) {
+        const o = await owedFrontState(w, tid);
+        if (o === 'shown') { already.push(tid); forgetFront(w, tid); continue; }
+        if (o === 'moved') { moved.push(tid); forgetFront(w, tid); continue; }
+        if (o === 'unknown') { unread.push(tid); continue; }
+      }
       const s = w.targets.has(tid) ? await showFront(w, tid) : null;
       if (s && s.failed) { failed.push(s); if (showFailed(w, tid, s.failed)) continue; } else if (s) shown.push(s);
       forgetFront(w, tid);
     }
-    return { shown, ...(failed.length ? { failed } : {}), ...(already.length ? { already } : {}) };
+    return { shown, ...(failed.length ? { failed } : {}), ...(already.length ? { already } : {}), ...(moved.length ? { moved } : {}), ...(unread.length ? { unread } : {}) };
   }
-  function forgetFront(w, tid) { if (w.hiddenFronts) w.hiddenFronts.delete(tid); if (w.frontWin) w.frontWin.delete(tid); if (w.showOwed) w.showOwed.delete(tid); if (w.otherWin) w.otherWin.delete(tid); }
+  /** r4186 (2): an owed front's state before it is shown again — its own visibility, every tab's window and every other tab's
+   *  visibility, read at once (each its own bound): 'shown' (it reads visible), 'moved' (another tab of its window reads visible),
+   *  'unknown' (a read that decides it did not answer), 'hidden' (still its window's front, hidden: show it). */
+  async function owedFrontState(w, tid) {
+    const others = [...w.targets.values()].filter((e) => e.sid && e.targetId !== tid);
+    const [own, wins, vis] = await Promise.all([visibilityOf(w, tid), Promise.all([tid, ...others.map((e) => e.targetId)].map((t) => windowOfTarget(w, t))), Promise.all(others.map((e) => visibilityOf(w, e.targetId)))]);
+    if (own === 'visible') return 'shown';
+    const winA = wins[0] != null ? wins[0] : w.frontWin && w.frontWin.get(tid) != null ? w.frontWin.get(tid) : null;
+    const near = others.map((e, i) => ({ win: wins[i + 1], vis: vis[i] })).filter((x) => winA == null || x.win == null || x.win === winA);
+    if (winA != null && near.some((x) => x.win === winA && x.vis === 'visible')) return 'moved';
+    if (winA == null || typeof own !== 'string' || near.some((x) => x.win == null || typeof x.vis !== 'string')) return 'unknown';
+    return 'hidden';
+  }
+  function forgetFront(w, tid) { if (w.hiddenFronts) w.hiddenFronts.delete(tid); if (w.frontWin) w.frontWin.delete(tid); if (w.showOwed) w.showOwed.delete(tid); if (w.otherWin) w.otherWin.delete(tid); if (w.retryAt) w.retryAt.delete(tid); }
   /** A tab's document.visibilityState, its own bound; undefined = unread. */
   async function visibilityOf(w, tid) { const e = w.targets.get(tid); if (!e || !e.sid) return undefined; const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); return v && v.result && v.result.result ? v.result.result.value : undefined; }
   /** r4176 (b): a person watching a front whose show failed does not wait for the agent's next verb — while a viewer is there the
-   *  keeper's sweep asks this: the owed shows (those that failed) are tried again, nothing else (another holder's front stays owed). */
+   *  keeper's sweep asks this. It tries again EVERY failed show of this browser, whichever holder's (each in its own window, its front
+   *  activated first), and nothing that never failed (a front still owed to another holder waits for that holder's verb or viewer).
+   *  r4186: (1) never while the browser is busy — a verb running, a dialog open, a page loading: the same busy that keeps the freeze
+   *  from acting; the show then waits for the next idle tick or the verb's own thaw. (2) a front no longer its window's front is
+   *  forgotten (showNeed). (3) a front whose retry fails is tried again after a wait that doubles, RETRY_FIRST_MS up to RETRY_MAX_MS,
+   *  reset when it is shown — a sick Chrome gets no flip tab born in the person's window at every tick. */
   function retryOwedShows(profileId) {
     const w = watches.get(String(profileId || ''));
     if (!w || w.state !== 'open' || w.paint === 'frozen' || w.thawing || !w.showOwed || !w.showOwed.size) return Promise.resolve({ ok: true, shown: [] });
-    const need = [...w.showOwed].filter((tid) => w.hiddenFronts && w.hiddenFronts.has(tid));
-    for (const tid of [...w.showOwed]) if (!need.includes(tid)) w.showOwed.delete(tid);
-    if (!need.length) return Promise.resolve({ ok: true, shown: [] });
-    w.thawing = (async () => { try { return { ok: true, retried: need.length, ...(await showNeed(w, need)) }; } finally { w.thawing = null; } })();
+    if (w.open.size > 0 || [...w.targets.values()].some((e) => e.navSince > 0) || verbRunningOn(profileId)) return Promise.resolve({ ok: true, shown: [], busy: true });
+    for (const tid of [...w.showOwed]) if (!(w.hiddenFronts && w.hiddenFronts.has(tid))) forgetFront(w, tid);
+    if (!w.retryAt) w.retryAt = new Map();
+    const t = now(), need = [...w.showOwed].filter((tid) => !w.retryAt.has(tid) || w.retryAt.get(tid).next <= t);
+    if (!need.length) return Promise.resolve({ ok: true, shown: [], waiting: w.showOwed.size });
+    w.thawing = (async () => {
+      try {
+        const r = await showNeed(w, need);
+        for (const s of r.failed || []) if (w.showOwed && w.showOwed.has(s.targetId)) { const g = w.retryAt.has(s.targetId) ? Math.min(RETRY_MAX_MS, w.retryAt.get(s.targetId).gap * 2) : RETRY_FIRST_MS; w.retryAt.set(s.targetId, { gap: g, next: now() + g }); }
+        return { ok: true, retried: need.length, ...r };
+      } finally { w.thawing = null; }
+    })();
     return w.thawing;
   }
   /** The CDP window a tab sits in (Browser.getWindowForTarget), null when Chrome does not say. */
@@ -1287,7 +1322,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function noteLateFlip(w) {
     const was = w.flipLate && now() < w.flipLate.until ? w.flipLate.n : 0;
     w.flipLate = { n: Math.min(8, was + 1), until: now() + FLIP_LATE_MS };
-    closeLateBirths(w);
+    // r4186 (its small): never while ANOTHER flip runs (a freeze's check and a verb's show at once) — that flip's own birth may be in the
+    // births before its reply names it; the scan then waits for the count to reach zero (flipEnd), when every flip's own id is known
+    if (w.flipping <= 1) closeLateBirths(w);
   }
   /** Every birth still at the flip address that no flip of this watch made, while a late flip is owed: the hub's own late tab —
    *  closed by its id (r4058 (1)). */
