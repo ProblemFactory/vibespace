@@ -3484,6 +3484,7 @@ export default {
   "Remote sessions are scanned once, not polled.": "远程会话只扫描一次，不会持续轮询。",
   "Remove dial-out (keep the ssh machine)": "移除拨出连接（保留 ssh 机器）",
   "Removed “{name}”": "已移除“{name}”",
+  "Removed “{name}” — its sign-in folder is kept: a pool could not be moved off it": "已移除“{name}”——它的登录文件夹保留了：有个账号池没能从它移开",
   "Removing…": "正在移除…",
   "Rename failed — {reason}": "重命名失败 — {reason}",
   "Restoring the terminal…": "正在恢复终端…",

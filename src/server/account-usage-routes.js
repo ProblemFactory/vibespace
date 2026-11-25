@@ -429,8 +429,8 @@ app.delete('/api/accounts/:id', (req, res) => {
     const _wasPool = accounts.get(req.params.id)?.type === 'pooled';
     // a deleted MEMBER leaves every pool that listed it: the default and each conversation's link go where the ENGINE
     // decides (verify r2 — the store alone re-points to the first live member / the default)
-    let unlanded = null;   // r3977 (2): the removal FINISHED in memory and on the hub; its follow-ups on the machines run too, then the landing is said
-    try { accounts.remove(req.params.id, {
+    let unlanded = null, removed = null;   // r3977 (2): the removal FINISHED in memory and on the hub; its follow-ups on the machines run too, then the landing is said; B-e381: its answer (a kept folder)
+    try { removed = accounts.remove(req.params.id, {
       chooseDefault: (poolId, from) => (typeof engine.decideDefaultTarget === 'function' ? engine.decideDefaultTarget(poolId, from) : null) || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(poolId, from) : null),
       chooseLink: (poolId, from, sid) => (typeof engine.removalTargetFor === 'function' ? engine.removalTargetFor(poolId, from, sid) : null),
     }); } catch (e) { if (e && e.code === 'not-durable' && e.landingOwed) unlanded = e; else throw e; } // throws for unknown ids → only real (shape-safe) ids continue
@@ -455,8 +455,8 @@ app.delete('/api/accounts/:id', (req, res) => {
       const sweep = () => { for (const h of hosts.list() || []) { try { execFile('ssh', [...hosts.sshArgs(hosts.get(h.id)), '--', rm], { env: hosts.sshEnv(), timeout: 15000 }, () => {}); } catch { } } };
       if (hosts.whenRead) hosts.whenRead(sweep, `the token-copy sweep of account ${rid} on every machine`, `token-sweep:${rid}`); else sweep();   // the B-f276 remainder (its read r1, S5): a held hosts.json sweeps once it reads; the moved chain's read (S4): named + keyed
     }
-    if (unlanded) return notDurable(res, unlanded);
-    res.json({ success: true });
+    if (unlanded) return notDurable(res, unlanded, unlanded.keptFolder ? { keptFolder: unlanded.keptFolder } : {});   // B-e381: a kept folder is said beside an unlanded removal
+    res.json({ success: true, ...(removed && removed.keptFolder ? { keptFolder: removed.keptFolder } : {}) });   // B-e381: a pool that could not be moved off the member keeps its folder — said to the person
   }
   catch (e) { failAcct(res, e); }
 });

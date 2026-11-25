@@ -449,11 +449,16 @@ const P = amP.createPool({ name: 'Pool' }).id;
   // (B-e381, lane bl-tests-e, 主开发 r4531: ensureSessionPoolLink reads its member by the member's OWN harness — _memberSignIn: the
   // reader, the folder, the file a re-point bumps; for a Claude member the release's values, value for value — the slot (_noteSlot's
   // row), the link and the ledger unchanged; its two writers' Claude scene is the release's byte for byte in test-codex-pool «B-e381»)
-  const PIN = { ensureSessionPoolLink: '56cc4b8af486cdd5', _noteSlot: 'f7c6d00977b723ab', setPoolTarget: 'd5e1be9cf1471633', repointPoolSymlink: '90eae116e782737a' };
-  const now = { ensureSessionPoolLink: h(fnText(src, 'ensureSessionPoolLink')), _noteSlot: h(fnText(src, '_noteSlot')), setPoolTarget: h(fnText(src, 'setPoolTarget')), repointPoolSymlink: h(fnTop(mat, 'repointPoolSymlink')) };
-  ok(JSON.stringify(now) === JSON.stringify(PIN), 'THE SLOT LAW (invariant 3): ensureSessionPoolLink / _noteSlot / setPoolTarget / repointPoolSymlink are byte-identical to rel267 (sha pins)', now);
+  // (B-e381's second unit, 主开发 r4614: ensureSessionPoolLink decides by the POOL's harness — a member of another harness refused by
+  // name, a per-session link only where the capability row's planC says its process reads one — and the helper that names the link's
+  // target JOINS this table, so the target is pinned as the function is)
+  const PIN = { ensureSessionPoolLink: 'b7f49c7bb8ea09e2', _memberSignIn: '19070c53aea36534', _noteSlot: 'f7c6d00977b723ab', setPoolTarget: 'd5e1be9cf1471633', repointPoolSymlink: '90eae116e782737a' };
+  const now = { ensureSessionPoolLink: h(fnText(src, 'ensureSessionPoolLink')), _memberSignIn: h(fnText(src, '_memberSignIn')), _noteSlot: h(fnText(src, '_noteSlot')), setPoolTarget: h(fnText(src, 'setPoolTarget')), repointPoolSymlink: h(fnTop(mat, 'repointPoolSymlink')) };
+  ok(JSON.stringify(now) === JSON.stringify(PIN), 'THE SLOT LAW (invariant 3): ensureSessionPoolLink / _memberSignIn / _noteSlot / setPoolTarget / repointPoolSymlink are byte-identical to their pins (sha pins)', now);
   const mutated = h(fnText(src.replace("const from = this.poolCurrentFor(poolId, sessKey);", "const from = this.poolCurrentFor(poolId, sessKey) ;"), 'ensureSessionPoolLink'));
   ok(mutated !== PIN.ensureSessionPoolLink, 'RED control: one added character in ensureSessionPoolLink moves its pin');
+  const mutatedHelper = h(fnText(src.replace("const dir = this._acctDir(be, member.id);", "const dir = this._acctDir(be, member.id) ;"), '_memberSignIn'));
+  ok(mutatedHelper !== PIN._memberSignIn && fnText(src, '_memberSignIn').includes('const dir = this._acctDir(be, member.id);'), 'RED control (B-e381): one added character in _memberSignIn — the helper that names the link\'s target — moves its pin');
   // its death: an expired file leaves the candidate list through the slot reader
   const amD = new AccountManager({ dataDir: path.join(tmp, 'data-death') });
   const D = amD.createSubscription({ name: 'Dying' }).id;

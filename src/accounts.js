@@ -1870,23 +1870,36 @@ class AccountManager {
     // dangling — the whole pool showed signed-out and running sessions read
     // creds through a dead link until some spawn happened to heal it).
     // Deleting a member must leave every pool self-consistent NOW.
-    if (capsOf(this._acctBackend(a)).oauthUsage && this._acctType(a) === 'subscription') {
+    // (B-e381's second unit, 主开发 r4613) EVERY harness that keeps a sign-in here (its creds row — never a harness's name) has pools
+    // to heal: «this harness reports usage by its sign-in» (oauthUsage, the old gate) is not «this harness has pools». THE ORDER: the
+    // links move BEFORE the member's folder is wiped; a heal that failed keeps the folder standing and the answer says so
+    let kept = null;
+    if (this._acctType(a) === 'subscription' && this._keepsSignIn(this._acctBackend(a))) {
       // poolMembers below must not offer the removed account; 主开发 r4168 (MUST 1): a row that held a sign-in is OFF THE FILE before its
       // pools are healed and its folder wiped, as at the release (a kill after the wipe never brings it back with its sign-in and its pools);
       // the act still finishes (it has no undo) and a landing that fails is said at its end (r3977 (2))
       unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);
-      this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });
+      const failed = this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });
+      if (failed.length) kept = { pools: failed.length, codes: [...new Set(failed.map((f) => f.code))] };
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
-    else if (this._acctType(a) === 'subscription') { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
+    else if (this._acctType(a) === 'subscription') {
+      if (kept) console.warn(`[pool] a removed member's sign-in folder is KEPT: ${kept.pools} pool(s) could not be moved off it (${kept.codes.join(', ')}) — its links still read it`);   // B-e381: names no account
+      else { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
+    }
     this._displayForget(a);   // B-360d: the folder's kept facts go with it
     // r3782: a row that held a sign-in is gone from the file before the call returns; r3977 (2): a landing that fails is said AFTER the act
     // finished (the pools healed, the folder wiped, every page told) — the person's retry never meets a half-done removal
     const unlanded = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);
     this._notify();
-    if (unlanded || unlanded0) throw (unlanded || unlanded0);
+    // B-e381 (formed with B-574d's r3977): a landing that fails is said at the end as before, and a kept folder rides it (keptFolder)
+    const owed = unlanded || unlanded0;
+    if (owed) { if (kept) owed.keptFolder = kept; throw owed; }
+    return kept ? { keptFolder: kept } : {};   // B-e381: the removal's answer — the folder kept when a pool could not be moved off it
   }
+  /** B-e381: this harness keeps a sign-in here — its descriptor's creds row has a reader (an unknown harness keeps none) */
+  _keepsSignIn(be) { try { const c = this._credsOf(be); return !!(c && typeof c.parseAuth === 'function'); } catch { return false; } }
 
   /** Every pool that referenced a just-removed member: strip it from explicit
    *  member lists, re-point the default link if it targeted the removed
@@ -1905,6 +1918,7 @@ class AccountManager {
     const goneKey = this._providerKeyOf(removedProvider);
     const sameProv = (mid) => goneKey == null || this._providerKeyOf(this.memberProviderOf(mid)) === goneKey;
     const provWord = (removedProvider && (removedProvider.label || removedProvider.kind || removedProvider.id)) || 'its provider';
+    const failed = [];
     for (const pool of this._state.accounts.filter((x) => this._acctType(x) === 'pooled')) {
       try {
         if (Array.isArray(pool.members) && pool.members.includes(removedId)) {
@@ -1920,7 +1934,7 @@ class AccountManager {
         if (Array.isArray(pool.priority)) pool.priority = pool.priority.filter((m) => m !== removedId); // a deleted account has no place in the manual order
         const alive = this.poolMembers(pool.id);
         const aliveSame = alive.filter((m) => sameProv(m.id)); // (q-055 M2) the deleted member's OWN provider only
-        if (readTarget(this.subDir(pool.id)) === removedId) {
+        if (readTarget(this._poolLinkDir(pool)) === removedId) {   // B-e381: the POOL's own link (its harness's folder), never Claude's path
           if (aliveSame.length) {
             // the ENGINE's decision when it is wired (verify r2) — `aliveSame[0]` only as the no-engine fallback
             let pick = null;
@@ -1929,7 +1943,7 @@ class AccountManager {
             this.setPoolTarget(pool.id, to.id, { why: 'member-removed' });
             console.warn(`[pool] "${pool.name}" target was the deleted account — re-pointed to ${to.name}${pick ? ' (decided)' : ''}`);
           } else {
-            try { fs.unlinkSync(this.subDir(pool.id)); } catch { } // a dangling link reads as a phantom login path; absent = honestly signed-out
+            try { fs.unlinkSync(this._poolLinkDir(pool)); } catch { } // a dangling link reads as a phantom login path; absent = honestly signed-out (B-e381: the pool's own link)
             this._displayForget(pool);   // B-360d: the pool's folder is gone — never a minute of the removed member's identity on its row
             if (alive.length) {
               this._markUnplaced(pool, null, removedId, removedProvider);
@@ -1960,8 +1974,9 @@ class AccountManager {
             }
           }
         }
-      } catch (e) { console.warn(`[pool] hygiene after removing ${removedId} failed for ${pool.id}:`, e.message); }
+      } catch (e) { console.warn(`[pool] hygiene after removing ${removedId} failed for ${pool.id}:`, e.message); failed.push({ poolId: pool.id, code: (e && e.code) || 'error' }); }
     }
+    return failed;   // B-e381: the pools this removal could not move off the member (the caller keeps its folder)
   }
 
   // null = the CLI's own global login is the default for new sessions. Each
@@ -2030,7 +2045,7 @@ class AccountManager {
     // branch below.
     if (this._acctType(a) === 'pooled') {
       if (hostFacts) return { usable: false, how: null, reason: 'pool-local-only', linked: false, held: false, heldVerified: false };
-      const ok = !!this.poolCurrent(a.id) && !!this.readSubCreds(a.id).loggedIn;
+      const ok = !!this.poolCurrent(a.id) && !!this._readAuthFor(backend, a.id).loggedIn;   // B-e381: the pool's link read through its OWN harness
       return { usable: ok, how: 'local-env', reason: ok ? null : 'pool-no-target', linked: false, held: false, heldVerified: false };
     }
     const isSub = this._acctType(a) === 'subscription' || !this._credsOf(backend).supportsApiKeys;
@@ -2921,7 +2936,16 @@ class AccountManager {
   ensureSessionPoolLink(poolId, sessKey, memberId, { why = 'session-link' } = {}) {
     const target = this.get(memberId);
     if (!target || this._acctType(target) !== 'subscription') throw new Error('not a subscription: ' + memberId);
-    const signIn = this._memberSignIn(target);   // B-e381: judged by its OWN harness (a Codex pool's member by Codex's reader and folder)
+    // B-e381 (主开发 r4614): THE POOL's HARNESS decides — a member of another harness is refused by name (the pool's default writer's own
+    // words), and a per-session link is written ONLY where its harness's process reads one: the capability row's planC (the row the
+    // engine tests before its per-session loop) — never a harness's name. A harness without it holds its member for life on the pool's
+    // default; a link written there would credit the conversation to a member its process does not bill.
+    const pool = this.get(poolId), poolBe = pool && this._acctType(pool) === 'pooled' ? this._acctBackend(pool) : null;
+    if (poolBe != null) {
+      if (this._acctBackend(target) !== poolBe) throw new Error(`not a ${poolBe} subscription: ` + memberId);
+      if (!capsOf(poolBe).planC) throw new Error(`no per-session pool link for this harness (${poolBe}): its conversations read the pool's default`);
+    }
+    const signIn = this._memberSignIn(target);   // B-e381: judged by its OWN harness (its reader and folder)
     if (!signIn.auth().loggedIn) throw new Error('pool member not logged in: ' + target.name);
     const link = this.sessionPoolLinkPath(poolId, sessKey);
     const from = this.poolCurrentFor(poolId, sessKey); // read BEFORE the re-point — the ledger records a transition, not a state

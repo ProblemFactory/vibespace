@@ -3484,6 +3484,7 @@ export default {
   "Remote sessions are scanned once, not polled.": "リモートセッションは一度だけスキャンされ、継続的なポーリングは行いません。",
   "Remove dial-out (keep the ssh machine)": "発信接続を削除（ssh マシンは維持）",
   "Removed “{name}”": "「{name}」を削除しました",
+  "Removed “{name}” — its sign-in folder is kept: a pool could not be moved off it": "「{name}」を削除しました — サインインのフォルダーは残しています：プールをそこから移せませんでした",
   "Removing…": "削除中…",
   "Rename failed — {reason}": "名前の変更に失敗しました — {reason}",
   "Restoring the terminal…": "ターミナルを復元中…",
