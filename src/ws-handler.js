@@ -2133,12 +2133,13 @@ function registerWsHandler(wss, ctx) {
         case 'state-resync': {
           // Client reconnected — send missed ops or full snapshot per store
           if (data.versions && typeof data.versions === 'object') {
+            const unreadNames = Array.isArray(data.unread) ? data.unread : [];   // r3654 3: the stores this page holds as unread
             for (const [name, sinceVersion] of Object.entries(data.versions)) {
               const store = getSyncStore(name);
               if (!store) continue;
               // lane lg-recovery (主开发 r3262 / r3271, law (a)): the store's own answer — a HELD store says `state-held` (the page
-              // keeps what it holds), never a snapshot of its unread state; else the missed ops or the full snapshot, as before
-              for (const m of store.resyncAnswer(sinceVersion)) ws.send(JSON.stringify(m));
+              // keeps what it holds), never a snapshot of its unread state; a page unread gets the full snapshot once the store reads
+              for (const m of store.resyncAnswer(sinceVersion, { unread: unreadNames.includes(name) })) ws.send(JSON.stringify(m));
             }
           }
           break;

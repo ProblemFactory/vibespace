@@ -2027,7 +2027,7 @@ const HELD_WORDS = Object.freeze({
   plugin_registry_unread: () => t('VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).'),   // bl-browser-a (plugin-registry.json, 主开发 r3305 / r3470: the row in the unit for the train) — a plugin's switch, consent, install, uninstall, update, an engine profile's start
   record_unreadable: () => t('VibeSpace cannot read your vault right now — nothing is lost and nothing was changed. It reads it again by itself; wait a few minutes, then unlock again.'),   // lg-vault-env (unit (b): data/vault.json, the vault record) — the vault itself, not a list: its own sentence (r3168: a store boarding after the hotfix adds its own row)
   // lg-recovery (the synced stores' one read, 主开发 r3262 / r3271; rows in the unit, r3489): GET /api/sync/:store 503 and a reconnect's state-held (src/sync-store.js) — LIST holds: read again by itself, nothing written over, what is typed meanwhile kept. The page words the drafts and the uploads in place with these same sentences (src/lib/chat-input.js, src/lib/file-explorer-uploads.js)
-  drafts_unread: () => t('Your saved drafts can’t be read right now — what you type is kept and joins them when they read again'),   // drafts.json
+  drafts_unread: () => t('Your saved drafts can’t be read right now: what you type stays on this page until they read again'),   // drafts.json
   stage_unread: () => t('The Stage layout can’t be read right now — nothing was changed; it is read again by itself'),   // stage-sync.json
   uploads_unread: () => t('The list of recent uploads can’t be read right now — it is read again by itself'),   // uploads-sync.json
   settings_unread: () => t('The synced settings can’t be read right now — nothing was changed; they are read again by themselves'),   // settings-sync.json
@@ -2330,9 +2330,10 @@ class StateSync {
     this._stateHandler = (connected) => {
       // the socket dropped: an own set in flight is never answered on it — its held ops are judged now (resync converges)
       if (!connected) { for (const [name, s] of Object.entries(this.stores)) { s.pending.clear(); for (const key of [...s.held.keys()]) this._release(name, key); } return; }
-      const versions = {};
-      for (const [name, s] of Object.entries(this.stores)) versions[name] = s.version;
-      if (Object.keys(versions).length) this.ws.send({ type: 'state-resync', versions });
+      const versions = {}, unread = [];
+      for (const [name, s] of Object.entries(this.stores)) { versions[name] = s.version; if (s.unread) unread.push(name); }
+      // r3654 3: a store this page holds as UNREAD is named — a hub that reads it again answers with the full snapshot
+      if (Object.keys(versions).length) this.ws.send({ type: 'state-resync', versions, ...(unread.length ? { unread } : {}) });
     };
     wsManager.onStateChange(this._stateHandler);
   }
@@ -2344,7 +2345,8 @@ class StateSync {
     if (this.stores[storeName]) return this.stores[storeName].loaded;
     // pending: key → own sets not yet acked; acked: key → the version of the last acked own set; held: key → remote ops
     // waiting for that ack (the arrival rule's three facts)
-    const s = this.stores[storeName] = { version: 0, data: {}, listeners: new Map(), loaded: null, pending: new Map(), acked: new Map(), held: new Map() };
+    // saw: this page holds the store's data (false while a page that opened during a hold has never read it — r3654 2)
+    const s = this.stores[storeName] = { version: 0, data: {}, listeners: new Map(), loaded: null, pending: new Map(), acked: new Map(), held: new Map(), saw: false };
     s.loaded = (async () => {
       try {
         const res = await fetch(`/api/sync/${storeName}`);
@@ -2354,6 +2356,7 @@ class StateSync {
         if (snap && snap.held === true) { this._applyUnread(storeName, snap); return false; }
         s.data = snap.data || {};
         s.version = snap.version || 0;
+        s.saw = true;
         return !!res.ok;
       } catch { return false; }
     })();
@@ -2366,10 +2369,16 @@ class StateSync {
   set(storeName, key, value) {
     const s = this.stores[storeName];
     if (!s) return;
+    // r3654, THE PAGE OWNS WHAT IT HOLDS UNSENT: while the store is UNREAD nothing is sent for it (the hub takes nothing while held).
+    // TEXT (a chat draft, a document's comments) stays on this page, in its map, and is sent at the store's first snapshot; any other
+    // unit acts for this page only, is NOT kept, and the page says so once (onUnread's { notKept })
+    if (s.unread) {
+      if (value == null || value === '') delete s.data[key]; else s.data[key] = value;
+      if (this._isText(storeName)) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(key, value == null || value === '' ? null : value);
+      else if (!s.unread.notKeptSaid) { s.unread.notKeptSaid = true; this._tellUnread(storeName, s.unread, { notKept: true }); }
+      return;
+    }
     s.pending.set(key, (s.pending.get(key) || 0) + 1);
-    // r3271, THE PAGE's LAW: what the person types or changes while the store is unread is THIS page's newer value for that unit —
-    // kept here until a snapshot (the lift's, or one after a hub restart) has taken it, then sent again (null = a deletion)
-    if (s.unread) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(key, value == null || value === '' ? null : value);
     if (value == null || value === '') {
       delete s.data[key];
       this.ws.send({ type: 'state-set', store: storeName, key, value: '', basedOn: s.version });
@@ -2433,8 +2442,36 @@ class StateSync {
     const s = this.stores[storeName];
     if (!s) return;
     const first = !s.unread;
-    s.unread = { code: String((msg && msg.code) || storeName + '_unread') };
+    const code = String((msg && msg.code) || storeName + '_unread');
+    if (first) s.unread = { code }; else s.unread.code = code;
+    // r3654: the hub's answer to ONE op this page sent before it knew (`key`): not taken — its wait released; a text unit stays here
+    if (msg && typeof msg.key === 'string') {
+      const n = (s.pending.get(msg.key) || 0) - 1;
+      if (n > 0) s.pending.set(msg.key, n); else { s.pending.delete(msg.key); this._release(storeName, msg.key); }
+      const m = this._isText(storeName) ? (s.typedWhileUnread || (s.typedWhileUnread = new Map())) : null;
+      if (m && !m.has(msg.key)) { const v = s.data[msg.key]; m.set(msg.key, v === undefined || v === '' ? null : v); }
+    }
     if (first) this._tellUnread(storeName, s.unread, null);
+  }
+  /** the stores whose units are a person's TEXT (r3654 1): what is typed while unread stays on the page and is sent at the first snapshot */
+  _isText(storeName) { return storeName === 'drafts'; }
+  /** A PAGE THAT NEVER SAW THE DATA JOINS (r3654 2): the file's unit, then what was typed here, once — { value, prepended } (the saved
+   *  text is a PREFIX of the result, so the composer lands it in front of its live box, as a put-back lands), or null: nothing to send */
+  _joinUnseen(saved, typed) {
+    const SEP = '\n\n';   // the put-back's separator (src/queue-putback.js PUTBACK_SEP)
+    if (saved === undefined || saved === null || saved === '') return { value: typed };
+    if (typeof saved === 'string' && typeof typed === 'string') {
+      if (typed === saved || typed.includes(saved)) return { value: typed };
+      if (saved.includes(typed)) return null;   // nothing new: the saved text already holds it
+      return { value: saved + SEP + typed, prepended: (saved + SEP).length };
+    }
+    if (Array.isArray(saved) && Array.isArray(typed)) {   // a document's comments: the saved rows, then the new ones
+      const id = (r) => (r && typeof r === 'object' && r.id != null ? 'id:' + r.id : JSON.stringify(r));
+      const have = new Set(saved.map(id));
+      const add = typed.filter((r) => !have.has(id(r)));
+      return add.length ? { value: [...saved, ...add] } : null;
+    }
+    return null;   // not text: never sent over a unit this page never saw
   }
   /** the store's unread facts ({ code }) — null when it reads */
   unreadOf(storeName) { return this.stores[storeName]?.unread || null; }
@@ -2445,11 +2482,14 @@ class StateSync {
   _applySnapshot(storeName, data, version, msg) {
     const s = this.stores[storeName];
     if (!s) return;
-    // r3271, THE PAGE's LAW: a unit typed or changed here while the store was unread is never cleared or replaced by this snapshot
-    // (the lift's, or one after a hub restart): the page's newer value wins for that unit, and is sent again below
+    // r3654, THE PAGE OWNS WHAT IT HOLDS UNSENT: at the store's FIRST snapshot (the lift's, or a later hub's first answer after a
+    // restart) each unit typed here while unread is sent ONCE — a page that held the data before the hold sends a true edit; a page
+    // that never saw it (it opened during the hold) JOINS a text unit (the file's, then what was typed) and sends a deletion of a unit
+    // it never saw as nothing. Then the map is empty.
     const typed = s.typedWhileUnread && s.typedWhileUnread.size ? new Map(s.typedWhileUnread) : null;
+    const saw = s.saw !== false;
     const wasUnread = !!s.unread;
-    s.unread = null; s.typedWhileUnread = null;
+    s.unread = null; s.typedWhileUnread = null; s.saw = true;
     const oldData = s.data;
     const oldKeys = new Set(Object.keys(oldData));
     // Server ROLLBACK defense: a snapshot whose version is BELOW what this
@@ -2468,10 +2508,15 @@ class StateSync {
       if (key in oldData) s.data[key] = oldData[key]; else delete s.data[key];
       this._applyOp(storeName, op);
     }
-    if (typed) for (const [key, value] of typed) { if (value === null) delete s.data[key]; else s.data[key] = value; }
-    if (typed) for (const [key, value] of typed) this.set(storeName, key, value === null ? '' : value);   // sent again: the store then holds it
-    if (rolledBack && !typed) {
+    const sent = new Map();   // key → { value, prepended? }: what this page sends now, of what it typed while unread
+    if (typed) for (const [key, value] of typed) {
+      if (saw) sent.set(key, { value: value === null ? '' : value });
+      else if (value !== null) { const j = this._joinUnseen(s.data[key], value); if (j) sent.set(key, j); }
+    }
+    for (const [key, j] of sent) this.set(storeName, key, j.value);   // ordinary sets (set() mutates s.data)
+    if (rolledBack && saw) {
       for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
+        if (sent.has(key)) continue;
         const localVal = oldData[key] ?? '';
         const serverVal = s.data[key] ?? '';
         // set() mutates s.data + sends state-set, so the notify loop below
@@ -2479,10 +2524,11 @@ class StateSync {
         if (JSON.stringify(localVal) !== JSON.stringify(serverVal)) this.set(storeName, key, localVal);
       }
     }
-    // Notify for all changed keys
+    // Notify for all changed keys — a joined text unit rides as a PREFIX (the composer lands it in front of its live box)
     for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
       const newVal = s.data[key] || '';
-      this._notify(s, key, newVal);
+      const j = sent.get(key);
+      this._notify(s, key, newVal, j && j.prepended ? { prepended: j.prepended } : undefined);
     }
     if (wasUnread || (msg && msg.setAside)) this._tellUnread(storeName, null, msg && msg.setAside ? { setAside: String(msg.setAside) } : null);
   }
@@ -2564,10 +2610,16 @@ export async function initStateSync(wsManager) {
   _stateSync = new StateSync(wsManager);
   // lane lg-recovery (r3262 / r3271): a store lifted from TORN bytes says so ONCE, where its damaged bytes are kept and what the
   // person can do — never «restore that copy» (they are the damaged bytes)
+  // r3654 4: a change to a structured unit while its store is unread acts for this page only and is NOT kept — said once, by name
+  _stateSync.onUnread((store, unread, facts) => {
+    if (!unread || !facts || !facts.notKept) return;
+    if (store === 'stage') showToast(t('The Stage layout can’t be read right now: what you arrange here stays on this page and is not kept'));
+    else if (store === 'uploads') showToast(t('The list of recent uploads can’t be read right now: uploads made meanwhile are not added to it'));
+  });
   _stateSync.onUnread((store, unread, facts) => {
     if (unread || !facts || !facts.setAside) return;
     const list = store === 'drafts' ? t('Your saved drafts') : store === 'stage' ? t('The Stage layout') : store === 'uploads' ? t('The list of recent uploads') : t('A saved list');
-    showToast(t('{list} could not be read: the file was damaged. Its damaged bytes are kept aside as {name} in VibeSpace’s data folder. What you changed since is kept; add again what is missing, or mend the file by hand and restart.', { list, name: facts.setAside }), { type: 'error', duration: 15000 });
+    showToast(t('{list} could not be read: the file was damaged. Its damaged bytes are kept aside as {name} in VibeSpace’s data folder. What you typed since on this page is kept; add again what is missing, or mend the file by hand and restart.', { list, name: facts.setAside }), { type: 'error', duration: 15000 });
   });
   await _stateSync.init('drafts');
   await _stateSync.init('uploads');

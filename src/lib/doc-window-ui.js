@@ -991,9 +991,6 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     cancel.addEventListener('click', () => close());
     add.addEventListener('click', () => {
       const note = ta.value.trim(); if (!note) { ta.focus(); return; }
-      // lane lg-recovery (r3262 / r3271): the comments' store unread — the strip holds none of the saved ones, and a list written now
-      // would stand over them at the lift: adding waits, said in place (the control stays live)
-      if (sync && sync.unreadOf && sync.unreadOf('drafts')) { say(t('This document’s comments can’t be read right now — adding one waits until they read again; nothing was changed')); return; }
       if (comments.length >= M.LIMITS.sendItems) { say(t('At most {n} comments — send these first', { n: M.LIMITS.sendItems })); return; }
       comments.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), quote: M.commentItem({ quote, note }).quote, ...(line ? { line } : {}), ...(raw ? { raw } : {}), note });
       saveComments(); renderStrip(); close(); setStrip(true);
