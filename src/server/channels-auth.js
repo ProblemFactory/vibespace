@@ -1273,6 +1273,12 @@ function create(engineCtx) {
     let journalClean = true;
     try { if (store.index.journalDurable) journalClean = (await store.index.journalDurable()) !== false; } catch { journalClean = false; }
     if (!journalClean) log.warn(`[channels] ${rec.id}: removed — its rows left index.json, but the index's journal could not be rewritten now (the storage did not take it): its older lines leave at the next compaction`);
+    // B-360d (r1556's MUST, kept at the move): the account's POLL STAMPS leave the disk before the removal says done — a compaction
+    // made after the purge, landed; one that could not land is said, and answered as the index's journal is (journalClean)
+    let stampsClean = true;
+    try { if (r && r.stamps) stampsClean = (await r.stamps) !== false; } catch { stampsClean = false; }
+    if (!stampsClean) log.warn(`[channels] ${rec.id}: removed — but its poll times are not off the disk yet (the side file's write failed, or its family is held): they leave at the next write that lands`);
+    journalClean = journalClean && stampsClean;
     // r2943 (L2): a purge REFUSED by name (the accounts' records not read, a record under the id, a bad id) — NOTHING was removed: its
     // local copy is answered as left, whole, and stays listed (its mark stands)
     if (r && r.refused) {

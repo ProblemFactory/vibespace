@@ -42,6 +42,8 @@ const ONE_PACE_MS = DEB * 6;         // one debounce + one gap of this suite's s
 //     (m1)–(m6), the compaction's own legs: test-channel-stamps-write.
 //     (m7) A WRITE NEVER SCHEDULES THE NEXT WRITE (round wkovlam1t's MUST): steady polls over a small account write the side
 //          file once, the store asks the writer once, a stray ask writes nothing. CONTROLS: one per half — red.
+//     (m8) A PURGE's «done» waits for its compaction (r1556's MUST): no byte of the account's names left on disk; a failed
+//          landing answers false. CONTROL: a purge that owes nothing — red.
 //     (m9) a failed flush that was never owed keeps its retry (round w5ymfrq4i). CONTROL: the owed mark dropped — red.
 console.log('(m) B-360d: quiet is free — the side file is the journal\'s compaction, made in slices; a rollback reads it');
 {
@@ -57,7 +59,7 @@ console.log('(m) B-360d: quiet is free — the side file is the journal\'s compa
   // round wkovlam1t's MUST, the tip that was sent back: the one-slice compaction re-dirtied the writer from its own produce, and
   // produce began a compaction whenever the writer asked
   const HALF_A = ['    if (!b.inProduce) W().dirty(stampsFile', '    if (true) W().dirty(stampsFile'], HALF_B = ['    if (!stampsCompactOwed) return null;', '    if (false) return null;'];
-  const NOPURGEOWE = ['    owe(stampsFile, stampsAsk());\n    return W().durable(stampsFile);', '    return W().durable(stampsFile);'];
+  const NOPURGEOWE = ["    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });\n    return W().durable(stampsFile);", '    return W().durable(stampsFile);'];
   const NORETRY = ['    if (!ok) { stampsDirty = true; stampsCompactOwed = true;', '    if (!ok) { stampsDirty = true;'];
   const BOUND0 = ['  function stampsBoundBytes() { return stampsSideBytes < 0 ? 0 :', '  function stampsBoundBytes() { return 0; return stampsSideBytes < 0 ? 0 :'];
   const ONESLICE = ['end = Math.min(b.keys.length, b.i + stampsSlice);', 'end = b.keys.length;'];
@@ -117,6 +119,40 @@ console.log('(m) B-360d: quiet is free — the side file is the journal\'s compa
   ok(swa.asks > 1, `(m7) CONTROL (A): the one-slice compaction asks the writer again from its own produce — ${swa.asks} asks — red`, swa);
   const swb = await steadyRun('steady-cb', HALF_B, { stray: true });
   ok(swb.writes > 1, `(m7) CONTROL (B): produce compacts whenever the writer asks — the stray ask writes (${swb.writes} writes) — red`, swb);
+
+  // (m8) THE COORDINATOR'S MUST (r1556): A PURGED ACCOUNT's STAMPS LEAVE THE DISK BEFORE ITS REMOVAL SAYS DONE — purgeAccount owes
+  //      the compaction at once and answers `stamps`, resolved when one made after it lands: then no byte of the account's names
+  //      is in the side file or its journal, the other account's stamps kept; a failed landing answers false (said, never done).
+  //      CONTROL: a purge that owes nothing — the names stay on the disk until the next bound — red.
+  const purgeRun = async (tag, cut, { fail = false } = {}) => {
+    const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const w = SW.create({ log: quiet, workerPath: STAND, pace: PACED });
+    const st = loadCut(cut).createChannelStore({ dir, log: quiet, writer: w, stampsDebounceMs: DEB });
+    await st.index.update(() => { for (let i = 0; i < 30; i++) { st.index.entry('gone', `g${i}`, { create: true }); st.index.entry('keep', `k${i}`, { create: true }); } });
+    for (let i = 0; i < 30; i++) { st.stamps.set(`gone/g${i}`, { lastPollAt: T + i }); st.stamps.set(`keep/k${i}`, { lastPollAt: T + i }); }
+    st.stamps.flush();   // a side file that holds both accounts
+    for (let i = 0; i < 5; i++) st.stamps.set(`gone/g${i}`, { lastPollAt: T + 100 + i });   // and journal lines of the account
+    if (fail) failOn('poll-stamps.json', true);
+    const pr = await st.purgeAccount('gone');   // the release's purge is async (B-92fc): its answer carries `stamps`
+    const landed = await Promise.race([pr.stamps, sleep(DEB * 40).then(() => 'timeout')]);   // forty stated paces: a purge's write is urgent and lands in the first
+    if (fail) failOn('poll-stamps.json', false);
+    await settle(w, st);
+    const text = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+    const side = text(st.stamps.file), jl = text(st.stamps.log);
+    const r = { landed, inSide: side.includes('"gone/'), inJournal: jl.includes('"gone/'), keepOnDisk: side.includes('"keep/k3"'), keep: (st.stamps.get('keep/k3') || {}).lastPollAt === T + 3 };
+    w.stop();
+    return r;
+  };
+  const pg = await purgeRun('purge', null);
+  ok(pg.landed === true && !pg.inSide && !pg.inJournal && pg.keepOnDisk && pg.keep, `(m8) A PURGE's «done» waits for its compaction: it landed (${pg.landed}) — no byte of the purged account's names in the side file (${pg.inSide}) or its journal (${pg.inJournal}); the other account kept on disk`, pg);
+  const pgf = await purgeRun('purge-fail', null, { fail: true });
+  ok(pgf.landed === false, `(m8) a purge whose compaction's write FAILS answers false (${pgf.landed}): the caller says it and never «done»`, pgf);
+  const pgc = await purgeRun('purge-c', NOPURGEOWE);
+  ok(pgc.inSide, `(m8) CONTROL: a purge that owes nothing — «done» at once (${pgc.landed}) with the names still in the side file (${pgc.inSide}) — red`, pgc);
+  { const CHA = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+    ok(/try \{ if \(r && r\.stamps\) stampsClean = \(await r\.stamps\) !== false; \} catch \{ stampsClean = false; \}/.test(CHA) && /journalClean = journalClean && stampsClean;/.test(CHA), '(m8) the removal awaits the stamps\' landing before its «done» (src/server/channels-auth.js purgeIfDeclared: beside the index journal\'s; one that could not land is said and answered as journalClean)'); }
+
+  ok(CS.STAMPS_FAIL_BEHIND_MS === PACE.MIN_GAP_CEIL_MS, `(m9) STAMPS_FAIL_BEHIND_MS (${CS.STAMPS_FAIL_BEHIND_MS}) IS the writer's longest paced gap, store-pace's MIN_GAP_CEIL_MS (${PACE.MIN_GAP_CEIL_MS}) — one number in two files (the SHARED store imports no pace module)`);
 
   // (m9) ROUND w5ymfrq4i: A FAILED WRITE THAT WAS NEVER OWED (a close's flush, a suite's flush) KEEPS ITS RETRY — the landing's failure
   //      branch keeps the compaction owed: the writer's paced retry writes the side file once the storage heals. CONTROL: the
