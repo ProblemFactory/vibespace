@@ -36,6 +36,37 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// r4456 (the flake census, round 2: «a wait is on the fact the leg judges»): the parse's ONE transcript lookup for a started command
+// ends in session-brain's noteTurnCmdRecord — the CLI's record, or null once its retry ladder gave up — kept on the session as
+// _turnOpen.cmdRecs; the card it carries is fed in the SAME synchronous step right after it (claude-stream-json peerCommandCard).
+// So a leg reads the card, or the turn's opener, only once THAT lookup has answered — never after a fixed sleep (a slow lookup was a
+// false red; a «no card» read before the lookup answered proved nothing). The bound is generous; its expiry is a NAMED harness line
+const answered = (s, cmd) => !!(s && s._turnOpen && s._turnOpen.cmdRecs && s._turnOpen.cmdRecs.has(cmd));
+const lookupDone = async (s, cmd, what, ms = 15000) => {
+  const end = Date.now() + ms;
+  while (!answered(s, cmd) && Date.now() < end) await sleep(10);
+  if (!answered(s, cmd)) ok(`HARNESS (${what}): the transcript lookup for ${cmd} answered within ${ms} ms`, false, 'it never answered');
+  return answered(s, cmd);
+};
+// the transcript's own reads, as the consumer makes them (the same fs.promises object): a STAT per attempt (made at once when an
+// attempt runs: «no lookup» is read as none made), a CLOSE per finished read, and a HOLD on a file's open (the placement legs below)
+const FSP = fs.promises, IO = { stats: new Map(), closes: new Map(), hold: new Map() };
+const K = (f) => path.basename(String(f));   // keyed by the transcript's own name (<cid>.jsonl: one per session), whatever folder the lookup resolved
+const bump = (m, f) => m.set(K(f), (m.get(K(f)) || 0) + 1);
+const ioOf = (m, f) => m.get(K(f)) || 0;
+{
+  const stat0 = FSP.stat.bind(FSP), open0 = FSP.open.bind(FSP);
+  FSP.stat = (f, ...a) => { bump(IO.stats, String(f)); return stat0(f, ...a); };
+  FSP.open = async (f, ...a) => {
+    const g = IO.hold.get(K(f)); if (g) await g.p;
+    const fh = await open0(f, ...a), close0 = fh.close.bind(fh);
+    fh.close = () => close0().finally(() => bump(IO.closes, String(f)));
+    return fh;
+  };
+}
+const holdOpen = (f) => { let go = null; const g = { p: new Promise((r) => { go = r; }) }; IO.hold.set(K(f), g); return () => { IO.hold.delete(K(f)); go(); }; };
+// one turn of the timer list: a 0 ms timer the consumer set BEFORE this one (its lookup's first attempt) has run when this resolves
+const turn = () => new Promise((r) => setTimeout(r, 0));
 
 // ── scratch HOME: the lookup resolves ~/.claude/projects through os.homedir() ──
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-peer-cmd-'));
@@ -93,7 +124,7 @@ console.log('— the incident shape: SendMessage delivery → card at turn START
   const U = '38fa716a-286c-4555-937c-657cdd1fd6c3', M = 'aab20665-ecbb-430b-819e-d930f0c59969';
   fs.writeFileSync(jsonl, J({ type: 'user', uuid: 'older', message: { role: 'user', content: 'earlier typed prompt' }, timestamp: new Date().toISOString() }) + J(peerRecord(U, M)));
   p.data(J(started(U)));
-  await sleep(120);
+  await lookupDone(s, U, 'the incident shape');
   const c1 = cards(s);
   ok('the card is on screen right after command_lifecycle started (not at turn end)', c1.length === 1, `got ${c1.length}`);
   ok('…attributed to the sender by name (origin.name, never the socket path)', c1[0]?.peerFrom === 'Sender Session', c1[0]?.peerFrom);
@@ -103,9 +134,10 @@ console.log('— the incident shape: SendMessage delivery → card at turn START
   p.data(J(result(M)));
   await sleep(30);
   ok('the result rung dedups on msg_id — still exactly ONE card after the turn ends', cards(s).length === 1, `got ${cards(s).length}`);
+  const statsBefore = ioOf(IO.stats, jsonl);
   p.data(J(started(U)));
-  await sleep(120);
-  ok('a re-emitted started for the same uuid is a no-op (per-attach seen set)', cards(s).length === 1);
+  await turn();   // a second lookup's first attempt would have stated the transcript by now
+  ok(`a re-emitted started for the same uuid is a no-op (per-attach seen set): no second lookup (${ioOf(IO.stats, jsonl) - statsBefore} reads more), one card`, cards(s).length === 1 && ioOf(IO.stats, jsonl) === statsBefore);
 }
 
 console.log('— the write races the frame: the record lands AFTER started → the retry finds it');
@@ -114,10 +146,11 @@ console.log('— the write races the frame: the record lands AFTER started → t
   const U = 'aaaaaaaa-0000-4000-8000-000000000001', M = 'bbbbbbbb-0000-4000-8000-000000000001';
   fs.writeFileSync(jsonl, J({ type: 'user', uuid: 'older', message: { role: 'user', content: 'x' } }));
   p.data(J(started(U)));
-  await sleep(60);
-  ok('nothing yet while the transcript has no such record', cards(s).length === 0);
+  const missed = await (async () => { const end = Date.now() + 15000; while (!(ioOf(IO.closes, jsonl) >= 1) && Date.now() < end) await sleep(10); return ioOf(IO.closes, jsonl) >= 1; })();   // its first attempt READ the transcript and missed
+  if (!missed) ok('HARNESS (the write races the frame): the lookup\'s first attempt read the transcript within 15000 ms', false);
+  ok('nothing yet while the transcript has no such record (its first read missed it, no answer kept)', missed && cards(s).length === 0 && !answered(s, U));
   fs.appendFileSync(jsonl, J(peerRecord(U, M)));
-  await sleep(400);
+  await lookupDone(s, U, 'the write races the frame');
   ok('…and the card appears once the record is written (bounded retries)', cards(s).length === 1, `got ${cards(s).length}`);
 }
 
@@ -127,7 +160,7 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   const U = 'cccccccc-0000-4000-8000-000000000001';
   fs.writeFileSync(jsonl, J({ type: 'user', uuid: U, message: { role: 'user', content: 'a prompt the user typed' }, promptSource: 'sdk', timestamp: new Date().toISOString() }));
   p.data(J(started(U)));
-  await sleep(120);
+  await lookupDone(s, U, 'a typed prompt');
   ok('a TYPED prompt (no origin) → no card', cards(s).length === 0);
 }
 {
@@ -135,7 +168,7 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   const U = 'dddddddd-0000-4000-8000-000000000001';
   fs.writeFileSync(jsonl, J({ type: 'user', uuid: U, isMeta: true, origin: { kind: 'peer', from: 'unknown' }, message: { role: 'user', content: 'Message from session "Jobs" (via vibespace-msg): hi' }, timestamp: new Date().toISOString() }));
   p.data(J(started(U)));
-  await sleep(120);
+  await lookupDone(s, U, 'a server-posted delivery');
   ok('a SERVER-posted delivery (body-less origin, the deliver ladder already drew its card) → no second card from this carrier', cards(s).length === 0);
 }
 {
@@ -143,7 +176,7 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   const U = 'eeeeeeee-0000-4000-8000-000000000001';
   fs.writeFileSync(jsonl, J({ type: 'user', uuid: U, origin: { kind: 'task-notification' }, message: { role: 'user', content: '<task-notification>done</task-notification>' }, timestamp: new Date().toISOString() }));
   p.data(J(started(U)));
-  await sleep(120);
+  await lookupDone(s, U, 'a task-notification wake');
   ok('a task-notification wake → no peer card', cards(s).length === 0);
 }
 {
@@ -176,7 +209,7 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
     fs.writeFileSync(path.join(projDir, cid + '.jsonl'), J({ type: 'user', uuid: U, isMeta: false, origin: { kind: 'auto-continuation' }, message: { role: 'user', content: text }, timestamp: new Date().toISOString() }));
     brainLog.length = 0;
     px.data(J(started(U)));
-    await sleep(120);
+    await lookupDone(sx, U, label);
     px.data(J({ type: 'result', subtype: 'success', is_error: false, origin: { kind: 'auto-continuation' }, session_id: 'x' }));
     await sleep(20);
     ok(`${label} (origin auto-continuation) → no peer card, and the brain is handed nothing`, cards(sx).length === 0 && brainLog.length === 0, JSON.stringify(brainLog));
@@ -192,8 +225,8 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   const U = 'ffffffff-0000-4000-8000-000000000001', M = 'ffffffff-0000-4000-8000-000000000002';
   fs.writeFileSync(jsonl, J(peerRecord(U, M)));
   p.data(J(started(U)));
-  await sleep(120);
-  ok('a REMOTE-host session never looks up a local transcript (the result rung still covers it)', cards(s).length === 0);
+  await turn();   // a lookup's first attempt would have stated the transcript by now
+  ok(`a REMOTE-host session never looks up a local transcript (${ioOf(IO.stats, jsonl)} reads; the result rung still covers it)`, cards(s).length === 0 && ioOf(IO.stats, jsonl) === 0 && !answered(s, U));
   p.data(J(result(M)));
   ok('…and the result rung renders it there', cards(s).length === 1);
 }
@@ -201,8 +234,8 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   const { s, p, jsonl } = mkSession('w-missing');
   fs.writeFileSync(jsonl, J({ type: 'user', uuid: 'zzz', message: { role: 'user', content: 'x' } }));
   p.data(J(started('99999999-0000-4000-8000-000000000001')));
-  await sleep(3100);
-  ok('a uuid the transcript never carries gives up after the bounded retries — no card, no throw', cards(s).length === 0);
+  await lookupDone(s, '99999999-0000-4000-8000-000000000001', 'a uuid the transcript never carries');
+  ok('a uuid the transcript never carries gives up after the bounded retries — no card, no throw (its answer kept as none)', cards(s).length === 0 && answered(s, '99999999-0000-4000-8000-000000000001') && s._turnOpen.cmdRecs.get('99999999-0000-4000-8000-000000000001') === null);
 }
 {
   // a device-fed copy of the JSONL record after the turn-start card: same msg_id, one card
@@ -210,7 +243,7 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
   const U = '12121212-0000-4000-8000-000000000001', M = '12121212-0000-4000-8000-000000000002';
   fs.writeFileSync(jsonl, J(peerRecord(U, M)));
   p.data(J(started(U)));
-  await sleep(120);
+  await lookupDone(s, U, 'the device gap-fill');
   s._normalizer.processLive(peerRecord(U, M));
   ok('the JSONL user record arriving later (device gap-fill) dedups on msg_id — one card', cards(s).length === 1, `got ${cards(s).length}`);
   const { s: s2 } = mkSession('w-rebuild');
@@ -255,7 +288,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   const ended = said(s);
   // (2) a queued peer message: its command starts BETWEEN turns, the init names nothing — read off the CLI's own record (the
   // peer card's ONE lookup)
-  p.data(J(started(U(3)))); p.data(J(init(null))); await sleep(300);
+  p.data(J(started(U(3)))); p.data(J(init(null))); await lookupDone(s, U(3), 'B-d868 the queued peer message');
   const peer = said(s);
   p.data(J(result(M3)));
   // (3) the reader's must 1: a background task's turn the CLI opens by itself — no command start, no names; the turn's first
@@ -272,7 +305,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   // (5) the reader's note 8: a lookup that answers after its turn ended never writes over the newer turn's fact
   p.data(J(started(U(7)))); p.data(J(init(null))); p.data(J(result(M3)));
   p.data(J(init(null))); p.data(J(T(U(8), { kind: 'task-notification' })));
-  fs.appendFileSync(jsonl, J(peerRecord(U(7), M3))); await sleep(800);
+  fs.appendFileSync(jsonl, J(peerRecord(U(7), M3))); await lookupDone(s, U(7), 'B-d868 the late lookup');   // the late lookup HAS answered: the newer turn's fact is read after it
   const late = said(s);
   ok(`B-d868 RED-able (fe1d59c41: no such fact): the person's send to an idle CLI ⇒ «person» from the init's names (${JSON.stringify(person)}); a steer inside that turn changes nothing (${steered.by}); the result ends the fact (${ended.by}, ${ended.source})`,
     person.by === 'person' && person.source === 'frame-stamp' && steered.by === 'person' && steered.at === person.at && ended.by === 'unrecorded' && ended.source === 'turn-ended', JSON.stringify({ person, steered, ended }));
@@ -284,7 +317,7 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   // reads «not recorded», never the running turn's «you»; once the set no longer names it, the turn's own opener again
   p.data(J(result(M3)));   // (5) left a turn running
   fs.appendFileSync(jsonl, J(peerRecord(U('a'), M3)));
-  p.data(J(started(U('a')))); p.data(J(init(null))); await sleep(300);
+  p.data(J(started(U('a')))); p.data(J(init(null))); await lookupDone(s, U('a'), 'B-d868 the peer turn with a helper');
   // the real order (2.1.312-frames lines 14–15): the level set names the helper BEFORE its own task_started
   const BG = { task_id: 'bg-1', task_type: 'local_agent', description: 'helper' };
   p.data(J({ type: 'system', subtype: 'background_tasks_changed', tasks: [BG] }));
@@ -319,6 +352,47 @@ console.log('— B-d868: WHO STARTED THE TURN — a kept fact with its source (s
   const PURE2 = [MM0.turnByForAsk({ by: 'person' }, []), MM0.turnByForAsk({ by: 'person' }, ['person']), MM0.turnByForAsk({ by: 'person' }, ['peer|N']), MM0.turnByForAsk({ by: 'peer', name: 'N' }, ['peer|N']), MM0.turnByForAsk({ by: 'peer', name: 'B' }, ['peer|A']), MM0.turnByForAsk({ by: 'person' }, ['unknown']), MM0.turnByForAsk(null, ['peer|N'])];
   ok(`B-d868 PURE turnByForAsk: no background, or only this opener's (its kind AND name) ⇒ the opener; another opener's, another peer's, or an unknown one ⇒ «not recorded» (background); no fact ⇒ null (${JSON.stringify(PURE2)})`,
     JSON.stringify(PURE2) === '[{"by":"person"},{"by":"person"},{"by":"unrecorded","why":"background"},{"by":"peer","name":"N"},{"by":"unrecorded","why":"background"},{"by":"unrecorded","why":"background"},null]', JSON.stringify(PURE2));
+  // r4456 (the flake census, round 2) — THE FIND PLACED FIRST, red at will by a hold, each on a session of its own:
+  // (P1) «a slow lookup leaves the turn unrecorded»: the queued-peer road with the transcript's open HELD — read as the leg stood (the
+  // opener after a wait that is not the lookup's answer), the turn's opener is still PENDING; the wait on the lookup's answer, once
+  // the hold is let go, reads «peer» off the CLI's record
+  {
+    const h = mkSession('w-turnby-held'), Uh = U('h');
+    fs.writeFileSync(h.jsonl, J(peerRecord(Uh, M3)));
+    const go = holdOpen(h.jsonl);
+    h.p.data(J(result(M3)));   // a turn this attach saw end: a command start counts only BETWEEN turns (session-brain: live === false), as at (2)
+    h.p.data(J(started(Uh))); h.p.data(J(init(null)));
+    await turn(); const asStood = said(h.s), answeredThen = answered(h.s, Uh), statedThen = ioOf(IO.stats, h.jsonl);   // its first attempt is out, its open held
+    go(); await lookupDone(h.s, Uh, 'the placed peer read');
+    const now = said(h.s);
+    ok(`B-d868 PLACED (r4456): with the transcript's read HELD (its lookup out: ${statedThen} read), the opener read before the lookup's answer says «${asStood.by}» (${asStood.source}; answered: ${answeredThen}) — RED at will, the old fixed wait's false red; the wait on the lookup's answer says «${now.by}» (${now.source})`,
+      statedThen >= 1 && asStood.by !== 'peer' && asStood.source === 'pending' && !answeredThen && now.by === 'peer' && now.source === 'cli-record', JSON.stringify({ asStood, now }));
+    h.p.data(J(result(M3)));
+  }
+  // (P2) «a late lookup that writes over the newer turn could land after the read»: the late road with the transcript's open HELD
+  // past the read, and a PLANTED fault of the leg's own (no product edit): session-brain's lookup hand-over wrapped so this command's
+  // answer writes its opener over whatever turn runs — the shape before the identity rule. Read as the leg stood (before the lookup
+  // answered) the newer turn's «task» is green and proves nothing; the wait on the lookup's answer catches the write-over — red at
+  // will. (The real hand-over, unwrapped, keeps the newer turn's fact: the leg above, now read after its lookup answered)
+  {
+    const SBm = require(path.join(REPO, 'src/server/session-brain.js')), real = SBm.noteTurnCmdRecord;
+    const h = mkSession('w-turnby-late-held'), Uj = U('j');
+    fs.writeFileSync(h.jsonl, J({ type: 'user', uuid: 'older', message: { role: 'user', content: 'x' } }));
+    const go = holdOpen(h.jsonl);
+    SBm.noteTurnCmdRecord = (session, cmd, rec) => { real(session, cmd, rec); if (cmd === Uj && rec) session._turnBy = { by: 'peer', name: 'Sender Session', source: 'cli-record', at: Date.now() }; };   // THE PLANT
+    try {
+      h.p.data(J(result(M3)));   // between turns, as at (5)
+      h.p.data(J(started(Uj))); h.p.data(J(init(null))); h.p.data(J(result(M3)));
+      h.p.data(J(init(null))); h.p.data(J(T(U('k'), { kind: 'task-notification' })));
+      fs.appendFileSync(h.jsonl, J(peerRecord(Uj, M3)));
+      await turn(); const asStood = said(h.s), answeredThen = answered(h.s, Uj);
+      go(); await lookupDone(h.s, Uj, 'the placed late lookup');
+      const now = said(h.s);
+      ok(`B-d868 PLACED (r4456), A PLANTED FAULT (a lookup that writes over the newer turn), its read HELD: read before the lookup answered (${answeredThen}) the newer turn says «${asStood.by}» — green, proving nothing; the wait on the lookup's answer catches the write-over («${now.by}») — RED at will`,
+        asStood.by === 'task' && !answeredThen && now.by === 'peer', JSON.stringify({ asStood, now }));
+    } finally { SBm.noteTurnCmdRecord = real; }
+    h.p.data(J(result(M3)));
+  }
   // (6) the reader's must 2: a hub restart mid-turn — a FRESH consumer, the turn already running, and the person steers
   const r = mkSession('w-turnby-restart');
   r.p.data(J({ type: 'frame_stamp', msg_id: 'web-6', cli_uuid: U(6) })); r.p.data(J(started(U(6)))); r.p.data(J(assistant)); await sleep(30);
