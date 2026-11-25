@@ -1920,7 +1920,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const OLD_BOUND = "  if (!(Number(repointAgeMs) >= 0) || Number(repointAgeMs) > shadowMs) return { key: newKey, shadowed: false, why: 'shadow-expired' };\n";
     const GUARD_ASK = "    const d = decideReadingTarget({ key, readingWindow: windowOf(rl), windows: establishedWindows() });\n";
     const GUARD_OFF = "    const d = { action: 'write', key, reason: 'pre-fix: this producer had no window guard', matched: [] };\n";
-    const clockFirst = (txt) => txt.replace(NEW_BOUND, '').replace(NO_REPOINT, NO_REPOINT + OLD_BOUND);
+    const clockFirst = (txt) => editAnchor(editAnchor(txt, NEW_BOUND, '', "the text handed to clockFirst()"), NO_REPOINT, NO_REPOINT + OLD_BOUND, "the text handed to clockFirst()");
     ok('§15 NEGATIVE CONTROL setup: the clock bound, the no-repoint rung and the guard call are each a single line in the shipped tool (every patch below must hit)',
       shipped.split(NEW_BOUND).length === 2 && shipped.split(NO_REPOINT).length === 2 && shipped.split(GUARD_ASK).length === 2, '');
     {

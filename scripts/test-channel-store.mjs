@@ -1389,7 +1389,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const cuts = { KEEP, HEAL, HEAL2, SKIP, QUIET, CLOSE, OWED, LOADHEAL, PRUNE, BIRTH, SAID, JOURNAL, REPLAY, FOLD };
   const missing = Object.entries(cuts).filter(([, [from]]) => src.split(from).length !== 2).map(([k]) => k);
   ok(!missing.length, `⑭ CONTROL setup: the fourteen rules are where the controls cut them (missing: ${missing.join(', ') || 'none'})`);
-  const cutFile = (tag, ...cs) => MUTCS.write('src/channel-store.js', cs.reduce((s, [from, to]) => s.replace(from, to), src), tag);
+  const cutFile = (tag, ...cs) => MUTCS.write('src/channel-store.js', cs.reduce((s, [from, to]) => editAnchor(s, from, to, "src/channel-store.js"), src), tag);
   const cut = (tag, ...cs) => require(cutFile(tag, ...cs));
   const c1 = await quietRun(cut('qs-inrow', KEEP, HEAL, HEAL2), 'c-inrow', true);
   // lane mirror-green-channels (the Actions mirror, 2.369.204): the rewrite is witnessed by its BYTES (the tenth pass's
@@ -1681,7 +1681,7 @@ console.log('\n⑮ B-f276 (lane bl-windows, 主开发 r457): a failed READ holds
   const HOLD = ["    if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }\n", "    if (st !== 'data') { fam.value = empty(); fam.missing = true; return fam; }   /* MUTANT: the release — a failed read starts EMPTY */\n"];   // B-f276 1b: the store hold's answer
   const MERGE = ["(v) => { paceSet({ ...v, pairs: unionBy(v.pairs, pc.pairs), senders: unionBy(v.senders, pc.senders) }); }", '(v) => { paceSet(v); }'];
   ok([HOLD, MERGE].every(([from]) => src.split(from).length === 2), '⑮ CONTROL setup: the hold and the merge are where the controls cut them');
-  const mut = (tag, ...cs) => require(MUTCS.write('src/channel-store.js', cs.reduce((t, [from, to]) => t.replace(from, to), src), tag));
+  const mut = (tag, ...cs) => require(MUTCS.write('src/channel-store.js', cs.reduce((t, [from, to]) => editAnchor(t, from, to, "src/channel-store.js"), src), tag));
   const c1 = await heldRun(mut('held-rename', HOLD), 'c-rename');
   ok(c1.ad.ran === true && c1.ad.refusal !== 'store-blocked', '⑮ CONTROL: the hold cut (the release\'s read: a failed read starts EMPTY) — a change RUNS over the accounts nobody read — red', JSON.stringify({ ad: { ran: c1.ad.ran, refusal: c1.ad.refusal } }));
   const c2 = await heldRun(mut('held-nomerge', MERGE), 'c-nomerge');

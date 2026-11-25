@@ -128,6 +128,15 @@ fs.mkdirSync(path.join(CWD, 'alpha'), { recursive: true });
 fs.mkdirSync(path.join(CWD, 'alps'), { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); check(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── the stub CLI: argv recorded, stdin logged, a scripted run of permission asks ──
@@ -1261,7 +1270,7 @@ try {
       ["        hostSel.value = this._nsHostPicked ? was : (hostId || '');\n        if (hostSel.selectedIndex < 0) hostSel.value = hostId || '';\n", "        hostSel.value = hostId || '';\n"],
     ];
     check('the four edits the control makes are each spelled exactly once in app.js', EDITS.every(([a]) => src.split(a).length === 2), EDITS.map(([a]) => src.split(a).length - 1));
-    fs.writeFileSync(A, EDITS.reduce((x, [a, b]) => x.replace(a, b), src));
+    fs.writeFileSync(A, EDITS.reduce((x, [a, b]) => editAnchor(x, a, b, "the text a fold hands its step"), src));
     const esbuild = path.join(repo, 'node_modules', '.bin', 'esbuild');
     const rebuild = () => execFileSync(esbuild, ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify', '--log-level=error'], { cwd: wt, stdio: 'ignore' });
     const reboot = async () => { await cdp('Page.reload', { ignoreCache: true }); await sleep(500); await waitApp(); await sleep(600); await stubCreate(); };

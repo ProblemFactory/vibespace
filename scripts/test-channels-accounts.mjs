@@ -83,6 +83,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
@@ -221,7 +230,7 @@ const rawDisk = (dir) => fs.readFileSync(path.join(dir, 'channels', 'adapters.js
 function patchedEngine(needles) {
   const src = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files as one text (one closed world)
   for (const [n] of needles) if (src.split(n).length !== 2) throw new Error(`control needle not found exactly once: ${n.slice(0, 90)}`);
-  return ownHook(require(MUTA.write(ENGINE_PATH, needles.reduce((acc, [a, b]) => acc.replace(a, b), src), 'prefix')));
+  return ownHook(require(MUTA.write(ENGINE_PATH, needles.reduce((acc, [a, b]) => editAnchor(acc, a, b, "the text a fold hands its step"), src), 'prefix')));
 }
 /** The PRE-r4 engine, byte for byte from git (null when the history is not
  *  present — a shallow mirror clone — and the leg SAYS it skipped). */

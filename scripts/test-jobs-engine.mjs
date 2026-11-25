@@ -705,7 +705,7 @@ setInterval(() => { }, 1000);
         { k: 'gone', name: 'the spec file is gone', good: !d.specLeft },
       ];
     }
-    const swap = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('spec-off-argv mutant: anchor not found once: ' + from.slice(0, 70)); return src.replace(from, to); };
+    const swap = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('spec-off-argv mutant: anchor not found once: ' + from.slice(0, 70)); return editAnchor(src, from, to, "the text handed to swap()"); };
 
     // ── the build ──
     const realRun = await measure('real');
@@ -912,7 +912,7 @@ setInterval(() => { }, 1000);
 
     // ── NEGATIVE CONTROL: the ≤ .332 judgment (no window) — the incident's shape ──
     const NOWIN = "const proto = exit.reason === 'update_window' && !job._stopRequested ? (this._inUpdateWindow(run) ? 'update_window' : 'wrapper-mismatch') : null;";
-    const swapU = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('update-window mutant: anchor not found once: ' + from.slice(0, 70)); return src.replace(from, to); };
+    const swapU = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('update-window mutant: anchor not found once: ' + from.slice(0, 70)); return editAnchor(src, from, to, "the text handed to swapU()"); };
     const JMno = mutantCopies('jobs-uw', ROOT).load('src/jobs.js', swapU(JS, NOWIN, 'const proto = null;'), 'no-window').JobManager;
     const N = world('mutant', JMno), XN = N.boot();
     N.wrapper(FUTURE, XN._bootAt + 2000);

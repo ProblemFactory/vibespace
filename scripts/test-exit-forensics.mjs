@@ -1226,7 +1226,7 @@ console.log('— §6 B-f698: an unexpected exit while working is resumed once by
   const GUARDS = ["  if ((backend || 'claude') !== 'claude') return no('backend:' + backend);\n", "  if (remote) return no('remote');\n"];
   const LOOP = "  if (!midTurn && !restarting) return no('idle');\n";
   ok(GUARDS.every((g) => xfSrc.includes(g)) && xfSrc.includes(LOOP), 'r1 controls setup: the two guards and the startup rule exist verbatim');
-  const cg = r1Table(require(M.write('src/exit-facts.js', GUARDS.reduce((s, g) => s.replace(g, ''), xfSrc), 'ue-r1-noguard')));
+  const cg = r1Table(require(M.write('src/exit-facts.js', GUARDS.reduce((s, g) => editAnchor(s, g, '', "src/exit-facts.js"), xfSrc), 'ue-r1-noguard')));
   ok(cg.codex === 'respawn/first' && cg.remote === 'respawn/first', 'r1 NEGATIVE CONTROL: without the two guards a codex and a remote conversation are respawned (the r1 finding)', cg);
   const cl = r1Table(require(M.write('src/exit-facts.js', editAnchor(xfSrc, LOOP, "  if (!midTurn) return no('idle');\n", "src/exit-facts.js"), 'ue-r1-noloop')));
   ok(cl.loop === 'null/idle', 'r1 NEGATIVE CONTROL: without the startup rule the crash loop is silent (the r1 finding)', cl);

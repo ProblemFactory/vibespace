@@ -1574,7 +1574,7 @@ await section('§14b THE DESKTOP TAB OPEN ACROSS THE RESTART (lane phone-resume-
       ["    if (!this._userDirty && !this._applying && !this._deferT && this._owedDesks().size) { this._deferT = setTimeout(() => { this._deferT = null; this.scheduleAutoSave(); }, 200); return; } // an owed recipe (r4 N1) waits for the gate too — asked again every 200 ms until it opens; no dirty bit, no input time\n", ''],
     ];
     if (ok(cut.every(([x]) => LYSRC.includes(x)), 'mutant r14b-owed-rearm: the patched lines exist in layout.js')) {
-      const LMo = (await import(pathToFileURL(M.write('src/lib/layout.js', cut.reduce((s, [x, y]) => s.replace(x, y), LYSRC), 'r14b-owed-rearm', { esm: true })).href)).LayoutManager;
+      const LMo = (await import(pathToFileURL(M.write('src/lib/layout.js', cut.reduce((s, [x, y]) => editAnchor(s, x, y, "src/lib/layout.js"), LYSRC), 'r14b-owed-rearm', { esm: true })).href)).LayoutManager;
       const f = await r14bLegs({ install: install14, quiet: true, visits: false, LM: LMo, r4: 'owe' });
       ok(f.some((n) => n.startsWith('§14b (r4 N1)')), `mutant r14b-owed-rearm (5033f0a06's owed recipe: re-armed after every remote record with a fabricated input time): §14b (r4 N1) RED — the idle phone echoes (${f.length})`, f);
     }

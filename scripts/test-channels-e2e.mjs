@@ -1161,7 +1161,7 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   ];
   ok(CSS_EDITS.every(([a]) => cssNow.split(a).length === 2), 'the two rules the control reverts are spelled once in style.css', JSON.stringify(CSS_EDITS.map(([a]) => cssNow.split(a).length - 1)));
   const cssPreFile = path.join(MUT.dir, 'style-r4-cap.css');
-  fs.writeFileSync(cssPreFile, CSS_EDITS.reduce((x, [a, b]) => x.replace(a, b), cssNow));
+  fs.writeFileSync(cssPreFile, CSS_EDITS.reduce((x, [a, b]) => editAnchor(x, a, b, "the text a fold hands its step"), cssNow));
   MUT.files.push(cssPreFile);
   const cssPre = fs.readFileSync(cssPreFile, 'utf8');
 

@@ -2656,7 +2656,7 @@ console.log("㉑ lane channel-feed-authority (OWNER'S LAW 2026-10-06: fetch the 
   const Mf = mutantCopies('chan-agg-feedauth', REPO);
   const CAPS_SRC = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
   const capsReq = "require('../channel-caps.js')";
-  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return src.split(a).join(b); };
+  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return editAnchor(src, a, b, "the text handed to swap()", 'join'); };
   /** an engine copy over a patched channel-caps (every family requires it: replaceAll) */
   const engOverCaps = (capsSrc, tag) => Mf.load('src/server/channels-engine.js', swap(ENGINE_SRC, capsReq, `require(${JSON.stringify(Mf.write('src/channel-caps.js', capsSrc, tag))})`, tag), tag);
   const FEED_ONLY_NEEDLE = "  if (l.pollCadence === 'feed-only') {\n    if (watched) return { seconds: clamp(T.hotSec), tier, paused: false, source: 'tier' };\n";
@@ -2770,7 +2770,7 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
   const Mg = mutantCopies('chan-agg-feedgap', REPO);
   const CAPS_SRC = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
   const capsReq = "require('../channel-caps.js')";
-  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return src.split(a).join(b); };
+  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return editAnchor(src, a, b, "the text handed to swap()", 'join'); };
   // CONTROL engine: the base rule — the feed "not carrying" after a silence (a cursor-holding feed falls to the tiers)
   const BASE = Mg.load('src/server/channels-engine.js', swap(ENGINE_SRC, capsReq, `require(${JSON.stringify(Mg.write('src/channel-caps.js', swap(CAPS_SRC, "  const cursorHeld = d.authority === 'authoritative' && !!f.carrying", '  const cursorHeld = false && !!f.carrying', 'cursor-held'), 'silence-falls'))})`, 'silence-falls'), 'silence-falls');
   const N = 10000, NAMED = 30, PAGE = 10;
@@ -2865,7 +2865,7 @@ console.log("㉒ lane gmail-feed-gap (B-5134): a GAP in the change feed is ONE h
 console.log("㉓ lane discovery-cursor-persist (B-6638): a server restart never re-walks an account's whole listing — the cursor is the record's");
 {
   const Md = mutantCopies('chan-agg-disccur', REPO);
-  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return src.split(a).join(b); };
+  const swap = (src, a, b, what) => { if (!src.includes(a)) throw new Error(`control needle gone: ${what}`); return editAnchor(src, a, b, "the text handed to swap()", 'join'); };
   // CONTROL engine: the base — discovery's walk state in memory only (the record's `discovery` never read back at boot)
   const BASE = Md.load('src/server/channels-engine.js', swap(ENGINE_SRC, 'disc: discFromRecord(rec)', 'disc: discFromRecord({})', 'disc-memory'), 'disc-memory');
   const N = 10000;

@@ -5845,7 +5845,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     [" en.threadReach = Feed.mergeThreadReach(en.threadReach, prevOwed, [...g.threads.keys()], g.from, en.threadOwed); }", ' }'],
     ['from: prev && Number(prev.from) > 0 ? Math.min(Number(prev.from), win.from) : win.from,', 'from: win.from,']];
   ok(RW.every(([a]) => esrcF.split(a).length === 2), 'CONTROL setup: the birth\'s, the discovery\'s and the hint\'s reach are each spelled once');
-  const noReach = MUTE.load('src/server/channels-engine.js', RW.reduce((x, [a, b]) => x.replace(a, b), esrcF), 'feed-late-reach3');
+  const noReach = MUTE.load('src/server/channels-engine.js', RW.reduce((x, [a, b]) => editAnchor(x, a, b, "src/server/channels-engine.js"), esrcF), 'feed-late-reach3');
   for (const shape of ['dm', 'found', 'found-twice']) {
     const r = await lateWindow(ENG, `${shape}-real`, shape);
     ok(r.inFlight && r.stored && r.woke === 1 && r.backlogWoke === 0 && (shape !== 'dm' || r.born === 'feed'), `(${shape}) the late window's new reply in a thread ${shape === 'dm' ? 'of a single chat it BORN' : shape === 'found' ? 'of a group the listing had not listed yet' : 'of that group, named again by the fresh window'}: stored, ONE wake (${r.woke}); the backlog nobody (${r.backlogWoke})`, JSON.stringify(r));
@@ -5892,7 +5892,7 @@ console.log('\n㉒ lane lark-search-poll: the change feed over the real engine')
     ["        if (en && en.threadReach && en.threadReach[tk.threadKey] !== undefined) { const r = { ...en.threadReach }; delete r[tk.threadKey]; if (Object.keys(r).length) en.threadReach = r; else delete en.threadReach; }\n", ''],
     ["      if (en.threadReach) delete en.threadReach;\n", '']];
   ok(RC.every(([a]) => esrcF.split(a).length === 2), 'CONTROL setup: the three clears are each spelled once');
-  const rc0 = await reachClears(MUTE.load('src/server/channels-engine.js', RC.reduce((x, [a, b]) => x.replace(a, b), esrcF), 'feed-reach-noclear'), 'mut');
+  const rc0 = await reachClears(MUTE.load('src/server/channels-engine.js', RC.reduce((x, [a, b]) => editAnchor(x, a, b, "src/server/channels-engine.js"), esrcF), 'feed-reach-noclear'), 'mut');
   ok(rc0.walk.orphan.includes('th-a') && rc0.threadRefused.orphan.includes('th-b') && rc0.convRefused.orphan.includes('th-c'), 'CONTROL: the copy without the three clears keeps an orphan reach on each path', JSON.stringify(rc0));
 
   // ── (V) verify r2 (the revert table: r1 #9's second half no gate noticed — its only leg is a GROUP's feed-named walk):

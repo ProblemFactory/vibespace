@@ -355,7 +355,7 @@ async function neverConverging({ tag, bundleSrc, ms }) {
   const SITE = /(?<![\w$])VERSION = process\.env\.VIBESPACE_AGENTD_VERSION \|\| require_version\(\)\.VERSION;/g;
   const sites = [...bundleSrc.matchAll(SITE)].map((m) => bundleSrc.slice(0, m.index).split('\n').length);
   check(`(${tag}: the bundle has exactly ONE daemon VERSION site to pin — ${sites.length} found${sites.length ? ` at line ${sites.join(' + ')}` : ''})`, sites.length === 1);
-  const pinned = bundleSrc.replace(SITE, 'VERSION = "2.300.0";');
+  const pinned = editAnchor(bundleSrc, SITE, 'VERSION = "2.300.0";', "the text of a loop's item");
   check(`(${tag}: the shipped copy is pinned to report 2.300.0 whatever lands)`, pinned !== bundleSrc);
   fs.writeFileSync(stuckBundle, pinned);
   // lane device-bundle-signing (design q-042 D2): a hub pushes only the SIGNED release and the device lands only what a key

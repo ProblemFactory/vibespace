@@ -49,6 +49,15 @@ if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const T0 = Date.now();
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const W = await bootWorld('pairdlg');
 const mints = (P) => P.requests.filter((r) => r.method === 'POST' && /\/api\/(device|agentd)\/dial-pair$/.test(r.url));
 const openRemote = async (P) => { await P.evalJs(`(() => { const s = app.sidebar; s.toggle?.(true); if (s._railEl) { if (s._activeTab !== 'mounts') s._railGo('mounts'); else s._render(); } else { s._activeTab = 'mounts'; s._updateTabs?.(); s._render(); } return true; })()`); return P.waitFor(`!!document.querySelector('.mounts-panel') && !!document.querySelector('.mounts-panel').offsetParent`, 15000); };
@@ -91,7 +100,7 @@ try {
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     ok(LABEL_FIX_REVERT.every(([fixed]) => real.split(fixed).length === 2), 'N-radio: the fixed selectors are in public/style.css once each (the control\'s anchors)');
     const MUT = mutantCopies('pairdlg', REPO);
-    const pre = LABEL_FIX_REVERT.reduce((x, [fixed, old]) => x.replace(fixed, old), real);
+    const pre = LABEL_FIX_REVERT.reduce((x, [fixed, old]) => editAnchor(x, fixed, old, "the text a fold hands its step"), real);
     const fPre = path.join(MUT.dir, `style-prefix-${process.pid}.css`); fs.writeFileSync(fPre, pre); MUT.files.push(fPre);
     await P.evalJs(swapStyleJs(fs.readFileSync(fPre, 'utf8')));
     await sleep(200);
