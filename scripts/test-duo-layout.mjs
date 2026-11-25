@@ -671,6 +671,25 @@ try {
       await evalJs(`(window.dispatchEvent(new Event('resize')), 1)`); await waitFor(`!!document.getElementById('mobile-nav').dataset.colYield`, 4000);
       check(`④f RED CONTROL at ${w}×${h}: the release's bar (no yield) leaves global doors past its room — neither drawn inside nor a row`, !barOk(red, rows), { global: red.global.map((d) => `${d.id}:${d.inside ? 'in' : 'OUT'}`), gear: red.gear.inside });
     }
+    // r4254 (the follow's round — tests only): BACK TO PORTRAIT and A TALL LANDSCAPE. The law strips every mark before it decides; after
+    // a rotation out of the bar no door keeps a yield mark and Global settings holds no yielded row; on a regular landscape tall enough
+    // for every door nothing yields at all
+    const marksJs = `({ marks: [...document.querySelectorAll('#mobile-nav > .col-yield')].map((e) => e.id), attr: document.getElementById('mobile-nav').dataset.colYield || '', vc: document.documentElement.dataset.vc })`;
+    const rowsByPress = async () => { await evalJs(`(app._showGlobalSettings(document.getElementById('mobile-nav-gear')), 1)`); await waitFor(`!!document.querySelector('.gs-menu')`, 4000); const r = await evalJs(ROWS_JS);
+      await evalJs(`document.querySelectorAll('.context-menu, .global-settings-popover, .gs-menu').forEach((m) => m.remove()); 1`); return r; };
+    await device(844, 390); await place({ left: 59, leftMax: 59, right: 59, rightMax: 59, bottom: 21, bottomMax: 21 }); await load(); await attachBoth();
+    await waitFor(`!!document.getElementById('mobile-nav').dataset.colYield`, 6000);
+    const before = await evalJs(marksJs);
+    await place({ top: 59, topMax: 59, bottom: 34, bottomMax: 34 }); await device(390, 844);
+    await waitFor(`document.documentElement.dataset.vc === 'compact' && !document.getElementById('mobile-nav').dataset.colYield`, 6000); await sleep(300);
+    const after = await evalJs(marksJs), afterRows = await rowsByPress();
+    check('④f a rotation out of the bar (844×390 → 390×844 portrait): the doors yielded there keep no mark, the bar\'s yield is gone, and Global settings holds no yielded row',
+      before.marks.length > 0 && after.vc === 'compact' && after.marks.length === 0 && !after.attr && afterRows.length === 0, { before, after, afterRows });
+    await place({}); await device(1000, 900); await load(); await attachBoth();
+    await waitFor(`document.documentElement.dataset.vc === 'regular'`, 6000); await sleep(400);
+    const tall = await evalJs(barState(false)), tallMarks = await evalJs(marksJs), tallRows = await gearRows();
+    check('④f a tall regular landscape (1000×900, every door fits): NOTHING yields — every global door and ⚙ drawn inside the bar, no mark, no row',
+      tall.global.every((d) => !d.absent && d.inside) && tall.gear.inside && tallMarks.marks.length === 0 && !tallMarks.attr && tallRows.length === 0, { global: tall.global.map((d) => `${d.id}:${d.inside ? 'in' : 'OUT'}`), tallMarks, tallRows });
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: seam.identifier });
     await place({}); await device(951, 585); await load();
   }
