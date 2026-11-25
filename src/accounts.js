@@ -1947,8 +1947,9 @@ class AccountManager {
           // (q-055 M2) never the default of ANOTHER provider: the default when it is the deleted member's provider, else that
           // provider's first live member (the engine re-decides it within its provider next pass), else UNPLACED
           const target = chosen || (def && sameProv(def) ? def : null) || (aliveSame[0] ? aliveSame[0].id : null);
-          if (target) {
-            require('./account-material.js').repointPoolSymlink(l.path, this.subDir(target), this.subCredsPath(target));
+          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch { } }   // B-e381: the member's OWN harness folder
+          if (signIn) {
+            require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);
             this._noteSlot({ sessionId: l.sessKey, poolId: pool.id, from: removedId, to: target, why: 'member-removed' });
           }
           else {
@@ -2883,6 +2884,16 @@ class AccountManager {
    *  pool = symlink among the CODEX_HOME dirs; P2, design-backend-parity §2). */
   _poolLinkDir(a) { return this._acctDir(this._acctBackend(a), a.id); }
   _poolMemberDir(a, subId) { return this._acctDir(this._acctBackend(a), subId); }
+  /** B-e381: a pool member read by ITS OWN harness — the harness's creds row (its descriptor, the one source) gives the sign-in
+   *  reader, the folder a pool link points at and the file a re-point bumps; a harness that keeps no sign-in here (no creds row) is
+   *  refused by name, never read as Claude's. For a Claude member these are readSubCreds / subDir / subCredsPath, value for value.
+   *  → { dir, bump, auth() } */
+  _memberSignIn(member) {
+    const be = this._acctBackend(member), creds = this._credsOf(be);
+    if (!creds || typeof creds.parseAuth !== 'function') throw new Error(`pool member's harness keeps no sign-in here (${be}): ` + member.name);
+    const dir = this._acctDir(be, member.id);
+    return { dir, bump: creds.bumpFile ? path.join(dir, creds.bumpFile) : null, auth: () => this._readAuthFor(be, member.id) };
+  }
 
   // The real account a pool currently resolves to, read from the symlink
   // itself (the link IS the state — no second source of truth to drift).
@@ -2910,11 +2921,12 @@ class AccountManager {
   ensureSessionPoolLink(poolId, sessKey, memberId, { why = 'session-link' } = {}) {
     const target = this.get(memberId);
     if (!target || this._acctType(target) !== 'subscription') throw new Error('not a subscription: ' + memberId);
-    if (!this.readSubCreds(memberId).loggedIn) throw new Error('pool member not logged in: ' + target.name);
+    const signIn = this._memberSignIn(target);   // B-e381: judged by its OWN harness (a Codex pool's member by Codex's reader and folder)
+    if (!signIn.auth().loggedIn) throw new Error('pool member not logged in: ' + target.name);
     const link = this.sessionPoolLinkPath(poolId, sessKey);
     const from = this.poolCurrentFor(poolId, sessKey); // read BEFORE the re-point — the ledger records a transition, not a state
     fs.mkdirSync(path.dirname(link), { recursive: true });
-    require('./account-material.js').repointPoolSymlink(link, this.subDir(memberId), this.subCredsPath(memberId));
+    require('./account-material.js').repointPoolSymlink(link, signIn.dir, signIn.bump);
     this._noteSlot({ sessionId: sessKey, poolId, from, to: memberId, why });
     this._notifyLinks(); // the payload's auth.poolTarget just changed — every client caches it (lane badge-stale)
     return link;

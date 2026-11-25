@@ -1611,6 +1611,83 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
 
 fs.rmSync(dataDir, { recursive: true, force: true });
 
+// ── B-e381 (主开发 r4531): A POOL's MEMBER IS JUDGED BY ITS OWN HARNESS ──
+// The per-session link's two writers (ensureSessionPoolLink, and the heal's re-point after a member is removed) read a member by ITS
+// harness's creds row: its sign-in reader, its folder, its sign-in file. The release read every member with the Claude reader and
+// pointed the link at Claude's folder and file, so a Codex pool's SIGNED-IN member was refused «not logged in». Stand-in homes, made-up
+// sign-in files, judged BY NAME only. RED: the release's two writers, planted in a copy of today's module.
+console.log('\nB-e381 a pool member is read by its own harness — its reader, its folder, its sign-in file');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const SRC = read('src/accounts.js');
+  const REL = anchored(anchored(anchored(SRC,
+    "    const signIn = this._memberSignIn(target);   // B-e381: judged by its OWN harness (a Codex pool's member by Codex's reader and folder)\n    if (!signIn.auth().loggedIn) throw new Error('pool member not logged in: ' + target.name);\n",
+    "    if (!this.readSubCreds(memberId).loggedIn) throw new Error('pool member not logged in: ' + target.name);\n", "B-e381: the release's member read (the Claude reader)"),   // stale-pins: kept (the red copy: the release's own text, planted)
+    "    require('./account-material.js').repointPoolSymlink(link, signIn.dir, signIn.bump);\n",
+    "    require('./account-material.js').repointPoolSymlink(link, this.subDir(memberId), this.subCredsPath(memberId));\n", "B-e381: the release's link target (Claude's folder and file)"),   // stale-pins: kept (the red copy: the release's own text, planted)
+    "          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch { } }   // B-e381: the member's OWN harness folder\n          if (signIn) {\n            require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);\n",
+    "          if (target) {\n            require('./account-material.js').repointPoolSymlink(l.path, this.subDir(target), this.subCredsPath(target));\n", "B-e381: the release's heal re-point (Claude's folder and file)");   // stale-pins: kept (the red copy: the release's own text, planted)
+  const relF = copyPath('src/accounts.js', 'e381-release'); writeCopy(relF, REL);
+  const RelAM = require(relF).AccountManager;
+  // A CODEX POOL: two signed-in members, one signed out (its folder holds no auth.json)
+  const codexScene = (AM, tag) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxpool-e381-' + tag + '-'));
+    const m = new AM({ dataDir: d });
+    const sub = (name, signedIn) => { const { id } = m.createCodexSubscription({ name }); if (signedIn) fs.writeFileSync(path.join(m.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-' + name } })); return id; };
+    const A = sub('CxIn', true), B = sub('CxIn2', true), O = sub('CxOut', false);
+    const P = m.createPool({ name: 'CxP', backend: 'codex' }).id;
+    return { d, m, A, B, O, P };
+  };
+  const linkRun = (AM, tag) => {
+    const w = codexScene(AM, tag), out = {};
+    try { const link = w.m.ensureSessionPoolLink(w.P, 'sess-1', w.B, { why: 'spawn' }); out.to = fs.readlinkSync(link); out.current = w.m.poolCurrentFor(w.P, 'sess-1') === w.B; out.claudeFile = fs.existsSync(path.join(w.m.codexSubDir(w.B), '.credentials.json')); } catch (e) { out.refused = e.message; }
+    try { w.m.ensureSessionPoolLink(w.P, 'sess-2', w.O, { why: 'spawn' }); out.outLinked = true; } catch (e) { out.outRefused = e.message; }
+    out.codexDirOfB = w.m.codexSubDir(w.B);
+    return out;
+  };
+  const cx = linkRun(AccountManager, 'tip'), cxRel = linkRun(RelAM, 'release');
+  ok('B-e381: a CODEX pool\'s signed-in member is LINKED — the per-session link points at its own Codex folder (data/codex-subs/<id>), the conversation reads it, and no Claude sign-in file is made beside it', !cx.refused && cx.to === cx.codexDirOfB && cx.current === true && cx.claudeFile === false, JSON.stringify(cx));
+  ok('B-e381: a Codex pool\'s SIGNED-OUT member is refused by the same words as today («pool member not logged in: <name>»), here and in the release', /^pool member not logged in: CxOut$/.test(cx.outRefused || '') && cx.outRefused === cxRel.outRefused, JSON.stringify({ tip: cx.outRefused, release: cxRel.outRefused }));
+  ok('B-e381 RED — the release\'s writer (the Claude reader) refuses the SIGNED-IN Codex member «not logged in»: the leg above can tell', /^pool member not logged in: CxIn2$/.test(cxRel.refused || ''), JSON.stringify(cxRel));
+  // THE HEAL's PER-SESSION WRITER, asked directly: remove() reaches _healPoolsAfterRemoval only for a member of a harness with
+  // oauthUsage (src/accounts.js remove(): a Codex member's removal heals no pool today — named for the next unit); the writer itself
+  // re-points a Codex pool's per-session link on the gone member to the live member's OWN folder
+  const healRun = async (AM, tag) => {
+    const w = codexScene(AM, tag);
+    w.m.setPoolTarget(w.P, w.B);   // the pool's default on the member that stays (the heal's own default road is not this leg's)
+    const link = w.m.sessionPoolLinkPath(w.P, 'sess-h'); fs.mkdirSync(path.dirname(link), { recursive: true }); fs.symlinkSync(w.m.codexSubDir(w.A), link);   // a link the conversation holds on A (planted the same in both)
+    await new Promise((r) => setImmediate(r));   // the run's one listing of the links' folder (src/run-reads.js) ends: the heal lists it as it is
+    w.m._healPoolsAfterRemoval(w.A);   // the heal's own writer, as remove() would ask it
+    let to = null; try { to = fs.readlinkSync(link); } catch (e) { to = '(' + e.code + ')'; }
+    return { to, codexDirOfB: w.m.codexSubDir(w.B) };
+  };
+  const hl = await healRun(AccountManager, 'heal-tip'), hlRel = await healRun(RelAM, 'heal-release');
+  ok('B-e381: the heal\'s per-session writer re-points a Codex pool\'s link on the gone member to the live member\'s OWN Codex folder', hl.to === hl.codexDirOfB, JSON.stringify(hl));
+  ok('B-e381 RED — the release\'s heal points that link at the CLAUDE folder of the member (data/subs/<id>): the leg above can tell', typeof hlRel.to === 'string' && hlRel.to !== hlRel.codexDirOfB && hlRel.to.includes(path.sep + 'subs' + path.sep), JSON.stringify(hlRel));
+  // A HARNESS THAT KEEPS NO SIGN-IN HERE (no creds row: opencode, an ACP harness — its descriptor's creds is null) is refused by name
+  let noRow = null; try { am._memberSignIn({ id: 'sub-x', name: 'NoRow', backend: 'opencode' }); } catch (e) { noRow = e.message; }
+  ok('B-e381: a member of a harness with NO creds row (opencode) is refused by name («keeps no sign-in here (opencode)»), never guessed as Claude', /keeps no sign-in here \(opencode\): NoRow$/.test(noRow || ''), noRow);
+  // A CLAUDE POOL IS UNCHANGED, BYTE FOR BYTE: the same scene through today's module and through the release's writers in a copy —
+  // the link's target, the sign-in file beside it, the refusal's words, the heal's target (each id written as its role)
+  const claudeRun = (AM, tag) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-clpool-e381-' + tag + '-'));
+    const m = new AM({ dataDir: d });
+    const sub = (name, signedIn) => { const a = m.createSubscription({ name }); if (signedIn) fs.writeFileSync(path.join(m.subDir(a.id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-' + name, refreshToken: 'fake-rt', expiresAt: Date.now() + 3600e3, scopes: ['user:inference'] } })); return a.id; };
+    const A = sub('ClA', true), B = sub('ClB', true), O = sub('ClOut', false);
+    const P = m.createPool({ name: 'ClP', members: [A, B] }).id; m.setPoolTarget(P, A);
+    const role = (x) => String(x).split(d).join('<data>').split(A).join('<A>').split(B).join('<B>').split(O).join('<O>').split(P).join('<P>');
+    const out = {};
+    const link = m.ensureSessionPoolLink(P, 'sess-1', B, { why: 'spawn' });
+    out.link = role(link); out.to = role(fs.readlinkSync(link)); out.current = m.poolCurrentFor(P, 'sess-1') === B; out.credsFile = fs.existsSync(path.join(m.subDir(B), '.credentials.json'));
+    try { m.ensureSessionPoolLink(P, 'sess-2', O, { why: 'spawn' }); out.refused = null; } catch (e) { out.refused = role(e.message); }
+    m.remove(B);
+    try { out.healed = role(fs.readlinkSync(link)); } catch (e) { out.healed = '(' + e.code + ')'; }
+    return out;
+  };
+  const cl = claudeRun(AccountManager, 'tip'), clRel = claudeRun(RelAM, 'release');
+  ok('B-e381: a CLAUDE pool is UNCHANGED, byte for byte — the link\'s target, its sign-in file, the refusal\'s words and the heal\'s target are the release\'s own (its writers in a copy)', JSON.stringify(cl) === JSON.stringify(clRel) && cl.to === '<data>/subs/<B>' && cl.healed === '<data>/subs/<A>' && /^pool member not logged in: ClOut$/.test(cl.refused || ''), JSON.stringify({ tip: cl, release: clRel }));
+}
+
 // ── R-tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix
