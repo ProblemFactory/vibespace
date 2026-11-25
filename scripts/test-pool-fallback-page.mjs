@@ -59,11 +59,11 @@ console.log('— ① the section');
     '① «Ask me first» is the default and says the pool asks in For you first');
   ok(/value="allow" checked/.test(allow) && /continues there and is BILLED THERE, on that key's own bill at its vendor, not on this pool's subscriptions/.test(allow.replace(/&#39;|'/g, "'")),
     '① «Move without asking» says the BILL in plain words: the conversation continues on that provider and is billed THERE, on its own bill');
-  ok((never.match(/class="pool-fb-row"/g) || []).length === 3 && /No key is stored for this provider — add it in the account dialog first/.test(never) && !/disabled/.test(never + allow)
+  ok((never.match(/class="pool-fb-row"/g) || []).length === 3 && /This key&#39;s value is not stored yet — add it in the account dialog first|This key's value is not stored yet — add it in the account dialog first/.test(never) && !/disabled/.test(never + allow)
     && /data-id="pv-demo-router" checked/.test(never) && /At most 8\./.test(never),
     '① three providers, the one with no stored key worded beside its row — no control greyed (none disabled); the picked one checked; the bound said (8)');
   ok(/Pay-as-you-go API keys are for Claude pools/.test(codex) && !/pool-fb-row/.test(codex) && !/pool-fb-mode/.test(codex), '① a ChatGPT pool says its sentence and lists nothing (no switch, no rows)');
-  ok(MA.fallbackNotReadyWords('vault-locked', T) === 'The vault is locked — this provider can take conversations once you unlock it' && MA.fallbackNotReadyWords(null, T) === null,
+  ok(MA.fallbackNotReadyWords('vault-locked', T) === 'The vault is locked — this key can take conversations once you unlock it' && MA.fallbackNotReadyWords(null, T) === null,
     '① the vault locked has its own word; a ready provider wears none');
 }
 
@@ -119,7 +119,7 @@ console.log('— ⑤ the wiring');
 {
   const S = read('src/lib/manage-agents.js'), R = read('src/server/account-usage-routes.js');
   ok(S.includes("body: JSON.stringify(poolSaveBody({ members, priority, codex, cross: st.cross, fb: st.fb, cross0, fb0, crossTouched, fbTouched })) });")
-    && S.includes("cross: fresh.crossProvider === 'allow' ? 'allow' : 'never',") && S.includes("if (st.fb.length >= FALLBACK_MAX) { cb.checked = false; showToast(t('A pool lists at most {n} fallback providers — remove one first', { n: FALLBACK_MAX })")
+    && S.includes("cross: fresh.crossProvider === 'allow' ? 'allow' : 'never',") && S.includes("if (st.fb.length >= FALLBACK_MAX) { cb.checked = false; showToast(t('A pool lists at most {n} pay-as-you-go API keys — remove one first', { n: FALLBACK_MAX })")
     && S.includes("if (c && !c.ready) { const why = fallbackNotReadyWords(c.notReady, t); if (why) showToast(why"),
     '⑤ the switch and the list ride the dialog\'s ONE save (Claude pools only), the switch starts from the pool\'s own (never unless allow), the ninth is refused in words, a provider that cannot start says why at its press');
   ok(R.includes("app.post('/api/accounts/:poolId/fallback/move-back', (req, res) => {") && R.includes("const who = require('../routes/vault.js').personVerdict(req);")
@@ -146,7 +146,7 @@ const legs6 = (X) => {
     save: JSON.stringify(Object.keys(only)) === '["members","priority"]' && sw.crossProvider === 'never' && sw.crossProviderOpened === 'allow' && !('fallbackProviders' in sw) && eqA(li.fallbackProviders, ['pv-a', 'pv-b']) && eqA(li.fallbackProvidersOpened, ['pv-a']) && !('crossProvider' in li) && JSON.stringify(Object.keys(cx)) === '["members","priority"]',
     touched: swBack.crossProvider === 'allow' && swBack.crossProviderOpened === 'allow' && eqA(liBack.fallbackProviders, ['pv-a']) && eqA(liBack.fallbackProvidersOpened, ['pv-a']),
     nofit: (() => { const c = X.fallbackChoicesWithListed([], 'claude', [{ id: 'pv-lab', label: 'Lab', fits: false }])[0]; return !!c && c.notReady === 'no-fit' && c.name === 'Lab' && /no longer serves Claude Code/.test(X.fallbackNotReadyWords(c.notReady, T) || ''); })(),
-    listed: !!gone && gone.ready === false && gone.notReady === 'unknown' && /data-id="pv-gone-1" checked/.test(sec) && /VibeSpace does not find this provider now/.test(sec) && eqA(after.fallbackProviders, ['pv-demo-router', 'pv-gone-1', 'pv-demo-deep']),
+    listed: !!gone && gone.ready === false && gone.notReady === 'unknown' && /data-id="pv-gone-1" checked/.test(sec) && /VibeSpace does not find this key now/.test(sec) && eqA(after.fallbackProviders, ['pv-demo-router', 'pv-gone-1', 'pv-demo-deep']),
     words: (() => { const a2 = w({ queued: 2 }), al = w({ queued: 0, already: 2 }), rs = w({ queued: 0, otherRecord: 1 }), no = w({}); return /now if it is idle, or when its turn is over/.test(a2[0]) && al.length === 1 && /2 conversations are already on their way back/.test(al[0]) && rs.length === 1 && !rs.some((x) => /Nothing moved back/.test(x)) && no.length === 1 && /Nothing moved back/.test(no[0]); })(),
     seen: { only, sw, li, cx, gone, after, swBack, liBack },
   };
@@ -332,11 +332,31 @@ console.log('— ⑩ each row says what it is — its name, its vendor, ••�
   ok(tx.tails.length === 3, 'CONTROL (loaded, run): a model-providers copy whose roster rows carry the tail puts the three tails in the list and its push ⇒ the leg goes RED', tx);
 }
 
+console.log('— ⑪ the rows\' follow (r4028): the vendor through the REAL roster\'s rows; a hostile name and tail escaped on the new span');
+const HOSTILE = { id: 'pv-demo-hostile', name: '<img src=x onerror=1>"q', type: 'provider', backend: 'claude', loggedIn: true, preset: 'deepseek', kind: 'anthropic-compatible', tail: '<"x>' };
+const hostileOk = (h) => !/<img/.test(h) && !/<"x>/.test(h) && /&lt;img src=x onerror=1&gt;&quot;q/.test(h) && /DeepSeek · ••••&lt;&quot;x&gt;/.test(h);
+{
+  // (3) the vendor through the REAL roster's rows (model-providers rosterRowsOf over normalized records — the accounts list's own rows), never a hand-built list
+  const rec = (id, o) => MP.normalizeProvider({ id, ...o });
+  const real = MP.rosterRowsOf([rec('pv-r1', { preset: 'deepseek', kind: 'anthropic-compatible', label: 'Router' }), rec('pv-r2', { preset: 'deepseek', kind: 'anthropic-compatible', label: 'DeepSeek' }),
+    rec('pv-r3', { preset: 'other', kind: 'self-hosted', wire: 'anthropic-messages', baseUrl: 'https://lab.invalid/v1', label: 'Home lab' })], { usable: true });
+  const h = MA.fallbackSectionHtml({ cross: 'never', picked: [], choices: MA.fallbackChoices(real, 'claude') }, T, ESC);
+  const subs = [...h.matchAll(/<span class="pool-mem-sub pool-fb-what">([^<]*)<\/span>/g)].map((m) => m[1]);
+  ok(eqA(subs, ['DeepSeek', 'DeepSeek', 'Other or self-hosted']) && real.every((r) => !('tail' in r)),
+    '⑪ (r4028 (3)) the vendor reaches each row through the REAL roster\'s rows (rosterRowsOf carries the preset; no tail) — two DeepSeek keys and a self-hosted one', { subs, rows: real.length });
+  // (2) a HOSTILE name and tail (a tag and a quote) on the new span: escaped in the name, its aria-label and the vendor-and-tail line
+  const hh = MA.fallbackSectionHtml({ cross: 'never', picked: ['pv-demo-hostile'], choices: MA.fallbackChoices([HOSTILE], 'claude') }, T, ESC);
+  ok(hostileOk(hh), '⑪ (r4028 (2)) a key named «<img src=x onerror=1>"q» with the tail «<"x>» is drawn escaped — no tag and no bare quote reach the page, in its name, its label or its vendor-and-tail line', hh.slice(0, 600));
+}
+
 console.log('— RED COPIES (each LOADED, its leg RUN on it — r3886 (E))');
 {
   const S = read('src/lib/manage-agents.js');
   const loadMA = async (src, tag) => import(pathToFileURL(M.write('src/lib/manage-agents.js', src, tag)).href);
   const BILL = "t('The pool moves a conversation to one of these keys by itself — it then continues there and is BILLED THERE, on that key\\'s own bill at its vendor, not on this pool\\'s subscriptions.')";
+  const WHAT = '<span class="pool-mem-sub pool-fb-what">${esc(what)}</span>';
+  const noEsc = await loadMA(anchored(S, WHAT, '<span class="pool-mem-sub pool-fb-what">${what}</span>', 'the new span unescaped'), 'what-unescaped');
+  ok(!hostileOk(noEsc.fallbackSectionHtml({ cross: 'never', picked: ['pv-demo-hostile'], choices: noEsc.fallbackChoices([HOSTILE], 'claude') }, T, ESC)), 'CONTROL (loaded, run): a copy whose vendor-and-tail span drops its escape puts the hostile tail on the page raw ⇒ ⑪\'s escape leg goes RED');
   const noBill = await loadMA(anchored(S, BILL, "t('The pool moves a conversation to one of these keys by itself.')", 'the bill cut'), 'no-bill');
   ok(!/BILLED THERE/.test(noBill.fallbackSectionHtml({ cross: 'allow', picked: [], choices: [] }, T, ESC)), 'CONTROL (loaded, run): a copy whose «Move without asking» says no bill draws the section WITHOUT the bill ⇒ ①\'s bill leg goes RED');
   const BACK = "${back ? ` <button class=\"agent-btn pool-fb-back\"";

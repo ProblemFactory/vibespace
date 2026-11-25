@@ -207,10 +207,10 @@ export function fallbackPressToasts(r, t) {
 }
 /** the word a provider that cannot start wears beside its row (never a greyed control: its press says it too) */
 export function fallbackNotReadyWords(code, t) {
-  return code === 'vault-locked' ? t('The vault is locked — this provider can take conversations once you unlock it')
-    : code === 'no-key' ? t('No key is stored for this provider — add it in the account dialog first')
-    : code === 'unknown' ? t('VibeSpace does not find this provider now (removed, or its list cannot be read) — it stays on this list until you uncheck it')
-    : code === 'no-fit' ? t('This provider no longer serves Claude Code — it stays on this list until you uncheck it') : null;
+  return code === 'vault-locked' ? t('The vault is locked — this key can take conversations once you unlock it')
+    : code === 'no-key' ? t('This key\'s value is not stored yet — add it in the account dialog first')
+    : code === 'unknown' ? t('VibeSpace does not find this key now (removed, or its list cannot be read) — it stays on this list until you uncheck it')
+    : code === 'no-fit' ? t('This key no longer serves Claude Code — it stays on this list until you uncheck it') : null;
 }
 /** (r3908 (2)) the words of the list's lock, from the hub's ONE fact: the store's own words while it is held; after a torn lift the
  *  family's own sentence for a list that started empty (provider-roster, the wizard) and the way out — a restart reads it again */
@@ -1767,7 +1767,7 @@ export function installManageAgents(App, ctx = {}) {
         if (fbLock) { cb.checked = st.fb.includes(id); showToast(fbLock, { type: 'error' }); return; }   // (r3886 (B), r3908 (2)) no change of the list while the store cannot be read — the hub's own fact, its words
         fbTouched = true;
         if (cb.checked && !st.fb.includes(id)) {
-          if (st.fb.length >= FALLBACK_MAX) { cb.checked = false; showToast(t('A pool lists at most {n} fallback providers — remove one first', { n: FALLBACK_MAX }), { type: 'error' }); return; }
+          if (st.fb.length >= FALLBACK_MAX) { cb.checked = false; showToast(t('A pool lists at most {n} pay-as-you-go API keys — remove one first', { n: FALLBACK_MAX }), { type: 'error' }); return; }
           st.fb.push(id);
           if (c && !c.ready) { const why = fallbackNotReadyWords(c.notReady, t); if (why) showToast(why, { type: 'info' }); }
         } else if (!cb.checked) st.fb = st.fb.filter((x) => x !== id);
