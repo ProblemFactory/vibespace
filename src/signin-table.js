@@ -37,7 +37,7 @@ function heldWords(lang, sso, held = null) {
   const named = files.length < 2 ? files.join('') : `${files.slice(0, -1).join(', ')} ${w['signin-held-and']} ${files[files.length - 1]}`;
   const root = held.dir ? String(held.dir).replace(/\/+[^/]+\/*$/, '') || '/' : '';   // the install the data folder sits in
   const fill = (t) => String(t || '').replace(/\{dir\}/g, held.dir || '').replace(/\{root\}/g, root).replace(/\{home\}/g, held.home || '').replace(/\{witness\}/g, named).replace(/\{env\}/g, DECLARE_ENV).replace(/\{machine\}/g, held.machine || '').replace(/\{idfile\}/g, held.idFile || '');
-  const whyKey = kind === 'folder' && held.idUnread ? 'signin-held-id-unread' : kind === 'folder' && held.unread ? 'signin-held-unread' : kind === 'home' && held.machine ? 'signin-held-home-machine' : kind === 'home' && held.parked ? 'signin-held-home-parked' : `signin-held-${kind}`;   // r3219 (2): a parked look has its own words
+  const whyKey = held.liftFailed ? 'signin-held-lift-failed' : kind === 'folder' && held.idUnread ? 'signin-held-id-unread' : kind === 'folder' && held.unread ? 'signin-held-unread' : kind === 'home' && held.machine ? 'signin-held-home-machine' : kind === 'home' && held.parked ? 'signin-held-home-parked' : `signin-held-${kind}`;   // r3219 (2): a parked look has its own words
   const fixKey = kind === 'link' && held.witness ? 'signin-held-link-witness-fix' : kind === 'folder' && held.unread && held.net ? 'signin-held-unread-net-fix' : `${whyKey}-fix`;
   return { title: w.title, why: fill(w[whyKey]) + (sso ? ' ' + w['signin-held-sso-still'] : ''), fix: fill(w[fixKey]) };
 }

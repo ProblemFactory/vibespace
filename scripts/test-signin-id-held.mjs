@@ -25,6 +25,7 @@ import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SW = require(path.join(REPO, 'src/signin-witness.js'));
+const T = require(path.join(REPO, 'src/signin-table.js'));   // the held words a person reads (r4440)
 const { Auth } = require(path.join(REPO, 'src/auth.js'));
 const LW = require(path.join(REPO, 'src/login-words.js'));
 const MUT = mutantCopies('dc3f-id-held', REPO);
@@ -285,34 +286,59 @@ console.log('⑧ 主开发 r3629 (round w43tjwjp5): THE LIFT REPLAYS THE START\'
     const r = await withEnv('VIBESPACE_PASSWORD', 'pw-order-0002', () => scene('order-lift-then-home-red', { local: true, A0: RO }));
     ok(r.after === null && !r.a.passwordEnabled, 'RED CONTROL: the home answer\'s replay cut — after that order the instance OPENS with no sign-in though VIBESPACE_PASSWORD was set');
   });
+  // r4440 (d): a wait inside a scene is ON ITS FACT, its expiry said by a named HARNESS line
+  const waitFact = async (label, fn, ms = 1500) => { const r = await until(fn, ms); if (!r) console.log(`  · HARNESS: «${label}» never reached its fact within ${ms} ms`); return r; };
   // (2) the id lifts as TORN bytes while the home is still unanswered (its answer held by a placed gate), then the home answers a witness of the
   //     folder's OLD id: held «folder», nothing minted over the torn file
   let open2; const gate2 = new Promise((r) => { open2 = r; });
   const latePool = (it) => ({ calls: [], call(op, payload = {}) { this.calls.push(op); return op === 'netRead' ? gate2.then(() => ({ file: path.join(payload.path || '', 'signin-net.json'), text: docOf(it, OTHER) })) : Promise.resolve({}); } });
-  const o2 = await scene('order-torn-then-home', { torn: true, poolOf: latePool, between: async (a) => { await until(() => !(a._idHold && a._idHold.held()), 1500); open2(); await until(() => !!a.held && a.held.kind === 'folder', 1500); } });
+  const o2 = await scene('order-torn-then-home', { torn: true, poolOf: latePool, between: async (a) => { await waitFact('order 2: the torn id lifted', () => !(a._idHold && a._idHold.held())); open2(); await waitFact('order 2: the home answered and held «folder»', () => !!a.held && a.held.kind === 'folder'); } });
   ok(o2.after === 'folder' && !SW.ID_RE.test(String(idNow(o2.it))), `the id lifts as torn bytes (no id) while the home is unanswered; the home then answers a witness of the folder's old id: HELD «${o2.after}», nothing minted over it (${idNow(o2.it)})`);
   // (3) the id lifts, then the home's copy CANNOT be read (a placed EIO): held «home», asked again — never open
   const eioPool = (it) => ({ calls: [], call(op, payload = {}) { this.calls.push(op); return Promise.resolve(op === 'netRead' ? { file: path.join(payload.path || '', 'signin-net.json'), code: 'EIO', message: 'the read refused (placed)' } : {}); } });
-  const o3 = await scene('order-lift-then-eio', { local: true, poolOf: eioPool, between: async (a) => { await until(() => !!a.held && a.held.kind === 'home', 1500); await until(() => a._pool && a.held && (a._held && a._held.kind === 'home'), 1500); } });
-  await until(() => o3.pool.calls.filter((c) => c === 'netRead').length >= 2, 1500);
+  const o3 = await scene('order-lift-then-eio', { local: true, poolOf: eioPool, between: async (a) => { await waitFact('order 3: held «home» after the unreadable copy', () => !!a.held && a.held.kind === 'home'); } });
+  await waitFact('order 3: the home asked again', () => o3.pool.calls.filter((c) => c === 'netRead').length >= 2);
   ok(o3.after === 'home' && o3.pool.calls.filter((c) => c === 'netRead').length >= 2, `the id lifts, then the home's copy cannot be read: HELD «${o3.after}» and asked again (${o3.pool.calls.filter((c) => c === 'netRead').length} reads) — never open`);
-  // THE HOLD PUT BACK when the start's tail throws after a lift (a PLACED throw), and a generated word that could not be saved is never kept
+  // THE HOLD PUT BACK when the start's tail throws after a lift (a PLACED throw): its OWN mark and words, its real door (r4440)
   const placed = (code) => () => { throw Object.assign(new Error(`a placed failure (${code})`), { code }); };
-  const failSaid = (code) => (a, said) => said.some((l) => l.includes(`could not finish (${code})`));
+  const failSaid = (code) => (a, said) => said.some((l) => l.includes(`was read again (${code})`));
+  /** the put-back's words, as a person reads them (the page and the 503) and as the journal says them — ONE line, no self-lifting word */
+  const putBack = (r, code) => {
+    const h = r.a.held, w = h ? T.heldWords('en', false, h) : null, lines = r.said.filter((l) => l.includes(`was read again (${code})`));
+    return !!h && h.kind === 'folder' && h.liftFailed === true && !h.idUnread && !h.unread && !h.net && !h.home && !!w
+      && /a sign-in step could not finish after the data folder .* was read again/.test(w.why) && /^Restart VibeSpace: nothing lifts this hold by itself/.test(w.fix)
+      && lines.length === 1 && /Restart VibeSpace: nothing lifts this hold by itself/.test(lines[0]) && !/no restart|by itself:|keeps asking|reads it again/.test(lines[0].replace('nothing lifts this hold by itself', ''));
+  };
   const t1 = await scene('lift-tail-throws', { brk: (a) => { a._afterLoad = placed('EPLACED'); }, settled: failSaid('EPLACED') });
-  ok(!!t1.before && t1.before.idUnread && t1.after === 'folder' && !!t1.a.held && t1.a.held.idUnread && t1.said.some((l) => /the start's own sign-in step could not finish \(EPLACED\)/.test(l)),
-    `the id's lift: its tail THROWS (placed) — the hold is PUT BACK («${t1.after}»), said by name; never an open instance`, t1.said.filter((l) => /could not finish/.test(l)));
+  ok(!!t1.before && t1.before.idUnread && putBack(t1, 'EPLACED'),
+    'the id\'s lift: its tail THROWS (placed) — held by its OWN mark: the words say what happened and its real door (restart; the disk if it comes back), one journal line saying the same, none of the id hold\'s «reads it again by itself»', { held: t1.a.held, said: t1.said.filter((l) => /read again \(/.test(l)) });
   const t2 = await scene('home-tail-throws', { local: true, brk: (a) => { a._afterLoad = placed('EPLACED2'); }, settled: failSaid('EPLACED2') });
-  ok(t2.after === 'home' && t2.said.some((l) => /could not finish \(EPLACED2\)/.test(l)), `the home answer's lift: its tail THROWS (placed) — held «${t2.after}» (a look that is over is put back as the home's), said by name`);
+  ok(t2.pool.calls.includes('netRead') && putBack(t2, 'EPLACED2'), 'the home answer\'s lift: its tail THROWS (placed) — the same own mark and words (never «it keeps asking the home folder»: that ask is over)', { held: t2.a.held });
   const t3 = await scene('lift-generate-save-fails', { ensure: { generateIfMissing: true }, brk: (a) => { a._save = placed('ENOSPC'); }, settled: failSaid('ENOSPC') });
-  ok(!!t3.a.held && !t3.said.some((l) => /Generated workspace password: /.test(l)) && t3.said.some((l) => /a generated password could not be saved and is not kept: the next start makes and says a new one/.test(l)) && !(t3.a._state && t3.a._state.passwordHash),
-    'a generated password whose save fails at the lift: never said, never kept in memory (nobody could sign in with it) — the start held, and the next start makes and says a new one');
+  ok(putBack(t3, 'ENOSPC') && !t3.said.some((l) => /Generated workspace password: /.test(l)) && t3.said.some((l) => /a generated password could not be saved and is not kept: the next start makes and says a new one/.test(l)) && !(t3.a._state && t3.a._state.passwordHash),
+    'a generated password whose save fails at the lift: never said, never kept in memory (nobody could sign in with it) — held by its own mark');
+  // (b) …and THE NEXT START over the same folder makes and says a FRESH word, once (its save works now)
+  const said3 = [], l0 = console.log, w0 = console.warn, e0 = console.error; console.log = (...m) => said3.push(m.join(' ')); console.warn = (...m) => said3.push(m.join(' ')); console.error = (...m) => said3.push(m.join(' '));
+  let next; try { next = new Auth(t3.it.data, { witness: cfgOf(t3.it, { mountinfo: nfs(t3.it), pool: homePool(t3.it, ID), ...quick }) }); next.ensurePassword({ generateIfMissing: true }); await waitFact('the next start: its word said', () => said3.some((l) => /Generated workspace password: /.test(l))); } finally { console.log = l0; console.warn = w0; console.error = e0; }
+  const words3 = said3.map((l) => (/Generated workspace password: (\S+)/.exec(l) || [])[1]).filter(Boolean);
+  ok(words3.length === 1 && !next.held && next.verifyPassword(words3[0]), `the next start over that folder makes a FRESH word and says it ONCE (${words3.length}), and it signs in`);
+  // (c) a write QUEUED by the tail before it threw (the home copy's removal, no password set) asks the hold again when it RUNS: nothing removed
+  const t4 = await scene('home-queued-write-held', { local: true, brk: (a) => { a._replayEnsure = placed('EQUEUE'); }, settled: failSaid('EQUEUE') });
+  await t4.a._netWrites;
+  ok(putBack(t4, 'EQUEUE') && !t4.pool.calls.includes('netRemove') && !t4.pool.calls.includes('netWrite'), `the home copy's removal queued by the tail before it threw runs after the put-back and asks the hold again: nothing removed or written (${t4.pool.calls.join(',')})`);
+  await red('queued-write-ask-cut', async () => {
+    const RQ = authCut("      if (this._held) return;   // 主开发 r4440 (c)", "      // cut   // 主开发 r4440 (c)", 'queued-write-ask-cut');
+    const r = await scene('home-queued-write-held-red', { local: true, A0: RQ, brk: (a) => { a._replayEnsure = placed('EQUEUE'); }, settled: failSaid('EQUEUE') });
+    await r.a._netWrites;
+    ok(r.pool.calls.includes('netRemove'), `RED CONTROL: the queued write's ask cut — a HELD start removes the home's copy (${r.pool.calls.join(',')})`);
+  });
   await red('lift-restore-cut', async () => {
     const RC = MUT.load('src/auth.js', ['      } catch (e) { this._liftFailed(idHold, e); }', '    } catch (e) { this._liftFailed(netHold, e); }'].reduce((t, from, i) => anchored(t, from, from.replace(/this\._liftFailed\((idHold|netHold), e\);/, 'void e;'), `restore-cut-${i}`), MUT_AUTH), 'auth-lift-restore-cut').Auth;
     const r1 = await scene('lift-tail-throws-red', { A0: RC, brk: (a) => { a._afterLoad = placed('EPLACED'); } });
+    const r2 = await scene('home-tail-throws-red', { A0: RC, local: true, brk: (a) => { a._afterLoad = placed('EPLACED2'); } });
     const r3 = await scene('lift-generate-save-fails-red', { A0: RC, ensure: { generateIfMissing: true }, brk: (a) => { a._save = placed('ENOSPC'); } });
-    ok(r1.after === null && r3.after === null && r3.a.passwordEnabled && !r3.said.some((l) => /Generated workspace password: /.test(l)),
-      'RED CONTROL: the restore cut — the thrown tail leaves the instance OPEN without the start\'s word, and the generated password stays in memory, never said (nobody can sign in)');
+    ok(r1.after === null && r2.after === null && r2.pool.calls.includes('netRead') && r3.after === null && r3.a.passwordEnabled && !r3.said.some((l) => /Generated workspace password: /.test(l)),
+      'RED CONTROL: the restore cut — through the id\'s road AND the home answer\'s road the thrown tail leaves the instance OPEN without the start\'s word, and the generated password stays in memory, never said');
   });
 }
 

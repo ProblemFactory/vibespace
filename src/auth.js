@@ -343,17 +343,17 @@ class Auth {
       this._replayEnsure();   // the boot's own password road, held until the answer (server.js asked it while this was checking) — the one replay
     } catch (e) { this._liftFailed(netHold, e); }
   }
-  /** 主开发 r3774: A LIFT WHOSE START TAIL THREW (the migration's save, the id's write, the boot's password road) — the hold it cleared is put
-   *  back, its words kept and its journal naming the failure: never an instance left open without the start's own word. A generated
-   *  password that could not be saved is not kept in memory (nobody was told it): the next start makes and says a new one */
+  /** 主开发 r3774 + r4440: A LIFT WHOSE START TAIL THREW (the migration's save, the id's write, the boot's password road) — the instance is HELD
+   *  again, by a hold of its OWN mark (`liftFailed`): its words say what happened and its real door (restart VibeSpace; if it comes back, the
+   *  disk the data folder is on refuses writes) — never the old hold's self-lifting words (the id's helper has lifted, the home's ask is done:
+   *  nothing asks again). ONE journal line says the same. A generated password that could not be saved is not kept in memory (nobody was
+   *  told it): the next start makes and says a new one */
   _liftFailed(hold, e) {
     const code = String((e && (e.code || e.message)) || e).slice(0, 120);
     const lost = e && e.generatedLost ? ' — a generated password could not be saved and is not kept: the next start makes and says a new one' : '';
-    const why = `${(hold && hold.why) || 'the sign-in'} — after it lifted, the start's own sign-in step could not finish (${code})${lost}; held until VibeSpace restarts`;
-    // a «checking» hold is put back as the home's (its look is over: «checking» would never end, and says nothing in the journal)
-    this._hold(why, hold && hold.kind && hold.kind !== 'checking' ? hold.kind : 'home', hold ? { ...hold, files: hold.witnesses || [] } : null);
-    try { console.error(`[auth] ${why}`); } catch { }   // said by name, whatever the kind's own journal does
+    this._hold(`a sign-in step could not finish after the data folder ${this._dataDir} was read again (${code})${lost}`, 'folder', { liftFailed: true, files: (hold && hold.witnesses) || [] });
   }
+
   /** H1: THE NETWORK HOME's COPY, kept like the others but ONLY through the pool (never on the loop): written at a start that is not
    *  held and at every set / import, removed when the sign-in is turned off; a START reads it first and never writes over or removes
    *  another folder's copy (H2); never while the home's answer is unknown. A failure is said once; the next start learns it. */
@@ -365,6 +365,7 @@ class Auth {
     // this start's look answered already: never read twice; the START-NEW start reads none of the home (r2926): its copy is the act's to remove
     const seen = atStart && this._startNewUsed ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;
     return this._netQueue(async () => {
+      if (this._held) return;   // 主开发 r4440 (c): a write queued before a put-back asks the hold again when it RUNS — a held start writes and removes nothing
       if (atStart) {   // H2: a start reads it first, and with no password keeps another folder's copy as it is
         const a = seen || SW.netAnswerOf(await this._netAsk('netRead', { path: home, root, maxBytes: NET_MAX_BYTES }).then((result) => ({ result }), (error) => ({ error })), { root: f.root, dataDir: f.dataDir });
         if (!a.answered) return say(set ? 'written' : 'removed', a.why);
@@ -432,6 +433,7 @@ class Auth {
     this._held = { why, kind, ...(kind !== 'file' ? { dir: this._dataDir, ...(files.length ? { witness: files.join(', '), witnesses: files } : {}), ...(verdict && verdict.unread ? { unread: true } : {}) } : {}) };
     if (verdict && verdict.home) this._held.home = verdict.home;   // H1: the network home the look reads
     if (verdict && verdict.idUnread) { this._held.idUnread = true; this._held.idFile = verdict.idFile; }   // r3336: the id file unread — its own words
+    if (verdict && verdict.liftFailed) this._held.liftFailed = true;   // 主开发 r4440: a hold put back after a failed start tail — its own words, its real door
     if (verdict && verdict.net) this._held.net = true;   // r3030 (d): an unreadable NETWORK copy — its act names the start-new file
     if (kind === 'checking') return;   // r3030 (f): an open instance's look is said only past its bound (warn), never as a held error at every start
     try { console.error(`[auth] ${heldJournal(this._file, why, sso, this._held)}`); } catch { }   // the table's shared words (src/signin-table.js): a folder / link / declared hold says its own act
