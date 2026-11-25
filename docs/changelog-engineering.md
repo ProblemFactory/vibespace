@@ -293,6 +293,29 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE (src/server/stash-handover.js, on src/store-read-hold.js, code `handover_memory_unread`): HELD, nothing is written over the file; a new hand-over's record lives in memory (one journal line a hold); a frame handed back for a hand-over memory cannot see is kept in the stash as itself (`about.handover`) behind a stash gate — not handed out, the wake waits; a clear reaches the file's records at the lift. LIFTED: the file's records, memory's after them, written once; the file's put-backs put back; every kept frame judged (its originals restored, or it goes as itself) — also at a readable start. TORN: kept aside once, then empty.
 - Legs: scripts/test-handover-memory-held.mjs (NEW, fast), each with its RED where a line can be put back; test-store-write-census rows.
 
+### login-request-card — B-9dd0: every suite Chrome resolves no name but the loopback's and the suite's own (主开发 r3727)
+- **Why (the harm measure, the probe 55394096f, never lined; run 55394096f-20261124170543-box):** 164 rows were sampled, 159 of them census rows. The hub, the CLIs and every child that is not Chrome reached NOTHING past the loopback, and no model vendor's address appeared in any row. But all 14 rows with a Chrome child reached Google's background services (component downloads on :80, 443 over TCP and QUIC, the push channel on :5228) in spite of CHROME_QUIET's switches.
+- **What (tests and harness only):** scripts/scratch.mjs gains `chromeNames({ map, own })`, THE ONE names rule. Every name is mapped to «^NOTFOUND» except the loopback's (127.0.0.1, [::1], localhost) and the suite's own (`map`: a name to an address, ahead of the rest; `own`: EXCLUDEd, resolved as usual). CHROME_QUIET carries it, so every suite Chrome gets it, and chromeBelt takes its rule from the same builder.
+- **The vendor's source** (chromium.googlesource.com, tag 157.0.8103.78):
+  - services/network/public/cpp/network_switches.cc: `kHostResolverRules[] = "host-resolver-rules"`, «These mappings only apply to the host resolver»;
+  - net/base/host_mapping_rules.cc: the list splits at «,» and a rule at « »; the FIRST matching MAP wins, and a matching EXCLUDE stops the search;
+  - net/dns/mapped_host_resolver.cc: a name mapped to «^NOTFOUND» fails with ERR_NAME_NOT_RESOLVED, and «any invalid mapping» is treated as if it were «^NOTFOUND».
+  The belt wrote «~NOTFOUND», which the source does not name: it failed only as an invalid mapping. The builder writes the vendor's literal.
+- **The launches that wrote the switch themselves now take it from the builder:**
+  - test-artifacts-intent-chrome and test-phone-titlebar-ui keep their own dead proxy and take the rule from CHROME_QUIET (chromeBelt would bring r1521's probe-the-belt law with it);
+  - test-chat-mermaid-chrome → chromeNames();
+  - test-integrations-ui, test-voice-chrome, test-voice-teach-chrome and test-tailnet-reach-chrome's RULES → chromeNames({ map }).
+  test-integrations-ui's rule had only its two MAPs, so every other name resolved; now none does.
+- **The belt's CONTROL** (chromeReach, a Chrome with no belt): CHROME_QUIET's rule refuses the box's own name too, so the control gets that one name through the rule's allow list (`own: [the box's name]`), the switch's last copy. Without it the control SKIPs: «with no belt this box did not reach its own name», found by the unit's own heavy read of test-https-hub-chrome.
+- **The lasting guard is a census, not a reader** (test-architecture §47d over scripts/chrome-store-census.mjs):
+  - a launch that does not spread CHROME_QUIET brings no rule, and is red;
+  - a launch whose own list names the switch is red by name;
+  - so is any file of the scope whose text names it, unless a NAMES row says why. The rows: scratch.mjs; the agent browser's own config in two suites' scratch HOME; the tailnet suite's driver line; the census's own controls.
+  - RED controls: a literal-only quiet launch, a launch naming the switch, a planted file holding it in a const, and a stale row.
+- **Named remainders, out of this unit:**
+  - the agent browser's own Chrome in the real-driver rows (test-browser-live reached Google's :5228 and :443). The product already has a seam for a suite's row: the scratch HOME's ~/.agent-browser/config.json `args`, which test-browser-propose-chrome and test-vault-login-chrome already use;
+  - test-window-target's Chromes, launched by the product's desktop-app road with the suite's catalog `args` (its NET list).
+
 ## 2.369.418 — 2026-11-24
 
 ### bl-browser-b — B-19a9, the paired-machine road: the scope proxy stands in front of a paired machine's forward (the coordinator's r1840 / r1846)
