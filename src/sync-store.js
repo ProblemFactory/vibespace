@@ -64,6 +64,15 @@ function senderOf(ws) {
   return id;
 }
 
+/** rule (C)'s join of two texts, once each (r4106 1): the one that holds the other stands; else the hub's text, then the page's, with the
+ *  put-back's separator unless the hub's text already ends with it */
+const JOIN_SEP = '\n\n';   // src/queue-putback.js PUTBACK_SEP
+function joinText(saved, typed) {
+  if (saved === typed || saved.includes(typed)) return saved;
+  if (typed.includes(saved)) return typed;
+  return saved === '' || saved.endsWith(JOIN_SEP) ? saved + typed : saved + JOIN_SEP + typed;
+}
+
 class SyncStore {
   /**
    * @param {string} name - Store name (e.g. 'drafts', 'settings')
@@ -91,6 +100,7 @@ class SyncStore {
     // LAW (E) (r4040): the keys WRITTEN or CLEARED in this life of the hub (since its start or its lift) — a page's restore of one
     // is refused; in memory, small, gone at a restart (a new life has no writes yet). Every store has it, a mirror with no file too
     this._lifeWrites = new Set();
+    this._lifeLaid = new Set();   // the follow (r4106 1): keys written in this life ONLY by the hub's own put-back lays — a page's restore JOINS them
     if (this.filePath) this._load();
   }
 
@@ -146,7 +156,7 @@ class SyncStore {
     this.ops = [];
     const owed = this._owed || []; this._owed = null;
     if (facts && facts.setAside) { this.version++; this._scheduleSave(); }   // torn bytes now kept aside: the file is written whole
-    this._lifeWrites = new Set();   // law (E): a lift begins a life — nothing is written in it yet (the owed put-backs below are its first writes)
+    this._lifeWrites = new Set(); this._lifeLaid = new Set();   // law (E): a lift begins a life — nothing is written in it yet (the owed put-backs below are its first writes)
     // `fresh`: no data came from the file (gone, or torn and set aside) — its counter began again: no page's last version is this one (r3972);
     // kept for this process, so a page still unread that missed this snapshot is told the same at its resync
     this._freshLife = !(v && v.data);
@@ -250,6 +260,9 @@ class SyncStore {
   // `state-set` passes none. The op rides the ring whole, so a reconnecting client's replay keeps the stamp.
   set(key, value, senderWs, basedOn, extra) {
     if (this._hold && this._hold.held()) { this._whileHeld(key, senderWs, value, extra); return; }
+    // a put-back's lay (its `prepended`) on a key nothing else wrote in this life keeps the key's restore a JOIN (r4106 1); any other write ends that
+    const laid = !!(extra && Number.isSafeInteger(extra.prepended) && extra.prepended > 0);
+    if (laid && (!this._lifeWrites.has(key) || this._lifeLaid.has(key))) this._lifeLaid.add(key); else this._lifeLaid.delete(key);
     this._lifeWrites.add(key);
     this.version++;
     this.data[key] = value;
@@ -262,7 +275,7 @@ class SyncStore {
 
   delete(key, senderWs, basedOn) {
     if (this._hold && this._hold.held()) { this._whileHeld(key, senderWs); return; }
-    this._lifeWrites.add(key);   // a clear is a write of the key (law (E)): a page's later restore of it is refused
+    this._lifeWrites.add(key); this._lifeLaid.delete(key);   // a clear is a write of the key (law (E)): a page's later restore of it is refused
     if (!(key in this.data)) { this._ack(key, senderWs); return; } // nothing to delete — still answered (the store's version), so the sender's set never waits
     this.version++;
     delete this.data[key];
@@ -280,6 +293,15 @@ class SyncStore {
   restore(key, value, senderWs, basedOn) {
     if (this._hold && this._hold.held()) { this._whileHeld(key, senderWs, value); return 'held'; }
     if (value != null && value !== '' && !this._lifeWrites.has(key)) { this.set(key, value, senderWs, basedOn); return 'applied'; }
+    // THE FOLLOW (r4106 1): a key written in this life only by the hub's own put-back lays — the put-back's words and the page's
+    // earlier draft BOTH STAND, joined as rule (C) joins text (the words in front, as a put-back lands); the join is the hub's own write,
+    // told to every page (a second page's restore of the key is then refused), and this page is answered with the joined value
+    if (typeof value === 'string' && value !== '' && this._lifeLaid.has(key) && typeof this.data[key] === 'string') {
+      const joined = joinText(this.data[key], value);
+      if (joined !== this.data[key]) this.set(key, joined, null);
+      if (senderWs && senderWs.readyState === 1) { try { senderWs.send(JSON.stringify({ type: 'state-restore-refused', store: this.name, key, version: this.version, value: this.data[key], joined: true })); } catch { } }
+      return 'joined';
+    }
     if (senderWs && senderWs.readyState === 1) {
       try { senderWs.send(JSON.stringify({ type: 'state-restore-refused', store: this.name, key, version: this.version, ...(key in this.data ? { value: this.data[key] } : {}) })); } catch { }
     }

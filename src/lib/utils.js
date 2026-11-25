@@ -2331,7 +2331,7 @@ class StateSync {
     // On reconnect, request missed ops for all stores
     this._stateHandler = (connected) => {
       // the socket dropped: an own set in flight is never answered on it — its held ops are judged now (resync converges)
-      if (!connected) { for (const [name, s] of Object.entries(this.stores)) { s.pending.clear(); for (const key of [...s.held.keys()]) this._release(name, key); } return; }
+      if (!connected) { for (const [name, s] of Object.entries(this.stores)) { s.pending.clear(); s.restoring = null; for (const key of [...s.held.keys()]) this._release(name, key); } return; }
       const versions = {}, unread = [];
       for (const [name, s] of Object.entries(this.stores)) { versions[name] = s.version; if (s.unread) unread.push(name); }
       // r3654 3: a store this page holds as UNREAD is named — a hub that reads it again answers with the full snapshot
@@ -2387,6 +2387,7 @@ class StateSync {
       return;
     }
     s.pending.set(key, (s.pending.get(key) || 0) + 1);
+    if (s.restoring) s.restoring.delete(key);   // r4106: what the person types now supersedes a restore still in flight
     if (value == null || value === '') {
       delete s.data[key];
       this.ws.send({ type: 'state-set', store: storeName, key, value: '', basedOn: s.version });
@@ -2402,7 +2403,9 @@ class StateSync {
     const s = this.stores[storeName];
     if (!s || s.unread || value == null || value === '') return;   // a restore never carries absence
     s.pending.set(key, (s.pending.get(key) || 0) + 1);
-    s.data[key] = value;
+    // r4106 (the follow): the box keeps showing the hub's value while the hub decides — the page's old copy lands only when the hub
+    // applies it (its ack), so a refused restore never flashes the old text in the box
+    (s.restoring || (s.restoring = new Map())).set(key, value);
     this.ws.send({ type: 'state-set', store: storeName, key, value, basedOn: s.version, restore: true });
   }
   /** the hub refused a restore (law (E) 4): this page takes the hub's value for that key — unless an own later set of it is still
@@ -2410,6 +2413,7 @@ class StateSync {
   _applyRestoreRefused(storeName, msg) {
     const s = this.stores[storeName];
     if (!s || !msg || typeof msg.key !== 'string') return;
+    if (s.restoring) s.restoring.delete(msg.key);
     const n = (s.pending.get(msg.key) || 0) - 1;
     if (n > 0) { s.pending.set(msg.key, n); return; }
     s.pending.delete(msg.key);
@@ -2455,6 +2459,8 @@ class StateSync {
     const n = (s.pending.get(ack.key) || 0) - 1;
     if (n > 0) { s.pending.set(ack.key, n); return; }
     s.pending.delete(ack.key);
+    const restored = s.restoring ? s.restoring.get(ack.key) : undefined;   // r4106: the hub applied this page's restore — now its box shows it (none after a drop)
+    if (restored !== undefined) { s.restoring.delete(ack.key); s.data[ack.key] = restored; this._notify(s, ack.key, restored); }
     this._release(storeName, ack.key);
   }
 
@@ -2479,6 +2485,9 @@ class StateSync {
       const n = (s.pending.get(msg.key) || 0) - 1;
       if (n > 0) s.pending.set(msg.key, n); else { s.pending.delete(msg.key); this._release(storeName, msg.key); }
       const m = this._isText(storeName) ? (s.typedWhileUnread || (s.typedWhileUnread = new Map())) : null;
+      // r4106: a restore that met a NEW hold — its words are this page's text now (sent at the next lift by rule (C)); very rare
+      const restoring = s.restoring && s.restoring.has(msg.key) ? s.restoring.get(msg.key) : undefined;
+      if (restoring !== undefined) { s.restoring.delete(msg.key); s.data[msg.key] = restoring; }
       if (m && !m.has(msg.key)) { const v = s.data[msg.key]; m.set(msg.key, v === undefined || v === '' ? null : v); }
     }
     if (first) this._tellUnread(storeName, s.unread, null);
@@ -2589,7 +2598,7 @@ class StateSync {
         if (sent.has(key) || (typed && typed.has(key)) || (changed && changed.has(key))) continue;
         const localVal = oldData[key];
         if (localVal === undefined || localVal === '') continue;
-        // _restore() mutates s.data, so the notify loop below already sees the restored values
+        // the box keeps the hub's value until the hub applies the restore (its ack lands it); a refusal answers with the hub's value
         if (JSON.stringify(localVal) !== JSON.stringify(s.data[key] ?? '')) this._restore(storeName, key, localVal);
       }
     }

@@ -2124,7 +2124,7 @@ function registerWsHandler(wss, ctx) {
             else store.set(data.key, value, ws, data.basedOn); // answered to the sender (state-ack), stamped from + basedOn (lane statesync-last-arrival)
             // lane worker-dispatch verify r2 ①: a non-empty chat draft is a PERSON composing a reply (not yet sent, so
             // _userInputAt is stale) — stamp it so a dispatch never compacts a worker whose owner is mid-draft.
-            if (data.store === 'drafts' && data.value != null && data.value !== '' && data.key.startsWith('chat:')) {
+            if (data.store === 'drafts' && data.restore !== true && data.value != null && data.value !== '' && data.key.startsWith('chat:')) {   // a restore is no person composing (r4106)
               const s = activeSessions.get(data.key.slice(5));
               if (s) s._draftEditAt = Date.now();
             }

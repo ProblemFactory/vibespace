@@ -49,7 +49,12 @@
 //   ⑳ LAW (E) (r4040), A RESTORE NEVER BEATS A WRITE, AND THE HUB DECIDES: a page that wakes late after a torn lift restores nothing
 //      over the other page's hour of work (a draft rewritten, one sent, a new one — never deleted: a page never restores absence),
 //      and is answered with the hub's value; at the lift, a page's held-time text and an idle page's restore meet in BOTH orders
-//      of arrival (placed): the typed words stand (RED: today's blind set, a page copy; and a hub copy that does not decide)
+//      of arrival (placed): the typed words stand (RED: today's blind set, a page copy; and a hub copy that does not decide — scene
+//      two's blind red runs the order «B first, A's old copy last», the other order cannot go red under a blind set)
+//   ㉑ THE FOLLOW (r4106): an owed put-back laid at a torn lift and the page's draft of before the hold BOTH STAND, joined, whichever
+//      arrives second (RED: today's refusal); a hub write then a page's restore of the key: refused (RED: the undecided hub); no
+//      second lift in one life (the life's writes kept); the box shows no old text while a restore is decided; a person typing
+//      while a restore is out keeps what they typed
 // ①–⑮ and ⑰–⑳ hand the store the writer's contract AT THE CALL (scratch.mjs landingWriter): they read the file right after its door.
 // Run: node scripts/test-sync-store-hold.mjs
 import { scratch, anchored, landingWriter } from './scratch.mjs';
@@ -121,15 +126,17 @@ function world(name, { torn = false, readable = false, Store = SyncStore, cls = 
   };
   const StateSync = cls ? new Function('fetch', 'arrivalVerdict', cls + '\nreturn StateSync;')(fetchFake, arrivalVerdict) : null;
   const page = (pname) => {
-    const globals = [], states = [], sent = [], heard = [];
-    const sock = { name: pname, readyState: 1, send(m) { const x = JSON.parse(m); heard.push(x); for (const h of globals) h(x); } };
+    const globals = [], states = [], sent = [], heard = [], errors = [];
+    // a throw in the page's handler is RECORDED: the hub's own sends swallow it (try / catch around ws.send), a real page would not see it either
+    const sock = { name: pname, readyState: 1, send(m) { const x = JSON.parse(m); heard.push(x); for (const h of globals) { try { h(x); } catch (e) { errors.push(String(e && e.message)); throw e; } } } };
     let queued = null;   // ⑳: while held, this page's sends wait — released in a placed order (two pages' arrivals at the hub)
     const deliver = (d) => { sent.push(JSON.parse(S(d))); if (sock.readyState === 1) handle(JSON.parse(S(d)), sock); };
     const wm = { onGlobal: (h) => globals.push(h), onStateChange: (h) => states.push(h), send: (d) => { if (queued) queued.push(d); else deliver(d); } };
     wss.clients.add(sock);
     const sync = new StateSync(wm);
-    return { sock, sync, sent, heard, handle: (d) => handle(d, sock), reconnect: () => { sock.readyState = 1; for (const h of states) h(true); }, drop: () => { sock.readyState = 3; for (const h of states) h(false); },
-      hold: () => { queued = queued || []; }, release: () => { const q = queued || []; queued = null; for (const d of q) deliver(d); } };
+    return { sock, sync, sent, heard, errors, handle: (d) => handle(d, sock), reconnect: () => { sock.readyState = 1; for (const h of states) h(true); }, drop: () => { sock.readyState = 3; for (const h of states) h(false); },
+      hold: () => { queued = queued || []; }, release: () => { const q = queued || []; queued = null; for (const d of q) deliver(d); },
+      releaseOne: () => { if (queued && queued.length) deliver(queued.shift()); } };   // ㉑: the first held send only — the rest still held
   };
   const restart = () => { const old = stores[name]; if (old && old._hold) old._hold.stop(); stores[name] = new Store(name, file, wss, { saveDelay: 20, writer: landingWriter() }); return stores[name]; };   // (a restart: the old process's hold ends with it)
   return { dir, file, bytes, get store() { return stores[name]; }, stores, page, wss, restart };
@@ -595,6 +602,7 @@ console.log('⑯ THE FLUSH OFF THE LOOP (r3321) — the REAL store writer: the l
   }
 }
 
+const unreadOn = (...ps) => until(() => ps.every((p) => !!p.sync.unreadOf('drafts')), 500);   // a reconnect settled by its FACT: each page holds the store unread (r4106 3)
 console.log('⑰ THE ROLLBACK RE-PUSH STANDS (r3972) — a page that had seen the data keeps its drafts at a torn lift and at a lower-version lift');
 const TORN_BYTES = '{"version": 41, "data": {"chat:sess-a": "cut off in the mid';
 const DOCK = 'doc:\u0001/home/userL/notes.md';
@@ -602,7 +610,7 @@ const tornScene = async (cls, tag) => {   // a page that saw version 41; held; o
   const T = world('drafts', { readable: true, cls });
   const P = T.page('rb-' + tag);
   await P.sync.init('drafts');
-  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await sleep(5);   // held (EIO): the page is unread
+  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await unreadOn(P);   // held (EIO): the page is unread
   P.sync.set('drafts', 'chat:sess-b', 'typed while held');                     // rule (C): its text joins, once
   P.sync.set('drafts', DOCK, '');                                              // rule (C): its old deletion is nothing
   fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);                 // the file now reads TORN
@@ -620,7 +628,7 @@ const lowerScene = async (cls, tag) => {   // the page's save at 42 never reache
   P.sync.set('drafts', 'chat:sess-a', 'the newer draft, saved at 42');
   await until(() => { const d = disk(T.file); return !!(d && d.version === 42); }, 500);
   fs.writeFileSync(T.file, S(MADE.drafts, null, 2));
-  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await sleep(5);
+  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await unreadOn(P);
   REFUSE.delete(T.file); await T.store._hold.again(); await sleep(5);
   const out = { a: T.store.get('chat:sess-a'), box: P.sync.get('drafts', 'chat:sess-a') };
   T.store._hold.stop();
@@ -633,7 +641,7 @@ const oneScene = async (cls, Store, tag, { missed = false } = {}) => {   // a st
   await P.sync.init('drafts');
   P.sync.set('drafts', 'chat:sess-a', 'the one draft, version 1');
   await until(() => { const d = disk(T.file); return !!(d && d.version === 1); }, 500);
-  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await sleep(5);   // held: unread, its last version 1
+  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await unreadOn(P);   // held: unread, its last version 1
   if (missed) P.drop();                                                         // …and its socket is down at the lift
   fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
   await T.store._hold.again(); await sleep(5);
@@ -737,7 +745,7 @@ const sceneOne = async (cls, Store, tag) => {   // B open at a torn lift, A's so
   const T = world('drafts', { readable: true, cls, Store });
   const A = T.page('one-a-' + tag), B = T.page('one-b-' + tag);
   await A.sync.init('drafts'); await B.sync.init('drafts');
-  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await sleep(5);   // held: both unread
+  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await unreadOn(A, B);   // held: both unread
   A.drop();
   fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
   await T.store._hold.again(); await until(() => T.store.get(KK) === SAVED, 500);   // the torn lift: B restores the drafts it saw
@@ -756,7 +764,7 @@ const sceneTwo = async (cls, Store, tag, first) => {   // at the lift: B typed K
   const T = world('drafts', { readable: true, cls, Store });
   const A = T.page('two-a-' + tag), B = T.page('two-b-' + tag);
   await A.sync.init('drafts'); await B.sync.init('drafts');
-  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await sleep(5);
+  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await unreadOn(A, B);
   const TYPED = SAVED + ' — and the words B typed while held';
   B.sync.set('drafts', KK, TYPED);
   fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
@@ -792,10 +800,118 @@ const sceneTwo = async (cls, Store, tag, first) => {   // at the lift: B typed K
   const mirrorScene = (Store) => { try { const X = new Store('mirror', null, { clients: new Set() }); X.set('a', 'written'); const r1 = X.restore('a', 'old', null), r2 = X.restore('b', 'kept', null); return { a: X.get('a'), b: X.get('b'), r1, r2 }; } catch (e) { return { threw: String(e && e.message) }; } };
   const MR = mirrorScene(SyncStore);
   ok(MR.a === 'written' && MR.b === 'kept' && MR.r1 === 'refused' && MR.r2 === 'applied', `a store with NO file (a mirror) takes its writes and decides its restores (${S(MR)})`);
-  const NOTMIRROR = M.load('src/sync-store.js', anchored(SRC, "    this._lifeWrites = new Set();\n    if (this.filePath) this._load();\n", "    if (this.filePath) { this._load(); this._lifeWrites = new Set(); }\n", 'set-with-file-only'), 'set-with-file-only').SyncStore;
+  const NOTMIRROR = M.load('src/sync-store.js', anchored(anchored(SRC, "    this._lifeWrites = new Set();\n    this._lifeLaid = new Set();", "    this._lifeLaid = new Set();", 'set-with-file-only-a'), "    if (this.filePath) this._load();\n", "    if (this.filePath) { this._load(); this._lifeWrites = new Set(); }\n", 'set-with-file-only-b'), 'set-with-file-only').SyncStore;
   const MX = mirrorScene(NOTMIRROR);
   ok(!!MX.threw, `CONTROL (a hub copy that keeps the set only for a store with a file): a mirror's first write throws (red) (${S(MX)})`);
   ok(E2X.hub === SAVED, `CONTROL (today's blind set), B's text first and A's old copy last: B's typed words gone from the hub (red) (${S(E2X.hub)})`);
+}
+
+console.log('㉑ THE FOLLOW (r4106) — an owed put-back and the page\'s earlier draft both stand; a hub write is never beaten; one lift a life');
+const NOJOIN = () => M.load('src/sync-store.js', anchored(SRC, "    if (typeof value === 'string' && value !== '' && this._lifeLaid.has(key) && typeof this.data[key] === 'string') {\n", "    if (false) {\n", 'no-join'), 'no-join').SyncStore;
+const owedScene = async (Store, tag) => {   // no page open at the Stop (owed); a torn lift lays the words; the page comes back with its draft
+  const T = world('drafts', { readable: true, Store });
+  const A = T.page('ow-' + tag);
+  await A.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); A.drop(); A.reconnect(); await unreadOn(A);
+  A.drop();
+  DOOR.create({ getSyncStore: (n) => T.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-ow-' + tag));
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+  await T.store._hold.again();
+  const laid = T.store.get(KK);
+  A.reconnect();
+  await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread && A.sync.stores.drafts.pending.size === 0, 500);
+  await until(() => { const d = disk(T.file); return !!(d && d.data && d.data[KK] === T.store.get(KK)); }, 500);
+  const d = disk(T.file) || { data: {} };
+  const out = { laid, hub: T.store.get(KK), box: A.sync.get('drafts', KK), disk: d.data[KK], joinedSaid: A.heard.some((m) => m.type === 'state-restore-refused' && m.key === KK && m.joined === true) };
+  T.store._hold.stop();
+  return out;
+};
+const restoreFirst = async (tag) => {   // the other order: the page's restore lands first, a Stop's put-back after it (the ordinary road)
+  const T = world('drafts', { readable: true });
+  const A = T.page('rf-' + tag);
+  await A.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); A.drop(); A.reconnect(); await unreadOn(A);
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+  await T.store._hold.again(); await until(() => T.store.get(KK) === SAVED, 500);
+  DOOR.create({ getSyncStore: (n) => T.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-rf-' + tag));
+  await until(() => A.sync.get('drafts', KK) === PREFIX + SAVED, 500);
+  const out = { hub: T.store.get(KK), box: A.sync.get('drafts', KK) };
+  T.store._hold.stop();
+  return out;
+};
+const hubWriteScene = async (Store, tag, { again = false } = {}) => {   // after the torn lift the HUB writes K itself (or a page writes K and the hold is asked again); A wakes late
+  const T = world('drafts', { readable: true, Store });
+  const A = T.page('hw-a-' + tag), B = T.page('hw-b-' + tag);
+  await A.sync.init('drafts'); await B.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await unreadOn(A, B);
+  A.drop(); B.drop();
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+  await T.store._hold.again();
+  let secondLift = null;
+  if (again) { B.reconnect(); await until(() => B.sync.stores.drafts.pending.size === 0 && !B.sync.stores.drafts.unread, 500); B.sync.set('drafts', KK, 'K written on B'); secondLift = await T.store._hold.again(); }
+  else T.store.set(KK, 'K the hub wrote itself', null);
+  const wrote = T.store.get(KK);
+  A.reconnect();
+  await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread && A.sync.stores.drafts.pending.size === 0, 500);
+  const out = { wrote, secondLift, hub: T.store.get(KK), box: A.sync.get('drafts', KK), refused: A.heard.some((m) => m.type === 'state-restore-refused' && m.key === KK) };
+  T.store._hold.stop();
+  return out;
+};
+const boxScene = async (tag, { typeMeanwhile = false, cls = CLASS } = {}) => {   // B wrote K after the torn lift; A wakes; while A's restore is out, its box shows…
+  const T = world('drafts', { readable: true, cls });
+  const A = T.page('bx-a-' + tag), B = T.page('bx-b-' + tag);
+  await A.sync.init('drafts'); await B.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await unreadOn(A, B);
+  A.drop();
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+  await T.store._hold.again(); await until(() => T.store.get(KK) === SAVED, 500);
+  B.sync.set('drafts', KK, 'K rewritten on B');
+  const told = [];
+  A.sync.on('drafts', KK, (v) => told.push(v));
+  A.hold(); A.reconnect(); A.releaseOne();                         // only A's resync reaches the hub: the snapshot comes back, A's restore of K waits at the page
+  await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread, 500);
+  const inFlight = A.sync.get('drafts', KK);
+  if (typeMeanwhile) A.sync.set('drafts', KK, 'typed on A meanwhile');   // the person types while the restore is out
+  A.release();
+  await until(() => A.sync.stores.drafts.pending.size === 0, 500);
+  const out = { told: told.slice(), inFlight, hub: T.store.get(KK), box: A.sync.get('drafts', KK) };
+  T.store._hold.stop();
+  return out;
+};
+{
+  const F1 = await owedScene(SyncStore, 'real');
+  ok(F1.laid === PREFIX && F1.hub === PREFIX + SAVED && F1.box === PREFIX + SAVED && F1.disk === PREFIX + SAVED && F1.joinedSaid,
+    `an owed put-back laid at a torn lift, then the page's draft of before the hold: BOTH stand, joined (the words in front) — on the hub, in the box, in the file (${S(F1.hub)})`);
+  const F1X = await owedScene(NOJOIN(), 'nojoin');
+  ok(F1X.hub === PREFIX && F1X.box === PREFIX, `CONTROL (today's refusal, a hub copy without the join): the page's earlier draft is gone — only the put-back's words (red) (${S(F1X)})`);
+  const F2 = await restoreFirst('real');
+  ok(F2.hub === PREFIX + SAVED && F2.box === PREFIX + SAVED, `the other order — the page's restore first, a Stop's put-back after it: both stand, the words in front (${S(F2.hub)})`);
+  const F3 = await hubWriteScene(SyncStore, 'real');
+  ok(F3.hub === 'K the hub wrote itself' && F3.box === F3.hub && F3.refused, `a HUB write of K in this life, then a late page's restore of K: refused, the page takes the hub's value (${S(F3)})`);
+  const F3X = await hubWriteScene(UNDECIDED(), 'undecided');
+  ok(F3X.hub === SAVED, `CONTROL (a hub copy that applies every restore): the page's old copy beats the hub's own write (red) (${S(F3X.hub)})`);
+  const F4 = await hubWriteScene(SyncStore, 'again', { again: true });
+  ok(F4.secondLift === false && F4.hub === 'K written on B' && F4.refused, `no SECOND lift in one life: the hold asked again after its lift does nothing (${S(F4.secondLift)}), the life's writes stand and a late restore of K is refused`);
+  const F5 = await boxScene('quiet');
+  ok(!F5.told.includes(SAVED) && F5.inFlight === 'K rewritten on B' && F5.box === 'K rewritten on B' && F5.hub === F5.box, `while its restore is decided the waking page's box never shows its old text (in flight ${S(F5.inFlight)}, told ${S(F5.told)}); refused, it shows the hub's value`);
+  const FLICKER = pageCopy("    (s.restoring || (s.restoring = new Map())).set(key, value);\n", "    (s.restoring || (s.restoring = new Map())).set(key, value); s.data[key] = value;\n", 'flicker');
+  const F5X = await boxScene('flicker', { cls: FLICKER });
+  ok(F5X.told.includes(SAVED) && F5X.inFlight === SAVED, `CONTROL (a page copy that writes its old copy at once, as before): the waking page's box shows the old text until the refusal lands (red) (${S({ told: F5X.told, inFlight: F5X.inFlight })})`);
+  // a page whose socket dropped (its restores forgotten) sets a key after it reconnects: the set's ack lands like any other
+  const dropScene = async (cls, tag) => {
+    const T = world('drafts', { readable: true, cls });
+    const P = T.page('dr-' + tag);
+    await P.sync.init('drafts');
+    try { P.drop(); P.reconnect(); P.sync.set('drafts', KK, 'set after a reconnect'); return { hub: T.store.get(KK), box: P.sync.get('drafts', KK), pending: P.sync.stores.drafts.pending.size, errors: P.errors.slice() }; }
+    catch (e) { return { threw: String(e && e.message) }; }
+  };
+  const D1 = await dropScene(CLASS, 'real');
+  ok(D1.hub === 'set after a reconnect' && D1.box === D1.hub && D1.pending === 0 && D1.errors.length === 0, `a page whose socket dropped, then a set: its ack lands, nothing thrown in the page (no restore is in flight after a drop) (${S(D1)})`);
+  const NULLREAD = pageCopy("    const restored = s.restoring ? s.restoring.get(ack.key) : undefined;", "    const restored = s.restoring && s.restoring.get(ack.key);", 'null-read');
+  const D1X = await dropScene(NULLREAD, 'nullread');
+  ok(!!D1X.threw || (D1X.errors && D1X.errors.length > 0), `CONTROL (a page copy reading the dropped record as «s.restoring && …»: null is not undefined): the ack throws in the page (red) (${S(D1X)})`);
+  const F6 = await boxScene('typed', { typeMeanwhile: true });
+  ok(F6.hub === 'typed on A meanwhile' && F6.box === F6.hub, `a person typing in the box while its restore is out keeps what they typed (the refusal yields to the own later set; the hub takes it) (${S(F6)})`);
 }
 
 for (const s of [W]) { REFUSE.delete(s.file); if (s.store._hold) s.store._hold.stop(); }
