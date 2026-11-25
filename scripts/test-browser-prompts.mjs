@@ -20,7 +20,7 @@ import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { WebSocketServer } = require('ws');
+const { WebSocketServer, WebSocket: WSClient } = require('ws');
 const ST = require('../src/browser-stuck.js');
 const D = require('../src/server/browser-dialogs.js');
 let pass = 0, fail = 0;
@@ -35,6 +35,43 @@ function editAnchor(text, from, to, file, mode = 'one') {
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// THE FLAKE CENSUS, ROUND 2 (主开发 r4456, lane bl-loop-b): the watch's reads here waited a CLOCK for a message to cross the loopback
+// socket (30-80 ms) or for the product's own clocks to run out (a 200 / 320 / 160 / 450 ms margin); ③x's CONTROL went red when its
+// sign-in reached the watch after its 40 ms. THE ONE DOOR: the watch's socket is the tree's own (ws) with counts beside it — each
+// message it SENT (at the send) and each it HANDLED (once the watch's own listener returned) — and each fake counts, per connection,
+// what it sent and heard. settled() reads the watch's newest socket against the fake's newest connection both ways (one socket keeps
+// its order), under a generous bound whose expiry is a NAMED harness line; untilFact() waits for the fact a leg judges the same way.
+// holdOut / holdIn keep the watch's sends off the wire or its handling of what arrives, until released: the late thing, held at will
+const REC = new WeakMap();
+function recSocket() {
+  const socks = [];
+  class RecWS extends WSClient {
+    constructor(...a) { super(...a); const r = { sent: [], handled: 0, opened: 0, holdOut: false, outHeld: [], holdIn: false, inHeld: [] }; REC.set(this, r); socks.push(r); }
+    send(d, ...a) { const r = REC.get(this); if (r) { r.sent.push(String(d)); if (r.holdOut) { r.outHeld.push(() => super.send(d, ...a)); return undefined; } } return super.send(d, ...a); }
+    on(ev, fn) {
+      if (ev !== 'message' && ev !== 'open') return super.on(ev, fn);
+      return super.on(ev, (...a) => {
+        const r = REC.get(this);
+        if (ev === 'message' && r && r.holdIn) { r.inHeld.push(() => { try { fn.apply(this, a); } finally { r.handled++; } }); return undefined; }
+        try { return fn.apply(this, a); } finally { if (r) { if (ev === 'message') r.handled++; else r.opened++; } }
+      });
+    }
+  }
+  const release = (r) => { r.holdOut = false; r.holdIn = false; for (const f of r.outHeld.splice(0)) f(); for (const f of r.inHeld.splice(0)) f(); };
+  return { Impl: RecWS, socks, get last() { return socks[socks.length - 1] || null; }, release };
+}
+const SETTLE_MS = 15000;
+const neverCame = (words, v, facts) => { ok(false, `HARNESS (the flake census r2): ${words}`, facts); return v; };
+async function settled(ch, rec, what) {
+  const t0 = Date.now();
+  for (;;) {
+    const c = ch.conns[ch.conns.length - 1], r = rec.last;
+    if (c && r && r.opened > 0 && !r.holdOut && !r.holdIn && r.handled === c.sent && c.heard === r.sent.length) return true;
+    if (Date.now() - t0 > SETTLE_MS) return neverCame(`${what} — the watch and the fake never settled in ${SETTLE_MS / 1000} s (a message one side sent never reached the other: the machine, not the product)`, false, { conns: ch.conns.length, sentByFake: c && c.sent, heardByFake: c && c.heard, handledByWatch: r && r.handled, sentByWatch: r && r.sent.length });
+    await sleep(2);
+  }
+}
+const untilFact = async (pred, what, ms = SETTLE_MS) => { const t0 = Date.now(); for (;;) { const v = pred(); if (v) return v; if (Date.now() - t0 > ms) return neverCame(`${what} — it did not come in ${ms / 1000} s (the leg below reads what stands)`, v); await sleep(5); } };
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const dict = (lang) => { const s = read(`src/lib/i18n-${lang}.js`); const m = {}; for (const x of s.matchAll(/^ {2}("(?:[^"\\]|\\.)*"): ("(?:[^"\\]|\\.)*"),/gm)) { try { m[JSON.parse(x[1])] = JSON.parse(x[2]); } catch { /* a JS-only escape: not a key of ours */ } } return m; };
 const DICT = { zh: dict('zh'), ja: dict('ja') };
@@ -97,16 +134,18 @@ ok(badM.length > 0, 'the copy without `file` goes RED', badM);
 console.log('③ the watch over a fake CDP socket');
 function fakeChrome() {
   const calls = []; const sessions = new Map(); let n = 0;
+  const conns = [], cnOf = new Map(), out = (ws, o) => { const cn = cnOf.get(ws); if (cn) cn.sent++; ws.send(JSON.stringify(o)); };   // the flake census r2: per connection, what the fake sent and heard (settled())
   const wss = new WebSocketServer({ noServer: true });
   const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
   srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => wss.emit('connection', ws)));
-  wss.on('connection', (ws) => ws.on('message', (d) => {
-    const m = JSON.parse(d); calls.push(m); const reply = (o) => ws.send(JSON.stringify({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o }));
+  wss.on('connection', (ws) => { const cn = { sent: 0, heard: 0 }; conns.push(cn); cnOf.set(ws, cn); ws.on('message', (d) => {
+    cn.heard++;
+    const m = JSON.parse(d); calls.push(m); const reply = (o) => out(ws, { id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o });
     if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [{ targetId: 'T1', type: 'page', url: 'http://127.0.0.1:9/', title: 't' }] } });
     if (m.method === 'Target.attachToTarget') { const sid = `S-${m.params.targetId}-${++n}`; sessions.set(sid, ws); return reply({ result: { sessionId: sid } }); }
     return reply({ result: {} });
-  }));
-  return { calls, emit(method, params) { for (const [sid, ws] of sessions) ws.send(JSON.stringify({ sessionId: sid, method, params })); },
+  }); });
+  return { calls, conns, emit(method, params) { for (const [sid, ws] of sessions) out(ws, { sessionId: sid, method, params }); },
     async listen() { await new Promise((r) => srv.listen(0, '127.0.0.1', r)); this.url = `ws://127.0.0.1:${srv.address().port}/devtools/browser/fake`; return this; },
     async close() { for (const c of wss.clients) c.terminate(); await new Promise((r) => srv.close(() => r())); } };
 }
@@ -127,25 +166,26 @@ const forYou = {
   sweepAs: (prefix, status, by) => { const ids = todos.idsWhere((i) => i.status === 'open' && i.sessionKey === 'browser' && typeof i.itemKey === 'string' && i.itemKey.startsWith(String(prefix))); for (const id of ids) todos.setStatus(id, status, by); return ids.length; },
 };
 const ch = await fakeChrome().listen();
-const w = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400 });
+const rec3 = recSocket(), settle3 = (what) => settled(ch, rec3, what);
+const w = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log, forYou, promptAskMs: 120, authHoldMaxMs: 400, WebSocketImpl: rec3.Impl });
 const events = []; w.onChange((ev) => events.push(ev));
 const NAMED = 'bp-a0000002', KEY = 'bk-0000d1a1';
 const tgt = { profileId: NAMED, browserKey: KEY };
-await w.arm(NAMED); await sleep(80);
+await w.arm(NAMED); await settle3('the watch armed');
 const callsOf = (method) => ch.calls.filter((m) => m.method === method);
 ok(callsOf('Page.setInterceptFileChooserDialog').some((m) => m.params.enabled === true && m.sessionId), 'the file chooser is intercepted on the tab (its session)');
 const fe = callsOf('Fetch.enable')[0];
 ok(fe && fe.params.handleAuthRequests === true && fe.params.patterns.length === 1 && fe.params.patterns[0].resourceType === 'Document' && fe.params.patterns[0].requestStage === 'Request', 'Fetch: sign-ins handled, Document requests only (a sub-resource never waits on this socket)', fe && fe.params);
-ch.emit('Fetch.requestPaused', { requestId: 'P9', request: { url: 'http://127.0.0.1:9/' } }); await sleep(40);
+ch.emit('Fetch.requestPaused', { requestId: 'P9', request: { url: 'http://127.0.0.1:9/' } }); await settle3('requestPaused P9');
 ok(callsOf('Fetch.continueRequest').some((m) => m.params.requestId === 'P9'), 'a paused Document request is continued at once (never a second proxy)');
-ch.emit('Page.fileChooserOpened', FILE_P); await sleep(40);
+ch.emit('Page.fileChooserOpened', FILE_P); await settle3('fileChooserOpened');
 let f = w.factFor({ ...tgt, consume: false });
 ok(f.prompt && f.prompt.type === 'file' && /vibespace-browser upload/.test(f.prompt.text) && events.some((e) => e.kind === 'prompt' && e.state === 'open'), 'fileChooserOpened ⇒ the record + THE SENTENCE + a prompt event', f.prompt);
 w.verbStarted(KEY, { profileId: NAMED, verb: 'upload' }); w.verbEnded(KEY, { profileId: NAMED });
 ok(w.factFor({ ...tgt, consume: false }).prompt === null, '…the agent\'s upload ends it');
-ch.emit('Page.fileChooserOpened', FILE_P); await sleep(40);
+ch.emit('Page.fileChooserOpened', FILE_P); await settle3('fileChooserOpened');
 ok((await w.answerPrompt(tgt, { cancel: true })).ok && w.factFor({ ...tgt, consume: false }).prompt === null, '…the live view\'s Dismiss ends a file prompt (the page got nothing)');
-ch.emit('Fetch.authRequired', AUTH_P); await sleep(40);
+ch.emit('Fetch.authRequired', AUTH_P); await settle3('authRequired R1');
 f = w.factFor({ ...tgt, consume: false });
 ok(f.prompt && f.prompt.type === 'http-auth' && f.prompt.realm === 'Lane Realm' && /only the user can answer it/.test(f.prompt.text), 'authRequired ⇒ the sign-in record + THE SENTENCE', f.prompt);
 ok((await w.answerPrompt(tgt, { username: '' })).code === 'bad_request', 'an empty username is refused');
@@ -154,10 +194,10 @@ const cwa = callsOf('Fetch.continueWithAuth');
 ok(ans.ok && cwa.length === 1 && cwa[0].params.requestId === 'R1' && cwa[0].params.authChallengeResponse.response === 'ProvideCredentials' && cwa[0].params.authChallengeResponse.username === 'ann' && cwa[0].params.authChallengeResponse.password === PW, '…the answer ⇒ continueWithAuth ProvideCredentials on the paused request (on its session)', cwa);
 let notes = w.factFor({ ...tgt, consume: true }).notes;
 ok(notes.length === 1 && /was answered: the user signed in/.test(notes[0]) && w.factFor({ ...tgt, consume: true }).notes.length === 0, '…the agent\'s next result: who answered, once', notes);
-ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R2' }); await sleep(40);
+ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R2' }); await settle3('authRequired R2');
 await w.answerPrompt(tgt, { cancel: true });
 ok(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R2' && m.params.authChallengeResponse.response === 'CancelAuth'), 'Cancel ⇒ CancelAuth (the page gets its 401)');
-ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R3' }); await sleep(200);
+ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R3' }); await settle3('authRequired R3'); await untilFact(() => fy.added.length >= 1, 'R3: its For-you item past the ask clock');   // (was 200 ms: the ask clock is 120)
 ok(fy.added.length === 1 && fy.added[0].i18n.text.key === 'A page in the agent browser asks you to sign in ({host})' && fy.added[0].i18n.text.params.host === '127.0.0.1', 'unanswered past the ask clock ⇒ ONE For-you item naming the site', fy.added);
 // B-ebb7: the item is FILED by the real store (the watch's catch said nothing to the agent and the tray stayed empty before the cure)
 const signIn = fy.stored[0];
@@ -165,14 +205,14 @@ ok(fy.stored.length === 1 && signIn && signIn.sessionKey === 'browser' && signIn
 // the control: the shape before the cure (detail as one object) is REFUSED by the same store — the leg above judges with a real judge
 let objRefused = null; try { fileItem({ text: 't', detail: 'd', i18n: { text: { key: 'A page in the agent browser asks you to sign in ({host})', params: { host: 'x' } }, detail: { key: 'd' } } }); } catch (e) { objRefused = String(e && e.message); }
 ok(/i18n\.detail must be an array of lines/.test(String(objRefused)), 'the control: the pre-cure object detail is REFUSED by the store by name (so a watch that files it files nothing)', objRefused);
-await sleep(320);
+await untilFact(() => w.factFor({ ...tgt, consume: false }).prompt === null && fy.resolved.includes(signIn && signIn.id), 'R3: the hold clock ran out (its record gone, its item resolved)'); await settle3('R3 cancelled');   // (was 320 ms more: the hold is 400)
 ok(callsOf('Fetch.continueWithAuth').some((m) => m.params.requestId === 'R3' && m.params.authChallengeResponse.response === 'CancelAuth') && fy.resolved.includes(signIn && signIn.id) && todos.get(signIn.id).status === 'done' && w.factFor({ ...tgt, consume: false }).prompt === null, 'nobody answers within the hold ⇒ CancelAuth, the For-you item resolved, the record gone');
 ok(/nobody answered it within/.test(w.factFor({ ...tgt, consume: true }).notes.join(' ')), '…and the agent hears it was cancelled for want of an answer');
-ch.emit('Page.fileChooserOpened', FILE_P); await sleep(40);
-ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R4' }); await sleep(40);
+ch.emit('Page.fileChooserOpened', FILE_P); await settle3('fileChooserOpened');
+ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R4' }); await settle3('authRequired R4');
 ok(w.factFor({ ...tgt, consume: false }).prompt.type === 'http-auth', 'one prompt per tab: the newer one is said');
 // B-ebb7 (the adversarial read): a filed item must not outlive its hub — it is KEYED, and the next hub life's watch resolves it
-await sleep(160);
+await untilFact(() => { const x = fy.stored[fy.stored.length - 1]; return !!(x && x !== signIn && String((todos.get(x.id) || {}).itemKey || '').startsWith(`prompt-auth:${NAMED}:`)); }, 'R4: its For-you item past the ask clock');   // (was 160 ms: the ask clock is 120)
 const r4 = fy.stored[fy.stored.length - 1]; const r4Item = r4 && todos.get(r4.id);
 const r4Open = !!(r4Item && r4Item !== signIn && r4Item.status === 'open' && String(r4Item.itemKey || '').startsWith(`prompt-auth:${NAMED}:`));
 const said0 = lines.length;
@@ -214,27 +254,36 @@ console.log('③x the X road: the sign-in is Chrome\'s own sheet');
 {
   const chx = await fakeChrome().listen();
   let road = 'x';
-  const wx = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: chx.url }), pictureSourceFor: () => ({ source: road, why: road === 'x' ? 'attach' : 'driver' }) }, log, forYou: { add: () => 'todo-x', resolve() { } }, promptAskMs: 5000, authHoldMaxMs: 400 });
+  const recX = recSocket(), settleX = (what) => settled(chx, recX, what);
+  const wx = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: chx.url }), pictureSourceFor: () => ({ source: road, why: road === 'x' ? 'attach' : 'driver' }) }, log, forYou: { add: () => 'todo-x', resolve() { } }, promptAskMs: 5000, authHoldMaxMs: 400, WebSocketImpl: recX.Impl });
   const NX = 'bp-a0000003', KX = 'bk-0000d1a2';
   const tx = { profileId: NX, browserKey: KX };
-  await wx.arm(NX); await sleep(80);
+  await wx.arm(NX); await settleX('the watch armed');
   const cwaX = () => chx.calls.filter((m) => m.method === 'Fetch.continueWithAuth');
-  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X1' }); await sleep(40);
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X1' }); await settleX('authRequired X1');
   let fx = wx.factFor({ ...tx, consume: false });
   ok(cwaX().length === 1 && cwaX()[0].params.requestId === 'X1' && cwaX()[0].params.authChallengeResponse.response === 'Default', 'X road: the sign-in is answered `Default` AT ONCE — Chrome draws its own sheet (the request is never held for a form of ours)', cwaX());
   ok(fx.prompt && fx.prompt.native === true && fx.prompt.title === 'Sign in' && /^Chrome's own sign-in sheet \("Sign in"/.test(fx.prompt.text), "…and it STANDS as Chrome's native sheet, said by its title", fx.prompt);
   ok((await wx.answerPrompt(tx, { username: 'ann', password: PW })).code === 'native_sheet' && cwaX().length === 1, '…the live view\'s form cannot answer it (no credential ever passes through VibeSpace on this road)');
-  chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'chrome-error://chromewebdata/' } }); await sleep(30);
+  chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'chrome-error://chromewebdata/' } }); await settleX('frameNavigated chrome-error');
   ok(wx.factFor({ ...tx, consume: false }).prompt && wx.factFor({ ...tx, consume: false }).prompt.native, 'the chrome-error://chromewebdata/ commit UNDER the sheet leaves it standing (measured: the sheet shows over it)');
-  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X2' }); await sleep(40);
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X2' }); await settleX('authRequired X2');
   ok(cwaX().some((m) => m.params.requestId === 'X2' && m.params.authChallengeResponse.response === 'Default') && wx.factFor({ ...tx, consume: false }).prompt.native, 'a wrong password (authRequired again) ⇒ Default again, the sheet stands');
-  chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'http://127.0.0.1:9/' } }); await sleep(30);
+  chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'http://127.0.0.1:9/' } }); await settleX('frameNavigated the page');
   fx = wx.factFor({ ...tx, consume: true });
   ok(fx.prompt === null && fx.notes.length === 1 && /closed in its window/.test(fx.notes[0]), 'a commit of the page itself (signed in, or the 401 body after Cancel) ⇒ the sheet is gone, told ONCE', fx.notes);
-  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X3' }); await sleep(450);
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X3' }); await settleX('authRequired X3'); await untilFact(() => wx.factFor({ ...tx, consume: false }).prompt === null, 'X3: the hold clock ran out (the native sheet forgotten)'); await settleX('X3 forgotten');   // (was 450 ms: the hold is 400)
   ok(wx.factFor({ ...tx, consume: false }).prompt === null && !cwaX().some((m) => m.params.requestId === 'X3' && m.params.authChallengeResponse.response === 'CancelAuth'), 'past the hold clock a native sheet is FORGOTTEN, never cancelled by the watch (it is Chrome\'s)');
   road = 'screencast';
-  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X4' }); await sleep(40);
+  // the flake census r2's find (this CONTROL): the watch makes the held prompt only when the socket's message is HANDLED, and the 40 ms
+  // was a guess that it had been. PLACED (at will): the watch's handling HELD — the read as it stood (40 ms after the emit) finds no
+  // prompt, the control's red with nothing wrong (and its «no Default» half reads nothing); released, the socket's order brings it
+  const hx = recX.last; hx.holdIn = true;
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X4' }); await sleep(40);   // the read as it stood
+  const asStood = { prompt: wx.factFor({ ...tx, consume: false }).prompt };
+  await untilFact(() => hx.inHeld.length >= 1, 'X4 reached the held socket');
+  asStood.held = hx.inHeld.length; recX.release(hx); await settleX('X4 released');
+  ok(asStood.prompt === null && asStood.held >= 1 && !!wx.factFor({ ...tx, consume: false }).prompt, 'PLACED (the census\'s find, at will): the sign-in HELD at the watch\'s socket — the read as it stood (40 ms after the emit) finds no prompt though Chrome raised it; released, the socket\'s order brings it', asStood);
   ok(!cwaX().some((m) => m.params.requestId === 'X4') && wx.factFor({ ...tx, consume: false }).prompt && !wx.factFor({ ...tx, consume: false }).prompt.native, 'CONTROL: the SCREENCAST road holds the sign-in for the live view\'s form exactly as before (no Default)');
   wx.shutdown(); await chx.close();
 }
@@ -285,31 +334,34 @@ fs.writeFileSync(path.join(ROOT, 'browser-stuck-perm.js'), mutP);
 ok(judgePerm(require(path.join(ROOT, 'browser-stuck-perm.js'))).length > 0, 'a patched copy that leaves the hidden window\'s prompt pending goes RED');
 function fakeChrome2() {
   const calls = []; const sessions = new Map(); let n = 0;
+  const conns = [], cnOf = new Map(), out = (ws, o) => { const cn = cnOf.get(ws); if (cn) cn.sent++; ws.send(JSON.stringify(o)); };   // the flake census r2: per connection (settled())
   const wss = new WebSocketServer({ noServer: true });
   const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
   srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => wss.emit('connection', ws)));
-  wss.on('connection', (ws) => { this_ws = ws; ws.on('message', (d) => {
-    const m = JSON.parse(d); calls.push(m); const reply = (o) => ws.send(JSON.stringify({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o }));
+  wss.on('connection', (ws) => { this_ws = ws; const cn = { sent: 0, heard: 0 }; conns.push(cn); cnOf.set(ws, cn); ws.on('message', (d) => {
+    cn.heard++;
+    const m = JSON.parse(d); calls.push(m); const reply = (o) => out(ws, { id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o });
     if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [{ targetId: 'T1', type: 'page', url: 'http://127.0.0.1:9/', title: 't', browserContextId: 'C1' }] } });
     if (m.method === 'Target.attachToTarget') { const sid = `S-${m.params.targetId}-${++n}`; sessions.set(sid, m.params.targetId); return reply({ result: { sessionId: sid } }); }
     if (m.method === 'Runtime.evaluate' && /closePrintPreviewDialog/.test(m.params.expression)) return reply({ result: { result: { type: 'string', value: 'released' } } });
     return reply({ result: {} });
   }); });
   let this_ws = null;
-  return { calls, sessions, emit(method, params, sid) { this_ws.send(JSON.stringify({ ...(sid ? { sessionId: sid } : {}), method, params })); },
+  return { calls, sessions, conns, emit(method, params, sid) { out(this_ws, { ...(sid ? { sessionId: sid } : {}), method, params }); },
     sidOf(tid) { return [...sessions].filter(([, t]) => t === tid).pop()?.[0]; }, // the newest watch's session
     async listen() { await new Promise((r) => srv.listen(0, '127.0.0.1', r)); this.url = `ws://127.0.0.1:${srv.address().port}/devtools/browser/fake`; return this; },
     async close() { for (const c of wss.clients) c.terminate(); await new Promise((r) => srv.close(() => r())); } };
 }
 async function printLeg(Dmod) {
   const c2 = await fakeChrome2().listen(); const evs = [];
-  const w2 = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: c2.url }) }, log: { warn() {}, log() {}, error() {} }, WebSocketImpl: require('ws').WebSocket }); // the copy under scratch resolves no `ws` of its own
+  const rec2 = recSocket(), settle2 = (what) => settled(c2, rec2, what);
+  const w2 = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: c2.url }) }, log: { warn() {}, log() {}, error() {} }, WebSocketImpl: rec2.Impl }); // the copy under scratch resolves no `ws` of its own (the tree's, with its counts)
   w2.onChange((ev) => evs.push(ev));
   const P2 = 'bp-a0000003', t2 = { profileId: P2, browserKey: 'bk-0000d1a2' };
-  await w2.arm(P2); await sleep(60);
-  c2.emit('Target.targetCreated', { targetInfo: { targetId: 'T2', type: 'page', url: 'http://127.0.0.1:9/two', browserContextId: 'C1' } }); await sleep(40);
+  await w2.arm(P2); await settle2('the watch armed');
+  c2.emit('Target.targetCreated', { targetInfo: { targetId: 'T2', type: 'page', url: 'http://127.0.0.1:9/two', browserContextId: 'C1' } }); await settle2('targetCreated T2');
   c2.emit('Target.targetCreated', { targetInfo: { targetId: 'PV', type: 'other', url: '' } });
-  c2.emit('Target.targetInfoChanged', { targetInfo: { targetId: 'PV', type: 'page', url: 'chrome://print/', openerId: 'T1' } }); await sleep(60);
+  c2.emit('Target.targetInfoChanged', { targetInfo: { targetId: 'PV', type: 'page', url: 'chrome://print/', openerId: 'T1' } }); await settle2('the print preview');
   const rel = c2.calls.filter((m) => m.method === 'Runtime.evaluate' && /closePrintPreviewDialog/.test(m.params.expression));
   const r = { calls: c2.calls, evs, released: rel.map((m) => c2.sessions.get(m.sessionId)), closed: c2.calls.filter((m) => m.method === 'Target.closeTarget').map((m) => m.params.targetId), tracked: [...w2._watches.get(P2).targets.keys()], notes: w2.factFor({ ...t2, consume: true }).notes, again: w2.factFor({ ...t2, consume: true }).notes, w: w2, t: t2, ch: c2 };
   return r;
@@ -323,8 +375,9 @@ ok(pl.notes.filter((n) => /tried to print/.test(n) && /vibespace-browser pdf/.te
 const flips = []; pl.w._watches.get('bp-a0000003'); 
 const kp = { cdpEndpointFor: async () => ({ ok: true, url: pl.ch.url }), notePermission: (...a) => { flips.push(a); return true; } };
 pl.w.shutdown();
-const w3 = D.create({ keeper: kp, log: { warn() {}, log() {}, error() {} } }); const ev3 = []; w3.onChange((e) => ev3.push(e));
-await w3.arm('bp-a0000003'); await sleep(60);
+const rec3b = recSocket();
+const w3 = D.create({ keeper: kp, log: { warn() {}, log() {}, error() {} }, WebSocketImpl: rec3b.Impl }); const ev3 = []; w3.onChange((e) => ev3.push(e));
+await w3.arm('bp-a0000003'); await settled(pl.ch, rec3b, 'the second watch armed (the fake\'s newest connection)');
 const n0 = pl.ch.calls.length;
 const fl = await w3.setPermission(pl.t, { kind: 'geolocation', setting: 'allow', at: '51.5,-0.12' });
 const after = pl.ch.calls.slice(n0);
@@ -353,9 +406,10 @@ async function heldLeg(Dmod, tag) {
   let held = null;   // no place yet: the leg's first grant is an agent's from BEFORE the person set one (it stands in the watch's grants)
   let holders = [], leaseFn = null;
   const kH = { cdpEndpointFor: async () => ({ ok: true, url: ch.url }), notePermission: () => true, geoHeldFor: () => held, onLease: (fn) => { leaseFn = fn; return () => {}; } };
-  const wH = Dmod.create({ keeper: kH, holdersOf: () => holders, log: { warn() {}, log() {}, error() {} } });
+  const recH = recSocket(), settleH = (what) => settled(ch, recH, what);
+  const wH = Dmod.create({ keeper: kH, holdersOf: () => holders, log: { warn() {}, log() {}, error() {} }, WebSocketImpl: recH.Impl });
   const PH = `bp-a00000${{ real: '09', red: '0a', red2: '0b', red3: '0c', red4: '0d' }[tag]}`, tH = { profileId: PH, browserKey: 'bk-0000d1a9' };
-  await wH.arm(PH); await sleep(60);
+  await wH.arm(PH); await settleH('the watch armed');
   const o = {};
   const since = (n) => ch.calls.slice(n);
   o.pre = await wH.setPermission(tH, { kind: 'geolocation', setting: 'allow', origin: 'http://127.0.0.1:9' });
@@ -369,7 +423,7 @@ async function heldLeg(Dmod, tag) {
   o.allowOverride = since(n).filter((m) => /GeolocationOverride/.test(m.method)).length;
   o.allowCalls = since(n).filter((m) => /setPermission|GeolocationOverride/.test(m.method)).length;
   n = ch.calls.length;
-  ch.emit('Target.targetCreated', { targetInfo: { targetId: 'T5', type: 'page', url: 'http://127.0.0.1:9/five', browserContextId: 'C1' } }); await sleep(80);
+  ch.emit('Target.targetCreated', { targetInfo: { targetId: 'T5', type: 'page', url: 'http://127.0.0.1:9/five', browserContextId: 'C1' } }); await settleH('targetCreated T5');
   o.replayOverride = since(n).filter((m) => m.method === 'Emulation.setGeolocationOverride').length;
   o.replayEnabled = since(n).some((m) => m.method === 'Page.enable');
   // r1264 must 1: the person TAKES OVER (the watch moves agent → person) while an agent's geolocation grant stands — the hand-over resets the
@@ -377,12 +431,12 @@ async function heldLeg(Dmod, tag) {
   n = ch.calls.length;
   holders = [{ human: true, browserKey: 'bk-person' }];
   if (leaseFn) await leaseFn({ kind: 'attach', profileId: PH });
-  await sleep(80);
+  await settleH('the person took over');
   o.handReset = since(n).some((m) => m.method === 'Browser.resetPermissions');
   o.handClear = since(n).filter((m) => m.method === 'Emulation.clearGeolocationOverride').length;
   holders = [];
   if (leaseFn) await leaseFn({ kind: 'attach', profileId: PH });   // back to the agent's watch for the legs below
-  await sleep(80);
+  await settleH('back to the agent');
   n = ch.calls.length;
   o.deny = await wH.setPermission(tH, { kind: 'geolocation', setting: 'deny', origin: 'http://127.0.0.1:9' });
   o.denyClear = since(n).filter((m) => m.method === 'Emulation.clearGeolocationOverride').length;
