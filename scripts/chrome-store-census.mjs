@@ -117,7 +117,7 @@ export function filesOf(repo) {
 export const NAMES_SWITCH = /--host-resolver-rules\b/;
 export const NAMES_ROWS = Object.freeze({
   'scripts/scratch.mjs': 'THE ONE PLACE: chromeNames builds the names rule; CHROME_QUIET carries it, chromeBelt and a suite\'s own names (map / own) use it; DRIVER_NAMES is the agent browser driver\'s ONE comma-free rule (B-8695), driverArgs its builder',
-  'scripts/test-tailnet-reach-chrome.mjs': 'a COMMENT naming the switch (the attach road\'s names); its driver line takes scratch.mjs DRIVER_NAMES (B-8695) and its own Chromes take chromeNames (RULES)',
+  'scripts/test-tailnet-reach-chrome.mjs': 'a COMMENT naming the switch (the attach road\'s names); its driver line is built by scratch.mjs driverArgs (B-8695: DRIVER_NAMES last, its PAC switch whole) and its own Chromes take chromeNames (RULES)',
   'scripts/test-architecture.mjs': 'the census\'s own controls (§47d): planted launch texts that name the switch',
 });
 
@@ -130,17 +130,22 @@ export const NAMES_ROWS = Object.freeze({
  *  127.0.0.1 too) and stray words — the 2.369.419 shape of three real-driver suites, cured by this unit. */
 export const DRIVER_LINE = /['"]\.agent-browser['"]\s*,\s*['"]config\.json['"]|\bAGENT_BROWSER_ARGS['"]?\s*:/;
 export const DRIVER_BUILT = /\bdriverArgs\(/;
+// B-8695 (主开发 r4617): THE --config ROAD — a driver config written as a FILE and handed by AGENT_BROWSER_CONFIG / --config is the
+// driver's line too: in a file of the DRIVER DOOR (one that can run the real driver), every line that writes a JSON object with an
+// `args` key is judged as a driver line (built, or counted in its row)
+export const DOOR_FILE = /\bDRIVER\.skip\b|\bdriverDoor\(|\bVS_AGENT_BROWSER_BIN\b|\bDRIVER\.env\b/;
+export const CONFIG_FILE_LINE = /writeFileSync\([^\n]*JSON\.stringify\(\{[^\n]*\bargs\s*:/;
 export const QUIET_JOINED = /\bCHROME_QUIET\s*\.\s*join\s*\(/;
 export const DRIVER_ROWS = Object.freeze({
   'scripts/test-browser-builds-keeper.mjs': { n: 1, why: 'a FAKE driver (FAKE_BIN): the egress home\'s config.json fixture (pac and ozone switches) the keeper reads and asserts — no Chrome starts' },
-  'scripts/test-browser-display-chrome.mjs': { n: 1, why: 'the user config\'s PATH (UCFG); the file it writes holds OWNER_ARGS, built by driverArgs on its own line (the pin)', pin: /const OWNER_ARGS = driverArgs\(/ },
+  'scripts/test-browser-display-chrome.mjs': { n: 2, why: 'the user config\'s PATH (UCFG) and its write: the file holds OWNER_ARGS, built by driverArgs on its own line (the pin)', pin: /const OWNER_ARGS = driverArgs\(/ },
   'scripts/test-browser-display.mjs': { n: 3, why: 'in-process over a FAKE driver: a read inside the fake\'s source and two config PATHS the display reader is handed — no Chrome' },
   'scripts/test-browser-env.mjs': { n: 2, why: 'in-process: config.json fixtures for the environment builder under test — no driver runs' },
   'scripts/test-browser-ephemeral.mjs': { n: 1, why: 'FAKE Chromes (node) under a fake driver: a config PATH — no Chrome' },
   'scripts/test-browser-kept.mjs': { n: 5, why: 'a FAKE driver: kept-profile config.json fixtures the keeper reads — no Chrome' },
-  'scripts/test-browser-mediation-chrome.mjs': { n: 2, why: 'r3\'s user config whose executablePath is a recording shell script (exit 1: no Chrome), and a decoy shell environment (AGENT_BROWSER_ARGS among the twins the mediation refuses) handed to the VibeSpace CLI under test — neither reaches a Chrome' },
+  'scripts/test-browser-mediation-chrome.mjs': { n: 5, why: 'r3\'s user, project and named configs whose executablePath is a recording shell script (exit 1: no Chrome), an engine fixture\'s launch row (its own --vibespace-engine=fixture), and a decoy shell environment (AGENT_BROWSER_ARGS among the twins the mediation refuses) handed to the VibeSpace CLI under test — none reaches a real Chrome' },
   'scripts/test-browser-pin.mjs': { n: 2, why: 'a FAKE driver: pin config.json fixtures — no Chrome' },
-  'scripts/test-browser-profiles.mjs': { n: 16, why: 'fifteen config.json FIXTURES for the profile readers under test, and one real-binary leg that is LAUNCH-FREE (session info --json; a tab list refused before any launch) — no Chrome starts' },
+  'scripts/test-browser-profiles.mjs': { n: 18, why: 'seventeen config FIXTURES (config.json and two --config files) for the profile readers under test, and one real-binary leg that is LAUNCH-FREE (session info --json; a tab list refused before any launch) — no Chrome starts' },
   'scripts/test-browser-share-model.mjs': { n: 1, why: 'a FAKE driver (the share model over a node stand-in): a config.json fixture — no Chrome' },
   'scripts/test-browser-stderr-pipe-real.mjs': { n: 1, why: 'quietLeg hands AGENT_BROWSER_ARGS its PARAMETER; both callers build it with driverArgs (the pin)', pin: /quietLeg\('bspd', driverArgs\([\s\S]*quietLeg\('bspc', BE\.withQuietLogging\(driverArgs\(/ },
   'scripts/test-browser-stop-verb.mjs': { n: 1, why: 'a FAKE driver: a config.json fixture — no Chrome' },
@@ -155,10 +160,10 @@ export function driverCensus(repo, { patch = {}, extra = {}, rows = DRIVER_ROWS 
   const out = { files: 0, built: 0, unbuilt: [], moved: [], unpinned: [], joined: [], stale: [] };
   for (const f of [...filesOf(repo), ...Object.keys(extra)]) {
     const src = f in extra ? extra[f] : f in patch ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
-    const open = []; let named = false;
+    const open = []; let named = false; const door = DOOR_FILE.test(src);
     src.split('\n').forEach((l, i) => {
       if (QUIET_JOINED.test(l)) out.joined.push({ file: f, line: i + 1 });
-      if (!DRIVER_LINE.test(l)) return;
+      if (!DRIVER_LINE.test(l) && !(door && CONFIG_FILE_LINE.test(l))) return;
       named = true;
       if (DRIVER_BUILT.test(l)) out.built++; else open.push(i + 1);
     });

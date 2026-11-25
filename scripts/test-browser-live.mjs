@@ -1739,7 +1739,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
   else if (!CHROME_ANY) skip('no chrome on this box for a real headless chromium');
   else await (async () => {
     const D = path.join(ROOT, 'real'); fs.mkdirSync(path.join(D, 'prof'), { recursive: true, mode: 0o700 }); fs.mkdirSync(path.join(D, 'sock'), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(D, 'cfg.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled' }));
+    fs.writeFileSync(path.join(D, 'cfg.json'), JSON.stringify({ headed: false, args: driverArgs('--no-sandbox', '--disable-blink-features=AutomationControlled') }));   // B-8695: a --config file is the driver's line too
     const ns = 'vs-bk-' + crypto.randomBytes(4).toString('hex');
     const env = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) env[k] = v;
     const extraEnv = { AGENT_BROWSER_CONFIG: path.join(D, 'cfg.json'), AGENT_BROWSER_HEADED: '0', AGENT_BROWSER_SOCKET_DIR: path.join(D, 'sock') };

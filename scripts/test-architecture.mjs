@@ -2269,9 +2269,14 @@ await section(async () => {
     const movedRow = CS.driverCensus(process.cwd(), { rows: { ...CS.DRIVER_ROWS, 'scripts/test-browser-pin.mjs': { n: 3, why: 'a planted count' } } });
     const lostPin = CS.driverCensus(process.cwd(), { patch: { 'scripts/test-browser-display-chrome.mjs': fs.readFileSync('scripts/test-browser-display-chrome.mjs', 'utf8').replace('const OWNER_ARGS = driverArgs(', 'const OWNER_ARGS = String(') } });
     const staleRow = CS.driverCensus(process.cwd(), { rows: { ...CS.DRIVER_ROWS, 'scripts/test-planted-gone.mjs': { n: 1, why: 'a planted row' } } });
+    // r4617: THE --config ROAD — a driver door's file writing a JSON config with `args` (no driverArgs) is red; the same line in a file that
+    // runs no real driver is not judged (the door's marker assembled from pieces: this file is no door)
+    const WR = 'fs.write' + 'FileSync(cfg, JSON.stringify({ args: ', DOOR = 'DRIVER' + '.skip';
+    const cfgRoad = CS.driverCensus(process.cwd(), { extra: { 'scripts/test-planted-door.mjs': `skip(\`\${${DOOR}} none\`);\n${WR}'--no-sandbox' }));\n`, 'scripts/test-planted-nodoor.mjs': `${WR}'--no-sandbox' }));\n` } });
     ok(cut.includes('--host-resolver-rules=MAP * ^NOTFOUND') && cut.some((p) => /^EXCLUDE /.test(p))
       && planted.unbuilt.some((u) => u.file === 'scripts/test-planted-driver.mjs' && u.line === 1) && planted.joined.some((u) => u.file === 'scripts/test-planted-driver.mjs')
-      && movedRow.moved.some((m) => m.file === 'scripts/test-browser-pin.mjs') && lostPin.unpinned.includes('scripts/test-browser-display-chrome.mjs') && staleRow.stale.includes('scripts/test-planted-gone.mjs'),
+      && movedRow.moved.some((m) => m.file === 'scripts/test-browser-pin.mjs') && lostPin.unpinned.includes('scripts/test-browser-display-chrome.mjs') && staleRow.stale.includes('scripts/test-planted-gone.mjs')
+      && cfgRoad.unbuilt.some((u) => u.file === 'scripts/test-planted-door.mjs' && u.line === 2) && !cfgRoad.unbuilt.some((u) => u.file === 'scripts/test-planted-nodoor.mjs'),
       '§47e RED CONTROLS: the quiet list joined by a comma reaches the driver as the catch-all ALONE (it takes 127.0.0.1 too) plus stray EXCLUDE words; a planted driver config not built by driverArgs is red, and so is the joined list; a row whose count moved, a pin that no longer holds and a stale row are each red',
       JSON.stringify({ cut: cut.filter((p) => /resolver|EXCLUDE/.test(p)), planted: planted.unbuilt.filter((u) => /planted/.test(u.file)), moved: movedRow.moved, unpinned: lostPin.unpinned, stale: staleRow.stale }));
   }
