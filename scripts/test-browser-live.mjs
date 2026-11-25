@@ -101,7 +101,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET, driverArgs } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET, driverArgs, chromeNamesProgram } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
@@ -214,7 +214,11 @@ async function legAttach() {
   const ds = DS9.install({ dataDir: path.join(R9, 'desk'), env: () => env, log: hidden });
   const dk = { facts: (o) => ds.facts(o), launchDisplay: (b) => ds.launchDisplay(b), x11EnvFor: (id) => ds.x11EnvFor(id), stop: (id, o) => ds.stop(id, o), liveRecords: () => ds.liveRecords() };
   const settings = { 'browser.idleTimeoutMs': 600000 };
-  const mkK = (o = {}) => K9.create({ dataDir: path.join(R9, o.data || 'data'), homeDir: env.HOME, env: () => env, serverSetting: (x) => settings[x], runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: hidden, install: false, tickMs: 3600e3, attachSocketBase: SB, ...o.k });
+  // B-8695 (主开发 r4612): the harness's OWN Chrome program, written into this world's folder and first on the KEEPER env's PATH alone
+  // (the display, the driver, the viewer and the control's spawn keep `env`): the attach road's Chrome resolves no name off the box,
+  // and the keeper's argv is the product's, unchanged
+  const NP = chromeNamesProgram(path.join(R9, 'chrome-bin'), env), kenv = NP ? NP.env : env;
+  const mkK = (o = {}) => K9.create({ dataDir: path.join(R9, o.data || 'data'), homeDir: env.HOME, env: () => kenv, serverSetting: (x) => settings[x], runtime: F.createBrowserRuntime({ env: kenv }), facts: F.createBrowserFacts({ env: kenv }), log: hidden, install: false, tickMs: 3600e3, attachSocketBase: SB, ...o.k });
   const abRun = (args, pairsEnv, timeout = 30000) => new Promise((resolve) => require('node:child_process').execFile(realBin, args, { env: { ...env, ...pairsEnv }, encoding: 'utf8', timeout }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || '').trim(), err: String(stderr || '').trim() })));
   const x = (args, xenv, timeout = 10000) => { try { return execFileSync(args[0], args.slice(1), { env: { ...env, ...xenv }, encoding: 'utf8', timeout }).trim(); } catch (e) { return null; } };
   let k = null, viewerX = null, viewer = null;
@@ -229,6 +233,7 @@ async function legAttach() {
     ok(v.state === 'ready' && rec.launch === 'attach' && drec && drec.state === 'ready' && DA9.isDisplayForBrowser(drec) && drec.forBrowser === p.id && drec.backend === 'xpra', `⑨ start: the ATTACH road — a display-only xpra session (${drec && drec.display}, port ${drec && drec.port}) and the keeper's own Chrome on it (${startMs} ms)`, JSON.stringify({ state: v.state, launch: rec.launch, why: rec.launchWhy, err: rec.lastError, d: drec && { state: drec.state, err: drec.lastError } }));
     if (!(v.state === 'ready' && rec.launch === 'attach' && drec)) return;
     const argv = fs.readFileSync(`/proc/${rec.pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
+    ok(!!NP && rec.executable === NP.program && argv.includes(NP.rule), `⑨ the attach Chrome came through the harness's Chrome program (B-8695): the keeper ran it (its recorded executable) and the names rule stands on the real Chrome's own command line, the product's argv beside it`, { exe: rec.executable, program: NP && NP.program, ruled: argv.includes(NP && NP.rule) });
     ok(AT9.ATTACH_REQUIRED.every((f) => argv.includes(f)) && !argv.some((a) => a.startsWith('--disable-sync')) && argv.includes(`--user-data-dir=${p.dir}`) && /chrome$/.test(argv[0]), `⑨ the REAL Chrome's own command line: every required flag, its profile dir, NO --disable-sync (${path.basename(argv[0])}, ${argv.length} args)`, argv.join(' '));
     ok(/^Chrome\/\d+\./.test(rec.cdpBrowser || '') && rec.cdpPort === Number(fs.readFileSync(path.join(p.dir, 'DevToolsActivePort'), 'utf8').split('\n')[0]) && fs.readFileSync(`/proc/${rec.pid}/environ`, 'utf8').split('\0').includes(`DISPLAY=${drec.display}`), `⑨ its port = the NEW DevToolsActivePort (${rec.cdpPort}); it answers as ${rec.cdpBrowser}; it runs on the session's display`);
     // THE AGENT: the real driver as the shipped CLI runs it — the attach answer's pairs (the CDP url + the config's socket
@@ -293,7 +298,7 @@ async function legAttach() {
     {
       const pd = path.join(R9, 'home', 'noac-profile'); fs.mkdirSync(pd, { recursive: true, mode: 0o700 });
       const avc = AT9.attachArgv({ profileDir: pd, quiet: [] }).argv.filter((a) => a !== '--disable-blink-features=AutomationControlled');
-      const rc = await ATL9.spawnChrome({ exe: need['google-chrome'], argv: avc, env: { ...env, ...sx }, profileDir: pd, logFile: path.join(R9, 'noac.log') });
+      const rc = await ATL9.spawnChrome({ exe: NP ? NP.program : need['google-chrome'], argv: avc, env: { ...env, ...sx }, profileDir: pd, logFile: path.join(R9, 'noac.log') });
       let wd2 = null;
       if (rc.ok) { wd2 = await abRun(['--cdp', String(rc.port), 'eval', 'String(navigator.webdriver)'], { AGENT_BROWSER_SOCKET_DIR: path.join(SB, 'noac'), AGENT_BROWSER_SESSION: 'noac', AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' }); await abRun(['close', '--all'], { AGENT_BROWSER_SOCKET_DIR: path.join(SB, 'noac'), AGENT_BROWSER_SESSION: 'noac' }); try { process.kill(rc.pid, 'SIGTERM'); } catch { } }
       ok(rc.ok && wd2 && /true/.test(wd2.out), `⑨ CONTROL (RED): the attach argv minus AutomationControlled ⇒ navigator.webdriver = ${wd2 && wd2.out} (the debugging port alone sets it — the flag is load-bearing)`, JSON.stringify({ rc: { ...rc, child: undefined }, wd2 }));
