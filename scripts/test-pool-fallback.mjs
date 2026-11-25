@@ -601,13 +601,13 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   // (5) A PERSON's PRESS, PACED FOR THE BOX (r3041 MUST): at the head, uncounted, FOUR restarts OUT at a time — a slot is held until
   // that conversation's restart LANDS (its create asks the carry), never freed at the send
   const land = async (w, t) => { const r = w.eng.poolChooserForModel(w.P, { model: t.model, resumeOf: t.backendSessionId, carryRecord: true }); await w.moved('a landing (its press slot freed: the next press goes)'); return r; };
-  const pressTen = async (w) => { w.client(); for (let i = 0; i < 10; i++) w.mk('pb' + i); await w.pass(); const a = await w.answer(fbItems(w)[0].action.askId, { answer: 'once' }); await w.settle(); await w.settle(); return a; };
+  const pressTen = async (w) => { w.client(); for (let i = 0; i < 10; i++) w.mk('pb' + i); await w.pass(); const a = await w.answer(fbItems(w)[0].action.askId, { answer: 'once' }); return a; };   // the door waited for its moves (r4418: no settle after it)
   const settleUntil = async (w, n, k = 8) => { for (let i = 0; i < k && w.restarts().length < n; i++) await w.settle(); };
   const wB = world();
   const ansB = await pressTen(wB);
   const atOnce = wB.restarts().length;
   let landed = 0, maxOut = atOnce, rounds = 0, recs = 0;
-  while (landed < wB.restarts().length && rounds++ < 30) { if (await land(wB, wB.restarts()[landed])) recs++; landed++; await wB.settle(); await wB.settle(); maxOut = Math.max(maxOut, wB.restarts().length - landed); }
+  while (landed < wB.restarts().length && rounds++ < 30) { if (await land(wB, wB.restarts()[landed])) recs++; landed++; maxOut = Math.max(maxOut, wB.restarts().length - landed); }
   ok(ansB.queued === 10 && ansB.moved === false && atOnce === 4 && maxOut === 4 && wB.restarts().length === 10 && recs === 10 && wB.eng._fbLanding.size === 0 && wB.eng._fbMovedAt.length === 0 && wB.eng.PRESS_MOVES_AT_ONCE === 4,
     '(5) Allow once on 10 waiting conversations: the answer says 10 QUEUED; FOUR restarts out at a time — the next goes only as one LANDS (its create asks the carry), never at the send; all ten in the end, none counted by the pool\'s pace', { queued: ansB.queued, atOnce, maxOut, restarts: wB.restarts().length, recs, rounds });
   const wL = world({ landingMs: 250 });
@@ -617,7 +617,11 @@ console.log('— §4 the move there (unit F2): every member out, the switch, the
   await wL.settle();
   const firstL = wL.restarts().length;
   const saidL = [], logL = console.log; console.log = (m) => { saidL.push(String(m)); };
-  try { await new Promise((r) => setTimeout(r, 700)); await settleUntil(wL, 6); } finally { console.log = logL; }
+  // (r4418) a wait on the FACT the leg judges (the bound's four journal lines said and the next two restarts out), never a fixed 700 ms;
+  // at most 5 s, its expiry a named harness line
+  const notSeenL = () => saidL.filter((m) => /was not seen landing within/.test(m)).length;
+  try { const end = Date.now() + 5e3; while ((notSeenL() < 4 || wL.restarts().length < 6) && Date.now() < end) await wL.settle(); } finally { console.log = logL; }
+  if (notSeenL() < 4 || wL.restarts().length < 6) ok(false, 'THE HARNESS\'s BOUND (never the product\'s answer): (5)\'s landing bound — four slots said freed and six restarts out within 5 s', { said: notSeenL(), restarts: wL.restarts().length });
   ok(firstL === 4 && wL.restarts().length === 6 && saidL.filter((m) => /was not seen landing within/.test(m)).length >= 4,
     '(5) …a restart never seen landing holds its slot only to the bound: then the slot is freed AND SAID (the journal), and the next ones go', { firstL, after: wL.restarts().length, said: saidL.filter((m) => /landing/.test(m)).length });
   // (a) THE PRESS's WORDS (r3041): the answer counts what is QUEUED (the hub says each move as it is made, a refused one in its own
