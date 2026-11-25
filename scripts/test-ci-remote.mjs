@@ -4,7 +4,8 @@
 //   ② loadRule: the box's LOAD RULE at its edges (40 / 25 GB)
 //   ③ selectSlice over THIS tree's ci.mjs: the n slices of an affected selection PARTITION it (none in two, none in
 //     none), the serial group whole in slice 1, longest-first by a marker's timings; an unknown --only name refused
-//   ④ the same cut as `ci.mjs --list-affected` (the hub half) — names AND order, over the same marker dir
+//   ④ the same cut as `ci.mjs --list-affected` (the hub half) — names AND order, over the same marker dir, over the WHOLE tier (no
+//     range): THE HAND-OVER of the range and the changed files to the affected set is judged in the heavy twin test-ci-remote-impact only
 //   ⑤ runScript: --only=<slice> --sha=<head>, a private HOME / XDG_RUNTIME_DIR / bus (TMPDIR=/tmp: the scratch law),
 //     the run id in every child's env, the LOAD RULE printed; the snapshot = a git worktree at the head on the box
 //     (the build's censuses read git ls-files), the missing commits as one bundle
@@ -67,10 +68,17 @@ try {
   ok(un.names.join() === [two[1], two[0]].join(), '③ unmeasured: late-in-table first (the table runs cheap → expensive)');
   ok(throws(() => R.selectSlice(CI, { tree: REPO, only: ['test-not-a-suite'] }), /not a heavy suite/), '③ an unknown --only name refused before any rsync');
   // ④ the hub half cuts the same list
+  // ④ (B-7e49, 主开发 r4544): the hub half cuts the same list over the WHOLE heavy tier, with NO range — the remote's slicing and order
+  // against the hub's, names AND order. The affected set over the real tree (a range and changed files handed to ci.mjs affectedSuites)
+  // is judged in the heavy twin test-ci-remote-impact only
   for (const k of [2]) {
-    const mine = R.selectSlice(CI, { tree: REPO, changed: ['src/server.js'], range: 'x..y', shard: { i: k, n: 2 }, timingDirs: [md] });
-    const hub = CI.listAffected({ range: 'x..y', shard: { i: k, n: 2 }, dir: md, changed: ['src/server.js'] });
-    ok(mine.names.length > 0 && mine.names.join() === hub.names.join(), `④ slice ${k}/2 = ci.mjs --list-affected's (${mine.names.length} names, same order)`);
+    const mine = R.selectSlice(CI, { tree: REPO, shard: { i: k, n: 2 }, timingDirs: [md] });
+    const hub = CI.listAffected({ shard: { i: k, n: 2 }, dir: md });
+    ok(mine.names.length >= 2 && mine.names.join() === hub.names.join(), `④ slice ${k}/2 of the whole tier = ci.mjs --list-affected's (${mine.names.length} names, same order)`);
+    // THE LEG CAN GO RED: a remote slice that takes the WRONG shard, and one that ORDERS by other times, each differ from the hub's list
+    const wrongShard = R.selectSlice({ ...CI, shardPlan: (p, n, o) => { const r = CI.shardPlan(p, n, o); return { ...r, shards: [...r.shards].reverse() }; } }, { tree: REPO, shard: { i: k, n: 2 }, timingDirs: [md] });
+    const wrongOrder = R.selectSlice({ ...CI, previousTimings: () => Object.fromEntries(heavy.map((s, i) => [s.name, i])) }, { tree: REPO, shard: { i: k, n: 2 }, timingDirs: [md] });
+    ok(wrongShard.names.join() !== hub.names.join() && wrongOrder.names.join() !== hub.names.join(), `CONTROL ④ a remote slice that takes the wrong shard, or orders by other times, differs from the hub's list (red)`);
   }
   const cli = spawnSync(process.execPath, [path.join(REPO, 'scripts/ci.mjs'), '--list-affected', '--shard', '2/2', `--markers=${md}`], { encoding: 'utf-8', cwd: REPO });
   const want = CI.listAffected({ shard: { i: 2, n: 2 }, dir: md }).names.join(',');
@@ -135,8 +143,7 @@ try {
   const bt = R.selectSlice(CI, { tree: REPO, batch: 'desktop', timingDirs: [] });
   ok(self.length > 20 && bt.names.slice().sort().join() === self.join() && /--batch desktop: the \d+ self-hosted/.test(bt.summary),
     `⑦ the batch IS the tree's self-hosted set (${bt.names.length} of ${heavy.length}: ci.mjs hostPlan .self)`);
-  const bta = R.selectSlice(CI, { tree: REPO, batch: 'desktop', changed: ['package.json'], range: 'x..y' });
-  ok(bta.names.slice().sort().join() === self.join(), '⑦ an affected batch selects inside the self-hosted set (a global input ⇒ all of it, none of the hosted)');
+  // ⑦'s affected batch (a range and changed files) runs in the heavy twin test-ci-remote-impact (B-7e49, r4544)
   ok(throws(() => R.selectSlice({ SUITES: CI.SUITES }, { tree: REPO, batch: 'desktop' }), /no HOSTS rule/), 'CONTROL ⑦ a tree whose ci.mjs predates the host rule is refused (never a guessed list)');
   // a suite the box never ran takes the tree's checked-in desktop time (lane xpra-window-split: the giant's new parts)
   const dt = CI.batchTimings(REPO) || {};

@@ -328,6 +328,7 @@
   "test-checkpoints.mjs": 1,
   "test-chrome-marks-chrome.mjs": 1,
   "test-ci-heavy-launch.mjs": 1,
+  "test-ci-remote-impact.mjs": 1,
   "test-ci-remote.mjs": 1,
   "test-claim-jsonls.mjs": 1,
   "test-claude-hot-switch.mjs": 1,

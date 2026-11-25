@@ -7,7 +7,8 @@
   "run45670081619-heavy-4-of-7-node22.log",
   "run45670081619-heavy-5-of-7-node22.log",
   "run45670081619-heavy-6-of-7-node22.log",
-  "run45670081619-heavy-7-of-7-node22.log"
+  "run45670081619-heavy-7-of-7-node22.log",
+  "FIRST-MACHINE READING, not a hosted runner time (主开发 r4541 (3)): test-ci-remote-impact 5255 ms, the lane bl-tests-chrome's heavy read 34986ff30-20261125205330h-box on test machine 1 — the next hosted run replaces it"
  ],
  "ms": {
   "test-account-reset-door-controls": 11601,
@@ -139,6 +140,7 @@
   "test-ci-gate-tiers-deep": 11685,
   "test-ci-heavy-launch": 571327,
   "test-ci-heavy-verdict-real": 2803,
+  "test-ci-remote-impact": 5255,
   "test-claim-jsonls": 101,
   "test-claude-hot-switch": 86,
   "test-claude-steer-chrome": 135533,
