@@ -2132,9 +2132,9 @@ await section(async () => {
   ok(judge("import { scratch } from './scratch.mjs';\nawait cdp('Page.navigate', { url: U });") !== null && judge("import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: U });") === null && judge("// onboarding-under-test\nawait cdp('Page.navigate', { url: U });") === null, 'NEGATIVE CONTROL: a bare navigate is caught, the shared idiom passes, the declared exemption passes');
   const LP = "import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nimport { loadPage } from './cdp-page-load.mjs';\n";
   ok(judge(LP + "await loadPage(cdp, U);\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });") !== null && judge(LP + "await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await loadPage(cdp, U);") === null
-    && !importsLoad("const loadPage = async (t) => t;\nawait loadPage('x');") && !scope.includes('scripts/test-user-state-echo.mjs')
+    && !importsLoad("const loadPage = async (t) => t;\nawait loadPage('x');") && !scope.includes('scripts/test-user-state-echo.mjs') && !scope.includes('scripts/test-user-state-echo-rounds.mjs')
     && bootMods("import { loadPage } from './cdp-page-load.mjs';").length === 0 && scope.some((f) => importsLoad(fs.readFileSync(f, 'utf8')) && !fs.readFileSync(f, 'utf8').includes("'Page.navigate'")),
-    'NEGATIVE CONTROL (B-1217 (13)): an imported loadPage( before the addScript is caught and after it passes; a suite\'s own helper merely named loadPage is no navigate (test-user-state-echo keeps one: out of scope); the one page load is no boot module; a suite whose only navigates are loadPage( calls is in scope');
+    'NEGATIVE CONTROL (B-1217 (13)): an imported loadPage( before the addScript is caught and after it passes; a suite\'s own helper merely named loadPage is no navigate (test-user-state-echo and its heavy twin test-user-state-echo-rounds each keep one: out of scope); the one page load is no boot module; a suite whose only navigates are loadPage( calls is in scope');
 });
 
 

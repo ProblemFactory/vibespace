@@ -427,6 +427,37 @@ console.log('§5b B-360d (A): THE SWEEP — every ceiling the census states is p
   ok(writerCensus({ ...files, 'src/rogue-ledger-fix.js': "fs.writeFileSync(path.join(dir, 'events-2026-01.ndjson'), x)" }).length === 1, 'control: a rogue shard writer outside the migrations ⇒ RED');
 }
 
+// §L11f (B-7e49, lane bl-tests-e, 主开发 r3965): THE TWIN's §L11 OVER A FRESHLY LOADED CACHE, IN THE FAST TIER. §L11 (every field of the
+// ledger cache is COUNTED by a row of cacheCensus() or DECLARED with why it is no holder) reads, in the heavy twin, the cache §2's legs
+// loaded and read. This reduced copy reads this file's own window right after its FIRST load: a field the LOAD makes with no row and no
+// reason is red at every push (a field only a read, a trim or an absorb pass makes is §L11's, in the twin). Its two tables are the
+// twin's, line for line (pinned below): a row added to one is added to both.
+console.log('§L11f the fields of a freshly loaded ledger cache: each counted by a census row or declared');
+{
+  win._loadEvents();
+  const c = win._evCache, rows = new Map(win.cacheCensus().map((r) => [r.name, r]));
+  const COUNTED = { events: 'usage ledger window', hotBytes: 'usage ledger window', cold: 'usage ledger cold columns', cells: 'usage cells', arr: 'usage arrival log', hours: 'usage hour sums', hostAcct: 'usage dark-host index' };
+  const DECLARED = {
+    consumed: 'one offset per shard (≤ a few dozen numbers)', marks: 'one same-file proof per shard', sizes: 'one number per HOT row — bounded by the window row', locs: 'one number per HOT row', hrh: 'one hash per HOT row',
+    rids: 'the HOT rows\' ids — bounded by the window row (the cold ids are in the columns\' row)', mids: 'the HOT rows\' message ids — as rids', srcWm: 'one watermark per source machine', checkedAt: 'a scalar', cutoff: 'a scalar',
+    walking: 'a scalar', shards: 'the shard names (one per month)', shardIx: 'one index per shard name', whole: 'a flag', booting: 'a flag', pending: 'the stepped pass in flight (its own rows are the window\'s)', stale: 'a flag + the rewritten shard\'s name',
+    sortedLen: 'a scalar', sortedOf: 'a reference to the window\'s own rows', hostAcctVer: 'a scalar', hostAcctFloor: 'a scalar', loading: 'the load\'s words', gen: 'a scalar', sorted: 'the window\'s rows in ts order (the same objects)', sortedSz: 'one number per hot row',
+    trim: 'a flag (a stepped trim in flight)', trimAgain: 'a flag', trimOwed: 'a flag', trimP: 'the trim in flight (one promise)', lastTrim: 'the last trim\'s dozen counts', fullSorts: 'a count', stuck: 'two scalars (the cut a trim found nothing coldable below)',
+    hostAcctNewest: 'a scalar', hostAcctRows: 'a count of the dark-host index\'s rows (the index is its own row)', hostAcctDown: 'when the dark-host index was dropped + its count', overWarned: 'a flag', skipped: 'a count of bytes', skipSaid: 'the shard names already said (one per shard)',
+    absorbing: 'the absorb pass in flight (one promise)', absorbAgain: 'a flag', absorbed: 'the absorb pass\'s step counts (one entry a step, the pass\'s own)',
+  };
+  const keys = Object.keys(c), unknown = keys.filter((k) => !(k in COUNTED) && !(k in DECLARED));
+  const missingRows = [...new Set(Object.values(COUNTED))].filter((n) => !rows.has(n));
+  ok(keys.length > 0 && unknown.length === 0, `§L11f every field of a freshly loaded ledger cache is counted or declared (${keys.length} fields)${unknown.length ? ' — RED, no row and no reason: ' + unknown.join(', ') : ''}`);
+  ok(missingRows.length === 0 && rows.has('usage remote id sets') && rows.has('usage cells') && Object.values(COUNTED).every((n) => !rows.has(n) || Number.isFinite(rows.get(n).ceiling)), '§L11f each counted structure is a census row WITH a ceiling — the cells and the remote per-month id sets included');
+  const planted = { ...c, newIndex: new Map() };
+  ok(Object.keys(planted).filter((k) => !(k in COUNTED) && !(k in DECLARED)).length === 1, 'CONTROL: a field planted in the freshly loaded cache with no row and no reason is RED by name');
+  const tablesOf = (text) => { const opens = text.indexOf('  const COUNTED = {'); if (opens === -1) return null; const closes = text.indexOf('\n  };\n', opens); return closes === -1 ? null : text.slice(opens, closes + 6); };   // (names no span: the wall-clock census reads spans by name)
+  const twinText = fs.readFileSync(path.join(REPO, 'scripts/test-cache-bounds-walks.mjs'), 'utf-8'), hereText = fs.readFileSync(new URL(import.meta.url), 'utf-8');
+  ok(tablesOf(hereText) !== null && tablesOf(hereText) === tablesOf(twinText), '§L11f its COUNTED and DECLARED tables are the heavy twin §L11\'s, line for line');
+  ok(tablesOf(editAnchor(twinText, "checkedAt: 'a scalar',", "checkedAt: 'a scalar', plantedField: 'a scalar',", 'scripts/test-cache-bounds-walks.mjs')) !== tablesOf(hereText), 'RED CONTROL: a twin table with one more row is not this file\'s — the pin goes red');
+}
+
 // ── §T THE TWIN HOLDS THE MOVED LEGS (B-7e49, lane bl-tests-e, 主开发 r2522: a leg cannot fall between the two files) ─────────────
 // §2, §6–§11, §13–§19, §25–§31 and §L11 moved VERBATIM to the heavy twin scripts/test-cache-bounds-walks.mjs: they run the ledger over a synthesized month
 // (fold workers, deadlines, paced waits) — about 14 s of this file's 16 (r3's shard-writer census stays here). This file runs none of them. RED: a twin with r3's heading
