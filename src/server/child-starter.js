@@ -114,7 +114,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
     if (direct) return runDirect(cmd, args, o);
     if (!proc) { try { start(); } catch (e) { fault('the starter could not be started'); if (direct) return runDirect(cmd, args, o); stats.unknown++; return Promise.resolve({ unknown: true, why: 'no starter' }); } }   // the request answers unknown, counted as one
     const id = ++seq, add = o.wholeEnv ? o.env : {};
-    if (!o.wholeEnv) for (const [k, v] of Object.entries(o.envAdd || {})) if ((typeof v === 'string' || v === null) && !SECRET_NAME.test(k)) add[k] = v;   // null = the site's env lacks it (removed)
+    if (!o.wholeEnv) for (const [k, v] of Object.entries(o.envAdd || {})) if ((typeof v === 'string' || v === null) && (!SECRET_NAME.test(k) || PLAN_MARKS.has(k))) add[k] = v;   // null = the site's env lacks it (removed); a PLAN MARK kept by its whole name (below)
     return new Promise((resolve) => {
       const bound = (o.timeoutMs > 0 ? o.timeoutMs : NO_BOUND_MS) + guardMs;
       const q = { resolve, settled: false, started: false, pid: 0, onTimeout: o.onTimeout || null, onLateExit: o.onLateExit || null, timer: null, detach: !!o.detach };
@@ -140,7 +140,7 @@ function createChildStarter({ script = STARTER_SCRIPT, log = console, guardMs = 
   function directEnv(o) {
     if (o.wholeEnv) return o.env;
     const env = serviceEnv(process.env);
-    for (const [k, v] of Object.entries(o.envAdd || {})) { if (SECRET_NAME.test(k)) continue; if (typeof v === 'string') env[k] = v; else if (v === null) delete env[k]; }
+    for (const [k, v] of Object.entries(o.envAdd || {})) { if (SECRET_NAME.test(k) && !PLAN_MARKS.has(k)) continue; if (typeof v === 'string') env[k] = v; else if (v === null) delete env[k]; }   // the same PLAN MARKS as the starter's road
     return env;
   }
   /** THE OLD ROAD (after two faults): a direct start from this process, with the starter road's env (directEnv) */
@@ -184,6 +184,11 @@ const SESSION_DRAIN_MS = 100;   // r2862: a session child's run ends at its exit
 /** B-323e's remainder (lane bl-chat-b, r2689): the MARKS a whole env may carry under the hub's own prefixes — a word a person's rc
  *  reads, never a secret: the login-shell look's VIBESPACE_SHELL_PROBE=1 («skip a tmux autostart or a banner») */
 const WHOLE_MARKS = new Set(['VIBESPACE_SHELL_PROBE']);
+/** B-ddf3 (lane bl-scratch, the coordinator's r4027): the NAMED PLAN MARKS a request's `envAdd` may carry under the hub's own prefixes
+ *  — a plan the site built, never a secret: the CLI-config helper's plan (VIBESPACE_CLI_CONFIG, src/server/cli-config-runner.js; the
+ *  shipped helper reads it by that name). Matched by the WHOLE name, on BOTH roads (the starter's and the direct one); every other name
+ *  of the one secret shape is still refused. Its value rides the request's env only — never an argument, never a journal line */
+const PLAN_MARKS = new Set(['VIBESPACE_CLI_CONFIG']);
 let shared = null;
 /** THE hub's starter (one per process) */
 function childStarter() { if (!shared) shared = createChildStarter(); return shared; }

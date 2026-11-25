@@ -682,5 +682,43 @@ async function watchRecovery(RW) {
   ok(rwm.memoKept && rwm.said === false, 'RED (the tip\'s guard): «no folder here» reads as a failure — the memo kept, the recovery never said (a person keeps a warning that is no longer true)', rwm);
 }
 
+// ── r4027 (B-ddf3, lane bl-scratch): THE PLAN REACHES THE HELPER ON THE REAL STARTER ──
+// The runner hands the helper its plan as VIBESPACE_CLI_CONFIG; the real starter (src/server/child-starter.js) refused every
+// added name of the one secret shape, whose first half is the hub's own prefixes — so the shipped helper fell back to its
+// hooks-only default plan, wrote none of the managed rows and read none of them back. Here THE REAL STARTER runs the shipped
+// helper's --status through the runner on a scratch HOME, on BOTH roads (the starter's process, and the direct road a twice-
+// failed starter falls back to): the helper prints a receipt of a PLANNED MANAGED ROW (claude's transcript retention).
+//                                                     RED: the starter's drop of the plan's name (either road)
+console.log('r4027: THE PLAN REACHES THE SHIPPED HELPER ON THE REAL STARTER (its road and the direct road) — a receipt of a planned managed row');
+{
+  const CS_REL = 'src/server/child-starter.js', SHIPPED = path.join(REPO, 'data', 'bin', 'vibespace-hook-register.mjs');
+  const planHome = path.join(ROOT, `plan-home-${process.pid}`);
+  fs.rmSync(planHome, { recursive: true, force: true }); fs.mkdirSync(path.join(planHome, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(planHome, '.claude', 'settings.json'), JSON.stringify({ cleanupPeriodDays: 36500 }, null, 2) + '\n');
+  const S0 = require(path.join(REPO, SYNC_REL)).create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home: planHome, helperPath: SHIPPED, runner: { last: () => null }, log: () => {}, warn: () => {} });
+  const planB64 = S0.cliConfigPlanB64();
+  const planned = (HCJ.decodePlan(planB64).files || []).some((f) => f.harness === 'claude' && (f.set || []).some((x) => x.key === 'transcriptRetentionDays'));
+  const viaStarter = async (CSmod, { direct = false } = {}) => {
+    const st = CSmod.createChildStarter(direct ? { script: path.join(ROOT, 'no-such-starter.cjs'), guardMs: 100, log: { warn: () => {} } } : { log: { warn: () => {} } });
+    try {
+      if (direct) for (let i = 0; i < 2 && !st.stats().direct; i++) await st.run(process.execPath, ['-e', ''], { timeoutMs: 2000 });   // a starter that cannot start: twice ⇒ the direct road
+      const Rr = R.createCliConfigRunner({ starter: st, helperPath: SHIPPED, home: planHome, timeoutMs: 15000, journal: () => {}, warn: () => {} });
+      const l = await Rr.status(planB64);
+      return { direct: st.stats().direct, row: (l.receipts || []).find((x) => x && x.harness === 'claude' && x.key === 'transcriptRetentionDays') || null, keys: (l.receipts || []).filter((x) => x && x.harness).length, why: l.why || null };
+    } finally { try { st.closePipe(); } catch { } }
+  };
+  const CSm = require(path.join(REPO, CS_REL));
+  const viaS = await viaStarter(CSm), viaD = await viaStarter(CSm, { direct: true });
+  ok(!!(planned && viaS.direct === false && viaS.row && viaS.row.state === 'applied' && viaD.direct === true && viaD.row && viaD.row.state === 'applied'),
+    'r4027: the REAL starter hands the shipped helper its plan — on the starter\'s road and on the direct road the helper prints a receipt of the planned retention row (read back as it is on disk)', { planned, viaS, viaD });
+  const srcCS = src(CS_REL);
+  ok(/^const PLAN_MARKS = new Set\(\['VIBESPACE_CLI_CONFIG'\]\);$/m.test(srcCS) && (srcCS.match(/PLAN_MARKS\.has\(k\)/g) || []).length === 2 && /\(!SECRET_NAME\.test\(k\) \|\| PLAN_MARKS\.has\(k\)\)\) add\[k\] = v;/.test(srcCS) && /if \(SECRET_NAME\.test\(k\) && !PLAN_MARKS\.has\(k\)\) continue;/.test(srcCS),
+    'PIN r4027: ONE plan mark, matched by its whole name, read on both roads — every other name of the secret shape still refused', {});
+  const DROP_S = require(MC.write(CS_REL, anchored(srcCS, '(!SECRET_NAME.test(k) || PLAN_MARKS.has(k))) add[k] = v;', '!SECRET_NAME.test(k)) add[k] = v;', 'the starter\'s road drops the plan'), 'starter-drop-plan'));
+  const DROP_D = require(MC.write(CS_REL, anchored(srcCS, 'if (SECRET_NAME.test(k) && !PLAN_MARKS.has(k)) continue;', 'if (SECRET_NAME.test(k)) continue;', 'the direct road drops the plan'), 'starter-drop-plan-direct'));
+  const redS = await viaStarter(DROP_S), redD = await viaStarter(DROP_D, { direct: true });
+  ok(!!(!redS.row && !redD.row), 'RED (the release\'s drop of the plan\'s name, on each road): the helper falls back to its hooks-only plan — no receipt of the retention row', { redS, redD });
+}
+
 clearInterval(KEEP);
 report();
