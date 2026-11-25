@@ -4,6 +4,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.420 — 2026-11-25
 
+### Added
+- A conversation's status strip says when it runs on one of its pool's pay-as-you-go keys, with a button to move it back, or there while the pool asks.
+
 ### Fixed
 - If VibeSpace cannot read your drafts, Stage layout or upload history, it no longer writes an empty copy over them; what you type meanwhile stays on the page.
 - On slow storage, VibeSpace no longer stalls for a moment every few seconds while you type a draft or rearrange Stage.
