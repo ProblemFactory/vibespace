@@ -752,6 +752,17 @@ else await (async () => {
         if (ASKED.has(name)) { const d = shot.result.data, n = Math.ceil(d.length / 4000); for (let i = 0; i < n; i++) console.log(`    PICTURE ${name} ${i + 1}/${n} ${d.slice(i * 4000, (i + 1) * 4000)}`); }
       };
       const markOk = (b, w) => !!b && ((b.mark && b.mark.text === w.mark && b.mark.tag === 'SPAN' && b.mark.right <= b.mark.barRight + 1) || (!b.mark && b.folded)) && (!b.mark || b.mark.title.length > 20);
+      // B-346d (主开发 r4191; card-door-in-chat's deciding read, page-r4169-deciding.md): the one red try of (3) was THIS LEG's race — a
+      // push of the browsers' digest from the hub itself (the keeper's 5 s tick: tick, commit, notify) fell 15 ms before the read at 390,
+      // after the leg's plant, and the page drew the hub's fact over the planted one. THE SUITE's GATE PLACES THE PUSH: the socket's
+      // frames reach the page through app.ws.heard (src/lib/ws.js) while the plants call the handlers themselves, so while a read is
+      // planted and made (and pictured) the hub's digest frames are HELD at heard, and delivered when the read is done — the page never
+      // loses one. Never a longer sleep, never a read asked again
+      const gateJs = `if (!app.ws.__b346dGate) { const ws = app.ws, own = ws.heard.bind(ws); ws.__b346dGate = { on: false, held: [], total: 0 }; ws.__b346dOwn = own; ws.heard = (d, how) => { const g = ws.__b346dGate; if (g.on && d && d.type === 'browser-profiles-updated') { g.held.push([d, how]); g.total += 1; return; } return own(d, how); }; } return true;`;
+      const hold = (on) => ev(`const g = app.ws.__b346dGate; if (!g) return -1; g.on = ${on ? 'true' : 'false'}; const n = g.held.length; if (!g.on) for (const [d, how] of g.held.splice(0)) app.ws.__b346dOwn(d, how); return n;`);
+      const readHeld = async (fn) => { await hold(true); try { return await fn(); } finally { await hold(false); } };
+      // the red, placed on purpose: the hub's OWN digest (fetched from it now) pushed down the socket's road, between a plant and its read
+      const placeHubPush = () => ev(`const d = await (await fetch('/api/browser/profiles')).json(); if (!d || !Array.isArray(d.profiles)) return false; app.ws.heard({ type: 'browser-profiles-updated', ...d }); return true;`);
       for (const lang of ['en', 'zh']) {
         const w = WORDS[lang];
         await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
@@ -761,25 +772,26 @@ else await (async () => {
         await until(() => ev('return !!chatWin();'), 10000);
         await ev(`if (!live()) app.openBrowserLive({ sessionId: ${S(SID)} }); return true;`);
         await until(() => ev('const l = L(); return !!(l && l.state().connected && l.state().target && l.state().target.profileId);'), 12000);
+        await ev(gateJs);   // B-346d: the suite's gate on this page load's socket road
         // (1) THE MARK — a new run: its line said, beside the mark (at 1280, then 390 within the same 20 s)
         await sizeTo(1280);
         const runA = Date.now();
         const pids = await plantRun(runA);
         await sleep(300);
         const first = {};
-        for (const wpx of [1280, 390]) { await sizeTo(wpx); await plantRun(runA); await sleep(150); first[wpx] = await bars(); await shoot(`b346d-mark-first-${lang}-${wpx}.png`, first[wpx], wpx); }
+        for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await sleep(150); first[wpx] = await bars(); await shoot(`b346d-mark-first-${lang}-${wpx}.png`, first[wpx], wpx); }); }
         ok(Array.isArray(pids) && pids.length > 0 && [1280, 390].every((x) => markOk(first[x], w) && first[x].note.length > 20) && first[1280].mark && first[1280].note === first[1280].mark.title,
           `⑩ ${lang}: a browser in a hidden window — the bar's quiet MARK «${w.mark}» (a span, its tip the full sentence; inside the bar, or folded into ⋯ at 390) and its line said, at 1280 and 390`, S(first));
         // …then the mark alone, once the run's 20 s have passed
         await sleep(20600);
         const later = {};
-        for (const wpx of [390, 1280]) { await sizeTo(wpx); await plantRun(runA); await sleep(150); later[wpx] = await bars(); await shoot(`b346d-mark-later-${lang}-${wpx}.png`, later[wpx], wpx); }
+        for (const wpx of [390, 1280]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await sleep(150); later[wpx] = await bars(); await shoot(`b346d-mark-later-${lang}-${wpx}.png`, later[wpx], wpx); }); }
         ok([1280, 390].every((x) => markOk(later[x], w) && later[x].note === ''), `⑩ ${lang}: the line is said ONCE a browser run — after its 20 s the mark alone stays, at 1280 and 390`, S(later));
         // (2) THE SIGN-IN PROMPTS LINE: what to do, a button whose word names the moment (none for another machine's browser)
         for (const [why, btnWord] of [['not-watched', w.watch], ['gave-up', w.connect], ['remote', null]]) {
           await feedPk(why); await sleep(200);
           const got = {};
-          for (const wpx of [1280, 390]) { await sizeTo(wpx); await plantRun(runA); await feedPk(why); await sleep(150); got[wpx] = await bars(); await shoot(`b346d-signin-${why}-${lang}-${wpx}.png`, got[wpx], wpx); }
+          for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await feedPk(why); await sleep(150); got[wpx] = await bars(); await shoot(`b346d-signin-${why}-${lang}-${wpx}.png`, got[wpx], wpx); }); }
           ok([1280, 390].every((x) => w.prompts.test(got[x].line) && (btnWord ? !!got[x].btn && got[x].btn.text === btnWord && got[x].btn.right <= got[x].btn.dbRight + 1 : !got[x].btn)),
             `⑩ ${lang}: «${why}» — the line speaks of sign-in prompts and says what to do; ${btnWord ? `its button «${btnWord}», whole inside the bar` : 'no button (another machine: close the tab there)'}, at 1280 and 390`, S(got));
         }
@@ -788,9 +800,20 @@ else await (async () => {
         const feedAck = () => ev(`L().state().pkRetryAt = Date.now(); L().ws().onmessage({ data: JSON.stringify({ type: 'passkey-retry-ack', ok: false, changed: false, error: 'the watch did not open' }) }); return true;`);
         const REPLY = { en: /^Tried again at .+: still cannot watch this browser \(no watch could open\)\.$/, zh: /已重试：仍然无法监看这个浏览器（无法开始监看）。$/ }; // the arm failed: said in the person's words (the first zh picture had the arm's English error inside)
         const said = {};
-        for (const wpx of [1280, 390]) { await sizeTo(wpx); await plantRun(runA); await feedPk('gave-up'); await feedAck(); await sleep(150); said[wpx] = await bars(); said[wpx].reply = await ev(`const e = L().el().querySelector('.browser-live-passkey-retry-said'); return e && e.style.display !== 'none' ? e.textContent : '';`); await shoot(`b346d-reply-gave-up-${lang}-${wpx}.png`, said[wpx], wpx); }
+        const replyOf = () => ev(`const e = L().el().querySelector('.browser-live-passkey-retry-said'); return e && e.style.display !== 'none' ? e.textContent : '';`);
+        for (const wpx of [1280, 390]) { await sizeTo(wpx); await readHeld(async () => { await plantRun(runA); await feedPk('gave-up'); await feedAck(); await sleep(150); said[wpx] = await bars(); said[wpx].reply = await replyOf(); await shoot(`b346d-reply-gave-up-${lang}-${wpx}.png`, said[wpx], wpx); }); }
         ok([1280, 390].every((x) => REPLY[lang].test(said[x].reply) && markOk(said[x], w) && !!said[x].btn && said[x].btn.text === w.connect),
           `⑩ ${lang}: a press that changed nothing is ANSWERED under the line («${said[1280].reply}»), the mark quiet beside it, at 1280 and 390`, S(said));
+        if (lang === 'en') {
+          // B-346d, THE RED MADE ON PURPOSE (once, en at 390 — where the box's red try fell): the hub's own digest pushed down the
+          // socket's road between the plant and the read. Held by the gate, the read is the plant's; the leg as it stood (no gate)
+          // reads the hub's fact drawn over the plant — the mark gone
+          const placed = async (gated) => { await sizeTo(390); const run = async () => { await plantRun(runA); await feedPk('gave-up'); await feedAck(); const pushed = await placeHubPush(); await sleep(150); const b = await bars(); return { pushed, ok: markOk(b, w), mark: b.mark, folded: b.folded }; }; return gated ? readHeld(run) : run(); };
+          const pg = await placed(true), pr = await placed(false);
+          ok(pg.pushed && pg.ok, '⑩ en: B-346d — a push of the hub\'s own digest placed between the plant and the read is HELD by the suite\'s gate: the read is the plant\'s (the mark quiet at 390)', S(pg));
+          ok(pr.pushed && !pr.ok, 'CONTROL (the leg as it stood, no gate): the same placed push lands before the read — the hub\'s fact drawn over the plant, the mark gone at 390 (the one red try) — RED', S(pr));
+        }
+        console.log(`    ⑩ ${lang}: the gate held ${await ev('const g = app.ws.__b346dGate; return g ? g.total : -1;')} push(es) of the hub's digest during the reads`);
         await feedPk(null);
       }
       await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
