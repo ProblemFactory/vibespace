@@ -1011,6 +1011,17 @@ async function sweepOne(route, who, bearer) {
   }
 }
 async function pool(jobs, n) { const q = [...jobs]; await Promise.all(Array.from({ length: n }, async () => { while (q.length) await q.shift()(); })); }
+// r4077 (lane bl-msg, the coordinator's find): THE BUILT-IN AGENTS ADAPTER's ROWS. It lists every live conversation by its name
+// (src/channels/agents.js listConversations) and answers its reach with msg-acl, but its rows reach the conversation index only
+// through the engine's discovery pass, whose FIRST timer tick comes 5 s after the wiring started the engine. A quick run read
+// GET /api/agent/channels/list before that tick (no Agents row: B was never listed); a slow one after it, and the related pass
+// told A B's name (an intermittent NEW). The pass is AWAITED here, once, before the sweeps, so every pass reads the same rows:
+// the main pass proves an unrelated A is never told, the related pass that a fellow member of B's Task Group is (its findings row).
+const agentsRowOfB = () => { const ix = CHW && CHW.channels && CHW.channels.store && CHW.channels.store.index; const live = ix && typeof ix.live === 'function' ? ix.live() || {} : {}; return Object.values(live).find((en) => en && en.adapterId === 'agents' && JSON.stringify(en).includes(SENT.bName)) || null; };
+const agentsBefore = !!agentsRowOfB();
+const agentsPass = CHW && CHW.channels && typeof CHW.channels.pass === 'function' ? await CHW.channels.pass('agents', { force: true }) : null;
+const AGENTS_ROW_B = agentsRowOfB();
+ok(!!AGENTS_ROW_B, `r4077: the Agents adapter's pass is awaited before the sweeps, and B's conversation is its row in the index (${agentsBefore ? 'there before the pass: the engine\'s first tick came first' : 'not there before the pass: a quick run'})`, JSON.stringify({ pass: agentsPass, row: AGENTS_ROW_B && { key: AGENTS_ROW_B.key, adapterId: AGENTS_ROW_B.adapterId } }).slice(0, 400));
 const reads = MOUNTED.filter((r) => r.startsWith('GET ')), writes = MOUNTED.filter((r) => !r.startsWith('GET '));
 await pool(reads.flatMap((r) => BEARERS.map(([w, b]) => () => sweepOne(r, w, b))), 12);
 const lastOf = (r) => ((TABLE.routes || {})[r] || {}).last ? 1 : 0;
@@ -1062,6 +1073,10 @@ const RELATED = RESULTS.splice(MAIN);
 for (const x of RELATED) x.who = 'A-related';
 console.log(`    the granted key: ${KEY_RESULTS.length} verbs aimed at B — ${KEY_RESULTS.map((x) => `${x.route.split('/').pop()} ${x.status}`).join(', ')}`);
 console.log(`    the related pass: ${RELATED.length} reads with A in B's group — ${RELATED.filter((x) => x.hits.length).length} carry B's facts`);
+// r4077: with B's Agents row in the index through every pass, channels/list never names B to an unrelated A (the main pass)
+// and names B to a fellow member of B's Task Group (the related pass, its findings row)
+{ const main = RESULTS.find((x) => x.route === 'GET /api/agent/channels/list' && x.who === 'A'), rel = RELATED.find((x) => x.route === 'GET /api/agent/channels/list');
+  ok(!!(main && rel && main.status === 200 && rel.status === 200 && !main.hits.includes('bName') && rel.hits.includes('bName')), 'r4077: GET /api/agent/channels/list with B\'s Agents row in the index never names B to an unrelated A (the main pass) and names B to a fellow member of B\'s Task Group (the related pass)', JSON.stringify({ main: main && { status: main.status, hits: main.hits }, related: rel && { status: rel.status, hits: rel.hits } })); }
 // ── the verdicts — ONE function over the answers and a table (the controls below run it over planted tables) ──
 const CRASH_RE = /Cannot read propert|is not a function|is not iterable|is not defined|is not a constructor/;
 const ANON_KEYS = new Set(['ok', 'error', 'code', 'why', 'hint', 'success']);   // what a refusal to an unknown caller may say
@@ -1140,6 +1155,17 @@ ok(!SVF.dead.length, 'no findings row no answer carries', SVF.dead.join(' | '));
   ok(!!(land && land.status === 'open' && swap && JSON.stringify(swap.i18n).includes(SENT.chanLabel)), 'through every pass the owner\'s «finish connecting» item stood OPEN and the client-swap item stayed in the store with its labels (open or resolved — swept either way)', JSON.stringify({ landed: land && land.status, swap: swap && { status: swap.status, by: swap.resolvedBy } })); }
 ok(!SVF.hits.some((h) => /· A(-job|-key|-related)? ·/.test(h) && KIND[h.split(' · ')[2]] === 'CRITICAL'), 'no CRITICAL sentinel (B\'s tokens, a secret\'s bytes, a login\'s password) reaches A by any road — its token, its job, its granted key, its membership — rowed or not');
 ok(!SVF.critical.length, 'no CRITICAL sentinel reaches any caller outside a listed finding', SVF.critical.join(' | '));
+// r4077's two REDS (the same verdict function over this run's answers): (1) THE AWAIT CUT, a quick run's answer: the related pass's
+// channels/list as listFor builds it with no Agents row in the index (B's row out of the answer) ⇒ its findings row is DEAD;
+// (2) THE ROW CUT ⇒ the item is NEW again, and only it
+{ const ROW = 'GET /api/agent/channels/list · A-related · bName';
+  const noAgents = (txt) => { try { const j = JSON.parse(txt); j.conversations = (j.conversations || []).filter((c) => c && c.adapterId !== 'agents'); return JSON.stringify(j); } catch { return txt; } };
+  const quick = ALL_RESULTS.map((x) => { if (!(x.who === 'A-related' && x.route === 'GET /api/agent/channels/list')) return x; const text = noAgents(x.text); const still = hitsIn({ text }); return { ...x, text, hits: x.hits.filter((h) => h !== 'bName' || still.includes('bName')) }; });
+  const v1 = sweepVerdicts(quick, TABLE).findings;
+  ok(v1.dead.length === 1 && v1.dead[0] === ROW && !v1.unrowed.length, 'RED (r4077): the Agents pass not awaited (a quick run: no Agents row when the related pass reads) ⇒ its findings row is DEAD', JSON.stringify({ dead: v1.dead, unrowed: v1.unrowed }));
+  const t = JSON.parse(JSON.stringify(TABLE)); delete t.findings[ROW];
+  const v2 = sweepVerdicts(ALL_RESULTS, t).findings;
+  ok(v2.unrowed.length === 1 && v2.unrowed[0] === ROW && !v2.dead.length, `RED (r4077): the findings row cut ⇒ «NEW ${ROW}» again, and only it`, v2.unrowed.join(' | ')); }
 // ── the table kinds' RED controls: the same verdict function over planted tables ──
 {
   const t = JSON.parse(JSON.stringify(TABLE));
