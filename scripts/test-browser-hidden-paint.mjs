@@ -18,6 +18,10 @@
 //      during A's thaws, its window read at birth — the red cell), no stray afterwards (Chrome's targets, both
 //      conversations' own `tab list`), B's next verb runs on B's page, one window per holder (windowCensus);
 //   f  CONTROL — the switch turned OFF on the same browser: 60 s with nobody ⇒ never frozen, the GPU still draws.
+//   g  rows B-98f5 / B-bcf8: the thaw's flip tab is born at an address no driver takes (src/browser-idle.js FLIP_TAB_URL) — the
+//      product's freeze and thaw 30 times: an UNPINNED session on the raw address (a second tab after A's) and the agent read
+//      their own page after every flip, no command over 2 s, every flip tab born there, neither session's own tab counter
+//      moves. RED WHEN A DRIVER UPDATE CHANGES ITS FILTER (agent-browser's should_track_target).
 //   B-e674 (the coordinator's r562 / r605 / r683, written once by a lane that runs no real driver) — PROOFS: a1 a raw client's
 //      plain create lands in A's window and is named «a tab nobody holds» in front of it; b1 a tab A's page opens while the person
 //      drives A's view stays A's and carries the birth stamp «opened in your takeover» on A's view (the real watch tells the
@@ -294,6 +298,57 @@ try {
   await sleep(55000);
   const gF = await gpuPct(spy, 5);
   ok(frozenLines().length === nF && facts() && !facts().frozen && gF.pct >= 20, `f: 60 s with nobody and the switch OFF ⇒ never frozen (the keeper reads it at each sweep); the GPU still draws at ${gF.pct} %`, { lines: frozenLines().length - nF, facts: facts() });
+
+  // ── g ── rows B-98f5 / B-bcf8 (lane bl-browser-a, box rows 715-725): THE THAW'S FLIP TAB IS ONE NO DRIVER TAKES. A driver that sees
+  // every tab (this keeper has no mediator: the raw road, as a conversation's own browser runs) takes every page tab it is told of —
+  // a tab that dies while its drain prepares it held the session 30 s (the blank live view of leg c, the late alert of leg d), and an
+  // UNPINNED session made it its active tab and was left on its LAST tab when it went (probe 10: 35 of 100 thaws). The flip tab is
+  // born at BI.FLIP_TAB_URL, which the driver's own filter never takes. The product's own freeze and thaw, G_FLIPS times: U, an
+  // unpinned session on the raw address with a SECOND tab after A's in its list, must read A's page after every flip, the agent's
+  // next command too, no command over 2 s, every flip tab born at that address — and neither the pinned nor the unpinned session's
+  // own tab counter moves (a tab the driver took would have taken a number). THIS LEG GOES RED WHEN A DRIVER UPDATE CHANGES ITS FILTER.
+  console.log('— g: the thaw\'s flip tab is one no driver takes — neither a pinned nor an unpinned session takes it, or moves');
+  SET['browser.idlePaintFreeze'] = false;   // only the leg's own freezes (leg f left the switch off)
+  const G_FLIPS = 30;
+  const recG = kk.browserOf(prof.id) || rec, URt = Ff.createBrowserRuntime({ env: kenv });
+  const tAg = (await pagesNow(recG)).find((t) => /HP-A/.test(t.title));
+  const OAg = await kk.leaseCliOpts(prof.id, KA);
+  const OU = { session: 'vs-bk-0000c3c3', extraEnv: { AGENT_BROWSER_CDP: recG.cdpUrl, AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } };
+  const uX = (argv) => URt.exec('vs-' + prof.id, argv, { ...OU, timeout: 60000 }), aX = (argv) => URt.exec('vs-' + prof.id, argv, { ...OAg, timeout: 60000 });
+  const tabsIn = (r) => (r && r.ok && r.json && r.json.data && Array.isArray(r.json.data.tabs) ? r.json.data.tabs : []);
+  const tabNo = (t) => { const m = /^t(\d+)$/.exec(String((t && t.tabId) || '')); return m ? Number(m[1]) : -1; };
+  const sameId = (a, b) => !!a && !!b && String(a).toUpperCase() === String(b).toUpperCase();
+  await uX(['tab', 'list', '--json']);                                                  // U's daemon: unpinned, on the raw address
+  const sc = await spy.send('Target.createTarget', { url: U('/b') }); const secondG = sc && sc.result ? sc.result.targetId : null;
+  await sleep(1500);
+  if (tAg) { await uX(['tab', tAg.targetId]); await spy.send('Target.activateTarget', { targetId: tAg.targetId }); }
+  const uT0 = tabsIn(await uX(['tab', 'list', '--json'])), aT0 = tabsIn(await aX(['tab', 'list', '--json']));
+  const iAg = uT0.findIndex((t) => tAg && sameId(t.targetId, tAg.targetId)), iSg = uT0.findIndex((t) => sameId(t.targetId, secondG));
+  const maxU0 = Math.max(-1, ...uT0.map(tabNo)), maxA0 = Math.max(-1, ...aT0.map(tabNo));
+  const bornG = spy.born.length, gRuns = [];
+  const holderA = { ok: true, profileId: prof.id, ephemeral: false, sessionId: 'sess-a', browserKey: KA };   // the route's own (dialogTargetFor)
+  for (let i = 0; i < G_FLIPS; i++) {
+    const f1 = await dialogs.freezePaint(prof.id);
+    const th = f1 && f1.ok ? await dialogs.thawPaint(prof.id, { holder: holderA }) : null;
+    const na = await A(['get', 'url']);
+    const t1 = Date.now(); const nu = await uX(['get', 'url']); const nuMs = Date.now() - t1;
+    gRuns.push({ froze: !!(f1 && f1.ok), why: (f1 && f1.why) || null, shown: th && Array.isArray(th.shown) ? th.shown.length : 0, aMs: na.ms, aOwn: String(na.out + na.err).includes(U('/a')), uMs: nuMs, uOwn: String((nu && nu.stdout) || '').includes(U('/a')) });
+    await sleep(200);
+  }
+  const flipBirths = spy.born.slice(bornG).filter((b) => !sameId(b.targetId, secondG)).map((b) => String(b.url || ''));
+  // the counters: one more tab, listed by both (each list's own drain registers it), its number read — then closed (it was prepared)
+  const pc = await spy.send('Target.createTarget', { url: U('/b') }); const probeG = pc && pc.result ? pc.result.targetId : null;
+  await sleep(1500);
+  const noU = tabNo(tabsIn(await uX(['tab', 'list', '--json'])).find((t) => sameId(t.targetId, probeG))), noA = tabNo(tabsIn(await aX(['tab', 'list', '--json'])).find((t) => sameId(t.targetId, probeG)));
+  for (const id of [probeG, secondG]) { if (id) { try { await spy.send('Target.closeTarget', { targetId: id }); } catch { /* gone */ } } }
+  try { await uX(['close']); } catch { /* U's own connection only (a CDP session's close leaves the pages) */ }
+  await sleep(500);
+  const flipsG = gRuns.filter((x) => x.shown >= 1).length, slowG = gRuns.filter((x) => x.aMs > 2000 || x.uMs > 2000);
+  const gWhy = { flips: flipsG, of: G_FLIPS, refused: gRuns.filter((x) => !x.froze).map((x) => x.why), births: [...new Set(flipBirths)], u: { agentIndex: iAg, secondIndex: iSg, counter: { before: maxU0, probe: noU } }, a: { counter: { before: maxA0, probe: noA } } };
+  ok(flipsG === G_FLIPS && flipBirths.length >= G_FLIPS && flipBirths.every((u) => u === BI.FLIP_TAB_URL), `g: ${flipsG} of ${G_FLIPS} thaws flipped, every flip tab born at ${BI.FLIP_TAB_URL} (the address no driver takes)`, gWhy);
+  ok(iAg >= 0 && iSg > iAg && gRuns.every((x) => x.uOwn) && gRuns.every((x) => x.aOwn), `g: after every flip the UNPINNED session (a second tab after A's in its list) and the agent read their own page — the moved tab of today's blank flip never happens`, { ...gWhy, notOwn: gRuns.map((x, i) => (!x.uOwn || !x.aOwn ? i + 1 : null)).filter(Boolean) });
+  ok(slowG.length === 0, `g: no command over 2 s in ${G_FLIPS} flips (the 30 s hold of the blank a driver prepared and lost)`, { slow: slowG.slice(0, 4) });
+  ok(maxU0 >= 0 && maxA0 >= 0 && noU === maxU0 + 1 && noA === maxA0 + 1, `g: neither the pinned nor the unpinned session took a flip tab — their own tab counters did not move in ${G_FLIPS} flips (U ${maxU0} → ${noU}, A ${maxA0} → ${noA})`, gWhy);
 
   // ══ B-e674 (the coordinator's r548 / r562 / r605): THE CREATE ROADS THAT NEED THE REAL PROGRAM — written once by the lane
   //    (which runs no real driver), run on the box by the integrator. Each leg reads what the KEEPER says (tabOwnersFor: its

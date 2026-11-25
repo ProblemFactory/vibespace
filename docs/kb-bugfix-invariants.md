@@ -997,6 +997,7 @@
 - (2026-11-22) THE FORCED END WALKED EVERY PROCESS'S ENVIRONMENT ON THE HUB'S THREAD (B-d8f4 (9)). 不变量 = a mark walk runs in a child through the starter (proc-identity's own membersOf there), ended at a deadline and said; pids and start times only; nothing but the stop waits ⇒ kb-file-structure
 - (2026-11-22) THE FIRST HOLD UP INTO UNLOADED HISTORY SKIPPED A SCREEN AND A HALF PAST THE READER (test-chat-paging's hosted red): the range's end at the insert; settles answered by no one or twice. 不变量 = the card being read stays put; one authority answers a settle (kb-bugfix-invariants)
 - (2026-11-23) OPENING SEARCH MOVED THE CARD BEING READ 314 PX AND IT STAYED (B-3e8b's next unit): a row's offsetTop counted from .chat-view, the bar above the list shifted every one. 不变量 = the list is its rows' offsetParent (kb-bugfix-invariants)
+- (2026-11-24) THE IDLE-PAINT THAW'S BLANK TAB HELD A CONVERSATION'S OWN BROWSER 30 S AND MOVED IT TO ANOTHER TAB (B-98f5 / B-bcf8). 不变量 = a tab the hub makes only to close is born where no driver looks (chrome://version/), else no freeze (kb-bugfix-invariants)
 
 ## THE FORCED END WALKED EVERY PROCESS'S ENVIRONMENT ON THE HUB'S THREAD (B-d8f4 (9), lane bl-jobs, 主开发 r1745 / r1993 / r2228, 2026-11-22)
 
@@ -10702,3 +10703,38 @@ Found by reading during the 2.369.412 release red of test-internal-links-chrome 
 **The fix (public/chat.css).** `.chat-message-list { position: relative; }` — the list is its rows' offsetParent: every row offsetTop is in the list's own scroll space whether the bar is open or not (with it closed nothing changes: the list's own offset was 0 and it has no border). Every site that reads a row's offsetTop against scrollTop is then right while search is open (the census): `_runsAnchor` (this unit's), `_runsRestore`'s fallback to the run header, `_withViewportAnchor` (its visible test and its neighbour), `_cardPositions` (the trims' keep zone), `landOnHeader`, the run bar's covers test, `_gapReaderCard` and the settle watch's line test; the rect-based pieces (the search flash, the run bar's own top) were already right. Nothing absolutely placed sits in the list outside a card (cards are `contain: layout`, their own containing blocks).
 **不变量.** THE CARD A PERSON IS READING STAYS WHERE IT IS WHEN SEARCH UNFOLDS OR FOLDS THE RUNS ABOVE IT; a row's offsetTop is the list's own coordinate.
 **Gates.** test-chat-paging §4h (heavy): the search scene at three depths, with the watch and in the browser's own world — the card at the reading line stays (± 8 px) on open and on close (at the cure's tip: 314 / 314 px at the shallowest depth, in both worlds).
+
+## THE IDLE-PAINT THAW'S BLANK TAB HELD A CONVERSATION'S OWN BROWSER 30 S AND MOVED IT TO ANOTHER TAB (rows B-98f5 / B-bcf8, lane bl-browser-a, 主开发 r3862–r3960, 2026-11-24; box rows 713–725)
+**The symptom.** test-browser-hidden-paint, about one red in three at the cut of 2.369.418:
+- leg c's live view got 0 frames, because the hub's stream-port ask took 30.0 s;
+- leg d's alert closed 30 s late, because the agent's click took 30.1 s;
+- earlier rows saw a relaunch's first command take 15–30 s (row B-bcf8).
+
+Every held command answered right after the wait, and nothing else overlapped it.
+**The cause.** Placed by ten probes on the box, and by the driver's published source at v0.38.2, read once by the lane and again by three readers.
+- A frozen page is shown again by a tab flip: a blank tab opened in front of it and closed, alive 20–43 ms.
+- A driver that sees every tab takes that blank. This is the raw road: a conversation's own browser, or this suite's keeper with no mediator.
+- The driver's drain runs every 100 ms, and at every command's start and end, under ONE lock. It attaches the blank and awaits Page/Runtime/Network.enable on it. Nothing fails a CDP call whose target went away, so a blank closed mid-prepare holds the lock 30 s, and every command of that session waits.
+- Unpinned (a conversation's own browser runs without --pin-tab), the registered blank also becomes the session's active tab and binding. When it goes, the session lands on its LAST tab, not its own, with no notice.
+- Probe 6 row 722 made the hold on demand: idle flips with the blank alive 19–62 ms held 3 of 60. Probe 8: L25 3 of 120, L150 2 of 120, L250 0 of 200. With a command in flight: 0 of 140.
+- Probe 10's control (row 725): the about:blank flip held 2 of 100, and moved the unpinned session to another tab in 35 of 100.
+
+**Laws weighed and dropped:**
+- a longer life for the blank: still a race, and every life registers it;
+- asking the driver until it lists the blank: the ask itself drains, and an unpinned session's active tab moves every time (20 of 20);
+- no freeze on the raw road: a whole core per idle dashboard;
+- pinning a conversation's own browser: a changed default for the tabs an agent's page opens.
+
+**The fix (src/browser-idle.js FLIP_TAB_URL; src/server/browser-dialogs.js showFront / flipCheck / flipBirthUrl / flipTaken).**
+- The flip tab is born at chrome://version/: Chromium's kChromeUIVersionURL at 154.0.8037.57.
+- The driver's should_track_target never takes it (chrome://, chrome-extension://, devtools://, unless the address is EMPTY), on the event road and the connect road (discover_and_attach_targets).
+- The hub reads the birth address Chrome reports: the watch's own targetCreated, kept while a flip runs. It does so once before a browser's first freeze, in a window of its own, unfocused, and at every flip.
+- An address a driver would take (another browser family, a policy, a later build) means that browser is never frozen again, and the journal says `idle_paint_flip_tab_taken` once.
+- Measured in probe 10: 0 holds in 180 flips, never listed by a pinned or an unpinned session, the unpinned session on its own page every time, the frozen front shown as the blank showed it, nothing left after a restore or in History.
+
+**不变量.** A PAGE TAB THE HUB MAKES ONLY TO CLOSE IS BORN WHERE NO BROWSER DRIVER LOOKS, read off its own birth; a browser where that cannot hold is not frozen. The hub never makes a short-lived page tab a driver takes.
+**Gates.**
+- test-browser-tabs (fast): the thaw's create carries the address, and the check sits in its own unfocused window; RED: the release's about:blank flip. The guard: about:blank, an empty birth, or a later flip born elsewhere means no freeze, said once.
+- test-browser-hidden-paint g (heavy, the box): 30 product flips. An unpinned session (a second tab after A's) and the agent read their own page; no command runs over 2 s; every birth is chrome://version/; neither session's tab counter moves.
+- RED WHEN A DRIVER UPDATE CHANGES ITS FILTER: re-read should_track_target at the new tag (src/browser-verbs.js AGENT_BROWSER_CLI).
+- Row B-bcf8 (the relaunch with Chrome's own restore) is not placed and stays open.

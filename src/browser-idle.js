@@ -63,4 +63,33 @@ function unseenRung(display) {
   return display.headed === false || !!(display.fallback && display.fallback.rung === 'hidden-window');
 }
 
-module.exports = { IDLE_PAINT_MS, IDLE_PAINT_PROOF, IDLE_PAINT_DEFAULT, idlePaintVerdict, unseenRung };
+/**
+ * THE THAW'S FLIP TAB IS ONE NO DRIVER TAKES (rows B-98f5 / B-bcf8, lane bl-browser-a, box rows 715-725, 2026-11-24). A frozen
+ * page is shown again by its tab strip: a tab opened in front of it, then closed (IDLE_PAINT_PROOF.frozenThenFlip). A driver
+ * that sees every tab (the raw road: a conversation's own browser) takes every page tab it is told of: its drain attaches and
+ * prepares the tab under its one lock, and a tab that dies mid-prepare holds that lock 30 s (every command of that session
+ * waits); unpinned, the tab also becomes its ACTIVE tab, and its going leaves the session on the LAST tab, not its own, with no
+ * notice. So the flip tab is born at an address the driver's own filter never takes:
+ *   Chromium at 154.0.8037.57, chrome/common/webui_url_constants.h:
+ *     `inline constexpr char kChromeUIVersionURL[] = "chrome://version/";`
+ *   agent-browser at v0.38.2, cli/src/native/browser.rs (the event road and the connect road, discover_and_attach_targets):
+ *     `(target.target_type == "page" || target.target_type == "webview")
+ *        && (target.url.is_empty() || !is_internal_chrome_target(&target.url))`
+ *     with is_internal_chrome_target = starts with `chrome://`, `chrome-extension://` or `devtools://`.
+ * MEASURED (test-browser-hidden-paint probe 10, box row 725: Chrome 154.0.8037.57 + agent-browser 0.38.2 on the raw road): the
+ * flip at this address held 0 of 180 (with no command in flight, with commands ending inside its life, asked inside its life:
+ * listed by neither a pinned nor an unpinned session); every birth address `chrome://version/`; the unpinned session's next
+ * command on its own page every time. The about:blank flip of before: 2 holds of 30 s in 100, and the unpinned session moved to
+ * another tab in 35 of 100. The flip at this address shows a frozen front as the blank did (hidden to visible, 30 frames in
+ * 500 ms, ten of ten); nothing of it stays (no tab back at a restore, no History row). The hub reads the tab's own birth address
+ * every time (browser-dialogs.js showFront, and once before a browser's first freeze): an address the driver would take means
+ * that browser is not frozen at all (it paints), said once in the journal (`idle_paint_flip_tab_taken`).
+ * A DRIVER UPDATE THAT CHANGES ITS FILTER turns test-browser-tabs's flip pins and test-browser-hidden-paint leg g red: re-read
+ * should_track_target at the new tag before the floor moves (src/browser-profiles.js FLOOR_VERSION).
+ */
+const FLIP_TAB_URL = 'chrome://version/';
+const DRIVER_UNTAKEN_PREFIXES = Object.freeze(['chrome://', 'chrome-extension://', 'devtools://']);
+/** Would the driver (its should_track_target at v0.38.2) leave a page tab born at this address alone? An EMPTY address is taken. */
+function driverLeavesUrl(url) { const u = String(url == null ? '' : url); return u !== '' && DRIVER_UNTAKEN_PREFIXES.some((p) => u.startsWith(p)); }
+
+module.exports = { IDLE_PAINT_MS, IDLE_PAINT_PROOF, IDLE_PAINT_DEFAULT, idlePaintVerdict, unseenRung, FLIP_TAB_URL, DRIVER_UNTAKEN_PREFIXES, driverLeavesUrl };

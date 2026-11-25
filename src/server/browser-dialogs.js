@@ -115,6 +115,9 @@ const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
 // lane passkey-browse-yourself: the user's own key (`hu-…`) → its profile — required at first use (only a human key asks it)
 let HMm = null;
 const HM = () => HMm || (HMm = require('../browser-human.js'));
+// rows B-98f5 / B-bcf8: the idle-paint flip tab's address and the driver's filter (PURE) — required at first use, like SF / PT
+let BIm = null;
+const BI = () => BIm || (BIm = require('../browser-idle.js'));
 const PROMPT_FY_KEY = 'prompt-auth:'; // B-ebb7: a sign-in's For-you item is keyed — a past hub life's open ones are swept when a watch starts
 const REARM_MS = 2000; // a watch whose socket closed under the person's own browsing is opened again after this — doubled at each failed try (acceptance r1: a refused port looped every 2 s)
 const REARM_TRIES = 5; // then the watch stops trying and his fact says so (`gave-up`) until the next arm (his window, his press, a verb)
@@ -519,8 +522,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function track(w, info) {
     if (ST.printTargetVerdict(info)) return releasePrint(w, info); // lane browser-ui-prompts-r2: the print preview is never a tab — it is released
     if (!info || info.type !== 'page' || !info.targetId) return Promise.resolve();
-    // lane browser-swiftshader-cpu: thawPaint's own blank tab (opened and closed in ~20 ms) is nobody's — never tracked
-    if (w.flipping && !info.openerId && /^(about:blank)?$/.test(String(info.url || ''))) return Promise.resolve();
+    // lane browser-swiftshader-cpu: thawPaint's own flip tab (opened and closed in ~20 ms) is nobody's — never tracked. Rows B-98f5 /
+    // B-bcf8: while a flip runs, each page's BIRTH address is kept — the guard reads the address Chrome itself reported (showFront)
+    if (w.flipping) { if (!w.flipBirths) w.flipBirths = new Map(); const tb = String(info.targetId); if (!w.flipBirths.has(tb) && w.flipBirths.size < 64) w.flipBirths.set(tb, String(info.url == null ? '' : info.url)); }
+    if (w.flipping && !info.openerId && (/^(about:blank)?$/.test(String(info.url || '')) || String(info.url || '') === BI().FLIP_TAB_URL)) return Promise.resolve();
     if (!w.kernel && w.mode !== 'person') decideAhead(w, info.browserContextId || null); // acceptance r1: never on the person's watch (Chrome asks him, his saved grants stand) // lane browser-surfaces: a kernel's permission asks are surfaces (P deny unless allowed ahead) // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
     const tid = String(info.targetId);
     const known = w.targets.get(tid);
@@ -1093,13 +1098,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // (a verb of any holder still RUNNING on this browser is busy: the idle stop never freezes a page under a verb — an agent's
     // feedback 2026-11-18: a fresh profile's first open of a large web app froze 30 s after its verb STARTED and waited out the
     // verb's own timeout, ~2 min, with nothing said; the next verb's thaw recovered it at once)
-    return { frozen: w.paint === 'frozen', lastVerbAt: w.lastVerbAt || w.bornAt || 0, busy: w.open.size > 0 || loading || !!w.thawing || verbRunningOn(profileId), frozenAt: w.frozenAt || 0, fronts: (w.fronts || []).length, hidden: w.hiddenFronts ? w.hiddenFronts.size : 0, title: [...w.targets.values()].map((e) => e.title).find(Boolean) || null };
+    return { frozen: w.paint === 'frozen', lastVerbAt: w.lastVerbAt || w.bornAt || 0, busy: w.open.size > 0 || loading || !!w.thawing || verbRunningOn(profileId), frozenAt: w.frozenAt || 0, fronts: (w.fronts || []).length, hidden: w.hiddenFronts ? w.hiddenFronts.size : 0, flipTaken: w.flipTaken || null, title: [...w.targets.values()].map((e) => e.title).find(Boolean) || null };
   }
   /** Every tab of the browser FROZEN (measured: the only act that stops an Xvfb window drawing — IDLE_PAINT_PROOF). The tabs
    *  in front are remembered: a frozen page is hidden, and only its tab strip shows it again (thawPaint). */
   async function freezePaint(profileId) {
     const w = watches.get(String(profileId || ''));
     if (!w || w.state !== 'open' || w.paint === 'frozen' || w.thawing || w.open.size) return { ok: false };
+    // rows B-98f5 / B-bcf8: a browser whose flip tab a driver would take is never frozen — nothing could show its pages again safely
+    if (w.flipTaken) return { ok: false, why: 'flip_tab_taken' };
+    if (!w.flipChecked) { const tc = now(); if (!(await flipCheck(w))) return { ok: false, why: 'flip_tab_taken' }; if (w.paint === 'frozen' || w.thawing || w.open.size || (w.lastVerbAt || 0) >= tc) return { ok: false }; }
     const tabs = [...w.targets.values()].filter((e) => e.sid);
     const fronts = []; const t0 = now();
     for (const e of tabs) { const v = await settle(call(w, 'Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true }, e.sid, 1000)); if (v && v.result && v.result.result && v.result.result.value === 'visible') fronts.push(e.targetId); }
@@ -1169,20 +1177,59 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** One frozen front shown again IN ITS OWN WINDOW: activated first (its window becomes the last activated one — where a
    *  plain create lands), a blank opened, its window read off Chrome (getWindowForTarget), closed, the front activated. A
    *  blank that landed elsewhere (another holder's activation raced it) is closed at once and journaled — never kept. */
+  /** Rows B-98f5 / B-bcf8 — the address Chrome reported at the BIRTH of a tab the hub made: the watch's own targetCreated, kept while
+   *  a flip runs; read off Chrome (Target.getTargetInfo) when the event has not come within 50 ms. null = unread. */
+  async function flipBirthUrl(w, id) {
+    const k = String(id), t0 = now();
+    while (!(w.flipBirths && w.flipBirths.has(k)) && now() - t0 < 50) await new Promise((r) => setTimeout(r, 5));
+    if (w.flipBirths && w.flipBirths.has(k)) return w.flipBirths.get(k);
+    const r = await settle(call(w, 'Target.getTargetInfo', { targetId: k }, null, 1000));
+    return r && r.result && r.result.targetInfo && typeof r.result.targetInfo.url === 'string' ? r.result.targetInfo.url : null;
+  }
+  /** Was this flip tab born where the driver leaves it? false ⇒ flipTaken (said once). */
+  async function flipBirthLeft(w, id) { const u = await flipBirthUrl(w, id); if (BI().driverLeavesUrl(u)) return true; flipTaken(w, u); return false; }
+  /** A flip tab born at an address a browser driver would take (another browser family, a policy, a later build): this browser is
+   *  never frozen again — it keeps drawing, as before the freeze existed — said ONCE in the journal by its code, never silently. */
+  function flipTaken(w, url) {
+    if (w.flipTaken) return;
+    w.flipTaken = url == null ? 'unread' : url === '' ? 'empty' : 'taken';
+    const said = w.flipTaken === 'unread' ? 'an address Chrome did not report' : w.flipTaken === 'empty' ? 'an empty address' : 'an address a browser driver takes';
+    try { log.warn?.(`[browser-dialogs] ${w.profileId}: [idle_paint_flip_tab_taken] the idle-paint flip tab was born at ${said} — this browser is not frozen again (it keeps drawing)`); } catch { /* */ }
+  }
+  /** Before a browser's FIRST freeze: the flip tab born once in a window of its own (unfocused: no window's front moves), its birth
+   *  address read, the tab closed. false ⇒ flipTaken: the browser is never frozen. */
+  async function flipCheck(w) {
+    if (w.flipChecked) return true;
+    w.flipping = (w.flipping || 0) + 1;
+    let id = null;
+    try {
+      const c = await settle(call(w, 'Target.createTarget', { url: BI().FLIP_TAB_URL, newWindow: true, focus: false }, null, 2000));
+      id = c && c.result && c.result.targetId ? c.result.targetId : null;
+      if (!id) { flipTaken(w, null); return false; }
+      if (!(await flipBirthLeft(w, id))) return false;
+      w.flipChecked = true;
+      return true;
+    } finally {
+      if (id) await settle(call(w, 'Target.closeTarget', { targetId: id }, null, 2000));
+      w.flipping -= 1; if (!w.flipping && w.flipBirths) w.flipBirths.clear();
+    }
+  }
   async function showFront(w, tid) {
     const winOf = (id) => windowOfTarget(w, id);
     w.flipping = (w.flipping || 0) + 1;
     try {
+      // rows B-98f5 / B-bcf8: the flip tab is born at an address no browser driver takes (browser-idle.js FLIP_TAB_URL); its birth read
       const want = await winOf(tid);
       await settle(call(w, 'Target.activateTarget', { targetId: tid }, null, 2000));
-      const b = await settle(call(w, 'Target.createTarget', { url: 'about:blank' }, null, 2000));
+      const b = await settle(call(w, 'Target.createTarget', { url: BI().FLIP_TAB_URL }, null, 2000));
       const bid = b && b.result && b.result.targetId;
+      if (bid) await flipBirthLeft(w, bid);
       const got = bid ? await winOf(bid) : null;
       if (bid) await settle(call(w, 'Target.closeTarget', { targetId: bid }, null, 2000));
       await settle(call(w, 'Target.activateTarget', { targetId: tid }, null, 2000));
       if (bid && want != null && got !== want) { try { log.warn?.(`[browser-dialogs] ${w.profileId}: the idle-paint thaw's blank tab opened in window ${got}, not the tab's window ${want} — closed at once`); } catch { /* */ } }
       return { targetId: tid, window: want, blankIn: got };
-    } finally { w.flipping -= 1; }
+    } finally { w.flipping -= 1; if (!w.flipping && w.flipBirths) w.flipBirths.clear(); }
   }
 
   // ── which conversation a tab's dialog is for ──

@@ -151,7 +151,10 @@ const BOOL_FLAGS = new Set(['--allow-file-access', '--annotate', '--auto-connect
  *  verb + flag tables were measured on: the pinned install (CLI_PIN_RECORD), the windows proof (src/browser-windows.js), and
  *  the two files that cannot import it — deploy/docker/Dockerfile's `npm install -g agent-browser@…` and package.json's
  *  agentTools install hint — pinned to it by scripts/test-browser-cli-pin.mjs; `floor` = the oldest CLI VibeSpace runs on
- *  (src/browser-profiles.js FLOOR_VERSION, package.json's declared floor); `recordingFloor` = `record start`'s (src/browser-trace.js). */
+ *  (src/browser-profiles.js FLOOR_VERSION, package.json's declared floor); `recordingFloor` = `record start`'s (src/browser-trace.js).
+ *  Rows B-98f5 / B-bcf8: the idle-paint thaw's flip tab is born where `table`'s own tab filter never looks (should_track_target:
+ *  chrome://, chrome-extension://, devtools:// — src/browser-idle.js FLIP_TAB_URL); a `table` move re-reads it at the new tag, and
+ *  test-browser-tabs (the flip pins) and test-browser-hidden-paint leg g go red when the filter changed. */
 const AGENT_BROWSER_CLI = Object.freeze({ table: '0.38.2', floor: '0.37.1', recordingFloor: '0.37.0' }); // lane browser-stderr-pipe: 0.38.2 drains Chrome's stderr (#2003 — 0.38.1 froze once 64 KB of log filled the unread pipe); its --help adds lines, removes no verb or flag
 const TABLE_VERSION = AGENT_BROWSER_CLI.table; // lane H (2026-09-25): re-measured on 0.38.1 — was 0.32.0 (its fixtures stay as the r3 evidence)
 /** → the installed version when it is not the table's (`'unknown'` when the

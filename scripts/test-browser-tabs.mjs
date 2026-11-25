@@ -758,9 +758,9 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   //     root (A's blank, B's blank) — A's page by no witness and no grant. The thaw must still show A's page, and only A's
   const TA0 = T(0x80), TA = T(0x81), TB = T(0x82), TB0 = T(0x83);
   const { WebSocketServer: WSS } = require('ws');
-  const standIn = async () => {
+  const standIn = async ({ report = null } = {}) => {
     const winOf = new Map([[TA0, 1], [TA, 1], [TB, 2], [TB0, 2]]), vis = new Map([[TA0, 'hidden'], [TA, 'visible'], [TB, 'visible'], [TB0, 'hidden']]);
-    const st = { last: null, acts: [], made: [], blind: new Set() }; // blind: the tabs whose window read gets no answer (a busy Chrome)
+    const st = { last: null, acts: [], made: [], blind: new Set(), creates: [], urls: new Map() }; // blind: the tabs whose window read gets no answer (a busy Chrome)
     const wss = new WSS({ port: 0, host: '127.0.0.1' }); await new Promise((r) => wss.once('listening', r));
     wss.on('connection', (sock) => sock.on('message', (raw) => {
       let m; try { m = JSON.parse(String(raw)); } catch { return; }
@@ -770,7 +770,10 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       if (m.method === 'Runtime.evaluate' && p.expression === 'document.visibilityState') return re({ result: { type: 'string', value: vis.get(String(m.sessionId || '').slice(1)) || 'hidden' } });
       if (m.method === 'Browser.getWindowForTarget') return st.blind.has(p.targetId) ? re({}) : re({ windowId: winOf.has(p.targetId) ? winOf.get(p.targetId) : null });
       if (m.method === 'Target.activateTarget') { st.last = p.targetId; st.acts.push(p.targetId); return re({}); }
-      if (m.method === 'Target.createTarget') { const id = 'BLANK' + (st.made.length + 1); st.made.push(id); winOf.set(id, winOf.get(st.last)); return re({ targetId: id }); }
+      // rows B-98f5 / B-bcf8: every create recorded with its address; its BIRTH event sent first (as Chrome does), at the address
+      // the leg makes Chrome report (`report`: another browser family, a policy, a later build), and Target.getTargetInfo answers it
+      if (m.method === 'Target.createTarget') { const id = 'BLANK' + (st.made.length + 1); st.made.push(id); winOf.set(id, winOf.get(st.last)); const url = String(p.url == null ? '' : p.url); st.creates.push({ url, newWindow: !!p.newWindow, focus: p.focus }); const born = report ? report(url, st.creates.length) : url; st.urls.set(id, born); try { sock.send(JSON.stringify({ method: 'Target.targetCreated', params: { targetInfo: { targetId: id, type: 'page', url: born, title: '', attached: false } } })); } catch { /* closed */ } return re({ targetId: id }); }
+      if (m.method === 'Target.getTargetInfo') return re({ targetInfo: { targetId: p.targetId, type: 'page', url: st.urls.has(p.targetId) ? st.urls.get(p.targetId) : '' } });
       return re({});
     }));
     return { url: `ws://127.0.0.1:${wss.address().port}/devtools/browser/stand-in`, st, close: () => new Promise((r) => { for (const c of wss.clients) c.terminate(); wss.close(() => r()); }) };
@@ -791,7 +794,7 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
         out.a = shownOf(await D.thawPaint(PID, { holder: { ...holders.a, profileId: PID } })); out.hiddenA = (D.paintFacts(PID) || {}).hidden;
         out.b = shownOf(await D.thawPaint(PID, { holder: { ...holders.b, profileId: PID } })); out.hiddenB = (D.paintFacts(PID) || {}).hidden;
       }
-      out.blanks = SI.st.made.length;
+      out.blanks = SI.st.made.length; out.creates = SI.st.creates;
       return out;
     } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
   };
@@ -822,6 +825,44 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
   if (DDs) ok(c3 && c3.fz && c3.fz.ok && J(c3.a) === J([TB]), 'CONTROL (the stamp trusted alone): A\'s viewer shows B\'s page in B\'s window — the cell heavy hidden-paint e guards — RED', c3);
   ok(un && un.fz && un.fz.ok && J(un.a) === J([TA]) && un.hiddenA === 1, 'B-1626 cure 4: a window Chrome did not report at the freeze is UNKNOWN — read again at the thaw, A\'s viewer shows A\'s page (never a blank on every later visit)', un);
   if (DDu) ok(c4 && c4.fz && c4.fz.ok && J(c4.a) === J([]) && c4.hiddenA === 2, 'CONTROL (cure 3\'s rule: an unread window is «not yours»): A\'s front stays owed — the live view blank on this visit and every later one — RED', c4);
+  // ═══ ROWS B-98f5 / B-bcf8 — THE THAW'S FLIP TAB IS ONE NO DRIVER TAKES (box rows 715-725; src/browser-idle.js FLIP_TAB_URL): the
+  //     flip tab is born at chrome://version/ (Chromium's kChromeUIVersionURL at 154.0.8037.57), which the driver's own filter never
+  //     takes (agent-browser v0.38.2 should_track_target); the hub reads the birth address Chrome reports, and a browser whose flip
+  //     tab a driver WOULD take is never frozen — said once by its code. A DRIVER UPDATE that changes its filter is read again here
+  //     and in test-browser-hidden-paint leg g ═══
+  {
+    const BIdle = require('../src/browser-idle.js');
+    const FLIP = BIdle.FLIP_TAB_URL;
+    const FANCH = "      const b = await settle(call(w, 'Target.createTarget', { url: BI().FLIP_TAB_URL }, null, 2000));";
+    if (!dsrc.includes(FANCH)) ok(false, 'the anchor of the control «the release\'s about:blank flip» is not in the source (src/server/browser-dialogs.js)');
+    const DDf = dsrc.includes(FANCH) ? M.load('src/server/browser-dialogs.js', editAnchor(dsrc, FANCH, "      const b = await settle(call(w, 'Target.createTarget', { url: 'about:blank' }, null, 2000)); // the release: the blank a driver takes", 'src/server/browser-dialogs.js'), 'b98f5-blank-flip') : null;
+    const guardLeg = async (Dmod, report) => {
+      const SI = await standIn({ report }); const PID = 'bp-0000c23c'; const said = [];
+      const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: { ...quiet, warn: (m) => said.push(String(m)) }, leaseCountOf: () => 2,
+        tabsOf: (q) => (String(q && q.browserKey) === KA ? [TA0] : String(q && q.browserKey) === KB ? [TB0] : []) });
+      try {
+        await D.arm(PID, { budgetMs: 3000 });
+        const opened = await until(() => !!D.paintFacts(PID), 3000);
+        const fz = opened ? await D.freezePaint(PID) : null;
+        const th = fz && fz.ok ? await D.thawPaint(PID, { holder: { ...H.a, profileId: PID } }) : null;
+        const fz2 = opened ? await D.freezePaint(PID) : null;
+        const f = D.paintFacts(PID);
+        return { opened, fz, th: th ? { thawed: !!th.thawed, shown: (th.shown || []).length } : null, fz2, flipTaken: f ? f.flipTaken : undefined, creates: SI.st.creates.slice(), said: said.filter((x) => x.includes('[idle_paint_flip_tab_taken]')) };
+      } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+    };
+    const [g0, gc, g1, g2, g3] = await Promise.all([guardLeg(DD, null), DDf ? guardLeg(DDf, null) : Promise.resolve(null),
+      guardLeg(DD, () => 'about:blank'), guardLeg(DD, () => ''), guardLeg(DD, (url, n) => (n === 1 ? url : 'about:blank'))]);
+    const thawOf = (g) => (g ? g.creates.filter((c) => !c.newWindow) : []), checkOf = (g) => (g ? g.creates.filter((c) => c.newWindow) : []);
+    ok(g0.fz && g0.fz.ok && g0.th && g0.th.thawed && g0.th.shown === 1 && thawOf(g0).length >= 1 && thawOf(g0).every((c) => c.url === FLIP) && checkOf(g0).length === 1 && checkOf(g0)[0].url === FLIP && checkOf(g0)[0].focus === false && g0.fz2 && g0.fz2.ok && !g0.flipTaken && g0.said.length === 0,
+      `B-98f5 / B-bcf8: the thaw's flip tab is born at ${FLIP} — Chromium's kChromeUIVersionURL, an address the driver's own filter never takes — and so is the ONE check before the browser's first freeze, in a window of its own, unfocused (no window's front moves)`, g0);
+    if (DDf) ok(gc && gc.fz && gc.fz.ok && thawOf(gc).some((c) => c.url === 'about:blank'), 'CONTROL (the release\'s flip: about:blank — the tab a driver takes, prepares and loses mid-prepare: the 30 s hold, the moved tab) — RED', gc);
+    ok(g1.fz && g1.fz.ok === false && g1.fz.why === 'flip_tab_taken' && g1.fz2 && g1.fz2.ok === false && g1.fz2.why === 'flip_tab_taken' && !g1.th && thawOf(g1).length === 0 && g1.flipTaken === 'taken' && g1.said.length === 1,
+      'B-98f5 / B-bcf8 THE GUARD ON THE FACT: Chrome reports the check\'s tab born at an address a driver takes (another browser family, a policy, a later build) ⇒ that browser is NEVER frozen (it keeps drawing), no flip made, said ONCE in the journal by its code', g1);
+    ok(g2.fz && g2.fz.ok === false && g2.fz.why === 'flip_tab_taken' && g2.flipTaken === 'empty' && thawOf(g2).length === 0 && g2.said.length === 1,
+      'B-98f5 / B-bcf8 THE GUARD: an EMPTY birth address (the driver\'s filter TAKES an empty one) ⇒ never frozen, said once', g2);
+    ok(g3.fz && g3.fz.ok && g3.th && g3.th.thawed && g3.fz2 && g3.fz2.ok === false && g3.fz2.why === 'flip_tab_taken' && g3.flipTaken === 'taken' && g3.said.length === 1,
+      'B-98f5 / B-bcf8 THE GUARD AT EVERY FLIP: the check passed, then a thaw\'s own flip tab is born at an address a driver takes ⇒ the browser is not frozen again, said once', g3);
+  }
   // ═══ the IDLE PAINT STOP UNDER A RUNNING VERB (an agent's feedback 2026-11-18: a fresh profile's first open of a large web app
   //     left its tab busy ~2 min, the person saw a crashed page; opening the sign-in page again recovered it at once) — PLACED over
   //     the real watch on a stand-in browser (a loaded page: no navigation in flight), its clock the leg's own ═══
