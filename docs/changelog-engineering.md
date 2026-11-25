@@ -57,6 +57,10 @@ This file is the engineers' record of every release: the lanes, the verification
   - smalls: a late flip's scan waits while another flip runs (a check and a show at once); the retry's comment says it retries every holder's failed shows; boundScale scales every call of the watch;
   - LEGS: the must's scene on both roads + its RED (6ed465256); a silent read keeps the front owed; the backoff on a placed clock; the keeper never retries while busy + its RED; four failed creates never give up + its RED (every reason capped).
 
+### bl-scratch — B-ddf3: line 908's follow (主开发 r4073; line 932, taken for 2.369.420's first pick)
+
+- LINE 908's FOLLOW (r4073, for 2.369.420; its short round wf_23a8a62c-09c took the cure with no must): (1) a CLI's FOLDER that is a link to nowhere is err too (the look checks the folder first); (2) err carries its cause (HOOK|cli|err|unreadable · dangling · folder-dangling · unsearchable), each said in its true words, with its own code look-err and the page's sentence in en / zh / ja; (3) a paired machine's status reads err as not known (null), and the card says «not known — its hook file could not be read», never «not registered»; a leg for a REUSED pid (a placed /proc: another start time is another process). Its fresh read (one must, five shoulds) added: the USUAL Remove road (the helper RAN and read «missing» for a folder that is a link to nowhere) is looked at too; a HOME (or a folder above the CLI's) that is not a searchable directory is err; every err carries its code with both lists and the toast says «the tools were kept»; an unknown cause has neutral words (Object.hasOwn); reds for each.
+
 ## 2.369.419 — 2026-11-25
 
 ### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)
