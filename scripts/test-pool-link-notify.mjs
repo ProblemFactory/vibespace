@@ -56,11 +56,28 @@ const mk = (AccountManager, { hook = true } = {}) => {
   return { am, A, B, pool, seen };
 };
 
+// r4434 (row B-3dbd's family; red under load on two gates, box zone, «changes 2»): A COUNTED WINDOW OPENS ONLY ONCE THE STORE's OWN
+// SET-UP HAS SETTLED. mk() makes two subscriptions and writes their sign-in files itself; their display reads land OFF the loop, and a
+// landing that changes what is kept sends ONE list broadcast on a 100 ms timer (_notifyRowsSoon) — the probe f9ce6c595 (never lined)
+// read it, both zones: with the counters reset after ONE tick, that set-up broadcast fell inside a later window («rows-soon@placed»)
+// as a second change; with the set-up settled, the move's window holds its own notice alone. settledOf() waits on the FACT (every
+// display read landed, no rows broadcast armed) under a 20 s bound whose expiry is a NAMED failed line — the law of bl-accounts'
+// r4209 cure (test-oat-materialize-sweep). A move's OWN row re-read arms its broadcast only once that read lands, so it can never fall
+// before the move's tick. Every count stays exact.
+const SETTLE_MS = 20000;
+const settledOf = async (am, what) => {
+  const t0 = Date.now();
+  const landed = await Promise.race([am.displaySettled().then(() => true), new Promise((r) => setTimeout(() => r(false), SETTLE_MS))]);
+  while (am._rowsSoon && Date.now() - t0 < SETTLE_MS) await new Promise((r) => setTimeout(r, 5));
+  const quiet = landed === true && !am._rowsSoon;
+  if (!quiet) ok(false, `the store's set-up never settled (${what}) — waited ${SETTLE_MS} ms on its display reads and its rows broadcast`, { landed, rowsSoonArmed: !!am._rowsSoon });
+  return quiet;
+};
 console.log('§1 ensureSessionPoolLink notifies, once per burst');
 const { AccountManager } = require('../src/accounts.js');
 {
   const { am, A, B, pool, seen } = mk(AccountManager);
-  await tick();
+  await settledOf(am, '§1');   // r4434: the set-up settled — never one tick
   seen.links = 0; seen.changes = 0; seen.targetsAtLinks = [];
   am.ensureSessionPoolLink(pool, 'sess-1', A, { why: 'spawn' });
   am.ensureSessionPoolLink(pool, 'sess-1', B, { why: 'per-session-switch' });
@@ -77,6 +94,18 @@ const { AccountManager } = require('../src/accounts.js');
   am.setPoolTarget(pool, B, { why: 'pool-switch' });
   await tick();
   ok(seen.changes === 1 && seen.links === 3, 'the pool DEFAULT keeps its own path (setPoolTarget → onChange, as before)', seen);
+  // r4434 (主开发 r4340 law 3): THE RACE MADE RED AT WILL — the same store with the counters reset after ONE tick (the old wait), then
+  // its set-up's late list broadcast let land INSIDE the window (a placed hold: the wait on it, as a loaded machine's slow turns): the
+  // move's window counts TWO changes for one move; the settled window above counted one
+  {
+    const P = mk(AccountManager);
+    await tick();   // the OLD wait, as it stood
+    P.seen.links = 0; P.seen.changes = 0;
+    await settledOf(P.am, 'the placed window');   // the placed hold: the set-up's broadcast lands inside the window
+    P.am.setPoolTarget(P.pool, P.B, { why: 'pool-switch' });
+    await tick();
+    ok(P.seen.changes === 2 && P.am.poolCurrent(P.pool) === P.B, `PLACED (r4340 law 3): with the old one-tick wait the set-up's late list broadcast lands in the move's window — ${P.seen.changes} changes for ONE move of the default (red at will); settled first, the window holds the move alone`, P.seen);
+  }
   // a throwing hook never fails the move
   const t = mk(AccountManager);
   t.am._onSessionLinks = () => { throw new Error('boom'); };
@@ -93,7 +122,7 @@ console.log('§2 noteDeviceRepoint (the daemon\'s re-point, recorded after the f
 {
   const { am, A, B, pool, seen } = mk(AccountManager);
   am.ensureSessionPoolLink(pool, 'sess-1', A, { why: 'spawn' });
-  await tick();
+  await settledOf(am, '§2');   // r4434: the set-up settled — never one tick
   seen.links = 0; seen.changes = 0;
   const at = Date.now();
   const row = am.noteDeviceRepoint({ link: am.sessionPoolLinkPath(pool, 'sess-1'), poolId: pool, from: am.subDir(A), to: B, at, why: 'sealed-orders' });
@@ -115,7 +144,7 @@ const MUT = mutantCopies('badge-link', REPO);
   ok(NOTIFY.test(src) && src.match(/this\._notifyLinks\(\);/g).length === 2, 'the notify is spelled once in ensureSessionPoolLink (+ once in noteDeviceRepoint) — the control patches exactly it');
   const { AccountManager: Pre } = MUT.load('src/accounts.js', editAnchor(src, NOTIFY, '$1', "src/accounts.js"), 'pre-fix');
   const { am, B, pool, seen } = mk(Pre);
-  await tick();
+  await settledOf(am, '§3');   // r4434: the set-up settled — never one tick
   seen.links = 0;
   am.ensureSessionPoolLink(pool, 'sess-1', B, { why: 'per-session-switch' });
   await tick(); await tick();
