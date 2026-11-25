@@ -16,7 +16,11 @@
 //   T5 an EMPTY file ⇒ read once more before it is torn (a second rung), then as T4
 //   T6 «not there» at the start ⇒ minted and written before any session is handed it (a new instance, as the release)
 //   T7 a read again that HANGS ⇒ the press answers by the bound, a read that waits is said, the late answer lifts it
-//   T8 the value is never said: no log line, no held-list row, no stats answer carries it
+//   T8 the value is never said: no log line, no held-list row, no stats answer carries it — nor a part of it (its first eight
+//      characters) nor its length beside a known word (a planted line is caught: the scan's control)
+// THE FOLLOW (主开发 r4292): T1b the door while the file is held refuses a missing header, an empty value, «undefined», «null» and an
+//   arbitrary value, and lets this run's value in (RED: a compare that takes two empties as equal); T2b after the read again it lets
+//   both in and still refuses the five; T7 counts the reads: a second press starts NONE (RED: the one-in-flight guard cut)
 // Run: node scripts/test-otel-token-held.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,12 +36,13 @@ const ok = (c, name, extra) => { if (typeof name !== 'string') throw new TypeErr
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ── THE PLACED READS for the token path: EIO (placed), and one-shot answers of the off-loop read ('enoent' | 'hang') ──
-const placed = new Set(), plans = new Map(), hangs = [];
+const placed = new Set(), plans = new Map(), hangs = [], reads = new Map();
 const realRF = fs.readFileSync, realPRF = fs.promises.readFile;
 const eio = (p) => Object.assign(new Error(`EIO: a placed read refusal, read '${p}'`), { code: 'EIO' });
 fs.readFileSync = function (p, ...a) { if (placed.has(String(p))) throw eio(p); return realRF.call(this, p, ...a); };
 fs.promises.readFile = function (p, ...a) {
   const k = String(p), q = plans.get(k);
+  reads.set(k, (reads.get(k) || 0) + 1);
   if (q && q.length) {
     const act = q.shift();
     if (act === 'enoent') return Promise.reject(Object.assign(new Error(`ENOENT: a placed «not there», open '${p}'`), { code: 'ENOENT' }));
@@ -71,7 +76,10 @@ function world(tag, content) {
 const bytes = (f) => { try { return realRF.call(fs, f, 'utf8'); } catch { return null; } };
 const modeOf = (f) => { try { return (fs.statSync(f).mode & 0o777).toString(8); } catch { return null; } };
 /** the loopback door asked with a value → its status (200 let in, 403 refused) */
-const door = (o, v) => { let st = 200; const res = { status(c) { st = c; return this; }, json() { return this; }, set() { return this; } }; o.ok({ socket: { remoteAddress: '127.0.0.1' }, headers: { 'x-vibespace-otel': v } }, res); return st; };
+const door = (o, v) => { let st = 200; const res = { status(c) { st = c; return this; }, json() { return this; }, set() { return this; } }; o.ok({ socket: { remoteAddress: '127.0.0.1' }, headers: v === undefined ? {} : { 'x-vibespace-otel': v } }, res); return st; };   // undefined: no header at all
+const ODD = ['f0e1d2c3', 'b4a59687', '78695a4b', '3c2d1e0f'].join('');   // an arbitrary value of the right shape (built at runtime)
+const FIVE = [undefined, '', 'undefined', 'null', ODD];   // r4292: what the door refuses in every state
+const five = (o) => FIVE.map((v) => door(o, v));
 const valueOf = (o) => String((o.envFor() || {}).OTEL_EXPORTER_OTLP_HEADERS || '').replace(/^x-vibespace-otel=/, '');
 const until = async (fn, ms = 3000) => { for (const end = Date.now() + ms; Date.now() < end;) { if (fn()) return true; await sleep(10); } return !!fn(); };
 const within = (p, ms) => Promise.race([p.then((v) => ({ v })), sleep(ms).then(() => ({ hung: true }))]);
@@ -87,6 +95,15 @@ try {
   };
   const g1 = run1(O);
   ok(g1.same && g1.fresh && g1.newIn === 200 && g1.oldIn === 403 && g1.held, `the file is NOT written over (its bytes unchanged); a session started now carries this run's own value (let in: ${g1.newIn}); the file's value waits for the file (${g1.oldIn} while held); the hold is said`, { same: g1.same, fresh: g1.fresh, newIn: g1.newIn, oldIn: g1.oldIn, held: g1.held });
+  const f1 = five(g1.o);
+  ok(f1.every((c) => c === 403) && door(g1.o, valueOf(g1.o)) === 200, `T1b the door while the file is held: a missing header, an empty value, «undefined», «null» and an arbitrary value refused (${f1.join(' ')}); this run's value let in`, f1);
+  const twoEmpties = (() => {
+    const w = world('t1e', OLD); placed.add(w.file);
+    const o = w.make(copyOf([["    if (loop && token && sameToken(req.headers['x-vibespace-otel'], token)) return true;", "    if (loop && (req.headers['x-vibespace-otel'] || '') === (token || '')) return true;"]], 'two-empties'));
+    placed.delete(w.file);
+    return door(o, undefined);
+  })();
+  ok(twoEmpties === 200, `RED: a compare that takes two empties as equal ⇒ a post with NO header is let in while the file is held (${twoEmpties})`, { twoEmpties });
   const hl = HL.create({ hold: { holds: () => [], readAgainOf: async () => false, onHoldsChange: () => () => { } }, older: [g1.o.tokenRow] });
   const rows = hl.list(); hl.stop();
   ok(rows.length === 1 && rows[0].what === 'otel-token' && rows[0].readAgain === true, `the hold is ONE row of the family's held list («${rows[0] && rows[0].what}», read again: ${rows[0] && rows[0].readAgain})`, rows);
@@ -98,6 +115,9 @@ try {
   const lifted2 = await g1.o.readTokenAgain();
   ok(lifted2 === true && door(g1.o, OLD) === 200 && door(g1.o, v1) === 200 && valueOf(g1.o) === OLD && bytes(g1.w.file) === OLD && !g1.o.stats().tokenHeld,
     'the file read again: its value let in again (surviving sessions), this run\'s still let in (sessions started meanwhile), new sessions carry the file\'s; nothing written', { lifted2, now: valueOf(g1.o) === OLD });
+
+  const f2 = five(g1.o);
+  ok(f2.every((c) => c === 403) && door(g1.o, OLD) === 200 && door(g1.o, v1) === 200, `T2b after the read again: the file's value and this run's let in, the five still refused (${f2.join(' ')})`, f2);
 
   console.log('— T3 «not there» right after the unread answer, then not there again');
   const run3 = async (Mod, tag) => {
@@ -138,21 +158,34 @@ try {
   ok(bytes(w6.file) === valueOf(o6) && /^[0-9a-f]{32}$/.test(valueOf(o6)) && modeOf(w6.file) === '600' && !o6.stats().tokenHeld, 'a new instance: a value minted and written before any session is handed it (0600), as the release');
 
   console.log('— T7 a read again that HANGS');
-  const w7 = world('t7', OLD); placed.add(w7.file);
-  const o7 = w7.make(O, { tokenReadMs: 80 }); placed.delete(w7.file); plans.set(w7.file, ['hang']);
-  const press = await within(o7.readTokenAgain(), 600), waiting = !!(o7.stats().tokenHeld && o7.stats().tokenHeld.waiting);
-  const press2 = await within(o7.readTokenAgain(), 600);
-  while (hangs.length) hangs.shift()();
-  const lifted7 = await until(() => !o7.stats().tokenHeld);
-  plans.delete(w7.file);
-  ok(!press.hung && waiting && !press2.hung && lifted7 && door(o7, OLD) === 200, `the press answers by the bound, the read that waits is said (${waiting}), a second press waits for none; the late answer lifts it (the file's value let in)`, { press: !!press.hung, waiting, press2: !!press2.hung, lifted7 });
+  const run7 = async (Mod, tag) => {
+    const w = world(tag, OLD); placed.add(w.file);
+    const o = w.make(Mod, { tokenReadMs: 80 }); placed.delete(w.file); plans.set(w.file, ['hang']);
+    const r0 = reads.get(w.file) || 0;
+    const press = await within(o.readTokenAgain(), 600), waiting = !!(o.stats().tokenHeld && o.stats().tokenHeld.waiting);
+    const press2 = await within(o.readTokenAgain(), 600);
+    const n = (reads.get(w.file) || 0) - r0, hung = hangs.length;
+    while (hangs.length) hangs.shift()();
+    const lifted = await until(() => !o.stats().tokenHeld);
+    plans.delete(w.file);
+    return { press: !press.hung, waiting, press2: !press2.hung, n, hung, lifted, oldIn: door(o, OLD) };
+  };
+  const g7 = await run7(O, 't7'), r7 = await run7(copyOf([['    if (tBusy) return false;\n', '']], 'two-in-flight'), 't7r');
+  ok(g7.press && g7.waiting && g7.press2 && g7.n === 1 && g7.hung === 1 && g7.lifted && g7.oldIn === 200, `the press answers by the bound, the read that waits is said (${g7.waiting}), a second press starts NO read (${g7.n} read in all); the late answer lifts it (the file's value let in)`, g7);
+  ok(r7.n === 2, `RED: the one-in-flight guard cut ⇒ the second press starts a second read (${r7.n} reads)`, r7);
 
-  console.log('— T8 the value is never said');
+  console.log('— T8 the value is never said — nor a part of it, nor its length');
   const values = [OLD, valueOf(g1.o), v1, g3.v, v4, valueOf(o5), valueOf(o6)].filter(Boolean);
-  const leakLog = said.filter((l) => values.some((v) => l.includes(v)));
-  const leakStats = [g1.o, o4, o5, o6, o7].map((o) => JSON.stringify(o.stats())).filter((s) => values.some((v) => s.includes(v)));
-  const leakRow = JSON.stringify(rows).includes(OLD) || values.some((v) => JSON.stringify(rows).includes(v));
-  ok(said.length > 0 && leakLog.length === 0 && leakStats.length === 0 && !leakRow, `${said.length} [otel] line(s) said, a held-list row and the stats answers: none carries a sign-in value`, { leakLog: leakLog.slice(0, 2), leakStats: leakStats.length, leakRow });
+  const lens = [...new Set(values.map((v) => v.length))];
+  const lenRe = new RegExp(`\\b(?:${lens.join('|')})\\s*(?:characters?|chars?|bytes?|long|hex)\\b|\\b(?:length|size|long|characters?|chars?)\\D{0,4}(?:${lens.join('|')})\\b`, 'i');
+  /** a text → why it leaks (a whole value, its first eight characters, its length beside a known word), or null */
+  const leakOf = (t) => (values.some((v) => t.includes(v)) ? 'a whole value' : values.some((v) => t.includes(v.slice(0, 8))) ? 'a part (its first eight characters)' : lenRe.test(t) ? 'its length' : null);
+  const planted = [`[otel] otel-token: the value ${OLD.slice(0, 8)}… is let in`, `[otel] otel-token: a value of ${OLD.length} characters`];
+  ok(planted.every((l) => leakOf(l)), `CONTROL: the scan catches a planted part and a planted length (${planted.map(leakOf).join(' · ')})`, planted.map(leakOf));
+  const leakLog = said.map((l) => [leakOf(l), l]).filter(([w]) => w);
+  const leakStats = [g1.o, o4, o5, o6].map((o) => JSON.stringify(o.stats())).map((t) => leakOf(t)).filter(Boolean);
+  const leakRow = leakOf(JSON.stringify(rows));
+  ok(said.length > 0 && leakLog.length === 0 && leakStats.length === 0 && !leakRow, `${said.length} [otel] line(s) said, a held-list row and the stats answers: none carries a sign-in value, a part of one or its length`, { leakLog: leakLog.slice(0, 2), leakStats, leakRow });
 } catch (e) { fail++; console.error('  ✗ threw: ' + ((e && e.stack) || e)); }
 
 fs.readFileSync = realRF; fs.promises.readFile = realPRF; console.warn = realWarn; void realLog;

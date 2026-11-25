@@ -105,7 +105,10 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   // look agrees; an empty file only on a second rung) are kept aside ONCE (0600, an exclusive name), then this life's value is the
   // file's. Its own small hold (the family's helper reads JSON); a row of the family's held list (tokenRow). The value is never said:
   // not in a log line, a list row or an answer. ITS LIMIT, said: a session started while the file is held keeps this life's value —
-  // let in until the hub restarts, refused after it.
+  // let in until the hub restarts, refused after it. THE KEPT COPIES (r4292): nobody removes a kept copy of torn bytes
+  // (usage-history/otel-token.corrupt-<ms>, 0600): one a hold, and one more for each restart that meets a torn file whose replacing
+  // write has not landed; src/vault.js names them beside the file. THE SHAPE: a value placed by hand that is shorter than sixteen
+  // characters or holds a space is not a value's shape — it is judged torn: kept aside, then replaced by this run's value.
   const TOKEN_SHAPE = (v) => typeof v === 'string' && /^[\x21-\x7e]{16,256}$/.test(v);
   const parseToken = (t) => String(t).trim();
   const mintToken = () => crypto.randomBytes(16).toString('hex');
