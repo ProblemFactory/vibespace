@@ -303,7 +303,7 @@ async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFi
     // and the control is judged there by what it PLANTS: its structure checks below (the one batch; the release's backfill verbatim,
     // the restore's own batches under the bound) — never by a number of milliseconds a faster machine does not reach
     if (HOSTED) console.log(`  ⊘ SKIP: ${redWords} — NOT JUDGED on the hosted runner (GITHUB_ACTIONS=true): a red control's clock is judged on the box only, as its law (主开发 r2955); its plant is judged by its structure checks`);
-    else check(redWords, h.ok && h.over > 0 && tied.length > 0, h.top);;
+    else check(redWords, h.ok && h.over > 0 && tied.length > 0, h.top);
   } else console.log(`  ${label}: reported, not judged in this unit (worst /login ${s.worst} ms, longest hold ${h.maxHeld} ms)`);
   return { s, h };
 }
