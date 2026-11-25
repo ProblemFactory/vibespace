@@ -497,6 +497,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
   ck('...and the dead member never speaks again', filed.length === 3);
 
   // RESTART SURVIVAL: a fresh watcher over the same data dir replays nothing.
+  await w.whenWritten();   // B-0248 unit 5 (lane bl-loop-b): the ledger is the store writer's, written on its thread
   ck('the ledger is on disk (atomic store), not in memory only', fs.existsSync(path.join(dataDir, 'login-expiry.json')));
   const w2 = mk();
   w2.sweep(); w2.sweep();
@@ -561,6 +562,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     ck('...the pre-existing ones are RECORDED as done, so they never surface later either', ['sub-old', 'sub-ancient'].every((id) => (w6.ledger()[id]?.sent || []).includes('expired')));
     w6.sweep(); w6.sweep();
     ck('...and further sweeps stay silent', filed4.length === 1);
+    await w6.whenWritten();   // B-0248 unit 5: written on the store writer's thread
     ck("the ledger's birth is persisted, so the grace is spent exactly ONCE per install", Number.isFinite(JSON.parse(fs.readFileSync(path.join(dir4, 'login-expiry.json'), 'utf-8')).since));
 
     // NEGATIVE CONTROL 1: a login that dies AFTER we started watching is one
@@ -838,6 +840,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       const s = world(wiped(NOW - 20 * MIN));
       s.w.sweep();
       const id = s.open()[0].id;
+      await s.w.whenWritten();   // B-0248 unit 5: written on the store writer's thread
       const onDisk = JSON.parse(fs.readFileSync(path.join(s.dir, 'login-expiry.json'), 'utf-8'));
       ck('(f) the filed item id is PERSISTED with the member row', (onDisk.members['sub-fish'].items || []).some((r) => r.id === id));
       s.clock += 30 * MIN;
@@ -880,6 +883,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
       s.w.sweep();
       ck('(h) a witnessed login files the 24 h rung AND names the short session', s.open().length === 1
         && /its last login session lasted only ~24 h — this org's session policy may be short/.test(s.open()[0].text));
+      await s.w.whenWritten();   // B-0248 unit 5: written on the store writer's thread
       ck('...and the measurement is persisted in the OBSERVATION log for the next session',
         JSON.parse(fs.readFileSync(path.join(s.dir, 'login-expiry.json'), 'utf-8')).seen['sub-fish'].spanMs === 24 * H);
       ck('...in the observation log, never in the warning row (two stores, two questions)',

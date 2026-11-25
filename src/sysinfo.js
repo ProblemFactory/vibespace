@@ -365,14 +365,17 @@ function loadHistory(dataDir) {
     if (Array.isArray(d.coarse)) _hist.coarse = d.coarse.slice(-COARSE_MAX);
   } catch { }
 }
-function persistHistory() {
-  if (!_histFile || !_histDirty) return;
+// B-0248 step 2 unit 5 (lane bl-loop-b, 主开发 r4147): the history's temp, write and rename are THE STORE WRITER's, on its thread. The release
+// wrote them ON THE LOOP every 5 minutes (about 100 KB, both rings), and on slow storage a rename holds the loop its whole delay (the page
+// bl-loop-b/b0248-page.md, row 9). The bytes are made AT the write (the rings as they are then). At the hub's stop server.js asks it once
+// more and the writer's exitFlush writes what is owed. THE WRITER IS HANDED IN (startWatch's `writer`, server.js; a suite's own as the
+// argument), never required here: this module is in the device agent's bundle (src/agentd), and the store writer is the hub's alone.
+// No writer handed: nothing is written (only the hub keeps a history on disk)
+let _histWriter = null;
+function persistHistory(writer = _histWriter) {
+  if (!_histFile || !_histDirty || !writer) return;
   _histDirty = false;
-  try {
-    const tmp = _histFile + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }));
-    fs.renameSync(tmp, _histFile);
-  } catch { }
+  try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); } catch { }
 }
 let _lastLoopLag = 0; // most recent 500ms-drift sample, folded into history
 function recordSample(mem, cores) {
@@ -431,7 +434,8 @@ async function cmdlineHead(pid, { max = CMDLINE_HEAD, procDir = '/proc' } = {}) 
 // triggerVerdict) — {level, medianMs, at} of the last 3-min window, null before the window is full or without the watch
 let _lagNow = null;
 const loopLagNow = () => _lagNow;
-function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } = {}) {
+function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null, writer = null } = {}) {
+  _histWriter = writer;   // B-0248 unit 5: the hub's store writer (persistHistory, above)
   let lastLevel = 0, lastAlertAt = 0;
   // ── Event-loop lag watch (2.235.0, userL "卡了2h但CPU不高" incident): the
   // ONE metric that caught that degradation was loop lag, and it lived only in
@@ -490,4 +494,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } 
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram, sampleProcCpu, statTicks, SAMPLE_SLICE, SAMPLE_BOUND_MS };
+module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, loadHistory, recordSample, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram, sampleProcCpu, statTicks, SAMPLE_SLICE, SAMPLE_BOUND_MS };

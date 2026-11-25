@@ -656,7 +656,7 @@ app.get('/api/sysinfo/history', (req, res) => {
   res.json({ points: sysinfo.history(ms), rangeMs: ms, cpus: require('os').cpus().length });
 });
 sysinfo.startWatch({
-  dataDir: path.join(__dirname, 'data'), onSample: (mem) => memoryPressure.onSample(mem), // lane browser-resource-care (B-afeb): the memory-pressure episode (src/server/memory-pressure-watch.js)
+  dataDir: path.join(__dirname, 'data'), writer: require('./src/store-writer.js').storeWriter(), onSample: (mem) => memoryPressure.onSample(mem), // lane browser-resource-care (B-afeb): the memory-pressure episode (src/server/memory-pressure-watch.js); B-0248 unit 5 (lane bl-loop-b): the history's writer is the hub's, handed here (src/sysinfo.js is in the device agent's bundle and requires none)
   broadcast: (msg) => { const json = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }); },
 });
 

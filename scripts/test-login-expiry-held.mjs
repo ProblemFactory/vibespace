@@ -39,8 +39,9 @@ const inbox = (dir) => { const t = new UserTodoManager({ dataDir: dir, onChange:
 const T1 = T0 + 3 * 3600e3;   // a later life: the same «24 h left» rung, its words now «17 h»
 const fileOf = (dir) => path.join(dir, 'login-expiry.json');
 const mkW = (Mod, dir, todos, logs, t = T1) => Mod.create({ accounts, userTodos: todos, dataDir: dir, now: () => t, log: (...a) => logs.push(a.join(' ')) });
-/** life one at T0: the record read, one sweep files the «24 h left» warning and records it */
-function firstLife(Mod = W) { const dir = mk(), todos = inbox(dir), logs = []; const w = mkW(Mod, dir, todos, logs, T0); w.sweep(); return { dir, todos, bytes: fs.readFileSync(fileOf(dir), 'utf8'), first: todos.open().map((i) => ({ id: i.id, text: i.text })) }; }
+/** life one at T0: the record read, one sweep files the «24 h left» warning and records it — ON DISK before the next life (B-0248 unit 5,
+ *  lane bl-loop-b: the record is the store writer's, written on its thread; a held life must meet the file, not the writer's owed bytes) */
+async function firstLife(Mod = W) { const dir = mk(), todos = inbox(dir), logs = []; const w = mkW(Mod, dir, todos, logs, T0); w.sweep(); await w.whenWritten(); return { dir, todos, bytes: fs.readFileSync(fileOf(dir), 'utf8'), first: todos.open().map((i) => ({ id: i.id, text: i.text })) }; }
 function heldLife(Mod, dir, todos, logs = []) { const pr = placeReads(fileOf(dir)); let w = null; try { w = mkW(Mod, dir, todos, logs); } finally { pr.restore(); } return { w, logs, seen: pr.seen.sync }; }
 // THE RELEASE (the RED copies): a read blind to the hold, a save over the unread record, a filing with no identity of its own
 const NO_HOLD = (src) => anchored(anchored(src, "    { const h = hold.held(); if (h) {", "    { const h = null; if (h) {", 'sweep-blind-to-the-hold'), "    if (!hold.writable('a write of the login warnings record')) return;", '', 'save-over-the-unread-record');
@@ -48,13 +49,13 @@ const NO_KEY = (src) => anchored(src, "          itemKey: `login-expiry:${a.id}:
 
 console.log('§1 a record that could not be read is HELD: the sweep files, retracts and drops nothing, nothing is written over it; it comes back whole');
 {
-  const f = firstLife();
+  const f = await firstLife();
   ok(f.first.length === 1 && JSON.parse(f.bytes).members['sub-1'] && JSON.parse(f.bytes).since === T0, 'CONTROL: a readable record — one sweep files the «24 h left» warning once and records it', f.first);
-  const again = mkW(W, f.dir, f.todos, []); again.sweep();
+  const again = mkW(W, f.dir, f.todos, []); again.sweep(); await again.whenWritten();
   ok(f.todos.open().length === 1, 'CONTROL: a later start (3 h on) that reads the record files nothing twice', f.todos.open().length);
   const bytes = fs.readFileSync(fileOf(f.dir), 'utf8');
   const { w, logs, seen } = heldLife(W, f.dir, f.todos);
-  const r = w.sweep(); w.sweep();
+  const r = w.sweep(); w.sweep(); await w.whenWritten();   // nothing is owed while held: the bytes below are judged after the writer could have written
   ok(seen === 1 && !!w.held() && r && r.held === true && f.todos.open().length === 1 && fs.readFileSync(fileOf(f.dir), 'utf8') === bytes && logs.filter((l) => /sweep skipped — the record of the login warnings already filed could not be read/.test(l)).length === 1, 'HELD: the sweeps file nothing, retract nothing, write nothing over the record; said ONCE a hold', { held: w.held(), open: f.todos.open().length, logs });
   ok(/could not be read/.test(w.heldWords() || ''), `HELD: its words name what waits («${w.heldWords()}»)`);
   const lifted = await w.readAgain();
@@ -62,22 +63,22 @@ console.log('§1 a record that could not be read is HELD: the sweep files, retra
   ok(lifted === true && !w.held() && f.todos.open().length === 1 && !!w.ledger()['sub-1'] && w.watchingSince() === T0, 'LIFTED: the record back as it was (the watch began at T0) — the warning already filed is not filed again', { open: f.todos.open().length, since: w.watchingSince() });
   // RED: the release (no hold, no key) — the same warning filed a SECOND time (its words moved with the clock) and the record written over
   const REL = M.load('src/server/login-expiry-watch.js', NO_KEY(NO_HOLD(SRC)), 'release');
-  const g = firstLife(REL);
-  const h = heldLife(REL, g.dir, g.todos); h.w.sweep();
+  const g = await firstLife(REL);
+  const h = heldLife(REL, g.dir, g.todos); h.w.sweep(); await h.w.whenWritten();
   ok(g.todos.open().length === 2 && JSON.parse(fs.readFileSync(fileOf(g.dir), 'utf8')).since === T1, 'RED: the release — the same warning filed a SECOND time and the record written over (the watch «began» again)', g.todos.open().map((i) => i.text));
   // RED: the key without the hold — one item (the store's identity), but the record still written over: the watch's birth and the measured lengths gone
   const HK = M.load('src/server/login-expiry-watch.js', NO_HOLD(SRC), 'no-hold');
-  const k = firstLife(HK);
-  heldLife(HK, k.dir, k.todos).w.sweep();
+  const k = await firstLife(HK);
+  { const hk = heldLife(HK, k.dir, k.todos).w; hk.sweep(); await hk.whenWritten(); }
   ok(k.todos.open().length === 1 && JSON.parse(fs.readFileSync(fileOf(k.dir), 'utf8')).since === T1, 'RED: no hold — the record written over (since reset to the held life), though the key files nothing twice', JSON.parse(fs.readFileSync(fileOf(k.dir), 'utf8')).since);
   for (const t of [f.todos, g.todos, k.todos]) try { t.flush(); } catch { }
 }
 
 console.log('§2 a restart while still unreadable: held again, its sweeps file nothing, the record untouched');
 {
-  const f = firstLife();
-  heldLife(W, f.dir, f.todos).w.sweep();
-  const b = heldLife(W, f.dir, f.todos); b.w.sweep();
+  const f = await firstLife();
+  { const a = heldLife(W, f.dir, f.todos).w; a.sweep(); await a.whenWritten(); }
+  const b = heldLife(W, f.dir, f.todos); b.w.sweep(); await b.w.whenWritten();
   ok(!!b.w.held() && f.todos.open().length === 1 && fs.readFileSync(fileOf(f.dir), 'utf8') === f.bytes, 'a second start while unreadable: held again, nothing filed, the bytes as they were');
   try { f.todos.flush(); } catch { }
 }
@@ -85,7 +86,7 @@ console.log('§2 a restart while still unreadable: held again, its sweeps file n
 console.log('§3 TORN: kept aside once; the record starts empty; THE INBOX IS THE SECOND WITNESS — the warning re-filed is the SAME item (its key), never a second');
 {
   const run = async (Mod = W) => {
-    const f = firstLife(Mod);
+    const f = await firstLife(Mod);
     const TORN = f.bytes.slice(0, 40);
     fs.writeFileSync(fileOf(f.dir), TORN);
     const logs = [];

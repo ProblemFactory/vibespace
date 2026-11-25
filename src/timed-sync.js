@@ -45,6 +45,8 @@ const STORES = Object.freeze({
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),
   'jobs-logs-sweep.write': row('write', 'jobs-logs-sweep', 'src/jobs.js', ['_logsSave']),   // through the store writer (lane job-logs-sweep: the job-logs catch-up's record — paced, the hub's bookkeeping)
   'providers.write': row('write', 'providers', 'src/server/provider-store.js', ['save']),   // through the store writer (lane lg-providers U1 cure (C): the third-party provider records, a person's act durable before its answer)
+  'login-expiry.write': row('write', 'login-expiry', 'src/server/login-expiry-watch.js', ['save']),   // B-0248 unit 5 (lane bl-loop-b, 主开发 r4147): the login warnings' record, through the store writer (the 5-minute sweep's save off the loop; nothing written while held)
+  'sysinfo-history.write': row('write', 'sysinfo-history', 'src/sysinfo.js', ['persistHistory']),   // B-0248 unit 5: the resource history's two rings, through the store writer (every 5 minutes, and once more at the stop)
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)

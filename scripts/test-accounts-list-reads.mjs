@@ -546,6 +546,7 @@ console.log('\n⑨ the expiry sweep keeps the ledger\'s birth apart from the set
   const wW = watch.create({ accounts: acctW, userTodos: { add: (k, i) => filedW.push(i), resolve: () => { } }, dataDir: dirW, now: () => tw, log: () => { } });
   const t0 = tw;
   wW.sweep({ since: tw - 5 });   // the timer's settle: confirmed just before the sweep
+  await wW.whenWritten();   // B-0248 unit 5 (lane bl-loop-b): the ledger is the store writer's, written on its thread
   const filedBirth = (() => { try { return JSON.parse(fs.readFileSync(path.join(dirW, 'login-expiry.json'), 'utf8')).since; } catch { return undefined; } })();
   ck('(a) the ledger\'s BIRTH is the first sweep\'s own instant and it is persisted, whatever settle instant the timer hands', wW.watchingSince() === t0 && filedBirth === t0, JSON.stringify({ birth: wW.watchingSince(), filed: filedBirth, t0 }));
   tw += 2 * 3600e3; deadAt = tw - 3600e3;   // the login dies an hour ago: AFTER the birth, before this settle's instant

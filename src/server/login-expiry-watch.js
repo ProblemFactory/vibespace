@@ -222,7 +222,7 @@ function measureLoginSpan(info, seen, now, gapMs) {
  *   log        console.log-shaped
  *   now        injectable clock (the suite drives the ladder on a fake one)
  */
-function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date.now(), sweepMs = SWEEP_MS } = {}) {
+function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date.now(), sweepMs = SWEEP_MS, writer = null } = {}) {
   let heldSaid = false;   // the held sweep is said once an unread episode
   const file = path.join(dataDir, 'login-expiry.json');
   let ledger = {};       // accountId → { exp, sent: [...], items: [{id,text}] } — what we have SAID
@@ -264,7 +264,11 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   const hold = HOLD.create({ file, valid: isObj, code: 'expiry_warnings_unread', aside: (m) => file + '.corrupt-' + m,
     words: (h) => `the record of the login warnings already filed could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and a new login warning waits until it reads`,
     log: (l) => log(`[login-expiry] ${l}`), onLift: (v) => { load(v); storeHeldSaid = false; if (timer) { try { sweep(); } catch (e) { log('[login-expiry] the sweep at the lift failed:', e.message); } } } });
-  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+  // B-0248 step 2 unit 5 (lane bl-loop-b, 主开发 r4147): the record is THE STORE WRITER's (save, below) — a suite's own writer, else the
+  // process's. A second watch over this file in ONE process (a suite's restart) reads what the writer still OWES it, never the older file
+  const W = () => writer || require('../store-writer.js').storeWriter();
+  const owedNow = () => { try { const w = W(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } };
+  { let read; const owed = owedNow(); if (owed != null) read = { text: owed }; else try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: isObj });
     if (hold.start(a) === 'data') load(a.value); }
 
@@ -272,13 +276,17 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
     // Atomic (tmp+rename): a torn ledger would either replay every warning or
     // suppress the real one — both are the exact failure this feature exists
     // to prevent.
+    // B-0248 step 2 unit 5 (lane bl-loop-b, 主开发 r4147): the temp, write and rename are THE STORE WRITER's, on its thread. The release
+    // wrote them ON THE LOOP at every 5-minute sweep (its `seen` changes each sweep), and on slow storage a rename holds the loop its whole
+    // delay (the page bl-loop-b/b0248-page.md, row 9). The bytes are made AT the write (the newest record); a failed write is said by the
+    // writer and written again; one owed at a stop is written by the hub's exit (server.js shutdown: the writer's exitFlush)
     if (!hold.writable('a write of the login warnings record')) return;   // HELD: never over a file that could not be read
-    try {
-      const tmp = file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify({ version: 1, since, members: ledger, seen }, null, 2), { mode: 0o600 });
-      fs.renameSync(tmp, file);
-    } catch (e) { log('[login-expiry] ledger write failed:', e.message); }
+    try { W().dirty(file, { name: 'login-expiry.write', mode: 0o600, produce: () => JSON.stringify({ version: 1, since, members: ledger, seen }, null, 2) }); }
+    catch (e) { log('[login-expiry] ledger write failed:', e.message); }
   }
+  /** the record as memory holds it is on disk — true when written, false when the writer's write failed or passed its bound (it stays
+   *  owed); at once when nothing is owed (a suite's restart and its readers wait on it) */
+  const whenWritten = () => { try { return Promise.resolve(W().durable(file)).then((ok) => ok !== false, () => false); } catch { return Promise.resolve(false); } };
 
   /** RETRACT the items THIS WATCH filed for THIS member's previous deadline.
    *  Returns { n, remaining } — n resolved now, remaining = the records we
@@ -453,7 +461,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
   }
   function stop() { if (timer) { clearTimeout(timer); timer = null; } }
 
-  return { sweep, start, stop, held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), ledger: () => JSON.parse(JSON.stringify(ledger)), seen: () => JSON.parse(JSON.stringify(seen)), watchingSince: () => since, INBOX_KEY, WARN_STAGES };
+  return { sweep, start, stop, whenWritten, held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), ledger: () => JSON.parse(JSON.stringify(ledger)), seen: () => JSON.parse(JSON.stringify(seen)), watchingSince: () => since, INBOX_KEY, WARN_STAGES };
 }
 
 module.exports = { create, itemTextFor, itemWordsFor, detailWordsFor, shortSessionHint, measureLoginSpan, INBOX_KEY, SWEEP_MS, RESOLVED_BY };

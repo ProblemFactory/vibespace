@@ -43,8 +43,8 @@ const DEDUP_MS = 60000;       // an identical consecutive (session → to) insid
 // drops the rows for the next read. So an outside edit is seen within the bound plus one look (a same-size rewrite right after a
 // write of the hub, before the next look has named the file's time, is the one shape it cannot tell), and a share that stops
 // answering holds nothing.
-// THE CLAIM, EXACTLY (round wuq1b1trm, 主开发 r2940): NO synchronous file ask on a record's READ road. The WRITE road still reads
-// the live file whole at its trim check (_maybeTrim: once a move, not once a record). A whole read of the live file AND every
+// THE CLAIM, EXACTLY (round wuq1b1trm, 主开发 r2940): NO synchronous file ask on a record's READ road. The WRITE road reads the live
+// file whole at its trim check only when its line count is not known or has passed the bound (B-0248 step 2 unit 5, _maybeTrim below). A whole read of the live file AND every
 // shard happens at the first read, after a trim, after a write that failed and after the backstop found the file changed. The
 // kept rows hold every shard's rows for the life of the process, and the per-file map is never emptied (one ledger per hub; a
 // suite's folders are a handful) — fine for a hub. A look that never returns keeps its file's look out for good: the backstop is
@@ -58,7 +58,7 @@ const lookNow = () => (_test.now ? _test.now() : Date.now());
 function fileState(file) {
   const k = path.resolve(file);
   let st = _files.get(k);
-  if (!st) { st = { rows: null, bytes: -1, clean: true, seen: null, lookAt: 0, lookOut: false, gen: 0 }; _files.set(k, st); }
+  if (!st) { st = { rows: null, bytes: -1, clean: true, seen: null, lookAt: 0, lookOut: false, gen: 0, lines: null }; _files.set(k, st); }
   return st;
 }
 
@@ -75,7 +75,7 @@ class SlotTransitions {
    *  behind the ledger's back says so this way. all() hands out THE ONE KEPT ARRAY, READ-ONLY: frozen, its rows frozen, replaced
    *  (never changed) by a write — a caller that wants its own order or its own rows copies them */
   get _cache() { return this._st.rows ? { rows: this._st.rows } : null; }
-  set _cache(v) { if (v == null) { this._st.rows = null; this._st.gen++; } }
+  set _cache(v) { if (v == null) { this._st.rows = null; this._st.lines = null; this._st.gen++; } }
 
   /** The dedup key is the LINK, not the session (2026-09-07 r3, reproduced).
    *  A session key (`sess-<seq>-<ms>`) is globally unique and a conversation
@@ -106,10 +106,12 @@ class SlotTransitions {
     if (prev && prev.to === to && at - prev.at < DEDUP_MS && (!from || from === prev.to)) return null;
     const row = { sessionId: sessionId || null, poolId: poolId || null, from: from || null, to, at, ...(why ? { why: String(why).slice(0, 40) } : {}) };
     const st = this._st, line = JSON.stringify(row) + '\n';
+    const counted = st.lines; st.lines = null;   // the trim check's count (below): not known while the append is out — a write that fails leaves it so
     try {
       fs.mkdirSync(this.dataDir, { recursive: true });
       fs.appendFileSync(this.file, line);
     } catch { st.rows = null; st.gen++; return null; }   // a write that FAILED (a part of it may have landed): the next read reads the file
+    if (counted != null) st.lines = counted + 1;   // …landed: one line more
     this._last.set(k, { to, at });
     // THE WRITE LANDS IN THE KEPT ROWS in this step, exactly as a read would give them (the line parsed back; a row whose `at` is
     // not finite is one a read drops; the order is the read's stable sort by `at`). Only on a file whose last line was whole: a
@@ -134,15 +136,17 @@ class SlotTransitions {
     const st = this._st;
     if (st.rows) { this._lookMaybe(); return st.rows; }   // from memory: no stat, no read (the backstop's look is off the loop)
     const rows = [];
-    let bytes = -1, clean = true;
+    let bytes = -1, clean = true, lines = null;
     const eat = (fp, live = false) => {
       let buf; try { buf = fs.readFileSync(fp); } catch (e) { MR.absentOr(e, fp); return; }   // MG1: inside a migration an unread record = not run
       // the live file's size is its BYTES before decoding — the backstop compares it with the size on disk (a byte that is no
       // valid text, left by a hand, decodes to more bytes and would make them differ for ever)
       if (live) { bytes = buf.length; clean = !buf.length || buf[buf.length - 1] === 0x0a; }
       const txt = buf.toString('utf-8');
+      if (live) lines = 0;
       for (const line of txt.split('\n')) {
         if (!line) continue;
+        if (live) lines++;
         try { const r = JSON.parse(line); if (r && r.to && Number.isFinite(r.at)) rows.push(r); } catch { }
       }
     };
@@ -154,7 +158,7 @@ class SlotTransitions {
     eat(this.file, true);
     rows.sort((a, b) => a.at - b.at);
     for (const r of rows) Object.freeze(r);
-    st.rows = Object.freeze(rows); st.bytes = bytes; st.clean = clean; st.seen = null; st.lookAt = lookNow(); st.gen++;
+    st.rows = Object.freeze(rows); st.bytes = bytes; st.clean = clean; st.lines = lines; st.seen = null; st.lookAt = lookNow(); st.gen++;
     return rows;
   }
 
@@ -166,7 +170,7 @@ class SlotTransitions {
     const gen = st.gen;
     const said = (size, mtimeMs) => {
       if (st.gen !== gen || !st.rows) return;   // the hub wrote (or the rows were dropped) while the look was out: its answer is old
-      if (size !== st.bytes || (st.seen != null && mtimeMs !== st.seen)) { st.rows = null; st.gen++; return; }   // changed outside the hub
+      if (size !== st.bytes || (st.seen != null && mtimeMs !== st.seen)) { st.rows = null; st.lines = null; st.gen++; return; }   // changed outside the hub
       st.seen = mtimeMs;
     };
     Promise.resolve().then(() => (_test.stat ? _test.stat(this.file) : fs.promises.stat(this.file)))   // the census counts this reader site
@@ -218,9 +222,19 @@ class SlotTransitions {
    *  these to place a reading between two re-points. */
   transitionsFor(sessionId) { return this.all().filter((r) => r.sessionId === sessionId); }
 
+  /** B-0248 step 2 unit 5 (lane bl-loop-b, 主开发 r4147): the release read the live file WHOLE here at EVERY record (up to about 2.4 MB on
+   *  the loop at each pool re-point: the page bl-loop-b/b0248-page.md). The live file's line count is now kept in the file's one state
+   *  (every instance of the file shares it): learned at a whole read (all(), or here when not known), one more a line appended, and
+   *  dropped wherever the kept rows are (a failed write, a trim, a change seen outside the hub, a suite's drop). For the hub's own writes
+   *  it is never below the file's count (a line glued onto a partial last one counts one more), so their trim is never missed; a writer
+   *  outside the hub is seen by the backstop's look (above), which drops it. The file is read whole only when
+   *  the count is not known or has passed the bound, and the cut judges the lines it read, never the count */
   _maybeTrim() {
-    let txt; try { txt = fs.readFileSync(this.file, 'utf-8'); } catch { return; }
+    const st = this._st;
+    if (st.lines != null && st.lines <= this.max) return;
+    let txt; try { txt = fs.readFileSync(this.file, 'utf-8'); } catch { st.lines = null; return; }
     const lines = txt.split('\n').filter(Boolean);
+    st.lines = lines.length;
     if (lines.length <= this.max) return;
     const cut = Math.floor(lines.length / 2);
     try {
@@ -234,6 +248,7 @@ class SlotTransitions {
       fs.writeFileSync(this.file + '.tmp', lines.slice(cut).join('\n') + '\n');
       fs.renameSync(this.file + '.tmp', this.file);
     } catch { }
+    st.lines = null;   // …and its count is learned again
     this._st.rows = null; this._st.gen++;   // a trim (whole or failed half-way) moved rows between files: the next read reads them
   }
 }
