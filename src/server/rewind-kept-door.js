@@ -31,6 +31,7 @@ const DA = require('../device-acts.js');
 const { SafeFs } = require('../safe-fs');
 const K = require('../rewind-kept.js');
 const RQ = require('./rewind-requests.js');
+const { addressableId } = require('../claude-lock-capture.js');   // the id a live session may be addressed by (a pending fork's borrowed id is nobody's)
 
 const DATA_ROOT = path.join(__dirname, '..', '..', 'data', 'rewind-kept');
 const CONV_RE = /^[\w-][\w.-]{0,127}$/;
@@ -162,6 +163,7 @@ async function pairedRoad(conv, dm, { by: who, host, callMs = K.KEEP.copyMs, all
 
 /** the road for a conversation → a road | {ok: false, why} */
 async function roadOf(session, conv, { hosts = null, by = null, dataRoot = DATA_ROOT, call = null, dm = null, callMs = K.KEEP.copyMs, allMs = K.KEEP.allMs } = {}) {
+  if (conv == null) return { ok: false, why: 'not-started' };   // r4423: no addressable id yet (a pending fork) — no record, said by its cause
   if (typeof conv !== 'string' || !CONV_RE.test(conv) || conv === '.' || conv === '..') return { ok: false, why: 'unreadable' };
   if (!session || !session.host) return hubRoad(conv, { dataRoot, call });
   let agent = dm;
@@ -243,6 +245,10 @@ async function manifestAt(conv, press, opts = {}) {
  *  (the law; its own press spared from that keep's sweep); then each row, one at a time, the mount door asked before each */
 async function putBack({ session, conv, press, by, hosts = null, dryRun = false, expect = null, now = Date.now(), ...opts } = {}) {
   if (!by || by.kind !== 'human') return { ok: false, reason: 'not-the-person', cls: 'cannot' };
+  // r4423: THE FENCES BELOW ARE READ ON THE SESSION WHOSE ADDRESSABLE ID IS THE KEY — the conversation's one live session (the ws case
+  // keys by that very session; a conversation has one live writer). No live session: not running; no addressable id: not started
+  if (!session) return { ok: false, reason: 'not-running', cls: 'cannot' };
+  if (conv == null) return { ok: false, reason: 'not-started', cls: 'cannot' };
   const manifest = await manifestAt(conv, press, opts);
   if (!manifest) return { ok: false, reason: 'not-kept', cls: 'cannot' };
   if ((manifest.machine || null) !== ((session && session.host) || null)) return { ok: false, reason: 'stopped', cls: 'cannot' };   // its machine's conversation, live there
@@ -288,9 +294,12 @@ async function putBack({ session, conv, press, by, hosts = null, dryRun = false,
 // every file is put back, the line stays and SAYS so (never a greyed door). The record goes with its conversation (forgetLines).
 const LINES_MAX = 32;
 /** THE CONVERSATION's OWN KEY (主开发 r2372 (1)): the kept copies and their lines follow the CONVERSATION, not the session — a resume
- *  or an exit gives a new session id, the harness's own conversation id stays (claude: its session uuid) → '<backend>-<id>' | null */
+ *  or an exit gives a new session id, the harness's own conversation id stays (claude: its session uuid; codex: its thread) →
+ *  '<backend>-<id>' | null. A BORROWED ID IS NOBODY's ADDRESS (r4423): a pending fork carries its parent's id until the CLI announces
+ *  its own, so the key is the conversation's ADDRESSABLE id (claude-lock-capture.js addressableId) — none yet, no key: nothing is
+ *  drawn, kept or put back for it, refused «not started yet» */
 function convKeyOf(session) {
-  const id = session && (session.claudeSessionId || session.backendSessionId);
+  const id = addressableId(session);
   const be = String((session && session.backend) || 'claude');
   return id && /^[\w-]{1,100}$/.test(String(id)) && /^[a-z][\w-]{0,20}$/.test(be) ? `${be}-${id}` : null;
 }

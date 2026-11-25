@@ -293,6 +293,14 @@ console.log('— ④ the press');
   const oc = conv({ answers: [DRY()] });
   const ro = await D.pressFiles({ session: oc.session, msgId: oc.pid, by: HUMAN, ...KA, choice: 'conversation', lastSeenUuid: U(9), stat: stat(MT) });
   ok(!ro.ok && ro.reason === 'page-behind' && ro.step === 'conversation', '④ «THE CONVERSATION ONLY» refused by tier one\'s door: marked the conversation\'s too (r2245 (10)) — the page says it in tier one\'s words', ro);
+  // r4423 MUST 1: a conversation with NO addressable id yet (a pending fork: no key) — its files press keeps and puts back nothing,
+  // refused by name; its confirm draws the conversation only and says why
+  const nk = conv({ answers: [DRY(), PRESS] }), nkc = conv({ answers: [DRY()] });
+  const rnk = await D.pressFiles({ session: nk.session, msgId: nk.pid, by: HUMAN, conv: null, keepOpts: KA.keepOpts, choice: 'files', drawn, stat: stat(MT) });
+  const cnk = await D.filesConfirmOf({ session: nkc.session, msgId: nkc.pid, by: HUMAN, conv: null, keepOpts: KA.keepOpts, stat: stat(MT) });
+  const pressedNk = (c) => c.sent().filter((q) => q.request && q.request.subtype === 'rewind_files' && !q.request.dry_run).length;
+  ok(!rnk.ok && rnk.reason === 'not-started' && pressedNk(nk) === 0 && cnk.ok && cnk.default === 'conversation' && cnk.keep.ok === false && cnk.keep.refusals[0].why === 'not-started',
+    '④ A CONVERSATION WITH NO ADDRESSABLE ID YET (r4423: a pending fork has no key): its files press is refused «not started» and nothing is pressed or kept; its confirm draws the conversation only and says why', { rnk: rnk.reason, keep: cnk.keep });
 }
 
 console.log('— ⑤ file times');

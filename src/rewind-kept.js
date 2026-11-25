@@ -38,7 +38,7 @@ const FILE_MODE = 0o600;
 const PRESS_RE = /^kp-[0-9a-z]{6,12}-[0-9a-f]{8}$/;
 // why a file «cannot keep a copy» (the confirm's words each); `kept-full`: the machine's kept copies are full — the oldest leave seven
 // days after their press (no door removes them early: the row's remainder)
-const KEEP_WHY = Object.freeze(['too-many', 'too-large', 'press-full', 'kept-full', 'unreadable', 'relative-path', 'link', 'folder', 'device', 'no-time', 'not-kept', 'agent-too-old', 'files-not-allowed']);
+const KEEP_WHY = Object.freeze(['too-many', 'too-large', 'press-full', 'kept-full', 'unreadable', 'relative-path', 'link', 'folder', 'device', 'no-time', 'not-kept', 'agent-too-old', 'files-not-allowed', 'not-started']);
 // a path the keep can name for sure: absolute (posix, or a drive). A relative or `~` path would be read against the HUB's own
 // folder — never kept for the person's file
 const isAbsPath = (p) => typeof p === 'string' && (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p));

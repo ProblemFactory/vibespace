@@ -192,6 +192,7 @@ async function pressFiles({ session, msgId, by, choice, drawn = null, lastSeenUu
     return r.ok ? { ok: true, steps: F.STEPS.conversation, results: { conversation: { ...r, asked: true } }, outcome: F.outcomeOf(F.STEPS.conversation, { conversation: r }) } : { ...r, step: 'conversation' };   // r2245 (10): tier one's refusal, said in its words
   }
   if (session._fileCheckpoints !== true) return { ok: false, reason: 'files-off', cls: F.FILES_REFUSALS['files-off'] };   // DARK until U1
+  if (conv == null) return { ok: false, reason: 'not-started', cls: 'cannot' };   // r4423: no addressable id yet (a pending fork) — nothing kept, nothing put back
   if (rewindOut(session, Date.now())) return { ok: false, reason: 'pending', cls: REWIND_REFUSALS.pending };
   if (F.STEPS[choice].includes('conversation')) {   // «both»: the conversation's whole verdict BEFORE anything is written
     const c = requestRewind({ session, msgId, lastSeenUuid, by, dryRun: true, now: Date.now() });

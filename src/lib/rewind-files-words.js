@@ -66,6 +66,7 @@ const KEEP_WORDS = () => ({
   'not-kept': t('its copy could not be checked'),
   'agent-too-old': t('that machine\'s agent is an older version'),
   'files-not-allowed': t('that machine does not allow file changes'),
+  'not-started': t('this conversation has not started yet (it gets its own name with its first message)'),   // r4423: a pending fork's
 });
 export const keepWhyWords = (why) => KEEP_WORDS()[why] || t('not known');
 
@@ -119,6 +120,7 @@ const PRESS_REFUSALS = () => ({
   pending: t('Another rewind is still out — try again once it answers.'),
   'not-the-person': t('Only a press on this page can put files back.'),
   'door-failed': t('VibeSpace could not do this — nothing was sent.'),
+  'not-started': t('This conversation has not started yet — its files can be kept once its first message is sent. Nothing was kept or put back.'),
 });
 export const pressRefusalWords = (reason) => PRESS_REFUSALS()[reason] || null;
 
@@ -195,6 +197,8 @@ const PUT_REFUSALS = () => ({
   stopped: t('Put these files back from the conversation on their own machine.'),
   'not-the-person': t('Only a press on this page can put files back.'),
   'door-failed': t('VibeSpace could not do this — nothing was put back.'),
+  'not-started': t('This conversation has not started yet — nothing was put back.'),
+  'not-running': t('This conversation is not running here — resume it, then put its files back.'),
 });
 /** the put-back's answer → one sentence */
 export function putBackOutcomeWords(r) {

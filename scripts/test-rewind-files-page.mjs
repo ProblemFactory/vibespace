@@ -126,6 +126,9 @@ console.log('— ① the words');
   ok(lostW === `${t('Put back as they were: {n} file(s); {m} not put back — the kept copy still holds them.', { n: 1, m: 1 })} ${t('{k} file(s) could not be read from the kept copy — it cannot put them back.', { k: 1 })}`
     && lostL.words.includes(t('A put-back on {date} left {m} file(s) not put back — the kept copy still holds them.', { date: 'D5', m: 1 })) && lostL.words.includes(t('At the put-back on {date}, {k} file(s) could not be read from the kept copy — it cannot put them back.', { date: 'D5', k: 1 })),
     '① A ROW WHOSE KEPT COPY CANNOT BE READ is named apart (r2372 (4)) — in the put-back\'s answer and in the line — never counted as «the kept copy still holds them»', { lostW, lostL: lostL.words });
+  ok(W.putBackOutcomeWords({ ok: false, reason: 'not-started' }) === t('This conversation has not started yet — nothing was put back.') && W.putBackOutcomeWords({ ok: false, reason: 'not-running' }) === t('This conversation is not running here — resume it, then put its files back.')
+    && W.pressRefusalWords('not-started') === t('This conversation has not started yet — its files can be kept once its first message is sent. Nothing was kept or put back.'),
+    '① A CONVERSATION THAT HAS NOT STARTED (a pending fork, r4423) and one that is not running: each refusal in its own words');
   const bounded = W.putBackPlanWords(Array.from({ length: 20 }, (_, i) => ({ path: `/w/p${i}.js`, act: 'overwrite' })));
   ok(bounded.length === W.SHOWN_MAX + 1 && bounded[W.SHOWN_MAX] === t('and {n} more', { n: 20 - W.SHOWN_MAX }), `① THE PUT-BACK's CONFIRM is bounded as the files confirm is (r2245 (11)): ${W.SHOWN_MAX} rows, «and N more»`, bounded.length);
   const d = W.drawnOf(FILES());
@@ -308,7 +311,12 @@ const dryAnswer = (q) => q.match({ type: 'rewind-result', sessionId: 'sess-1', r
   meta.call(s.v, { type: 'msg', sessionId: 'sess-1', op: 'meta', subtype: 'rewind-kept-line', data: { press: live1.press, triedAt: T, notPut: 1, unrecorded: true } });
   const kept1 = s.v._keptLines.get(live1.press);
   ok(kept1.state === 'kept' && kept1.door === true && doors().length === 1 && box().children[0].innerText.includes(t('This line could not be saved: the conversation\'s record of kept files could not be read.')),
-    '② A TOLD PATCH WITH NO STATE (r2372 (3)) is laid over the line the page drew — its state and its door kept, never turned to «gone»; the line says it was not saved', kept1);
+    '② a told patch is laid over the line this page drew — its state and its door kept; the line says it was not saved (the hub\'s half — no door, no state in the frame — is test-rewind-kept\'s leg, r4423 MUST 2)', kept1);
+  // r4423 (a): a patch with no state for a press this page NEVER drew (a window attached after the record was torn) is not drawn
+  const pa = fresh(V, { files: true }); view = pa.v;
+  meta.call(pa.v, { type: 'msg', sessionId: 'sess-1', op: 'meta', subtype: 'rewind-kept-line', data: { press: 'kp-mwq6g800-0000abcd', triedAt: T, notPut: 1, unrecorded: true } });
+  ok(!pa.root.children.some((c) => c.className === 'chat-rewind-kept') && !(pa.v._keptLines && pa.v._keptLines.has('kp-mwq6g800-0000abcd')),
+    '② A PATCH FOR A PRESS THIS PAGE NEVER DREW (r4423 (a)) is not drawn at all — never «gone» for files whose copy still stands (the attach already said the record could not be read)');
   // a line that arrives keeps the strip's scroll place (r2372)
   box().scrollTop = 40;
   meta.call(s.v, { type: 'msg', sessionId: 'sess-1', op: 'meta', subtype: 'rewind-kept-line', data: { ...live1, files: 2 } });
@@ -371,6 +379,15 @@ console.log('— red controls');
   kn.v._disposed = true; kn.v._endKeptView();
   const knNote = toasts.find((x) => x[0] === t('Checking the files…'));
   ok(!!knNote && knNote[1].removed === false, 'RED CONTROL (the view\'s end leaves «Checking the files…»): a window closed while its files are checked leaves the line pinned for good');
+  const drawsUndrawn = liftView(anchored(VSRC, "    if (!d.state && !lines.has(d.press)) return;\n", '', 'page: an undrawn patch drawn'));
+  const du = fresh(drawsUndrawn, { files: true }); view = du.v;
+  metaOf(VSRC).call(du.v, { type: 'msg', sessionId: 'sess-1', op: 'meta', subtype: 'rewind-kept-line', data: { press: 'kp-mwq6g800-0000abce', triedAt: Date.now(), notPut: 1, unrecorded: true } });
+  ok(du.root.all().some((e) => /is gone/.test(e.textContent || '')), 'RED CONTROL (a patch for a press never drawn, drawn): a second window shows «the copy … is gone» for files whose copy still stands');
+  const keepsWatcher = liftView(anchored(VSRC, "    try { this._keptRo?.disconnect?.(); } catch { }\n", '', 'page: the view\'s end leaves the size watcher'));
+  const kw = fresh(keepsWatcher, { files: true }); view = kw.v;
+  kw.v._sayKeptLine({ press: 'kp-mwq6g800-0000abcf', state: 'kept', door: true, files: 1, at: 1, until: 9e12 });
+  const kwRo = watchers[watchers.length - 1]; kw.v._disposed = true; kw.v._endKeptView();
+  ok(!!kwRo && kwRo.on === true, 'RED CONTROL (the view\'s end leaves the size watcher): a closed view keeps watching its strip');
   const unwiredMeta = metaOf(anchored(VSRC, "{ this._onKeptMeta(op); return; }", "{ void op; return; }", 'page: the kept-lines meta not wired'));
   const uw = fresh(V0, { files: true }); view = uw.v;
   unwiredMeta.call(uw.v, (await serverFrames('0000adad', { now: Date.now() - 100, msgAt: Date.now() - 9e5 })).told[0]);

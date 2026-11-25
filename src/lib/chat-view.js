@@ -2288,8 +2288,11 @@ class ChatView {
   _sayKeptLine(d, { told = false, draw = true } = {}) {
     if (!d || typeof d.press !== 'string' || !d.press) return;
     const lines = this._keptLines || (this._keptLines = new Map());
-    // r2372 (3): a told PATCH (a field the hub could not record) is laid over what the page drew — never an undefined over a state
-    lines.set(d.press, { ...(lines.get(d.press) || {}), ...Object.fromEntries(Object.entries(d).filter(([, v]) => v !== undefined)) });
+    // r2372 (3): a told PATCH (a field the hub could not record) is laid over the line this page drew; r4423 (a): a patch with no
+    // state for a press this page NEVER drew (a window attached after the record was torn) is not drawn at all — the attach already
+    // said the record could not be read, and «gone» would be false for a copy that still stands
+    if (!d.state && !lines.has(d.press)) return;
+    lines.set(d.press, { ...(lines.get(d.press) || {}), ...d });
     if (told && d.door === true) this._keptClosed = false;   // a copy just kept is shown, even after a close
     if (draw) this._drawKeptStrip();
   }
