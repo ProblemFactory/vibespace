@@ -1141,7 +1141,15 @@ function noticeText(warn) {
   return `${scope} has used ${warn.used} of its ${warn.limit} unattended turns ${window} (${warn.pct}%) — the limit: ${SL.settingLink(warnRowOf(warn))}.${spent} VibeSpace will refuse further automatic turns on it when the budget is spent.`;
 }
 
+/** B-ef83 unit 1 (主开发 r4320 / r4323): THE GATE COULD NOT JUDGE — the refusals that say nothing of a cap, a budget or a wall: the
+ *  ledger's lock held by another process (or unwritable / unreadable), the ledger unread, the settings unread. Each hold lifts by its
+ *  OWN event (spend-guard onGateFree); a turn refused ONLY for one of these is owed to that lift — asked ONCE when it comes. A cap,
+ *  a switch, an overage or an identity refusal is never in this family. */
+const HELD_WHYS = Object.freeze(['ledger-lock-unwritable', 'ledger-lock-unreadable', 'ledger-held-elsewhere', 'ledger-unreadable', 'settings-unread']);
+const isHeldWhy = (why) => HELD_WHYS.includes(String(why || ''));
+
 module.exports = {
+  HELD_WHYS, isHeldWhy,
   SPEND_ROW_KEYS, DOOR_LINK_WORDS, spendRowOf, spendRowLink, warnRowOf,
   authorizeUnattendedBatch, // lane auto-resume-bulk: ONE authorization for N turns (the resume of every wall-stopped session)
   SPEND_REASONS, BUDGET_DEFAULTS, HOUR_MS, DAY_MS, MAX_STAMPS, CAP_MAX, stampCap, OVERAGE_STALE_MS,

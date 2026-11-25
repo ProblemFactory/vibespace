@@ -844,6 +844,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       for (const e of q.slice()) {   // a copy: a posting wake leaves `q` inside the loop
         if (!e || typeof e !== 'object') continue;
         if (e.charged) e.charged.hold = null;
+        if (e.waitsLift) { delete e.waitsLift; e.nextAt = clock.now(); }   // B-ef83 unit 1: owed to an earlier process's lift — this start's own road asks it ONCE
         if (isOwed(e)) { delete e.paceRefusals; delete e.forceRefusedAt; waitedOut++; }   // its schedule starts again here (owedEnd)
         // A WAKE WHOSE FRAME WAS BEING POSTED (主开发 14:26Z — a hard kill between the post and the entry's end): its frame MAY have
         // landed — said, NEVER offered to the line again (a second resume and a second frame = two billed turns for one delivery);
@@ -1135,7 +1136,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const q of Object.values(retry)) for (const e of q) {
       if (!e || e.inflight) continue;   // an in-flight entry arms nothing (its hold is the post's; a due hold on it re-armed the timer at 0 ms)
       if (holdDueAt(e) < due) due = holdDueAt(e);
-      if (!e.ho && !e.waitsReadopt && Number(e.nextAt) < due) due = Number(e.nextAt);   // a wake waiting for the re-adoption arms no timer
+      if (!e.ho && !e.waitsReadopt && !e.waitsLift && Number(e.nextAt) < due) due = Number(e.nextAt);   // a wake waiting for the re-adoption arms no timer
     }
     if (!Number.isFinite(due)) return;
     parkTimer = clock.setTimeout(() => { parkTimer = null; runDueRetries().catch((e) => log('[deliver] retry sweep failed:', e && e.message)); }, Math.max(0, due - clock.now()));
@@ -1147,8 +1148,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const q of Object.values(retry)) for (const e of q) if (e && !e.inflight && holdDueAt(e) <= now) { releaseHoldOf(e); changed = true; }   // never an in-flight entry's (verify r1): the post's own outcome converts or keeps it within seconds
     if (changed) writeRetryNow();
     const due = [];
-    for (const [cid, q] of Object.entries(retry)) if (q.some((e) => e && !e.inflight && !e.ho && !e.waitsReadopt && Number(e.nextAt) <= now)) due.push(cid);
-    const dueOf = (cid) => (retry[cid] || []).filter((e) => e && !e.inflight && !e.ho && !e.waitsReadopt && Number(e.nextAt) <= clock.now());
+    for (const [cid, q] of Object.entries(retry)) if (q.some((e) => e && !e.inflight && !e.ho && !e.waitsReadopt && !e.waitsLift && Number(e.nextAt) <= now)) due.push(cid);
+    const dueOf = (cid) => (retry[cid] || []).filter((e) => e && !e.inflight && !e.ho && !e.waitsReadopt && !e.waitsLift && Number(e.nextAt) <= clock.now());
     for (const cid of due) {
       // B-f276 1a (the fourth read's must): a conversation whose due wakes are ALL held is asked by THE DOOR ALONE — never a whole attempt
       // dragging its other wakes in once a minute (their pace asked, rows, writes, events, a force come early); a wake the door lifts is
@@ -1160,7 +1161,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // THE BELT (verify r1): an entry still due after its conversation's pass was not moved by anything above — it is
     // paced to the first step, never left to re-arm the timer at 0 ms (a hot loop is the one failure a park must not have)
     let belted = 0;
-    for (const cid of due) for (const e of (retry[cid] || [])) if (e && !e.inflight && !e.ho && !e.waitsReadopt && Number(e.nextAt) <= clock.now()) { e.nextAt = clock.now() + RETRY_STEPS_MS[0]; belted++; }
+    for (const cid of due) for (const e of (retry[cid] || [])) if (e && !e.inflight && !e.ho && !e.waitsReadopt && !e.waitsLift && Number(e.nextAt) <= clock.now()) { e.nextAt = clock.now() + RETRY_STEPS_MS[0]; belted++; }
     if (belted) { writeRetryNow(); log(`[deliver] ${belted} parked entr${belted === 1 ? 'y was' : 'ies were'} still due after the sweep — paced to ${RETRY_STEPS_MS[0] / 1000} s (a sweep that moves nothing must not re-arm at once)`); }
     scheduleRetry();
   }
@@ -1237,7 +1238,53 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // what it is handed it falls (its callers' contract). What waits is bounded by its own key: one owed wake per (producer, key), one
   // ended wake per conversation (the parks merge them).
   const HELD_STEP_MS = 60_000;
-  const aside = (x) => !!(x && x.waitsHeld);
+  const aside = (x) => !!(x && (x.waitsHeld || x.waitsLift));   // B-ef83 unit 1: a wake owed to the gate's lift is passed over the same way
+  // B-ef83 unit 1 (主开发 r4320 / r4323): A WAKE THE GATE COULD NOT JUDGE IS KEPT, never felled. A park entry (a parked frame, a paced wake,
+  // an ended conversation's owed wake) — and a first try's wake for a caller that parks (`opts.retry`) — whose spend ask was refused ONLY
+  // because the gate could not judge (src/spend-authorizer.js HELD_WHYS: the ledger's lock kept by another process — a restart's seconds —
+  // or unwritable / unreadable, the ledger or the settings unread) is MARKED `waitsLift {why, since}` on disk and passed over by every road
+  // (no attempt, no bound, no fall, no timer — as a wake waiting for the re-adoption). It is asked ONCE at the lift of the hold that
+  // refused it (spend-guard onGateFree), through its OWN road: the pace and the caps as any attempt — a cap then refuses it AS A CAP (it
+  // falls, never owed again); refused held again (another hold of the family stands) it is owed to that hold's lift. Its words stay where
+  // they are; a turn that carries them ends the entry by the park's own roads (never a wake for words that rode a turn). A boot asks a
+  // mark the last process left ONCE (adoptRetryDoc). A person's press never reaches this road (an attended verdict is never held).
+  const SA = require('../spend-authorizer.js');
+  function waitLift(entries, why, at = clock.now()) {
+    const marked = (entries || []).filter((e) => e && retry[e.cid] && retry[e.cid].includes(e));
+    if (!marked.length) return 0;
+    for (const e of marked) { e.waitsLift = { why: String(why), since: at }; delete e.inflight; }
+    writeRetryNow();
+    // law (h): the senders of a kept owed wake are told the TRUTH at the refusal — not woken yet, held, asked again at the lift — where
+    // today's words told them it fell (the fall's notice road: their own stash, read on their next turn)
+    for (const e of marked) for (const to of (isOwed(e) && Array.isArray(e.senders) ? e.senders : []).filter((x) => x && localSessionFor(x))) {
+      const name = (e.meta && (e.meta.name || e.meta.memberName)) || e.fromName || null;
+      try { stashFor(to, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text: `${name ? `Your wake of ${name}` : 'A wake you asked for'} is not sent yet: the spend gate could not judge just now (${why} — its record of turns nobody typed is held, a restart's seconds or another VibeSpace process). It is asked again once, by itself, when that hold lifts. The message is in the group and reaches them on their next turn (free).`, ts: at, held: { kind: 'spend-cap', why: String(why), lift: true } }); } catch (err) { log(`[deliver] the held notice could not reach ${String(to).slice(0, 8)}: ${err && err.message}`); }
+    }
+    for (const e of marked) emitRetry('held', e.cid, e, { why: String(why), lift: true, attempts: Array.isArray(e.attempts) ? e.attempts.length : 0 });
+    log(`[deliver] ${marked[0].cid}: ${marked.map((e) => e.id).join(', ')} not woken yet — the spend gate could not judge (${why}); kept, asked again ONCE when that hold lifts`);
+    stashChanged(marked[0].cid);
+    scheduleRetry();
+    return marked.length;
+  }
+  /** the lift of a hold of the family: every wake owed to THAT hold is due now, ONCE (its own road asks the gate again) */
+  function gateLifted({ whys = [], at = clock.now() } = {}) {
+    if (retryClosed) return 0;   // a closed park (a stopping hub) answers no lift: the next start's own road asks what it left
+    let n = 0;
+    for (const q of Object.values(retry)) for (const e of q) {
+      if (!e || !e.waitsLift || !whys.includes(e.waitsLift.why)) continue;
+      // the bound clock moved by the hold, as a producer's hold is (liftHeld): the time the gate could not judge never fells it at its lift
+      const span = Math.max(0, at - Math.max(Number(e.waitsLift.since) || at, parkBootAt));
+      e.firstAt = Math.max(Number(e.firstAt || at), parkBootAt) + span;
+      if (Number(e.boundFrom) > 0) e.boundFrom = Number(e.boundFrom) + span;
+      delete e.waitsLift; e.nextAt = clock.now(); n++;
+    }
+    if (!n) return 0;
+    writeRetryNow();
+    log(`[deliver] the spend gate's hold lifted (${whys.join(', ')}) — ${n} wake${n === 1 ? '' : 's'} owed to it asked again, each once, by its own road`);
+    scheduleRetry();
+    return n;
+  }
+  require('./spend-guard.js').onGateFree(gateLifted);
   const producersOf = (e) => (isEnded(e) ? (Array.isArray(e.producers) ? e.producers : [e.producer]) : isOwed(e) ? [e.producer] : []).filter(Boolean);
   /** → {why, by} (by = the producer that said held) | null */
   function heldWhy(e) {
@@ -1405,6 +1452,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // B-f276 1a: the line found NOTHING BUT KEPT entries (their reach cannot be judged now): the wake stays owed, set aside, and goes
         // when the stash keeps none (or a new delivery brings words) — never ended «nothing is waiting» over entries that wait
         if (r && r.outcome === 'held') { if (e.attempts.length && e.attempts[e.attempts.length - 1] && e.attempts[e.attempts.length - 1].phase === 'line') e.attempts.pop(); const hh = r.code === 'kept' ? null : heldWhy(e); setAside(e, r.why || 'every entry waiting for it is kept (its reach cannot be judged now)', clock.now(), r.code === 'kept' ? { kept: true } : hh && hh.by ? { by: hh.by } : hh && hh.stash ? { stash: true } : {}); endedAnswers.delete(e.cid); writeRetryNow();   /* no refusal: the row keeps «{n} notices are waiting for it» — true */ stashChanged(e.cid); scheduleRetry(); return; }
+        if (r && r.outcome === 'refused' && r.code === 'spend' && SA.isHeldWhy(r.spendWhy)) { if (e.attempts.length && e.attempts[e.attempts.length - 1] && e.attempts[e.attempts.length - 1].phase === 'line') e.attempts.pop(); endedAnswers.set(e.cid, { outcome: 'waits', code: 'spend-held', why: r.why || null, until: null, at: clock.now() }); waitLift([e], r.spendWhy); return; }   // B-ef83 unit 1: kept, asked at the lift
         if (r && r.outcome === 'waits') { e.waitsReadopt = true; endedAnswers.set(e.cid, { outcome: 'waits', code: r.code || 'readopt-pending', why: r.why || null, until: null, at: clock.now() }); if (readoptDone) { delete e.waitsReadopt; e.nextAt = clock.now(); } writeRetryNow(); stashChanged(e.cid); scheduleRetry(); return; }
         endEnded(e, r && r.outcome === 'again' ? { outcome: 'failed', why: r.why } : r);
       });
@@ -1769,6 +1817,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         return;
       }
       giveBack({ attempted: true });
+      if (r && r.refused === 'spend' && SA.isHeldWhy(r.why)) { waitLift(shown, r.why); return; }   // B-ef83 unit 1: the gate could not judge — kept, asked at its lift
       if (r && r.refused === 'spend') { for (const e of shown) fellRetry(e, 'spend-cap', r.reason || 'spend budget', { why: r.why || undefined, identity: r.identity ? String(r.identity.name || r.identity.key) : undefined, cap: Number.isFinite(Number(r.cap)) && r.cap != null ? Number(r.cap) : undefined, retryAfter: Number(r.retryAfter) > 0 ? Number(r.retryAfter) : undefined, capUnset: r.capUnset === true ? true : undefined }); return; }   // B-0a33 (3)
       if (r && r.notRunning) { for (const e of shown) fellRetry(e, 'not-running', r.reason || 'the conversation is no longer running'); return; }
       const attempt = { at: now, reason: (r && r.reason) || 'unknown', phase: (r && r.phase) || null, busy: null, late: 0, why };
@@ -1799,6 +1848,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       if (v && v.ok === false) {
         const cap = v.why === 'hour-cap' ? v.limits?.perIdentityHour : v.why === 'day-cap' ? v.limits?.perIdentityDay : v.why === 'instance-cap' ? v.limits?.perInstanceDay : null;
         giveBack({ attempted: true });
+        if (SA.isHeldWhy(v.why)) { waitLift(shown, v.why); return; }   // B-ef83 unit 1: the gate could not judge — kept, asked at its lift
         for (const e of shown) fellRetry(e, 'spend-cap', `spend budget: ${v.detail || v.why}`, { why: v.why, identity: v.identity ? String(v.identity.name || v.identity.key) : undefined, cap: Number.isFinite(Number(cap)) ? Number(cap) : undefined, retryAfter: Number(v.retryAfter) > 0 ? Number(v.retryAfter) : undefined, capUnset: v.capUnset === true ? true : undefined });   // B-0a33 (3)
         return;
       }
@@ -2412,6 +2462,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // entry names the slot and the ceiling it hit, so the panel can say why
       if (v && v.ok === false) {
         const cap = v.why === 'hour-cap' ? v.limits?.perIdentityHour : v.why === 'day-cap' ? v.limits?.perIdentityDay : v.why === 'instance-cap' ? v.limits?.perInstanceDay : null;
+        // B-ef83 unit 1 (iv): a first try's wake the gate could not judge, for a caller that PARKS (`opts.retry`): parked by the same road
+        // as a transient miss and kept for the lift (waitLift) — never stashed and lost: a wake asked in a restart's seconds had no later turn
+        if (SA.isHeldWhy(v.why) && opts.retry && typeof opts.retry === 'object') {
+          const e = parkRetry(cid, text, opts, { kind, spendReason, charged: null, attempt: { at: clock.now(), reason: `spend gate held: ${v.detail || v.why}`, phase: 'spend', busy: null, late: 0, why: 'first' } });
+          waitLift([e], v.why);
+          return { ok: false, lane: 'message', reason: `not woken yet — the spend gate could not judge (${v.why}); kept, asked again when it lifts`, parked: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, waitsLift: true, refused: 'spend', why: v.why };
+        }
         return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself
       }
       // CHARGE WHAT YOU AUTHORIZED (r4, reproduced). `identity` is null on the

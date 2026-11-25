@@ -192,6 +192,7 @@ export const ROWS = Object.freeze([
   ['authorizeSpend', 'src/server/conversation-deliver.js', 'attemptRetry', 'spend', 1],
   ['authorizeSpend', 'src/server/conversation-deliver.js', 'deliverToConversation', 'spend', 1],
   ['authorizeSpend', 'src/server/worker-dispatch.js', 'dispatch', 'spend', 1],
+  ['authorizeSpend', 'src/server/worker-dispatch.js', 'askOwedCompaction', 'spend', 1],   // B-ef83 unit 1 (i): the owed compaction's one ask at the gate's lift
   ['billingIdentity@server.js', 'server.js', 'sessionAuth', 'pile', 1],
   ['billingIndex@src/server/auto-cli-loop.js', 'src/server/auto-cli-loop.js', 'tick', 'readings', 1],
   ['chooseDefault@src/accounts.js', 'src/accounts.js', '_healPoolsAfterRemoval', 'pool', 1],
@@ -570,6 +571,7 @@ export const CONSUMERS = Object.freeze({
   "deliver": {"file": "src/server/auto-resume.js", "fields": [], "why": "attemptFire's post-gate closure: re-resolves identityFor, authorizes and charges the continue inside; returns only a boolean delivered."},
   "deliverToConversation": {"file": "src/server/conversation-deliver.js", "fields": ["identity"], "why": "delivers a message after the spend check; a refusal's object echoes the verdict's identity for the refusal's words and the stash"},
   "dispatch": {"file": "src/server/worker-dispatch.js", "fields": [], "why": "the worker dispatch's spend check before it sends; returns {ok, code, error} — no account in its return"},
+  "askOwedCompaction": {"file": "src/server/worker-dispatch.js", "fields": [], "why": "B-ef83 unit 1 (i): the compaction a held gate refused, asked ONCE at that hold's lift — the same peer-compact check before it compacts; returns nothing (its end is the ledger's row and the journal)"},
   "dispatcher": {"file": "src/agent-routes.js", "fields": null, "why": "the agent routes' dispatcher: its sends ask the guard; it returns the dispatcher itself", "gap": "it returns the dispatcher object (its methods close over the authorizer), not a value whose fields can be named"},
   "ensureSessionPoolLink": {"file": "src/accounts.js", "fields": [], "why": "Re-points a session's pool link; poolCurrentFor only feeds the slot ledger's from field, and it returns the link's file path."},
   "evaluateOnHost": {"file": "src/accounts.js", "fields": ["dirEmail"], "why": "Usability verdict for an account on a machine; poolCurrent only checks a pool has a target; dirEmail names a mismatched dir login in a refusal."},

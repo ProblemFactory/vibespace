@@ -470,7 +470,7 @@ const RN = require(path.join(REPO, 'src/refresh-note.js'));
     'src/server/channel-api-cards.js': { accept: 1 },     // 82 marks the receipt «not on disk» (r3919); r3988: its clearer asks the stash's own word (stashOnDisk), no peek
     'src/server/channels-engine.js': { accept: 6, peek: 1 },    // 6613 / 7126 / 8849 ignore it rightly (notes; memory holds them); 9145 / 9410 / 9853 read it right — not durable: the kept rows stay for a restart (errs toward again, never lost); 6606 peeks MEMORY for the digest's caps
     'src/server/channels-outbound.js': { accept: 1, peek: 1, plainPeek: 1 },   // 2413 the receipt's mark in its own field (r3919 must 1); 1516 the reconcile: a refused peek decides nothing
-    'src/server/conversation-deliver.js': { accept: 3 },  // the ladder's own (a paced-out fall, the park's fall, a held-back hand-back): its journal counts them
+    'src/server/conversation-deliver.js': { accept: 4 },  // the ladder's own (a paced-out fall, the park's fall, a held-back hand-back; B-ef83 unit 1: the senders of a wake the gate could not judge told it waits): its journal counts them
     'src/server/design-engine.js': { accept: 1 },         // says it: stored:false + why to the comment's sender
     'src/server/doc-engine.js': { accept: 1 },            // says it: stored:false to the doc's comment
     'src/server/end-proposals.js': { accept: 1 },         // TAKEN is told (r3919 must 2) — said in the journal
@@ -501,7 +501,7 @@ const RN = require(path.join(REPO, 'src/refresh-note.js'));
   for (const f of [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js')]) { const t = fs.readFileSync(f, 'utf8'); if (/\bstash(For|Peek)\b/.test(t)) texts.set(path.relative(REPO, f).split(path.sep).join('/'), t); }
   const bad = census(texts);
   const n = Object.values(CALLERS).reduce((a, r) => a + (r.accept || 0) + (r.peek || 0), 0);
-  ok(bad.length === 0 && n === 32, `THE CENSUS: ${n} calls of the accept and the peek in ${Object.keys(CALLERS).length} files, each with its row (28 accepts; 4 peeks — two of memory, two plain that decide nothing from a refusal)`, bad);
+  ok(bad.length === 0 && n === 33, `THE CENSUS: ${n} calls of the accept and the peek in ${Object.keys(CALLERS).length} files, each with its row (29 accepts; 4 peeks — two of memory, two plain that decide nothing from a refusal)`, bad);
   const planted = new Map(texts); planted.set('src/server/a-new-producer.js', "deliver.stashFor(cid, { text: 'x' });");
   const planted2 = new Map(texts); planted2.set('src/server/channels-engine.js', texts.get('src/server/channels-engine.js').replace('deliver.stashPeek(cid, { memory: true })', 'deliver.stashPeek(cid)'));   // stale-pins: kept — the RED puts the plain peek back
   ok(census(planted).some((b) => /a-new-producer\.js: 1 accept/.test(b)) && census(planted2).some((b) => /channels-engine\.js: 1 plain peek/.test(b)), 'RED: a caller born without a row, and a memory peek turned into a plain one, are each named');

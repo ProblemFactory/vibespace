@@ -42,6 +42,7 @@ const { awaitCompactionEnd } = require('./compaction-watch.js');
 const { addressableId } = require('../claude-lock-capture.js');
 const { capsOf } = require('../backend-caps.js');
 const { cleanName } = require('../channel-groups.js');
+const SA = require('../spend-authorizer.js');   // B-ef83 unit 1: the family «the gate could not judge»
 
 // verify r2 ②: the ledger key is the brief's identity for REPLAY (a lost-answer retry / a restart). The optional
 // `attempt` nonce lets a coordinator send the SAME text again ON PURPOSE (`--again`): a fresh nonce ⇒ a distinct key ⇒
@@ -50,6 +51,7 @@ const dispatchKey = (from, to, text, attempt = '') => crypto.createHash('sha256'
 
 function create({ activeSessions, getGroups = () => null, getSendUserInput = () => null, authorizeSpend = null, noteSpend = null, releaseSpend = null, log = () => { }, waitMs = M.COMPACT_WAIT_MS, awaitEnd = awaitCompactionEnd, now = Date.now } = {}) {
   const inFlight = new Set();   // target conversation ids with a dispatch's compaction running (two dispatches never compact twice)
+  const owedCompactions = new Map();   // B-ef83 unit 1 (i): ledger key → { from, to, name, why, since, gid, rec } — a compaction the gate could not judge
   function liveOf(cid) {
     try { for (const [wid, s] of activeSessions) if (s && addressableId(s) === cid) return { wid, s }; } catch { }
     return { wid: null, s: null };
@@ -97,7 +99,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     if (!pre.ok) return { ok: false, code: pre.code, error: pre.why };
     const name = target.name || (s && s.name) || null;
     if (pre.steps[0] === 'replay') {
-      const ago = Math.max(0, Math.round((t0 - Number(entry.deliveredAt)) / 1000));
+      const ago = Math.max(0, Math.round((t0 - Number(entry.deliveredAt || (entry.owedCompact && entry.owedCompact.since))) / 1000));   // B-ef83 unit 1 (i): an owed compaction's brief was posted at its mark
       const pair = typeof ge.findPair === 'function' ? ge.findPair(from, cid) : null;
       const reply = await armReplyWake(ge, from, pair && pair.id);   // the earlier attempt armed it; re-arm (idempotent) so an old delivery predating this feature is corrected and the record is accurate
       const record = M.dispatchRecord({ target: { cid, name }, verdict: pre, wake: { woke: false, reason: `delivered ${ago} s ago by the earlier attempt` }, waitMs, reply });
@@ -114,7 +116,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       let v = null;
       try { v = authorizeSpend({ reason: 'peer-compact', session: s, cid }); }
       catch (e) { v = { ok: false, why: 'authorizer-failed', detail: 'spend authorizer failed: ' + (e && e.message) }; }
-      if (v && v.ok === false) spend = { why: v.why || 'refused', detail: v.detail || v.why || 'refused' };
+      if (v && v.ok === false) spend = { why: v.why || 'refused', detail: v.detail || v.why || 'refused', ...(SA.isHeldWhy(v.why) ? { held: v.why } : {}) };   // B-ef83 unit 1 (i): the gate could not judge
       else charge = { counted: false, identity: (v && v.identity) || null, hold: (v && v.hold) || null, session: s };
     }
     const verdict = M.dispatchVerdict({ ...base, pacer: pace, spend });
@@ -156,7 +158,11 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       log(`[dispatch] ${String(from).slice(0, 8)} → ${cid.slice(0, 8)}: the brief was NOT posted (${(post && post.error) || 'refused'})${compaction ? ' — after a compaction attempt' : ''}`);
       return { ok: false, code: (post && post.code) || 'error', error: (post && post.error) || 'not posted', candidates: post && post.candidates, compaction };
     }
-    if (ledger) { try { ledger.set(key, { from, to: cid, deliveredAt: now() }); } catch { } }   // the brief is in the worker's group: a retry is a replay
+    // B-ef83 unit 1 (i): a compaction the gate could not judge is OWED — its brief posted (the free ride) and NEVER recorded «delivered»
+    // (a replay of the same brief would never compact): the ledger keeps the owed mark, and the lift of that hold asks it ONCE
+    const owedHere = spend !== true && spend && spend.held && compactFirst === true;
+    if (owedHere) { owedCompactions.set(key, { from, to: cid, name, why: spend.held, since: now(), gid: post.group && post.group.id ? post.group.id : null, rec: post.message || null }); if (ledger) { try { ledger.set(key, { from, to: cid, owedCompact: { why: spend.held, since: now() } }); } catch { } } }
+    else if (ledger) { try { ledger.set(key, { from, to: cid, deliveredAt: now() }); } catch { } }   // the brief is in the worker's group: a retry is a replay
     const woke = (post.woke || []).some((w) => w.member === cid);
     const queuedW = (post.queued || []).find((w) => w.member === cid) || null;   // lane queued-is-not-woke: behind its running turn (reserved, billed by that unit)
     const ref = (post.refused || []).find((w) => w.member === cid) || null;
@@ -169,7 +175,50 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     log(M.journalLine({ from, record, charge }));
     return { ok: true, record, post, attempt: nonce || null };
   }
-  return { dispatch, dispatchKey, _inFlight: inFlight };
+  // ── B-ef83 unit 1 (i) (主开发 r4320 / r4323): THE OWED COMPACTION, asked ONCE at the lift of the hold that refused it ──
+  // (g) never a wake for words that rode a turn: the worker's report marker passed the brief ⇒ it ends; a worker not live or mid-turn
+  // ⇒ it ends (its turn carries the brief). Else the SAME authorization (peer-compact, a hold) — held again ⇒ owed to that hold's lift,
+  // a cap ⇒ it ends, said — then the compaction as a dispatch makes it, and the wake by the groups engine's own road (the pace, the
+  // caps). In memory: a compaction owed when the hub stops is not asked by the next start (its ledger holds no «delivered»: a
+  // dispatch of the same brief compacts), said in the record.
+  async function askOwedCompaction(key, o) {
+    const ge = getGroups(), ledger = ge ? ge.dispatchLedger || null : null;
+    const end = (why) => { if (ledger) { try { ledger.set(key, { from: o.from, to: o.to, deliveredAt: now() }); } catch { } } log(`[dispatch] ${String(o.from).slice(0, 8)} → ${String(o.to).slice(0, 8)}: the owed compaction ends — ${why}`); };
+    const { wid, s } = liveOf(o.to);
+    if (!s) return end('the worker is not live (its brief waits in the group)');
+    const pair = ge && typeof ge.findPair === 'function' ? ge.findPair(o.from, o.to) : null;
+    const m = pair && Array.isArray(pair.members) ? pair.members.find((x) => x && x.member === o.to) : null;
+    if (m && o.rec && Number(m.reportedUpTo) >= Number(o.rec.at)) return end('its brief rode a turn already (no wake is made for words that rode one)');
+    const facts = M.targetFacts({ live: true, mode: s.mode, hasPty: !!s.pty, streaming: !!s._isStreaming, streamingKind: s._streamingKind, turnState: s._turnState, dispatching: inFlight.has(o.to), userInputAt: s._userInputAt, draftEditAt: s._draftEditAt, now: now() });   // the dispatch's own facts: a worker a person uses is never compacted
+    if (facts.targetState !== 'idle') return end(`the worker is ${facts.targetState} — not compacted (its brief rides its next turn, free)`);
+    let v = null;
+    try { v = authorizeSpend ? authorizeSpend({ reason: 'peer-compact', session: s, cid: o.to }) : { ok: true }; }
+    catch (e) { v = { ok: false, why: 'authorizer-failed', detail: 'spend authorizer failed: ' + (e && e.message) }; }
+    if (v && v.ok === false) {
+      if (SA.isHeldWhy(v.why)) { owedCompactions.set(key, { ...o, why: v.why }); log(`[dispatch] ${String(o.to).slice(0, 8)}: the owed compaction is held again (${v.why}) — asked once more when that hold lifts`); return; }
+      return end(`the spend ceiling refused the compaction (${v.detail || v.why})`);
+    }
+    const sendUserInput = getSendUserInput();
+    inFlight.add(o.to);
+    let compaction = null;
+    try {
+      const byS = liveOf(o.from).s;
+      const sent = typeof sendUserInput === 'function' ? sendUserInput(wid, '/compact', { origin: 'dispatch', by: { cid: o.from, name: cleanName((byS && byS.name) || '') || String(o.from).slice(0, 8) } }) : { ok: false, error: 'the typing path is not wired' };
+      if (!sent || !sent.ok) { compaction = { sent: false }; if (v && v.hold && releaseSpend) { try { releaseSpend({ hold: v.hold }); } catch { } } }
+      else {
+        if (noteSpend) { try { noteSpend({ reason: 'peer-compact', identity: v && v.identity, session: s, hold: v && v.hold }); } catch (e) { log('[dispatch] spend accounting for the owed compaction failed: ' + e.message); } }
+        compaction = await awaitEnd(wid, { timeoutMs: waitMs });
+      }
+    } finally { inFlight.delete(o.to); }
+    if (ledger) { try { ledger.set(key, { from: o.from, to: o.to, compactAt: now() }); } catch { } }
+    let woke = null;
+    if (ge && typeof ge.wake === 'function' && o.gid && o.rec) { try { woke = await ge.wake(o.gid, o.to, o.rec, 'dispatch'); } catch (e) { woke = { ok: false, reason: e && e.message }; } }
+    end(`asked at the lift: ${compaction && compaction.sent === false ? 'the compaction was not sent' : 'compacted'}; ${woke && woke.ok ? 'the worker woken for its brief' : `not woken (${(woke && woke.reason) || 'no wake road'}) — the brief rides its next turn`}`);
+  }
+  require('./spend-guard.js').onGateFree(({ whys = [] } = {}) => {
+    for (const [key, o] of [...owedCompactions]) if (whys.includes(o.why)) { owedCompactions.delete(key); askOwedCompaction(key, o).catch((e) => log('[dispatch] the owed compaction failed: ' + (e && e.message))); }
+  });
+  return { dispatch, dispatchKey, _inFlight: inFlight, _owedCompactions: owedCompactions };
 }
 
 module.exports = { create, dispatchKey };

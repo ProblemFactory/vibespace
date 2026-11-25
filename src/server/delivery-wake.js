@@ -108,12 +108,12 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     } catch (e) { limit = { unread: true, why: `its account's limit could not be read (${String((e && e.message) || e).slice(0, 120)})` }; log(`[delivery-wake] ${cid}: ${limit.why} — it waits`); }
     let probe = null;
     if (verdict.ok && ended.ok && identity && !(limit && (limit.usable === false || limit.unread))) {
-      try { const v = spendGuard.authorize({ reason: entry.spendReason, session: payer, cid, identity, hold: false }); probe = v && v.ok === true ? { ok: true } : { ok: false, reason: (v && (v.detail || v.why)) || null }; }
+      try { const v = spendGuard.authorize({ reason: entry.spendReason, session: payer, cid, identity, hold: false }); probe = v && v.ok === true ? { ok: true } : { ok: false, reason: (v && (v.detail || v.why)) || null, spendWhy: (v && v.why) || null }; }   // B-ef83 unit 1: the why rides (a held gate keeps the owed wake)
       catch (e) { probe = { ok: false, reason: (e && e.message) || String(e) }; }
     }
     const g = D.gate({ verdict, ended, identity, limit, probe });
     // every answer carries `ok` / `why` too: a key's conversations.resume that JOINS this entry reads the wake's answer in its own shape
-    if (!g.go) return { ok: false, outcome: 'refused', code: g.code, why: g.why, until: g.until || null, ended: how.kind, by: how.by || null };
+    if (!g.go) return { ok: false, outcome: 'refused', code: g.code, why: g.why, until: g.until || null, ended: how.kind, by: how.by || null, ...(g.code === 'spend' && probe && probe.spendWhy ? { spendWhy: probe.spendWhy } : {}) };
     const sh = getStashHandover();
     if (!sh) return { ok: false, outcome: 'failed', why: 'the hand-over is not ready on this server' };
     // a PEER's wake keeps its words in the group log (the report rides the prompt hook of the turn this hand-over starts):

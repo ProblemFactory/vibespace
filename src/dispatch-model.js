@@ -91,6 +91,7 @@ const SKIPS = Object.freeze({
   replay: 'this same brief already reached this worker (an earlier attempt whose answer was lost) — nothing re-sent, nothing re-compacted, nobody woken',
   paced: 'the wake pace said no',
   spend: 'the spend ceiling said no',
+  'spend-held': 'not compacted yet — the spend gate could not judge just now (its record of turns nobody typed is held); asked again ONCE when that hold lifts',   // B-ef83 unit 1 (i)
 });
 
 const reasonOf = (v, dflt) => (v && typeof v === 'object' && (v.reason || v.why || v.detail)) ? String(v.reason || v.detail || v.why) : dflt;
@@ -132,6 +133,9 @@ function replayVerdict(entry, { now = 0 } = {}) {
   if (!entry || typeof entry !== 'object') return null;
   const d = Number(entry.deliveredAt), c = Number(entry.compactAt);
   if (Number.isFinite(d) && d > 0 && now - d < REPLAY_DELIVERED_MS) return 'delivered';
+  // B-ef83 unit 1 (i): a brief posted whose compaction is OWED to a hold's lift was delivered too — a replay re-sends nothing (the lift asks the compaction once)
+  const o = entry.owedCompact && Number(entry.owedCompact.since);
+  if (Number.isFinite(o) && o > 0 && now - o < REPLAY_DELIVERED_MS) return 'delivered';
   if (Number.isFinite(c) && c > 0 && now - c < REPLAY_COMPACT_MS) return 'compacted';
   return null;
 }
@@ -166,6 +170,7 @@ function dispatchVerdict({ callerKind = null, senderReach = 'none', targetKind =
   // a PACED wake is OWED (lane paced-wake-retry): the pacer answered the wait, so the brief is posted and its wake parked for the window's end
   if (pacer !== true && Number(pacer && pacer.retryInMs) > 0) return { ...skip('paced', STEPS.park, `${reasonOf(pacer, 'rate floor')} — not compacted`), retryInMs: Number(pacer.retryInMs) };
   if (pacer !== true) return skip('paced', STEPS.stash, `${reasonOf(pacer, 'rate floor')} — the brief rides the worker's next turn (free), not compacted`);
+  if (spend !== true && spend && spend.held) return skip('spend-held', STEPS.stash, `${reasonOf(spend, 'held')} — the brief rides the worker's next turn (free); the compaction is OWED to the hold's lift`);   // B-ef83 unit 1 (i)
   if (spend !== true) return skip('spend', STEPS.stash, `${reasonOf(spend, 'refused')} — the brief rides the worker's next turn (free), not compacted`);
   if (compactFirst !== true) return skip('not-asked', STEPS.wake);
   if (targetKind !== 'chat') return skip('harness', STEPS.wake);

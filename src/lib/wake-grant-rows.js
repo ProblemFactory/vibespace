@@ -94,7 +94,8 @@ export function waitingWords(w, fmt) {
   const code = w.code || null;
   if (!code) return t('{n} notices are waiting for it', { n });
   if (code === 'limit' && w.until && typeof fmt === 'function') return t('{n} notices are waiting — not resumed: its account is at its limit until {when}', { n, when: fmt(w.until) });
-  if (code === 'readopt-pending') return t('{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines', { n });   // the stores chain's two roads: a wake that WAITS (it goes by itself), never «not resumed»
+  if (code === 'readopt-pending') return t('{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines', { n });
+  if (code === 'spend-held') return t('{n} notices are waiting — not woken yet: VibeSpace could not judge its spending limits just now; it asks again once that clears', { n });   // B-ef83 unit 1: the gate could not judge (its record held) — the wake is OWED to that hold's lift, asked once   // the stores chain's two roads: a wake that WAITS (it goes by itself), never «not resumed»
   return t('{n} notices are waiting — not resumed: {why}', { n, why: refusalWords(code) });
 }
 /** a refusal's code in the person's words (the ended row's «— not resumed: {why}», the resumed window's «— but …») */

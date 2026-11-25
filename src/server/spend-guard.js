@@ -420,6 +420,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     }
     if (recheckTimer) { try { unschedule(recheckTimer); } catch { } recheckTimer = null; }
     persist();
+    noteGateFree(['ledger-unreadable'], now);   // B-ef83 unit 1: the ledger's own hold lifted
     return true;
   }
   /** the self-recheck: armed while the ledger cannot be read, one re-read per LEDGER_RECHECK_MS (unref'd), never two at once */
@@ -483,6 +484,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     offSettingsLift = onLimitsWritten(() => {
       if (settingsHeld()) return;
       const off = offSettingsLift; offSettingsLift = null; if (off) off();
+      noteGateFree(['settings-unread']);   // B-ef83 unit 1: the settings' hold lifted
       owedInbox.delete(SETTINGS_SIG);
       if (state.notices[SETTINGS_SIG]) { delete state.notices[SETTINGS_SIG]; persist(); }
       let ut0 = null; try { ut0 = getUserTodos(); } catch { ut0 = null; }
@@ -1057,6 +1059,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
       return false;
     }
     const was = heldBy;
+    const wasUnreadable = !!unreadable;   // B-ef83 unit 1: the lift below names the ledger's own hold too when this read ends it
     heldBy = null; lockOurs = true; releaseAtExit(lockFile, myToken);
     unlockedCloseOwed = true;   // r2047 (2): a boot that started HELD takes the lock — an earlier run's «kept without the lock» item is no longer true
     if (lockTimer) { try { lunsched(lockTimer); } catch { } lockTimer = null; }
@@ -1082,6 +1085,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
     armBeat();
     if (!unreadable) flush();
     fileResetNotice(); armNoticeRetry();
+    // B-ef83 unit 1: the lock's holds lifted (an owed turn refused by another hold that still stands is refused held again: owed to ITS lift)
+    noteGateFree(['ledger-held-elsewhere', 'ledger-lock-unwritable', 'ledger-lock-unreadable', ...(wasUnreadable && !unreadable ? ['ledger-unreadable'] : [])], now);
     return true;
   }
   if (heldBy) armLockRetry(); else armBeat();
@@ -1122,6 +1127,18 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, l
 // once, before the running turn can end and let its wrapper run them past a cap just lowered. One registry for the process.
 const limitsListeners = new Set();
 function onLimitsWritten(fn) { limitsListeners.add(fn); return () => limitsListeners.delete(fn); }
+// B-ef83 unit 1 (主开发 r4320 / r4323): THE GATE IS FREE AGAIN — one registry for the process (as onLimitsWritten: no wiring in
+// server.js). A turn refused ONLY because the gate could not judge (A.HELD_WHYS) is owed to the lift of the hold that refused it;
+// each hold says its OWN lift here, ONCE per held→free transition — the lock taken (its three whys), the ledger read again, the
+// settings read at their lift. Never a timer of a producer's: the retries that end a hold are the guard's own (the lock's 5 s,
+// the ledger's 60 s, the settings' write). → fn({ whys: [...], at })
+const gateFreeListeners = new Set();
+function onGateFree(fn) { gateFreeListeners.add(fn); return () => gateFreeListeners.delete(fn); }
+function noteGateFree(whys, at = Date.now()) {
+  const w = [...new Set((whys || []).filter((x) => A.isHeldWhy(x)))];
+  if (!w.length) return;
+  for (const fn of [...gateFreeListeners]) { try { fn({ whys: w, at }); } catch { } }
+}
 function noteLimitsWritten(prev, next) {
   // (r2, the follow-up's read S1) only a write that MOVED the limits re-judges the waiting frames: every settings write (an
   // autosave of any row) used to ask every waiting frame back out again — each ask a sidecar read on the main thread
@@ -1129,4 +1146,4 @@ function noteLimitsWritten(prev, next) {
   for (const fn of [...limitsListeners]) { try { fn(prev || null, next || null); } catch { } }
 }
 
-module.exports = { create, onLimitsWritten, noteLimitsWritten, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry, LOCK_RETRY_MS, LOCK_UNMADE_RETRY_MS, LOCK_BEAT_MS, LOCK_STALE_MS, HELD_ITEM, SETTINGS_ITEM };
+module.exports = { create, onLimitsWritten, noteLimitsWritten, onGateFree, noteGateFree, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry, LOCK_RETRY_MS, LOCK_UNMADE_RETRY_MS, LOCK_BEAT_MS, LOCK_STALE_MS, HELD_ITEM, SETTINGS_ITEM };

@@ -2026,6 +2026,7 @@ function create({
     post: ['refused', 'async', 'a group message: a log append, a groups.json write and wakes'],
     sendToAgent: ['refused', 'async', 'a direct message: a pair found or made, a post and a wake'],
     findPair: ['refused', 'sync', 'a direct pair — none would read as «no direct group exists yet»'],
+    wake: ['refused', 'async', 'a member woken for its report (B-ef83 unit 1 (i): an owed compaction’s wake at the spend gate’s lift): a delivery and a groups.json write — refused while the families are held'],
     findOrCreatePair: ['refused', 'async', 'a pair made: a groups.json write'],
     read: ['refused', 'sync', 'a group’s log read — «no such group» over a list nobody read'],
     clearMessages: ['refused', 'async', 'a log rewrite and a groups.json write'],
@@ -2044,7 +2045,7 @@ function create({
     list, listFor, markRead, liveRoster, pacerFor, noteRoster, get: (id) => { const g = getGroup(id); return g ? view(g) : null; }, resolveGroup, resolveMember, resolveTarget, reach,
     sharesGroup, dispatchLedger,   // lane worker-dispatch verify r1 ④ / ②
     create: createGroup, invite, leave: (o) => remove({ ...o, kick: false }), kick: (o) => remove({ ...o, kick: true }),
-    rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, read, clearMessages, clearedCopies, clearedCopiesAsync,
+    rename: renameGroup, archive: archiveGroup, setNotify, post, sendToAgent, findPair, findOrCreatePair, wake, read, clearMessages, clearedCopies, clearedCopiesAsync,
     reportsForTurn, commitReports,
     WAKE_BUDGET, TURN_BUDGET, MIN_REPORT_ROOM,
   }, GROUP_HELD_DOORS, { held: groupsPaused, error: groupsPausedError, answer: groupsPausedAnswer, say: sayPausedDoor });

@@ -49,6 +49,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const A = require('../automation-keys.js');
+const SA = require('../spend-authorizer.js');   // B-ef83 unit 1 (ii): the family «the gate could not judge»
 const { tokenMatches } = require('../pairing-token.js');   // lane fleet-feedback-marks: the maintainer key's sha, compared in constant time
 const GM = require('../grant-model.js');   // lane grants-unify: THE grant model (admits)
 // lane lg-group-parents U3d (its read, 3): a caller's lineage as the model reads it — none (undefined / null: no lineage handed), a
@@ -712,7 +713,11 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const keep = result && typeof result === 'object' ? Object.fromEntries(['bucket', 'retryAfter', 'field', 'reach'].filter((k) => result[k] != null).map((k) => [k, result[k]])) : {};   // `reach`: a reach refusal's kind (lane key-instance-scope)
     // B-119d: the verb's noticeName (the target's name) goes to the owner's notice alone — never into `keep`, the answer or the audit
     const noticeName = result && typeof result === 'object' && result.noticeName != null ? String(result.noticeName).slice(0, 200) : null;
-    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.why), ...keep, args: v0.args }, key.id, { ...(asked ? { ask: asked } : {}), ...(noticeName ? { noticeName } : {}) });
+    // B-ef83 unit 1 (ii) (主开发 r4323): a verb the spend gate refused ONLY because it could not judge (src/spend-authorizer.js HELD_WHYS —
+    // its record held by another process, a restart's seconds) RELEASES the once-grant this call reserved, as the limits' refusal does
+    // (a passing hold never costs the owner a grant); the 429's `bucket` names the hold by its code, as every spend refusal's does
+    const heldOnce = held && result && result.ok === false && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? { once: release() } : {};
+    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.why), ...keep, args: v0.args }, key.id, { ...heldOnce, ...(asked ? { ask: asked } : {}), ...(noticeName ? { noticeName } : {}) });
     done({ ok: true, args: v0.args }, key.id, asked ? { ask: asked } : {});
     return { ok: true, keyId: key.id, key: key.name, verb, result, ms: now() - t0 };
   }
