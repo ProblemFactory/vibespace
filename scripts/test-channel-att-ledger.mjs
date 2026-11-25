@@ -35,6 +35,12 @@
 //      is UNFINISHED and the entry kept. RED: the stat's failure read as «gone» (a whole walk prunes it).
 //   ②b (line 743's should) AN EARLIER VERSION's LEDGER WHOSE FILES ARE ALL GONE: the whole walk prunes every entry and the ledger is
 //      saved (v 2, empty) once. RED: a landing that saves only a ledger with entries (the dead v 1 walked at every start).
+//   ⑫ (line 877's required follow, 主开发 r3958) A LEDGER WRITE IN FLIGHT ACROSS «FORGET ITS DATA»: the write held on the writer's
+//      thread (the stand-in thread's hold, 400 ms) before its temp is opened, the purge during it — after the purge has
+//      answered, the account's attachments folder is not there and done holds. RED: the settle that waits only for the own folder.
+//   ⑫b (its round's should) A LEDGER WRITE STILL OWED at the purge, and a late read of the removed account: the writer holds
+//      nothing of it after the purge, and no byte of it is written. REDs: the purge without its forget (the writer still holds the
+//      write); without its forget and lruBytes' guard (the ledger written again, the folder back).
 // Run: node scripts/test-channel-att-ledger.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -522,10 +528,92 @@ async function stopLeg(mod, tag) {
 {
   const r = await stopLeg(CS, 'stop');
   ok(r.owed && r.moved, `⑪ a hit's stamp owed to the coalesced flush (not on disk yet: ${r.owed}), the store closed at once: the ledger on disk holds it (${r.moved})`, r);
+  // THE PREMISE of both controls (line 877's round, lens three): this store owed no ledger write before the hit, so lruFile is not in
+  // the close's flush list — the stamp can reach the disk only through close's lruFlush → lruSave → owe → writeNow (closed)
   const CLOSEF = '    lruFlush();\n';
   await redOf(CLOSEF, async () => {
     const rn = await stopLeg(M.load('src/channel-store.js', anchored(SRC, CLOSEF, '', 'a close that does not flush the ledger'), 'close-noflush'), 'stop-red');
     ok(!rn.moved, `⑪ RED CONTROL: a close that does not flush the ledger — the owed stamp is lost (on disk moved: ${rn.moved}) — the leg above would go red`, rn);
+  });
+  const NOWW = '    if (closed) writeNow(file);\n';
+  await redOf(NOWW, async () => {
+    const rw = await stopLeg(M.load('src/channel-store.js', anchored(SRC, NOWW, '', 'an owe after close that does not write now'), 'owe-nonow'), 'stop-red2');
+    ok(!rw.moved, `⑪ RED CONTROL (line 877's round, lens one): an owe after close that hands the write and returns (no writeNow) — the stamp is lost when the writer stops (on disk moved: ${rw.moved}) — the leg above would go red`, rw);
+  });
+}
+
+// ═══ ⑫ A LEDGER WRITE IN FLIGHT ACROSS «FORGET ITS DATA» (line 877's required follow, 主开发 r3958) ═══
+console.log('⑫ a ledger write held in flight across «Forget its data»: after the purge answers, the attachments folder is not there and done holds');
+const STAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs'));
+// the write's hold: longer than a purge that does not wait for it takes (a few ms here), so the red control's purge answers
+// before the held write lands; the leg's own purge waits it out
+const FLIGHT_MS = 400;
+async function flightLeg(mod, tag) {
+  const dir = tmp(tag);
+  await seed(dir);
+  const lf = ledgerOf(dir), af = path.join(dir, 'attachments', ACC);
+  const S = STAND.make(dir + '-stand');
+  let t = 2e12; const w = SW.create({ log: quiet, workerPath: S.path });
+  const st = mod.createChannelStore({ dir, now: () => (t += 1000), log: quiet, writer: w });
+  let r;
+  try {
+    st.attachmentUsage(ACC); await settled(st);
+    S.hold('lru.json', FLIGHT_MS);   // the ledger's write held on the writer's thread BEFORE its temp is opened
+    st.attachmentGet(ACC, CONV, 'att-1', 'm1'); st.lruFlush(); w.durable(lf);   // a hit's stamp owed, asked now
+    let taken = false;
+    for (let k = 0; k < 200 && !(taken = w.stats().some((x) => x.inflight && x.file === lf)); k++) await turns(10);   // the write in flight, held
+    const ans = await st.purgeAccount(ACC);   // «Forget its data» while it flies
+    const atAnswer = fs.existsSync(af);
+    S.unhold('lru.json');
+    for (let k = 0; k < 300 && w.stats().some((x) => x.inflight); k++) await turns(10);   // the held write landed and its file was unlinked
+    await turns(50);
+    r = { taken, done: !!(ans && ans.done), files: ans && ans.files, atAnswer, after: fs.existsSync(af), ledger: fs.existsSync(lf) };
+  } finally { try { st.close(); } catch { } try { w.stop(); } catch { } }
+  return r;
+}
+{
+  const r = await flightLeg(CS, 'flight');
+  ok(r.taken && r.done && !r.atAnswer && !r.after && !r.ledger, `⑫ a ledger write held in flight (${r.taken}) across «Forget its data»: the purge answered done (${r.done}, files ${JSON.stringify(r.files)}), the account's attachments folder not there at the answer (${!r.atAnswer}) nor after the held write ended (${!r.after}), no ledger (${!r.ledger})`, r);
+  const SETTLE = "    const roots = [own, folders.files].map((q) => q + path.sep);\n    const flying = () => { try { return W().stats().some((x) => x.inflight && roots.some((q) => String(x.file || '').startsWith(q))); } catch { return false; } };\n";
+  await redOf(SETTLE, async () => {
+    const rs = await flightLeg(M.load('src/channel-store.js', anchored(SRC, SETTLE, "    const flying = () => { try { return W().stats().some((x) => x.inflight && String(x.file || '').startsWith(own + path.sep)); } catch { return false; } };\n", 'the settle of the own folder alone'), 'settle-own'), 'flight-red');   // stale-pins: kept (the red control restores the release's settle line)
+    ok(rs.taken && rs.done && rs.after, `⑫ RED CONTROL: the settle that waits only for the own folder — the purge answered done (${rs.done}) and the held write made the removed account's attachments folder again after it (${rs.after}) — the leg above would go red`, rs);
+  });
+}
+
+// ═══ ⑫b A LEDGER WRITE STILL OWED AT THE PURGE (line 877's round, lens three: the forget and lruBytes' guard, each with a red) ═══
+console.log('⑫b a ledger write still owed at «Forget its data», then a late read of the removed account: the writer holds nothing of it, no byte written');
+async function owedLeg(mod, tag) {
+  const dir = tmp(tag);
+  await seed(dir);
+  const lf = ledgerOf(dir), af = path.join(dir, 'attachments', ACC);
+  const o = open(mod, dir);
+  let r;
+  try {
+    o.st.attachmentUsage(ACC); await settled(o.st);
+    o.st.attachmentGet(ACC, CONV, 'att-1', 'm1'); o.st.lruFlush();   // the stamp OWED to the writer (paced: not taken yet)
+    const owed = o.w.pending(lf);
+    const pp = o.st.purgeAccount(ACC);   // its marks and forgets are set synchronously, before any wait
+    o.st.attachmentUsage(ACC);   // a late read of the removed account at once: its ledger's cache made again (empty), before the writer's pace
+    const ans = await pp;
+    const held = o.w.pending(lf);   // what the writer still holds of the ledger once the purge answered
+    o.w.durable(lf);   // the ledger's write asked NOW (urgent): what the writer still holds of it is taken at once, never after its pace
+    for (let k = 0; k < 200 && o.w.pending(lf); k++) await turns(10);   // past the writer's pace
+    await turns(50);
+    r = { owed, done: !!(ans && ans.done), held, after: fs.existsSync(af), ledger: fs.existsSync(lf) };
+  } finally { shut(o); }
+  return r;
+}
+{
+  const r = await owedLeg(CS, 'owed');
+  ok(r.owed && r.done && !r.held && !r.after && !r.ledger, `⑫b a ledger write still owed (${r.owed}) at «Forget its data», then a late read: the writer holds nothing of it after the purge (${!r.held}), no folder (${!r.after}) and no ledger (${!r.ledger}) after its pace`, r);
+  const FORGET = "    try { W().forget(lruFile(adapterId)); } catch { }   // B-0248 row 5: the ledger's owed write too\n";
+  const GUARD = "  function lruBytes(adapterId) {\n    if (goneAccounts.has(adapterId)) return null;\n";
+  await redOf(FORGET, async () => {
+    const rf = await owedLeg(M.load('src/channel-store.js', anchored(SRC, FORGET, '', 'a purge that forgets no ledger write'), 'purge-noforget'), 'owed-red1');
+    ok(rf.held === true, `⑫b RED CONTROL: the purge without its forget of the ledger — the writer still holds the removed account's ledger write after the purge (${rf.held}; lruBytes' guard then makes it write nothing: folder ${rf.after}) — the leg above would go red`, rf);
+    const rg = await owedLeg(M.load('src/channel-store.js', anchored(anchored(SRC, FORGET, '', 'no forget'), GUARD, '  function lruBytes(adapterId) {\n', 'no guard'), 'purge-noforget-noguard'), 'owed-red2');
+    ok(rg.after === true || rg.ledger === true, `⑫b RED CONTROL: without the forget AND lruBytes' guard — the removed account's ledger written again after the purge (folder ${rg.after}, ledger ${rg.ledger}) — the leg above would go red`, rg);
   });
 }
 

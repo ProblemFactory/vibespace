@@ -3335,9 +3335,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const folders = { logs: path.join(msgsDir, seg), files: path.join(attRoot, seg), own };
     const r = {};
     for (const [k, q] of Object.entries(folders)) r[k] = await removeOne(q);
-    // THE SETTLE: a write of the own folder already IN FLIGHT on the writer's thread may land its rename after that removal (its makeDir
-    // makes the folder again; its forgotten file is unlinked after it lands) — once no write of the folder flies, it goes again
-    const flying = () => { try { return W().stats().some((x) => x.inflight && String(x.file || '').startsWith(own + path.sep)); } catch { return false; } };
+    // THE SETTLE: a write of the own folder — or of the account's ATTACHMENTS folder (its ledger, owed to the writer since B-0248 row 5:
+    // line 877's required follow, 主开发 r3958) — already IN FLIGHT on the writer's thread may land its rename after that removal (its
+    // makeDir makes the folder again; its forgotten file is unlinked after it lands) — once no write of either folder flies, they go again
+    const roots = [own, folders.files].map((q) => q + path.sep);
+    const flying = () => { try { return W().stats().some((x) => x.inflight && roots.some((q) => String(x.file || '').startsWith(q))); } catch { return false; } };
     for (let k = 0; k < 600 && flying(); k++) await new Promise((z) => setTimeout(z, 50));
     // the truth at the end: a folder still there is LEFT (one more removal tried for a folder that came back)
     for (const [k, q] of Object.entries(folders)) {
