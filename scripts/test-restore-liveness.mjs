@@ -68,6 +68,9 @@ function editAnchor(text, from, to, file, mode = 'one') {
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// the hosted run of 2.369.419 (run 45584145109): a word the pty echoes can come split over two frames («echo VSH» + «EALED») —
+// a leg judges the JOINED stream of its frames (from a heal: only the frames since it), never each frame alone
+const streamHas = (frames, re, from = 0) => re.test(frames.slice(from).map((f) => String(f.data || '')).join(''));
 
 // ── throwaway everything (2.369.76 law: per-process paths, free ports) ──
 const ROOT = scratch('restore-liveness');
@@ -287,9 +290,9 @@ async function attachLeg({ label, fault, modulePath, expectBytes, expectDaemon =
   try {
     eng.attachToDtach(id, sock, session);
     const t0 = Date.now();
-    while (Date.now() - t0 < BUDGET_MS) { if (frames.some((f) => /TICK/.test(f.data || ''))) break; await sleep(150); }
+    while (Date.now() - t0 < BUDGET_MS) { if (streamHas(frames, /TICK/)) break; await sleep(150); }
   } finally { console.warn = realWarn; console.log = realLog; }
-  const gotBytes = frames.some((f) => /TICK/.test(f.data || ''));
+  const gotBytes = streamHas(frames, /TICK/);
   // READ THE VERDICT BEFORE TEARING DOWN. Killing the pty fires the product's
   // own detach ladder (session.pty = null, re-attach in 1s) against a
   // DeviceManager we are about to stop — so a verdict read after the teardown
@@ -369,13 +372,13 @@ console.log('— §2b a byte that arrives before `ready` settles must not be dro
     try {
       eng.attachToDtach(id, sock, session);
       const t0 = Date.now();                       // > the probe's 4.0 s + 0.6 s confirm
-      while (Date.now() - t0 < 7000) { if (frames.some((f) => /TICK/.test(f.data || ''))) break; await sleep(150); }
+      while (Date.now() - t0 < 7000) { if (streamHas(frames, /TICK/)) break; await sleep(150); }
     } finally { console.warn = realWarn; console.log = realLog; }
     const r = {
-      early: frames.some((f) => /VSEARLYBYTE/.test(f.data || '')),
+      early: streamHas(frames, /VSEARLYBYTE/),
       onDaemon: session.pty?._daemon === true,
       healed: logs.some((l) => /re-attaching dtach locally/.test(l)),
-      tick: frames.some((f) => /TICK/.test(f.data || '')),
+      tick: streamHas(frames, /TICK/),
       heals: Number(session._attachProbeHeals || 0),
       logs,
     };
@@ -419,8 +422,8 @@ console.log('— §3 a restore must not race the daemon connect/self-upgrade —
   eng.attachToDtach(id, sock, session);
   ok(session.pty && !session.pty._daemon, 'FIX: a restore while the link is still connecting attaches LOCALLY, in the same tick');
   const t0 = Date.now();
-  while (Date.now() - t0 < 5000 && !frames.some((f) => /TICK/.test(f.data || ''))) await sleep(120);
-  ok(frames.some((f) => /TICK/.test(f.data || '')), 'FIX: and it streams immediately (no blind window while the daemon comes up)');
+  while (Date.now() - t0 < 5000 && !streamHas(frames, /TICK/)) await sleep(120);
+  ok(streamHas(frames, /TICK/), 'FIX: and it streams immediately (no blind window while the daemon comes up)');
   try { session.pty?.kill?.(); } catch { }
 
   // control: master takes the daemon path in that same window
@@ -893,14 +896,15 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
   try { before.kill(); } catch { }
   eng.setupSessionPty(session, id, dead);
   eng.writeSessionInput(session, 'echo VSHEALED');
+  const sinceHeal = frames.length;   // the stream the NEW attach produces starts here
   const healed = eng.reattachLocalPty(id, session, 'test heal');
   ok(healed === true && session.pty !== dead && session.pty !== before, 'reattachLocalPty replaces the pty and reports it');
   // the replay through the NEW attach is another attach + an echo: bounded by the healer's own budget or 20 × this run's
   // first attach, whichever is larger (the old 5 s literal read red once on 2 busy cpus), its state printed
   const t0 = Date.now(), healBound = Math.max(BUDGET_MS, attachMs * 20);
-  while (Date.now() - t0 < healBound && !frames.some((f) => /VSHEALED/.test(f.data || ''))) await sleep(50);
-  ok(frames.some((f) => /VSHEALED/.test(f.data || '')), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding',
-    JSON.stringify({ attachMs, healBound, waitedMs: Date.now() - t0, frames: frames.length, tail: frames.slice(-3).map((f) => String(f.data || '').slice(-60)) }));
+  while (Date.now() - t0 < healBound && !streamHas(frames, /VSHEALED/, sinceHeal)) await sleep(50);
+  ok(streamHas(frames, /VSHEALED/, sinceHeal), 'reattachLocalPty RESENDS the input the never-spoke bridge was holding (judged on the joined stream since the heal)',
+    JSON.stringify({ attachMs, healBound, waitedMs: Date.now() - t0, frames: frames.length, sinceHeal, tail: frames.slice(-3).map((f) => String(f.data || '').slice(-60)) }));
   try { session.pty?.kill?.(); } catch { }
   // B-1217 (the folded B-380f, lane lg-recovery): THIS LEG'S RUNNER RED, PLACED. setupSessionPty stamped the birth at `now` and
   // took a byte from ANY pty it ever wired: a byte of the OLD attach in the stand-in's birth millisecond reads «spoke» by
@@ -921,18 +925,19 @@ console.log('— §5 the attach probe and the input detector share ONE re-attach
     while (!Number(s2._lastPtyDataAt) && Date.now() - tA < BUDGET_MS) await sleep(20);
     const aMs = Date.now() - tA, old = s2.pty, lastByte = Number(s2._lastPtyDataAt);
     const dead2 = { _daemon: true, pid: -1, onData: () => ({ dispose() { } }), onExit: () => ({ dispose() { } }), write() { }, resize() { }, kill() { } };
-    const realNow = Date.now; let replay = [];
+    const realNow = Date.now; let replay = [], fromHeal = 0;
     Date.now = () => lastByte;   // the stall placed: the stand-in is born, typed into and healed inside the old attach's last-byte millisecond
     try {
       try { old.kill(); } catch { }
       E.setupSessionPty(s2, id2, dead2);
       E.writeSessionInput(s2, 'echo VSSTALLED');
+      fromHeal = F.length;
       E.reattachLocalPty(id2, s2, 'test heal (B-1217 stall placed)');
       replay = s2._bridgeHeldInputs && s2._bridgeHeldInputs.replaying ? s2._bridgeHeldInputs.lines.slice() : [];
     } finally { Date.now = realNow; }
     const t1 = Date.now(), bound = Math.max(BUDGET_MS, aMs * 20);
-    if (replay.length) while (Date.now() - t1 < bound && !F.some((f) => /VSSTALLED/.test(f.data || ''))) await sleep(50);
-    const seen = F.some((f) => /VSSTALLED/.test(f.data || ''));
+    if (replay.length) while (Date.now() - t1 < bound && !streamHas(F, /VSSTALLED/, fromHeal)) await sleep(50);
+    const seen = streamHas(F, /VSSTALLED/, fromHeal);
     try { s2.pty?.kill?.(); } catch { }
     AS.delete(id2);
     return { replay, seen, aMs, lastByte, frames: F.length };
