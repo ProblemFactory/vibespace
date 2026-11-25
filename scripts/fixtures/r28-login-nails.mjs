@@ -1580,6 +1580,18 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
     }
 
     // ── R28-5c: Driver 2 Group 3 — `--generate` rollback on confirmed-empty `Input.insertText` error vs fail-closed on timeout ──
+    // B-1217 (lane bl-loop-b, 主开发 r4407): THE ROLLBACK's FACTS, read before a retry is judged. After an Input.insertText error the
+    // product rolls a generated pending back (and lifts the tab's fence) ONLY once its wipe VERIFIED the field empty — each of the
+    // wipe's CDP calls bounded at 1500 ms (src/server/browser-dialogs.js: call(…, 1500)); a missed answer leaves the fence and the
+    // pending as they are: fail closed BY DESIGN, and the immediate retry is refused (409). The one red (run 22d33fcd2-20261119033909
+    // -both, UTC: chg2 409, its For-you count back as judged) is that road under the machine's load. So the leg reads the facts first:
+    // they are there ⇒ the retries are judged as before; they are not ⇒ a NAMED HARNESS line, never a 409 read as the product's red.
+    // Its CONTROL (below the scene) places that branch (the wipe answered «one value remains», where a missed answer also ends) — red at will
+    const rollFactsOf = (name) => {
+      const ent = (logins.list().entries || []).find((x) => x && x.name === name) || null;
+      const fenceLifted = dialogs.liveFillOnTarget(PID, mainTid) === null;
+      return { fenceLifted, pending: ent ? !!ent.pending : null, rolledBack: fenceLifted && !(ent && ent.pending) };
+    };
     {
       resetDom();
       const fyBefore = forYou.openCount();
@@ -1603,6 +1615,7 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
       });
       relay.state.hook = null;
       const fyAfterChgRollback = forYou.openCount();
+      const chgRoll = rollFactsOf(BL.entryName(ORIGIN, 'alice'));   // B-1217: the change's rollback, read before its retry
       const chg2 = await post('/api/agent/browser/fill-vault', {
         profile: PID,
         target: '#pw',
@@ -1632,6 +1645,7 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
         targetId: mainTid,
       });
       relay.state.hook = null;
+      const regRoll = rollFactsOf(BL.entryName(ORIGIN, 'newbie'));   // B-1217: the register's rollback (its entry dropped), read before its retry
       const reg2 = await post('/api/agent/browser/fill-vault', {
         profile: PID,
         target: '#pw',
@@ -1674,15 +1688,18 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
         targetId: mainTid,
       });
 
+      const rolled = chgRoll.rolledBack && regRoll.rolledBack;
       ok(
-        chg1.status === 409 && fyAfterChgRollback === fyBefore && chg2.status === 200
+        rolled && chg1.status === 409 && fyAfterChgRollback === fyBefore && chg2.status === 200
           && reg1.status === 409 && reg2.status === 200
           && regTimeout1.status === 409
           && regTimeoutRetryNew.status === 409 && regTimeoutRetryNew.json?.code === 'login_exists'
           && /--vault .*\/password|\/pending|discard/i.test(String(regTimeoutRetryNew.json?.error || ''))
           && regTimeoutFillPending.status === 200,
-        'R28-5c (Driver 2 Group 3): --generate change and new: register roll back pending + For-you card on confirmed-empty Input.insertText error (immediate retry 200), while Input.insertText timeout stays fail-closed and points to /pending (200)',
+        rolled ? 'R28-5c (Driver 2 Group 3): --generate change and new: register roll back pending + For-you card on confirmed-empty Input.insertText error (immediate retry 200), while Input.insertText timeout stays fail-closed and points to /pending (200)'
+          : `HARNESS (R28-5c): after a failed insert the rollback's facts are NOT there (the change: ${JSON.stringify(chgRoll)}; the register: ${JSON.stringify(regRoll)}) — the wipe's verification missed its 1500 ms CDP bound (the machine's load: the product fails closed by design, so the retries were refused); the retries are not judged`,
         {
+          chgRoll, regRoll, chg2Code: chg2.json?.code,
           chg1: chg1.status,
           fyBefore,
           fyAfterChgRollback,
@@ -1693,6 +1710,40 @@ export async function runR28LoginNails({ repoDir, ok, MUT = null }) {
           regTimeoutFillPending: regTimeoutFillPending.status,
         },
       );
+      await clearTabFenceByNav();
+    }
+
+    // ── R28-5c's CONTROL (B-1217, lane bl-loop-b, 主开发 r4407): THE UNVERIFIED WIPE, PLACED — the one red's road, red at will ──
+    // After the change's Input.insertText error the WIPE's own Runtime.evaluate (its expression the one that holds `_vsAllowHeuristic`) is
+    // answered «one value remains»: the wipe cannot verify the field empty — THE SAME BRANCH a missed answer takes (a call past its 1500 ms
+    // bound reads as not verified: src/server/browser-login-fill.js wipeTabTypedInputs ends verifiedEmpty false on both), answered at once
+    // so the control costs no 1.5 s wait. The fence stays on the tab and the generated pending stays staged (fail closed by design), and
+    // the immediate retry is refused — chg2's 409 of the one red, by a placed answer, never by load. The leg above reads exactly these
+    // facts before it judges a retry: here they say «not rolled back»
+    {
+      resetDom();
+      let failed = false, held = 0;
+      relay.state.hook = async (m, { sendToClient }) => {
+        if (!failed && m.method === 'Input.insertText') {
+          failed = true;
+          sendToClient({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), error: { code: -32000, message: 'Insert failed (the control)' } });
+          return true;
+        }
+        if (failed && !held && m.method === 'Runtime.evaluate' && String(m.params && m.params.expression).includes('_vsAllowHeuristic')) {   // THE PLACED ANSWER: the wipe cannot verify
+          held++;
+          sendToClient({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), result: { result: { type: 'object', value: { ok: true, wiped: 0, remaining: 1, hasFrames: false } } } });
+          return true;
+        }
+        return false;
+      };
+      const c1 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'shop.example.test#alice/password', generate: true, targetId: mainTid });
+      relay.state.hook = null;
+      const roll = rollFactsOf(BL.entryName(ORIGIN, 'alice'));
+      const c2 = await post('/api/agent/browser/fill-vault', { profile: PID, target: '#pw', spec: 'shop.example.test#alice/password', generate: true, targetId: mainTid });
+      ok(held === 1 && c1.status === 409 && !roll.rolledBack && c2.status === 409,
+        'R28-5c CONTROL (the unverified wipe, PLACED: its Runtime.evaluate answered «one value remains», the branch a missed answer takes): the fence stays and the pending stays (fail closed), and the immediate retry is refused 409 — the one red\'s shape at will; the leg reads these facts before it judges a retry',
+        { held, c1: c1.status, roll, c2: c2.status, c2Code: c2.json?.code });
+      logins.discardPending(BL.entryName(ORIGIN, 'alice'), { by: 'owner' });
       await clearTabFenceByNav();
     }
 
