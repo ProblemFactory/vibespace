@@ -158,13 +158,13 @@ ok('a fresh instance reloads the persisted store', pages2.list().length === 1 &&
   const notes = [];
   const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages3-'));
   const pg = require(path.join(REPO, 'src/server/published-pages.js')).create({ dataDir: dir3, requestAuthed: () => true, publicUrl: () => null, onPublished: (p, x) => notes.push({ p, x }) });
-  const r1 = pg.publishContent({ html: '<!doctype html><title>c1</title>', name: 'Canvas One', srcKey: 'host-a:/home/u/canvas.html', sessionId: 'sess-1-1', conversationId: 'conv-1' });
+  const r1 = await pg.publishContent({ html: '<!doctype html><title>c1</title>', name: 'Canvas One', srcKey: 'host-a:/home/u/canvas.html', sessionId: 'sess-1-1', conversationId: 'conv-1' });
   okc(r1.page && /^pg/.test(r1.page.id) && r1.page.sessionId === 'sess-1-1' && r1.page.replaced === false, 'content publish creates a page attributed to the publishing session', JSON.stringify(r1));
   okc(r1.page.url === '/p/' + r1.page.id && r1.page.path === '/p/' + r1.page.id, 'no public URL and no browser origin yet → honest relative /p/<id> (client joins its origin)');
-  const r2 = pg.publishContent({ html: '<!doctype html><title>c2</title>', srcKey: 'host-a:/home/u/canvas.html', sessionId: 'sess-1-1' });
+  const r2 = await pg.publishContent({ html: '<!doctype html><title>c2</title>', srcKey: 'host-a:/home/u/canvas.html', sessionId: 'sess-1-1' });
   okc(r2.page.id === r1.page.id && r2.page.replaced === true && r2.page.name === 'Canvas One', 'same srcKey → same id (stable share URL), snapshot replaced, name kept when omitted');
   okc(fs.readFileSync(path.join(dir3, 'published-pages', r1.page.id + '.html'), 'utf8').includes('c2'), 'the snapshot on disk is the new content');
-  const r3 = pg.publishContent({ html: '<!doctype html><title>other</title>', srcKey: 'host-b:/home/u/canvas.html', sessionId: 'sess-2-2' });
+  const r3 = await pg.publishContent({ html: '<!doctype html><title>other</title>', srcKey: 'host-b:/home/u/canvas.html', sessionId: 'sess-2-2' });
   okc(r3.page.id !== r1.page.id, 'the same path on ANOTHER host is a different page (host is part of the identity)');
   okc(pg.list({ sessionId: 'sess-1-1' }).length === 1 && pg.list({ sessionId: 'sess-2-2' }).length === 1 && pg.list().length === 2, 'list filters by sessionId');
   okc(notes.length === 3 && notes[0].x.replaced === false && notes[1].x.replaced === true && notes[0].p.id === r1.page.id, 'onPublished fires for every publish with the replaced flag (the ONE notify point)');
@@ -182,8 +182,8 @@ ok('a fresh instance reloads the persisted store', pages2.list().length === 1 &&
   okc(pg.list().length === 2, 'removed page gone from the store');
   // hostile Host headers never become share-link origins
 
-  okc(!!pg.publishContent({ html: '', srcKey: 'x:y' }).error && !!pg.publishContent({ html: '<p>x</p>', srcKey: '' }).error, 'empty body / missing srcKey refused');
-  okc(!!pg.publishContent({ html: Buffer.alloc(26 * 1024 * 1024, 65), srcKey: 'x:big' }).error, 'oversized body refused');
+  okc(!!(await pg.publishContent({ html: '', srcKey: 'x:y' })).error && !!(await pg.publishContent({ html: '<p>x</p>', srcKey: '' })).error, 'empty body / missing srcKey refused');
+  okc(!!(await pg.publishContent({ html: Buffer.alloc(26 * 1024 * 1024, 65), srcKey: 'x:big' })).error, 'oversized body refused');
   // URLs are built from the ASKING request only — never a remembered origin
   // (owner: "你怎么知道我用啥地址能访问你？是不是存在反代？"). A stored origin is
   // a guess about someone else's device; 2.366.0 handed an agent this box's own
@@ -223,8 +223,8 @@ ok('a fresh instance reloads the persisted store', pages2.list().length === 1 &&
     REG.configure({ activeSessions: () => new Map([['sess-9', live]]), log: { log() {}, warn() {} } });
     const dir9 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pages9-'));
     const pg9 = require(path.join(REPO, 'src/server/published-pages.js')).create({ dataDir: dir9, onPublished: (p, x) => REG.notePage(p, x) });
-    const a = pg9.publishContent({ html: '<!doctype html><title>r</title>', srcKey: 'local:/home/u/report.html', sessionId: 'sess-9' });
-    pg9.publishContent({ html: '<!doctype html><title>r2</title>', srcKey: 'local:/home/u/report.html', sessionId: 'sess-9' });
+    const a = await pg9.publishContent({ html: '<!doctype html><title>r</title>', srcKey: 'local:/home/u/report.html', sessionId: 'sess-9' });
+    await pg9.publishContent({ html: '<!doctype html><title>r2</title>', srcKey: 'local:/home/u/report.html', sessionId: 'sess-9' });
     const row = live._artifacts && live._artifacts[':/home/u/report.html'];
     okc(row && row.kind === 'page' && row.url === '/p/' + a.page.id && row.state === 'published' && Object.keys(live._artifacts).length === 1, 'a publish reaches the registry: ONE page row on the source file with its /p/ link (published twice = one row)', JSON.stringify(row));
     pg9.remove(a.page.id);
@@ -370,7 +370,7 @@ ok('Background Work sender-click opens the jobs panel (not a session lookup)', c
   const vm = await import('node:vm');
   const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
   authed = true;
-  const pgR = pages.publishContent({ html: '<html><body>d</body></html>', name: 'deck', srcKey: 'local:/designs/deck' });
+  const pgR = await pages.publishContent({ html: '<html><body>d</body></html>', name: 'deck', srcKey: 'local:/designs/deck' });
   const sh = await (await fetch(`${base}/p/${pgR.page.id}`)).text();
   okc(/<iframe src="\/p\/pg[a-z0-9]{10}\/raw" sandbox="allow-scripts allow-popups allow-downloads allow-modals allow-forms allow-popups-to-escape-sandbox" allow="clipboard-write; fullscreen"/.test(sh), 'lane design-present: the shell lets its frame go fullscreen (a design presents full-screen from its link) — the sandbox list unchanged, never allow-same-origin');
   // the shell's own script, run with a stand-in page: which address does its frame end up loading?
@@ -396,7 +396,7 @@ ok('Background Work sender-click opens the jobs panel (not a session lookup)', c
     const pm = PM.create({ dataDir: dirM, requestAuthed: () => true, publicUrl: () => 'https://inst.example' });
     const appM = express(); pm.registerRoutes(appM);
     const srvM = appM.listen(0); await new Promise((r) => srvM.on('listening', r));
-    const pg = pm.publishContent({ html: '<html><body>m</body></html>', name: 'm', srcKey: 'local:/m' });
+    const pg = await pm.publishContent({ html: '<html><body>m</body></html>', name: 'm', srcKey: 'local:/m' });
     const shM = await (await fetch(`http://127.0.0.1:${srvM.address().port}/p/${pg.page.id}`)).text();
     okc(JSON.stringify(table(sh)) === JSON.stringify(WANT) && JSON.stringify(table(shM)) !== JSON.stringify(WANT), 'CONTROL (the shell hands over ANY fragment): the real shell passes the table, the patched copy FAILS it', table(shM));
     srvM.close();

@@ -129,8 +129,8 @@ function mountRoutes({ app, tasks, taskFanout, activeSessions, sameToken, server
     catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
   });
   // P4 repo task files: export a task to a committable markdown file / import one.
-  app.post('/api/tasks/:id/export', (req, res) => {
-    try { res.json({ success: true, path: tasks.exportToFile(req.params.id, req.body?.path) }); }
+  app.post('/api/tasks/:id/export', async (req, res) => {   // B-ddf3 (r4361): the export is written off the loop, its failure named
+    try { res.json({ success: true, path: await tasks.exportToFile(req.params.id, req.body?.path) }); }
     catch (e) { res.status(e.message === 'task not found' ? 404 : 400).json({ error: e.message }); }
   });
   app.post('/api/tasks/import', (req, res) => {

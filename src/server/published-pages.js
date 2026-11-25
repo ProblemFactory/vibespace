@@ -212,8 +212,22 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
    *  namespaced identity rather than `<host>:<path>` (the SendUserFile channel
    *  scopes its key by conversation, so two conversations naming the same file
    *  stay two pages) says what the source file actually was, instead of
-   *  letting the prefix-strip below invent `<conv>:/abs/path`. */
-  function publishContent({ html, name, srcKey, srcPath = '', makePublic, sessionId = null, conversationId = null, req = null, mediaType = '' }) {
+   *  letting the prefix-strip below invent `<conv>:/abs/path`.
+   *  → Promise<{ page } | { error }>. B-ddf3 (lane bl-vault, r4361): the page's content (up to 25 MB) is written, SYNCED and renamed
+   *  through the thread pool — never on the hub's loop — before the page is recorded; a failed write or sync is a failed publish,
+   *  said by name (nothing renamed, the temp removed, nothing recorded). ONE publish of a source at a time (`publishing`: a second
+   *  waits for the first, as the synchronous form ordered them), so two publishes of one source never mint two pages. */
+  const publishing = new Map();   // srcKey → the last publish of it in flight
+  function publishContent(args = {}) {
+    const k = String((args && args.srcKey) || '').slice(0, 1024);
+    const prev = publishing.get(k) || Promise.resolve();
+    const run = prev.then(() => publishContentNow(args), () => publishContentNow(args));
+    const tail = run.then(() => null, () => null);
+    publishing.set(k, tail);
+    tail.then(() => { if (publishing.get(k) === tail) publishing.delete(k); });
+    return run;
+  }
+  async function publishContentNow({ html, name, srcKey, srcPath = '', makePublic, sessionId = null, conversationId = null, req = null, mediaType = '' }) {
     if (hold.held()) return heldAnswer();
     const buf = Buffer.isBuffer(html) ? html : Buffer.from(String(html || ''), 'utf8');
     if (!buf.length) return { error: 'empty page body' };
@@ -224,17 +238,28 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     let rec = store.pages.find((p) => p.srcKey === key);
     const replaced = !!rec;
     const draft = rec || { id: mintId(), srcKey: key, srcPath: String(srcPath || '') || key.replace(/^[^:]*:/, ''), public: false, createdAt: Date.now() };
+    const prevExt = snapExt(rec);
+    const fp = path.join(pagesDir, draft.id + (mt ? '.bin' : '.html'));
     try {
-      fs.mkdirSync(pagesDir, { recursive: true });
-      // A re-publish that CHANGES kind (html ⇄ binary) must not leave the old
-      // snapshot behind under the other extension — serveRaw picks the file by
-      // the record's current mediaType, so a stale twin would be dead bytes on
-      // disk that a later flip would silently serve.
-      const prevExt = snapExt(rec);
-      const fp = path.join(pagesDir, draft.id + (mt ? '.bin' : '.html'));
-      fs.writeFileSync(fp + '.tmp', buf); fs.renameSync(fp + '.tmp', fp);
-      if (rec && prevExt !== (mt ? '.bin' : '.html')) { try { fs.unlinkSync(path.join(pagesDir, draft.id + prevExt)); } catch { } }
+      await fs.promises.mkdir(pagesDir, { recursive: true });
+      const tmp = fp + '.tmp';
+      let h = null, fault = null;
+      try { h = await fs.promises.open(tmp, 'w'); await h.writeFile(buf); await h.sync(); } catch (e) { fault = e; }
+      if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; }
+      if (fault) { await fs.promises.unlink(tmp).catch(() => { }); return { error: `the page could not be put on disk (${(fault && fault.code) || 'failed'}) — not published, nothing was replaced` }; }
+      await fs.promises.rename(tmp, fp);
     } catch (e) { return { error: 'store failed: ' + e.message }; }
+    // the list as it stands NOW (the write left the loop): a hold that began meanwhile records nothing; a page TAKEN DOWN meanwhile
+    // stays down (its content just written is removed again, never published back)
+    if (hold.held()) { if (!rec) await fs.promises.unlink(fp).catch(() => { }); return heldAnswer(); }
+    if (rec) {   // by its id (a lift may have read the list again into new rows)
+      const cur = store.pages.find((p) => p.id === rec.id);
+      if (!cur) { await fs.promises.unlink(fp).catch(() => { }); return { error: 'the page was taken down while it was being published — not published' }; }
+      rec = cur;
+    }
+    // A re-publish that CHANGES kind (html ⇄ binary) must not leave the old snapshot behind under the other extension — serveRaw picks
+    // the file by the record's current mediaType, so a stale twin would be dead bytes on disk that a later flip would silently serve.
+    if (rec && prevExt !== (mt ? '.bin' : '.html')) await fs.promises.unlink(path.join(pagesDir, draft.id + prevExt)).catch(() => { });
     if (!rec) { rec = draft; store.pages.push(rec); }
     if (mt) rec.mediaType = mt; else delete rec.mediaType;
     rec.name = String(name || rec.name || path.basename(rec.srcPath || 'page', path.extname(rec.srcPath || ''))).slice(0, 120);

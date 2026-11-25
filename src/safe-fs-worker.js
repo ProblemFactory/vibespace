@@ -82,6 +82,29 @@ function readCapped(p, capBytes) {
 // (a list of ArrayBuffers to hand off zero-copy). All paths are ALREADY resolved
 // by the main process (path.resolve/safePath) — the worker never re-derives or
 // validates paths; it just executes. ──
+// THE STAGED COPY (#22; B-ddf3 unit 3, lane bl-vault, r4361): a copy into `<dest>.vs-partial`, EVERY file of it synced, then renamed
+// over `dest` — the one road of copy() and of move()'s cross-device fallback (a crash mid-copy never leaves a truncated dest at the final
+// name, and a power loss never leaves a name over bytes not on disk); a failed copy or sync removes the partial and throws by name
+function stageCopy(src, dest) {
+  const part = dest + '.vs-partial';
+  try {
+    fs.rmSync(part, { recursive: true, force: true });
+    fs.cpSync(src, part, { recursive: true });
+    // B-ddf3 (lane bl-vault, r4361): every file of the partial synced ONCE at the end of the copy (a file, or each file of a tree), here on
+    // the pool's own thread (never the hub's loop); a failed sync is a failed copy, said by name (the partial removed below)
+    for (const stack = [part]; stack.length;) {
+      const p = stack.pop(), lst = fs.lstatSync(p);
+      if (lst.isDirectory()) { for (const n of fs.readdirSync(p)) stack.push(path.join(p, n)); continue; }
+      if (!lst.isFile()) continue;
+      let fd = null, fault = null;
+      try { fd = fs.openSync(p, 'r'); fs.fsyncSync(fd); } catch (se) { fault = se; }
+      if (fd != null) { try { fs.closeSync(fd); } catch (ce) { if (!fault) fault = ce; } }
+      if (fault) throw Object.assign(new Error(`${path.basename(dest)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved, nothing was replaced`), { code: (fault && fault.code) || 'EIO' });
+    }
+    fs.renameSync(part, dest);
+  } catch (e) { try { fs.rmSync(part, { recursive: true, force: true }); } catch {} throw e; }
+}
+
 const OPS = {
   // the folder field's three (dirSlice / pathStat / dirIndex): src/dir-ops.js — the device agent's fs worker runs the same three
   ...require('./dir-ops.js').OPS,
@@ -328,12 +351,7 @@ const OPS = {
   copy({ src, dest, overwrite }) {
     if (overwrite) { fs.cpSync(src, dest, { recursive: true, force: true }); return { result: { success: true } }; }
     if (fs.existsSync(dest)) { const e = new Error(`EEXIST: dest exists: ${dest}`); e.code = 'EEXIST'; throw e; }
-    const part = dest + '.vs-partial';
-    try {
-      fs.rmSync(part, { recursive: true, force: true });
-      fs.cpSync(src, part, { recursive: true });
-      fs.renameSync(part, dest);
-    } catch (e) { try { fs.rmSync(part, { recursive: true, force: true }); } catch {} throw e; }
+    stageCopy(src, dest);   // staged through `.vs-partial`, synced, renamed (above)
     return { result: { success: true } };
   },
 
@@ -342,15 +360,9 @@ const OPS = {
     try { fs.renameSync(src, dest); }
     catch (e) {
       if (e.code !== 'EXDEV') throw e;
-      // EXDEV fallback = copy+rm; stage through `.vs-partial` like copy() so a
-      // crash mid-copy never leaves a truncated dest at the final name (#22).
-      // Source is only removed after the rename landed.
-      const part = dest + '.vs-partial';
-      try {
-        fs.rmSync(part, { recursive: true, force: true });
-        fs.cpSync(src, part, { recursive: true });
-        fs.renameSync(part, dest);
-      } catch (e2) { try { fs.rmSync(part, { recursive: true, force: true }); } catch {} throw e2; }
+      // EXDEV fallback = copy+rm, staged like copy() (stageCopy: through `.vs-partial`, every file synced before the rename) so a crash
+      // mid-copy never leaves a truncated dest at the final name (#22). Source is only removed after the synced rename landed.
+      stageCopy(src, dest);
       fs.rmSync(src, { recursive: true, force: true });
     }
     return { result: { success: true } };

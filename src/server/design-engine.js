@@ -922,7 +922,7 @@ function create({
       if (!mine) return fail('page_forbidden', `page ${pageId} was not published by this conversation — publish without --page for its own URL`);
       srcKey = rec.srcKey;
     }
-    const p = pages.publishContent({ html: b.html, name: cleanTitle(title) || r.title, srcKey, srcPath: r.dir, makePublic, sessionId, conversationId, req });
+    const p = await pages.publishContent({ html: b.html, name: cleanTitle(title) || r.title, srcKey, srcPath: r.dir, makePublic, sessionId, conversationId, req });   // B-ddf3 (r4361): written off the loop
     if (!p || p.error) return fail('publish_failed', (p && p.error) || 'the page store refused it');
     return { ok: true, page: p.page, size: b.size, frames: r.frames.length };
   }

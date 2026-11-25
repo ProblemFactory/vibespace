@@ -205,6 +205,18 @@ function bearerOf(req) {
   } catch { return null; }
 }
 
+// B-ddf3 unit 3 (lane bl-vault, r4361): A DAV UPLOAD LANDS SYNCED — the temp synced ONCE at its end through the thread pool, then renamed
+// over its name; a failed sync is a failed upload, said by name (a 500 whose text body names it), the temp removed. Its own function at
+// the module's level: its rename is judged in its own scope (the MOVE verb's rename in the route stays a move)
+async function landUpload(tmp, target, existed, res) {
+  let h = null, fault = null;
+  try { h = await fsp.open(tmp, 'r+'); await h.sync(); } catch (se) { fault = se; }
+  if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; }
+  if (fault) { fsp.unlink(tmp).catch(() => {}); return res.status(500).type('text/plain').send(`${path.basename(target)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved`); }
+  return fsp.rename(tmp, target).then(() => res.status(existed ? 204 : 201).end(),
+    () => { fsp.unlink(tmp).catch(() => {}); res.status(500).end(); });
+}
+
 function registerWebdav(app, { tokens }) {
   const WRITE_METHODS = new Set(['PUT', 'MKCOL', 'DELETE', 'MOVE', 'COPY', 'PROPPATCH', 'LOCK']);
 
@@ -321,10 +333,7 @@ function registerWebdav(app, { tokens }) {
           const tmp = target + '.vsdav-' + crypto.randomBytes(4).toString('hex');
           const w = fs.createWriteStream(tmp, { mode: 0o644 });
           req.pipe(w);
-          w.on('finish', () => {
-            fsp.rename(tmp, target).then(() => res.status(st ? 204 : 201).end(),
-              () => { fsp.unlink(tmp).catch(() => {}); res.status(500).end(); });
-          });
+          w.on('finish', () => { landUpload(tmp, target, !!st, res); });   // B-ddf3 unit 3: synced, then renamed (landUpload, above)
           w.on('error', () => { fsp.unlink(tmp).catch(() => {}); res.status(500).end(); });
           req.on('aborted', () => { try { w.destroy(); } catch {} fsp.unlink(tmp).catch(() => {}); });
           return;

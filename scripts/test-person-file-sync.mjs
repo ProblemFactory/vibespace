@@ -15,6 +15,11 @@
 //     writer (every machine's, the hub's own since line 1) syncs its temp before the rename or the link; a failed sync is an
 //     «error» receipt said by name, the file as it was, no temp left. RED: today's writer (both syncs taken out).
 // The census of the renames (test-temp-rename-census) reads the sites «synced» (OWED_MAX 150 → 148 by unit 1; 146 → 144 by this unit, on the train's count).
+//   ③–⑧ B-ddf3 unit 3 (lane bl-vault, 主开发 r4361): a copy from another machine (src/routes/files.js crossHostTransfer), a copy or
+//     move across devices (src/safe-fs-worker.js), a DAV upload (src/webdav.js PUT), a design file (src/design-fs.js writeUser), a
+//     Task Group export (src/task-groups.js exportToFile) and a published page (src/server/published-pages.js publishContent): each
+//     synced ONCE before its rename, off the hub's loop; a PLACED refusal of the sync is said by name, nothing renamed, no temp left;
+//     RED: each with the sync taken out. The census reads them «synced» (OWED_MAX 141 → 134, browser-serve's planned copy «derived»).
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -167,5 +172,165 @@ async function cliRun(mod, { exists = true, fail, mode = null } = {}) {
         : `RED (line 534's second open, 0${ro.toString(8)}): the write that worked in the release is REFUSED («could not be put on disk (EACCES)»), the file left as it was`, rm.receipt);
   }
 }
+
+
+// ── B-ddf3 unit 3 (lane bl-vault, 主开发 r4361): six more «person» sites, each run for real on a scratch folder, its fs calls
+//    RECORDED; a PLACED refusal of its sync (said by name, nothing renamed, no temp left); a RED copy with the sync taken out ──
+const { Readable } = await import('node:stream');
+const without = (text, re, why) => anchored(text, re, '', why);   // a red copy: the unit's sync block taken out (the release's order)
+const tmpLeft = (dir, re) => fs.readdirSync(dir).filter((n) => re.test(n));
+
+// ③ a file copied from another machine into the person's folder (src/routes/files.js crossHostTransfer, the file case)
+console.log('③ a copy from another machine (src/routes/files.js crossHostTransfer)');
+const FILES_REL = 'src/routes/files.js', FILES = fs.readFileSync(path.join(REPO, FILES_REL), 'utf8');
+const withCht = (text) => text + '\nmodule.exports.__crossHostTransfer = crossHostTransfer;   // the suite\'s own handle (this copy only)\n';
+async function chtRun(modPath, fail) {
+  const dir = path.join(ROOT, `cht-${++seq}`); fs.mkdirSync(dir, { recursive: true });
+  const buf = Buffer.from('a made-up file of the person\'s\n'.repeat(4096)), dest = path.join(dir, 'copied.txt');
+  const stand = { info: async () => ({ isDirectory: false }), _run: async () => `${buf.length}\n`, _spawn: () => ({ stdout: Readable.from([buf]) }) };   // the other machine: a stand-in of the suite's own
+  const cht = require(modPath).__crossHostTransfer;
+  const res = { code: 200, body: null, status(c) { this.code = c; return this; }, json(o) { this.body = o; return this; } };
+  const out = await recorded(() => cht({ body: { src: '/made-up/source.txt', dest, srcHost: 'h-made-up' }, app: { locals: { getRemoteFs: () => stand } } }, res, { move: false }), fail);
+  return { ...out, res, dest, buf, dir, now: fs.existsSync(dest) ? fs.readFileSync(dest) : null };
+}
+{
+  const FILES_LIVE = MC.write(FILES_REL, withCht(FILES), 'files-live');   // the module with the suite's own handle (one copy, reused)
+  const live = await chtRun(FILES_LIVE);
+  ok(!live.err && live.res.code === 200 && !!live.now && live.now.equals(live.buf), 'the copy lands whole under its name', live.err ? live.err.message : JSON.stringify(live.res.body));
+  ok(before(live.log, 'sync copied.txt.vs-partial', 'rename copied.txt.vs-partial') && !live.log.some((x) => /^(writeFileSync|fsyncSync) /.test(x)), 'its partial is synced ONCE at its end, BEFORE the rename — on the thread pool, no sync write on the loop', live.log.join(' → '));
+  const f = await chtRun(FILES_LIVE, (k, p) => k === 'sync' && /\.vs-partial$/.test(String(p)));
+  ok(f.res.code === 400 && /copied\.txt could not be put on disk \(EIO\) — not saved/.test(String(f.res.body && f.res.body.error)), 'a PLACED refusal of its sync is a failed copy, said by name (the answer the page toasts)', JSON.stringify(f.res.body));
+  ok(!f.now && tmpLeft(f.dir, /vs-partial/).length === 0 && !f.log.some((x) => x.startsWith('rename')), '…nothing renamed, no partial left', `${fs.readdirSync(f.dir).join(', ') || 'empty'} · ${f.log.join(' → ')}`);
+  const today = without(FILES, /\n {8}\/\/ B-ddf3 \(lane bl-vault, r4361\): the copy's bytes[\s\S]*?nothing was replaced`\); \}/, 'today: the partial renamed with nothing synced');
+  const t = await chtRun(MC.write(FILES_REL, withCht(today), 'files-today'), (k, p) => k === 'sync' && /\.vs-partial$/.test(String(p)));
+  ok(t.res.code === 200 && !t.log.some((x) => x.startsWith('sync')) && t.log.some((x) => x.startsWith('rename')), 'RED (today\'s copy): renamed with nothing synced, and a failing disk is never asked', t.log.join(' → '));
+}
+
+// ④ a copy or move across devices (src/safe-fs-worker.js copy / move — the pool's worker, its ops run here in-process)
+console.log('④ a copy or move across devices (src/safe-fs-worker.js copy, move)');
+const SFW_REL = 'src/safe-fs-worker.js', SFW = fs.readFileSync(path.join(REPO, SFW_REL), 'utf8');
+const withOps = (text) => text + '\nmodule.exports.__OPS = OPS;   // the suite\'s own handle (this copy only)\n';
+async function sfwRun(modPath, op, fail, { exdev = false } = {}) {
+  const dir = path.join(ROOT, `sfw-${++seq}`), src = path.join(dir, 'src-tree'), dest = path.join(dir, 'dest-tree');
+  fs.mkdirSync(path.join(src, 'inner'), { recursive: true });
+  fs.writeFileSync(path.join(src, 'a.txt'), 'made-up a'); fs.writeFileSync(path.join(src, 'inner', 'b.txt'), 'made-up b');
+  const OPS = require(modPath).__OPS;
+  const keepRename = fs.renameSync;
+  if (exdev) fs.renameSync = function placedCrossDevice(a, b) { if (path.resolve(String(a)) === src) throw Object.assign(new Error('EXDEV: a placed cross-device rename'), { code: 'EXDEV' }); return keepRename.call(fs, a, b); };   // the cross-device road, placed
+  try {
+    const out = await recorded(() => OPS[op]({ src, dest, overwrite: false }), fail);
+    return { ...out, dir, src, dest, srcLeft: fs.existsSync(src), files: fs.existsSync(dest) ? [fs.existsSync(path.join(dest, 'a.txt')), fs.existsSync(path.join(dest, 'inner', 'b.txt'))] : null };
+  } finally { fs.renameSync = keepRename; }
+}
+const SFW_LIVE = MC.write(SFW_REL, withOps(SFW), 'sfw-live');   // the worker with the suite's own handle (one copy, reused)
+for (const [op, exdev] of [['copy', false], ['move', true]]) {
+  const live = await sfwRun(SFW_LIVE, op, undefined, { exdev });
+  ok(!live.err && !!live.files && live.files.every(Boolean) && (op === 'copy' || !live.srcLeft), `${op}: the tree lands whole under its name${op === 'move' ? ' and its source goes' : ''}`, live.err ? live.err.message : JSON.stringify(live.files));
+  ok(before(live.log, 'fsyncSync a.txt', 'rename dest-tree.vs-partial') && before(live.log, 'fsyncSync b.txt', 'rename dest-tree.vs-partial'), `${op}: EVERY file of its partial is synced at the end of the copy, BEFORE the rename (on the pool's thread)`, live.log.join(' → '));
+  const f = await sfwRun(SFW_LIVE, op, (k, p) => k === 'fsyncSync' && /b\.txt$/.test(String(p)), { exdev });
+  ok(!!f.err && /dest-tree could not be put on disk \(EIO\) — not saved/.test(f.err.message), `${op}: a PLACED refusal of a sync is a failed ${op}, said by name (the toast's words)`, f.err ? f.err.message : 'NO ERROR');
+  ok(!f.files && tmpLeft(f.dir, /vs-partial/).length === 0 && f.srcLeft && !f.log.some((x) => x === 'rename dest-tree.vs-partial'), `${op}: …nothing renamed, no partial left, the source kept`, `${fs.readdirSync(f.dir).join(', ')} · ${f.log.join(' → ')}`);
+}
+{
+  const today = without(SFW, /\n {4}\/\/ B-ddf3 \(lane bl-vault, r4361\): every file of the partial[\s\S]*?\n {4}\}(?=\n {4}fs\.renameSync\(part, dest\);)/, 'today: the staged copy renamed with nothing synced');
+  ok(today !== SFW && (today.match(/fsyncSync/g) || []).length < (SFW.match(/fsyncSync/g) || []).length, 'RED setup: today\'s worker (both syncs taken out)', today === SFW ? 'nothing removed' : 'removed');
+  const t = await sfwRun(MC.write(SFW_REL, withOps(today), 'sfw-today'), 'copy', (k, p) => k === 'fsyncSync');
+  ok(!t.err && !t.log.some((x) => x.startsWith('fsyncSync')) && t.log.includes('rename dest-tree.vs-partial'), 'RED (today\'s copy): renamed with nothing synced, and a failing disk is never asked', t.log.join(' → '));
+}
+
+// ⑤ a DAV upload (src/webdav.js, the PUT)
+console.log('⑤ a DAV upload (src/webdav.js PUT)');
+const DAV_REL = 'src/webdav.js', DAV = fs.readFileSync(path.join(REPO, DAV_REL), 'utf8');
+async function davRun(modPath, fail) {
+  const dir = path.join(ROOT, `dav-${++seq}`); fs.mkdirSync(dir, { recursive: true });
+  const { registerWebdav } = require(modPath);
+  let handler = null;
+  registerWebdav({ use: (p, fn) => { if (p === '/dav') handler = fn; } }, { tokens: { resolve: () => ({ mode: 'rw', root: dir }) } });   // a token store of the suite's own: one share, the scratch folder
+  const buf = Buffer.from('a made-up upload\n'.repeat(2048));
+  const req = Object.assign(Readable.from([buf]), { method: 'PUT', path: '/upload.txt', url: '/upload.txt', headers: {} });
+  let done; const finished = new Promise((r) => { done = r; });
+  const res = { code: 200, text: '', headers: {}, set(k, v) { this.headers[k] = v; return this; }, type() { return this; }, status(c) { this.code = c; return this; }, end() { done(); return this; }, send(t) { this.text = String(t); done(); return this; } };
+  const out = await recorded(async () => { await handler(req, res); await Promise.race([finished, new Promise((r) => setTimeout(r, 5000))]); }, fail);
+  const target = path.join(dir, 'upload.txt');
+  return { ...out, res, dir, buf, now: fs.existsSync(target) ? fs.readFileSync(target) : null };
+}
+{
+  const live = await davRun(path.join(REPO, DAV_REL));
+  ok(live.res.code === 201 && !!live.now && live.now.equals(live.buf), 'the upload lands whole under its name (201)', `${live.res.code} ${live.res.text}`);
+  ok(live.log.some((x) => /^sync upload\.txt\.vsdav-/.test(x)) && live.log.findIndex((x) => /^sync upload\.txt\.vsdav-/.test(x)) < live.log.findIndex((x) => /^rename upload\.txt\.vsdav-/.test(x)) && !live.log.some((x) => /^(writeFileSync|fsyncSync) /.test(x)), 'its temp is synced ONCE at its end, BEFORE the rename — on the thread pool', live.log.join(' → '));
+  const f = await davRun(path.join(REPO, DAV_REL), (k, p) => k === 'sync' && /\.vsdav-/.test(String(p)));
+  ok(f.res.code === 500 && /upload\.txt could not be put on disk \(EIO\) — not saved/.test(f.res.text), 'a PLACED refusal of its sync is a failed upload, said by name (a 500 whose body names it)', `${f.res.code} ${f.res.text}`);
+  await new Promise((r) => setTimeout(r, 50));
+  ok(!f.now && tmpLeft(f.dir, /vsdav-/).length === 0 && !f.log.some((x) => x.startsWith('rename')), '…nothing renamed, no temp left', `${fs.readdirSync(f.dir).join(', ') || 'empty'} · ${f.log.join(' → ')}`);
+  const today = without(DAV, /\n {2}try \{ h = await fsp\.open\(tmp, 'r\+'\); await h\.sync\(\); \} catch \(se\) \{ fault = se; \}/, 'today: the upload renamed with nothing synced');
+  const t = await davRun(MC.write(DAV_REL, today, 'dav-today'), (k, p) => k === 'sync');
+  ok(t.res.code === 201 && !t.log.some((x) => x.startsWith('sync')), 'RED (today\'s upload): renamed with nothing synced, and a failing disk is never asked', `${t.res.code} · ${t.log.join(' → ')}`);
+}
+
+// ⑥ a design file of the person's (src/design-fs.js writeUser, through its action)
+console.log('⑥ a design file (src/design-fs.js writeUser)');
+const DFS_REL = 'src/design-fs.js', DFS = fs.readFileSync(path.join(REPO, DFS_REL), 'utf8');
+async function dfsRun(modPath, fail) {
+  const dir = path.join(ROOT, `design-${++seq}`); fs.mkdirSync(dir, { recursive: true });
+  const text = JSON.stringify({ tweak: 'a made-up value' });
+  const out = await recorded(() => require(modPath).run('write-user', { dir, text }), fail);
+  const f = path.join(dir, 'user.json');
+  return { ...out, dir, text, now: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null };
+}
+{
+  const live = await dfsRun(path.join(REPO, DFS_REL));
+  const iS = live.log.findIndex((x) => /^sync \.user\.json\..*\.tmp$/.test(x)), iR = live.log.findIndex((x) => /^rename \.user\.json\..*\.tmp$/.test(x));
+  ok(!!live.r && live.r.ok === true && live.now === live.text && iS >= 0 && iS < iR, 'the design file lands whole, its handle synced BEFORE the rename (on the thread pool)', `${JSON.stringify(live.r)} · ${live.log.join(' → ')}`);
+  const f = await dfsRun(path.join(REPO, DFS_REL), (k, p) => k === 'sync' && /\.user\.json\./.test(String(p)));
+  ok(!!f.r && f.r.ok === false && f.r.code === 'write_failed' && /\(EIO\)/.test(String(f.r.why || f.r.error || '')) && f.now === null && tmpLeft(f.dir, /\.tmp$/).length === 0 && !f.log.some((x) => x.startsWith('rename')), 'a PLACED refusal of its sync is a failed write said by name (write_failed, the chip\'s words): nothing renamed, no temp left', `${JSON.stringify(f.r)} · ${f.log.join(' → ')}`);
+  const today = without(DFS, /\n {4}await fh\.sync\(\);[^\n]*/, 'today: the handle closed and renamed with nothing synced');
+  const t = await dfsRun(MC.write(DFS_REL, today, 'design-today'), (k, p) => k === 'sync');
+  ok(!!t.r && t.r.ok === true && !t.log.some((x) => x.startsWith('sync')), 'RED (today\'s write): renamed with nothing synced, and a failing disk is never asked', t.log.join(' → '));
+}
+
+// ⑦ an export the person asked for (src/task-groups.js TaskGroupManager.exportToFile)
+console.log('⑦ a Task Group export (src/task-groups.js exportToFile)');
+const TG_REL = 'src/task-groups.js', TG = fs.readFileSync(path.join(REPO, TG_REL), 'utf8');
+async function tgRun(modPath, fail) {
+  const dir = path.join(ROOT, `export-${++seq}`); fs.mkdirSync(dir, { recursive: true });
+  const { TaskGroupManager } = require(modPath);
+  const m = new TaskGroupManager({ dataDir: path.join(dir, 'data'), onChange: () => { } });
+  const t = m.create({ title: 'a made-up group', objective: 'made-up', folders: [dir] });
+  const file = path.join(dir, 'out', 'group.md');
+  const out = await recorded(() => m.exportToFile(t.id, file), fail);
+  return { ...out, dir, file, now: fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null };
+}
+{
+  const live = await tgRun(path.join(REPO, TG_REL));
+  ok(!live.err && live.r === live.file && !!live.now && /made-up group/.test(live.now), 'the export lands whole under its name', live.err ? live.err.message : String(live.r));
+  ok(before(live.log, 'sync group.md.tmp', 'rename group.md.tmp') && !live.log.some((x) => /^(writeFileSync|fsyncSync|rename(Sync)?) group/.test(x) && /writeFileSync|fsyncSync/.test(x)), 'it is written, synced BEFORE the rename — through the thread pool, nothing synchronous on the loop', live.log.join(' → '));
+  const f = await tgRun(path.join(REPO, TG_REL), (k, p) => k === 'sync' && /group\.md\.tmp$/.test(String(p)));
+  ok(!!f.err && /group\.md could not be put on disk \(EIO\) — not exported/.test(f.err.message) && !f.now && tmpLeft(path.join(f.dir, 'out'), /\.tmp$/).length === 0 && !f.log.some((x) => x.startsWith('rename')), 'a PLACED refusal of its sync is a failed export said by name (the toast\'s words): nothing renamed, no temp left', f.err ? f.err.message : 'NO ERROR');
+  const today = without(TG, / await h\.sync\(\);(?= \} catch \(e\) \{ fault = e; \}\n {4}if \(h\) \{ const c = await h\.close)/, 'today: the export renamed with nothing synced');
+  const t = await tgRun(MC.write(TG_REL, today, 'export-today'), (k, p) => k === 'sync');
+  ok(!t.err && !t.log.some((x) => x.startsWith('sync')), 'RED (today\'s export, the sync taken out): renamed with nothing synced, a failing disk never asked', t.log.join(' → '));
+}
+
+// ⑧ a page's published content (src/server/published-pages.js publishContent)
+console.log('⑧ a published page (src/server/published-pages.js publishContent)');
+const PP_REL = 'src/server/published-pages.js', PP = fs.readFileSync(path.join(REPO, PP_REL), 'utf8');
+async function ppRun(modPath, fail) {
+  const dir = path.join(ROOT, `pages-${++seq}`); fs.mkdirSync(dir, { recursive: true });
+  const pages = require(modPath).create({ dataDir: dir });
+  const out = await recorded(() => pages.publishContent({ html: '<!doctype html><title>a made-up page</title>', name: 'made-up', srcKey: 'local:/made-up/page.html', sessionId: 's-made-up' }), fail);
+  return { ...out, dir, pages, list: pages.list({}) };
+}
+{
+  const live = await ppRun(path.join(REPO, PP_REL));
+  const iS = live.log.findIndex((x) => /^sync .*\.html\.tmp$/.test(x)), iR = live.log.findIndex((x) => /^rename .*\.html\.tmp$/.test(x));
+  ok(!live.err && !!live.r && !!live.r.page && live.list.length === 1, 'the page is published and recorded', live.err ? live.err.message : JSON.stringify(live.r && (live.r.error || live.r.page && live.r.page.id)));
+  ok(iS >= 0 && iS < iR && !live.log.some((x) => /^(writeFileSync|fsyncSync) .*\.html/.test(x)), 'its content is written, synced BEFORE the rename — through the thread pool (25 MB never on the loop)', live.log.join(' → '));
+  const f = await ppRun(path.join(REPO, PP_REL), (k, p) => k === 'sync' && /\.html\.tmp$/.test(String(p)));
+  ok(!!f.r && /the page could not be put on disk \(EIO\) — not published/.test(String(f.r.error)) && f.list.length === 0 && tmpLeft(path.join(f.dir, 'published-pages'), /\.tmp$/).length === 0 && !f.log.some((x) => x.startsWith('rename')), 'a PLACED refusal of its sync is a failed publish said by name: nothing renamed, nothing recorded, no temp left', `${JSON.stringify(f.r)} · ${f.log.join(' → ')}`);
+  const today = without(PP, / await h\.sync\(\);(?= \} catch \(e\) \{ fault = e; \}\n {6}if \(h\) \{ const c = await h\.close)/, 'today: the page renamed with nothing synced');
+  const t = await ppRun(MC.write(PP_REL, today, 'pages-today'), (k, p) => k === 'sync');
+  ok(!!t.r && !!t.r.page && !t.log.some((x) => x.startsWith('sync')), 'RED (today\'s publish, the sync taken out): renamed with nothing synced, a failing disk never asked', t.log.join(' → '));
+}
+// browser-serve's planLaunch file is NOT a person's file (a planned copy, made again at every start): read «derived» by the census
 
 report();

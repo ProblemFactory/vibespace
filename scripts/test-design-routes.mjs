@@ -451,8 +451,8 @@ console.log('§6 publish');
   const ap = await W.call('POST', '/api/agent/design/publish', { token: 'vsst_local', body: { dir: DIR, public: true } });
   ok(ap.body.ok && ap.body.page.id === p.body.page.id && ap.body.page.public === true && ap.body.page.url === ap.body.page.path, 'the agent route publishes onto the same page; its answer is the RELATIVE path (an agent has no browser)', ap.body.page);
   // --page: onto the caller's own page only
-  const other = W.pages.publishContent({ html: '<html><body>o</body></html>', name: 'other', srcKey: 'local:/elsewhere/o.html', sessionId: 'w7', conversationId: 'conv-7' });
-  const own = W.pages.publishContent({ html: '<html><body>m</body></html>', name: 'mine', srcKey: 'local:/elsewhere/m.html', sessionId: 'w1', conversationId: 'conv-local' });
+  const other = await W.pages.publishContent({ html: '<html><body>o</body></html>', name: 'other', srcKey: 'local:/elsewhere/o.html', sessionId: 'w7', conversationId: 'conv-7' });
+  const own = await W.pages.publishContent({ html: '<html><body>m</body></html>', name: 'mine', srcKey: 'local:/elsewhere/m.html', sessionId: 'w1', conversationId: 'conv-local' });
   const pf = await W.call('POST', '/api/agent/design/publish', { token: 'vsst_local', body: { dir: DIR, page: other.page.id } });
   ok(pf.status === 403 && pf.body.code === 'page_forbidden', '--page onto ANOTHER conversation\'s page: 403 page_forbidden');
   const po = await W.call('POST', '/api/agent/design/publish', { token: 'vsst_local', body: { dir: DIR, page: own.page.id } });

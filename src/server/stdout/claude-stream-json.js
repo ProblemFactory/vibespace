@@ -235,7 +235,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
         const mediaType = USER_FILE_EXT_TYPES.get(ext) || 'application/octet-stream';
         const pages = pagesRef;
         if (!pages || typeof pages.publishContent !== 'function') { out.push({ path: abs, name, error: 'publishing is unavailable on this instance' }); continue; }
-        const r = pages.publishContent({
+        const r = await pages.publishContent({   // B-ddf3 (r4361): written off the loop
           html: buf, name,
           // THE CHANNEL'S OWN KEY NAMESPACE (round-3 verifier, MAJOR).
           // `srcKey` is the UPSERT IDENTITY of a published page, and

@@ -144,7 +144,7 @@ console.log('PP [published-pages.json] the share links a person gave out');
     const before = disk(F), pr = placeReads(F, 1);
     let p2 = null;
     try { await quietly(() => { p2 = mk(d); }); } finally { pr.restore(); }
-    const flags = p2.setFlags(ids[0], { makePublic: false }), gone = p2.remove(ids[1]), content = p2.publishContent({ html: '<p>x</p>', name: 'x', srcKey: 'userfile:conv-madeup:/x.html' });
+    const flags = p2.setFlags(ids[0], { makePublic: false }), gone = p2.remove(ids[1]), content = await p2.publishContent({ html: '<p>x</p>', name: 'x', srcKey: 'userfile:conv-madeup:/x.html' });
     ok([flags, gone, content].every((r) => r && r.code === 'pages_unread' && r.status === 503), 'PP2 every change while held is refused by name: a visibility flip, an unpublish, an agent\'s SendUserFile (503 pages_unread)', { flags, gone, content });
     const v = visit(p2, ids[0]);
     ok(v.code === 503 && /cannot be shown right now/.test(String(v.body)) && !!v.headers['Retry-After'], 'PP2 a share link given out answers 503 «cannot be shown right now» (Retry-After) — never 404 «not found», never 410 «unpublished»', { code: v.code, body: v.body });

@@ -1563,6 +1563,9 @@ async function crossHostTransfer(req, res, { move }) {
       try {
         await new Promise((resolve, reject) => { const w = fs.createWriteStream(part); w.on('error', reject); w.on('finish', resolve); reader.on('error', reject); reader.pipe(w); });   // ckpt61 cure 3: the listeners before the pipe
         if (srcSize != null && fs.statSync(part).size !== srcSize) throw new Error('transfer truncated (source changed or connection dropped)');
+        // B-ddf3 (lane bl-vault, r4361): the copy's bytes are on disk before its name points at them — the partial synced ONCE at its
+        // end through the thread pool (never on the hub's loop); a failed sync is a failed copy, said by name (the partial removed below)
+        { let h = null, fault = null; try { h = await fs.promises.open(part, 'r+'); await h.sync(); } catch (se) { fault = se; } if (h) { const c = await h.close().then(() => null, (x) => x); if (!fault && c) fault = c; } if (fault) throw new Error(`${path.basename(dPath)} could not be put on disk (${(fault && fault.code) || 'failed'}) — not saved, nothing was replaced`); }
         fs.renameSync(part, dPath);
       } catch (e) { try { fs.rmSync(part, { force: true }); } catch {} throw e; }
     }
