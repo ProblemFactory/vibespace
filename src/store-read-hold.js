@@ -79,7 +79,7 @@ function onHoldsChange(fn) { if (typeof fn !== 'function') return () => {}; CHAN
 function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now, readMs = READ_MS } = {}) {   // readMs: a number, or a function asked at each read (a store's own knob)
   if (!file || typeof aside !== 'function' || typeof words !== 'function' || !code) throw new Error('store-read-hold: file, aside, words and code are required');
   const name = path.basename(file);
-  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0, waitingSince = 0, waitSaid = false, unlikeSaid = false, keepFailSaid = false;   // r3986: said once a hold each   // waitingSince: a read past its bound (2b)   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
+  let held = null, tries = 0, timer = null, busy = false, missingAt = 0, stopped = false, saveSaid = false, tornLift = null, nextAt = 0, waitingSince = 0, waitSaid = false, unlikeSaid = false, keepFailSaid = false, emptySaid = false;   // r3986: said once a hold each (r4039 (b): the empty file's)   // waitingSince: a read past its bound (2b)   // nextAt: B-f276 unit B — the armed read again's due time (the family's notice says the next try)
   const prefix = path.basename(aside(''));   // the copies' common head (`<file>.corrupt-`)
   const onErr = (e) => { log(`${name}: a read again failed: ${(e && e.message) || e}`); arm(); };
   function arm() {
@@ -160,14 +160,33 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
       waitingSince = 0;
       if (!held || stopped) return false;
       a = SR.storeAnswer(read, { valid });
-      if (a.state === 'unreadable') { held.code = codeOf(a); missingAt = 0; return false; }
+      if (a.state === 'unreadable') { held.code = codeOf(a); missingAt = 0; held.emptyOnce = false; return false; }
       if (a.state === 'missing' && !missingAt) { missingAt = now(); return false; }
       if (a.state === 'corrupt') {
-        const fileBytes = await fileConfirms(read.buf);   // r3986: the FILE confirms the torn verdict, or the read failed
+        // r4039 (a): the second look has the FIRST read's bound and words — past it the hold says a read waits (its slot stays this
+        // read's until the file answers: one read in flight a store)
+        const look = fileConfirms(read.buf), lookMs = Number(typeof readMs === 'function' ? readMs() : readMs) || READ_MS;
+        let tmL = null;
+        let fileBytes = await Promise.race([look, new Promise((r) => { tmL = setTimeout(() => r(SLOW), lookMs); tmL.unref?.(); })]);
+        clearTimeout(tmL);
+        if (fileBytes === SLOW) {
+          waitingSince = now();
+          if (!waitSaid) { waitSaid = true; log(`${name}: a read again has not answered in ${lookMs / 1000} s — its answer is used the moment it comes; no second read starts meanwhile`); }
+          changed();
+          fileBytes = await look;
+          waitingSince = 0;
+        }
         if (!held || stopped) return false;
         if (!fileBytes) {
           held.code = 'a read unlike the file';
           if (!unlikeSaid) { unlikeSaid = true; log(`${name}: a read answered bytes the file does not hold (its size or a second look disagrees) — it stays held and is read again; nothing is copied or written`); }
+          return false;
+        }
+        // r4039 (b): an EMPTY file (its size says zero, both looks agree) lifts as torn only on TWO rungs in a row — a mount wrong about
+        // everything for one moment must not empty a store; a file truly of size zero lifts a rung later
+        if (fileBytes.length === 0 && !held.emptyOnce) {
+          held.emptyOnce = true; held.code = 'empty, read once more';
+          if (!emptySaid) { emptySaid = true; log(`${name}: the file is empty (its size says zero and two reads agree) — it stays held and is read once more before it starts empty`); }
           return false;
         }
         held.torn = true;
@@ -182,7 +201,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
         }
       }
     } finally { busy = false; active--; }
-    const was = held; held = null; tries = 0; missingAt = 0; saveSaid = false; waitSaid = false; unlikeSaid = false; keepFailSaid = false;
+    const was = held; held = null; tries = 0; missingAt = 0; saveSaid = false; waitSaid = false; unlikeSaid = false; keepFailSaid = false; emptySaid = false;
     if (timer) { clearTimeout(timer); timer = null; }
     if (a.setAside) tornLift = { copy: a.setAside, since: was.since, at: now() };
     log(`${name} read again (held since ${new Date(was.since).toISOString()}, ${was.code}): ${a.state === 'data' ? 'its records are back' : a.setAside ? `torn bytes, kept aside as ${a.setAside} — it starts empty` : 'the file is gone — it starts empty'}`);

@@ -2963,7 +2963,7 @@ export default {
   "Connects once the disconnect has finished": "切断が終わってから接続します",   // B-323e follow (lane bl-machines-b)
   "this machine is not in the machines list now — pair it again before mounting here, or unmount this mount": "このマシンは今マシン一覧にありません — ここにマウントする前にもう一度ペアリングするか、このマウントを解除してください",
   "Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything": "ここでマウント解除しました — そのマシンは今一覧にないため、マシン側には届きませんでした。そのリンクはもう何も開けません",
-  "Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything": "ここでマウント解除しました — そのマシンが応答しなかったため、マシン側には届きませんでした。そのリンクはもう何も開けません",
+  "Unmounted here — its machine did not answer, so the folder may still be mounted on that machine; its link no longer opens anything. Unmount it on that machine once it is back": "ここでマウント解除しました — そのマシンが応答しなかったため、フォルダーはまだそのマシンでマウントされているかもしれません。そのリンクはもう何も開けません。マシンが戻ったらそちらでマウント解除してください",
   "could not release the folder {mountpoint} — its unmount did not answer in {s} s": "フォルダー {mountpoint} を解放できませんでした — アンマウントが {s} 秒以内に応答しませんでした",
   "device serve-folder failed: {detail}": "デバイスの serve-folder に失敗しました: {detail}",
   "rclone webdav mount exited: {detail}": "rclone webdav マウントが終了しました: {detail}",

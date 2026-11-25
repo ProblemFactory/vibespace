@@ -2960,7 +2960,7 @@ export default {
   "machine is offline — start its daemon first": "机器离线——先启动它的守护进程",
   "this machine is not in the machines list now — pair it again before mounting here, or unmount this mount": "这台机器现在不在机器列表中——先重新配对再在这里挂载，或者卸载这个挂载",
   "Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything": "已在这里卸载——它的机器现在不在列表中，所以没有到达机器那一端；它的链接已不能再打开任何东西",
-  "Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything": "已在这里卸载——它的机器没有应答，所以没有到达机器那一端；它的链接已不能再打开任何东西",
+  "Unmounted here — its machine did not answer, so the folder may still be mounted on that machine; its link no longer opens anything. Unmount it on that machine once it is back": "已在这里卸载——它的机器没有应答，所以这个文件夹可能仍挂载在那台机器上；它的链接已不能再打开任何东西。等那台机器回来后在那里卸载它",
   "could not release the folder {mountpoint} — its unmount did not answer in {s} s": "无法释放文件夹 {mountpoint}——它的卸载在 {s} 秒内没有回应",
   "Did not disconnect — {why}; try again in a moment": "没有断开连接——{why}；请稍后再试",   // B-323e follow (lane bl-machines-b)
   "Disconnected, but could not confirm its process ended — {why}": "已断开连接，但无法确认它的进程已经结束——{why}",   // B-323e follow (lane bl-machines-b)

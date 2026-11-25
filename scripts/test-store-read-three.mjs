@@ -376,9 +376,9 @@ try {
     // today with the FILE's own bytes kept; a file truly of size zero lifts (its own size states it). RED: the release's verdict on one read
     console.log('⑤ the helper (r3986): «torn» is a verdict about the FILE — a read that answers bytes the file does not hold lifts nothing');
     const HSRC3 = fs.readFileSync(path.join(REPO, 'src/store-read-hold.js'), 'utf8');
-    const CONFIRM = "        const fileBytes = await fileConfirms(read.buf);   // r3986: the FILE confirms the torn verdict, or the read failed\n";
+    const CONFIRM = "        const look = fileConfirms(read.buf), lookMs = Number(typeof readMs === 'function' ? readMs() : readMs) || READ_MS;\n";   // r4039 (a): the second look, bounded
     ok(HSRC3.split(CONFIRM).length === 2, 'control setup: the torn verdict asks the file once (found once)');
-    const RELEASE = mutant('src/store-read-hold.js', [[CONFIRM, '        const fileBytes = read.buf;   /* MUTANT: the release — the verdict on ONE read, its own bytes kept */\n']]);
+    const RELEASE = mutant('src/store-read-hold.js', [[CONFIRM, "        const look = Promise.resolve(read.buf), lookMs = Number(typeof readMs === 'function' ? readMs() : readMs) || READ_MS;   /* MUTANT: the release — the verdict on ONE read, its own bytes kept */\n"], ["        if (fileBytes.length === 0 && !held.emptyOnce) {\n", "        if (false) {   /* MUTANT: the release — no second rung for an empty answer */\n"]]);
     const body = '{"rows": [1, 2]}';
     const tornScene = async (Mod, tag, { onDisk = body, answer = null, late = false } = {}) => {
       const d = dirOf(tag), f = path.join(d, 'w.json'); fs.writeFileSync(f, onDisk);
@@ -398,7 +398,7 @@ try {
         const afterAnswer = { held: !!h.held(), code: h.held() ? h.held().code : null, copies: copies().length, copyBytes: copies().map((c) => fs.readFileSync(path.join(d, c), 'utf8')).join('|') };
         fs.promises.readFile = rf;
         if (h.held()) await h.again();   // the next TRUE read
-        out = { first, afterAnswer, lifted: !h.held(), rows: value && Array.isArray(value.rows) ? value.rows.join() : null, onDisk: fs.readFileSync(f, 'utf8') };
+        out = { first, afterAnswer, lifted: !h.held(), rows: value && Array.isArray(value.rows) ? value.rows.join() : null, onDisk: fs.readFileSync(f, 'utf8'), copiesAfter: copies().length, copyBytesAfter: copies().map((c) => fs.readFileSync(path.join(d, c), 'utf8')).join('|') };
       } finally { fs.promises.readFile = rf; clearInterval(keep); if (h) h.stop(); }
       return out;
     };
@@ -409,8 +409,60 @@ try {
     ok(shortR.afterAnswer.held && shortR.afterAnswer.code === 'a read unlike the file' && shortR.afterAnswer.copies === 0 && shortR.lifted && shortR.rows === '1,2', 'a SHORT read of a whole file (fewer bytes than the file holds) is a FAILED read: held, nothing copied, the records back at the next true read', shortR);
     const tornDisk = await tornScene(H, 'torn-disk', { onDisk: '{"rows": [', answer: null }), emptyDisk = await tornScene(H, 'torn-empty', { onDisk: '', answer: null });
     ok(!tornDisk.afterAnswer.held && tornDisk.afterAnswer.copies === 1 && tornDisk.afterAnswer.copyBytes === '{"rows": [' && tornDisk.rows === null, 'a file that IS torn on disk lifts as today — empty, the FILE\'s own bytes kept aside (one copy)', tornDisk);
-    ok(!emptyDisk.afterAnswer.held && emptyDisk.afterAnswer.copies === 1 && emptyDisk.afterAnswer.copyBytes === '', 'a file truly of size ZERO (its own size states it) lifts as torn — its zero bytes kept', emptyDisk);
+    ok(emptyDisk.afterAnswer.held && emptyDisk.afterAnswer.code === 'empty, read once more' && emptyDisk.afterAnswer.copies === 0 && emptyDisk.lifted && emptyDisk.copiesAfter === 1 && emptyDisk.copyBytesAfter === '', 'a file truly of size ZERO (its own size states it, both looks agree) lifts as torn on its SECOND rung in a row (r4039 (b)) — its zero bytes kept', emptyDisk);
     const zeroX = await tornScene(RELEASE, 'torn-zero-ctl', { answer: Buffer.alloc(0) }), shortX = await tornScene(RELEASE, 'torn-short-ctl', { answer: Buffer.from('{"rows": [') });
+    // r4039 (c): two reads of EQUAL length and different bytes are a failed read (a compare by length alone would pass); the LATE form
+    // against the release's verdict; the empty file's two rungs, each with its red
+    const sameLen = await tornScene(H, 'torn-same-length', { answer: Buffer.from('x'.repeat(body.length)) });
+    const LENONLY = mutant('src/store-read-hold.js', [['again2.equals(buf) ? again2 : null', 'true ? again2 : null']]);
+    const sameLenX = await tornScene(LENONLY, 'torn-same-length-ctl', { answer: Buffer.from('x'.repeat(body.length)) });
+    ok(sameLen.afterAnswer.held && sameLen.afterAnswer.code === 'a read unlike the file' && sameLen.lifted && sameLen.rows === '1,2', 'r4039 (c): two reads of EQUAL length and different bytes are a FAILED read — held, nothing copied, the records back at the next true read', sameLen);
+    ok(!sameLenX.afterAnswer.held && sameLenX.rows === null, 'RED CONTROL — the second look compared by length alone (in a copy): the whole file lifts EMPTY', sameLenX);
+    const zeroLateX = await tornScene(RELEASE, 'torn-zero-late-ctl', { answer: Buffer.alloc(0), late: true });
+    ok(!zeroLateX.afterAnswer.held && zeroLateX.afterAnswer.copyBytes === '', 'RED CONTROL — the release\'s verdict on ONE read, LATE (in a copy): the late zero-byte answer lifts the whole file EMPTY with a copy of nothing', zeroLateX);
+    const EMPTY2 = "        if (fileBytes.length === 0 && !held.emptyOnce) {\n";
+    const emptyX = await tornScene(mutant('src/store-read-hold.js', [[EMPTY2, '        if (false) {\n']]), 'torn-empty-ctl', { onDisk: '', answer: null });
+    ok(!emptyX.afterAnswer.held && emptyX.afterAnswer.copies === 1, 'RED CONTROL — the empty file\'s second rung cut (in a copy): one empty moment empties the store at once', emptyX);
+    // r4039 (c): THE FIRST READ AT A START — the caller's own read answered torn bytes while the file is whole: the start's road reads
+    // the file again, and a placed empty answer there is a failed read too (held), then the next true read brings the records
+    const startScene = async (tag, placed) => {
+      const d = dirOf(tag), f = path.join(d, 's.json'); fs.writeFileSync(f, body);
+      const rf = fs.promises.readFile; let once = placed !== null, value = null, h = null;
+      fs.promises.readFile = function (p, ...a) { if (String(p) === f && once) { once = false; return Promise.resolve(placed); } return rf.call(fs.promises, p, ...a); };
+      try {
+        h = H.create({ file: f, code: 's', aside: (m) => f + '.corrupt-' + m, words: () => 's', onLift: (v) => { value = v; } });
+        h.start({ state: 'corrupt', why: 'the caller read torn bytes (placed)' });
+        await until(() => !h.held() || (h.held() && h.held().code === 'a read unlike the file'), 2000);
+        const mid = { held: !!h.held(), copies: fs.readdirSync(d).filter((x) => x.startsWith('s.json.corrupt-')).length };
+        fs.promises.readFile = rf;
+        if (h.held()) await h.again();
+        return { mid, lifted: !h.held(), rows: value && Array.isArray(value.rows) ? value.rows.join() : null };
+      } finally { fs.promises.readFile = rf; if (h) h.stop(); }
+    };
+    const st0 = await startScene('start-torn-whole', null), st1 = await startScene('start-torn-whole-empty', Buffer.alloc(0));
+    ok(!st0.mid.held && st0.mid.copies === 0 && st0.rows === '1,2' && st1.mid.held && st1.mid.copies === 0 && st1.rows === '1,2', 'r4039 (c): a FIRST read at a start that answered torn bytes of a whole file lifts with its records (the start reads the file again); a placed empty answer there is a failed read, held, then the records', { st0, st1 });
+    // r4039 (a): THE SECOND LOOK HAS THE FIRST READ'S BOUND: a stat that hangs there is said (the waiting fact, the same line), then used
+    const lookScene = async (Mod, tag) => {
+      const d = dirOf(tag), f = path.join(d, 'l.json'); fs.writeFileSync(f, '{"rows": [');
+      const st = fs.promises.stat, said = []; let release = null, h = null, value = 'unset';
+      fs.promises.stat = function (p, ...a) { if (String(p) === f && !release) return new Promise((res, rej) => { release = () => st.call(fs.promises, p, ...a).then(res, rej); }); return st.call(fs.promises, p, ...a); };
+      const keep = setInterval(() => { }, 1000);
+      try {
+        h = Mod.create({ file: f, code: 'l', aside: (m) => f + '.corrupt-' + m, words: (x) => (x.waiting ? 'a read waits' : 'l'), log: (m) => said.push(m), onLift: (v) => { value = v; }, readMs: () => 30 });
+        h.start({ state: 'unreadable', code: 'EIO', why: 'placed' });
+        const p = h.again();
+        await until(() => !!release && !!(h.held() && h.held().waiting), 1500);
+        const during = { waiting: !!(h.held() && h.held().waiting), words: h.words(), saidOnce: said.filter((l) => /a read again has not answered in 0\.03 s/.test(l)).length };
+        if (release) release();
+        await p; await until(() => !h.held(), 2000);
+        return { during, lifted: !h.held(), copies: fs.readdirSync(d).filter((x) => x.startsWith('l.json.corrupt-')).length };
+      } finally { fs.promises.stat = st; clearInterval(keep); if (h) h.stop(); }
+    };
+    const lk = await lookScene(H, 'look-bound');
+    const LOOKRACE = "        let fileBytes = await Promise.race([look, new Promise((r) => { tmL = setTimeout(() => r(SLOW), lookMs); tmL.unref?.(); })]);\n";
+    const lkx = await lookScene(mutant('src/store-read-hold.js', [[LOOKRACE, '        let fileBytes = await look;\n']]), 'look-bound-ctl');
+    ok(lk.during.waiting && lk.during.words === 'a read waits' && lk.during.saidOnce === 1 && lk.lifted && lk.copies === 1, 'r4039 (a): a second look that hangs past the bound is SAID — the waiting fact (the words say a read waits) and the first read\'s own line, once — and its answer is used when it comes', lk);
+    ok(!lkx.during.waiting && lkx.during.saidOnce === 0, 'RED CONTROL — the second look with no bound (in a copy): it hangs and nothing says it', lkx);
     ok(!zeroX.afterAnswer.held && zeroX.afterAnswer.copies === 1 && zeroX.afterAnswer.copyBytes === '' && !shortX.afterAnswer.held && shortX.afterAnswer.copyBytes === '{"rows": [', 'RED CONTROL — the release\'s verdict on ONE read (in a copy): the zero-byte answer lifts the whole file EMPTY with a copy of nothing, the short read lifts it with a copy of its half — the next save would write over every record', { zeroX, shortX });
   }
   {
@@ -543,7 +595,7 @@ try {
     const dn = dirOf('no-place'), fn = path.join(dn, 'n.json'); fs.writeFileSync(fn, 'torn {');
     const saidN = [];
     const hn = H.create({ file: fn, code: 'n', aside: (m) => path.join(dn, 'no-such-folder', 'n.json.corrupt-' + m), words: () => 'n', log: (l) => saidN.push(l) }); hn.start({ state: 'corrupt', why: 'did not parse' });
-    await new Promise((r) => setTimeout(r, 100));
+    await until(() => H.holds().some((x) => x.file === 'n.json' && x.code === 'torn bytes, not copied'));   // r4039 (c): on its fact, never a fixed wait
     const rn = H.holds().find((x) => x.file === 'n.json');
     ok(!!hn.held() && !!rn && rn.code === 'torn bytes, not copied' && rn.torn === true && fs.readFileSync(fn, 'utf8') === 'torn {', 'NO PLACE for the copy: the hold stands, said as torn bytes not copied — the live file is their only copy, untouched', rn);
     ok(saidN.filter((l) => /n\.json: its torn bytes could not be kept aside \(ENOENT\) — it stays held, nothing is written over it, and it is read again/.test(l)).length === 1, 'r3986 (3): a copy that cannot be made is SAID in the journal by name (its error\'s code, never a path), once', saidN);
@@ -809,14 +861,16 @@ try {
       // r3813 (the verifier's two facts, same follow): a REMOUNT on a machine not listed is refused as «not in the machines list» — never
       // «start its daemon» (the page offers no Remount there); a PUSH UNMOUNT whose machine side was not reached SAYS so (not listed, or no
       // answer), its token revoked and its record dropped as before
-      const sideRun = async (MMX, tag, { listed = false, run = null } = {}) => {   // run: the machine's answer, in the product's real shape (r3982 (1): `_run` RESOLVES, it never throws)
+      const sideRun = async (MMX, tag, { listed = false, run = null, method = 'rclone-webdav' } = {}) => {   // run: the machine's answer, in the product's real shape (r3982 (1): `_run` RESOLVES, it never throws)
         const d = dirOf(tag); fs.writeFileSync(path.join(d, 'machine-mounts.json'), JSON.stringify({ mounts: [
-          { id: 'mm-push01', dir: 'push', hostId: 'host-made07', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro', method: 'rclone-webdav', tokenId: 'tok-made07', createdAt: 1 },
+          { id: 'mm-push01', dir: 'push', hostId: 'host-made07', folder: '/srv/made', mountpoint: '/mnt/made', mode: 'ro', method, tokenId: 'tok-made07', createdAt: 1 },
           { id: 'mm-pull01', dir: 'pull', hostId: 'host-made07', remotePath: '/srv/r', mountpoint: path.join(d, 'pulled'), createdAt: 1 }] }));
         const revoked = [];
-        const hosts = { get: (id) => { if (listed) return { id, name: 'made-up', transport: 'ssh', host: 'made.example.invalid', user: 'u' }; throw Object.assign(new Error('host not found'), { code: 'host_not_found' }); }, findByDeviceId: () => null, held: () => false };
+        // r4039 (g): a machine that does not reply, in the product's OWN shape — a DIAL record whose device is not dialed in: the real `_run`
+        // answers for it (no stand-in of the run); a given `run` stands in for an ssh machine's own answers
+        const hosts = { get: (id) => { if (listed) return run ? { id, name: 'made-up', transport: 'ssh', host: 'made.example.invalid', user: 'u' } : { id, name: 'made-up', transport: 'dial', deviceId: 'made07' }; throw Object.assign(new Error('host not found'), { code: 'host_not_found' }); }, findByDeviceId: () => null, held: () => false, deviceBounded: async () => { throw new Error('the device is not dialed in (placed)'); }, dataPlaneOn: () => false };
         const M = new MMX({ dataDir: d, hosts, mountTokens: { list: () => [], revoke: (t) => revoked.push(t) }, broadcast() { }, log() { } }); clearInterval(M._sweep);
-        if (listed) M._run = run || (async () => ({ code: 1, stdout: '', stderr: 'device unreachable: the device is not dialed in (placed)' }));   // the device road's own answer for a machine that does not reply
+        if (listed && run) M._run = run;   // (an ssh machine's answer; the dial machine's is the product's own road)
         let re = null; if (!listed) { try { await M.remount('mm-pull01'); re = 'answered'; } catch (e) { re = e && e.code; } }   // (a LISTED ssh machine reads as online: its remount would start a real pull — not asked here)
         const un = await M.unmount('mm-push01');
         return { re, side: un && un.machineSide, revoked: revoked.join(), left: M.list().map((m) => m.id).join() };
@@ -824,6 +878,12 @@ try {
       const sNL = await sideRun(MMv, 'side-not-listed'), sNR = await sideRun(MMv, 'side-no-answer', { listed: true });
       const sSSH = await sideRun(MMv, 'side-ssh-fails', { listed: true, run: async () => ({ code: 255, stdout: '', stderr: 'ssh: connect to host made.example.invalid port 22: Connection refused (placed)' }) });   // ssh's own failure
       const sOK = await sideRun(MMv, 'side-reached', { listed: true, run: async () => ({ code: 0, stdout: '', stderr: '' }) });   // reached: nothing to say
+      // r4039 (d): the NET-USE road — a run killed, timed out or ended with no code of its own (`_run`'s own shape: `ended: 'no-code'`) never reached its end there
+      const sNU = await sideRun(MMv, 'side-netuse-no-code', { listed: true, method: 'net-use', run: async () => ({ code: 1, stdout: '', stderr: 'Command failed (placed)', ended: 'no-code' }) });
+      const sNUok = await sideRun(MMv, 'side-netuse-reached', { listed: true, method: 'net-use', run: async () => ({ code: 2, stdout: '', stderr: 'The network connection could not be found (placed)' }) });   // it ran there: its own code
+      const NOCODE = "    if (r.refusal || r.code === 255 || r.ended === 'no-code' || r.code == null || /^device unreachable: /.test(String(r.stderr || ''))) return true;";
+      const sNUx = await sideRun(mutant('src/machine-mounts.js', [[NOCODE, "    if (r.refusal || r.code === 255 || /^device unreachable: /.test(String(r.stderr || ''))) return true;"]]).MachineMounts, 'side-netuse-ctl', { listed: true, method: 'net-use', run: async () => ({ code: 1, stdout: '', stderr: 'Command failed (placed)', ended: 'no-code' }) });
+      ok(sNU.side === 'not-reached' && sNUok.side === undefined && sNUx.side === undefined, 'r4039 (d): the net-use road — a run killed, timed out or with no code of its own is NOT REACHED; a run that ended with its own code reached the machine; RED (in a copy): the no-code end read as reached', { sNU, sNUok, sNUx });
       ok(sNL.re === 'machine_not_listed' && sNL.side === 'not-listed' && sNL.revoked === 'tok-made07' && sNL.left === 'mm-pull01' && sNR.side === 'not-reached' && sNR.revoked === 'tok-made07', 'r3813: a remount on a machine NOT LISTED is refused as such (machine_not_listed — never «start its daemon»); a push unmount there answers machineSide not-listed (and not-reached when the machine did not answer) — its token revoked, its record dropped', { sNL, sNR });
       ok(sSSH.side === 'not-reached' && sOK.side === undefined && sOK.revoked === 'tok-made07', 'r3982 (1): the machine side NOT REACHED is read from the run\'s OWN result — the device road\'s «device unreachable» and ssh\'s own failure (255) say not-reached; a run that answered says nothing', { sNR, sSSH, sOK });
       const NRL = "        if (this._notReached(r, { cannotFail: true })) side = 'not-reached';   // r3982 (1): the run RESOLVES on a machine that does not reply — its own result says so\n";
@@ -834,7 +894,7 @@ try {
       ok(MMS2.split(RENL).length === 2 && MMS2.split(SIDE).length === 2, 'control setup: the remount\'s refusal and the unmount\'s answer are each found once in machine-mounts.js');
       const sX = await sideRun(mutant('src/machine-mounts.js', [[RENL, "MW.refusal('machine_offline_start')"], [SIDE, '    return { ok: true };\n']]).MachineMounts, 'side-ctl');
       ok(sX.re === 'machine_offline_start' && sX.side === undefined, 'RED CONTROLS (in a copy) — the release\'s words: «start its daemon» for a machine not listed, and an unmount that answers done with nothing said of the machine side', sX);
-      const NR_L = 'Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything', NR_R = 'Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything';
+      const NR_L = 'Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything', NR_R = 'Unmounted here — its machine did not answer, so the folder may still be mounted on that machine; its link no longer opens anything. Unmount it on that machine once it is back';   // r4039 (e)
       const MWS = fs.readFileSync(path.join(REPO, 'src/mount-error-words.js'), 'utf8'), NLW = 'this machine is not in the machines list now — pair it again before mounting here, or unmount this mount';
       const SMr = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8'), zhr = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jar = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
       ok(SMr.includes("if (!m.live && !(m.errorParams && m.errorParams.held) && !h.notListed) {") && SMr.includes('if (pushGone && !h.notListed) {') && (SMr.match(/, notListed: true \}, m\)\);/g) || []).length === 3
@@ -847,15 +907,17 @@ try {
       ok(!fGoneMany.unknown && !fGoneMany.flag && !fGoneMany.earlyUnknown, 'r3982 (2): a machine the person REMOVED is «removed» at once, even with more copies than the look reads', fGoneMany);
       ok(fGoneManyX.unknown === true, 'RED CONTROL — the removal asked after the copies (in a copy): over twenty copies, the removed machine is drawn as unknown', fGoneManyX);
       // r3982 (3): after a torn boot the one-time legacy ingest runs at the NEXT start — the lift marks it owed in the list it saves
-      const legacyRun = async (MMX, tag) => {
+      const legacyRun = async (MMX, tag, { dup = false, noLegacy = false } = {}) => {   // r4039 (f): dup — the list already holds that mount point; noLegacy — nothing to ingest
         const d = dirOf(tag), f = path.join(d, 'machine-mounts.json'), LEG = path.join(d, 'host-mounts.json'); fs.writeFileSync(f, '{"mounts": [');
-        fs.writeFileSync(LEG, JSON.stringify({ mounts: [{ id: 'old-made08', hostId: 'host-made08', folder: '/srv/old', mountpoint: '/mnt/old' }] }));
+        if (!noLegacy) fs.writeFileSync(LEG, JSON.stringify({ mounts: [{ id: 'old-made08', hostId: 'host-made08', folder: '/srv/old', mountpoint: '/mnt/old' }] }));
         const mkM = () => { const M = new MMX({ dataDir: d, hosts: { get: () => null, findByDeviceId: () => null, held: () => false }, mountTokens: { list: () => [], revoke() { } }, broadcast() { }, log() { } }); clearInterval(M._sweep); return M; };
         const M1 = mkM();
         for (let k = 0; k < 5000 && M1.unreadWords(); k++) await new Promise((r) => setImmediate(r));   // the torn start: held while its copy is made, then the lift
-        const afterLift = { legacyLeft: fs.existsSync(LEG), owed: !!(JSON.parse(fs.readFileSync(f, 'utf8')).legacyOwed) }; M1._hold.stop();
+        const afterLift = { legacyLeft: fs.existsSync(LEG), owed: !!(JSON.parse(fs.readFileSync(f, 'utf8')).legacyOwed) };
+        if (dup) { M1._state.mounts.push({ id: 'mm-same08', dir: 'push', hostId: 'host-made08', folder: '/srv/same', mountpoint: '/mnt/old', tokenId: 'tok-same08', createdAt: 2 }); M1._save(); }   // a person's mount on that mount point meanwhile
+        M1._hold.stop();
         const M2 = mkM();   // the next start: the list reads as data
-        const next = { ingested: M2.list().some((m) => m.id === 'old-made08'), migrated: fs.existsSync(LEG + '.migrated') }; M2._hold.stop();
+        const next = { ingested: M2.list().some((m) => m.id === 'old-made08'), migrated: fs.existsSync(LEG + '.migrated'), markGone: !JSON.parse(fs.readFileSync(f, 'utf8')).legacyOwed, ids: M2.list().map((m) => m.id).sort().join() }; M2._hold.stop();
         return { ...afterLift, ...next };
       };
       const lg = await legacyRun(MMv, 'legacy-owed');
@@ -863,6 +925,12 @@ try {
       const lgx = await legacyRun(mutant('src/machine-mounts.js', [[OWE, '']]).MachineMounts, 'legacy-owed-ctl');
       ok(lg.legacyLeft && lg.owed && lg.ingested && lg.migrated, 'r3982 (3): after a torn boot the one-time ingest of the legacy mount stores is OWED (marked in the list the lift saves) and runs at the NEXT start', lg);
       ok(!lgx.ingested && !lgx.migrated, 'RED CONTROL — no mark (in a copy): the torn lift saves, the next start reads data, and the legacy store is never ingested', lgx);
+      const lgN = await legacyRun(MMv, 'legacy-owed-none', { noLegacy: true }), lgD = await legacyRun(MMv, 'legacy-owed-dup', { dup: true });
+      const PAID = "this._migrateLegacy(); this._save(); }   // r4039 (f)", SKIP = ".filter((r) => !have.has(r.id) && !(r.mountpoint && have.has(r.mountpoint)));";
+      const lgNx = await legacyRun(mutant('src/machine-mounts.js', [[PAID, 'this._migrateLegacy(); }   // r4039 (f)']]).MachineMounts, 'legacy-owed-none-ctl', { noLegacy: true });
+      const lgDx = await legacyRun(mutant('src/machine-mounts.js', [[SKIP, ';']]).MachineMounts, 'legacy-owed-dup-ctl', { dup: true });
+      ok(lg.markGone && lgN.markGone && lgD.ids === 'mm-same08', 'r4039 (f): the owed mark is SAVED AWAY once it is paid — with no legacy store there too; the owed ingest SKIPS a record whose mount point the list already holds', { lg, lgN, lgD });
+      ok(!lgNx.markGone && lgDx.ids === 'mm-same08,old-made08', 'RED CONTROLS (each in a copy) — the mark kept after its ingest (every start says it again); the owed ingest adding the same mount point twice', { lgNx, lgDx });
       // r3982 (4): the machines list's lift ORDER — the records loaded, THEN the waits run (a wait sees the machines)
       const orderRun = async (HMX, tag) => {
         const d = dirOf(tag), f = path.join(d, 'hosts.json'); fs.writeFileSync(f, JSON.stringify({ hosts: [{ id: 'host-made09', name: 'made-up', host: 'made.example.invalid', user: 'u' }] }));

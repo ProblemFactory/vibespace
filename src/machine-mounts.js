@@ -201,7 +201,9 @@ class MachineMounts {
       if (!fs.existsSync(file)) return null; // nothing to do
       try {
         const st = JSON.parse(fs.readFileSync(file, 'utf-8'));
-        const recs = (st.mounts || []).map(map);
+        // r4039 (f): an OWED ingest meets a list that may hold the same mount already — a record whose id or mount point is there is skipped
+        const have = new Set(this._state.mounts.flatMap((m) => [m.id, m.mountpoint].filter(Boolean)));
+        const recs = (st.mounts || []).map(map).filter((r) => !have.has(r.id) && !(r.mountpoint && have.has(r.mountpoint)));
         this._state.mounts.push(...recs);
         return recs.length;
       } catch (e) { this.log(`legacy store unreadable — kept in place (fix or remove it, then delete machine-mounts.json to re-migrate): ${file}: ${e.message}`); return -1; }
@@ -249,7 +251,7 @@ class MachineMounts {
     // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
     // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
     if (a.state !== 'data' && !atLift) this._migrateLegacy();
-    else if (a.state === 'data' && !atLift && this._state.legacyOwed) { delete this._state.legacyOwed; this.log('machine-mounts.json: the one-time ingest of the legacy mount stores owed by a mid-life lift runs at this start'); this._migrateLegacy(); }
+    else if (a.state === 'data' && !atLift && this._state.legacyOwed) { delete this._state.legacyOwed; this.log('machine-mounts.json: the one-time ingest of the legacy mount stores owed by a mid-life lift runs at this start'); this._migrateLegacy(); this._save(); }   // r4039 (f): the mark goes once it is paid (saved even when no legacy store was there)
     else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores is not run mid-life (a legacy store still there is ingested at the next start: the lift marks it owed)');
   }
   _asideName(mark = Date.now()) { return this._file + '.corrupt-' + mark; }   // ONE set-aside name: the helper's keep and the copies' prefix (the census counts the names)
@@ -289,7 +291,7 @@ class MachineMounts {
    *  runs (`… || true`), any other code too */
   _notReached(r, { cannotFail = false } = {}) {
     if (!r || typeof r !== 'object') return true;
-    if (r.refusal || r.code === 255 || /^device unreachable: /.test(String(r.stderr || ''))) return true;
+    if (r.refusal || r.code === 255 || r.ended === 'no-code' || r.code == null || /^device unreachable: /.test(String(r.stderr || ''))) return true;   // r4039 (d): a run killed, timed out or with no code never reached its end there
     return cannotFail ? r.code !== 0 : false;
   }
   /** r3813: is the mount's machine in the machines list (a held list counts as listed — unknown, never «not listed») */
@@ -385,7 +387,7 @@ class MachineMounts {
     return await new Promise((resolve) => {
       const child = execFile('ssh', sshArgs, { env: this.hosts.sshEnv(), timeout: 60000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
         const refusal = err && sshRefusal(h, err, stderr, fed);
-        if (err) resolve({ code: err.code || 1, stdout: (stdout || '').toString(), stderr: (stderr || err.message).toString(), ...(refusal ? { refusal: refusal.code } : {}) });
+        if (err) resolve({ code: err.code || 1, stdout: (stdout || '').toString(), stderr: (stderr || err.message).toString(), ...(refusal ? { refusal: refusal.code } : {}), ...(err.killed || err.signal || typeof err.code !== 'number' ? { ended: 'no-code' } : {}) });   // r4039 (d): killed, timed out, or no exit code of its own
         else resolve({ code: 0, stdout: (stdout || '').toString(), stderr: '' });
       });
       const fed = feedStdin(child, input);

@@ -1517,7 +1517,7 @@ export function installSidebarMounts(Sidebar) {
       un.title = m.dir === 'pull' ? tr('Unmount') : tr('Unmount from this machine');
       un.onclick = async (e) => {
         e.stopPropagation(); un.disabled = true;
-        try { const r = await mmApi(`/api/machine-mounts/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); showToast(r && r.machineSide === 'not-listed' ? tr('Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything') : r && r.machineSide === 'not-reached' ? tr('Unmounted here — its machine did not answer, so the machine’s side was not reached; its link no longer opens anything') : tr('Unmounted')); }   // r3813: a push mount's machine side not reached is said
+        try { const r = await mmApi(`/api/machine-mounts/${encodeURIComponent(m.id)}`, { method: 'DELETE' }); showToast(r && r.machineSide === 'not-listed' ? tr('Unmounted here — its machine is not in the list now, so the machine’s side was not reached; its link no longer opens anything') : r && r.machineSide === 'not-reached' ? tr('Unmounted here — its machine did not answer, so the folder may still be mounted on that machine; its link no longer opens anything. Unmount it on that machine once it is back') : tr('Unmounted')); }   // r3813: a push mount's machine side not reached is said
         catch (err) { showToast(err.message || 'Failed', { type: 'error' }); }
         this._renderMounts();
       };

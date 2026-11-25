@@ -2750,6 +2750,13 @@ The reports, the causes as measured and the before / after shots: /var/tmp/vibes
   - Two looks that disagree, or an answer shorter than the file, are a FAILED read («a read unlike the file», said once): the store stays held and is read again on the ladder.
   - A copy that cannot be made keeps the hold and is said once in the journal, by its error's code.
   - Before, a read again answered zero bytes (the late answer of a let-go read, or an ordinary one) lifted a whole file EMPTY with a copy of nothing, and the next save wrote over every record.
+- **r4039's follow (one commit on the chain's tip, the coordinator's read):**
+  - (a) The torn verdict's second look has the first read's bound and words: past it the hold says a read waits, and its slot stays the read's.
+  - (b) An EMPTY file (its size says zero, both looks agree) lifts as torn only on its second rung in a row, said once («empty, read once more»).
+  - (d) The net-use road reads a run killed, timed out or with no code (`_run`'s `ended: 'no-code'`) as not reached.
+  - (e) The «not reached» toast says the folder may still be mounted on that machine and to unmount it there once it is back (zh, ja).
+  - (f) The owed legacy-ingest mark is saved away once paid, and the owed ingest skips a record whose id or mount point the list already holds.
+  - (g) The legs' machine that does not reply is a dial record on the product's own `_run`.
 - Still to come: the exit re-judge's words for a machine a kept copy names.
 
 **The content stores — published-pages.json first (lane card-door-in-chat, 主开发 r3005).** The store census (bl-machines-b, batch 2) found content stores whose read was a bare catch; the legs (scripts/test-content-store-reads.mjs at the candidate) showed each NOT KEPT: one failed read, then the ordinary next write replaced the file. Each now reads through `SR.storeAnswer` and **src/store-read-hold.js**, as unit 1's stores do. **published-pages.json** (src/server/published-pages.js): HELD, a publish, an agent's SendUserFile, a flag and an unpublish are refused by name (503 `pages_unread`); a share link answers 503 «cannot be shown right now» with Retry-After — never 404 «not found» or 410 «unpublished», the page may well be there; the artifact registry reads an id's fate as held (an attach hears the words; a presented row keeps what it last knew — guarded in the server-only registry, since src/artifacts.js is a device bundle input); the Publish dialog says the list cannot be read and its toasts word the refusal by its code (utils `pagesHeldWords`, zh / ja). Its remover question: none — a snapshot under published-pages/ is deleted only by an unpublish or a re-publish of its own record, never by a sweep of what the list does not name.
