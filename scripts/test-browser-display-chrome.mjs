@@ -30,7 +30,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, endRootedProcesses, freeDisplay } from './scratch.mjs';
+import { scratch, endRootedProcesses, freeDisplay, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -109,7 +109,7 @@ if (XVFB_BIN) fs.symlinkSync(XVFB_BIN, path.join(XV, 'Xvfb'));
 console.log(`— the launch PATH farm: ${linked.size} names linked to their resolved targets — agent-browser → ${REAL}; Xvfb kept out of it (${XVFB_BIN || 'none on PATH'})`);
 
 // the owner's config SHAPE (the args and headed of the incident; no profile)
-const OWNER_ARGS = '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=wayland';
+const OWNER_ARGS = driverArgs('--no-sandbox', '--disable-blink-features=AutomationControlled', '--ozone-platform=wayland');   // B-8695: the owner's shape, its line built by the ONE driver builder (DRIVER_NAMES last)
 const UCFG = path.join(HOME, '.agent-browser', 'config.json');
 fs.writeFileSync(UCFG, JSON.stringify({ args: OWNER_ARGS, headed: true }, null, 2));
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');

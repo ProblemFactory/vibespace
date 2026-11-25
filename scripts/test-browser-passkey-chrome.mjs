@@ -29,7 +29,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, CHROME_QUIET, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -608,6 +608,7 @@ async function world(tag, { Dmod = D } = {}) {
   const W = path.join(ROOT, tag);
   const KH = path.join(W, 'h'), KXD = path.join(W, 'x');
   for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs() }), { mode: 0o600 });   // B-8695: the driver's own Chrome resolves no name off the box (scratch.mjs DRIVER_NAMES; the product carries a person's config `args`)
   const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const KEY = tag === 'ctl' ? 'bk-0000c7a1' : 'bk-0000d7a1';
   const live = new Set([KEY]);

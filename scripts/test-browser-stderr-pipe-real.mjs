@@ -17,7 +17,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, DRIVER, DRIVER_LEFT_ALONE, REHOMED } from './scratch.mjs';
+import { scratch, DRIVER, DRIVER_LEFT_ALONE, REHOMED, driverArgs } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const BE = require('../src/browser-stderr.js');
 let pass = 0, fail = 0;
@@ -92,7 +92,7 @@ try {
   let tHang = 10000;
   if (AB_BASE && verBase && cmpV(verBase, BE.FIXED_IN) < 0) {
     console.log(`— Ⓐ base: the driver ${verBase}'s own stdio under log spam`);
-    const A = await launch('bspa' + process.pid, { __bin: AB_BASE, AGENT_BROWSER_ARGS: '--no-sandbox,--enable-logging=stderr' });
+    const A = await launch('bspa' + process.pid, { __bin: AB_BASE, AGENT_BROWSER_ARGS: driverArgs('--no-sandbox', '--enable-logging=stderr') });
     ok(A.ok && A.cpid && A.port, 'the base browser launched (daemon + Chrome + its DevTools port)', A.error || { dpid: A.dpid, cpid: A.cpid, port: A.port });
     const fdA = fd2Of(A.cpid);
     ok(/^pipe:\[\d+\]$/.test(String(fdA)), `Chrome's fd 2 is the driver's pipe (${fdA})`);
@@ -107,7 +107,7 @@ try {
 
   // ═══ Ⓑ THE PIN ═══
   console.log(`— Ⓑ the pin (${ver}): the same spam`);
-  const B = await launch('bspb' + process.pid, { AGENT_BROWSER_ARGS: '--no-sandbox,--enable-logging=stderr' });
+  const B = await launch('bspb' + process.pid, { AGENT_BROWSER_ARGS: driverArgs('--no-sandbox', '--enable-logging=stderr') });
   ok(B.ok && B.cpid && B.port, 'the browser launched on the pinned driver', B.error);
   const fdB = fd2Of(B.cpid);
   const hold = Math.max(3 * tHang, 30000);
@@ -130,8 +130,8 @@ try {
     await end(it);
     return { ok: it.ok, bytes, answers };
   };
-  const D = await quietLeg('bspd', '--no-sandbox');
-  const C = await quietLeg('bspc', BE.withQuietLogging('--no-sandbox'));
+  const D = await quietLeg('bspd', driverArgs('--no-sandbox'));
+  const C = await quietLeg('bspc', BE.withQuietLogging(driverArgs('--no-sandbox')));
   ok(D.ok && C.ok && D.answers && C.answers, 'both browsers launched and answer', { D, C });
   ok(C.bytes < D.bytes, `the quiet switches cut what Chrome writes on its own: ${C.bytes} bytes vs ${D.bytes} without them (same page, same 20 s)`, { C, D });
 
@@ -141,7 +141,7 @@ try {
     const ENVM = require('../src/server/browser-env.js');
     // its readers: Ⓐ–Ⓒ pass --no-sandbox through AGENT_BROWSER_ARGS — this child launches on its config ALONE, so the person's
     // own file (the env's home) names it: a root runner or a user-namespace limit then fails on the leg, never on the sandbox
-    const EH = path.join(S, 'env-home'); fs.mkdirSync(path.join(EH, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(EH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
+    const EH = path.join(S, 'env-home'); fs.mkdirSync(path.join(EH, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(EH, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox') }));
     const be = ENVM.create({ dataDir: path.join(S, 'env-data'), homeDir: EH, serverSetting: () => undefined, log: { log() { }, warn() { }, error() { } }, env: {}, socketDirBase: path.join(S, 'env-sock'), facts: { floor: async () => ({ state: 'ok' }) } });
     const PK = 'bk-0000b789';
     be.envFor({ browserKey: PK }); // the conversation's own spawn file (the parent the child's copies)

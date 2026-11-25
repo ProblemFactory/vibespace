@@ -34,7 +34,7 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -139,6 +139,7 @@ async function gpuPct(c, secs) { const r = await c.send('SystemInfo.getProcessIn
 // ── the world: one named profile, two conversations (A, B), the keeper's own tick ──
 const KH = path.join(ROOT, 'h'), KXD = path.join(ROOT, 'x'), CWD = path.join(ROOT, 'cwd');
 for (const d of [path.join(KH, '.agent-browser'), KXD, CWD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs() }), { mode: 0o600 });   // B-8695: the driver's own Chrome resolves no name off the box (scratch.mjs DRIVER_NAMES; the product carries a person's config `args`)
 const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
 const SET = { 'browser.headed': 'yes', 'browser.idlePaintFreeze': true }; // a window asked for, no desktop ⇒ the hidden-window rung
 const journal = []; const jl = (m) => journal.push({ at: Date.now(), m: String(m) });

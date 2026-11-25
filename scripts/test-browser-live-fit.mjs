@@ -45,7 +45,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { gitEnvFrom } from './git-env.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never :7/5901 — test-architecture §57)
@@ -86,7 +86,7 @@ const ROOT = scratch('browser-live-fit');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const HOME = scratchHome('browser-live-fit-home', fs, ['.claude/projects', '.claude/sessions', '.config', '.vibespace', '.agent-browser']);
 fs.symlinkSync(realBrowsers, path.join(HOME, '.agent-browser', 'browsers')); // the INSTALLED browser, read-only use; never a download, never the owner's profiles
-fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled' }));
+fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: driverArgs('--no-sandbox', '--disable-blink-features=AutomationControlled') }));
 const procs = new Set();
 let wt = null;
 function cleanup() {

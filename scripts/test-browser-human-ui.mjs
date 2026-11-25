@@ -49,7 +49,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs, CHROME_QUIET, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -140,7 +140,7 @@ for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.c
 fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(INST, 'node_modules'));
 // the agent's browser: the machine's own Chrome — agent-browser falls back to it with an empty scratch HOME (how U1 / U3
 // were measured); nothing of ~/.agent-browser is read (no download, no profile, no socket)
-fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-gpu,--disable-gpu-shader-disk-cache' }));
+fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: driverArgs('--no-sandbox', '--disable-blink-features=AutomationControlled', '--disable-gpu', '--disable-gpu-shader-disk-cache') }));
 const SID = crypto.randomUUID();
 const hook = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID, hook_name: 'SessionStart' });
 const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, cwd: CWD, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });

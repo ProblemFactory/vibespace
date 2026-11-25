@@ -101,7 +101,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
@@ -467,7 +467,7 @@ async function legPasskeyRoads() {
   const K11 = require('../src/server/browser-keeper.js'), D11 = require('../src/server/browser-dialogs.js'), PK11 = require('../src/browser-passkey.js'), BF11 = require('../src/browser-fact.js');
   const RT = path.join(ROOT, 'pkroads'), KH = path.join(RT, 'h'), KXD = path.join(RT, 'x');
   for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-gpu' }));
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: driverArgs('--no-sandbox', '--disable-gpu') }));
   const env = { ...envBase, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const quiet = { log() { }, warn() { }, error() { }, info() { } };
   const pages = http.createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.setHeader('cache-control', 'no-store'); res.end(req.url.startsWith('/pk') ? PK_ROADS_PAGE : '<!doctype html><title>plain</title><p>plain'); });
@@ -2144,7 +2144,7 @@ await (async () => {
     ];
     for (const shape of SHAPES) {
       if (shape.needsDisplay && DISPLAY_N === null) { skip(`⑤ ${shape.name}: no Xvfb (or no free display) for a headed browser`); continue; }
-      fs.writeFileSync(path.join(HOME5, '.agent-browser', 'config.json'), JSON.stringify(shape.config));
+      fs.writeFileSync(path.join(HOME5, '.agent-browser', 'config.json'), JSON.stringify({ ...shape.config, args: driverArgs(shape.config.args.split(',')) }));
       const envBefore = new Set(fs.readdirSync(ENVS));
       const nCreated = msgs.filter((m) => m.type === 'created').length;
       wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: D5, cols: 80, rows: 24, reqId: 'r5-' + shape.key, name: 'live-' + shape.key }));

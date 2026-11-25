@@ -30,7 +30,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, CHROME_QUIET } from './scratch.mjs';
+import { scratch, freePort, CHROME_QUIET, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -101,7 +101,7 @@ function world(tag, SET) {
   // B-9dd0 unit 2 (line 107; the coordinator's r624): every Chrome this suite's driver launches carries scripts/scratch.mjs
   // CHROME_QUIET — through THIS world's own user config (the driver's `args`, which the spawn composer layers into every launch
   // config it writes): this run's Chrome never takes the background network roads. The product's launch is not touched.
-  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: CHROME_QUIET.join(',') }), { mode: 0o600 });
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs(...CHROME_QUIET) }), { mode: 0o600 });
   const journal = [], calls = [];
   const line = (lvl) => (...a) => journal.push({ at: Date.now(), lvl, m: a.map((x) => (typeof x === 'string' ? x : x && x.message ? x.message : JSON.stringify(x))).join(' ') });
   return { tag, key: KEYS[tag], D, KH, KXD, dataDir: path.join(D, 'data'), env: { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, TMPDIR: KT }, SET, setting: (k) => SET[k], journal, calls,

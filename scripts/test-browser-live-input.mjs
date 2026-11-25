@@ -41,7 +41,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_QUIET, chromeNames } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_QUIET, chromeNames, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -248,7 +248,7 @@ async function makeWorld(name, { patches = [] } = {}) {
   }
   fs.symlinkSync(BROWSERS, path.join(HOME, '.agent-browser', 'browsers')); // the INSTALLED chromium, read-only use; never a download, never the owner's profiles or sockets
   // no GPU shader cache under the scratch HOME: a GPU process a dying Chromium re-spawned wrote one back after the removal
-  fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled,--disable-gpu,--disable-gpu-shader-disk-cache' }));
+  fs.writeFileSync(path.join(HOME, '.agent-browser', 'config.json'), JSON.stringify({ headed: false, args: driverArgs('--no-sandbox', '--disable-blink-features=AutomationControlled', '--disable-gpu', '--disable-gpu-shader-disk-cache') }));
   const SID = crypto.randomUUID();
   const hook = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID, hook_name: 'SessionStart' });
   const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, cwd: CWD, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });

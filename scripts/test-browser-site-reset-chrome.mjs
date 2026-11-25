@@ -20,7 +20,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies } from './mutant-copy.mjs';
 // 2.369.200 integration (lane hooks-create H5 × this suite): with no desktop and Xvfb on the keeper's PATH an UNSET window
@@ -99,7 +99,7 @@ async function world(tag, { Dmod = D, ephemeral = true, second = false } = {}) {
   let pairs = null;
   if (ephemeral) {
     const cfg = path.join(W, 'spawn-config.json');
-    fs.writeFileSync(cfg, JSON.stringify(Bp.generatedConfigParts({ userConfig: {}, headed: false, mark: KEY, holdDialogs: true }).config, null, 2), { mode: 0o600 });
+    fs.writeFileSync(cfg, JSON.stringify(Bp.generatedConfigParts({ userConfig: { args: driverArgs() }, headed: false, mark: KEY, holdDialogs: true }).config, null, 2), { mode: 0o600 });
     pairs = [`AGENT_BROWSER_SESSION=vs-${KEY}`, `AGENT_BROWSER_NAMESPACE=vs-${KEY}`, `AGENT_BROWSER_CONFIG=${cfg}`];
   }
   const sessions = new Map([['sess-' + tag, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', _browserEnv: pairs, name: 'Chat ' + tag, cwd: W }]]);

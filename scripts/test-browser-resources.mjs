@@ -49,7 +49,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, vncEnv, endRootedProcesses, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
@@ -108,7 +108,7 @@ const HB = scratch('bh');
 // override, a named default profile neither session may land on) under this suite's own root.
 const USER_HOME = path.join(HB, 'u');
 fs.mkdirSync(path.join(USER_HOME, '.agent-browser'), { recursive: true });
-fs.writeFileSync(path.join(USER_HOME, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', headed: true, profile: path.join(USER_HOME, '.agent-browser', 'default-profile') }));
+fs.writeFileSync(path.join(USER_HOME, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox'), headed: true, profile: path.join(USER_HOME, '.agent-browser', 'default-profile') }));
 const REPO_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(path.join(ROOT, 'data', 'session-meta'), { recursive: true });
@@ -534,7 +534,7 @@ console.log('\nⓔ a project-level agent-browser.json fence survives the generat
   const http = await import('node:http');
   const HOME_E = path.join(HB, 'e'), PROJ_E = path.join(ROOT, 'proj-e'), DATA_E = path.join(ROOT, 'data-e');
   fs.mkdirSync(path.join(HOME_E, '.agent-browser'), { recursive: true }); fs.mkdirSync(PROJ_E, { recursive: true }); fs.mkdirSync(DATA_E, { recursive: true });
-  fs.writeFileSync(path.join(HOME_E, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', headed: false }));   // NO fence at user level
+  fs.writeFileSync(path.join(HOME_E, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox'), headed: false }));   // NO fence at user level
   fs.writeFileSync(path.join(PROJ_E, 'agent-browser.json'), JSON.stringify({ allowedDomains: ['example.com'] }));                 // the fence, project level
   const srv = http.createServer((q, s) => s.end('<title>FENCE PROBE PAGE</title><h1>FENCE PROBE PAGE</h1>'));
   await new Promise((res) => srv.listen(0, '127.0.0.1', res));
@@ -588,7 +588,7 @@ console.log('\nⓖ a fenced session whose generated config cannot be written (r4
   const { execFile } = await import('node:child_process');
   const HOME_G = path.join(HB, 'g');
   fs.mkdirSync(path.join(HOME_G, '.agent-browser'), { recursive: true });
-  fs.writeFileSync(path.join(HOME_G, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', headed: false, allowedDomains: ['127.0.0.1'] }));
+  fs.writeFileSync(path.join(HOME_G, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox'), headed: false, allowedDomains: ['127.0.0.1'] }));
   const srv = http.createServer((q, s) => s.end('<title>FENCE C PROBE</title><h1>FENCE C PROBE</h1>'));
   await new Promise((res) => srv.listen(0, '127.0.0.1', res));
   const url = `http://127.0.0.1:${srv.address().port}/`;
@@ -639,7 +639,7 @@ console.log('\nⓗ a mid-task pin: the next command relaunches the browser (r4)'
 {
   const HOME_H = path.join(HB, 'p');
   fs.mkdirSync(path.join(HOME_H, '.agent-browser'), { recursive: true });
-  fs.writeFileSync(path.join(HOME_H, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', headed: false }));
+  fs.writeFileSync(path.join(HOME_H, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox'), headed: false }));
   const resH = BE.create({ dataDir: path.join(ROOT, 'data-h'), homeDir: HOME_H, env: {}, socketDirBase: path.join(HB, 'sb'), log: { warn() { }, log() { } } });
   const arm = (key, pinTo) => {
     const r = resH.envFor({ browserKey: key, integrationOn: true });
@@ -686,7 +686,7 @@ console.log('\nⓘ HOME 38 vs 39: the fifth variable launches where round 3 was 
   const uid = process.getuid();
   const H38 = path.join(HB, 'a'.repeat(38 - HB.length - 1));
   const H39 = H38 + 'b';
-  for (const h of [H38, H39]) { fs.mkdirSync(path.join(h, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(h, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', headed: false })); }
+  for (const h of [H38, H39]) { fs.mkdirSync(path.join(h, '.agent-browser'), { recursive: true }); fs.writeFileSync(path.join(h, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox'), headed: false })); }
   ok(H38.length === 38 && H39.length === 39, `setup: HOME lengths ${H38.length} and ${H39.length}`);
   const base = path.join(HB, 'sb');
   const sdir = path.join(base, `vs-ab-${uid}`);
@@ -736,7 +736,7 @@ console.log('\nⓕ two remote-shaped sessions on a host whose config names a pro
   const shq = (x) => `'${String(x).replace(/'/g, `'"'"'`)}'`;
   const HOME_F = path.join(HB, 'f'), PROJ_F = path.join(ROOT, 'proj-f');
   fs.mkdirSync(path.join(HOME_F, '.agent-browser'), { recursive: true }); fs.mkdirSync(PROJ_F, { recursive: true });
-  const hostCfg = (o) => fs.writeFileSync(path.join(HOME_F, '.agent-browser', 'config.json'), JSON.stringify(o));
+  const hostCfg = (o) => fs.writeFileSync(path.join(HOME_F, '.agent-browser', 'config.json'), JSON.stringify({ ...o, args: driverArgs(String(o.args || '').split(',').filter(Boolean)) }));   // B-8695: the driver's line through its ONE builder
   hostCfg({ args: '--no-sandbox', headed: false, profile: path.join(HOME_F, 'shared-profile') });
   const page = (t) => `data:text/html,<title>${t}</title>`;
   const resF = BE.create({ dataDir: path.join(ROOT, 'data-f'), homeDir: HOME_F, socketDirBase: path.join(HB, 'sb'), log: { warn() { }, log() { } } });

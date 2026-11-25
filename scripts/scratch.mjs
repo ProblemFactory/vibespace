@@ -105,6 +105,30 @@ export const chromeBelt = (own = []) => {
   const list = [...new Set([...own].map((h) => String(h || '')).filter(Boolean))];
   return Object.freeze(['--proxy-server=http://127.0.0.1:9', ...(list.length ? [`--proxy-bypass-list=${list.join(';')}`] : []), chromeNames({ own: list })]);   // r3727: the names rule from its ONE builder
 };
+// B-8695 (主开发 r4364): THE AGENT BROWSER's OWN CHROME. The real driver launches its Chrome with ONE line of switches — its config's
+// `args` (a scratch HOME's ~/.agent-browser/config.json, a --config file) or AGENT_BROWSER_ARGS — and CUTS that line at every comma and
+// every line break, each piece trimmed, empty pieces dropped: agent-browser 0.38.2 (the version the tree pins), its published source
+// cli/src/native/actions.rs launch_options_from_env, `v.split([',', '\n']).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())`;
+// the tree's own reading is src/browser-verbs.js driverArgsList. chromeNames' rule holds «, », so it arrives there in pieces: the
+// catch-all alone (which takes 127.0.0.1 too) and stray words. So the line carries ONE rule with no comma: DRIVER_NAMES maps EVERY
+// name, and an address written as numbers (the vendor's MatchPattern has no branch for one: the r3968 round), to the loopback, where
+// every suite's own names and pages live. A page the agent browser opens at the box's own LAN address or name reaches it on the
+// loopback; nothing it asks resolves off the box. The fence (allowedDomains) refuses no such switch (the same source:
+// allowed_domains_disallowed_chrome_arg names profile, restore and app switches, startup URLs and positional words only).
+export const DRIVER_NAMES = '--host-resolver-rules=MAP * 127.0.0.1';
+/** THE ONE BUILDER of a suite's driver line (a config's `args`, an AGENT_BROWSER_ARGS): the switches handed (lists flattened),
+ *  CHROME_QUIET's own names rule swapped for DRIVER_NAMES, DRIVER_NAMES last — written by the product's ONE writer of that line
+ *  (src/browser-verbs.js driverArgsText), which refuses a switch the driver would cut (a comma or a line break inside it, a blank at
+ *  an end) by name. Any other resolver rule is refused by name: the line holds one. scripts/chrome-store-census.mjs driverCensus +
+ *  test-architecture §47e: a driver line a suite writes without it is red. → the line (a string) */
+export const driverArgs = (...switches) => {
+  const quiet = chromeNames(), list = switches.flat().map(String).filter((s) => s !== quiet);
+  const rules = list.filter((s) => /^--host-resolver-rules(=|$)/.test(s));
+  if (rules.length) throw new Error(`driverArgs: ${rules.map((s) => `«${s}»`).join(', ')} — the driver's line holds ONE resolver rule, DRIVER_NAMES (every name to the loopback, where a suite's own names live)`);
+  const r = require('../src/browser-verbs.js').driverArgsText([...list, DRIVER_NAMES]);
+  if (!r.ok) throw new Error(`driverArgs: ${r.error}`);
+  return r.args;
+};
 /** B-9dd0's remainder (2) and the round's CONTROL (主开发 r1246; r1521: THE CHROME UNDER TEST is probed, never a second one):
  *  reachFrom(cdpPort) opens ONE fresh blank tab in the Chrome listening on `cdpPort` — the suite's OWN Chrome: its proxy and
  *  resolver switches are the whole browser's, so a tab of it is that browser — asks it three probes and closes the tab

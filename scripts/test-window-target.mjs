@@ -40,7 +40,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, gtkRow, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, freePort, gtkRow, CHROME_STORE, CHROME_QUIET, chromeNames } from './scratch.mjs';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from '../src/lib/window-live-mode.js';
 
 const require = createRequire(import.meta.url);
@@ -398,7 +398,9 @@ async function laneE() {
   const RE = require('../src/window-reach.js');
   const chromeBin = D.binOnPath('google-chrome', { env: base });
   const outFile = path.join(HOME, 'xterm-typed.txt');
-  const NET = ['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-features=Translate,OptimizationHints,MediaRouter'];
+  // B-8695: the catalog's args are a LIST the product's desktop-app road hands to Chrome one argv word each (src/desktop-browser-app.js
+  // browserArgv: no cut; the resolver switch is not among its forbidden ones), so they carry scratch.mjs's names rule whole
+  const NET = ['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-features=Translate,OptimizationHints,MediaRouter', chromeNames()];
   const registryRows = [
     { id: 'vs-calc', label: 'Calculator', exec: 'gnome-calculator', args: [], env: { GSETTINGS_BACKEND: 'memory' }, category: 'utility' },
     { id: 'vs-xterm', label: 'xterm', exec: 'xterm', args: ['-e', 'sh', '-c', `cat > ${outFile}`], category: 'terminal' },

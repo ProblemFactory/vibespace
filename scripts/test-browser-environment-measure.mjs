@@ -23,7 +23,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, CHROME_QUIET, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, CHROME_QUIET, CHROME_STORE, endRootedProcesses, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -116,7 +116,7 @@ F.zone = {};
 for (const [tag, tz] of [['tz1', 'Asia/Tokyo'], ['tz2', 'America/Sao_Paulo']]) {
   const H = path.join(ROOT, tag), X = path.join(H, 'run');
   fs.mkdirSync(path.join(H, '.agent-browser'), { recursive: true, mode: 0o700 }); fs.mkdirSync(X, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(H, '.agent-browser', 'config.json'), JSON.stringify({ args: [...CHROME_QUIET, ...CHROME_STORE, PROXY].join(',') }), { mode: 0o600 });
+  fs.writeFileSync(path.join(H, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs(...CHROME_QUIET, ...CHROME_STORE, PROXY) }), { mode: 0o600 });
   const env = { ...BASE_ENV, HOME: H, TMPDIR: H, XDG_RUNTIME_DIR: X, TZ: tz };
   const verb = await ab(['open', `${ORIGIN}/probe?k=${tag}`], env);
   const [r] = await reportsOf((x) => x.k === tag, 1, 20000);

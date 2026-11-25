@@ -2236,6 +2236,43 @@ await section(async () => {
       '§47d CONTROL: a launch quiet by the literal switch alone brings no names rule (red); a launch that names the switch itself is red by name, through the builder it is not; a planted file that names the switch in a const is red by its text; a NAMES row whose file no longer names it is stale',
       JSON.stringify({ litOnly: [litOnly.quiet, litOnly.spread], own: [own.spread, own.named], viaB: [viaB.spread, viaB.named], text: txt.namesText, stale: gone.namesStale }));
   }
+  {
+    // §47e B-8695 (主开发 r4364): THE AGENT BROWSER's OWN CHROME. The real driver launches it with ONE line (a scratch HOME's
+    // ~/.agent-browser/config.json `args`, an AGENT_BROWSER_ARGS) that it cuts at every comma and line break (agent-browser 0.38.2's
+    // published source and src/browser-verbs.js driverArgsList, quoted at scripts/scratch.mjs DRIVER_NAMES): that line carries ONE
+    // comma-free rule, every name to the loopback, built by scratch.mjs driverArgs. The census over the scope, then the builder from
+    // its own text (this suite imports nothing of the harness), then its red controls.
+    const d = CS.driverCensus(process.cwd());
+    ok(d.unbuilt.length === 0 && d.moved.length === 0 && d.unpinned.length === 0 && d.joined.length === 0 && d.stale.length === 0 && d.built >= 20,
+      `§47e every driver line a suite writes for the agent browser is built by scratch.mjs driverArgs on its own line (${d.built} lines in ${d.files} files); the rest are DRIVER_ROWS, each read and counted (${Object.keys(CS.DRIVER_ROWS).length} rows); no quiet list joined by a comma`,
+      JSON.stringify({ unbuilt: d.unbuilt.slice(0, 8), moved: d.moved, unpinned: d.unpinned, joined: d.joined, stale: d.stale }));
+    const scr = fs.readFileSync('scripts/scratch.mjs', 'utf8'), req = (await import('node:module')).createRequire(import.meta.url), V = req('../src/browser-verbs.js');
+    const body = (name) => { const at = scr.indexOf(`export const ${name} = `), end = scr.indexOf('\n};\n', at); return at >= 0 && end > at ? scr.slice(at + `export const ${name} = `.length, end + 2) : ''; };
+    const NB = (() => { try { return new Function(`return (${body('chromeNames')});`)(); } catch { return null; } })();
+    const QUIET = (() => { const m = /^export const CHROME_QUIET = Object\.freeze\((\[[^\]]*\])\)/m.exec(scr); try { return m && NB ? new Function('chromeNames', `return ${m[1]};`)(NB) : null; } catch { return null; } })();
+    const NAMES = (/^export const DRIVER_NAMES = '([^']*)';$/m.exec(scr) || [])[1] || null;
+    const DA = (src) => { try { return new Function('chromeNames', 'require', 'DRIVER_NAMES', `return (${src});`)(NB, (p) => req(p.replace(/^\.\.\/src\//, '../src/')), NAMES); } catch { return null; } };
+    const build = DA(body('driverArgs')), throws = (f, ...a) => { try { f(...a); return false; } catch { return true; } };
+    const line = build && QUIET ? build(...QUIET) : '', pieces = V.driverArgsList(line);
+    ok(NAMES === '--host-resolver-rules=MAP * 127.0.0.1' && JSON.stringify(V.driverArgsList(NAMES)) === JSON.stringify([NAMES]) && !!QUIET
+      && pieces[pieces.length - 1] === NAMES && pieces.filter((p) => /^--host-resolver-rules/.test(p)).length === 1 && !pieces.some((p) => /^EXCLUDE|\^NOTFOUND/.test(p))
+      && QUIET.filter((s) => s !== NB()).every((s) => pieces.includes(s)) && throws(build, '--host-resolver-rules=MAP a.test 127.0.0.1') && throws(build, '--a=1,2') && throws(build, ' --a'),
+      '§47e THE BUILDER: DRIVER_NAMES is ONE rule that the driver reads back whole; driverArgs(...CHROME_QUIET) gives the driver every quiet switch, CHROME_QUIET\'s own names rule swapped for DRIVER_NAMES, DRIVER_NAMES last and alone; another resolver rule, a switch holding a comma, and a switch with a blank at its end are refused by name',
+      JSON.stringify({ names: NAMES, last: pieces[pieces.length - 1], rules: pieces.filter((p) => /^--host-resolver-rules/.test(p)) }));
+    // RED CONTROLS: the 2.369.419 shape read as the driver reads it; a planted driver line not built; a row whose count moved; a
+    // pin that no longer holds; a stale row (the planted texts are assembled from pieces, so this file is no writer of them)
+    const cut = QUIET ? V.driverArgsList(QUIET.slice().join(',')) : [];
+    const AB = "'.agent-" + "browser', 'config.json'", QJ = 'CHROME' + '_QUIET.join(\',\')';
+    const planted = CS.driverCensus(process.cwd(), { extra: { 'scripts/test-planted-driver.mjs': `fs.writeFileSync(path.join(H, ${AB}), JSON.stringify({ args: '--no-sandbox' }));\nfs.writeFileSync(path.join(H2, ${AB}), JSON.stringify({ args: ${QJ} }));\n` } });
+    const movedRow = CS.driverCensus(process.cwd(), { rows: { ...CS.DRIVER_ROWS, 'scripts/test-browser-pin.mjs': { n: 3, why: 'a planted count' } } });
+    const lostPin = CS.driverCensus(process.cwd(), { patch: { 'scripts/test-browser-display-chrome.mjs': fs.readFileSync('scripts/test-browser-display-chrome.mjs', 'utf8').replace('const OWNER_ARGS = driverArgs(', 'const OWNER_ARGS = String(') } });
+    const staleRow = CS.driverCensus(process.cwd(), { rows: { ...CS.DRIVER_ROWS, 'scripts/test-planted-gone.mjs': { n: 1, why: 'a planted row' } } });
+    ok(cut.includes('--host-resolver-rules=MAP * ^NOTFOUND') && cut.some((p) => /^EXCLUDE /.test(p))
+      && planted.unbuilt.some((u) => u.file === 'scripts/test-planted-driver.mjs' && u.line === 1) && planted.joined.some((u) => u.file === 'scripts/test-planted-driver.mjs')
+      && movedRow.moved.some((m) => m.file === 'scripts/test-browser-pin.mjs') && lostPin.unpinned.includes('scripts/test-browser-display-chrome.mjs') && staleRow.stale.includes('scripts/test-planted-gone.mjs'),
+      '§47e RED CONTROLS: the quiet list joined by a comma reaches the driver as the catch-all ALONE (it takes 127.0.0.1 too) plus stray EXCLUDE words; a planted driver config not built by driverArgs is red, and so is the joined list; a row whose count moved, a pin that no longer holds and a stale row are each red',
+      JSON.stringify({ cut: cut.filter((p) => /resolver|EXCLUDE/.test(p)), planted: planted.unbuilt.filter((u) => /planted/.test(u.file)), moved: movedRow.moved, unpinned: lostPin.unpinned, stale: staleRow.stale }));
+  }
   const L = (src) => CS.launchesOf(src, { acorn });
   const planted = L("import { scratch } from './scratch.mjs';\nconst c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0']);\n");
   const carried = L("import { CHROME_STORE } from './scratch.mjs';\nconst c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");

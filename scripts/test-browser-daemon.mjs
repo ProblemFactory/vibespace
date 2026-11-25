@@ -24,7 +24,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
@@ -77,6 +77,7 @@ const live = new Set([KA, KB, KC]);
 function world(tag) {
   const D = path.join(ROOT, tag), KH = path.join(D, 'h'), KXD = path.join(D, 'x');
   for (const d of [path.join(KH, '.agent-browser'), KXD, path.join(D, 'data')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs() }), { mode: 0o600 });   // B-8695: the driver's own Chrome resolves no name off the box (scratch.mjs DRIVER_NAMES; the product carries a person's config `args`)
   const env = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const journal = []; const jl = (m) => journal.push(String(m));
   const mine = (r) => (r.argv || []).some((x) => String(x).includes(D)) || Object.values(r.env || {}).some((x) => String(x).includes(D));

@@ -41,7 +41,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop names for the server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -648,7 +648,7 @@ await (async () => {
   // this scratch machine's OWN config (written here, never copied): measured on this box (Ubuntu, AppArmor-restricted user
   // namespaces), a Chrome for Testing build dies "No usable sandbox!" without --no-sandbox — the CLI's DEFAULT build exactly
   // like a pinned one; the keeper carries the machine config's `args` (sanctionedConfig) on every call
-  fs.writeFileSync(path.join(HOME_R, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
+  fs.writeFileSync(path.join(HOME_R, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox') }));
   const K = require('../src/server/browser-keeper.js');
   const D = path.join(ROOT, 'real-data'); fs.mkdirSync(D, { recursive: true });
   // verify r2 (G2): the runtime dir is the scratch's too — inherited, the real CLI put its daemon's sockets under the
@@ -690,7 +690,7 @@ await (async () => {
   const ACCOUNT_BROWSERS = path.join(os.homedir(), '.agent-browser', 'browsers');
   const H = path.join(ROOT, 'h1-home'); fs.mkdirSync(path.join(H, '.agent-browser'), { recursive: true });
   fs.symlinkSync(ACCOUNT_BROWSERS, path.join(H, '.agent-browser', 'browsers'));
-  fs.writeFileSync(path.join(H, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' })); // this scratch machine's own (⑤'s measured reason)
+  fs.writeFileSync(path.join(H, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox') })); // this scratch machine's own (⑤'s measured reason)
   const XDG = path.join(ROOT, 'h1-xdg'); fs.mkdirSync(XDG, { recursive: true, mode: 0o700 });
   const D = path.join(ROOT, 'h1-data'), T = path.join(D, 'browser-tools'); fs.mkdirSync(T, { recursive: true });
   // the previous version as VibeSpace's own install of it: its folder + the witness the keeper writes after the program said its version
@@ -776,7 +776,7 @@ await (async () => {
   if (!usable.length) { skip(`needs a measured Chrome build in the account's browsers/ (${usable.length})`); return; }
   const chromeOf = path.join(os.homedir(), '.agent-browser', 'browsers', 'chrome-' + usable[0].version, 'chrome');
   const H = path.join(ROOT, 'b5-home'); const HB = path.join(H, '.agent-browser', 'browsers'); fs.mkdirSync(HB, { recursive: true });
-  fs.writeFileSync(path.join(H, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
+  fs.writeFileSync(path.join(H, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox') }));
   const BAD = '999.0.0.1'; fs.mkdirSync(path.join(HB, 'chrome-' + BAD), { recursive: true });
   fs.writeFileSync(path.join(HB, 'chrome-' + BAD, 'chrome'), `#!/bin/sh\nexec ${chromeOf} "$@"\n`, { mode: 0o755 });
   const XDG = path.join(ROOT, 'b5-xdg'); fs.mkdirSync(XDG, { recursive: true, mode: 0o700 });

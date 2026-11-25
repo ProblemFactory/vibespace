@@ -28,7 +28,7 @@ import crypto from 'node:crypto';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { startLoginPages } from './fixtures/login-pages.mjs';
@@ -226,7 +226,7 @@ async function world(tag) {
   const W = path.join(ROOT, tag);
   const KH = path.join(W, 'h'), KXD = path.join(W, 'x'), VD = path.join(W, 'vault'), KD = path.join(W, 'data');
   for (const d of [path.join(KH, '.agent-browser'), KXD, VD, KD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox\n--host-resolver-rules=MAP *.example.com 127.0.0.1\n--ignore-certificate-errors', ...(process.env.VS_CHROME && fs.existsSync(process.env.VS_CHROME) ? { executablePath: process.env.VS_CHROME } : {}) }), { mode: 0o600 });   // (lane chrome-157: VS_CHROME — a Chrome for Testing build for the real-browser claim, as the other chrome suites take it)   // (主开发's must-hold, a form posting to a sibling host: *.example.com — IANA's reserved name — resolves to loopback in this scratch browser only, its https served with a certificate the scene makes; no lookup and no request leaves the box)
+  fs.writeFileSync(path.join(KH, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox', '--ignore-certificate-errors'), ...(process.env.VS_CHROME && fs.existsSync(process.env.VS_CHROME) ? { executablePath: process.env.VS_CHROME } : {}) }), { mode: 0o600 });   // (lane chrome-157: VS_CHROME — a Chrome for Testing build for the real-browser claim, as the other chrome suites take it)   // (主开发's must-hold, a form posting to a sibling host: *.example.com — IANA's reserved name — resolves to loopback in this scratch browser only, its https served with a certificate the scene makes; no lookup and no request leaves the box)
   const hostBrowsers = path.join(process.env.HOME || '/root', '.agent-browser', 'browsers');
   const localBrowsers = path.join(KH, '.agent-browser', 'browsers');
   if (fs.existsSync(hostBrowsers) && !fs.existsSync(localBrowsers)) {

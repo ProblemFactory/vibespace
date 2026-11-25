@@ -25,7 +25,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker, CHROME_STORE, CHROME_QUIET, DRIVER, DRIVER_LEFT_ALONE, REHOMED } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, realClicker, CHROME_STORE, CHROME_QUIET, DRIVER, DRIVER_LEFT_ALONE, REHOMED, driverArgs } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const V = require('../src/browser-verbs.js');
@@ -75,7 +75,7 @@ const SIGNIN = `http://${HOST}:${PAGE_PORT}/v3/signin/identifier?TL=AInv3nt3d0y`
 fs.mkdirSync(path.join(fakeHome, '.agent-browser'), { recursive: true });
 const realBrowsers = path.join(os.homedir(), '.agent-browser', 'browsers'); // the INSTALLED browser, read-only use (test-browser-live's rule): $HOME is the suite's home — never the passwd entry (verify r6: a pinned HOME must be the whole reach; test-architecture §68 census)
 if (fs.existsSync(realBrowsers)) fs.symlinkSync(realBrowsers, path.join(fakeHome, '.agent-browser', 'browsers'));
-fs.writeFileSync(path.join(fakeHome, '.agent-browser', 'config.json'), JSON.stringify({ args: `--no-sandbox,--host-resolver-rules=MAP ${HOST} 127.0.0.1` }));
+fs.writeFileSync(path.join(fakeHome, '.agent-browser', 'config.json'), JSON.stringify({ args: driverArgs('--no-sandbox') }));
 
 // ── the LOCAL fixture page (never a vendor site): a title + a path that read like Google's refusal, and a beacon ──
 const hits = [];
