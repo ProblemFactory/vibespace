@@ -102,7 +102,7 @@ const path = require('path');
 // build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
 let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
 const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
-const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
+const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say, sync = true } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
 const { spawn } = require('child_process');
 const os = require('os');
 const { randomUUID } = require('crypto');
@@ -485,12 +485,15 @@ async function settleLeftRecords() {
   await settleGone(gone.map((r) => HR.get(r.msgId)), 'successor', 'handed records at this start');
 }
 
-function persistBuffer() {
+// r4563 (主开发's ruling — A BUFFER IS NOT A DURABLE RECORD): the timer's road and the exit's flush ask NO sync (the ring rewritten
+// every 2 s, 250 ms while followed; a conversation comes back from its transcript); only the DURABLE road (persistNow: the queue's
+// records, a turn's state, an answered permission, the journal's rewrite) asks one. Every road's write and close are judged
+function persistBuffer(durable) {
   writeTimer = null;
   // B-5a4d (its reader): tmp + rename, as the sidecar — a hub that restarts reads this file once, and a person's CLI follows it by
   // its path: a reader sees the whole old file or the whole new one, never a truncated one mid-write (write-through made it often)
   const tmp = `${bufferFile}.${process.pid}.tmp`;
-  try { renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log }); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced; B-bcb8 unit B: synced before its name
+  try { renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log, sync: durable === true }); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced; B-bcb8 unit B: synced before its name
   catch (e) { try { fs.unlinkSync(tmp); } catch {} if (!persistBuffer.said) { persistBuffer.said = true; log(`history buffer write failed: ${e.message}`); } }
 }
 
@@ -555,7 +558,7 @@ function sendChild(line) { // line WITHOUT trailing \n
 const DURABLE_RECORDS = new Set(['queue_changed', 'queued_input', 'queue_op_result', 'queue_dropped', 'input_handover', 'queue_settle', 'rewind_out']);
 function persistNow() {
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
-  persistBuffer();
+  persistBuffer(true);   // r4563: the durable road asks its sync (as built in 1ce0eb76e)
 }
 // ONE WRITE PER INPUT (its readers): a chunk of the CLI's stdout, or a chunk of stdin, is handled whole — every interrupt it owes
 // the CLI goes out INSIDE it, as before — then the file is written ONCE if a line in it changes what the conversation is, and only

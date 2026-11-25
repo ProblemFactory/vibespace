@@ -550,19 +550,22 @@ fsp.open = async (...a) => { const h = await open.apply(fsp, a); if (String(a[0]
 // write is a FAILED WRITE: thrown, the temp removed, the OLD record stands, the caller's own road taken. ONLY a sync the file system does
 // not do at all (EINVAL, ENOTSUP, EOPNOTSUPP, ENOSYS) is said once and lands. PLACED failures (fs.fsyncSync / fs.closeSync answering a
 // code), never a real disk. ONE helper and ONE spelling; EACH RECORD from its wrapper's own code. RED: bf8355a8a's form (in a copy: a
-// failed sync said, the temp renamed over the good record anyway)
-console.log('⑥ a record takes its name after ONE sync — a failed sync is a FAILED WRITE (the old record stands); only a sync the file system does not do is said and lands');
+// failed sync said, the temp renamed over the good record anyway). THE TWO BUFFERS (r4563 — a buffer is not a durable record): their
+// timer's road and exit flushes ask NO sync, their durable road one; every road's write and close judged. RED: 1ce0eb76e's (one sync a write)
+console.log('⑥ a record takes its name after ONE sync — a failed sync is a FAILED WRITE (the old record stands); only a sync the file system does not do is said and lands; a buffer\'s timer asks none');
 {
   const FCm = require(path.join(REPO, 'src/fd-close.js'));
   const D6 = scratchDir('fdc-synced-name');
   const errOf = (code) => Object.assign(new Error(`${code}: a stand-in`), { code });
   const fdPath = (fd) => { try { return fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { return ''; } };
-  // THE PLACED FAILURE: a sync answering `sync`, a temp's close answering `close` (the descriptor's path read before; the close is real)
-  const placed6 = (fn, { sync = null, close = null } = {}) => {
-    const fsy = fs.fsyncSync, cls = fs.closeSync, asked = [];
+  // THE PLACED FAILURE: a sync answering `sync`, a temp's close answering `close` (the descriptor's path read before; the close is real),
+  // a temp's write answering `write` (r4563: a full local disk is refused at the write itself)
+  const placed6 = (fn, { sync = null, close = null, write = null } = {}) => {
+    const fsy = fs.fsyncSync, cls = fs.closeSync, wrs = fs.writeSync, asked = [];
     fs.fsyncSync = function (fd) { asked.push(path.basename(fdPath(fd))); if (sync) throw errOf(sync); return fsy.call(this, fd); };
     if (close) fs.closeSync = function (fd, ...a) { const p = fdPath(fd); cls.call(this, fd, ...a); if (p.endsWith('.tmp')) throw errOf(close); };
-    try { let r, threw = null; try { r = fn(); } catch (e) { threw = (e && e.code) || String(e); } return { r, threw, asked }; } finally { fs.fsyncSync = fsy; fs.closeSync = cls; }
+    if (write) fs.writeSync = function (fd, ...a) { if (fdPath(fd).endsWith('.tmp')) throw errOf(write); return wrs.call(this, fd, ...a); };
+    try { let r, threw = null; try { r = fn(); } catch (e) { threw = (e && e.code) || String(e); } return { r, threw, asked }; } finally { fs.fsyncSync = fsy; fs.closeSync = cls; fs.writeSync = wrs; }
   };
   const OLD = 'the good older record';
   const fresh = (dir, n) => { const f = path.join(dir, n); fs.writeFileSync(f, OLD); return f; };
@@ -592,7 +595,7 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
     try { FCm.renameSynced(g + '.tmp', g, 'x', { where: 'full' }); } catch (e) { threw = e.code; } finally { fs.writeSync = ws0; }
     ok(!r.threw && r.asked.length === 1 && !s.length && fs.readFileSync(f, 'utf8') === 'xyz' && threw === 'ENOSPC' && fs.readFileSync(g, 'utf8') === OLD && !fs.existsSync(g + '.tmp'), '⑥ renameSynced: a healthy sync asked ONCE, nothing said, landed; a failed WRITE throws, the old record stands, the temp gone', { asked: r.asked, said: s, threw }); }
   // ONE SPELLING: each wrapper's fallback, built from its own text
-  const FB6 = /const renameSynced = FC && FC\.renameSynced \? FC\.renameSynced : (\(tmp, final, bytes, \{ mode, where, say \} = \{\}\) => \{[^\n]*\});/;
+  const FB6 = /const renameSynced = FC && FC\.renameSynced \? FC\.renameSynced : (\(tmp, final, bytes, \{ mode, where, say(?:, sync = true)? \} = \{\}\) => \{[^\n]*\});/;   // r4563: the sync a named choice (bf8355a8a's form had none)
   const fbOf = (text) => { const m = FB6.exec(text || ''); return m ? new Function('fs', 'closeWritten', `return ${m[1]};`)(fs, FCm.closeWritten) : null; };   // eslint-disable-line no-new-func
   const WR6 = ['data/bin/job-wrapper.js', 'data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/acp-wrapper.js', 'data/bin/agy-wrapper.js'];
   const spell6 = {};
@@ -630,12 +633,6 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
     { f: 'data/bin/chat-wrapper.js', name: 'handed.json', where: 'the handed records', road: 'returned false, said', code: (t) => linesFrom(t, '  const tmp = `${file}.${process.pid}.tmp`;', 3),
       run: (code, rs, say, d) => F('fs', 'path', 'file', 'text', 'renameSynced', 'log', 'sayOnce', `${code}\nreturn true;`)(fs, path, path.join(d, 'handed.json'), '{"v":1}', rs, say, (k, l) => say(l)),
       tip: "renameSynced(tmp, file, text, { mode: 0o600, where: 'the handed records', say: log });", rel: 'fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, file);' },
-    { f: 'data/bin/chat-wrapper.js', name: 'chat.buf', where: 'the chat buffer', road: 'said', code: (t) => fnText(t, 'function persistBuffer() {'),
-      run: (code, rs, say, d) => F('fs', 'path', 'bufferFile', 'buffer', 'JOURNAL', 'renameSynced', 'log', `let writeTimer = null;\n${code}\nreturn persistBuffer;`)(fs, path, path.join(d, 'chat.buf'), 'history', null, rs, say)(),
-      tip: "renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log });", rel: 'fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile);' },
-    { f: 'data/bin/codex-chat-wrapper.js', name: 'codex.buf', where: 'the codex buffer', road: 'swallowed', code: (t) => fnText(t, 'function persistBuffer() {'),
-      run: (code, rs, say, d) => F('fs', 'path', 'bufferFile', 'buffer', 'JOURNAL', 'renameSynced', 'log', `let writeTimer = null;\n${code}\nreturn persistBuffer;`)(fs, path, path.join(d, 'codex.buf'), 'history', null, rs, say)(),
-      tip: "renameSynced(tmp, bufferFile, buffer, { where: 'the codex buffer', say: log });", rel: 'fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile);' },
     ...['codex-chat', 'acp', 'agy'].map((w) => ({ f: `data/bin/${w}-wrapper.js`, name: 'meta.json', where: 'the session meta sidecar', road: 'swallowed', code: (t) => fnText(t, 'function persistMeta() {'),
       run: (code, rs, say, d) => F('fs', 'path', 'metaFile', 'meta', 'renameSynced', 'log', `let metaTimer = null;\n${code}\nreturn persistMeta;`)(fs, path, path.join(d, 'meta.json'), { a: 1 }, rs, say)(),
       tip: "renameSynced(tmp, metaFile, JSON.stringify(meta), { where: 'the session meta sidecar', say: log });", rel: 'fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile);' })),
@@ -660,10 +657,47 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
     rel6[key] = !v.asked.length && !v.old ? 'no sync asked' : J(v);
     red6[key] = !x.old ? 'the good record replaced' : J({ old: x.old, threw: x.r.threw });
   }
-  ok(Object.keys(rec6).length === 10 && Object.values(rec6).every((v) => /^old stands, /.test(v)), '⑥ EACH RECORD, from its wrapper\'s own code over a GOOD older record: by the helper AND by its fallback: ONE sync asked, of its own temp; FAILED (EIO, placed) — the old record stands byte for byte, the temps gone, the caller\'s own road taken (the job\'s pid throws at its start, its exit and bound swallowed as at the release; chat\'s meta returns its error, its handed records return false and say it, its buffer says it once; codex\'s, acp\'s and agy\'s swallowed)', rec6);
-  ok(Object.keys(nos6).length === 10 && Object.values(nos6).every((v) => v === 'said, landed'), '⑥ EACH RECORD: a sync the file system does not do (EINVAL, placed) — said once in that wrapper\'s own sink, the record LANDED', nos6);
-  ok(Object.keys(red6).length === 10 && Object.values(red6).every((v) => v === 'the good record replaced'), 'RED (bf8355a8a\'s spelling, in a copy): the failed sync said, the temp renamed OVER the good record — for every record', red6);
-  ok(Object.keys(rel6).length === 10 && Object.values(rel6).every((v) => v === 'no sync asked'), 'RED (the release\'s form of each record, in a copy): no sync asked at all — the record took its name over the good one unsynced', rel6);
+  ok(Object.keys(rec6).length === 8 && Object.values(rec6).every((v) => /^old stands, /.test(v)), '⑥ EACH RECORD, from its wrapper\'s own code over a GOOD older record: by the helper AND by its fallback: ONE sync asked, of its own temp; FAILED (EIO, placed) — the old record stands byte for byte, the temps gone, the caller\'s own road taken (the job\'s pid throws at its start, its exit and bound swallowed as at the release; chat\'s meta returns its error, its handed records return false and say it; codex\'s, acp\'s and agy\'s swallowed) — the EIGHT durable records (r4563)', rec6);
+  ok(Object.keys(nos6).length === 8 && Object.values(nos6).every((v) => v === 'said, landed'), '⑥ EACH RECORD: a sync the file system does not do (EINVAL, placed) — said once in that wrapper\'s own sink, the record LANDED', nos6);
+  ok(Object.keys(red6).length === 8 && Object.values(red6).every((v) => v === 'the good record replaced'), 'RED (bf8355a8a\'s spelling, in a copy): the failed sync said, the temp renamed OVER the good record — for every record', red6);
+  ok(Object.keys(rel6).length === 8 && Object.values(rel6).every((v) => v === 'no sync asked'), 'RED (the release\'s form of each record, in a copy): no sync asked at all — the record took its name over the good one unsynced', rel6);
+  // THE TWO BUFFERS (主开发 r4563 — A BUFFER IS NOT A DURABLE RECORD): the ring rewritten whole every 1–2 s (250 ms while a person
+  // follows) asks NO sync on its timer's road (setTimeout calls persistBuffer bare) nor at an exit's flush; its DURABLE road —
+  // persistBuffer(true): chat's persistNow (the queue's records, a turn's state, an answered permission, the journal's rewrite), codex's
+  // journal rewrite — asks ONE, as built. EVERY road's write and close are JUDGED: on a network folder a write error held back by the
+  // client comes out at the close, on a local disk a full disk is refused at the write — the road by which a full disk never replaces a
+  // good buffer with an empty one. Through the helper AND the fallback, from each wrapper's own code. RED: 1ce0eb76e's form (in a copy:
+  // its call names no choice — the helper's default, one sync a write)
+  const BUFFERS = [
+    { f: 'data/bin/chat-wrapper.js', name: 'chat.buf', where: 'the chat buffer', road: 'said', durable: (t) => fnText(t, 'function persistNow() {') },
+    { f: 'data/bin/codex-chat-wrapper.js', name: 'codex.buf', where: 'the codex buffer', road: 'swallowed', durable: (t) => fnText(t, 'const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: ') },
+  ];
+  const CHOICE = ', sync: durable === true }';
+  const bufRun = (code, rs, say, d, name, arg) => F('fs', 'path', 'bufferFile', 'buffer', 'JOURNAL', 'renameSynced', 'log', `let writeTimer = null;\n${code}\nreturn persistBuffer;`)(fs, path, path.join(d, name), 'history', null, rs, say)(...arg);
+  const cnt6 = {}, red16 = {}, dur6 = {}, ref6 = {}, wire6 = {};
+  for (const B of BUFFERS) {
+    const key = path.basename(B.f), t = FILES[B.f] || '', fb = fbOf(t), code = fnText(t, 'function persistBuffer(durable) {');
+    const lined = code ? code.split(CHOICE).join(' }') : null;   // 1ce0eb76e's call, in a copy: no choice named
+    if (!fb || !code || !code.includes(`{ where: '${B.where}', say: log${CHOICE}`) || lined === code) { cnt6[key] = red16[key] = dur6[key] = ref6[key] = wire6[key] = 'its code or its anchor is gone'; continue; }
+    const scene = (rs, src, arg, placed) => { const d = scratchDir(`fdc-buf-${++k6}`), s = []; const final = fresh(d, B.name); const r = placed6(() => bufRun(src, rs, (l) => s.push(l), d, B.name, arg), placed); return { r, said: s, now: fs.readFileSync(final, 'utf8'), tmps: fs.readdirSync(d).filter((x) => x.endsWith('.tmp')) }; };
+    const both = (fn) => [fb, FCm.renameSynced].map(fn);   // fb: a scratch copy's road; FCm: the installed road
+    const mine = (r) => r.asked.length === 1 && r.asked[0].startsWith(B.name) && r.asked[0].endsWith('.tmp');
+    const tm = both((rs) => scene(rs, code, [], {}));   // the timer's road (and an exit's flush): persistBuffer bare
+    cnt6[key] = tm.every((s) => !s.r.asked.length && !s.r.threw && s.now === 'history' && !s.tmps.length && !s.said.length) ? 'no sync asked, landed' : J(tm.map((s) => ({ asked: s.r.asked, threw: s.r.threw, now: s.now, tmps: s.tmps, said: s.said })));
+    const rd = both((rs) => scene(rs, lined, [], {}));
+    red16[key] = rd.every((s) => mine(s.r) && s.now === 'history') ? 'one sync a write' : J(rd.map((s) => ({ asked: s.r.asked, now: s.now })));
+    const du = both((rs) => scene(rs, code, [true], {}));
+    dur6[key] = du.every((s) => mine(s.r) && !s.r.threw && s.now === 'history' && !s.tmps.length) ? 'one sync, landed' : J(du.map((s) => ({ asked: s.r.asked, threw: s.r.threw, now: s.now, tmps: s.tmps })));
+    const rf = [...both((rs) => scene(rs, code, [], { write: 'ENOSPC' })), ...both((rs) => scene(rs, code, [], { close: 'EIO' }))];
+    ref6[key] = rf.every((s) => s.now === OLD && !s.tmps.length && !s.r.asked.length && roadOf(s.r, s.said) === B.road) ? `old stands, ${B.road}` : J(rf.map((s) => ({ now: s.now, tmps: s.tmps, asked: s.r.asked, road: roadOf(s.r, s.said), said: s.said })));
+    const dz = B.durable(t) || '';
+    wire6[key] = (t.split('persistBuffer(true)').length - 1) === 1 && dz.includes('persistBuffer(true)') && /writeTimer = setTimeout\(persistBuffer, Date\.now\(\) - lastReceiptAt < FOLLOWED_MS \? 250 : \d+\);/.test(t) ? 'durable road only' : J({ trues: t.split('persistBuffer(true)').length - 1, inDurable: dz.includes('persistBuffer(true)') });
+  }
+  ok(Object.keys(cnt6).length === 2 && Object.values(cnt6).every((v) => v === 'no sync asked, landed'), '⑥ THE TWO BUFFERS (r4563): the timer\'s road (and an exit\'s flush) asks NO sync — the chat and the codex buffer, through the helper AND the fallback, landed', cnt6);
+  ok(Object.keys(red16).length === 2 && Object.values(red16).every((v) => v === 'one sync a write'), 'RED (1ce0eb76e\'s call, in a copy: no choice named): ONE sync asked at every buffer write', red16);
+  ok(Object.keys(dur6).length === 2 && Object.values(dur6).every((v) => v === 'one sync, landed'), '⑥ THE TWO BUFFERS: the durable road (persistBuffer(true)) asks ONE sync of its own temp, as built', dur6);
+  ok(Object.keys(ref6).length === 2 && Object.values(ref6).every((v) => /^old stands, /.test(v)), '⑥ THE TWO BUFFERS: a PLACED refusal at the write (ENOSPC — a full local disk) and at the close (EIO — a write error a network client held back): the OLD buffer byte for byte, the temp gone, no sync asked, the caller\'s own road (chat says it once, codex swallows) — a full disk never replaces a good buffer with an empty one', ref6);
+  ok(Object.keys(wire6).length === 2 && Object.values(wire6).every((v) => v === 'durable road only'), '⑥ THE TWO BUFFERS\' WIRING: persistBuffer(true) is called ONCE in each wrapper, on its durable road (chat: persistNow; codex: the journal\'s rewrite); the timer calls it bare', wire6);
 }
 
 report();

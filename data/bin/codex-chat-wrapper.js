@@ -9,7 +9,7 @@ const path = require('path');
 // build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
 let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
 const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
-const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
+const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say, sync = true } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
 const { spawn } = require('child_process');
 
 const bufferFile = process.argv[2];
@@ -481,7 +481,7 @@ let writeTimer = null;
 // is APPENDED to the file before it is said, between the timer's whole rewrites — a hub that restarts, or a kill of this process,
 // never beats it. A tree without the module keeps the timer alone, and adverts no fence.
 let SJ = null; try { SJ = require(path.join(__dirname, '..', '..', 'src', 'said-journal.js')); } catch { SJ = null; }
-const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => { if (writeTimer) { clearTimeout(writeTimer); } persistBuffer(); }, say: log }) : null;
+const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => { if (writeTimer) { clearTimeout(writeTimer); } persistBuffer(true); }, say: log }) : null;
 if (JOURNAL) meta.caps.fence = SJ.FENCE_VERSION;   // a restoring hub asks this wrapper's fence (session-stdout's gate)
 // THE FENCE (row B-cd4b — src/said-journal.js; the hub's half is src/server/session-stdout.js setupSessionPty `fence`): the answer to
 // a restoring hub's `webui_fence` is in the file AT ITS PLACE before it is said; it rides the ring for FENCE_KEEP_MS, then leaves it
@@ -513,14 +513,16 @@ const readyPromise = new Promise((resolve, reject) => {
   markReadyFailed = reject;
 });
 
-function persistBuffer() {
+// r4563 (主开发's ruling — A BUFFER IS NOT A DURABLE RECORD): the timer's road and the exit's flushes ask NO sync (the ring rewritten
+// every 1 s, 250 ms while followed); only the journal's rewrite (at most once a wrapper life) asks one. Every road's write and close are judged
+function persistBuffer(durable) {
   writeTimer = null;
   // B-cd4b (ALSO CURED): tmp + rename, as the claude wrapper's — a restarting hub that read this file between an in-place write's
   // truncate and its bytes restored an EMPTY or half history; the said journal's descriptor named the file the rename replaced
   const tmp = `${bufferFile}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(bufferFile), { recursive: true });
-    renameSynced(tmp, bufferFile, buffer, { where: 'the codex buffer', say: log });   // B-bcb8 unit B: synced before its name
+    renameSynced(tmp, bufferFile, buffer, { where: 'the codex buffer', say: log, sync: durable === true });   // B-bcb8 unit B; r4563: synced on the durable road only
     if (JOURNAL) JOURNAL.rewritten();
   } catch { try { fs.unlinkSync(tmp); } catch {} }
 }

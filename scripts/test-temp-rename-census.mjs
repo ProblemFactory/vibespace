@@ -197,7 +197,7 @@ const ROWS = [
   ["src/desktop-serve.js", "unsynced", "derived", "a seeded profile frame, made again when missing", "install > seedChromiumFrame"],
   ["src/desktop-serve.js", "move", "move", "", "install > stop"],
   ["src/exit-proxy.js", "synced", "self-synced", "", "ExitProxyManager._transferHeld"],
-  ["src/fd-close.js", "synced", "self-synced", "the wrappers' records the hub reads (B-bcb8 unit B, 主开发 r4367: the job's pid / exit / bound records, the conversations' meta sidecar, buffer and handed records): a sync that FAILS fails the write (r4474: thrown, the temp removed, the old record stands); only a sync the file system does not do (EINVAL, ENOTSUP, EOPNOTSUPP, ENOSYS) is said and lands", "renameSynced"],
+  ["src/fd-close.js", "synced", "self-synced", "the wrappers' records the hub reads (B-bcb8 unit B, 主开发 r4367: the job's pid / exit / bound records, the conversations' meta sidecar, buffer and handed records): a sync that FAILS fails the write (r4474: thrown, the temp removed, the old record stands); only a sync the file system does not do (EINVAL, ENOTSUP, EOPNOTSUPP, ENOSYS) is said and lands; the two buffers' timer road asks none (sync: false — r4563: a buffer is not a durable record), its write and close judged", "renameSynced"],
   ["src/fixture-ledger-purge.js", "unsynced", "store", "", "_writeAtomic"],
   ["src/gmail-sync.js", "unsynced", "store", "", "GmailSync._saveState"],
   ["src/gmail-sync.js", "synced", "self-synced", "the person's local mail copy: the folder's file NAMES are the seen index (a torn copy would never be fetched again) — written, synced and renamed off the loop since B-ddf3 unit 1", "GmailSync._writeMessage"],

@@ -43,13 +43,16 @@ function syncUnsupportedWords(where, code) { return `${where}: its file system d
  *  A sync that FAILS — or a close that fails after the write (a deferred write error) — is a FAILED WRITE: the temp is removed, the
  *  error THROWN as writeFileSync's was, the OLD record stands; each caller's own try is unchanged. ONLY a sync the file system does not
  *  do at all (SYNC_UNSUPPORTED) is SAID once (the site's name, the code — no path) and the record still takes its name. WHAT is written
- *  and WHEN are the caller's. The wrappers carry a one-line fallback with THESE words (test-fd-close-census ⑥) */
-function renameSynced(tmp, final, bytes, { mode, where, say } = {}) {
+ *  and WHEN are the caller's. THE SYNC IS THE CALLER'S NAMED CHOICE (r4563: «a buffer is not a durable record»): `sync: false` asks
+ *  none — the write and the close still JUDGED (a failed write or close is a failed write: thrown, the temp removed, the OLD file
+ *  stands; on a network folder a write error held back by the client comes out at the close, on a local disk a full disk is refused at
+ *  the write), then the rename. The wrappers carry a one-line fallback with THESE words (test-fd-close-census ⑥) */
+function renameSynced(tmp, final, bytes, { mode, where, say, sync = true } = {}) {
   const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes));
   let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null;
   try {
     for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; }
-    try { fs.fsyncSync(fd); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { if (typeof say === 'function') say(syncUnsupportedWords(where, e.code)); } catch { /* a sink that throws says nothing more */ } }
+    if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { if (typeof say === 'function') say(syncUnsupportedWords(where, e.code)); } catch { /* a sink that throws says nothing more */ } } }   // r4563: `sync: false` — a caller's named choice (a buffer)
   } catch (e) { failed = e; }
   try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there — a failed write
   fd = null;
