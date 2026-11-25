@@ -448,7 +448,7 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
   const pause = (ms) => new Promise((r) => setTimeout(r, ms)); // the counter's own flight comes back in it (r1311: never awaited by the tick)
   const standIn = async (args = []) => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', ...args], { stdio: 'ignore' }); kids.push(c); for (let i = 0; i < 100 && F.procStart(c.pid) == null; i++) await pause(10); return c; };
   const ended = (c) => new Promise((r) => { if (c.exitCode !== null || c.signalCode !== null) return r(); c.once('exit', () => r()); try { c.kill('SIGKILL'); } catch { r(); } });
-  const isEnded = async (c) => { for (let i = 0; i < 200 && c.exitCode === null && c.signalCode === null; i++) await pause(10); return c.exitCode !== null || c.signalCode !== null; };
+  const isEnded = async (c) => { const t0i = Date.now(); while (c.exitCode === null && c.signalCode === null && Date.now() - t0i < 5000) await pause(10); return c.exitCode !== null || c.signalCode !== null; };   // r4363: a 5 s bound; a scene names its expiry
   const evText = (n) => `low 0\nhigh 0\nmax 0\noom 0\noom_kill ${n}\n`;
   // ONE world: an ephemeral daemon (a stand-in process) seen alive by three ticks, its Chrome (a stand-in naming its user-data-dir),
   // the hub unit's counter (a stand-in memory.events: 3, then 4 before the third tick), then the daemon ENDS and the fourth tick
@@ -484,11 +484,16 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
       await ended(daemon); if (chrome && chromeCase === 'gone') await ended(chrome);   // the daemon ENDS (who or what is the record's question)
       clk = CLK0 + 22e3;
       try { await k.tick(); } catch (e) { threw = String(e && e.message); }  // the next tick finds it gone
-      for (let i = 0; i < 200 && !lines.some((l) => l.includes('gone record') || l.includes('could not be written')); i++) await pause(10);
-      const chromeEnded = chrome && chromeCase === 'alive' ? await isEnded(chrome) : null;
-      for (let i = 0; i < 100 && chromeEnded && !lines.some((l) => l.includes('ended its own orphaned browser pid')); i++) await pause(10);
+      // r4363 (B-7e49; r4340 law 1): each wait is on its FACT and its bound's expiry is NAMED (the scene's `expired`, judged below), never a
+      // silent read of whatever is there. A tick that THREW ran neither the record nor the reap (both are its own steps, and no other tick
+      // comes: tickMs is an hour), so nothing more is waited for (the unfenced control paid 2 s + 2 s here for what could never come)
+      const expired = [], waitFor = async (what, fact, ms) => { const t0f = Date.now(); while (!fact() && Date.now() - t0f < ms) await pause(10); if (!fact()) expired.push(what); };
+      if (!threw) await waitFor('its gone record (or why none)', () => lines.some((l) => l.includes('gone record') || l.includes('could not be written')), 5000);
+      const chromeEnded = chrome && chromeCase === 'alive' ? (threw ? (chrome.exitCode !== null || chrome.signalCode !== null) : await isEnded(chrome)) : null;
+      if (chrome && chromeCase === 'alive' && !threw && !chromeEnded) expired.push('its Chrome ended by the reap');
+      if (chromeEnded) await waitFor('the reap\'s own line', () => lines.some((l) => l.includes('ended its own orphaned browser pid')), 5000);
       const rec = k.browserOf(id) || {};
-      return { line: lines.find((l) => l.includes('gone record')) || '', lines, daemon: daemon.pid, chrome: chrome ? chrome.pid : null, state: rec.state, chromeEnded, threw, runs: k.recorderRuns() };
+      return { expired, line: lines.find((l) => l.includes('gone record')) || '', lines, daemon: daemon.pid, chrome: chrome ? chrome.pid : null, state: rec.state, chromeEnded, threw, runs: k.recorderRuns() };
     } finally { try { k.shutdown(); } catch { /* none */ } for (const c of [daemon, chrome]) if (c) await ended(c); }
   };
   const iso = (ms) => new Date(ms).toISOString();
@@ -582,6 +587,7 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «
     recordOf(M.load('src/server/browser-keeper.js', unfenced, 'recorder-throws-unfenced')),
     recordOf(M.load('src/server/browser-keeper.js', afterReap, 'recorder-after-reap')),
   ]);
+  for (const [n, x] of [['recorder (a) all', all], ['gone', gone], ['none', none], ['other', other], ['early', early], ['CONTROL (a)', ca], ['CONTROL (b)', cb], ['CONTROL (c)', cc], ['fenced', fenced], ['CONTROL (2) late', late]]) if (x && x.expired && x.expired.length) ok(false, `HARNESS (⑫ ${n}): ${x.expired.join(', ')} did not come within its bound — its leg is not judged on it`, x.expired);
   ok(ca.line.includes('last seen alive never by a tick'), 'CONTROL (a): a keeper whose tick does not stamp «seen alive» says «never by a tick» of a daemon a tick saw — RED', ca.line);
   ok(cb.line.includes('its Chrome: none recorded for this run') && !cb.line.includes('alive (pid'), 'CONTROL (b): a record that never reads the Chrome says «none recorded» of a Chrome that outlived its daemon — RED', cb.line);
   ok(cc.line.includes('the hub\'s own signals: none ('), 'CONTROL (c): a record that never reads the ledger says «none» of a daemon the hub signalled — RED', cc.line);
