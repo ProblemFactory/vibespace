@@ -2139,6 +2139,54 @@ const idOf = (p) => (typeof p.id === 'string' && /^da-[\w-]{1,64}$/.test(p.id) ?
  *              runAppOp: the plan as the user, the RECORD after the package slot ran; the hub asks a daemon only when
  *              its hello-ack names `app-install`)
  */
+// ROW B-5278's LAST PRODUCER (主开发 r4358; lane lg-remote-hardening): a machine's desktop-serve LIST and STATUS reply BOUNDED WHERE
+// IT IS MADE, the family's form (opencode-remote boundRead / boundStatus). The constants bound 56 records (HISTORY_KEEP ended +
+// CONCURRENT_CAP live), 300 witness rows and the fixed rows; the door's catalog (one row per desktop file of each app installed
+// through the door, its args and env of no length bound) and a record's args / env (its row's, or its launch's) do not — a big
+// machine's reply passed its op's cap and was refused, and the feature was lost there (the launch dialog's catalog; a refused
+// status marks the machine offline with its live apps). THE NAMED SIZE: the reply's JSON within SERVE_REPLY_MAX, cut in THIS
+// order, each cut COUNTED in the reply (`cut`) and said once by the hub (client.js _saidLeftOnce): (1) the registry's witness and
+// door rows (`seen.` / `app.` ids), from its end — the fixed default rows never; (2) ENDED records, the oldest first, their samples
+// with them; (3) last, a LIVE record's args and env (`argsCut` on that record) — a live record itself is never left out: the hub
+// reads a record missing from the reply as ENDED (desktop-app-keeper ingestHost). PURE; a reply that fits answers as before.
+const SERVE_REPLY_MAX = 6 * 1024 * 1024;
+function boundServeReply(r, max = SERVE_REPLY_MAX) {
+  const size = (o) => Buffer.byteLength(JSON.stringify(o));
+  if (!r || typeof r !== 'object' || size(r) <= max) return r;
+  // the per-row arithmetic aims under the size (the cut's own key and the commas ride in the slack); the reply's OWN size decides
+  for (const slack of [64 * 1024, 1024 * 1024]) { const out = cutServeReply(r, max - slack, size); if (size(out) <= max) return out; }
+  return cutServeReply(r, 0, size);   // nothing cuttable is left: the fixed rows and the live records' skeletons
+}
+function cutServeReply(r, target, size) {
+  const out = { ...r }, cut = { registry: 0, apps: 0, argsCut: 0 };
+  let total = size(out);
+  if (Array.isArray(out.registry)) {
+    const reg = out.registry.slice();
+    const cuttable = (row) => !!row && typeof row.id === 'string' && /^(?:app|seen)\./.test(row.id);
+    for (let i = reg.length - 1; i >= 0 && total > target; i--) if (cuttable(reg[i])) { total -= size(reg[i]) + 1; reg.splice(i, 1); cut.registry++; }
+    out.registry = reg;
+  }
+  if (Array.isArray(out.apps)) {
+    const apps = out.apps.slice(), samples = out.samples && typeof out.samples === 'object' ? { ...out.samples } : null;
+    const at = (a) => Number(a && (a.endedAt || a.startedAt)) || 0;
+    const ended = apps.filter((a) => a && !M.isLiveState(a.state)).sort((a, b) => at(a) - at(b));   // the oldest first
+    for (const a of ended) {
+      if (total <= target) break;
+      total -= size(a) + 1; apps.splice(apps.indexOf(a), 1); cut.apps++;
+      if (samples && a.id in samples) { total -= size({ [a.id]: samples[a.id] }) - 1; delete samples[a.id]; }
+    }
+    const big = apps.filter((a) => a && M.isLiveState(a.state)).sort((a, b) => size(b) - size(a));   // the largest live record first
+    for (const a of big) {
+      if (total <= target) break;
+      const slim = { ...a, args: [], env: null, argsCut: true };
+      total -= size(a) - size(slim); apps[apps.indexOf(a)] = slim; cut.argsCut++;
+    }
+    out.apps = apps;
+    if (samples) out.samples = samples;
+  }
+  out.cut = cut;
+  return out;
+}
 async function runDesktopServeOp(ds, action, params = {}) {
   const op = String(action || '');
   if (!DESKTOP_SERVE_OPS.includes(op)) return bad(`unknown desktop-serve op ${JSON.stringify(op)} — one of ${DESKTOP_SERVE_OPS.join(', ')}`);
@@ -2154,7 +2202,7 @@ async function runDesktopServeOp(ds, action, params = {}) {
       if (p.install !== true) return { ok: true, facts };
       return { ok: true, facts, install: typeof ds.installFacts === 'function' ? await ds.installFacts() : null };
     }
-    if (op === 'list') return { ok: true, ...(await ds.list({ ...(settings ? { settings } : {}), ...(p.witness === 'recheck' ? { witness: 'recheck' } : {}) })) };
+    if (op === 'list') return boundServeReply({ ok: true, ...(await ds.list({ ...(settings ? { settings } : {}), ...(p.witness === 'recheck' ? { witness: 'recheck' } : {}) })) });   // B-5278: within SERVE_REPLY_MAX, the cut said
     if (op === 'launch') {
       if (!p.body || typeof p.body !== 'object') return bad('launch needs a `body` (the launch request)');
       const opts = {};
@@ -2167,7 +2215,7 @@ async function runDesktopServeOp(ds, action, params = {}) {
       const apps = ds.listApps();
       const samples = {};
       for (const a of apps) { const s = ds.latestSample(a.id); if (s) samples[a.id] = s; }
-      return { ok: true, apps, samples };
+      return boundServeReply({ ok: true, apps, samples });   // B-5278: within SERVE_REPLY_MAX, the cut said
     }
     const id = needId();
     if (!id) return bad(`${op} needs a desktop app id (da-…), got ${JSON.stringify(p.id)}`);
@@ -2197,4 +2245,4 @@ async function runDesktopServeOp(ds, action, params = {}) {
   }
 }
 
-module.exports = { install, runDesktopServeOp, DESKTOP_SERVE_OPS, SETTING_KEYS, settingsReader, STORE_FILE, LOG_DIR, TICK_MS, STOP_GRACE_MS, ASK_CLOSE_MS, RFB_DEADLINE_MS, SETTLE_BRINGUP_MS, SESSION_ENV, FIT_DEBOUNCE_MS, FIT_FIRST_STEP_MS, FIT_FIRST_WINDOW_MS, FIT_REFUSED_RETRY_MS, FIT_SETTLE_RUNS, FIT_ACTIVE_MS, FIT_SLOW_BELT_MS, EXIT_CENSUS_MS, HISTORY_KEEP, PARTS };
+module.exports = { install, runDesktopServeOp, boundServeReply, SERVE_REPLY_MAX, DESKTOP_SERVE_OPS, SETTING_KEYS, settingsReader, STORE_FILE, LOG_DIR, TICK_MS, STOP_GRACE_MS, ASK_CLOSE_MS, RFB_DEADLINE_MS, SETTLE_BRINGUP_MS, SESSION_ENV, FIT_DEBOUNCE_MS, FIT_FIRST_STEP_MS, FIT_FIRST_WINDOW_MS, FIT_REFUSED_RETRY_MS, FIT_SETTLE_RUNS, FIT_ACTIVE_MS, FIT_SLOW_BELT_MS, EXIT_CENSUS_MS, HISTORY_KEEP, PARTS };

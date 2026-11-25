@@ -59,7 +59,7 @@ const BOUNDED_CAPS = Object.freeze({
   'quota-refresh': 8 * MiB,        // passive ≤ PASSIVE_FILES_MAX × PASSIVE_FILE_MAX = 4 MiB + two vendor bodies (< 256 Ki units each), escaped
   'pool-orders': 2 * MiB,          // the log ≤ 2000 events / 1 MiB at its write (sealed-orders POOL_LOG_*), escaped
   'probe-creds': SMALL,            // ≤ 500 folders × (a 255-byte name riding THREE times — hostSubs, its login status, its email — + a 320-unit email + an 80-unit attempt + fields) ≈ 0.6 MB
-  'desktop-serve': 8 * MiB,        // its code's own bounds: 56 records, 300 witness rows, the catalog (the inventory's §6)
+  'desktop-serve': 8 * MiB,        // list / status cut where they are made to SERVE_REPLY_MAX (6 MiB, desktop-serve.js boundServeReply; r4358), its envelope
   'opencode-serve': 40 * MiB,      // read: the newest records within 32 MiB (opencode-remote READ_MAX) + the session record, escaped; status ≤ 2000 entries
 });
 // the passive usage readings an agent answers (quota-refresh `passive`): the ssh twin's own bound (hosts.js PASSIVE_PEEK_*) —

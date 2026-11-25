@@ -750,6 +750,67 @@ console.log('⑭ r1225 (part 5\'s follow, its smalls): the dropped total only ri
   ok(read('src/agentd/client.js').includes("if (m.op === 'pool-orders-executed') { this._onPoolOrdersExecuted?.(m.events || [], m.reportAck || null); return; }"), 'the executed push (no agent sends it today) hands its own report\'s token to the ack, like the reply');
 }
 
+console.log('⑮ r4358 (row B-5278\'s last question): a machine\'s desktop-serve LIST and STATUS reply bounded where it is made — the catalog, the ended records and a live record\'s command line cut within SERVE_REPLY_MAX, a live record never left out, the cut said once');
+{
+  const DS = require('../src/desktop-serve.js'), AC15 = require('../src/agentd/answer-caps.js');
+  const MAX = DS.SERVE_REPLY_MAX, size = (o) => Buffer.byteLength(JSON.stringify(o));
+  const fixed = [{ id: 'xterm', label: 'XTerm', exec: 'xterm', args: [], available: true }, { id: 'firefox', label: 'Firefox', exec: 'firefox', args: [], available: true }];
+  const door = (n, kib) => Array.from({ length: n }, (_, i) => ({ id: `app.entry-${i}`, label: `App ${i}`, exec: '/usr/bin/a', args: ['x'.repeat(kib * 1024)], available: true }));
+  const seen = (n) => Array.from({ length: n }, (_, i) => ({ id: `seen.s-${i}`, label: `Seen ${i}`, exec: 'seen', args: [], available: true, witnessed: true }));
+  const app = (i, state, kib) => ({ id: `da-${String(i).padStart(4, '0')}`, state, label: `app ${i}`, exec: '/usr/bin/a', args: ['y'.repeat(kib * 1024)], env: { A: '1' }, startedAt: 1000 + i, endedAt: state === 'ended' ? 2000 + i : undefined, pids: {}, starts: {} });
+  const live = (kib) => Array.from({ length: 6 }, (_, i) => app(100 + i, 'ready', kib));   // a LIVE state of the model (launching / ready)
+  const ended = (kib) => Array.from({ length: 50 }, (_, i) => app(i, 'ended', kib));
+  // (1) THE PURE BOUND — a reply that fits answers as before (no new key)
+  const small = { ok: true, apps: live(1), registry: fixed };
+  ok(DS.boundServeReply(small) === small && !('cut' in small), 'a reply within its size answers as before (the same object, no cut key)');
+  // the catalog: 1200 door rows of 8 KiB + 300 witness rows over the size — the witness rows and then the door rows go from the end
+  const L1 = { ok: true, apps: [...live(200), ...ended(20)], registry: [...fixed, ...door(1200, 8), ...seen(300)], witness: null, hostName: 'big' };
+  const b1 = DS.boundServeReply(L1);
+  ok(size(L1) > MAX && size(b1) <= MAX && b1.cut.registry > 300 && b1.cut.apps === 0 && b1.cut.argsCut === 0 && b1.registry.slice(0, 2).every((r, i) => r === fixed[i]) && !b1.registry.some((r) => r.id.startsWith('seen.'))
+    && b1.registry.length === L1.registry.length - b1.cut.registry && b1.apps.length === L1.apps.length,
+    `THE CATALOG over its size (${(size(L1) / 1048576).toFixed(1)} MiB): cut from its end within ${(MAX / 1048576)} MiB — ${b1.cut.registry} catalog row(s) left out (the witness rows first), the fixed rows and every record kept (${(size(b1) / 1048576).toFixed(2)} MiB)`);
+  // the ended records: 50 of 180 KiB (9 MiB: over the op's cap too) — the OLDEST go first, their samples with them; every live record stays
+  const L2 = { ok: true, apps: [...live(50), ...ended(180)].sort((a, b) => b.startedAt - a.startedAt), samples: Object.fromEntries([...live(1), ...ended(1)].map((a) => [a.id, { at: 1, cpu: 0 }])) };
+  const b2 = DS.boundServeReply(L2);
+  const keptEnded = b2.apps.filter((a) => a.state === 'ended').map((a) => a.endedAt), cutEnded = ended(1).map((a) => a.endedAt).filter((x) => !keptEnded.includes(x));
+  ok(size(L2) > MAX && size(b2) <= MAX && b2.cut.apps > 0 && b2.cut.argsCut === 0 && live(1).every((a) => b2.apps.some((x) => x.id === a.id && x.args[0].length === 50 * 1024))
+    && Math.max(...cutEnded) < Math.min(...keptEnded) && Object.keys(b2.samples).length === Object.keys(L2.samples).length - b2.cut.apps,
+    `THE ENDED RECORDS over the size: ${b2.cut.apps} left out, the OLDEST first (the newest ${keptEnded.length} kept), their samples with them; every LIVE record whole`);
+  // a live record's command line, last: 6 live records of 1.2 MiB — the largest slimmed first; NONE left out (the hub reads a missing one as ended)
+  const L3 = { ok: true, apps: live(1200), samples: {} };
+  const b3 = DS.boundServeReply(L3);
+  ok(size(L3) > MAX && size(b3) <= MAX && b3.cut.argsCut > 0 && b3.apps.length === 6 && b3.apps.every((a) => a.state === 'ready') && b3.apps.filter((a) => a.argsCut === true).length === b3.cut.argsCut && b3.apps.filter((a) => a.argsCut).every((a) => a.args.length === 0 && a.env === null),
+    `THE LIVE RECORDS over the size: every one kept (${b3.apps.length}), the command line of ${b3.cut.argsCut} cut (args, env; argsCut on the record) — never a live record left out`);
+  // (2) THE DEVICE's OP, the real table: a stand-in machine whose list and status are over the size
+  const machine = { launch: async () => null, list: async () => ({ apps: L1.apps, registry: L1.registry, witness: null, hostName: 'big', availability: { backend: 'xpra' } }), listApps: () => L2.apps, latestSample: (id) => L2.samples[id] || null, get: () => null };
+  const lr = await DS.runDesktopServeOp(machine, 'list', {}), sr = await DS.runDesktopServeOp(machine, 'status', {});
+  ok(lr.ok && size(lr) <= MAX && lr.cut && lr.cut.registry > 0 && sr.ok && size(sr) <= MAX && sr.cut && sr.cut.apps > 0 && live(1).every((a) => sr.apps.some((x) => x.id === a.id)),
+    `the device's op (runDesktopServeOp, the table the hub's own machine runs too): list ${(size(lr) / 1048576).toFixed(2)} MiB and status ${(size(sr) / 1048576).toFixed(2)} MiB, each within ${MAX / 1048576} MiB with its cut; the op's answer cap ${AC15.BOUNDED_CAPS['desktop-serve'] / 1048576} MiB`);
+  // RED AT THE RELEASE (a copy with the release's list and status): the same machine's replies pass the op's cap and are refused
+  const DSRC = read('src/desktop-serve.js');
+  const relList = "    if (op === 'list') return { ok: true, ...(await ds.list({ ...(settings ? { settings } : {}), ...(p.witness === 'recheck' ? { witness: 'recheck' } : {}) })) };\n";   // stale-pins: kept — the red restores the release's list / status
+  const Rel = M.load('src/desktop-serve.js', anchored(anchored(DSRC,
+    "    if (op === 'list') return boundServeReply({ ok: true, ...(await ds.list({ ...(settings ? { settings } : {}), ...(p.witness === 'recheck' ? { witness: 'recheck' } : {}) })) });   // B-5278: within SERVE_REPLY_MAX, the cut said\n", relList, 'release-list'),
+    '      return boundServeReply({ ok: true, apps, samples });   // B-5278: within SERVE_REPLY_MAX, the cut said\n', '      return { ok: true, apps, samples };\n', 'release-status'), 'release-serve');   // stale-pins: kept — the red restores the release's list / status
+  const rl = await Rel.runDesktopServeOp(machine, 'list', {}), rs = await Rel.runDesktopServeOp(machine, 'status', {});
+  const cap = AC15.capOf('desktop-serve', [AC15.PRODUCER_BOUNDS]);
+  ok(size(rl) > cap && size(rs) > cap && !rl.cut && !rs.cut, `CONTROL (the release's list and status, in a copy): ${(size(rl) / 1048576).toFixed(1)} MiB and ${(size(rs) / 1048576).toFixed(1)} MiB — over the op's ${cap / 1048576} MiB cap, refused at the hub (the feature lost on that machine) — RED`);
+  // (3) THE HUB SAYS IT ONCE (client.js desktopServe → _saidLeftOnce), the family's form; a reply with nothing cut says nothing
+  const { DeviceManager } = require('../src/agentd/client.js');
+  const said = [], dm = Object.create(DeviceManager.prototype);
+  let answer = { result: lr };
+  Object.assign(dm, { connect: async () => ({ info: { capabilities: ['desktop-serve'] } }), _request: async () => answer, _log: (l) => said.push(String(l)), _machine: 'big box' });
+  await dm.desktopServe('list'); await dm.desktopServe('list');
+  const once = said.length;
+  answer = { result: { ok: true, apps: [] } };
+  await dm.desktopServe('status');
+  ok(once === 1 && said.length === 1 && /^\[bounds\] big box: its desktop-app list reply was cut to 6 MiB: \d+ catalog row\(s\) left out$/.test(said[0]),
+    'the hub says the cut ONCE per machine, in the family\'s words (client.js _saidLeftOnce); a reply with nothing cut says nothing', said);
+  // (4) THE OP's ROW rests on the named size: the lowered cap holds the size and its envelope
+  ok(AC15.BOUNDED_CAPS['desktop-serve'] === 8 * AC15.MiB && AC15.BOUNDED_CAPS['desktop-serve'] >= MAX + 64 * 1024 && MAX === 6 * AC15.MiB && /SERVE_REPLY_MAX \(6 MiB, desktop-serve\.js boundServeReply; r4358\)/.test(read('src/agentd/answer-caps.js')),
+    'the op\'s lowered row (8 MiB) rests on its producer\'s named size (SERVE_REPLY_MAX 6 MiB) and the line\'s envelope — computed here, no longer a count in a comment');
+}
+
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
 fs.rmSync(tmp, { recursive: true, force: true });
 report();
