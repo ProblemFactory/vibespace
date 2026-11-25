@@ -13559,6 +13559,10 @@ export default {
   "Not removed: the list of forwards could not be read, so this service's public address could not be taken down. Stop it now; remove it once the list of forwards reads.": "削除されていません：ポート転送の一覧を読み込めないため、このサービスの公開アドレスを取り下げられませんでした。今は停止し、ポート転送の一覧が読み込めるようになってから削除してください。",
   "Stopped, not removed: the list of forwards could not be read, so this service's public address could not be taken down yet. Remove it once the list of forwards reads.": "停止しました（削除はしていません）：ポート転送の一覧を読み込めないため、このサービスの公開アドレスをまだ取り下げられません。ポート転送の一覧が読み込めるようになってから削除してください。",
   "Its background job is gone: this forward and its public address stay until you remove it here.": "このバックグラウンドジョブはもうありません：この転送とその公開アドレスは、ここで削除するまで残ります。",
+  "Runs VibeSpace: its memory bound can end it.": "VibeSpace を実行中：メモリ上限で終了することがあります。", // B-2c5c (r4564): the card true to the run's rung
+  "This job runs VibeSpace itself: past this memory bound the kernel stops one of its processes, which can be VibeSpace or a conversation.": "このジョブは VibeSpace そのものを実行しています：このメモリ上限を超えると、カーネルがそのプロセスの一つを止めます。それは VibeSpace のことも、会話のこともあります。", // B-2c5c (r4564): the card true to the run's rung
+  "This job runs VibeSpace itself: each of its processes has this memory bound as its own limit, and one that passes it gets no more memory — VibeSpace too.": "このジョブは VibeSpace そのものを実行しています：各プロセスがこのメモリ上限をそれぞれの上限として持ち、超えたプロセスはそれ以上メモリを得られません——VibeSpace も同じです。", // B-2c5c (r4564): the card true to the run's rung
+  "This job runs VibeSpace itself: its memory bound can end VibeSpace and the conversations it started.": "このジョブは VibeSpace そのものを実行しています：このメモリ上限で、VibeSpace とそれが始めた会話が終了することがあります。", // B-2c5c (r4564): the card true to the run's rung
   "Not restarted: it ran VibeSpace itself.": "再起動しません：VibeSpace 自身を実行していました。",
   "Runs VibeSpace: its memory bound ends it whole.": "VibeSpace を実行中：メモリ上限を超えると丸ごと終了します。",
   "Memory bound": "メモリ上限",

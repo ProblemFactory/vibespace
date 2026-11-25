@@ -17,7 +17,7 @@ import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
 import { nameOrGone } from './plain-words.js'; // lane ui-plain-words M2a: a gone conversation / group is named in words, its id in the tooltip
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, publishBlockedNote, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, budgetWords, budgetRefusalPersonWords, runLeftWords } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, publishBlockedNote, memoryChip, hubBoundNote, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, budgetWords, budgetRefusalPersonWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', waiting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -335,7 +335,7 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
   // because a restart would start a second VibeSpace, and (4c) a VibeSpace running under this job's memory bound (it ends WITH its
   // conversations when it passes the bound)
   const hubNote = j.hubMainDown && j.state === 'down' && !j.desiredUp ? (compact ? t('Not restarted: it ran VibeSpace itself.') : t('Not restarted by itself: its main process was VibeSpace itself, and a restart would start a second one. Start it again if you mean to.'))
-    : j.runsHub && /^\d/.test(memoryChip(j, t) || '') ? (compact ? t('Runs VibeSpace: its memory bound ends it whole.') : t('This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.')) : '';   // r1610: the compact rail takes a short form
+    : j.runsHub && /^\d/.test(memoryChip(j, t) || '') ? hubBoundNote(j, t, compact) : '';   // r1610: the compact rail takes a short form; r4564: true to the run's rung (jobs-layout hubBoundNote)
   const pubNote = publishBlockedNote(j, t);   // r3228: a publish the Ports list refused — said on the card
   if (!compact || j.progress || lastLine || hubNote || pubNote) {
     const l2 = document.createElement('div'); l2.className = 'jobs-card-l2';

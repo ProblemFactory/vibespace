@@ -518,7 +518,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }
       // B-2c5c (4c), 主开发 r4380: a VibeSpace started AS a background job lives under that job's memory bound — said ONCE, here, where
       // the job's record is read (the card and the job's notification already name a memory-bound end with its size)
-      try { const id = require('./throwaway-root.js').handedJobId(); if (id) { const job = jm.jobs && jm.jobs.get(id); log(M.startedInJobLine(id, job ? { label: jm.labelOf(job), mb: (job.memoryBound && job.memoryBound.mb) || job.memoryMb } : null)); } } catch { /* words only */ }
+      // r4564: the bound IN FORCE (the last run's own record, else the tree's one bound function) and its rung — never the raw asked figure
+      try { const id = require('./throwaway-root.js').handedJobId(); if (id) { const job = jm.jobs && jm.jobs.get(id); log(M.startedInJobLine(id, job ? { label: jm.labelOf(job), ...M.boundInForceOf(job, typeof jm._memoryCtx === 'function' ? jm._memoryCtx() : {}) } : null)); } } catch (e) { log('[jobs] the boot could not say which job holds this VibeSpace —', e && e.message); }
       // two passes: dtach re-attaches trickle in after boot
       const t1 = setTimeout(pushAcceptToLiveSessions, 5000);
       const t2 = setTimeout(pushAcceptToLiveSessions, 60_000);
