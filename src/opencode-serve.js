@@ -855,8 +855,9 @@ function createServeLocator({
   // B-460d's remainder (lane login-request-card, 主开发 r1362): THE SERVE STARTS BELOW THE HUB — `startPrefix()` → { argv, fact }:
   // the hub's ONE start verdict (src/server/spawn-priority.js priorityFor, the person's own `agents.lowerCpuPriority`), composed
   // by src/spawn/line.js priorityArgv, read at EACH start; its argv goes IN FRONT of the spawn (the start-time step: every
-  // terminal and every turn the serve runs inherits it — never a renice after the fork). The device agent passes NONE: its
-  // serve's argv is the release's, byte for byte.
+  // terminal and every turn the serve runs inherits it — never a renice after the fork). The device agent passes the start the
+  // hub LAST handed it (src/agentd/agentd.js ocStart — B-460d's last part, r4369: the hub's verdict for THAT machine, taken only as
+  // its own nice program by src/nice-program.js serveStartOf); none handed ⇒ its serve's argv is the release's, byte for byte.
   startPrefix = null,
   // r3675 (round wf_2d351a7c-4b1's must): a locator with NO person's Start on its machine (the device agent installs this module with
   // its autostart on, and no op starts the serve on a person's behalf): its words name only what works there (no Start, no For you)

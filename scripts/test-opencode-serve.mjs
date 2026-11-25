@@ -552,8 +552,9 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
     ok('B-460d last part: THE HUB\'s COMPOSITION for a paired machine — the ONE verdict (devicePriorityFor, fed its hello nicePath) composed by priorityArgv → [<its nice>, -n, 5] with the fact {by: 5}; the setting off, an agent that states no program, a Windows agent, no setting reader ⇒ none (the release\'s start)',
       !!st && JSON.stringify(st.argv) === JSON.stringify([NICE, '-n', '5']) && st.fact && st.fact.by === 5 && none.every((x) => x === null), { st, none });
     const took = NP.serveStartOf(st, NICE);
-    const refused = [NP.serveStartOf(st, '/bin/nice'), NP.serveStartOf({ argv: ['/tmp/nice', '-n', '5'] }, '/tmp/x'), NP.serveStartOf({ argv: [NICE, '-n', '0'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '20'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', 5] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5', 'x'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5x'] }, NICE), NP.serveStartOf(null, NICE), NP.serveStartOf(st, null)];
-    ok('B-460d last part: THE DEVICE TAKES IT ONLY AS ITS OWN PROGRAM (serveStartOf): the hub\'s composition → the same argv and a fact built from its step; another program, a step of 0 / 20 / a number / «5x», more words, none handed, a machine with no program ⇒ none',
+    const refused = [NP.serveStartOf(st, '/bin/nice'), NP.serveStartOf({ argv: ['/tmp/nice', '-n', '5'] }, '/tmp/x'), NP.serveStartOf({ argv: [NICE, '-n', '0'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '20'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', 5] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5', 'x'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5x'] }, NICE), NP.serveStartOf(null, NICE), NP.serveStartOf(st, null),
+      NP.serveStartOf({ argv: [NICE, '-n', '-5'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '05'] }, NICE), NP.serveStartOf({}, NICE), NP.serveStartOf({ fact: { by: 5 } }, NICE), NP.serveStartOf(st, '')];   // r4422 (2): a negative step, a leading zero, no argv, an empty program on the device
+    ok('B-460d last part: THE DEVICE TAKES IT ONLY AS ITS OWN PROGRAM (serveStartOf): the hub\'s composition → the same argv and a fact built from its step; another program, a step of 0 / 20 / −5 / «05» / a number / «5x», more words, an object with no argv, none handed, a machine with no program or an empty one ⇒ none',
       !!took && JSON.stringify(took.argv) === JSON.stringify(st.argv) && took.fact.by === 5 && refused.every((x) => x === null), { took, refused: refused.map((x) => x === null) });
     // the device's serve, started with what it took: below its agent (the step in front), the fact said
     const dirP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), captP = [];
@@ -596,6 +597,27 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
     const MN = MCN('nice-start-any', REPO), NSRC = read('src/nice-program.js');
     const NPX = MN.load('src/nice-program.js', anchored(NSRC, ' || a[0] !== nicePath ||', ' ||', 'the own-program check cut'), 'nice-start-any');
     const evil = { argv: ['/tmp/evil', '-n', '5'] };
+    // r4422 (3): THE HANDLER RUN, not only read — its own text (the `opencode-serve` op's body) run over stand-ins of the two modules
+    // it requires: the NEW handler, and AN OLDER AGENT's (the same text without this unit's two takes — the release's handler)
+    const HBODY = HB.slice(HB.indexOf('{') + 1);
+    const TAKE = "ocStart = serveStartOf(msg.start, niceProgram());", PREFIX = 'startPrefix: () => ocStart,';
+    const runHandler = async (body, msg) => {
+      const installs = [], ops = []; let reply = null, done = null; const settled = new Promise((r) => { done = r; });
+      const req = (m) => (/opencode-serve\.js$/.test(m) ? { install: (o) => { installs.push(o); return { facts: 'device' }; } } : /opencode-remote\.js$/.test(m) ? { runOpencodeOp: async (f, a, p) => { ops.push({ f, a, p }); return { ok: true }; } } : require(m));
+      const fn = new Function('msg', 'mux', 'require', 'log', 'path', 'process', 'serveStartOf', 'niceProgram', `let ocFacts = null; let ocStart = null;\n${body}\nreturn { start: () => ocStart };`);
+      const st = fn(msg, { control: (m) => { reply = m; done(); } }, req, () => { }, path, process, NP.serveStartOf, () => NICE);
+      await Promise.race([settled, new Promise((r) => setTimeout(r, 5000))]);
+      return { installs, ops, reply, start: st.start() };
+    };
+    const MSG = { op: 'opencode-serve', id: 7, action: OPN, params: { a: 1 }, start: st };
+    const NEW = await runHandler(HBODY, MSG), NEW0 = await runHandler(HBODY, { ...MSG, start: undefined });
+    const OLDB = HBODY.replace(TAKE, '').replace(PREFIX, ''), OLD = await runHandler(OLDB, MSG);
+    ok('B-460d last part (r4422 (3)): THE HANDLER RUN — the new one takes the handed start (its one install reads it: `<nice> -n 5`), and an op with none hands the release\'s start; AN OLDER AGENT\'s handler (this unit\'s two takes cut) run against the new field IGNORES it: its install gets no prefix, the op runs with its action and params only, and it answers as before',
+      HBODY.includes(TAKE) && HBODY.includes(PREFIX) && !OLDB.includes('msg.start')
+        && NEW.installs.length === 1 && typeof NEW.installs[0].startPrefix === 'function' && JSON.stringify((NEW.installs[0].startPrefix() || {}).argv) === JSON.stringify(st.argv) && NEW.reply && NEW.reply.op === 'opencode-serve-result' && NEW.reply.id === 7
+        && NEW0.installs.length === 1 && NEW0.installs[0].startPrefix() === null
+        && OLD.installs.length === 1 && OLD.installs[0].startPrefix === undefined && OLD.ops.length === 1 && OLD.ops[0].a === OPN && JSON.stringify(OLD.ops[0].p) === JSON.stringify({ a: 1 }) && OLD.reply && OLD.reply.op === 'opencode-serve-result' && OLD.reply.result && OLD.reply.result.ok === true,
+      { new: NEW.installs.map((o) => typeof o.startPrefix), none: NEW0.installs.map((o) => o.startPrefix && o.startPrefix()), old: OLD.installs.map((o) => typeof o.startPrefix), oldOps: OLD.ops.map((o) => [o.a, o.p]), oldReply: OLD.reply && OLD.reply.op });
     ok('B-460d last part RED CONTROLS: a handler that never takes the op\'s start, and an install that hands no prefix, read false; a copy of serveStartOf with its own-program test cut TAKES a foreign program (the tree\'s refuses it)',
       !handled(HB.replace('ocStart = serveStartOf(msg.start, niceProgram());', '')) && !installed(block.replace('startPrefix: () => ocStart,', ''))
         && NP.serveStartOf(evil, NICE) === null && !!NPX && NPX.serveStartOf(evil, NICE) !== null, { copy: !!NPX });

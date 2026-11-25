@@ -54,6 +54,9 @@ function access() {
  *  nicePath), composed by the ONE composer (src/spawn/line.js priorityArgv) and handed with the op; the device takes it only as its own
  *  program (src/nice-program.js serveStartOf). None (the setting off, an agent that states no program, Windows) ⇒ the release's start.
  *  Unproven on the real program: the box and the test machines hold no `opencode`. */
+// THE SETTING OFF hands nothing, so a paired machine's serve states NO fact where the hub's own states «off»: the paired serve's
+// fact is read by no one (OpenCode terminals open on the hub only, LOCAL_ONLY_OPS), while the hub's own is a terminal's Session
+// Properties line (r4422 (4): said, not built)
 function serveStartFor({ serverSetting = null, hello = null, machine = null } = {}) {
   if (typeof serverSetting !== 'function') return null;
   const pri = require('./spawn-priority.js').devicePriorityFor({ serverSetting, hello, machine });

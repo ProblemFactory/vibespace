@@ -404,7 +404,7 @@ export const PRIORITY_ROADS = Object.freeze([
   ['src/spawn/ssh.js', '…the keeper road\'s fresh run takes them in front of the command', '[...priorityArgv(cPri && cPri.priority), rcmd, ...rargs.map(shq)]', 1],
   ['src/spawn/ssh.js', '…and the device road\'s pipe-session spec is built with the SAME builder', "withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, cPri && cPri.priority)", 1],
   // B-460d's remainder, the OpenCode serve (主开发 r1362 (2)): the serve STARTS below the hub — its terminals and its turns inherit it
-  ['src/opencode-serve.js', 'B-460d\'s remainder: the OpenCode serve\'s spawn takes the caller\'s prefix in front (the device passes none)', 'child = spawnImpl(preArgv.length ? preArgv[0] : cmd, preArgv.length ? [...preArgv.slice(1), cmd, ...serveArgs] : serveArgs, {', 1],
+  ['src/opencode-serve.js', 'B-460d\'s remainder: the OpenCode serve\'s spawn takes the caller\'s prefix in front (the hub its own verdict; the device the start the hub last handed it, r4369 — none handed ⇒ none)', 'child = spawnImpl(preArgv.length ? preArgv[0] : cmd, preArgv.length ? [...preArgv.slice(1), cmd, ...serveArgs] : serveArgs, {', 1],
   ['src/server/cli-env.js', '…the hub hands it the ONE verdict, composed by the ONE composer, read at each start', "return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };", 1],
 ]);
 export const PRIORITY_EXCEPT = Object.freeze([
