@@ -293,10 +293,12 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
     try { log.warn?.(`[browser] ${FILE_NAME} could not be read (${kind}) — no browser binding is written while it is unknown; each is offered again at its conversation's next record, and nothing ends by «no binding names it»`); } catch { }
   }
   function writeAll(obj) { writeBindingsFile(file, obj); }
-  function prune(byConversation) {
+  function prune(byConversation, protect = null) {
     const entries = Object.entries(byConversation);
     if (entries.length <= MAX_BINDINGS) return byConversation;
-    entries.sort((a, b) => (b[1].at || 0) - (a[1].at || 0));
+    // r3961 (4): the keys a kept folder's note names (`protect`, the reconcile's) are kept first — the bound evicts the oldest OTHER bindings
+    const kept = (e) => !!(protect && e[1] && protect.has(String(e[1].key)));
+    entries.sort((a, b) => (Number(kept(b)) - Number(kept(a))) || ((b[1].at || 0) - (a[1].at || 0)));
     return Object.fromEntries(entries.slice(0, MAX_BINDINGS));
   }
   /** The belt (r6): a bound conversation keeps its key. Journalled once per
@@ -423,12 +425,13 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
   /** 'ok' | 'absent' | 'unknown' — the file's read now (r3054: a one-shot step that would MOVE by «no binding names it» waits). */
   function state() { return readState().state; }
   /**
-   * r3786 (hold 2): BINDINGS MADE AGAIN FROM THE KEPT FOLDERS' NOTES — `[[conversation, key, at]]`, each ONLY INTO AN EMPTY PLACE: no
+   * r3786 (hold 2): BINDINGS MADE AGAIN FROM THE KEPT FOLDERS' NOTES — `[[conversation, key, firstAt]]` in the caller's order (r3961: the
+   * rebuild's own rule, the first key first), each stamped `at` (now), ONLY INTO AN EMPTY PLACE: no
    * binding names that conversation AND none names that key (record()'s own belts; never over a binding that stands). One read, one
    * write. → { made, movedOn (the conversation is bound to ANOTHER key: it moved on), taken (the key is another conversation's),
    * already } | { unknown: true } (the file unread: nothing is written over it)
    */
-  function restoreFromNotes(pairs) {
+  function restoreFromNotes(pairs, { at = Date.now(), protect = null } = {}) {
     const rs = readState();
     if (rs.state === 'unknown') { sayUnknown(rs.kind); return { unknown: true }; }
     const all = rs.all, out = { made: 0, movedOn: 0, taken: 0, already: 0 };
@@ -439,10 +442,10 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
       if (cur && cur.key === key) { out.already++; continue; }
       if (cur && KEY_RE.test(String(cur.key || ''))) { out.movedOn++; continue; }
       if (holderOf(all.byConversation, key)) { out.taken++; continue; }
-      all.byConversation[sid] = { key, at: Math.round(Number(p[2])) || Date.now() }; out.made++;
+      all.byConversation[sid] = { key, at: Math.round(Number(at)) || Date.now() }; out.made++;   // r3961 (4): stamped NOW (the folder's first time is old: the bound would evict it at once)
     }
     if (!out.made) return out;
-    try { all.byConversation = prune(all.byConversation); writeAll(all); known.clear(); }
+    try { all.byConversation = prune(all.byConversation, protect); writeAll(all); known.clear(); }
     catch (e) { try { log.warn?.(`[browser] the bindings made again from the kept folders' notes could not be written (${(e && e.code) || 'failed'}) — they are made again at the next reconcile`); } catch { } return { unknown: true }; }
     return out;
   }

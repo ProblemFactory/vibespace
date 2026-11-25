@@ -1459,7 +1459,7 @@ function createSessionMessages(session, sessionId) {
     // instance reads the same objects); B-f7ab's late key composes through it too
     const browserEnvFn = () => {
       if (browserEnvMemo !== undefined) return browserEnvMemo;
-      try { browserEnvMemo = require('./browser-env').create({ dataDir: path.join(rootDir, 'data'), serverSetting, settingsHeld: () => (typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null), serverNotice: null, telemetry: null, keptKeys: () => (browserKept ? browserKept.keyVerdict() : undefined), keptNoted: () => (browserKept ? browserKept.notedKeys() : undefined) }); }   // r3786 (LAW 4): the kept store's own verdict
+      try { browserEnvMemo = require('./browser-env').create({ dataDir: path.join(rootDir, 'data'), serverSetting, settingsHeld: () => (typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null), serverNotice: null, telemetry: null, keptKeys: () => (browserKept ? browserKept.keyVerdict() : undefined), keptNoted: () => (browserKept ? browserKept.notedKeys() : undefined), keptReady: () => (browserKept ? browserKept.reconciled() : Promise.resolve({ done: true, code: null })) }); }   // r3786 (LAW 4): the kept store's own verdict
       catch (e) { console.warn('[browser] pin re-point unavailable — ' + (e && e.message)); browserEnvMemo = null; }
       return browserEnvMemo;
     };

@@ -138,6 +138,9 @@ function conversationIdOfSession(session, meta) {
  *                    called when a real record exists (a partial record would be a restore's garbage)
  * @param onLiveFactsChanged  () => re-publish active-sessions (the browser fact moved)
  */
+/** r3961 (hold 3 (b)): the late door's refusal while the kept folders' reconcile runs inside its bound (hub-side words: the device
+ *  bundle's src/browser-profiles.js is not touched) */
+const KEPT_RECONCILING = Object.freeze({ ok: false, code: 'no_browser_key', why: 'kept_reconciling', error: 'VibeSpace is still reading its kept browsers (their folders\' notes) after its start — a browser handed now could be a new one over this conversation\'s own kept browser', remedy: 'ask again in a moment — it waits at most about 20 seconds' });
 function create({ browserEnv = () => null, keeper = () => null, activeSessions = new Map(), integrationEnabled = () => true,
   readMeta = () => null, persistMeta = null, onLiveFactsChanged = null, log = console } = {}) {
   const be = () => { try { return browserEnv() || null; } catch { return null; } };
@@ -189,6 +192,12 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
   function ensureBrowserKey(session, { sessionId = null } = {}) {
     if (session && B.isBrowserKey(session._browserKey)) return { ok: true, key: session._browserKey, minted: false };
     if (!session) return B.lateKeyRefusal('session_gone');
+    // r3961 (hold 3 (b), THE LATE DOOR): no NEW browser is handed before the kept folders' reconcile has ended or its bound is over — while
+    // one runs inside its bound (the start's, a lift's, or one asked again after an unknown) the first browser command is refused by name,
+    // «ask again in a moment»; past the bound the door goes on, and a key it MINTS is told by name (the kept store's start word)
+    const ks0 = (() => { const kk = kp(); try { return kk && typeof kk.keptStore === 'function' ? kk.keptStore() : null; } catch { return null; } })();
+    const order = ks0 && typeof ks0.startOrder === 'function' ? ks0.startOrder() : { done: true };
+    if (order && order.done === false && order.waiting) return refused(session, sessionId || liveIdOf(session), KEPT_RECONCILING);
     const f = factsFor(session, sessionId);
     const e = f.env;
     const v = B.lateKeyVerdict({ live: f.live, remote: f.remote, integrationOn: integrationOn(), isolationOn: isolationOn(e), envAvailable: !!(e && typeof e.envFor === 'function'),
@@ -264,6 +273,7 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
         + (persisted ? (bound === bk.key ? '' : ` — the binding was NOT recorded (the store holds ${bound || 'nothing'} for it; the next resume decides from there)`) : ' — no session record to persist it to: this process keeps it, a later resume mints its own'));
     } catch { /* never throws */ }
     try { global.__vsMetric?.('browser-key-late', 1); } catch { }
+    if (order && order.done === false && origin === 'new' && ks0 && typeof ks0.noteStartCode === 'function') { try { ks0.noteStartCode(bk.key, order.code); log.warn?.(`[browser] ${f.id}: ${order.code} — the kept browsers' notes were not read to their end within their bound when this conversation got its browser key; ${bk.key} is a new one`); } catch { /* the store says its own */ } }   // r3961 (hold 3 (b)): told by name
     try { onLiveFactsChanged?.(); } catch { /* optional */ }
     return { ok: true, key: bk.key, minted: true, origin, variant: env.variant, conversationId: v.conversationId };
   }

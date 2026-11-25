@@ -39,6 +39,7 @@ const NOTE_NAME = '.vibespace-kept.json';
 const NOTE_MODE = 0o600;
 const NOTE_MAX_BYTES = 1024;
 const NOTE_WRITE_MS = 5 * 1000;
+const TEMP_REAP_MS = 60 * 1000;   // r3961: a note's temp older than this in a folder no write of ours is on is a crash's leftover (reaped)
 const CONVERSATION_MAX = 200;
 const LIST_TIMEOUT_MS = 20 * 1000;
 const LIST_MAX_DIRS = 4096;
@@ -68,7 +69,7 @@ const bounded = (p, ms, late) => { let t = null; return Promise.race([p, new Pro
 async function readNote(dir, { fsp = fs.promises } = {}) {
   let fh = null, out;
   try {
-    fh = await fsp.open(path.join(dir, NOTE_NAME), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+    fh = await fsp.open(path.join(dir, NOTE_NAME), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));   // r3961: never through a link, and a pipe planted there answers at once (not a file: not a note)
     const st = await fh.stat();
     if (!st.isFile() || st.size > NOTE_MAX_BYTES) out = { state: 'untrue' };
     else {
@@ -84,21 +85,24 @@ async function readNote(dir, { fsp = fs.promises } = {}) {
   return out;
 }
 /** WRITE IT WHOLE: a temp file beside it (0600), synced, renamed over — bounded. A landing past the bound is taken back when the
- *  folder had no true note before (`takeBack`): its browser was started «not kept» and the folder must not read as kept after. */
-async function writeNote(dir, doc, { timeoutMs = NOTE_WRITE_MS, fsp = fs.promises, takeBack = true } = {}) {
+ *  folder had no true note before (`takeBack`): its browser was started «not kept» and the folder must not read as kept after.
+ *  r3961 (1): the take-back removes ONLY the file this write put there (the temp's inode, read before its rename), never a note another
+ *  write made true; and `ended(work)` hands the write's REAL end to the folder's chain, so the folder's next write starts only after it */
+async function writeNote(dir, doc, { timeoutMs = NOTE_WRITE_MS, fsp = fs.promises, takeBack = true, ended = null } = {}) {
   const tmp = path.join(dir, `${NOTE_NAME}.tmp-${crypto.randomBytes(4).toString('hex')}`);
   const fin = path.join(dir, NOTE_NAME);
   let cut = false;
   const work = (async () => {
-    let fh = null;
+    let fh = null, ino = null;
     try {
       fh = await fsp.open(tmp, 'wx', NOTE_MODE);
       await fh.writeFile(JSON.stringify(doc));
       await fh.sync();
+      ino = await fh.stat().then((s) => s.ino, () => null);
       await fh.close(); fh = null;
       if (cut) { await fsp.unlink(tmp).catch(() => { }); return { ok: false, code: 'kept_note_timeout' }; }
       await fsp.rename(tmp, fin);
-      if (cut && takeBack) await fsp.unlink(fin).catch(() => { });
+      if (cut && takeBack) await takeBackOwn(fin, ino, fsp);
       return cut ? { ok: false, code: 'kept_note_timeout' } : { ok: true };
     } catch (e) {
       const cl = fh ? await fh.close().then(() => null, (x) => x) : null;   // the temp's close on the failed road: said in the why, never swallowed
@@ -106,35 +110,62 @@ async function writeNote(dir, doc, { timeoutMs = NOTE_WRITE_MS, fsp = fs.promise
       return { ok: false, code: 'kept_note_unwritten', why: String((e && e.code) || 'failed') + (cl ? ` (and its close: ${(cl && cl.code) || 'failed'})` : '') };
     }
   })();
+  if (typeof ended === 'function') ended(work);   // r3961 (1): the folder's next write waits for THIS one's real end, not its bound
   let t = null;
   const bound = new Promise((res) => { t = setTimeout(() => { cut = true; res({ ok: false, code: 'kept_note_timeout' }); }, timeoutMs); });   // the cut is set AT the bound, so a rename that lands after it is taken back
   try { return await Promise.race([work, bound]); } finally { clearTimeout(t); }
 }
-// ONE WRITE AT A TIME PER FOLDER (the start's and the choke point's): each waits for the one before it
-const chains = new Map();   // key → the promise of its last write
-function serial(key, fn) {
+/** r3961 (1): a late landing's take-back — only when the file at the note's name is still the one this write renamed there (its inode) */
+async function takeBackOwn(fin, ino, fsp) {
+  if (ino === null || ino === undefined) return;
+  const st = await fsp.lstat(fin).catch(() => null);
+  if (st && st.ino === ino) await fsp.unlink(fin).catch(() => { });
+}
+/** r3961: a crash between a temp's open and its rename leaves `.vibespace-kept.json.tmp-…` for good — reaped at the folder's next write
+ *  (no write of ours is on it then: the chain), when older than TEMP_REAP_MS (another hub's write in flight is younger) */
+async function reapTemps(dir, fsp) {
+  const names = await fsp.readdir(dir).catch(() => []);
+  for (const n of names) {
+    if (!n.startsWith(NOTE_NAME + '.tmp-')) continue;
+    const p = path.join(dir, n), st = await fsp.lstat(p).catch(() => null);
+    if (st && st.isFile() && Date.now() - st.mtimeMs > TEMP_REAP_MS) await fsp.unlink(p).catch(() => { });
+  }
+}
+// ONE WRITE AT A TIME PER FOLDER (the start's and the choke point's): each waits for the one before it to TRULY end — r3961 (1): the
+// chain holds on the write's own promise (`hold(work)`), never on its bounded answer, so a cut write still running blocks the next one
+const chains = new Map();   // key → the promise of its last write's real end
+function serial(key, fn, waitMs = Infinity) {
   const prev = chains.get(key) || Promise.resolve();
-  const next = prev.catch(() => null).then(fn);
-  const held = next.catch(() => null);
-  chains.set(key, held);
-  held.then(() => { if (chains.get(key) === held) chains.delete(key); });
-  return next;
+  let held = null, ran = false;
+  // the wait for the previous write is BOUNDED for a start (waitMs): past it this one writes nothing and answers «not kept», and the chain
+  // stays on the previous write (a later one still waits for it)
+  const free = waitMs === Infinity ? prev.then(() => true) : bounded(prev.then(() => true), waitMs, false);
+  const run = free.then((ok) => { if (!ok) return null; ran = true; return fn((p) => { held = p; }); });
+  const end = run.then(() => (ran ? held : prev), () => null).then(() => null, () => null);
+  chains.set(key, end);
+  end.then(() => { if (chains.get(key) === end) chains.delete(key); });
+  return run.then((v) => (ran ? v : { ok: false, code: 'kept_note_timeout', why: 'the folder\'s previous write has not ended' }));
 }
 /** THE NOTE MADE TRUE for `conversation` ('' = not decided yet): a true note that names it (or names another: the first holder keeps
  *  the key) is left alone; a true note naming none gets it; none, or a note not true to the folder, is written fresh. Bounded whole.
  *  → { ok: true, doc, wrote, other } | { ok: false, code, why } */
 function ensureNote(dir, key, conversation, { timeoutMs = NOTE_WRITE_MS, now = Date.now, fsp = fs.promises } = {}) {
-  return serial(String(key), async () => {
-    const t0 = Date.now(), conv = convOf(conversation);
-    const r = await bounded(readNote(dir, { fsp }), timeoutMs, { state: 'cut' });
+  // r3961 (1): the start stays BOUNDED while it waits for the folder's previous write to truly end — past its bound it is not kept and
+  // starts no write of its own (the previous one may still land: only its own file is ever taken back)
+  const k = String(key), t0 = Date.now();
+  return serial(k, async (hold) => {
+    const conv = convOf(conversation);
+    const left = () => Math.max(1, timeoutMs - (Date.now() - t0));   // the ONE bound, from the start's ask (its wait included)
+    const r = await bounded(readNote(dir, { fsp }), left(), { state: 'cut' });
     if (r.state === 'cut') return { ok: false, code: 'kept_note_timeout' };
     if (r.state === 'unreadable') return { ok: false, code: 'kept_note_unreadable', why: r.why };
     if (r.state === 'true' && (r.doc.conversation === conv || r.doc.conversation)) return { ok: true, doc: r.doc, wrote: false, other: !!(conv && r.doc.conversation !== conv) };   // it names this one, or names another first (kept)
     const doc = noteDoc(key, conv, r.state === 'true' ? r.doc.firstAt : now());
-    const w = await writeNote(dir, doc, { timeoutMs: Math.max(1, timeoutMs - (Date.now() - t0)), fsp, takeBack: r.state !== 'true' });
+    await bounded(reapTemps(dir, fsp), left(), null);
+    const w = await writeNote(dir, doc, { timeoutMs: left(), fsp, takeBack: r.state !== 'true', ended: hold });
     if (w.ok) quiet.delete(String(key));   // the choke point's next record looks at it again (it may join a conversation now)
     return w.ok ? { ok: true, doc, wrote: true, other: false } : w;
-  });
+  }, timeoutMs);
 }
 
 // ── the choke point's join (src/server/session-stdout.js, beside the binding's record) ──
@@ -150,11 +181,11 @@ function join(profileDir, key, conversation, { fsp = fs.promises } = {}) {
   if (decided.get(k) !== c || joined.has(k + '\0' + c)) return null;
   if (Date.now() - (quiet.get(k) || 0) < QUIET_MS) return null;
   const dir = path.join(profileDir, k);
-  return serial(k, async () => {
+  return serial(k, async (hold) => {
     const r = await bounded(readNote(dir, { fsp }), NOTE_WRITE_MS, { state: 'cut' });
     if (r.state === 'true' && r.doc.conversation) { joined.add(k + '\0' + c); return { ok: true, wrote: false }; }   // named (by it, or first by another: kept)
     if (r.state !== 'true') { quiet.set(k, Date.now()); if (quiet.size > 8192) quiet.delete(quiet.keys().next().value); return { ok: true, wrote: false, none: true }; }   // no note yet: its browser's start writes it, with this conversation
-    const w = await writeNote(dir, noteDoc(k, c, r.doc.firstAt), { fsp, takeBack: false });
+    const w = await writeNote(dir, noteDoc(k, c, r.doc.firstAt), { fsp, takeBack: false, ended: hold });
     if (w.ok) joined.add(k + '\0' + c);
     return w;
   }).catch(() => null);
@@ -196,7 +227,7 @@ async function noteExisting({ dataDir, fsp = fs.promises } = {}) {
 }
 
 // ── the listing child (the reconcile's one read) ──
-const LIST_SRC = "const fs=require('fs'),p=require('path');const a=process.argv.slice(1),d=a[0],regs=a.slice(1);const K=/^bk-[0-9a-f]{8}$/,N='.vibespace-kept.json',MAXD=" + LIST_MAX_DIRS + ",NB=" + NOTE_MAX_BYTES + ";let n=[];try{n=fs.readdirSync(d)}catch(e){if(e&&e.code==='ENOENT'){n=null}else{process.stderr.write(String((e&&e.code)||'unreadable'));process.exit(3)}}const o=[];for(const x of (n||[])){if(!K.test(x))continue;if(o.length>=MAXD){process.stderr.write('too-many');process.exit(4)}let s;try{s=fs.lstatSync(p.join(d,x))}catch(e){continue}if(!s.isDirectory())continue;let st='none',doc=null;try{const fd=fs.openSync(p.join(d,x,N),fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));try{const z=fs.fstatSync(fd);if(!z.isFile()||z.size>NB)st='bad';else{const b=Buffer.alloc(z.size);fs.readSync(fd,b,0,z.size,0);try{doc=JSON.parse(b.toString('utf8'));st='doc'}catch(e){st='bad'}}}finally{fs.closeSync(fd)}}catch(e){st=e&&e.code==='ENOENT'?'none':(e&&(e.code==='ELOOP'||e.code==='EISDIR'))?'bad':'unreadable'}o.push([x,s.mtimeMs,String(s.dev),String(s.ino),st,doc])}const r=[];for(const g of regs){try{const s=fs.statSync(g);r.push([g,String(s.dev),String(s.ino)])}catch(e){r.push([g,null,null,String((e&&e.code)||'unreadable')])}}process.stdout.write(JSON.stringify({dirs:o,regs:r}))";
+const LIST_SRC = "const fs=require('fs'),p=require('path');const a=process.argv.slice(1),d=a[0],regs=a.slice(1);const K=/^bk-[0-9a-f]{8}$/,N='.vibespace-kept.json',MAXD=" + LIST_MAX_DIRS + ",NB=" + NOTE_MAX_BYTES + ";let n=[];try{n=fs.readdirSync(d)}catch(e){if(e&&e.code==='ENOENT'){n=null}else{process.stderr.write(String((e&&e.code)||'unreadable'));process.exit(3)}}const o=[];for(const x of (n||[])){if(!K.test(x))continue;if(o.length>=MAXD){process.stderr.write('too-many');process.exit(4)}let s;try{s=fs.lstatSync(p.join(d,x))}catch(e){continue}if(!s.isDirectory())continue;let st='none',doc=null;try{const fd=fs.openSync(p.join(d,x,N),fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0)|(fs.constants.O_NONBLOCK||0));try{const z=fs.fstatSync(fd);if(!z.isFile()||z.size>NB)st='bad';else{const b=Buffer.alloc(z.size);fs.readSync(fd,b,0,z.size,0);try{doc=JSON.parse(b.toString('utf8'));st='doc'}catch(e){st='bad'}}}finally{fs.closeSync(fd)}}catch(e){st=e&&e.code==='ENOENT'?'none':(e&&(e.code==='ELOOP'||e.code==='EISDIR'))?'bad':'unreadable'}o.push([x,s.mtimeMs,String(s.dev),String(s.ino),st,doc])}const r=[];for(const g of regs){try{const s=fs.statSync(g);r.push([g,String(s.dev),String(s.ino)])}catch(e){r.push([g,null,null,String((e&&e.code)||'unreadable')])}}process.stdout.write(JSON.stringify({dirs:o,regs:r}))";
 /** THE CHILD: the key-named folders of `profileDir` with their identity and their note, and the registered folders' identities →
  *  Promise<{ ok: true, dirs: [{ name, mtimeMs, id, note: 'none'|'true'|'untrue'|'unreadable', doc }], regs: [{ dir, id }] } | { ok: false, why }> */
 function listFolders(profileDir, { registered = [], timeoutMs = LIST_TIMEOUT_MS, execFileImpl = require('child_process').execFile } = {}) {

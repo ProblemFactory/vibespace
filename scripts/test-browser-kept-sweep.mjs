@@ -145,7 +145,7 @@ async function bindScene(BBm, how) {
   const hasCopy = () => fs.readdirSync(path.dirname(bfile)).some((n) => n.startsWith('bindings.json.corrupt-') && realRead(path.join(path.dirname(bfile), n), 'utf8') === bytes);
   let copyKept = false;
   for (let i = 0; i < 800 && how === 'torn' && BBm === BB0 && !(copyKept = hasCopy()); i++) await new Promise((r) => setTimeout(r, 10));   // the real module's copy only (the red control's never comes)
-  const res = { how, refusedN, ended: sw ? sw.ended : null, removed: KEYS.length - left, kept: KEYS.filter((k) => S.has(k)).length, recorded: rec, same: realRead(bfile, 'utf8') === bytes, copyKept };
+  const res = { how, refusedN, ended: sw ? (sw.held ? 0 : sw.ended) : null, waited: !!(sw && sw.held), removed: KEYS.length - left, kept: KEYS.filter((k) => S.has(k)).length, recorded: rec, same: realRead(bfile, 'utf8') === bytes, copyKept };
   try { S.shutdown(); } catch { /* its own */ }
   return res;
 }
@@ -233,7 +233,7 @@ async function unfinishedRun(KS) {
   const S = mkStore(KS, w.dir, { listFolders: () => { asked++; return answer; } });
   S.has(KEYS[0]);
   // waited on the rebuild's ATTEMPT (its listing asked, then its turn settled) — never on the held state a red copy would never reach
-  await until(() => asked > 0); await new Promise((r) => setTimeout(r, 30));
+  await until(() => asked > 0); await until(() => !!hf(S) || fs.readFileSync(w.file, 'utf8') !== TORN, 3000);   // r3961: the attempt's own end (held again, or the red copy's write) — no fixed sleep
   const held = hf(S), same = fs.readFileSync(w.file, 'utf8') === TORN, sw = await S.sweep();
   const boot = w.be.sweep(new Set(), { graceMs: 0 });
   answer = { ok: true, dirs: KEYS.map((k) => ({ name: k, mtimeMs: 1000, id: null, note: 'none', doc: null })), regs: [] };   // r3786: the listing's answer (the folders, their notes, the registered folders)
@@ -390,7 +390,7 @@ async function bindTornRun(KSmod) {
 const B12 = await bindTornRun(KS0);
 console.log(`    facts: ${JSON.stringify(B12)}`);
 ok(B12.rebuilt === 2 && B12.bound && B12.stoodKept && B12.keptBound && B12.laterEnded && B12.ended === 1, 'torn bindings at a start: rebuilt from the two records (a fork source binds nothing); the conversation with NO record gets its binding made again from its folder\'s note — kept three hours past the grace, its sign-in on disk; the folder with no note that no binding names ends as ordinary', B12);
-const B12x = await bindTornRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "        b = bb && typeof bb.restoreFromNotes === 'function' ? bb.restoreFromNotes(pairs) : { unknown: true };", '        b = { made: 0, movedOn: 0, taken: 0 };', 'r3786 no binding made again from a note'), 'kept-sweep-no-restore'));
+const B12x = await bindTornRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "        b = bb && typeof bb.restoreFromNotes === 'function' ? bb.restoreFromNotes(pairs, { at: now(), protect: new Set(pairs.map((x) => x[1])) }) : { unknown: true };", '        b = { made: 0, movedOn: 0, taken: 0 };', 'r3786 no binding made again from a note'), 'kept-sweep-no-restore'));
 console.log(`    facts (red): ${JSON.stringify(B12x)}`);
 ok(!B12x.stoodKept && B12x.ended === 2, 'RED CONTROL (the reconcile without its bindings half): the conversation whose record is gone is never bound again — its kept browser ENDS with its folder — red', B12x);
 
@@ -653,7 +653,6 @@ console.log('㉔ r3786 HOLD 3: THE START\'s ORDER — a resume during the start\
   let release; const gateP = new Promise((r) => { release = r; });
   const { S, be } = startOver(dir, KS0, { listFolders: (d, o) => gateP.then(() => KNM.listFolders(d, o)) });
   const p = S.reconciled();
-  await new Promise((r) => setTimeout(r, 30));
   const early = be.priorKeyFor(C);   // a resume that did NOT wait: its key asked before the note was read
   release();
   const r = await p;
@@ -670,7 +669,7 @@ console.log('㉔ r3786 HOLD 3: THE START\'s ORDER — a resume during the start\
   try { o2.S.shutdown(); } catch { }
   ok(r2.done === false && r2.code === 'kept_reconcile_unfinished' && !!b && b.beforeReconcile === true && /A new browser/.test(words) && told === 'kept_reconcile_unfinished' && again2 === null && /kept_reconcile_unfinished/.test(KB.startNoteText(told)), 'past its bound the wait ends (unknown), and the start is TOLD BY NAME: the conversation\'s browser card says it is a new browser, the agent\'s first answer carries the code once', { r2, b, words, told, again2 });
   const WC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
-  const W1 = 'keptOrder = await ks.reconciled();', W2 = '? be0.priorKeyFor(data.resumeId) : \'\';';
+  const W1 = 'keptOrder = await be0.startKeyOrder({ resumeId: resumeAsk });', W2 = "const prior = resumeAsk ? (keptOrder ? keptOrder.prior : be0.priorKeyFor(data.resumeId)) : '';";
   const order = (x) => x.indexOf(W1) >= 0 && x.indexOf(W1) < x.indexOf(W2) && x.indexOf(W2) - x.indexOf(W1) < 1200;
   ok(order(WC) && !order(anchored(WC, W1, 'keptOrder = null;', 'r3786 the create that does not wait')) && WC.includes("liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code)"), 'WIRING: the create asks the start\'s reconcile BEFORE it asks the conversation\'s prior key, and a resume past the bound is told by its code (RED: the create that does not wait)', null);
 }
@@ -701,13 +700,13 @@ ok(N25x.kept === 0, 'RED CONTROL (an unfinished reconcile taken as «nothing fou
 }
 
 console.log('㉖ r3786 HOLD 5: a note that CANNOT BE WRITTEN — off the loop, whole, 0600, BOUNDED: the start is NOT KEPT and BOTH are told (the agent in its tool\'s words, the person on that conversation\'s browser); a landing past the bound is taken back');
-async function unwritableRun(KS, noteFs, { noteWriteMs = 2000, settle = 0 } = {}) {
+async function unwritableRun(KS, noteFs, { noteWriteMs = 2000, ended = null } = {}) {
   const K = freshKey();
   const dir = noteWorld({});
   const S = mkStore(KS, dir, { noteFs, noteWriteMs });
   fs.mkdirSync(S.dirOf(K), { recursive: true });
   const t0 = Date.now(), g = await S.startGate(K), ms = Date.now() - t0;
-  if (settle) await new Promise((r) => setTimeout(r, settle));
+  if (ended) await until(ended, 3000);   // r3961: the late write's own end (its temp unlinked, or renamed) — no fixed settle
   const b = S.brief(K), fact = BF.browserFactFor({ browserKey: K, variant: BF.MANAGED_RUNGS[0] }, { kept: b, now: Date.now() });
   const told = S.takeStartNote(K), again2 = S.takeStartNote(K);
   const left = fs.readdirSync(S.dirOf(K));
@@ -724,10 +723,13 @@ ok(N26x.kept === true && !N26x.notKept && !N26x.card, 'RED CONTROL (a note that 
 const stall = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ? new Promise(() => { }) : fs.promises.open(p, f, m)) };   // PLACED: the temp's open never answers
 const N26b = await unwritableRun(KS0, stall, { noteWriteMs: 150 });
 ok(N26b.kept === false && N26b.code === 'kept_note_timeout' && N26b.notKept === 'kept_note_timeout', 'the note\'s write that never answers (its open never settles: only the bound can answer): past its bound the start is NOT kept (kept_note_timeout)', N26b);
-const late = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ? new Promise((r, j) => setTimeout(() => fs.promises.open(p, f, m).then(r, j), 250)) : fs.promises.open(p, f, m)) };   // PLACED: the temp's open answers past the bound
-const N26c = await unwritableRun(KS0, late, { noteWriteMs: 80, settle: 600 });
+const lateEnd = { n: 0 };
+const late = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ? new Promise((r, j) => setTimeout(() => fs.promises.open(p, f, m).then(r, j), 250)) : fs.promises.open(p, f, m)),
+  unlink: (p) => fs.promises.unlink(p).finally(() => { if (String(p).includes('.tmp-')) lateEnd.n++; }), rename: (a, b) => fs.promises.rename(a, b).finally(() => { lateEnd.n++; }) };   // PLACED: the temp's open answers past the bound (its end counted)
+lateEnd.n = 0;
+const N26c = await unwritableRun(KS0, late, { noteWriteMs: 80, ended: () => lateEnd.n > 0 });
 ok(N26c.kept === false && N26c.code === 'kept_note_timeout' && N26c.left.length === 0, 'a write that lands PAST its bound is taken back: the folder of a browser told «not kept» holds no note after it (nothing reads it as kept later)', N26c);
-const N26cx = await unwritableRun(overKN(anchored(anchored(KNSRC, "      if (cut) { await fsp.unlink(tmp).catch(() => { }); return { ok: false, code: 'kept_note_timeout' }; }\n", '', 'r3786 no cut before the rename'), '      if (cut && takeBack) await fsp.unlink(fin).catch(() => { });\n', '', 'r3786 a late landing left'), 'kept-sweep-late-note').KS, late, { noteWriteMs: 80, settle: 600 });
+const N26cx = await unwritableRun(overKN(anchored(anchored(KNSRC, "      if (cut) { await fsp.unlink(tmp).catch(() => { }); return { ok: false, code: 'kept_note_timeout' }; }\n", '', 'r3786 no cut before the rename'), '      if (cut && takeBack) await takeBackOwn(fin, ino, fsp);\n', '', 'r3786 a late landing left'), 'kept-sweep-late-note').KS, late, (lateEnd.n = 0, { noteWriteMs: 80, ended: () => lateEnd.n > 0 }));
 ok(N26cx.left.includes(NOTE), 'RED CONTROL (a late landing left in place): a browser told «not kept» has a note in its folder after all — red', N26cx);
 {
   const d = noteWorld({}), kept = path.join(d, 'browser-profiles', freshKey()), cfg = path.join(d, 'browser-env', 'bk-madeup.json'), other = path.join(d, 'browser-env', 'bk-other.json');
@@ -822,7 +824,7 @@ const shapeRun = await bootRun(BE, { listBytes: JSON.stringify({ version: 1, ent
 const shapeRed = await bootRun(MUT.load('src/server/browser-env.js', anchored(BESRC, "    if (a.state !== 'data') return null;\n", "    if (a.state !== 'data') return new Set();\n", 'r3786 the boot sweep\'s own parse: a wrong shape is «no rows»'), 'kept-sweep-shape'), { listBytes: JSON.stringify({ version: 1, entries: [] }) });
 ok(!shapeRun.removed && shapeRun.keptUnreadable && shapeRed.removed, 'RULE 1 (the verifier\'s scene 1): a list whose entries are not the store\'s shape is TORN to the boot sweep (judged by the store\'s own judge) — every key-named folder spared — RED: the sweep\'s own parse reads it as «no rows» and removes the folder', { shapeRun, shapeRed });
 const noted = await bootRun(BE, { keptKeys: () => new Set(), keptNoted: (k) => new Set([k]) });
-const notedRed = await bootRun(MUT.load('src/server/browser-env.js', anchored(BESRC, "(bindingsUnread || noted === null || (noted instanceof Set ? noted.has(key) : noteHeld(path.join(dir, n))))", "(bindingsUnread || noted === null)", 'r3786 a noted folder removed by age'), 'kept-sweep-noted-age'), { keptKeys: () => new Set(), keptNoted: (k) => new Set([k]) });
+const notedRed = await bootRun(MUT.load('src/server/browser-env.js', anchored(BESRC, "(noted instanceof Set ? noted.has(key) : noteHeld(path.join(dir, n)))", 'false', 'r3786 a noted folder removed by age'), 'kept-sweep-noted-age'), { keptKeys: () => new Set(), keptNoted: (k) => new Set([k]) });
 ok(!noted.removed && noted.notedSpared === 1 && notedRed.removed, 'RULE 2: the store names no row for a folder whose note names its conversation — the boot sweep does NOT remove it by age — RED: removed by its age', { noted, notedRed });
 const unread = await bootRun(BE, { keptKeys: () => new Set(), keptNoted: () => new Set(), bindingsBytes: '{"v":1,"byConversation":{"x' });
 const unreadRed = await bootRun(MUT.load('src/server/browser-env.js', anchored(BESRC, "(bindingsUnread || noted === null ||", "(noted === null ||", 'r3786 the bindings unread ignored'), 'kept-sweep-bind-unread'), { keptKeys: () => new Set(), keptNoted: () => new Set(), bindingsBytes: '{"v":1,"byConversation":{"x' });
@@ -831,6 +833,254 @@ ok(!unread.removed && unread.notedSpared === 1 && unreadRed.removed, 'RULE 3: th
   const WC = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8'), MW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   ok(WC.includes("keptKeys: () => { const ks = liveKeptStore(); return ks && typeof ks.keyVerdict === 'function' ? ks.keyVerdict() : undefined; },") && WC.includes("keptNoted: () => { const ks = liveKeptStore(); return ks && typeof ks.notedKeys === 'function' ? ks.notedKeys() : undefined; },") && MW.includes("keptKeys: () => (browserKept ? browserKept.keyVerdict() : undefined), keptNoted: () => (browserKept ? browserKept.notedKeys() : undefined)"),
     'WIRING: both browser-env instances of the hub (ws-create\'s boot sweep, the routes\') take the live kept store\'s verdict and facts — ONE verdict of the list for every remover', null);
+}
+
+
+// ══ r3961 (the round wf_9f9929d5-6b1's cure) and r3963 (the verifier's scene 2) ══
+const BKS = fs.readFileSync(path.join(REPO, 'src/server/browser-key.js'), 'utf8');
+const BBS4 = fs.readFileSync(path.join(REPO, 'src/server/browser-bindings.js'), 'utf8');
+const twoHoursOld = (p) => { const t = (Date.now() - 2 * 3600e3) / 1000; fs.utimesSync(p, t, t); };
+
+console.log('㉛ r3961 (1): ONE WRITE AT A TIME A FOLDER — a rename held past the bound, then a second start: the second waits (inside ITS bound) for the first to truly end, and a take-back removes only its own file — never «kept» over a folder with no note');
+async function oneAtATimeRun(KS, { releaseAfterSecond = false } = {}) {
+  const K = freshKey();
+  const dir = noteWorld({});
+  let release; const gateP = new Promise((r) => { release = r; });
+  let held = 0, firstLanded = null;
+  const flags = { lstatDone: 0, unlinkIssued: 0, unlinkDone: 0 };
+  const isNote = (p) => String(p).endsWith(NOTE);
+  const noteFs = { ...fs.promises,
+    rename: (a, b) => { if (isNote(b) && held++ === 0) { firstLanded = gateP.then(() => fs.promises.rename(a, b)); return firstLanded; } return fs.promises.rename(a, b); },   // PLACED: the FIRST note's rename held
+    lstat: (p) => fs.promises.lstat(p).finally(() => { if (firstLanded && isNote(p)) flags.lstatDone++; }),
+    unlink: (p) => { if (isNote(p)) flags.unlinkIssued++; return fs.promises.unlink(p).finally(() => { if (isNote(p)) flags.unlinkDone++; }); } };
+  const S = mkStore(KS, dir, { noteFs, noteWriteMs: 300 });   // a bound wide enough for a loaded machine's fsync (the second start's whole wait and write)
+  fs.mkdirSync(S.dirOf(K), { recursive: true });
+  const g1 = await S.startGate(K);   // past its bound: not kept — its write still runs (its rename held)
+  const g2p = S.startGate(K);        // the next start of the same folder
+  let g2;
+  if (releaseAfterSecond) { g2 = await g2p; release(); } else { release(); g2 = await g2p; }
+  // the first write's late landing and its take-back look (then its unlink, when it took its own file back): waited for by their own events
+  await firstLanded; await until(() => flags.lstatDone > 0, 3000); await new Promise((r) => setImmediate(r)); await until(() => flags.unlinkDone >= flags.unlinkIssued, 3000);
+  const note = noteOf(S.dirOf(K));
+  try { S.shutdown(); } catch { }
+  return { first: g1.kept ? 'kept' : g1.code, second: g2.kept ? 'kept' : g2.code, note: !!note && note.key === K, keptOverNone: !!g2.kept && !(note && note.key === K) };
+}
+const N31a = await oneAtATimeRun(KS0), N31b = await oneAtATimeRun(KS0, { releaseAfterSecond: true });
+console.log(`    facts: ${JSON.stringify({ N31a, N31b })}`);
+ok(N31a.first === 'kept_note_timeout' && N31a.second === 'kept' && N31a.note && !N31b.keptOverNone && N31b.second === 'kept_note_timeout',
+  'the first write past its bound (its rename held): not kept; a second start WAITS for it to end, then writes the folder\'s note — kept, its note there; when the first is still held through the second\'s whole bound, the second is not kept either (it writes nothing): never «kept» over a folder with no note', { N31a, N31b });
+const N31x = await oneAtATimeRun(overKN(anchored(KNSRC, '  const end = run.then(() => (ran ? held : prev), () => null).then(() => null, () => null);', '  const end = run.then(() => null, () => null);', 'r3786 the chain moves on at the bound'), 'kept-sweep-chain-bound').KS, { releaseAfterSecond: true });
+ok(N31x.keptOverNone, 'RED CONTROL (the chain moves on at the bounded answer): the second start writes and says kept, then the first lands over its note and takes it back — a browser told «kept» on a folder with NO note — red', N31x);
+
+console.log('㉜ r3961 (2): TWO TRUE NOTES NAME ONE CONVERSATION — bound by the bindings\' own rebuild rule (a conversation keeps its FIRST key: the earliest first time), whatever the listing\'s order');
+async function twoNotesRun(KS, order) {
+  const X = freshKey(), Y = freshKey(), C = freshConv();
+  const dir = noteWorld({ folders: [[X, { key: X, conversation: C, firstAt: 1000 }], [Y, { key: Y, conversation: C, firstAt: 2000 }]] });
+  const listFolders = (d, o) => KNM.listFolders(d, o).then((r) => (r && r.ok ? { ...r, dirs: [...r.dirs].sort((a, b) => (order === 'xy' ? 1 : -1) * ((a.name === X ? 0 : 1) - (b.name === X ? 0 : 1))) } : r));
+  const { S, bb } = startOver(dir, KS, { listFolders });
+  await S.reconciled();
+  const out = { bound: bb.lookup(C) === X ? 'X' : bb.lookup(C) === Y ? 'Y' : 'none' };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N32 = [await twoNotesRun(KS0, 'xy'), await twoNotesRun(KS0, 'yx')];
+ok(N32.every((x) => x.bound === 'X'), 'two folders noted for one conversation, the bindings empty: in BOTH listing orders the conversation is bound to the folder of its FIRST key (the earliest first time) — the other is an ordinary row with no holder', N32);
+const KS32 = MUT.load('src/server/browser-kept.js', anchored(KSRC, '      pairs.sort((a, b) => (a[2] - b[2]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));\n', '', 'r3786 the listing\'s order'), 'kept-sweep-listing-order');
+const N32x = [await twoNotesRun(KS32, 'xy'), await twoNotesRun(KS32, 'yx')];
+ok(N32x[0].bound !== N32x[1].bound, 'RED CONTROL (the listing\'s order decides): the two orders bind two different folders — which sign-ins a person keeps is a folder listing\'s — red', N32x);
+
+console.log('㉝ r3961 (3): HOLD 3 AT EVERY DOOR — (a) a create waits for a reconcile a LIFT began; (b) THE LATE DOOR refuses by name while one runs, then hands the conversation its own key; (c) a reconcile that ended unknown is ASKED AGAIN');
+{
+  // (a) the create's door (browser-env startKeyOrder, the one ws-create asks): a LIFT's reconcile in flight is waited for
+  const aRun = async (KS) => {
+    const K = freshKey(), C = freshConv();
+    const dir = noteWorld({ rows: { [K]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 } } });
+    let gate = null;
+    const listFolders = (d, o) => (gate ? gate.then(() => KNM.listFolders(d, o)) : KNM.listFolders(d, o));
+    const o = startOver(dir, KS, { listFolders });
+    const be = BE.create({ dataDir: dir, homeDir: path.join(dir, 'home'), serverSetting: () => undefined, log: quiet, socketDirBase: path.join(dir, 'sock'), keptReady: () => o.S.reconciled() });
+    await o.S.reconciled();   // the start's reconcile: done (no note yet)
+    fs.mkdirSync(path.join(dir, 'browser-profiles', K), { recursive: true }); fs.writeFileSync(path.join(dir, 'browser-profiles', K, NOTE), JSON.stringify({ key: K, conversation: C, firstAt: 1000 }));
+    let release; gate = new Promise((r) => { release = r; });
+    o.S.reconcile('lift');    // a LIFT's reconcile, in flight
+    const pk = be.startKeyOrder({ resumeId: C });
+    release();
+    const r = await pk;
+    try { o.S.shutdown(); } catch { }
+    return { prior: r.prior === K, code: r.code };
+  };
+  const A = await aRun(KS0);
+  const Ax = await aRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    if (recState === 'done' && !recBusy) return Promise.resolve({ done: true, code: null });\n    if (!notDoneSince)", "    if (recState === 'done') return Promise.resolve({ done: true, code: null });\n    if (!notDoneSince)", 'r3786 the start\'s reconcile only'), 'kept-sweep-lift-wait'));
+  ok(A.prior && A.code === null && !Ax.prior, '(a) a create during a LIFT\'s reconcile waits for it: its resume\'s key is its folder\'s (the binding made again from the note) — RED (the wait covers the start\'s reconcile only): it reads no binding and would mint a new browser', { A, Ax });
+  // (b) THE LATE DOOR (browser-key.js ensureBrowserKey, the routes' first browser command of a keyless session)
+  const bRun = async (BKm) => {
+    const K = freshKey(), C = freshConv();
+    const dir = noteWorld({ folders: [[K, { key: K, conversation: C, firstAt: 1000 }]], rows: { [K]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 } } });
+    let release; const gateP = new Promise((r) => { release = r; });
+    const o = startOver(dir, KS0, { listFolders: (d, oo) => gateP.then(() => KNM.listFolders(d, oo)) });
+    const session = { claudeSessionId: C, cwd: dir, name: 'made-up' };
+    const active = new Map([['sess-made-up-1', session]]);
+    const keys = BKm.create({ browserEnv: () => o.be, keeper: () => ({ keptStore: () => o.S }), activeSessions: active, log: quiet });
+    o.S.reconciled();   // the start's reconcile, held at its listing
+    const during = keys.ensureBrowserKey(session, { sessionId: 'sess-made-up-1' });
+    release();
+    await o.S.reconciled();
+    const s2 = { claudeSessionId: C, cwd: dir, name: 'made-up' }; active.set('sess-made-up-2', s2);
+    const after = BKm === BK0 ? keys.ensureBrowserKey(s2, { sessionId: 'sess-made-up-2' }) : null;
+    try { o.S.shutdown(); } catch { }
+    return { during: during.ok ? (during.key === K ? 'its own' : 'a NEW key') : during.why, after: after ? (after.ok && after.key === K ? 'its own' : after.ok ? 'a NEW key' : after.why) : null };
+  };
+  const BK0 = require(path.join(REPO, 'src/server/browser-key.js'));
+  const Bv = await bRun(BK0);
+  const Bx = await bRun(MUT.load('src/server/browser-key.js', anchored(BKS, '    if (order && order.done === false && order.waiting) return refused(session, sessionId || liveIdOf(session), KEPT_RECONCILING);\n', '', 'r3786 the late door asks nothing'), 'kept-sweep-late-door'));
+  ok(Bv.during === 'kept_reconciling' && Bv.after === 'its own' && Bx.during === 'a NEW key', '(b) THE LATE DOOR: while the reconcile runs its first browser command is refused by name (kept_reconciling, «ask again in a moment»); after it the conversation gets ITS OWN key back (the binding made again from the note) — RED (the door asks nothing): a NEW browser over its own kept one', { Bv, Bx });
+  // (c) a reconcile that ended UNKNOWN is asked again by the next wait
+  const cRun = async (KS) => {
+    let fail = true;
+    const dir = noteWorld({});
+    const o = startOver(dir, KS, { listFolders: (d, oo) => (fail ? Promise.resolve({ ok: false, why: 'made-up: the listing did not answer' }) : KNM.listFolders(d, oo)) });
+    const r1 = await o.S.reconciled();
+    fail = false;
+    const r2 = await o.S.reconciled();
+    try { o.S.shutdown(); } catch { }
+    return { first: r1.done, second: r2.done };
+  };
+  const Cv = await cRun(KS0);
+  const Cx = await cRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    const p = recBusy || reconcile(recStart ? 'a start of a conversation\\'s browser' : 'start');\n    if (!recStart) recStart = p;", "    if (!recStart) recStart = reconcile('start');\n    const p = recStart;", 'r3786 the start\'s answer for good'), 'kept-sweep-ask-again'));
+  ok(Cv.first === false && Cv.second === true && Cx.second === false, '(c) the start\'s reconcile ended unknown; the next wait ASKS AGAIN and is done — RED (the start\'s answer kept for the run): every later start is told «had not finished» and waits for nothing', { Cv, Cx });
+  const WC2 = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  ok(WC2.includes('keptOrder = await be0.startKeyOrder({ resumeId: resumeAsk });') && WC2.includes("const prior = resumeAsk ? (keptOrder ? keptOrder.prior : be0.priorKeyFor(data.resumeId)) : '';"), 'WIRING: ws-create asks the create\'s door (startKeyOrder) for the wait AND the resume\'s prior key — the door ㉝ (a) drives', null);
+}
+
+console.log('㉞ r3961 (4): THE RESTORED BINDING AT THE BOUND (4096 bindings): stamped NOW, and a noted key is never pruned for it — the conversation\'s kept browser stays bound');
+async function pruneBoundRun(BBm) {
+  const K = freshKey(), C = freshConv(), P = freshKey(), CP = freshConv();
+  const by = {};
+  for (let i = 0; i < 4095; i++) by[`c-old-${String(i).padStart(5, '0')}-0000-4000-8000-000000000000`] = { key: 'bk-' + (0x00e00000 + i).toString(16).padStart(8, '0'), at: 1000 + i };
+  by[CP] = { key: P, at: 1 };   // the OLDEST binding — its key has a note (a kept browser)
+  const dir = noteWorld({ folders: [[K, { key: K, conversation: C, firstAt: 500 }], [P, { key: P, conversation: CP, firstAt: 1 }]], bindings: by });
+  const bb = BBm.create({ dataDir: dir, log: quiet });
+  const S = KS0.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0 });
+  await S.reconciled();
+  const out = { restored: bb.lookup(C) === K, notedKept: bb.lookup(CP) === P, n: Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'browser-env', 'bindings.json'), 'utf8')).byConversation).length };
+  try { S.shutdown(); } catch { }
+  return out;
+}
+const N34 = await pruneBoundRun(BB0);
+console.log(`    facts: ${JSON.stringify(N34)}`);
+ok(N34.restored && N34.notedKept && N34.n === 4096, 'at the bound: the binding made again from the note stays (stamped now), the oldest binding is kept too because its key has a note — the bound evicts the oldest OTHER binding', N34);
+const N34x = await pruneBoundRun(MUT.load('src/server/browser-bindings.js', anchored(anchored(BBS4, "      all.byConversation[sid] = { key, at: Math.round(Number(at)) || Date.now() }; out.made++;", "      all.byConversation[sid] = { key, at: Math.round(Number(p[2])) || Date.now() }; out.made++;", 'r3786 stamped with the first time'), "    try { all.byConversation = prune(all.byConversation, protect); writeAll(all); known.clear(); }", "    try { all.byConversation = prune(all.byConversation); writeAll(all); known.clear(); }", 'r3786 nothing protected'), 'kept-sweep-bound-prune'));   // stale-pins: kept (the red copy writes the release's two lines)
+ok(!N34x.restored || !N34x.notedKept, 'RED CONTROL (stamped with the folder\'s old first time, nothing protected): the prune evicts the binding just made again, or the noted oldest one — a kept browser left unbound until the sweep ends it — red', N34x);
+
+console.log('㉟ r3961 (5): HOLD 4 — a reconcile over an UNREADABLE note, and one over UNREAD bindings, is UNKNOWN: nothing is removed; the start over an unreadable note is not kept');
+{
+  const nRun = async (KS) => {
+    const A = freshKey();
+    const dir = noteWorld({ folders: [[A, null]], rows: { [A]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 } } });
+    const listFolders = (d, o) => KNM.listFolders(d, o).then((r) => (r && r.ok ? { ...r, dirs: r.dirs.map((x) => (x.name === A ? { ...x, note: 'unreadable', doc: null } : x)) } : r));   // the child's answer for a note it could not open (EACCES)
+    const { S, there } = startOver(dir, KS, { listFolders });
+    const sw = await S.sweep();
+    const out = { state: S._reconcileState(), held: !!(sw && sw.held), kept: S.has(A) && there(A) };
+    try { S.shutdown(); } catch { }
+    return out;
+  };
+  const Nv = await nRun(KS0), Nx = await nRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "      if (r.dirs.some((d) => d.note === 'unreadable')) return unfinished(why, 'a folder\\'s note could not be read');\n", '', 'r3786 an unreadable note read as none'), 'kept-sweep-unreadable-note'));
+  ok(Nv.state === 'unknown' && Nv.held && Nv.kept && !Nx.kept, 'a folder\'s note the child could not read: the reconcile is unknown, the sweep removes nothing (a row no binding names, past its grace, stays) — RED (an unreadable note read as none): it ends with its folder', { Nv, Nx });
+  const uRun = async (KS) => {
+    const A = freshKey();
+    const dir = noteWorld({ folders: [[A, null]], rows: { [A]: { hasDir: true, startedAt: 1000, stoppedAt: 2000, lastUsedAt: 2000 } } });
+    const bfile = path.resolve(path.join(dir, 'browser-env', 'bindings.json'));
+    const realRead = fs.readFileSync;
+    fs.readFileSync = function (p, ...a) { if (path.resolve(String(p)) === bfile) throw Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }); return realRead.call(this, p, ...a); };
+    let out;
+    try { const { S, there } = startOver(dir, KS); const ok1 = await S.reconcile('start'); out = { reconciled: ok1, state: S._reconcileState(), kept: S.has(A) && there(A) }; try { S.shutdown(); } catch { } }
+    finally { fs.readFileSync = realRead; }
+    return out;
+  };
+  const Uv = await uRun(KS0), Ux = await uRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "      if (!bb0 || (typeof bb0.state === 'function' && bb0.state() === 'unknown')) return unfinished(why, 'the bindings could not be read');\n", '', 'r3786 the bindings not asked'), 'kept-sweep-bindings-unread'));
+  ok(Uv.reconciled === false && Uv.state === 'unknown' && Uv.kept && Ux.state === 'done', 'the bindings unread (EIO): the reconcile is UNKNOWN (never «done» over a fact it could not read), nothing removed — RED (the bindings not asked): the reconcile says done over them', { Uv, Ux });
+  const K2 = freshKey(), d2 = noteWorld({});
+  const S2 = mkStore(KS0, d2, { noteFs: { ...fs.promises, open: (p, f, m) => (String(p).endsWith(NOTE) ? Promise.reject(Object.assign(new Error('EACCES: permission denied, open'), { code: 'EACCES' })) : fs.promises.open(p, f, m)) } });
+  fs.mkdirSync(S2.dirOf(K2), { recursive: true });
+  const g = await S2.startGate(K2);
+  ok(g.kept === false && g.code === 'kept_note_unreadable' && S2.brief(K2).notKept === 'kept_note_unreadable', 'the start over a note it cannot read (EACCES, placed): NOT kept, by its code — the person\'s card and the agent\'s answer say it', g);
+}
+
+console.log('㊱ r3961 (5): THE BOOT SWEEP\'s RULE 2 IN A PROCESS WITH NO LIVE STORE — a folder holding a note file is never removed by age');
+async function noStoreRun(BEm) {
+  const K = freshKey();
+  const dir = noteWorld({ folders: [[K, 'any bytes: a note file the sweep does not judge']], rows: {} });
+  twoHoursOld(path.join(dir, 'browser-profiles', K));
+  const be = BEm.create({ dataDir: dir, homeDir: path.join(dir, 'home'), serverSetting: () => undefined, log: quiet, socketDirBase: path.join(dir, 'sock') });   // no keptKeys, no keptNoted: no live store
+  be.sweep(new Set(), { graceMs: 0 });
+  return { kept: fs.existsSync(path.join(dir, 'browser-profiles', K, 'Cookies')) };
+}
+const N36 = await noStoreRun(BE), N36x = await noStoreRun(MUT.load('src/server/browser-env.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8'), "    const noteHeld = (dir) => { try { fs.lstatSync(path.join(dir, require('./browser-kept-note.js').NOTE_NAME)); return true; } catch (e) { return !e || e.code !== 'ENOENT'; } };", '    const noteHeld = () => false;', 'r3786 the note not looked for'), 'kept-sweep-nostore-note'));
+ok(N36.kept && !N36x.kept, 'no live store, a valid list with no row, a key-named folder two hours old holding a note file: spared — RED (the note not looked for): removed by its age', { N36, N36x });
+
+console.log('㊲ r3963 (item 6): LAW 4 — a folder a STANDING BINDING names is never removed by age (with no live store, and with one), and it is not left a folder with no row: its note is written and its row made at the reconcile; the folder nothing names still goes');
+{
+  const scene = () => {
+    const A = freshKey(), B = freshKey(), C = freshConv();
+    const dir = noteWorld({ folders: [[A, null], [B, null]], bindings: { [C]: { key: A, at: 1000 } }, rows: {} });
+    for (const k of [A, B]) twoHoursOld(path.join(dir, 'browser-profiles', k));
+    return { A, B, C, dir };
+  };
+  const BESRC6 = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
+  const BEred = MUT.load('src/server/browser-env.js', anchored(BESRC6, ' || (boundNow && boundNow.has(key))', '', 'r3786 the sweep asks no binding'), 'kept-sweep-bound-folder');
+  // (i) NO live store in the process (a fresh browser-env over the data)
+  const noStore = (BEm) => { const s = scene(); const be = BEm.create({ dataDir: s.dir, homeDir: path.join(s.dir, 'home'), serverSetting: () => undefined, log: quiet, socketDirBase: path.join(s.dir, 'sock') }); be.sweep(new Set(), { graceMs: 0 }); return { bound: fs.existsSync(path.join(s.dir, 'browser-profiles', s.A, 'Cookies')), other: fs.existsSync(path.join(s.dir, 'browser-profiles', s.B, 'Cookies')) }; };
+  const I = noStore(BE), Ix = noStore(BEred);
+  ok(I.bound && !I.other && !Ix.bound, '(i) no live store: the folder the binding names is spared; the folder nothing names goes (the control) — RED (today\'s sweep, no binding asked): BOTH removed', { I, Ix });
+  // (ii) a START: fresh bindings, a fresh store, a fresh boot sweep wired to its verdict, over the same data
+  const withStore = async (KS) => {
+    const s = scene();
+    const dir = restartCopy(s.dir);
+    const o = startOver(dir, KS);
+    await o.S.reconciled();
+    o.be.sweep(new Set(), { graceMs: 0 });
+    const note = noteOf(path.join(dir, 'browser-profiles', s.A));
+    const out = { row: o.S.has(s.A), note: !!note && note.key === s.A && note.conversation === s.C, bound: o.bb.lookup(s.C) === s.A, kept: o.there(s.A), other: o.there(s.B) };
+    try { o.S.shutdown(); } catch { }
+    return out;
+  };
+  const II = await withStore(KS0);
+  const IIx = await withStore(MUT.load('src/server/browser-kept.js', anchored(KSRC, "          const w = await KN.ensureNote(path.join(PROFILE_DIR, d.name), d.name, sid, { timeoutMs: noteWriteMs, now: () => d.mtimeMs || now(), ...(noteFs ? { fsp: noteFs } : {}) });", '          const w = null;', 'r3786 no note for a bound folder'), 'kept-sweep-bound-note'));
+  ok(II.row && II.note && II.bound && II.kept && !II.other && !IIx.row && !IIx.note, '(ii) a start over the same data: the reconcile gives the bound folder its NOTE (true to its folder, the binding\'s conversation) and its ROW; the boot sweep spares it, removes the folder nothing names — RED (no note for a bound folder): it stays a folder with no row and no note', { II, IIx });
+}
+
+console.log('⑭b r3961 (5): THE BINDINGS\' REBUILD CHILD starts with the allowlisted environment');
+{
+  const envRun = async (BBm) => {
+    const w = bindWorld({ bytes: '{"v":1,"byConversation":{"z', metas: [{ browserKey: KEYS[0], claudeSessionId: CONVS[0], browserKeyFor: CONVS[0] }] });
+    const calls = [];
+    process.env.VS_LEG_MADEUP_TOKEN = 'vsst_s1';
+    let bb;
+    try {
+      bb = BBm.create({ dataDir: w.dir, log: quiet, execFileImpl: (cmd, args, opts, cb) => { calls.push(opts); return realExecFile(cmd, args, opts, cb); } });
+      try { bb.boundKeys(); } catch { /* torn */ }
+      await until(() => calls.length > 0 && !hb(bb));
+    } finally { delete process.env.VS_LEG_MADEUP_TOKEN; }
+    const o = calls[0] || {};
+    const allow = new Set(Object.keys(require(path.join(REPO, 'src/agent-env.js')).serviceEnv({ ...process.env, VS_LEG_MADEUP_TOKEN: 'x' })));
+    return { env: o.env ? Object.keys(o.env).every((k) => allow.has(k)) && !('VS_LEG_MADEUP_TOKEN' in o.env) : 'the hub\'s whole environment' };
+  };
+  const E = await envRun(BB0), Ex = await envRun(MUT.load('src/server/browser-bindings.js', anchored(BBS4, ", env: require('../agent-env.js').serviceEnv(process.env) }, (err, stdout) => {", ' }, (err, stdout) => {', 'r3786 the rebuild child with no env'), 'kept-sweep-meta-env'));
+  ok(E.env === true && Ex.env !== true, 'the rebuild\'s child (the conversations\' records) gets the allowlist only — RED (no env): the hub\'s whole environment, a made-up token with it', { E, Ex });
+}
+
+console.log('㊳ r3961 (5): THE PERSON\'s TWO SENTENCES WHERE THEY ARE DRAWN — the chat card of the conversation\'s own browser (both phases) and its live view, from THE fact');
+{
+  const CR = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8'), LW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  const CARD = "    { const w = this._browserStartNote(b); if (w) { const g = document.createElement('div'); g.className = 'chat-browser-session-note chat-status-dim'; g.textContent = w; el.appendChild(g); } }";
+  // drawn for BOTH phases: after the head, before the end card's branch — never inside it (the start card says it too)
+  const cardBoth = (x) => { const i = x.indexOf(CARD), h = x.indexOf('    el.appendChild(head);'), e = x.indexOf("    if (b.phase === 'end') {", h); return i > h && h > 0 && i < e && x.includes('return startNoteWords(fact, t);'); };
+  const LIVE = '    renderKeptNote();   // r3786: every move of the fact or the status asks it again';
+  const liveDrawn = (x) => { const r = x.indexOf('  function renderResume() {'); return r > 0 && x.indexOf(LIVE, r) === x.indexOf('\n', r) + 1 && x.includes('  shareLine.after(keptNoteLine);') && x.includes('const words = own ? startNoteWords(f, t) : \'\';'); };
+  const cardRed = anchored(CR, CARD, '', 'r3786 the card draws nothing').replace("    if (b.phase === 'end') {\n", "    if (b.phase === 'end') {\n" + CARD + '\n');   // moved into the end card only
+  ok(cardBoth(CR) && !cardBoth(cardRed) && liveDrawn(LW) && !liveDrawn(anchored(LW, LIVE + '\n', '', 'r3786 the live view never asks')), 'the chat card draws «Not kept…» / «A new browser…» from THE fact in BOTH its phases (RED: moved into the end card only — the start card would say nothing); the live view asks it at every move of the fact and draws it under its share line (RED: never asked)', null);
+  const f = (n) => BF.startNoteWords({ own: { startNote: n } });
+  ok(/^Not kept: its sign-ins end with it/.test(f('not-kept')) && /^A new browser: VibeSpace had not finished reading/.test(f('before-reconcile')) && f(null) === '', 'the two sentences themselves (THE fact\'s words): «Not kept: its sign-ins end with it — …» and «A new browser: …»; nothing for a start that was kept', null);
 }
 
 report();

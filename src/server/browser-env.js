@@ -182,7 +182,10 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   keepOn = null, keptKeys = null,
   // r3786 (LAW 4): the kept store's facts for the boot sweep — the keys whose folder's true note names a conversation (null = unknown;
   // undefined = no live store in this process: then a folder holding a note file is never removed by age)
-  keptNoted = null } = {}) {
+  keptNoted = null,
+  // r3961 (hold 3 (a)): the kept store's order for a create — () => Promise<{ done, code }> (its reconciled: the reconcile in flight
+  // ended, or its bound is over; one that ended unknown asked again). Absent: no live store, nothing to wait for
+  keptReady = null } = {}) {
   const ENV_DIR = path.join(dataDir, 'browser-env');        // generated configs + pin symlinks (+ the C rung's `<key>.cwd`)
   const PROFILE_DIR = path.join(dataDir, 'browser-profiles'); // variant C scratch dirs (ours, swept)
   // lane browser-resource-care (B-afeb): THE TMPDIR every agent-browser process VibeSpace launches gets — the CLI mints its
@@ -791,6 +794,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // facts; with no live store, any folder holding a note file), and with the BINDINGS UNREAD it removes no key-named folder at all
     const noted = keptNotedSet();
     let bindingsUnread = false; try { bindingsUnread = bindings.state() === 'unknown'; } catch { bindingsUnread = true; }
+    // r3963 (item 6, LAW 4 «a fact on disk»): A STANDING BINDING gives its folder to a conversation — a key-named folder any binding
+    // names is never removed by age, in a process with a live store and in one with none (the same read the bindings answer)
+    let boundNow = null; if (!bindingsUnread) { try { boundNow = bindings.boundKeys(); } catch { bindingsUnread = true; } }
     const noteHeld = (dir) => { try { fs.lstatSync(path.join(dir, require('./browser-kept-note.js').NOTE_NAME)); return true; } catch (e) { return !e || e.code !== 'ENOENT'; } };
     let notedSpared = 0;
     const regDirs = registeredDirs();
@@ -810,7 +816,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         if (!B.isBrowserKey(key)) continue;
         if (live.has(key)) { kept++; continue; }
         if (isDir && (!keptSet || keptSet.has(key))) { keptDirs++; continue; }
-        if (isDir && (bindingsUnread || noted === null || (noted instanceof Set ? noted.has(key) : noteHeld(path.join(dir, n))))) { notedSpared++; continue; }   // r3786: the store's facts (or, with none, the note's presence)
+        if (isDir && (bindingsUnread || noted === null || (boundNow && boundNow.has(key)) || (noted instanceof Set ? noted.has(key) : noteHeld(path.join(dir, n))))) { notedSpared++; continue; }   // r3786: the store's facts (or, with none, the note's presence)
         if (isDir && isRegistered(path.join(dir, n))) { regSpared++; continue; } // verify F1: a registered profile's directory is its logins — never swept
         // A create in flight has written its indirection and not yet its meta.
         // Every sweeper in this tree refuses to remove something that young,
@@ -926,6 +932,17 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
    * that died before `writeSessionMeta`) simply is not there, and the ladder
    * then calls this a `resume-unknown` out loud instead of silently minting.
    */
+  /**
+   * r3961 (hold 3 (a), THE START's ORDER AT A CREATE — the door ws-create asks): the kept folders' reconcile in flight (the start's, a
+   * lift's, or one asked again after an unknown) ended, or its bound is over; THEN a resume's prior key is asked (its binding may have
+   * been made again from its folder's note meanwhile) → { prior, code } — `code` (kept_reconcile_unfinished) when the wait ended unknown:
+   * the create tells by name if it mints
+   */
+  async function startKeyOrder({ resumeId = '' } = {}) {
+    let code = null;
+    if (typeof keptReady === 'function') { try { const r = await keptReady(); if (r && r.done === false) code = r.code || 'kept_reconcile_unfinished'; } catch { code = 'kept_reconcile_unfinished'; } }
+    return { prior: resumeId ? priorKeyFor(String(resumeId)) : '', code };
+  }
   function priorKeyFor(conversationId) {
     if (!conversationId) return '';
     // RUNG 1 (r5): the durable binding. The meta files below are UNLINKED by
@@ -957,7 +974,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   }
 
   return {
-    envFor, checkFloor, floorState, repointPin, resolvedProfileDir, sweep, priorKeyFor, liveKeysFromMeta, keyNamed, bindings, childConfigFor,
+    envFor, checkFloor, floorState, repointPin, resolvedProfileDir, sweep, priorKeyFor, startKeyOrder /* r3961 */, liveKeysFromMeta, keyNamed, bindings, childConfigFor,
     // lane browser-resume (§3.9): is keeping on, and the keys the kept store names (the routes' adopt + the suites)
     keepOn: () => keeping(), keptKeys: () => keptKeySet(),
     // B-f7ab: the late key (src/server/browser-key.js) names WHY `envFor` gave nothing — this switch off, before it asks

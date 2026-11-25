@@ -226,6 +226,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
         // r3786 (LAW 4): the boot sweep judges the kept list by THE kept store's own verdict and facts (undefined: none in this process)
         keptKeys: () => { const ks = liveKeptStore(); return ks && typeof ks.keyVerdict === 'function' ? ks.keyVerdict() : undefined; },
         keptNoted: () => { const ks = liveKeptStore(); return ks && typeof ks.notedKeys === 'function' ? ks.notedKeys() : undefined; },
+        keptReady: () => { const ks = liveKeptStore(); return ks && typeof ks.reconciled === 'function' ? ks.reconciled() : Promise.resolve({ done: true, code: null }); },   // r3961 (hold 3 (a))
       });
     } catch (e) {
       // A degrade path that prints the message VERBATIM is the only reason this
@@ -1429,10 +1430,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // r3786 (hold 3, THE START's ORDER): no conversation is handed a NEW browser before this start's reconcile of the kept folders'
             // notes has ended or its bound is over (the kept store's RECONCILE_WAIT_MS) — a resume in the first seconds would otherwise mint
             // a new key while its own folder's note (and the binding made again from it) is still unread
+            // r3961: the wait and the prior key's read are ONE door of browser-env (startKeyOrder) — the reconcile in flight, whoever began it
             let keptOrder = null;
-            if (be0 && integrationOn) { const ks = liveKeptStore(); if (ks && typeof ks.reconciled === 'function') { try { keptOrder = await ks.reconciled(); } catch { keptOrder = null; } } }
-            const prior = (be0 && data.resume && data.resumeId && !data.fork)
-              ? be0.priorKeyFor(data.resumeId) : '';
+            const resumeAsk = (be0 && data.resume && data.resumeId && !data.fork) ? String(data.resumeId) : '';
+            if (be0 && integrationOn && typeof be0.startKeyOrder === 'function') { try { keptOrder = await be0.startKeyOrder({ resumeId: resumeAsk }); } catch { keptOrder = null; } }
+            const prior = resumeAsk ? (keptOrder ? keptOrder.prior : be0.priorKeyFor(data.resumeId)) : '';
             const bk = browserProfiles.browserKeyFor({
               prior, resume: !!(data.resume && data.resumeId), fork: !!data.fork,
               mint: browserKeyMod.mintKey, // THE mint (src/server/browser-key.js — a live session's first use mints through it too, B-f7ab; the fresh-key rule lives there, identity r4)
@@ -1557,7 +1559,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               if (bk.origin === 'resume-unknown') {
                 console.warn(`[browser] ${id}: resuming ${String(data.resumeId).slice(0, 8)} but no previous browser key was recorded — minted ${bk.key} (this conversation's earlier browser, if any, is not reused)`);
                 // r3786 (hold 3): past the start's reconcile's bound — TOLD BY NAME (its code: the agent's first browser answer, the card)
-                if (keptOrder && !keptOrder.done) { console.warn(`[browser] ${id}: ${keptOrder.code} — the kept browsers' notes were not read to their end within their bound when this conversation resumed; its earlier browser, if it had one, was not found in time and ${bk.key} is a new one`); try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); } catch { } }
+                if (keptOrder && keptOrder.code) { console.warn(`[browser] ${id}: ${keptOrder.code} — the kept browsers' notes were not read to their end within their bound when this conversation resumed; its earlier browser, if it had one, was not found in time and ${bk.key} is a new one`); try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); } catch { } }
               }
             }
             if (be.pairs.length) spawnEnvPairs.push(...be.pairs);

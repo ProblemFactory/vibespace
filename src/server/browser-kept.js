@@ -115,7 +115,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   });
   const isHeld = () => !!hold.held() || !!rebuilding;
   // r3786: THE RECONCILE's state — 'none' (not asked yet this run) | 'done' | 'unknown' (it did not finish: nothing is removed)
-  let recState = 'none', recBusy = null, recStart = null, recFacts = null, recSaid = false;
+  let recState = 'none', recBusy = null, recStart = null, recFacts = null, recSaid = false, recBusySince = 0, notDoneSince = 0;   // notDoneSince: the first ask of a streak not yet done (the doors' one bound)
   /** r3786: what a START of a key's browser is told by — bk → { code, at, said } (NOT_KEPT_CODES: not kept; RECONCILE_CODE: a
    *  resume handed a new browser past the start's reconcile's bound). Memory only, and that is the safe side: lost at a restart, the
    *  folder is what the release keeps (a note never written leaves no row by a note; nothing is removed by this map) */
@@ -685,14 +685,35 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
    */
   function reconcile(why = 'start') {
     if (recBusy) return recBusy;
+    recBusySince = Date.now();
     const p = (async () => {
       const r = await listNotes();
       if (!r || !r.ok) return unfinished(why, (r && r.why) || 'failed');
       if (r.dirs.some((d) => d.note === 'unreadable')) return unfinished(why, 'a folder\'s note could not be read');
       const noted = new Map();
       for (const d of r.dirs) if (d.note === 'true' && !r.registered(d)) noted.set(d.name, { ...d.doc, mtimeMs: d.mtimeMs });
+      // r3963 (item 6): the bindings must READ for a reconcile to finish (a standing binding is a fact on disk) — unknown removes nothing
+      let bb0 = null; try { bb0 = bindingsOf(); } catch { bb0 = null; }
+      if (!bb0 || (typeof bb0.state === 'function' && bb0.state() === 'unknown')) return unfinished(why, 'the bindings could not be read');
       load();
-      let added = 0, ordinary = 0;
+      let added = 0, ordinary = 0, fromBinding = 0, notWritten = 0;
+      if (!isHeld()) {
+        // r3963 (item 6): a key-named folder a STANDING BINDING names, with no true note and no row (a folder of before the upgrade whose
+        // row lived in memory only, or a list that is gone), is not left a folder with no row: its NOTE is written now — true to its folder
+        // (its own name), the binding's conversation, the folder's time — and its row follows below. Nothing is bound by it (the binding
+        // stands). A note that cannot be written leaves the folder to the boot sweep's rule (a binding names it: never removed by age),
+        // tried again at the next reconcile
+        const owners = typeof bb0.conversationsByKey === 'function' ? bb0.conversationsByKey() : new Map();
+        const s0 = load();
+        for (const d of r.dirs) {
+          if (d.note === 'true' || noted.has(d.name) || s0.entries[d.name] || r.registered(d)) continue;
+          const sid = owners.get(d.name);
+          if (!sid) continue;
+          const w = await KN.ensureNote(path.join(PROFILE_DIR, d.name), d.name, sid, { timeoutMs: noteWriteMs, now: () => d.mtimeMs || now(), ...(noteFs ? { fsp: noteFs } : {}) });
+          if (w && w.ok && w.doc) { noted.set(d.name, { ...w.doc, mtimeMs: d.mtimeMs }); fromBinding++; } else notWritten++;
+        }
+        if (notWritten) log.warn?.(`[browser-kept] ${notWritten} key-named folder(s) a binding names could not get their note now — each stays (a binding names it), tried again at the next reconcile`);
+      }
       if (!isHeld()) {
         const s = load();
         for (const [k, n] of noted) {
@@ -702,28 +723,52 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
         }
         if (added || ordinary) save();
       }
+      // r3961 (2): TWO TRUE NOTES THAT NAME ONE CONVERSATION are ordered by ONE stated rule — the bindings' own rebuild's
+      // (browser-bindings rebuildBindings: «a conversation keeps its FIRST key»): the earliest first time first, ties by the key's name —
+      // so restoreFromNotes binds the same folder whatever the listing's order; the other is an ordinary row with no holder (hold 2)
       const pairs = [];
       for (const [k, n] of noted) if (n.conversation) pairs.push([n.conversation, k, n.firstAt]);
+      pairs.sort((a, b) => (a[2] - b[2]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
       let b = { made: 0, movedOn: 0, taken: 0 };
       if (pairs.length) {
         let bb = null; try { bb = bindingsOf(); } catch { bb = null; }
-        b = bb && typeof bb.restoreFromNotes === 'function' ? bb.restoreFromNotes(pairs) : { unknown: true };
+        b = bb && typeof bb.restoreFromNotes === 'function' ? bb.restoreFromNotes(pairs, { at: now(), protect: new Set(pairs.map((x) => x[1])) }) : { unknown: true };   // r3961 (4): stamped NOW, the noted keys never pruned for it
         if (!b || b.unknown) return unfinished(why, 'the bindings could not be read');
       }
       recFacts = { at: now(), noted: new Set(pairs.map((x) => x[1])), trueKeys: new Set(noted.keys()) };
-      recState = 'done'; recSaid = false;
-      if (added || ordinary || b.made) changed();   // a broadcast only when a row or a binding moved
-      if (added || ordinary || b.made || b.movedOn) log.log?.(`[browser-kept] the kept folders' notes were read (${why}): ${added} row(s) made from their notes, ${ordinary} found-again row(s) ordinary now, ${b.made} binding(s) made again into an empty place${b.movedOn ? `; ${b.movedOn} folder(s) whose conversation has moved on to another browser — ordinary rows with no holder, ended by the release's rules` : ''}`);
+      recState = 'done'; recSaid = false; notDoneSince = 0;
+      // r3961: the start's «had not finished reading» word ends when a reconcile has finished (it said what WAS, not what is)
+      let cleared = 0; for (const [k, sn] of startNotes) if (sn.code === RECONCILE_CODE) { startNotes.delete(k); cleared++; }
+      if (added || ordinary || b.made || cleared) changed();   // a broadcast only when a row, a binding or a card's word moved
+      if (added || ordinary || b.made || b.movedOn) log.log?.(`[browser-kept] the kept folders' notes were read (${why}): ${added} row(s) made from their notes${fromBinding ? ` (${fromBinding} of them a folder a binding named, its note written now)` : ''}, ${ordinary} found-again row(s) ordinary now, ${b.made} binding(s) made again into an empty place${b.movedOn ? `; ${b.movedOn} folder(s) whose conversation has moved on to another browser — ordinary rows with no holder, ended by the release's rules` : ''}`);
       return true;
     })().catch((e) => unfinished(why, (e && e.message) || 'failed')).finally(() => { if (recBusy === p) recBusy = null; });
     recBusy = p;
     return p;
   }
-  /** r3786 (hold 3, THE START's ORDER): asked by a create BEFORE it hands a conversation a browser — the start's reconcile ended, or its
-   *  bound is over (RECONCILE_WAIT_MS, the reconcile's own) → { done, code } (code RECONCILE_CODE: the create tells by name) */
+  /** r3786 / r3961 (hold 3, THE START's ORDER, at every door): asked BEFORE a conversation is handed a browser — the reconcile
+   *  in flight ended (the START's, or one a LIFT or a sweep began), or its bound is over (RECONCILE_WAIT_MS, the reconcile's own); a
+   *  reconcile that ended UNKNOWN is ASKED AGAIN (single flight), never taken as the last word → { done, code } (code RECONCILE_CODE:
+   *  the door tells by name) */
   function reconciled(ms = RECONCILE_WAIT_MS) {
-    if (!recStart) recStart = reconcile('start');
-    return bounded(recStart, ms, null).then((v) => (v === true ? { done: true, code: null } : { done: false, code: RECONCILE_CODE }));
+    if (recState === 'done' && !recBusy) return Promise.resolve({ done: true, code: null });
+    if (!notDoneSince) notDoneSince = Date.now();
+    const p = recBusy || reconcile(recStart ? 'a start of a conversation\'s browser' : 'start');
+    if (!recStart) recStart = p;
+    // ONE bound for a streak that is not done (counted from its first ask): a door waits inside what is left of it, never a new bound at
+    // every ask — past it the reconcile is still asked (above) and the door goes on at once, told by name
+    const left = Math.min(ms, RECONCILE_WAIT_MS - (Date.now() - notDoneSince));
+    if (left <= 0) return Promise.resolve({ done: false, code: RECONCILE_CODE });
+    return bounded(p, left, null).then(() => (recState === 'done' && !recBusy ? { done: true, code: null } : { done: false, code: RECONCILE_CODE }));
+  }
+  /** r3961 (hold 3 (b), THE LATE DOOR — synchronous): a live session's first browser use mints its key on the loop (browser-key.js). →
+   *  { done } | { done: false, waiting, code } — `waiting` while a reconcile runs inside its bound (the door refuses by name, «ask again in a
+   *  moment»); past the bound the door goes on and tells by name. A reconcile that ended unknown is asked again here too */
+  function startOrder() {
+    if (recState === 'done' && !recBusy) return { done: true };
+    if (!notDoneSince) notDoneSince = Date.now();
+    if (!recBusy) reconciled().catch(() => { });
+    return { done: false, waiting: Date.now() - notDoneSince < RECONCILE_WAIT_MS, code: RECONCILE_CODE };   // the streak's one bound
   }
   /**
    * r3786 (hold 5): THE START's GATE — the keeper asks it before a conversation's own browser STARTS on its folder. The folder's note must
@@ -810,7 +855,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   const bindingsRecovered = () => { try { const bb = bindingsOf(); return typeof bb.recoveredFacts === 'function' ? bb.recoveredFacts() : null; } catch { return null; } };
   return { noteStart, noteTabs, noteStop, noteDeliberate, latestOf, has, keys, get, brief, list, limits, forget, adopted, sweep, checkThere /* B-7a30 r2: the acts' door */, recheckAll /* B-7a30 r2: the tick's pass */, boot, shutdown, dirOf, file, lastSweep: () => lastSweep, _load: load, _measure: measure,
     heldFacts, heldWords, recoveredFacts, bindingsHeld, bindingsRecovered, _hold: hold, _rebuild: rebuildFromFolders,   // r3585
-    reconcile, reconciled, startGate, takeStartNote, noteStartCode, keyVerdict, notedKeys, _reconcileState: () => recState,   // r3786
+    reconcile, reconciled, startOrder, startGate, takeStartNote, noteStartCode, keyVerdict, notedKeys, _reconcileState: () => recState,   // r3786 / r3961
     setRestore, consumeRestore, afterReopen }; // lane B
 }
 
