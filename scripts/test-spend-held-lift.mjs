@@ -9,7 +9,8 @@
 // THE CURE (主开发 r4410): at the lift an owed compaction asks the sender's OWN pace first (law (b)); what waits on a lift for
 // one conversation is bounded by the park's own cap (the oldest falls to the stash, as at the release) and a held first try costs
 // one park write; the family is pinned to the authorizer; each lift site has its leg (the lock, the ledger read again, the
-// settings' lift, the ladder road); the owed mark stands before the send, a restart's replay asks it, and it has an age (60 min).
+// settings' lift, the ladder road); the owed record stands before the send, in MEMORY ONLY (主开发 r4473: the REAL dispatch ledger
+// says «delivered» at the post, as the release — a resend is a replay), and it has an age (60 min).
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -39,6 +40,11 @@ const SG = require(path.join(REPO, 'src/server/spend-guard.js'));
 const SA = require(path.join(REPO, 'src/spend-authorizer.js'));
 const PM = require(path.join(REPO, 'src/peer-messaging.js'));
 const WD = require(path.join(REPO, 'src/server/worker-dispatch.js'));
+const GE = require(path.join(REPO, 'src/server/groups-engine.js'));
+const { createChannelStore } = require(path.join(REPO, 'src/channel-store.js'));
+// 主开发 r4473: the dispatch worlds drive the REAL dispatch ledger (the groups engine's dispatchLedger over its own store: its merge
+// and its prune on every write) and, where a leg asks, the REAL pacer (pacerFor over the same store) — never a stand-in that replaces
+const realEngine = (clock) => { const dir = path.join(scratchDir('shl-ge'), Math.random().toString(36).slice(2, 8)); fs.mkdirSync(dir, { recursive: true }); const quiet = { info() { }, warn() { }, log() { } }; const store = createChannelStore({ dir: path.join(dir, 'channels'), log: quiet }); return { store, eng: GE.create({ store, dataDir: dir, now: clock, paceClock: clock, log: quiet }) }; };
 const MUT = mutantCopies('spend-held-lift', REPO);
 const copyOf = (rel, from, to, why) => { try { return require(MUT.write(rel, anchored(fs.readFileSync(path.join(REPO, rel), 'utf8'), from, to, why))); } catch (e) { return { err: String((e && e.message) || e).slice(0, 160) }; } };
 const copyOfAll = (rel, edits, why) => { try { let t = fs.readFileSync(path.join(REPO, rel), 'utf8'); for (const [a, b] of edits) t = anchored(t, a, b, why); return require(MUT.write(rel, t)); } catch (e) { return { err: String((e && e.message) || e).slice(0, 160) }; } };
@@ -183,13 +189,15 @@ function paceOf({ perSender = 8, perTarget = 1 } = {}) {   // the sender's wake 
   }, { refund: (cid) => { const g = P.grants.find((x) => !x.back && x.cid === cid); if (g) { g.back = true; P.refunds.push(cid); } } });
   return P;
 }
-function dispatchWorld(Mod = WD, { reported = 0, workers = 1, sendGate = null, wakeAnswer = { ok: true }, clock = null } = {}) {
+function dispatchWorld(Mod = WD, { reported = 0, workers = 1, sendGate = null, wakeAnswer = { ok: true }, clock = null, typing = null } = {}) {
   const FROM = 'aaaaaaaa-0000-4000-8000-0000000000a1';
   const TOs = Array.from({ length: workers }, (_, k) => 'bbbbbbbb-0000-4000-8000-0000000000' + String(k + 10));
-  const ledgerMap = new Map(), ledger = { get: (k) => ledgerMap.get(k) || null, set: (k, v) => ledgerMap.set(k, v) };
-  const rec = { id: 'rec-1', at: 1000, author: { id: FROM } }, wakes = [], typed = [], posts = [], asked = [], logs = [];
+  const E = realEngine(clock || (() => Date.now())), ledger = E.eng.dispatchLedger;   // THE REAL LEDGER (merge + prune)
+  const rec = { id: 'rec-1', at: 1000, author: { id: FROM } }, wakes = [], typed = [], posts = [], asked = [], logs = [], releases = [];
   const members = TOs.map((m) => ({ member: m, reportedUpTo: reported }));
-  const W = { ledgerMap, wakes, typed, posts, asked, logs, member: members[0], rec, FROM, TO: TOs[0], TOs, sending: 0 };
+  const W = { E, ledger, wakes, typed, posts, asked, logs, releases, member: members[0], rec, FROM, TO: TOs[0], TOs, sending: 0 };
+  W.entries = () => Object.values(((E.store.dispatch.live() || {}).entries) || {});
+  W.keyOf = (k = 0, text = 'the brief') => WD.dispatchKey(FROM, TOs[k], text, '');
   const ge = { dispatchLedger: ledger, reach: () => 'messageable', sharesGroup: () => true, findPair: (a, b) => ({ id: 'g-1', members: members.filter((x) => x.member === b) }),
     sendToAgent: async (o) => { W.sending++; if (sendGate) await sendGate(o); posts.push(o); return { ok: true, group: { id: 'g-1' }, message: { ...rec, id: 'rec-' + posts.length }, woke: [], refused: [], queued: [] }; },
     wake: async (gid, m, r, why) => { wakes.push({ gid, m, r: r && r.id, why }); return wakeAnswer; } };
@@ -197,24 +205,24 @@ function dispatchWorld(Mod = WD, { reported = 0, workers = 1, sendGate = null, w
   W.worker = sessions.get('w-0');
   let refuse = null;
   W.setRefuse = (w) => { refuse = w; };
-  W.make = () => Mod.create({ activeSessions: sessions, getGroups: () => ge, getSendUserInput: () => (wid, text) => { typed.push(text); return { ok: true }; },
+  W.make = () => Mod.create({ activeSessions: sessions, getGroups: () => ge, getSendUserInput: () => typing || ((wid, text) => { typed.push(text); return { ok: true }; }),
     authorizeSpend: (q) => { asked.push(q.reason); return refuse ? { ok: false, why: refuse, detail: refuse } : { ok: true, identity: { key: 'acct' }, hold: 'h' + asked.length }; },
-    noteSpend: () => { }, releaseSpend: () => { }, log: (...a) => logs.push(a.join(' ')), waitMs: 50, awaitEnd: async () => ({ ended: true, ms: 5 }), ...(clock ? { now: clock } : {}) });
+    noteSpend: () => { }, releaseSpend: (q) => releases.push(q && q.hold), log: (...a) => logs.push(a.join(' ')), waitMs: 50, awaitEnd: async () => ({ ended: true, ms: 5 }), ...(clock ? { now: clock } : {}) });
   W.D = W.make();
   W.close = () => { try { if (W.D && typeof W.D.close === 'function') W.D.close(); } catch { } };
   return W;
 }
 const BRIEF = (W, k = 0, text = 'the brief', mayWake = null) => W.D.dispatch({ from: W.FROM, target: { cid: W.TOs[k], name: 'Worker ' + k }, text, compactFirst: true, ...(mayWake ? { mayWake } : {}) });
-const dispatchHeld = async (Mod = WD, o = {}) => { const W = dispatchWorld(Mod, o); W.setRefuse(HELD); W.r = await BRIEF(W); W.entry = [...W.ledgerMap.values()][0] || null; return W; };
+const dispatchHeld = async (Mod = WD, o = {}) => { const W = dispatchWorld(Mod, o); W.setRefuse(HELD); W.r = await BRIEF(W); W.entry = W.ledger.get(W.keyOf()); return W; };
 const settledN = (W) => W.logs.filter((l) => /the owed compaction (ends|is held again)/.test(l)).length;
 const liftD = async (W, n = 1, whys = [HELD]) => { SG.noteGateFree(whys); await tick(); return waitFor(() => settledN(W) >= n, `${n} owed compaction(s) settled at the lift`); };
 { const W = await dispatchHeld();
-  ok(!!(W.asked.join() === 'peer-compact' && W.posts.length === 1 && W.typed.length === 0 && W.entry && W.entry.owedCompact && W.entry.owedCompact.why === HELD && !W.entry.deliveredAt), 'refused held: the brief is posted (the free ride), the compaction is NOT made and the ledger keeps an OWED mark — never «delivered»', JSON.stringify({ r: W.r, asked: W.asked, posts: W.posts.length, entry: W.entry }));
+  ok(!!(W.asked.join() === 'peer-compact' && W.posts.length === 1 && W.typed.length === 0 && W.entry && W.entry.deliveredAt && !W.entry.owedCompact && W.D._owedCompactions.size === 1 && [...W.D._owedCompactions.values()][0].why === HELD), 'refused held: the brief is posted (the free ride), the compaction is NOT made; the REAL ledger says «delivered» as the release writes it, and the compaction is OWED in memory (r4473: no owed mark on disk)', JSON.stringify({ r: W.r, asked: W.asked, posts: W.posts.length, entry: W.entry }));
   const again = await W.D.dispatch({ from: W.FROM, target: { cid: W.TO, name: 'Worker' }, text: 'the brief', compactFirst: true });
   ok(!!(again.ok && again.replay === true && W.posts.length === 1 && W.asked.length === 1), '…the same brief sent again meanwhile is a replay: nothing re-posted, nothing asked twice', JSON.stringify({ replay: again.replay, posts: W.posts.length }));
   W.setRefuse(null); await liftD(W);
-  const e2 = [...W.ledgerMap.values()][0];
-  ok(!!(W.asked.length === 2 && W.typed.join() === '/compact' && W.wakes.length === 1 && W.wakes[0].r === 'rec-1' && e2 && e2.deliveredAt), 'at the lift: the compaction asked ONCE (the same authorization), made, then the worker woken for its brief by the groups engine\'s own wake; the ledger now says delivered', JSON.stringify({ asked: W.asked, typed: W.typed, wakes: W.wakes, entry: e2 })); }
+  const e2 = W.ledger.get(W.keyOf());
+  ok(!!(W.asked.length === 2 && W.typed.join() === '/compact' && W.wakes.length === 1 && W.wakes[0].r === 'rec-1' && e2 && e2.deliveredAt), 'at the lift: the compaction asked ONCE (the same authorization), made, then the worker woken for its brief by the groups engine\'s own wake; the ledger\'s entry is still the post\'s (the owed road writes nothing)', JSON.stringify({ asked: W.asked, typed: W.typed, wakes: W.wakes, entry: e2 })); }
 { const W = await dispatchHeld();
   W.worker._userInputAt = Date.now();   // its owner typed into it just now
   W.setRefuse(null); await liftD(W);
@@ -224,12 +232,12 @@ const liftD = async (W, n = 1, whys = [HELD]) => { SG.noteGateFree(whys); await 
   ok(!!(W.typed.length === 0 && W.wakes.length === 0 && W.asked.length === 1), 'the brief rode a turn meanwhile (its report marker passed it): the owed compaction ENDS — no compaction, no wake for words that rode a turn', JSON.stringify({ typed: W.typed, wakes: W.wakes.length })); }
 { const W = await dispatchHeld();
   W.setRefuse('hour-cap'); await liftD(W);
-  const e3 = [...W.ledgerMap.values()][0] || null;
+  const e3 = W.ledger.get(W.keyOf());
   ok(!!(W.typed.length === 0 && W.wakes.length === 0 && !!e3 && !!e3.deliveredAt), 'a CAP at the lift ends it as a cap (never owed again)', JSON.stringify({ e3, typed: W.typed.length })); }
 { const RED = copyOf('src/server/worker-dispatch.js', 'const owedHere = spend !== true && spend && spend.held && compactFirst === true;', 'const owedHere = false;', 'the held compaction recorded delivered (today)');
-  ok(!!(!RED.err), 'RED CONTROL built: the dispatch recording a held compaction «delivered»', RED.err);
+  ok(!!(!RED.err), 'RED CONTROL built: the dispatch keeping no owed record (the release)', RED.err);
   if (!RED.err) { const W = await dispatchHeld(RED); W.setRefuse(null); SG.noteGateFree([HELD]); await tick(); const again = await W.D.dispatch({ from: W.FROM, target: { cid: W.TO, name: 'Worker' }, text: 'the brief', compactFirst: true });
-    ok(!!(W.entry && W.entry.deliveredAt && W.typed.length === 0 && again.replay === true && W.typed.length === 0), 'RED (today): the held refusal writes «delivered» — the lift asks nothing and a re-dispatch replays «delivered»: the compaction is LOST', JSON.stringify({ entry: W.entry, typed: W.typed.length })); } }
+    ok(!!(W.entry && W.entry.deliveredAt && W.typed.length === 0 && again.replay === true && W.typed.length === 0), 'RED (the release): no owed record — the lift asks nothing and a re-dispatch replays «delivered»: the compaction is LOST', JSON.stringify({ entry: W.entry, typed: W.typed.length })); } }
 
 console.log('§0b the guard says its OWN lift: the lock another process kept, taken');
 { const dir = path.join(scratchDir('shl-guard'), 'g1'); fs.mkdirSync(dir, { recursive: true });
@@ -394,7 +402,7 @@ console.log('§9 (r4410 MUST 1, law (b)) THE SAME PACE: owed compactions at ONE 
 async function owedMany(Mod, workers, briefs, o = {}) {
   const W = dispatchWorld(Mod, { workers, ...o }); W.pace = paceOf(); W.setRefuse(HELD);
   for (const [k, text] of briefs) await BRIEF(W, k, text, W.pace.mayWake);
-  W.owed = [...W.ledgerMap.values()].filter((e) => e.owedCompact && !e.deliveredAt).length;
+  W.owed = W.D._owedCompactions.size;   // in memory (r4473)
   return W;
 }
 const nine = Array.from({ length: 9 }, (_, k) => [k, 'brief ' + k]);
@@ -404,7 +412,7 @@ const nine = Array.from({ length: 9 }, (_, k) => [k, 'brief ' + k]);
   await liftD(W, 9);
   ok(!!(W.pace.refusals.length === 1 && W.pace.refusals[0].rule === 'sender' && W.asked.length - asks0 === 8 && W.typed.length === 8 && W.wakes.length === 8), 'at ONE lift the sender\'s OWN pace is asked first: it grants eight and refuses the ninth — the spend gate asked eight times, never nine; eight compactions, eight wakes', JSON.stringify({ refusals: W.pace.refusals, spendAsks: W.asked.length - asks0, typed: W.typed.length, wakes: W.wakes.length }));
   ok(!!(W.pace.live() === 8 && W.pace.refunds.length === 9), '…each grant is the reservation its wake spent: eight stamps stand, none given back after a wake', JSON.stringify({ live: W.pace.live(), refunds: W.pace.refunds.length }));
-  ok(!!(W.D._owedCompactions.size === 0 && [...W.ledgerMap.values()].every((e) => e.deliveredAt) && W.logs.filter((l) => /the wake pace said no/.test(l)).length === 1), '…the refused one ENDS (its brief rides the worker\'s next turn, said), never a retry of ours: nothing is owed after the lift', JSON.stringify({ left: W.D._owedCompactions.size }));
+  ok(!!(W.D._owedCompactions.size === 0 && W.entries().length === 9 && W.entries().every((e) => e.deliveredAt && !e.owedCompact) && W.logs.filter((l) => /the wake pace said no/.test(l)).length === 1), '…the refused one ENDS (its brief rides the worker\'s next turn, said), never a retry of ours: nothing is owed after the lift', JSON.stringify({ left: W.D._owedCompactions.size }));
   const asks1 = W.asked.length; SG.noteGateFree([HELD]); await tick();
   ok(!!(W.asked.length === asks1 && W.typed.length === 8), '…a second lift asks nothing'); W.close(); }
 { const W = await owedMany(WD, 1, [[0, 'brief a'], [0, 'brief b']]);
@@ -424,7 +432,25 @@ const nine = Array.from({ length: 9 }, (_, k) => [k, 'brief ' + k]);
   if (!RED.err) { const W = await owedMany(RED, 9, nine); W.setRefuse(null); await liftD(W, 9);
     ok(!!(W.typed.length === 9 && W.wakes.length === 9 && W.pace.refusals.length === 0), 'RED (83fc0f481): at one lift nine compactions and nine wakes go at once — the sender\'s pace never asked', JSON.stringify({ typed: W.typed.length, wakes: W.wakes.length })); W.close(); } }
 
-console.log('§10 (r4410 (c)) the owed mark is honest across the SEND and across a STOP');
+{ const W = await owedMany(WD, 1, [[0, 'brief e']], { typing: () => { throw new Error('a made-up typing fault'); } });
+  W.setRefuse(null);
+  await liftD(W, 1);
+  ok(!!(W.typed.length === 0 && W.wakes.length === 0 && W.releases.length === 1 && W.pace.live() === 0 && W.D._owedCompactions.size === 0), 'the typing path THROWS at the lift (the round\'s should): the hold released and the pace grant given back — the frame never left; no wake; the owed compaction ends, said', JSON.stringify({ releases: W.releases.length, live: W.pace.live() })); W.close(); }
+console.log('§9b the REAL pacer\'s refund (the groups engine\'s pacerFor over its own store): attempted:true keeps the sender\'s minute, attempted:false returns it');
+const paceOfStore = (W) => { const x = W.E.store.pace.live() || {}; return { pairs: x.pairs || {}, senders: x.senders || {} }; };
+{ const W = dispatchWorld(WD, { wakeAnswer: { ok: false, reason: 'refused by its own gate' } }); const P = W.E.eng.pacerFor(W.FROM); W.setRefuse(HELD);
+  await BRIEF(W, 0, 'brief r', P);
+  const p0 = paceOfStore(W), pair = W.FROM + '|' + W.TO;
+  ok(!!(!(pair in p0.pairs) && !(p0.senders[W.FROM] || []).length), 'the held dispatch\'s grant went back WHOLE (the dispatch\'s attempted:false): no pair stamp, no minute', JSON.stringify(p0));
+  W.setRefuse(null); await liftD(W, 1);
+  const p1 = paceOfStore(W);
+  ok(!!(W.typed.length === 1 && W.wakes.length === 1 && !(pair in p1.pairs) && (p1.senders[W.FROM] || []).length === 1), 'at the lift: compacted, its wake refused ⇒ the real refund (attempted:true) gives the PAIR back and KEEPS the sender\'s minute (one stamp)', JSON.stringify(p1)); W.close(); }
+{ const W = dispatchWorld(WD, {}); const P = W.E.eng.pacerFor(W.FROM); W.setRefuse(HELD);
+  await BRIEF(W, 0, 'brief s', P);
+  W.setRefuse('ledger-unreadable'); await liftD(W, 1);
+  const p1 = paceOfStore(W), pair = W.FROM + '|' + W.TO;
+  ok(!!(W.typed.length === 0 && !(pair in p1.pairs) && !(p1.senders[W.FROM] || []).length && W.D._owedCompactions.size === 1), 'held AGAIN at the lift: the real refund (attempted:false) gives back the pair AND the minute; still owed to that hold', JSON.stringify(p1)); W.close(); }
+console.log('§10 (r4410 (c)) the owed record is honest across the SEND (memory only, 主开发 r4473)');
 async function sendHeldWorld(Mod = WD) {
   let open; const gate = new Promise((r) => { open = r; });   // PLACED: the brief's send held open by the test, no clock
   const W = dispatchWorld(Mod, { sendGate: () => gate }); W.setRefuse(HELD);
@@ -433,8 +459,8 @@ async function sendHeldWorld(Mod = WD) {
   return W;
 }
 { const W = await sendHeldWorld();
-  const mark = [...W.ledgerMap.values()][0] || null;
-  ok(!!(W.posts.length === 0 && mark && mark.owedCompact && mark.owedCompact.why === HELD && !mark.deliveredAt), 'the owed mark stands BEFORE the awaited send (the ledger says owed while the brief is still on its way)', JSON.stringify(mark));
+  const rec0 = [...W.D._owedCompactions.values()][0] || null;
+  ok(!!(W.posts.length === 0 && rec0 && rec0.pending === true && rec0.why === HELD && !W.ledger.get(W.keyOf())), 'the owed RECORD stands BEFORE the awaited send (in memory, pending) — and the ledger holds nothing for the brief until its post, as at the release', JSON.stringify({ pending: rec0 && rec0.pending, entry: W.ledger.get(W.keyOf()) }));
   W.setRefuse(null); SG.noteGateFree([HELD]); await tick();
   ok(!!(W.typed.length === 0 && W.D._owedCompactions.size === 1), 'a lift DURING the send asks nothing yet (no compaction before its brief is posted)');
   W.open(); const r = await W.p;
@@ -444,23 +470,31 @@ async function sendHeldWorld(Mod = WD) {
   ok(!!(!RED.err), 'RED CONTROL built: a lift during the send not kept', RED.err);
   if (!RED.err) { const W = await sendHeldWorld(RED); W.setRefuse(null); SG.noteGateFree([HELD]); await tick(); W.open(); await W.p; await tick();
     ok(!!(W.typed.length === 0 && W.D._owedCompactions.size === 1), 'RED (83fc0f481): the lift that came during the send is lost — the compaction waits for a lift that already passed', JSON.stringify({ typed: W.typed.length, owed: W.D._owedCompactions.size })); W.close(); } }
-async function restartWorld(Mod = WD) {
-  const W = await dispatchHeld(Mod);
-  W.close();   // the hub stops: its records in memory go with it (its listener off); the ledger stays
-  W.setRefuse(null);
-  W.D = W.make();   // the next start, over the SAME ledger
-  W.again = await BRIEF(W);   // the same brief sent again inside the replay window
+console.log('§10a (主开发 r4473) THE REAL DISPATCH LEDGER: an owed compaction is MEMORY ONLY — a resend of a held brief is a replay on every road');
+async function twoHeld(Mod = WD) {
+  const W = dispatchWorld(Mod, { workers: 2 }); W.setRefuse(HELD);
+  W.a = await BRIEF(W, 0, 'brief A'); W.b = await BRIEF(W, 1, 'brief B');   // the second's write runs the real ledger's merge and prune
   return W;
 }
-{ const W = await restartWorld();
-  ok(!!(W.again.ok && W.again.replay === true && W.posts.length === 1 && W.typed.join() === '/compact' && W.wakes.length === 1 && W.wakes[0].r === 'rec-1'), 'after a restart the brief sent again inside the window is a replay (nothing re-posted) that ASKS the owed compaction once — compacted and woken for that brief, never «delivered» for a compaction nobody asks (the choice: the replay compacts)', JSON.stringify({ replay: W.again.replay, posts: W.posts.length, typed: W.typed, wakes: W.wakes.length }));
-  const e = [...W.ledgerMap.values()][0] || {};
-  ok(!!(e.deliveredAt && !e.owedCompact), '…the ledger now says delivered (the mark ends at its ask)', JSON.stringify(e));
-  const third = await BRIEF(W);
-  ok(!!(third.replay === true && W.typed.length === 1), '…a third send is a plain replay: nothing asked twice'); W.close(); }
-{ const RED = copyOf('src/server/worker-dispatch.js', '      if (entry && entry.owedCompact && !owedCompactions.has(key)) {', '      if (false) {', 'a replay answering «delivered» for an owed mark (83fc0f481)');
-  ok(!!(!RED.err), 'RED CONTROL built: the replay with no owed ask', RED.err);
-  if (!RED.err) { const W = await restartWorld(RED); ok(!!(W.again.replay === true && W.typed.length === 0 && W.wakes.length === 0), 'RED (83fc0f481): after a restart the re-sent brief is answered «delivered» and the owed compaction is never asked', JSON.stringify({ typed: W.typed.length })); W.close(); } }
+{ const W = await twoHeld();
+  const eA = W.ledger.get(W.keyOf(0, 'brief A')), eB = W.ledger.get(W.keyOf(1, 'brief B'));
+  ok(!!(W.posts.length === 2 && eA && eA.deliveredAt && !eA.owedCompact && eB && eB.deliveredAt && W.D._owedCompactions.size === 2), 'two briefs refused held, the second written after the first: the REAL ledger keeps BOTH «delivered» (written as the release writes it, at the post) — no owed mark on disk; the two compactions owed in memory', JSON.stringify({ eA, eB, owed: W.D._owedCompactions.size }));
+  const again = await BRIEF(W, 0, 'brief A');
+  ok(!!(again.ok && again.replay === true && W.posts.length === 2 && W.typed.length === 0), 'a resend of the FIRST (a lost answer) before the lift is a replay: nothing posted again, nothing compacted', JSON.stringify({ replay: again.replay, posts: W.posts.length }));
+  W.setRefuse(null); await liftD(W, 2);
+  ok(!!(W.typed.length === 2 && W.wakes.length === 2), '…at the lift each owed compaction is asked once (its record in memory): two compactions, two wakes', JSON.stringify({ typed: W.typed.length, wakes: W.wakes.length }));
+  const after = await BRIEF(W, 0, 'brief A');
+  ok(!!(after.replay === true && W.posts.length === 2 && W.typed.length === 2), '…a resend after the lift: a replay, nothing asked twice'); W.close(); }
+{ const W = await twoHeld();
+  W.close(); W.setRefuse(null); W.D = W.make();   // a STOP during the hold: the records in memory go with the process; the ledger stays
+  const a2 = await BRIEF(W, 0, 'brief A'), b2 = await BRIEF(W, 1, 'brief B');
+  SG.noteGateFree([HELD]); await tick();
+  ok(!!(a2.replay === true && b2.replay === true && W.posts.length === 2 && W.typed.length === 0 && W.wakes.length === 0), 'across a STOP during the hold: both resends are replays (nothing posted again); the compaction is lost and each brief rides its worker\'s next turn uncompacted — as at the release', JSON.stringify({ a2: a2.replay, b2: b2.replay, posts: W.posts.length, typed: W.typed.length })); W.close(); }
+{ const RED = copyOf('src/server/worker-dispatch.js', '    if (ledger) { try { ledger.set(key, { from, to: cid, deliveredAt: now() }); } catch { } }   // the brief is in the worker\'s group: a retry is a replay\n    // B-ef83 unit 1 (i), 主开发 r4473',
+    '    if (ledger) { try { ledger.set(key, owedHere ? { from, to: cid, owedCompact: { why: spend.held, since: now() } } : { from, to: cid, deliveredAt: now() }); } catch { } }\n    // B-ef83 unit 1 (i), 主开发 r4473', '9948c979c: an owed-only mark in the ledger');
+  ok(!!(!RED.err), 'RED CONTROL built: 9948c979c\'s write (an owed-only mark, no «delivered»)', RED.err);
+  if (!RED.err) { const W = await twoHeld(RED); const gone = !W.ledger.get(W.keyOf(0, 'brief A')); const again = await BRIEF(W, 0, 'brief A');
+    ok(!!(gone && again.ok && again.replay !== true && W.posts.length === 3), 'RED (9948c979c): the REAL ledger drops the first brief\'s owed-only mark at the second\'s write — the resend of the first posts it to the worker a SECOND time', JSON.stringify({ gone, replay: again.replay, posts: W.posts.length })); W.close(); } }
 
 console.log('§10b (r4410 (d)) an owed compaction has an AGE: past the park\'s own bound it ends');
 async function agedWorld(Mod = WD) {
