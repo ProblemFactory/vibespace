@@ -1512,10 +1512,10 @@ class DeviceManager {
    *  -- the daemon runs the very same runOpencodeOp() against its own facts,
    *  so `hostId` really is only a transport choice. Capability-gated: an old
    *  daemon that does not know the op would HANG (the 2.300.0 rule). */
-  async opencodeServe(action, params = {}, { timeoutMs = 20000 } = {}) {
+  async opencodeServe(action, params = {}, { timeoutMs = 20000, start = null } = {}) {   // `start`: B-460d's last part — the serve's start the hub hands (an older agent ignores it)
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('opencode-serve')) throw new Error('daemon lacks opencode-serve (capabilities gate) -- upgrade the agent on this machine');
-    const r = await this._request({ op: 'opencode-serve', action, params, timeoutMs });
+    const r = await this._request({ op: 'opencode-serve', action, params, ...(start ? { start } : {}), timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || {};
   }

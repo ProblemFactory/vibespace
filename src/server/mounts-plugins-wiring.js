@@ -1264,7 +1264,7 @@ function createSessionMessages(session, sessionId) {
   // per instance: routes and ws cases name a machine with `hostId` and it
   // picks the transport (local facts / the `opencode-serve` agentd op / the
   // shipped ssh script) — hostId is a parameter, never a branch.
-  require('./opencode-access').create({ app, hosts, broadcast: (m) => bcastAll(m) });
+  require('./opencode-access').create({ app, hosts, broadcast: (m) => bcastAll(m), serverSetting });
 
   // ── AGENT BROWSER P1: the profile registry + lease keeper + its routes ──
   // (design-agent-browser-v2 §3.3–§3.5). ONE keeper per instance, installed

@@ -331,7 +331,7 @@ console.log('— ⑤ B-460d\'s remainder: a PAIRED machine\'s conversation start
   const AG = read('src/agentd/agentd.js');
   NP._resetNice(); const winLook = NP.niceProgram({ platform: 'win32', access: () => { } }); NP._resetNice();
   ok(SPRI.niceProgram === NP.niceProgram && SPRI.NICE_DIRS === NP.NICE_DIRS && winLook === null && !/function niceProgram/.test(read('src/server/spawn-priority.js'))   // stale-pins: kept (the look moved OUT of spawn-priority.js on purpose: this pins its absence there)
-    && AG.includes("const { niceProgram } = require('../nice-program.js');") && AG.includes('nicePath: niceProgram(),'),
+    && AG.includes("const { niceProgram, serveStartOf } = require('../nice-program.js');") && AG.includes('nicePath: niceProgram(),'),
     'THE nice look lives in ONE shared file (src/nice-program.js): the hub\'s verdict uses it, the device agent\'s hello says its answer (nicePath); none on Windows', { winLook });
   const T = [[{ nicePath: '/usr/bin/nice', platform: 'linux' }, '/usr/bin/nice'], [{ nicePath: '/opt/homebrew/bin/nice', platform: 'darwin' }, '/opt/homebrew/bin/nice'],
     [{ nicePath: 'nice' }, null], [{ nicePath: '/usr/bin/ni ce' }, null], [{ nicePath: '/usr/bin/nice\u202e' }, null], [{ nicePath: '/usr/bin/nice\n' }, null],

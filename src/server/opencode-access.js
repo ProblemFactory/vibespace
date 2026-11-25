@@ -49,7 +49,18 @@ function access() {
 
 /** Wire it ONCE from server.js: builds the layer, mounts the action routes and
  *  publishes the singleton. Returns the layer. */
-function create({ app = null, hosts = null, facts = null, broadcast = null, log = console } = {}) {
+/** B-460d's last part (lane login-request-card, 主开发 r4369): A PAIRED MACHINE's SERVE STARTS BELOW ITS AGENT by the ONE verdict that
+ *  machine's conversations take — src/server/spawn-priority.js devicePriorityFor (the person's setting, fed THAT machine's hello
+ *  nicePath), composed by the ONE composer (src/spawn/line.js priorityArgv) and handed with the op; the device takes it only as its own
+ *  program (src/nice-program.js serveStartOf). None (the setting off, an agent that states no program, Windows) ⇒ the release's start.
+ *  Unproven on the real program: the box and the test machines hold no `opencode`. */
+function serveStartFor({ serverSetting = null, hello = null, machine = null } = {}) {
+  if (typeof serverSetting !== 'function') return null;
+  const pri = require('./spawn-priority.js').devicePriorityFor({ serverSetting, hello, machine });
+  return pri && pri.priority ? { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact } : null;
+}
+
+function create({ app = null, hosts = null, facts = null, broadcast = null, log = console, serverSetting = null } = {}) {
   const factsOf = () => (facts || localFacts());
 
   /** Run one op on the machine named by hostId. Throws with the machine-side
@@ -59,7 +70,7 @@ function create({ app = null, hosts = null, facts = null, broadcast = null, log 
     if (!hostId) return runOpencodeOp(factsOf(), op, params);
     if (LOCAL_ONLY_OPS.has(op)) throw new Error(`"${op}" only works on this machine — the OpenCode terminal is served over a loopback websocket the hub cannot reach on ${hostId}`);
     if (!hosts?.opencodeOp) throw new Error('remote machines are not configured on this instance');
-    return hosts.opencodeOp(hostId, op, params);
+    return hosts.opencodeOp(hostId, op, params, { startOf: (hello, machine) => serveStartFor({ serverSetting, hello, machine }) });
   }
 
   /** {session, records} for a conversation on any machine. */
@@ -96,4 +107,4 @@ function create({ app = null, hosts = null, facts = null, broadcast = null, log 
   return layer;
 }
 
-module.exports = { create, access, LOCAL_ONLY_OPS };
+module.exports = { create, access, LOCAL_ONLY_OPS, serveStartFor };

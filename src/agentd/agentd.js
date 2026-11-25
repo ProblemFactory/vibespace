@@ -425,7 +425,7 @@ const { ptyInput } = require('./pty-input.js');   // B-5019: one UTF-8 decoder p
 // also is — every daemon child and every daemon re-exec is born from
 // `daemonEnv(process.env)`, never from `process.env` (see spawnEnv below).
 const { daemonEnv, withSpawnPath } = require('../agent-env.js');
-const { niceProgram } = require('../nice-program.js');   // B-460d's remainder (SHARED, bundled): THE nice look the hub's own starts use — the hello says its answer
+const { niceProgram, serveStartOf } = require('../nice-program.js');   // B-460d's remainder (SHARED, bundled): THE nice look the hub's own starts use — the hello says its answer
 
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
 // verify-r1 B9: THIS process's boot id rides every dial attempt (x-vibespace-daemon-boot) so the server can tell our
@@ -2079,6 +2079,11 @@ try { fs.unlinkSync(SOCK); } catch { }
 /** THE daemon's OpenCode facts (S9 remainder piece (e)) — one per PROCESS.
  *  See the `opencode-serve` op handler for why this may not live on `this`. */
 let ocFacts = null;
+/** B-460d's last part (主开发 r4369): the serve's START the hub handed with its LAST op (nice-program.js serveStartOf: THIS machine's
+ *  own nice program and a step, or null) — read at EACH serve start, so a serve this agent starts runs below it by the verdict its
+ *  conversations take. An older hub, the setting off, a Windows agent, no program ⇒ null: the release's start. A serve already
+ *  running keeps the priority it started with (never a renice). */
+let ocStart = null;
 /** THE daemon's browser-serve facts (agent browser P4) — one per PROCESS,
  *  for the same reason as `ocFacts`. */
 let bsFacts = null;
@@ -2846,6 +2851,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           try {
             const oc = require('./../opencode-serve.js');
             const { runOpencodeOp } = require('./../opencode-remote.js');
+            ocStart = serveStartOf(msg.start, niceProgram());   // B-460d's last part: each op says the hub's verdict NOW
             if (!ocFacts) {
               ocFacts = oc.install({
                 dataDir: path.join(process.env.HOME || require('os').homedir(), '.vibespace'),
@@ -2859,6 +2865,8 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
                 autostart: true,
                 // r3675: no person's Start on this machine — a damaged record's words name what works here (remove the record)
                 personStart: false,
+                // B-460d's last part (主开发 r4369): the start the hub last handed, read at each serve start (the hook the hub's own serve takes)
+                startPrefix: () => ocStart,
               });
             }
             const r = await runOpencodeOp(ocFacts, String(msg.action || ''), msg.params || {});

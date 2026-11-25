@@ -528,16 +528,78 @@ console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in pro
   const off = () => { const p = SPRI.priorityFor({ serverSetting: (k) => (k === SPRI.SETTING ? false : undefined) }); return { argv: LINE.priorityArgv(p.priority), fact: p.fact }; };
   const locF = serve.createServeLocator({ dataDir: dirF, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captF.push({ cmd, args }); throw new Error('captured'); }, startPrefix: off });
   await locF.ensure().catch(() => null);
-  // THE DEVICE passes NONE (src/agentd/agentd.js): the release's argv, byte for byte; nothing claimed
+  // THE DEVICE with NO start handed (an older hub, the setting off, a machine with no program): the release's argv, byte for byte;
+  // nothing claimed — B-460d's last part (r4369): its install hands the start the hub LAST sent (`startPrefix: () => ocStart`)
   const dirD = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), captD = [];
   const locD = serve.createServeLocator({ dataDir: dirD, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captD.push({ cmd, args }); throw new Error('captured'); } });
   await locD.ensure().catch(() => null);
   const REL = (a) => JSON.stringify((a || []).map((x, i) => (i === 2 ? '<port>' : x)));
   const AGD = read('src/agentd/agentd.js'), i0 = AGD.indexOf('ocFacts = oc.install({'), block = i0 < 0 ? '' : AGD.slice(i0, AGD.indexOf('});', i0));
-  ok('THE DEVICE\'S CALL (no prefix — its install hands none): the spawn is the release\'s, byte for byte (`opencode serve --port <p> --hostname 127.0.0.1 --log-level WARN`) and nothing is claimed; the setting OFF on the hub gives the same argv',
+  ok('THE DEVICE\'S CALL with no start handed: the spawn is the release\'s, byte for byte (`opencode serve --port <p> --hostname 127.0.0.1 --log-level WARN`) and nothing is claimed; the setting OFF on the hub gives the same argv',
     captD.length >= 1 && captD[0].cmd === 'opencode' && REL(captD[0].args) === JSON.stringify(['serve', '--port', '<port>', '--hostname', '127.0.0.1', '--log-level', 'WARN']) && locD.state().cpuNice === null
-      && !!block && !block.includes('startPrefix') && captF.length >= 1 && captF[0].cmd === 'opencode' && REL(captF[0].args) === REL(captD[0].args),
-    { captD, captF, block: block.slice(0, 80) });
+      && captF.length >= 1 && captF[0].cmd === 'opencode' && REL(captF[0].args) === REL(captD[0].args),
+    { captD, captF });
+  // B-460d's last part (主开发 r4369): A PAIRED MACHINE's SERVE STARTS BELOW ITS AGENT by the ONE verdict its conversations take —
+  // the hub composes it (opencode-access serveStartFor: devicePriorityFor fed THAT machine's hello, line.js priorityArgv), hands it
+  // with the op (hosts.opencodeOp → the client's `start`), and the device takes it only as its OWN program (nice-program serveStartOf)
+  {
+    const NP = require(path.join(REPO, 'src/nice-program.js')), OA = require(path.join(REPO, 'src/server/opencode-access.js'));
+    const ON = (k) => (k === SPRI.SETTING ? true : undefined), OFF = (k) => (k === SPRI.SETTING ? false : undefined);
+    const NICE = '/usr/bin/nice', HELLO = { nicePath: NICE, platform: 'linux' }, MACH = { id: 'h-box', deviceId: 'd-box', name: 'Box' };
+    const quiet = { warn() { } };
+    const st = OA.serveStartFor({ serverSetting: ON, hello: HELLO, machine: MACH });
+    const none = [OA.serveStartFor({ serverSetting: OFF, hello: HELLO, machine: MACH }), OA.serveStartFor({ serverSetting: ON, hello: { platform: 'linux' }, machine: MACH }), OA.serveStartFor({ serverSetting: ON, hello: { nicePath: NICE, platform: 'win32' }, machine: MACH }), OA.serveStartFor({ hello: HELLO, machine: MACH })];
+    ok('B-460d last part: THE HUB\'s COMPOSITION for a paired machine — the ONE verdict (devicePriorityFor, fed its hello nicePath) composed by priorityArgv → [<its nice>, -n, 5] with the fact {by: 5}; the setting off, an agent that states no program, a Windows agent, no setting reader ⇒ none (the release\'s start)',
+      !!st && JSON.stringify(st.argv) === JSON.stringify([NICE, '-n', '5']) && st.fact && st.fact.by === 5 && none.every((x) => x === null), { st, none });
+    const took = NP.serveStartOf(st, NICE);
+    const refused = [NP.serveStartOf(st, '/bin/nice'), NP.serveStartOf({ argv: ['/tmp/nice', '-n', '5'] }, '/tmp/x'), NP.serveStartOf({ argv: [NICE, '-n', '0'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '20'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', 5] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5', 'x'] }, NICE), NP.serveStartOf({ argv: [NICE, '-n', '5x'] }, NICE), NP.serveStartOf(null, NICE), NP.serveStartOf(st, null)];
+    ok('B-460d last part: THE DEVICE TAKES IT ONLY AS ITS OWN PROGRAM (serveStartOf): the hub\'s composition → the same argv and a fact built from its step; another program, a step of 0 / 20 / a number / «5x», more words, none handed, a machine with no program ⇒ none',
+      !!took && JSON.stringify(took.argv) === JSON.stringify(st.argv) && took.fact.by === 5 && refused.every((x) => x === null), { took, refused: refused.map((x) => x === null) });
+    // the device's serve, started with what it took: below its agent (the step in front), the fact said
+    const dirP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), captP = [];
+    const locP = serve.createServeLocator({ dataDir: dirP, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captP.push({ cmd, args }); throw new Error('captured'); }, startPrefix: () => took });
+    await locP.ensure().catch(() => null);
+    fs.rmSync(dirP, { recursive: true, force: true });
+    ok('B-460d last part: the device\'s serve started with that start runs BELOW its agent: `<its nice> -n 5 opencode serve …`',
+      captP.length >= 1 && captP[0].cmd === NICE && JSON.stringify(captP[0].args.slice(0, 4)) === JSON.stringify(['-n', '5', 'opencode', 'serve']), captP[0]);
+    // THE ROAD: opencode-access hands a startOf to hosts.opencodeOp; the rung hands its answer to the client; the client sends it
+    const OPN = require(path.join(REPO, 'src/opencode-remote.js')).OPENCODE_OP_NAMES.find((n) => !OA.LOCAL_ONLY_OPS.has(n));
+    let gotOpts = null;
+    const layer = OA.create({ hosts: { opencodeOp: async (h, op, params, opts) => { gotOpts = opts; return {}; } }, serverSetting: ON, log: quiet });
+    await layer.call('h-box', OPN, {}).catch(() => null);
+    const viaLayer = gotOpts && typeof gotOpts.startOf === 'function' ? gotOpts.startOf(HELLO, MACH) : null;
+    const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
+    let seen = null;
+    const dm = { helloInfo: () => HELLO, opencodeServe: async (op, params, opts) => { seen = opts; return { ok: true } } };
+    const fakeHosts = { get: () => ({ id: 'h-box', transport: 'dial' }), dataPlaneOn: () => false, deviceBounded: async () => dm };
+    await HostManager.prototype.opencodeOp.call(fakeHosts, 'h-box', OPN, {}, { startOf: (hello, machine) => OA.serveStartFor({ serverSetting: ON, hello, machine }) });
+    const seenStart = seen && seen.start;
+    seen = null; await HostManager.prototype.opencodeOp.call(fakeHosts, 'h-box', OPN, {}, {});
+    const seenNone = seen && !('start' in seen);
+    const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
+    const sent = [];
+    const fakeDm = { connect: async () => ({ info: { capabilities: ['opencode-serve'] } }), _request: async (m) => { sent.push(m); return { result: { ok: 1 } }; } };
+    await DeviceManager.prototype.opencodeServe.call(fakeDm, OPN, {}, { start: st });
+    await DeviceManager.prototype.opencodeServe.call(fakeDm, OPN, {});
+    ok('B-460d last part: THE ROAD — the access layer hands hosts.opencodeOp a startOf (the verdict for THAT machine); the device rung hands its answer (read from the link\'s hello) to the client as `start`, and none when there is none; the client sends `start` beside the op only when handed one',
+      !!viaLayer && JSON.stringify(viaLayer.argv) === JSON.stringify(st.argv) && !!seenStart && JSON.stringify(seenStart.argv) === JSON.stringify(st.argv) && seenNone
+        && sent.length === 2 && sent[0].op === 'opencode-serve' && JSON.stringify(sent[0].start) === JSON.stringify(st) && !('start' in sent[1]), { viaLayer, seenStart, seenNone, sent: sent.map((m) => Object.keys(m)) });
+    // THE DEVICE's HANDLER (src/agentd/agentd.js, by its text: the daemon is not booted here): each op takes the hub's start NOW,
+    // and the ONE install reads it at each serve start
+    const H0 = AGD.indexOf("if (msg.op === 'opencode-serve') {"), HB = H0 < 0 ? '' : AGD.slice(H0, AGD.indexOf('return;\n      }', H0));
+    const handled = (src) => { const t = src.indexOf('ocStart = serveStartOf(msg.start, niceProgram());'), i = src.indexOf('if (!ocFacts) {'); return t >= 0 && i > t; };
+    const installed = (blk) => blk.includes('startPrefix: () => ocStart,');
+    ok('B-460d last part: THE DEVICE\'s HANDLER takes the hub\'s start at EACH op (`ocStart = serveStartOf(msg.start, niceProgram())`, before its one install) and the install reads it at each serve start (`startPrefix: () => ocStart`); nicePath of its hello and the check are ONE look (niceProgram)',
+      handled(HB) && installed(block) && AGD.includes("const { niceProgram, serveStartOf } = require('../nice-program.js');"), { handled: handled(HB), installed: installed(block) });
+    // a copy of the shared check with its OWN-PROGRAM test cut: it takes a foreign program — the device would run what it was handed
+    const { mutantCopies: MCN } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
+    const MN = MCN('nice-start-any', REPO), NSRC = read('src/nice-program.js');
+    const NPX = MN.load('src/nice-program.js', anchored(NSRC, ' || a[0] !== nicePath ||', ' ||', 'the own-program check cut'), 'nice-start-any');
+    const evil = { argv: ['/tmp/evil', '-n', '5'] };
+    ok('B-460d last part RED CONTROLS: a handler that never takes the op\'s start, and an install that hands no prefix, read false; a copy of serveStartOf with its own-program test cut TAKES a foreign program (the tree\'s refuses it)',
+      !handled(HB.replace('ocStart = serveStartOf(msg.start, niceProgram());', '')) && !installed(block.replace('startPrefix: () => ocStart,', ''))
+        && NP.serveStartOf(evil, NICE) === null && !!NPX && NPX.serveStartOf(evil, NICE) !== null, { copy: !!NPX });
+  }
   // a serve ADOPTED from another life (the record road) claims nothing — it keeps whatever it started with
   const dirR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), mockR = await startMockServe();
   fs.writeFileSync(path.join(dirR, 'opencode-serve.json'), JSON.stringify({ port: mockR.port, pid: process.pid, startedAt: Date.now() }));

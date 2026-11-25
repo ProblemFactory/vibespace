@@ -32,7 +32,19 @@ function listedNicePath(answer, { platform = null } = {}) {
   return i < 0 ? null : LISTED[i];
 }
 
+/** B-460d's last part (主开发 r4369) — A PAIRED MACHINE's SERVE START, as the hub hands it with an `opencode-serve` op (the ONE
+ *  verdict its conversations take: src/server/spawn-priority.js devicePriorityFor, fed THIS machine's hello nicePath, composed by
+ *  src/spawn/line.js priorityArgv) → { argv, fact } taken ONLY when its argv is exactly [THIS machine's own nice program, '-n', a
+ *  step of 1–19]; the fact is built from that step, never taken as handed. Anything else — an older hub's none, a foreign program,
+ *  another step, more words, a machine with no program — ⇒ null: the serve starts as the release starts it. PURE. */
+function serveStartOf(start, nicePath) {
+  if (!start || typeof start !== 'object' || typeof nicePath !== 'string' || !nicePath) return null;
+  const a = start.argv;
+  if (!Array.isArray(a) || a.length !== 3 || a[0] !== nicePath || a[1] !== '-n' || typeof a[2] !== 'string' || !/^(?:[1-9]|1[0-9])$/.test(a[2])) return null;
+  return { argv: [nicePath, '-n', a[2]], fact: { by: Number(a[2]) } };
+}
+
 /** a suite's seam: forget the one look */
 function _resetNice() { niceAt = undefined; }
 
-module.exports = { niceProgram, NICE_DIRS, LISTED, listedNicePath, _resetNice };
+module.exports = { niceProgram, NICE_DIRS, LISTED, listedNicePath, serveStartOf, _resetNice };

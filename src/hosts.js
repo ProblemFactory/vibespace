@@ -3841,13 +3841,14 @@ class HostManager {
    *      parity-pinned by scripts/test-opencode-remote.mjs.
    *  Returns the op's plain-JSON result; every failure THROWS with the
    *  machine-side reason (a user action must never fail silently). */
-  async opencodeOp(hostId, op, params = {}, { timeoutMs = 60000 } = {}) {
+  async opencodeOp(hostId, op, params = {}, { timeoutMs = 60000, startOf = null } = {}) {   // `startOf(hello, machine)`: B-460d's last part — the serve's start for THAT machine (its caller's verdict), handed with the op
     const h = this.get(hostId);
     if (!h) throw new Error(`unknown host ${hostId}`);
     if (this.dataPlaneOn?.() || h.transport === 'dial') {
       try {
         const dm = await this.deviceBounded(hostId);
-        return await dm.opencodeServe(op, params, { timeoutMs });
+        let start = null; if (typeof startOf === 'function') { try { start = startOf(helloOf(dm), h); } catch { start = null; } }   // a verdict that cannot be read: the release's start
+        return await dm.opencodeServe(op, params, { timeoutMs, ...(start ? { start } : {}) });
       } catch (e) {
         // a dial device has NO ssh fallback — reporting the ssh path's error
         // instead of the device one misdiagnoses the failure (2.271.0 T3-6).
