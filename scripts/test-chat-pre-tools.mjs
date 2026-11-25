@@ -150,7 +150,8 @@ const built = await esbuild.build({
 const TEXT = built.outputFiles[0].text;
 const load = (tag, text) => { const f = path.join(SCR, `r-${tag}.cjs`); fs.writeFileSync(f, text); return require(f); };
 /** an anchored edit of the bundled text (esbuild renames locals and double-quotes strings — the anchors are regexes) */
-const mutant = (text, re, to) => { if (!re.test(text)) throw new Error('control anchor gone: ' + re); return editAnchor(text, re, to, "the text handed to mutant()"); };
+// (B-0d3e slice 10: no re.test before the helper — its count names a gone or doubled anchor, and a test() would move a /g anchor's lastIndex)
+const mutant = (text, re, to) => editAnchor(text, re, to, "the text handed to mutant()");
 const REAL = load('real', TEXT);
 // (a) THE BASE'S RULE: every block a Copy + Wrap toolbar (a file's picker too), laid AFTER its block (f5e087bb5's overlay)
 const controls = () => ({ BASE_RULE: load('base', mutant(mutant(TEXT, /const \{ kind, tools, at \} = preToolsOf\((\w+)\);/, 'const { kind, tools, at } = { kind: "code", tools: ["copy", "wrap", ...($1.classList.contains("chat-code-block") ? ["lang"] : [])], at: "row" };'),

@@ -108,8 +108,8 @@ const domFree = (s) => {
     ["import { t as tr } from './i18n.js';", "const tr = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] != null ? String(p[k]) : m));"],
   ];
   for (const [a, b] of reps) { if (!s.includes(a)) throw new Error('domFree anchor gone: ' + a); s = editAnchor(s, a, b, "the text handed to domFree()"); }
-  s = s.replace(/^import \{ reportOwnerPage \} from '\.\/owner-facts\.js';.*$/m, 'const reportOwnerPage = () => null;')
-    .replace(/^import \{ sessionRowOf, placeOf, settingsPolicy \} from '\.\.\/attention-model\.js';.*$/m, 'const sessionRowOf = () => null, placeOf = () => 0, settingsPolicy = () => null;');
+  s = editAnchor(editAnchor(s, /^import \{ reportOwnerPage \} from '\.\/owner-facts\.js';.*$/m, 'const reportOwnerPage = () => null;', "the text handed to domFree()"),
+    /^import \{ sessionRowOf, placeOf, settingsPolicy \} from '\.\.\/attention-model\.js';.*$/m, 'const sessionRowOf = () => null, placeOf = () => 0, settingsPolicy = () => null;', "the text handed to domFree()");
   const n0 = (s.match(/fetch\('\/api\/user-state'/g) || []).length, n1 = (s.match(/localStorage\./g) || []).length, n2 = (s.match(/showToast\(/g) || []).length;
   if (!n0 || !n1) throw new Error('domFree doors gone');   // (no createSync = the pre-lane page: the harness still drives it — its reds are the point)
   void n2;

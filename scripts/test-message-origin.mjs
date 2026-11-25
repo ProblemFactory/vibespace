@@ -225,7 +225,7 @@ console.log('§2 THE READERS — the renderer and the list ask the verdict; ever
     "    if (origin.why === 'interrupt') return this._renderNotificationMsg(rawText, { label: t('Turn stopped'), detail: INTERRUPT_ONLY_RE.test(rawText.trim()) ? '' : rawText.trim() }); // the marker says THAT a stop happened, never who pressed it (a stop the product sends writes the same marker); the result row says «Interrupted»\n",
     "      if (msg.originKind === 'wakeup') return this._renderNotificationMsg(rawText, { label: t('Scheduled wake-up'), detail: rawText.trim() });\n"];
   ok('…the control\'s anchors are in chat-renderers.js once each', CUT.every((c) => CRS.split(c).length === 2));
-  const CR1 = await import(pathToFileURL(MUTC.write('src/lib/chat-renderers.js', CUT.reduce((x, c) => editAnchor(x, c, '', "src/lib/chat-renderers.js"), CRS).replace("from 'marked';", `from ${JSON.stringify(import.meta.resolve('marked'))};`), 'no3d90', { esm: true })).href);
+  const CR1 = await import(pathToFileURL(MUTC.write('src/lib/chat-renderers.js', editAnchor(CUT.reduce((x, c) => editAnchor(x, c, '', "src/lib/chat-renderers.js"), CRS), "from 'marked';", `from ${JSON.stringify(import.meta.resolve('marked'))};`, "src/lib/chat-renderers.js"), 'no3d90', { esm: true })).href);
   const doc0 = globalThis.document;
   globalThis.document = { createElement: () => ({ className: '', innerHTML: '', title: '', classList: { add() { }, toggle() { } }, querySelector: () => null, appendChild() { }, setAttribute() { } }), addEventListener() { }, removeEventListener() { } };
   const CASES = [['mo-compact-1', 'Context compacted'], ['mo-interrupt-1', 'Turn stopped'], ['mo-interrupt-tool', 'Turn stopped'], ['mo-notification-wakeup', 'Scheduled wake-up']];
