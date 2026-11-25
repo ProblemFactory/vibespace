@@ -24,7 +24,8 @@ import { createRequire } from 'node:module';
 import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
-import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE, CHROME_QUIET, endRootedProcesses } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv, CHROME_STORE, CHROME_QUIET, endRootedProcesses, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
@@ -44,6 +45,11 @@ const endRootsAndSay = (roots, ms = 5000) => {
 };
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// r4151 (lane bl-chat-b): EVERY NEGATIVE CONTROL's copy of a product file is built by the tree's shared helper — written into this
+// run's scratch folder with its requires bound to the REAL file's place (scripts/mutant-copy.mjs), each edit an anchored one
+// (scripts/scratch.mjs): a product require the copy could not resolve from a temp folder (src/opencode-serve.js's
+// './store-read-hold.js', line 812) can no longer leave a control unbuilt
+const MO = mutantCopies('opencode-s9', REPO);
 const serve = require(path.join(REPO, 'src/opencode-serve.js'));
 const events = require(path.join(REPO, 'src/opencode-events.js'));
 const { AcpMessageManager } = require(path.join(REPO, 'src/acp-message-manager.js'));
@@ -52,6 +58,8 @@ let pass = 0; const fails = [];
 const ok = (name, cond, detail) => { if (cond) { pass++; console.log(`  ✓ ${name}`); } else { fails.push(name); console.log(`  ✗ ${name}${detail ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)) : ''}`); } };
 const skipNames = [];   // a skip is not a green (主开发 r1083 should): COUNTED apart and named in the closing line
 const skip = (name, why) => { skipNames.push(name); console.log(`  ⊘ SKIP ${name} — ${why}`); };
+// r4151: a negative control whose copy could not be built is a FAILED line — never a skip that leaves the suite green
+const unbuilt = (name, why) => ok(name, false, `its copy of the product could not be built — ${why}`);
 /** A SATURATED machine (this repo's box runs many agents) hits EMFILE/ENOSPC on
  *  inotify and then: fs.watch cannot attach, and OpenCode cannot boot the
  *  instance a pty needs. That is the ENVIRONMENT failing, not the mechanism —
@@ -919,13 +927,8 @@ const R6_NEUTER = [
 let unfixedEvents = null, unfixedWhy = null, unfixedFile = null;
 try {
   let src = read('src/opencode-events.js');
-  for (const [name, from, to] of R6_NEUTER) {
-    const hits = src.split(from).length - 1;
-    if (hits !== 1) throw new Error(`the negative control is stale: "${name}" matched ${hits}× (expected 1) — re-derive it from the current source`);
-    src = src.replace(from, to);
-  }
-  const f = path.join(os.tmpdir(), `vs-oc-events-unfixed-${process.pid}.js`);
-  fs.writeFileSync(f, src);
+  for (const [name, from, to] of R6_NEUTER) src = anchored(src, from, to, `the negative control is stale: "${name}" — re-derive it from the current source`);
+  const f = MO.write('src/opencode-events.js', src, 'events-unfixed');   // r4151: the shared helper (its requires the real file's)
   unfixedEvents = require(f);
   unfixedFile = f;
 } catch (e) { unfixedWhy = e.message; }
@@ -968,7 +971,7 @@ const stalledChild = () => { const c = new EventEmitter(); c.pid = null; c.unref
     ok('a stop() landing in the SAME TICK as start() leaves NO fs.watch on the user\'s store', fixedR.leaked === 0, fixedR);
     ok('…and the lane it stopped never reports a watch it does not hold', fixedR.st.watch.active === false && fixedR.st.watch.watching.length === 0, fixedR.st.watch);
     ok('…and a write to the store after the service went OFF wakes NOTHING (no dirty signal, no /api/sessions sweep)', fixedR.externals === 0, fixedR.externals);
-    if (!ctlR) skip('NEGATIVE CONTROL: the unfixed lane leaks that same watch', unfixedWhy || 'no control module');
+    if (!ctlR) unbuilt('NEGATIVE CONTROL: the unfixed lane leaks that same watch', unfixedWhy || 'no control module');
     else if (ctlR.base < 0) skip('NEGATIVE CONTROL: the unfixed lane leaks that same watch', 'the control could not be measured here');
     else ok('NEGATIVE CONTROL: the UNFIXED lane leaks exactly that watch, and it still fires — so the zero above is a fix, not a broken measurement',
       ctlR.leaked >= 1 && ctlR.externals >= 1, ctlR);
@@ -1017,7 +1020,7 @@ const stalledChild = () => { const c = new EventEmitter(); c.pid = null; c.unref
   else {
     ok('disabling the service while the arm is still in flight (0 ms and mid-await, a serve that cannot boot) leaves ZERO watches on the store', fixedRuns.every(([, r]) => r.leaked === 0), fixedRuns);
     ok('…and nothing of ours answers a store write afterwards', fixedRuns.every(([, r]) => r.externals === 0), fixedRuns);
-    if (!unfixedEvents) skip('NEGATIVE CONTROL: the unfixed lane leaks at every one of those delays', unfixedWhy || 'no control module');
+    if (!unfixedEvents) unbuilt('NEGATIVE CONTROL: the unfixed lane leaks at every one of those delays', unfixedWhy || 'no control module');
     else {
       const ctlRuns = [];
       for (const d of delays) ctlRuns.push([d, await toggle(unfixedEvents, d)]);
@@ -1066,7 +1069,7 @@ const stalledChild = () => { const c = new EventEmitter(); c.pid = null; c.unref
   else {
     ok('the first disable gave every handle back (the state the second toggle is measured from)', r.between === 0, r);
     ok('disabling while the keeper is PARKED leaves ZERO watches, and nothing answers a later store write', r.leaked === 0 && r.externals === 0, r);
-    if (!unfixedEvents) skip('NEGATIVE CONTROL: the unfixed lane leaks on the parked toggle too', unfixedWhy || 'no control module');
+    if (!unfixedEvents) unbuilt('NEGATIVE CONTROL: the unfixed lane leaks on the parked toggle too', unfixedWhy || 'no control module');
     else {
       const c = await parkedRun(unfixedEvents);
       ok('NEGATIVE CONTROL: the UNFIXED lane leaks on the parked toggle too', c.leaked >= 1 && c.externals >= 1, c);
@@ -1099,7 +1102,7 @@ const stalledChild = () => { const c = new EventEmitter(); c.pid = null; c.unref
   ok('a stop() landing inside locator.client() opens NO SSE subscription on the serve', f.open === 0, f);
   ok('…and the stopped lane does not claim to be connected (it used to report stopped AND connected at once)', f.claims === false, f);
   ok('…and it asks the serve for nothing further, not even the store path it was resolving', f.requests.length === 0, f.requests);
-  if (!unfixedEvents) skip('NEGATIVE CONTROL: the unfixed stream opens that socket after stop()', unfixedWhy || 'no control module');
+  if (!unfixedEvents) unbuilt('NEGATIVE CONTROL: the unfixed stream opens that socket after stop()', unfixedWhy || 'no control module');
   else {
     const c = await sseRun(unfixedEvents);
     ok('NEGATIVE CONTROL: the UNFIXED stream opens the subscription AFTER stop() and keeps it open, while claiming to be connected', c.open >= 1 && c.claims === true, c);
@@ -1143,14 +1146,8 @@ const R7_NEUTER = [
 function buildNeutered(tag, table) {
   try {
     let src = read('src/opencode-serve.js');
-    for (const [name, from, to, count] of table) {
-      const hits = src.split(from).length - 1;
-      if (hits !== count) throw new Error(`the negative control is stale: "${name}" matched ${hits}× (expected ${count}) — re-derive it from the current source`);
-      src = src.split(from).join(to);
-    }
-    src = src.replace(/require\('\.\/([\w-]+)'\)/g, (_m, n) => `require(${JSON.stringify(path.join(REPO, 'src', `${n}.js`))})`);
-    const f = path.join(os.tmpdir(), `vs-oc-serve-${tag}-${process.pid}.js`);
-    fs.writeFileSync(f, src);
+    for (const [name, from, to, count] of table) src = anchored(src, from, to, `the negative control is stale: "${name}" — re-derive it from the current source`, { count });
+    const f = MO.write('src/opencode-serve.js', src, tag);   // r4151: every relative require resolves as the real file's (the hand-made temp copy missed './store-read-hold.js')
     return { mod: require(f), why: null, file: f };
   } catch (e) { return { mod: null, why: e.message, file: null }; }
 }
@@ -1250,7 +1247,7 @@ for (const [win, label] of [['reuse', 'the reuse health probe on a BUSY recorded
       else ok(`…(positive control) the same harness DOES watch the store while the service is on — the zero above could have failed (${win})`, on.leaked >= 1, on);
     }
   }
-  if (!unfixedServe) skip(`NEGATIVE CONTROL: the unfixed keeper leaks through ${label}`, unfixedServeWhy || 'no control module');
+  if (!unfixedServe) unbuilt(`NEGATIVE CONTROL: the unfixed keeper leaks through ${label}`, unfixedServeWhy || 'no control module');
   else {
     const ctl = await r7Run(unfixedServe, { window: win, disable: true });
     if (win === 'cwd') ok(`NEGATIVE CONTROL: the UNFIXED keeper starts a serve AFTER the stop, through ${label}`, ctl.spawns >= 1, ctl);
@@ -1379,13 +1376,13 @@ async function r8Run(mod, { disable = true, enable = true } = {}) {
   ok('…and the Enable\'s own start() resolves that client, so the route reports the truth', fixed.startResult === 'client', fixed);
   ok('…and the record left behind names the serve we are actually talking to (what the NEXT boot adopts)', fixed.record === fixed.port, fixed);
 
-  if (!r8EpochCtl.mod) skip('NEGATIVE CONTROL: without the epoch, the cancelled ladder republishes the killed serve', r8EpochCtl.why);
+  if (!r8EpochCtl.mod) unbuilt('NEGATIVE CONTROL: without the epoch, the cancelled ladder republishes the killed serve', r8EpochCtl.why);
   else {
     const ctl = await r8Run(r8EpochCtl.mod);
     ok('NEGATIVE CONTROL: with `cancelled()` reduced to the `state.stopping` LEVEL, the cancelled ladder wakes up after the Enable and publishes the SIGTERMed serve — TWO adoptions, the second a dead process',
       ctl.adoptions.length === 2 && ctl.adoptedTheKilledServe === true, ctl);
   }
-  if (!r8DetachCtl.mod) skip('NEGATIVE CONTROL: without the detach, the Enable joins the cancelled attempt', r8DetachCtl.why);
+  if (!r8DetachCtl.mod) unbuilt('NEGATIVE CONTROL: without the detach, the Enable joins the cancelled attempt', r8DetachCtl.why);
   else {
     const ctl = await r8Run(r8DetachCtl.mod);
     ok('NEGATIVE CONTROL: without `ensuring = null` in stop(), the Enable JOINS the cancelled attempt and its start() resolves null — a click the route reports as "did nothing"',
@@ -1425,7 +1422,7 @@ async function r8Run(mod, { disable = true, enable = true } = {}) {
   ok('stop() nulls `state.child`/`state.pid` FIRST — abandon() finds the slot already empty, which is why its conditional null is a no-op (and must never be unconditional: a newer ladder owns that slot)', r.afterStopPid === null, r);
   ok('…and abandon() STILL SIGTERMs the child it holds in its closure — the second kill arrives after stop() returned', JSON.stringify(r.kills) === JSON.stringify(['stop:SIGTERM', 'after-stop:SIGTERM']), r.kills);
   ok('…and it says so honestly (the boot was OURS to stop) and leaves no record for the next boot to ADOPT', /was starting when the background service was turned off/.test(r.lastError || '') && r.record === false, r);
-  if (!r8AbandonCtl.mod) skip("NEGATIVE CONTROL: without abandon()'s kill the child survives the bail", r8AbandonCtl.why);
+  if (!r8AbandonCtl.mod) unbuilt("NEGATIVE CONTROL: without abandon()'s kill the child survives the bail", r8AbandonCtl.why);
   else {
     const ctl = await runAbandon(r8AbandonCtl.mod);
     ok("NEGATIVE CONTROL: with abandon()'s SIGTERM removed, only stop()'s kill is recorded — the assert above can fail", JSON.stringify(ctl.kills) === JSON.stringify(['stop:SIGTERM']), ctl.kills);
@@ -1587,7 +1584,7 @@ for (const [win, label] of [['bad', "the reuse VERDICT probe on a '/'-worktree l
   ok(`…and the cancelled ladder signalled NOTHING of its own: every SIGTERM the recorded pid gets is stop({killRecorded})'s (${stopKills} here)`,
     fixed.killsOfRecorded === stopKills, fixed);
 
-  if (!r9PreFix.mod) skip(`NEGATIVE CONTROL: the pre-fix keeper orphans its own serve through ${label}`, r9PreFix.why);
+  if (!r9PreFix.mod) unbuilt(`NEGATIVE CONTROL: the pre-fix keeper orphans its own serve through ${label}`, r9PreFix.why);
   else {
     const ctl = await r9Run(r9PreFix.mod, { window: win });
     ok(`NEGATIVE CONTROL: the PRE-FIX keeper (both epoch checks + the ownership test removed) DELETES the live ladder's record through ${label} — a running \`opencode serve\` the next boot can neither adopt nor kill`,
@@ -1596,13 +1593,13 @@ for (const [win, label] of [['bad', "the reuse VERDICT probe on a '/'-worktree l
 }
 {
   // …and each layer alone, so a future edit cannot quietly drop one of them
-  if (!r9VerdictCtl.mod) skip('NEGATIVE CONTROL: without the verdict check the cancelled ladder still ACTS', r9VerdictCtl.why);
+  if (!r9VerdictCtl.mod) unbuilt('NEGATIVE CONTROL: without the verdict check the cancelled ladder still ACTS', r9VerdictCtl.why);
   else {
     const ctl = await r9Run(r9VerdictCtl.mod, { window: 'bad' });
     ok('NEGATIVE CONTROL: with ONLY the reuse-verdict `cancelled(epoch)` removed, the cancelled ladder still SIGTERMs the recorded pid on its own account (two kills) — and the record survives only because the OWNERSHIP layer refuses its clear',
       ctl.killsOfRecorded === 2 && ctl.record === ctl.port, ctl);
   }
-  if (!r9DeadPidCtl.mod) skip('NEGATIVE CONTROL: the dead-pid arm alone', r9DeadPidCtl.why);
+  if (!r9DeadPidCtl.mod) unbuilt('NEGATIVE CONTROL: the dead-pid arm alone', r9DeadPidCtl.why);
   else {
     const ctl = await r9Run(r9DeadPidCtl.mod, { window: 'dead' });
     ok('NEGATIVE CONTROL: with ONLY the dead-pid arm\'s `cancelled(epoch)` removed, the stale ladder reaches the clear and the OWNERSHIP layer alone holds the record (the two layers are independent — the pre-fix control above needs both gone)',
@@ -1670,7 +1667,7 @@ for (const [win, label] of [['bad', "the reuse VERDICT probe on a '/'-worktree l
   ok('(the setup) two ladders really spawned, and the record was rewritten to the recycled shape', r.spawns === 2 && r.samePortWritten === true, r);
   ok("abandon() REFUSES to clear a record that carries the newer ladder's pid on the port it is giving up — port equality is not identity",
     r.recordPid === r.livePid, r);
-  if (!r9OwnedCtl.mod) skip("NEGATIVE CONTROL: without the ownership test abandon() deletes the newer ladder's record", r9OwnedCtl.why);
+  if (!r9OwnedCtl.mod) unbuilt("NEGATIVE CONTROL: without the ownership test abandon() deletes the newer ladder's record", r9OwnedCtl.why);
   else {
     const ctl = await runRecycle(r9OwnedCtl.mod);
     ok("NEGATIVE CONTROL: with ONLY clearRecord()'s ownership test removed, the abandoned ladder deletes the record naming the LIVE serve (port matched, pid did not)",
@@ -1837,7 +1834,7 @@ async function r10Run(mod, { socket = 'hung', recorded = 'ours', autostart = tru
     fixed.kills.length === 1 && fixed.kills[0][0] === fixed.recordedPid && fixed.kills[0][1] === 'SIGTERM' && fixed.recordedPid !== process.pid, fixed.kills);
   ok('…and it SPOKE: one warn naming the pid, the port and the budget it missed (the fall-through logged nothing at all)',
     fixed.warns.some((w) => w.includes(String(fixed.recordedPid)) && w.includes(String(fixed.recordedPort)) && /ALIVE but answered no \/global\/health/.test(w)), fixed.warns);
-  if (!r10Ctl.mod) skip('NEGATIVE CONTROL: the fall-through leaves two live serves', r10Ctl.why);
+  if (!r10Ctl.mod) unbuilt('NEGATIVE CONTROL: the fall-through leaves two live serves', r10Ctl.why);
   else {
     const ctl = await r10Run(r10Ctl.mod, { socket: 'hung', recorded: 'ours' });
     ok('NEGATIVE CONTROL: with the settlement replaced by the fall-through it grew out of, the recorded serve is STILL RUNNING while the record names the NEW one — two live serves, one of them unreachable forever, and not one signal or log line',
@@ -1949,7 +1946,7 @@ async function r10Run(mod, { socket = 'hung', recorded = 'ours', autostart = tru
     d.blockedKind === 'blocked' && d.crashedKind === 'crash', d);
   ok('a CRASH park stays terminal even though a blocked park set a cooldown earlier — a park\'s deadline is cleared with the park that owns it',
     d.reopened === false && d.endParked === true && d.endKind === 'crash', d);
-  if (!deadlineCtl.mod) skip('NEGATIVE CONTROL: a stale cooldown lets a crash park unpark itself', deadlineCtl.why);
+  if (!deadlineCtl.mod) unbuilt('NEGATIVE CONTROL: a stale cooldown lets a crash park unpark itself', deadlineCtl.why);
   else {
     const ctl = await runDeadline(deadlineCtl.mod);
     ok('NEGATIVE CONTROL: with the deadline resets removed, the CRASH park inherits the blocked park\'s elapsed cooldown and restarts itself — the terminal park quietly stops being terminal',
@@ -1990,7 +1987,9 @@ const R11_NEUTER = [
 ];
 const R11_STOP_NEUTER = [
   ["stop()'s verdict route",
-    "      const decided = decideRecordedKill(rec, talking ? livePid : null);\n      const birth = talking && decided.pid === livePid ? liveBirth : { start: rec && rec.start, bootId: rec && rec.bootId };\n      if (decided.pid) { try { if (decided.pid !== process.pid) signalServe(decided.pid, birth.start, birth.bootId, 'SIGTERM', 'serve stop'); } catch { } }\n      else if (decided.why) { state.lastError = decided.why; log?.warn?.(`[opencode-serve] ${decided.why}`); }",
+    // r4151: the WHOLE verdict chain as it stands now — line 812 (r3334) added its third branch (the withheld record): replacing only the
+    // first two left that `else` dangling («Unexpected token 'else'»), so the control was never built
+    "      const decided = decideRecordedKill(rec, talking ? livePid : null);\n      const birth = talking && decided.pid === livePid ? liveBirth : { start: rec && rec.start, bootId: rec && rec.bootId };\n      if (decided.pid) { try { if (decided.pid !== process.pid) signalServe(decided.pid, birth.start, birth.bootId, 'SIGTERM', 'serve stop'); } catch { } }\n      else if (decided.why) { state.lastError = decided.why; log?.warn?.(`[opencode-serve] ${decided.why}`); }\n      else if (!talking && recordHeld()) {   // r3334: the record withheld — it names nothing, so nothing is signalled or removed, and that is SAID\n        state.lastError = `the OpenCode background service was turned off, but ${torn && !torn.decided ? `its record was damaged${torn.copy ? ` (its bytes are kept as ${torn.copy})` : ''}` : 'its record could not be read'}: nothing could be stopped — a serve from before may still be running. Stop it by hand if it runs`;\n        log?.warn?.(`[opencode-serve] ${state.lastError}`);\n      }",
     "      const target = livePid || rec?.pid || null;\n      try { if (target && target !== process.pid) (killPid || ((p, s) => process.kill(p, s)))(target, 'SIGTERM'); } catch { }", 1],
 ];
 /** RESIDUAL (a) — the PRE-FIX stop(): a Disable that leaves the blocked/runaway
@@ -2089,7 +2088,7 @@ ok('(the controls themselves) a PRE-FIX copy can be built for each of the two ro
     blind.kills.length === 0 && blind.recordedAlive === true, blind.kills);
   ok('…and it SAID SO once, naming the machine rather than the process',
     blind.warns.some((w) => /cannot identify ANY process|cannot read its own process command line/.test(w)), blind.warns);
-  if (!r11Ctl.mod) skip('NEGATIVE CONTROL: without the blind verdict the same host parks forever', r11Ctl.why);
+  if (!r11Ctl.mod) unbuilt('NEGATIVE CONTROL: without the blind verdict the same host parks forever', r11Ctl.why);
   else {
     const ctl = await r10Run(r11Ctl.mod, { socket: 'hung', recorded: 'ours', ...blindHost });
     ok('NEGATIVE CONTROL: with the blind verdict removed, that machine parks BLOCKED with no spawn and tells the user to go stop an unrelated process — the regression this leg exists for',
@@ -2114,7 +2113,7 @@ const { storeFailureReason: storeFailureReasonS9 } = require(path.join(REPO, 'sr
   ok('…the record is still cleared (the user turned it off — that outranks the file) and the state SAYS what was left alone',
     blocked.recordAfterStop === null && /could not be identified/.test(blocked.lastError || '') && /LEFT ALONE/.test(blocked.lastError || '')
     && (blocked.lastError || '').includes(String(blocked.recordedPid)), blocked.lastError);
-  if (!r11StopCtl.mod) skip("NEGATIVE CONTROL: stop() signals the pid the park refused", r11StopCtl.why);
+  if (!r11StopCtl.mod) unbuilt("NEGATIVE CONTROL: stop() signals the pid the park refused", r11StopCtl.why);
   else {
     const ctl = await r10Run(r11StopCtl.mod, { socket: 'hung', recorded: 'ours', readCmdline: (pid) => (pid === process.pid ? serve.readProcCmdline(pid) : null), stopAfter: true });
     ok('NEGATIVE CONTROL: with stop() back on `state.pid || rec.pid`, Disable SIGTERMs exactly the pid the blocked park had just refused to touch',
@@ -2131,7 +2130,7 @@ const { storeFailureReason: storeFailureReasonS9 } = require(path.join(REPO, 'sr
   ok('…and /api/home agrees through the SAME predicate: no storeReason, no red toast — while lastError SURVIVES as history for the ⚙ card',
     storeFailureReasonS9({ id: 'opencode', store: { serveState: () => blocked.snap, unavailableReason: () => blocked.reason } }) === null
     && /could not be identified/.test(blocked.lastError || ''), [blocked.lastError, blocked.reason]);
-  if (!resACtl.mod) skip('NEGATIVE CONTROL: the park outlives the Disable and the store still calls itself broken', resACtl.why);
+  if (!resACtl.mod) unbuilt('NEGATIVE CONTROL: the park outlives the Disable and the store still calls itself broken', resACtl.why);
   else {
     const kept = await r10Run(resACtl.mod, { socket: 'hung', recorded: 'ours', readCmdline: (pid) => (pid === process.pid ? serve.readProcCmdline(pid) : null), stopAfter: true });
     ok('NEGATIVE CONTROL: without the clear, a service the user just turned OFF still reports parkedKind blocked, and storeFailureReason still hands /api/home a red reason',
