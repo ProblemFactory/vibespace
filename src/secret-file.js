@@ -90,20 +90,4 @@ async function shredFile(file) {
   try { await fsp.lstat(file); return false; } catch { return true; }
 }
 
-/** THE SAME REMOVAL, SYNC (主开发 r3932, lane bl-chat-b: a sealed store's plain copy of torn sign-in bytes, shredded inside the
- *  store's own sync write at the person's Connect): the bytes overwritten in place (random, fsync) before the name is unlinked;
- *  never through a link; a missing file is nothing to do. → true when it is gone. */
-function shredFileSync(file) {
-  let st = null;
-  try { st = fs.lstatSync(file); } catch { return true; }
-  if (!st.isSymbolicLink() && st.isFile()) {
-    let fd = null;
-    try { fd = fs.openSync(file, 'r+'); if (st.size > 0) fs.writeSync(fd, crypto.randomBytes(st.size), 0, st.size, 0); try { fs.fsyncSync(fd); } catch { } }
-    catch { /* the unlink below still removes the name */ }
-    finally { if (fd !== null) { try { fs.closeSync(fd); } catch (e) { void e; /* its bytes were overwritten and synced before: the unlink below still removes the name */ } fd = null; } }
-  }
-  try { fs.unlinkSync(file); } catch { /* said by the answer below */ }
-  try { fs.lstatSync(file); return false; } catch { return true; }
-}
-
-module.exports = { replaceShredding, replaceShreddingAsync, shredFile, shredFileSync };
+module.exports = { replaceShredding, replaceShreddingAsync, shredFile };

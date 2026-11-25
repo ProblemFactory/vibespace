@@ -68,6 +68,10 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
   // (503 voice_signin_unread) before any vendor call and before any write; torn bytes kept aside (`torn`) read as no pair, said damaged
   const heldNow = () => { try { return !!(tokens && typeof tokens.held === 'function' && tokens.held()); } catch { return false; } };
   const heldError = (what = 'the voice sign-in') => { const r = tokens && typeof tokens.heldRefusal === 'function' ? tokens.heldRefusal(what) : null; return new DroplineError((r && r.code) || 'voice_signin_unread', (r && r.message) || 'the voice sign-in could not be read — nothing was changed', { status: 503 }); };
+  /** r4045: the person's act replaced the sign-in — its plain copies shredded OFF the loop (the store's one sweep at a time); the answer
+   *  waits for it → the base names a shred could not remove ([] when none) */
+  const sweepPlain = async () => { try { const r = tokens && typeof tokens.shredPlainCopies === 'function' ? await tokens.shredPlainCopies() : null; return r && Array.isArray(r.left) ? r.left : []; } catch { return []; } };
+  const leftNow = () => { try { return tokens && typeof tokens.left === 'function' ? tokens.left() : null; } catch { return null; } };
   const tornNow = () => { try { return tokens && typeof tokens.torn === 'function' ? tokens.torn() : null; } catch { return null; } };
   const lockedError = () => new DroplineError('vault-locked', 'the vault is locked — the Dropline sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)', { status: 423 });
   const livePair = () => { const p = pairNow(); return p && p.access && p.state !== 'reconnect' ? p : null; };
@@ -225,11 +229,12 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     if (!res.ok) throw await vendorError(res);
     const pair = pairOf(await res.json(), clientId, { registeredFor: (pairNow() || {}).registeredFor || null, registeredClientId: (pairNow() || {}).registeredClientId || null });   // B-1e9a: the hub's own client over a preset survives the sign-in
     if (!pair.access) throw new DroplineError('failed', 'Fish Audio answered no access token', { status: 502 });
-    tokens.write(pair, { byPerson: true });   // r3932: the person's fresh pair — the torn bytes' plain copies shredded
+    tokens.write(pair);
+    const left = await sweepPlain();   // r3932 / r4045: the person's fresh pair — the torn bytes' plain copies shredded OFF the loop, answered after
     let who = { name: '', team: '' };
     try { who = await me(); tokens.write({ ...pairNow(), name: who.name, team: who.team }); } catch (e) { log.warn?.(`[voice] connected, but /v1/me failed: ${e && e.message}`); }
     log.log?.('[voice] Dropline connected by OAuth'); // never the code, the verifier or a token
-    return { user: who };
+    return left.length ? { user: who, left } : { user: who };
   }
   /** Disconnect: the pair is forgotten HERE (Fish Audio keeps the grant until the person removes it at fish.audio) */
   // B-1e9a (the read): the sign-in goes; a client this hub REGISTERED over a cluster preset stays (a public client, no secret) —
@@ -239,10 +244,14 @@ function create({ integrations = null, pluginOn = () => true, base = DROPLINE_BA
     const p = pairNow() || {};
     if (heldNow()) throw heldError('disconnecting the voice sign-in');   // r3334: HELD — the unread file is not cleared
     if (pairLocked) throw lockedError();   // B-1e9a cure: a LOCKED vault refuses by name — never the sealed file cleared blind (the kept registration with it)
-    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }, { byPerson: true }); else tokens.clear();   // r3932: the person's act
-    return { ok: true };
+    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();
+    // r3932 / r4045: the person's Disconnect — its refusals stay SYNCHRONOUS (thrown by name, as before); the plain copies are shredded
+    // off the loop and the answer (a promise) comes after them
+    return sweepPlain().then((left) => (left.length ? { ok: true, left } : { ok: true }));
   }
-  function account() {
+  /** r4045: a damaged copy the person's last Connect or Disconnect could not remove rides every answer (`left`, its base name) */
+  function account() { const a = accountOf(), l = leftNow(); return l ? { ...a, left: l } : a; }
+  function accountOf() {
     if (credentialOf().key) return { tier: 'key', state: 'connected', name: null, team: null };
     const p = pairNow();
     if (!p && heldNow()) return { tier: 'oauth', state: 'unread', name: null, team: null };   // r3334: HELD — «could not be read», never «connect»

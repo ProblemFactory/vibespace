@@ -94,11 +94,11 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     timer = setTimeout(() => { timer = null; again().catch(onErr); }, ms);
     timer.unref?.();
   }
+  /** a copy on disk IS these bytes? — byte for byte (a store's copy road: its bytes opened back first) */
+  const sameAs = (on, buf) => { const back = copy ? copy.opens(on) : on; return Buffer.isBuffer(back) && back.equals(buf); };
   /** the torn bytes' copy, OFF the loop. A copy of THESE bytes already beside the store (the same size, the same bytes — the newest
    *  COPY_LOOK copies are compared) IS their copy: nothing new is made. Else an exclusive create of the caller's dated name (0600 — a
    *  store may hold sealed secrets) → the copy's basename, or null (no place for it) */
-  /** a copy on disk IS these bytes? — byte for byte (a store's copy road: its bytes opened back first) */
-  const sameAs = (on, buf) => { const back = copy ? copy.opens(on) : on; return Buffer.isBuffer(back) && back.equals(buf); };
   async function keep(buf) {
     const dir = path.dirname(file);
     let names = [];

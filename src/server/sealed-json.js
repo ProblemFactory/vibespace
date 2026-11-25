@@ -23,13 +23,20 @@
  *     the release's Connect shredded the torn file. A copy made while the vault is OPEN is written sealed from its creation (the
  *     hold's copy road); none is made while it is LOCKED (the lock's refusal: nothing read, nothing copied). Never at a start or on
  *     a timer. A good file put back BY HAND is read only after a restart (the damage is cached for the vault's epoch).
+ *   · r4045 (the coordinator's ruling): THE COPIES' ROAD RUNS OFF THE LOOP — every listing, look, read, seal and shred of them on the
+ *     file pool (fs.promises; secret-file's async replace and shred), ONE SWEEP AT A TIME this store (a Connect while a seal is in
+ *     flight waits for it), the order kept (a copy's box synced and renamed in before its plain bytes are overwritten). The person's
+ *     Connect and Disconnect answer AFTER their sweep (a copy a shred could not remove is told: `left()`, the account's words); the
+ *     vault's opening never waits for it. A stop while the hold wrote a plain copy leaves its hidden part (`.<copy>.part`): the sweep
+ *     takes it (shredded at the vault's seal and at the person's acts; never touched while the hold copies). The seal also runs at a
+ *     lift the hold's ladder fires and at the first sealing read: it keeps the bytes (a box), it never removes one.
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
-const { replaceShredding, shredFileSync } = require('../secret-file.js');
+const { replaceShredding, replaceShreddingAsync, shredFile } = require('../secret-file.js');
 const HOLD = require('../store-read-hold.js');   // r3334 unit 2: the store-read law's hold (its read again, the torn bytes' copy)
 const SR = require('../store-read.js');
 
@@ -93,35 +100,60 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
   function copyBytes(buf) { const st = stateOf(); return st === 'not_set_up' ? buf : st === 'unlocked' ? boxOfCopy(buf) : null; }
   /** …and a copy's bytes back for its compare (a box opens only while the vault is open; null: not judged) */
   function copyOpens(on) { const j = parsedOf(on); if (!isCopyBox(j)) return on; if (stateOf() !== 'unlocked') return null; const k = keyOf(); try { return Buffer.from(SB.decWith(k, j.box), 'base64'); } finally { k.fill(0); } }
-  /** the copies beside the live file → [abs path] (files only — never a replace's own temp) */
-  function copiesNow() {
+  // r4045: OFF THE LOOP, ONE SWEEP AT A TIME — each sweep waits for the one before it (its own failure never stops the next)
+  let sweeping = Promise.resolve();
+  const inTurn = (fn) => { const p = sweeping.then(fn, fn).catch((e) => { hlog(`${base}: a sweep of its copies failed (${(e && e.code) || 'failed'})`); return null; }); sweeping = p; return p; };
+  let leftCopies = [];   // the plain copies the person's last act could not remove (base names) — told by the account's words
+  const partHead = '.' + copyHead;   // a copy's hidden part (the helper's writeWhole, `.<copy>.part`): plain bytes a stop left behind
+  /** the copies beside the live file, on the file pool → [{ p, n, part }] (files only — never a replace's own temp; a part only while
+   *  the hold copies nothing: a part then is a stop's leftover, never its keep at work) */
+  async function copiesNow() {
     const dir = path.dirname(file);
-    let names = []; try { names = fs.readdirSync(dir); } catch { return []; }
-    return names.filter((n) => n.startsWith(copyHead) && !/\.tmp-\d+-[0-9a-f]{8}$/.test(n)).map((n) => path.join(dir, n)).filter((p) => { try { return fs.lstatSync(p).isFile(); } catch { return false; } });
-  }
-  /** the vault's seal of the live file: every PLAIN copy sealed under this store's key (replaceShredding: the plain inode overwritten) → how many */
-  function sealCopies() {
-    if (!H || stateOf() !== 'unlocked') return 0;
-    let n = 0;
-    for (const p of copiesNow()) {
-      let on; try { on = fs.readFileSync(p); } catch (e) { hlog(`${path.basename(p)}: a copy of torn bytes could not be read to seal it (${(e && e.code) || 'unreadable'}) — it stays as it is`); continue; }
-      if (isCopyBox(parsedOf(on))) continue;
-      try { replaceShredding(p, boxOfCopy(on)); n++; } catch (e) { hlog(`${path.basename(p)}: a copy of torn bytes could not be sealed (${(e && e.code) || 'failed'}) — it stays as it is`); }
+    let names = []; try { names = await fs.promises.readdir(dir); } catch { return []; }
+    const out = [];
+    for (const n of names) {
+      const part = n.startsWith(partHead) && n.endsWith('.part');
+      if (!part && !(n.startsWith(copyHead) && !/\.tmp-\d+-[0-9a-f]{8}$/.test(n))) continue;
+      if (part && H && H.held()) continue;
+      const p = path.join(dir, n);
+      try { if ((await fs.promises.lstat(p)).isFile()) out.push({ p, n, part }); } catch { /* gone meanwhile */ }
     }
-    if (n) hlog(`${base}: ${n} plain cop${n === 1 ? 'y' : 'ies'} of its torn bytes sealed under the vault (the plain bytes overwritten in place)`);
-    return n;
+    return out;
   }
-  /** the person's own act replaced the sign-in (a Connect's fresh pair, a Disconnect): every copy that is no box SHREDDED → how many */
-  function shredCopies() {
-    if (!H) return 0;
-    let n = 0;
-    for (const p of copiesNow()) {
-      let boxed = false; try { boxed = isCopyBox(parsedOf(fs.readFileSync(p))); } catch { boxed = false; }
-      if (boxed) continue;
-      if (shredFileSync(p)) n++; else hlog(`${path.basename(p)}: a plain copy of torn bytes could not be removed — it stays as it is`);
-    }
-    if (n) hlog(`${base}: ${n} plain cop${n === 1 ? 'y' : 'ies'} of its torn bytes shredded (the person replaced the sign-in)`);
-    return n;
+  const boxedOn = async (p) => { try { return isCopyBox(parsedOf(await fs.promises.readFile(p))); } catch { return false; } };
+  /** the vault's seal of the live file: every PLAIN copy sealed under this store's key (the async replace: the box synced and renamed in,
+   *  then the plain inode overwritten); `parts` (the vault's own seal): a part is shredded (no copy landed: its bytes are the live file's)
+   *  → a promise of how many (the caller never waits for it) */
+  function sealCopies({ parts = false } = {}) {
+    return inTurn(async () => {
+      if (!H || stateOf() !== 'unlocked') return 0;
+      let n = 0;
+      for (const c of await copiesNow()) {
+        if (c.part) { if (parts && await shredFile(c.p)) n++; continue; }
+        let on; try { on = await fs.promises.readFile(c.p); } catch (e) { hlog(`${c.n}: a copy of torn bytes could not be read to seal it (${(e && e.code) || 'unreadable'}) — it stays as it is`); continue; }
+        if (isCopyBox(parsedOf(on))) continue;
+        if (stateOf() !== 'unlocked') break;   // locked meanwhile: the next opening seals the rest
+        try { await replaceShreddingAsync(c.p, boxOfCopy(on)); n++; } catch (e) { hlog(`${c.n}: a copy of torn bytes could not be sealed (${(e && e.code) || 'failed'}) — it stays as it is`); }
+      }
+      if (n) hlog(`${base}: ${n} plain cop${n === 1 ? 'y' : 'ies'} of its torn bytes sealed under the vault (the plain bytes overwritten in place)`);
+      return n;
+    });
+  }
+  /** the person's own act replaced the sign-in (a Connect's fresh pair, a Disconnect): every copy that is no box, and every part,
+   *  SHREDDED → a promise of { removed, left } (left: the base names a shred could not remove — the person is told) */
+  function shredPlainCopies() {
+    return inTurn(async () => {
+      if (!H) return { removed: 0, left: [] };
+      let removed = 0; const left = [];
+      for (const c of await copiesNow()) {
+        if (!c.part && await boxedOn(c.p)) continue;
+        if (await shredFile(c.p)) removed++; else left.push(c.n);
+      }
+      leftCopies = left;
+      if (removed) hlog(`${base}: ${removed} plain cop${removed === 1 ? 'y' : 'ies'} of its torn bytes shredded (the person replaced the sign-in)`);
+      if (left.length) hlog(`${base}: ${left.length} plain cop${left.length === 1 ? 'y' : 'ies'} of its torn bytes could not be removed (${left.join(', ')}) — the person is told`);
+      return { removed, left: left.slice() };
+    }).then((r) => r || { removed: 0, left: [] });
   }
   /** → the object, or null (absent / damaged — the plain token file's answer); LOCKED ⇒ throws `vault_locked`; HELD (r3334: a read
    *  that failed, or torn bytes while their copy is made) ⇒ throws the hold's refusal BY NAME */
@@ -156,17 +188,14 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
     cache = j; cacheAt = at;
     return j;
   }
-  /** `byPerson` (r3932): the person's own act wrote it (a Connect's fresh pair, a Disconnect's kept registration) — the torn bytes'
-   *  plain copies are shredded once it landed */
-  function write(obj, { byPerson = false } = {}) {
+  function write(obj) {
     { const no = heldRefusal(`writing ${base}`); if (no) throw no; }   // r3334: HELD — nothing is written over the file
     const st = stateOf();
     if (st === 'locked') throw lockedRefusal();
     if (st === 'unlocked') writeSealed(obj);
     else { fs.mkdirSync(path.dirname(file), { recursive: true }); replaceShredding(file, JSON.stringify(obj)); }   // not set up: plain JSON, 0600 (as before)
     cache = obj; cacheAt = epochOf();
-    tornText = null; tornBy = null;   // r3334: a write landed over the torn bytes (the person's Connect): the damage is over
-    if (byPerson) shredCopies();      // r3932: …and no plain copy of the old sign-in outlives it (a sealed one stays the person's)
+    tornText = null; tornBy = null;   // r3334: a write landed over the torn bytes (the person's Connect): the damage is over (r4045: its plain copies go by shredPlainCopies, off the loop)
   }
   /** Disconnect: the file and its vault key forgotten (a locked vault forgets too — dropping an entry needs no DEK). */
   function clear() {
@@ -174,7 +203,6 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
     try { fs.unlinkSync(file); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
     cache = null; cacheAt = epochOf();
     tornText = null; tornBy = null;
-    shredCopies();   // r3932: the person's Disconnect — no plain copy of the sign-in outlives it
     const v = vault();
     if (v && v.state() !== 'not_set_up') v.secretDrop(entry);
   }
@@ -182,7 +210,7 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
   function seal() {
     if (stateOf() !== 'unlocked') return false;
     if (H && H.held()) return false;   // r3334: HELD — nothing is written over the unread file (the lift's next read seals it)
-    sealCopies();   // r3932: the vault's seal — the torn bytes' plain copies sealed under this store's key (the live file below)
+    sealCopies({ parts: true });   // r3932: the vault's seal — the plain copies sealed under this store's key, off the loop (r4045: never waited for)
     const text = readRaw();
     if (text === null) return false;
     let j; try { j = JSON.parse(text); } catch { return false; }
@@ -206,7 +234,9 @@ function sealedJson(file, { dataDir = path.dirname(file), hold = null } = {}) {
   const held = () => (H ? H.held() : null);
   /** r3334: torn bytes kept aside and read as absent → { copy } (the copy's base name), null when none */
   const torn = () => (tornBy ? { copy: tornBy } : null);
-  return { read, write, clear, seal, locked, forget, writable, file, held, torn, heldRefusal, dispose: () => { if (H) H.stop(); } };
+  return { read, write, clear, seal, locked, forget, writable, file, held, torn, heldRefusal, dispose: () => { if (H) H.stop(); },
+    // r4045: the person's sweep (its promise answers after the copies are gone or their failure known), what it could not remove, the sweeps' turn
+    shredPlainCopies, left: () => leftCopies[0] || null, settled: () => sweeping };
 }
 
 module.exports = { sealedJson, MARK, isSealed, lockedError };

@@ -184,7 +184,7 @@ const ROWS = [
   ["src/safe-fs-worker.js","*",15,"not-main","—","—","the SafeFs worker thread"],
   ["src/search-index-worker.js","*",3,"not-main","—","—","the search index worker thread"],
   ["src/secret-box.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
-  ["src/secret-file.js","*",13,"durable","—","NOT idempotent: money / authority / a credential","a secret file (secrets) — must be on disk before the answer (r3932 +4, lane bl-chat-b: shredFileSync — the open r+, the overwrite, its sync, the unlink of a plain copy of torn sign-in bytes; B-dc3f r1148 +3: the temp file opened for write and synced BEFORE its rename, the folder synced after)"],
+  ["src/secret-file.js","*",9,"durable","—","NOT idempotent: money / authority / a credential","a secret file (secrets) — must be on disk before the answer (B-dc3f r1148 +3: the temp file opened for write and synced BEFORE its rename, the folder synced after)"],
   ["src/signin-witness.js","*",2,"durable","—","idempotent: a fact the next start learns again","B-dc3f (1): the sign-in witness's folder (mkdir 0700, in the CLI index's persistent place) and its removal (the sign-in turned off) — at the person's act after the sign-in file is on disk, and at the start; the witness itself is written through replaceShredding (secret-file.js)"],
   ["src/server/agent-tool-generators.js","*",30,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/apps-engine.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],

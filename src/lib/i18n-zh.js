@@ -15752,6 +15752,7 @@ export default {
   "Your voice sign-in cannot be read right now — nothing was changed. VibeSpace reads it again by itself; try again in a few minutes.": "暂时读不出你的语音登录——没有做任何改动。VibeSpace 会自动再读；请过几分钟再试。",
   "Your voice sign-in could not be read (the saved file was damaged) — connect again to sign in.": "读不出你的语音登录（保存的文件已损坏）——请重新连接来登录。",
   "Your voice sign-in could not be read (the saved file was damaged; its bytes are kept beside it as {copy}) — connect again to sign in.": "读不出你的语音登录（保存的文件已损坏；损坏的字节另存在它旁边，名为 {copy}）——请重新连接来登录。",
+  "A damaged copy of your old voice sign-in could not be removed: {copy}, beside the sign-in file — remove it by hand.": "旧语音登录留下的一份损坏副本没能删除：{copy}，在登录文件旁边——请手动删除。",   // r4045 (lane bl-chat-b): a damaged copy a Connect or a Disconnect could not remove
   "The voice sign-in cannot be read right now": "暂时读不出语音登录",
   "The voice sign-in could not be read — connect again": "读不出语音登录——请重新连接",
   "your voice sign-in": "你的语音登录",   // lane bl-chat-b r3334 unit 2: the held list's plain name

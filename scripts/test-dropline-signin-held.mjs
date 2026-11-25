@@ -18,7 +18,10 @@
 //      helper made carries a plain byte) and is its copy at the next start; while it is locked none is made (the lock's refusal).
 //   ⑤ THE SMALL ITEMS (r3932): the open hook writes nothing while held; a dictation while held answers the hold's code; a second tear
 //      with other bytes is copied once more; the Test press while held says the hold's words; the chip while unread has no Connect look.
-//   RED CONTROLS: a copy of the sealed file with the release's read (① ② red); copies with one r3932 line cut each (④ ⑤ red).
+//   ⑥ THE COPIES' ROAD OFF THE LOOP (主开发 r4045): a placed stall in the main thread's own file calls on the copies during a Connect —
+//      nothing stalled, the copy gone before the reply; a shred that fails is told (the reply and the account's words); a stop's part
+//      file is swept.
+//   RED CONTROLS: a copy of the sealed file with the release's read (① ② red); copies with one r3932 / r4045 line cut each (④ ⑤ ⑥ red).
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,6 +41,7 @@ const SJ = require(path.join(REPO, 'src/server/sealed-json.js'));
 const DC = require(path.join(REPO, 'src/server/dropline-client.js'));
 const DO = require(path.join(REPO, 'src/server/dropline-oauth.js'));
 const HOLD = require(path.join(REPO, 'src/store-read-hold.js'));
+const REG_WORDS = () => require(path.join(REPO, 'src/integration-registry.js')).ROWS.find((x) => x.id === 'dropline').connect.words;   // r4045: the row's words
 const { mutantCopies } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
 const MO = mutantCopies('dropline-held', REPO);
 const ROOT = scratch('dropline-held'); fs.mkdirSync(ROOT, { recursive: true });
@@ -178,9 +182,9 @@ console.log('③ THE PAGE\'s WORDS — the table row, the Connect block\'s two w
   const VM = require(path.join(REPO, 'src/voice-model.js'));
   const row = /\n  voice_signin_unread: \(\) => t\('((?:[^'\\]|\\.)+)'\)/.exec(U);
   const w = REG.ROWS.find((x) => x.id === 'dropline').connect.words;
-  const sentences = [row && row[1].replace(/\\'/g, "'"), w.unread, w.damaged, VM.voiceWords('voice-signin-held').words, VM.voiceWords('signin-damaged').words].map((x) => (x && typeof x === 'object' && x.key) ? x.key : x);
+  const sentences = [row && row[1].replace(/\\'/g, "'"), w.unread, w.damaged, w.left, VM.voiceWords('voice-signin-held').words, VM.voiceWords('signin-damaged').words].map((x) => (x && typeof x === 'object' && x.key) ? x.key : x);
   const both = (s) => !!s && ZH.includes(J(s) + ':') && JA.includes(J(s) + ':');
-  ok('the family\'s table words voice_signin_unread; the Connect block declares «unread» and «damaged» (a closed set); the mic has both codes; each sentence has zh and ja', !!row && REG.CONNECT_WORDS.includes('unread') && REG.CONNECT_WORDS.includes('damaged') && VM.VOICE_CODES.includes('voice-signin-held') && VM.VOICE_CODES.includes('signin-damaged') && sentences.every(both), sentences.map((s) => [String(s).slice(0, 50), both(s)]));
+  ok('the family\'s table words voice_signin_unread; the Connect block declares «unread» and «damaged» (a closed set); the mic has both codes; each sentence has zh and ja', !!row && REG.CONNECT_WORDS.includes('unread') && REG.CONNECT_WORDS.includes('damaged') && REG.CONNECT_WORDS.includes('left') && VM.VOICE_CODES.includes('voice-signin-held') && VM.VOICE_CODES.includes('signin-damaged') && sentences.every(both), sentences.map((s) => [String(s).slice(0, 50), both(s)]));
   ok('…no sentence names a file path; the damaged one names only the copy by its {copy} slot, and none says to restore it', sentences.every((s) => !/data\/|\.json/.test(String(s)) && !/restore/i.test(String(s))) && /\{copy\}/.test(String(w.damaged && (w.damaged.key || w.damaged))));
 }
 
@@ -203,7 +207,7 @@ const connect = async (S) => { await S.oauth.start({ origin: 'https://hub.exampl
 const tornOnce = async (H) => { try { H.read(); } catch { /* held while its copy is made */ } await until(() => !!H.torn()); return H.torn(); };
 // THE r3932 LINES, cut one at a time in copies (the red controls of ④ ⑤)
 const cut = (src, anchor, to, name) => anchored(src, anchor, to, name);   // stale-pins: kept (each anchor below is a line r3932 added)
-const CUT_COPIES = MO.load('src/server/sealed-json.js', cut(cut(SSRC, 'function sealCopies() {\n', 'function sealCopies() { return 0;\n', 'the seal of the copies'), 'function shredCopies() {\n', 'function shredCopies() { return 0;\n', 'the shred of the copies'), 'copies-cut');
+const CUT_COPIES = MO.load('src/server/sealed-json.js', cut(cut(SSRC, 'function sealCopies({ parts = false } = {}) {\n', 'function sealCopies({ parts = false } = {}) { return Promise.resolve(0);\n', 'the seal of the copies'), 'function shredPlainCopies() {\n', 'function shredPlainCopies() { return Promise.resolve({ removed: 0, left: [] });\n', 'the shred of the copies'), 'copies-cut');
 const CUT_ROAD = MO.load('src/server/sealed-json.js', cut(SSRC, /\n    copy: \{ bytes: \(buf\) => copyBytes\(buf\), opens: \(on\) => copyOpens\(on\) \},[^\n]*/, '', 'the copy road'), 'road-cut');
 const CUT_OPENS = MO.load('src/server/sealed-json.js', cut(SSRC, 'function copyOpens(on) { ', 'function copyOpens(on) { return on; ', 'a box opened back'), 'opens-cut');
 const CUT_LOCKED = MO.load('src/server/sealed-json.js', cut(SSRC, /\n        if \(st === 'locked'\) throw lockedRefusal\(\);[^\n]*/, '', 'no copy while locked'), 'locked-cut');
@@ -224,19 +228,20 @@ console.log('④ THE COPIES UNDER THE VAULT\'s LAW (r3932) — sealed at its sea
   ok('(the scene) a torn plain file with no vault: its copy is the plain bytes', cp0.length === 1 && realRead(path.join(A.dir, cp0[0])).equals(TORN), cp0);
   const v = mkVault(A.dir, A.tokens);
   const su = await v.setup(PW, {});
+  await A.tokens.settled();   // r4045: the opening never waits for the copies' sweep — the leg waits for its turn
   const box = boxOf(A.dir, cp0[0]);
   ok('THE VAULT\'s SEAL (the setup\'s open hook): the copy SEALED in place — its name kept, a box under the store\'s own key holding the bytes as they are; only the torn live file still holds them', su.ok && copiesIn(A.dir).length === 1 && !!box && opened(v, box).equals(TORN) && hits(A.dir).join() === 'dropline-oauth.json' && A.client.account().state === 'damaged' && A.client.account().copy === cp0[0], { su, hits: hits(A.dir) });
   await connect(A);
   ok('…THEN A CONNECT: connected, and NO FILE in the data folder holds a byte of the torn sign-in — no plain copy is left (the sealed copy stays the person\'s)', A.client.account().state === 'connected' && hits(A.dir).length === 0 && copiesIn(A.dir).length === 1 && !!boxOf(A.dir, copiesIn(A.dir)[0]), hits(A.dir));
   A.tokens.dispose();
   const R = await tornCopied(CUT_COPIES);
-  const vr = mkVault(R.dir, R.tokens); await vr.setup(PW, {});
+  const vr = mkVault(R.dir, R.tokens); await vr.setup(PW, {}); await R.tokens.settled();
   await connect(R);
   ok('RED CONTROL (the copies\' seal and shred cut, in a copy): after the vault\'s seal and a Connect the PLAIN copy is still there, for good', hits(R.dir).length === 1 && hits(R.dir)[0].startsWith('dropline-oauth.json.corrupt-'), hits(R.dir));
   R.tokens.dispose();
   // no vault: a Connect, and a Disconnect, SHRED the plain copy
   const B = await tornCopied(), B2 = await tornCopied(), RB = await tornCopied(CUT_COPIES);
-  await connect(B); const off = B2.client.disconnect(); await connect(RB);
+  await connect(B); const off = await B2.client.disconnect(); await connect(RB);
   ok('NO VAULT SET UP: a Connect SHREDS the plain copy, and so does a Disconnect (the person\'s own acts) — no byte of the torn sign-in left in either folder', B.client.account().state === 'connected' && copiesIn(B.dir).length === 0 && hits(B.dir).length === 0 && off.ok === true && copiesIn(B2.dir).length === 0 && hits(B2.dir).length === 0, { b: copiesIn(B.dir), b2: copiesIn(B2.dir) });
   ok('RED CONTROL (the same cut): the Connect leaves the plain copy', copiesIn(RB.dir).length === 1 && hits(RB.dir).length === 1, copiesIn(RB.dir));
   for (const x of [B, B2, RB]) x.tokens.dispose();
@@ -247,10 +252,10 @@ console.log('④ THE COPIES UNDER THE VAULT\'s LAW (r3932) — sealed at its sea
     const C = sceneOf(SJ); const vc = mkVault(C.dir, C.tokens); await vc.setup(PW, {}); C.tokens.dispose();
     fs.writeFileSync(C.file, TORN, { mode: 0o600 });
     written.length = 0; FHP.writeFile = function (data, ...a) { written.push(Buffer.from(data)); return realFhWrite.call(this, data, ...a); };
-    const C2 = handleOf(C, mod); const t2 = await tornOnce(C2);
+    const C2 = handleOf(C, mod); const t2 = await tornOnce(C2); await C2.settled();
     FHP.writeFile = realFhWrite;
     const w = written.slice();
-    C2.dispose(); const C3 = handleOf(C, mod); const t3 = await tornOnce(C3); C3.dispose();
+    C2.dispose(); const C3 = handleOf(C, mod); const t3 = await tornOnce(C3); await C3.settled(); C3.dispose();
     return { C, vc, t2, t3, w, cp: copiesIn(C.dir) };
   };
   const O = await openCopy(SJ);
@@ -268,7 +273,7 @@ console.log('④ THE COPIES UNDER THE VAULT\'s LAW (r3932) — sealed at its sea
     const r = { e, held: L2.held(), cp: copiesIn(L.dir) };
     if (!unlock) { L2.dispose(); return r; }
     wireVaultHooks({ vault: vl, sealed: [L2], log: quiet }); await vl.unlock(PW, {});
-    r.t = await tornOnce(L2); r.after = copiesIn(L.dir); r.box = r.after.length === 1 && !!boxOf(L.dir, r.after[0]); L2.dispose();
+    r.t = await tornOnce(L2); await L2.settled(); r.after = copiesIn(L.dir); r.box = r.after.length === 1 && !!boxOf(L.dir, r.after[0]); L2.dispose();
     return r;
   };
   const K = await lockedRead(SJ), KR = await lockedRead(CUT_LOCKED, { unlock: false });
@@ -330,6 +335,54 @@ console.log('⑤ THE SMALL ITEMS (r3932) — the open hook while held, a dictati
   const [un, dm, none] = chipsOf(PUI), [unR] = chipsOf(cut(PUI, "const unread = !p.vaultLocked && p.signin === 'unread';", 'const unread = false;', 'the chip while unread'));
   ok('THE PLUGIN\'s CHIP WHILE UNREAD wears no Connect look and no Connect hint (tone warn, no title); damaged and never connected keep the Connect door', !!un && un.tone === 'warn' && !un.chipTitle && /cannot be read/.test(un.chip) && !!dm && dm.tone === 'primary' && !!dm.chipTitle && !!none && none.tone === 'primary' && none.chip === 'Connect with Fish Audio', { un, dm, none });
   ok('RED CONTROL (that line cut): the unread chip wears the Connect look and its hint', !!unR && unR.tone === 'primary' && !!unR.chipTitle, unR);
+}
+console.log('⑥ THE COPIES\' ROAD OFF THE LOOP (r4045) — a placed stall on the copies\' file calls, a shred that fails told, a stop\'s part swept');
+{
+  // THE PLACED STALL: every SYNCHRONOUS file call the main thread makes on a copy, a part or the folder listing stalls 150 ms and is
+  // counted (the live file's own write stays as at the release: synchronous, never counted)
+  const STALL = 150, SYNC = ['readdirSync', 'lstatSync', 'statSync', 'readFileSync', 'openSync', 'writeFileSync', 'renameSync', 'unlinkSync', 'existsSync'];
+  const realSync = Object.fromEntries(SYNC.map((k) => [k, fs[k]]));
+  let stalled = [], placing = null;
+  // the folder counts for a LISTING only (the live file's replace opens the folder to sync it, as at the release); a copy or a part for every call
+  const isCopyPath = (k, a) => typeof a === 'string' && !!placing && ((k === 'readdirSync' && path.resolve(a) === placing) || (path.dirname(path.resolve(a)) === placing && /^\.?dropline-oauth\.json\.corrupt-/.test(path.basename(a))));
+  const place = (dir) => { placing = path.resolve(dir); stalled = []; for (const k of SYNC) { const real = realSync[k]; fs[k] = function (a, ...r) { if (isCopyPath(k, a)) { stalled.push(k); const t0 = Date.now(); while (Date.now() - t0 < STALL) { /* the placed stall */ } } return real.call(this, a, ...r); }; } };
+  const unplace = () => { placing = null; for (const k of SYNC) fs[k] = realSync[k]; };
+  const stallRun = async (mod) => {
+    const S = await tornCopied(mod); const cp = copiesIn(S.dir);
+    let worst = 0, last = Date.now(); const tick = setInterval(() => { const t = Date.now(); worst = Math.max(worst, t - last); last = t; }, 5);
+    place(S.dir); calls.length = 0;
+    let r = null, e = null; try { await S.oauth.start({ origin: 'https://hub.example.test' }); r = await S.client.connectWith({ clientId: 'vsc-fresh-1', code: 'code-6', verifier: 'v', redirectUri: 'https://hub.example.test/api/channels/oauth/cb/dropline' }); } catch (x) { e = x; }
+    unplace(); clearInterval(tick);   // (lifted FIRST: the leg's own look at the folder below is no call of the product's)
+    const goneAtReply = copiesIn(S.dir).length === 0;
+    S.tokens.dispose();
+    return { stalled: stalled.slice(), worst, goneAtReply, cp, ok: !!r && !e, e: e && e.message };
+  };
+  const ON_LOOP = MO.load('src/server/sealed-json.js', cut(SSRC, 'let names = []; try { names = await fs.promises.readdir(dir); } catch { return []; }', 'let names = []; try { names = fs.readdirSync(dir); } catch { return []; }', 'the listing on the loop'), 'listing-on-loop');   // stale-pins: kept (the red's replacement: the listing back on the loop, as at 90c2dd4c9)
+  const G = await stallRun(SJ), GR = await stallRun(ON_LOOP);
+  ok('A CONNECT WITH A COPY ON DISK, a stall placed in the main thread\'s own file calls on the copies: NOT ONE of them is made (nothing stalled on the main thread), and the copy is gone when the Connect answers', G.ok && G.cp.length === 1 && G.stalled.length === 0 && G.goneAtReply, G);
+  ok('RED CONTROL (the copies\' listing back on the loop, as at 90c2dd4c9): the Connect makes a synchronous file call on the data folder and stalls the main thread', GR.ok && GR.stalled.length >= 1 && GR.worst >= STALL, { stalled: GR.stalled, worst: GR.worst });
+  // A SHRED THAT FAILS is told: the copy's removal refused (a placed EACCES on its unlink), the Connect's answer and the account carry its name
+  const realUnlink = fs.promises.unlink;
+  const failRun = async (mod) => {
+    const S = await tornCopied(mod); const cp = copiesIn(S.dir);
+    fs.promises.unlink = async function (q, ...r) { if (typeof q === 'string' && path.resolve(q) === path.join(S.dir, cp[0])) throw Object.assign(new Error('EACCES: permission denied, unlink'), { code: 'EACCES' }); return realUnlink.call(this, q, ...r); };
+    let r = null; try { await S.oauth.start({ origin: 'https://hub.example.test' }); r = await S.client.connectWith({ clientId: 'vsc-fresh-1', code: 'code-7', verifier: 'v', redirectUri: 'https://hub.example.test/api/channels/oauth/cb/dropline' }); } finally { fs.promises.unlink = realUnlink; }
+    const a = S.client.account(); S.tokens.dispose();
+    return { r, a, cp, said: S.logs.some((l) => l.includes(cp[0]) && /could not be removed/.test(l)) };
+  };
+  const F = await failRun(SJ), FR = await failRun(MO.load('src/server/sealed-json.js', cut(SSRC, '      leftCopies = left;\n', '', 'the left copies kept'), 'left-cut'));
+  const leftWord = REG_WORDS().left;
+  ok('A SHRED THAT FAILS IS TOLD to the person: the Connect still lands, its answer names the copy left, and the account the card reads carries it (the row says «could not be removed», with its name, in three languages)', !!F.r && Array.isArray(F.r.left) && F.r.left[0] === F.cp[0] && F.a.state === 'connected' && F.a.left === F.cp[0] && F.said && !!leftWord && /\{copy\}/.test(String(leftWord)), { r: F.r, a: F.a });
+  ok('RED CONTROL (the left copies not kept, in a copy): the card is never told — the account carries no copy left', !!FR.r && !FR.a.left, FR.a);
+  // A STOP'S PART FILE (the helper's `.<copy>.part`, plain torn bytes) is swept with the copies at the person's Connect
+  const partRun = async (mod) => {
+    const S = await tornCopied(mod); const part = path.join(S.dir, '.dropline-oauth.json.corrupt-1700000000000.part');
+    fs.writeFileSync(part, TORN, { mode: 0o600 });
+    await connect(S); const r = { part: fs.existsSync(part), hits: hits(S.dir) }; S.tokens.dispose(); return r;
+  };
+  const P = await partRun(SJ), PR = await partRun(MO.load('src/server/sealed-json.js', cut(SSRC, "const part = n.startsWith(partHead) && n.endsWith('.part');", 'const part = false;', 'the part in the pattern'), 'part-cut'));
+  ok('A STOP\'S PART FILE is swept at the person\'s Connect: no part, no copy, no byte of the torn sign-in left in the folder', !P.part && P.hits.length === 0, P);
+  ok('RED CONTROL (the part out of the sweep\'s pattern, in a copy): the hidden part keeps the plain torn bytes after the Connect', PR.part && PR.hits.some((n) => n.endsWith('.part')), PR);
 }
 for (const e of engines) { try { e.close(); } catch { /* closed */ } }
 

@@ -26,6 +26,8 @@ const WHY_DOORS = Object.freeze({ 'self-hosted': (app) => ({ also: httpsAuto(app
 export function renderConnectRow(box, decl, st, rerender, { app = null } = {}) {
   const a = (st && st.account) || {};
   const W = decl.words || {};
+  // r4045 (lane bl-chat-b): a damaged copy of the old sign-in that the person's Connect or Disconnect could not remove — said, by its name
+  if (a.left && W.left) box.appendChild(el('div', 'plugin-detail plugin-cfg-warn oauth-connect-left', t(W.left, { copy: a.left })));
   // B-1e9a cure: the person's row hides the cluster's settings (an earlier Connect saved its own client id there) — said, with
   // the door that heals it: the store's «use the cluster's settings» (PUT /api/integrations/<row> {use:'cluster'}), or — the
   // cluster offering several with none the default (cure 3: `presetChoices`) — its picker (PUT {clusterKey})

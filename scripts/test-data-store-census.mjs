@@ -472,7 +472,7 @@ const DELETION_CALLS = Object.freeze({
   'src/opencode-serve.js': 2, 'src/opslog.js': 1, 'src/owner-mark.js': 5, 'src/plugins/frp.js': 6,
   'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 17,
   'src/routes/persistence.js': 6, 'src/routes/window-targets.js': 1, 'src/safe-fs-worker.js': 9, 'src/search-index-worker.js': 1,
-  'src/secret-box.js': 1, 'src/secret-file.js': 5, 'src/server/agent-listener.js': 1, 'src/server/agent-tool-generators.js': 2,
+  'src/secret-box.js': 1, 'src/secret-file.js': 4, 'src/server/agent-listener.js': 1, 'src/server/agent-tool-generators.js': 2,
   'src/server/apps-ops-door.js': 2, 'src/server/automation-engine.js': 1, 'src/server/boot-restore.js': 14, 'src/server/browser-attach-launch.js': 1,
   'src/server/browser-builds-keeper.js': 8, 'src/server/browser-cli-install.js': 3, 'src/server/browser-clone-run.js': 2, 'src/server/browser-display-config.js': 2,
   'src/server/browser-env.js': 1, 'src/server/browser-installs.js': 1, 'src/server/browser-keeper.js': 5, 'src/server/browser-kept.js': 6,

@@ -1017,7 +1017,7 @@ console.log('§7 fleet.json browserEngine — the cluster layer, the override, b
   const noCarry = M.load('src/server/dropline-client.js', anchored(DCSRC, ", registeredClientId: (pairNow() || {}).registeredClientId || null });", " });", 'B-1e9a: the sign-in drops the registration'), 'dl-nocarry');
   const cyr = await carry(noCarry);
   ok(!cyr.afterSignIn.kept, 'RED control: a sign-in that does not carry the registration loses the hub\'s client (the next Connect would register another)', cyr);
-  const oldDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }, { byPerson: true }); else tokens.clear();", "    tokens.clear();", 'B-1e9a: Disconnect clears the registration'), 'dl-olddisc');
+  const oldDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "    if (p.registeredClientId) tokens.write({ registeredFor: p.registeredFor || null, registeredClientId: p.registeredClientId }); else tokens.clear();", "    tokens.clear();", 'B-1e9a: Disconnect clears the registration'), 'dl-olddisc');
   const cyd = await carry(oldDisc);
   ok(cyd.afterSignIn.kept === 'selfregClient01' && !cyd.afterDisconnect.kept, 'RED control: the old Disconnect (clear everything) drops the registration — a new vendor client at the next Connect', cyd);
   const blindDisc = M.load('src/server/dropline-client.js', anchored(DCSRC, "    if (pairLocked) throw lockedError();", "    if (false) throw lockedError();", 'B-1e9a cure: a locked Disconnect not refused'), 'dl-blinddisc');
