@@ -16,6 +16,8 @@
 //     simulator's real column heights; RED CONTROLS: the release's eleven overflow, the slice-1 stylesheet, a bar without the law's call
 //   ⑤c THE FOUR EDGES, EVERY iPHONE SHAPE (B-78db slice 2): the audit's cures pinned, the audit's table in kb-features; RED CONTROL:
 //     the stylesheets before the block
+//   ⑤e THE SIMULATOR'S FAULTS (r4463): the launch's ground from one cookie the index route writes; the home-screen copy's chrome in ONE
+//     fixed container; RED CONTROLS: 26d571cdb's route and stylesheet
 //   ⑤d THE LAUNCH FOR EVERY THEME (line 914's cure): the default status bar style; the inline ground goes with the splash;
 //     RED CONTROLS: 17c6dd081's meta and its client
 // Run: node scripts/test-viewport-class.mjs
@@ -354,6 +356,32 @@ console.log('⑤d the launch for every theme (B-78db line 914 cure — 主开发
   const SCS = read('src/lib/side-column.js');
   ok(SC.installSideColumn(docTab, winTab) === false && heard.length === 0 && /const later = \(\) => \{ if \(queued\) return; queued = true;/.test(SCS) && /win\.addEventListener\('resize', later\)/.test(SCS),
     '⑤d no listener and no probe where no inset can exist (a tab, an Android or a desktop installed copy — display-mode standalone no longer counts); in the home-screen copy the read is once a frame at most');
+}
+
+console.log('⑤e the simulator\'s faults (主开发 r4463): the launch wears the stored theme\'s ground; the top band takes the bar\'s colour');
+{
+  const LG = require(path.join(REPO, 'src/launch-ground.js'));
+  const IDX = read('public/index.html'), SRV = read('server.js'), TH = read('src/lib/themes.js'), CSS = read('public/style.css');
+  // THE VALUE IS A COLOUR OR NOTHING (it is written into an attribute of the page every client is served)
+  const good = ['#fafafa', '#FFF', '#0c0c18cc', 'rgb(250, 250, 250)', 'rgba(1,2,3,0.5)'], bad = ['white', '#ggg', 'url(x)', '#fff"><script>', '#fff;color:red', 'rgb(1,2,3);x', 'expression(1)', '', null, 'var(--bg-root)', '#'.padEnd(50, 'a'),
+    '#fffff', '#fffffff', 'rgb(256,0,0)', 'rgb(1,2)', 'rgba(1,2,3,2)', '#fff\n', '#fff</style>', 'rgb(1,2,3))', 'hsl(0,0%,100%)', 'transparent', 'dark', 'light', 'custom-my-theme', '\u0023fff'.replace('#', '＃')];   // r4467: hostile values and a theme's NAME write nothing
+  ok(good.every((g) => LG.cleanGround(g) === g) && bad.every((b) => LG.cleanGround(b) === null), '⑤e THE ONE STRICT PATTERN: a hex of 3/4/6/8 digits or rgb()/rgba() of 0–255 channels — a word, a theme\'s name, a url(), a quote, a semicolon, a var(), a channel of 256, a newline, a full-width «＃» are refused', { good: good.map(LG.cleanGround), bad: bad.map(LG.cleanGround) });
+  ok(LG.groundOf('a=1; vs_ground=%23fafafa; b=2') === '#fafafa' && LG.groundOf('vs_ground=%23fff%22%3E%3Cscript%3E') === null && LG.groundOf('') === null && LG.groundOf('xvs_ground=%23fafafa') === null && LG.groundOf('vs_ground=%E0%A4%A') === null,
+    '⑤e the cookie is read by its exact name, decoded, and refused unless it is a colour (a malformed escape is nothing)');
+  // ON THE REAL PAGE: exactly the two launch grounds change — <html>'s inline style and the loading screen's
+  const lit = IDX.split('#0c0c18').length - 1, out = LG.withGround(IDX, '#fafafa');
+  ok(out.includes('<html lang="en" style="background:#fafafa">') && /<div id="loading-screen" style="[^"]*background:#fafafa;/.test(out) && out.split('#0c0c18').length - 1 === lit - 2 && LG.withGround(IDX, null) === IDX && LG.withGround(IDX, 'white') === IDX && LG.withGround(IDX, LG.DARK) === IDX,
+    `⑤e on public/index.html the remembered ground replaces exactly its two launch grounds (of ${lit} dark literals); no cookie, a word or the dark ground leave the page as it is`);
+  // THE WIRING: the index route writes it before it sends; a theme that applies remembers its ground
+  const routeOk = (src) => /html = launchGround\.withGround\(html, launchGround\.groundOf\(req\.headers\.cookie\)\);[^\n]*\n\s*res\.set\('Cache-Control', 'no-cache'\)/.test(src);
+  ok(routeOk(SRV) && /app\.get\(\['\/', '\/index\.html'\], \(req, res, next\) => \{[\s\S]{0,700}const launchGround = require\('\.\/src\/launch-ground\.js'\);/.test(SRV) && /import \{ cookieFor \} from '\.\.\/launch-ground\.js';/.test(TH) && /const c = cookieFor\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); if \(c\) document\.cookie = c;/.test(TH),
+    '⑤e the index route writes the remembered ground into the page before it sends it; ThemeManager.apply remembers the applied theme\'s ground (a custom or plugin theme\'s as the page computes it)');
+  ok(!routeOk(SRV.replace(/\n\s*html = launchGround\.withGround\([^\n]*/, '')), '⑤e RED CONTROL: 26d571cdb\'s route (no rewrite) — a light theme\'s launch stays dark');
+  ok(LG.cookieFor('#fafafa') === 'vs_ground=%23fafafa; path=/; max-age=31536000; SameSite=Lax' && LG.cookieFor('red') === null, '⑤e the cookie: the whole origin, a year, never sent cross-site; nothing for a value that is no colour');
+  // FAULT 1: the page's chrome in ONE fixed container in the home-screen copy only
+  const fixedOk = (css) => /html\[data-standalone\] #main-wrapper \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; \}/.test(css);
+  ok(fixedOk(CSS), '⑤e the home-screen copy\'s #main-wrapper is fixed at its own rectangle (主开发\'s simulator experiment: the system\'s top band then takes the bar\'s colour, the title sharp) — UNPROVEN on the device until the pictures');
+  ok(!fixedOk(CSS.slice(0, CSS.indexOf('THE SYSTEM\'s TOP BAND (B-78db'))), '⑤e RED CONTROL: 26d571cdb\'s stylesheet leaves the wrapper in the flow (the blurred title)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

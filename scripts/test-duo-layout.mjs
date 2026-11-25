@@ -494,7 +494,7 @@ try {
   // probe b214928c8): insets MANDATORY; top / topMax / left / leftMax / bottom / bottomMax / right / rightMax optional integers; an
   // unset one leaves env() undefined (its fallback); env() follows it with or without viewport-fit=cover (the product's own cover
   // and column verdicts are test-viewport-class ⑤ / ⑤b). RED CONTROL: the release's stylesheet (the bar at right 0, 56 px).
-  console.log('④b–④f THE SYSTEM\'s EDGES (B-78db: insets PLACED — the Duo\'s side column inner 951×648 / outer 466×657; an ordinary notched iPhone 390×844 / 844×390; the sheets\' order under a custom theme)');
+  console.log('④b–④g THE SYSTEM\'s EDGES (B-78db: insets PLACED — the Duo\'s side column inner 951×648 / outer 466×657; an ordinary notched iPhone 390×844 / 844×390; the sheets\' order under a custom theme)');
   {
     const place = (insets) => cdp('Emulation.setSafeAreaInsetsOverride', { insets });
     // THE TEST SEAM (主开发 r4115's reach order — named in the line): the product asks cover and reads the column ONLY in an iPhone's
@@ -690,6 +690,26 @@ try {
     const tall = await evalJs(barState(false)), tallMarks = await evalJs(marksJs), tallRows = await gearRows();
     check('④f a tall regular landscape (1000×900, every door fits): NOTHING yields — every global door and ⚙ drawn inside the bar, no mark, no row',
       tall.global.every((d) => !d.absent && d.inside) && tall.gear.inside && tallMarks.marks.length === 0 && !tallMarks.attr && tallRows.length === 0, { global: tall.global.map((d) => `${d.id}:${d.inside ? 'in' : 'OUT'}`), tallMarks, tallRows });
+    // ④g THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coordinator): (1) the TOP BAND — in the home-screen copy the
+    // page's chrome stands in ONE fixed container, #main-wrapper at the very rectangle the release's flow gives it (both classes); the blur
+    // itself is the simulator's to show; (2) the LAUNCH's GROUND — a theme that applies remembers its ground, and the page the server sends
+    // wears it from its first paint (<html> and the loading screen)
+    const WRAP = `(() => { const w = document.getElementById('main-wrapper'), r = w.getBoundingClientRect(); return { pos: getComputedStyle(w).position, l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) }; })()`;
+    const FLOW = `(() => { const h = document.documentElement, was = h.dataset.standalone; delete h.dataset.standalone; const out = ${WRAP}; h.dataset.standalone = was; return out; })()`;
+    for (const [w, h] of [[951, 648], [466, 657]]) {
+      await device(w, h); await place({ right: 84, rightMax: 84, bottom: 34, bottomMax: 34 }); await load(); await attachBoth();
+      await waitFor(`document.documentElement.dataset.standalone === '1' && document.documentElement.dataset.sidecol === 'right'`, 6000); await sleep(300);
+      const fx = await evalJs(WRAP), flow = await evalJs(FLOW);
+      check(`④g ${w}×${h}: in the home-screen copy #main-wrapper is FIXED at the very rectangle the release's flow gives it (${fx.l},${fx.t}–${fx.r},${fx.b})`, fx.pos === 'fixed' && fx.l === flow.l && fx.t === flow.t && fx.r === flow.r && fx.b === flow.b, { fx, flow });
+      check(`④g RED CONTROL ${w}×${h}: without the copy's mark (26d571cdb's page) the wrapper stands in the flow — the build whose title the system's band blurred`, flow.pos !== 'fixed', flow);
+    }
+    const ground = await evalJs(`(async () => { const tm = app.themeManager, gOf = () => getComputedStyle(document.documentElement).getPropertyValue('--bg-root').trim();
+      const page = async () => (await fetch('/', { credentials: 'same-origin', cache: 'no-store' })).text();
+      tm.apply('light'); const gl = gOf(), cl = document.cookie, hl = await page();
+      tm.apply('dark'); const gd = gOf(), hd = await page();
+      const wears = (html, g) => html.includes('<html lang="en" style="background:' + g + '">') && html.includes('background:' + g + ';color:');
+      return { gl, gd, cookie: /vs_ground=/.test(cl), light: wears(hl, gl), dark: wears(hd, gd) }; })()`);
+    check(`④g a theme that applies remembers its ground, and the page the server sends wears it in <html> and the loading screen (light ${ground.gl}, then dark ${ground.gd})`, ground.cookie && ground.light && ground.dark && ground.gl !== ground.gd, ground);
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: seam.identifier });
     await place({}); await device(951, 585); await load();
   }

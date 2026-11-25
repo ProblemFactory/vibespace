@@ -173,6 +173,8 @@ app.get(['/', '/index.html'], (req, res, next) => {
       try { return `${attr}="/${file}?v=${Math.floor(fs.statSync(path.join(pub, file)).mtimeMs)}"`; }
       catch { return m; }
     });
+    const launchGround = require('./src/launch-ground.js'); // PURE (B-78db, r4463 fault 2) — required INSIDE the route: test-csp-report runs this route from its own text
+    html = launchGround.withGround(html, launchGround.groundOf(req.headers.cookie)); // the launch wears the stored theme's ground from the first paint
     res.set('Cache-Control', 'no-cache'); res.set(...cspReports.header()); // the app page: Content-Security-Policy-Report-Only (never the enforcing header — a later lane's switch)
     res.type('html').send(html);
   } catch { next(); }

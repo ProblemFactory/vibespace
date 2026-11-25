@@ -4866,6 +4866,21 @@ held landscape reports about 47–59 on EACH side, so its leading inset is never
 three-button navigation about 48. 80 stands above every ordinary inset and below the Duo's 84. test-viewport-class ⑤ has its
 edge at 79.
 
+THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coordinator after line 914 was taken):
+- THE TOP BAND. After a cold launch of the home-screen copy the system laid a soft blur over about the top 60 points, and the
+  conversation's title was blurred under it, on both displays and in both themes. The cure follows the coordinator's own experiment: in the
+  home-screen copy only (html[data-standalone]) #main-wrapper is FIXED at its own rectangle (its margins stand, inset 0), and the system's
+  band then takes the bar's colour. test-duo-layout ④g holds the rectangle the flow gives in both classes. What differs at the top between
+  the build the owner saw on 11-24 (a solid strip, a sharp title) and 26d571cdb is NOT known: the copy stores the default style, and the
+  page's top elements are the same. UNPROVEN on the device until the simulator's pictures.
+- THE LAUNCH's GROUND. ThemeManager.apply remembers the applied theme's ground in one cookie (src/launch-ground.js: a hex of 3/4/6/8 digits
+  or rgb()/rgba() of 0–255 channels, nothing else, never a theme's name). The index route writes it into <html>'s inline style and the
+  loading screen's, so the loading screen wears the stored theme's ground from the first paint. With no cookie the ground is today's dark.
+- THE WHITE BEFORE THE PAGE (about 3 s at a cold launch) comes before the page begins (the document's answer ends at 10 ms, the first paint
+  at 18 ms). Nothing in the page reaches it. Apple's apple-touch-startup-image would need at least four images for one device (two
+  displays, two orientations), taken at install and never following the stored theme. Not built (the coordinator's choice, named to the
+  owner).
+
 ### THE STYLESHEETS' ORDER (B-78db line 914's cure — 主开发 r4115 MUST 1)
 
 The launch cure puts the six stylesheet links in the BODY, after the inline loading screen (the first paint is ours and not
