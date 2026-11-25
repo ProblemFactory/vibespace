@@ -715,6 +715,15 @@ try {
       const wears = (html, g) => html.includes('<html lang="en" style="background:' + g + '">') && html.includes('background:' + g + ';color:');
       return { gl, gd, cookie: /vs_ground=/.test(cl), light: wears(hl, gl), dark: wears(hd, gd) }; })()`);
     check(`④g a theme that applies remembers its ground, and the page the server sends wears it in <html> and the loading screen (light ${ground.gl}, then dark ${ground.gd})`, ground.cookie && ground.light && ground.dark && ground.gl !== ground.gd, ground);
+    // THE LAUNCH IMAGE (B-78db (B), 主开发 r4481): the page a real server sends holds the startup links in the ground it wears; one of them
+    // answers a PNG through the sign-in; a size off the list is a 404 (the simulator alone can say whether the system takes it)
+    const shot = await evalJs(`(async () => { const html = await (await fetch('/', { credentials: 'same-origin', cache: 'no-store' })).text(), g = getComputedStyle(document.documentElement).getPropertyValue('--bg-root').trim();
+      const hrefs = [...html.matchAll(/<link rel="apple-touch-startup-image" media="[^"]+" href="([^"]+)">/g)].map((m) => m[1]);
+      const duo = hrefs.find((h) => h.startsWith('/launch-image/1398x2034.png?')) || '', r = duo ? await fetch(duo, { credentials: 'same-origin' }) : null, b = r ? new Uint8Array(await r.arrayBuffer()) : new Uint8Array(0);
+      const bad = await fetch('/launch-image/1399x2034.png', { credentials: 'same-origin' });
+      return { n: hrefs.length, g, inG: hrefs.every((h) => h.endsWith('?g=' + encodeURIComponent(g))), duo, status: r ? r.status : 0, type: r ? r.headers.get('content-type') : '', sig: [...b.slice(0, 8)].join(','), bytes: b.length, off: bad.status }; })()`);
+    check(`④g the page a real server sends holds ${shot.n} launch links in the ground it wears (${shot.g}); the Duo's answers a PNG (${shot.bytes} bytes, ${shot.type}) through the sign-in; a size off the list is a ${shot.off}`,
+      shot.n === 26 && shot.inG && shot.status === 200 && /^image\/png/.test(shot.type) && shot.sig === '137,80,78,71,13,10,26,10' && shot.off === 404, shot);
     // ④h THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the owner's simulator: the outer display held landscape reads 678×445, the insets
     // left 84 · bottom 34, the regular class; the column stood EMPTY beside our bar on the right, the conversation 538 of 678). THE LAW:
     // wherever the system reserves a side column our global doors live INSIDE it. Insets PLACED; the list hidden, then shown.
