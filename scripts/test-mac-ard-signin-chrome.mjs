@@ -32,7 +32,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, scratch, endRootedProcesses, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePort, scratch, endRootedProcesses, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, chromeNames } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 
 const require = createRequire(import.meta.url);
@@ -222,7 +222,8 @@ const CDP_PORT = await freePort();
 const chromeHome = path.join(root, 'chrome-home'), chromeRun = path.join(root, 'chrome-run');
 fs.mkdirSync(chromeHome, { recursive: true }); fs.mkdirSync(chromeRun, { recursive: true, mode: 0o700 });
 const cenv = { ...process.env, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun }; delete cenv.DISPLAY; delete cenv.WAYLAND_DISPLAY;
-chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv });
+// B-9dd0 (主开发 r3968): CHROME_QUIET's names rule refuses every name AND address but the loopback's — this box's non-loopback address (its desk and phone pages), stated as its own
+chrome = spawn(CHROME, [...CHROME_QUIET, ...(IP ? [chromeNames({ own: [IP] })] : []), ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: cenv });
 const WebSocket = require(path.join(REPO, 'node_modules/ws'));
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 async function page(w, h, url) {

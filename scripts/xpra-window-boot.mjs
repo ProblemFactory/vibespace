@@ -28,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, chromeNames } from './scratch.mjs';
 
 /** Boot ONE part of the xpra window family: everything above, up and checked ('worktree server boots'); returns the
  *  handles, the evidence deadlines, the shared measures and the part's end. `part` names the part in its verdict line. */
@@ -155,7 +155,8 @@ export async function bootXpraWindow(part) {
   const srvLog = [];
   const bootServer = () => { srv = spawnCopy('the worktree server', wt, srvEnv); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
   bootServer();
-  const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskxpra-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+  // B-9dd0 (主开发 r3968): CHROME_QUIET's names rule refuses every name AND address but the loopback's — this box's own name (the xpra suites' plain-http pages), stated as its own
+  const chrome = spawn(CHROME, [...CHROME_QUIET, ...(HOSTNAME ? [chromeNames({ own: [HOSTNAME] })] : []), ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskxpra-chrome')}`, 'about:blank'], { stdio: 'ignore' });
   const worktrees = [wt];
   const devProcs = [], devHomes = []; // §13 (lane C2): the paired scratch devices (their daemons + HOMEs) // + §5's pre-x5 CONTROL copy while it exists
   const ctlServers = [];

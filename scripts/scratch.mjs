@@ -85,8 +85,11 @@ export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock
 // one (Chrome keeps the LAST copy of a switch). scripts/chrome-store-census.mjs + test-architecture §47d: a launch that names the
 // switch itself is red by name.
 export const chromeNames = ({ map = {}, own = [] } = {}) => {
-  const maps = Object.entries(map || {}).map(([h, to]) => `MAP ${h} ${to}`);
-  const keep = [...new Set([...(own || [])].map((h) => String(h || '')).filter(Boolean))].map((h) => `EXCLUDE ${h}`);
+  // r3968: a name holding a space or a comma would SPLIT the rule (the vendor splits the list at «,» and a rule at « »), and a
+  // star in `own` would OPEN it (EXCLUDE * = the rule off): each is refused by name, never written
+  const word = (h, what) => { const v = String(h ?? ''); if (!v || /[\s,]/.test(v) || (what === 'own' && v.includes('*'))) throw new Error(`chromeNames: ${what} «${v}» would ${/[\s,]/.test(v) || !v ? 'split' : 'open'} the names rule — name each host, with no space, comma or star`); return v; };
+  const maps = Object.entries(map || {}).map(([h, to]) => `MAP ${word(h, 'map')} ${word(to, 'map')}`);
+  const keep = [...new Set([...(own || [])].map((h) => word(h, 'own')))].map((h) => `EXCLUDE ${h}`);
   return `--host-resolver-rules=${[...maps, 'MAP * ^NOTFOUND', 'EXCLUDE 127.0.0.1', 'EXCLUDE [::1]', 'EXCLUDE localhost', ...keep].join(', ')}`;
 };
 export const CHROME_QUIET = Object.freeze(['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-domain-reliability', '--metrics-recording-only', '--no-first-run', '--no-default-browser-check', chromeNames()]);
@@ -109,7 +112,9 @@ export const chromeBelt = (own = []) => {
  *              target — the probe that tells a belt from no belt;
  *    vendor  — https://vendor.example/ (a reserved name: it never resolves, belt or not);
  *    testnet — https://192.0.2.1/ (often refused by the box's routing alone).
- *  The belt's leg: all three refused in the suite's own Chrome (taking the belt off it turns the leg red); its CONTROL
+ *  The belt's leg: all three refused in the suite's own Chrome. Since r3727 CHROME_QUIET's names rule alone refuses all
+ *  three (its catch-all takes an address written as numbers too), so the leg proves the suite's Chrome refuses them, rule and
+ *  belt together, and no longer tells the belt from no belt (r3968): the CONTROL does that by the box's own name; its CONTROL
  *  (chromeReach below): `own` REACHED by a Chrome with no belt — where it is not, this box cannot show the belt and the suite
  *  says so by name (a SKIP), never a green it did not earn. test-ci-gate §2n: a suite that probes a second Chrome is red. */
 export async function reachFrom(cdpPort, { timeoutMs = 20000 } = {}) {
@@ -144,6 +149,8 @@ export async function chromeReach(chromeBin, { args = [], env = process.env, dir
   fs.mkdirSync(dir, { recursive: true });
   // r3727: CHROME_QUIET's names rule refuses every name, the box's own too; the CONTROL proves the belt by reaching that one name,
   // so it gets it through the rule's allow list (`own`), the last copy of the switch (Chrome keeps the last) — never the rule left off
+  // (r3968) a caller's `args` come AFTER this rule, so a caller's own copy would win: NO caller hands one — test-https-hub-chrome and
+  // test-plugin-consent-chrome pass none; test-ci-gate's r1521 control plants a form with chromeBelt as TEXT, never launched
   const ch = spawn(chromeBin, [...CHROME_QUIET, chromeNames({ own: [os.hostname()] }), ...CHROME_STORE, ...args, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', env });
   try { return await reachFrom(cdpPort, { timeoutMs }); }
   finally {

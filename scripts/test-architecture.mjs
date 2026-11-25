@@ -2192,6 +2192,18 @@ await section(async () => {
     const scr = fs.readFileSync('scripts/scratch.mjs', 'utf8'), quietSrc = (/^export const CHROME_QUIET = Object\.freeze\((\[[^\]]*\])\)/m.exec(scr) || [])[1] || '';
     ok(/, chromeNames\(\)\]$/.test(quietSrc) && /'MAP \* \^NOTFOUND', 'EXCLUDE 127\.0\.0\.1', 'EXCLUDE \[::1\]', 'EXCLUDE localhost'/.test(scr) && /chromeNames\(\{ own: list \}\)/.test(scr),
       '§47d scripts/scratch.mjs: CHROME_QUIET ends with chromeNames() — every name mapped to «^NOTFOUND» (the vendor\'s literal) but the loopback\'s — and chromeBelt takes its rule from the same builder', quietSrc.slice(-60));
+    // r3968: THE BUILDER, run from its own text (a PURE function, no import of the harness): its order and its refusals
+    const nbAt = scr.indexOf('export const chromeNames = '), nbEnd = scr.indexOf('\n};\n', nbAt);
+    const nbSrc = nbAt >= 0 && nbEnd > nbAt ? scr.slice(nbAt + 'export const chromeNames = '.length, nbEnd + 2) : '';
+    const nbOf = (src) => { try { return new Function(`return (${src});`)(); } catch { return null; } };
+    const NB = nbOf(nbSrc), throwsOf = (f, arg) => { try { f(arg); return false; } catch { return true; } };
+    const ordered = (f) => { const r = f ? f({ map: { 'hub.test': '127.0.0.1' } }) : ''; const m = r.indexOf('MAP hub.test 127.0.0.1'), c = r.indexOf('MAP * ^NOTFOUND'); return m >= 0 && c > m; };
+    const BAD = [{ own: ['a b'] }, { own: ['x,y'] }, { own: ['*'] }, { own: ['*.example.com'] }, { map: { 'a,b.test': '127.0.0.1' } }, { map: { 'a.test': '127.0.0.1, MAP * 1.2.3.4' } }, { own: [''] }];
+    const NBswap = nbOf(nbSrc.replace("[...maps, 'MAP * ^NOTFOUND',", "['MAP * ^NOTFOUND', ...maps,")), NBloose = nbOf(nbSrc.replace("if (!v || /[\\s,]/.test(v) || (what === 'own' && v.includes('*'))) throw", 'if (false) throw'));
+    ok(!!NB && ordered(NB) && BAD.every((x) => throwsOf(NB, x)) && !throwsOf(NB, { map: { 'hub.test': '127.0.0.1' }, own: ['192.168.1.9', 'box-name'] }),
+      '§47d r3968 THE BUILDER: a suite\'s own map stands AHEAD of the catch-all (the vendor takes the FIRST matching MAP), and a name that would split the rule (a space, a comma) or open it (a star in own, an empty name) is refused by name — a plain address and a plain name are taken', JSON.stringify({ built: !!NB, ordered: ordered(NB), refused: NB ? BAD.map((x) => throwsOf(NB, x)) : null }));
+    ok(!!NBswap && !ordered(NBswap) && !!NBloose && BAD.some((x) => !throwsOf(NBloose, x)),
+      '§47d r3968 RED CONTROLS: the catch-all written FIRST reads out of order; the refusal cut lets a splitting name through — the legs above can fail', JSON.stringify({ swapOrdered: NBswap ? ordered(NBswap) : null, looseLets: NBloose ? BAD.filter((x) => !throwsOf(NBloose, x)).length : null }));
     const Ln = (src) => CS.launchesOf(src, { acorn }).launches[0] || {};
     const litOnly = Ln("const c = spawn(CHROME, ['--disable-background-networking', '--password-store=basic', '--headless=new', '--remote-debugging-port=0']);\n");
     const own = Ln("const c = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--host-resolver-rules=MAP * 127.0.0.1', '--headless=new', '--remote-debugging-port=0']);\n");
