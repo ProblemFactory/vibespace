@@ -995,11 +995,21 @@ const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 // heard of any of them.
 const queue = [];
 for (let i = 1; i <= 12; i++) queue.push({ id: 'iq' + i, clientUserMessageId: '1788731' + (200000 + i * 137) + '-inh' + i, input: [{ type: 'text', text: 'inherited message ' + i }] });
+// r4456 (the flake census): each commit twin is NOTED (a line in COMMITTED_FILE), a planted HOLD_TWINS keeps the steers' twins until
+// the suite removes it, and a planted MARK_FILE sends one marker item right after the twelfth — the suite waits on those facts
+const COMMITTED_FILE = __RPCLOG__.replace(/rpc\.jsonl$/, 'committed'), MARK_FILE = __RPCLOG__.replace(/rpc\.jsonl$/, 'mark-after-twins'), HOLD_TWINS = __RPCLOG__.replace(/rpc\.jsonl$/, 'hold-twins');
+let steerCommits = 0; const heldTwins = [];
 const commit = (q) => {
   // The commit is the app-server's, and it is LATE: on the owner's session the
   // twins arrived 42s after the steers' replies.
   send({ method: 'item/completed', params: { threadId: 'th-inh', turnId: activeTurn, item: { type: 'userMessage', id: 'um-' + (++committed), clientId: q.clientUserMessageId, content: q.input.map((x) => ({ ...x, text_elements: [] })) } } });
+  try { fs.appendFileSync(COMMITTED_FILE, String(q.clientUserMessageId) + '\\n'); } catch {}
 };
+const twin = (q) => {
+  commit(q);
+  if (++steerCommits === 12 && fs.existsSync(MARK_FILE)) send({ method: 'item/completed', params: { threadId: 'th-inh', turnId: activeTurn, item: { type: 'agentMessage', id: 'mark-after-twins', text: 'marker after the twelve twins', phase: 'final_answer' } } });
+};
+setInterval(() => { if (heldTwins.length && !fs.existsSync(HOLD_TWINS)) for (const q of heldTwins.splice(0)) twin(q); }, 40);
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => {
   b += d; let i;
@@ -1034,7 +1044,7 @@ process.stdin.on('data', (d) => {
       send({ id: m.id, result: { turnId: activeTurn } });
       // the steer LANDED; the commit twin follows later, out of band
       const q = { clientUserMessageId: m.params.clientUserMessageId, input: m.params.input };
-      setTimeout(() => commit(q), 200);
+      setTimeout(() => { if (fs.existsSync(HOLD_TWINS)) heldTwins.push(q); else twin(q); }, 200);
       continue;
     }
     send({ id: m.id, result: {} });
@@ -1071,16 +1081,23 @@ setInterval(() => {
   ok(await waitFor(() => I.meta()?.activeTurnId === 'turn-1'), 'a turn is running');
   ok(await waitFor(() => userRecs().length === 1), 'our own send has its bubble, written by handleInput as always');
 
+  // r4456: the commit twins HELD (placed) while the steers' bubbles are judged, then released and waited for by their own fact
+  const committedI = () => { try { return fs.readFileSync(path.join(I.dir, 'committed'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+  const markI = () => I.events().some((e) => JSON.stringify(e).includes('marker after the twelve twins'));
+  fs.writeFileSync(path.join(I.dir, 'hold-twins'), ''); fs.writeFileSync(path.join(I.dir, 'mark-after-twins'), '');
   I.send({ type: 'queue-op', op: 'steer-all' });
   ok(await waitFor(() => I.ops().filter((r) => r.op === 'steer' && r.ok).length === 12, 15000), `all twelve steer (${I.ops().filter((r) => r.op === 'steer').length})`);
+  ok(committedI() === 0, 'the hold placed: no commit twin has reached the wrapper while the steers\' bubbles are judged', { committed: committedI() });
   const inherited = () => userRecs().filter((r) => r.payload.webui_queue_id);
   ok(inherited().length === 12, `THE FIX: twelve steered messages, twelve bubbles — written AT THE STEER, not at the app-server's much later commit (${inherited().length})`, JSON.stringify(inherited().map((r) => r.payload.content[0].text)));
   ok(inherited().every((r, i) => r.payload.content[0].text === `inherited message ${i + 1}`), 'in queue order', JSON.stringify(inherited().map((r) => r.payload.content[0].text)));
   ok(inherited().every((r, i) => r.payload.webui_queue_id === `1788731${200000 + (i + 1) * 137}-inh${i + 1}`), 'each stamped with the submission id its queue row advertised');
   ok(I.ops().filter((r) => r.op === 'steer' && r.ok).every((r) => /-inh\d+$/.test(r.msg_id || '')), 'every steer result names the same id, so the chip can flip', JSON.stringify(I.ops().filter((r) => r.op === 'steer').slice(0, 2)));
-  // THE COMMIT TWINS land ~200ms later: they must add NOTHING (this is the
-  // dedupe that keeps one message one bubble when both producers speak).
-  await sleep(700);
+  // THE COMMIT TWINS land later: they must add NOTHING (this is the dedupe that
+  // keeps one message one bubble when both producers speak). r4456: released
+  // now, and the count read only once all twelve AND the marker after them are in
+  fs.unlinkSync(path.join(I.dir, 'hold-twins'));
+  ok(await waitFor(() => committedI() === 12 && markI(), 30000), 'harness: the twelve commit twins and the marker after them reached the wrapper (a 30 s bound — its expiry fails the dedupe leg here, never a silent count)', { committed: committedI(), mark: markI() });
   ok(inherited().length === 12, `the app-server's own item/completed twins add no second copy (${inherited().length})`, JSON.stringify(inherited().map((r) => r.payload.webui_queue_id)));
   ok(userRecs().length === 13, `thirteen user records for thirteen messages, no duplicates (${userRecs().length})`);
   ok(!userRecs().some((r) => r.payload.webui_queue_id && r.payload.webui_msg_id), 'a record carries ONE identity — the queue id or the webui msgId, never both');
@@ -1186,10 +1203,16 @@ setInterval(() => {
       await waitFor(() => meta2()?.threadId === 'th-inh');
       p2.stdin.write(JSON.stringify({ type: 'chat-input', text: 'typed here', msgId: 'own-1' }) + '\n');
       await waitFor(() => meta2()?.activeTurnId === 'turn-1');
+      // r4456: the twins HELD (placed) until the steers are all in, then a marker after the twelfth — the count waits on that fact
+      const committedOf = () => { try { return fs.readFileSync(path.join(cd, 'committed'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+      const markSeen = () => ev2().some((e) => JSON.stringify(e).includes('marker after the twelve twins'));
+      fs.writeFileSync(path.join(cd, 'hold-twins'), ''); fs.writeFileSync(path.join(cd, 'mark-after-twins'), '');
       p2.stdin.write(JSON.stringify({ type: 'queue-op', op: 'steer-all' }) + '\n');
       await waitFor(() => ops2().filter((r) => r.op === 'steer' && r.ok).length === 12, 15000);
-      await sleep(900);   // long enough for every commit twin to have arrived
       ok(ops2().filter((r) => r.op === 'steer' && r.ok).length === 12, 'PRE-FIX CONTROL: the shipped wrapper steers all twelve too — the messages DID enter the turn');
+      ok(committedOf() === 0 && users2().length === 1, 'PRE-FIX CONTROL, THE HOLD PLACED: no commit twin has reached the wrapper yet — a count read now (the old fixed sleep) would see one bubble whether the twins are dropped or not', { committed: committedOf(), users: users2().length });
+      fs.unlinkSync(path.join(cd, 'hold-twins'));
+      ok(await waitFor(() => committedOf() === 12 && markSeen(), 30000), 'harness: the twelve commit twins and the marker after them reached the wrapper (a 30 s bound — its expiry fails the pre-fix control here, never a silent count)', { committed: committedOf(), mark: markSeen() });
       ok(users2().length === 1, `PRE-FIX CONTROL: …and renders ONE bubble, the message typed here — exactly the owner's report ("我只能看到我最后插入的一条消息") (${users2().length})`, JSON.stringify(users2().map((r) => r.payload.content?.[0]?.text)));
       ok(!/unhandled item kind/.test((() => { try { return fs.readFileSync(path.join(cd, 'codex-chat-wrapper.log'), 'utf8'); } catch { return ''; } })()),
         '…and said nothing about the twelve item kinds it dropped — the silence this fix also closes');
@@ -1207,6 +1230,9 @@ setInterval(() => {
 console.log('— ⑦ reorder / edit / run-now / run-all against a paginating stub');
 const STUB_VERBS = `
 const fs = require('fs');
+// r4456 (the flake census): a planted HOLD_UPDATE keeps thread/queue/update's replies until the suite removes it
+const HOLD_UPDATE = __INJECT__.replace(/\.json$/, '.hold-update'); const heldUpdates = [];
+setInterval(() => { if (heldUpdates.length && !fs.existsSync(HOLD_UPDATE)) for (const r of heldUpdates.splice(0)) { send(r); changed(); } }, 40);
 let b = ''; let turns = 0; let queue = []; let qseq = 0; let activeTurn = null;
 const PAGE = 2;
 const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
@@ -1265,7 +1291,9 @@ process.stdin.on('data', (d) => {
       const at = queue.findIndex((q) => q.id === m.params.queuedSubmissionId);
       if (at < 0) { send({ id: m.id, error: { code: -32600, message: 'queued submission not found: ' + m.params.queuedSubmissionId } }); continue; }
       queue[at] = { ...queue[at], input: m.params.input };
-      send({ id: m.id, result: { queuedSubmission: queue[at] } }); changed(); continue;
+      const reply = { id: m.id, result: { queuedSubmission: queue[at] } };
+      if (fs.existsSync(HOLD_UPDATE)) { heldUpdates.push(reply); continue; }   // r4456: the reply HELD until the suite removes the file
+      send(reply); changed(); continue;
     }
     if (m.method === 'thread/queue/start') {
       const qid = m.params.queuedSubmissionId;
@@ -1391,10 +1419,18 @@ process.stdin.on('data', (d) => {
     ok(await waitFor(() => V.lastQueue().some((i) => i.msgId === 'v-noop')), 'a second typed message is queued');
     const same = V.lastQueue().find((i) => i.msgId === 'v-noop');
     const beforeNoop = rpcOf('thread/queue/update').length;
+    // r4456: the no-op edit's own result is what the verdict waits for — the wrapper records any retraction BEFORE that result
+    // (test-queue-steer-pins pins the order); the update's reply HELD first, so the old read (an earlier edit's ok, a fixed sleep)
+    // is shown to come before the edit has answered
+    const holdUpdate = injectFile.replace(/\.json$/, '.hold-update');
+    const ownOp = () => V.ops().find((r) => r.op === 'edit' && r.id === same.id) || null;
+    fs.writeFileSync(holdUpdate, '');
     V.send({ type: 'queue-op', op: 'edit', id: same.id, text: 'pong' });
     ok(await waitFor(() => rpcOf('thread/queue/update').length > beforeNoop && lastOp('edit')?.ok === true), 'a no-op save still goes out as an update RPC (the verb is honoured either way)');
-    await sleep(300);
-    ok(!retractions().some((r) => r.msg_id === 'v-noop'), 'NEGATIVE CONTROL: an edit that changes NOTHING keeps the claim — the twin still collapses', JSON.stringify(retractions()));
+    ok(ownOp() === null, 'THE HOLD PLACED: the update RPC is out and the last edit result reads ok (v-edit\'s, earlier) — while the no-op edit itself has not answered yet', V.ops().filter((r) => r.op === 'edit'));
+    fs.unlinkSync(holdUpdate);
+    ok(await waitFor(() => ownOp() !== null, 30000), 'harness: the no-op edit\'s own op result came (a 30 s bound — its expiry fails the negative control here, never a silent read)', V.ops().filter((r) => r.op === 'edit'));
+    ok(ownOp().ok === true && !retractions().some((r) => r.msg_id === 'v-noop'), 'NEGATIVE CONTROL: an edit that changes NOTHING keeps the claim — the twin still collapses (judged after the edit\'s own result)', JSON.stringify({ op: ownOp(), retractions: retractions() }));
     // (d) THE REBUILD, from the wrapper's REAL records: the server preview
     // (built by the REAL adapter from the same frame ws-handler saw) + the
     // wrapper's copy + the retraction, merged with the rollout a codex that
