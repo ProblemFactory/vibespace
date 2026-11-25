@@ -1277,13 +1277,13 @@ leg('§3 REAL ㊹ ONE SIGNAL PER PID PER STOP STEP — a main that cleans up 0.3
 leg('§3 REAL ㊹c B-c134 A STOP ENDS THE WHOLE TREE, ONE SIGNAL A PROCESS — a child the job started with setsid env -i (outside its group, without its mark) cleans up 0.3 s on its first signal and dies on a second: the engine\'s stop, on the pod\'s rung and the cgroup rung — it hears ONE SIGTERM, ends gracefully, nothing of it is left', async () => {
   const rungs = [...(realOf('prlimit') ? ['rlimit-data'] : []), ...(userSystemd ? ['cgroup'] : [])];
   if (!rungs.length) { skip++; ok.say('  - SKIP the tree leg: neither prlimit nor a user systemd here'); return; }
-  const SIGKID = (f, pf) => `const fs=require('fs'),f=${JSON.stringify(f)},log=(s)=>fs.appendFileSync(f,Date.now()+' '+s+'\\n');fs.writeFileSync(${JSON.stringify(pf)},String(process.pid));let g=false;for(const s of ['SIGINT','SIGTERM','SIGHUP'])process.on(s,()=>{log(s);if(g){log('hard-exit');process.exit(143)}g=true;setTimeout(()=>{log('graceful-exit');process.exit(0)},300)});setInterval(()=>{},1000);`;
+  const SIGKID = (f, pf) => `const fs=require('fs'),f=${JSON.stringify(f)},log=(s)=>fs.appendFileSync(f,Date.now()+' '+s+'\\n');let g=false;for(const s of ['SIGINT','SIGTERM','SIGHUP'])process.on(s,()=>{log(s);if(g){log('hard-exit');process.exit(143)}g=true;setTimeout(()=>{log('graceful-exit');process.exit(0)},300)});fs.writeFileSync(${JSON.stringify(pf)},String(process.pid));setInterval(()=>{},1000);`;   // r4408: its pid written AFTER its handlers — the leg's own fact that the child is ready for the stop
   const one = async (rung) => {
     const dir = scratch(), f = path.join(dir, 'tree.signals'), pf = path.join(dir, 'tree.pid'), kid = path.join(dir, 'kid.js');
     fs.writeFileSync(kid, SIGKID(f, pf));
     const E = engineIn(dir)({ memoryRungs: [rung], memorySample: { stopMs: 2000 } });
     const j = E.jobs.get(E.create({ kind: 'task', name: `tree-${rung}`, cmd: { argv: ['sh', '-c', `setsid env -i ${NODE} ${kid} & wait`] }, memoryMb: 1024, owner }, caller).job.id);
-    await fact(() => ready(j) && fs.existsSync(pf), 'the job\'s «ready» before the leg acts (wait 10 of 10)');
+    await fact(() => fs.existsSync(pf), '(㊹c) the setsid child up — its pid written after its handlers');   // r4408 (box row 824): this job prints no «ready» — the old wait expired silently after 6 s and went on; the fact is the child's own pid file
     const st = E._readStamp(j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
     const kp = Number(fs.readFileSync(pf, 'utf8')) || 0;
     E.stop(j);
