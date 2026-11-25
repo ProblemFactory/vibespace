@@ -14,11 +14,17 @@
 //   ⑥ (r1316) THE BOUND: a pool that never answers — the ask answers «not sampled» at its bound, a second ask joins that flight (no
 //      new reads); RED: a copy without the bound never answers
 //   ④ CENSUS: no synchronous read left in the sample
+// r4212 (the 2.369.419 candidate's hosted run 45584145109: ② red on BOTH tries in the Node 24 fast job, one of four parallel lanes
+// at load 6.1 on a four-core runner; green in the Node 22 job): ② judges two clocks, so the suite runs in the fast tier's SERIAL
+// lane (scripts/ci.mjs FAST_SERIAL: after the parallel lanes drain, alone); its number is unchanged; and ② PRINTS what tells a
+// hold from a stray stall (they judge nothing): the slice out when the longest gap closed and the stat reads started inside it
+// (a slice starts its 128 reads in ONE turn, the turn that parsed the slice before it), how many gaps passed the bound and how
+// many of those held a slice's start, and the collector's pauses inside the timed window (perf_hooks «gc» entries)
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { performance } from 'node:perf_hooks';
+import { performance, PerformanceObserver } from 'node:perf_hooks';
 import { anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
@@ -78,12 +84,33 @@ else {
   const pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number);
   const ROWS = 2400;
   const rowsOf = () => Array.from({ length: ROWS }, (_, i) => ({ pid: pids[i % pids.length], rss: i, pcpu: 0 }));
-  const gapOf = async (fn) => { let last = performance.now(), max = 0; const t = setInterval(() => { const n = performance.now(); max = Math.max(max, n - last); last = n; }, 1); const t0 = performance.now(); let out; try { out = await fn(); } finally { clearInterval(t); } max = Math.max(max, performance.now() - last); return { max: +max.toFixed(1), took: +(performance.now() - t0).toFixed(1), out }; };
-  const run = async (Mod) => { const a = rowsOf(); await Mod.sampleProcCpu(a); await new Promise((r) => setTimeout(r, 30)); const b = rowsOf(); const g = await gapOf(() => Promise.resolve(Mod.sampleProcCpu(b))); return { max: g.max, took: g.took, sampled: g.out, live: b.filter((r) => typeof r.pcpuNow === 'number').length }; };
-  const rel = await run(REL), mine = await run(SI);
+  // r4212's prints: every stat read counted on the shared fs.promises.readFile (as ⑤ does; the product reads through it), every
+  // gap the meter takes kept with the reads started when it closed, the collector's pauses observed over this tree's run
+  let statReads = 0;
+  const rfm = fs.promises.readFile;
+  fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && p.startsWith('/proc/') && p.endsWith('/stat')) statReads++; return rfm.call(this, p, ...a); };
+  const gcs = [], gcObs = new PerformanceObserver((list) => { for (const e of list.getEntries()) gcs.push({ start: e.startTime, end: e.startTime + e.duration }); });
+  const gapOf = async (fn) => { const r0 = statReads, gaps = []; let last = performance.now(), max = 0; const t = setInterval(() => { const n = performance.now(); gaps.push({ ms: n - last, reads: statReads - r0, at: n }); max = Math.max(max, n - last); last = n; }, 1); const t0 = performance.now(); let out; try { out = await fn(); } finally { clearInterval(t); } const tail = performance.now(); gaps.push({ ms: tail - last, reads: statReads - r0, at: tail }); max = Math.max(max, tail - last); return { max: +max.toFixed(1), took: +(performance.now() - t0).toFixed(1), out, gaps, from: t0 }; };
+  const run = async (Mod) => { const a = rowsOf(); await Mod.sampleProcCpu(a); await new Promise((r) => setTimeout(r, 30)); const b = rowsOf(); const g = await gapOf(() => Promise.resolve(Mod.sampleProcCpu(b))); return { max: g.max, took: g.took, sampled: g.out, live: b.filter((r) => typeof r.pcpuNow === 'number').length, gaps: g.gaps, from: g.from }; };
+  let rel, mine;
+  try {
+    rel = await run(REL);
+    gcObs.observe({ entryTypes: ['gc'] });
+    mine = await run(SI);
+    await new Promise((r) => setTimeout(r, 20));   // a pause's entry reaches the observer a turn or two after it (the prints only)
+    for (const e of (typeof gcObs.takeRecords === 'function' ? gcObs.takeRecords() : [])) gcs.push({ start: e.startTime, end: e.startTime + e.duration });
+  } finally { gcObs.disconnect(); fs.promises.readFile = rfm; }
   ok(rel.max >= rel.took * 0.8, `CONTROL (the release's synchronous sample, in a copy): the loop is HELD for the whole sample — its longest gap ${rel.max} ms of its ${rel.took} ms (one turn) over ${ROWS} stat files`);
   say(`    the sample's wall time at ${ROWS} rows (slices of ${SI.SAMPLE_SLICE}): ${mine.took} ms off the loop; the release's ${rel.took} ms in one turn`);
   ok(mine.max < rel.max / 3 && mine.max < mine.took / 2, `this tree: the reads off the loop, in slices of ${SI.SAMPLE_SLICE} — the longest gap ${mine.max} ms of its ${mine.took} ms, under a third of the release's ${rel.max} ms measured in this run`);
+  {   // r4212: what tells a hold from a stray stall (they judge nothing): a hold shows at EVERY slice's start, a stray stall in one gap
+    const slices = Math.ceil(ROWS / SI.SAMPLE_SLICE), bound = rel.max / 3;
+    const gaps = mine.gaps.map((g, i) => ({ ms: g.ms, at: g.at, started: g.reads - (i ? mine.gaps[i - 1].reads : 0), slice: Math.ceil(g.reads / SI.SAMPLE_SLICE) }));
+    const top = gaps.reduce((a, b) => (b.ms > a.ms ? b : a)), over = gaps.filter((g) => g.ms > bound);
+    const inside = (e, from, to) => Math.max(0, Math.min(to, e.end) - Math.max(from, e.start));
+    const gcIn = gcs.map((e) => inside(e, mine.from, mine.from + mine.took)).filter(Boolean), gcTop = gcs.reduce((s, e) => s + inside(e, top.at - top.ms, top.at), 0);
+    say(`    what tells a hold from a stray stall (r4212, ${process.version}): the longest gap ${top.ms.toFixed(1)} ms closed while slice ${top.slice} of ${slices} was out, ${top.started} stat reads started inside it (${top.started ? (top.slice > 1 ? `the turn that parsed slice ${top.slice - 1} and started slice ${top.slice}` : 'the call that started slice 1') : 'no slice started in it'}); ${over.length} of ${gaps.length} gaps over the bound ${bound.toFixed(1)} ms, ${over.filter((g) => g.started).length} of them at a slice\'s start; the collector inside the timed window: ${gcIn.length} pause(s), ${gcIn.reduce((s, x) => s + x, 0).toFixed(1)} ms, ${gcTop.toFixed(1)} ms of them inside the longest gap`);
+  }
   ok(mine.sampled === true && rel.sampled === true && mine.live > 0 && rel.live > 0, `both sample the table (${mine.live} / ${rel.live} rows carry a live CPU %: a pid's FIRST row of a run reads the last run's — the rows cycle ${pids.length} pids, and a process may end between the runs)`);
   for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 1, label: 'B-360d sample ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }

@@ -5038,6 +5038,7 @@ export const FAST_SERIAL = [
   { name: 'test-channel-blocks', why: 'clock: ⑬ ⑯ judge every hostile shape ≤ 150 × the rung\'s benign walk (CPU) and its controls past it; ⑱ a 1 MB post ≤ 8 × the post at the bound (its linear pin + control are WORK since .209)' },
   { name: 'test-auto-cli-tick-reads', why: 'clock: the tick\'s synchronous hold of the loop is judged ≤ 1/5 of the reverted tick\'s in the same run (and that control > 1 s)' },
   { name: 'test-raw-filename', why: 'waits: a real ssh child must end inside 3 s of the viewer leaving (its control stays blocked 2 s) — waits a loaded parallel lane can spend; no ms is judged since lane wall-clock-ratchet-down (a 502 is an answer, a hang reads `no answer`)' },
+  { name: 'test-sysinfo-sample', why: 'clock: ② judges the loop\'s longest gap while the CPU sample reads 2 400 stat files off the loop against a third of the release\'s synchronous sample measured in the same run, two clocks; the 2.369.419 candidate\'s hosted run read it red on both tries on Node 24 as one of four lanes at load 6.1 (the coordinator\'s r4212: alone, its number unchanged; it prints what tells a hold from a stray stall)' },
   { name: 'test-fixture-isolation', last: true, why: 'LAST ON PURPOSE: the standing sweep for fixture litter in the real ~/.claude/projects runs after every suite that could write one' },
 ];
 // THE CLOCK-JUDGE CENSUS (lane work-meter-judges, .209): a COMPLEXITY claim (linear / quadratic / bounded) is judged
