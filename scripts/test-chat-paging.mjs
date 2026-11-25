@@ -124,7 +124,7 @@ for (const f of ['src', 'public', 'server.js']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 // UNMINIFIED bundle for the worktree: scrollTop-write stacks must carry real
 // function names so each jump can be attributed to its exact call site.
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });

@@ -89,7 +89,7 @@ const mkTree = (name, levers = []) => {
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(t, 'node_modules'));
   const G = ['-c', 'user.name=suite', '-c', 'user.email=suite@example.invalid'];
   execFileSync('git', ['init', '-q'], { cwd: t }); execFileSync('git', ['add', '-A'], { cwd: t }); execFileSync('git', [...G, 'commit', '-qm', name], { cwd: t });
-  execSync('npm run build', { cwd: t, stdio: 'ignore' });
+  execSync('npm run build:bundles', { cwd: t, stdio: 'ignore' });
   fs.mkdirSync(path.join(t, 'data'), { recursive: true });
   return t;
 };

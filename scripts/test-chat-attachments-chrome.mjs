@@ -34,7 +34,7 @@ try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore'
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'data/bin']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 // a REAL picture (1×1 PNG) under a temporary folder, read by the agent; the transcript keeps its bytes (the CLI's own shape)
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4c10000000049454e44ae426082', 'hex');

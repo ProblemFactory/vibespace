@@ -399,7 +399,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
   // script the build serves, each built here in memory — never a line:column written down (a rebuild moves it).
   console.log('③e every script the app serves with a DOMPurify is in the judge\'s table (app-csp PARSE_SCRIPTS) — mermaid.js\'s own parse is the sanitizer\'s; its other lines, and another script\'s site, are the app\'s');
   {
-    const steps = String(JSON.parse(readRepo('package.json')).scripts.build).split('&&').map((x) => x.trim());
+    const steps = (({ scripts: s }) => [s['build:bundles'], s.build].filter(Boolean).join(' && '))(JSON.parse(readRepo('package.json'))).split('&&').map((x) => x.trim());   // B-c27e: build = build:bundles + the checks
     /** an esbuild CLI step → API options; a flag the census does not know throws (a silent difference would read other bytes) */
     const optsOf = (step) => {
       const a = step.split(/\s+/), o = { entryPoints: [a[1]], loader: {} };

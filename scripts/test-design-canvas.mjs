@@ -824,7 +824,7 @@ console.log('⑥b wiring pins — the Design window');
 console.log('⑥c the published page\'s runtime (the second esbuild entry)');
 {
   const pkg = JSON.parse(read('package.json'));
-  ok(/ && esbuild src\/design-viewer-entry\.js --bundle --outfile=public\/design-viewer\.js --format=iife --platform=browser --target=es2020 --minify && /.test(pkg.scripts.build), 'npm run build writes public/design-viewer.js (an IIFE: the hub inlines it into a <script>)');
+  ok(/ && esbuild src\/design-viewer-entry\.js --bundle --outfile=public\/design-viewer\.js --format=iife --platform=browser --target=es2020 --minify && /.test(pkg.scripts['build:bundles']), 'npm run build writes public/design-viewer.js (an IIFE: the hub inlines it into a <script>)');
   ok(/^public\/design-viewer\.js$/m.test(read('.gitignore')) && /^public\/novnc\.js$/m.test(read('.gitignore')), 'the built runtime is gitignored like public/novnc.js (the precedent)');
   const e = read('src/design-viewer-entry.js');
   const ec = codeOnly(e);

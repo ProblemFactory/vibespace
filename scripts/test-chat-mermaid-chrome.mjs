@@ -65,7 +65,7 @@ for (const f of ['src', 'public', 'server.js', 'package.json', 'scripts', 'docs'
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const tBuild = Date.now();
-try { execSync('npm run build', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(String(e.stdout || '').split('\n').filter((l) => /✗|FAIL|rror/.test(l)).slice(0, 8).join('\n')); throw e; }
+try { execSync('npm run build:bundles', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(String(e.stdout || '').split('\n').filter((l) => /✗|FAIL|rror/.test(l)).slice(0, 8).join('\n')); throw e; }
 const MERMAID_JS = path.join(wt, 'public', 'mermaid.js');
 check(`the build made public/mermaid.js (${Math.round((Date.now() - tBuild) / 1000)} s build)`, fs.existsSync(MERMAID_JS));
 const rawBytes = fs.statSync(MERMAID_JS).size, gzBytes = require('node:zlib').gzipSync(fs.readFileSync(MERMAID_JS), { level: 9 }).length;

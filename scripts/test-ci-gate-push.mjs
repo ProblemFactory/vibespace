@@ -429,7 +429,7 @@ console.log('\n§4 the pre-push hook, end to end');
     // documentation TODAY (measured: 0 of the five), which is a fact that can
     // change with one commit, and the derivation is the thing that would
     // notice.
-    const buildCmd = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf-8')).scripts.build || '';
+    const buildCmd = (({ scripts: s }) => [s['build:bundles'], s.build].filter(Boolean).join(' && '))(JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf-8')));   // B-c27e: the whole chain
     const buildScripts = [...new Set([...String(buildCmd).matchAll(/scripts\/([A-Za-z0-9._-]+)\.mjs/g)].map((m) => m[1]))];
     ok(buildScripts.length >= 4 && buildScripts.includes('test-architecture'),
       `\`npm run build\`'s own chained scripts are in the scan set (${buildScripts.length}: ${buildScripts.join(', ')}) — the fast tier is build + suites`);
@@ -732,6 +732,44 @@ console.log('\n§5 the detached child\'s git environment');
   // Leave no worktree registrations behind in the throwaway repos.
   for (const [root, wt] of [[ours, wt1], [ours, wt2], [decoy, wt2]]) { try { spawnSync('git', ['-C', root, 'worktree', 'remove', '--force', wt], { env: GIT_ENV }); } catch {} }
 }
+  // B-c27e (lane bl-ci, 主开发 r4377): THE BUILD's TWO HALVES. `build:bundles` holds every step that WRITES an output (the i18n check, the
+  // build version, the bundles, noVNC, the device bundle); `build` is it followed by the four chained CHECKS and nothing else, so a
+  // person's `npm run build`, the installer and the updater do exactly what they did. A suite that builds in a worktree of its own asks
+  // `build:bundles` (the checks write nothing; each tier runs them once, inside its own `npm run build`).
+  console.log('\n§B-c27e the build\'s two halves — build:bundles writes, build checks; no suite builds whole in a worktree of its own');
+  {
+    const CHECKS = ['node scripts/test-bundle-globals.mjs', 'node scripts/test-architecture.mjs', 'node scripts/test-ws-contract.mjs', 'node scripts/test-session-schema.mjs'];
+    const halves = (sc) => {
+      const out = [], steps = String((sc && sc['build:bundles']) || '').split(' && ');
+      if ((sc && sc.build) !== ['npm run build:bundles', ...CHECKS].join(' && ')) out.push(`build is not «npm run build:bundles» followed by the four checks alone: ${String(sc && sc.build).slice(0, 160)}`);
+      if (steps.some((x) => /^node scripts\/test-/.test(x))) out.push('a check stands inside build:bundles');
+      if (!steps.some((x) => /^esbuild src\/client\.js\s/.test(x)) || !steps.includes('npm run build:agentd') || !steps.includes('node scripts/i18n-check.mjs')) out.push('build:bundles lacks a writer it must hold (the client bundle, the device bundle, the i18n check)');
+      return out;
+    };
+    const PKG = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf-8'));
+    const now = halves(PKG.scripts), planted = halves({ ...PKG.scripts, build: PKG.scripts.build + ' && esbuild src/x-entry.js --bundle --outfile=public/x.js' });
+    ok(now.length === 0, `(1) THE TWO HALVES: build ≡ build:bundles then the four checks and nothing else; every writer stands in build:bundles (${String(PKG.scripts['build:bundles'] || '').split(' && ').length} steps)${now.length ? ' — ' + now.join(' · ') : ''}`);
+    ok(planted.length === 1 && /four checks alone/.test(planted[0]), `(1) CONTROL: a writer added to build alone is red by name (${planted.length})`);
+    // (2) THE CENSUS: a suite that runs the WHOLE build script (`npm run build`, the chain with its checks) with a cwd of its own is red by
+    // name — a worktree or scratch asks build:bundles. NEEDS_CHECKS would name a suite that truly needs the checks there, with its reason:
+    // none today. (A planted text — a string in a suite — whose call has no `cwd:` of its own is no call of this census.)
+    const NEEDS_CHECKS = {};
+    const BUILD_CALL = /(?:execSync|execFileSync|spawnSync|spawn|execFile|exec)\(\s*(?:(['"`])npm run build\1|['"]npm['"]\s*,\s*\[\s*['"]run['"]\s*,\s*['"]build['"]\s*\])([^\n]*)/g;
+    const BUNDLES_CALL = /(?:execSync|execFileSync|spawnSync|spawn|execFile|exec)\(\s*(?:(['"`])npm run build:bundles\1|['"]npm['"]\s*,\s*\[\s*['"]run['"]\s*,\s*['"]build:bundles['"]\s*\])/g;
+    const whole = (name, src) => [...src.matchAll(BUILD_CALL)].filter((m) => { const c = /\bcwd:\s*([A-Za-z_$][\w$.]*)/.exec(m[2] || ''); return !!c && !/^(REPO|repo|ROOT)$/.test(c[1]); }).map(() => name);
+    const files = fs.readdirSync(path.join(REPO, 'scripts')).filter((n) => /^test-.*\.mjs$/.test(n));
+    let calls = 0; const red = [];
+    for (const f of files) { const src = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf-8'), n = f.slice(0, -4); calls += (src.match(BUNDLES_CALL) || []).length; for (const w of whole(n, src)) if (!NEEDS_CHECKS[w]) red.push(w); }
+    ok(red.length === 0 && calls >= 40, `(2) THE CENSUS: ${files.length} suites read — ${calls} build:bundles calls in a worktree of their own, ${red.length} building the whole chain there${red.length ? ': ' + [...new Set(red)].join(', ') : ''}; needing the checks there: ${Object.keys(NEEDS_CHECKS).length}`);
+    const PLANT = "const wt = 'x';\nexecSync('npm run " + "build', { cwd: wt, stdio: 'ignore' });\n";
+    ok(whole('test-zz-planted', PLANT).length === 1, '(2) CONTROL: a planted suite that runs the whole build in its worktree is red by name');
+    // (3) EACH TIER RUNS THE FOUR CHECKS ONCE, BY NAME: ci.mjs runBuild spawns the whole `npm run build`; the fast gate and the heavy gate
+    // each call it once on their tree (the hosted jobs run those gates)
+    const CI = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+    ok(CI.includes("const r = spawnSync('npm', ['run', " + "'build'], { cwd,") &&   // (the anchor in two pieces: this file's own census reads no call in it)
+       (CI.match(/\brunBuild\(\{ cwd: runRoot\b/g) || []).length === 2 && !CI.includes('build:bundles'),
+      '(3) EACH TIER RUNS THE FOUR CHECKS ONCE: runBuild spawns the whole «npm run build» (its chain ends in the four checks), the fast and the heavy gate each call it on their tree, and the gate never asks build:bundles');
+  }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

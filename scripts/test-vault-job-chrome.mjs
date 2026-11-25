@@ -45,7 +45,7 @@ const until = async (fn, ms = 20000, step = 200) => { const t = Date.now() + ms;
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'scripts']) { execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`); }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 // ── THE SEED, before the first boot — in a CHILD that exits (the jobs registry's lock goes with it) ──
 const dataDir = path.join(wt, 'data');

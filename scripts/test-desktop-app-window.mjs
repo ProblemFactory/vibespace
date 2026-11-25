@@ -110,7 +110,7 @@ for (const f of ['src', 'public', 'server.js']) { execSync(`rm -rf ${wt}/${f} &&
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'desktop.backendPrefs': 'vnc-display, xpra, desktop-singleton' })); // the pin (see the header)
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 // §E's SHARE legs need an agent the SERVER runs (the .195 merge: since lane channel-withdraw verify r6 the Share dialog
 // sends a session by its LIVE webui id and the engine spells the durable key — a client-only roster entry is refused

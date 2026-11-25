@@ -82,7 +82,7 @@ execFileSync('sh', ['-c', `git -C ${S(REPO)} archive HEAD | tar -x -C ${S(WT)}`]
 for (const f of ['src', 'public', 'docs', 'server.js', 'package.json']) execFileSync('sh', ['-c', `rm -rf ${S(path.join(WT, f))} && cp -r ${S(path.join(REPO, f))} ${S(path.join(WT, f))}`]);
 execFileSync('sh', ['-c', `cp -r ${S(path.join(REPO, 'data/bin') + '/.')} ${S(path.join(WT, 'data/bin'))}`]);
 fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(WT, 'node_modules'));
-const buildSteps = JSON.parse(fs.readFileSync(path.join(WT, 'package.json'), 'utf8')).scripts.build.split(' && ').filter((x) => !/^node scripts\//.test(x)); // the bundles + agentd; the chained suites gate the tree in the repo, not here
+const buildSteps = JSON.parse(fs.readFileSync(path.join(WT, 'package.json'), 'utf8')).scripts['build:bundles'].split(' && ').filter((x) => !/^node scripts\//.test(x)); // the bundles + agentd; the chained suites gate the tree in the repo, not here
 const tb = Date.now();
 execFileSync('sh', ['-c', buildSteps.join(' && ')], { cwd: WT, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, HOME, PATH: path.join(WT, 'node_modules/.bin') + ':' + process.env.PATH } });
 console.log(`[design-window] root ${ROOT} · tree HEAD ${HEAD.slice(0, 8)} + the working tree · built in ${((Date.now() - tb) / 1000).toFixed(1)} s · design-viewer.js ${(fs.statSync(path.join(WT, 'public/design-viewer.js')).size / 1024).toFixed(1)} KB`);

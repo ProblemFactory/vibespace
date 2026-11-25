@@ -118,10 +118,10 @@ console.log('④ scripts/symbolicate.mjs end to end');
   const realOpts = SY.clientBuildOptions(realPkg);
   ok('clientBuildOptions reads the REAL package.json client step (bundle, minify, iife, public/bundle.js, the .css loader)', realOpts.bundle && realOpts.minify && realOpts.format === 'iife' && realOpts.outfile === 'public/bundle.js' && realOpts.loader['.css'] === 'css', realOpts);
   // 主开发's ruling (2026-10-21): the flags are PARSED off the build script at run time — never a copied list
-  const realStep = realPkg.scripts.build.split('&&').map((s) => s.trim()).find((s) => s.startsWith('esbuild src/client.js'));
+  const realStep = [realPkg.scripts['build:bundles'], realPkg.scripts.build].filter(Boolean).join(' && ').split('&&').map((s) => s.trim()).find((s) => s.startsWith('esbuild src/client.js'));
   const stepFlags = realStep.split(/\s+/).slice(2).sort();
   ok(`CENSUS: the parsed flags ARE the build script's client step (${stepFlags.length}: ${stepFlags.join(' ')})`, JSON.stringify(SY.flagsOf(realOpts)) === JSON.stringify(stepFlags), { parsed: SY.flagsOf(realOpts), script: stepFlags });
-  const moved = SY.clientBuildOptions({ scripts: { build: realPkg.scripts.build.replace(/--target=\S+/, '--target=es2022') } });
+  const moved = SY.clientBuildOptions({ scripts: { build: [realPkg.scripts['build:bundles'], realPkg.scripts.build].filter(Boolean).join(' && ').replace(/--target=\S+/, '--target=es2022') } });
   ok('MUTANT: the build line changed (--target=es2022) ⇒ the parse follows it — nothing to drift', moved.target === 'es2022' && JSON.stringify(SY.flagsOf(moved)) !== JSON.stringify(SY.flagsOf(realOpts)), SY.flagsOf(moved));
   const symSrc = read('scripts/symbolicate.mjs');
   const symCode = symSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -132,7 +132,7 @@ console.log('④ scripts/symbolicate.mjs end to end');
   let threw = '';
   try { SY.clientBuildOptions({ scripts: { build: 'esbuild src/client.js --bundle --outfile=public/bundle.js --define:x=1' } }); } catch (e) { threw = e.message; }
   ok('CONTROL: a flag the tool does not know throws (a silent difference would map other bytes)', /does not know: --define:x=1/.test(threw), threw);
-  const step = realPkg.scripts.build.split('&&').map((s) => s.trim()).find((s) => s.startsWith('esbuild src/client.js'));
+  const step = [realPkg.scripts['build:bundles'], realPkg.scripts.build].filter(Boolean).join(' && ').split('&&').map((s) => s.trim()).find((s) => s.startsWith('esbuild src/client.js'));
   fs.writeFileSync(path.join(CK, 'package.json'), JSON.stringify({ name: 'sym-fixture', scripts: { build: step } }));
   fs.writeFileSync(path.join(CK, 'src/lib/rings.js'), [
     '// the fixture: a renderer that reads a missing list',

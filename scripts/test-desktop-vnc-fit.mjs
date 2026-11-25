@@ -58,7 +58,7 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 // the pin: xpra wins the default ladder when installed — this suite drives the vnc-display rung (a reorder, nothing falls)
 fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'desktop.backendPrefs': 'vnc-display, xpra, desktop-singleton' }));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 // a PATH with NO Xvnc/Xtigervnc: every other executable of the real PATH symlinked into one dir (the FIXED leg's knob — a test-only environment, never a setting)
 const noVncBin = scratch('deskfit-novnc-bin');

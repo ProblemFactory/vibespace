@@ -44,7 +44,7 @@ for (const f of ['src', 'public', 'server.js']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 const SID_LOCAL = '11111111-2222-3333-4444-555555555555';
 const SID_CACHED = '66666666-7777-8888-9999-aaaaaaaaaaaa';

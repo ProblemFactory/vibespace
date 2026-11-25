@@ -137,7 +137,7 @@ try {
     const wf = path.join(wts, 'src/lib/desktop-app-window.js'); const src9 = fs.readFileSync(wf, 'utf8');
     check('B-92aa stall: the relaunch fit\'s call is spelled exactly once (the copy holds exactly it)', src9.split(FROM).length === 2);
     fs.writeFileSync(wf, src9.replace(FROM, TO));
-    rebaseline(wts); execSync('npm run build', { cwd: wts, stdio: 'ignore' });
+    rebaseline(wts); execSync('npm run build:bundles', { cwd: wts, stdio: 'ignore' });
     const [PORTS] = await freePorts(1);
     const homeS = scratchHome('deskxpra-stall-home', fs);
     const ss = spawnCopy('the stalled-fit copy', wts, { ...srvEnv, PORT: String(PORTS), HOME: homeS }); ctlServers.push(ss);

@@ -134,7 +134,7 @@ const bootServer = async (wt, name) => {
 };
 
 const wt = mkTree('deskapp-snap');
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 const S = await bootServer(wt, 'deskapp-snap-home');
 check('the worktree server boots (under its own dbus-run-session)', S.up);
 const [CDP_PORT] = await freePorts(1);
@@ -511,7 +511,7 @@ try {
   let once = true;
   for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtc, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 80)}`); } fs.writeFileSync(path.join(wtc, f), src.replace(from, to)); }
   check('CONTROL: each placement lever (r1 + r2) is spelled exactly once in window.js (the copy pulls back exactly those)', once);
-  execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
+  execSync('npm run build:bundles', { cwd: wtc, stdio: 'ignore' });
   const C = await bootServer(wtc, 'deskapp-snap-ctl-home');
   check('CONTROL: the pre-fix copy boots', C.up);
   if (C.up) {

@@ -182,7 +182,7 @@ const mermaidImports = tracked.filter((f) => /from\s*['"]mermaid['"]|import\(\s*
 ok(JSON.stringify(mermaidImports) === '["src/mermaid-entry.js"]', 'mermaid is imported by its lazy entry ONLY (it never rides the main bundle)', mermaidImports);
 const pkg = JSON.parse(read('package.json'));
 ok(/\^11\./.test(pkg.dependencies.mermaid || ''), 'mermaid ^11 is a dependency', pkg.dependencies.mermaid);
-ok(/esbuild src\/mermaid-entry\.js --bundle --outfile=public\/mermaid\.js --format=esm --platform=browser --target=es2020 --minify/.test(pkg.scripts.build), 'npm run build makes public/mermaid.js (ESM, minified) beside doc-editor.js');
+ok(/esbuild src\/mermaid-entry\.js --bundle --outfile=public\/mermaid\.js --format=esm --platform=browser --target=es2020 --minify/.test(pkg.scripts['build:bundles']), 'npm run build makes public/mermaid.js (ESM, minified) beside doc-editor.js');
 ok(/^public\/mermaid\.js$/m.test(read('.gitignore')), 'the built file is gitignored like public/novnc.js');
 const ix = read('public/index.html');
 ok(/<link rel="vs-lazy-bundle" href="\/mermaid\.js">/.test(ix), 'index.html names the lazy bundle by a link that fetches nothing (an unknown rel)');

@@ -43,7 +43,7 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 stage('its worktree is built (its own bundle)');
 const FAKE_BIN = path.join(fakeHome, 'fake-bin'); fs.mkdirSync(FAKE_BIN, { recursive: true });
 const FAKE_CLAUDE = path.join(FAKE_BIN, 'claude');

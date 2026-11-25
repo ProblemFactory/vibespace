@@ -54,7 +54,7 @@ for (const f of ['src', 'public', 'server.js']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(chromeDir, { recursive: true });   // the throwaway hub's own HOME (never the user's — its device daemon root lives under it) and Chrome's profile
 // B-ddc5: the hub's env drops the machine user's XDG stores (its children resolve them under the scratch home) and the session

@@ -44,7 +44,7 @@ fs.copyFileSync(path.join(repo, 'docs/settings.md'), path.join(wt, 'docs/setting
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'desktop.backendPrefs': 'vnc-display, xpra, desktop-singleton', 'desktop.appPortal': 'all', 'desktop.appNotifications': 'on' }));
-try { execSync('npm run build', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(`npm run build failed in the scratch tree:\n${String((e.stdout || '') + (e.stderr || '')).split('\n').filter((l) => /✗|FAILED|Error:/.test(l)).slice(0, 12).join('\n')}`); try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {} process.exit(1); }
+try { execSync('npm run build:bundles', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(`npm run build failed in the scratch tree:\n${String((e.stdout || '') + (e.stderr || '')).split('\n').filter((l) => /✗|FAILED|Error:/.test(l)).slice(0, 12).join('\n')}`); try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {} process.exit(1); }
 
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, XDG_RUNTIME_DIR: RT, VIBESPACE_SKIP_AGENT_HOOKS: '1' };
 delete srvEnv.DBUS_SESSION_BUS_ADDRESS; // never the owner's session bus (the app's own bus is the plan's)

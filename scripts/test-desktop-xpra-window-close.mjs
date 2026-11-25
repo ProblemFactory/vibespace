@@ -290,7 +290,7 @@ try {
       const closeLine = '    if (!v.close) return false;';
       check('CONTROL: the window\'s close decision is spelled exactly once (the control pulls exactly it back)', winSrc.split(closeLine).length === 2);
       fs.writeFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), editAnchor(winSrc, closeLine, '    return false; // pre-A2 CONTROL: the window never closes itself', "src/lib/desktop-app-window.js"));
-      rebaseline(wtc); execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
+      rebaseline(wtc); execSync('npm run build:bundles', { cwd: wtc, stdio: 'ignore' });
       const [PORTA] = await freePorts(1);
       const homeA = scratchHome('deskxpra-a2ctl-home', fs);
       const sa = spawnCopy('the pre-A2 copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTA), HOME: homeA }); ctlServers.push(sa);

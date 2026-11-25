@@ -341,7 +341,7 @@ ok(!/from '(prosemirror|markdown-it|@tiptap)/.test(door) && /import\(new URL\('\
 const pkg = JSON.parse(read('package.json'));
 const PINS = ['@tiptap/core', '@tiptap/extension-image', '@tiptap/extension-link', '@tiptap/extension-list', '@tiptap/extension-table', '@tiptap/markdown', '@tiptap/pm', '@tiptap/starter-kit']; // lane doc-editor-wheel
 ok(PINS.every((p) => /^\d+\.\d+\.\d+$/.test(pkg.dependencies[p] || '')), 'the editor packages are pinned EXACT', PINS.map((p) => p + '@' + pkg.dependencies[p]));
-ok(/esbuild src\/doc-editor-entry\.js --bundle --outfile=public\/doc-editor\.js --format=esm/.test(pkg.scripts.build) && /^public\/doc-editor\.js$/m.test(read('.gitignore')), 'npm run build makes public/doc-editor.js (gitignored build output)');
+ok(/esbuild src\/doc-editor-entry\.js --bundle --outfile=public\/doc-editor\.js --format=esm/.test(pkg.scripts['build:bundles']) && /^public\/doc-editor\.js$/m.test(read('.gitignore')), 'npm run build makes public/doc-editor.js (gitignored build output)');
 
 { // HOT FIX 2.369.257: many messages, in order, through the same door; a failure part-way names what went out
   const want = M.commentsBatches('/w/BRIEF.md', EIGHTEEN).batches.map((b) => b.text);

@@ -36,7 +36,7 @@ for (const f of ['src', 'public', 'server.js']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 // An EMPTY home (no ~/.claude sessions): the Actions runner's condition. On a
 // developer box the real ~/.claude has sessions, the workbench renders its

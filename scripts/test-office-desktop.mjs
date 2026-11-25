@@ -129,7 +129,7 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'scripts', 'package.json']) { execSync(`rm -rf '${wt}/${f}' && cp -r '${repo}/${f}' '${wt}/${f}'`); }
 fs.symlinkSync(fs.realpathSync(path.join(repo, 'node_modules')), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-try { execSync('npm run build', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(String(e.stdout || '').split('\n').filter((l) => /✗|Error/.test(l)).slice(0, 20).join('\n')); throw e; }
+try { execSync('npm run build:bundles', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(String(e.stdout || '').split('\n').filter((l) => /✗|Error/.test(l)).slice(0, 20).join('\n')); throw e; }
 
 bootServer();
 check('worktree server boots', await waitServer());

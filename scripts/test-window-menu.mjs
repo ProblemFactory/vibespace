@@ -43,7 +43,7 @@ for (const f of ['src', 'public', 'server.js', 'scripts']) {
   execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 }
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 
 // the EXCLUDED package's verdict (主开发 2026-11-18, the kill law): the throwaway hub runs under a SCRATCH HOME with the hooks switch —
 // never the machine user's own home, whose default device-agent root (src/agentd/client.js) is a production one on the hub box —

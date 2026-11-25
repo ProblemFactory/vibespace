@@ -229,7 +229,7 @@ try {
     let allOnce = true;
     for (const [f, from, to] of patches) { const src = fs.readFileSync(path.join(wtc, f), 'utf8'); if (src.split(from).length !== 2) allOnce = false; fs.writeFileSync(path.join(wtc, f), src.replace(from, to)); }
     check('CONTROL: each pre-fix lever is spelled exactly once in the tree (the control patches exactly those)', allOnce);
-    rebaseline(wtc); execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
+    rebaseline(wtc); execSync('npm run build:bundles', { cwd: wtc, stdio: 'ignore' });
     const [PORTH] = await freePorts(1);
     const homeH = scratchHome('deskxpra-hidpictl-home', fs);
     const sh = spawnCopy('the pre-fix copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTH), HOME: homeH }); ctlServers.push(sh);

@@ -70,7 +70,7 @@ for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && c
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const T0 = Date.now();   // (主开发 r1292: where this suite's time goes — its own build first, then each section, printed)
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 console.log(`  (the worktree's own npm run build — i18n check, the bundles, the agentd release, its test scripts: ${Date.now() - T0} ms)`);
 const tPlus = () => `(t+${Math.round((Date.now() - T0) / 1000)} s)`;
 

@@ -38,7 +38,7 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'scripts']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-try { execSync('npm run build', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(String(e.stdout || '').split('\n').filter((l) => /✗|FAIL|rror/.test(l)).slice(0, 8).join('\n')); throw e; }
+try { execSync('npm run build:bundles', { cwd: wt, stdio: 'pipe' }); } catch (e) { console.error(String(e.stdout || '').split('\n').filter((l) => /✗|FAIL|rror/.test(l)).slice(0, 8).join('\n')); throw e; }
 const logFile = path.join(wt, 'server.log');
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', NO_AUTO_UPDATE: '1' };
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', fs.openSync(logFile, 'w'), fs.openSync(logFile, 'a')] });

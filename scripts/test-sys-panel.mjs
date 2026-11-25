@@ -17,7 +17,7 @@ try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catc
 execSync(`git worktree add --detach ${wt} HEAD`, { stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 fs.rmSync(fakeHome, { recursive: true, force: true }); fs.mkdirSync(fakeHome, { recursive: true });
 // seed 90min of fake samples so charts render immediately

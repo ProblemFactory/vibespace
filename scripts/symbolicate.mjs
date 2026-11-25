@@ -112,7 +112,8 @@ export function lookupMany(map, positions) {
  *  on a flag it does not know — a silent difference would map the wrong bytes. `flagsOf` renders them back (the census:
  *  flagsOf(clientBuildOptions(pkg)) is the step's own flag list). */
 export function clientBuildOptions(pkg) {
-  const build = String((pkg && pkg.scripts && pkg.scripts.build) || '');
+  const sc = (pkg && pkg.scripts) || {};
+  const build = [sc['build:bundles'], sc.build].filter(Boolean).join(' && ');   // B-c27e: the writers stand in build:bundles; build = it + the checks
   const step = build.split('&&').map((s) => s.trim()).find((s) => /^esbuild src\/client\.js(\s|$)/.test(s));
   if (!step) throw new Error('package.json build: no `esbuild src/client.js …` step');
   const o = { entryPoints: ['src/client.js'], loader: {} };

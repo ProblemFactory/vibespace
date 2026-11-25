@@ -160,7 +160,7 @@ try {
     let once = true;
     for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtr, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtr, f), src.replace(from, to)); }
     check('CONTROL (r1): each of the nine r2 levers is spelled exactly once in the tree (the control pulls back exactly those)', once);
-    rebaseline(wtr); execSync('npm run build', { cwd: wtr, stdio: 'ignore' });
+    rebaseline(wtr); execSync('npm run build:bundles', { cwd: wtr, stdio: 'ignore' });
     const [PORTR] = await freePorts(1);
     const homeR = scratchHome('deskxpra-r2ctl-home', fs);
     const sr = spawnCopy('the r1 copy', wtr, { ...srvEnv, ...VNC_ENV, PORT: String(PORTR), HOME: homeR }); ctlServers.push(sr);
