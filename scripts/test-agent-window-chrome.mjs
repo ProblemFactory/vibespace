@@ -22,6 +22,9 @@ const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome for the client'); process.exit(0); }
 let failed = 0;
+// r4266 (the hosted run of 2.369.419: this row ran out its budget twice with no line to place it): its STAGES' times, seconds since the
+// process started — the worktree built, the server answering, each page ready — so that a slow run is placed by one read
+const stage = (what) => console.log(`  · ${process.uptime().toFixed(1)} s — ${what}`);
 const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 30000, step = 250) => { const t = Date.now() + ms; while (Date.now() < t) { let v = null; try { v = await fn(); } catch { } if (v) return v; await sleep(step); } return null; };
@@ -41,6 +44,7 @@ for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && c
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
+stage('its worktree is built (its own bundle)');
 const FAKE_BIN = path.join(fakeHome, 'fake-bin'); fs.mkdirSync(FAKE_BIN, { recursive: true });
 const FAKE_CLAUDE = path.join(FAKE_BIN, 'claude');
 {
@@ -69,6 +73,7 @@ try {
   const up = await until(async () => { if (srv.exitCode !== null) return 'dead'; await fetch(`http://127.0.0.1:${PORT}/api/home`); return 'up'; }, 120000, 250);
   check('the scratch server answers (private HOME + runtime dir)', up === 'up', srvLog.join('').slice(-600));
   if (up !== 'up') throw new Error('no server');
+  stage('its server answers');
   const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   const msgs = []; ws.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
   await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
@@ -96,6 +101,7 @@ try {
     await S('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
     const ev = async (expr) => { const r = await S('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result && r.result.exceptionDetails) return { __err: JSON.stringify(r.result.exceptionDetails).slice(0, 400) }; return r.result && r.result.result ? r.result.result.value : undefined; };
     const ready = await until(() => ev("!!(window.app && window.app.wm) && !document.getElementById('loading-screen')"), 60000, 300);
+    stage(`the ${w}×${h} page is ready (${ready ? 'booted' : 'NOT booted in 60 s'})`);
     for (const [sid, name] of sids) {
       await ev(`(app.attachSession(${JSON.stringify(sid)}, ${JSON.stringify(name)}, ${JSON.stringify(fakeHome)}, { mode: 'chat' }), true)`);
       await until(() => ev(`[...app.sessions.values()].some((v) => v && v.sessionId === ${JSON.stringify(sid)})`), 20000, 250);
