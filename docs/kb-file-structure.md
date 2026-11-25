@@ -5,6 +5,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 ## INDEX (one line per file; the essay is below)
 
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
+scripts/test-vault-job-verify.mjs (NEW in the tiers, heavy — B-a08e L3) — the independent verification of the vault's service secret for jobs: each leg a law of the owner's design on the real road (wrapper, JobManager, door) with stand-in values; ~48 s alone; never edited by a builder
 scripts/test-doc-owners-held.mjs (NEW, fast — r3332) — data/doc-owners.json under the store-read law: a placed refusal of the read: the comment door, the edit note and the owner look say the hold, nothing written over, lifted with no restart; torn bytes kept aside once, said
 scripts/test-browser-settings-held.mjs (NEW, fast — B-50e7) — the agent browser while the settings are held: last values kept; nothing known ⇒ the safe side (no default clock, cap said unread, exit check by name, no plugin address, kept pin checked); the kept and trace sweeps wait; the lift
 scripts/test-browser-kept-sweep.mjs (fast, NEW — r3006 the sweep's fail-closed law; r3054 ④ the bindings) — a kept store whose read was refused at a start: the real boot sweep removes no kept browser's profile folder, nothing is written over the file; red = the release's rename

@@ -402,6 +402,7 @@
   "test-vault-chrome": 69809,
   "test-vault-hour-grant": 5599,
   "test-vault-job-chrome": 351812,
+  "test-vault-job-verify": 48115,
   "test-vault-login-table": 85065,
   "test-vault-paste-chrome": 134863,
   "test-vault-run-model-deep": 28480,
