@@ -174,10 +174,20 @@ app.get(['/', '/index.html'], (req, res, next) => {
       catch { return m; }
     });
     const launchGround = require('./src/launch-ground.js'); // PURE (B-78db, r4463 fault 2) — required INSIDE the route: test-csp-report runs this route from its own text
+    const launchImage = require('./src/launch-image.js'); // PURE (B-78db (B), r4481) — inside the route for the same reason
+    html = launchImage.withLinks(html, launchGround.groundOf(req.headers.cookie)); // the home-screen copy's launch image, in the colour the page itself paints first
     html = launchGround.withGround(html, launchGround.groundOf(req.headers.cookie)); // the launch wears the stored theme's ground from the first paint
     res.set('Cache-Control', 'no-cache'); res.set(...cspReports.header()); // the app page: Content-Security-Policy-Report-Only (never the enforcing header — a later lane's switch)
     res.type('html').send(html);
   } catch { next(); }
+});
+// THE LAUNCH IMAGE (B-78db (B), 主开发 r4481): a home-screen copy's startup image — ONE solid colour of a listed size, made on request
+// (src/launch-image.js; any other size is a 404, any other colour today's dark). A page behind the sign-in like every other
+app.get('/launch-image/:size', (req, res) => {
+  require('./src/launch-image.js').imageFor(req.params.size, req.query.g).then((png) => {
+    if (!png) return res.status(404).end();
+    res.set('Cache-Control', 'private, max-age=86400'); res.type('png').send(png);
+  }, (e) => { console.warn('[launch-image] ' + (e && e.message)); res.status(500).end(); });
 });
 app.use(require('./src/server/static-public.js').create(path.join(__dirname, 'public'))); // lane vault-chip-zone-errors: public/ through express.static — every file but a source map (served to nobody; test-csp-report ⑨)
 // WebDAV bridge — BEFORE the json body parser (PUT bodies stream to disk).

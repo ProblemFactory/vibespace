@@ -4889,9 +4889,18 @@ THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coo
   the left was never read (the outer display held portrait has it on the right; an iPhone has no upside-down portrait): the compact
   rules keep the right one. UNPROVEN on the device until the simulator's picture.
 - THE WHITE BEFORE THE PAGE (about 3 s at a cold launch) comes before the page begins (the document's answer ends at 10 ms, the first paint
-  at 18 ms). Nothing in the page reaches it. Apple's apple-touch-startup-image would need at least four images for one device (two
-  displays, two orientations), taken at install and never following the stored theme. Not built (the coordinator's choice, named to the
-  owner).
+  at 18 ms). Nothing in the page reaches it. THE LAUNCH IMAGE (B-78db (B), 主开发 r4481 — the owner: can the launch's white be removed
+  altogether): the coordinator read the runtime — a home-screen copy takes a startup image and a landscape one from the page's
+  apple-touch-startup-image links WHEN IT IS ADDED (an existing copy took nothing at three cold launches; a person adds it again once).
+  src/launch-image.js makes our ground as ONE solid PNG per listed screen (each current iPhone's and the Duo's 466×678 at 3×, portrait and
+  landscape — its SIZES; server.js /launch-image/<W>x<H>.png?g=…, a page behind the sign-in; any other size a 404, any other colour today's
+  dark), and the index route writes ONE link set in the colour the page itself paints first: the remembered ground, else today's dark (the
+  product follows no look of the system's). AFTER A THEME CHANGE the copy keeps the image it took: the launch shows the OLD colour for that
+  moment, then the page wears the new ground from its first paint; adding the copy again takes the new one. UNPROVEN until the owner adds
+  the copy again and the simulator shows it: whether the system's fetch at the add carries the sign-in (if it does not, the copy takes
+  nothing and the launch stays as before; a door only on the coordinator's word), whether a size that is not the screen's own is scaled
+  or refused, which image the Duo's inner display takes (both displays read the same device size). test-viewport-class ⑤f decodes the
+  PNGs; test-duo-layout ④g fetches the links and an image from a real server.
 
 ### THE STYLESHEETS' ORDER (B-78db line 914's cure — 主开发 r4115 MUST 1)
 

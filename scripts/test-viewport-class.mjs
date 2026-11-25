@@ -20,6 +20,9 @@
 //     fixed container; RED CONTROLS: 26d571cdb's route and stylesheet
 //   ⑤d THE LAUNCH FOR EVERY THEME (line 914's cure): the default status bar style; the inline ground goes with the splash;
 //     RED CONTROLS: 17c6dd081's meta and its client
+//   ⑤f THE LAUNCH IMAGE (主开发 r4481): src/launch-image.js's PNGs read back by the suite's own reader (every CRC, every pixel the
+//     colour), its sizes, hostile colours, the links in ONE colour, the route and the index route's wiring; RED CONTROLS: a bad
+//     chunk, a wrong colour, effa5382a's route
 //   ⑤g THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the outer display held landscape): the bar moves into it, the list column and
 //     the conversation after it, ☰ / the For-you tray / the head's ✕ and ⋯ follow; a long press's tip on the conversation's side;
 //     RED CONTROL: effa5382a's stylesheet (no column on the left)
@@ -386,6 +389,65 @@ console.log('⑤e the simulator\'s faults (主开发 r4463): the launch wears th
   const fixedOk = (css) => /html\[data-standalone\] #main-wrapper \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; \}/.test(css);
   ok(fixedOk(CSS), '⑤e the home-screen copy\'s #main-wrapper is fixed at its own rectangle (主开发\'s simulator experiment: the system\'s top band then takes the bar\'s colour, the title sharp) — UNPROVEN on the device until the pictures');
   ok(!fixedOk(CSS.slice(0, CSS.indexOf('THE SYSTEM\'s TOP BAND (B-78db'))), '⑤e RED CONTROL: 26d571cdb\'s stylesheet leaves the wrapper in the flow (the blurred title)');
+}
+
+console.log('⑤f the launch image (主开发 r4481 — the owner: can the launch\'s white be removed altogether)');
+{
+  const zlib = require('zlib'), LI = require(path.join(REPO, 'src/launch-image.js')), LG = require(path.join(REPO, 'src/launch-ground.js'));
+  // THE SUITE's OWN PNG READER (never the module's): the signature, every chunk's CRC, IHDR 8-bit RGB, the IDATs inflated, every row
+  // un-filtered (0–4) → { w, h, types, off: the pixels that are not `rgb` }
+  const crcT = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1); crcT.push(c >>> 0); }
+  const crc = (b) => { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = crcT[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const decode = (png, rgb) => {
+    if (!Buffer.isBuffer(png) || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return { error: 'signature' };
+    let at = 8, ihdr = null; const idat = [], types = [];
+    while (at + 12 <= png.length) { const len = png.readUInt32BE(at), type = png.toString('latin1', at + 4, at + 8);
+      if (crc(png.subarray(at + 4, at + 8 + len)) !== png.readUInt32BE(at + 8 + len)) return { error: 'crc ' + type };
+      types.push(type); if (type === 'IHDR') ihdr = png.subarray(at + 8, at + 8 + len); if (type === 'IDAT') idat.push(png.subarray(at + 8, at + 8 + len)); at += 12 + len; }
+    if (!ihdr || ihdr[8] !== 8 || ihdr[9] !== 2 || ihdr[12] !== 0) return { error: 'not 8-bit RGB', types };
+    const w = ihdr.readUInt32BE(0), h = ihdr.readUInt32BE(4), stride = 3 * w, raw = zlib.inflateSync(Buffer.concat(idat));
+    if (raw.length !== (stride + 1) * h) return { error: 'length', w, h };
+    let prev = Buffer.alloc(stride), off = 0;
+    for (let y = 0; y < h; y++) { const f = raw[y * (stride + 1)], line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+      if (f > 4) return { error: 'filter ' + f };
+      for (let i = 0; i < stride; i++) { const a = i >= 3 ? line[i - 3] : 0, b = prev[i]; let add = 0;
+        if (f === 1) add = a; else if (f === 2) add = b; else if (f === 3) add = (a + b) >> 1;
+        else if (f === 4) { const c = i >= 3 ? prev[i - 3] : 0, p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c); add = pa <= pb && pa <= pc ? a : pb <= pc ? b : c; }
+        line[i] = (line[i] + add) & 0xff; }
+      for (let i = 0; i < stride; i += 3) if (line[i] !== rgb[0] || line[i + 1] !== rgb[1] || line[i + 2] !== rgb[2]) off++;
+      prev = line; }
+    return { w, h, types, off };
+  };
+  const DUO_P = '1398x2034.png', DUO_L = '2034x1398.png';
+  const light = await LI.imageFor(DUO_P, '#f0f0f5'), dark = await LI.imageFor(DUO_P), land = await LI.imageFor(DUO_L, 'rgb(30, 31, 41)');
+  const dl = decode(light, [0xf0, 0xf0, 0xf5]), dd = decode(dark, [0x0c, 0x0c, 0x18]), dn = decode(land, [30, 31, 41]);
+  ok(dl.w === 1398 && dl.h === 2034 && dl.off === 0 && JSON.stringify(dl.types) === '["IHDR","IDAT","IEND"]' && dd.w === 1398 && dd.off === 0 && dn.w === 2034 && dn.h === 1398 && dn.off === 0,
+    `⑤f the Duo's launch images read back by the suite's own reader: every CRC, 8-bit RGB, EVERY pixel the colour — light ${dl.w}×${dl.h}, today's dark (no colour), rgb() held landscape ${dn.w}×${dn.h} (${light.length} / ${dark.length} / ${land.length} bytes)`, { dl, dd, dn });
+  const bent = Buffer.from(light); bent[60] ^= 0xff;   // one byte of the IDAT turned over
+  ok(decode(bent, [0xf0, 0xf0, 0xf5]).error === 'crc IDAT' && decode(light, [0x0c, 0x0c, 0x18]).off === 1398 * 2034, '⑤f RED CONTROLS: the reader refuses a bent chunk by its CRC, and counts every pixel of a colour that is not the image\'s (the colour check is not vacuous)');
+  // THE SIZES: each listed screen's portrait and landscape in device pixels — nothing else answers
+  const want = [...new Set(LI.SCREENS.flatMap((s) => [`${s.w * s.r}x${s.h * s.r}`, `${s.h * s.r}x${s.w * s.r}`]))];
+  const offList = await Promise.all(['1399x2034.png', '1398x2034', '01398x2034.png', '../1398x2034.png', '1398x2034.png?x', '', null].map((x) => LI.imageFor(x, '#fff')));
+  ok(JSON.stringify([...LI.SIZES].sort()) === JSON.stringify(want.sort()) && LI.SCREENS[0].w === 466 && LI.SCREENS[0].h === 678 && LI.SCREENS[0].r === 3 && offList.every((x) => x === null),
+    `⑤f the sizes are the listed screens' own (${LI.SIZES.length}: the Duo's 466×678 at 3× first), portrait and landscape; any other size is refused (the route's 404)`, { sizes: LI.SIZES, offList });
+  // A COLOUR OR TODAY's DARK — the same strict rule as the launch ground; a hostile value is the very image of no colour at all (one cache entry)
+  ok(['url(x)', '#fff"><x', 'white', ['#fff', '#000'], '#'.padEnd(50, 'a'), undefined].every((g) => LI.imageFor(DUO_P, g) === LI.imageFor(DUO_P, LG.DARK)) && LI.imageFor(DUO_P, '#fff') !== LI.imageFor(DUO_P, LG.DARK),
+    '⑤f a colour by launch-ground.js\'s one strict rule; a word, markup, a repeated query or an over-long value is today\'s dark (the same image)');
+  // THE LINKS: ONE set, in the colour the page paints first
+  const IDX = read('public/index.html'), links = LI.linksFor('#f0f0f5'), none = LI.linksFor(null), page = LI.withLinks(IDX, '#f0f0f5');
+  const linkOk = (l) => { const m = /^<link rel="apple-touch-startup-image" media="\(device-width: (\d+)px\) and \(device-height: (\d+)px\) and \(-webkit-device-pixel-ratio: (\d)\) and \(orientation: (portrait|landscape)\)" href="\/launch-image\/(\d+)x(\d+)\.png\?g=([^"]+)">$/.exec(l);
+    if (!m) return false; const [w, h, r, o, W, H] = m.slice(1, 7).map((x, i) => (i === 3 ? x : Number(x)));
+    return W === (o === 'portrait' ? w : h) * r && H === (o === 'portrait' ? h : w) * r && LI.SIZES.includes(`${W}x${H}`); };
+  ok(links.length === LI.SCREENS.length * 2 && links.every(linkOk) && links.every((l) => l.endsWith('?g=%23f0f0f5">')) && none.every((l) => l.endsWith('?g=%230c0c18">')) && LI.linksFor('url(x)').join() === none.join(),
+    `⑤f the links: ${links.length} (each screen, both orientations, its media exact), ONE set in the remembered ground — none remembered (or no colour): today's dark`, links.filter((l) => !linkOk(l)));
+  ok(page.split('rel="apple-touch-startup-image"').length - 1 === links.length && page.indexOf(links.at(-1)) < page.indexOf('</head>') && page.replace(`  ${links.join('\n  ')}\n`, '') === IDX && !IDX.includes('apple-touch-startup-image'),
+    '⑤f the page wears the links at the end of its head and is otherwise unchanged (index.html itself holds none: the index route writes them)');
+  // THE WIRING: the index route writes the links (inside the route: test-csp-report runs it from its text); the image's own route
+  const SRV = read('server.js');
+  const linksOk = (src) => /const launchImage = require\('\.\/src\/launch-image\.js'\);[^\n]*\n\s*html = launchImage\.withLinks\(html, launchGround\.groundOf\(req\.headers\.cookie\)\);/.test(src);
+  const routeOk = (src) => /app\.get\('\/launch-image\/:size', \(req, res\) => \{\n\s*require\('\.\/src\/launch-image\.js'\)\.imageFor\(req\.params\.size, req\.query\.g\)\.then\(\(png\) => \{\n\s*if \(!png\) return res\.status\(404\)\.end\(\);/.test(src);
+  ok(linksOk(SRV) && routeOk(SRV) && SRV.indexOf("app.get('/launch-image/:size'") > SRV.indexOf("app.get(['/', '/index.html']"), '⑤f the index route writes the links in the remembered ground; /launch-image/<W>x<H>.png answers from launch-image.js, a 404 off its list (a page behind the sign-in, no door)');
+  ok(!linksOk(SRV.replace(/\n\s*html = launchImage\.withLinks\([^\n]*/, '')) && !routeOk(SRV.replace("app.get('/launch-image/:size'", "app.get('/launch-image-gone/:size'")), '⑤f RED CONTROLS: effa5382a\'s route (no links) and a server without the image\'s route are caught');
 }
 
 console.log('⑤g the system\'s column on the LEFT (主开发 r4481 — the owner\'s simulator: the outer display held landscape, left 84 · right 0 · bottom 34)');
