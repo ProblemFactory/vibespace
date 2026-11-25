@@ -19,6 +19,10 @@
 //     500 ms; the bound 2 s, said). CONTROL (the cure's line blinded: the tabs save always 30 s): the row is not on disk at the bound.
 //   ⑦ the reverse: a remover's dropped row (an adopt), then a tabs change inside the floor: the file no longer names the folder within
 //     the bound. CONTROL (blinded): the file still names it at the bound.
+//   LINE 964's ROUND (r4283): the POSITIVE legs wait a generous 10 s bound (anything well under 30 s tells the floor from the tabs' 30 s;
+//   a miss there says a HARNESS line by name: a loaded machine, not the product); the controls keep their 2 s bound.
+//   ⑧ a PEEK (a second store built over the file in one process reads the writer's owed bytes — the producer runs, nothing is written)
+//     does not mark the owed act taken: a tabs save after it still keeps the floor. RED: a producer that marks on a peek too.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -174,10 +178,10 @@ console.log('⑤ a second store built while a write is OWED reads the owed bytes
 
 console.log('⑥ ⑦ line 961\'s round (r4278): an act\'s write, once owed, is never due later because of a tabs save (one debounce a file)');
 {
-  const BOUND_MS = 2000;   // the floor is 500 ms (SAVE_GAP_MS); the tabs' debounce 30 s — the bound tells the two apart
+  const BOUND_MS = 2000, POSITIVE_MS = 10000;   // the floor is 500 ms (SAVE_GAP_MS), the tabs' debounce 30 s: the controls' 2 s bound; the positive legs' 10 s (line 964's round: a loaded machine's slow landing never reads as the product's red)
   const BLIND = (src) => anchored(src, '    try { owe(actOwed ? SAVE_GAP_MS : PERSIST_TABS_MS); }', '    try { owe(PERSIST_TABS_MS); }', 'the-cure-blinded-a-tabs-save-always-30s');
   const K4 = 'bk-0000d014';
-  const scene = async (Mod, { reverse = false } = {}) => {
+  const scene = async (Mod, { reverse = false, peek = false, bound = BOUND_MS } = {}) => {
     const w = world(), W = SW.create({ log: quiet });
     try {
       const S = mk(Mod, w.dir, W);
@@ -186,18 +190,24 @@ console.log('⑥ ⑦ line 961\'s round (r4278): an act\'s write, once owed, is n
       await S.whenWritten();   // both rows on disk: the act below is the only change owed
       const t0 = performance.now();
       if (reverse) S.adopted(K4); else S.noteStart(K4, { hasDir: false, label: 'the act' });   // THE ACT: owed at the floor
+      if (peek) { const S2 = mk(Mod, w.dir, W); S2.has(K4); stopHold(S2); }   // ⑧ THE PEEK: a second store's read of the owed bytes (the producer runs, nothing written)
       S.noteTabs(K3, [{ targetId: 't1', url: 'https://tabs.example/moved', title: 'Moved', active: true }]);   // …a tabs save inside the floor
-      const landed = await until(() => { const r = rows(w.file); return !!r && (reverse ? !r.includes(K4) : r.includes(K4)); }, BOUND_MS);
+      const landed = await until(() => { const r = rows(w.file); return !!r && (reverse ? !r.includes(K4) : r.includes(K4)); }, bound);
       const ms = Math.round(performance.now() - t0);
       stopHold(S);
       return { landed, ms, rows: rows(w.file) };
     } finally { W.stop(); }
   };
-  const [G, GX, H, HX] = await Promise.all([scene(KS), scene(M.load(KS_REL, BLIND(KSRC), 'blind-6')), scene(KS, { reverse: true }), scene(M.load(KS_REL, BLIND(KSRC), 'blind-7'), { reverse: true })]);
-  ok(G.landed, `⑥ AN ACT THEN A TABS SAVE INSIDE THE FLOOR: the list was on disk with the act's row within the ${BOUND_MS / 1000} s bound (in ${G.ms} ms) — the tabs rode the act's write`, G);
+  const MARKS_ON_PEEK = (src) => anchored(src, 'if (!PEEKING.has(file)) { actTaken = actOwed; actOwed = false; }', '{ actTaken = actOwed; actOwed = false; }', 'a-producer-that-marks-on-a-peek');
+  const [G, GX, H, HX, P, PX] = await Promise.all([scene(KS, { bound: POSITIVE_MS }), scene(M.load(KS_REL, BLIND(KSRC), 'blind-6')), scene(KS, { reverse: true, bound: POSITIVE_MS }), scene(M.load(KS_REL, BLIND(KSRC), 'blind-7'), { reverse: true }),
+    scene(KS, { peek: true, bound: POSITIVE_MS }), scene(M.load(KS_REL, MARKS_ON_PEEK(KSRC), 'marks-on-peek'), { peek: true })]);
+  const harness = (leg) => `HARNESS (${leg}): nothing landed within the generous ${POSITIVE_MS / 1000} s bound — the machine's load, not the product (the floor is 500 ms, the tabs' 30 s)`;
+  ok(G.landed, G.landed ? `⑥ AN ACT THEN A TABS SAVE INSIDE THE FLOOR: the list was on disk with the act's row within the ${POSITIVE_MS / 1000} s bound (in ${G.ms} ms) — the tabs rode the act's write` : harness('⑥'), G);
   ok(!GX.landed, `⑥ CONTROL (the cure's line blinded: a tabs save always 30 s): the act's row was NOT on disk at the ${BOUND_MS / 1000} s bound — the tabs save pushed it to 30 s (red)`, GX);
-  ok(H.landed, `⑦ THE REVERSE — A REMOVER's DROPPED ROW (an adopt), THEN A TABS SAVE: the file no longer named the folder within the ${BOUND_MS / 1000} s bound (in ${H.ms} ms)`, H);
+  ok(H.landed, H.landed ? `⑦ THE REVERSE — A REMOVER's DROPPED ROW (an adopt), THEN A TABS SAVE: the file no longer named the folder within the ${POSITIVE_MS / 1000} s bound (in ${H.ms} ms)` : harness('⑦'), H);
   ok(!HX.landed, `⑦ CONTROL (blinded): the file still named the dropped folder at the ${BOUND_MS / 1000} s bound (red)`, HX);
+  ok(P.landed, P.landed ? `⑧ A PEEK BETWEEN THE ACT AND THE TABS SAVE (a second store read the owed bytes): the act stayed owed at the floor — its row on disk within the bound (in ${P.ms} ms)` : harness('⑧'), P);
+  ok(!PX.landed, `⑧ RED control (a producer that marks the act taken on a peek): the tabs save after the peek pushed the act's row past the ${BOUND_MS / 1000} s bound (red)`, PX);
 }
 
 report();

@@ -45,7 +45,10 @@ const THERE_FRESH_MS = 10 * 1000; // B-7a30: a kept folder's presence bit is che
 const THERE_ACT_MS = 5 * 1000; // B-7a30 r2: an act's fresh check waits at most this long — past it the act is refused by name
 const UNANSWERED = Symbol('unanswered');
 const PERSIST_TABS_MS = 30 * 1000;
-const SAVE_GAP_MS = 500;   // B-0248 unit 2: an act's write waits only the writer's own floor (src/store-pace.js MIN_GAP_FLOOR_MS): a burst is one write
+const SAVE_GAP_MS = 500;
+/** line 964's round (r4283): the files whose owed bytes a store is PEEKING at (the writer's owed() runs the producer without writing) —
+ *  module-wide: the peek is another instance's read of the same file in one process (a suite's restart; a hub has one store) */
+const PEEKING = new Set();   // B-0248 unit 2: an act's write waits only the writer's own floor (src/store-pace.js MIN_GAP_FLOOR_MS): a burst is one write
 const DU_TIMEOUT_MS = 120 * 1000;
 const BROADCAST_DEBOUNCE_MS = 250;
 /** r3585: the store the hold keeps, by its name (K.KEPT_FILE — said in the journal; the family's census reads it here) */
@@ -135,7 +138,9 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   // B-0248 unit 2: the list is THE STORE WRITER's (save, below) — a suite's own writer, else the process's. A second store over this file in
   // ONE process (a suite's restart) reads what the writer still OWES it, never the older file (the moved2 law; null while held: EHELD)
   const W = () => writer || require('../store-writer.js').storeWriter();
-  const owedNow = () => { try { const w = W(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } };
+  // line 964's round (r4283): the writer's owed() RUNS the producer without writing — a PEEK, never a take: marked while it runs, so the
+  // producer does not mark an owed act as taken on it (a tabs save after a peek still keeps the floor)
+  const owedNow = () => { try { const w = W(); if (typeof w.owed !== 'function') return null; PEEKING.add(file); try { return w.owed(file); } finally { PEEKING.delete(file); } } catch { return null; } };
   function load() {
     if (store) return store;
     // r3585: the ONE sync read at the start, as before, answered through the family's law (held ⇒ the helper reads it again off the loop)
@@ -166,7 +171,7 @@ function create({ dataDir, keeper = null, liveKeys = () => new Set(), bindings =
   function owe(debounceMs) {   // the list's one hand-off to the writer (store-timing's row: src/timed-sync.js browser-kept.write)
     return W().dirty(file, { name: 'browser-kept.write', mode: FILE_MODE, makeDir: true, debounceMs,
       onWritten: (ok) => { const wasAct = actTaken; actTaken = false; if (!ok && wasAct) { actOwed = true; try { owe(SAVE_GAP_MS); } catch { } } },
-      produce: () => { if (isHeld()) throw namedError('EHELD', 'the kept browsers\' list is held (unread or rebuilding) — nothing is written over it until it reads'); actTaken = actOwed; actOwed = false; return JSON.stringify(store, null, 2); } });
+      produce: () => { if (isHeld()) throw namedError('EHELD', 'the kept browsers\' list is held (unread or rebuilding) — nothing is written over it until it reads'); if (!PEEKING.has(file)) { actTaken = actOwed; actOwed = false; } return JSON.stringify(store, null, 2); } });
   }
   function save() {
     if (!store) return;
