@@ -445,7 +445,7 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   /** A 1 ms injector (the Windows resident script's cost a line, verify r1); the agent's 1500-char `type --keys` through the ENGINE
    *  (chunks over desktop-input into the host); 10 ms in, the page does what it does on the owner's click: the three records down
    *  the data channel AND the hub's pause. → { ownerMs (the click's md: injected − sent), act, log, input (the lease after) } */
-  async function measure(SHmod, tag) {
+  async function measure(SHmod, tag, { holdMs = 0 } = {}) {
     const t0 = Date.now(), log = [];
     const injector = { kind: 'fake', inject(evs) { return new Promise((res) => setTimeout(() => { log.push({ at: Date.now() - t0, t: evs[0].t, c: evs[0].c }); res({ ok: true, n: 1, refused: [] }); }, 1)); } };
     const host = SHmod.createStreamHost({ injector, loadWerift, screen: () => srcOf() });
@@ -457,19 +457,31 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
     const act = caught(() => eng.act('md-pcM', A, { verb: 'type', text: 'A'.repeat(1500), keys: true }));
     await sleep(10);
     const sentAt = Date.now() - t0;
+    log.push({ mark: 'sent' }); // THE ORDER's MARK (flake census r2, 主开发 r4456): every record logged after it completed after the click was sent
     for (const x of DH.clickRecords('5,5', 1)) dc.onMessage.execute(J(x)); // the owner's own click, down the data channel …
     eng.pause('pcM', 'owner_input'); // … and the page's /pause to the hub
+    if (holdMs) { const until = Date.now() + holdMs; while (Date.now() < until) { /* THE PLACED HOLD: a loaded box's event loop, held right after the click */ } }
     const a = await act;
     await sleep(40);
     const input = eng.stateOf('pcM') && eng.stateOf('pcM').input;
     host.stopAll('done'); streams.delete('stM'); try { eng.revoke('pcM'); } catch { /* it ended */ }
-    const md = log.findIndex((l) => l.t === 'md');
-    return { ownerMs: md >= 0 ? log[md].at - sentAt : null, act: a, log, md, input, ms: Date.now() - t0 };
+    const md = log.findIndex((l) => l.t === 'md'), sent = log.findIndex((l) => l.mark === 'sent');
+    return { ownerMs: md >= 0 ? log[md].at - sentAt : null, act: a, log, md, sent, input, ms: Date.now() - t0 };
   }
+  /** THE VERDICT IS AN ORDER, never a clock (flake census r2 — the find: «ownerMs ≤ 50» was a ratio of small timers a loaded box's loop
+   *  lag can pass): between the click's send (the mark) and its md, the agent may complete the ONE record in flight and then only its
+   *  let-gos (ku of the keys it held) — never a new press. The one-chain control goes on pressing (kd after the first). */
+  const afterSent = (m) => (m.sent >= 0 && m.md > m.sent ? m.log.slice(m.sent + 1, m.md).filter((l) => l.t === 'kd' || l.t === 'ku') : null);   // the AGENT's records (the owner's own click is mv / md / mu)
+  const ordered = (m) => { const a = afterSent(m); return !!a && a.slice(1).every((l) => l.t === 'ku'); };
+  const presses = (m) => { const a = afterSent(m); return a ? a.slice(1).filter((l) => l.t === 'kd').length : null; };
   const m = await measure(SH, 'fix');
-  const before = m.log.slice(0, m.md);
+  const before = m.log.slice(0, m.md).filter((l) => !l.mark);
   const held = new Set(); for (const l of before) { if (l.t === 'kd') held.add(l.c); else if (l.t === 'ku') held.delete(l.c); }
-  ok(m.ownerMs != null && m.ownerMs <= 50, `MEASURED: the owner's click sent 10 ms into a 1500-char type landed ${m.ownerMs} ms after its send (≤ 50; verify r1 measured 6395 ms behind 6000 records) — ${m.md} agent records went before it`, { ownerMs: m.ownerMs, md: m.md });
+  ok(ordered(m), `ORDERED: the owner's click sent 10 ms into a 1500-char type went in after at most the ONE agent record in flight and its let-gos (${afterSent(m)?.length ?? '?'} record(s) between the send and its md, ${presses(m)} new press) — never behind the chunk (verify r1 measured 6395 ms behind 6000 records); measured, not judged: ${m.ownerMs} ms`, { ownerMs: m.ownerMs, sent: m.sent, md: m.md, after: afterSent(m) });
+  // THE PLACED HOLD (the find made wrong at will): the same fixed host with the event loop held 80 ms right after the click — the old
+  // clock verdict (≤ 50 ms) goes red for the wrong reason, the order holds
+  const mh = await measure(SH, 'held', { holdMs: 80 });
+  ok(mh.ownerMs != null && mh.ownerMs > 50 && ordered(mh), `PLACED: the loop held 80 ms after the click — the fixed host's click lands ${mh.ownerMs} ms after its send (the old «≤ 50» verdict RED though nothing went before it) while the ORDER holds (${presses(mh)} new press)`, { ownerMs: mh.ownerMs, after: afterSent(mh) });
   ok(held.size === 0 && J(m.log.slice(-3).map((l) => l.t)) === J(['mv', 'md', 'mu']), 'no stuck modifier: every key the agent pressed was up before the owner\'s click, and nothing of the agent\'s came after it', { held: [...held], tail: m.log.slice(-4) });
   ok(m.act.code === 'window_paused' && m.act.did && m.act.did.partial === true && m.act.did.of === 6000 && m.act.did.sent < 6000 && m.act.did.charsTyped >= 0 && m.act.did.charsTyped < 1500 && /records went in \(\d+ of 1500 characters typed\)/.test(m.act.message) && m.input === 'user', `the act answers window_paused, partial: ${m.act.did && m.act.did.sent} of 6000 records, ${m.act.did && m.act.did.charsTyped} of 1500 characters said; the lease paused`, m.act);
   // CONTROL: the same leg over a copy of the stream host with ONE ordered chain (the owner's records queue behind the agent's, no drop)
@@ -477,7 +489,7 @@ console.log('⑩ fix r2 — the owner\'s input PREEMPTS the agent\'s (verify r1 
   const chainSrc = editAnchor(editAnchor(shSrc, '(lane === \'owner\' ? s.ownerQ : s.agentQ).push(', 's.agentQ.push(', "src/agentd/stream-host.js"), 'if (s.agentQ.length || s.agentHeld.size || s.inFlight === \'agent\') dropAgent(s, \'owner_input\');', '', "src/agentd/stream-host.js");
   ok(chainSrc !== shSrc && !chainSrc.includes('dropAgent(s, \'owner_input\')'), 'CONTROL copy: one chain, no drop (the anchors exist)');
   const ctl = await measure(mutantCopies('dho-chain', REPO).load('src/agentd/stream-host.js', chainSrc, 'one-chain'), 'ctl');
-  ok(ctl.ownerMs != null && ctl.ownerMs > 50, `CONTROL (one chain, today's chunks): the owner's click waits behind the chunk in flight — ${ctl.ownerMs} ms ⇒ the leg tells`, { ownerMs: ctl.ownerMs, md: ctl.md });
+  ok(!ordered(ctl) && presses(ctl) > 0, `CONTROL (one chain, today's chunks): the owner's click waits behind the chunk in flight — ${presses(ctl)} agent presses went in after its send, before its md (measured, not judged: ${ctl.ownerMs} ms) ⇒ the ORDER tells`, { ownerMs: ctl.ownerMs, sent: ctl.sent, md: ctl.md, presses: presses(ctl) });
 
   // ── DETERMINISTIC ORDER: a gated injector (the record named in `hold` waits for open()) ──
   const got = []; let hold = null, open = null;
