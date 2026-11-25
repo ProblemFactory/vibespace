@@ -111,8 +111,11 @@ const PRE = M.write('src/accounts.js', preSrc, 'pre-fix');
   check('the control is the pre-fix writer: ensureSessionPoolLink without its notify, nothing else changed (a patched copy outside the tree)',
     NOTIFY_LINE.test(accSrc) && /_notifyLinks\(\)/.test(body(accSrc)) && !/_notifyLinks\(\)/.test(body(preSrc)) && preSrc.split('\n').length === accSrc.split('\n').length - 1 && !PRE.startsWith(repo), { pre: PRE });
 }
-check('the rows road the control cuts is the landing of the kept sign-in facts alone: onLanded → _notifyRowsSoon, its one caller (B-360d)',
-  /onLanded: \(\) => this\._notifyRowsSoon\(\)/.test(accSrc) && (accSrc.match(/\._notifyRowsSoon\(/g) || []).length === 1 && /\n  _notifyRowsSoon\(\) \{/.test(accSrc));
+// the landing's handler holds EXACTLY two statements since 0c578dfdc (B-87fd identity unit 4, 主开发 r3680): the landing counter that
+// accounts.landedEpoch() reads, and the one call of the rows road — nothing else (a second broadcast beside it would not match); the
+// count of callers (exactly one) and the method's header stay as they were (hosted run 45584145109, 主开发 r4209)
+check('the rows road the control cuts is the landing of the kept sign-in facts alone: onLanded → (its landing counter) + _notifyRowsSoon, its one caller (B-360d)',
+  /onLanded: \(\) => \{ this\._landedN = \(this\._landedN \|\| 0\) \+ 1; this\._notifyRowsSoon\(\); \}/.test(accSrc) && (accSrc.match(/\._notifyRowsSoon\(/g) || []).length === 1 && /\n  _notifyRowsSoon\(\) \{/.test(accSrc));
 
 // ── the in-process hook: capture the server's AccountManager; a command file drives the ENGINE's writer ──
 const CMD = path.join(ROOT, 'cmd.json'), RES = path.join(ROOT, 'res.json');
