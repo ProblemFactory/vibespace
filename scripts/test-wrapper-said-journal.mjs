@@ -59,7 +59,7 @@ const SJ = require(path.join(REPO, 'src/said-journal.js'));
 const CW = 'data/bin/chat-wrapper.js', CX = 'data/bin/codex-chat-wrapper.js';
 const cwSrc = read(CW), cxSrc = read(CX), sjSrc = read('src/said-journal.js');
 const JOURNAL_PLANT = "const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => persistNow(), say: log }) : null;";
-const CX_JOURNAL_PLANT = "const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => { if (writeTimer) { clearTimeout(writeTimer); } persistBuffer(true); }, say: log }) : null;";   // r4563: the journal's rewrite is the codex buffer's durable road
+const CX_JOURNAL_PLANT = "const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => { if (writeTimer) { clearTimeout(writeTimer); } persistBuffer(); }, say: log }) : null;";
 
 // THE STAND-IN CLI: a frame `stand_in_say` (forwarded raw — no turn opens) is answered by its lines in ONE write; every stdin line kept
 const STAND = path.join(HOME, 'stand-in-say.cjs');

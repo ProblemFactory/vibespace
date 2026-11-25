@@ -485,15 +485,16 @@ async function settleLeftRecords() {
   await settleGone(gone.map((r) => HR.get(r.msgId)), 'successor', 'handed records at this start');
 }
 
-// r4563 (主开发's ruling — A BUFFER IS NOT A DURABLE RECORD): the timer's road and the exit's flush ask NO sync (the ring rewritten
-// every 2 s, 250 ms while followed; a conversation comes back from its transcript); only the DURABLE road (persistNow: the queue's
-// records, a turn's state, an answered permission, the journal's rewrite) asks one. Every road's write and close are judged
-function persistBuffer(durable) {
+// r4563 + r4578 (主开发's rulings — A BUFFER IS NOT A DURABLE RECORD): the buffer file asks NO sync on any road — the timer's (every 2 s,
+// 250 ms while followed), the exit's and the durable one's (persistNow: the queue's records, a turn's state, the journal's rewrite: the
+// next timer write renames an unsynced ring over it within 2 s, and a conversation comes back from its transcript). The durable road
+// keeps its ORDER: the write, the judged close and the rename before the line is said. Every road's write and close are judged
+function persistBuffer() {
   writeTimer = null;
   // B-5a4d (its reader): tmp + rename, as the sidecar — a hub that restarts reads this file once, and a person's CLI follows it by
   // its path: a reader sees the whole old file or the whole new one, never a truncated one mid-write (write-through made it often)
   const tmp = `${bufferFile}.${process.pid}.tmp`;
-  try { renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log, sync: durable === true }); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced; B-bcb8 unit B: synced before its name
+  try { renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log, sync: false }); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced; B-bcb8 unit B: synced before its name
   catch (e) { try { fs.unlinkSync(tmp); } catch {} if (!persistBuffer.said) { persistBuffer.said = true; log(`history buffer write failed: ${e.message}`); } }
 }
 
@@ -558,7 +559,7 @@ function sendChild(line) { // line WITHOUT trailing \n
 const DURABLE_RECORDS = new Set(['queue_changed', 'queued_input', 'queue_op_result', 'queue_dropped', 'input_handover', 'queue_settle', 'rewind_out']);
 function persistNow() {
   if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
-  persistBuffer(true);   // r4563: the durable road asks its sync (as built in 1ce0eb76e)
+  persistBuffer();
 }
 // ONE WRITE PER INPUT (its readers): a chunk of the CLI's stdout, or a chunk of stdin, is handled whole — every interrupt it owes
 // the CLI goes out INSIDE it, as before — then the file is written ONCE if a line in it changes what the conversation is, and only

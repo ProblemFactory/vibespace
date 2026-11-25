@@ -481,7 +481,7 @@ let writeTimer = null;
 // is APPENDED to the file before it is said, between the timer's whole rewrites — a hub that restarts, or a kill of this process,
 // never beats it. A tree without the module keeps the timer alone, and adverts no fence.
 let SJ = null; try { SJ = require(path.join(__dirname, '..', '..', 'src', 'said-journal.js')); } catch { SJ = null; }
-const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => { if (writeTimer) { clearTimeout(writeTimer); } persistBuffer(true); }, say: log }) : null;
+const JOURNAL = SJ ? SJ.create({ file: bufferFile, rewrite: () => { if (writeTimer) { clearTimeout(writeTimer); } persistBuffer(); }, say: log }) : null;
 if (JOURNAL) meta.caps.fence = SJ.FENCE_VERSION;   // a restoring hub asks this wrapper's fence (session-stdout's gate)
 // THE FENCE (row B-cd4b — src/said-journal.js; the hub's half is src/server/session-stdout.js setupSessionPty `fence`): the answer to
 // a restoring hub's `webui_fence` is in the file AT ITS PLACE before it is said; it rides the ring for FENCE_KEEP_MS, then leaves it
@@ -513,16 +513,16 @@ const readyPromise = new Promise((resolve, reject) => {
   markReadyFailed = reject;
 });
 
-// r4563 (主开发's ruling — A BUFFER IS NOT A DURABLE RECORD): the timer's road and the exit's flushes ask NO sync (the ring rewritten
-// every 1 s, 250 ms while followed); only the journal's rewrite (at most once a wrapper life) asks one. Every road's write and close are judged
-function persistBuffer(durable) {
+// r4563 + r4578 (主开发's rulings — A BUFFER IS NOT A DURABLE RECORD): the buffer file asks NO sync on any road — the timer's (every 1 s,
+// 250 ms while followed), the exit flushes and the journal's rewrite (the buffer too). Every road's write and close are judged
+function persistBuffer() {
   writeTimer = null;
   // B-cd4b (ALSO CURED): tmp + rename, as the claude wrapper's — a restarting hub that read this file between an in-place write's
   // truncate and its bytes restored an EMPTY or half history; the said journal's descriptor named the file the rename replaced
   const tmp = `${bufferFile}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(bufferFile), { recursive: true });
-    renameSynced(tmp, bufferFile, buffer, { where: 'the codex buffer', say: log, sync: durable === true });   // B-bcb8 unit B; r4563: synced on the durable road only
+    renameSynced(tmp, bufferFile, buffer, { where: 'the codex buffer', say: log, sync: false });   // B-bcb8 unit B; r4578: a buffer asks no sync, its write and close judged
     if (JOURNAL) JOURNAL.rewritten();
   } catch { try { fs.unlinkSync(tmp); } catch {} }
 }
