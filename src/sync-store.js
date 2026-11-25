@@ -110,7 +110,8 @@ class SyncStore {
    *  snapshot, as before */
   resyncAnswer(sinceVersion, { unread = false } = {}) {
     if (this.held()) return [{ type: 'state-held', store: this.name, code: this._heldCode }, ...this._handOwed().map((o) => ({ type: 'state-held-putback', store: this.name, code: this._heldCode, ...o }))];
-    if (unread) return [{ type: 'state-snapshot', store: this.name, data: this.data, version: this.version }];
+    // r3972: a page still unread holds a version of before the lift — after a FRESH lift that version is of the old counter, said
+    if (unread) return [{ type: 'state-snapshot', store: this.name, data: this.data, version: this.version, ...(this._freshLife ? { fresh: true } : {}) }];
     const result = this.getOpsSince(sinceVersion);
     if (result.full) return [{ type: 'state-snapshot', store: this.name, data: result.full, version: result.version }];
     return result.ops.map((op) => ({ type: 'state-sync', store: this.name, ...op }));
@@ -125,7 +126,10 @@ class SyncStore {
     this.ops = [];
     const owed = this._owed || []; this._owed = null;
     if (facts && facts.setAside) { this.version++; this._scheduleSave(); }   // torn bytes now kept aside: the file is written whole
-    const msg = JSON.stringify({ type: 'state-snapshot', store: this.name, data: this.data, version: this.version, lifted: true, ...(facts && facts.setAside ? { setAside: facts.setAside } : {}) });
+    // `fresh`: no data came from the file (gone, or torn and set aside) — its counter began again: no page's last version is this one (r3972);
+    // kept for this process, so a page still unread that missed this snapshot is told the same at its resync
+    this._freshLife = !(v && v.data);
+    const msg = JSON.stringify({ type: 'state-snapshot', store: this.name, data: this.data, version: this.version, lifted: true, ...(this._freshLife ? { fresh: true } : {}), ...(facts && facts.setAside ? { setAside: facts.setAside } : {}) });
     this.wss.clients.forEach((client) => { if (client.readyState === 1) { try { client.send(msg); } catch { } } });
     this._layOwed(owed);
   }

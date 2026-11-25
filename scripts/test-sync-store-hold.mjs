@@ -21,7 +21,8 @@
 //      (RED: a page copy that keeps Stage units as text — the saved record replaced)
 //   ⑩ STOP's PUT-BACK WHILE HELD (r3890), through the REAL door: (a) the words go to the open page at once — in its box and its
 //      map — and at the lift a page that had deleted the draft (the messages queued) sends them, not the deletion (RED: a hub copy
-//      that never hands them — the box stays empty while the toast says they are back); (b) a hub restart before the lift loses
+//      that never hands them — the box stays empty while the toast says they are back; and, taken to the lift, one that JOINS them
+//      into the lift's snapshot — the page's own deletion wipes them); (b) a hub restart before the lift loses
 //      nothing the page holds (RED: the same copy — the words gone); (c) with NO page open they are owed, said «in memory only», and
 //      laid on the ordinary road AFTER the lift's snapshot, the door's belt noted at their version (RED: a copy laying them first)
 //   ⑪ TORN BYTES: held while their copy is made, lifted EMPTY; a fresh page's text is sent; the snapshot names the copy
@@ -32,6 +33,14 @@
 //      that does not record the send)
 //   ⑮ A HELD REPLY THAT ARRIVES AFTER THE LIFT's SNAPSHOT (placed: the first load's answer gated until after the lift) does not
 //      leave the page unread (RED: a page copy without the check)
+//   ⑰ THE ROLLBACK RE-PUSH STANDS for a page that had seen the data (r3972): a torn lift at version 1 keeps every draft of before the
+//      hold (on the hub, in the file, in the box), a unit typed or cleared while held is rule (C)'s alone; a lift at a lower version
+//      keeps the page's newer draft (RED: the guard that skipped an unread page); a page whose last version IS the fresh lift's number
+//      keeps its draft, open at the lift or resyncing after it (RED: a page copy / a hub copy that compares the number alone)
+//   ⑱ THE RACE AT A PAGE's START (placed: the held reply handing owed words, gated until after the lift's snapshot): the words land
+//      all the same (RED: a page copy that drops the whole reply as old)
+//   ⑲ A PAGE THAT CONNECTS WHILE HELD takes the owed words (the hub's copy leaves); the owed list keeps at most 20, the oldest
+//      dropped, said (RED: copies that never hand at a start / keep no bound)
 // Run: node scripts/test-sync-store-hold.mjs
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -266,7 +275,7 @@ const twoScene = async (cls, tag) => {
   ok(T1.heardWhileHeld === 0, `while held neither page hears the other (${T1.heardWhileHeld} ops)`);
   ok(T1.atLift.a === 1 && T1.atLift.b === 1 && T1.atLift.onA === T1.atLift.store && T1.atLift.onB === T1.atLift.store, `at the lift each page sends ONCE, the last to send wins and both pages show it (${S(T1.atLift)})`);
   ok(T1.later === 'v3, the newer text' && T1.aSetsAfter === 0, `a later hold and lift re-sends nothing of the first: the newer text stands (${S(T1.later)}, ${T1.aSetsAfter} sent by A)`);
-  const KEEPS = pageCopy('    s.unread = null; s.typedWhileUnread = null; s.saw = true;\n', '    s.unread = null; s.saw = true;\n', 'map-kept');
+  const KEEPS = pageCopy('    s.unread = null; s.typedWhileUnread = null; s.saw = true; s.changedWhileUnread = null;\n', '    s.unread = null; s.saw = true; s.changedWhileUnread = null;\n', 'map-kept');
   const TX = await twoScene(KEEPS, 'keeps');
   ok(TX.later !== 'v3, the newer text', `CONTROL (a page copy that keeps its map after the snapshot): the first hold's stale text is sent over the newer one (red) (${S(TX.later)})`);
 }
@@ -335,6 +344,9 @@ const putbackB = async (Store, tag) => {   // must 2: Stop while held, the hub r
   ok(A1.hub === PREFIX && A1.page === PREFIX, `at the lift the page sends its unit — the words, not the deletion — and the hub holds them (${S(A1.hub)})`);
   const AX = await putbackA(NEVER_HANDS(), 'never');
   ok(AX.atStop.box !== PREFIX, `CONTROL (a hub copy that never hands the words to a page): at Stop the box holds none of them while the toast says they are back (red) (${S(AX.atStop.box)})`);
+  const JOINS = M.load('src/sync-store.js', anchored(anchored(SRC, '    if (open.length) {\n      const msg = JSON.stringify({ type: \'state-held-putback\'', '    if (false) {\n      const msg = JSON.stringify({ type: \'state-held-putback\'', 'joins-a'), "    this._freshLife = !(v && v.data);\n", "    this._freshLife = !(v && v.data);\n    for (const o of owed.splice(0)) this.data[o.key] = o.prefix + (typeof this.data[o.key] === 'string' ? this.data[o.key] : '');\n", 'joins-b'), 'joins').SyncStore;
+  const AY = await putbackA(JOINS, 'joins');
+  ok(AY.atStop.box !== PREFIX && !String(AY.hub || '').includes('first queued') && !String(AY.page || '').includes('first queued'), `CONTROL TAKEN TO THE LIFT (a hub copy that never hands the words and JOINS them into the lift's snapshot, at the version as read): the page's own deletion, a true edit there, wipes the joined words — on the hub and on the page (red) (${S({ hub: AY.hub, page: AY.page })})`);
   const B1 = await putbackB(SyncStore, 'real');
   ok(B1.hub === PREFIX + SAVED, `a hub restart before the lift loses nothing the page holds: the words arrive from the page at the first snapshot, in front of the draft it saw (${S(B1.hub)})`);
   const BX = await putbackB(NEVER_HANDS(), 'never');
@@ -413,7 +425,7 @@ const sleptScene = async (cls, tag) => {
 {
   const L1 = await sleptScene(CLASS, 'real');
   ok(L1.a === 'newer, saved by B after the lift\n\nA\'s old text, typed while held' && L1.b === MADE.drafts.data['chat:sess-b'], `the newer saved draft, then A's old text, once; A's old deletion deletes nothing (${S(L1)})`);
-  const ANYVER = pageCopy('    const saw = s.saw !== false && (version || 0) === s.version;\n', '    const saw = s.saw !== false;\n', 'saw-any-version');
+  const ANYVER = pageCopy('    const saw = sawBefore && !fresh && (version || 0) === s.version;\n', '    const saw = sawBefore;\n', 'saw-any-version');
   const LX = await sleptScene(ANYVER, 'anyver');
   ok(LX.a === 'A\'s old text, typed while held' || LX.b !== MADE.drafts.data['chat:sess-b'], `CONTROL (a page copy that ignores the version it saw): the newer draft is replaced, the unit deleted (red) (${S(LX)})`);
 }
@@ -454,9 +466,139 @@ const lateScene = async (cls, tag) => {
 {
   const H1 = await lateScene(CLASS, 'real');
   ok(!H1.unread && H1.has === SAVED, `the late «held» answer is dropped: the page reads, unread no more (${S(H1)})`);
-  const NOCHECK = pageCopy("        if ((s.snapEpoch || 0) !== epoch) return true;   // the store was lifted (or answered) since: this older answer is dropped\n", '', 'no-epoch-check');
+  const NOCHECK = pageCopy("        if ((s.snapEpoch || 0) !== epoch) { for (const pb of handed) this._landPutback(storeName, pb, snap.code); return true; }\n", '', 'no-epoch-check');
   const HX = await lateScene(NOCHECK, 'nocheck');
   ok(HX.unread, `CONTROL (a page copy without the check): the late answer leaves the page unread for good (red) (${S(HX)})`);
+}
+
+console.log('⑰ THE ROLLBACK RE-PUSH STANDS (r3972) — a page that had seen the data keeps its drafts at a torn lift and at a lower-version lift');
+const TORN_BYTES = '{"version": 41, "data": {"chat:sess-a": "cut off in the mid';
+const DOCK = 'doc:\u0001/home/userL/notes.md';
+const tornScene = async (cls, tag) => {   // a page that saw version 41; held; one draft typed and one unit cleared while held; a TORN lift
+  const T = world('drafts', { readable: true, cls });
+  const P = T.page('rb-' + tag);
+  await P.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await sleep(5);   // held (EIO): the page is unread
+  P.sync.set('drafts', 'chat:sess-b', 'typed while held');                     // rule (C): its text joins, once
+  P.sync.set('drafts', DOCK, '');                                              // rule (C): its old deletion is nothing
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);                 // the file now reads TORN
+  await T.store._hold.again(); await sleep(5);                                 // set aside, lifted EMPTY at version 1
+  if (T.store.get('chat:sess-a') === SAVED) await until(() => { const d = disk(T.file); return !!(d && d.data && d.data['chat:sess-a'] === SAVED); }, 500);   // the write, when the hub holds it
+  const d = disk(T.file);
+  const out = { a: T.store.get('chat:sess-a'), b: T.store.get('chat:sess-b'), bSets: setsOf(P, 'chat:sess-b').length, doc: T.store.get(DOCK), docSets: setsOf(P, DOCK).length, box: P.sync.get('drafts', 'chat:sess-a'), disk: d && d.data ? d.data['chat:sess-a'] : null };
+  T.store._hold.stop();
+  return out;
+};
+const lowerScene = async (cls, tag) => {   // the page's save at 42 never reached the file (it reads 41); held; the lift at 41
+  const T = world('drafts', { readable: true, cls });
+  const P = T.page('lv-' + tag);
+  await P.sync.init('drafts');
+  P.sync.set('drafts', 'chat:sess-a', 'the newer draft, saved at 42');
+  await until(() => { const d = disk(T.file); return !!(d && d.version === 42); }, 500);
+  fs.writeFileSync(T.file, S(MADE.drafts, null, 2));
+  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await sleep(5);
+  REFUSE.delete(T.file); await T.store._hold.again(); await sleep(5);
+  const out = { a: T.store.get('chat:sess-a'), box: P.sync.get('drafts', 'chat:sess-a') };
+  T.store._hold.stop();
+  return out;
+};
+const oneScene = async (cls, Store, tag, { missed = false } = {}) => {   // a store born empty; ONE draft (version 1); held; a torn lift AT VERSION 1
+  const T = world('drafts', { readable: true, cls, Store });
+  fs.writeFileSync(T.file, S({ version: 0, data: {} })); T.restart();
+  const P = T.page('v1-' + tag);
+  await P.sync.init('drafts');
+  P.sync.set('drafts', 'chat:sess-a', 'the one draft, version 1');
+  await until(() => { const d = disk(T.file); return !!(d && d.version === 1); }, 500);
+  REFUSE.add(T.file); T.restart(); P.drop(); P.reconnect(); await sleep(5);   // held: unread, its last version 1
+  if (missed) P.drop();                                                         // …and its socket is down at the lift
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+  await T.store._hold.again(); await sleep(5);
+  const version = T.store.version;
+  if (missed) { P.reconnect(); await sleep(5); }                                // its resync, still unread: the full snapshot
+  const out = { version, pageVersion: P.sync.stores.drafts.version, a: T.store.get('chat:sess-a'), box: P.sync.get('drafts', 'chat:sess-a') };
+  T.store._hold.stop();
+  return out;
+};
+{
+  const R1 = await tornScene(CLASS, 'real');
+  ok(R1.a === SAVED && R1.box === SAVED && R1.disk === SAVED, `a TORN lift at version 1 under a page that saw 41: the page's drafts of before the hold are on the hub, in the file and in the box (${S(R1.a)})`);
+  ok(R1.b === 'typed while held' && R1.bSets === 1 && R1.doc === undefined && R1.docSets === 0, `…a unit typed while held joins, sent ONCE; a unit cleared while held is not pushed back (its deletion is nothing, the file gave none) (${S({ b: R1.b, bSets: R1.bSets, doc: R1.doc, docSets: R1.docSets })})`);
+  const OLDGUARD = pageCopy('    if (rolledBack && sawBefore) {\n', '    if (rolledBack && !wasUnread) {\n', 'old-guard');
+  const RX = await tornScene(OLDGUARD, 'oldguard');
+  ok(RX.a !== SAVED && RX.box !== SAVED, `CONTROL (today's guard, which skipped a page held unread): every saved draft gone from the hub and the box (red) (${S({ a: RX.a, box: RX.box })})`);
+  const V1 = await lowerScene(CLASS, 'real');
+  ok(V1.a === 'the newer draft, saved at 42' && V1.box === 'the newer draft, saved at 42', `a lift at a LOWER version (41) than the page's (42): the page's newer draft stands (${S(V1.a)})`);
+  const VX = await lowerScene(OLDGUARD, 'oldguard');
+  ok(VX.a === SAVED && VX.box === SAVED, `CONTROL (the same guard): the file's older draft replaces the newer one on the hub and the page (red) (${S(VX)})`);
+  // the counter begins again at a fresh lift: a page's last version can be the lift's number by chance — the compare is safe
+  // against it (the lift's snapshot and an unread page's resync say `fresh`)
+  const O1 = await oneScene(CLASS, SyncStore, 'real');
+  ok(O1.version >= 1 && O1.a === 'the one draft, version 1' && O1.box === 'the one draft, version 1', `a page whose last version (1) is the torn lift's own number: its draft is pushed again all the same (hub ${S(O1.a)})`);
+  const NOFRESH = pageCopy('    const rolledBack = (version || 0) < s.version || fresh;\n', '    const rolledBack = (version || 0) < s.version;\n', 'no-fresh');   // stale-pins: kept — the red copy's own text (the compare by the number alone), meant to be absent
+  const OX = await oneScene(NOFRESH, SyncStore, 'nofresh');
+  ok(OX.pageVersion === 1 && OX.a === undefined && OX.box === undefined, `CONTROL (a page copy whose rollback compare is the number alone): the draft is gone from the hub and the page (red) (${S(OX)})`);
+  const O2 = await oneScene(CLASS, SyncStore, 'missed', { missed: true });
+  ok(O2.a === 'the one draft, version 1' && O2.box === 'the one draft, version 1', `the same page with its socket down at the lift: its resync, still unread, is told the counter began again, and its draft comes back (${S(O2.a)})`);
+  const RESYNC_NUMBER = M.load('src/sync-store.js', anchored(SRC, "version: this.version, ...(this._freshLife ? { fresh: true } : {}) }];", "version: this.version }];", 'resync-number'), 'resync-number').SyncStore;   // stale-pins: kept — the red copy's own text (the resync by the number alone), meant to be absent
+  const O2X = await oneScene(CLASS, RESYNC_NUMBER, 'missed-x', { missed: true });
+  ok(O2X.a === undefined && O2X.box === undefined, `CONTROL (a hub copy whose unread resync carries the number alone): the draft is gone (red) (${S(O2X)})`);
+}
+
+console.log('⑱ THE RACE AT A PAGE\'s START (r3972) — the held reply that hands owed words, read after the lift\'s snapshot: the words land');
+const startRace = async (cls, tag) => {
+  let release; const gate = new Promise((r) => { release = r; });
+  const Q = world('drafts', { cls, fetchGate: () => gate });
+  DOOR.create({ getSyncStore: (n) => Q.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-r-' + tag));   // owed: no page open
+  const p = Q.page('race-' + tag);
+  const loading = p.sync.init('drafts');           // its 503 hands the owed words NOW (the hub's copy leaves); the answer waits
+  REFUSE.delete(Q.file); await Q.store._hold.again(); await sleep(5);   // the lift's snapshot reaches the page FIRST
+  release(); await loading; await sleep(5);
+  const out = { owedLeft: (Q.store._owed || []).length, hub: Q.store.get('chat:sess-a'), box: p.sync.get('drafts', 'chat:sess-a') };
+  Q.store._hold.stop();
+  return out;
+};
+{
+  const S1 = await startRace(CLASS, 'real');
+  ok(S1.owedLeft === 0 && S1.hub === PREFIX + SAVED && S1.box === PREFIX + SAVED, `the hub handed the words in its reply; the page read the reply late and landed them all the same, in front of the saved draft (${S(S1.hub)})`);
+  const DROPS = pageCopy("        if ((s.snapEpoch || 0) !== epoch) { for (const pb of handed) this._landPutback(storeName, pb, snap.code); return true; }\n", "        if ((s.snapEpoch || 0) !== epoch) return true;\n", 'drops-reply');
+  const SX = await startRace(DROPS, 'drops');
+  ok(SX.hub === SAVED, `CONTROL (a page copy that drops the whole reply as old): the words are on no page and the hub has nothing left to lay (red) (${S(SX.hub)})`);
+}
+
+console.log('⑲ A PAGE THAT CONNECTS WHILE HELD takes the owed words; the owed list keeps at most 20, the oldest dropped, said');
+const connectScene = async (Store, tag) => {
+  const Q = world('drafts', { Store });
+  DOOR.create({ getSyncStore: (n) => Q.stores[n], log: () => { } }).onLiveRecord({}, 'sess-a', dropped('d-h-' + tag));   // owed: no page open
+  const owedBefore = (Q.store._owed || []).length;
+  const p = Q.page('conn-' + tag);
+  await p.sync.init('drafts');                       // connects while still held: handed
+  const atConnect = { owedLeft: (Q.store._owed || []).length, box: p.sync.get('drafts', 'chat:sess-a') };
+  REFUSE.delete(Q.file); await Q.store._hold.again(); await sleep(5);
+  const out = { owedBefore, atConnect, hub: Q.store.get('chat:sess-a') };
+  Q.store._hold.stop();
+  return out;
+};
+const boundScene = async (Store, tag) => {
+  const Q = world('drafts', { Store });
+  const said = [], oWarn = console.warn;
+  console.warn = (...a) => { said.push(a.map(String).join(' ')); };
+  try {
+    for (let i = 1; i <= 21; i++) Q.store.heldPutBack('chat:sess-a', `queued ${i}\n\n`);
+    return { owed: (Q.store._owed || []).length, first: (Q.store._owed || [])[0] && Q.store._owed[0].prefix, said: said.filter((l) => /the oldest is dropped/.test(l)).length };
+  } finally { console.warn = oWarn; Q.store._hold.stop(); }
+};
+{
+  const C1 = await connectScene(SyncStore, 'real');
+  ok(C1.owedBefore === 1 && C1.atConnect.owedLeft === 0 && C1.atConnect.box === PREFIX, `owed with no page open; the page that connects while held takes the words (in its box: ${S(C1.atConnect.box)}) and the hub's copy leaves`);
+  ok(C1.hub === SAVED + '\n\n' + PREFIX, `…at the lift they arrive from that page, once (it opened during the hold: its text joins after the saved draft) (${S(C1.hub)})`);
+  const NOHAND = M.load('src/sync-store.js', anchored(SRC, "    if (h) { const owed = this._handOwed(); return", "    if (h) { const owed = []; return", 'no-hand-at-start'), 'no-hand-at-start').SyncStore;
+  const CX = await connectScene(NOHAND, 'nohand');
+  ok(CX.atConnect.owedLeft === 1 && CX.atConnect.box !== PREFIX, `CONTROL (a hub copy that hands nothing at a page's start): the page's box lacks the words while the hub still owes them (red) (${S(CX.atConnect)})`);
+  const B1 = await boundScene(SyncStore, 'real');
+  ok(B1.owed === 20 && B1.first === 'queued 2\n\n' && B1.said >= 1, `the owed list keeps 20: the oldest (queued 1) dropped, said (${S(B1)})`);
+  const NOBOUND = M.load('src/sync-store.js', anchored(SRC, '    if (this._owed.length > OWED_MAX) {', '    if (false) {', 'no-bound'), 'no-bound').SyncStore;
+  const BX = await boundScene(NOBOUND, 'nobound');
+  ok(BX.owed === 21, `CONTROL (a hub copy with no bound): 21 owed (red) (${S(BX)})`);
 }
 
 for (const s of [W]) { REFUSE.delete(s.file); if (s.store._hold) s.store._hold.stop(); }

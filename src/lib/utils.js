@@ -2353,10 +2353,13 @@ class StateSync {
         const epoch = s.snapEpoch || 0;   // r3890: a snapshot that lands on the socket while this read is out is newer than its answer
         const res = await fetch(`/api/sync/${storeName}`);
         const snap = await res.json();
-        if ((s.snapEpoch || 0) !== epoch) return true;   // the store was lifted (or answered) since: this older answer is dropped
+        const handed = snap && snap.held === true && Array.isArray(snap.putbacks) ? snap.putbacks : [];
+        // the store was lifted (or answered) since: this older answer is dropped — but put-back words the hub HANDED in it left the
+        // hub's memory for this page, so they land here all the same (r3972: owed words leave the hub only to a page that has them)
+        if ((s.snapEpoch || 0) !== epoch) { for (const pb of handed) this._landPutback(storeName, pb, snap.code); return true; }
         // lane lg-recovery (主开发 r3262 / r3271, law (a)): the hub could not read this store — HELD by name: the page starts empty AND
         // held (init answers false: no surface takes it for «nothing stored»), and keeps what it holds — with any put-back the hub owed
-        if (snap && snap.held === true) { this._applyUnread(storeName, snap); for (const pb of Array.isArray(snap.putbacks) ? snap.putbacks : []) this._applyHeldPutback(storeName, { ...pb, code: snap.code }); return false; }
+        if (snap && snap.held === true) { this._applyUnread(storeName, snap); for (const pb of handed) this._applyHeldPutback(storeName, { ...pb, code: snap.code }); return false; }
         s.data = snap.data || {};
         s.version = snap.version || 0;
         s.saw = true;
@@ -2376,6 +2379,7 @@ class StateSync {
     // TEXT (a chat draft, a document's comments) stays on this page, in its map, and is sent at the store's first snapshot; any other
     // unit acts for this page only, is NOT kept, and the page says so once (onUnread's { notKept })
     if (s.unread) {
+      (s.changedWhileUnread || (s.changedWhileUnread = new Set())).add(key);
       if (value == null || value === '') delete s.data[key]; else s.data[key] = value;
       if (this._isText(storeName)) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(key, value == null || value === '' ? null : value);
       else if (!s.unread.notKeptSaid) { s.unread.notKeptSaid = true; this._tellUnread(storeName, s.unread, { notKept: true }); }
@@ -2469,6 +2473,17 @@ class StateSync {
     if (this._isText(storeName)) (s.typedWhileUnread || (s.typedWhileUnread = new Map())).set(msg.key, value);
     this._notify(s, msg.key, value, { prepended: msg.prefix.length });
   }
+  /** a put-back the hub handed in a reply this page reads late (r3972): held → the held road; read already → an ordinary set, its words
+   *  in front of the unit's draft, told to the composer as a prefix */
+  _landPutback(storeName, pb, code) {
+    const s = this.stores[storeName];
+    if (!s || !pb || typeof pb.key !== 'string' || typeof pb.prefix !== 'string' || !pb.prefix) return;
+    if (s.unread) { this._applyHeldPutback(storeName, { ...pb, code }); return; }
+    const cur = typeof s.data[pb.key] === 'string' ? s.data[pb.key] : '';
+    const value = pb.prefix + cur;
+    this.set(storeName, pb.key, value);
+    this._notify(s, pb.key, value, { prepended: pb.prefix.length });
+  }
   /** the stores whose units are a person's TEXT (r3654 1): what is typed while unread stays on the page and is sent at the first snapshot */
   _isText(storeName) { return storeName === 'drafts'; }
   /** A PAGE THAT NEVER SAW THE DATA JOINS (r3654 2): the file's unit, then what was typed here, once — { value, prepended } (the saved
@@ -2506,10 +2521,15 @@ class StateSync {
     // r3890 C: «had seen the data» means «had seen THIS version» — a unit of this page is a true edit only when the snapshot is the
     // version it last saw; a newer one (the page slept through a lift, another page saved since) makes its text JOIN and its deletion
     // nothing, as on a page that never saw the data
-    const saw = s.saw !== false && (version || 0) === s.version;
-    s.snapEpoch = (s.snapEpoch || 0) + 1;
+    // A lift that set torn bytes aside or found no file is a FRESH START (its counter begins again): no page's last version is that
+    // one, whatever its number (r3972), so nothing of this page counts as a true edit there
+    const sawBefore = s.saw !== false;   // r3972: taken BEFORE the reset — the rollback re-push below stands for such a page
+    const fresh = !!(msg && (msg.setAside || msg.fresh));
+    const saw = sawBefore && !fresh && (version || 0) === s.version;
+    const changed = s.changedWhileUnread || null;
     const wasUnread = !!s.unread;
-    s.unread = null; s.typedWhileUnread = null; s.saw = true;
+    s.snapEpoch = (s.snapEpoch || 0) + 1;
+    s.unread = null; s.typedWhileUnread = null; s.saw = true; s.changedWhileUnread = null;
     const oldData = s.data;
     const oldKeys = new Set(Object.keys(oldData));
     // Server ROLLBACK defense: a snapshot whose version is BELOW what this
@@ -2518,7 +2538,8 @@ class StateSync {
     // single-user instance — adopt the server's version base, then re-push
     // every differing key so both sides converge forward instead of silently
     // diverging (e.g. a draft typed in the ~2s before an OOM kill).
-    const rolledBack = (version || 0) < s.version;
+    // A FRESH START (r3972) is a rollback whatever its number: the file gave nothing, so a page that saw the data holds the newer truth
+    const rolledBack = (version || 0) < s.version || fresh;
     s.data = data || {};
     s.version = version || 0;
     // a key with an own set still awaiting its ack keeps the own value: the server answers that set AFTER this snapshot,
@@ -2534,9 +2555,12 @@ class StateSync {
       else if (value !== null) { const j = this._joinUnseen(s.data[key], value); if (j) sent.set(key, j); }
     }
     for (const [key, j] of sent) this.set(storeName, key, j.value);   // ordinary sets (set() mutates s.data)
-    if (rolledBack && !wasUnread) {   // r3890: a page that was unread pushes no view of its own (its text went above; the rest was said not kept)
+    // the RELEASE's rollback defense, for a page that had seen the data (r3972 — a torn lift at version 1, a save that never reached the
+    // file): its view is the newer truth and is pushed again; a unit changed while unread is left to rule (C) above (text) or was said
+    // not kept (structured): never pushed twice
+    if (rolledBack && sawBefore) {
       for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
-        if (sent.has(key)) continue;
+        if (sent.has(key) || (typed && typed.has(key)) || (changed && changed.has(key))) continue;
         const localVal = oldData[key] ?? '';
         const serverVal = s.data[key] ?? '';
         // set() mutates s.data + sends state-set, so the notify loop below
