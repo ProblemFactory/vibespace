@@ -869,6 +869,27 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       && /app\.post\('\/api\/automation\/grants\/:grantId\/only', person\(\(req\) => engine\.setOnly\(/.test(arC) && /\.\.\.\(Array\.isArray\(body\(req\)\.only\) \? \{ only: body\(req\)\.only \} : \{\}\)/.test(arC)
       && /only: \{ keys: always\.filter\(\(g\) => g\.only === true/.test(vaC) && /`\/api\/automation\/grants\/\$\{encodeURIComponent\(g\.id\)\}\/only`/.test(vaC) && /'key\.only': i18nKey\('changed «this group only»'\)/.test(vwC), 'automation (the cure (C)): the key dialog offers the switch; an added grant carries it, a kept grant flips by ONE verb (off said explicitly to the writer); the listing carries the stored flag; the audit line has its words');
   }
+  // B-fbd6 ITEM 3 (主开发 r4365): THE WAKE RE-PICKS AS THE SAVE DOES — a watcher stored through a group (here the parent tg-p) whose
+  // row now leaves it out (its «除了» names the child group), while ANOTHER row (the child group's own) admits it: the save admits
+  // it (viaJudge over every group row), so the wake does too; with no other row it stays stopped. RED: the wake that judges the
+  // stored group's row alone (the release: stopped in silence, the row listed and inert)
+  {
+    const CF3 = require('../src/channel-filter.js');
+    const members3 = [{ cid: 'k1', groups: ['tg-y'], inherited: ['tg-p'] }];
+    const stored3 = { principal: { kind: 'agent', id: 'k1' }, via: 'tg-p' };
+    const pRow3 = { row: { principal: { kind: 'group', id: 'tg-p', name: 'Parent' }, authority: 'draft', except: [{ kind: 'group', id: 'tg-y', name: 'Kid' }] }, source: 'grant' };
+    const yRow3 = { row: { principal: { kind: 'group', id: 'tg-y', name: 'Kid' }, authority: 'draft' }, source: 'conversation' };
+    const w3 = { principal: { kind: 'agent', id: 'k1' }, notify: 'wake', mode: 'all', dailyWakeCap: 50 };
+    const save3 = CF3.validateWatchers([w3], [pRow3.row, yRow3.row], { members: members3 });
+    const judge3 = (CFm) => ({ both: CFm.memberStill(stored3, members3, { rows: [pRow3, yRow3] }), pOnly: CFm.memberStill(stored3, members3, { rows: [pRow3] }), gone: CFm.memberStill(stored3, [{ cid: 'k1', groups: [], inherited: [] }], { rows: [pRow3, yRow3] }) });
+    const r3 = judge3(CF3);
+    ok(save3.ok === true && save3.watchers[0].via === 'tg-y' && r3.both === true && r3.pOnly === false && r3.gone === false, `B-fbd6 item 3: stored through the parent whose row now leaves its child out, another row (the child's own) admitting it — the save admits it (via ${save3.ok ? save3.watchers[0].via : save3.code}) and so does the wake (${r3.both}); with no other row it stays stopped (${r3.pOnly}); out of every group, stopped (${r3.gone})`, { save: save3.ok ? save3.watchers[0] : save3, r3 });
+    const SRC3 = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+    const REPICK3 = "    const v = viaJudge(new Set(viaRowOf(rows).map((p) => `group:${p.id}`)), s, row.principal.id, rows, except);\n    return !!(v && v.ok && v.entry && v.entry.kind === 'group');\n";
+    const M3 = mutantCopies('fbd6-repick', REPO);
+    const red3 = judge3(M3.load('src/channel-filter.js', anchored(SRC3, REPICK3, '    return false;\n', 'the wake that judges the stored group alone'), 'fbd6-stored-only'));
+    ok(red3.both === false && red3.pOnly === false, `B-fbd6 item 3 RED CONTROL: the wake that judges the stored group's row alone — the member another row admits is stopped (${red3.both}) — the leg above would go red`, red3);
+  }
   // the chain's cure (D, the U3c read): a CHILD of an access-holding parent reads there — so it may be a watcher there (at the save
   // and at every wake); a parent's «仅本组» access refuses it and says THAT
   {
@@ -887,7 +908,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const keyOnly = CFD.validateWatchers([wD('k3')], accP, { inherited: ['group:tg-q'], members: [...membersD, { cid: 'k3', groups: ['tg-q'], inherited: [] }] });
     ok(CFD.memberStill(viaRow, membersD, { rows: wrapped }) === true && !exP.ok && /left out through its parent Task Group "Parent"/.test(exP.error) && keyOnly.ok && keyOnly.watchers[0].via === 'tg-q', 'channels (the cure (D), its read): the wake\'s wrapped rows are read through; a parent left out of the access list leaves the child out (said so); a key-only group stays a via group beside the rows', [exP.error, keyOnly.ok && keyOnly.watchers[0].via]);
     const caD = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
-    ok(/F\.memberStill\(it\.watcher, members, \{ rows: viaRows \}\)/.test(caD) && /const viaRows = hasVia \? \[\.\.\.e0\.access, \.\.\.visibleRowsOf\(grantsOfConversation\(en\)\)\] : null;/.test(caD), 'channels (the cure (D)): the wake hands the grain\'s access rows to the re-judge (B-1e96: and the grant rows after them)');
+    ok(/F\.memberStill\(it\.watcher, members, \{ rows: viaRows \}\)/.test(caD) && /const viaRows = hasVia \? \[\.\.\.e0\.access, \.\.\.visibleRowsOf\(grants\)\] : null;/.test(caD), 'channels (the cure (D)): the wake hands the grain\'s access rows to the re-judge (B-1e96: and the grant rows after them)');
     // CONTROL: the release's via judge (own groups only, from key strings) refuses the child — the leg above would be red
     const MD = mutantCopies('cure-d-via', REPO);
     try {
@@ -1035,6 +1056,23 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ok(exKid.wrote && exKid.page === 'refused' && /has no access here|left out/.test(exKid.save) && !exKid.woke, `B-1e96 (round wg5m3njdx 1): the grant row's OWN «除了» names a CHILD group under the granted parent — its member refused on the page (${exKid.page}), at the save (${exKid.save.slice(0, 80)}), not woken (${exKid.woke})`, exKid);
     ok(exLater.wrote && exLater.save === 'ok' && !exLater.woke, `B-1e96 (round wg5m3njdx 1) at the WAKE: saved through the parent's plain grant row, the row's own «除了» then naming the child group — the wake re-judges the row and does not wake (save ${exLater.save}, woken ${exLater.woke})`, exLater);
     ok(ruleS.wrote && ruleS.save === 'ok', `B-1e96 (round wg5m3njdx 2): a RULE save reads the account's grants as ROWS — a pre-unify account grant to the parent admits its child's member on a new title rule (save ${ruleS.save}; woken ${ruleS.woke})`, ruleS);
+    // B-fbd6 ITEM 6 (主开发 r4365): ONE READ OF THE CONVERSATION's GRANTS A WAKE — the grants store's reads counted over the same
+    // pass (the scene's wake of a via watcher, the counter set at its last write): the cured wake reads them fewer times than the
+    // release's form (effectiveFor's keys and the via judge's rows each a read); the same member woken by both
+    {
+      const CGM6 = require('../src/server/channels-grants.js');
+      const create6 = CGM6.create;
+      let reads6 = 0;
+      CGM6.create = (o) => { const cg = create6(o); const f6 = cg.conversationGrants; cg.conversationGrants = (k) => { reads6 += 1; return f6(k); }; return cg; };
+      try {
+        const count6 = async (eng) => { const r = await scene(eng, { ...S_LIN, after: () => { reads6 = 0; } }); return { woke: r.woke, reads: reads6 }; };
+        const cur6 = await count6(ENG);
+        const ES6 = engineSource(REPO), M6 = mutantCopies('fbd6-wake-reads', REPO);
+        const two6 = anchored(anchored(ES6, "    const grants = grantsOfConversation(en);   // B-fbd6 item 6 (主开发 r4365): ONE read of the conversation's grants a wake — effectiveFor's keys and the via judge's rows\n    const e0 = effectiveFor(en, grants);\n", '    const e0 = effectiveFor(en);\n', 'the wake reads the grants for effectiveFor'), '    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grants)] : null;', '    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grantsOfConversation(en))] : null;', 'and again for the via rows');   // stale-pins: kept (the red control restores the release's two reads)
+        const rel6 = await count6(M6.load('src/server/channels-engine.js', two6, 'fbd6-two-reads'));
+        ok(cur6.woke && rel6.woke && cur6.reads > 0 && cur6.reads < rel6.reads, `B-fbd6 item 6: the wake reads the conversation's grants ONCE — over the same pass ${cur6.reads} reads of the grants store against ${rel6.reads} in the release's form (two reads a wake), the member woken by both (${cur6.woke} / ${rel6.woke})`, { cur6, rel6 });
+      } finally { CGM6.create = create6; }
+    }
     // RED CONTROLS
     const M9 = mutantCopies('b1e96-grant-rows', REPO);
     try {
@@ -1046,7 +1084,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       ok(wake9.save === 'ok' && !wake9.woke, 'B-1e96 RED CONTROL: the wake re-judging without the grant rows — saved via the parent, never woken (the save and the wake judge the same row)', wake9);
       const ex9 = await scene(copy(", except: Array.isArray(g.except) ? g.except : [] });", ' });', 'B-1e96 a grant row without its own except'), S_OWNEX);
       ok(/has no access here|left out/.test(ex9.save) && !ex9.woke, 'B-1e96 RED CONTROL (a): a grant row without its OWN «除了» falls back to this grain\'s — the session left out of another group is refused (the chain\'s regression)', ex9);
-      const onlyWake9 = await scene(copy('    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grantsOfConversation(en))] : null;', '    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grantsOfConversation(en)).map((r) => ({ ...r, principal: { ...r.principal, only: false } }))] : null;', 'B-1e96 the wake drops the only flag'), S_ONLY_LATER);
+      const onlyWake9 = await scene(copy('    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grants)] : null;', '    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grants).map((r) => ({ ...r, principal: { ...r.principal, only: false } }))] : null;', 'B-1e96 the wake drops the only flag'), S_ONLY_LATER);
       ok(onlyWake9.save === 'ok' && onlyWake9.woke, 'B-1e96 RED CONTROL (b) at the wake: the wake\'s grant rows without their «仅本组» — the child\'s member is woken through a grant now for the parent\'s own members only', onlyWake9);
       const only9 = await scene(copy("...(p.kind === 'group' && p.only === true ? { only: true } : {}) }, via: g.scope", '}, via: g.scope', 'B-1e96 a grant row without its only flag'), S_ONLY);
       ok(only9.save === 'ok' && only9.woke, 'B-1e96 RED CONTROL (b): a grant row that drops its «仅本组» — the child\'s member is saved and woken through a parent that reaches its own members only', only9);

@@ -1266,7 +1266,15 @@ function memberStill(row, members = [], { rows = null, except = [] } = {}) {   /
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
   const viaEnt = (Array.isArray(rows) ? rows : []).find((r) => { const pr = principalOfRow(r); return pr && pr.kind === 'group' && str(pr.id) === str(row.via); });   // the cure's cure (1): the via row WITH its own «除了»
   const viaRow = viaEnt ? viaRowOf([viaEnt])[0] : null, viaEx = viaEnt && viaEnt.row && Array.isArray(viaEnt.row.except) ? viaEnt.row.except : viaEnt && Array.isArray(viaEnt.except) ? viaEnt.except : except;
-  if (viaRow) return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: viaExceptOf(viaEx) }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [], groupsUnreadable: s.inherited === null }).ok;
+  if (viaRow) {
+    if (!s) return false;
+    if (GM.admits([{ door: 'channel-reach', resource: '-', to: [viaRow], except: viaExceptOf(viaEx) }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: Array.isArray(s.inherited) ? s.inherited.map(str) : [], groupsUnreadable: s.inherited === null }).ok) return true;
+    // B-fbd6 item 3 (主开发 r4365): the STORED group's row refuses (its «除了», its «仅本组») — the wake RE-PICKS over every group
+    // row as the save does (viaJudge: the first row per group, each with its own «除了»): a member another row admits is still
+    // woken; one no row admits is not
+    const v = viaJudge(new Set(viaRowOf(rows).map((p) => `group:${p.id}`)), s, row.principal.id, rows, except);
+    return !!(v && v.ok && v.entry && v.entry.kind === 'group');
+  }
   return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }).ok;   // lane lg-group-parents (the U3c read, MAJOR 4): own groups only, as memberVia
 }
 /** the chain's cure (D): why a member the via judge refused is refused, in the model's words (a parent's «仅本组» access) — '' when

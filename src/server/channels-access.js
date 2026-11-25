@@ -339,9 +339,9 @@ function create(engineCtx) {
   /** The facts a pattern matches over (PURE input). */
   function convFacts(en) { return { title: (en && en.title) || '', participants: (en && en.participants) || '', kind: (en && en.kind) || '', authors: (en && Array.isArray(en.authors)) ? en.authors : [] }; }
   /** WHO HAS ACCESS AND WHO WATCHES — the ONE answer for a conversation. */
-  function effectiveFor(en) {
+  function effectiveFor(en, grants = null) {   // B-fbd6 item 6: `grants` = this conversation's grants as the caller read them (the wake: one read)
     if (!en) return null;
-    return F.effectiveGrants({ conversation: convGrainOf(en), patterns: patternsOf(en.adapterId), account: accountGrainOf(en.adapterId) }, convFacts(en), { grantKeys: visibleKeysOf(grantsOfConversation(en)), accountKeys: accountGrantKeys(en.adapterId) });
+    return F.effectiveGrants({ conversation: convGrainOf(en), patterns: patternsOf(en.adapterId), account: accountGrainOf(en.adapterId) }, convFacts(en), { grantKeys: visibleKeysOf(grants || grantsOfConversation(en)), accountKeys: accountGrantKeys(en.adapterId) });
   }
   /** The running agent conversations an ALL-AGENTS watcher fans out to (`[{cid, name}]`, the live roster now). */
   function fanTargets() {
@@ -354,14 +354,16 @@ function create(engineCtx) {
    *  pace LEDGER: a cap of N is N wakes per conversation, never N shared and never uncapped). `base` = the answer as
    *  the views read it (one All row). Every view path keeps `effectiveFor`. */
   function wakeEffOf(en) {
-    const e0 = effectiveFor(en);
+    if (!en) return effectiveFor(en);
+    const grants = grantsOfConversation(en);   // B-fbd6 item 6 (主开发 r4365): ONE read of the conversation's grants a wake — effectiveFor's keys and the via judge's rows
+    const e0 = effectiveFor(en, grants);
     if (!e0) return e0;
     // lane notify-rules-r2: a member session's watcher (`via` its group) is RE-JUDGED on every wake — a session that left
     // the group (or is not running: membership unknown) is not woken; its row stays, inert, until it is a member again
     const hasVia = e0.watchers.some((it) => it && it.watcher && it.watcher.via);
     const anyExcept = CG.hasAnyExcept();
     const members = hasVia || anyExcept ? membersNow() : null;
-    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grantsOfConversation(en))] : null;   // B-1e96: + the grant rows (after the grains' rows: the store's precedence) — the save judged them, so does the wake
+    const viaRows = hasVia ? [...e0.access, ...visibleRowsOf(grants)] : null;   // B-1e96: + the grant rows (after the grains' rows: the store's precedence) — the save judged them, so does the wake
     let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members, { rows: viaRows })) } : e0;   // the chain's cure (D): the grain's access rows (a via row's «仅本组», the lineage)
     // lane grants-unify: with an exception anywhere, a NAMED watcher that is running is re-judged too (wakeAdmitOf: may it
     // still see this conversation) — one not running is judged when it runs (its held hits wait, never dropped here)
