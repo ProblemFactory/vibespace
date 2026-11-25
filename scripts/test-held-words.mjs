@@ -171,6 +171,7 @@ const LEFT_ALONE = [
   ['not', 'a verdict\'s input (a conversation\'s groups could not be read — the asking door words its refusal)', ['groups_unreadable']],
   // r3856 (the train 2.369.419's whole tier at 725162b8a): line 817 (B-d578, the fallback chain) brought it
   ['not', 'a pool verdict\'s own why (memberVerdictFor, src/server/usage-pool-engine.js): a LISTED fallback provider whose key cannot be read now (the vault locked, the key missing) — memberCanServe reads only its `ok`; the pin route words any why it does not know as «is not usable in the pool right now», and a fallback provider is never a member row a pin press names; the code itself reaches only the journal and the 409\'s protocol field — no list is held', ['fallback-key-unreadable']],
+  ['not', 'the idle-paint freeze\'s own refusal reason (a tab\'s visibility read did not answer: that pass freezes nothing) — internal to the keeper\'s sweep, no route answers it', ['front_unread']],
 ];
 const LEFT = new Map(LEFT_ALONE.flatMap(([kind, why, codes]) => codes.map((c) => [c, { kind, why }])));
 function endingsOf(sources, pattern) {
