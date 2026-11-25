@@ -339,6 +339,7 @@ function usageIdentityGroups() {
       // freshest cache is the identity's anchor source (the same real login can
       // surface as BOTH __global__ and a named sub — one quota, two files)
       if (!g.cache || m.cache.fetchedAt > g.cache.fetchedAt) { g.cache = m.cache; g.accountId = m.accountId; }
+      if (g.cache === m.cache) g.cacheOwner = m.id;   // the freshest's OWNER by its MEMBER id — a machine login's own pseudo id too (主开发 r3959: the stand-in's law)
       // the file that stands «no 5h limit» (the newest such): the anchor sweep records no 5h bucket over it (no-5h-window r5)
       if (quotaModel.fiveHourAbsent(m.cache) > (quotaModel.fiveHourAbsent(g.tomb5h) || 0)) g.tomb5h = m.cache;
     }
@@ -727,10 +728,11 @@ function poolReadReading({ group = true } = {}) {
     if (raw === usageWrite.UNREAD_READING) return raw;
     // A GROUP's CACHED READING STANDS IN ONLY FOR A SIBLING's (B-87fd identity unit 4, 主开发 r3840): when the group's freshest is the
     // row's OWN last reading (the memo's copy of its file), it never stands in for the row's live read — the file decides, and a file
-    // NOT THERE is «no reading» (the law above; the release kept it only while its memo predated the file's last reading)
+    // NOT THERE is «no reading» (the law above; the release kept it only while its memo predated the file's last reading). The owner is
+    // compared by its MEMBER id (`cacheOwner`), so the machine's own login rows (their pseudo ids) keep the law too (r3959)
     if (group) try {
       for (const [, g] of usageIdentityGroupsCached()) {
-        if (g.accountIds.includes(id) && g.cache && g.accountId !== id && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
+        if (g.accountIds.includes(id) && g.cache && g.cacheOwner !== id && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
       }
     } catch { }
     // A PERSON'S RESET CLAIM IS A VIEW (lane account-reset-door): a claimed lane older than its claim reads as reset — the
