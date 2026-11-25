@@ -26,36 +26,46 @@ export function leakSignOf(m, id) {
 /** The sentence's watch (no DOM, node-tested): `id` / `choice` the profile and its choice when the form opened, `ask()` → the server's
  *  answer, `say(isolated)`, `on(fn)` / `off(fn)` the app's broadcasts. A profile on stock Chrome ASKS NOTHING (words only, the owner's
  *  decision) until a move of its own puts it on an engine; ONE ask in flight, a move meanwhile asks once more after it; the server's
- *  answer is the baseline the broadcasts are compared with; stop() (the form closed) says nothing more. → { start, stop }. */
+ *  answer is the baseline the broadcasts are compared with; a reply asked before a move of the profile is dropped (r4127); stop()
+ *  (the form closed) says nothing more; idle() resolves once every ask begun is handled. → { start, stop, idle }. */
 export function leakWatch({ id = '', choice = null, ask, say, on = null, off = null }) {
-  let live = false, inFlight = false, again = false, sign = null;
+  let live = false, inFlight = false, again = false, sign = null, gen = 0, tail = Promise.resolve();
   let plugin = !!(choice && choice.kind === 'plugin');
   const once = async () => {
     if (!live) return;
     if (!plugin) { say(false); return; }
     if (inFlight) { again = true; return; }
     inFlight = true;
+    const asked = gen;
     let a = null;
     try { a = await ask(); } catch { a = null; }
     inFlight = false;
     if (!live) return;
-    { const s0 = leakSignOf(a, id); if (s0 !== null) sign = s0; }
-    say(placeIsolatedOf(a));
+    // r4127: A REPLY ASKED BEFORE A MOVE OF THE PROFILE NEVER SPEAKS AFTER IT — it is dropped (asked again while the profile is on an
+    // engine); and a profile on stock Chrome never shows the strong sentence, whatever arrives
+    if (asked === gen) {
+      { const s0 = leakSignOf(a, id); if (s0 !== null) sign = s0; }
+      say(plugin && placeIsolatedOf(a));
+    } else if (plugin) again = true;
     if (again) { again = false; await once(); }
   };
+  /** every ask begun, kept so the watch can say when it has handled them all (idle()) */
+  const kick = () => { const p = once(); tail = Promise.all([tail, p]); return p; };
   const onMove = (m) => {
     if (!live || !m || !LEAK_MOVES.includes(m.type)) return;   // only the two moves that can move it
-    if (m.type === 'browser-engines-updated') { if (plugin) once(); return; }
+    if (m.type === 'browser-engines-updated') { gen++; if (plugin) kick(); return; }
     const s1 = leakSignOf(m, id);
     if (s1 === null || s1 === sign) return;
-    sign = s1;
+    sign = s1; gen++;
     const p = m.profiles.find((x) => x && x.id === id);
     plugin = !!(p && p.browser && p.browser.kind === 'plugin');
-    once();
+    kick();
   };
   return {
-    start() { if (live) return Promise.resolve(); live = true; say(false); if (on) on(onMove); return once(); },
+    start() { if (live) return Promise.resolve(); live = true; say(false); if (on) on(onMove); return kick(); },
     stop() { live = false; if (off) off(onMove); },
+    /** r4340 law 1: the fact a leg waits on — every ask this watch began has been answered and handled */
+    idle() { return tail.then(() => undefined); },
   };
 }
 export const SITES_LIMIT = SITES_MAX;

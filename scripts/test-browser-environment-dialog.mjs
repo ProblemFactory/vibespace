@@ -22,6 +22,7 @@
 //      scenes (each with its RED), the keeper and the route that answer it, the open form's watch, a RED for each PURE helper.
 //      r3946: the answer reads the KEPT probe (12 answers, 0 probes; RED: one that asks again), the open form asks only on ITS profile's
 //      moves (unrelated broadcasts: none; its own: one; RED: blind to whose move), stock Chrome asks nothing.
+//      r4127: a reply asked before a move of the profile never speaks after it (a PLACED late reply; RED: the watch as it stood).
 //   ⑦ r2767 (a): ONE PLAN WHILE A BROWSER RUNS — after a save place → this machine's while it runs, the gates still judge a place;
 //      r2932 (5) the other direction: started with nothing set, a place saved while it runs is judged by the SAVED place (stricter).
 import fs from 'node:fs';
@@ -353,7 +354,7 @@ console.log('— ⑧ the owner\'s decision on the place hole (r2911 / r2916): th
     probes = 0;
     const kf = mkKE(Kfresh, { engines: countStand(ENGN) }), pf = kf.createProfile({ label: 'Fresh' }); recOf(kf, pf.id).browser = { kind: 'plugin', id: 'acme.engine' };
     await kf.engineRowsView(); const pf0 = probes; for (let i = 0; i < 12; i++) kf.placeAnswerFor(pf.id);
-    await new Promise((r) => setTimeout(r, 20)); const freshProbes = probes - pf0; kf.shutdown?.();
+    const freshProbes = probes - pf0; kf.shutdown?.();   // each answer's probe is asked before its first await: counted at once (r4340 law 1: no wait on a span)
     ok(freshProbes === 12, '⑧ RED (r3946) — an answer that asks its engine again: twelve answers start twelve probes', { freshProbes });
     // where a waiting kernel comes from (r3946 should): engine-distribution stages a download beside a kernel in use as `next` — a pin
     // back to an older build included — and kernelFact answers it as `next`
@@ -399,8 +400,8 @@ console.log('— ⑧ the owner\'s decision on the place hole (r2911 / r2916): th
   const watchRun = async (Fm, choice = { kind: 'plugin', id: 'acme.engine' }) => {
     const said = [], hs = new Set(); let asks = 0, answer = { placeIsolated: true, profiles: [{ id: PID8, browser: { kind: 'plugin', id: 'acme.engine' }, kernelLive: null }], browsers: {} };
     const w = Fm.leakWatch({ id: PID8, choice, ask: async () => { asks++; return answer; }, say: (x) => said.push(x), on: (h) => hs.add(h), off: (h) => hs.delete(h) });
-    const emit = async (m) => { for (const h of [...hs]) h(m); await new Promise((r) => setTimeout(r, 15)); };
-    await w.start(); await new Promise((r) => setTimeout(r, 15));
+    const emit = async (m) => { for (const h of [...hs]) h(m); if (w.idle) await w.idle(); };   // r4340 law 1: the wait is on the fact (every ask handled)
+    await w.start(); if (w.idle) await w.idle();
     const a0 = asks;
     // a run of broadcasts that do NOT concern this profile: another profile's moves, the trace's housekeeping, this one unchanged
     for (let i = 0; i < 6; i++) await emit(digest(choice, null, [{ id: 'bp-0000ffff', browser: { kind: 'default' }, kernelLive: null, n: i }]));   // this profile's own row unchanged (its choice), another profile moving
@@ -413,7 +414,7 @@ console.log('— ⑧ the owner\'s decision on the place hole (r2911 / r2916): th
     await emit(digest({ kind: 'default' }, 'ready'));   // Change build… moved it to stock Chrome while the form is open: no ask, the weaker words
     const toStock = asks - a1;
     const before = said.length; w.stop();
-    await emit(digest({ kind: 'plugin', id: 'acme.engine' }, 'ready'));
+    for (const h of [...hs]) h(digest({ kind: 'plugin', id: 'acme.engine' }, 'ready'));   // closed: nothing subscribed, nothing asked
     return { said, afterStop: said.length - before, subscribed: hs.size, first: a0, unrelated, own, toStock };
   };
   const ws0 = await watchRun(F8);
@@ -427,6 +428,28 @@ console.log('— ⑧ the owner\'s decision on the place hole (r2911 / r2916): th
   const Fblind = await esmCopy('src/lib/browser-environment-form.js', anchored(fsrc, '    if (s1 === null || s1 === sign) return;\n', '', 'decision RED the watch blind to whose move'), 'watch-blind');
   const ws2 = await watchRun(Fblind);
   ok(ws2.unrelated > 0, '⑧ RED (r3946) — a watch blind to whose move it is: every unrelated broadcast asks the server again', ws2);
+  // r4127 THE LATE REPLY: the form's ask is in flight; a move puts the profile on stock Chrome; the reply the hub computed BEFORE the move
+  // is then released (a PLACED hold — r4340 law 2: never a clock). The reply never speaks after the move; asked again when it stays on an engine
+  const LATE_YES = { placeIsolated: true, profiles: [{ id: PID8, browser: { kind: 'plugin', id: 'acme.engine' }, kernelLive: null }], browsers: {} };
+  const lateRun = async (Fm, move) => {
+    const said = [], hs = new Set(); let release = null, asks = 0;
+    const held = new Promise((r) => { release = r; });
+    const w = Fm.leakWatch({ id: PID8, choice: { kind: 'plugin', id: 'acme.engine' }, ask: async () => { asks++; return asks === 1 ? held : { placeIsolated: false, profiles: [{ id: PID8, browser: move.browser, kernelLive: null }], browsers: { [PID8]: { state: 'ready', browserChoice: null } } }; }, say: (x) => said.push(x), on: (h) => hs.add(h), off: (h) => hs.delete(h) });
+    const first = w.start();   // its first ask is in flight, HELD
+    for (const h of [...hs]) h(digest(move.browser, 'ready'));   // the move, while the reply is held
+    const atMove = said.slice();
+    release(LATE_YES);   // the reply the hub computed before the move
+    await first; await w.idle(); w.stop();
+    return { said, atMove, asks, afterMove: said.slice(atMove.length) };
+  };
+  const toStock = await lateRun(F8, { browser: { kind: 'default' } }), stays = await lateRun(F8, { browser: { kind: 'plugin', id: 'acme.engine' } });
+  ok(J(toStock.said) === J([false, false]) && toStock.asks === 1 && !stays.afterMove.includes(true) && stays.asks === 2 && stays.said[stays.said.length - 1] === false,
+    '⑧ r4127 THE LATE REPLY: a reply asked before a move of the profile never speaks after it — moved to stock Chrome while it was held, the weaker sentence stands and nothing is asked again; moved but still on its engine (its browser started), the old reply is dropped and the profile is asked again (the second answer speaks)', { toStock, stays });
+  const ffsrc = read('src/lib/browser-environment-form.js');
+  const LATE_CUT = "    if (asked === gen) {\n      { const s0 = leakSignOf(a, id); if (s0 !== null) sign = s0; }\n      say(plugin && placeIsolatedOf(a));\n    } else if (plugin) again = true;\n";
+  const Ftip = await esmCopy('src/lib/browser-environment-form.js', anchored(ffsrc, LATE_CUT, "    { const s0 = leakSignOf(a, id); if (s0 !== null) sign = s0; }\n    say(placeIsolatedOf(a));\n", 'decision RED the late reply speaks (the tip 41b5b489e)'), 'late-reply');
+  const tR = await lateRun(Ftip, { browser: { kind: 'default' } });
+  ok(tR.said[tR.said.length - 1] === true, '⑧ RED (r4127) — the watch as it stood at 41b5b489e: the reply computed before the move to stock Chrome arrives after it and the STRONG sentence stands on a stock-Chrome profile', tR);
   const DS = read('src/lib/browser-environment-dialog.js');
   ok(DS.includes("watch = leakWatch({ id: String(r.id), choice: r.browser || null, ask: () => fetchJson(`/api/browser/engines?profile=${encodeURIComponent(r.id)}`), say: (iso) => { leak.textContent = placeLeakWords(iso, t); }, on: (h) => app.ws?.onGlobal?.(h), off: (h) => app.ws?.offGlobal?.(h) });")
       && DS.includes('shell.ready.then((s) => { if (s) watch.start(); });') && DS.includes('try { if (watch) watch.stop(); } catch') && DS.includes("const leak = el('div', 'bnew-hint benv-leak', placeLeakWords(false, t));") && DS.includes('lrow.append(lsel, place, blocked, leak);') && !/leak\.(disabled|setAttribute\('disabled)/.test(DS),
