@@ -219,6 +219,24 @@ console.log('— the conversation\'s own press: its fact, its two doors, the pus
     };
     const lc = await lastScene();
     ok(lc.first === 200 && lc.gone && lc.second === '200:already', '(r4199 (4)) the ask settled by the first press (its only conversation): a second page\'s press is told «already on its way» — never «the request is gone»', lc);
+    // (r4204) «ALREADY» ONLY OF THE PLACE THE PRESS NAMED: a conversation moved BACK to a member a minute ago, not waiting, pressed
+    // «Move to» from a stale page — where the ask is gone (the route) and where it is open for another conversation (the engine's answer)
+    const staleScene = async (engM = null) => {
+      const w = world(engM ? { engM } : {}); const rt = mountRoutes(w); w.client(); heal(w);
+      onFbRec(w, 'cs0', { fromModel: 'sonnet' }); await w.pass();
+      const back = await rt.call('POST /api/accounts/:poolId/fallback/move-back', { poolId: w.P }, { sids: ['cs0'] }, PAGEc);
+      await landed(w);
+      const moved = w.restarts().some((t) => t.serverId === 'cs0');
+      const gone = await rt.call('POST /api/accounts/pool-cross/asks/:askId', { askId: 'ask-stale-gone' }, { answer: 'once', sid: 'cs0' }, PAGEc);
+      const q = { askId: 'ask-stale-open', key: w.P + ':' + ds.id, poolId: w.P, pv: ds.id, sids: new Map([['cs9', Date.now()]]), todoId: null, n: 1 };
+      const inAsk = w.mute(() => w.eng.answerFallbackAsk(q, 'once', Date.now(), { sid: 'cs0' }));
+      return { back: back.code + ':' + (back.body && back.body.queued), moved, gone: gone.code + ':' + ((gone.body && (gone.body.state || gone.body.code)) || ''), inAsk: (inAsk.status || 200) + ':' + (inAsk.state || inAsk.code) };
+    };
+    const st = await staleScene();
+    ok(st.back === '200:1' && st.moved && st.gone === '400:bad_args' && st.inAsk === '409:not_waiting',
+      '(r4204) a conversation moved BACK to its member, not waiting, pressed «Move to» from a stale page is refused BY NAME — where the ask is gone and where one is open for another conversation — never told «already on its way» to a provider it is not going to', st);
+    const stx = await staleScene(M.load('src/server/usage-pool-engine.js', anchored(anchored(ENG, 'if (way && way === q.pv) return', 'if (way) return', 'any move counted in the ask'), "if (way && /^pv-/.test(String(way))) return", 'if (way) return', 'any move counted where the ask is gone'), 'engine-already-anywhere'));
+    ok(stx.gone === '200:already' && stx.inAsk === '200:already', 'CONTROL (loaded, run): an engine copy that says «already» of ANY move (the answer before r4204) tells the stale page the conversation is on its way to the provider — both roads ⇒ the leg goes RED', stx);
     // (r4199 (6)) «Move back» while that conversation's move back is QUEUED (in a turn: it waits for the stop): the fact offers no second
     // press and says where it is going; the strip's facts are pushed after the press
     const queuedBack = async () => {

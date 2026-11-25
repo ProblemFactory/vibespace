@@ -369,7 +369,7 @@ console.log('— ⑨ the conversation\'s own press in its status strip (r3918)')
   ok(z.none, '⑨ (r3918 (c) (d)) with no member able to take it back the strip says why and draws NO press; with no fact, nothing', z.b);
   ok(z.queued, '⑨ (r4199 (6)) a conversation whose move back is already queued: the strip says where it runs, the bill and «on its way back to Team Max» — and offers NO second press', z.q);
   const BAR4 = read('src/lib/chat-status-bar.js'), CSS4 = read('public/chat.css');
-  ok(BAR4.includes("t('This conversation is already on its way to {provider}', { provider: fs.request.provider })") && BAR4.includes("? (Number(r.already) > 0")
+  ok(BAR4.includes("t('This conversation is already on its way to {provider}', { provider: r.toLabel || r.to })") && BAR4.includes("? (Number(r.already) > 0")
     && BAR4.includes("if (!one) { const iFb = ordered.findIndex((c) => c.key === 'fallback'); if (iFb >= 0) { const [fb] = ordered.splice(iFb, 1); ordered.unshift(fb, mark('row-break-fallback', 'chat-status-rowbreak')); } }")
     && CSS4.includes('.chat-status-bar.chat-status-two-rows > .chat-status-fallback.chat-status-fallback[data-chip] { flex: 1 1 100%; }')
     && CSS4.includes('.chat-status-bar > .chat-status-fallback.chat-status-fallback[data-chip] > span.chat-status-fb-words { white-space: normal; overflow: visible; text-overflow: clip;'),

@@ -655,7 +655,7 @@ export class ChatStatusBar {
     if (!r || r.error || r.ok === false) { showToast(t('Could not move it — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
     const said = fs.request.kind === 'to'
       ? (Number(r.already) > 0   // (r4199 (4)) pressed after another page did: already on its way — never «could not move it»
-        ? [{ text: t('This conversation is already on its way to {provider}', { provider: fs.request.provider }), type: 'info' }]
+        ? [{ text: t('This conversation is already on its way to {provider}', { provider: r.toLabel || r.to }), type: 'info' }]   // (r4204) the place the HUB answered, never the one this page assumed
         : [{ text: t('This conversation is queued to move to {provider} — it restarts there now if it is idle, or when its turn is over', { provider: fs.request.provider }), type: 'success' }])
       : fallbackPressToasts(r, t);
     for (const m of said) showToast(m.text, { type: m.type, duration: m.type === 'success' ? undefined : 8000 });

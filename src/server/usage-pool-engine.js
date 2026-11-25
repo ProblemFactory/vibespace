@@ -7907,14 +7907,17 @@ const FALLBACK_MOVES_PER_MIN = 6;
 const PRESS_MOVES_AT_ONCE = 4;   // (F2 cure, r2939 (5)) a person's press: at the head and never counted, but FOUR restarts out at a time — a slot is held until that restart LANDS (F2 cure 2, r3041: the moved conversation's create asks the carry) or `fallbackLandingMs`, then freed and said
 const _fbQueue = new Map();   // server id → {poolId, sid, to, by: 'pool'|'person', at}
 const _fbInFlight = new Map(); // server id → its entry, from the move's start to its end (r2939 (3): never queued nor executed twice across the record's wait)
-const _fbMovedRecently = new Map();   // (r4199 (4)) server id → {to, at}: a move just MADE — a second page's press on it says «already on its way», never a failure
-/** (r4199 (4) (6)) where a conversation's move is going now: its queued or in-flight entry's target, else a move made in the last dwell → id | null */
-function fallbackMoveOf(sid, now = Date.now()) {
+const _fbMovedRecently = new Map();   // (r4199 (4), r4204) server id → {to, at}: its LAST move made — onto a fallback or back to a member — so a stale page's press is judged against where it really went
+/** (r4199 (4) (6), r4204) where a conversation's move is going now: its queued or in-flight entry's target, else (`made`) its LAST move
+ *  made within the dwell, wherever it went → id | null. Callers compare it with the place the press named before saying «already». */
+function fallbackMoveOf(sid, now = Date.now(), { made = true } = {}) {
   const k = String(sid || ''), e = _fbInFlight.get(k) || _fbQueue.get(k);
   if (e) return e.to || null;
+  if (!made) return null;
   const m = _fbMovedRecently.get(k);
   return m && now - m.at >= 0 && now - m.at < FALLBACK_DWELL_MS ? m.to : null;
 }
+const noteFallbackMoveMade = (sid, to) => { _fbMovedRecently.set(String(sid), { to, at: Date.now() }); while (_fbMovedRecently.size > 4096) _fbMovedRecently.delete(_fbMovedRecently.keys().next().value); };
 const _fbMovedAt = [];        // the instants of the pool-made moves started in the rolling minute (the pace)
 const _fbLanding = new Map();  // (F2 cure 2, r3041 MUST) backend id → the press slot that waits for that restart to LAND
 const _fbBackoff = new Map();  // (F2 cure 2, r3041 (c)) server id → {to, n, until}: a move the provider refused is not queued by the pool again before `until`
@@ -8036,7 +8039,7 @@ async function executeFallbackMove(e, now = Date.now()) {
   if (inTurnOf(s3)) { clearFallbackRecord(s3); _fbInFlight.delete(e.sid); queueFallbackMove(e.poolId, e.sid, e.to, e.by, now); return { moved: false, why: 'in-turn' }; }   // a turn began meanwhile: it waits for the stop
   const r = applyCrossMove(e.poolId, e.sid, s3, j2.curFor, j2.d, Date.now(), { why: 'fallback', record, quiet: true });
   if (!r.moved) clearFallbackRecord(s3);   // (r2939 (1)) no record left on a conversation that did not move (no client)
-  else { endFallbackEpisode(e.sid); _fbMovedRecently.set(e.sid, { to: e.to, at: Date.now() }); while (_fbMovedRecently.size > 4096) _fbMovedRecently.delete(_fbMovedRecently.keys().next().value); if (e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid); }   // (r3041 MUST) a press's slot waits for the LANDING
+  else { endFallbackEpisode(e.sid); noteFallbackMoveMade(e.sid, e.to); if (e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid); }   // (r3041 MUST) a press's slot waits for the LANDING
   return r;
 }
 // (r3148 (1)) a conversation's line is a STORED string — never translated (it stays English): plain strings, no dictionary rows
@@ -8203,6 +8206,7 @@ async function executeFallbackBack(e, now = Date.now()) {
   const d = { to, cross: { from: providerLabel(pv(held)), fromId: held, to: providerLabel(pv(to)), toId: providerKey(pv(to)), model: rec.toModel || null, toModel: rec.fromModel || null, fallbackOnly: false, back: true, removed: removed2 } };
   const r = applyCrossMove(e.poolId, e.sid, s3, held, d, Date.now(), { why: 'fallback-back', quiet: true });
   if (!r.moved) { s3._poolFallback = rec; try { await writeFallbackRecord(s3, rec); } catch { } }   // a restart that could not be made (no page open): the record as it was — never half-moved
+  if (r.moved) noteFallbackMoveMade(e.sid, to);   // (r4204) a move BACK is a move made too: a stale page's «Move to» on it is never «already»
   if (r.moved && e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid);   // a press's slot waits for the LANDING (its resumed conversation is seen)
   return r;
 }
@@ -8248,7 +8252,7 @@ function fallbackFactOf(sid, now = Date.now()) {
   if (held && /^pv-/.test(String(held))) {
     if (!fb || !fb.has(held)) return null;
     const rec = s2._poolFallback && s2._poolFallback.provider === held ? s2._poolFallback : null;
-    const going = fallbackMoveOf(sid, now);   // (r4199 (6)) its move back already queued or under way: no second press, the strip says where it is going
+    const going = fallbackMoveOf(sid, now, { made: false });   // (r4199 (6)) its move back already queued or under way: no second press, the strip says where it is going
     if (going && !/^pv-/.test(String(going))) return { on: { sid, poolId, provider: held, label: labelOf(held), back: { id: going, name: labelOf(going) }, why: null, queued: true } };
     let v = { to: null, why: 'no-first-model' }; try { if (rec) v = fallbackBackVerdict(poolId, rec, now, s2, sid); } catch { }
     return { on: { sid, poolId, provider: held, label: labelOf(held), back: v.to ? { id: v.to, name: labelOf(v.to) } : null, why: v.to ? null : (v.why || null) } };
@@ -8395,7 +8399,7 @@ function answerFallbackAsk(q, answer, now = Date.now(), { sid = null } = {}) {
     const s1 = activeSessions.get(String(sid));
     if (!q.sids.has(String(sid)) || !s1 || s1._accountId !== q.poolId) {
       const way = fallbackMoveOf(sid, now);   // (r4199 (4)) pressed again (a second page): its move is on its way — said as that, never a failure
-      if (way) return { ok: true, state: 'already', moved: false, queued: 0, already: 1, sid: String(sid), to: way };
+      if (way && way === q.pv) return { ok: true, state: 'already', moved: false, queued: 0, already: 1, sid: String(sid), to: way, toLabel: labelOf(way) };   // (r4204) ONLY to the place the press named (this ask's provider)
       return { ok: false, status: 409, code: 'not_waiting', error: 'that conversation is not one of this pool\'s waiting for this provider' };
     }
     queueFallbackMove(q.poolId, String(sid), q.pv, 'person', now);
@@ -8469,7 +8473,7 @@ function closeCrossAsksFor(poolId, sid, by) { for (const q of [..._crossAsks.val
 function answerCrossProviderAsk(askId, { answer, now = Date.now(), sid = null } = {}) {
   const fk = _fbAskById.get(String(askId || '')), fq = fk ? _fbAsks.get(fk) : null; // (B-d578 F2) a fallback item — one a pool and provider
   if (fq) { if (!['once', 'always', 'deny'].includes(answer)) return { ok: false, status: 400, code: 'bad_args', error: 'the answer is once, always or deny' }; return answerFallbackAsk(fq, answer, now, { sid }); }
-  if (sid && !_crossAsks.has(String(askId || ''))) { const way = fallbackMoveOf(sid, now); if (way) return { ok: true, state: 'already', moved: false, queued: 0, already: 1, sid: String(sid), to: way }; }   // (r4199 (4)) the ask settled by the first page's press: the second says «already on its way»
+  if (sid && !_crossAsks.has(String(askId || ''))) { const way = fallbackMoveOf(sid, now); if (way && /^pv-/.test(String(way))) return { ok: true, state: 'already', moved: false, queued: 0, already: 1, sid: String(sid), to: way, toLabel: labelOf(way) }; }   // (r4199 (4), r4204) the ask settled by the first page's press: «already» only when its move goes to a PROVIDER, named by the hub's answer (the page says that place, never the one it assumed)
   if (sid) return { ok: false, status: 400, code: 'bad_args', error: 'one conversation is named only on a fallback provider\'s ask' };   // (r3918) the conversation's own press answers a fallback ask only
   const q = _crossAsks.get(String(askId || ''));
   if (!q) return { ok: false, status: 404, code: 'ask_unknown', error: 'that request is gone' };
