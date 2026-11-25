@@ -103,6 +103,14 @@ const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive
 const S = require('../browser-stream.js');
 const T = require('../browser-takeover.js');
 const TBS = require('../browser-tabs.js'); // row B-0e4a (主开发 r4319, L2): the mark leaves the hub in no view — markOutText, the ONE door
+/** 主开发 r4421 (2): a driver's frame record through the door on its HEAD (every field but `data`, the pixels): the same text back
+ *  when the head holds no mark (every frame today — one small stringify of its metadata), else the record with its head masked. */
+function frameOut(text, msg) {
+  if (!msg || typeof msg !== 'object') return text;
+  const { data, ...head } = msg;
+  if (!/#vs-own-/i.test(JSON.stringify(head))) return text;
+  return JSON.stringify({ ...TBS.markOut(head), data });
+}
 const { pressBearer, pressOf, pageOfUpgrade, pageVerdict, ownOriginOf, isPress } = require('../write-origin.js');   // lane owner-press-attended r2: the live view's Hand back is a person's door (r3: a press per MESSAGE)
 const FIT = require('../browser-fit.js');
 const crypto = require('crypto'); // lane browser-x-in-window: the X picture's ticket (a per-viewer secret)
@@ -616,14 +624,17 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     // row B-0e4a (主开发 r4319, L2): the relay's own picture state above keeps the page's own address (the viewport read finds the
     // tab by it); what LEAVES the relay — the recorder's taps, the keeper's notes (the lease's last url, the kept tabs), the replay
     // store, the viewers — leaves through the ONE door (a frame's pictures pass the one send's door below)
-    const outText = cls === 'frame' ? text : TBS.markOutText(text);
+    // 主开发 r4421 (2): a DRIVER's picture frame is scanned on its HEAD only — every field but its pixels (base64: never a '#') —
+    // so a frame record that carried an address beside its pixels still sends no mark; the hub's own two frame builders (the
+    // fresh picture, the polled tab's) write only {type, data, metadata of numbers}
+    const outText = cls === 'frame' ? frameOut(text, msg) : TBS.markOutText(text);
     const outMsg = outText === text ? msg : JSON.parse(outText);
     // P5: every tap sees every record (a tap that throws never breaks the fan-out)
     for (const fn of relay.taps) { try { fn(outMsg, outText, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
     if (cls !== 'frame') onOrderedForKeeper(relay, outMsg);
     if (cls === 'frame') {
-      relay.lastFrame = text; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;   // r178: the tab this picture shows
-      fanOutFrame(relay, text, t);
+      relay.lastFrame = outText; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;   // r178: the tab this picture shows
+      fanOutFrame(relay, outText, t);
     } else {
       relay.stats.ordered++;
       if (S.REPLAYED_TYPES.includes(msg.type)) { relay.last[msg.type] = outText; if (msg.type === 'url' || msg.type === 'tabs') relay.lastRaw[msg.type] = text; }

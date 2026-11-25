@@ -1343,6 +1343,11 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
       if (!st.some((l) => l.includes('fn(outMsg, outText, relay)'))) bad.push('browser-stream: the recorder\'s taps take the raw record');
       if (!st.some((l) => l.includes('onOrderedForKeeper(relay, outMsg)'))) bad.push('browser-stream: the keeper\'s notes take the raw record');
       if (st.some((l) => /relay\.last\[msg\.type\] = text\b/.test(l))) bad.push('browser-stream: the replay store keeps the raw record');
+      // r4421 (2): a driver's frame passes frameOut (its head scanned); the hub's own frame builders write {type, data, metadata} only
+      if (!outLine.length || !outLine[0].includes('frameOut(text, msg)')) bad.push('browser-stream: a driver\'s frame leaves the relay unscanned (no frameOut)');
+      const lastFr = st.filter((l) => /relay\.lastFrame = /.test(l));
+      const builders = st.filter((l) => /const rec = \{ type: 'frame', data: r\.data, metadata: \{/.test(l));
+      if (lastFr.filter((l) => /relay\.lastFrame = outText;/.test(l)).length !== 1 || lastFr.filter((l) => /relay\.lastFrame = text;/.test(l)).length !== builders.length || lastFr.length !== 1 + builders.length) bad.push(`browser-stream: a kept last frame that is neither the driver's scanned frame nor one of the hub's own ${builders.length} builders — ${lastFr.map((l) => l.trim().slice(0, 60)).join(' | ')}`);
       const kb = src.keeper.split('\n');
       if (!kb.some((l) => l.includes("broadcast: broadcastIn = null"))) bad.push('browser-keeper: create takes `broadcast` raw (not as broadcastIn)');
       const rawB = kb.filter((l) => /\bbroadcastIn\(/.test(l) && !l.includes('broadcastIn(TBS.markOut('));
@@ -1373,10 +1378,40 @@ console.log('— ③d B-1626 / K23: a live view attaching shows its conversation
     ksT.noteTabs(KA, [{ targetId: P1, url: U0, title: U0, active: true }], 'cdp');
     const keptRow = (ksT.latestOf(KA) || { tabs: [] }).tabs[0] || null;
     try { ksT.shutdown(); } catch { /* none */ }
-    const anchoredDoor = { query: TBS0.markOutText('https://x.example/?q=about:blank#vs-own-zz'), longer: TBS0.markOutText(`${U0}0`), cut: TBS0.markOutText(`about:blank#vs-own-${MARK.slice(0, 7)}`) };
+    const anchoredDoor = { query: TBS0.markOutText('https://x.example/?q=about:blank#vs-own-zz'), wholeLetter: TBS0.markOutText(`${U0}x`), wholeDigit: TBS0.markOutText(`${U0}0`), shortLetter: TBS0.markOutText(`about:blank#vs-own-${MARK.slice(0, 7)}z`), cut: TBS0.markOutText(`about:blank#vs-own-${MARK.slice(0, 7)}`) };
     ok(!!pick0 && pick0.url === 'about:blank' && !note0.includes('vs-own') && !!keptRow && keptRow.url === 'about:blank' && !/vs-own/i.test(keptRow.title) && !!tAlone.ask && tAlone.ask.ok && tAlone.ask.url === 'about:blank' && !/vs-own/i.test(String(tAlone.ask.title))
-      && anchoredDoor.query === 'https://x.example/?q=about:blank#vs-own-zz' && anchoredDoor.longer === `${U0}0` && anchoredDoor.cut === 'about:blank',
-      'r4339 FOLLOW: kept out at the WRITE — the kept tabs\' row (a CDP read\'s), the rebind\'s pick and its note, a takeover request\'s page hold the plain blank; the door\'s match is anchored (a page\'s own «?q=…#vs-own-zz», a longer hex run stay as they are; a cut-short mark is the blank)', { pick: pick0, keptRow, ask: tAlone.ask, anchoredDoor });
+      && anchoredDoor.query === 'https://x.example/?q=about:blank#vs-own-zz' && anchoredDoor.wholeLetter === 'about:blankx' && anchoredDoor.wholeDigit === 'about:blank0' && anchoredDoor.shortLetter === `about:blank#vs-own-${MARK.slice(0, 7)}z` && anchoredDoor.cut === 'about:blank',
+      'r4339 FOLLOW: kept out at the WRITE — the kept tabs\' row (a CDP read\'s), the rebind\'s pick and its note, a takeover request\'s page hold the plain blank; the door\'s match (r4421): the WHOLE mark masked whatever follows it (a letter, a digit); a cut-short one only at a word\'s end (a page\'s own «?q=…#vs-own-zz» and a short run followed by a letter stay as they are)', { pick: pick0, keptRow, ask: tAlone.ask, anchoredDoor });
+    // ═══ 主开发 r4421 (2): THE FRAME ROAD — a stand-in DRIVER whose frame record carries an address field holding the mark, beside
+    //     its pixels: what the viewer receives (the real bridge, a stand-in upstream and a stand-in viewer). RED: the frame road as at
+    //     6e10ade3d (no scan at all) ═══
+    const frameLeg = async (Bmod) => {
+      const { WebSocket: WSc, WebSocketServer: WSSf } = require('ws');
+      const fk = { setFor: () => ({ attachments: [{ profileId: 'bp-0000c0f2', alias: 'work', isDefault: true, label: 'Work' }], handles: ['work'], defaultId: 'bp-0000c0f2', children: [] }), list: () => ({ profiles: [{ id: 'bp-0000c0f2', label: 'Work' }] }),
+        streamPortFor: async () => ({ ok: true, port: upPortF }), inputStateFor: () => ({ input: 'agent' }), tabOwnersFor: async () => ({ ok: true, owners: {}, mediated: false, adoptable: false }), noteViewers: () => {} };
+      const upW = new WSSf({ port: 0, host: '127.0.0.1' }); await new Promise((r) => upW.on('listening', r)); const upPortF = upW.address().port;
+      const PIX = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+      upW.on('connection', (ws) => { ws.send(JSON.stringify({ type: 'status', connected: true })); setTimeout(() => { try { ws.send(JSON.stringify({ type: 'frame', data: PIX, metadata: { deviceWidth: 800, deviceHeight: 600, pageScaleFactor: 1, offsetTop: 0, scrollOffsetX: 0, scrollOffsetY: 0, timestamp: 1, url: U0 }, url: U0, title: U0 })); } catch { /* closed */ } }, 50); });
+      const brF = Bmod.create({ keeper: fk, activeSessions: new Map([['sess-f', { _browserKey: KA, webuiId: 'sess-f' }]]), requestAuthed: () => true, log: quiet });
+      const hsF = http.createServer(); servers.push(hsF); hsF.on('upgrade', (req, sock, head) => brF.handleUpgrade(req, sock, head));
+      await new Promise((r) => hsF.listen(0, '127.0.0.1', r));
+      const got = []; const wsF = new WSc(`ws://127.0.0.1:${hsF.address().port}/api/browser/stream?session=sess-f`);
+      wsF.on('message', (d) => { got.push(String(d)); });
+      await new Promise((r, e) => { wsF.on('open', r); wsF.on('error', e); });
+      const arrived = await until(() => got.some((x) => x.includes('"frame"')), 3000); // the fact this leg judges: the stand-in's frame reached the viewer
+      wsF.close(); brF.shutdown?.(); upW.close();
+      const fr = got.map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((j) => j && j.type === 'frame') || null;
+      return { arrived: !!arrived, frames: got.filter((x) => x.includes('"frame"')).length, marked: got.filter((x) => /vs-own-/i.test(x)).length, url: fr ? fr.url : null, metaUrl: fr && fr.metadata ? fr.metadata.url : null, pixels: fr ? fr.data === PIX : false };
+    };
+    const FR_ANCH = "    const outText = cls === 'frame' ? frameOut(text, msg) : TBS.markOutText(text);\n";
+    if (!exitSrc.stream.includes(FR_ANCH)) ok(false, 'the anchor of the control «the frame road with no scan» is not in the source (src/server/browser-stream.js)');
+    const BmodF = require('../src/server/browser-stream.js');
+    const BfCtl = exitSrc.stream.includes(FR_ANCH) ? M.load('src/server/browser-stream.js', editAnchor(exitSrc.stream, FR_ANCH, "    const outText = cls === 'frame' ? text : TBS.markOutText(text);\n", 'src/server/browser-stream.js'), 'b0e4a-frame-no-scan') : null;
+    const [frNow, frCtl] = await Promise.all([frameLeg(BmodF), BfCtl ? frameLeg(BfCtl) : Promise.resolve(null)]);
+    if (!frNow.arrived) ok(false, 'the frame leg: no frame reached the viewer within 3 s — the stand-in\'s frame never came, so the leg cannot judge', frNow);
+    else ok(frNow.marked === 0 && frNow.url === 'about:blank' && frNow.metaUrl === 'about:blank' && frNow.pixels,
+      'r4421 (2): a stand-in DRIVER\'s frame record carrying a marked address beside its pixels — the viewer receives the frame with that address as the plain blank (the head scanned, the pixels untouched); the hub\'s own two builders write numbers only', frNow);
+    if (BfCtl) ok(!!frCtl && frCtl.arrived && frCtl.marked > 0, 'CONTROL (the frame road with no scan, as at 6e10ade3d): the mark reaches the viewer in the frame record — RED', frCtl);
     const stSrc = exitSrc.stream;
     ok(/function lastUrlOf\(relay\) \{[\s\S]{0,400}relay\.lastRaw\.url[\s\S]{0,300}relay\.lastRaw\.tabs/.test(stSrc) && stSrc.includes("relay.last[msg.type] = outText; if (msg.type === 'url' || msg.type === 'tabs') relay.lastRaw[msg.type] = text;"),
       'r4339 FOLLOW: the replay store holds the masked record; the url fallback that feeds the viewport lookup reads the RAW copy (never sent)', null);

@@ -681,7 +681,9 @@ function aloneVerdict({ take = '', windows = null } = {}) {
  * cut short — reads as the plain blank a person would see (Chrome titles a blank page `about:blank`). `markOut` walks a reply
  * (copy-on-write: a value with no mark comes back AS IT IS, the same object); `markOutText` one serialized record. PURE.
  */
-const MARK_ANY_RE = /about:blank#vs-own-[0-9a-f]{0,24}(?![0-9a-z])/gi; // the mark whole or cut short — never a longer word that only begins like it (a page's own `?q=…#vs-own-zz` stays as it is)
+// 主开发 r4421 (1): the WHOLE mark (its 24 hex) is masked WHATEVER FOLLOWS it (law B: in no view); only a CUT-SHORT one needs the
+// end-of-word test, so a page's own longer word that merely begins like it (`?q=…#vs-own-zz`) stays as it is
+const MARK_ANY_RE = /about:blank#vs-own-(?:[0-9a-f]{24}|[0-9a-f]{0,23}(?![0-9a-z]))/gi;
 const MARK_HINT_RE = /#vs-own-/i; // one cheap scan first: a record with no mark (every frame) comes back as it is
 function markOutText(s) { return typeof s === 'string' && MARK_HINT_RE.test(s) ? s.replace(MARK_ANY_RE, 'about:blank') : s; }
 function markOut(v, depth = 0) {
