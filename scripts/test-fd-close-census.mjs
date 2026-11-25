@@ -419,7 +419,7 @@ console.log('⑤ a close of a written file says a failed close once (its code, w
   // ONE SPELLING: every fallback, built from its file's own text, says EXACTLY the helper's words
   const FALL = /const closeWritten = FC \? FC\.closeWritten : (\(fd, where, say\) => \{[^\n]*\});\n/, FALLH = /const closeWrittenHandle = FCL \? FCL\.closeWrittenHandle : (async \(fh, where, say\) => \{[^\n]*\});\n/;
   const spell = {};
-  for (const f of ['data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/pty-wrapper.js', 'data/bin/job-wrapper.js', 'data/bin/acp-wrapper.js', 'data/bin/agy-wrapper.js']) {   // B-bcb8 unit B: + acp, agy (they load the helper now)
+  for (const f of ['data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/pty-wrapper.js', 'data/bin/job-wrapper.js']) {
     const m = FALL.exec(FILES[f] || ''); if (!m) { spell[f] = 'no fallback'; continue; }
     const fb = new Function('fs', `return ${m[1]};`)(fs); const got = [];   // eslint-disable-line no-new-func
     const r = placed(() => fb(424242, 'a stand-in store', (l) => got.push(l)));
@@ -428,7 +428,7 @@ console.log('⑤ a close of a written file says a failed close once (its code, w
   { const m = FALLH.exec(FILES['data/bin/vibespace-channels'] || ''); if (!m) spell['data/bin/vibespace-channels'] = 'no fallback';
     else { const fb = new Function(`return ${m[1]};`)(); const got = []; const r = await fb({ close: async () => { throw eio(); } }, 'a stand-in handle', (l) => got.push(l));   // eslint-disable-line no-new-func
       spell['data/bin/vibespace-channels'] = r === null && J(got) === J([FCm.closeFailedWords('a stand-in handle', 'EIO')]) ? 'same' : J(got); } }
-  ok(Object.values(spell).length === 7 && Object.values(spell).every((v) => v === 'same'), '⑤ ONE SPELLING: the six wrappers\' fallbacks and the channels CLI\'s, built from their own text, say EXACTLY the helper\'s words', spell);
+  ok(Object.values(spell).length === 5 && Object.values(spell).every((v) => v === 'same'), '⑤ ONE SPELLING: the four wrappers\' fallbacks and the channels CLI\'s, built from their own text, say EXACTLY the helper\'s words', spell);
   { const drift = (FILES['data/bin/pty-wrapper.js'] || '').replace('— what was written may not be on disk`); } catch { } } return null; };', '— it may be lost`); } catch { } } return null; };');
     const m = FALL.exec(drift); const fb = m ? new Function('fs', `return ${m[1]};`)(fs) : null; const got = []; if (fb) placed(() => fb(424242, 'a stand-in store', (l) => got.push(l)));   // eslint-disable-line no-new-func
     ok(drift !== FILES['data/bin/pty-wrapper.js'] && !!fb && got.length === 1 && got[0] !== WORDS, 'CONTROL (a fallback whose words drifted, in its text): it no longer says the helper\'s words — red', got); }
@@ -545,91 +545,125 @@ fsp.open = async (...a) => { const h = await open.apply(fsp, a); if (String(a[0]
     ok(xcl.code === 1 && xcl.closes === 2, 'CONTROL (the release\'s order — the handle forgotten only AFTER its awaited close, in a copy): the catch closes it a SECOND time — red', xcl); }
 }
 
-// ── ⑥ THE SYNCED NAME (row B-bcb8 unit B — 主开发 r4367): a record the hub reads takes its name only after ONE sync of its temp — the job
-// wrapper's pid / exit / bound records, the conversation wrappers' meta sidecar, buffer and handed records (after a power cut or a full
-// disk the hub read a record with its name and no bytes). ONE helper (src/fd-close.js renameSynced) and ONE spelling: each wrapper's
-// fallback, built here from its own text. A PLACED refusal of the sync (fs.fsyncSync answering EIO), never a real disk: said once, and
-// the record STILL lands. EACH RECORD from its wrapper's own code, run here over a scratch folder; RED: the release's form of that
-// record (in a copy) asks no sync at all
-console.log('⑥ a record the hub reads takes its name after ONE sync of its temp — a refused sync said once, the record still lands; one helper, one spelling, every record');
+// ── ⑥ THE SYNCED NAME (row B-bcb8 unit B — 主开发 r4367; THE LAW of r4474): a record the hub reads takes its name only after ONE sync of
+// its temp. A sync that FAILS (the write error's class — EIO, ENOSPC, EDQUOT, EROFS, any unknown code) or a close that fails after the
+// write is a FAILED WRITE: thrown, the temp removed, the OLD record stands, the caller's own road taken. ONLY a sync the file system does
+// not do at all (EINVAL, ENOTSUP, EOPNOTSUPP, ENOSYS) is said once and lands. PLACED failures (fs.fsyncSync / fs.closeSync answering a
+// code), never a real disk. ONE helper and ONE spelling; EACH RECORD from its wrapper's own code. RED: bf8355a8a's form (in a copy: a
+// failed sync said, the temp renamed over the good record anyway)
+console.log('⑥ a record takes its name after ONE sync — a failed sync is a FAILED WRITE (the old record stands); only a sync the file system does not do is said and lands');
 {
   const FCm = require(path.join(REPO, 'src/fd-close.js'));
   const D6 = scratchDir('fdc-synced-name');
-  const eio6 = () => Object.assign(new Error('EIO: a stand-in refused sync'), { code: 'EIO' });
-  // THE PLACED REFUSAL: every sync answers EIO; what was asked is named by the descriptor's own path (read before the refusal)
-  const syncPlaced = (fn) => { const fsy = fs.fsyncSync; const asked = []; fs.fsyncSync = function (fd) { let p = ''; try { p = fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { } asked.push(path.basename(p)); throw eio6(); }; try { return { r: fn(), asked }; } finally { fs.fsyncSync = fsy; } };
-  // the helper itself: one sync asked, refused ⇒ said once (no path), the record still lands, the temp gone
-  const said = [], t1 = path.join(D6, 'rec.json.tmp'), f1 = path.join(D6, 'rec.json');
-  const a = syncPlaced(() => FCm.renameSynced(t1, f1, '{"a":1}', { where: 'a stand-in record', say: (l) => said.push(l) }));
-  const W6 = FCm.syncFailedWords('a stand-in record', 'EIO');
-  ok(J(a.asked) === J(['rec.json.tmp']) && J(said) === J([W6]) && W6 === 'a stand-in record: its new bytes could not be synced before it took its name (EIO) — after a power cut it may read empty' && fs.readFileSync(f1, 'utf8') === '{"a":1}' && !fs.existsSync(t1),
-    '⑥ renameSynced: ONE sync of the temp asked; refused (placed) it is SAID once (the site\'s name, the code — no path) and the record STILL takes its name with its bytes, the temp gone', { asked: a.asked, said });
-  // a healthy sync: asked once, nothing said; a write that FAILS throws (as writeFileSync did: the caller's own try) and nothing takes the name
-  const said2 = [], fsy0 = fs.fsyncSync; let n2 = 0; fs.fsyncSync = function (fd) { n2++; return fsy0.call(this, fd); };
-  try { FCm.renameSynced(path.join(D6, 'ok.json.tmp'), path.join(D6, 'ok.json'), Buffer.from('xyz'), { where: 'ok', say: (l) => said2.push(l) }); } finally { fs.fsyncSync = fsy0; }
-  const ws0 = fs.writeSync; let threw = null; fs.writeSync = () => { throw Object.assign(new Error('ENOSPC: a stand-in full disk'), { code: 'ENOSPC' }); };
-  try { FCm.renameSynced(path.join(D6, 'full.json.tmp'), path.join(D6, 'full.json'), 'x', { where: 'full' }); } catch (e) { threw = e.code; } finally { fs.writeSync = ws0; }
-  ok(n2 === 1 && !said2.length && fs.readFileSync(path.join(D6, 'ok.json'), 'utf8') === 'xyz' && threw === 'ENOSPC' && !fs.existsSync(path.join(D6, 'full.json')),
-    '⑥ renameSynced: a healthy sync asked once and nothing said; a write that FAILS throws (as writeFileSync did) and nothing takes the name', { n2, said2, threw });
-  // ONE SPELLING: each wrapper's fallback, built from its own text (the module's close beside it)
+  const errOf = (code) => Object.assign(new Error(`${code}: a stand-in`), { code });
+  const fdPath = (fd) => { try { return fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { return ''; } };
+  // THE PLACED FAILURE: a sync answering `sync`, a temp's close answering `close` (the descriptor's path read before; the close is real)
+  const placed6 = (fn, { sync = null, close = null } = {}) => {
+    const fsy = fs.fsyncSync, cls = fs.closeSync, asked = [];
+    fs.fsyncSync = function (fd) { asked.push(path.basename(fdPath(fd))); if (sync) throw errOf(sync); return fsy.call(this, fd); };
+    if (close) fs.closeSync = function (fd, ...a) { const p = fdPath(fd); cls.call(this, fd, ...a); if (p.endsWith('.tmp')) throw errOf(close); };
+    try { let r, threw = null; try { r = fn(); } catch (e) { threw = (e && e.code) || String(e); } return { r, threw, asked }; } finally { fs.fsyncSync = fsy; fs.closeSync = cls; }
+  };
+  const OLD = 'the good older record';
+  const fresh = (dir, n) => { const f = path.join(dir, n); fs.writeFileSync(f, OLD); return f; };
+  // (a) THE HELPER: the write error's class and an unknown code, each over a good record — thrown with its code, the temp removed, the
+  // OLD record byte for byte, nothing said
+  const wrong = {};
+  for (const code of ['EIO', 'ENOSPC', 'EDQUOT', 'EROFS', 'EXYZ']) {
+    const f = fresh(D6, `w-${code}.json`), s = [];
+    const r = placed6(() => FCm.renameSynced(f + '.tmp', f, 'new bytes', { where: 'a stand-in record', say: (l) => s.push(l) }), { sync: code });
+    wrong[code] = r.threw === code && fs.readFileSync(f, 'utf8') === OLD && !fs.existsSync(f + '.tmp') && !s.length && r.asked.length === 1 ? 'failed write' : J({ threw: r.threw, file: fs.readFileSync(f, 'utf8'), tmp: fs.existsSync(f + '.tmp'), said: s });
+  }
+  ok(Object.values(wrong).every((v) => v === 'failed write'), '⑥ renameSynced: a sync that FAILS (EIO, ENOSPC, EDQUOT, EROFS, an unknown code) is a FAILED WRITE — thrown with its code, the temp removed, the OLD record standing byte for byte, nothing said', wrong);
+  { const f = fresh(D6, 'w-close.json'); const r = placed6(() => FCm.renameSynced(f + '.tmp', f, 'new bytes', { where: 'x' }), { close: 'EIO' });
+    ok(r.threw === 'EIO' && fs.readFileSync(f, 'utf8') === OLD && !fs.existsSync(f + '.tmp'), '⑥ renameSynced: a CLOSE that fails after the write (a deferred write error) is a failed write too — thrown, the temp removed, the old record stands', { threw: r.threw }); }
+  // (b) the class the file system does not do: said once (no path), the record lands
+  const nos = {};
+  for (const code of ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']) {
+    const f = fresh(D6, `n-${code}.json`), s = [];
+    const r = placed6(() => FCm.renameSynced(f + '.tmp', f, 'new bytes', { where: 'a stand-in record', say: (l) => s.push(l) }), { sync: code });
+    nos[code] = !r.threw && fs.readFileSync(f, 'utf8') === 'new bytes' && J(s) === J([FCm.syncUnsupportedWords('a stand-in record', code)]) ? 'said, landed' : J({ threw: r.threw, said: s });
+  }
+  ok(Object.values(nos).every((v) => v === 'said, landed') && J([...FCm.SYNC_UNSUPPORTED].sort()) === J(['EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP']) && FCm.syncUnsupportedWords('a stand-in record', 'EINVAL') === 'a stand-in record: its file system does not do a sync (EINVAL) — its new bytes took their name unsynced',
+    '⑥ renameSynced: ONLY a sync the file system does not do at all (EINVAL, ENOTSUP, EOPNOTSUPP, ENOSYS) is SAID once (the site\'s name, the code — no path) and the record lands', nos);
+  // (c) a healthy sync: asked once, nothing said, landed; a failed WRITE throws and the old record stands
+  { const f = fresh(D6, 'ok.json'), s = []; const r = placed6(() => FCm.renameSynced(f + '.tmp', f, Buffer.from('xyz'), { where: 'ok', say: (l) => s.push(l) }));
+    const g = fresh(D6, 'full.json'), ws0 = fs.writeSync; let threw = null; fs.writeSync = () => { throw errOf('ENOSPC'); };
+    try { FCm.renameSynced(g + '.tmp', g, 'x', { where: 'full' }); } catch (e) { threw = e.code; } finally { fs.writeSync = ws0; }
+    ok(!r.threw && r.asked.length === 1 && !s.length && fs.readFileSync(f, 'utf8') === 'xyz' && threw === 'ENOSPC' && fs.readFileSync(g, 'utf8') === OLD && !fs.existsSync(g + '.tmp'), '⑥ renameSynced: a healthy sync asked ONCE, nothing said, landed; a failed WRITE throws, the old record stands, the temp gone', { asked: r.asked, said: s, threw }); }
+  // ONE SPELLING: each wrapper's fallback, built from its own text
   const FB6 = /const renameSynced = FC && FC\.renameSynced \? FC\.renameSynced : (\(tmp, final, bytes, \{ mode, where, say \} = \{\}\) => \{[^\n]*\});/;
   const fbOf = (text) => { const m = FB6.exec(text || ''); return m ? new Function('fs', 'closeWritten', `return ${m[1]};`)(fs, FCm.closeWritten) : null; };   // eslint-disable-line no-new-func
   const WR6 = ['data/bin/job-wrapper.js', 'data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/acp-wrapper.js', 'data/bin/agy-wrapper.js'];
   const spell6 = {};
   for (const f of WR6) {
     const fb = fbOf(FILES[f]); if (!fb) { spell6[f] = 'no fallback'; continue; }
-    const s = [], tt = path.join(D6, path.basename(f) + '.tmp'), ff = path.join(D6, path.basename(f) + '.rec');
-    const r = syncPlaced(() => fb(tt, ff, 'bytes', { where: 'a stand-in record', say: (l) => s.push(l) }));
-    spell6[f] = J(r.asked) === J([path.basename(tt)]) && J(s) === J([W6]) && fs.readFileSync(ff, 'utf8') === 'bytes' ? 'same' : J({ asked: r.asked, said: s });
+    const g = fresh(D6, `s-${path.basename(f)}.json`), n = fresh(D6, `s2-${path.basename(f)}.json`), s = [];
+    const a = placed6(() => fb(g + '.tmp', g, 'new bytes', { where: 'a stand-in record', say: (l) => s.push(l) }), { sync: 'EIO' });
+    const b = placed6(() => fb(n + '.tmp', n, 'new bytes', { where: 'a stand-in record', say: (l) => s.push(l) }), { sync: 'EINVAL' });
+    spell6[f] = a.threw === 'EIO' && fs.readFileSync(g, 'utf8') === OLD && !fs.existsSync(g + '.tmp') && !b.threw && fs.readFileSync(n, 'utf8') === 'new bytes' && J(s) === J([FCm.syncUnsupportedWords('a stand-in record', 'EINVAL')]) ? 'same' : J({ a: a.threw, b: b.threw, said: s });
   }
-  ok(Object.values(spell6).length === 5 && Object.values(spell6).every((v) => v === 'same'), '⑥ ONE SPELLING: the five wrappers\' fallbacks (job, chat, codex, acp, agy), built from their own text, ask ONE sync, say EXACTLY the helper\'s words and land the record', spell6);
-  // EACH RECORD, from its wrapper's own code: the sync REFUSED (placed) — asked once for that record's temp, said once in that wrapper's
-  // own sink, the record landed. RED: the release's form of the record (in a copy) asks no sync at all
+  ok(Object.values(spell6).length === 5 && Object.values(spell6).every((v) => v === 'same'), '⑥ ONE SPELLING: the five wrappers\' fallbacks (job, chat, codex, acp, agy), built from their own text — a failed sync a failed write (the old record stands), a sync not done said in the helper\'s EXACT words and landed', spell6);
+  // EACH RECORD, from its wrapper's own code, over a GOOD OLDER record: its sync FAILED (EIO) — the old record byte for byte, the temps gone,
+  // the caller's OWN road taken (as a failed writeFileSync was at the release); a sync NOT DONE (EINVAL) — said once in that wrapper's sink,
+  // landed. RED: bf8355a8a's spelling (in a copy) — the failed sync said, the temp renamed over the good record anyway
   const fnText = (text, header) => { const i = (text || '').indexOf(header); if (i < 0) return null; const eol = text.indexOf('\n', i), line = text.slice(i, eol); if ((line.match(/\{/g) || []).length === (line.match(/\}/g) || []).length) return line; const j = text.indexOf('\n}\n', i); return j > i ? text.slice(i, j + 2) : null; };
   const linesFrom = (text, head, n) => { const i = (text || '').indexOf(head); if (i < 0) return null; let j = i; for (let k = 0; k < n; k++) { j = text.indexOf('\n', j + 1); if (j < 0) return null; } return text.slice(i, j); };
   const between = (text, x, y) => { const i = (text || '').indexOf(x), j = i < 0 ? -1 : text.indexOf(y, i + x.length); return i >= 0 && j > i ? text.slice(i + x.length, j) : null; };
   const F = (...a) => new Function(...a);   // eslint-disable-line no-new-func
   const RECORDS = [
-    { f: 'data/bin/job-wrapper.js', name: 'pid.json', where: "the job's pid record", code: (t) => between(t, 'fs.mkdirSync(ctlDir, { recursive: true });\n', 'function writeExit(exit) {'),
-      run: (code, rs, say, d) => { const lp = path.join(d, 'current.log'); F('fs', 'path', 'ctlDir', 'stamp', 'renameSynced', 'logPath', code)(fs, path, d, { pid: 1 }, rs, lp); try { for (const l of fs.readFileSync(lp, 'utf8').split('\n').filter(Boolean)) say(l.replace(/^\[job-wrapper\] /, '')); } catch { } },
+    { f: 'data/bin/job-wrapper.js', name: 'pid.json', where: "the job's pid record", road: 'threw', code: (t) => between(t, 'fs.mkdirSync(ctlDir, { recursive: true });\n', 'function writeExit(exit) {'),
+      run: (code, rs, say, d) => { const lp = path.join(d, 'current.log'); try { F('fs', 'path', 'ctlDir', 'stamp', 'renameSynced', 'logPath', code)(fs, path, d, { pid: 1 }, rs, lp); } finally { try { for (const l of fs.readFileSync(lp, 'utf8').split('\n').filter(Boolean)) say(l.replace(/^\[job-wrapper\] /, '')); } catch { } } },
       tip: `renameSynced(path.join(ctlDir, 'pid.json.tmp'), path.join(ctlDir, 'pid.json'), JSON.stringify(stamp), { where: "the job's pid record", say: (l) => recordSay(l) });`,
       rel: "fs.writeFileSync(path.join(ctlDir, 'pid.json.tmp'), JSON.stringify(stamp)); fs.renameSync(path.join(ctlDir, 'pid.json.tmp'), path.join(ctlDir, 'pid.json'));" },
-    { f: 'data/bin/job-wrapper.js', name: 'exit.json', where: "the job's exit record", code: (t) => fnText(t, 'function writeExit(exit) {'),
+    { f: 'data/bin/job-wrapper.js', name: 'exit.json', where: "the job's exit record", road: 'swallowed', code: (t) => fnText(t, 'function writeExit(exit) {'),
       run: (code, rs, say, d) => F('fs', 'path', 'ctlDir', 'renameSynced', 'recordSay', `${code}\nreturn writeExit;`)(fs, path, d, rs, say)({ code: 0 }),
       tip: `renameSynced(path.join(ctlDir, 'exit.json.tmp'), path.join(ctlDir, 'exit.json'), JSON.stringify(exit), { where: "the job's exit record", say: (l) => recordSay(l) });`,
       rel: "fs.writeFileSync(path.join(ctlDir, 'exit.json.tmp'), JSON.stringify(exit)); fs.renameSync(path.join(ctlDir, 'exit.json.tmp'), path.join(ctlDir, 'exit.json'));" },
-    { f: 'data/bin/job-wrapper.js', name: 'bound.json', where: "the job's bound record", code: (t) => fnText(t, 'function writeBound() {'),
+    { f: 'data/bin/job-wrapper.js', name: 'bound.json', where: "the job's bound record", road: 'swallowed', code: (t) => fnText(t, 'function writeBound() {'),
       run: (code, rs, say, d) => F('fs', 'path', 'ctlDir', 'boundRec', 'renameSynced', 'recordSay', `${code}\nreturn writeBound;`)(fs, path, d, { mb: 1 }, rs, say)(),
       tip: `renameSynced(path.join(ctlDir, 'bound.json.tmp'), path.join(ctlDir, 'bound.json'), JSON.stringify(boundRec), { where: "the job's bound record", say: (l) => recordSay(l) });`,
       rel: "fs.writeFileSync(path.join(ctlDir, 'bound.json.tmp'), JSON.stringify(boundRec)); fs.renameSync(path.join(ctlDir, 'bound.json.tmp'), path.join(ctlDir, 'bound.json'));" },
-    { f: 'data/bin/chat-wrapper.js', name: 'meta.json', where: 'the session meta sidecar', code: (t) => fnText(t, 'function persistMeta() {'),
+    { f: 'data/bin/chat-wrapper.js', name: 'meta.json', where: 'the session meta sidecar', road: 'returned its error', code: (t) => fnText(t, 'function persistMeta() {'),
       run: (code, rs, say, d) => F('fs', 'path', 'metaFile', 'meta', 'renameSynced', 'log', `let metaTimer = null;\n${code}\nreturn persistMeta;`)(fs, path, path.join(d, 'meta.json'), { a: 1 }, rs, say)(),
       tip: "renameSynced(tmp, metaFile, JSON.stringify(meta), { where: 'the session meta sidecar', say: log });", rel: 'fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile);' },
-    { f: 'data/bin/chat-wrapper.js', name: 'handed.json', where: 'the handed records', code: (t) => linesFrom(t, '  const tmp = `${file}.${process.pid}.tmp`;', 3),
+    { f: 'data/bin/chat-wrapper.js', name: 'handed.json', where: 'the handed records', road: 'returned false, said', code: (t) => linesFrom(t, '  const tmp = `${file}.${process.pid}.tmp`;', 3),
       run: (code, rs, say, d) => F('fs', 'path', 'file', 'text', 'renameSynced', 'log', 'sayOnce', `${code}\nreturn true;`)(fs, path, path.join(d, 'handed.json'), '{"v":1}', rs, say, (k, l) => say(l)),
       tip: "renameSynced(tmp, file, text, { mode: 0o600, where: 'the handed records', say: log });", rel: 'fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, file);' },
-    { f: 'data/bin/chat-wrapper.js', name: 'chat.buf', where: 'the chat buffer', code: (t) => fnText(t, 'function persistBuffer() {'),
+    { f: 'data/bin/chat-wrapper.js', name: 'chat.buf', where: 'the chat buffer', road: 'said', code: (t) => fnText(t, 'function persistBuffer() {'),
       run: (code, rs, say, d) => F('fs', 'path', 'bufferFile', 'buffer', 'JOURNAL', 'renameSynced', 'log', `let writeTimer = null;\n${code}\nreturn persistBuffer;`)(fs, path, path.join(d, 'chat.buf'), 'history', null, rs, say)(),
       tip: "renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log });", rel: 'fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile);' },
-    { f: 'data/bin/codex-chat-wrapper.js', name: 'codex.buf', where: 'the codex buffer', code: (t) => fnText(t, 'function persistBuffer() {'),
+    { f: 'data/bin/codex-chat-wrapper.js', name: 'codex.buf', where: 'the codex buffer', road: 'swallowed', code: (t) => fnText(t, 'function persistBuffer() {'),
       run: (code, rs, say, d) => F('fs', 'path', 'bufferFile', 'buffer', 'JOURNAL', 'renameSynced', 'log', `let writeTimer = null;\n${code}\nreturn persistBuffer;`)(fs, path, path.join(d, 'codex.buf'), 'history', null, rs, say)(),
       tip: "renameSynced(tmp, bufferFile, buffer, { where: 'the codex buffer', say: log });", rel: 'fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile);' },
-    ...['codex-chat', 'acp', 'agy'].map((w) => ({ f: `data/bin/${w}-wrapper.js`, name: 'meta.json', where: 'the session meta sidecar', code: (t) => fnText(t, 'function persistMeta() {'),
+    ...['codex-chat', 'acp', 'agy'].map((w) => ({ f: `data/bin/${w}-wrapper.js`, name: 'meta.json', where: 'the session meta sidecar', road: 'swallowed', code: (t) => fnText(t, 'function persistMeta() {'),
       run: (code, rs, say, d) => F('fs', 'path', 'metaFile', 'meta', 'renameSynced', 'log', `let metaTimer = null;\n${code}\nreturn persistMeta;`)(fs, path, path.join(d, 'meta.json'), { a: 1 }, rs, say)(),
       tip: "renameSynced(tmp, metaFile, JSON.stringify(meta), { where: 'the session meta sidecar', say: log });", rel: 'fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile);' })),
   ];
-  const rec6 = {}, red6 = {};
+  // bf8355a8a's spelling, the RED's copy (its words: a failed sync said, the temp renamed anyway)
+  const LINED_FB = "const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode); try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(`${where}: its new bytes could not be synced before it took its name (${(e && e.code) || 'error'}) \u2014 after a power cut it may read empty`); } catch { } } } finally { fd = closeWritten(fd, where, say); } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census \u2465)";
+  const linedFb = fbOf(LINED_FB);
+  const roadOf = (r, said) => (r.threw ? 'threw' : r.r instanceof Error ? 'returned its error' : r.r === false && said.length ? 'returned false, said' : said.length ? 'said' : 'swallowed');
+  const rec6 = {}, nos6 = {}, red6 = {}, rel6 = {};
   let k6 = 0;
   for (const R of RECORDS) {
     const key = `${path.basename(R.f)} ${R.name}`, t = FILES[R.f] || '', fb = fbOf(t), code = R.code(t);
-    if (!fb || !code || !code.includes(R.tip)) { rec6[key] = 'its code or its anchor is gone'; red6[key] = 'no copy'; continue; }
-    const scene = (src) => { const d = scratchDir(`fdc-rec-${++k6}`), s = []; const r = syncPlaced(() => R.run(src, fb, (l) => s.push(l), d)); return { asked: r.asked, said: s, landed: fs.existsSync(path.join(d, R.name)) }; };
-    const g = scene(code), x = scene(code.split(R.tip).join(R.rel));
-    rec6[key] = g.asked.length === 1 && g.asked[0].startsWith(R.name) && J(g.said) === J([FCm.syncFailedWords(R.where, 'EIO')]) && g.landed ? 'synced, said, landed' : J(g);
-    red6[key] = !x.asked.length && x.landed && !x.said.length ? 'no sync asked' : J(x);
+    if (!fb || !code || !code.includes(R.tip) || !linedFb) { rec6[key] = nos6[key] = red6[key] = rel6[key] = 'its code, its anchor or the lined copy is gone'; continue; }
+    const scene = (rs, sync) => { const d = scratchDir(`fdc-rec-${++k6}`), s = []; const final = fresh(d, R.name); const r = placed6(() => R.run(code, rs, (l) => s.push(l), d), { sync }); return { r, said: s, old: fs.readFileSync(final, 'utf8') === OLD, tmps: fs.readdirSync(d).filter((x) => x.endsWith('.tmp')) }; };
+    const w = scene(fb, 'EIO'), n = scene(fb, 'EINVAL'), x = scene(linedFb, 'EIO'), h = scene(FCm.renameSynced, 'EIO'), hn = scene(FCm.renameSynced, 'EINVAL');   // fb: a scratch copy's road; FCm: the installed road (src/ beside it)
+    const v = (() => { const d = scratchDir(`fdc-rec-${++k6}`), s = []; fresh(d, R.name); const r = placed6(() => R.run(code.split(R.tip).join(R.rel), fb, (l) => s.push(l), d), { sync: 'EIO' }); return { asked: r.asked, old: fs.readFileSync(path.join(d, R.name), 'utf8') === OLD }; })();
+    const mine = (r) => r.asked.length === 1 && r.asked[0].startsWith(R.name) && r.asked[0].endsWith('.tmp');
+    const stands = (s) => mine(s.r) && s.old && !s.tmps.length && roadOf(s.r, s.said) === R.road;
+    const landed = (s) => mine(s.r) && !s.old && !s.r.threw && s.said.filter((l) => l === FCm.syncUnsupportedWords(R.where, 'EINVAL')).length === 1;
+    rec6[key] = stands(w) && stands(h) ? `old stands, ${R.road}` : J({ fallback: { asked: w.r.asked, old: w.old, tmps: w.tmps, road: roadOf(w.r, w.said), said: w.said }, helper: { asked: h.r.asked, old: h.old, tmps: h.tmps, road: roadOf(h.r, h.said), said: h.said } });
+    nos6[key] = landed(n) && landed(hn) ? 'said, landed' : J({ fallback: { asked: n.r.asked, old: n.old, threw: n.r.threw, said: n.said }, helper: { asked: hn.r.asked, old: hn.old, threw: hn.r.threw, said: hn.said } });
+    rel6[key] = !v.asked.length && !v.old ? 'no sync asked' : J(v);
+    red6[key] = !x.old ? 'the good record replaced' : J({ old: x.old, threw: x.r.threw });
   }
-  ok(Object.keys(rec6).length === 10 && Object.values(rec6).every((v) => v === 'synced, said, landed'), '⑥ EACH RECORD, from its wrapper\'s own code (the job\'s pid / exit / bound; chat\'s meta, handed records, buffer; codex\'s buffer and meta; acp\'s and agy\'s meta): its sync REFUSED (placed) — asked once for its temp, said once in that wrapper\'s own sink, the record LANDED', rec6);
-  ok(Object.keys(red6).length === 10 && Object.values(red6).every((v) => v === 'no sync asked'), 'RED (the release\'s form of each record, in a copy): no sync asked at all — the record took its name with its bytes unsynced', red6);
+  ok(Object.keys(rec6).length === 10 && Object.values(rec6).every((v) => /^old stands, /.test(v)), '⑥ EACH RECORD, from its wrapper\'s own code over a GOOD older record: by the helper AND by its fallback: ONE sync asked, of its own temp; FAILED (EIO, placed) — the old record stands byte for byte, the temps gone, the caller\'s own road taken (the job\'s pid throws at its start, its exit and bound swallowed as at the release; chat\'s meta returns its error, its handed records return false and say it, its buffer says it once; codex\'s, acp\'s and agy\'s swallowed)', rec6);
+  ok(Object.keys(nos6).length === 10 && Object.values(nos6).every((v) => v === 'said, landed'), '⑥ EACH RECORD: a sync the file system does not do (EINVAL, placed) — said once in that wrapper\'s own sink, the record LANDED', nos6);
+  ok(Object.keys(red6).length === 10 && Object.values(red6).every((v) => v === 'the good record replaced'), 'RED (bf8355a8a\'s spelling, in a copy): the failed sync said, the temp renamed OVER the good record — for every record', red6);
+  ok(Object.keys(rel6).length === 10 && Object.values(rel6).every((v) => v === 'no sync asked'), 'RED (the release\'s form of each record, in a copy): no sync asked at all — the record took its name over the good one unsynced', rel6);
 }
 
 report();

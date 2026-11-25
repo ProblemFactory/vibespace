@@ -796,6 +796,9 @@ const PRINTS = {
     'fd': `${V}:the descriptor of the record's own temp file (renameSynced opens it; never stdout or stderr)`,
     'b': `${V}:the record's own bytes the wrapper hands it (its sidecar, buffer, handed or exit record), written to that temp file — never printed`,
     'o': `${V}:a byte offset into those bytes (a number)`,
+    // r4474 (a sync that fails is a failed write): the helper THROWS node's own error — caught by each wrapper's own try, as a failed writeFileSync was
+    'e': `${V}:node's own error of the temp's sync (fs.fsyncSync: its code and the call's name, no peer text), rethrown as the write's failure`,
+    'failed': `${V}:node's own error of the temp's write, sync or close (or our own «a short write»), thrown once the temp is removed — the failed write`,
   }),
   ...rows('src/cli-call.js', {
     'line': `${V}:THE expiry line (expiryLine — our words around a budget number, the hub's own address, an HTTP status number and a step KEY worded by STEP_WORDS; stderr)`,

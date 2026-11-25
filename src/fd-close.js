@@ -27,23 +27,34 @@ async function closeWrittenHandle(fh, where, say) {
   return null;
 }
 
-/** THE words of a refused sync (the one spelling) */
-function syncFailedWords(where, code) { return `${where}: its new bytes could not be synced before it took its name (${code || 'error'}) — after a power cut it may read empty`; }
+/** THE codes of a sync the file system REFUSES TO DO AT ALL (r4474): EINVAL — the kernel's own answer for a file system with no fsync
+ *  operation at all (Linux vfs_fsync_range), and fsync(2)'s for a file kind that cannot be synced; ENOTSUP / EOPNOTSUPP — a file
+ *  system (some network and FUSE ones) answering that it does not support the operation (one number on Linux, two names elsewhere);
+ *  ENOSYS — the call itself not implemented (Linux's FUSE layer turns a daemon's ENOSYS into success; another kernel may pass it on).
+ *  EVERY OTHER CODE (EIO, ENOSPC, EDQUOT, EROFS, an unknown one) is where a WRITE error first shows on a network folder: the bytes may
+ *  not be there — a FAILED WRITE */
+const SYNC_UNSUPPORTED = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
+/** THE words of a sync the file system does not do (the one spelling) */
+function syncUnsupportedWords(where, code) { return `${where}: its file system does not do a sync (${code}) — its new bytes took their name unsynced`; }
 
-/** B-bcb8 unit B (主开发 r4367): A RECORD THE HUB READS TAKES ITS NAME ONLY AFTER ONE SYNC OF ITS TEMP — the job wrapper's pid / exit /
- *  bound records, the conversation wrappers' meta sidecar, buffer and handed records (after a power cut or a full disk the hub read a
- *  record with its name and no bytes). `bytes` written to `tmp` (its mode), synced ONCE, closed through closeWritten, renamed to `final`.
- *  A refused sync is SAID once (the site's name, the code — no path) and the record STILL takes its name: never a lost record because a
- *  sync refused. A failed open / write / rename THROWS, as writeFileSync + renameSync did: each caller's own try is unchanged. WHAT is
- *  written and WHEN are the caller's, as before. The wrappers carry a one-line fallback with THESE words (test-fd-close-census ⑥) */
+/** B-bcb8 unit B (主开发 r4367; r4474's law): A RECORD THE HUB READS TAKES ITS NAME ONLY AFTER ONE SYNC OF ITS TEMP — the job wrapper's
+ *  pid / exit / bound records, the conversation wrappers' meta sidecar, buffer and handed records (after a power cut or a full disk the
+ *  hub read a record with its name and no bytes). `bytes` written to `tmp` (its mode), synced ONCE, closed, renamed to `final`.
+ *  A sync that FAILS — or a close that fails after the write (a deferred write error) — is a FAILED WRITE: the temp is removed, the
+ *  error THROWN as writeFileSync's was, the OLD record stands; each caller's own try is unchanged. ONLY a sync the file system does not
+ *  do at all (SYNC_UNSUPPORTED) is SAID once (the site's name, the code — no path) and the record still takes its name. WHAT is written
+ *  and WHEN are the caller's. The wrappers carry a one-line fallback with THESE words (test-fd-close-census ⑥) */
 function renameSynced(tmp, final, bytes, { mode, where, say } = {}) {
   const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes));
-  let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode);
+  let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null;
   try {
     for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; }
-    try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(syncFailedWords(where, e && e.code)); } catch { /* a sink that throws says nothing more */ } }
-  } finally { fd = closeWritten(fd, where, say); }
+    try { fs.fsyncSync(fd); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { if (typeof say === 'function') say(syncUnsupportedWords(where, e.code)); } catch { /* a sink that throws says nothing more */ } }
+  } catch (e) { failed = e; }
+  try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there — a failed write
+  fd = null;
+  if (failed) { try { fs.unlinkSync(tmp); } catch { /* gone already */ } throw failed; }
   fs.renameSync(tmp, final);
 }
 
-module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, syncFailedWords };
+module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, syncUnsupportedWords, SYNC_UNSUPPORTED };

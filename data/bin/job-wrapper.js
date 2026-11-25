@@ -28,7 +28,7 @@ const path = require('path');
 // build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
 let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
 const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
-const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode); try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(`${where}: its new bytes could not be synced before it took its name (${(e && e.code) || 'error'}) — after a power cut it may read empty`); } catch { } } } finally { fd = closeWritten(fd, where, say); } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
+const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
 
@@ -174,8 +174,9 @@ const stamp = {
   startedAt: Date.now(),
 };
 fs.mkdirSync(ctlDir, { recursive: true });
-// B-bcb8 unit B: the wrapper's own records (pid / exit / bound) take their name only after ONE sync of the temp; a refused sync is said in
-// the job's log (before the own lines' road exists: appended — the job has not started; after it: on that road) and the record still lands
+// B-bcb8 unit B: the wrapper's own records (pid / exit / bound) take their name only after ONE sync of the temp; a sync that FAILS is a failed
+// write (r4474: thrown, the temp removed, the old record stands); a sync the file system does not do is said in the job's log (before the own
+// lines' road exists: appended — the job has not started; after it: on that road) and the record still lands
 let recordSay = (l) => { try { fs.appendFileSync(logPath, `[job-wrapper] ${l}\n`); } catch { } };
 renameSynced(path.join(ctlDir, 'pid.json.tmp'), path.join(ctlDir, 'pid.json'), JSON.stringify(stamp), { where: "the job's pid record", say: (l) => recordSay(l) });
 function writeExit(exit) {
@@ -211,7 +212,7 @@ function logOpen() {
 // until its end (the stop itself never waits for them); a wrapper killed before its drain loses what is still queued
 let lastNl = true, ownQ = [], ownT = null;
 function sayOwn(text) { ownQ.push(String(text).replace(/^\n+|\n+$/g, '')); drainOwn(); }
-recordSay = (l) => sayOwn(`[job-wrapper] ${l}`);   // B-bcb8 unit B: from here a record's refused sync goes on the own lines' road
+recordSay = (l) => sayOwn(`[job-wrapper] ${l}`);   // B-bcb8 unit B: from here a record's sync not done goes on the own lines' road
 function maskHolds() { try { return !!(VAL && vmask && !vEnded && typeof vmask.holding === 'number' && vmask.holding > 0); } catch { return false; } }   // (before the masker's bindings exist: nothing is held)
 function armOwn() { if (!ownT) { ownT = setTimeout(() => { ownT = null; drainOwn('quiet'); }, 450); ownT.unref?.(); } }
 /** how: '' (a turn of the job's words: a line ended, nothing held), 'quiet' (no word of the job meanwhile: a line of its own), 'end' */

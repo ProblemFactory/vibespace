@@ -466,7 +466,7 @@ const DELETION_CALLS = Object.freeze({
   'src/app-secrets.js': 1, 'src/app-serve.js': 8, 'src/app-system-serve.js': 1, 'src/browser-facts.js': 1,
   'src/browser-serve.js': 4, 'src/channel-outbox-files.js': 1, 'src/channel-store.js': 9, 'src/claude-oat-probe.js': 8,
   'src/design-fs.js': 1, 'src/desktop-display.js': 1, 'src/desktop-mic.js': 3, 'src/desktop-serve.js': 7,
-  'src/exit-proxy.js': 2, 'src/fixture-ledger-purge.js': 1, 'src/gmail-sync.js': 1, 'src/harness-config.js': 2,
+  'src/exit-proxy.js': 2, 'src/fd-close.js': 1, 'src/fixture-ledger-purge.js': 1, 'src/gmail-sync.js': 1, 'src/harness-config.js': 2,   // fd-close (B-bcb8 unit B, r4474): renameSynced removes ITS OWN temp after a failed write — no store's remover
   'src/harnesses/antigravity.js': 3, 'src/harnesses/claude-home.js': 1, 'src/harnesses/codex.js': 1, 'src/host-keys.js': 1,
   'src/hosts.js': 8, 'src/interface/main.js': 2, 'src/job-logs-sweep-worker.js': 11, 'src/jobs.js': 3,
   'src/kept-copies.js': 2, 'src/machine-probes.js': 2, 'src/mounts.js': 5, 'src/node-runtime.js': 3,

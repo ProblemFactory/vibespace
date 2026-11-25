@@ -2978,13 +2978,14 @@ userW (inc-mw2oamb4-vain, 2.369.378): a window that turned red blinked yellow in
 
 ### src/fd-close.js — the one close of a written file, and a wrapper's record synced before its name (B-15ac; B-bcb8 unit B, 主开发 r4367)
 - **`closeWritten(fd, where, say)` / `closeWrittenHandle`** (B-15ac): a written file is closed ONCE. A failed close (where a deferred write error arrives on a network or FUSE folder) is said once, with the site's name and the code, never a path. It never throws; the caller forgets the number in the statement that closes it.
-- **`renameSynced(tmp, final, bytes, {mode, where, say})`** (B-bcb8 unit B): a record the hub reads takes its name only after ONE sync of its temp. It writes, makes one `fsyncSync`, closes through `closeWritten`, then renames.
-  - A refused sync is SAID once (`syncFailedWords`: the site's name and the code) and the record STILL takes its name: never a lost exit record because a sync refused.
-  - A failed open, write or rename throws, as `writeFileSync` + `renameSync` did, so each caller's own try is unchanged.
+- **`renameSynced(tmp, final, bytes, {mode, where, say})`** (B-bcb8 unit B): a record the hub reads takes its name only after ONE sync of its temp. It writes, makes one `fsyncSync`, closes, then renames.
+  - THE LAW (r4474): a sync that FAILS — EIO, ENOSPC, EDQUOT, EROFS, any unknown code — or a close that fails after the write is a FAILED WRITE: the temp is removed, the error thrown, the OLD record stands byte for byte.
+  - Only a sync the file system does not do at all (`SYNC_UNSUPPORTED`) is SAID once (`syncUnsupportedWords`: the site's name and the code) and the record lands. The codes: EINVAL (Linux's answer for a file system with no fsync operation, and fsync(2)'s for a file kind that cannot be synced), ENOTSUP / EOPNOTSUPP (a file system that says it does not support it), ENOSYS (the call not implemented).
+  - A failed open, write, sync, close or rename throws, as `writeFileSync` + `renameSync` did, so each caller's own try is unchanged.
   - Its users are the job wrapper's pid.json, exit.json and bound.json, and the conversation wrappers' meta sidecar (chat, codex, acp, agy), buffer (chat, codex) and the chat wrapper's handed records.
-  - The job's refused sync is said in the job's log: appended before the own lines' road exists (the job has not started), on that road after.
+  - The job's sync not done is said in the job's log: appended before the own lines' road exists (the job has not started), on that road after.
   - WHAT is written and WHEN are the callers'. The sync runs on the wrapper's own loop, as its write did; a buffer's writes stay throttled by their timer.
-- **Carried, not bundled:** each wrapper requires src/fd-close.js at its start and carries a one-line fallback with the SAME words (test-fd-close-census ⑤ for the close, ⑥ for the rename: one spelling, built from each file's own text). acp and agy load it since unit B.
+- **Carried, not bundled:** each wrapper requires src/fd-close.js at its start and carries a one-line fallback with the SAME words (test-fd-close-census ⑤ for the close, ⑥ for the rename: one spelling, built from each file's own text). acp and agy load it since unit B, for the rename only (its fallback closes its own temp).
 - **Old and new:** a RUNNING conversation's or job's wrapper keeps the code it started with, so the sync reaches new starts only. An old wrapper with a new hub writes the same files, and the hub reads them the same way.
 - **Not this helper's (named):**
   - log rotations (a rename of a whole file, no temp);
@@ -2992,7 +2993,7 @@ userW (inc-mw2oamb4-vain, 2.369.378): a window that turned red blinked yellow in
   - the acp and agy buffers (written in place, no rename);
   - agy's conversation modes and the person's agy link (unit C);
   - agy's own synced settings write.
-- **Legs:** test-fd-close-census ⑥ runs each of the 10 records from its wrapper's own code with its sync REFUSED (placed). Each is said once and LANDED. RED: the release's form of each record asks no sync. test-temp-rename-census: the helper's rename is rowed (self-synced-best-effort), and the data/bin counts fall (job 5→3, chat 4→2, codex 3→2).
+- **Legs:** test-fd-close-census ⑥ runs each of the 10 records from its wrapper's own code, through the helper and through its fallback, over a GOOD older record. A placed failed sync (EIO): one sync asked of its own temp, the old record stands byte for byte, the temps gone, the caller's own road taken. A placed EINVAL: said once in that wrapper's sink, landed. REDS: bf8355a8a's spelling renamed over the good record; the release's form asks no sync. test-temp-rename-census: the helper's rename is rowed (self-synced), and the data/bin counts fall (job 5→3, chat 4→2, codex 3→2).
 
 ### src/job-notice.js + src/jobs.js — B-74f5: a published service's URL change is said only when proven (2026-11-19)
 A URL different from the job's `lastPublicUrl` is SAID only when the new address answered AND the old one failed. A web address (http / https) followed by a tcp:// one (`keepsWebUrl`) is not the job's until then: `publishedUrl` and `lastPublicUrl` keep the web address. This guards against the http probe misreading a web service as tcp while it or the relay comes back (fb-71b12fb3cd, fb-197c3042ca, fb-9efc35787c).
