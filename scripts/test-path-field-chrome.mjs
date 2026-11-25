@@ -879,7 +879,7 @@ console.log('\n── ⑱ THE LATE FACTS DRAWN (主开发 r1633 / r1636, both ro
   // this hub the collector's own count of refused calls is read across the road. Every red control first proves its road happened. No
   // bound raised, no retry, no sleep that guesses
   const deadKid = (dir, name = 'vs-dead-kid') => { const k = path.join(HOME, dir, name); fs.mkdirSync(path.join(k, '.git'), { recursive: true }); const old = (Date.now() - 3600e3) / 1000; fs.utimesSync(k, old, old); fs.utimesSync(path.join(HOME, dir), old, old); return k; };
-  const KIDS = {}; for (const d of ['lateh', 'tiph', 'redh', 'pasth', 'latep', 'redp', 'pastp']) KIDS[d] = deadKid(d);
+  const KIDS = {}; for (const d of ['lateh', 'tiph', 'redh', 'pasth', 'latep', 'redp', 'pastp', 'rcpth', 'rcptp']) KIDS[d] = deadKid(d);
   const kB = deadKid('busyh', 'vs-dead-a'), kZ = deadKid('busyh', 'vs-dead-zz');
   const began = (k) => fs.existsSync(path.join(k, '.held')), hasLeft = (k) => fs.existsSync(path.join(k, '.left'));
   const isHeld = (k) => began(k) && !hasLeft(k), letGo = (k) => fs.writeFileSync(path.join(k, '.go'), '');
@@ -918,26 +918,35 @@ console.log('\n── ⑱ THE LATE FACTS DRAWN (主开发 r1633 / r1636, both ro
   // …and, printed, what the page makes of it by the page model's own word (src/path-field-model.js replyKind): its kind, whether it
   // carried a listing at all, its error words (r4235: a late reply the page does not merge — what it carried, and whether any is dropped)
   const PFM18 = require('../src/path-field-model.js');
-  const readOut = (res, dir, name, into) => { const send = res.json.bind(res); res.json = (b) => { const e = b && b.listing && b.listing.dirs && b.listing.dirs[`~/${dir}/${name}`]; into.carried = !!(e && e.git); into.reply = { kind: PFM18.replyKind(b), listing: !!(b && b.listing), kid: !!e, partial: !!(b && b.partial), error: String((b && b.error) || '').slice(0, 160) }; return send(b); }; };
-  // the page's own word that it TOOK a reply sent at or after `outAt` (the route's finish, the same clock) as the field's current one —
+  // …and the MOMENT it is handed to the route's json, before it is sent (`sentAt`, with `atSend` read then): the page cannot take a reply
+  // before that moment, so every receipt is read against it — never against the route's `finish`, which Node emits only once its loop
+  // turns after the bytes are out (r4345: the mirror's paired control read «not received» on a reply the page had taken before it)
+  const readOut = (res, dir, name, into, atSend = null) => { const send = res.json.bind(res); res.json = (b) => { const e = b && b.listing && b.listing.dirs && b.listing.dirs[`~/${dir}/${name}`]; into.carried = !!(e && e.git); into.reply = { kind: PFM18.replyKind(b), listing: !!(b && b.listing), kid: !!e, partial: !!(b && b.partial), error: String((b && b.error) || '').slice(0, 160) }; if (!into.sentAt) { if (atSend) atSend(); into.sentAt = Date.now(); } return send(b); }; };
+  // the page's own word that it TOOK a reply handed over at or after `sentAt` (the same machine's clock) as the field's current one —
   // merged, the model told and the rows painted in that same step (src/lib/path-field.js sliceAsk: trace, then fire → paint)
-  const taken = async (outAt) => (await ev(`window.pf.trace().some((x) => x.at >= ${outAt} && x.how === 'current' && x.listing)`));
-  // …and its word that it RECEIVED a reply sent at or after `outAt`, whatever it made of it (past the bound: a late reply that is not a
+  const taken = async (sentAt) => (await ev(`window.pf.trace().some((x) => x.at >= ${sentAt} && x.how === 'current' && x.listing)`));
+  // …and its word that it RECEIVED a reply handed over at or after `sentAt`, whatever it made of it (past the bound: a late reply that is not a
   // complete listing is not merged — r1636 — and is still the reply the leg reads the badge after; row 794's paired leg)
-  const received = async (outAt) => (await ev(`window.pf.trace().some((x) => x.at >= ${outAt})`));
+  const received = async (sentAt) => (await ev(`window.pf.trace().some((x) => x.at >= ${sentAt})`));
   const letGoWhenHeld = (k) => { until(() => (isHeld(k) ? true : null), 3000).then(() => setImmediate(() => letGo(k))); };   // inside the re-ask's wait
   const letGoAtReply = (k, res) => res.on('finish', () => letGo(k));   // only once the re-ask's reply is out
   // ONE LEG's ROAD: its own kid, the road warmed, its own ask held at the door until the road is settled; the quiet re-ask's arrival
   // hooked, its reply read on its way out and taken by the page; the hub's refused calls counted across it
-  const road = async (hostVal, dir, onLate, { strip = false } = {}) => {
-    const k = KIDS[dir], S = { lateAt: false, leftAtArrival: null, leftAtReply: null, outAt: 0, carried: null, refused: null, took: false, got: false };
+  // (`holdFinish`: the route's `finish` HELD until the page has received the reply — the receipt leg's placement, below)
+  const road = async (hostVal, dir, onLate, { strip = false, holdFinish = false } = {}) => {
+    const k = KIDS[dir], S = { lateAt: false, leftAtArrival: null, leftAtReply: null, sentAt: 0, outAt: 0, carried: null, refused: null, took: false, got: false };
     const warm = await warmUp(hostVal), r0 = hostVal ? 0 : refusedNow();
     ASK_DOOR.set(`~/${dir}/`, doorFor(hostVal));
     LATE_HOOK.strip = strip;
-    LATE_HOOK.on.set(`~/${dir}/`, (req, res) => { S.lateAt = true; S.leftAtArrival = hasLeft(k); readOut(res, dir, 'vs-dead-kid', S); res.on('finish', () => { S.leftAtReply = hasLeft(k); S.outAt = Date.now(); }); onLate(k, res); });
+    LATE_HOOK.on.set(`~/${dir}/`, (req, res) => {
+      S.lateAt = true; S.leftAtArrival = hasLeft(k); readOut(res, dir, 'vs-dead-kid', S, () => { S.leftAtReply = hasLeft(k); });
+      if (holdFinish) { const emit = res.emit.bind(res); res.emit = (ev, ...a) => { if (ev !== 'finish') return emit(ev, ...a); until(async () => (S.sentAt && (await received(S.sentAt)) ? true : null), 6000).then(() => emit(ev, ...a)); return true; }; }
+      res.on('finish', () => { S.outAt = Date.now(); }); onLate(k, res);
+    });
     await start(hostVal, dir);
-    S.got = !!(await until(async () => (S.outAt && (await received(S.outAt)) ? true : null), 6000));
-    S.took = !!(S.got && (await taken(S.outAt)));
+    S.got = !!(await until(async () => (S.sentAt && (await received(S.sentAt)) ? true : null), 6000));
+    if (!S.got) console.log(`  ⑱ HARNESS: the page's receipt of ~/${dir}/'s re-ask reply did not come within 6 s (handed to the route: ${!!S.sentAt})`);
+    S.took = !!(S.got && (await taken(S.sentAt)));
     LATE_HOOK.strip = false;
     S.refused = hostVal ? 0 : refusedNow() - r0;
     return { k, S, warm };
@@ -982,7 +991,7 @@ console.log('\n── ⑱ THE LATE FACTS DRAWN (主开发 r1633 / r1636, both ro
     const mid = { warm: P.warm, ...P.S, back: !!backP, asks: await asksOf(`past${tag}`), drawn: await drawnAs(`past${tag}`, 'vs-dead-kid'), trace: await ev('window.pf.trace().slice(-3)') };
     await ev(`window.pf.refresh(); true`);
     const later = await until(async () => ((await drawnAs(`past${tag}`, 'vs-dead-kid')) === 'git' ? true : null), 6000);
-    ok(`⑱ ${name}: past the bound the re-ask says the rest is late — its reply out before the read returned (${mid.leftAtReply}) and without the git (${mid.carried}), no badge (${mid.drawn}) once the page received it (${mid.got}; the reply's kind «${mid.reply && mid.reply.kind}», a listing: ${!!(mid.reply && mid.reply.listing)}${mid.reply && mid.reply.error ? `, its words «${mid.reply.error}»` : ''}; the page filed it «${((mid.trace || []).find((x) => x.at >= mid.outAt) || {}).how}», a listing: ${!!((mid.trace || []).find((x) => x.at >= mid.outAt) || {}).listing}), NO third ask (${mid.asks.length} asks); the read came back (${mid.back}; refused: ${mid.refused}) — the next ask brings the badge (${!!later})`,
+    ok(`⑱ ${name}: past the bound the re-ask says the rest is late — its reply out before the read returned (${mid.leftAtReply}) and without the git (${mid.carried}), no badge (${mid.drawn}) once the page received it (${mid.got}; the reply's kind «${mid.reply && mid.reply.kind}», a listing: ${!!(mid.reply && mid.reply.listing)}${mid.reply && mid.reply.error ? `, its words «${mid.reply.error}»` : ''}; the page filed it «${((mid.trace || []).find((x) => x.at >= mid.sentAt) || {}).how}», a listing: ${!!((mid.trace || []).find((x) => x.at >= mid.sentAt) || {}).listing}), NO third ask (${mid.asks.length} asks); the read came back (${mid.back}; refused: ${mid.refused}) — the next ask brings the badge (${!!later})`,
       !!(mid.warm && mid.lateAt && mid.leftAtArrival === false && mid.leftAtReply === false && mid.carried === false && mid.back && mid.got && mid.drawn === 'row' && mid.asks.length === 2 && later), { mid, later: await drawnAs(`past${tag}`, 'vs-dead-kid') });
     await key('Escape'); await reset(); ASK_DOOR.delete(`~/past${tag}/`);
   };
@@ -993,21 +1002,22 @@ console.log('\n── ⑱ THE LATE FACTS DRAWN (主开发 r1633 / r1636, both ro
     // count moves) — and the quiet re-ask starts none: no git in its reply, no badge, NO third ask. THE NEXT ASK (the premise put right):
     // a FRESH ask STARTS the refused kid's call behind its answer and earns ONE more quiet re-ask (r1399 (4)), which joins that call —
     // that read let go once held, inside the second re-ask's wait — and that reply, which only adds the git to a folder listed, draws it
-    const busyDir = 'busyh', B = { lateAt: false, aLeftAtReply: null, zzBegan: null, carried: null, outAt: 0 }, B2 = { lateAt: false, leftAtArrival: null, leftAtReply: null, carried: null, outAt: 0 };
+    const busyDir = 'busyh', B = { lateAt: false, aLeftAtReply: null, zzBegan: null, carried: null, sentAt: 0, outAt: 0 }, B2 = { lateAt: false, leftAtArrival: null, leftAtReply: null, carried: null, sentAt: 0, outAt: 0 };
     const warmB = await warmUp(''), r0 = refusedNow();
     ASK_DOOR.set(`~/${busyDir}/`, doorFor(''));
-    LATE_HOOK.on.set(`~/${busyDir}/`, (req, res) => { B.lateAt = true; readOut(res, busyDir, 'vs-dead-zz', B); res.on('finish', () => { B.aLeftAtReply = hasLeft(kB); B.zzBegan = began(kZ); B.outAt = Date.now(); letGo(kB); }); });
+    LATE_HOOK.on.set(`~/${busyDir}/`, (req, res) => { B.lateAt = true; readOut(res, busyDir, 'vs-dead-zz', B, () => { B.aLeftAtReply = hasLeft(kB); B.zzBegan = began(kZ); }); res.on('finish', () => { B.outAt = Date.now(); letGo(kB); }); });
     await start('', busyDir);
-    const tookB = await until(async () => (B.outAt && (await taken(B.outAt)) ? true : null), 6000);
+    const tookB = await until(async () => (B.sentAt && (await taken(B.sentAt)) ? true : null), 6000);
+    if (!tookB) console.log(`  ⑱ HARNESS: the page's taking of ~/${busyDir}/'s re-ask reply did not come within 6 s (handed to the route: ${!!B.sentAt})`);
     const backB = await until(() => (hasLeft(kB) ? true : null), 3000);
     const atAsk = { warm: warmB, ...B, refused: refusedNow() - r0, took: !!tookB, back: !!backB, asks: (await asksOf(busyDir)).length, drawn: await drawnAs(busyDir, 'vs-dead-zz') };
     ok(`⑱ this hub, NO IDLE WORKER (the box's shape, a leg of its own): the one worker held by the folder's first kid's read (not returned at the re-ask's reply: ${atAsk.aLeftAtReply === false}; back once let go: ${atAsk.back}) — the next kid's call REFUSED: its read never begun (${atAsk.zzBegan === false}), no git in the re-ask's reply (${atAsk.carried}), no badge (${atAsk.drawn}), NO third ask (${atAsk.asks} asks)`,
       !!(atAsk.warm && atAsk.lateAt && atAsk.aLeftAtReply === false && atAsk.back && atAsk.zzBegan === false && atAsk.carried === false && atAsk.took && atAsk.drawn === 'row' && atAsk.asks === 2), atAsk);
     const r1 = refusedNow();
-    LATE_HOOK.on.set(`~/${busyDir}/`, (req, res) => { B2.lateAt = true; B2.leftAtArrival = hasLeft(kZ); readOut(res, busyDir, 'vs-dead-zz', B2); res.on('finish', () => { B2.leftAtReply = hasLeft(kZ); B2.outAt = Date.now(); }); letGoWhenHeld(kZ); });
+    LATE_HOOK.on.set(`~/${busyDir}/`, (req, res) => { B2.lateAt = true; B2.leftAtArrival = hasLeft(kZ); readOut(res, busyDir, 'vs-dead-zz', B2, () => { B2.leftAtReply = hasLeft(kZ); }); res.on('finish', () => { B2.outAt = Date.now(); }); letGoWhenHeld(kZ); });
     await ev(`window.pf.refresh(); true`);
     const nextDrawn = await until(async () => ((await drawnAs(busyDir, 'vs-dead-zz')) === 'git' ? true : null), 6000);
-    const asksB = await asksOf(busyDir), next = { ...B2, refused: refusedNow() - r1, took: !!(B2.outAt && (await taken(B2.outAt))) };
+    const asksB = await asksOf(busyDir), next = { ...B2, refused: refusedNow() - r1, took: !!(B2.sentAt && (await taken(B2.sentAt))) };
     ok(`⑱ this hub, NO IDLE WORKER, THE NEXT ASK: a fresh ask (held at the door until the hub is settled) starts the refused kid's call and earns one more quiet re-ask, which arrives with that read out there (returned: ${next.leftAtArrival}) and lets it go inside its wait (the reply after it returned: ${next.leftAtReply}, carrying the git: ${next.carried}; refused: ${next.refused}) — the badge drawn (${!!nextDrawn}), ${asksB.length} asks, the fourth marked late=1`,
       !!(joined(next) && nextDrawn && asksB.length === 4 && !asksB[2].includes('late=1') && asksB[3].includes('late=1')), { next, asks: asksB, drawn: await drawnAs(busyDir, 'vs-dead-zz') });
     await key('Escape'); await reset(); ASK_DOOR.delete(`~/${busyDir}/`);
@@ -1015,6 +1025,22 @@ console.log('\n── ⑱ THE LATE FACTS DRAWN (主开发 r1633 / r1636, both ro
   await roadLegs('this hub', '', 'h');   // r4143 / r4197: this hub's road, placed
   await busyLegs();
   if (paired) await roadLegs('the paired machine', 'h-pair', 'p');   // r4197: the paired machine's road, the same seam and the same legs
+  // THE RECEIPT's OWN CLOCK (主开发 r4345 — the mirror's red-then-green row: the paired machine's hub's-wait control read «not received»
+  // and «not taken» on a reply that WAS a complete listing): the legs read the page's receipt against the route's `finish`, which Node
+  // emits only once its loop turns after the bytes are out — under load the page takes the reply BEFORE it. PLACED, RED AT WILL: the
+  // same control's road (the re-ask unmarked, the read let go once its reply is out) with the route's `finish` HELD until the page has
+  // received the reply: read against `finish` (the old reading) the page received nothing; read against the moment the reply was handed
+  // to the route's json (the reading every leg now uses: the page cannot take it before) it received it
+  {
+    const [name, hostVal, dir] = paired ? ['the paired machine', 'h-pair', 'rcptp'] : ['this hub', '', 'rcpth'];
+    const R = await road(hostVal, dir, letGoAtReply, { strip: true, holdFinish: true });
+    const out = await until(() => (R.S.outAt ? true : null), 8000);
+    const back = await until(() => (hasLeft(R.k) ? true : null), 3000);
+    const oldRule = await received(R.S.outAt), newRule = await received(R.S.sentAt);
+    ok(`⑱ ${name}, THE RECEIPT's OWN CLOCK (the hub's-wait control's road, the route's finish HELD until the page received the reply): read against the route's finish the page received nothing (received: ${oldRule}) — RED AT WILL, the mirror's row — and read against the moment the reply was handed to the route it received it (${newRule}); the reply a ${R.S.reply && R.S.reply.kind} without the git (${R.S.carried}), the read back once let go (${!!back})`,
+      !!(R.warm && R.S.lateAt && R.S.sentAt && out && R.S.outAt > R.S.sentAt && oldRule === false && newRule === true && R.S.got && R.S.carried === false && back), { S: R.S, oldRule, newRule, back: !!back });
+    await key('Escape'); await reset(); ASK_DOOR.delete(`~/${dir}/`);
+  }
   for (const k of [...Object.values(KIDS), kB, kZ]) letGo(k);   // nothing of these left held in a worker
   try { endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { }
 }
