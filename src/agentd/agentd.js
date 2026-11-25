@@ -196,6 +196,7 @@ const fs = require('fs');
 // scan on its own loop — the exact stall the child exists to prevent.
 const os = require('os');
 const path = require('path');
+const DFILE = require('./durable-file.js');   // B-93e7: THE device's one door for its own files — a name only after ONE sync of its temp
 const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, titleLinesOf, TITLE_HEAD_BYTES, TITLE_TAIL_BYTES, pickLockFiles, DISCOVERY_LOCK_FILE_MAX, DISCOVERY_CODEX_OPEN_MAX, DISCOVERY_CHILD_MAX_BYTES } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
 const PI = require('./../proc-identity.js'); // B-1cc6: a pid is never an identity
@@ -741,9 +742,9 @@ function retireOwnStart(why, provenDialToken) {
   const steps = SR.retireSteps({ root: ROOT, platform: process.platform, home: os.homedir(), uid });
   const run = (c, a) => new Promise((r) => { try { require('child_process').execFile(c, a, { windowsHide: true, timeout: 10000, env: spawnEnv() }, (err) => r(!err)); } catch { r(false); } });
   const present = SR.presentOf(steps, fs);   // (read before any step: the stop runs after the unit file is gone)
-  SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: run, uid, present }).then((r) => {
+  SR.runRetire(steps.filter((s) => !s.last), { fs, supervisor: run, uid, present, log }).then((r) => {
     log(`retire: ${why} — removed: ${r.done.join(', ') || 'nothing'}${r.left.length ? `; left: ${r.left.map((x) => `${x.what} (${x.why})`).join(', ')}` : ''}`);
-    setTimeout(() => { SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: run, uid, present }).then((z) => { if (z.left.length) log(`retire: the supervisor's stop did not answer (${z.left.map((x) => `${x.what}: ${x.why}`).join(', ')}) — this agent ends itself; a supervisor that restarts it (a restart-always unit, a KeepAlive item) brings it back IDLE (no dial config: it dials nothing) until that item is removed by hand`); }).finally(() => process.exit(0)); }, 500).unref?.();   // the supervisor's stop last (it ends this agent), then the agent ends itself
+    setTimeout(() => { SR.runRetire(steps.filter((s) => s.last), { fs, supervisor: run, uid, present, log }).then((z) => { if (z.left.length) log(`retire: the supervisor's stop did not answer (${z.left.map((x) => `${x.what}: ${x.why}`).join(', ')}) — this agent ends itself; a supervisor that restarts it (a restart-always unit, a KeepAlive item) brings it back IDLE (no dial config: it dials nothing) until that item is removed by hand`); }).finally(() => process.exit(0)); }, 500).unref?.();   // the supervisor's stop last (it ends this agent), then the agent ends itself
   });
   return true;
 }
@@ -769,7 +770,7 @@ function readInputAllow() {
 }
 
 function writeDialStatus(st) {
-  try { const tmp = DIAL_STATUS_FILE + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(st), { mode: 0o600 }); fs.renameSync(tmp, DIAL_STATUS_FILE); }
+  try { DFILE.writeDurable({ fs, file: DIAL_STATUS_FILE, tmp: DIAL_STATUS_FILE + '.' + process.pid + '.tmp', data: JSON.stringify(st), mode: 0o600, log }); }   // B-93e7: one sync before its name
   catch (e) { try { log('dial-status not written: ' + e.message); } catch { } }
 }
 
@@ -833,10 +834,7 @@ if (process.argv.includes('--write-policy')) {
   if (!r.ok) { fs.writeSync(2, `✗ --allow: ${r.error}\n`); process.exit(2); }
   try {
     fs.mkdirSync(STATE, { recursive: true, mode: 0o700 });
-    const tmp = POLICY_FILE + '.tmp-' + process.pid;
-    try { fs.unlinkSync(tmp); } catch { }
-    fs.writeFileSync(tmp, JSON.stringify(DP.fileOf(r, { at: Date.now() })) + '\n', { mode: 0o600 });
-    fs.renameSync(tmp, POLICY_FILE);
+    DFILE.writeDurable({ fs, file: POLICY_FILE, tmp: POLICY_FILE + '.tmp-' + process.pid, data: JSON.stringify(DP.fileOf(r, { at: Date.now() })) + '\n', mode: 0o600, log });   // B-93e7
   } catch (e) { fs.writeSync(2, `✗ could not write ${POLICY_FILE}: ${e.message}\n`); process.exit(1); }
   fs.writeSync(1, `→ allow list: ${DP.allowArg(r.allow)} (${POLICY_FILE})\n`);
   process.exit(0);
@@ -948,10 +946,7 @@ const trustedKeys = () => { try { const k = SIG.parseTrust(fs.readFileSync(TRUST
 // — even one that does not parse — is never a reason to trust a stranger)
 const trustsNoKey = () => !fs.existsSync(TRUST_FILE) && !RK.RELEASE_KEYS.length;
 function pinTrust(keys, from) { // atomic at 0600 (tmp + rename), like dial.json
-  const tmp = TRUST_FILE + '.' + process.pid + '.tmp';
-  try { fs.unlinkSync(tmp); } catch { }
-  fs.writeFileSync(tmp, SIG.trustText(keys, { from, at: new Date().toISOString() }), { mode: 0o600 });
-  fs.renameSync(tmp, TRUST_FILE);
+  DFILE.writeDurable({ fs, file: TRUST_FILE, tmp: TRUST_FILE + '.' + process.pid + '.tmp', data: SIG.trustText(keys, { from, at: new Date().toISOString() }), mode: 0o600, log });   // B-93e7
 }
 /** The floor this install judges with: the newest version it ever ran — never below the version running now. */
 function floorNow() {
@@ -961,10 +956,7 @@ function floorNow() {
   return { floor, honoured: f ? f.honoured : [] };
 }
 function writeFloor(f) { // atomic at 0600, like the pin
-  const tmp = FLOOR_FILE + '.' + process.pid + '.tmp';
-  try { fs.unlinkSync(tmp); } catch { }
-  fs.writeFileSync(tmp, SIG.floorText({ ...f, at: new Date().toISOString() }), { mode: 0o600 });
-  fs.renameSync(tmp, FLOOR_FILE);
+  DFILE.writeDurable({ fs, file: FLOOR_FILE, tmp: FLOOR_FILE + '.' + process.pid + '.tmp', data: SIG.floorText({ ...f, at: new Date().toISOString() }), mode: 0o600, log });   // B-93e7
 }
 /** THE LANDING VERDICT over the bytes ON DISK. On this machine's own socket (never a dial link) the hub's single-use
  *  local proof (<state>/upgrade-proof, deleted on any read) is enough — whoever writes that dir is this machine's user
@@ -989,7 +981,9 @@ function landingVerdict(bytes, { version, sig = null, localProof = null }, { dia
 /** THE ONE WRITER of this install's `current` (test-architecture §92): the bytes ON DISK at `tmp` are judged first; only
  *  on a yes are they renamed to this install's file name, `current` repointed, and what the verdict changed recorded (the
  *  pin, a signed rollback honoured). The hub's stream (beginUpgrade) and the ssh road (`--land-upgrade`, fix r2) both
- *  land through here. A refusal deletes the bytes (and the empty dir) and says so. → the verdict; an fs error throws. */
+ *  land through here. A refusal deletes the bytes (and the empty dir) and says so. → the verdict; an fs error throws.
+ *  B-93e7 (r4387): after a YES the temp is synced ONCE before its name; a sync that FAILS → { ok: false, code: 'bundle-not-synced',
+ *  retry: true } (the bytes and the empty dir removed, `current` untouched — the hub tries again); a sync NOT OFFERED is said once. */
 function landBundle(tmp, dir, version, { sig = null, localProof = null } = {}, { dialed = false } = {}) {
   const verdict = landingVerdict(fs.readFileSync(tmp), { version, sig, localProof }, { dialed });
   if (!verdict.ok) {
@@ -1003,6 +997,32 @@ function landBundle(tmp, dir, version, { sig = null, localProof = null } = {}, {
   // vibespace-device.js, legacy ones agentd.js) — a hardcoded name here
   // would silently rename the daemon back on its first self-upgrade
   const selfName = path.basename(process.argv[1] || 'agentd.js');
+  // B-93e7 (主开发 r4387): THE BYTES ON DISK before any name points at them — the verdict above FIRST, then ONE sync of the temp,
+  // then its name, then `current`. A BUNDLE IS NOT A RECORD: a sync that FAILS (an i/o error, no space, a quota, a read-only file
+  // system) refuses the landing by name — the temp removed, `current` untouched, the hub answered so the next push tries again (a
+  // code outside the signature's refusals: never «never push again»). A sync the file system does not OFFER is said once and the
+  // landing goes on, as before the sync (a machine on such a folder must still take an update). Both roads (the stream, ssh) land here
+  {
+    let sfd = null, syncErr = null, closeErr = null;
+    try { sfd = fs.openSync(tmp, DFILE.SYNC_OPEN); } catch (e) { syncErr = e; }
+    if (sfd != null) {
+      try { fs.fsyncSync(sfd); } catch (e) { syncErr = e; }
+      try { fs.closeSync(sfd); } catch (e) { closeErr = e; }
+    }
+    // a close that fails is never «not offered»: a write-back error can surface there (NFS) — the bytes may not be on disk
+    const bad = closeErr || (syncErr && DFILE.syncRefusal(syncErr) === 'failed' ? syncErr : null);
+    if (bad || syncErr) {
+      const code = String(((bad || syncErr) && (bad || syncErr).code) || 'error');
+      if (bad) {
+        try { fs.unlinkSync(tmp); } catch { }
+        try { fs.rmdirSync(dir); } catch { } // only an empty dir goes (a version this daemon runs from keeps its files)
+        const why = `its bytes could not be synced to disk (${code}) — it is not put in place; the next push tries again`;
+        log(`upgrade to ${version} REFUSED — bundle-not-synced: ${why}; still running ${VERSION}`);
+        return { ok: false, code: 'bundle-not-synced', why, retry: true };
+      }
+      DFILE.sayOnce('bundle-sync-not-offered', `upgrade to ${version}: this folder offers no sync of the bundle (${code}) — it lands as before`, log);
+    }
+  }
   fs.renameSync(tmp, path.join(dir, selfName));
   // the current repoint — per platform (src/agentd/reexec.js: a junction on Windows, a symlink swap elsewhere)
   repointCurrent(fs, { root: ROOT, dir });
@@ -1091,7 +1111,9 @@ function acquireSingleton() {
 // (src/hosts.js installAgentd) runs it with the code ALREADY installed here — this agent judges the newcomer exactly
 // as it judges a stream over a dial link (landBundle: the signature, the floor, the pin; never a local proof). No lock,
 // no socket. ONE line on stdout — VS-AGENTD-LANDED <v> from=<this version> [tofu=<ids>] (exit 0) /
-// VS-AGENTD-REFUSED <code> from=<this version>: <why> (exit 3) / VS-AGENTD-FAILED <why> (exit 4).
+// VS-AGENTD-REFUSED <code> from=<this version>: <why> (exit 3) / VS-AGENTD-DEFERRED <code> from=<this version>: <why> (exit 3 —
+// B-93e7: the bundle could not be synced; this version keeps running and the hub's next connect tries again) /
+// VS-AGENTD-FAILED <why> (exit 4).
 if (process.argv.includes('--land-upgrade')) {
   const argOf = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : undefined; };
   const staged = String(argOf('--land-upgrade') || ''), version = String(argOf('--version') || ''), mf = argOf('--manifest');
@@ -1111,6 +1133,7 @@ if (process.argv.includes('--land-upgrade')) {
       log(`upgrade to ${version} (${fs.statSync(tmp).size} bytes) begins — staged over ssh`);
       const v = landBundle(tmp, dir, version, { sig }, { dialed: true });
       if (v.ok) line = `VS-AGENTD-LANDED ${version} from=${VERSION}${v.tofu ? ` tofu=${v.trustAfter.map((k) => k.keyId).join(',')}` : ''}`;
+      else if (v.retry) { line = `VS-AGENTD-DEFERRED ${v.code} from=${VERSION}: ${clean(v.why)}`; exit = 3; }   // B-93e7 (r4387): this version keeps running, the hub's next connect tries again (a REFUSED would be for good, a FAILED would fail the connect)
       else { line = `VS-AGENTD-REFUSED ${v.code} from=${VERSION}${v.floor ? ` floor=${v.floor}` : ''}${sig && typeof sig.keyId === 'string' ? ` key=${sig.keyId.replace(/[^0-9a-f]/g, '').slice(0, 16)}` : ''}: ${clean(v.why)}`; exit = 3; }
     }
   } catch (e) {
@@ -1208,8 +1231,7 @@ function pinnedHub(tokenDigest) {
   return MA.isPub(pub) && bound === String(tokenDigest).slice(0, 16) ? pub : null;
 }
 function pinHub(pub, tokenDigest) {
-  const tmp = HUB_PUB_FILE + '.' + process.pid + '.tmp';
-  fs.writeFileSync(tmp, `${pub} ${String(tokenDigest).slice(0, 16)}\n`, { mode: 0o600 }); fs.renameSync(tmp, HUB_PUB_FILE);
+  DFILE.writeDurable({ fs, file: HUB_PUB_FILE, tmp: HUB_PUB_FILE + '.' + process.pid + '.tmp', data: `${pub} ${String(tokenDigest).slice(0, 16)}\n`, mode: 0o600, log });   // B-93e7
   log('this device pinned the hub key it was paired with (state/hub.pub) — another hub key is refused from now on');
 }
 function deviceProof(nonceH) {
@@ -1274,8 +1296,7 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
         // 30 s, three times, and gave up while this daemon kept running the old version (every Windows machine)
         let tofuIds = null;
         try {
-          fs.fsyncSync(fd);
-          fs.closeSync(fd);
+          fs.closeSync(fd);   // B-93e7 (r4387): its ONE sync is landBundle's, after the verdict (one rule for both roads at one place)
           // THE SIGNATURE GATE (design q-042 D2): landBundle judges the bytes ON DISK before anything points at them. A
           // refusal deletes them, says so (the log + `upgrade-failed {code}`) and keeps running this version.
           const verdict = landBundle(tmp, dir, version, { sig, localProof }, { dialed });
@@ -1432,8 +1453,7 @@ const sealedOrders = {
   _persist() {
     try {
       if (this.pools.size) {
-        fs.writeFileSync(ORDERS_FILE + '.tmp', JSON.stringify(Object.fromEntries(this.pools)));
-        fs.renameSync(ORDERS_FILE + '.tmp', ORDERS_FILE);
+        DFILE.writeDurable({ fs, file: ORDERS_FILE, tmp: ORDERS_FILE + '.tmp', data: JSON.stringify(Object.fromEntries(this.pools)), log });   // B-93e7
       } else fs.rmSync(ORDERS_FILE, { force: true });
     } catch { }
   },
@@ -2581,8 +2601,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             st.commit = (cur) => {   // the cursor file, written temp-plus-rename (a walk with no new events, or the hub's ack)
               try {
                 fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
-                fs.writeFileSync(cursorFile + '.tmp', JSON.stringify(cur));
-                fs.renameSync(cursorFile + '.tmp', cursorFile);
+                DFILE.writeDurable({ fs, file: cursorFile, tmp: cursorFile + '.tmp', data: JSON.stringify(cur), log, what: 'a usage cursor' });   // B-93e7
               } catch { }
             };
             // THE PUSH's LOOP is answer-caps.js usagePushLoop (B-5278; the suite runs it): one walk at a time, a kick coalesced, a
@@ -2709,10 +2728,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           if (!norm.startsWith(home + path.sep)) throw new Error('secret path must be inside $HOME');
           fs.mkdirSync(path.dirname(norm), { recursive: true, mode: 0o700 });
           const buf = Buffer.from(String(msg.data || ''), 'base64');
-          const tmp = norm + '.tmp-' + process.pid;
-          const fd = fs.openSync(tmp, 'w', 0o600); // mode at open — never a chmod window
-          try { fs.writeSync(fd, buf); } finally { fs.closeSync(fd); }
-          fs.renameSync(tmp, norm);
+          DFILE.writeDurable({ fs, file: norm, tmp: norm + '.tmp-' + process.pid, data: buf, mode: 0o600, log, what: 'a secret file the hub handed' });   // mode at open — never a chmod window; B-93e7: one sync before its name
           mux.control({ op: 'secret-result', id: msg.id, ok: true, path: norm });
         } catch (e) { mux.control({ op: 'secret-result', id: msg.id, error: e.message }); }
         return;
@@ -3427,7 +3443,7 @@ listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: serverFatal, onListeni
   posixShells(); amIElevated(); // verify-r2: the first measure starts at boot, so the first hello rarely waits for it (amIElevated too, so the first hello reports a known value)
   if (SOCK_PICK) {
     // the WITNESS: the bridge and the hub read where we REALLY listen (atomic, 0600)
-    try { const w = SOCKP.witnessPathOf(ROOT), tmp = w + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, SOCK + '\n', { mode: 0o600 }); fs.renameSync(tmp, w); } catch (e) { log('socket witness not written: ' + e.message); }
+    try { const w = SOCKP.witnessPathOf(ROOT); DFILE.writeDurable({ fs, file: w, tmp: w + '.' + process.pid + '.tmp', data: SOCK + '\n', mode: 0o600, log }); } catch (e) { log('socket witness not written: ' + e.message); }   // B-93e7
     log(`listening on ${SOCK} (${SOCK_PICK.via}, ${SOCK_PICK.bytes}/${SOCK_PICK.max} bytes)`);
   } else log('listening on ' + SOCK);
   log(`allow list: ${DP.allowArg(POLICY.allow)} (${POLICY.source}${POLICY.source === 'install' ? ', ' + POLICY_FILE : ''})`); // lane device-allow-flags
@@ -3458,7 +3474,7 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
     // environment form removes the token from its environment on purpose, and its self-upgrade re-exec carries the
     // FLAGS — the re-exec'd daemon wrote `token: ''` over the good dial.json and was refused for good (reproduced)
     // atomic at 0600 (an existing looser file is REPLACED, never written through at its old mode)
-    if (cfg.token) { try { const tmp = DIAL_FILE + '.' + process.pid + '.tmp'; try { fs.unlinkSync(tmp); } catch { } fs.writeFileSync(tmp, JSON.stringify(cfg), { mode: 0o600 }); fs.renameSync(tmp, DIAL_FILE); } catch { } }
+    if (cfg.token) { try { DFILE.writeDurable({ fs, file: DIAL_FILE, tmp: DIAL_FILE + '.' + process.pid + '.tmp', data: JSON.stringify(cfg), mode: 0o600, log }); } catch { } }   // B-93e7
   }
   const readCfg = () => { try { return JSON.parse(fs.readFileSync(DIAL_FILE, 'utf-8')); } catch { return null; } };
   let cfg = readCfg();
@@ -3474,7 +3490,7 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
     const h = DF.hubIdOf(hub);
     const cur = h ? readCfg() : null;
     if (!cur || cur.url !== url || cur.hub === h) return;
-    try { const tmp = DIAL_FILE + '.' + process.pid + '.hub.tmp'; try { fs.unlinkSync(tmp); } catch { } fs.writeFileSync(tmp, JSON.stringify({ ...cur, hub: h }), { mode: 0o600 }); fs.renameSync(tmp, DIAL_FILE); log(`dial: this install now knows its hub (${h})`); } catch { }
+    try { DFILE.writeDurable({ fs, file: DIAL_FILE, tmp: DIAL_FILE + '.' + process.pid + '.hub.tmp', data: JSON.stringify({ ...cur, hub: h }), mode: 0o600, log });   /* B-93e7 */ log(`dial: this install now knows its hub (${h})`); } catch { }
   };
   let attempts = 0;
   let status = readDialStatus() || {};

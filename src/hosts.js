@@ -316,6 +316,7 @@ function installAgentdAnswer(out) {
   if ((m = /VS-AGENTD-INSTALLED (current|fresh|legacy)/.exec(t))) return { landed: m[1] };
   if ((m = /VS-AGENTD-LANDED (\S+) from=(\S*)(?: tofu=([0-9a-f,]+))?/.exec(t))) return { landed: 'verified', from: m[2] || null, tofu: m[3] ? m[3].split(',').filter((k) => /^[0-9a-f]{16}$/.test(k)).slice(0, 16) : null };
   if ((m = /VS-AGENTD-REFUSED ([a-z-]{1,40}) from=(\S*?)(?: floor=(\S+?))?(?: key=([0-9a-f]{16}))?: ?([^\n]*)/.exec(t))) return { refused: m[1], from: m[2] || null, floor: m[3] || null, keyId: m[4] || null, why: m[5].slice(0, 200) };
+  if ((m = /VS-AGENTD-DEFERRED ([a-z-]{1,40}) from=(\S*?): ?([^\n]*)/.exec(t))) return { deferred: m[1], from: m[2] || null, why: m[3].slice(0, 200) };   // B-93e7: the host could not sync the bundle — it keeps its agent; the next connect tries again
   if ((m = /VS-AGENTD-FAILED ([^\n]*)/.exec(t))) return { failed: m[1].slice(0, 200) };
   return null;
 }
@@ -2443,6 +2444,7 @@ class HostManager {
             if (err) return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
             const r = installAgentdAnswer(stdout);
             if (!r) return reject(new Error('unexpected response: ' + String(stdout).slice(0, 120)));
+            if (r.deferred) { console.warn(`[hosts] ${h.name || id}: its agent's update to ${ver} was deferred (${r.deferred}: ${r.why}) — it keeps running ${r.from || 'its agent'}; the next connect tries again`); return resolve({ agentdPath: '$HOME/.vibespace/agentd/current/agentd.js', ...r }); }   // B-93e7
             if (r.failed) return reject(new Error('the host could not land the agent: ' + r.failed));
             const machine = h.name || id;
             if (r.refused) { try { this.onAgentUpgrade?.('refused', { hostKey: id, machine, from: r.from, to: ver, code: r.refused, keyId: r.keyId, floor: r.floor, by: 'system:device-upgrade' }); } catch { } } // int315: lane device-act-audit's `by` for the version-drift push (ensureAgentdOnHost)

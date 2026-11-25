@@ -602,7 +602,8 @@ async function ensureAgentdOnHost(hostId) {
   const version = require('../../package.json').version;
   if (_agentdInstalled.get(hostId) === version) return;
   const bundlePath = path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js');
-  await hosts.installAgentd(hostId, bundlePath, version, agentdHostToken(hostId));
+  const r = await hosts.installAgentd(hostId, bundlePath, version, agentdHostToken(hostId));
+  if (r && r.deferred) return;   // B-93e7: a landing the host deferred (its bundle could not be synced) is no install — the next connect tries again
   _agentdInstalled.set(hostId, version);
 }
 // The node-pty DUCK over a device session handle. `onData`/`onExit` hold a SET
