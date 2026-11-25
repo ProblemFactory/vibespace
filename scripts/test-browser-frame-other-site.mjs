@@ -30,11 +30,38 @@ const Module = require('node:module');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const { ok, report } = checker();
-const { WebSocketServer } = require('ws');
+const { WebSocketServer, WebSocket: WSClient } = require('ws');
 const ST = require('../src/browser-stuck.js');
 const D = require('../src/server/browser-dialogs.js');
 const LF = require('../src/server/browser-login-fill.js');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// THE FLAKE CENSUS, ROUND 2 (主开发 r4456, lane bl-loop-b): every read of ② waited a CLOCK for a message to cross the loopback socket
+// (30-80 ms), and its zero-calls CONTROL went red when the copy's one call reached the fake after its 60 ms. THE ONE DOOR: the watch's
+// socket is the tree's own (ws) with two counts beside it — each message it SENT (at the send) and each it HANDLED (once the watch's
+// own listener returned) — and the fake counts what IT sent. settled() reads both ways: every message either side sent was taken by
+// the other, on the one socket that keeps its order, under a generous bound whose expiry is a NAMED harness line. hold() keeps the
+// watch's sends off the wire until release(): the late thing, held at will
+function recSocket() {
+  const sent = [], held = []; let handled = 0, opened = 0, holding = false;
+  class RecWS extends WSClient {
+    send(d, ...a) { sent.push(String(d)); if (holding) { held.push(() => super.send(d, ...a)); return undefined; } return super.send(d, ...a); }
+    on(ev, fn) {
+      if (ev !== 'message' && ev !== 'open') return super.on(ev, fn);
+      return super.on(ev, (...a) => { try { return fn.apply(this, a); } finally { if (ev === 'message') handled++; else opened++; } });
+    }
+  }
+  return { Impl: RecWS, sent, get handled() { return handled; }, get opened() { return opened; }, hold() { holding = true; }, release() { holding = false; for (const f of held.splice(0)) f(); } };
+}
+const SETTLE_MS = 15000;
+const neverSettled = (what, facts) => { ok(false, `HARNESS (the flake census r2): ${what} — the watch and the fake never settled in ${SETTLE_MS / 1000} s (a message one side sent never reached the other: the machine, not the product)`, facts); return false; };
+async function settled(ch, rec, what) {
+  const t0 = Date.now();
+  for (;;) {
+    if (rec.opened > 0 && rec.handled === ch.sent && ch.calls.length === rec.sent.length) return true;
+    if (Date.now() - t0 > SETTLE_MS) return neverSettled(what, { opened: rec.opened, handledByWatch: rec.handled, sentByFake: ch.sent, heardByFake: ch.calls.length, sentByWatch: rec.sent.length });
+    await sleep(2);
+  }
+}
 /** a copy of a product file with ONE anchored edit (scratch.mjs: a moved line fails BY NAME), compiled where the file lives */
 function copyOf(rel, anchor, to, name) {
   const file = path.join(REPO, rel);
@@ -103,19 +130,20 @@ console.log('— ① PURE: the tab\'s frames, their origins, the sentence, the d
 // ═══ ② THE REAL WATCH over a fake CDP ═══
 console.log('— ② the REAL watch: a frame target heard is kept and said for its tab only, at zero calls');
 function fakeChrome() {
-  const calls = []; const browsers = new Set(); const sessions = new Map(); let n = 0;
+  const calls = []; const browsers = new Set(); const sessions = new Map(); let n = 0, sent = 0;
+  const out = (ws, o) => { sent++; ws.send(JSON.stringify(o)); };   // the flake census r2: every message the fake sends, counted (settled())
   const wss = new WebSocketServer({ noServer: true });
   const srv = http.createServer((q, r) => { r.statusCode = 404; r.end(); });
   srv.on('upgrade', (req, sock, head) => wss.handleUpgrade(req, sock, head, (ws) => wss.emit('connection', ws)));
   wss.on('connection', (ws) => { browsers.add(ws); ws.on('close', () => browsers.delete(ws)); ws.on('message', (d) => {
-    const m = JSON.parse(d); calls.push(m); const reply = (o) => ws.send(JSON.stringify({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o }));
+    const m = JSON.parse(d); calls.push(m); const reply = (o) => out(ws, { id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), ...o });
     if (m.method === 'Target.getTargets') return reply({ result: { targetInfos: [{ targetId: 'T1', type: 'page', url: 'http://127.0.0.1:9/login', title: 'one' }, { targetId: 'T2', type: 'page', url: 'http://127.0.0.1:9/two', title: 'two' }] } });
     if (m.method === 'Target.attachToTarget') { const sid = `S-${m.params.targetId}-${++n}`; sessions.set(sid, { ws, tid: String(m.params.targetId) }); return reply({ result: { sessionId: sid } }); }
     if (m.method === 'Page.getFrameTree' && m.sessionId) { const tid = (sessions.get(m.sessionId) || {}).tid || ''; return reply({ result: { frameTree: { frame: { id: tid, loaderId: `L-${tid}` }, ...(tid === 'T1' ? { childFrames: [{ frame: { id: 'C5', parentId: 'T1', loaderId: 'L-C5' } }] } : {}) } } }); }
     return reply({ result: {} });
   }); });
-  return { calls, browserEvent(method, params) { for (const ws of browsers) ws.send(JSON.stringify({ method, params })); },
-    tabEvent(tid, method, params) { for (const [sid, x] of sessions) if (x.tid === tid) x.ws.send(JSON.stringify({ sessionId: sid, method, params })); },
+  return { calls, get sent() { return sent; }, browserEvent(method, params) { for (const ws of browsers) out(ws, { method, params }); },
+    tabEvent(tid, method, params) { for (const [sid, x] of sessions) if (x.tid === tid) out(x.ws, { sessionId: sid, method, params }); },
     async listen() { await new Promise((r) => srv.listen(0, '127.0.0.1', r)); this.url = `ws://127.0.0.1:${srv.address().port}/devtools/browser/fake`; return this; },
     async close() { for (const c of wss.clients) c.terminate(); await new Promise((r) => srv.close(() => r())); } };
 }
@@ -124,19 +152,22 @@ const NAMED = 'bp-a0005f2e', KEY = 'bk-00005f2e';
 const tgt = { profileId: NAMED, browserKey: KEY };
 async function watchOver(Dm) {
   const ch = await fakeChrome().listen();
-  const w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log: quiet });
-  await w.arm(NAMED); await sleep(80);
+  const rec = recSocket();
+  const w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log: quiet, WebSocketImpl: rec.Impl });
+  const settle = (what) => settled(ch, rec, what);
+  await w.arm(NAMED); await settle('the watch armed (its tabs tracked)');
   w.noteActiveTab(tgt, 'T1');
   const frame = (targetId, parentFrameId, url) => ch.browserEvent('Target.targetCreated', { targetInfo: { targetId, type: 'iframe', parentFrameId, url, title: '', attached: false } });
   frame('F1', 'T1', 'https://idp.example.net/signin'); frame('F9', 'T2', 'https://other.example.org/'); frame('F3', 'F1', 'https://deep.example.com/x');
-  await sleep(60);
-  return { ch, w, frame };
+  await settle('three frame targets heard');
+  return { ch, w, frame, rec, settle };
 }
 {
-  const { ch, w } = await watchOver(D);
+  const { ch, w, settle } = await watchOver(D);
   const before = ch.calls.length;
   const said = w.otherSiteFramesFor(tgt);
-  await sleep(60);   // a call the function made reaches the fake on a later tick
+  await sleep(60);   // the window a DEFERRED call of the lookup would fall in (kept as it was: nothing loosened) …
+  await settle('the lookup\'s calls, if any, reached the fake');   // … and a call it made is counted by the socket's order, never by its trip's time
   const after = ch.calls.length;
   ok(!!said && JSON.stringify(said.origins) === '["https://idp.example.net","https://deep.example.com"]' && said.text === ST.otherSiteFrameText(said.origins),
     'the conversation\'s tab (T1) holds a frame of another site and a frame inside it ⇒ both said, by origin, in the sentence', said);
@@ -145,42 +176,47 @@ async function watchOver(Dm) {
   w.noteActiveTab(tgt, 'T2');
   ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://other.example.org"]', 'the tab moved (T2) ⇒ its own frame is said, and only it');
   w.noteActiveTab(tgt, 'T1');
-  ch.browserEvent('Target.targetInfoChanged', { targetInfo: { targetId: 'F1', type: 'iframe', parentFrameId: 'T1', url: 'https://login.example.org/s', title: '', attached: false } }); await sleep(40);
+  ch.browserEvent('Target.targetInfoChanged', { targetInfo: { targetId: 'F1', type: 'iframe', parentFrameId: 'T1', url: 'https://login.example.org/s', title: '', attached: false } }); await settle('targetInfoChanged F1');
   ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://login.example.org","https://deep.example.com"]', 'targetInfoChanged: the frame navigated ⇒ its new origin is said');
-  ch.browserEvent('Target.targetDestroyed', { targetId: 'F1' }); await sleep(40);
+  ch.browserEvent('Target.targetDestroyed', { targetId: 'F1' }); await settle('targetDestroyed F1');
   ok(w.otherSiteFramesFor(tgt) === null, 'targetDestroyed: the frame went ⇒ nothing said (its child F3 is placed by no root any more ⇒ not said either)');
   ok(!ch.calls.some((m) => m.method === 'Target.attachToTarget' && /^F/.test(String(m.params && m.params.targetId))), 'the watch never attaches to a frame target to say it (no session, no call into the frame)');
   ok(w.otherSiteFramesFor({ profileId: 'bp-nobody', browserKey: KEY }) === null, 'a profile no watch holds ⇒ null');
   // a target Chrome gives NO parentFrameId: the tab's page attached that frame first (Page.frameAttached on the tab's own session)
-  ch.tabEvent('T1', 'Page.frameAttached', { frameId: 'F7', parentFrameId: 'T1' }); await sleep(30);
-  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F7', type: 'iframe', url: 'https://np.example.com/in', title: '', attached: false } }); await sleep(40);
+  ch.tabEvent('T1', 'Page.frameAttached', { frameId: 'F7', parentFrameId: 'T1' }); await settle('frameAttached F7');
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F7', type: 'iframe', url: 'https://np.example.com/in', title: '', attached: false } }); await settle('targetCreated F7');
   ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://np.example.com"]', 'a frame target with NO parentFrameId is said for the tab whose page attached it (Page.frameAttached: no call of ours)');
-  ch.tabEvent('T1', 'Page.frameDetached', { frameId: 'F7', reason: 'swap' }); await sleep(30);
+  ch.tabEvent('T1', 'Page.frameDetached', { frameId: 'F7', reason: 'swap' }); await settle('frameDetached swap');
   ok(!!w.otherSiteFramesFor(tgt), 'frameDetached «swap» (the frame moved to a process of its own) keeps it the tab\'s');
-  ch.tabEvent('T1', 'Page.frameDetached', { frameId: 'F7', reason: 'remove' }); await sleep(30);
+  ch.tabEvent('T1', 'Page.frameDetached', { frameId: 'F7', reason: 'remove' }); await settle('frameDetached remove');
   ok(w.otherSiteFramesFor(tgt) === null, 'frameDetached «remove» (the frame left the page) ⇒ no longer placed, not said');
   w.noteActiveTab(tgt, 'T2');
-  ch.tabEvent('T2', 'Page.frameAttached', { frameId: 'F8', parentFrameId: 'T2' }); await sleep(30);
+  ch.tabEvent('T2', 'Page.frameAttached', { frameId: 'F8', parentFrameId: 'T2' }); await settle('frameAttached F8 (T2)');
   w.noteActiveTab(tgt, 'T1');
-  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F8', type: 'iframe', url: 'https://t2only.example.com/', title: '', attached: false } }); await sleep(40);
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F8', type: 'iframe', url: 'https://t2only.example.com/', title: '', attached: false } }); await settle('targetCreated F8');
   ok(w.otherSiteFramesFor(tgt) === null, 'a frame ANOTHER tab\'s page attached is never said for this tab');
   // a tab the watch met with its frames already there: Page.enable replays no frameAttached — the frame tree the enable reads anyway
   // seeds them (T1's in-process child C5), so a frame of another site inside it is placed
-  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F6', type: 'iframe', parentFrameId: 'C5', url: 'https://pay.example.com/card', title: '', attached: false } }); await sleep(40);
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F6', type: 'iframe', parentFrameId: 'C5', url: 'https://pay.example.com/card', title: '', attached: false } }); await settle('targetCreated F6');
   ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://pay.example.com"]', 'a frame of another site inside the page\'s own in-process frame (C5, seeded from the enable\'s frame tree) is said for the tab');
   // the tab's top document changed: the old document's frames are not said (a page the browser keeps for Back keeps its frames)
-  ch.tabEvent('T1', 'Page.frameNavigated', { frame: { id: 'T1', loaderId: 'L-next', url: 'http://127.0.0.1:9/next', securityOrigin: 'http://127.0.0.1:9', mimeType: 'text/html' }, type: 'Navigation' }); await sleep(40);
+  ch.tabEvent('T1', 'Page.frameNavigated', { frame: { id: 'T1', loaderId: 'L-next', url: 'http://127.0.0.1:9/next', securityOrigin: 'http://127.0.0.1:9', mimeType: 'text/html' }, type: 'Navigation' }); await settle('frameNavigated T1');
   ok(w.otherSiteFramesFor(tgt) === null, 'the top frame navigated ⇒ the old document\'s frames are no longer said');
-  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F10', type: 'iframe', parentFrameId: 'T1', url: 'https://idp.example.net/again', title: '', attached: false } }); await sleep(40);
+  ch.browserEvent('Target.targetCreated', { targetInfo: { targetId: 'F10', type: 'iframe', parentFrameId: 'T1', url: 'https://idp.example.net/again', title: '', attached: false } }); await settle('targetCreated F10');
   ok(JSON.stringify((w.otherSiteFramesFor(tgt) || {}).origins) === '["https://idp.example.net"]', 'a frame of the NEW document is said again');
   w.disarm?.(NAMED); await ch.close();
 }
 {
-  // RED CONTROL for «zero calls»: a copy whose lookup asks Chrome once — the wait above sees it
+  // RED CONTROL for «zero calls»: a copy whose lookup asks Chrome once — the wait above sees it. The flake census r2: its one red was
+  // that call reaching the fake after the 60 ms; PLACED below (the call HELD off the wire, the read as it stood counts nothing), and
+  // the control reads as the leg now does: the same window, then the socket's order
   const Dask = copyOf('src/server/browser-dialogs.js', '    const e = pickScopedTabFor(w, target, { targetId });\n    if (!e) return null;\n    const origins = ST.otherSiteFrameOrigins(',
     '    call(w, \'Target.getTargets\', {}, null, 2000).catch(() => null);\n    const e = pickScopedTabFor(w, target, { targetId });\n    if (!e) return null;\n    const origins = ST.otherSiteFrameOrigins(', 'b5f2e-lookup-asks-chrome');
-  const { ch, w } = await watchOver(Dask);
-  const b0 = ch.calls.length; w.otherSiteFramesFor(tgt); await sleep(60);
+  const { ch, w, rec, settle } = await watchOver(Dask);
+  const h0 = ch.calls.length, s0 = rec.sent.length; rec.hold(); w.otherSiteFramesFor(tgt); await sleep(60);
+  const heldRead = ch.calls.length, heldSent = rec.sent.slice(s0).filter((x) => JSON.parse(x).method === 'Target.getTargets').length; rec.release(); await settle('the held call released');
+  ok(heldSent === 1 && heldRead === h0 && ch.calls.length > h0, 'PLACED (the census\'s find, at will): the copy\'s one call HELD off the wire — the read as it stood (the fake\'s calls after 60 ms) counts nothing though the watch sent it; released, the socket\'s order brings it', { h0, heldRead, heldSent, after: ch.calls.length });
+  const b0 = ch.calls.length; w.otherSiteFramesFor(tgt); await sleep(60); await settle('the copy\'s call reached the fake');
   ok(ch.calls.length > b0, 'CONTROL (a lookup that asks Chrome once): the same wait counts its call — the zero-calls leg can fail', { b0, after: ch.calls.length });
   w.disarm?.(NAMED); await ch.close();
 }
