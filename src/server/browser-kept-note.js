@@ -182,6 +182,7 @@ const decided = new Map();   // key → the conversation the choke point decided
 const joined = new Set();    // `key\0conversation` a true note already names
 const quiet = new Map();     // key → when its folder last had no true note (the choke point runs at every record: it looks again at most once a minute)
 const QUIET_MS = 60 * 1000;
+const rejoin = new Set();   // r4145: keys whose join waits for the folder's write in flight (one queued second try each)
 /** remembered for the start (bounded: a run's keys), and joined into a TRUE note that names no conversation yet */
 function join(profileDir, key, conversation, { fsp = fs.promises } = {}) {
   const k = String(key || ''), c = convOf(conversation);
@@ -189,7 +190,9 @@ function join(profileDir, key, conversation, { fsp = fs.promises } = {}) {
   if (!decided.has(k)) { decided.set(k, c); if (decided.size > 8192) decided.delete(decided.keys().next().value); }
   if (decided.get(k) !== c || joined.has(k + '\0' + c)) return null;
   if (Date.now() - (quiet.get(k) || 0) < QUIET_MS) return null;
-  if (chains.has(k)) return null;   // r4094 (small): a write of this folder is in flight — one waiter a folder; the next record joins again
+  // r4094 (small) / r4145: a write of this folder is in flight — one waiter a folder, and ONE queued second try when that write ends (a
+  // start's note written before its conversation was decided gets it then, with no later record needed)
+  if (chains.has(k)) { if (!rejoin.has(k)) { rejoin.add(k); chains.get(k).then(() => { rejoin.delete(k); join(profileDir, key, conversation, { fsp }); }, () => rejoin.delete(k)); } return null; }
   const dir = path.join(profileDir, k);
   return serial(k, async (hold) => {
     const r = await bounded(readNote(dir, { fsp }), NOTE_WRITE_MS, { state: 'cut' });
@@ -205,8 +208,10 @@ const conversationDecided = (key) => decided.get(String(key || '')) || '';
 // (the store's startGate), and NO BINDING: the choke point (src/server/session-stdout.js) records none for them, the doors write them into no
 // session record — so the conversation's place stays empty for its own folder's note. Memory only (bounded): a key never written into a
 // record is bound by nothing after a restart either
+// ONE BOUND, ONE RULE (r4145): this list and the kept store's start notes are each bounded at NOT_KEPT_MAX, the oldest first out
+const NOT_KEPT_MAX = 4096;
 const notKept = new Set();
-function markNotKept(key) { const k = String(key || ''); if (!KEY_RE.test(k)) return false; notKept.add(k); if (notKept.size > 512) notKept.delete(notKept.values().next().value); return true; }
+function markNotKept(key) { const k = String(key || ''); if (!KEY_RE.test(k)) return false; notKept.delete(k); notKept.add(k); if (notKept.size > NOT_KEPT_MAX) notKept.delete(notKept.values().next().value); return true; }
 const isNotKept = (key) => notKept.has(String(key || ''));
 
 // ── r3786 (hold 8): THE FOLDERS OF TODAY HAVE NO NOTE ──
@@ -290,4 +295,4 @@ async function unkeepConfig(configPath, keptDir, { fsp = fs.promises } = {}) {
   } catch (e) { return { ok: false, why: String((e && e.code) || (e && e.message) || 'failed') }; }
 }
 
-module.exports = { NOTE_NAME, NOTE_WRITE_MS, LIST_TIMEOUT_MS, ensureNote, join, conversationDecided, markNotKept, isNotKept, noteExisting, listFolders, unkeepConfig };
+module.exports = { NOTE_NAME, NOTE_WRITE_MS, LIST_TIMEOUT_MS, NOT_KEPT_MAX, ensureNote, join, conversationDecided, markNotKept, isNotKept, noteExisting, listFolders, unkeepConfig };

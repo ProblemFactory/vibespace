@@ -719,7 +719,7 @@ const N26 = await unwritableRun(KS0, refuseTmp);
 console.log(`    facts: ${JSON.stringify(N26)}`);
 ok(N26.kept === false && N26.code === 'kept_note_unwritten' && N26.notKept === 'kept_note_unwritten' && N26.kind === 'not-kept' && /^Not kept: its sign-ins end with it/.test(N26.card) && /NOT KEPT/.test(N26.agent) && /ends with it/.test(N26.agent) && N26.once && N26.left.length === 0,
   'the note\'s temp refused (EACCES): the start is NOT kept; the person\'s card says «Not kept: its sign-ins end with it…»; the agent\'s answer carries its English words ONCE; nothing is left in the folder', N26);
-const N26x = await unwritableRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    startNotes.set(k, { code: r.code, at: now(), said: false });\n", "    return { kept: true };\n", 'r3786 a failed note read as kept'), 'kept-sweep-silent-downgrade'), refuseTmp);
+const N26x = await unwritableRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    setStartNote(k, { code: r.code, at: now(), said: false });\n", "    return { kept: true };\n", 'r3786 a failed note read as kept'), 'kept-sweep-silent-downgrade'), refuseTmp);
 ok(N26x.kept === true && !N26x.notKept && !N26x.card, 'RED CONTROL (a note that failed read as kept): the browser starts on its folder with nothing protecting its sign-ins, and neither the agent nor the person hears of it — a silent downgrade — red', N26x);
 const stall = { ...fs.promises, open: (p, f, m) => (String(p).includes('.tmp-') ? new Promise(() => { }) : fs.promises.open(p, f, m)) };   // PLACED: the temp's open never answers
 const N26b = await unwritableRun(KS0, stall, { noteWriteMs: 150 });
@@ -740,7 +740,7 @@ ok(N26cx.left.includes(NOTE), 'RED CONTROL (a late landing left in place): a bro
   ok(u.ok && u.changed && !('profile' in c) && c.headed === false && Array.isArray(c.args) && (fs.statSync(cfg).mode & 0o777) === 0o600 && v.ok && !v.changed && JSON.parse(fs.readFileSync(other, 'utf8')).profile === '/var/empty/vs-work-profile',
     'a start NOT KEPT on rung D: the session\'s own generated config loses only the `profile` naming its kept folder (written whole, 0600, before the start); a config naming any other folder is left alone', { u, v, c });
   const KP = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), RB = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8'), CLI = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
-  const G1 = '      const g = await ks.startGate(bk);', G2 = "    const browser = await start(p.id, { why: resume === 'user' ? 'resumed by the user' : (created ? 'first verb' : 'verb') });";
+  const G1 = "      const g = ks && typeof ks.startGate === 'function' ? await ks.startGate(bk) : { kept: false, code: 'kept_reconcile_unfinished' };", G2 = "    const browser = await start(p.id, { why: resume === 'user' ? 'resumed by the user' : (created ? 'first verb' : 'verb') });";
   const gateFirst = (x) => x.indexOf(G1) > 0 && x.indexOf(G1) < x.indexOf(G2) && x.includes("require('./browser-kept-note.js').unkeepConfig(cfg, keptDirFor(bk))") && x.includes("{ ok: false, why: 'its link is its folder' }");
   ok(gateFirst(KP) && !gateFirst(anchored(KP, G1, '      const g = { kept: true };', 'r3786 the keeper that starts without the gate')) && RB.includes("...(e.startNote ? { notKept: { text: require('../browser-kept.js').startNoteText(e.startNote) } } : {}),") && CLI.includes('if (r.notKept && typeof r.notKept === \'object\' && r.notKept.text) console.error(`note: ${r.notKept.text} [browser_not_kept]`);'),
     'WIRING: the keeper asks the gate BEFORE the browser starts on its folder (rung D: its config un-kept; rung C, whose link IS the folder: refused by name); the route hands the agent its words, and the tool prints them (RED: the keeper that starts without the gate)', null);
@@ -1144,15 +1144,16 @@ console.log('㊴ r4099: PAST ITS BOUND A DOOR HANDS A BROWSER THAT IS NOT KEPT �
   };
   // the keeper's start of a handed key (its gate; the run and stop it tells the store, on its kept folder only when kept), then the
   // listing answers, then a sweep past the grace and the boot sweep
-  const ending = async (s, NEW, f0) => {
+  const ending = async (s, NEW, f0, after = null) => {
     const g = NEW ? await s.o.S.startGate(NEW) : null;
     if (NEW) { fs.mkdirSync(s.o.S.dirOf(NEW), { recursive: true }); if (g.kept) fs.writeFileSync(path.join(s.o.S.dirOf(NEW), 'Cookies'), 'a sign-in in the new one'); s.o.S.noteStart(NEW, { hasDir: !!g.kept }); s.o.S.noteStop(NEW, { why: 'idle', hasDir: !!g.kept }); }
     s.release(); await f0;
+    const afterFacts = after ? after() : null;   // r4145 (6): what the conversation does AFTER the reconcile, its not-kept browser still running
     const boundTo = s.o.bb.lookup(s.C);
     s.clocks.wall += 3 * 3600e3;
     await s.o.S.sweep();
     s.o.be.sweep(new Set(), { graceMs: 0 });
-    const out = { gate: g ? g.kept : null, noteNew: NEW ? fs.existsSync(path.join(s.o.S.dirOf(NEW), NOTE)) : null, bound: boundTo === s.OLD ? 'its OWN old browser' : boundTo && boundTo === NEW ? 'the NEW browser' : boundTo || 'none', oldLeft: fs.existsSync(path.join(s.dir, 'browser-profiles', s.OLD, 'Cookies')), newLeft: NEW ? fs.existsSync(s.o.S.dirOf(NEW)) : null };
+    const out = { ...(afterFacts ? { after: afterFacts } : {}), gate: g ? g.kept : null, noteNew: NEW ? fs.existsSync(path.join(s.o.S.dirOf(NEW), NOTE)) : null, bound: boundTo === s.OLD ? 'its OWN old browser' : boundTo && boundTo === NEW ? 'the NEW browser' : boundTo || 'none', oldLeft: fs.existsSync(path.join(s.dir, 'browser-profiles', s.OLD, 'Cookies')), newLeft: NEW ? fs.existsSync(s.o.S.dirOf(NEW)) : null };
     try { s.o.S.shutdown(); } catch { }
     return out;
   };
@@ -1170,10 +1171,12 @@ console.log('㊴ r4099: PAST ITS BOUND A DOOR HANDS A BROWSER THAT IS NOT KEPT �
     const past = keys.ensureBrowserKey(session, { sessionId: 'sess-made-up-1' });
     const NEW = past.ok && past.key !== s.OLD ? past.key : null;
     const told = NEW ? s.o.S.takeStartNote(NEW) : null, card = NEW ? s.o.S.brief(NEW) : null;
-    return { inside: inside.ok ? 'handed' : inside.why, handed: !!NEW, recorded: recorded.length, told, card: card && card.kind, ...(await ending(s, NEW, f0)) };
+    const after = () => { const v = keys.ensureBrowserKey(session, { sessionId: 'sess-made-up-1' }); return { verbKey: v.ok ? (v.key === NEW ? 'its running browser' : v.key === s.OLD ? 'its OLD folder' : 'another') : v.why, verbMinted: !!(v.ok && v.minted), forkPin: s.o.be.priorKeyFor(s.C) === s.OLD ? 'its own kept browser' : s.o.be.priorKeyFor(s.C) === NEW ? 'the not-kept one' : 'none' }; };
+    return { inside: inside.ok ? 'handed' : inside.why, handed: !!NEW, recorded: recorded.length, told, card: card && card.kind, ...(await ending(s, NEW, f0, after)) };
   };
   const Lv = await lateRun(BKr);
   const Lx = await lateRun(MUT.load('src/server/browser-key.js', anchored(BKS, '    const notKeptNow = !!(order && order.done === false);\n', '    const notKeptNow = false;\n', 'r4094 the mint, kept and in the record'), 'kept-sweep-late-mint'));
+  ok(!!Lv.after && Lv.after.verbKey === 'its running browser' && !Lv.after.verbMinted && Lv.after.forkPin === 'its own kept browser', '(i b) r4145 (6): AFTER the reconcile, the conversation still running its not-kept browser: a verb goes by the session\'s own key — its running browser, nothing minted, no second browser on the old folder; a fork asks the conversation\'s prior key and gets its OWN kept browser (whose pin it copies; the not-kept browser\'s ends with it)', Lv.after);
   ok(Lv.inside === 'kept_reconciling' && Lv.handed && Lv.recorded === 0 && Lv.told === 'kept_reconcile_unfinished' && Lv.card === 'not-kept' && Lv.gate === false && Lv.noteNew === false && Lv.bound === 'its OWN old browser' && Lv.oldLeft && Lv.newLeft === false
     && Lx.bound === 'the NEW browser' && !Lx.oldLeft,
     '(i) THE LATE DOOR: refused by name inside the bound; past it the browser handed is NOT KEPT (written into no record, so no binding; its start writes no note; the agent told once, the card «not kept»); the reconcile then binds the conversation\'s OWN old folder, and a sweep past the grace keeps its sign-ins and ends the not-kept one — RED (today\'s mint, its key in the session\'s record): the mint takes the conversation\'s place, the old folder «moved on» and its sign-ins are removed', { Lv, Lx });
@@ -1194,13 +1197,63 @@ console.log('㊴ r4099: PAST ITS BOUND A DOOR HANDS A BROWSER THAT IS NOT KEPT �
   ok(Cv2.order === 'kept_reconcile_unfinished' && Cv2.origin === 'resume-unknown' && Cv2.gate === false && Cv2.noteNew === false && Cv2.bound === 'its OWN old browser' && Cv2.oldLeft && Cv2.newLeft === false && Cx2.bound === 'the NEW browser' && !Cx2.oldLeft,
     '(ii) THE CREATE\'s DOOR past its bound: a resume-unknown key, NOT KEPT and in no record — the reconcile binds the conversation\'s own folder, the sweep keeps it — RED (the key in the record): the old folder ends', { Cv2, Cx2 });
   const WC4 = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
-  const R1 = 'spawnKeyNotKept = true; try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); }', R2 = '            ...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined } : {}),\n          });';
+  const R1 = "spawnKeyNotKept = true; try { require('./server/browser-kept-note.js').markNotKept(bk.key); } catch { } try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); }", R2 = '            ...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined, browserEnv: undefined } : {}),\n          });';
   const createRule = (x) => x.includes(R1) && x.includes(R2) && x.indexOf(R2) > x.indexOf('            browserKey: session._browserKey || undefined,');
   ok(createRule(WC4) && !createRule(anchored(WC4, R2, '          });', 'r4094 the create\'s key in its record')), 'WIRING: ws-create, past its bound, tells, marks the key NOT KEPT, and its record drops the key (after the field that writes it) — RED (the key in the record)', null);
   // the SECOND BELT: the bindings' ONE writer (record) binds no key the note module marks not kept — whoever writes a record with it
   const beltRun = (BBm) => { const dir = noteWorld({}); const bb = BBm.create({ dataDir: dir, log: quiet }); const k = freshKey(), C = freshConv(); KNM.markNotKept(k); const r = bb.record(C, k); return { refused: r === false, bound: bb.lookup(C) || '' }; };
   const Bt = beltRun(BB0), Btx = beltRun(MUT.load('src/server/browser-bindings.js', anchored(BBS4, "    try { if (require('./browser-kept-note.js').isNotKept(key)) return false; } catch { /* the module says its own */ }\n", '', 'r4094 the writer binds any key'), 'kept-sweep-belt'));
   ok(Bt.refused && Bt.bound === '' && Btx.bound !== '', 'the bindings\' writer binds no key handed past the bound (a second belt beside the doors) — RED (no belt): a record with that key takes the conversation\'s place', { Bt, Btx });
+}
+
+console.log('㊵ r4145: THE FOLLOW — a running conversation\'s own kept folder is not in the size bound\'s line; «not kept» leaves no row and no tabs; the words where a browser handed past the bound cannot start; the record and the mark with no live store');
+{
+  // (1) the size bound: OLD bound to a RUNNING conversation (its browser now another key), OTHER bound to one that is not; both measured 3 GB,
+  // the total 4 GB, OLD the older: the bound must take OTHER, never OLD while its conversation runs
+  const du3 = (cmd, args, opts, cb) => { if (cmd !== 'du') return realExecFile(cmd, args, opts, cb); const ps = args.slice(args.indexOf('--') + 1); setImmediate(() => cb(null, ps.map((x) => `${/browser-profiles\/bk-[0-9a-f]{8}$/.test(x) ? 3000 * KB.MB : 0}\t${x}`).join('\n'), '')); return { kill() { } }; };
+  const sizeRun = async (KS) => {
+    const OLD = freshKey(), OTHER = freshKey(), C = freshConv(), D = freshConv(), t = Date.now();
+    const dir = noteWorld({ folders: [[OLD, { key: OLD, conversation: C, firstAt: 1000 }], [OTHER, { key: OTHER, conversation: D, firstAt: 2000 }]], bindings: { [C]: { key: OLD, at: t }, [D]: { key: OTHER, at: t } },
+      rows: { [OLD]: { hasDir: true, startedAt: 1000, stoppedAt: t - 5 * 3600e3, lastUsedAt: t - 5 * 3600e3, conversationId: C }, [OTHER]: { hasDir: true, startedAt: 2000, stoppedAt: t - 3600e3, lastUsedAt: t - 3600e3, conversationId: D } } });
+    const o = startOver(dir, KS, { execFileImpl: du3, liveConversations: () => new Set([C]) });
+    await o.S.reconciled();
+    const sw = await o.S.sweep();
+    const out = { old: fs.existsSync(path.join(dir, 'browser-profiles', OLD, 'Cookies')), other: fs.existsSync(path.join(dir, 'browser-profiles', OTHER, 'Cookies')), removed: sw && sw.removed };
+    try { o.S.shutdown(); } catch { }
+    return out;
+  };
+  const Z = await sizeRun(KS0);
+  const Zx = await sizeRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, ' || !!(liveConvs && ownerOf.has(e.browserKey) && liveConvs.has(ownerOf.get(e.browserKey)))', '', 'r4099 a running conversation\'s bound folder not live'), 'kept-sweep-running-bound'));
+  ok(Z.old && !Z.other && Zx && !Zx.old, '(1) over the total, a kept folder BOUND to a running conversation counts as live: the bound takes the other one, never it while its conversation runs — RED (not live): its own kept folder, the older, goes first while it runs', { Z, Zx });
+  // (2) «not kept» leaves no row and no tabs
+  const rowRun = (KS) => {
+    const dir = noteWorld({});
+    const o = startOver(dir, KS);
+    const K = freshKey();
+    o.S.noteStartCode(K, 'kept_reconcile_unfinished');   // a door handed it past the bound
+    o.S.noteStart(K, { hasDir: false }); o.S.noteTabs(K, [{ targetId: 't1', url: 'https://a.test/private', title: 'A made-up private title', active: true }]); o.S.noteStop(K, { why: 'idle', hasDir: false });
+    const file = (() => { try { return fs.readFileSync(path.join(dir, KB.KEPT_FILE), 'utf8'); } catch { return ''; } })();
+    const out = { row: o.S.has(K), tabsWritten: file.includes('A made-up private title') || file.includes('a.test/private') };
+    try { o.S.shutdown(); } catch { }
+    return out;
+  };
+  const R2 = rowRun(KS0);
+  const R2x = rowRun(MUT.load('src/server/browser-kept.js', anchored(anchored(anchored(KSRC, "    if (KN.isNotKept(bk)) return null;   // r4145 (2): a browser handed past the bound is NOT KEPT — it leaves no row and no tabs\n", '', 'r4099 a row for it'), "    if (KN.isNotKept(bk)) return false;   // r4145 (2): not kept — its tabs' addresses and titles are written nowhere\n", '', 'r4099 its tabs'), "    if (KN.isNotKept(bk)) return null;   // r4145 (2): not kept — no row\n", '', 'r4099 its stop'), 'kept-sweep-not-kept-row'));
+  ok(!R2.row && !R2.tabsWritten && R2x.row && R2x.tabsWritten, '(2) a browser handed past the bound leaves NO ROW and NO TABS in the kept list (its start, its tabs, its stop) — RED (today\'s notes): a row with its tabs\' addresses and titles', { R2, R2x });
+  // (3) where it cannot start (rung C: its link IS its folder): the keeper's words say it will not start in this run, the card says «Not started»
+  const KPS = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const ZH5 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA5 = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const W3 = "so it was not started, and it will not start in this run of the conversation: the conversation's next resume gets its own kept browser`); }";
+  const refusedRun = (KS) => { const dir = noteWorld({}); const o = startOver(dir, KS); const K = freshKey(); o.S.noteStartCode(K, 'kept_reconcile_unfinished'); if (typeof o.S.startRefused === 'function') o.S.startRefused(K); const b = o.S.brief(K); try { o.S.shutdown(); } catch { } return BF.startNoteWords(BF.browserFactFor({ browserKey: K, variant: BF.MANAGED_RUNGS[0] }, { kept: b, now: Date.now() })); };
+  const w3 = refusedRun(KS0), w3x = refusedRun(MUT.load('src/server/browser-kept.js', anchored(KSRC, "    setStartNote(k, { code: RECONCILE_CODE, at: now(), said: true, unstarted: true }); changed(); return true;\n", '    return false;\n', 'r4099 the refusal unsaid'), 'kept-sweep-unstarted'));
+  ok(KPS.includes(W3) && KPS.includes('try { ks?.startRefused?.(bk); }') && /^Not started: VibeSpace had not finished reading/.test(w3) && /^Not kept:/.test(w3x) && ZH5.includes('"Not started: VibeSpace had not finished reading') && JA5.includes('"Not started: VibeSpace had not finished reading'),
+    '(3) on a rung whose link IS its folder a browser handed past the bound is refused with what is TRUE — it will not start in this run of the conversation, its next resume gets its own (never «ask again») — and the card says «Not started: …» (zh, ja) — RED (no refusal noted): the card says «Not kept: its sign-ins end with it» of a browser that never ran', { w3, w3x });
+  // (4) and (5): the create's record drops the not-kept browser's pairs with its key; the mark is made in the note module even with no live store,
+  // and the keeper's gate reads that mark when it has no store (ws-create and the keeper need a whole hub: read in their text)
+  const WC5 = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  const R4 = '...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined, browserEnv: undefined } : {}),', R5 = "spawnKeyNotKept = true; try { require('./server/browser-kept-note.js').markNotKept(bk.key); } catch { }", R5k = "const notKeptMark = B.isBrowserKey(bk) && require('./browser-kept-note.js').isNotKept(bk);";
+  ok(WC5.includes(R4) && WC5.includes(R5) && KPS.includes(R5k) && KPS.includes("const g = ks && typeof ks.startGate === 'function' ? await ks.startGate(bk) : { kept: false, code: 'kept_reconcile_unfinished' };"),
+    'WIRING (4)(5): the create\'s record drops the not-kept browser\'s environment pairs with its key; the key is marked in the note module even with no live store, and the keeper\'s gate reads that mark when it has no store', null);
 }
 
 report();

@@ -4049,12 +4049,17 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // loses its kept `profile` before the start (the binary's own temporary folder); rung C's link IS the folder, so that start is refused
     // by name — nothing starts on an unprotected folder. Told: the agent in this answer, the person on the conversation's browser card
     let notKept = null;
-    if (ks && typeof ks.startGate === 'function' && !B.isLiveBrowser(rec0) && !starting.has(p.id) && onKeptDir(p)) {
-      const g = await ks.startGate(bk);
+    // r4145 (5): a key handed PAST the kept reconcile's bound is not kept even in a process with NO live kept store (the note module's mark)
+    const notKeptMark = B.isBrowserKey(bk) && require('./browser-kept-note.js').isNotKept(bk);
+    if (((ks && typeof ks.startGate === 'function') || notKeptMark) && !B.isLiveBrowser(rec0) && !starting.has(p.id) && onKeptDir(p)) {
+      const g = ks && typeof ks.startGate === 'function' ? await ks.startGate(bk) : { kept: false, code: 'kept_reconcile_unfinished' };
       if (!g.kept) {
         const cfg = S0.pairsToEnv(v.pairs)[VERBS.CONFIG_KEY];
         const viaLink = v.pairs.some((s) => typeof s === 'string' && s.startsWith('AGENT_BROWSER_PROFILE='));
         const u = !viaLink && typeof cfg === 'string' && cfg.startsWith('/') ? await require('./browser-kept-note.js').unkeepConfig(cfg, keptDirFor(bk)) : { ok: false, why: 'its link is its folder' };
+        // r4145 (3): a browser handed past the bound stays not kept for this run of the conversation, so on a rung whose link IS its folder it
+        // will not start in this run: said so (never «ask again»), and its card says so; its next resume gets its own kept browser
+        if (!u.ok && g.code === 'kept_reconcile_unfinished') { try { ks?.startRefused?.(bk); } catch { /* the store says its own */ } throw namedError(g.code, `${KB.startNoteText(g.code)} — and on this machine it cannot run without a kept folder (${u.why}), so it was not started, and it will not start in this run of the conversation: the conversation's next resume gets its own kept browser`); }
         if (!u.ok) throw namedError(g.code, `${KB.startNoteText(g.code)} — and it could not start without its folder (${u.why}), so it was not started; ask again`);
         p.dir = null; commit(); notKept = g.code;
       }

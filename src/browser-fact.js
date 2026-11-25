@@ -153,7 +153,8 @@ function browserFactFor(session, view) {
   const kept = managed && kv && kv.kind !== 'none' ? { tabs: num(kv.tabs), kind: KEPT_KINDS.includes(kv.kind) ? kv.kind : 'tabs-only', why: kv.stoppedWhy ? str(kv.stoppedWhy) : null, restoreBy: kv.restoreBy === 'user' || kv.restoreBy === 'auto' ? kv.restoreBy : null, handedBack: kv.handedBack === true, waiting: num(kv.waiting) } : null;
   // r3786 / r4099 (holds 5 and 3): what the START of its own browser is told by — NOT KEPT, by hold 5's words: its folder's note could not be
   // written, or it was handed past the kept reconcile's bound (kept_reconcile_unfinished) — the card and the live view say it (startNoteWords)
-  const startNote = managed && kv && kv.notKept ? (kv.notKept === 'kept_reconcile_unfinished' ? 'not-kept-reconcile' : 'not-kept') : null;
+  // r4145 (3): a browser handed past the bound that could not start here at all (its link IS its folder) says THAT, not «its sign-ins end with it»
+  const startNote = managed && kv && kv.notKept ? (kv.notKept === 'kept_reconcile_unfinished' ? (kv.unstarted === true ? 'not-started-reconcile' : 'not-kept-reconcile') : 'not-kept') : null;
   const own = managed ? { label: pinned && PIN_RUNGS.includes(variant) && !atts.some((a) => str(a.profileId) === pinned.id) ? pinned.label : null, state: stateOf(v.own).state, ...(kept ? { kept } : {}), ...(startNote ? { startNote } : {}) } : null;
   const fact = { v: 1, key: bk, pinned, pinGone, pinCleared, using, own, lastUsed, differs, input, live: !!liveRef, liveRef: liveRef || null };
   // lane browser-stuck (2026-09-28): the page is held by a dialog / not responding — the dialog watch's fact, carried as
@@ -295,6 +296,7 @@ function startNoteWords(fact, tIn) {
   const n = fact && fact.own && fact.own.startNote;
   if (n === 'not-kept') return t('Not kept: its sign-ins end with it — the note that keeps them could not be written in its folder');
   if (n === 'not-kept-reconcile') return t('Not kept: its sign-ins end with it — VibeSpace had not finished reading its kept browsers when it was handed');
+  if (n === 'not-started-reconcile') return t("Not started: VibeSpace had not finished reading its kept browsers, and here this browser cannot run without its kept folder — the conversation's next resume gets its own browser");
   return '';
 }
 /** The ref a live view shows for the browser in use (a profile id, the conversation's own, else none). */

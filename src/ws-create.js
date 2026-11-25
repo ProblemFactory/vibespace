@@ -1560,7 +1560,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               if (bk.origin === 'resume-unknown') {
                 console.warn(`[browser] ${id}: resuming ${String(data.resumeId).slice(0, 8)} but no previous browser key was recorded — minted ${bk.key} (this conversation's earlier browser, if any, is not reused)`);
                 // r3786 (hold 3): past the start's reconcile's bound — TOLD BY NAME (its code: the agent's first browser answer, the card)
-                if (keptOrder && keptOrder.code) { console.warn(`[browser] ${id}: ${keptOrder.code} — the kept browsers' notes were not read to their end within their bound when this conversation resumed; its earlier browser, if it had one, was not found in time and ${bk.key} is a new one, NOT KEPT (no binding, no note: its own kept browser stays its own)`); spawnKeyNotKept = true; try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); } catch { } }
+                if (keptOrder && keptOrder.code) { console.warn(`[browser] ${id}: ${keptOrder.code} — the kept browsers' notes were not read to their end within their bound when this conversation resumed; its earlier browser, if it had one, was not found in time and ${bk.key} is a new one, NOT KEPT (no binding, no note: its own kept browser stays its own)`); spawnKeyNotKept = true; try { require('./server/browser-kept-note.js').markNotKept(bk.key); } catch { } try { liveKeptStore()?.noteStartCode?.(bk.key, keptOrder.code); } catch { } }   // r4145 (5): marked in the note module even with no live store
               }
             }
             if (be.pairs.length) spawnEnvPairs.push(...be.pairs);
@@ -2075,8 +2075,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             createdAt: session.createdAt,
             webuiSessionId: id,
             mode: sessionMode,
-            // r4099: a key handed past the kept reconcile's bound is NOT KEPT — in no record (no binding: the conversation's place stays empty)
-            ...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined } : {}),
+            // r4099 / r4145 (4): a key handed past the kept reconcile's bound is NOT KEPT — in no record (no binding: the conversation's place
+            // stays empty), and its environment pairs go with it (a restart restores no half of that browser)
+            ...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined, browserEnv: undefined } : {}),
           });
 
           // Capture claudeSessionId from lock file for new (non-resume) Claude sessions.
