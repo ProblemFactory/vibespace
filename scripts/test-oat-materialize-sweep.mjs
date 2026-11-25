@@ -10,12 +10,18 @@
 //   RED controls: a writer that goes synchronous on the member path (the spy sees it); a sweep that starts every row in one turn
 //        (the work count reads N); the r1 sweep with every act on the loop (the stall passes 3 × the control, the count 2 × N).
 // In-process, no network, no real CLI. The checker is scripts/lib/check.mjs (a swapped ok() throws).
+// r4340 (the 2.369.419 mirror, run 45633627765, heavy 7/7 on Node 24: F13 read 29.04 ms against 3 × 8.33 on a four-core runner beside
+// the other heavy lane, no list save in either window, green on its retry): F13 judges two small clocks, so the suite runs in the
+// heavy tier's SERIAL lane (scripts/ci.mjs SERIAL: after the parallel lanes drain, alone); its number is unchanged; and F13 PRINTS
+// what tells a hold from a stray stall (they judge nothing): what the longest gap held (the rows the sweep started in it, a roster
+// broadcast, the collector's pauses), how many gaps passed the leg's bound and what those held, and the Node version
 import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { PerformanceObserver } from 'node:perf_hooks';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -60,18 +66,31 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
   // the same length in this process — as long as the two sweeps took, turns that do nothing but `await setImmediate`,
   // each half ending in the store's own roster broadcast (_notify → list(): the ONE synchronous O(rows) read a sweep
   // that moved something makes, ~2.5 ms at 200 written rows here against ~0.5 ms for the longest act turn) — and the
-  // sweep's longest stall ≤ 3 × the control's. It runs right AFTER the sweeps, under the same spy, so its broadcast reads
+  // sweep's longest stall ≤ 3 × the control's (r4384: now as two pairs, below — the turns of the acts, and the broadcasts' turns,
+  // each ≤ 3 × the control's own). It runs right AFTER the sweeps, under the same spy, so its broadcast reads
   // the same written rows at the same cost, and a loaded runner's preemption gets the same window to land in (a control
   // of N turns is ~1 % of the sweeps' wall: 2 hogs on one CPU read the sweep 3.2 × it). A do-nothing control alone reads
   // ~0.1 ms — no K holds against it. A slower runner scales both.
-  const loopMeter = () => {
-    let maxGap = 0, turns = 0, last = performance.now(), on = true;
-    const mark = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; };
+  // r4384: each gap is classed as it closes: a gap that held a roster build (`built()` moved: list() is synchronous, so a build
+  // sits inside ONE gap) is the broadcast's turn; every other gap is a turn of the acts (or of nothing, in the control)
+  const loopMeter = (built = () => 0) => {
+    let maxGap = 0, maxRest = 0, maxCast = 0, seen = built(), turns = 0, last = performance.now(), on = true;
+    const long = [];   // r4340's prints only (they judge nothing): each gap of a millisecond or more, its length, its end and its turn
+    const mark = () => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); const b = built(); if (b !== seen) { maxCast = Math.max(maxCast, t - last); seen = b; } else maxRest = Math.max(maxRest, t - last); if (t - last >= 1) long.push({ ms: t - last, end: t, turn: turns }); last = t; };
     const tick = () => { mark(); turns++; if (on) setImmediate(tick); };
     setImmediate(tick);
     // stop() closes the open turn: a sweep that never yields reads its whole length
-    return { turn: () => turns, stop: () => { on = false; mark(); return { maxGap, turns }; } };
+    return { turn: () => turns, stop: () => { on = false; mark(); return { maxGap, maxRest, maxCast, turns, long }; } };
   };
+  // r4340: WHAT A GAP HELD (the prints; they judge nothing): the rows the sweep started inside it (a hold of the sweep's own acts
+  // shows at its row starts, gap after gap), a roster broadcast (list()) inside it, and the collector's pauses inside it (perf_hooks
+  // «gc»). A stray stall (the runner taking the CPU away) is one gap that held none of them
+  const heldBy = (g, starts, lists, gcs) => {
+    const from = g.end - g.ms, inside = ([s, e]) => e > from && s < g.end;
+    const gcMs = gcs.filter(inside).reduce((x, [s, e]) => x + Math.min(e, g.end) - Math.max(s, from), 0);
+    return { ms: +g.ms.toFixed(2), turn: g.turn, rows: starts.filter((k) => k === g.turn).length, broadcast: lists.some(inside), gcMs: +gcMs.toFixed(2) };
+  };
+  const longestOf = (gaps) => gaps.reduce((p, g) => (g.ms > p.ms ? g : p), { ms: 0, end: 0, turn: -1 });
   const f13 = async (M, N = 200, o = {}) => {
     const am13 = mk(M, o); await nv(am13, '2.1.296');
     const ids = [];
@@ -91,10 +110,13 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
     const keep = {};
     // (the ONE roster rebuild a sweep that moved something broadcasts — list(), the store's existing _notify path for
     // every change — reads the rows synchronously; it is outside the sweep's acts, and inside both stall figures)
-    let inList = 0;
-    am13.list = function (...a) { inList++; try { return Object.getPrototypeOf(this).list.apply(this, a); } finally { inList--; } };
+    let inList = 0, builds = 0;
+    const lists = [], gcs = [];   // r4340's prints: each roster broadcast's span, each pause of the collector
+    am13.list = function (...a) { inList++; const from = performance.now(); try { return Object.getPrototypeOf(this).list.apply(this, a); } finally { inList--; builds++; lists.push([from, performance.now()]); } };
     for (const k of SYNC) { keep[k] = fs[k]; fs[k] = function (p, ...r) { if (!inList && String(p).startsWith(subs)) syncHits.push(k); return keep[k].call(this, p, ...r); }; }
-    const meter = loopMeter(), starts = [];
+    const gcObs = new PerformanceObserver((l) => { for (const e of l.getEntries()) gcs.push([e.startTime, e.startTime + e.duration]); });
+    gcObs.observe({ entryTypes: ['gc'] });
+    const meter = loopMeter(() => builds), starts = [];
     am13.syncOatFile = function (...a) { starts.push(meter.turn()); return Object.getPrototypeOf(this).syncOatFile.apply(this, a); };
     let first, steady, run, ctl, savesSweep = 0, savesCtl = 0;
     try {
@@ -102,18 +124,40 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
       first = await am13.syncOatFiles(); steady = await am13.syncOatFiles(); run = meter.stop(); savesSweep = saves;
       const took = performance.now() - t0;
       // the CONTROL: as long as the sweeps, their one broadcast each, not one act — over the rows they wrote
-      const c = loopMeter();
+      const c = loopMeter(() => builds);
       for (let k = 0; k < 2; k++) { const until = performance.now() + took / 2; do await new Promise((res) => setImmediate(res)); while (performance.now() < until); am13._notify(); }
       ctl = c.stop(); savesCtl = saves - savesSweep;
-    } finally { if (!run) meter.stop(); delete am13.syncOatFile; delete am13.list; delete am13._save; for (const k of SYNC) fs[k] = keep[k]; }
+      await new Promise((res) => setTimeout(res, 20));   // a pause's entry reaches the observer a turn or two after it (the prints only)
+      for (const e of (typeof gcObs.takeRecords === 'function' ? gcObs.takeRecords() : [])) gcs.push([e.startTime, e.startTime + e.duration]);
+    } finally { gcObs.disconnect(); if (!run) meter.stop(); delete am13.syncOatFile; delete am13.list; delete am13._save; for (const k of SYNC) fs[k] = keep[k]; }
     const counts = {}; for (const v of Object.values(first)) counts[v] = (counts[v] || 0) + 1;
     const perTurn = {}; for (const t of starts) perTurn[t] = (perTurn[t] || 0) + 1;
-    return { N, maxGap: +run.maxGap.toFixed(2), ctlGap: +ctl.maxGap.toFixed(2), saves: { sweep: savesSweep, control: savesCtl }, turns: run.turns, starts: starts.length, rowsPerTurn: Math.max(0, ...Object.values(perTurn)), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)] };
+    const over = run.long.filter((g) => g.ms > 3 * ctl.maxGap).map((g) => heldBy(g, starts, lists, gcs));
+    const held = { sweep: heldBy(longestOf(run.long), starts, lists, gcs), control: heldBy(longestOf(ctl.long), [], lists, gcs), over: { n: over.length, rows: over.filter((x) => x.rows > 0).length, broadcast: over.filter((x) => x.broadcast).length, gc: over.filter((x) => x.gcMs > 0).length, top: [...over].sort((x, y) => y.ms - x.ms).slice(0, 5) }, node: process.version };
+    return { N, maxGap: +run.maxGap.toFixed(2), ctlGap: +ctl.maxGap.toFixed(2), rest: +run.maxRest.toFixed(2), ctlRest: +ctl.maxRest.toFixed(2), cast: +run.maxCast.toFixed(2), ctlCast: +ctl.maxCast.toFixed(2), saves: { sweep: savesSweep, control: savesCtl }, turns: run.turns, starts: starts.length, rowsPerTurn: Math.max(0, ...Object.values(perTurn)), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)], held };
   };
   const r13 = await f13();
   ok(r13.counts.materialize === 200 && r13.steady.join() === 'written', 'F13: 200 fake rows — the first sweep materializes every one (archive + write), the next finds every one written', r13.counts);
   ok(r13.starts === 400 && r13.rowsPerTurn === 1, `F13: ONE row per loop turn — the two sweeps start ${r13.starts} row acts over ${r13.turns} turns of the loop, never more than ${r13.rowsPerTurn} between two turns`, r13);
-  ok(r13.maxGap <= 3 * r13.ctlGap, `F13: the event loop's longest stall across both sweeps is ${r13.maxGap} ms ≤ 3 × the control's ${r13.ctlGap} ms (as long as the sweeps, no act, each half ending in the store's own roster broadcast over the rows they wrote — measured right after, in this process; the display landings settled before both windows — list saves in the sweep window ${r13.saves.sweep}, in the control ${r13.saves.control})`, r13);
+  // r4384 / r4420 THE LEG's FORM, LIKE AGAINST LIKE: the same factor 3 as before, now over two honest pairs. The sweep's turns
+  // WITHOUT a roster broadcast against the control's broadcast turn (one synchronous read of the same rows: today's bound for an
+  // act turn; the control's empty turns, ~0.4 ms, are no like for an act turn of ~1.2 ms — machine 1 read 1.26 against 3 × 0.40),
+  // and the turns that held the sweep's broadcasts against the control's broadcast turns (the mirror's 29.04 against 3 × 8.33 and a pod's 13.36 against 3 × 3.48 were the sweep's one
+  // broadcast against a control figure that mixed its own). A ratio of two clocks stays in this leg only because its subject IS
+  // a hold of the loop: a sweep that holds it leaves no work count to read; it is read where nothing runs beside it (the heavy
+  // SERIAL lane, scripts/ci.mjs SERIAL)
+  ok(r13.rest <= 3 * r13.ctlCast, `F13 (the acts): the event loop's longest stall across both sweeps outside their roster broadcasts is ${r13.rest} ms ≤ 3 × the control's broadcast turn ${r13.ctlCast} ms — one synchronous read of the same 200 rows, today's bound for an act turn (the control's empty turns, ${r13.ctlRest} ms, are no like for an act; as long as the sweeps, no act; measured right after, in this process; the display landings settled before both windows — list saves in the sweep window ${r13.saves.sweep}, in the control ${r13.saves.control}; the longest stall overall ${r13.maxGap} ms, the control's ${r13.ctlGap} ms)`, r13);
+  // THE BROADCAST PAIR STAYS AS BUILT, ITS REASON (r4420; probes 6cb57ff0d and a08855fca, never lined): the control's broadcast
+  // cannot be made a first build like the sweep's without the product's own file work. The sweep's builds made while its first
+  // sweep's writes and the keeper's off-loop reads are in flight in this process read up to ~3.9 × a warm one (a08855fca: 6.9 /
+  // 4.2 / 11.2 / 6.5 ms, then 3.8 / 3.3 / 3.3, warm 2.87); a stand-in change of every row's oat facts (same keys, new objects, no
+  // file) builds warm (3.24 / 3.26), no method of the store is compiled for the first time in any build, and the rows' display
+  // facts live in the keeper, reached again only by reading the folder. So this pair is read where nothing runs beside it (the
+  // heavy SERIAL lane), its factor 3 unchanged
+  ok(r13.cast <= 3 * r13.ctlCast, `F13 (the broadcast): the longest turn that held a roster build in the sweeps' window (over the 200 rows they wrote) is ${r13.cast} ms ≤ 3 × the control's longest broadcast turn ${r13.ctlCast} ms (the same list() over the same rows, each half of the control ending in one)`, r13);
+  { const h = r13.held;   // r4340: what tells a hold from a stray stall (judges nothing)
+    console.log(`    F13's longest gap ${h.sweep.ms} ms at turn ${h.sweep.turn}: rows started in it ${h.sweep.rows}, a roster broadcast ${h.sweep.broadcast ? 'inside' : 'not inside'}, the collector ${h.sweep.gcMs} ms inside; the control's ${h.control.ms} ms: a broadcast ${h.control.broadcast ? 'inside' : 'not inside'}, the collector ${h.control.gcMs} ms; gaps past 3 × the control's ${h.over.n} (with a row start ${h.over.rows}, a broadcast ${h.over.broadcast}, a pause ${h.over.gc}); node ${h.node}`);
+    for (const x of h.over.top) console.log(`      a gap past the bound: ${x.ms} ms at turn ${x.turn}: rows started ${x.rows}, a broadcast ${x.broadcast ? 'inside' : 'not inside'}, the collector ${x.gcMs} ms inside`); }
   ok(r13.syncHits.length === 0, 'F13: not one synchronous fs call on a member path from the sweep\'s acts (every read / write / rename / fsync is fs.promises; the one roster broadcast after it is the store\'s existing list())', r13.syncHits);
   const mF13 = mutantStore({ mat: [['    await fh.sync();\n', '    require(\'fs\').fsyncSync(fh.fd);\n    require(\'fs\').statSync(dest + \'.never\', { throwIfNoEntry: false });\n']] });
   const r13m = mF13 ? await f13(mF13, 20) : null;
@@ -138,7 +182,7 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
   } };
   const mF13c = mutantStore({ mat: [['const fsp = fs.promises;\n', R1_FSP]], acc: [['        await new Promise((res) => setImmediate(res));\n      }\n      if (moved) this._notify();\n', '      }\n      if (moved) this._notify();\n']] });
   const r13c = mF13c ? await f13(mF13c, undefined, { safeFs: SYNC_DOOR }) : null;
-  ok(!!r13c && r13c.counts.materialize === 200 && r13c.maxGap > 3 * r13c.ctlGap && r13c.rowsPerTurn === 400, `RED control (F13): the r1 sweep (every act on the loop) stalls it ${r13c && r13c.maxGap} ms — past 3 × its control's ${r13c && r13c.ctlGap} ms; ${r13c && r13c.rowsPerTurn} rows in one turn`, r13c);
+  ok(!!r13c && r13c.counts.materialize === 200 && !(r13c.rest <= 3 * r13c.ctlCast && r13c.cast <= 3 * r13c.ctlCast) && r13c.rowsPerTurn === 400, `RED control (F13): the r1 sweep (every act on the loop) turns the leg red — outside the broadcast ${r13c && r13c.rest} ms against 3 × ${r13c && r13c.ctlCast} ms, the broadcast's turn ${r13c && r13c.cast} ms against 3 × ${r13c && r13c.ctlCast} ms (the longest stall ${r13c && r13c.maxGap} ms); ${r13c && r13c.rowsPerTurn} rows in one turn`, r13c);
 }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
