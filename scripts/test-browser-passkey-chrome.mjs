@@ -599,7 +599,9 @@ const U = (p) => `http://localhost:${PORT}${p}`;
 // ── the hook's own reports (start / end + outcome), as the watch parses them: the shared PURE module, observed ──
 const SEEN = [];
 const realApply = PK.applyEvent;
-PK.applyEvent = (recs, ev, o) => { SEEN.push({ at: Date.now(), ...ev }); return realApply(recs, ev, o); };
+// (r4456, the flake census: the leg's own record of an `end` can be HELD — the placed red of control 1 below; the product applies it at once)
+const SEEN_HOLD = { end: null, held: [] };
+PK.applyEvent = (recs, ev, o) => { const s = { at: Date.now(), ...ev }; if (SEEN_HOLD.end && ev && ev.ev === 'end') SEEN_HOLD.held.push(s); else SEEN.push(s); return realApply(recs, ev, o); };
 const FY = { adds: [], resolves: [] };
 const forYou = { add: (pid, item) => { const id = 'fy-' + (FY.adds.length + 1); FY.adds.push({ at: Date.now(), pid, item, id }); return id; }, resolve: (id) => { FY.resolves.push({ at: Date.now(), id }); } };
 
@@ -798,11 +800,22 @@ try {
     const a3 = aid && await cdp.send('WebAuthn.addCredential', { authenticatorId: aid, credential: { credentialId: Buffer.from('vs-passkey-control').toString('base64'), isResidentCredential: true, rpId: 'localhost', privateKey: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'), userHandle: Buffer.from('vs-user').toString('base64'), signCount: 0 } });
     ok(a1 && !a1.error && aid && a3 && !a3.error, 'CONTROL 1: WebAuthn.enable + addVirtualAuthenticator (ctap2, internal, UV) + a resident credential for localhost', { a1, a2, a3 });
     const tv = Date.now(); const ev0 = w.events.length;
+    // r4456 (the flake census, round 2): the hook's `end` reaches the server by its CDP binding, a channel apart from the page's own
+    // report (vo) — so the leg WAITS for the `end` record (generous, its expiry a named harness line), then reads the events: a
+    // passkey_open is said only for a record still pending (src/browser-passkey.js passkeyVerdict), so once the ceremony's end is in
+    // none can come for it — «never passkey_open» is read after that end, never after a fixed 3300 ms.
+    // PLACED FIRST, RED AT WILL: the leg's own record of the end HELD (the product applies it at once): read as the leg stood (right
+    // after the page's report) the end «is not there» — the control red with nothing wrong; the wait reads it once let go
+    SEEN_HOLD.end = true;
     r = await w.cli(['click', '#go']);
     const vo = await until(() => last('vauth', 'pk', tv) && last('vauth', 'pk', tv).v !== 'started' ? last('vauth', 'pk', tv) : null, 8000);
-    const ve = SEEN.find((x) => x.ev === 'end' && x.at >= tv);
-    await sleep(3300);
-    ok(vo && vo.v === 'ok' && ve && ve.outcome === 'ok' && !w.events.slice(ev0).some((e) => e.state === PK.PASSKEY_OPEN_CODE), `(c) CONTROL 1: the ceremony completes — \`end ok\`, the page says ${vo && vo.v}, never passkey_open`, { vo, ve, ev: w.events.slice(ev0) });
+    const heldEnd = await until(() => (SEEN_HOLD.held.some((x) => x.at >= tv) ? true : null), 15000);
+    const asStood = SEEN.find((x) => x.ev === 'end' && x.at >= tv) || null;
+    SEEN_HOLD.end = null; SEEN.push(...SEEN_HOLD.held.splice(0));   // let go
+    const ve = await until(() => SEEN.find((x) => x.ev === 'end' && x.at >= tv) || null, 15000);
+    if (!ve) say('HARNESS (c): the hook\'s `end` record did not reach the server within 15000 ms');
+    ok(!!(vo && heldEnd && asStood === null && ve), `(c) CONTROL 1 PLACED (r4456): the end's record HELD, read as the leg stood (right after the page said ${vo && vo.v}) there is no end (${asStood === null}) — the control red with nothing wrong; the wait reads it once let go (${ve && ve.outcome})`, { vo, asStood, ve });
+    ok(vo && vo.v === 'ok' && ve && ve.outcome === 'ok' && !w.events.slice(ev0).some((e) => e.state === PK.PASSKEY_OPEN_CODE), `(c) CONTROL 1: the ceremony completes — \`end ok\`, the page says ${vo && vo.v}, never passkey_open (read after the end: ${w.events.slice(ev0).length} events)`, { vo, ve, ev: w.events.slice(ev0) });
     if (cdp) cdp.close();
     await w.close();
   }
