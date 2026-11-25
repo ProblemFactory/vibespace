@@ -34,6 +34,7 @@ import https from 'node:https';
 import net from 'node:net';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET, chromeNames, driverArgs } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
@@ -67,22 +68,35 @@ const watchdog = setTimeout(() => { fail++; console.log(`  ✗ the suite finishe
 const quietLog = { log() { }, warn() { }, error() { } };
 
 // ── ⑤ the sampler: every socket a Chrome of THIS suite holds (its process trees: the spawned ones + the driver's daemon) ──
+// B-8695 (主开发 r4630): OFF THE SUITE's LOOP. At the release each sample read /proc/<pid>/stat of EVERY process on the machine and
+// ran `ss` by execFileSync, both on the loop that also reads the browsers' CDP messages: on a full box every message reached the suite
+// about a second late (the timed row 920: Page.enable ~1 s, events 0.78 s apart) and the 180 s watchdog fired mid-suite, at the
+// release as on every tree since (a test that followed the machine's load, never a commit's). Now:
+//   - the walk covers only the suite's OWN trees (each root's /proc/<pid>/task/*/children, async), never every process;
+//   - `ss` runs by execFile (async: a child, never on the loop);
+//   - ONE sample at a time: a sample due while one runs is SKIPPED and counted;
+//   - its cost is printed at ⑤ (per sample: count, median, p95, the longest five) beside the loop's longest turn while it ran
+//     (perf_hooks monitorEventLoopDelay, the loop meter scripts/test-boot-loop-hold.mjs reads too);
+//   - the LAST sample, after the browsers' last act, is never skipped (⑤ awaits the running one, then takes one more).
+// ⑥ places its red: the release's sampler (kept verbatim below, for the control only) and this one, each over a stand-in `ss` held
+// for a set time: the release's makes the loop's turns that long, this one leaves them short.
 const roots = new Set(), outside = [];
-const treeOf = () => {
-  const kidsOf = new Map(), all = new Set();
-  for (const d of fs.readdirSync('/proc')) { if (!/^\d+$/.test(d)) continue; try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'); const pp = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); if (!kidsOf.has(pp)) kidsOf.set(pp, []); kidsOf.get(pp).push(Number(d)); } catch { } }
-  const walk = (p) => { if (all.has(p)) return; all.add(p); for (const k of kidsOf.get(p) || []) walk(k); };
-  for (const r of roots) walk(r);
-  return all;
-};
 const loopPeer = (a) => /^(127\.|\[::1\]|\[::ffff:127\.|\*|0\.0\.0\.0|\[::\])/.test(a);
-const sample = () => {
-  if (!roots.size) return;
-  const mine = treeOf();
-  let out = ''; try { out = execFileSync('ss', ['-tunpH'], { encoding: 'utf8', timeout: 2000 }); } catch { return; }
-  for (const l of out.split('\n')) { const f = l.trim().split(/\s+/); const peer = f[5] || ''; const pids = [...l.matchAll(/pid=(\d+)/g)].map((m) => Number(m[1])); if (pids.some((p) => mine.has(p)) && peer && !loopPeer(peer)) outside.push(`${(/users:\(\("([^"]+)"/.exec(l) || [])[1] || '?'} ${f[0]} ${f[4]} → ${peer}`); }
-};
-sampler = setInterval(sample, 250); if (sampler.unref) sampler.unref();
+const parseSs = (out, mine, into) => { for (const l of out.split('\n')) { const f = l.trim().split(/\s+/); const peer = f[5] || ''; const pids = [...l.matchAll(/pid=(\d+)/g)].map((m) => Number(m[1])); if (pids.some((p) => mine.has(p)) && peer && !loopPeer(peer)) into.push(`${(/users:\(\("([^"]+)"/.exec(l) || [])[1] || '?'} ${f[0]} ${f[4]} → ${peer}`); } };
+function makeSampler({ roots: rs, outside: into, ssBin = 'ss', everyMs = 250 } = {}) {
+  const fsp = fs.promises;
+  const run = (cmd, args) => new Promise((res) => execFile(cmd, args, { encoding: 'utf8', timeout: 2000, maxBuffer: 32 * 1024 * 1024 }, (e, so) => res(e ? null : String(so || ''))));
+  const kidsOf = async (pid) => { const out = []; let tasks = []; try { tasks = await fsp.readdir(`/proc/${pid}/task`); } catch { return out; } for (const t of tasks) { try { for (const c of (await fsp.readFile(`/proc/${pid}/task/${t}/children`, 'utf8')).trim().split(/\s+/)) if (c) out.push(Number(c)); } catch { } } return out; };
+  const treeOf = async () => { const all = new Set(), q = [...rs]; while (q.length) { const pid = q.pop(); if (all.has(pid)) continue; all.add(pid); for (const k of await kidsOf(pid)) q.push(k); } return all; };
+  const st = { n: 0, skipped: 0, ms: [], maxTree: 0, maxKids: 0 }; let running = null;
+  const one = async () => { const t0 = Date.now(); try { if (!rs.size) return; const mine = await treeOf(); if (mine.size > st.maxTree) st.maxTree = mine.size; if (mine.size - rs.size > st.maxKids) st.maxKids = mine.size - rs.size; const out = await run(ssBin, ['-tunpH']); if (out !== null) parseSs(out, mine, into); } finally { st.n++; st.ms.push(Date.now() - t0); } };
+  const tick = () => { if (running) { st.skipped++; return; } running = one().finally(() => { running = null; }); };
+  const iv = setInterval(tick, everyMs); if (iv.unref) iv.unref();
+  return { interval: iv, stop: () => clearInterval(iv), stats: () => st, async final() { if (running) await running; await one(); } };
+}
+const LOOP = monitorEventLoopDelay({ resolution: 10 }); LOOP.enable();   // the loop's longest turn while the sampler runs (ms at ⑤)
+const SAMPLER = makeSampler({ roots, outside });
+sampler = SAMPLER.interval;
 
 // ── the minted tailnet ──
 const SUF = 'tail-mint.ts.net', PEER_IP = '100.101.1.2', BETA_IP = '100.101.1.3', SELF_IP = '100.101.1.1', FUNNEL = 'app.tail9999.ts.net';
@@ -286,7 +300,7 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
     const s1 = socksSeen.length;
     const o2 = await run(['open', `http://public.example:${PUB_PORT}/`]);
     const t2 = await run(['get', 'text', 'body']);
-    sample();
+    await SAMPLER.final();   // B-8695: the driver's Chrome sampled after its last act, before its close (never skipped)
     await run(['close', '--all']);
     // the daemon this leg started: only a process whose cmdline names THIS leg's socket dir (never a pid by pattern alone)
     for (const d of daemons()) { try { process.kill(d, 'SIGKILL'); } catch { } }
@@ -359,7 +373,38 @@ console.log('④ LAW 2\'s page in the in-page browser (/proxy) AFTER the ordinar
 
 console.log('⑤ nothing left loopback');
 {
-  sample();
+  await SAMPLER.final();   // B-8695: the last sample, after the browsers' last act, is never skipped
+  const st = SAMPLER.stats(), srt = st.ms.slice().sort((x, y) => x - y), q = (f) => srt.length ? srt[Math.min(srt.length - 1, Math.floor(f * srt.length))] : 0;
+  console.log(`  · the sampler (B-8695): ${st.n} samples, ${st.skipped} skipped while one ran; per sample median ${q(0.5)} ms, p95 ${q(0.95)} ms, the longest five ${srt.slice(-5).reverse().join(' / ')} ms; the largest tree it walked ${st.maxTree} processes (${st.maxKids} beyond the roots); the loop's longest turn while it ran ${Math.round(LOOP.max / 1e6)} ms`);
+  ok(`the sampler walked the browsers' own trees, children included (at most ${st.maxKids} processes beyond the roots in one sample), and took its last sample after their last act`, st.n > 0 && st.maxKids > 0, { n: st.n, maxTree: st.maxTree, maxKids: st.maxKids, roots: roots.size });
   ok(`no Chrome of this suite held a non-loopback socket (${roots.size} process trees sampled at 4 Hz; every Chrome without background networking)`, outside.length === 0, [...new Set(outside)].slice(0, 20));
+}
+
+console.log('⑥ CONTROL: the sampler with its sample HELD (a stand-in `ss` that sleeps a set time: placed, never load) — the release\'s against this one');
+{
+  // THE RELEASE's SAMPLER, verbatim but for the program's path (kept for this control only): a sync walk of EVERY process, a sync `ss`
+  const releaseSample = (rs, into, ssBin) => {
+    if (!rs.size) return;
+    const kidsOf = new Map(), all = new Set();
+    for (const d of fs.readdirSync('/proc')) { if (!/^\d+$/.test(d)) continue; try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'); const pp = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); if (!kidsOf.has(pp)) kidsOf.set(pp, []); kidsOf.get(pp).push(Number(d)); } catch { } }
+    const walk = (pid) => { if (all.has(pid)) return; all.add(pid); for (const k of kidsOf.get(pid) || []) walk(k); };
+    for (const r of rs) walk(r);
+    let out = ''; try { out = execFileSync(ssBin, ['-tunpH'], { encoding: 'utf8', timeout: 2000 }); } catch { return; }
+    parseSs(out, all, into);
+  };
+  const HOLD_MS = 600, dir = path.join(ROOT, 'ss-held'); fs.mkdirSync(dir, { recursive: true });
+  const standIn = path.join(dir, 'ss'); fs.writeFileSync(standIn, `#!/bin/sh\nsleep ${HOLD_MS / 1000}\n`, { mode: 0o700 });
+  const held = async (kind) => {
+    const h = monitorEventLoopDelay({ resolution: 10 }); h.enable();
+    const rs = new Set([process.pid]), into = [];
+    let stop = () => { };
+    if (kind === 'release') { const iv = setInterval(() => releaseSample(rs, into, standIn), 250); stop = () => clearInterval(iv); }
+    else { const sm = makeSampler({ roots: rs, outside: into, ssBin: standIn }); stop = sm.stop; }
+    await sleep(2500); stop(); await sleep(HOLD_MS + 200); h.disable();
+    return Math.round(h.max / 1e6);
+  };
+  const relMax = await held('release'), curMax = await held('cured');
+  ok(`RED CONTROL: the release's sampler with its sample held ${HOLD_MS} ms makes the suite's loop turns that long (its longest ${relMax} ms)`, relMax >= HOLD_MS * 0.8, { relMax });
+  ok(`…and this sampler with the SAME hold leaves the loop's turns short (its longest ${curMax} ms): its work is a child's and async reads, never the loop's`, curMax < HOLD_MS / 3, { curMax });
 }
 done();
