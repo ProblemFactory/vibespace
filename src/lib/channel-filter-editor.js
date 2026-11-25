@@ -1074,20 +1074,14 @@ export async function showNotifyDialog(app, target) {
   const groupById = new Map(groupsCopy.filter((x) => x && x.id).map((x) => [String(x.id), x]));
   const ancestorsOfGroup = (id) => { const x = groupById.get(String(id)); return x && Array.isArray(x.ancestors) ? x.ancestors.map(String) : []; };
   const titleOf = (id) => { const x = groupById.get(String(id)); return (x && (x.title || x.name)) || String(id); };
-  const offerKeys = F.eligibleKeys({ access: st.access, inherited: st.eligibleAbove || [] });
-  const offerRows = [...st.access.map((row) => ({ row, except: st.except || [] })), ...(st.eligibleAbove || [])];
-  for (const s of rosterFromApp(app, { groups: false })) {
-    if (principals.some((x) => x.value === s.key)) continue;
-    const own = (s.groupIds || []).map(String);
-    const up = [...new Set(own.flatMap(ancestorsOfGroup))].filter((id) => !own.includes(id));
-    const via = F.memberVia(offerKeys, s.id, [{ cid: s.id, groups: own, inherited: up }], { rows: offerRows, except: st.except || [] });
-    if (!via) continue;
-    const g = principals.find((x) => x.kind === 'group' && String(x.id) === String(via)) || { name: null, authority: null };
-    const gName = g.name || titleOf(via);
-    const child = own.includes(String(via)) ? null : own.find((id) => ancestorsOfGroup(id).includes(String(via)));
-    const label = child ? t('Agent · {name} (in {group}, under {parent})', { name: s.name, group: titleOf(child), parent: gName }) : t('Agent · {name} (in {group})', { name: s.name, group: gName });
-    principals.push({ value: s.key, label, kind: 'agent', id: s.id, name: s.name || null, authority: g.authority, via, groupIds: own, inherited: up });
-    memberOf.set(String(via), gName);
+  // B-fbd6 item 5: the offer is F.memberOffer's — the ONE function its leg holds to what the save admits
+  const offered = F.memberOffer({ access: st.access, eligibleAbove: st.eligibleAbove || [], except: st.except || [], roster: rosterFromApp(app, { groups: false }), ancestorsOf: ancestorsOfGroup, taken: principals.map((x) => x.value) });
+  for (const o of offered) {
+    const g = principals.find((x) => x.kind === 'group' && String(x.id) === o.via) || { name: null, authority: null };
+    const gName = g.name || titleOf(o.via);
+    const label = o.child ? t('Agent · {name} (in {group}, under {parent})', { name: o.name, group: titleOf(o.child), parent: gName }) : t('Agent · {name} (in {group})', { name: o.name, group: gName });
+    principals.push({ value: o.key, label, kind: 'agent', id: o.id, name: o.name, authority: g.authority, via: o.via, groupIds: o.groups, inherited: o.inherited });
+    memberOf.set(o.via, gName);
   }
   if (!principals.length) {
     const empty = el('div', 'chan-notify-empty');

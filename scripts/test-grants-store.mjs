@@ -1105,11 +1105,48 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     // the facts the server's (own groups + the copy's `ancestors`, the store's own walk), a child labelled under its parent
     const ed = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8');
     const tgv = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf-8');
-    ok(/const via = F\.memberVia\(offerKeys, s\.id, \[\{ cid: s\.id, groups: own, inherited: up \}\], \{ rows: offerRows, except: st\.except \|\| \[\] \}\);/.test(ed)
-      && /const offerKeys = F\.eligibleKeys\(\{ access: st\.access, inherited: st\.eligibleAbove \|\| \[\] \}\);/.test(ed)
-      && /const offerRows = \[\.\.\.st\.access\.map\(\(row\) => \(\{ row, except: st\.except \|\| \[\] \}\)\), \.\.\.\(st\.eligibleAbove \|\| \[\]\)\];/.test(ed)
+    const cfSrc5 = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+    ok(/const offered = F\.memberOffer\(\{ access: st\.access, eligibleAbove: st\.eligibleAbove \|\| \[\], except: st\.except \|\| \[\], roster: rosterFromApp\(app, \{ groups: false \}\), ancestorsOf: ancestorsOfGroup, taken: principals\.map\(\(x\) => x\.value\) \}\);/.test(ed)
+      && /const keys = eligibleKeys\(\{ access: acc, inherited: above \}\);/.test(cfSrc5)
+      && /const rows = \[\.\.\.acc\.map\(\(row\) => \(\{ row, except: ex \}\)\), \.\.\.above\];/.test(cfSrc5)
+      && /const via = memberVia\(keys, s\.id, \[\{ cid: s\.id, groups: own, inherited: up \}\], \{ rows, except: ex \}\);/.test(cfSrc5)
       && /const members = principals\.filter\(\(p\) => p\.via\)\.map\(\(p\) => \(\{ cid: p\.id, groups: p\.groupIds \|\| \[p\.via\], inherited: p\.inherited \|\| \[\] \}\)\);/.test(ed)
-      && /ancestors: this\.ancestorsOf\(\[t\.id\]\)/.test(tgv), 'B-1e96 (c): the Notify… editor offers a member through F.memberVia over the save\'s keys, rows and «除了», with the server\'s member facts (the copy\'s `ancestors` — the store\'s own walk, never a second one)');
+      && /ancestors: this\.ancestorsOf\(\[t\.id\]\)/.test(tgv), 'B-1e96 (c): the Notify… editor offers a member through F.memberOffer (memberVia over the save\'s keys, rows and «除了»), with the server\'s member facts (the copy\'s `ancestors` — the store\'s own walk, never a second one)');
+    // B-fbd6 ITEM 5 (主开发 r4365): THE OFFER EQUALS WHAT THE SAVE ADMITS — F.memberOffer (the editor's one function) against
+    // validateWatchers, session by session over a table of grains: a parent's plain row (its child group's member offered «under»
+    // it), its «仅本组» row, this grain's «除了» naming the child group, a row above with its own «除了»; every session offered
+    // exactly when the save admits it, through the same group, the label's child group named. RED: an offer that reads this
+    // grain's rows without their «除了»
+    {
+      const CF5 = require('../src/channel-filter.js');
+      const par5 = { kind: 'group', id: 'tg-p', name: 'Parent' };
+      const roster5 = [{ id: 'k1', key: 'agent:k1', name: 'Kid one', groupIds: ['tg-y'] }, { id: 'k2', key: 'agent:k2', name: 'Parent one', groupIds: ['tg-p'] }, { id: 'k3', key: 'agent:k3', name: 'Other', groupIds: ['tg-z'] }];
+      const up5 = (id) => (id === 'tg-y' ? ['tg-p'] : []);
+      const grains5 = {
+        plain: { access: [{ principal: par5, authority: 'draft' }] },
+        only: { access: [{ principal: { ...par5, only: true }, authority: 'draft' }] },
+        excepted: { access: [{ principal: par5, authority: 'draft' }], except: [{ kind: 'group', id: 'tg-y', name: 'Kid' }] },
+        above: { access: [], eligibleAbove: [{ principal: par5, authority: 'draft', via: 'account', except: [{ kind: 'group', id: 'tg-y', name: 'Kid' }] }] },
+      };
+      const table5 = (CFm) => Object.fromEntries(Object.entries(grains5).map(([name, gr]) => {
+        const offer = CFm.memberOffer({ access: gr.access, eligibleAbove: gr.eligibleAbove || [], except: gr.except || [], roster: roster5, ancestorsOf: up5 });
+        const rows = roster5.map((s) => {
+          const own = s.groupIds, up = [...new Set(own.flatMap(up5))].filter((x) => !own.includes(x));
+          const v = CF5.validateWatchers([{ principal: { kind: 'agent', id: s.id }, notify: 'wake', mode: 'all', dailyWakeCap: 50 }], gr.access, { inherited: gr.eligibleAbove || [], members: [{ cid: s.id, groups: own, inherited: up }], except: gr.except || [] });
+          const o = offer.find((x) => x.id === s.id) || null;
+          return { id: s.id, offered: !!o, via: o ? o.via : null, child: o ? o.child : null, saved: v.ok === true, savedVia: v.ok === true ? v.watchers[0].via || null : null };
+        });
+        return [name, rows];
+      }));
+      const t5 = table5(CF5), same5 = (t) => Object.values(t).every((rows) => rows.every((r) => r.offered === r.saved && r.via === r.savedVia));
+      const k1 = (t, g) => t[g].find((r) => r.id === 'k1');
+      ok(same5(t5) && k1(t5, 'plain').offered && k1(t5, 'plain').child === 'tg-y' && !k1(t5, 'only').offered && !k1(t5, 'excepted').offered && !k1(t5, 'above').offered && t5.plain.find((r) => r.id === 'k3').offered === false,
+        `B-fbd6 item 5: the Notify editor's offer equals what the save admits, session by session, over four grains (plain: ${t5.plain.filter((r) => r.offered).map((r) => r.id + '/' + r.via + (r.child ? ' under, in ' + r.child : '')).join(', ')}; only: ${t5.only.filter((r) => r.offered).map((r) => r.id).join(', ') || 'none'}; excepted: ${t5.excepted.filter((r) => r.offered).map((r) => r.id).join(', ') || 'none'}; above: ${t5.above.filter((r) => r.offered).map((r) => r.id).join(', ') || 'none'})`, t5);
+      const OFFER5 = '  const rows = [...acc.map((row) => ({ row, except: ex })), ...above];\n';
+      const M5 = mutantCopies('fbd6-offer', REPO);
+      const r5 = table5(M5.load('src/channel-filter.js', anchored(cfSrc5, OFFER5, '  const rows = [...acc.map((row) => ({ row, except: [] })), ...above];\n', 'an offer without this grain\'s «除了»'), 'fbd6-offer-no-except'));
+      ok(!same5(r5) && k1(r5, 'excepted').offered === true, `B-fbd6 item 5 RED CONTROL: an offer that reads this grain's rows without their «除了» — the child group's member offered where the save refuses it (${k1(r5, 'excepted').offered} / saved ${k1(r5, 'excepted').saved}) — the leg above would go red`, r5.excepted);
+    }
   }
   // restack 411 (主开发 20:18Z, the meeting ruled (A)): the release's web-login «by what» facts carry the ancestors — a child's
   // conversation and a child group are drawn admitted by the parent's row; a row for «this group only» does not admit them

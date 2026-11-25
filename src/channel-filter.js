@@ -1259,6 +1259,31 @@ function memberVia(keys, cid, members = [], { rows = null, except = [] } = {}) {
   const v = viaJudge(keys, s, cid, rows, except);
   return v && v.ok && v.entry.kind === 'group' ? v.entry.id : null;
 }
+/** B-fbd6 item 5 (主开发 r4365): THE NOTIFY EDITOR's OFFER of member sessions — the page's dialog and its leg read this ONE
+ *  function. A running session that is not yet a principal here is offered when the SAVE would admit it: memberVia over the
+ *  same keys, rows and «除了» validateWatchers reads (this grain's access rows, each with this grain's «除了», then the rows
+ *  above it as the server hands them, each with its own), with the session's facts (its own groups + their ancestors). Each
+ *  offer names its group (`via`) and, when it reaches through a parent, the child group it is in (`child`: the «under parent»
+ *  label), with the session's own `groups`. `roster` = [{id, key, name, groupIds}]; `ancestorsOf(groupId)` = that group's parents; `taken` = the principal keys
+ *  already listed. */
+function memberOffer({ access = [], eligibleAbove = [], except = [], roster = [], ancestorsOf = () => [], taken = [] } = {}) {
+  const acc = Array.isArray(access) ? access : [], above = Array.isArray(eligibleAbove) ? eligibleAbove : [], ex = Array.isArray(except) ? except : [];
+  const keys = eligibleKeys({ access: acc, inherited: above });
+  const rows = [...acc.map((row) => ({ row, except: ex })), ...above];
+  const upOf = (id) => { const a = ancestorsOf(id); return Array.isArray(a) ? a.map(str) : []; };
+  const seen = new Set([...(taken || [])].map(str)), out = [];
+  for (const s of Array.isArray(roster) ? roster : []) {
+    if (!s || !s.id || seen.has(str(s.key))) continue;
+    const own = [].concat(s.groupIds || []).map(str);   // the roster's own groups: data, never the model's facts (memberVia builds those)
+    const up = [...new Set(own.flatMap(upOf))].filter((id) => !own.includes(id));
+    const via = memberVia(keys, s.id, [{ cid: s.id, groups: own, inherited: up }], { rows, except: ex });
+    if (!via) continue;
+    seen.add(str(s.key));
+    const child = own.includes(str(via)) ? null : own.find((id) => upOf(id).includes(str(via))) || null;
+    out.push({ key: str(s.key), id: str(s.id), name: s.name || null, via: str(via), child, groups: own, inherited: up });
+  }
+  return out;
+}
 /** Is a `via` watcher's session still a member of its group (the wake-time re-judge)? A row without `via` is not
  *  this rule's to judge (true). */
 function memberStill(row, members = [], { rows = null, except = [] } = {}) {   // the chain's cure (D): + the grain's access rows (the wake's re-judge reads the via row's «仅本组» and the lineage)
@@ -1966,6 +1991,6 @@ module.exports = {
   MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, WATCH_REQUEST_TTL_MS, HELD_AGE_WINDOWS, heldWindowMinutes, heldTooOld, heldSinceWords, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
-  memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
+  memberVia, memberStill, memberOffer, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
   splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, rankPatterns, effectiveAccess, effectiveWatchers, rowNames, rowVerdict, expectedWakesTotal, othersLine,
 };
