@@ -95,6 +95,7 @@ const STORES = Object.freeze({
   'remote-jsonl-meta.write': row('write', 'remote-jsonl/<host>/<transcript>.meta', 'src/hosts.js', ['_landCacheMeta']),   // B-0248 unit 4: its record (the .meta), after the bytes it names
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js
   // `_holdIO` says one that waits, at the time); r4–r7 timed its appends here (`_holdWrite`, `_dropCompact`)
+  'otel-token.write': row('write', 'usage-history/otel-token', 'src/server/otel-ingest.js', ['create']),   // B-f276 family unit 2: the sign-in value written as the file's when its hold lifts not there or torn — through the store writer, 0600
   'otel-truth.write': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),   // row B-360d: the stash's TRIM — a rewrite job on the store writer's thread, in order with its appends (was a renameSync on the loop)
   'otel-truth.append': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),   // through the store writer (usage-cpu U4: was an appendFileSync per post)
   'otel-truth-pending.write': row('write', 'usage-history/otel-truth.pending', 'src/server/otel-ingest.js', ['create']),   // the spill: posts waiting behind the boot replay (usage-cpu U4), through the store writer

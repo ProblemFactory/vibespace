@@ -60,6 +60,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { sameToken } = require('../pairing-token.js'); // B-8dda: the per-boot header is a secret too
+const SR = require('../store-read.js'); // B-f276 family unit 2: the sign-in value's read — not there / unreadable / torn told apart
 const { parseOtlpLogs } = require('../otel-truth.js');
 const { eachLine } = require('../ndjson-lines.js'); // row B-360d: the spill and the stash read by their lines in bounded reads (one descriptor each)
 const { spawnOf } = require('../harnesses'); // the spawn.otelExport row: whose accounts OTel can name
@@ -86,18 +87,134 @@ const spillOf = new WeakMap(); // usage-cpu U4: a waited record → its line in 
 const W = () => require('../store-writer.js').storeWriter(); // usage-cpu U4: the stash and the spill are written by THE STORE WRITER's thread
 const STASH_DURABLE_MS = 4000; // the chain's cure: a post's answer waits at most this for its stash lines; past it «retry» — two waits + the 1 s Retry-After stay inside the exporter's own 10 s
 
-function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, serverSetting }) {
+const TOKEN_READ_MS = 60_000; // B-f276 family unit 2: the sign-in value's read again is BOUNDED (the family's READ_MS): past it a read that waits is said
+function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, serverSetting, tokenReadMs = TOKEN_READ_MS }) {
   // PERSISTED token (review-caught): dtach/pipe sessions survive server
   // restarts BY DESIGN — a per-boot random token would silently 403 every
   // surviving session's truth stream (precisely the long-lived stale-token
   // sessions this module exists for). Loopback + 0600 file perms gate it.
   const tokenFile = path.join(dataDir, 'usage-history', 'otel-token');
-  let token;
-  try { token = fs.readFileSync(tokenFile, 'utf-8').trim(); } catch { }
-  if (!token) {
-    token = crypto.randomBytes(16).toString('hex');
-    try { fs.mkdirSync(path.dirname(tokenFile), { recursive: true }); fs.writeFileSync(tokenFile, token, { mode: 0o600 }); } catch { }
+  // B-f276 family unit 2 (主开发 r3175 / r4244, lane bl-loop-a): THE SIGN-IN VALUE UNDER THE STORE-READ LAW. The release read ANY failure
+  // of this file as «no value» and MINTED A NEW ONE OVER IT: every surviving session's exporter was refused from then on (its truth
+  // stream lost until the session restarts). NOW (src/store-read.js) «not there» mints and writes one (a new instance, as before);
+  // «the read failed» HOLDS the file: nothing is written over it; sessions started meanwhile carry THIS LIFE's own value (provisional:
+  // in memory, never written over the file), and both are let in; the file is read again OFF the loop by the family's rules (the next
+  // try armed first, ONE read in flight, a «not there» right after an unread answer believed only at a second, the read BOUNDED and
+  // said as waiting, its late answer judged when it comes). A read that answers lets the file's value in (this life's stays let in);
+  // a file not there twice takes this life's value as the file's; TORN bytes (not a value's shape — a verdict about the FILE: a second
+  // look agrees; an empty file only on a second rung) are kept aside ONCE (0600, an exclusive name), then this life's value is the
+  // file's. Its own small hold (the family's helper reads JSON); a row of the family's held list (tokenRow). The value is never said:
+  // not in a log line, a list row or an answer. ITS LIMIT, said: a session started while the file is held keeps this life's value —
+  // let in until the hub restarts, refused after it.
+  const TOKEN_SHAPE = (v) => typeof v === 'string' && /^[\x21-\x7e]{16,256}$/.test(v);
+  const parseToken = (t) => String(t).trim();
+  const mintToken = () => crypto.randomBytes(16).toString('hex');
+  const tokenLog = (l) => console.warn(`[otel] ${l}`);
+  let token = null;        // the FILE's value (null: not known — the file is held)
+  let provisional = null;  // this life's own value while the file is held (never written over it; the file's once it lifts as not there or torn)
+  let tokenHeld = null;    // { code, since, torn } — the file could not be read (or its bytes are not a value)
+  {
+    let read;
+    try { read = { text: fs.readFileSync(tokenFile, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { parse: parseToken, valid: TOKEN_SHAPE });
+    if (a.state === 'data') token = a.value;
+    else if (a.state === 'missing') {   // a new instance: minted and written before any session is handed it, as the release
+      token = mintToken();
+      try { fs.mkdirSync(path.dirname(tokenFile), { recursive: true }); fs.writeFileSync(tokenFile, token, { mode: 0o600 }); } catch { }
+    } else {
+      provisional = mintToken();
+      tokenHeld = { code: a.state === 'corrupt' ? 'torn bytes' : SR.codeOf(a.error), since: Date.now(), torn: a.state === 'corrupt' };
+      tokenLog(`otel-token ${a.state === 'corrupt' ? 'is not a sign-in value (torn bytes) — held while they are kept aside' : `could not be read (${tokenHeld.code}) — held: nothing is written over it, it is read again off the main loop`}; sessions started meanwhile carry this run's own value`);
+    }
   }
+  // THE SIGN-IN VALUE's READ AGAIN (its own small hold, the family's rules)
+  let tTries = 0, tTimer = null, tBusy = false, tMissingAt = 0, tWaiting = 0, tWaitSaid = false, tNextAt = 0, tEmptyOnce = false;
+  const tLifts = new Set();   // the held list's lift signal
+  const SLOW = Symbol('a read past its bound');
+  function tokenArm() {
+    if (tTimer || !tokenHeld) return;
+    const ms = SR.retryDelay(++tTries);
+    tNextAt = Date.now() + ms;
+    tTimer = setTimeout(() => { tTimer = null; tokenAgain().catch((e) => { tokenLog(`otel-token: a read again failed (${(e && e.message) || e})`); tokenArm(); }); }, ms);
+    if (tTimer.unref) tTimer.unref();
+  }
+  /** ONE read again of the sign-in value, off the loop → true when its hold lifted */
+  async function tokenAgain() {
+    if (!tokenHeld) return false;
+    tokenArm();   // the next try armed FIRST: a try that meets one in flight, a read that hangs, or a read that fails never ends the tries
+    if (tBusy) return false;
+    tBusy = true;
+    const p = fs.promises.readFile(tokenFile).then((buf) => ({ text: buf.toString('utf8'), buf }), (error) => ({ error }));
+    let tm = null;
+    const first = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r(SLOW), tokenReadMs); if (tm.unref) tm.unref(); })]);
+    clearTimeout(tm);
+    if (first !== SLOW) return tokenJudge(first);
+    tWaiting = Date.now();
+    if (!tWaitSaid) { tWaitSaid = true; tokenLog(`otel-token: a read again has not answered in ${tokenReadMs / 1000} s — its answer is used the moment it comes; no second read starts meanwhile`); }
+    p.then((late) => tokenJudge(late)).catch((e) => { tBusy = false; tokenLog(`otel-token: its late answer could not be judged (${(e && e.message) || e})`); });
+    return false;
+  }
+  /** torn is a verdict about the FILE: a second look (its size and its bytes) agrees → the file's bytes, else null (a failed read) */
+  async function tokenFileConfirms(buf) {
+    try {
+      if (!Buffer.isBuffer(buf)) return null;
+      const st = await fs.promises.stat(tokenFile);
+      if (!st.isFile() || st.size !== buf.length) return null;
+      const again = await fs.promises.readFile(tokenFile);
+      return again.length === st.size && again.equals(buf) ? again : null;
+    } catch { return null; }
+  }
+  /** the torn bytes kept aside ONCE: 0600 from the first byte, an exclusive name (never over another copy) → its base name, or null */
+  async function tokenKeepAside(buf) {
+    for (let k = 0; k < 5; k++) {
+      const to = `${tokenFile}.corrupt-${Date.now()}${k ? '-' + k : ''}`;
+      try { await fs.promises.writeFile(to, buf, { mode: 0o600, flag: 'wx' }); return path.basename(to); }
+      catch (e) { if (!e || e.code !== 'EEXIST') { await fs.promises.unlink(to).catch(() => { }); return null; } }   // a part of ours is never left at a copy's name
+    }
+    return null;
+  }
+  /** one read's answer (a try's, or a late one's) — lifts the hold, or keeps it; the read's turn ends here */
+  async function tokenJudge(r) {
+    let lifted = null;   // { value, write } — the file's value from now on
+    try {
+      tWaiting = 0;
+      if (!tokenHeld) return false;
+      const a = SR.storeAnswer(r, { parse: parseToken, valid: TOKEN_SHAPE });
+      if (a.state === 'unreadable') { tokenHeld.code = SR.codeOf(a.error); tMissingAt = 0; tEmptyOnce = false; return false; }
+      if (a.state === 'missing' && !tMissingAt) { tMissingAt = Date.now(); return false; }   // «not there» right after an unread answer: read once more first
+      if (a.state === 'data') lifted = { value: a.value, write: false };
+      else if (a.state === 'missing') lifted = { value: provisional, write: true };
+      else {
+        const fileBytes = await tokenFileConfirms(r.buf);
+        if (!tokenHeld) return false;
+        if (!fileBytes) { tokenHeld.code = 'a read unlike the file'; return false; }
+        if (fileBytes.length === 0 && !tEmptyOnce) { tEmptyOnce = true; tokenHeld.code = 'empty, read once more'; return false; }
+        const kept = await tokenKeepAside(fileBytes);
+        if (!tokenHeld) return false;
+        if (!kept) { tokenHeld.code = 'torn bytes, not copied'; return false; }   // the hold stands: the file is their only copy
+        tokenHeld.copy = kept;
+        lifted = { value: provisional, write: true };
+      }
+    } finally { if (!lifted) tBusy = false; }
+    const was = tokenHeld;
+    token = lifted.value; tokenHeld = null; tTries = 0; tMissingAt = 0; tWaitSaid = false; tNextAt = 0; tEmptyOnce = false; tBusy = false;
+    if (tTimer) { clearTimeout(tTimer); tTimer = null; }
+    if (lifted.write) {   // this life's value becomes the file's — through the store writer, 0600 (sessions started meanwhile already carry it)
+      try { W().dirty(tokenFile, { name: 'otel-token.write', rank: 0, mode: 0o600, makeDir: true, produce: () => token }); }
+      catch (e) { tokenLog(`otel-token: its value could not be handed to the store writer (${(e && e.message) || e}) — this run keeps it`); }
+    }
+    tokenLog(`otel-token read again (held since ${new Date(was.since).toISOString()}, ${was.code}): ${lifted.write ? (was.copy ? `its torn bytes kept aside as ${was.copy} — this run's value is the file's now` : 'not there twice — this run\'s value is the file\'s now') : 'the file\'s value is back — sessions started meanwhile keep this run\'s'}`);
+    for (const fn of [...tLifts]) { try { fn(); } catch { /* a listener's own */ } }
+    return true;
+  }
+  if (tokenHeld) { if (tokenHeld.torn) Promise.resolve().then(tokenAgain).catch((e) => { tokenLog(`otel-token: a read again failed (${(e && e.message) || e})`); tokenArm(); }); else tokenArm(); }
+  /** the sign-in value's hold as the family's held list reads an older hold (src/server/held-lists.js `older`): facts, read again, lift */
+  const tokenRow = Object.freeze({
+    key: 'otel-token',
+    facts: () => (tokenHeld ? { since: tokenHeld.since, next: tNextAt || null } : null),
+    readAgain: () => tokenAgain(),
+    onLift: (fn) => { if (typeof fn !== 'function') return false; tLifts.add(fn); return true; },
+  });
   let gate403 = 0;
   const file = path.join(dataDir, 'usage-history', 'otel-truth.ndjson');
   // usage-cpu U4 — THE SPILL: a post that arrives before the replay ended WAITS for it (its dedupe reads the replayed map), and
@@ -386,7 +503,8 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   function gate(req) {
     const a = req.socket?.remoteAddress || '';
     const loop = a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1';
-    if (loop && sameToken(req.headers['x-vibespace-otel'], token)) return true;
+    if (loop && token && sameToken(req.headers['x-vibespace-otel'], token)) return true;
+    if (loop && provisional && sameToken(req.headers['x-vibespace-otel'], provisional)) return true;   // B-f276 unit 2: this run's own value, the file held when it began
     // A rejected LOOPBACK post is a broken truth stream (stale env after a
     // token file wipe) — say so once instead of dying silently.
     if (loop && ++gate403 === 1) console.warn('[otel] rejecting loopback OTLP posts (token mismatch) — a session is exporting with a stale token');
@@ -443,7 +561,7 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
         OTEL_LOGS_EXPORTER: 'otlp',
         OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
         OTEL_EXPORTER_OTLP_ENDPOINT: `http://127.0.0.1:${PORT}/otel`,
-        OTEL_EXPORTER_OTLP_HEADERS: 'x-vibespace-otel=' + token,
+        OTEL_EXPORTER_OTLP_HEADERS: 'x-vibespace-otel=' + (token || provisional),   // the file's value; while the file is held, this run's own (B-f276 unit 2)
         OTEL_LOGS_EXPORT_INTERVAL: '5000',
       };
     },
@@ -459,7 +577,10 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     replayed,
     /** The newest api_request instant (ms) this conversation's CLI exported, or null (lane-dead-bridge's witness). */
     lastApiRequestAt(sid) { return (sid && lastApi.get(sid)) || null; },
-    stats() { return { rids: truth.size, unknownOrgs: [...unknownOrgs.entries()], ...arrivals }; },
+    stats() { return { rids: truth.size, unknownOrgs: [...unknownOrgs.entries()], ...arrivals, ...(tokenHeld ? { tokenHeld: { code: tokenHeld.code, since: tokenHeld.since, ...(tWaiting ? { waiting: tWaiting } : {}) } } : {}) }; },   // B-f276 unit 2: the sign-in value held (never its value)
+    /** B-f276 family unit 2: the sign-in value's hold as a row of the family's held list, and its read again (a person's press, a suite) */
+    tokenRow,
+    readTokenAgain: () => tokenAgain(),
     /** All /otel routes + a read-only stats view. The stats endpoint exists so
      *  a test (or a human) can tell "the CLI exported nothing here" from "we
      *  dropped what it sent" — the distinction the CI gate needs. */

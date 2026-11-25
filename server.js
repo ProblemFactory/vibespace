@@ -1246,6 +1246,7 @@ const { resumeRoad, settingHolds, decisionEngine, mounts, plugins, dialBridge, g
   auth, wss, WS_OPEN, syncStores, agentdDialDevices, deliveryWakeDeps: () => ({ spendGuard, identityOf: fireIdentityFor, quotaVerdictFor, usageCacheKeyFor, getStashHandover: () => stashView, jobGrantOf: (id) => { try { return jobsWiring.jm.wakeGrantOf(id); } catch { return { granted: false }; } }, jobs: () => jobsWiring.jm }), getAccounts: () => accounts, getChannels: () => channelsWiring.channels, // + lane vault-contents-window: the Vault window lists these two stores
   bcastAll: (...a) => bcastAll(...a), serverNotice: (...a) => serverNotice(...a), // + agent browser P1: the keeper's runaway/ceiling notices
   serverSetting: (...a) => serverSetting(...a),
+  otelTokenRow: otelIngest.tokenRow,   // B-f276 family unit 2: the OTel sign-in value's hold on the held list
   mountTokens, persistenceRouter, hosts,
   agentdDials, agentdHostToken,
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
