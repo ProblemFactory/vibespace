@@ -2325,6 +2325,7 @@ class StateSync {
       else if (msg.type === 'state-snapshot') this._applySnapshot(msg.store, msg.data, msg.version, msg);
       else if (msg.type === 'state-held') this._applyUnread(msg.store, msg);   // lane lg-recovery (r3262 / r3271): the hub cannot read the store
       else if (msg.type === 'state-held-putback') this._applyHeldPutback(msg.store, msg);   // r3890 A: Stop's put-back while the store is held
+      else if (msg.type === 'state-restore-refused') this._applyRestoreRefused(msg.store, msg);   // law (E), r4040: the hub kept a newer write
     };
     wsManager.onGlobal(this._globalHandler);
     // On reconnect, request missed ops for all stores
@@ -2393,6 +2394,28 @@ class StateSync {
       s.data[key] = value;
       this.ws.send({ type: 'state-set', store: storeName, key, value, basedOn: s.version });
     }
+  }
+
+  /** LAW (E) (r4040): the rollback re-push of ONE unit, sent AS A RESTORE — the hub applies it only to a key nothing has written or
+   *  cleared in its life, else answers `state-restore-refused` with its value. An own set as far as the arrival rule goes */
+  _restore(storeName, key, value) {
+    const s = this.stores[storeName];
+    if (!s || s.unread || value == null || value === '') return;   // a restore never carries absence
+    s.pending.set(key, (s.pending.get(key) || 0) + 1);
+    s.data[key] = value;
+    this.ws.send({ type: 'state-set', store: storeName, key, value, basedOn: s.version, restore: true });
+  }
+  /** the hub refused a restore (law (E) 4): this page takes the hub's value for that key — unless an own later set of it is still
+   *  out (a write: the hub takes it). The value is the hub's latest for the key, so the ops queued behind the restore are older */
+  _applyRestoreRefused(storeName, msg) {
+    const s = this.stores[storeName];
+    if (!s || !msg || typeof msg.key !== 'string') return;
+    const n = (s.pending.get(msg.key) || 0) - 1;
+    if (n > 0) { s.pending.set(msg.key, n); return; }
+    s.pending.delete(msg.key);
+    s.held.delete(msg.key);
+    if (msg.value === undefined || msg.value === null || msg.value === '') delete s.data[msg.key]; else s.data[msg.key] = msg.value;
+    this._notify(s, msg.key, s.data[msg.key] === undefined ? '' : s.data[msg.key]);
   }
 
   // Listen for changes to a specific key (or '*' for all keys in a store)
@@ -2558,14 +2581,16 @@ class StateSync {
     // the RELEASE's rollback defense, for a page that had seen the data (r3972 — a torn lift at version 1, a save that never reached the
     // file): its view is the newer truth and is pushed again; a unit changed while unread is left to rule (C) above (text) or was said
     // not kept (structured): never pushed twice
+    // LAW (E) (r4040): each unit goes AS A RESTORE, which never beats a write — the hub applies it only to a key nothing has written or
+    // cleared in its life (a page that wakes late meets the newer writes: refused, it takes the hub's value); a key this page LACKS is
+    // not pushed at all (it never restores absence)
     if (rolledBack && sawBefore) {
-      for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {
+      for (const key of oldKeys) {
         if (sent.has(key) || (typed && typed.has(key)) || (changed && changed.has(key))) continue;
-        const localVal = oldData[key] ?? '';
-        const serverVal = s.data[key] ?? '';
-        // set() mutates s.data + sends state-set, so the notify loop below
-        // already sees the restored values.
-        if (JSON.stringify(localVal) !== JSON.stringify(serverVal)) this.set(storeName, key, localVal);
+        const localVal = oldData[key];
+        if (localVal === undefined || localVal === '') continue;
+        // _restore() mutates s.data, so the notify loop below already sees the restored values
+        if (JSON.stringify(localVal) !== JSON.stringify(s.data[key] ?? '')) this._restore(storeName, key, localVal);
       }
     }
     // Notify for all changed keys — a joined text unit rides as a PREFIX (the composer lands it in front of its live box)

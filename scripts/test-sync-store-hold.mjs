@@ -41,6 +41,10 @@
 //      all the same (RED: a page copy that drops the whole reply as old)
 //   ⑲ A PAGE THAT CONNECTS WHILE HELD takes the owed words (the hub's copy leaves); the owed list keeps at most 20, the oldest
 //      dropped, said (RED: copies that never hand at a start / keep no bound)
+//   ⑳ LAW (E) (r4040), A RESTORE NEVER BEATS A WRITE, AND THE HUB DECIDES: a page that wakes late after a torn lift restores nothing
+//      over the other page's hour of work (a draft rewritten, one sent, a new one — never deleted: a page never restores absence),
+//      and is answered with the hub's value; at the lift, a page's held-time text and an idle page's restore meet in BOTH orders
+//      of arrival (placed): the typed words stand (RED: today's blind set, a page copy; and a hub copy that does not decide)
 // Run: node scripts/test-sync-store-hold.mjs
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -113,10 +117,13 @@ function world(name, { torn = false, readable = false, Store = SyncStore, cls = 
   const page = (pname) => {
     const globals = [], states = [], sent = [], heard = [];
     const sock = { name: pname, readyState: 1, send(m) { const x = JSON.parse(m); heard.push(x); for (const h of globals) h(x); } };
-    const wm = { onGlobal: (h) => globals.push(h), onStateChange: (h) => states.push(h), send: (d) => { sent.push(JSON.parse(S(d))); if (sock.readyState === 1) handle(JSON.parse(S(d)), sock); } };
+    let queued = null;   // ⑳: while held, this page's sends wait — released in a placed order (two pages' arrivals at the hub)
+    const deliver = (d) => { sent.push(JSON.parse(S(d))); if (sock.readyState === 1) handle(JSON.parse(S(d)), sock); };
+    const wm = { onGlobal: (h) => globals.push(h), onStateChange: (h) => states.push(h), send: (d) => { if (queued) queued.push(d); else deliver(d); } };
     wss.clients.add(sock);
     const sync = new StateSync(wm);
-    return { sock, sync, sent, heard, handle: (d) => handle(d, sock), reconnect: () => { sock.readyState = 1; for (const h of states) h(true); }, drop: () => { sock.readyState = 3; for (const h of states) h(false); } };
+    return { sock, sync, sent, heard, handle: (d) => handle(d, sock), reconnect: () => { sock.readyState = 1; for (const h of states) h(true); }, drop: () => { sock.readyState = 3; for (const h of states) h(false); },
+      hold: () => { queued = queued || []; }, release: () => { const q = queued || []; queued = null; for (const d of q) deliver(d); } };
   };
   const restart = () => { const old = stores[name]; if (old && old._hold) old._hold.stop(); stores[name] = new Store(name, file, wss, { saveDelay: 20 }); return stores[name]; };   // (a restart: the old process's hold ends with it)
   return { dir, file, bytes, get store() { return stores[name]; }, stores, page, wss, restart };
@@ -599,6 +606,79 @@ const boundScene = async (Store, tag) => {
   const NOBOUND = M.load('src/sync-store.js', anchored(SRC, '    if (this._owed.length > OWED_MAX) {', '    if (false) {', 'no-bound'), 'no-bound').SyncStore;
   const BX = await boundScene(NOBOUND, 'nobound');
   ok(BX.owed === 21, `CONTROL (a hub copy with no bound): 21 owed (red) (${S(BX)})`);
+}
+
+console.log('⑳ LAW (E) (r4040) — a restore never beats a write, and the hub decides');
+const KK = 'chat:sess-a', LL = 'chat:sess-b', MM = 'chat:sess-m';
+const BLIND = anchored(anchored(anchored(CLASS,
+  '      for (const key of oldKeys) {\n', '      for (const key of new Set([...oldKeys, ...Object.keys(s.data)])) {\n', 'blind-a'),   // stale-pins: kept — the red copy's own text (today's blind set), meant to be absent
+  "        const localVal = oldData[key];\n        if (localVal === undefined || localVal === '') continue;\n", "        const localVal = oldData[key] ?? '';\n", 'blind-b'),   // stale-pins: kept — the red copy's own text (today's blind set), meant to be absent
+  'this._restore(storeName, key, localVal);', 'this.set(storeName, key, localVal);', 'blind-c');   // stale-pins: kept — the red copy's own text (today's blind set), meant to be absent (as at 0ead09fad)
+const UNDECIDED = () => M.load('src/sync-store.js', anchored(SRC, "    if (value != null && value !== '' && !this._lifeWrites.has(key)) { this.set(key, value, senderWs, basedOn); return 'applied'; }", "    if (value != null && value !== '') { this.set(key, value, senderWs, basedOn); return 'applied'; }", 'undecided'), 'undecided').SyncStore;
+const box3 = (p) => ({ K: p.sync.get('drafts', KK), L: p.sync.get('drafts', LL), M: p.sync.get('drafts', MM) });
+const sceneOne = async (cls, Store, tag) => {   // B open at a torn lift, A's socket down (a closed laptop); an hour on B; A wakes
+  const T = world('drafts', { readable: true, cls, Store });
+  const A = T.page('one-a-' + tag), B = T.page('one-b-' + tag);
+  await A.sync.init('drafts'); await B.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await sleep(5);   // held: both unread
+  A.drop();
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+  await T.store._hold.again(); await until(() => T.store.get(KK) === SAVED, 500);   // the torn lift: B restores the drafts it saw
+  const restoredByB = T.store.get(KK) === SAVED && T.store.get(LL) === MADE.drafts.data[LL];
+  B.sync.set('drafts', KK, 'K rewritten on B'); B.sync.set('drafts', LL, ''); B.sync.set('drafts', MM, 'M typed on B');
+  A.reconnect();                                                   // A wakes: still unread — the whole snapshot, with the fresh mark
+  await until(() => A.sync.stores.drafts && !A.sync.stores.drafts.unread && A.sync.stores.drafts.pending.size === 0, 500);
+  await until(() => { const d = disk(T.file); return !!(d && d.data && d.data[MM] === T.store.get(MM) && d.data[KK] === T.store.get(KK)); }, 500);
+  const d = disk(T.file) || { data: {} };
+  const out = { restoredByB, hub: { K: T.store.get(KK), L: T.store.get(LL), M: T.store.get(MM) }, disk: { K: d.data[KK], L: d.data[LL], M: d.data[MM] }, boxB: box3(B), boxA: box3(A),
+    refused: A.heard.filter((m) => m.type === 'state-restore-refused').map((m) => m.key).sort(), aPushedM: setsOf(A, MM).length };
+  T.store._hold.stop();
+  return out;
+};
+const sceneTwo = async (cls, Store, tag, first) => {   // at the lift: B typed K while held (rule (C)); idle A restores the old K
+  const T = world('drafts', { readable: true, cls, Store });
+  const A = T.page('two-a-' + tag), B = T.page('two-b-' + tag);
+  await A.sync.init('drafts'); await B.sync.init('drafts');
+  REFUSE.add(T.file); T.restart(); A.drop(); B.drop(); A.reconnect(); B.reconnect(); await sleep(5);
+  const TYPED = SAVED + ' — and the words B typed while held';
+  B.sync.set('drafts', KK, TYPED);
+  fs.writeFileSync(T.file, TORN_BYTES); REFUSE.delete(T.file);
+  A.hold(); B.hold();
+  await T.store._hold.again();                                     // the lift's snapshot reaches both; each page's answer waits
+  for (const p of (first === 'B' ? [B, A] : [A, B])) p.release();  // the two arrivals PLACED at the hub in this order
+  await until(() => [A, B].every((p) => p.sync.stores.drafts.pending.size === 0), 500);
+  const second = first === 'B' ? A : B;
+  const out = { TYPED, hub: T.store.get(KK), boxA: A.sync.get('drafts', KK), boxB: B.sync.get('drafts', KK),
+    secondRefusedL: second.heard.some((m) => m.type === 'state-restore-refused' && m.key === LL), hubL: T.store.get(LL) };
+  T.store._hold.stop();
+  return out;
+};
+{
+  const E1 = await sceneOne(CLASS, SyncStore, 'real');
+  ok(E1.restoredByB, 'scene one: at the torn lift the open page B restores the drafts it saw (nothing was written in the new life)');
+  ok(E1.hub.K === 'K rewritten on B' && E1.hub.L === undefined && E1.hub.M === 'M typed on B' && S(E1.disk) === S(E1.hub) && S(E1.boxB) === S(E1.hub),
+    `scene one: page A wakes late with the fresh mark — B's hour stands on the hub, in the file and in B's box: K rewritten, L sent, M new (${S(E1.hub)})`);
+  ok(S(E1.boxA) === S({ K: 'K rewritten on B', L: undefined, M: 'M typed on B' }) && E1.refused.includes(KK) && E1.refused.includes(LL),
+    `…A's restores of K and L are REFUSED (written in this life) and A then shows the hub's values (${S(E1.refused)}; A ${S(E1.boxA)})`);
+  ok(E1.aPushedM === 0, 'a page never restores ABSENCE: A lacks M and pushes nothing for it');
+  const E1X = await sceneOne(BLIND, SyncStore, 'blind');
+  ok(E1X.hub.K === SAVED || E1X.hub.M === undefined, `CONTROL (today's blind set, a page copy): A's old copy is written over B's hour — K back to the old text, M deleted (red) (${S(E1X.hub)})`);
+  const E1H = await sceneOne(CLASS, UNDECIDED(), 'undecided');
+  ok(E1H.hub.K === SAVED, `CONTROL (a hub copy that applies every restore): the hub does not decide — K back to A's old text (red) (${S(E1H.hub)})`);
+  for (const first of ['A', 'B']) {
+    const E2 = await sceneTwo(CLASS, SyncStore, 'real-' + first, first);
+    ok(E2.hub === E2.TYPED && E2.boxA === E2.TYPED && E2.boxB === E2.TYPED, `scene two, ${first === 'A' ? "A's restore" : "B's typed text"} arriving FIRST: B's typed words stand on the hub and on both pages (${S(E2.hub)})`);
+    ok(E2.secondRefusedL && E2.hubL === MADE.drafts.data[LL], `…the key both pages restore (L): the first applies, the second page's restore is refused (an applied restore is a write)`);
+  }
+  const E2X = await sceneTwo(BLIND, SyncStore, 'blind-B', 'B');
+  // every store keeps the set, a MIRROR with no file too (a subclass's: the grants, the feedback) — its writes and restores
+  const mirrorScene = (Store) => { try { const X = new Store('mirror', null, { clients: new Set() }); X.set('a', 'written'); const r1 = X.restore('a', 'old', null), r2 = X.restore('b', 'kept', null); return { a: X.get('a'), b: X.get('b'), r1, r2 }; } catch (e) { return { threw: String(e && e.message) }; } };
+  const MR = mirrorScene(SyncStore);
+  ok(MR.a === 'written' && MR.b === 'kept' && MR.r1 === 'refused' && MR.r2 === 'applied', `a store with NO file (a mirror) takes its writes and decides its restores (${S(MR)})`);
+  const NOTMIRROR = M.load('src/sync-store.js', anchored(SRC, "    this._lifeWrites = new Set();\n    if (this.filePath) this._load();\n", "    if (this.filePath) { this._load(); this._lifeWrites = new Set(); }\n", 'set-with-file-only'), 'set-with-file-only').SyncStore;
+  const MX = mirrorScene(NOTMIRROR);
+  ok(!!MX.threw, `CONTROL (a hub copy that keeps the set only for a store with a file): a mirror's first write throws (red) (${S(MX)})`);
+  ok(E2X.hub === SAVED, `CONTROL (today's blind set), B's text first and A's old copy last: B's typed words gone from the hub (red) (${S(E2X.hub)})`);
 }
 
 for (const s of [W]) { REFUSE.delete(s.file); if (s.store._hold) s.store._hold.stop(); }

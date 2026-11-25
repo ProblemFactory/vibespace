@@ -2118,7 +2118,9 @@ function registerWsHandler(wss, ctx) {
             // before that client saw it (an autosave in flight) — the stored value keeps the put-back in front of it
             const belt = data.store === 'drafts' && data.key.startsWith('chat:') ? activeSessions.get(data.key.slice(5))?._putbackBelt : null;
             const value = belt ? putbackBelt(belt, data.value, data.basedOn) : data.value;
-            if (value == null || value === '') store.delete(data.key, ws, data.basedOn);
+            // law (E) (r4040): a page's rollback re-push is a RESTORE — the store decides (never over a key written in its life)
+            if (data.restore === true && typeof store.restore === 'function') store.restore(data.key, value, ws, data.basedOn);
+            else if (value == null || value === '') store.delete(data.key, ws, data.basedOn);
             else store.set(data.key, value, ws, data.basedOn); // answered to the sender (state-ack), stamped from + basedOn (lane statesync-last-arrival)
             // lane worker-dispatch verify r2 ①: a non-empty chat draft is a PERSON composing a reply (not yet sent, so
             // _userInputAt is stale) — stamp it so a dispatch never compacts a worker whose owner is mid-draft.

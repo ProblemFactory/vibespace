@@ -71,6 +71,9 @@ class SyncStore {
     this.data = {};
     this._saveTimer = null;
     this.clientWrites = clientWrites !== false;
+    // LAW (E) (r4040): the keys WRITTEN or CLEARED in this life of the hub (since its start or its lift) — a page's restore of one
+    // is refused; in memory, small, gone at a restart (a new life has no writes yet). Every store has it, a mirror with no file too
+    this._lifeWrites = new Set();
     if (this.filePath) this._load();
   }
 
@@ -126,6 +129,7 @@ class SyncStore {
     this.ops = [];
     const owed = this._owed || []; this._owed = null;
     if (facts && facts.setAside) { this.version++; this._scheduleSave(); }   // torn bytes now kept aside: the file is written whole
+    this._lifeWrites = new Set();   // law (E): a lift begins a life — nothing is written in it yet (the owed put-backs below are its first writes)
     // `fresh`: no data came from the file (gone, or torn and set aside) — its counter began again: no page's last version is this one (r3972);
     // kept for this process, so a page still unread that missed this snapshot is told the same at its resync
     this._freshLife = !(v && v.data);
@@ -215,6 +219,7 @@ class SyncStore {
   // `state-set` passes none. The op rides the ring whole, so a reconnecting client's replay keeps the stamp.
   set(key, value, senderWs, basedOn, extra) {
     if (this._hold && this._hold.held()) { this._whileHeld(key, senderWs, value, extra); return; }
+    this._lifeWrites.add(key);
     this.version++;
     this.data[key] = value;
     const op = { version: this.version, op: 'set', key, value, ...this._stamp(senderWs, basedOn), ...(extra && typeof extra === 'object' ? extra : {}) };
@@ -226,6 +231,7 @@ class SyncStore {
 
   delete(key, senderWs, basedOn) {
     if (this._hold && this._hold.held()) { this._whileHeld(key, senderWs); return; }
+    this._lifeWrites.add(key);   // a clear is a write of the key (law (E)): a page's later restore of it is refused
     if (!(key in this.data)) { this._ack(key, senderWs); return; } // nothing to delete — still answered (the store's version), so the sender's set never waits
     this.version++;
     delete this.data[key];
@@ -234,6 +240,19 @@ class SyncStore {
     this._scheduleSave();
     this._broadcast(op, senderWs);
     this._ack(key, senderWs);
+  }
+
+  /** LAW (E) (r4040), A RESTORE NEVER BEATS A WRITE, AND THE HUB DECIDES: a page's rollback re-push arrives as a RESTORE. It is
+   *  applied only to a key nothing has written or cleared in this life of the hub (decided here, at its arrival, never by the page's
+   *  view), and an applied restore is a write (a second page's restore of the key is refused). A refused one is answered
+   *  `state-restore-refused { store, key, version, value? }`, so that page takes the hub's value; a restore never carries absence */
+  restore(key, value, senderWs, basedOn) {
+    if (this._hold && this._hold.held()) { this._whileHeld(key, senderWs, value); return 'held'; }
+    if (value != null && value !== '' && !this._lifeWrites.has(key)) { this.set(key, value, senderWs, basedOn); return 'applied'; }
+    if (senderWs && senderWs.readyState === 1) {
+      try { senderWs.send(JSON.stringify({ type: 'state-restore-refused', store: this.name, key, version: this.version, ...(key in this.data ? { value: this.data[key] } : {}) })); } catch { }
+    }
+    return 'refused';
   }
 
   _stamp(senderWs, basedOn) {
