@@ -125,6 +125,7 @@ class Auth {
     if (this._held && this._held.idUnread) {
       const was = this._idWas || { auth: 'missing', table: null };
       const v = SW.verdictOf({ auth: was.auth, dataLink: f.dataLink, instance: f.instance, found: f.found, dataDir: this._dataDir });
+      const idHold = this._held;   // 主开发 r3774: restored if the start's tail below throws — never an open instance without the start's own word
       this._held = null;
       if (v.hold) { this._hold(v.hold.why, v.hold.kind, v.hold); return; }   // the folder's own rule, now that the id is known
       // 主开发 r3629 (round w43tjwjp5, must 1): THE SAME TAIL the start runs after its verdict — a start held by the id BEFORE that tail never
@@ -133,11 +134,13 @@ class Auth {
         if (!f.startNew) { if (this._idEnsure && !this._netEnsure) { this._netEnsure = this._idEnsure; this._idEnsure = null; } this._checkHome(was.auth, was.table); return; }
         this._startNewUsed = true;
       }
-      this._state = was.auth === 'off' ? was.table : null;
-      if (this._state) this._tokensTail();   // the off table's own tail at the start (its migration)
-      try { console.warn(`[auth] the data folder's own id file reads again (${f.instance ? f.instance.id : 'none'}): no sign-in witness names another folder — the instance opens as it would have`); } catch { }
-      this._afterLoad();
-      this._replayEnsure();   // r3629 (musts 2, 3): the boot's own password road, from the id's hold or the network home's, replayed once
+      try {
+        this._state = was.auth === 'off' ? was.table : null;
+        if (this._state) this._tokensTail();   // the off table's own tail at the start (its migration)
+        try { console.warn(`[auth] the data folder's own id file reads again (${f.instance ? f.instance.id : 'none'}): no sign-in witness names another folder — the instance opens as it would have`); } catch { }
+        this._afterLoad();
+        this._replayEnsure();   // r3629 (musts 2, 3): the boot's own password road, from the id's hold or the network home's, replayed once
+      } catch (e) { this._liftFailed(idHold, e); }
       return;
     }
     if (!this._held) this._afterLoad();   // the start opened: what it skipped while the id was unknown
@@ -328,14 +331,28 @@ class Auth {
     n.done = true; n.answer = a; if (n.timer) { clearTimeout(n.timer); n.timer = null; }
     if (a.found) f.found = [...(f.found || []), a.found];   // MARKED net (SW.netAnswerOf): the local writer never takes it
     const v = SW.verdictOf({ auth: n.was, dataLink: f.dataLink, instance: f.instance, idUnread: f.idUnread, found: f.found, dataDir: this._dataDir });
+    const netHold = this._held;   // 主开发 r3774: restored if the start's tail below throws (as the id's lift)
     this._held = null;
     if (v.hold && v.hold.idUnread && this._netEnsure) { this._idEnsure = this._netEnsure; this._netEnsure = null; }   // r3629 (musts 2, 3): held by the id now — its lift replays the boot's road
     if (v.hold) { this._hold(v.hold.why, v.hold.kind, v.hold); return; }   // the folder's own rule (r2869 (3))
-    this._state = n.was === 'off' ? n.table : null;
-    if (this._state) this._tokensTail();   // r3629's walk: the off table's own tail at the start (its migration), as the id's lift does
-    if (past) { try { console.warn(`[auth] the home folder ${f.netHome} answered: no sign-in witness of another folder there — the instance opens as it would have`); } catch { } }
-    this._afterLoad();
-    this._replayEnsure();   // the boot's own password road, held until the answer (server.js asked it while this was checking) — the one replay
+    try {
+      this._state = n.was === 'off' ? n.table : null;
+      if (this._state) this._tokensTail();   // r3629's walk: the off table's own tail at the start (its migration), as the id's lift does
+      if (past) { try { console.warn(`[auth] the home folder ${f.netHome} answered: no sign-in witness of another folder there — the instance opens as it would have`); } catch { } }
+      this._afterLoad();
+      this._replayEnsure();   // the boot's own password road, held until the answer (server.js asked it while this was checking) — the one replay
+    } catch (e) { this._liftFailed(netHold, e); }
+  }
+  /** 主开发 r3774: A LIFT WHOSE START TAIL THREW (the migration's save, the id's write, the boot's password road) — the hold it cleared is put
+   *  back, its words kept and its journal naming the failure: never an instance left open without the start's own word. A generated
+   *  password that could not be saved is not kept in memory (nobody was told it): the next start makes and says a new one */
+  _liftFailed(hold, e) {
+    const code = String((e && (e.code || e.message)) || e).slice(0, 120);
+    const lost = e && e.generatedLost ? ' — a generated password could not be saved and is not kept: the next start makes and says a new one' : '';
+    const why = `${(hold && hold.why) || 'the sign-in'} — after it lifted, the start's own sign-in step could not finish (${code})${lost}; held until VibeSpace restarts`;
+    // a «checking» hold is put back as the home's (its look is over: «checking» would never end, and says nothing in the journal)
+    this._hold(why, hold && hold.kind && hold.kind !== 'checking' ? hold.kind : 'home', hold ? { ...hold, files: hold.witnesses || [] } : null);
+    try { console.error(`[auth] ${why}`); } catch { }   // said by name, whatever the kind's own journal does
   }
   /** H1: THE NETWORK HOME's COPY, kept like the others but ONLY through the pool (never on the loop): written at a start that is not
    *  held and at every set / import, removed when the sign-in is turned off; a START reads it first and never writes over or removes
@@ -561,7 +578,7 @@ class Auth {
     if (this.passwordEnabled) return {};
     if (generateIfMissing) {
       const pw = crypto.randomBytes(9).toString('base64url'); // 12 chars, url-safe
-      this.setPassword(pw);
+      try { this.setPassword(pw); } catch (e) { throw Object.assign(e || new Error('the password could not be set'), { generatedLost: true }); }   // r3774: a lift holds on it; a boot fails
       return { generated: pw };
     }
     return {};

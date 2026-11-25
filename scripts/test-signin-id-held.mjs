@@ -205,17 +205,22 @@ console.log('⑧ 主开发 r3629 (round w43tjwjp5): THE LIFT REPLAYS THE START\'
   const withEnv = async (k, v, fn) => { const was = process.env[k]; process.env[k] = v; try { return await fn(); } finally { if (was === undefined) delete process.env[k]; else process.env[k] = was; } };
   const ID = 'vi-0c0c0c0c0c0c', OTHER = 'vi-0d0d0d0d0d0d';
   /** a start on a network home, the id file refused at the start and read again after: `local` = the folder's own local witness, `net` = the home's copy's id */
-  const scene = async (name, { local = false, net = ID, A0 = Auth, ensure = {}, cfg = {}, startNew = false, table = null, refuse = true } = {}) => {
-    const it = install(name); fs.writeFileSync(it.id, J({ v: 1, id: ID, createdAt: 1 }));
+  const scene = async (name, { local = false, net = ID, A0 = Auth, ensure = {}, cfg = {}, startNew = false, table = null, refuse = true, poolOf = null, brk = null, torn = false, between = null, settled = null } = {}) => {
+    const it = install(name); fs.writeFileSync(it.id, torn ? '{"v":1,"id":"vi-0c0c' : J({ v: 1, id: ID, createdAt: 1 }));   // torn: a PLACED torn file (its read is «corrupt»)
     if (table) fs.writeFileSync(it.auth, J(table));
     if (local) { fs.mkdirSync(path.dirname(varWitness(it)), { recursive: true, mode: 0o700 }); fs.writeFileSync(varWitness(it), docOf(it, ID)); }
     if (startNew) fs.writeFileSync(path.join(it.data, SW.START_NEW), '');
-    const pool = homePool(it, net), undo = refuse ? refuseRead(it.id) : () => {};
+    const pool = poolOf ? poolOf(it) : homePool(it, net), undo = refuse && !torn ? refuseRead(it.id) : () => {};
     let a; try { a = quiet(() => { const x = new A0(it.data, { witness: cfgOf(it, { mountinfo: nfs(it), pool, ...quick, ...cfg }) }); x.ensurePassword(ensure); return x; }).v; await until(() => !a.held || a.held.kind !== 'checking', 1500); } finally { undo(); }
     const before = a.held ? { kind: a.held.kind, idUnread: !!a.held.idUnread } : null;
     const said = [], log0 = console.log, warn0 = console.warn; console.log = (...m) => said.push(m.join(' ')); console.warn = (...m) => said.push(m.join(' '));
-    try { if (refuse) await readAgain(a); await until(() => !a.held || (!a.held.idUnread && a.held.kind !== 'checking'), 1500); await a._netWrites; } finally { console.log = log0; console.warn = warn0; }
-    return { it, a, pool, before, after: a.held ? a.held.kind : null, said };
+    const err0 = console.error; console.error = (...m) => said.push(m.join(' '));
+    // r4340 law 1: the wait is ON THE FACT the leg judges (`settled`, else the lift's end), and its expiry is said BY NAME, never a silent read
+    const fact = settled || (() => !a.held || (!a.held.idUnread && a.held.kind !== 'checking'));
+    let reached = true;
+    try { if (brk) brk(a); if (refuse || torn) await readAgain(a); if (between) await between(a, it); reached = await until(() => fact(a, said), 3000); await a._netWrites; } finally { console.log = log0; console.warn = warn0; console.error = err0; }
+    if (!reached) console.log(`  · HARNESS: the scene «${name}» never reached its fact within 3000 ms — its claims below read a state that did not settle`);
+    return { it, a, pool, before, after: a.held ? a.held.kind : null, said, reached };
   };
   // must 1: a LOCAL witness of the folder's id holds the start by the id BEFORE its tail; the network copy names ANOTHER folder
   const m1 = await scene('lift-net-other', { local: true, net: OTHER });
@@ -268,6 +273,46 @@ console.log('⑧ 主开发 r3629 (round w43tjwjp5): THE LIFT REPLAYS THE START\'
     const RI = authCut("      if (this._state) this._tokensTail();   // the off table's own tail at the start", "      // cut   // the off table's own tail at the start", 'id-tokens-cut');
     const r7 = await scene('lift-id-off-tokens-red', { table: OFF, A0: RI });
     ok(r7.after === null && !digested(r7.it), 'RED CONTROL: the id\'s lift without the tail — the plaintext token stays on disk');
+  });
+
+  // 主开发 r3774 (round weec12878's shoulds): THE THREE ORDERS that held by reading only, each its own leg — every fault PLACED, never a clock
+  // (1) the id lifts FIRST (a local witness held it before the tail), THEN the home answers the folder's own id, the start's word set
+  const o1 = await withEnv('VIBESPACE_PASSWORD', 'pw-order-0001', () => scene('order-lift-then-home', { local: true }));
+  ok(!!o1.before && o1.before.idUnread && o1.after === null && o1.a.verifyPassword('pw-order-0001') && api(o1.a).code === 401 && o1.pool.calls.includes('netRead'),
+    `the id lifts first, the home then answers the folder's own id: the start's word applies after BOTH (${o1.pool.calls.join(',')}; ${api(o1.a).code} without a login)`);
+  await red('order-replay-cut', async () => {
+    const RO = authCut("      this._replayEnsure();   // the boot's own password road, held until the answer", "      void 0;   // the boot's own password road, held until the answer", 'order-replay-cut');
+    const r = await withEnv('VIBESPACE_PASSWORD', 'pw-order-0002', () => scene('order-lift-then-home-red', { local: true, A0: RO }));
+    ok(r.after === null && !r.a.passwordEnabled, 'RED CONTROL: the home answer\'s replay cut — after that order the instance OPENS with no sign-in though VIBESPACE_PASSWORD was set');
+  });
+  // (2) the id lifts as TORN bytes while the home is still unanswered (its answer held by a placed gate), then the home answers a witness of the
+  //     folder's OLD id: held «folder», nothing minted over the torn file
+  let open2; const gate2 = new Promise((r) => { open2 = r; });
+  const latePool = (it) => ({ calls: [], call(op, payload = {}) { this.calls.push(op); return op === 'netRead' ? gate2.then(() => ({ file: path.join(payload.path || '', 'signin-net.json'), text: docOf(it, OTHER) })) : Promise.resolve({}); } });
+  const o2 = await scene('order-torn-then-home', { torn: true, poolOf: latePool, between: async (a) => { await until(() => !(a._idHold && a._idHold.held()), 1500); open2(); await until(() => !!a.held && a.held.kind === 'folder', 1500); } });
+  ok(o2.after === 'folder' && !SW.ID_RE.test(String(idNow(o2.it))), `the id lifts as torn bytes (no id) while the home is unanswered; the home then answers a witness of the folder's old id: HELD «${o2.after}», nothing minted over it (${idNow(o2.it)})`);
+  // (3) the id lifts, then the home's copy CANNOT be read (a placed EIO): held «home», asked again — never open
+  const eioPool = (it) => ({ calls: [], call(op, payload = {}) { this.calls.push(op); return Promise.resolve(op === 'netRead' ? { file: path.join(payload.path || '', 'signin-net.json'), code: 'EIO', message: 'the read refused (placed)' } : {}); } });
+  const o3 = await scene('order-lift-then-eio', { local: true, poolOf: eioPool, between: async (a) => { await until(() => !!a.held && a.held.kind === 'home', 1500); await until(() => a._pool && a.held && (a._held && a._held.kind === 'home'), 1500); } });
+  await until(() => o3.pool.calls.filter((c) => c === 'netRead').length >= 2, 1500);
+  ok(o3.after === 'home' && o3.pool.calls.filter((c) => c === 'netRead').length >= 2, `the id lifts, then the home's copy cannot be read: HELD «${o3.after}» and asked again (${o3.pool.calls.filter((c) => c === 'netRead').length} reads) — never open`);
+  // THE HOLD PUT BACK when the start's tail throws after a lift (a PLACED throw), and a generated word that could not be saved is never kept
+  const placed = (code) => () => { throw Object.assign(new Error(`a placed failure (${code})`), { code }); };
+  const failSaid = (code) => (a, said) => said.some((l) => l.includes(`could not finish (${code})`));
+  const t1 = await scene('lift-tail-throws', { brk: (a) => { a._afterLoad = placed('EPLACED'); }, settled: failSaid('EPLACED') });
+  ok(!!t1.before && t1.before.idUnread && t1.after === 'folder' && !!t1.a.held && t1.a.held.idUnread && t1.said.some((l) => /the start's own sign-in step could not finish \(EPLACED\)/.test(l)),
+    `the id's lift: its tail THROWS (placed) — the hold is PUT BACK («${t1.after}»), said by name; never an open instance`, t1.said.filter((l) => /could not finish/.test(l)));
+  const t2 = await scene('home-tail-throws', { local: true, brk: (a) => { a._afterLoad = placed('EPLACED2'); }, settled: failSaid('EPLACED2') });
+  ok(t2.after === 'home' && t2.said.some((l) => /could not finish \(EPLACED2\)/.test(l)), `the home answer's lift: its tail THROWS (placed) — held «${t2.after}» (a look that is over is put back as the home's), said by name`);
+  const t3 = await scene('lift-generate-save-fails', { ensure: { generateIfMissing: true }, brk: (a) => { a._save = placed('ENOSPC'); }, settled: failSaid('ENOSPC') });
+  ok(!!t3.a.held && !t3.said.some((l) => /Generated workspace password: /.test(l)) && t3.said.some((l) => /a generated password could not be saved and is not kept: the next start makes and says a new one/.test(l)) && !(t3.a._state && t3.a._state.passwordHash),
+    'a generated password whose save fails at the lift: never said, never kept in memory (nobody could sign in with it) — the start held, and the next start makes and says a new one');
+  await red('lift-restore-cut', async () => {
+    const RC = MUT.load('src/auth.js', ['      } catch (e) { this._liftFailed(idHold, e); }', '    } catch (e) { this._liftFailed(netHold, e); }'].reduce((t, from, i) => anchored(t, from, from.replace(/this\._liftFailed\((idHold|netHold), e\);/, 'void e;'), `restore-cut-${i}`), MUT_AUTH), 'auth-lift-restore-cut').Auth;
+    const r1 = await scene('lift-tail-throws-red', { A0: RC, brk: (a) => { a._afterLoad = placed('EPLACED'); } });
+    const r3 = await scene('lift-generate-save-fails-red', { A0: RC, ensure: { generateIfMissing: true }, brk: (a) => { a._save = placed('ENOSPC'); } });
+    ok(r1.after === null && r3.after === null && r3.a.passwordEnabled && !r3.said.some((l) => /Generated workspace password: /.test(l)),
+      'RED CONTROL: the restore cut — the thrown tail leaves the instance OPEN without the start\'s word, and the generated password stays in memory, never said (nobody can sign in)');
   });
 }
 
