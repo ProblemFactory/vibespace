@@ -3075,7 +3075,7 @@ export function installManageAgents(App, ctx = {}) {
               try {
                 const r = await fetchJson(`/api/hosts/${encodeURIComponent(selectedHost)}/agent-tools/uninstall`, { method: 'POST' });
                 if (r?.success) showToast(t('Integration removed from {host}', { host: hostName }));
-                else showToast(r?.error || t('Remove failed'), { type: 'error' });
+                else showToast(r?.code === 'look-no-reply' ? t('{host}: the look at its hook files did not reply — nothing was removed', { host: hostName }) : (r?.error || t('Remove failed')), { type: 'error' });   // r4014 (2): the look's own door, by its code
               } catch { showToast(t('Remove failed'), { type: 'error' }); }
               refresh();
             };

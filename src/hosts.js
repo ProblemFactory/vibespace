@@ -2092,8 +2092,7 @@ class HostManager {
       + `for f in ${HostManager.agentTools().join(' ')}; do `
       + 'p="$HOME/.vibespace/bin/$f"; if [ -f "$p" ]; then s=$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p" 2>/dev/null) | cut -d" " -f1 ); echo "T|$f|$s"; else echo "T|$f|"; fi; done; '
       + 'command -v node >/dev/null 2>&1 && echo "NODE|yes" || echo "NODE|no"; '
-      + 'grep -q vibespace-hook.mjs "$HOME/.claude/settings.json" 2>/dev/null && echo "HOOK|claude|yes" || echo "HOOK|claude|no"; '
-      + 'grep -q vibespace-hook.mjs "$HOME/.codex/hooks.json" 2>/dev/null && echo "HOOK|codex|yes" || echo "HOOK|codex|no"; '
+      + HostManager.hookLeftProbe(HostManager.hookClis())   // r4014 (1): THE look, over the declared rows (an unreadable file: «err», read as not registered)
       + 'echo "KEEP|$(ls "$HOME/.vibespace/run" 2>/dev/null | grep -c "\\.sock$")"; '
       // CLI-CONFIG RECEIPTS (design-harness-settings §6), GATED: only a helper
       // that knows the plan env (grep for the env NAME in the shipped file) is
@@ -2137,12 +2136,23 @@ class HostManager {
    *  CLI by their reason with their keys, a whole-run failure (the helper's own crash) by its words, a plan's hooks part the helper
    *  printed nothing of (no node there, or it stopped before its first receipt) as «not known», and the root verdict's refusal (no
    *  helper ran there). [] = every part landed. PURE. */
-  /** the CLIs whose hook files carry our entries, and the look at whether our marker is still in each (the status probe's own lines) */
-  static HOOK_FILES = [['claude', '$HOME/.claude/settings.json'], ['codex', '$HOME/.codex/hooks.json']];   // pairs, never an id-keyed branch (test-architecture §78)
-  static HOOK_CLIS = HostManager.HOOK_FILES.map(([c]) => c);
-  static hookLeftProbe(clis) {
-    return HostManager.HOOK_FILES.filter(([c]) => clis.includes(c)).map(([c, file]) => `grep -q vibespace-hook.mjs "${file}" 2>/dev/null && echo "HOOK|${c}|yes" || echo "HOOK|${c}|no"; `).join('');
+  /** r4014 (1): THE LOOK's LIST COMES FROM THE DECLARED ROWS — every registered harness whose descriptor names a hook file
+   *  (`inject.hookFile`, the rows the tools' generators register hooks from) as [cli, its path under that machine's $HOME, quoted],
+   *  read at each call: a harness added by its descriptor alone is looked at, never skipped at a Remove */
+  static hookFiles() {
+    const sq = (x) => `'${String(x).replace(/'/g, "'\\''")}'`;
+    return require('./harnesses').list().filter((x) => x && x.inject && x.inject.hookFile && Array.isArray(x.inject.hookFile.rel)).map((x) => [String(x.id), `"$HOME"/${sq(x.inject.hookFile.rel.join('/'))}`, sq(x.id)]);
   }
+  static hookClis() { return HostManager.hookFiles().map(([c]) => c); }
+  /** the look at whether our marker is still in each CLI's hook file (the status probe's own lines too) → one line a CLI:
+   *  HOOK|<cli>|yes (our entries still there) · no (no such file, or none of ours) · err (r4014 (2): the file is THERE but could
+   *  not be read, a link to nowhere (a volume not mounted yet), or its folder cannot be searched (a root-owned ~/.claude) — never
+   *  «gone») */
+  static hookLeftProbe(clis) {
+    return HostManager.hookFiles().filter(([c]) => clis.includes(c)).map(([, file, q]) => `f=${file}; d="\${f%/*}"; if [ -L "$f" ] && [ ! -e "$f" ]; then v=err; elif [ ! -e "$f" ] && [ -d "$d" ] && [ ! -x "$d" ]; then v=err; elif [ ! -e "$f" ]; then v=no; elif [ ! -r "$f" ]; then v=err; else grep -q vibespace-hook.mjs "$f" 2>/dev/null; v=$?; if [ "$v" = 0 ]; then v=yes; elif [ "$v" = 1 ]; then v=no; else v=err; fi; fi; printf 'HOOK|%s|%s\\n' ${q} "$v"; `).join('');
+  }
+  /** r4014 (2): the door a look that did not reply names (its words; the page words it by the code `look-no-reply`) */
+  static LOOK_NO_REPLY = 'the look at that machine\'s hook files did not reply — nothing removed';
   static installNotLanded(receipts, { refused = null, hooks = [] } = {}) {
     if (refused) return [`the hooks and CLI settings were not registered there: ${refused.line || refused.why || 'this server never writes a machine\'s CLI config'}`];
     const rs = Array.isArray(receipts) ? receipts : [], by = new Map();
@@ -2448,12 +2458,17 @@ class HostManager {
     // is silent even when it succeeds; a newer one may print a state this hub does not know; a helper killed before it printed; no node
     // or no helper at all; a server that never writes a machine's CLI config, so it strips nothing) is LOOKED AT: our marker still in
     // its hook file ⇒ the tools are kept and that is said, by its cause; gone ⇒ the strip is known, the tools go
+    // r4014 (2): UNKNOWN REMOVES NOTHING, LITERALLY — a hook file that is there but cannot be read («err») keeps the tools, said by
+    // its cause; a reply that does not answer for every CLI (empty, garbage, cut) removes nothing and names its door
     const look = async (clis, cause) => {
-      const out = String(await this._ssh(h, REMOTE_PRELUDE + HostManager.hookLeftProbe(clis), { timeoutMs: 15000 }));
-      if (!clis.every((c) => new RegExp(`^HOOK\\|${c}\\|(yes|no)$`, 'm').test(out))) throw new Error('unexpected response');
-      const left = clis.filter((c) => new RegExp(`^HOOK\\|${c}\\|yes$`, 'm').test(out));
-      if (!left.length) return null;
-      const nl = left.map((c) => `${c} (hooks): still in its hook file — ${cause}`);
+      let out = '';
+      try { out = String(await this._ssh(h, REMOTE_PRELUDE + HostManager.hookLeftProbe(clis), { timeoutMs: 15000 })); }
+      catch (e) { return { ok: false, code: 'look-no-reply', notLanded: [HostManager.LOOK_NO_REPLY], error: `${HostManager.LOOK_NO_REPLY} (the tools kept): ${cause} — ${String((e && e.message) || e).split('\n')[0].slice(0, 160)}` }; }   // its read's S8: a look that hung or failed over ssh names the same door
+      const said = new Map(out.split('\n').map((l) => /^HOOK\|(.+)\|(yes|no|err)$/.exec(l.trim())).filter(Boolean).map((m) => [m[1], m[2]]));
+      if (!clis.every((c) => said.has(c))) return { ok: false, code: 'look-no-reply', notLanded: [HostManager.LOOK_NO_REPLY], error: `${HostManager.LOOK_NO_REPLY} (the tools kept): ${cause}` };
+      const left = clis.filter((c) => said.get(c) === 'yes'), unread = clis.filter((c) => said.get(c) === 'err');
+      if (!left.length && !unread.length) return null;
+      const nl = [...left.map((c) => `${c} (hooks): still in its hook file — ${cause}`), ...unread.map((c) => `${c} (hooks): its hook file is there but could not be read, so whether our entries are left is not known — ${cause}`)];
       return { ok: false, notLanded: nl, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${nl.join('; ')}` };
     };
     const refusal = this._ownerWriteRefusal();
@@ -2464,10 +2479,10 @@ class HostManager {
       const sRecs = parseReceiptLines(sOut);
       stripped = HostManager.installNotLanded(sRecs);
       if (stripped.length) return { ok: false, notLanded: stripped, error: `the hooks were not removed on that machine (the tools kept, so the entries left still run): ${stripped.join('; ')}` };
-      const unsaid = HostManager.HOOK_CLIS.filter((c) => !sRecs.some((x) => x && x.harness === c && x.key === 'hooks' && x.state !== 'unknown'));
+      const unsaid = HostManager.hookClis().filter((c) => !sRecs.some((x) => x && x.harness === c && x.key === 'hooks' && x.state !== 'unknown'));
       if (unsaid.length) { const kept = await look(unsaid, stripRan ? 'the helper there said nothing this hub knows of the strip' : 'no helper ran there (no node, or its register helper is gone), so its hooks could not be stripped'); if (kept) return kept; }
     } else {
-      const kept = await look(HostManager.HOOK_CLIS, `this server never writes a machine's CLI config (${refusal.why || refusal.kind}), so it strips nothing`);
+      const kept = await look(HostManager.hookClis(), `this server never writes a machine's CLI config (${refusal.why || refusal.kind}), so it strips nothing`);
       if (kept) return kept;
     }
     // r3784: the removal's OWN failure is said (the hooks are gone, the tools could not be removed), never «removed»

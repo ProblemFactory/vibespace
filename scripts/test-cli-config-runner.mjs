@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { checker } from './lib/check.mjs';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -627,7 +627,7 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
         // the Remove road (the round's read): a strip that did not land keeps the tools — the entries left in the file still find their program
         // the stand-in machine: the strip prints `out`; the look at the hook files answers `look`; a removal that FAILS (`rmFails`) prints
         // what the command echoes on failure (the release's command echoes VS-REMOVED whatever rm did)
-        const unOf = async (Hmod, out, { look = 'HOOK|claude|no\nHOOK|codex|no\n', rmFails = false, refusal = null } = {}) => { const calls = []; const H = Object.create(Hmod.HostManager.prototype); H.get = () => ({ id: 'h-0001' }); if (refusal) H._ownerWriteRefusal = () => refusal; H._ssh = async (h, cmd) => { const k = /--uninstall/.test(cmd) ? 'strip' : /rm -f/.test(cmd) ? 'rm' : /grep -q vibespace-hook\.mjs/.test(cmd) ? 'look' : 'other'; calls.push(k); if (k === 'strip') return out; if (k === 'look') return look; return rmFails && /\|\| echo VS-NOT-REMOVED/.test(cmd) ? 'VS-NOT-REMOVED' : 'VS-REMOVED'; }; const r = await H.uninstallAgentTools('h-0001'); return { ok: r.ok, notLanded: r.notLanded || [], error: r.error || null, calls }; };
+        const unOf = async (Hmod, out, { look = 'HOOK|claude|no\nHOOK|codex|no\n', rmFails = false, refusal = null } = {}) => { const calls = []; let rmCmd = null, lookCmd = null; const H = Object.create(Hmod.HostManager.prototype); H.get = () => ({ id: 'h-0001' }); if (refusal) H._ownerWriteRefusal = () => refusal; H._ssh = async (h, cmd) => { const k = /--uninstall/.test(cmd) ? 'strip' : /rm -f/.test(cmd) ? 'rm' : /grep -q vibespace-hook\.mjs/.test(cmd) ? 'look' : 'other'; calls.push(k); if (k === 'rm') rmCmd = cmd; if (k === 'look') lookCmd = cmd; if (k === 'strip') return out; if (k === 'look') return look; return rmFails && /\|\| echo VS-NOT-REMOVED/.test(cmd) ? 'VS-NOT-REMOVED' : 'VS-REMOVED'; }; const r = await H.uninstallAgentTools('h-0001'); return { ok: r.ok, notLanded: r.notLanded || [], error: r.error || null, code: r.code || null, calls, rmCmd, lookCmd }; };
         const STRIP_BAD = 'VS-HELPER-RAN\n' + line('claude', 'hooks', 'refused', 'settings.json exists but is not valid JSON — not touching it') + '\nVS-STRIPPED\n', STRIP_OK = 'VS-HELPER-RAN\n' + line('claude', 'hooks', 'applied') + '\nVS-STRIPPED\n';
         const unB = await unOf(require(path.join(REPO, HOSTS_R)), STRIP_BAD), unG = await unOf(require(path.join(REPO, HOSTS_R)), STRIP_OK);
         ok(!!(unB.ok === false && unB.notLanded.length === 1 && JSON.stringify(unB.calls) === '["strip"]' && unG.ok === true && JSON.stringify(unG.calls) === '["strip","look","rm"]' && /success: !\(r && r\.ok === false\)/.test(src('src/server/exit-routes.js'))),
@@ -655,6 +655,50 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
         ok(!!(unR.ok === false && /its tools could not be removed/.test(unR.error || '') && unR.notLanded.some((w) => /^the tools: could not be removed/.test(w))), 'r3784: the removal\'s OWN failure is said (the hooks removed, the tools not), never «removed»', unR);
         const unRx = await unOf(require(MC.write(HOSTS_R, anchored(src(HOSTS_R), ' && echo VS-REMOVED || echo VS-NOT-REMOVED`;', '; echo VS-REMOVED`;', 'the release\'s removal echo'), 'hosts-rm-echo')), STRIP_OK, { rmFails: true });   // stale-pins: kept — the red's copy writes the release's own echo back
         ok(!!(unRx.ok === true), 'RED (the release\'s removal: echo VS-REMOVED whatever rm did): «removed» though the tools are still there', unRx);
+        // r4014 (2): UNKNOWN REMOVES NOTHING, LITERALLY — a look that could not read a hook file («err») keeps the tools, said by its
+        // cause; a look that did not reply (empty, garbage) removes nothing and names its door by its code (the page words it, en/zh/ja)
+        const HMr0 = require(path.join(REPO, HOSTS_R));
+        const unE = await unOf(HMr0, SILENT, { look: 'HOOK|claude|err\nHOOK|codex|no\n' });
+        const unN = await unOf(require(path.join(REPO, HOSTS_R)), SILENT, { look: '' }), unQ = await unOf(require(path.join(REPO, HOSTS_R)), SILENT, { look: 'HOOK|claude|maybe\nsome text\n' });
+        ok(!!(unE.ok === false && JSON.stringify(unE.calls) === '["strip","look"]' && /^claude \(hooks\): its hook file is there but could not be read, so whether our entries are left is not known — no helper ran there/.test(unE.notLanded[0] || '')
+            && [unN, unQ].every((u) => u.ok === false && u.code === 'look-no-reply' && JSON.stringify(u.calls) === '["strip","look"]' && /^the look at that machine's hook files did not reply — nothing removed \(the tools kept\): no helper ran there/.test(u.error || ''))
+            && src('src/lib/manage-agents.js').includes("r?.code === 'look-no-reply' ? t('{host}: the look at its hook files did not reply — nothing was removed', { host: hostName })")
+            && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => src(f).includes('"{host}: the look at its hook files did not reply — nothing was removed":'))),
+          'r4014 (2): a hook file there but unreadable keeps the tools, by its cause; a look that did not reply (empty, garbage) removes nothing and names its door — the page words it by its code in en / zh / ja', { unE: unE.notLanded, unN: [unN.code, unN.error, unN.calls], unQ: [unQ.code, unQ.calls] });
+        const unF = await (async () => { const H = Object.create(HMr0.HostManager.prototype); H.get = () => ({ id: 'h-0001' }); const calls = []; H._ssh = async (h, cmd) => { const k = /--uninstall/.test(cmd) ? 'strip' : /grep -q vibespace-hook\.mjs/.test(cmd) ? 'look' : 'rm'; calls.push(k); if (k === 'look') throw new Error('Command failed: a planted ssh timeout\nmore'); return k === 'strip' ? SILENT : 'VS-REMOVED'; }; const r = await H.uninstallAgentTools('h-0001'); return { ...r, calls }; })();
+        ok(!!(unF.ok === false && unF.code === 'look-no-reply' && JSON.stringify(unF.calls) === '["strip","look"]' && /nothing removed \(the tools kept\): no helper ran there.* — Command failed: a planted ssh timeout$/.test(unF.error || '')), 'r4014 (its read\'s S8): a look that failed over ssh (a hung mount there) removes nothing and names the same door, with its cause', { code: unF.code, calls: unF.calls, error: unF.error });
+        const unNx = await unOf(require(MC.write(HOSTS_R, anchored(src(HOSTS_R), '      if (!clis.every((c) => said.has(c))) return {', '      if (false) return {', 'a look with no reply taken for «gone»'), 'hosts-look-no-reply')), SILENT, { look: '' });
+        ok(!!(unNx.ok === true && JSON.stringify(unNx.calls) === '["strip","look","rm"]'), 'RED (a look with no reply taken for «nothing left»): the tools are removed on a look that said nothing', unNx);
+        // THE LOOK's OWN TEXT, RUN (a POSIX sh on a scratch HOME): a hook file that is THERE but cannot be read (a folder in its place,
+        // which no user reads as a file — root neither) says «err», never «no»; our marker: «yes»; no file: «no». The list is the registry's
+        const shHome = path.join(ROOT, `look-home-${process.pid}`);
+        fs.rmSync(shHome, { recursive: true, force: true });
+        fs.mkdirSync(path.join(shHome, '.claude', 'settings.json'), { recursive: true });   // a folder where the file should be
+        fs.mkdirSync(path.join(shHome, '.codex'), { recursive: true });
+        fs.writeFileSync(path.join(shHome, '.codex', 'hooks.json'), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node "$HOME/.vibespace/bin/vibespace-hook.mjs"' }] }] } }));
+        const runLook = (Hm) => { const r = spawnSync('sh', ['-c', Hm.HostManager.hookLeftProbe(Hm.HostManager.hookClis())], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: shHome }, encoding: 'utf8', timeout: 10000 }); return String(r.stdout || ''); };
+        const shHome2 = path.join(ROOT, `look-home2-${process.pid}`);
+        fs.rmSync(shHome2, { recursive: true, force: true }); fs.mkdirSync(path.join(shHome2, '.claude'), { recursive: true });
+        fs.symlinkSync(path.join(ROOT, `a-volume-not-mounted-${process.pid}`, 'settings.json'), path.join(shHome2, '.claude', 'settings.json'));   // a link to nowhere (a volume not mounted yet)
+        const runLook2 = (Hm) => { const r = spawnSync('sh', ['-c', Hm.HostManager.hookLeftProbe(Hm.HostManager.hookClis())], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: shHome2 }, encoding: 'utf8', timeout: 10000 }); return String(r.stdout || ''); };
+        const HMr = require(path.join(REPO, HOSTS_R)), lookOut = runLook(HMr), lookOut2 = runLook2(HMr), declared = require(path.join(REPO, 'src/harnesses/index.js')).list().filter((x) => x.inject && x.inject.hookFile).map((x) => x.id);
+        ok(!!(/^HOOK\|claude\|err$/m.test(lookOut) && /^HOOK\|codex\|yes$/m.test(lookOut) && /^HOOK\|claude\|err$/m.test(lookOut2) && /^HOOK\|codex\|no$/m.test(lookOut2) && declared.length >= 2 && JSON.stringify(HMr.HostManager.hookClis()) === JSON.stringify(declared) && /HostManager\.hookLeftProbe\(HostManager\.hookClis\(\)\)/.test(src(HOSTS_R)) && !/HOOK\|claude\|yes/.test(src(HOSTS_R))),
+          'r4014 (1)(2): the look, run by a POSIX sh — a hook file there but unreadable, or a link to nowhere, says «err»; our marker «yes»; no file «no»; its list is every registry row with a hook file (no literal table), and the status probe uses the same look', { lookOut, lookOut2, declared, clis: HMr.HostManager.hookClis() });
+        const OLD_LOOK = MC.write(HOSTS_R, anchored(src(HOSTS_R), "`f=${file}; d=\"\\${f%/*}\"; if [ -L \"$f\" ] && [ ! -e \"$f\" ]; then v=err; elif [ ! -e \"$f\" ] && [ -d \"$d\" ] && [ ! -x \"$d\" ]; then v=err; elif [ ! -e \"$f\" ]; then v=no; elif [ ! -r \"$f\" ]; then v=err; else grep -q vibespace-hook.mjs \"$f\" 2>/dev/null; v=$?; if [ \"$v\" = 0 ]; then v=yes; elif [ \"$v\" = 1 ]; then v=no; else v=err; fi; fi; printf 'HOOK|%s|%s\\\\n' ${q} \"$v\"; `", "`grep -q vibespace-hook.mjs ${file} 2>/dev/null && printf 'HOOK|%s|yes\\\\n' ${q} || printf 'HOOK|%s|no\\\\n' ${q}; `", 'the release\'s look: an error read as gone'), 'hosts-look-old');
+        const oldOut = runLook(require(OLD_LOOK)), oldOut2 = runLook2(require(OLD_LOOK));
+        ok(!!(/^HOOK\|claude\|no$/m.test(oldOut) && /^HOOK\|claude\|no$/m.test(oldOut2)), 'RED (the release\'s look: grep\'s error read as «gone»): a hook file there but unreadable, and a link to nowhere, say «no», and the tools would go', { oldOut, oldOut2 });
+        // THE REMOVAL's OWN TEXT, RUN on a scratch HOME: our tools and shims go — by find, ONE level, a quoted name — and nothing else;
+        // an empty HOME's folder ('/.vibespace/bin') is skipped by its -d test (pinned in the text: never run against the root)
+        const rmHome = path.join(ROOT, `rm-home-${process.pid}`), bin = path.join(rmHome, '.vibespace', 'bin');
+        fs.rmSync(rmHome, { recursive: true, force: true }); fs.mkdirSync(path.join(bin, 'deeper'), { recursive: true });
+        const toolsNow = HMr.HostManager.agentTools();
+        for (const n of [...toolsNow, 'vibespace-tool-a-shim', 'a-file-of-the-person', 'deeper/vibespace-tool-not-ours']) fs.writeFileSync(path.join(bin, n), 'x');
+        const unG2 = await unOf(HMr, STRIP_OK);
+        const rmRun = spawnSync('sh', ['-c', String(unG2.rmCmd || 'false')], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: rmHome }, encoding: 'utf8', timeout: 10000 });
+        const left = fs.readdirSync(bin).sort();
+        ok(!!(unG2.ok === true && /VS-REMOVED/.test(rmRun.stdout || '') && JSON.stringify(left) === '["a-file-of-the-person","deeper"]' && fs.existsSync(path.join(bin, 'deeper', 'vibespace-tool-not-ours'))
+            && String(unG2.rmCmd).includes(`[ ! -d "$HOME/.vibespace/bin" ] || find "$HOME/.vibespace/bin" -maxdepth 1 -name 'vibespace-tool-*' -exec rm -f {} + 2>/dev/null;`)),
+          'r4014: the removal\'s own text, run — our tools and every shim go (find from a fixed root, one level, a quoted name); the person\'s file and a deeper folder stay; an empty HOME is skipped by the -d test', { out: rmRun.stdout, left, tools: toolsNow.length });
         // r3784 (a should, pinned either way): a receipt state this hub does not know (a newer helper's) is parsed «unknown» and is NOT a
         // failure — on this road the helper is the hub's own; a hooks row in it counts as printed
         const unk = HM.installNotLanded(HCJ.parseReceiptLines('CFG|claude|hooks|a-state-from-the-future|%22%22|%22%22|%22%22'), { hooks: ['claude'] });
@@ -844,7 +888,7 @@ console.log('r4027: THE PLAN REACHES THE SHIPPED HELPER ON THE REAL STARTER (its
   const DROP_S = require(MC.write(CS_REL, anchored(srcCS, '(!SECRET_NAME.test(k) || PLAN_MARKS.has(k))) add[k] = v;', '!SECRET_NAME.test(k)) add[k] = v;', 'the starter\'s road drops the plan'), 'starter-drop-plan'));
   const DROP_D = require(MC.write(CS_REL, anchored(srcCS, 'if (SECRET_NAME.test(k) && !PLAN_MARKS.has(k)) continue;', 'if (SECRET_NAME.test(k)) continue;', 'the direct road drops the plan'), 'starter-drop-plan-direct'));
   const redS = await viaStarter(DROP_S), redD = await viaStarter(DROP_D, { direct: true });
-  ok(!!(!redS.row && !redD.row), 'RED (the release\'s drop of the plan\'s name, on each road): the helper falls back to its hooks-only plan — no receipt of the retention row', { redS, redD });
+  ok(!!(!redS.row && !redD.row && redS.keys === 0 && redD.keys === 0 && redS.why === null && redD.why === null && redS.direct === false && redD.direct === true), 'RED (the release\'s drop of the plan\'s name, on each road): the helper RAN (no failure) on its hooks-only plan — no receipt of any managed row', { redS, redD });
 }
 
 clearInterval(KEEP);

@@ -36,6 +36,9 @@ const { encodePlan } = require('../harness-config');   // B-ddf3 unit 2 line 1: 
 const STATUS_MS = 3000;   // r3462: how long a route waits for the helper's read of this machine's files (a page's look at its status)
 const STATUS_FRESH_MS = 60000;    // r3462: a read this young answers a caller whose own wait ran out (a short bound refuses no one)
 const STATUS_BACKOFF_MS = 60000;  // r3462: after a read the helper did not finish within the run's bound (or a starter that is down), no new read for this long
+const STATUS_LATE_SEE_MS = 1000;   // r4014: a late status child's /proc entry answers within this, or its end is not seen at that look
+const STATUS_LATE_LET_GO_MS = 10 * 60000;   // r4014: a late child whose end CANNOT be seen (no pid, no /proc, no answer) is let go past this, said once
+const STATUS_LATE_LET_GO_MAX_MS = 24 * 3600000;   // r4030: each further let-go of ONE spell waits twice as long as the last (10, 20, 40 min …), never past a day
 const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loaded with the module, never on a push's pass (batch 21's cure)
 
 /** Descriptor facts → plan specs for buildConfigPlan (ONE spelling: the
@@ -88,7 +91,7 @@ function accessorsFor({ serverSetting, harnesses }) {
   return { harnessSetting, harnessDeclares, harnessSpawnSettings };
 }
 
-function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, ownerWriteRefusal = null, refuseOwnerWrite = null, rootRecovery = null, log = console.log, warn = console.warn, home = null, helperPath = null, starter = null, hooksWanted = () => false, runner = null, statusMs = STATUS_MS, statusFreshMs = STATUS_FRESH_MS, statusBackoffMs = STATUS_BACKOFF_MS }) {
+function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hookRegistrationSafe = () => true, ownerWriteRefusal = null, refuseOwnerWrite = null, rootRecovery = null, log = console.log, warn = console.warn, home = null, helperPath = null, starter = null, hooksWanted = () => false, runner = null, statusMs = STATUS_MS, statusFreshMs = STATUS_FRESH_MS, statusBackoffMs = STATUS_BACKOFF_MS, statusLateSeeMs = STATUS_LATE_SEE_MS, statusLateLetGoMs = STATUS_LATE_LET_GO_MS, statusLateLetGoMaxMs = STATUS_LATE_LET_GO_MAX_MS, procRoot = '/proc', monoClock = null }) {
   // THE ROOT VERDICT (src/server-root.js, read by agent-tool-generators): the
   // refusal object when this server must not write the owner's CLI config.
   // Without the server's verdict (tests, tooling) an unsafe flag still refuses.
@@ -204,9 +207,27 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
    *    `'not-read'` when the read itself failed (the helper's own failure line, no helper road) — with `readAt` (the last read or
    *    landing known), and `unread` says why. A helper's CFG|*| line (its own failure) is never taken for fresh receipts.
    *  - A HUNG HOME PILES NO HELPERS: after a read the helper did not finish within the run's bound, no new read is asked for
-   *    `STATUS_BACKOFF_MS` (one helper a minute at most, never one a look). */
-  let statusFlight = null, lastRead = null, statusBackoff = null, statusOut = 0, statusLate = 0;   // statusBackoff: { until, cause } on the monotonic clock
-  const mono = () => performance.now();   // the backoff never hangs on a clock set back
+   *    `STATUS_BACKOFF_MS` (one helper a minute at most, never one a look).
+   *  - r4014: THE LATE MARK FALLS BY A FACT, NOT ONLY BY ONE EVENT. A status child the starter ended at its bound but that has not
+   *    exited is a LATE MARK, kept with its pid (the starter's own timeout reply names it: the process at that pid IS the child) and
+   *    its start time. It falls when the starter says the child ended (onLateExit) OR when /proc shows it gone at the next look (no
+   *    such process, a zombie, another start time): a starter that FAULTS drops its settled entries without that call
+   *    (child-starter.js fault()), so the event alone held the status «out» for the hub's life. The /proc read is ASYNC (a pool
+   *    thread, never the loop), bounded `STATUS_LATE_SEE_MS`, ONE in flight for every look. A child whose end CANNOT be seen (no
+   *    pid, no /proc, a read that did not answer, a start time never read) holds the look by its own code (`late-unseen`, said once)
+   *    and is let go past `STATUS_LATE_LET_GO_MS` (said once): the status is never «out» for good, and no restart is needed.
+   *    r4030: «SEEN GONE» IS OF THAT CHILD — the pid AND its own start time (field 22 of the same /proc file, read when the mark is
+   *    made): another start time at that pid is another process, so the child is gone; a live process whose start was never read
+   *    is «cannot see», never «the child». EACH FURTHER LET-GO OF ONE SPELL WAITS TWICE AS LONG (10, 20, 40 min …, up to a day);
+   *    the spell ends at the first real read. */
+  let statusFlight = null, lastRead = null, statusBackoff = null, statusOut = 0;   // statusBackoff: { until, cause } on the monotonic clock
+  const lateMarks = new Set();   // { pid, start, since, born } — the late status children (r4014)
+  let lateLook = null;           // the one /proc look in flight over them
+  const mono = typeof monoClock === 'function' ? monoClock : () => performance.now();   // the backoff never hangs on a clock set back (a suite places its own)
+  // r4030: THE LET-GO's SPELL — the let-goes since the last real read; each waits twice as long as the one before it (up to a day),
+  // so a home that hangs for a day on a host that cannot look gathers a few children, never one every ten minutes
+  let letGoSpell = 0;
+  const letGoBound = () => Math.min(statusLateLetGoMaxMs, statusLateLetGoMs * 2 ** Math.min(letGoSpell, 30));
   const lastLanding = () => (cliRunner && cliRunner.last()) || null;
   const landedAt = () => { const l = lastLanding(); return (l && !l.skipped && l.at) || 0; };   // any landing that may have WRITTEN: the join fence
   const readLandedAt = () => { const l = lastLanding(); return (l && l.ok && !l.skipped && l.at) || 0; };   // r3784 (1): only a landing that READ counts for «last read»
@@ -218,28 +239,72 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
   // the refusals are CODES (never the runner's English words), each said ONCE a spell in the journal; a read clears them
   const saidCodes = new Set();
   const sayOnce = (code, why) => { if (saidCodes.has(code)) return; saidCodes.add(code); warn(`[cli-config] this machine's CLI config status is not known now (${code}): ${why}`); };
+  // r4014: ONE process's state and start time from /proc → { state, start } | { gone } | { unseen: why } — async, bounded, never a throw.
+  // ONE read per pid in the pool at a time (its read's S4): a read the bound gave up on is still there, and a look meanwhile asks none
+  const procReads = new Map();
+  const procOf = (pid) => new Promise((resolve) => {
+    if (!(Number.isInteger(pid) && pid > 1)) { resolve({ unseen: 'the starter named no pid for it' }); return; }
+    let raw = procReads.get(pid);
+    if (!raw) {
+      const fsp = require('fs').promises;
+      raw = Promise.all([fsp.readFile(`${procRoot}/${pid}/stat`, 'utf8').then((x) => { const f = x.slice(x.lastIndexOf(')') + 2).split(' '); return { state: f[0], start: f[19] || null }; }, (e) => ({ err: (e && e.code) || 'error' })), fsp.stat(`${procRoot}/self`).then(() => true, () => false)])
+        .then(([st, hasProc]) => (!hasProc ? { unseen: 'this host has no /proc' } : st.err === 'ENOENT' || st.err === 'ESRCH' ? { gone: true } : st.err ? { unseen: `its /proc entry could not be read (${st.err})` } : st), () => ({ unseen: 'its /proc entry could not be read' }));
+      procReads.set(pid, raw);
+      raw.then(() => { if (procReads.get(pid) === raw) procReads.delete(pid); });
+    }
+    const t = setTimeout(() => resolve({ unseen: `its /proc entry did not answer within ${statusLateSeeMs} ms` }), statusLateSeeMs);
+    t.unref?.();
+    raw.then((st) => { clearTimeout(t); resolve(st); });
+  });
+  const dropLate = (m, how, why = '') => {
+    if (!lateMarks.delete(m)) return;
+    if (how === 'seen') warn('[cli-config] a status read of this machine\'s files that outlived its bound has ended — its end was never told by the starter (its starter ended first), seen in /proc; the status is read again');
+    else if (how === 'let-go') { const after = letGoBound(); letGoSpell++; warn(`[cli-config] a status read of this machine's files that outlived its bound could not be seen to end (${why}) — let go after ${Math.round(after / 1000)} s; the status is read again (a further let-go of this spell waits ${Math.round(letGoBound() / 1000)} s)`); }
+  };
+  // r4014: a mark is made at the starter's timeout reply; its start time is read at once (the child it just ended is still there).
+  // A child already gone at that read ended in the ordinary way, its exit line on its way: the mark falls without a word (its read's S5)
+  const markLate = (pid) => { const m = { pid, start: null, since: mono(), born: null }; m.born = procOf(pid).then((st) => { if (st.gone || st.state === 'Z') dropLate(m, 'born'); else if (st.start != null) m.start = st.start; }); lateMarks.add(m); return m; };
+  // r4014: THE LOOK AT THE MARKS (one in flight): gone by /proc ⇒ the mark falls; not seen ⇒ held by its own code, let go past the bound
+  const seeLate = () => lateLook || (lateLook = Promise.all([...lateMarks].map((m) => m.born.then(() => (lateMarks.has(m) ? procOf(m.pid) : { gone: true })).then((st) => {
+    if (!lateMarks.has(m)) return null;
+    if (st.gone || st.state === 'Z' || (m.start != null && st.start != null && st.start !== m.start)) { dropLate(m, 'seen'); return null; }
+    const unseen = st.unseen || (m.start == null ? 'its start time was never read, so a process at that pid may be another' : null);
+    if (!unseen) return null;   // the child itself, still there (the home still holds it): the look waits
+    if (mono() - m.since >= letGoBound()) { dropLate(m, 'let-go', unseen); return null; }
+    return unseen;
+  }))).then((l) => l.find(Boolean) || null, () => null).finally(() => { lateLook = null; }));
   function readByHelper() {
     if (statusFlight && statusFlight.startedAt >= landedAt()) return statusFlight.p;
     // r3784 (2): THE STATUS CHILDREN ARE COUNTED — no new helper while one of its own has not ended (a read older than a landing is
     // not joined, and no second child is started beside it), nor while the runner's own guard says the home is stuck
     // a child the starter ended at its bound but that has not EXITED (an uninterruptible read on a hung mount survives SIGKILL) still counts
-    if (statusOut > 0 || statusLate > 0) return Promise.resolve({ held: true, code: 'status-out', after: statusFlight && statusOut > 0 ? statusFlight.p : null, why: `an earlier read of this machine's files has not ended (${statusOut + statusLate} still out)` });
+    if (statusOut > 0) return Promise.resolve({ held: true, code: 'status-out', after: statusFlight ? statusFlight.p : null, why: `an earlier read of this machine's files has not ended (${statusOut + lateMarks.size} still out)` });
+    // r4014: a late child is looked at in /proc first — gone ⇒ its mark falls and this look reads again (no restart)
+    if (lateMarks.size > 0) return seeLate().then((unseen) => (lateMarks.size === 0 ? readByHelper() : unseen
+      ? { held: true, code: 'late-unseen', why: `an earlier read of this machine's files outlived its bound and its end cannot be seen (${unseen}) — it is let go ${Math.max(0, Math.ceil((Math.min(...[...lateMarks].map((m) => m.since)) + letGoBound() - mono()) / 1000))} s from now` }
+      : { held: true, code: 'status-out', after: null, why: `an earlier read of this machine's files has not ended (${lateMarks.size} still out)` }));
     const stuck = homeStuckNow();
     if (stuck > 0) return Promise.resolve({ held: true, code: 'home-stuck', why: `the home still has not answered an earlier read (${stuck} still out)` });
     if (statusBackoff && mono() < statusBackoff.until) return Promise.resolve({ held: true, code: 'backoff', cause: statusBackoff.cause, why: `an earlier read of this machine's files did not finish (${statusBackoff.cause}) — the next read is asked in ${Math.ceil((statusBackoff.until - mono()) / 1000)} s` });
     const startedAt = Date.now(), planned = plannedNow();
     statusOut++;
-    let late = false, exited = false;
-    const onLateExit = () => { exited = true; if (late) { late = false; statusLate--; } };   // the starter: a timed-out child ended at last
+    let mark = null, exited = false;
+    const onLateExit = () => { exited = true; if (mark) dropLate(mark, 'heard'); };   // the starter: a timed-out child ended at last
     const p = Promise.resolve().then(() => cliRunner.status(cliConfigPlanB64(), { onLateExit })).then((r) => r, (e) => ({ why: (e && e.message) || String(e), code: 'threw' })).then((r) => {
-      if (r && r.code === 'timed-out' && !exited) { late = true; statusLate++; }
-      if (usableRead(r, planned)) { lastRead = { at: startedAt, receipts: r.receipts || [] }; statusBackoff = null; saidCodes.clear(); }
-      else if (r && (r.code === 'timed-out' || r.code === 'starter-unknown')) statusBackoff = { until: mono() + statusBackoffMs, cause: r.code };   // by the runner's CODE
-      return r;
-    });
+      try {
+        if (r && r.code === 'timed-out' && !exited) mark = markLate(Number(r.pid) || 0);
+        else if (r && r.code === 'starter-unknown' && Number(r.pid) > 0 && !exited) mark = markLate(Number(r.pid));   // its read's S3: a child the faulted starter had STARTED was never ended at its bound — counted the same way
+        if (usableRead(r, planned)) { lastRead = { at: startedAt, receipts: r.receipts || [] }; statusBackoff = null; saidCodes.clear(); letGoSpell = 0; }   // r4030: a real read ends the let-go's spell
+        // 'starter-unknown' with NO pid: the RUNNER's own bound fired before the starter answered (the starter itself wedged), or the
+        // starter never said it started one — a child may live on that this hub can name by no pid, so it is NOT made a late mark
+        // (nothing could ever see it end); the backoff alone holds the next read: at most one helper a minute may start beside such a
+        // child (the starter's own fault then replaces it). WITH a pid (the starter faulted after its start): the mark above
+        else if (r && (r.code === 'timed-out' || r.code === 'starter-unknown')) statusBackoff = { until: mono() + statusBackoffMs, cause: r.code };   // by the runner's CODE
+        return r;
+      } catch (e) { return { why: `the status read's own bookkeeping failed (${(e && e.message) || e})`, code: 'threw' }; }   // never a rejection
+    }).finally(() => { statusOut--; if (statusFlight === f) statusFlight = null; });   // r4014's small: the count falls whatever the handler did
     const f = { p, startedAt };
     statusFlight = f;
-    p.then(() => { statusOut--; if (statusFlight === f) statusFlight = null; });
     return p;
   }
   async function cliConfigStatus({ ms = statusMs } = {}) {
@@ -249,7 +314,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       const left = Math.max(0, until - mono());
       const t = setTimeout(() => resolve({ timedOut: true, code: 'timed-out', why: `the helper's read of this machine's files did not answer within ${ms} ms` }), left);
       t.unref?.();
-      p.then((x) => { clearTimeout(t); resolve(x); });
+      p.then((x) => { clearTimeout(t); resolve(x); }, (e) => { clearTimeout(t); resolve({ why: `the status read failed (${(e && e.message) || e})`, code: 'threw' }); });   // its read's S6: never an unhandled rejection
     });
     let r = !cliRunner ? { why: 'no helper road on this server', code: 'no-helper' } : await within(readByHelper());
     // a read still out that this caller may not join (it began before a landing): wait for it to END inside this caller's own bound,
@@ -269,7 +334,7 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       unread = `not known now — ${silent ? "the helper printed no receipt of the plan's keys" : whole ? `the helper's read failed: ${whole.reason || whole.state}` : (r && r.why) || 'the read failed'}`;
       // the home did not answer (a bound, a stuck read, a child still out, a backoff after a timed-out read) ⇒ «did not answer in time»;
       // the read itself failed (the helper's own failure, a starter that is down, no receipt, no helper road) ⇒ «the read failed»
-      const late = r && (r.timedOut || r.code === 'timed-out' || r.code === 'home-stuck' || r.code === 'status-out' || (r.code === 'backoff' && r.cause === 'timed-out'));
+      const late = r && (r.timedOut || r.code === 'timed-out' || r.code === 'home-stuck' || r.code === 'status-out' || r.code === 'late-unseen' || (r.code === 'backoff' && r.cause === 'timed-out'));
       const knownAt = Math.max((lastRead && lastRead.at) || 0, readLandedAt()) || null;
       receipts = sets.map((k) => ({ ...k, state: 'unknown', reason: late ? 'not-known-now' : 'not-read', why: unread, readAt: knownAt }));
       sayOnce(unreadCode, unread);

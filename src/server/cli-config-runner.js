@@ -65,8 +65,8 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     const at = Date.now();
     // r3784: each failure carries a CODE beside its words — a reader keys on the code, never on the English (the status road's backoff)
     const failed = (why, code) => ({ at, reason, ok: false, receipts: [], created: [], why, code });
-    if (!r || r.unknown) return failed(`the starter did not answer${r && r.why ? ` (${r.why})` : ''} — nothing was written by this hub, asked again at the next change`, 'starter-unknown');
-    if (r.timedOut) return failed(`the helper ran past its ${timeoutMs} ms bound and was ended`, 'timed-out');
+    if (!r || r.unknown) return { ...failed(`the starter did not answer${r && r.why ? ` (${r.why})` : ''} — nothing was written by this hub, asked again at the next change`, 'starter-unknown'), pid: (r && Number(r.pid)) || 0 };   // r4014's read: a child the faulted starter had STARTED (its pid) may live on, never ended
+    if (r.timedOut) return { ...failed(`the helper ran past its ${timeoutMs} ms bound and was ended`, 'timed-out'), pid: Number(r.pid) || 0 };   // r4014: the child's pid (the starter's timeout reply) — a status reader keeps it to see the child gone
     if (r.started === false || r.error) return failed(`the helper could not start (${r.error || 'no start'})`, 'not-started');
     const receipts = parseReceiptLines(r.stdout || '');
     const whole = receipts.find((x) => x.harness === null && x.state !== 'unknown');

@@ -21,12 +21,20 @@
 //                                                     RED: a whole-run line taken for fresh receipts
 //   ⑥ A HUNG HOME PILES NO HELPERS: after a read the helper did not finish within the run's bound, no new read is asked.
 //                                                     RED: a new helper at every look
+//   ⑫ r4014: THE LATE MARK FALLS BY A FACT — a status child past its bound (the real helper waiting on a home that does not
+//     answer), then THE STARTER's FAULT (the real child-starter.js: its fault drops the settled entry without the late-exit
+//     call), then a healthy home: the next look sees the child gone in /proc and reads fresh, no restart.
+//                                                     RED: the mark falls only by the starter's late-exit event
+//   ⑬ r4014: a late child whose end CANNOT be seen (no pid) holds the look by its own code, said once, and is let go past its
+//     bound.                                          RED: no let-go (the status «out» for the hub's life)
+//   ⑬c r4030: each further let-go of ONE spell waits twice as long (a placed clock: 10, 30, 70 minutes, never sooner); a real
+//     read ends the spell.                            RED: a fixed ten minutes
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { checker } from './lib/check.mjs';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -183,7 +191,7 @@ ok(!!(lg.a && /^not known now/.test(lg.a.unread || '') && lg.runsB1 === 1 && lg.
 const JOIN_ALL = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (statusFlight && statusFlight.startedAt >= landedAt()) return statusFlight.p;', 'if (statusFlight) return statusFlight.p;', 'the landing\'s fence on the shared read'), 'status-join-all');
 const redJ = await landingLeg(JOIN_ALL);
 ok(!!(redJ.kb && redJ.kb.state === 'missing' && redJ.runsB1 === 1), 'RED (every caller joins the read in flight): the status after a write answers the files BEFORE it («missing»)', { runsB1: redJ.runsB1, kb: redJ.kb });
-const NO_COUNT = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (statusOut > 0 || statusLate > 0) return Promise.resolve(', 'if (false) return Promise.resolve(', 'the count of status children'), 'status-no-count');
+const NO_COUNT = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (statusOut > 0) return Promise.resolve(', 'if (false) return Promise.resolve(', 'the count of status children'), 'status-no-count');
 const redC = await landingLeg(NO_COUNT);
 ok(!!(redC.runsB1 === 2), 'RED (the status children not counted): a second helper starts beside one still out', { runsB1: redC.runsB1 });
 
@@ -278,7 +286,7 @@ ok(!!(r9.c && r9.c.unreadCode === 'backoff'), 'RED (a backoff that never ends): 
 console.log('⑪ r3784 (2): A STATUS CHILD THE STARTER ENDED AT ITS BOUND BUT THAT HAS NOT EXITED (a hung mount) IS STILL COUNTED');
 async function lateLeg(modPath) {
   const lates = [];
-  const st = { runs: 0, run: (cmd, args, o = {}) => { if (!args.includes('--status')) return Promise.resolve({ started: true, code: 0, stdout: '', stderr: '' }); st.runs++; if (o.onLateExit) lates.push(o.onLateExit); return Promise.resolve({ timedOut: true }); } };
+  const st = { runs: 0, run: (cmd, args, o = {}) => { if (!args.includes('--status')) return Promise.resolve({ started: true, code: 0, stdout: '', stderr: '' }); st.runs++; if (o.onLateExit) lates.push(o.onLateExit); return Promise.resolve({ timedOut: true, pid: process.pid }); } };   // r4014: a live process at the pid the starter named (this one): the child, still there
   const S = mkHand(modPath, st, { statusMs: 3000, statusFreshMs: 0, statusBackoffMs: 50 });
   const a = await S.cliConfigStatus();
   await new Promise((r) => setTimeout(r, 150));   // the backoff is over; the child has not exited
@@ -291,16 +299,116 @@ async function lateLeg(modPath) {
 }
 const s11 = await lateLeg(path.join(REPO, SYNC_REL));
 ok(!!(s11.a && s11.a.unreadCode === 'timed-out' && s11.b && s11.b.unreadCode === 'status-out' && s11.runsB === 1 && s11.runs === 2), '⑪ after the backoff, a child that has not exited still holds the next look («not known now», by its code: no second helper); once it exits a new read starts', { a: s11.a && s11.a.unreadCode, b: s11.b && s11.b.unreadCode, runsB: s11.runsB, runs: s11.runs });
-const NO_LATE = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (statusOut > 0 || statusLate > 0) return Promise.resolve(', 'if (statusOut > 0) return Promise.resolve(', 'the late child not counted'), 'status-no-late');
+const NO_LATE = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (lateMarks.size > 0) return seeLate()', 'if (false) return seeLate()', 'the late child not counted'), 'status-no-late');
 const r11 = await lateLeg(NO_LATE);
 ok(!!(r11.runsB === 2), 'RED (a child that outlives its kill not counted): a second helper starts beside it once the backoff ends', { runsB: r11.runsB });
+
+// ── ⑫ the starter faults while a status child is late ──
+console.log('⑫ r4014: THE LATE MARK FALLS BY A FACT — a status child past its bound, then THE STARTER\'s FAULT (its end never told), then a healthy home: a fresh read, no restart');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const CS = require(path.join(REPO, 'src/server/child-starter.js'));
+const PROC_REL = 'src/server/child-starter-proc.js';
+// the REAL starter process with ONE planted change: at a run's bound it does not end the child (as a read asleep in the kernel
+// outlives SIGKILL) and then the starter itself ends — so the REAL child-starter.js's fault() drops the settled entry without its
+// late-exit call (its `else pending.delete(id)`), and the child's end, when it comes, is told to no one
+const HOLDS = MC.write(PROC_REL, anchored(src(PROC_REL), "try { c.kill('SIGKILL'); } catch { } endOwnGroup(c); send({ id, ev: 'timeout', overflow }); }", "held.delete(id); send({ id, ev: 'timeout', overflow }); setTimeout(() => process.exit(0), 100); }", 'a child that outlives its kill, then the starter ends'), 'proc-holds-then-ends');
+async function faultLeg(modPath) {
+  const home = mkHome(`home-fault-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
+  const file = path.join(home, '.claude', 'settings.json');
+  fs.rmSync(file); execFileSync('mkfifo', [file]);   // a home that does not answer: the real helper's read of this file waits
+  const said = [];
+  const starter = CS.createChildStarter({ script: HOLDS, guardMs: 300, log: { warn: (l) => said.push(String(l)) } });
+  const runner = createCliConfigRunner({ starter, helperPath: HELPER, home, timeoutMs: 600, journal: () => {}, warn: () => {} });
+  const S = mkSync(modPath, home, { runner, statusMs: 5000, statusFreshMs: 0, statusBackoffMs: 50, warn: (l) => said.push(String(l)) });
+  // the home heals: the read that waited gets its file and ends — and nobody tells the hub (also in the finally: a leg that throws
+  // leaves no helper waiting on the FIFO)
+  let healed = false;
+  const heal = async () => { for (let i = 0; i < 100 && !healed; i++) { try { const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); try { fs.writeSync(fd, JSON.stringify({ cleanupPeriodDays: 36500 })); } finally { fs.closeSync(fd); } healed = true; } catch { await sleep(20); } } };
+  let a = null, b = null, faults = 0;
+  try {
+    a = await S.cliConfigStatus();   // past its bound: the starter says «timeout», the child lives on, then the starter ends
+    for (let i = 0; i < 100 && !(starter.stats().faults > 0); i++) await sleep(20);
+    await sleep(100);
+    faults = starter.stats().faults;
+    b = await S.cliConfigStatus();   // the child is still there (its read still waits): held, by its code
+  } finally { await heal(); }
+  await sleep(50);
+  fs.rmSync(file); fs.writeFileSync(file, JSON.stringify({ cleanupPeriodDays: 36500 }, null, 2) + '\n');
+  let c = null, looks = 0;
+  for (; looks < 15; looks++) { c = await S.cliConfigStatus(); if (c && c.unread === null) break; await sleep(150); }
+  return { a, b, c, looks, faults, healed, said, kc: (c && c.receipts || []).find((r) => r.key === NEEDLE) };
+}
+const s12 = await faultLeg(path.join(REPO, SYNC_REL));
+ok(!!(s12.a && s12.a.unreadCode === 'timed-out' && s12.faults >= 1 && s12.b && s12.b.unreadCode === 'status-out' && s12.healed && s12.c && s12.c.unread === null && s12.kc && s12.kc.state === 'applied' && s12.said.some((l) => /its end was never told by the starter \(its starter ended first\), seen in \/proc; the status is read again$/.test(l))),
+  '⑫ the starter faulted while its status child was late (the end never told): the child still there holds the look («status out»); once it has ended the next look SEES it gone in /proc, says so once, and reads fresh — no restart', { a: s12.a && s12.a.unreadCode, faults: s12.faults, b: s12.b && s12.b.unreadCode, healed: s12.healed, c: s12.c && s12.c.unreadCode, looks: s12.looks, kc: s12.kc && s12.kc.state, said: s12.said.slice(-3) });
+const EVENT_ONLY = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (lateMarks.size > 0) return seeLate().then(', 'if (lateMarks.size > 0) return Promise.resolve(null).then(', 'the mark falls only by the late-exit event'), 'status-event-only');
+const r12 = await faultLeg(EVENT_ONLY);
+ok(!!(r12.healed && r12.c && r12.c.unreadCode === 'status-out'), 'RED (the mark falls only by the starter\'s late-exit event — the drop without the call): the home is healthy and every look still says «not known now»', { c: r12.c && r12.c.unreadCode, looks: r12.looks });
+
+// ── ⑬ a late child whose end cannot be seen ──
+console.log('⑬ r4014: A LATE CHILD WHOSE END CANNOT BE SEEN (the starter named no pid) holds the look by its own code, said once, and is LET GO past its bound');
+async function unseenLeg(modPath) {
+  const said = [];
+  const st = { runs: 0, run: (cmd, args) => { if (!args.includes('--status')) return Promise.resolve({ started: true, code: 0, stdout: '', stderr: '' }); st.runs++; return Promise.resolve(st.runs === 1 ? { timedOut: true } : { started: true, code: 0, stdout: cfg('applied'), stderr: '' }); } };
+  const S = mkHand(modPath, st, { statusMs: 3000, statusFreshMs: 0, statusBackoffMs: 50, statusLateLetGoMs: 400, warn: (l) => said.push(String(l)) });
+  const a = await S.cliConfigStatus();
+  await sleep(120);
+  const b = await S.cliConfigStatus(), b2 = await S.cliConfigStatus();
+  const runsB = st.runs;
+  await sleep(450);
+  const c = await S.cliConfigStatus();
+  return { a, b, b2, c, runsB, runs: st.runs, unseenSaid: said.filter((l) => /\(late-unseen\)/.test(l)).length, letGo: said.filter((l) => /could not be seen to end \(the starter named no pid for it\) — let go after/.test(l)).length };
+}
+const s13 = await unseenLeg(path.join(REPO, SYNC_REL));
+ok(!!(s13.a && s13.a.unreadCode === 'timed-out' && s13.b && s13.b.unreadCode === 'late-unseen' && /its end cannot be seen \(the starter named no pid for it\) — it is let go \d+ s from now$/.test(s13.b.unread || '') && s13.b2 && s13.b2.unreadCode === 'late-unseen' && s13.runsB === 1 && s13.unseenSaid === 1 && s13.letGo === 1 && s13.c && s13.c.unread === null && s13.runs === 2),
+  '⑬ a late child the hub cannot see: the looks say so by their own code (the journal once), no second helper meanwhile; past its bound it is let go, said once, and the next look reads fresh', { a: s13.a && s13.a.unreadCode, b: s13.b && s13.b.unread, runsB: s13.runsB, unseenSaid: s13.unseenSaid, letGo: s13.letGo, c: s13.c && s13.c.unreadCode, runs: s13.runs });
+// ⑬b (its read's S3): the STARTER faulted after it had started the child (its answer: unknown, with the pid) — the child was never
+// ended at its bound and may live on: it is counted as a late child, so no second helper starts beside it once the backoff ends
+async function faultedLeg(modPath) {
+  const st = { runs: 0, run: (cmd, args) => { if (!args.includes('--status')) return Promise.resolve({ started: true, code: 0, stdout: '', stderr: '' }); st.runs++; return Promise.resolve({ unknown: true, why: 'a planted starter fault', pid: process.pid }); } };
+  const S = mkHand(modPath, st, { statusMs: 3000, statusFreshMs: 0, statusBackoffMs: 50 });
+  const a = await S.cliConfigStatus();
+  await sleep(150);
+  const b = await S.cliConfigStatus();
+  return { a, b, runs: st.runs };
+}
+const s13b = await faultedLeg(path.join(REPO, SYNC_REL));
+ok(!!(s13b.a && s13b.a.unreadCode === 'starter-unknown' && s13b.b && s13b.b.unreadCode === 'status-out' && s13b.runs === 1), '⑬b a starter that faulted after starting the child (unknown, with its pid): the child is counted — after the backoff no second helper starts beside it', { a: s13b.a && s13b.a.unreadCode, b: s13b.b && s13b.b.unreadCode, runs: s13b.runs });
+const NO_FAULTED = MC.write(SYNC_REL, anchored(src(SYNC_REL), "else if (r && r.code === 'starter-unknown' && Number(r.pid) > 0 && !exited) mark = markLate(Number(r.pid));", '', 'a faulted starter\'s child not counted'), 'status-no-faulted');
+const r13b = await faultedLeg(NO_FAULTED);
+ok(!!(r13b.runs === 2), 'RED (a faulted starter\'s started child not counted): a second helper starts beside it once the backoff ends', { runs: r13b.runs, b: r13b.b && r13b.b.unreadCode });
+const NO_LET_GO = MC.write(SYNC_REL, anchored(src(SYNC_REL), "if (mono() - m.since >= letGoBound()) { dropLate(m, 'let-go', unseen); return null; }", '', 'no let-go'), 'status-no-let-go');
+const r13 = await unseenLeg(NO_LET_GO);
+ok(!!(r13.c && r13.c.unreadCode === 'late-unseen' && r13.runs === 1), 'RED (no let-go): a late child the hub cannot see holds the status «not known now» for the hub\'s life', { c: r13.c && r13.c.unreadCode, runs: r13.runs });
+
+// ── ⑬c r4030: each further let-go of one spell waits twice as long ──
+console.log('⑬c r4030: EACH FURTHER LET-GO OF ONE SPELL WAITS TWICE AS LONG — a placed clock: let go at 10, 30 and 70 minutes, never sooner; a real read ends the spell (the next let-go: ten minutes again)');
+async function spellLeg(modPath) {
+  let now = 0; const MIN = 60000;
+  const st = { runs: 0, fresh: false, run: (cmd, args) => { if (!args.includes('--status')) return Promise.resolve({ started: true, code: 0, stdout: '', stderr: '' }); st.runs++; return Promise.resolve(st.fresh ? { started: true, code: 0, stdout: cfg('applied'), stderr: '' } : { timedOut: true }); } };   // a host that cannot look: no pid
+  const said = [];
+  const S = mkHand(modPath, st, { statusMs: 3000, statusFreshMs: 0, statusBackoffMs: 0, monoClock: () => now, warn: (l) => said.push(String(l)) });
+  const at = async (m) => { now = m * MIN; await S.cliConfigStatus(); return st.runs; };
+  const seen = {};
+  for (const m of [0, 9.99, 10, 29.99, 30, 69.99]) seen[m] = await at(m);
+  st.fresh = true; seen[70] = await at(70);   // the third let-go; its read is a real one: the spell ends
+  st.fresh = false; seen[70.5] = await at(70.5);   // a new spell: a read past its bound, a new mark
+  seen[80.49] = await at(80.49); seen[80.5] = await at(80.5);
+  return { seen, letGos: said.filter((l) => /let go after/.test(l)).map((l) => Number((/let go after (\d+) s/.exec(l) || [])[1])) };
+}
+const s13c = await spellLeg(path.join(REPO, SYNC_REL)), sc = s13c.seen;
+ok(!!(sc[0] === 1 && sc[9.99] === 1 && sc[10] === 2 && sc[29.99] === 2 && sc[30] === 3 && sc[69.99] === 3 && sc[70] === 4 && sc[70.5] === 5 && sc[80.49] === 5 && sc[80.5] === 6 && JSON.stringify(s13c.letGos) === '[600,1200,2400,600]'),
+  '⑬c one spell on a host that cannot look: the let-goes come at 10, 30 and 70 minutes (each wait twice the last), never sooner; a real read ends the spell, and the next let-go waits ten minutes again', s13c);
+const FIXED_TEN = MC.write(SYNC_REL, anchored(src(SYNC_REL), 'if (mono() - m.since >= letGoBound()) {', 'if (mono() - m.since >= statusLateLetGoMs) {', 'a fixed ten minutes'), 'status-fixed-ten');
+const r13c = await spellLeg(FIXED_TEN);
+ok(!!(r13c.seen[29.99] === 3 && r13c.seen[69.99] > 3), 'RED (a fixed ten minutes): a home that hangs gathers a child every ten minutes', r13c.seen);
 
 // ── ⑩ the secret lens ──
 console.log('⑩ r3784 (4): THE SECRET LENS — no piece of a value in a hand-broken file reaches a chip, the route\'s error, the journal or a paired machine\'s words');
 const rnd = Math.random().toString(36).replace(/[^a-z]/g, '').slice(0, 6) || 'kqzv';
 const VALUE = ['qx', 'vsmadeup', rnd, 'zpqw'].join('');   // built at run time: never a literal in the tree
 const LENS_PIECES = Array.from({ length: VALUE.length - 4 }, (_, k) => VALUE.slice(k, k + 5));   // every 5-character piece
-async function lensLeg(helperPath) {
+async function lensLeg(helperPath, hostsPath = path.join(REPO, 'src/hosts.js')) {
   const home = mkHome(`home-lens-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   fs.writeFileSync(path.join(home, '.claude', 'settings.json'), `{"${VALUE}": "${VALUE}" "cleanupPeriodDays": 36500}`);   // broken JSON, the value first and AT the error (a parser's snippet would hold it)
   fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
@@ -314,18 +422,30 @@ async function lensLeg(helperPath) {
   const CH = await import(pathToFileURL(path.join(REPO, 'src/lib/cli-config-chips.js')).href);
   const tt = (x, p) => String(x).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
   const chips = (st.receipts || []).map((r) => CH.receiptLine(r, { t: tt, where: 'this machine' }).text);
-  const remote = require(path.join(REPO, 'src/hosts.js')).HostManager.installNotLanded(land.receipts || [], { hooks: [] });   // a paired machine's words
-  const texts = [...said, ...chips, (body && body.error) || '', JSON.stringify((body && body.cliConfig) || {}), JSON.stringify(st.receipts || []), st.unread || '', JSON.stringify(land.receipts || []), land.why || '', ...remote];
+  const HMl = require(hostsPath).HostManager;
+  const remote = HMl.installNotLanded(land.receipts || [], { hooks: [] });   // a paired machine's words
+  // r4014: THE REMOVE ROAD's words too — the real helper's strip of this home (its refusal of the broken file) handed to a paired
+  // machine's Remove; a look that could not read a hook file; a look whose reply held the value (garbage); and the no-CLI toast
+  const strip = await new Promise((resolve) => { let out = ''; const c = spawn(process.execPath, [helperPath, '--uninstall'], { env: { ...process.env, HOME: home }, stdio: ['ignore', 'pipe', 'ignore'] }); c.stdout.on('data', (d) => { out += d; }); c.on('close', () => resolve(out)); c.on('error', () => resolve(out)); });
+  const removeWords = async (stripOut, look) => { const H = Object.create(HMl.prototype); H.get = () => ({ id: 'h-0001' }); H._ownerWriteRefusal = () => null; H._ssh = async (h, cmd) => (/--uninstall/.test(cmd) ? stripOut : /grep -q vibespace-hook\.mjs/.test(cmd) ? look : 'VS-REMOVED'); const r = await H.uninstallAgentTools('h-0001'); return [r.error || '', ...(r.notLanded || [])]; };
+  const removed = [...await removeWords(`VS-HELPER-RAN\n${strip}\nVS-STRIPPED\n`, 'HOOK|claude|yes\nHOOK|codex|no\n'), ...await removeWords('VS-STRIPPED\n', 'HOOK|claude|err\nHOOK|codex|no\n'), ...await removeWords('VS-STRIPPED\n', `HOOK|claude|${VALUE}\n${VALUE}\n`)];
+  const HLm = require(path.join(REPO, HL_REL)).create({ activeSessions: new Map(), getSessionStatus: () => null, getUserTodos: () => null, sessionStatusKey: () => null, harnesses: { list: () => [] }, log: () => { }, warn: () => { } });
+  const ans = HLm.installAnswer({ claude: { ok: false, missing: 'no-dir', error: `~/.claude not found (${VALUE})` }, codex: { ok: false, missing: 'no-dir', error: `~/.codex not found (${VALUE})` } });
+  const noCliToast = Array.isArray(ans.noCli) ? tt('Nothing registered: no CLI folder on this machine ({dirs})', { dirs: ans.noCli.join(', ') }) : 'NO TOAST';
+  const texts = [...said, ...chips, (body && body.error) || '', JSON.stringify((body && body.cliConfig) || {}), JSON.stringify(st.receipts || []), st.unread || '', JSON.stringify(land.receipts || []), land.why || '', ...remote, ...removed, noCliToast];
   const leaks = texts.filter((t) => LENS_PIECES.some((p) => String(t).includes(p)));
-  return { leaks: leaks.map((t) => String(t).slice(0, 160)), n: texts.length, refused: (land.receipts || []).filter((x) => x.state === 'refused').length, unreadable: (st.receipts || []).filter((x) => x.state === 'unreadable').length };
+  return { leaks: leaks.map((t) => String(t).slice(0, 160)), n: texts.length, refused: (land.receipts || []).filter((x) => x.state === 'refused').length, unreadable: (st.receipts || []).filter((x) => x.state === 'unreadable').length, removed: removed.length, stripRefused: /\|refused\|/.test(strip), noCliToast };
 }
 const lens = await lensLeg(HELPER);
-ok(!!(lens.leaks.length === 0 && lens.refused >= 2 && lens.unreadable >= 2 && lens.n >= 6), '⑩ the JSON and the TOML road, a hand-broken file holding a made-up value: the apply refuses both files and the status reads them unreadable — and no piece of the value is in any chip, the route\'s error, a journal line or the paired machine\'s words', { leaks: lens.leaks, refused: lens.refused, unreadable: lens.unreadable, n: lens.n });
+ok(!!(lens.leaks.length === 0 && lens.refused >= 2 && lens.unreadable >= 2 && lens.n >= 6 && lens.removed >= 6 && lens.stripRefused && lens.noCliToast === 'Nothing registered: no CLI folder on this machine (~/.claude, ~/.codex)'), '⑩ the JSON and the TOML road, a hand-broken file holding a made-up value: the apply refuses both files and the status reads them unreadable — and no piece of the value is in any chip, the route\'s error, a journal line or the paired machine\'s words', { leaks: lens.leaks, refused: lens.refused, unreadable: lens.unreadable, n: lens.n });
 const HELPER_REL = 'data/bin/vibespace-hook-register.mjs';
 const LEAK_JSON = MC.write(HELPER_REL, anchored(src(HELPER_REL), 'exists but is not valid JSON — not touching it`); } }', 'exists but is not valid JSON — not touching it: ${text.slice(0, 120)}`); } }', 'the JSON refusal echoing the file'), 'helper-leak-json');
 const rj = await lensLeg(LEAK_JSON);
 ok(!!(rj.leaks.length > 0), 'RED (the JSON refusal echoes the file\'s text): the value reaches the journal and the words', { leaks: rj.leaks.length });
 const LEAK_TOML = MC.write(HELPER_REL, anchored(src(HELPER_REL), 'return { error: `line ${n + 1}: not a key/value, table header or comment` };', 'return { error: `line ${n + 1}: not a key/value (${line.trim().slice(0, 60)})` };', 'the TOML tokenizer echoing the line'), 'helper-leak-toml');
+const LEAK_LOOK = MC.write('src/hosts.js', anchored(src('src/hosts.js'), 'notLanded: [HostManager.LOOK_NO_REPLY], error: `${HostManager.LOOK_NO_REPLY} (the tools kept): ${cause}` };', 'notLanded: [HostManager.LOOK_NO_REPLY + out.slice(0, 80)], error: `${HostManager.LOOK_NO_REPLY} (the tools kept): ${cause}` };', 'the look\'s door echoing its reply'), 'hosts-leak-look');
+const rl = await lensLeg(HELPER, LEAK_LOOK);
+ok(!!(rl.leaks.length > 0), 'RED (the Remove road\'s door echoes the look\'s reply): the value reaches the words', { leaks: rl.leaks.length });
 const rt = await lensLeg(LEAK_TOML);
 ok(!!(rt.leaks.length > 0), 'RED (the TOML tokenizer echoes the line): the value reaches a chip and the journal', { leaks: rt.leaks.length });
 

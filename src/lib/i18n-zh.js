@@ -2584,6 +2584,7 @@ export default {
   "cannot be read — not touched": "无法读取，未改动",
   "the helper failed": "辅助程序运行失败",
   "Nothing registered: no CLI folder on this machine ({dirs})": "未注册任何内容：这台机器上没有 CLI 文件夹（{dirs}）",
+  "{host}: the look at its hook files did not reply — nothing was removed": "{host}：查看其钩子文件时没有回应 — 什么都没有删除",
   "Unregisters the hook from the host's CLIs and deletes the tools. A future remote session on this host re-installs them.": "从主机的 CLI 注销钩子并删除工具。该主机上未来的远程会话会重新安装它们。",
   "Remove VibeSpace integration from {host}?": "从 {host} 移除 VibeSpace 集成？",
   "Unregisters the hook from the host's CLIs and deletes the tools under ~/.vibespace/bin. Running remote sessions lose their reporting tools; a future remote session re-installs everything.": "将从主机的 CLI 注销钩子并删除 ~/.vibespace/bin 下的工具。运行中的远程会话会失去上报工具；未来的远程会话会重新安装全部内容。",
