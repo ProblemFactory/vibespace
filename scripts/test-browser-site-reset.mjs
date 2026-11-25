@@ -34,6 +34,7 @@ import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { writeFakeAgentBrowser } from './fixtures/fake-agent-browser.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const B = require('../src/browser-profiles.js');
@@ -94,7 +95,7 @@ function fakeChromes() {
       switch (m.method) {
         case 'Target.getTargets': return reply({ result: { targetInfos: [...b.targets.values()].map((t) => t.info) } });
         case 'Target.attachToTarget': { if (!b.targets.has(m.params.targetId)) return reply({ error: { code: -32602, message: 'No target' } }); const sid = `S-${m.params.targetId}-${++b.n}`; b.sessions.set(sid, { targetId: m.params.targetId, ws, enabled: false }); return reply({ result: { sessionId: sid } }); }
-        case 'Page.enable': if (s) s.enabled = true; return reply({ result: {} });
+        case 'Page.enable': if (s && api.holdEnable && api.holdEnable.targetId === s.targetId) { api.holdEnable.p.then(() => { s.enabled = true; reply({ result: {} }); }); return; } if (s) s.enabled = true; return reply({ result: {} });   // r4456: an enable a leg HOLDS (its placed race)
         case 'Page.stopLoading': { if (b.stopRefuse > 0) { b.stopRefuse--; return reply({ error: { code: -32000, message: 'Not attached to an active page' } }); } const t = s && b.targets.get(s.targetId); if (t && t.replay) { clearTimeout(t.replay); t.replay = null; } return reply({ result: {} }); } // verify r4 #5: Chrome's transient refusal, N times
         // lane site-reset-windows: THE WINDOW MODEL lane browser-windows measured (src/browser-windows.js WINDOWS_PROOF) — a `newWindow`
         // create opens a new window (`focus:false` leaves the focus where it was), a plain create lands in the LAST ACTIVATED window,
@@ -112,6 +113,7 @@ function fakeChromes() {
     });
   });
   const api = {
+    holdEnable: null,   // r4456: { targetId, p } — that tab's Page.enable answered only when p settles
     srv, of, windowOf: (bpath, id) => (of(bpath).win.has(id) ? of(bpath).win.get(id) : null),
     addTab(bpath, targetId, url, { windowId = null } = {}) { const b = of(bpath); b.win.set(targetId, windowId == null ? b.focusWin : windowId); b.targets.set(targetId, { info: { targetId, type: 'page', url, title: 'T ' + targetId, attached: false }, replay: null }); for (const c of b.clients) send(c, { method: 'Target.targetCreated', params: { targetInfo: b.targets.get(targetId).info } }); },
     removeTab(bpath, targetId) { const b = of(bpath); const t = b.targets.get(targetId); if (!t) return; if (t.replay) clearTimeout(t.replay); b.targets.delete(targetId); for (const c of b.clients) send(c, { method: 'Target.targetDestroyed', params: { targetId } }); },
@@ -142,6 +144,9 @@ function fakeChromes() {
   return api;
 }
 const chrome = await fakeChromes().listen();
+// r4456: A TAB THE HUB's DIALOGS WATCH HAS ATTACHED AND ENABLED (the fake sends its page events only to such a session): the wait is on that
+// fact, never a fixed 80 ms after the tab was added; its expiry is said by THE ONE MARK
+const watchedTab = async (bpath, id, ms = 10000) => { const on = () => [...chrome.of(bpath).sessions.values()].some((s) => s.targetId === id && s.enabled); const w = await until(on, ms); return w ? true : markTimedOut(false, ms, `the hub's watch enabling tab ${id}`); };
 servers.add(chrome.srv);
 
 // ═══ the scratch world: the REAL keeper, watch, runner, routes; three conversations ═══
@@ -313,7 +318,7 @@ try {
   let closeCalls = chrome.of(OWNP).calls.slice(cmark).filter((c) => c.method === 'Target.closeTarget' || c.method === 'Target.createTarget');
   ok(r.code === 0 && /^closed the looping tab/.test(r.out) && !/only tab/.test(r.out) && closeCalls.map((c) => c.method).join() === 'Target.closeTarget' && closeCalls[0].params.targetId === 'T1' && chrome.of(OWNP).targets.size >= 1, 'lane site-reset-windows: a bare `tab close` while it loops goes DIRECT — Target.closeTarget on the looping tab alone: the conversation\'s own-window tab (opened at attach) stands beside it, so no blank tab is opened', { r, closeCalls, pages: [...chrome.of(OWNP).targets.keys()] });
   for (const id of [...chrome.of(OWNP).targets.keys()]) chrome.removeTab(OWNP, id);
-  chrome.addTab(OWNP, 'T1B', 'https://app.bank.test/login'); await sleep(80);
+  chrome.addTab(OWNP, 'T1B', 'https://app.bank.test/login'); await watchedTab(OWNP, 'T1B');
   await chrome.replay(OWNP, 'T1B', LOOP);
   cmark = chrome.of(OWNP).calls.length;
   r = await cli(sA, ['tab', 'close']);
@@ -324,7 +329,7 @@ try {
   // the agent MOVED ON (another tab of its appeared after the loop began): a bare `tab close` / a `screenshot` are its
   // current tab's again — the browser CLI's own verbs (the direct route answers no_loop), never the looping tab by surprise
   await chrome.replay(OWNP, 'T2', LOOP);
-  chrome.addTab(OWNP, 'T3', 'https://elsewhere.test/'); await sleep(80);
+  chrome.addTab(OWNP, 'T3', 'https://elsewhere.test/'); await watchedTab(OWNP, 'T3');
   r = await j('POST', '/api/agent/browser/direct', { profile: own.id, action: 'close' }, as(sA));
   const r2 = await j('POST', '/api/agent/browser/direct', { profile: own.id, action: 'screenshot' }, as(sA));
   const rs2 = await j('POST', '/api/agent/browser/resolve', { handle: own.id, argv: ['snapshot'], wrapper: true }, as(sA));
@@ -453,8 +458,9 @@ try {
   console.log('— ⑤b verify r1: on a shared browser with no live view open, a conversation acts on NO tab it cannot prove its own');
   {
     const SP = SHP2 || SHP;
-    chrome.addTab(SP, 'S9', 'https://app.bank.test/login'); await sleep(80);
+    chrome.addTab(SP, 'S9', 'https://app.bank.test/login');
     await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['snapshot'], wrapper: true }, as(sA)); // arms the watch
+    await watchedTab(SP, 'S9');
     await chrome.replay(SP, 'S9', LOOP, { speed: 32 });
     const stops0 = chrome.of(SP).calls.filter((c) => c.method === 'Page.stopLoading').length;
     r = await j('POST', '/api/agent/browser/direct', { profile: shared.id, action: 'stop' }, as(sB));
@@ -488,7 +494,7 @@ try {
     // and its /audit — was nobody's here, so its own loop was never its fact (its `snapshot` answered "(empty page)", its `stop`
     // was refused). THE CREATION WITNESS through the routes: A's verb in flight, a tab appears ⇒ A's; its loop cuts A's verb
     await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['tab', 'new', 'https://app.bank.test/login'], wrapper: true }, as(sA));
-    chrome.addTab(SP, 'S10', 'https://app.bank.test/login'); await sleep(80);
+    chrome.addTab(SP, 'S10', 'https://app.bank.test/login'); await watchedTab(SP, 'S10');
     await j('POST', '/api/agent/browser/audit', { profile: shared.id, verb: 'tab', ok: true }, as(sA));
     const scA = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sA._browserKey, sessionId: 'sess-a', ephemeral: false }), scB = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
     ok(scA instanceof Set && scA.has('S10') && scB instanceof Set && !scB.has('S10'), 'verify r2: a tab that appeared between A\'s /resolve and /audit (its `tab new`) is A\'s — in its scope, never B\'s', { a: [...(scA || [])], b: [...(scB || [])] });
@@ -505,7 +511,7 @@ try {
     // a tab born AFTER A's audit (no verb of anybody in flight on this browser) is nobody's — the audit ends the witness window
     // on THIS browser (the route hands the profile to verbEnded; A's verbs on its own browser are no witness here)
     await j('POST', '/api/agent/browser/resolve', { handle: own.id, argv: ['snapshot'], wrapper: true }, as(sA));
-    chrome.addTab(SP, 'S11', 'https://app.bank.test/late'); await sleep(80);
+    chrome.addTab(SP, 'S11', 'https://app.bank.test/late'); await watchedTab(SP, 'S11');
     await j('POST', '/api/agent/browser/audit', { profile: own.id, verb: 'snapshot', ok: true }, as(sA));
     const scA2 = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sA._browserKey, sessionId: 'sess-a', ephemeral: false });
     ok(scA2 instanceof Set && !scA2.has('S11') && scA2.has('S10'), 'verify r2: a tab born after A\'s audit on the shared browser (A\'s verb then runs on its OWN browser) is nobody\'s — the witness window is per browser and ends at the audit', [...(scA2 || [])]);
@@ -643,8 +649,9 @@ try {
     const SP = SHP2 || SHP;
     const evs = []; const unsub = W.dialogs.onChange((e) => evs.push(e));
     // (a) a direct `stop` while the user drives this conversation's browser is refused (browser_interrupted); allowed again after the handback
-    chrome.addTab(OWNP, 'T5', 'https://app.bank.test/login'); await sleep(80);
+    chrome.addTab(OWNP, 'T5', 'https://app.bank.test/login');
     await j('POST', '/api/agent/browser/resolve', { handle: own.id, argv: ['snapshot'], wrapper: true }, as(sA));
+    await watchedTab(OWNP, 'T5');
     await chrome.replay(OWNP, 'T5', LOOP, { speed: 32 });
     const tk = keeper.takeover({ browserKey: sA._browserKey, profileId: own.id, viewerId: 'view-1', sessionId: 'sess-a' });
     ok(tk && tk.ok !== false && keeper.inputStateFor(sA._browserKey, own.id).input === 'user', 'setup: the user takes over the conversation\'s browser', tk);
@@ -687,8 +694,9 @@ try {
   // (e) the quiet rule: a loop whose page stops hopping by itself clears without a stop (a world with the quiet clock at 300 ms)
   worldQuietMs = 300;
   const q = await swap(D, PR, RT, async () => {
-    chrome.addTab(OWNP, 'T6', 'https://app.bank.test/login'); await sleep(80);
+    chrome.addTab(OWNP, 'T6', 'https://app.bank.test/login');
     await j('POST', '/api/agent/browser/resolve', { handle: own.id, argv: ['snapshot'], wrapper: true }, as(sA));
+    await watchedTab(OWNP, 'T6');
     const ev2 = []; const un2 = W.dialogs.onChange((e) => ev2.push(e));
     await chrome.replay(OWNP, 'T6', LOOP, { speed: 32 });
     const during = !!W.dialogs.factFor({ profileId: own.id, browserKey: sA._browserKey, sessionId: 'sess-a', ephemeral: false, consume: false }).loopAny;
@@ -734,8 +742,22 @@ try {
   // C7 (verify r1): the watch that admits every tab to an unattributed conversation — B's `stop` lands on a stranger's page
   { const src = rel('src/server/browser-dialogs.js'); const nd = "(t.ephemeral || scope === null || (scope instanceof Set && scope.has(e.targetId))) && ownsTab(t, e.targetId).ok"; ok(src.split(nd).length === 3, 'control setup C7 (pickTab + ownTabs)');
     const Dm = MUT.load('src/server/browser-dialogs.js', src.split(nd).join("(t.ephemeral || scope === null || (scope instanceof Set && (scope.size === 0 || scope.has(e.targetId)))) && ownsTab(t, e.targetId).ok"), 'c7-admit-all');
-    const res = await swap(Dm, PR, RT, async () => { const SP = SHP2 || SHP; chrome.addTab(SP, 'S8', 'https://app.bank.test/login'); await sleep(80); await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['snapshot'], wrapper: true }, as(sA)); await chrome.replay(SP, 'S8', LOOP, { speed: 32 }); const n0 = chrome.of(SP).calls.filter((c) => c.method === 'Page.stopLoading').length; const x = await j('POST', '/api/agent/browser/direct', { profile: shared.id, action: 'stop' }, as(sB)); const landed = chrome.of(SP).calls.filter((c) => c.method === 'Page.stopLoading').length - n0; chrome.removeTab(SP, 'S8'); return { x: x.json, landed }; });
-    ok(res.x && res.x.ok && res.landed === 1, 'CONTROL C7: a watch admitting every tab to an unattributed conversation lets B stop a page it cannot prove its own — the ⑤b rows redden on it', res); }
+    // r4456: the waits are ON THE FACTS this control judges — the watch enabled S8 (its page events reach the hub only then), and the hub
+    // saw the loop on it — never a fixed 80 ms after the tab was added. `oldWait` keeps the old fixed 80 ms (the placed race below)
+    const c7 = (oldWait) => swap(Dm, PR, RT, async () => { const SP = SHP2 || SHP; chrome.addTab(SP, 'S8', 'https://app.bank.test/login'); if (oldWait) await sleep(80); await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['snapshot'], wrapper: true }, as(sA)); if (!oldWait) await watchedTab(SP, 'S8'); await chrome.replay(SP, 'S8', LOOP, { speed: 32 }); if (!oldWait) { const looped = await until(() => !!(W.dialogs.factFor({ profileId: shared.id, browserKey: sA._browserKey, sessionId: 'sess-a', ephemeral: false, consume: false }).loopAny || W.dialogs.factFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false, consume: false }).loopAny), 10000); if (!looped) markTimedOut(false, 10000, 'C7: the hub seeing the loop on S8'); } const n0 = chrome.of(SP).calls.filter((c) => c.method === 'Page.stopLoading').length; const x = await j('POST', '/api/agent/browser/direct', { profile: shared.id, action: 'stop' }, as(sB)); const landed = chrome.of(SP).calls.filter((c) => c.method === 'Page.stopLoading').length - n0; chrome.removeTab(SP, 'S8'); return { x: x.json, landed }; });
+    const res = await c7(false);
+    ok(res.x && res.x.ok && res.landed === 1, 'CONTROL C7: a watch admitting every tab to an unattributed conversation lets B stop a page it cannot prove its own — the ⑤b rows redden on it', res);
+    // r4456 (law 3): THE RACE PLACED — the same control with S8's Page.enable HELD (the watch's attach, the late thing): under the OLD fixed 80 ms
+    // the loop replays to nobody, the hub sees no loop and B's stop lands nothing — the control red with nothing wrong, at will; with the waits on
+    // the facts (the hold let go while the control waits) it lands
+    let letGo = null; chrome.holdEnable = { targetId: 'S8', p: new Promise((r) => { letGo = r; }) };
+    const heldOld = await c7(true);
+    letGo();
+    let letGo2 = null; chrome.holdEnable = { targetId: 'S8', p: new Promise((r) => { letGo2 = r; }) };
+    setTimeout(() => letGo2(), 400);
+    const heldNew = await c7(false);
+    chrome.holdEnable = null;
+    ok(heldOld.landed === 0 && heldNew.x && heldNew.x.ok && heldNew.landed === 1, `PLACED (law 3): S8's enable held — the old fixed 80 ms wait lands ${heldOld.landed} stop(s) (the control would go red with nothing wrong); the waits on the facts land ${heldNew.landed} once the hold is let go`, { heldOld, heldNew }); }
   for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7, label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);
 } finally { fake.reap(); for (const s of servers) { try { s.close(); } catch { } } }
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

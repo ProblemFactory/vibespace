@@ -486,9 +486,33 @@ console.log('— ⑤ the bridge controls: each fix removed in a patched copy tur
     const B = await bridgeOn(noOwn, k);
     const A = viewer(B.P); await A.ready();
     A.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: true });
-    await until(() => calls.set.length >= 1, 3000); await sleep(400);
-    A.send({ type: 'fit', width: 720, height: 900, dpr: 1, visible: true }); await sleep(700);
+    // r4456: the waits are ON THE FACTS this control judges — the fake upstream's echo of the bridge's first set reached viewer A (its
+    // «command viewport», and the fit read as the agent's), then the bridge's answer to the 720 request — never a fixed 400 / 700 ms
+    await until(() => calls.set.length >= 1, 3000);
+    await until(() => A.msgs.some((m) => m.type === 'command' && m.action === 'viewport') && A.fits().some((x) => x.state === 'agent'), 15000);
+    const fits0 = A.fits().length;
+    A.send({ type: 'fit', width: 720, height: 900, dpr: 1, visible: true });
+    await until(() => A.fits().length > fits0, 15000);
     ok(A.msgs.some((m) => m.type === 'command' && m.action === 'viewport') && A.fits().some((x) => x.state === 'agent') && calls.set.length <= 2 && !calls.set.some((c) => c[0] === 720), 'NEGATIVE CONTROL: without the own-mirror recognition our OWN set reaches the viewer and is read as the AGENT\'s — the next pane change is letterboxed and never fitted (verify r1: the mutant also "puts back" the size it took for the agent\'s, once)', JSON.stringify({ fits: A.fits().map((x) => x.state), calls: calls.set }));
+    await A.close(); await B.close(); await U.close();
+  }
+  // r4456 (law 3): THE RACE PLACED — the same copy with the fake upstream's echo of the bridge's set HELD (the late thing): the old fixed
+  // 400 ms wait reads no «command viewport» at viewer A — the control red with nothing wrong, at will — and the wait on the fact reads it
+  // once the hold is let go
+  {
+    const U = await fakeUpstream(); cleanups.push(() => U.close());
+    let letGo = null; const held = new Promise((r) => { letGo = r; });
+    const mirror0 = U.mirrorSet; U.mirrorSet = (...a) => { held.then(() => mirror0(...a)); };
+    const { k, calls } = stubKeeper(U);
+    const B = await bridgeOn(noOwn, k);
+    const A = viewer(B.P); await A.ready();
+    const echoed = () => A.msgs.some((m) => m.type === 'command' && m.action === 'viewport') && A.fits().some((x) => x.state === 'agent');
+    A.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: true });
+    await until(() => calls.set.length >= 1, 3000); await sleep(400);
+    const oldRead = echoed();   // the OLD wait, the echo held
+    letGo();
+    const newRead = await until(echoed, 15000);
+    ok(!oldRead && newRead, `PLACED (law 3): the fake upstream's echo of the bridge's set held — the old fixed 400 ms wait reads ${oldRead ? 'the echo (NOT placed)' : 'no «command viewport» (the control would go red with nothing wrong)'}; the wait on the fact reads it once the hold is let go`, JSON.stringify({ oldRead, newRead }));
     await A.close(); await B.close(); await U.close();
   }
   const T4 = "          if (f && f.applied && FIT.fitHonored({ fit: f.applied, picture: sz }) !== 'exact') { f.applied = null; f.failed = null; persistFit(f); }\n";

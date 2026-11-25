@@ -39,6 +39,7 @@ import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, deadPort, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
@@ -1172,8 +1173,26 @@ let work, solo, shop;
   await kx.browse(xp.id);
   const HX = HM.humanKeyFor(xp.id);
   kx.humanTake({ key: HX, viewerId: 41 }); kx.humanRelease({ key: HX, viewerId: 41 });
-  clock += 2 * 3600e3; await kx.tick(); await sleep(50);
-  ok(kx.browserOf(xp.id).state === 'stopped', 'CONTROL: a keeper copy whose idle clock reads the leases only STOPS the browser 2 h into his 12 h keep — the keep leg above can go red', kx.browserOf(xp.id).state);
+  // r4456 (law 3): THE RACE PLACED — a twin of the same copy whose idle stop is HELD at the CLI's close-all (the tick only STARTS the stop:
+  // the close-all, the pid's end and the reap come after): the old wait (a fixed 50 ms after the tick) reads that browser still up — the
+  // control red with nothing wrong, at will — and the wait on the fact reads it stopped once the hold is let go (one clock step for both)
+  const rt0 = F.createBrowserRuntime({ env });
+  let letGo = null; const held = new Promise((r) => { letGo = r; });
+  const kh = mkKeeper(Kc, { dataDir: path.join(ROOT, 'data-xh'), runtime: { ...rt0, closeAll: async (...a) => { await held; return rt0.closeAll(...a); } } });
+  const hp = kh.createProfile({ label: 'XH' }, { owner: { kind: 'instance', id: null } });
+  await kh.browse(hp.id);
+  const HH = HM.humanKeyFor(hp.id);
+  kh.humanTake({ key: HH, viewerId: 42 }); kh.humanRelease({ key: HH, viewerId: 42 });
+  clock += 2 * 3600e3; await kx.tick(); await kh.tick();
+  // the wait is ON THE FACT the control judges: the idle stop landed (a generous bound; its expiry is said by THE ONE MARK)
+  const stoppedX = await until(() => kx.browserOf(xp.id).state === 'stopped', 20000);
+  const readX = stoppedX ? kx.browserOf(xp.id).state : markTimedOut(kx.browserOf(xp.id).state, 20000, 'CONTROL: the idle stop of the copy whose clock reads the leases only');
+  ok(readX === 'stopped', 'CONTROL: a keeper copy whose idle clock reads the leases only STOPS the browser 2 h into his 12 h keep — the keep leg above can go red', readX);
+  await sleep(50); const oldRead = kh.browserOf(hp.id).state;   // the OLD wait, over the held twin
+  letGo();
+  const landed = await until(() => kh.browserOf(hp.id).state === 'stopped', 20000);
+  const readH = landed ? kh.browserOf(hp.id).state : markTimedOut(kh.browserOf(hp.id).state, 20000, 'PLACED: the held twin\'s idle stop after its hold was let go');
+  ok(oldRead !== 'stopped' && readH === 'stopped', `PLACED (law 3): the twin's idle stop held at its close-all — the old fixed 50 ms wait reads its browser «${oldRead}» (the control would go red with nothing wrong); the wait on the fact reads it stopped once the hold is let go`, { oldRead, readH });
 }
 
 // ═══ ②b the REAL bridge over a fake upstream + ③ the REAL recorder on his relay ═══
