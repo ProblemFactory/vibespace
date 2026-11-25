@@ -7907,6 +7907,14 @@ const FALLBACK_MOVES_PER_MIN = 6;
 const PRESS_MOVES_AT_ONCE = 4;   // (F2 cure, r2939 (5)) a person's press: at the head and never counted, but FOUR restarts out at a time — a slot is held until that restart LANDS (F2 cure 2, r3041: the moved conversation's create asks the carry) or `fallbackLandingMs`, then freed and said
 const _fbQueue = new Map();   // server id → {poolId, sid, to, by: 'pool'|'person', at}
 const _fbInFlight = new Map(); // server id → its entry, from the move's start to its end (r2939 (3): never queued nor executed twice across the record's wait)
+const _fbMovedRecently = new Map();   // (r4199 (4)) server id → {to, at}: a move just MADE — a second page's press on it says «already on its way», never a failure
+/** (r4199 (4) (6)) where a conversation's move is going now: its queued or in-flight entry's target, else a move made in the last dwell → id | null */
+function fallbackMoveOf(sid, now = Date.now()) {
+  const k = String(sid || ''), e = _fbInFlight.get(k) || _fbQueue.get(k);
+  if (e) return e.to || null;
+  const m = _fbMovedRecently.get(k);
+  return m && now - m.at >= 0 && now - m.at < FALLBACK_DWELL_MS ? m.to : null;
+}
 const _fbMovedAt = [];        // the instants of the pool-made moves started in the rolling minute (the pace)
 const _fbLanding = new Map();  // (F2 cure 2, r3041 MUST) backend id → the press slot that waits for that restart to LAND
 const _fbBackoff = new Map();  // (F2 cure 2, r3041 (c)) server id → {to, n, until}: a move the provider refused is not queued by the pool again before `until`
@@ -8028,7 +8036,7 @@ async function executeFallbackMove(e, now = Date.now()) {
   if (inTurnOf(s3)) { clearFallbackRecord(s3); _fbInFlight.delete(e.sid); queueFallbackMove(e.poolId, e.sid, e.to, e.by, now); return { moved: false, why: 'in-turn' }; }   // a turn began meanwhile: it waits for the stop
   const r = applyCrossMove(e.poolId, e.sid, s3, j2.curFor, j2.d, Date.now(), { why: 'fallback', record, quiet: true });
   if (!r.moved) clearFallbackRecord(s3);   // (r2939 (1)) no record left on a conversation that did not move (no client)
-  else { endFallbackEpisode(e.sid); if (e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid); }   // (r3041 MUST) a press's slot waits for the LANDING
+  else { endFallbackEpisode(e.sid); _fbMovedRecently.set(e.sid, { to: e.to, at: Date.now() }); while (_fbMovedRecently.size > 4096) _fbMovedRecently.delete(_fbMovedRecently.keys().next().value); if (e.by === 'person') r.landing = awaitFallbackLanding(s3.claudeSessionId || s3.backendSessionId, e.sid); }   // (r3041 MUST) a press's slot waits for the LANDING
   return r;
 }
 // (r3148 (1)) a conversation's line is a STORED string — never translated (it stays English): plain strings, no dictionary rows
@@ -8240,6 +8248,8 @@ function fallbackFactOf(sid, now = Date.now()) {
   if (held && /^pv-/.test(String(held))) {
     if (!fb || !fb.has(held)) return null;
     const rec = s2._poolFallback && s2._poolFallback.provider === held ? s2._poolFallback : null;
+    const going = fallbackMoveOf(sid, now);   // (r4199 (6)) its move back already queued or under way: no second press, the strip says where it is going
+    if (going && !/^pv-/.test(String(going))) return { on: { sid, poolId, provider: held, label: labelOf(held), back: { id: going, name: labelOf(going) }, why: null, queued: true } };
     let v = { to: null, why: 'no-first-model' }; try { if (rec) v = fallbackBackVerdict(poolId, rec, now, s2, sid); } catch { }
     return { on: { sid, poolId, provider: held, label: labelOf(held), back: v.to ? { id: v.to, name: labelOf(v.to) } : null, why: v.to ? null : (v.why || null) } };
   }
@@ -8268,7 +8278,7 @@ function fallbackMoveBack(poolId, sids = null, now = Date.now()) {
     queueFallbackMove(poolId, sid, to, 'person', now); if (was) already++; else n++;
   }
   if (n) pumpFallbackMoves(now);
-  tellFallbackStatus(poolId);
+  tellFallbackStatus(poolId); tellFallbackFacts(poolId, now);   // (r4199 (6)) the strip's fact pushed after a move back
   return { queued: n, already, noModel, lapsed, familyUnknown, otherRecord };
 }
 /** The pool row's count (the page, unit F3b): per provider, how many conversations run on it and how many could come back now. */
@@ -8383,10 +8393,15 @@ function answerFallbackAsk(q, answer, now = Date.now(), { sid = null } = {}) {
   if (sid) {
     if (answer !== 'once') return { ok: false, status: 400, code: 'bad_args', error: 'one conversation is answered «once» only' };
     const s1 = activeSessions.get(String(sid));
-    if (!q.sids.has(String(sid)) || !s1 || s1._accountId !== q.poolId) return { ok: false, status: 409, code: 'not_waiting', error: 'that conversation is not one of this pool\'s waiting for this provider' };
+    if (!q.sids.has(String(sid)) || !s1 || s1._accountId !== q.poolId) {
+      const way = fallbackMoveOf(sid, now);   // (r4199 (4)) pressed again (a second page): its move is on its way — said as that, never a failure
+      if (way) return { ok: true, state: 'already', moved: false, queued: 0, already: 1, sid: String(sid), to: way };
+      return { ok: false, status: 409, code: 'not_waiting', error: 'that conversation is not one of this pool\'s waiting for this provider' };
+    }
     queueFallbackMove(q.poolId, String(sid), q.pv, 'person', now);
     q.sids.delete(String(sid));
     if (!q.sids.size) settle('allowed');
+    else { try { drawFallbackAsk(q, accounts.get(q.poolId)); } catch { } }   // (r4199 (5)) the For-you item's count drawn again at once: the others still wait
     pumpFallbackMoves(now); tellFallbackFacts(q.poolId, now);
     return { ok: true, state: 'allowed', moved: false, queued: 1, sid: String(sid) };
   }
@@ -8454,6 +8469,7 @@ function closeCrossAsksFor(poolId, sid, by) { for (const q of [..._crossAsks.val
 function answerCrossProviderAsk(askId, { answer, now = Date.now(), sid = null } = {}) {
   const fk = _fbAskById.get(String(askId || '')), fq = fk ? _fbAsks.get(fk) : null; // (B-d578 F2) a fallback item — one a pool and provider
   if (fq) { if (!['once', 'always', 'deny'].includes(answer)) return { ok: false, status: 400, code: 'bad_args', error: 'the answer is once, always or deny' }; return answerFallbackAsk(fq, answer, now, { sid }); }
+  if (sid && !_crossAsks.has(String(askId || ''))) { const way = fallbackMoveOf(sid, now); if (way) return { ok: true, state: 'already', moved: false, queued: 0, already: 1, sid: String(sid), to: way }; }   // (r4199 (4)) the ask settled by the first page's press: the second says «already on its way»
   if (sid) return { ok: false, status: 400, code: 'bad_args', error: 'one conversation is named only on a fallback provider\'s ask' };   // (r3918) the conversation's own press answers a fallback ask only
   const q = _crossAsks.get(String(askId || ''));
   if (!q) return { ok: false, status: 404, code: 'ask_unknown', error: 'that request is gone' };
@@ -9668,7 +9684,7 @@ function maybeStopOnFallback(session, id, from, to) {
     providerIn, memberProvider, memberWord, applyCrossMove, fileCrossProviderAsk, answerCrossProviderAsk, crossMoveNow, _crossAsks, _crossLinesOwed, _crossPlacementOwed, crossCarryFor, dropCrossCarry, CROSS_ASK_TYPE, // THE PROVIDER (q-053 P0b): the inputs, the cold cross move, the owner's card
     queueFallbackMove, pumpFallbackMoves, fallbackJudge, fallbackRows, syncFallbackAsks, answerFallbackAsk, _fbQueue, _fbMovedAt, _fbAsks, FALLBACK_MOVES_PER_MIN,
     purgePoolMadeMoves, fallbackRefusal, _fbInFlight, PRESS_MOVES_AT_ONCE, _fbLanding, _fbBackoff, convBackend, noteFallbackLanded, endFallbackEpisode, // F2 cure (r2939) + cure 2 (r3041) // B-d578 F2: the fallback member's moves (the hub queue, the record first, scene 1's item)
-    judgeFallbackReturns, fallbackBackTarget, fallbackBackVerdict, fallbackMoveBack, fallbackStatus, fallbackFactOf, tellFallbackFacts, _fbFactSig, FALLBACK_DWELL_MS, _fbDwell, sweepFallbackDwell, stampFallbackDwell, tellFallbackStatus, _fbStatusSig, // B-d578 F3a: coming back; F3b: the row's counts
+    judgeFallbackReturns, fallbackBackTarget, fallbackBackVerdict, fallbackMoveBack, fallbackStatus, fallbackFactOf, tellFallbackFacts, _fbFactSig, fallbackMoveOf, _fbMovedRecently, FALLBACK_DWELL_MS, _fbDwell, sweepFallbackDwell, stampFallbackDwell, tellFallbackStatus, _fbStatusSig, // B-d578 F3a: coming back; F3b: the row's counts
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)

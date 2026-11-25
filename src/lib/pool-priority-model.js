@@ -263,6 +263,7 @@ export function fallbackStripOf(f, t) {
   if (f.on && f.on.provider) {
     const words = t('Runs on {provider} — billed there, on {provider}\'s own bill', { provider: f.on.label || f.on.provider });
     if (!f.on.back || !f.on.back.id) return { words: words + ' · ' + t('no member can take it back yet'), press: null, request: null };
+    if (f.on.queued) return { words: words + ' · ' + t('on its way back to {member}', { member: f.on.back.name || f.on.back.id }), press: null, request: null };   // (r4199 (6)) its move back already queued: said, never offered twice
     return { words, press: t('Move back to {member}', { member: f.on.back.name || f.on.back.id }),
       request: { url: '/api/accounts/' + encodeURIComponent(f.on.poolId) + '/fallback/move-back', body: { sids: [f.on.sid] }, kind: 'back' } };
   }

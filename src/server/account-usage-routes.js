@@ -677,9 +677,13 @@ app.post('/api/accounts/:poolId/fallback/move-back', (req, res) => {
 });
 app.post('/api/accounts/pool-cross/asks/:askId', (req, res) => {
   try {
-    if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
+    const who = require('../routes/vault.js').personVerdict(req);   // (r4199 (1)) THE TREE's ONE VERDICT OF A PERSON (the move-back route's): any bearer — an agent's, a job's, an automation key — and another site refused
+    if (!who.ok) return res.status(who.status || 403).json({ ok: false, code: who.code || 'human_only', error: who.error || 'a person\'s press only' });
     if (typeof engine.answerCrossProviderAsk !== 'function') return res.status(503).json({ error: 'pool engine unavailable', code: 'no_engine' });
-    const r = engine.answerCrossProviderAsk(String(req.params.askId || ''), { answer: req.body && req.body.answer, sid: req.body && req.body.sid ? String(req.body.sid) : null });   // (r3918 (a)) the conversation's own «Move to»: the same answer with ONE conversation named, the same guard
+    const b = req.body || {};
+    // (r4199 (2) (3)) ONE conversation is named by a non-empty string: a field present but empty, or a list, is refused by name — never read as «the whole ask»
+    if (Object.prototype.hasOwnProperty.call(b, 'sid') && (typeof b.sid !== 'string' || !b.sid.trim())) return res.status(400).json({ ok: false, code: 'bad_args', error: 'name one conversation by its id' });
+    const r = engine.answerCrossProviderAsk(String(req.params.askId || ''), { answer: b.answer, sid: typeof b.sid === 'string' ? b.sid : null });   // (r3918 (a)) the conversation's own «Move to»: the same answer with ONE conversation named
     if (!r || !r.ok) return res.status((r && r.status) || 400).json({ ok: false, code: (r && r.code) || 'failed', error: (r && r.error) || 'nothing changed' });
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }

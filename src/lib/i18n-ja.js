@@ -11590,6 +11590,8 @@ export default {
   "Every member of its pool is out": "このプールのメンバーはすべて使えません", // lane lg-providers B-d578 the conversation's own press (r3918)
   "Move to {provider} — billed there, on {provider}'s own bill": "{provider} へ移す — 料金はそこ、{provider} 自身の請求です", // lane lg-providers B-d578 the conversation's own press (r3918)
   "Could not move it — {reason}": "移せませんでした — {reason}", // lane lg-providers B-d578 the conversation's own press (r3918)
+  "on its way back to {member}": "{member} に戻る途中です", // lane lg-providers B-d578 the conversation's own press (r3918; r4199's cure)
+  "This conversation is already on its way to {provider}": "この会話はすでに {provider} へ移る途中です", // lane lg-providers B-d578 the conversation's own press (r3918; r4199's cure)
   "This conversation is queued to move to {provider} — it restarts there now if it is idle, or when its turn is over": "この会話を {provider} へ移す順番に入れました — 待機中ならすぐ、そうでなければ今のターンが終わるとそこで再起動します", // lane lg-providers B-d578 the conversation's own press (r3918)
   "This pool's fallback setting was changed on another page — nothing was saved; the dialog opens again with the pool as it is now": "このプールの予備の設定は別のページで変更されました — 保存していません。ダイアログを今のプールの状態で開き直します", // lane lg-providers B-d578 F3b's follow (round w3d6fa3b6, r3908)
   "The pool's fallback providers stay as they are until VibeSpace restarts with the list it reads now.": "VibeSpace が今読める一覧で再起動するまで、プールの予備プロバイダーはそのままです。", // lane lg-providers B-d578 F3b's follow (round w3d6fa3b6, r3908)

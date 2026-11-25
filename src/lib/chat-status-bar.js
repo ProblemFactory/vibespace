@@ -654,7 +654,9 @@ export class ChatStatusBar {
     try { r = await fetchJson(fs.request.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fs.request.body) }); } finally { this._fbBusy = false; this.render(); }
     if (!r || r.error || r.ok === false) { showToast(t('Could not move it — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') }), { type: 'error' }); return; }
     const said = fs.request.kind === 'to'
-      ? [{ text: t('This conversation is queued to move to {provider} — it restarts there now if it is idle, or when its turn is over', { provider: fs.request.provider }), type: 'success' }]
+      ? (Number(r.already) > 0   // (r4199 (4)) pressed after another page did: already on its way — never «could not move it»
+        ? [{ text: t('This conversation is already on its way to {provider}', { provider: fs.request.provider }), type: 'info' }]
+        : [{ text: t('This conversation is queued to move to {provider} — it restarts there now if it is idle, or when its turn is over', { provider: fs.request.provider }), type: 'success' }])
       : fallbackPressToasts(r, t);
     for (const m of said) showToast(m.text, { type: m.type, duration: m.type === 'success' ? undefined : 8000 });
   }
@@ -1379,6 +1381,10 @@ export class ChatStatusBar {
     const firstRow2 = ordered.findIndex((c) => rank(c.key)[0] === 2);
     const mark = (key, cls) => ({ key, cls, title: '', html: '', style: '', attrs: { 'aria-hidden': 'true' } });
     if (!one && firstRow2 > 0) ordered.splice(firstRow2, 0, mark('row-break', 'chat-status-rowbreak'));
+    // (B-d578 r4199) THE FALLBACK LINE — where a person reads whose bill a conversation runs on and finds its one press — is never
+    // squeezed beside the chips: on the two rows it is a ROW OF ITS OWN, the strip's first (chat.css wraps it whole); on the one row
+    // it stands in its place and never gives way (the other marks do)
+    if (!one) { const iFb = ordered.findIndex((c) => c.key === 'fallback'); if (iFb >= 0) { const [fb] = ordered.splice(iFb, 1); ordered.unshift(fb, mark('row-break-fallback', 'chat-status-rowbreak')); } }
     else if (one && w > 0) {   // the ONE row (the artboard at 960): a hairline between the classes — before row 2, before «⚙ 对话设置»
       const iSet = ordered.findIndex((c) => c.key === 'settings');
       if (iSet > 0) ordered.splice(iSet, 0, mark('class-line-iii', 'chat-status-classline'));

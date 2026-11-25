@@ -11591,6 +11591,8 @@ export default {
   "Every member of its pool is out": "它所在号池的所有成员都不可用", // lane lg-providers B-d578 the conversation's own press (r3918)
   "Move to {provider} — billed there, on {provider}'s own bill": "移到 {provider}——费用记在那里，记在 {provider} 自己的账上", // lane lg-providers B-d578 the conversation's own press (r3918)
   "Could not move it — {reason}": "没能移动它——{reason}", // lane lg-providers B-d578 the conversation's own press (r3918)
+  "on its way back to {member}": "正在移回 {member}", // lane lg-providers B-d578 the conversation's own press (r3918; r4199's cure)
+  "This conversation is already on its way to {provider}": "这个对话已经在移到 {provider} 的路上", // lane lg-providers B-d578 the conversation's own press (r3918; r4199's cure)
   "This conversation is queued to move to {provider} — it restarts there now if it is idle, or when its turn is over": "这个对话已排队移到 {provider}——空闲的话现在就在那里重启，否则在当前回合结束后重启", // lane lg-providers B-d578 the conversation's own press (r3918)
   "This pool's fallback setting was changed on another page — nothing was saved; the dialog opens again with the pool as it is now": "这个号池的备用设置已在另一个页面上改过——这次没有保存；对话框会按号池现在的样子重新打开", // lane lg-providers B-d578 F3b's follow (round w3d6fa3b6, r3908)
   "The pool's fallback providers stay as they are until VibeSpace restarts with the list it reads now.": "在 VibeSpace 用现在能读到的列表重新启动之前，号池的备用提供方保持不变。", // lane lg-providers B-d578 F3b's follow (round w3d6fa3b6, r3908)
