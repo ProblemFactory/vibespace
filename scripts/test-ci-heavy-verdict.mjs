@@ -800,6 +800,21 @@ console.log('    §6: scripts/ci.mjs run as a child (its refusals, --check-heavy
   ok(defs === 1 && calls === 2 && /if \(arg\('heavy-verdict'\) !== undefined\) \{[\s\S]{0,600}heavyVerdict\(\{ sha: vSha, runId: vRun, dir \}\)/.test(SRC),
     `the verdict runs only when asked: ONE call site, the --heavy-verdict branch (no timer, no hook, no launcher) — ${calls - defs} call(s)`); }
 
+// r4344 (THE CLASS of 1f763b01c): no line of the dispatcher (ci.mjs main) carries a statement INSIDE its trailing comment. That commit
+// appended words after «return exitFlushed(0);» with a «//» before them: the return became comment text, and every GREEN verdict fell
+// through to «REFUSED … undefined» and exited 3. A census by reading, string-aware (a «//» in a quoted text is no comment).
+{ const commentOf = (l) => { let q = null; for (let i = 0; i < l.length - 1; i++) { const c = l[i]; if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; } else if (c === "'" || c === '"' || c === '`') q = c; else if (c === '/' && l[i + 1] === '/') return l.slice(i + 2); } return null; };
+  const CODE_IN = /\breturn\s+[\w.]+\(|\bexitFlushed\(|\bprocess\.exit\(/;
+  const census = (text) => { const a = text.indexOf('\nfunction main(argv) {\n'), b = a < 0 ? -1 : text.indexOf('\n}\n', a); if (b < 0) return null;
+    const lines = text.slice(a + 1, b).split('\n'), withComment = lines.filter((l) => commentOf(l) !== null);
+    return { lines: lines.length, withComment: withComment.length, swallowed: withComment.filter((l) => CODE_IN.test(commentOf(l))).map((l) => l.trim()) }; };
+  const now = census(SRC);
+  const CURED = "ranEarlier)); // B-737b: the names that ran no leg on the runner, where the cut is read\n      return exitFlushed(0);";
+  const RELEASE = "ranEarlier)); // B-737b: the names that ran no leg on the runner, where the cut is read return exitFlushed(0);";
+  const red = SRC.includes(CURED) ? census(SRC.replace(CURED, RELEASE)) : null;
+  ok(!!now && now.lines > 40 && now.withComment > 10 && now.swallowed.length === 0 && !!red && red.swallowed.length === 1 && /where the cut is read return exitFlushed\(0\);/.test(red.swallowed[0]),
+    `THE DISPATCHER's CENSUS (r4344): ${now ? `${now.lines} lines, ${now.withComment} with a trailing comment, ${now.swallowed.length} holding a statement in it` : 'main() not found'}; CONTROL: the release's line (the verdict's return in its comment) is found by its text${red ? ` (${red.swallowed.length})` : ' — the cured lines are not in the file'}`); }
+
 console.log('§7 PARITY — production\'s 30 markers: the union reader and the reader it replaced agree on every HEAD of that history');
 {
   const i = UNION_AT, j = UNION_END;

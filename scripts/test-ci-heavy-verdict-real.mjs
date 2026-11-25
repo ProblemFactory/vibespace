@@ -10,6 +10,9 @@
 //      release's reader (073cc4a1e) as a mutant copy; the PURE passed-count leg stays in the fast file;
 //   §6 THE CLI — scripts/ci.mjs run as a child: the --heavy-verdict refusals and --check-heavy's three answers; the one-call-site
 //      leg (pure, over the source) stays in the fast file;
+//   §6b THE VERDICT THROUGH THE REAL COMMAND (主开发 r4344) — scripts/ci.mjs --heavy-verdict run as a child against a scratch repository
+//      whose one commit holds the running ci.mjs, with a stand-in gh on PATH: a green run exits 0 and prints one line, a failed run exits
+//      3 with its reason; RED CONTROL: the release's line (the green branch's return inside its trailing comment) exits 3 on a green run;
 //   §7d THE DIFFERENTIAL ON REAL GIT — one fast-import history, both readers asking git through their own doors; master's reader is
 //      the fast file's §7c copy (verbatim from 2056c98de), held byte for byte by the fast file's §T pin.
 // The fast file's §T pins that this file holds these legs, that it runs none of them, and that this row is heavy. Its host is the
@@ -22,7 +25,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { heavyBlocker, markerShapeWhy, runSuiteAsync, markerCommitsOf, resolveShortNames } from './ci.mjs';
+import { heavyBlocker, markerShapeWhy, runSuiteAsync, markerCommitsOf, resolveShortNames, SELF_SKIP_TITLE } from './ci.mjs';
 import { REPO, ok, git, report, GIT_ENV } from './ci-gate-kit.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';
@@ -118,6 +121,74 @@ const cli = (args) => spawnSync(process.execPath, [path.join(REPO, 'scripts', 'c
   ok(r2.status === 1 && /heavy-gate markers cannot be read/.test(r2.stderr) && !/not blocking/.test(r2.stderr), `--check-heavy on a marker path it cannot read: BLOCKED (exit ${r2.status}), never «not blocking»`);
   const r3 = cli(['--check-heavy', `--markers=${path.join(ROOT, 'absent-dir')}`, `--head=${head}`]);
   ok(r3.status === 0, `--check-heavy with no marker directory: CLEAR (exit ${r3.status})`); }
+
+console.log('§6b THE VERDICT THROUGH THE REAL COMMAND (主开发 r4344): a green run exits 0 with its one line; a failed one exits 3 with its reason');
+{ // THE WORLD: a scratch repository whose ONE commit holds a mirror workflow (7 heavy shards, the fast tier in 2 parts) and the running
+  // ci.mjs's own bytes (hostedHeavyNamesAt reads the plan from the commit and wants the RUNNING file's blob there); its scripts/ is a folder
+  // of links to this tree's scripts but ci.mjs, a real file of those bytes (the tree's, or for the control the release's line), src/ and
+  // node_modules links. The child runs ITS scripts/ci.mjs (--preserve-symlinks-main: the tool's repo root is the scratch repository),
+  // asking GitHub through a stand-in gh on PATH that answers made-up JSON by its API path and 404s every other.
+  const SLUG = 'made-up-owner/made-up-repo', RUN_OK = '4344001', RUN_RED = '4344002';
+  const WF = ['name: ci', 'on: push', 'jobs:', '  fast:', '    name: fast ${{ matrix.part }}/2', '    runs-on: ubuntu-24.04', '    strategy:', '      fail-fast: false',
+    '      matrix:', '        part: [1, 2]', '    steps:', '      - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2', '  heavy-shards:', '    name: heavy ${{ matrix.shard }}/7',
+    '    runs-on: ubuntu-24.04', '    strategy:', '      fail-fast: false', '      matrix:', '        shard: [1, 2, 3, 4, 5, 6, 7]', '    steps:',
+    '      - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/7', '  heavy:', '    runs-on: ubuntu-24.04', '    steps:', '      - run: node -e 0', ''].join('\n');
+  const ID_ENV = { ...GIT_ENV, GIT_AUTHOR_NAME: 'made-up', GIT_AUTHOR_EMAIL: 'made-up@example.invalid', GIT_COMMITTER_NAME: 'made-up', GIT_COMMITTER_EMAIL: 'made-up@example.invalid' };
+  const gitIn = (W, args, input) => { const r = spawnSync('git', ['-C', W, ...args], { input, env: ID_ENV, maxBuffer: 64 << 20 }); if (r.status !== 0) throw new Error(`git ${args[0]}: ${String(r.stderr || '').trim()}`); return String(r.stdout || '').trim(); };
+  const world = (tag, ciBytes) => {
+    const W = scratch(tag);
+    gitIn(W, ['init', '-q']); gitIn(W, ['remote', 'add', 'origin', `git@github.com:${SLUG}.git`]);
+    const bWf = gitIn(W, ['hash-object', '-w', '--stdin'], Buffer.from(WF)), bCi = gitIn(W, ['hash-object', '-w', '--stdin'], ciBytes);
+    gitIn(W, ['update-index', '--add', '--cacheinfo', `100644,${bWf},.github/workflows/ci.yml`]);
+    gitIn(W, ['update-index', '--add', '--cacheinfo', `100644,${bCi},scripts/ci.mjs`]);
+    const sha = gitIn(W, ['commit-tree', gitIn(W, ['write-tree']), '-m', 'the mirror commit']);
+    fs.mkdirSync(path.join(W, 'scripts'));
+    for (const n of fs.readdirSync(path.join(REPO, 'scripts'))) if (n !== 'ci.mjs') fs.symlinkSync(path.join(REPO, 'scripts', n), path.join(W, 'scripts', n));
+    fs.writeFileSync(path.join(W, 'scripts', 'ci.mjs'), ciBytes);
+    for (const n of ['src', 'node_modules', 'package.json']) if (fs.existsSync(path.join(REPO, n))) fs.symlinkSync(path.join(REPO, n), path.join(W, n));
+    return { W, sha };
+  };
+  // the made-up GitHub answers of one run (its jobs all success, each heavy shard's one «self-skipped» note naming no suite)
+  const answers = (sha, runId, conclusion) => {
+    const names = ['fast 1/2', 'fast 2/2', ...Array.from({ length: 7 }, (_, k) => `heavy ${k + 1}/7`), 'heavy'];
+    const jobs = names.map((name, k) => ({ id: Number(runId) * 100 + k, name, status: 'completed', conclusion: 'success', started_at: '2026-11-25T00:00:00Z', completed_at: '2026-11-25T00:30:00Z',
+      check_run_url: `https://api.github.com/repos/${SLUG}/check-runs/${Number(runId) * 100 + k}` }));
+    const out = {
+      [`repos/${SLUG}/actions/runs/${runId}`]: { id: Number(runId), repository: { full_name: SLUG }, head_repository: { full_name: SLUG }, path: '.github/workflows/ci.yml', event: 'push',
+        head_sha: sha, head_branch: 'ci/made-up', status: 'completed', conclusion, run_attempt: 1, run_started_at: '2026-11-25T00:00:00Z' },
+      [`repos/${SLUG}/actions/runs/${runId}/jobs?filter=latest&per_page=100`]: { total_count: jobs.length, jobs },
+    };
+    for (const j of jobs.filter((x) => /^heavy \d+\/7$/.test(x.name))) out[`repos/${SLUG}/check-runs/${j.id}/annotations?per_page=100`] = [{ title: SELF_SKIP_TITLE, message: `${j.name} (0):`, annotation_level: 'notice' }];
+    return out;
+  };
+  const BIN = scratch('fake-gh-bin');
+  fs.writeFileSync(path.join(BIN, 'gh'), ['#!/usr/bin/env node', "const fs = require('fs');", "const map = JSON.parse(fs.readFileSync(process.env.VS_FAKE_GH_MAP, 'utf8'));",
+    'const a = process.argv.slice(2);', "if (a[0] !== 'api' || !Object.prototype.hasOwnProperty.call(map, a[1])) { process.stderr.write('gh: HTTP 404 Not Found ' + a.join(' ')); process.exit(1); }",
+    'process.stdout.write(JSON.stringify(map[a[1]]));', ''].join('\n'), { mode: 0o755 });
+  const verdict = (w, runId, map) => {
+    const mapFile = path.join(w.W, `gh-${runId}.json`); fs.writeFileSync(mapFile, JSON.stringify(map));
+    const markers = scratch('markers');
+    const r = spawnSync(process.execPath, ['--preserve-symlinks', '--preserve-symlinks-main', path.join(w.W, 'scripts', 'ci.mjs'), '--heavy-verdict', w.sha, '--gh-run', runId, `--markers=${markers}`],
+      { cwd: w.W, encoding: 'utf-8', timeout: 180000, env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, VS_FAKE_GH_MAP: mapFile } });
+    const lines = String(r.stdout || '').split('\n').filter((l) => l.trim());
+    return { status: r.status, lines, err: String(r.stderr || '').trim(), wrote: fs.existsSync(markers) ? fs.readdirSync(markers) : [] };
+  };
+  const CURED = "ranEarlier)); // B-737b: the names that ran no leg on the runner, where the cut is read\n      return exitFlushed(0);";
+  const RELEASE = "ranEarlier)); // B-737b: the names that ran no leg on the runner, where the cut is read return exitFlushed(0);";
+  const tree = world('verdict-tree', fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs')));
+  const g = verdict(tree, RUN_OK, answers(tree.sha, RUN_OK, 'success'));
+  ok(g.status === 0 && g.lines.length === 1 && /^✓ heavy verdict: CI mirror run 4344001 \(attempt 1\) is green for /.test(g.lines[0]) && !/REFUSED|undefined/.test(g.err) && g.wrote.includes(`${tree.sha}.mirror.green`),
+    `a GREEN run through the real command: exit ${g.status}, ${g.lines.length} line(s) on stdout, its marker ${g.wrote.join(', ') || 'NOT written'}; stderr «${g.err.slice(0, 160)}»`);
+  const f = verdict(tree, RUN_RED, answers(tree.sha, RUN_RED, 'failure'));
+  ok(f.status === 3 && new RegExp(`heavy verdict REFUSED for ${tree.sha}: the run's conclusion is failure, not success — nothing written`).test(f.err) && !/undefined/.test(f.err) && f.lines.length === 0 && f.wrote.length === 0,
+    `a FAILED run through the real command: exit ${f.status}, its reason «${f.err.slice(0, 200)}», nothing written (${f.wrote.length})`);
+  // RED CONTROL: the release's line — the green branch's return inside its trailing comment — in a world of its own (its commit holds
+  // that file's bytes): the same green run exits 3 and says «undefined»
+  const SRC_NOW = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  const rel = SRC_NOW.includes(CURED) ? world('verdict-release', Buffer.from(SRC_NOW.replace(CURED, RELEASE))) : null;
+  const c = rel ? verdict(rel, RUN_OK, answers(rel.sha, RUN_OK, 'success')) : null;
+  ok(!!c && c.status === 3 && /heavy verdict REFUSED for [0-9a-f]{40}: undefined — nothing written/.test(c.err),
+    `CONTROL (the release's line, r4344): the same green run exits ${c ? c.status : '(no copy: the cured lines are not in the file)'} and says «${c ? c.err.slice(-120) : ''}» — RED`); }
 
 { // MASTER'S READER, verbatim from 2056c98de — the fast file's §7c copy, held byte for byte there (§T)
   const masterBlocker = ({ dir, head, exists, isAncestor }) => {
