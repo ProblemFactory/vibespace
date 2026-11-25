@@ -1137,7 +1137,10 @@ function onGateFree(fn) { gateFreeListeners.add(fn); return () => gateFreeListen
 function noteGateFree(whys, at = Date.now()) {
   const w = [...new Set((whys || []).filter((x) => A.isHeldWhy(x)))];
   if (!w.length) return;
-  for (const fn of [...gateFreeListeners]) { try { fn({ whys: w, at }); } catch { } }
+  // r4410 (g): the listeners' bodies run AFTER the guard's own call returns (lockAgain, recheckLedger, the settings' lift): no ask
+  // re-enters the guard from inside its lift — closed by construction
+  const fns = [...gateFreeListeners];
+  queueMicrotask(() => { for (const fn of fns) { if (!gateFreeListeners.has(fn)) continue; try { fn({ whys: w, at }); } catch { } } });   // one taken off meanwhile hears nothing
 }
 function noteLimitsWritten(prev, next) {
   // (r2, the follow-up's read S1) only a write that MOVED the limits re-judges the waiting frames: every settings write (an

@@ -1166,12 +1166,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     scheduleRetry();
   }
   /** `opts` = the ladder call's own (the relay of its caller's fromName / cardText / group / retry) */
-  function parkRetry(cid, text, opts, { kind, spendReason, charged, attempt }) {
+  function parkRetry(cid, text, opts, { kind, spendReason, charged, attempt, waitsLift = null }) {
     const now = clock.now();
     rereadRetry();   // B-f276's remainder: a HELD park's file read again at the park's own road (no-op when it reads)
     const e = { id: `rt-${now.toString(36)}-${retryRun}-${++retrySeq}`, cid, text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.group ? { group: opts.group } : {}), spendReason, producer: (opts.retry && opts.retry.producer) || null, meta: (opts.retry && opts.retry.meta) || null,
       charged: charged ? { reason: charged.reason, identity: charged.identity ? { key: charged.identity.key, name: charged.identity.name || charged.identity.key } : null, hold: charged.hold || null, holdAt: now } : null,
-      firstAt: now, attempts: [attempt], nextAt: now + RETRY_STEPS_MS[0], retries: 0 };
+      firstAt: now, attempts: [attempt], nextAt: now + RETRY_STEPS_MS[0], retries: 0, ...(waitsLift ? { waitsLift } : {}) };   // B-ef83 unit 1's cure: a held first try's mark rides the write that parks it
     retryQueue(cid).push(e);
     writeRetryNow();
     scheduleRetry();
@@ -1185,7 +1185,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // call a possible repeat "the oldest waiting" and stash it without the may-have-landed word
     const waiting = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
     if (waiting().length > RETRY_CAP) asideHeld(cid);   // B-f276 1a (the read's must 1): the door first — a held wake is never the cap's victim (fellRetry would fall it over its producer's held file)
-    for (let victim; waiting().length > RETRY_CAP && (victim = waiting().find((x) => !aside(x)));) {
+    for (let victim; waiting().length > RETRY_CAP && (victim = waiting().find((x) => !x.waitsHeld));) {   // B-ef83 unit 1's cure (r4410 MUST 2): a wake waiting on the gate's lift is the cap's as at the release — only a producer-held wake (waitsHeld) is never its victim
       log(`[deliver] ${cid}: the retry park holds ${RETRY_CAP} waiting per conversation — ${victim.id} (the oldest waiting, parked ${Math.round((now - Number(victim.firstAt || now)) / 1000)} s ago${(retry[cid] || []).length - waiting().length ? `; ${(retry[cid] || []).length - waiting().length} more on the wire, claimed or leaving`: ''}) falls to the stash, evicted`);
       fellRetry(victim, 'not-reachable', `the retry park holds ${RETRY_CAP} per conversation — the oldest falls to the stash`, { evicted: true });
     }
@@ -1219,7 +1219,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     log(`[deliver] ${cid}: a wake the pace refused is parked for the window's end (${e.id}, sent in ${Math.ceil((at - now) / 1000)} s): ${String(reason).slice(0, 200)}`);
     const waiting = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
     if (waiting().length > RETRY_CAP) asideHeld(cid);   // B-f276 1a: the door first — the oldest NOT held falls; held wakes are bounded by their own key (one per producer and key)
-    for (let victim; waiting().length > RETRY_CAP && (victim = waiting().find((x) => !aside(x)));) fellRetry(victim, 'not-reachable', `the retry park holds ${RETRY_CAP} per conversation — the oldest falls to the stash`, { evicted: true });
+    for (let victim; waiting().length > RETRY_CAP && (victim = waiting().find((x) => !x.waitsHeld));) fellRetry(victim, 'not-reachable', `the retry park holds ${RETRY_CAP} per conversation — the oldest falls to the stash`, { evicted: true });
     return { parked: true, id: e.id, retryAt: e.nextAt, retryInMs: at - now, merged: false };
   }
   /** A FALL THE PRODUCER FOUND OUTSIDE THE PARK'S OWN ATTEMPT (a marker moved past a record no report carried, acceptance r6, P24): the same door, so the same words reach the sender.
@@ -1254,6 +1254,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!marked.length) return 0;
     for (const e of marked) { e.waitsLift = { why: String(why), since: at }; delete e.inflight; }
     writeRetryNow();
+    return saidLift(marked, why, at);
+  }
+  /** the saying of a mark (law h) — its event, its journal line, the senders' notice — with NO write (the mark is already on disk) */
+  function saidLift(marked, why, at = clock.now()) {
+    if (!marked.length) return 0;
     // law (h): the senders of a kept owed wake are told the TRUTH at the refusal — not woken yet, held, asked again at the lift — where
     // today's words told them it fell (the fall's notice road: their own stash, read on their next turn)
     for (const e of marked) for (const to of (isOwed(e) && Array.isArray(e.senders) ? e.senders : []).filter((x) => x && localSessionFor(x))) {
@@ -1284,7 +1289,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     scheduleRetry();
     return n;
   }
-  require('./spend-guard.js').onGateFree(gateLifted);
+  const offGateFree = require('./spend-guard.js').onGateFree(gateLifted);   // r4410 (g): its off handle, taken at the park's close
   const producersOf = (e) => (isEnded(e) ? (Array.isArray(e.producers) ? e.producers : [e.producer]) : isOwed(e) ? [e.producer] : []).filter(Boolean);
   /** → {why, by} (by = the producer that said held) | null */
   function heldWhy(e) {
@@ -1938,6 +1943,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
   function closeRetries() {
     retryClosed = true;
+    try { offGateFree(); } catch { }   // B-ef83 unit 1's cure (r4410 (g)): a closed park hears no lift
     // line 494's follow (r2695 (2)): A STOP WHILE HELD — what was parked in memory is not written (the file is kept as it is): said, with its count
     if (retryHeld) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); if (n) log(`[deliver] the retry park stops HELD (data/msg-retry.json could not be read): ${n} deliver${n === 1 ? 'y' : 'ies'} parked during the hold lived in memory only and ${n === 1 ? 'is' : 'are'} not written — the file is kept as it is`); }
     flushRetryWrite();
@@ -2465,9 +2471,19 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // B-ef83 unit 1 (iv): a first try's wake the gate could not judge, for a caller that PARKS (`opts.retry`): parked by the same road
         // as a transient miss and kept for the lift (waitLift) — never stashed and lost: a wake asked in a restart's seconds had no later turn
         if (SA.isHeldWhy(v.why) && opts.retry && typeof opts.retry === 'object') {
-          const e = parkRetry(cid, text, opts, { kind, spendReason, charged: null, attempt: { at: clock.now(), reason: `spend gate held: ${v.detail || v.why}`, phase: 'spend', busy: null, late: 0, why: 'first' } });
-          waitLift([e], v.why);
-          return { ok: false, lane: 'message', reason: `not woken yet — the spend gate could not judge (${v.why}); kept, asked again when it lifts`, parked: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, waitsLift: true, refused: 'spend', why: v.why };
+          // r4410 MUST 2: what waits on a lift for one conversation never passes the park's own cap — parked by parkRetry, whose cap
+          // loop fells the OLDEST waiting past it (its words to the stash by the fall's own road), exactly as at the release. With no
+          // room at all (every waiting entry a producer's held one, never the cap's victim) it is NOT parked: the release's answer
+          // stands (the caller stashes, capped) — never «parked» for an entry that would fall at once (r4410 (e))
+          const waitingNow = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
+          if (waitingNow().length < RETRY_CAP || waitingNow().some((x) => !x.waitsHeld)) {
+            const at = clock.now();
+            const e = parkRetry(cid, text, opts, { kind, spendReason, charged: null, attempt: { at, reason: `spend gate held: ${v.detail || v.why}`, phase: 'spend', busy: null, late: 0, why: 'first' }, waitsLift: { why: String(v.why), since: at } });
+            if (retry[cid] && retry[cid].includes(e)) {
+              saidLift([e], v.why);   // the mark rode parkRetry's one write: said, nothing written again
+              return { ok: false, lane: 'message', reason: `not woken yet — the spend gate could not judge (${v.why}); kept, asked again when it lifts`, parked: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, waitsLift: true, refused: 'spend', why: v.why };
+            }
+          }
         }
         return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself
       }

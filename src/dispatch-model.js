@@ -133,7 +133,8 @@ function replayVerdict(entry, { now = 0 } = {}) {
   if (!entry || typeof entry !== 'object') return null;
   const d = Number(entry.deliveredAt), c = Number(entry.compactAt);
   if (Number.isFinite(d) && d > 0 && now - d < REPLAY_DELIVERED_MS) return 'delivered';
-  // B-ef83 unit 1 (i): a brief posted whose compaction is OWED to a hold's lift was delivered too — a replay re-sends nothing (the lift asks the compaction once)
+  // B-ef83 unit 1 (i): a brief posted whose compaction is OWED to a hold's lift was delivered too — a replay re-sends nothing (the lift asks the
+  // compaction once; after a restart the replay itself asks it once — src/server/worker-dispatch.js, r4410 (c))
   const o = entry.owedCompact && Number(entry.owedCompact.since);
   if (Number.isFinite(o) && o > 0 && now - o < REPLAY_DELIVERED_MS) return 'delivered';
   if (Number.isFinite(c) && c > 0 && now - c < REPLAY_COMPACT_MS) return 'compacted';

@@ -717,7 +717,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // its record held by another process, a restart's seconds) RELEASES the once-grant this call reserved, as the limits' refusal does
     // (a passing hold never costs the owner a grant); the 429's `bucket` names the hold by its code, as every spend refusal's does
     const heldOnce = held && result && result.ok === false && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? { once: release() } : {};
-    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.why), ...keep, args: v0.args }, key.id, { ...heldOnce, ...(asked ? { ask: asked } : {}), ...(noticeName ? { noticeName } : {}) });
+    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', 'once' in heldOnce ? `the spend gate could not judge this turn (${result.bucket}) — nothing was spent and the grant is kept; ask again shortly` : result && result.why), ...keep, args: v0.args }, key.id, { ...heldOnce, ...(asked ? { ask: asked } : {}), ...(noticeName ? { noticeName } : {}) });   // r4410 (said): a held 429 names the hold, never another process's pid and host
     done({ ok: true, args: v0.args }, key.id, asked ? { ask: asked } : {});
     return { ok: true, keyId: key.id, key: key.name, verb, result, ms: now() - t0 };
   }

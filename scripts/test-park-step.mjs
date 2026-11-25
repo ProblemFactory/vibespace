@@ -346,7 +346,7 @@ console.log('\n§5 the door census: every engine door is a table event, every ev
   const DOORS = [
     ['the park at a transient first miss', CDS, /const e = parkRetry\(cid, text, opts, \{ kind, spendReason, charged, attempt:/, []],   // the entry's birth: no event (freshEntry)
     ['the park of a wake the pace refused', CDS, /function parkOwedWake\(cid, \{ producer, key, retryInMs,/, []],   // lane paced-wake-retry: an owed entry's birth, its own suite pins its life
-    ['the cap at a park', CDS, /for \(let victim; waiting\(\)\.length > RETRY_CAP && \(victim = waiting\(\)\.find\(\(x\) => !aside\(x\)\)\);\) \{/, ['cap']],   // B-f276 1a: the oldest NOT held
+    ['the cap at a park', CDS, /for \(let victim; waiting\(\)\.length > RETRY_CAP && \(victim = waiting\(\)\.find\(\(x\) => !x\.waitsHeld\)\);\) \{/, ['cap']],   // B-f276 1a: the oldest NOT held (a producer's held wake; one waiting on the gate's lift is the cap's, B-ef83 r4410)
     ['the turn end attempts', CDS, /await runAttempt\(cid, 'turn-end'\);/, ['turn-end']],
     ['the timer attempts', CDS, /await runAttempt\(cid, 'timer'\);/, ['timer']],
     ['the attempt: a may-have-landed entry falls first', CDS, /fellRetry\(e, 'not-reachable', 'it was being posted when the previous server stopped/, ['boot-inflight', 'boot-ho']],
