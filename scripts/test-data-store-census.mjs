@@ -468,7 +468,7 @@ const DELETION_CALLS = Object.freeze({
   'src/design-fs.js': 1, 'src/desktop-display.js': 1, 'src/desktop-mic.js': 3, 'src/desktop-serve.js': 7,
   'src/exit-proxy.js': 2, 'src/fd-close.js': 1, 'src/fixture-ledger-purge.js': 1, 'src/gmail-sync.js': 1, 'src/harness-config.js': 2,   // fd-close (B-bcb8 unit B, r4474): renameSynced removes ITS OWN temp after a failed write — no store's remover
   'src/harnesses/antigravity.js': 3, 'src/harnesses/claude-home.js': 1, 'src/harnesses/codex.js': 1, 'src/host-keys.js': 1,
-  'src/hosts.js': 9, 'src/interface/main.js': 2, 'src/job-logs-sweep-worker.js': 11, 'src/jobs.js': 3,   // hosts.js +1 (B-323e's remainder, lane nl-starts): the bundle stage's late removal past the tar's bound — a temp folder, no store
+  'src/hosts.js': 9, 'src/interface/main.js': 2, 'src/job-logs-sweep-worker.js': 11, 'src/jobs.js': 4,   // hosts.js +1 (B-323e's remainder, lane nl-starts): the bundle stage's late removal past the tar's bound — a temp folder, no store   // jobs.js +1 (B-91aa's remainder, r4591): a FAILED START's own spec, removed off the loop — no store's remover
   'src/kept-copies.js': 2, 'src/machine-probes.js': 2, 'src/mounts.js': 5, 'src/node-runtime.js': 3,
   'src/opencode-serve.js': 2, 'src/opslog.js': 1, 'src/owner-mark.js': 5, 'src/plugins/frp.js': 6,
   'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 18,   /* r4828 (lane nl-journals): + the extraction journal's temp removed on a failed write */

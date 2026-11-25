@@ -213,9 +213,14 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   // THE REAL JobManager (a copy whose child_process.spawn records — nothing executes): the wrapper's spawn carries it
   const JSRC = read('src/jobs.js'), SP0 = "const { spawn, execFile } = require('child_process');";
   const jobsMod = JSRC.split(SP0).length === 2 ? M.load('src/jobs.js', editAnchor(JSRC, SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);", "src/jobs.js"), 'jobs-spawn-seam') : null;
+  // B-91aa's remainder (r4591): a job's wrapper is a start of THE STARTER — a vault job's alone the engine's own spawn: this suite's starter
+  // records its ask exactly as the seam records a spawn (nothing executes); handed back below
+  const CSm = require(path.join(REPO, 'src/server/child-starter.js'));
+  CSm.setChildStarter({ run: (cmd, args) => { try { if (globalThis.__vsJobAsked) globalThis.__vsJobAsked(cmd, args); } catch { } return Promise.resolve({ started: true, pid: 4343, starttime: null }); }, noteDirect() { }, stats: () => ({}) });
   const jobArgv = async (setting) => {
     const got = [];
     globalThis.__vsJobSpawn = (cmd, args) => { got.push([cmd, ...args]); return { pid: 4343, unref() { }, on() { }, once() { }, stdio: [], kill() { } }; };
+    globalThis.__vsJobAsked = (cmd, args) => { got.push([cmd, ...args]); };
     const dir = scratchDir('sline-jobs');
     const jm = new jobsMod.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, spawnPriority: () => SPRI.priorityFor({ serverSetting: setting, log: quiet }) });
     jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
@@ -236,7 +241,7 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   try { jobsNoW = M.load('src/jobs.js', anchored(anchored(JSRC, SP0, "const { execFile } = require('child_process'); const spawn = (...a) => globalThis.__vsJobSpawn(...a);", 'B-f494 the jobs spawn seam'), CW, '', 'B-f494 the engine without the job\'s cpu weight'), 'jobs-no-cpu-weight'); } catch (e) { noW = String((e && e.message) || e).slice(0, 200); }
   if (!jobsNoW) ok(false, `the control «the engine without the job's cpu weight» built nothing — ${noW}`);
   else {
-    const ctl = await (async () => { const got = []; globalThis.__vsJobSpawn = (cmd, args) => { got.push([cmd, ...args]); return { pid: 4345, unref() { }, on() { }, once() { }, stdio: [], kill() { } }; };
+    const ctl = await (async () => { const got = []; globalThis.__vsJobSpawn = (cmd, args) => { got.push([cmd, ...args]); return { pid: 4345, unref() { }, on() { }, once() { }, stdio: [], kill() { } }; }; globalThis.__vsJobAsked = (cmd, args) => { got.push([cmd, ...args]); };
       const dir = scratchDir('sline-jobs-nw'); const jm = new jobsNoW.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, spawnPriority: () => SPRI.priorityFor({ serverSetting: () => undefined, log: quiet }) });
       jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
       jm.create({ kind: 'task', name: 'nice-cw', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-W', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
@@ -246,15 +251,21 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
       `B-f494: a lowered job's spec asks its scope for CPUWeight ${JON && JON.spec && JON.spec.cpuWeight} (nice +5's share of 100); the setting off asks none; RED CONTROL: the engine without that line asks none under the same priority`, { on: JON && JON.spec && JON.spec.cpuWeight, off: JOFF && JOFF.spec && JOFF.spec.cpuWeight, ctl: ctl && ctl.cpuWeight });
   }
   // (its verdict's LENS THREE should) THE WRAPPER'S 'error' LISTENER RUNS: the stub child is a real EventEmitter; an exec that
-  // fails late (the nice program gone since the one look) is ONE journal line, never a throw out of the child's emitter
+  // fails late (the nice program gone since the one look) is ONE journal line, never a throw out of the child's emitter. B-91aa's
+  // remainder: the engine's own spawn is a VAULT job's alone (its values ride fd 3) — the scene starts the job through the starter, then
+  // its vault start (a stand-in door) on that road
   const { EventEmitter } = require('events');
   const errRun = async (mod, tag) => {
     const logs = []; let kid = null;
     globalThis.__vsJobSpawn = () => { kid = Object.assign(new EventEmitter(), { pid: 4344, unref() { }, stdio: [], kill() { } }); return kid; };
+    globalThis.__vsJobAsked = null;
     const dir = scratchDir(`sline-jobs-${tag}`);
-    const jm = new mod.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log: (l) => logs.push(String(l)), spawnPriority: () => SPRI.priorityFor({ serverSetting: () => undefined, log: quiet }) });
+    const door = { gate: () => ({ go: true, plan: [{ name: 'K', fd: 3, env: 'K_FD' }] }), payload: () => ({ ok: true, frame: Buffer.from('a stand-in frame') }), noteUses() { } };
+    const jm = new mod.JobManager({ dataDir: dir, broadcast() { }, notifyUser() { return { ok: true }; }, log: (l) => logs.push(String(l)), vaultJob: door, spawnPriority: () => SPRI.priorityFor({ serverSetting: () => undefined, log: quiet }) });
     jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
-    jm.create({ kind: 'task', name: 'nice-err', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-E', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
+    const made = jm.create({ kind: 'task', name: 'nice-err', cmd: { argv: ['sh', '-c', 'true'], cwd: dir }, owner: { conversation: null, sessionId: 's-E', sessionCreatedAt: 1, groupsSnapshot: [] } }, { isUser: true, groups: new Set() });
+    const j0 = made && made.job ? jm.jobs.get(made.job.id) : null;
+    if (j0) { j0.vault = [{ name: 'K', ref: 'vault://k' }]; try { jm._spawn(j0, 'manual'); } catch { } }   // a vault job's start: the engine's own spawn
     let threw = null;
     try { if (kid) kid.emit('error', Object.assign(new Error(`spawn ${NICE} ENOENT`), { code: 'ENOENT' })); } catch (e) { threw = e; }
     try { for (const j of jm.jobs.values()) j.desiredUp = false; jm.shutdown(); } catch { }
@@ -267,8 +278,8 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   const jobsNoLis = SEAM.length && noLis.length === SEAM.length - 1 ? M.load('src/jobs.js', noLis.join('\n'), 'jobs-no-error-listener') : null;
   const NOL = jobsNoLis ? await errRun(jobsNoLis, 'err-red') : null;
   ok(ERR && ERR.spawned && ERR.threw === null && ERR.said === 1 && NOL && NOL.spawned && NOL.threw === 'ENOENT' && NOL.said === 0,
-    `a job wrapper whose exec fails late is ONE journal line («its wrapper did not start (${NICE}): …»), never a throw out of the child; RED CONTROL: without the listener the same 'error' throws (${NOL && NOL.threw})`, { ERR, NOL });
-  delete globalThis.__vsJobSpawn;
+    `a job wrapper whose exec fails late (a vault job: the engine's own spawn) is ONE journal line («its wrapper did not start (${NICE}): …»), never a throw out of the child; RED CONTROL: without the listener the same 'error' throws (${NOL && NOL.threw})`, { ERR, NOL });
+  delete globalThis.__vsJobSpawn; delete globalThis.__vsJobAsked; CSm.setChildStarter(null);   // the hub's own starter again
   // REAL PROCESSES: the line started as the roads start it — the wrapper, its child and the child's child each report their niceness
   const { spawnSync } = require('child_process');
   const stand = path.join(scratchDir('sline-nice'), 'stand-in.cjs');

@@ -710,7 +710,7 @@ WD.section('⑩');
   // r2917: the mark is kept ONLY for a request that carries the session option (the login-shell look) — a whole env without it drops it
   const mk0 = await markLegs(CS, { session: false });
   ok(!mk0.mark && !mk0.token && mk0.n > 1, `(a2) a whole env WITHOUT the session option drops the login-shell look's mark (${!mk0.mark}) as it drops the hub's token (${!mk0.token})`, mk0);
-  const NOMARK = M.load('src/server/child-starter.js', anchored(read('src/server/child-starter.js'), 'if (HUB_OWN.test(k) && !(marks && WHOLE_MARKS.has(k))) { n++; continue; }', 'if (HUB_OWN.test(k)) { n++; continue; }', 'no mark kept'), 'no-mark');   // stale-pins: kept (the release's belt — the leg's RED)
+  const NOMARK = M.load('src/server/child-starter.js', anchored(read('src/server/child-starter.js'), 'if (HUB_OWN.test(k) && !(marks && (marks instanceof Set ? marks : WHOLE_MARKS).has(k))) { n++; continue; }', 'if (HUB_OWN.test(k)) { n++; continue; }', 'no mark kept'), 'no-mark');   // stale-pins: kept (the release's belt — the leg's RED)
   const mk2 = await markLegs(NOMARK);
   ok(!mk2.mark && !mk2.token, `(a2) RED: the starter's belt with no mark kept — the login-shell look's mark is dropped (${mk2.mark})`, mk2);
   // (b) THE OLD ROAD: a starter whose script ends at once — two faults, then the direct start from this process

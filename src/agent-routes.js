@@ -2911,8 +2911,10 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   try { where = await jobWhere({ body: b, session: a.session, hubMachine }); }
   catch (e) { return res.status(500).json({ error: `the folder check failed: ${(e && e.message) || e} — nothing was created`, code: 'where-failed', machine: hubMachine }); }
   if (!where.ok) return res.status(where.code === 'folder-blocked' ? 503 : 400).json({ error: where.error, code: where.code, machine: hubMachine });
+  const pressedAt = Date.now();   // B-91aa's remainder (r4591 (2)): the create's start is answered by the STARTER's answer — a failed start in today's words
   const r = a.jm.create(spec, a.caller);
   if (r.error) return res.status(400).json({ error: r.error });
+  { const sa = await a.jm.startAnswer(a.jm.jobs.get(r.job.id), pressedAt); if (sa && sa.error) return res.status(400).json({ error: sa.error }); }
   // Tell the creating agent up front whether ITS conversation will hear back
   // (owner request 2.344.0): honest three-state — live message / stash-at-
   // resume / off, with the deciding layer named.
@@ -3024,6 +3026,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   }
   try {
     let r;
+    const pressedAt = Date.now();   // B-91aa's remainder (r4591 (2)): a start or restart press is answered by ITS start's answer
     if (act === 'stop') r = a.jm.stop(job, { force: !!req.body?.force });
     else if (act === 'start') r = a.jm.start(job, { caller: a.caller });   // B-b14a round wh9e7xe8i: a refusal names only the holders THIS caller may view
     else if (act === 'restart') r = a.jm.restart(job, { caller: a.caller });   // B-cac2: stop, wait, start — one answer
@@ -3055,7 +3058,9 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     // floor) waits for it like an act (lane lg-store-writes, the moved2 cure 2's hunt (1): told ok, the job never says it again)
     if (act === 'progress' || (act === 'announce' && !r.landing)) return res.json({ success: true, ...r });
     if (r.landing) delete r.landing;
-    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
+    const reply = () => a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
+    if (act === 'start' || act === 'restart') return void a.jm.startAnswer(job, pressedAt).then((sa) => (sa && sa.error ? res.status(400).json({ error: sa.error }) : reply()));   // a failed start in today's words (never a silent «starting»)
+    reply();
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 }

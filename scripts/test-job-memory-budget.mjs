@@ -186,6 +186,8 @@ async function pressScene(JM, tag) {
   const s2 = j2.jobs.get(s1.id);
   return { code: press.code, error: press.error || '', same: before === after, before, after, unlocked, readOnly: !!j2.readOnly, state2: s2 && s2.state, runs2: s2 && s2.runs.length, runs1: s1.runs.length };
 }
+// B-91aa's remainder (r4591): a job's start is ASKED of the starter — «it starts» is a run asked (starting, its ask out) or answered (up)
+const asked = (j) => { const run = j && j.runs && j.runs[j.runs.length - 1]; return !!j && (j.state === 'up' || (j.state === 'starting' && !!(run && run.ask))); };
 const pressOk = (r) => r.code === 'memory-budget' && r.same && r.unlocked && !r.readOnly && r.state2 === 'down' && r.runs2 === r.runs1;
 async function measureScene(JM) {
   // THE REAL MEASURE (no seam): a stand-in wrapper whose child holds 48 MB — its tree's RssAnon read through /proc, the wrapper
@@ -348,7 +350,7 @@ const jm = engine('pod', { limit: limitDir(MB12G) });
     'a START past the budget: refused by name (the code + the facts the panel words), the record EXACTLY as it was (state, runs, wanted-up, supervision), the refusal on its events', { sr, state: d.state, runs: d.runs.length });
   for (const n of ['b', 'c2', 'svc']) byName(jm, n)._use.at = Date.now() - 20000;
   const sr2 = jm.start(d, { caller });
-  ok(!sr2.error && d.state === 'up', 'the same start once the measures are older than 15 s: NOT judged — it starts (a stale measure is no measure)', sr2);
+  ok(!sr2.error && asked(d), 'the same start once the measures are older than 15 s: NOT judged — it starts (a stale measure is no measure)', { sr2, state: d.state });
   endRun(d, 'done');
   await jm._sampleUse();
   // a schedule's fires past the budget: each fire skipped and said; ONE alarm a stretch of skips; the schedule kept
@@ -426,7 +428,7 @@ const SPAWN_VERDICT = '{ const bv = this._budgetVerdict(job, M.memoryMbOf(job, t
   await jx._sampleUse();
   const r = byName(jx, 'p'); endRun(r, 'done');
   const sr = jx.start(r, { caller });
-  ok(!sr.error && r.state === 'up', 'CONTROL (no verdict at the start, in a copy): the start past the budget GOES — the verdict line is what refuses it', sr);
+  ok(!sr.error && asked(r), 'CONTROL (no verdict at the start, in a copy): the start past the budget GOES — the verdict line is what refuses it', { sr, state: r.state });
 }
 {
   const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '    const ask = M.budgetAskOf(mem, M.budgetMbOf(lim && lim.mb));', '    const ask = { mb: Number(mem && mem.mb) || 0, named: true, halved: false, boundMb: Number(mem && mem.mb) || 0 };   /* MUTANT: the whole bound (the round\'s tip) */', 'what a start is judged with'), 'ask-whole');
@@ -461,7 +463,7 @@ const SPAWN_VERDICT = '{ const bv = this._budgetVerdict(job, M.memoryMbOf(job, t
 {
   const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '    job.desiredUp = p.was.desiredUp; job.supervise = p.was.supervise;\n', '    /* MUTANT: the press\'s writes kept */\n', 'the refused press\'s undo'), 'press-kept');
   const r = await pressScene(JX.JobManager, 'mut');
-  ok(!pressOk(r) && r.state2 === 'up' && r.runs2 === r.runs1 + 1, 'CONTROL (a refused press\'s writes KEPT, in a copy): the next hub\'s boot replay STARTS the service the person was told was not started — the press leg catches it', r);
+  ok(!pressOk(r) && ['up', 'starting'].includes(r.state2) && r.runs2 === r.runs1 + 1, 'CONTROL (a refused press\'s writes KEPT, in a copy): the next hub\'s boot replay STARTS the service the person was told was not started — the press leg catches it', r);
 }
 {
   const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '          if (pr) this._tellRefused(job, e, pr.by);\n', '          /* MUTANT: the pressers not told */\n', 'the deferred press\'s telling'), 'not-told');

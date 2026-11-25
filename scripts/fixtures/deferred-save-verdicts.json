@@ -120,7 +120,7 @@
   "verdict": "waits",
   "why": "its reply waits when its copy was only stashed (the rate floor)",
   "at": "src/agent-routes.js:if (r.landing) delete r.landing;",
-  "branch": "src/agent-routes.js:    if (r.landing) delete r.landing;\n    a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true",
+  "branch": "src/agent-routes.js:    if (r.landing) delete r.landing;\n    const reply = () => a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true",
   "stops": "the agent's «done»: it says not on disk"
  },
  {
@@ -263,6 +263,16 @@
   "why": "The run's intent (2238) is waited by _onDisk before any child exists — not landed => no child, refused by name; 2275 records that refusal and throws (an error answered, nothing spawned).",
   "branch": "if (!intent.ok) {",
   "stops": "the run's child: never started over an intent the disk lacks"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._startAnswered · _dirty = true",
+  "verdict": "none",
+  "why": "the next paced save carries it"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._failedStart · _save()",
+  "verdict": "none",
+  "why": "the failure is said; nothing waits"
  },
  {
   "key": "jobs · src/jobs.js · JobManager._adoptAndReplay · _dirty = true",

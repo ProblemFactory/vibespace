@@ -800,8 +800,11 @@ setInterval(() => { }, 1000);
     const m1r = reds(judgeRun(m1));
     if (m1.cmdline) { const a = argsOf(m1.cmdline)[3] || ''; console.log(`    wrapper cmdline (M1): node <wrapper> <ctl> <${a.length} base64 chars> — decodes to a spec carrying ${['PROBE_SECRET', 'VIBESPACE_JOB_TOKEN'].filter((k) => Buffer.from(a, 'base64').toString('utf8').includes(k)).join(' + ')}; rows red: ${m1r.join(' ')}`); }
     ok(['argv', 'secret', 'jbt', 'exit'].every((k) => m1r.includes(k)) && !m1.child && !!m1.exit && m1.exit.reason === 'update_window' && m1.exit.code === 75, 'NEGATIVE CONTROL M1: the spec on argv again (the .330 call) ⇒ the cmdline rows go RED (the secret and the jbt_ token read back out of the wrapper\'s cmdline), and the real wrapper never starts the job (exit 75, update_window)', m1r.join(' ') + ' ' + JSON.stringify(m1.exit || m1.error));
-    // M2 — the wrapper inherits the hub's env again (the spawn passes no env)
-    const m2r = reds(judgeRun(await measure('m2-inherit', { jobsJs: MC.write('src/jobs.js', swap(JS, ", env: wrapperEnv(job.id) }", ' }'), 'inherit') })));
+    // M2 — the wrapper inherits the hub's env again (the spawn passes no env). B-91aa's remainder (r4591): a job's wrapper is a start of
+    // THE STARTER, born with the service env — the hub's own env cannot reach it there; the inheriting spawn is the HUB's road (a vault
+    // job's alone today): the copy puts every job back on it (the starter line cut) AND drops its env
+    const ASK = "      if (!vj) { this._askStart(job, argv, specPath, trigger); return; }   // B-91aa's remainder: THE STARTER starts it (below) — a VAULT job alone keeps this road (its values ride fd 3: r4591 (A))\n";
+    const m2r = reds(judgeRun(await measure('m2-inherit', { jobsJs: MC.write('src/jobs.js', swap(swap(JS, ASK, ''), ", env: wrapperEnv(job.id) }", ' }'), 'inherit') })));
     ok(['wallow', 'wplant'].every((k) => m2r.includes(k)) && !m2r.includes('cplant'), 'NEGATIVE CONTROL M2: the wrapper spawned with no env ⇒ the planted tokens are in ITS /proc/<pid>/environ (the job stays clean: jobEnv strips them)', m2r.join(' '));
     // M3 — the wrapper falls back to its own env again (the pre-fix `spec.env || process.env`, no refusal)
     const m3 = direct('m3-fallback', swap(swap(WRAP, "if (!refusal && !(spec.env && typeof spec.env === 'object')) refusal = 'the spec carries no env (a job never runs on the wrapper\\'s own)';", ''), '  env: spec.env,', '  env: spec.env || process.env,'), {});
