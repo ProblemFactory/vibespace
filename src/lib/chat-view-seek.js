@@ -305,7 +305,12 @@ export function installChatSeek(ChatView) {
       // (or the card now at the top after one down) — never aged out while the slab lives. A navigation forgets it (null: the
       // rebuild's own anchor, as outside a slab's life). One lookup, at the rebuild that asks; nothing is added to a frame.
       card: () => {
-        const el = fr.moved === -Infinity ? fr.seed : (this._gapReaderCard(Math.max(list.scrollTop, fr.before)) || {}).el;
+        // a move this watch's frame has not recorded yet (a rebuild in the same animation frame, before the frame's own callback —
+        // line 960's round, measured once: the card from before the previous notch was kept, −30 px) is read as the frame would
+        // read it: a new burst's line is where the view was before it. Nothing is written here.
+        const st = list.scrollTop, unrec = Math.abs(st - fr.at) >= 0.5;
+        const before = unrec && performance.now() - fr.moved > GAP_SETTLE_BURST_MS ? fr.at : fr.before;
+        const el = fr.moved === -Infinity && !unrec ? fr.seed : (this._gapReaderCard(Math.max(st, before)) || {}).el;
         return el && el.isConnected && el.parentNode === list && el.offsetParent !== null && el.offsetHeight > 0 ? el : null;
       },
     };

@@ -816,7 +816,34 @@ const FLING_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.ar
     R.forcing = 1; v._updateRuns(); R.forcing = 0;
     R.topMoved = Math.round(R.t.getBoundingClientRect().top - lt - t0); R.step = 3; R.at = now; return false; }
   return R.step < 0 || now - R.at > 120; })()`;
+// LINE 960's ROUND, the race its own leg met once (主开发 r4332): A RUNS REBUILD IN THE SAME FRAME AS A NOTCH's SCROLL, BEFORE THE
+// WATCH's FRAME HAS RECORDED IT. PLACED: once the hold's slab landed and its own first rebuild ran (the first notch held), a scroll up
+// of 200 px (the watch records it: its card is A, the one read before it); a 27 px run header painted between B (the card now at
+// the top) and A; then a second scroll up of 200 px and, IN THAT SAME TASK (before any frame), a real rebuild that takes the
+// header away. The card read before the latest notch is B: it must keep its place; the control hands the rebuild A (the card from
+// before the previous notch — what the watch read before this cure) and B moves by what the rebuild took away.
+const RACE_PLANTED = (control) => RUNS_PLANTED(control);
+const RACE_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.armed = 1; if (!R.landed) return false;
+  const v = window.__v, list = v._messageList, now = performance.now();
+  const topCard = () => { const st = list.scrollTop; for (const el of list.children) { const cl = el.classList; if (el._isSeekSentinel || !cl || !cl.contains('chat-msg') || cl.contains('chat-run-header') || cl.contains('chat-run-footer')) continue; if (el.offsetHeight > 0 && el.offsetTop + el.offsetHeight > st) return el; } return null; };
+  if (R.step === 0 && !R.natural && now - R.landedAt < 1500) return false;
+  if (R.step === 0) { R.A = topCard(); list.scrollTop = list.scrollTop - 200; R.step = 1; R.at = now; return false; }
+  if (R.step === 1) { if (now - R.at < 200) return false;
+    const B = topCard(), A = R.A;
+    if (!A || !B || A === B || !(B.compareDocumentPosition(A) & Node.DOCUMENT_POSITION_FOLLOWING)) { R.step = -1; return true; }   // no scene (named by the leg)
+    const h = document.createElement('div'); h.className = 'chat-run-header'; h.style.flex = 'none'; h.style.height = '27px'; h.style.minHeight = '27px'; B.after(h);
+    R.B = B; R.step = 2; R.at = now; return false; }
+  if (R.step === 2) { if (now - R.at < 150) return false;
+    const lt = list.getBoundingClientRect().top;
+    list.scrollTop = list.scrollTop - 200;                       // the second notch's scroll …
+    const mid = R.B.getBoundingClientRect().top - lt;
+    if (R.control && v._gapSettle) { const A = R.A; v._gapSettle.card = () => A; }   // the control: the card from before the previous notch
+    R.forcing = 1; v._updateRuns(); R.forcing = 0;               // … and a rebuild in the same task, before the watch's frame
+    R.bMoved = Math.round(R.B.getBoundingClientRect().top - lt - mid); R.alive = !!v._gapSettleRO; R.step = 3; R.at = now; return false; }
+  return R.step < 0 || now - R.at > 120; })()`;
 const BLIND = {
+  'race placed': RACE_PLANTED(false),
+  'race placed, control': RACE_PLANTED(true),
   'fling placed': FLING_PLANTED(false),
   'fling placed, control': FLING_PLANTED(true),
   'grow placed': GROW_PLACED(false),
@@ -1009,6 +1036,19 @@ const searchScene = async (tail, stopFirst = false) => {
   const both = placed[0] && placed[0].after && placed[0].after.both;
   check(`§4h BOTH RULES: ${both && both.ok ? '' : 'PRECONDITION NOT MET (' + ((both && both.why) || 'no scene') + ') — '}a rebuild inside the slab's life keeps the card being read (it moved ${both?.inside?.card} px, the topmost element ${both?.inside?.top} px); the same rebuild after the watch ended keeps the topmost element (it moved ${both?.after?.top} px, the card ${both?.after?.card} px; ± ${NOTCH_TOL_PX})`,
     !!both && both.ok && Math.abs(both.inside.card) <= NOTCH_TOL_PX && Math.abs(both.inside.top) > NOTCH_TOL_PX && Math.abs(both.after.top) <= NOTCH_TOL_PX && Math.abs(both.after.card) > NOTCH_TOL_PX, JSON.stringify(both || null));
+  // THE RACE (r4332): a rebuild in the same frame as a notch's scroll, before the watch's frame records it — the card read before
+  // the latest notch keeps its place (the watch reads the unrecorded move as its frame would)
+  const RACE = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, bMoved: R.bMoved ?? null, alive: !!R.alive } : null; })()';
+  const raceHold = async (label, control) => {
+    globalThis.__firstNotchUntil = RACE_UNTIL;
+    try { return await firstHold(label, control ? 'race placed, control' : 'race placed', { after: RACE, cadence: 'shortHold' }); } finally { globalThis.__firstNotchUntil = null; }
+  };
+  const rc = await raceHold('a rebuild in the frame of a notch, before the watch records it', false), rcc = await raceHold('a rebuild in the frame of a notch, before the watch records it, control', true);
+  const rcScene = (h) => !!h.after && h.after.landed === 1 && h.after.step === 3 && h.after.alive && h.after.bMoved != null;
+  check(`§4h A RUNS REBUILD IN THE FRAME OF A NOTCH, BEFORE THE WATCH RECORDS IT (line 960's race, r4332): ${rcScene(rc) ? '' : 'PRECONDITION NOT MET (two scrolls up inside the watch, a header painted between the two candidate cards, the rebuild in the second scroll\'s task) — '}the card read before the latest notch keeps its place (it moved ${rc.after?.bMoved} px; ± ${NOTCH_TOL_PX})`,
+    rcScene(rc) && Math.abs(rc.after.bMoved) <= NOTCH_TOL_PX, JSON.stringify(rc.after));
+  check(`§4h CONTROL: the rebuild handed the card from before the previous notch (the watch before this cure) ⇒ the card read before the latest notch moves by what the rebuild took away (${rcc.after?.bMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red`,
+    rcScene(rcc) && Math.abs(rcc.after.bMoved) > NOTCH_TOL_PX, JSON.stringify(rcc.after));
   // LINE 960's MUST (r4273): a continuous scroll (one burst) carries the view a viewport and a half away from the watch's card; a runs
   // rebuild then keeps what the person looks at (the topmost element in view), never the off-screen card
   const FL = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, travelled: R.travelled ?? null, cardBelow: R.cardBelow ?? null, scrolls: R.scrolls || 0, topMoved: R.topMoved ?? null, alive: !!R.alive } : null; })()';
