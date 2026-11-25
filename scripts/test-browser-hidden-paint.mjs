@@ -339,16 +339,25 @@ try {
   // the counters: one more tab, listed by both (each list's own drain registers it), its number read — then closed (it was prepared)
   const pc = await spy.send('Target.createTarget', { url: U('/b') }); const probeG = pc && pc.result ? pc.result.targetId : null;
   await sleep(1500);
-  const noU = tabNo(tabsIn(await uX(['tab', 'list', '--json'])).find((t) => sameId(t.targetId, probeG))), noA = tabNo(tabsIn(await aX(['tab', 'list', '--json'])).find((t) => sameId(t.targetId, probeG)));
+  const uT1 = tabsIn(await uX(['tab', 'list', '--json'])), aT1 = tabsIn(await aX(['tab', 'list', '--json']));
+  const noU = tabNo(uT1.find((t) => sameId(t.targetId, probeG))), noA = tabNo(aT1.find((t) => sameId(t.targetId, probeG)));
+  // the PINNED session's own tabs, by target id (r4061, row 726: its tab NUMBERS start again with each new driver — agent-browser's
+  // assign_tab_id grows only inside one BrowserManager, `next_tab_id: 1` in launch / connect_cdp_inner — and two roads drive A here,
+  // the keeper's and the agent's): the same tabs before and after but the probe, none at the internal address
+  const idsOf = (l) => l.map((t) => String(t.targetId || '').toUpperCase()).filter(Boolean).sort();
+  const aBefore = idsOf(aT0), aAfter = idsOf(aT1.filter((t) => !sameId(t.targetId, probeG))), aFlipListed = aT1.filter((t) => String(t.url || '').startsWith(BI.FLIP_TAB_URL)).length;
   for (const id of [probeG, secondG]) { if (id) { try { await spy.send('Target.closeTarget', { targetId: id }); } catch { /* gone */ } } }
   try { await uX(['close']); } catch { /* U's own connection only (a CDP session's close leaves the pages) */ }
   await sleep(500);
   const flipsG = gRuns.filter((x) => x.shown >= 1).length, slowG = gRuns.filter((x) => x.aMs > 2000 || x.uMs > 2000);
-  const gWhy = { flips: flipsG, of: G_FLIPS, refused: gRuns.filter((x) => !x.froze).map((x) => x.why), births: [...new Set(flipBirths)], u: { agentIndex: iAg, secondIndex: iSg, counter: { before: maxU0, probe: noU } }, a: { counter: { before: maxA0, probe: noA } } };
+  const gWhy = { flips: flipsG, of: G_FLIPS, refused: gRuns.filter((x) => !x.froze).map((x) => x.why), births: [...new Set(flipBirths)], u: { agentIndex: iAg, secondIndex: iSg, counter: { before: maxU0, probe: noU } }, a: { counter: { before: maxA0, probe: noA }, tabs: { before: aBefore.length, after: aAfter.length, same: JSON.stringify(aBefore) === JSON.stringify(aAfter), flipListed: aFlipListed } } };
   ok(flipsG === G_FLIPS && flipBirths.length >= G_FLIPS && flipBirths.every((u) => u === BI.FLIP_TAB_URL), `g: ${flipsG} of ${G_FLIPS} thaws flipped, every flip tab born at ${BI.FLIP_TAB_URL} (the address no driver takes)`, gWhy);
   ok(iAg >= 0 && iSg > iAg && gRuns.every((x) => x.uOwn) && gRuns.every((x) => x.aOwn), `g: after every flip the UNPINNED session (a second tab after A's in its list) and the agent read their own page — the moved tab of today's blank flip never happens`, { ...gWhy, notOwn: gRuns.map((x, i) => (!x.uOwn || !x.aOwn ? i + 1 : null)).filter(Boolean) });
   ok(slowG.length === 0, `g: no command over 2 s in ${G_FLIPS} flips (the 30 s hold of the blank a driver prepared and lost)`, { slow: slowG.slice(0, 4) });
-  ok(maxU0 >= 0 && maxA0 >= 0 && noU === maxU0 + 1 && noA === maxA0 + 1, `g: neither the pinned nor the unpinned session took a flip tab — their own tab counters did not move in ${G_FLIPS} flips (U ${maxU0} → ${noU}, A ${maxA0} → ${noA})`, gWhy);
+  // RED for a flip tab a driver takes (probe 10 row 725's control: the about:blank flip was registered by the unpinned session — its
+  // ACTIVE tab moved — in 35 of 100 thaws, so 30 blank flips leave U's own counter still in about 0.65^30 ≈ 2.5e-6 of runs): U is
+  // driven by ONE road (one BrowserManager), so a tab it took has a number — the probe would read above before + 1
+  ok(maxU0 >= 0 && noU === maxU0 + 1 && aBefore.length > 0 && JSON.stringify(aBefore) === JSON.stringify(aAfter) && aFlipListed === 0, `g: neither session took a flip tab in ${G_FLIPS} flips — the UNPINNED session's own counter did not move (U ${maxU0} → ${noU}; one road drives it), and the PINNED session holds the very same ${aBefore.length} tabs by target id but the probe, none at the internal address (its numbers start again with each new driver: A ${maxA0} → ${noA})`, gWhy);
 
   // ══ B-e674 (the coordinator's r548 / r562 / r605): THE CREATE ROADS THAT NEED THE REAL PROGRAM — written once by the lane
   //    (which runs no real driver), run on the box by the integrator. Each leg reads what the KEEPER says (tabOwnersFor: its
