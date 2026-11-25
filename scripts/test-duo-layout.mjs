@@ -629,6 +629,21 @@ try {
     await evalJs(`(() => { const tm = app.themeManager; tm.apply('dark'); tm.unregisterCustomTheme('zz-b78db'); return 1; })()`);
     check('④d a registered custom theme\'s ground, read as the computed value on the root, is the theme\'s (#123456) — the six sheets stand back in the head at their release place, so the theme\'s head rule comes after them (a desktop, 1280×800)', themed === '#123456' && sheetsInHead === 6, { themed, sheetsInHead });
     check('④d RED CONTROL: 17c6dd081\'s order (the sheets after the head) — the same theme falls back to the stylesheet\'s dark default', redTheme !== '#123456' && !!redTheme, { redTheme });
+    // ④e THE BOOK POSE KEEPS ITS OWN MARGIN (主开发 r4187): with the list hidden (the setter the landscape carry-over takes), the
+    // conversation stays right of the seam — the list-hidden inset rule reaches only the home-screen copy and NEVER the book pose. Run
+    // WITH the seam on (a home-screen copy), so the book guard alone keeps it. RED CONTROL: f4499e926's unscoped rule put back.
+    await device(951, 585); await cdp('Emulation.setDevicePostureOverride', { posture: { type: 'folded' } });
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 951, height: 585, deviceScaleFactor: 2, mobile: true, displayFeature: { orientation: 'vertical', offset: 475, maskLength: 0 } });
+    await load(); await waitFor(`document.documentElement.dataset.fold === 'book'`, 6000);
+    await evalJs(`(app.sidebar.setListHidden(true), 1)`); await waitFor(`document.documentElement.classList.contains('vs-list-hidden')`, 3000); await sleep(300);
+    const BOOK = `(() => { const r = document.getElementById('main-wrapper').getBoundingClientRect(), cs = getComputedStyle(document.documentElement); return { fold: document.documentElement.dataset.fold, hidden: document.documentElement.classList.contains('vs-list-hidden'), standalone: document.documentElement.dataset.standalone || null, left: Math.round(r.left), edge: Math.round(parseFloat(cs.getPropertyValue('--seg-edge')) || 475.5) }; })()`;
+    const book = await evalJs(BOOK);
+    await evalJs(`(() => { const s = document.createElement('style'); s.id = 'zz-b78db-book-red'; s.textContent = 'html[data-vc="regular"].vs-list-hidden #main-wrapper { margin-left: env(safe-area-inset-left, 0px) !important; }'; document.body.appendChild(s); return 1; })()`); await sleep(300);
+    const bookRed = await evalJs(BOOK);
+    await evalJs(`(document.getElementById('zz-b78db-book-red')?.remove(), app.sidebar.setListHidden(false), 1)`);
+    await cdp('Emulation.clearDevicePostureOverride');
+    check('④e the book pose with the list hidden keeps the seam\'s margin (the conversation right of the seam, in a home-screen copy at inset 0)', book.fold === 'book' && book.hidden && book.standalone === '1' && book.left >= book.edge, book);
+    check('④e RED CONTROL: f4499e926\'s unscoped list-hidden rule draws the conversation over the list half (its margin 0)', bookRed.left < bookRed.edge, bookRed);
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: seam.identifier });
     await place({}); await device(951, 585); await load();
   }

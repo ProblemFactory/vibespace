@@ -10404,7 +10404,7 @@ html[data-vc="compact"][data-sidecol] .mobile-win-switcher { right: max(56px, en
   html[data-vc="regular"] .sidebar { padding-top: env(safe-area-inset-top, 0px); padding-left: env(safe-area-inset-left, 0px); }
   html[data-vc="regular"] #list-column-toggle { top: env(safe-area-inset-top, 0px); }
   html[data-vc="regular"].vs-list-hidden #list-column-toggle { left: env(safe-area-inset-left, 0px); }
-  html[data-vc="regular"].vs-list-hidden #main-wrapper { margin-left: env(safe-area-inset-left, 0px) !important; } /* the list hidden: the conversation column starts after a leading inset (an iPhone held landscape — line 914's cure, found by ④c); 0 at inset 0 */
+  html:not([data-fold="book"])[data-vc="regular"][data-standalone].vs-list-hidden #main-wrapper { margin-left: env(safe-area-inset-left, 0px) !important; } /* the list hidden: the conversation column starts after a leading inset (an iPhone held landscape — line 914's cure, found by ④c). ONLY the home-screen copy (its own mark), NEVER the book pose (主开发 r4187: unscoped, it outranked the book's own margin at inset 0 and laid the conversation over the list half) */
   html[data-vc="regular"][data-fold="laptop"] #mobile-nav { padding-right: calc(6px + env(safe-area-inset-right, 0px)); } /* r4115 MUST 3: the base's 6 px at inset 0 */
 }
 @media (orientation: landscape) {

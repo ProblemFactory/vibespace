@@ -4814,7 +4814,7 @@ right, rightMax } }`, insets mandatory, every field an optional integer; env() f
 | 3 | style.css:1899 .dialog-overlay (+ .dialog 95vw, .pf-picker 100vw×100vh, .desktop-adopt 100vw×100dvh, design sheets) | all | cured — the overlay is padded by the four insets, so a centred dialog and a full-screen one stay inside |
 | 4 | style.css:2765 .sidebar (phone) | t l | slice 1: compact pads all four — re-walked (r4115): a fixed drawer (top 0, bottom 0), so its padding takes room from its own content, nothing crushed |
 | 5 | style.css:2778 #mobile-nav (sticky) | t | compact: cured — height 44 + the inset, padding-top the inset (slice 1 gave the padding but kept the 44 px box: under a status bar its buttons sat under the clock — line 914's round, r4115 MUST 2). Regular portrait: cured — the same form (an iPad mini; the Duo's inner portrait) |
-| 6 | style.css:3042 regular .sidebar (the list column) | t b l | bottom: slice 1. cured: left (an iPhone held landscape: the list under the sensor housing) and top (an iPad's status bar); and, with the list HIDDEN, the conversation column's margin-left is the leading inset (#main-wrapper was 0 — found by test-duo-layout ④c, line 914's cure) |
+| 6 | style.css:3042 regular .sidebar (the list column) | t b l | bottom: slice 1. cured: left (an iPhone held landscape: the list under the sensor housing) and top (an iPad's status bar); and, with the list HIDDEN, the conversation column's margin-left is the leading inset (#main-wrapper was 0 — found by test-duo-layout ④c, line 914's cure) — ONLY in the home-screen copy (html[data-standalone]) and NEVER in the book pose, whose own margin (the seam's edge) it would outrank at inset 0 (r4187; test-duo-layout ④e) |
 | 7 | style.css:3160 regular #mobile-nav (the trailing bar) | t r b | right and bottom: slice 1 — re-walked: its width grows with the inset (56 + the inset) and the bottom is a fixed bar's padding, so room is given. cured: top (padding max(8px, the top inset)). Held landscape on an ordinary iPhone (390 tall) it already held more buttons than its height at the release — the column's law does not reach it (put to the coordinator) |
 | 8 | style.css:3165 #list-column-toggle | t | cured: top and left (it follows the list column) |
 | 9 | style.css:3253 book body::after (the seam) | t b | decoration — untouched; drawn through the insets on purpose |
@@ -4873,7 +4873,9 @@ there (its load, or its .sheet seen on a later frame); a clone that fails is dro
 is the release's, so every style appended to the head comes after the sheets and wins its ties as at the release. That includes
 ours, and a plugin's that appends by itself. A style inserted at the head's start loses its ties, as it did at the release.
 Legs: test-viewport-class ⑤d (a fake document: the clones at the release place, a twin kept until its clone loads, a head-appended
-rule after every sheet; RED: 17c6dd081's order); test-duo-layout ④d (a registered custom theme's ground read on the root; RED:
+rule after every sheet; RED: 17c6dd081's order);
+a clone that fails, or whose sheet never shows within 300 frames (a sheet is ready only when its rules can be read — Gecko's loading
+.sheet throws), keeps its twin and is SAID by one telemetry line (event «sheet-order-miss», src/client.js); test-duo-layout ④d (a registered custom theme's ground read on the root; RED:
 the sheets after the head).
 THE CENSUS of every place in src/ that adds a style element or a stylesheet link to a document at runtime:
 - src/lib/themes.js _injectStyle: a person's custom theme and a plugin's theme (plugin-client.js registerPluginTheme takes it), appended to the head. TIES with style.css `:root` and won at the release: wins again.

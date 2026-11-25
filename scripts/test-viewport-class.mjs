@@ -230,7 +230,8 @@ console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the aud
       layers: css.includes('THE FOUR EDGES, EVERY iPHONE SHAPE') && B.includes(`.dialog-overlay, #welcome.onboarding, .palette-overlay { box-sizing: border-box; ${pad4} }`) && B.includes('.dialog-overlay > .dialog { max-width: 100% !important; }')
         && B.includes('.dialog-overlay > .dialog:is(.pf-picker, .desktop-adopt) { height: 100% !important; max-height: 100% !important; }') && B.includes('.palette { max-width: 100%; }'),
       list: /html\[data-vc="regular"\] \.sidebar \{ padding-top: env\(safe-area-inset-top, 0px\); padding-left: env\(safe-area-inset-left, 0px\); \}/.test(B) && /html\[data-vc="regular"\] #list-column-toggle \{ top: env\(safe-area-inset-top, 0px\); \}/.test(B)
-        && /html\[data-vc="regular"\]\.vs-list-hidden #main-wrapper \{ margin-left: env\(safe-area-inset-left, 0px\) !important; \}/.test(B),
+        && /html:not\(\[data-fold="book"\]\)\[data-vc="regular"\]\[data-standalone\]\.vs-list-hidden #main-wrapper \{ margin-left: env\(safe-area-inset-left, 0px\) !important; \}/.test(B)
+        && !/html\[data-vc="regular"\]\.vs-list-hidden #main-wrapper \{ margin-left: env\(/.test(B),   // stale-pins: kept — a deliberate absence: f4499e926's unscoped form outranked the book pose's margin
       bars: /html\[data-vc="regular"\]:not\(\[data-sidecol\]\) #mobile-nav \{ padding-top: max\(8px, env\(safe-area-inset-top, 0px\)\); \}/.test(B) && /html\[data-vc="regular"\] #mobile-nav \{ height: calc\(44px \+ env\(safe-area-inset-top, 0px\)\); padding-top: env\(safe-area-inset-top, 0px\); \}/.test(B)
         && /html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right: calc\(6px \+ env\(safe-area-inset-right, 0px\)\); \}/.test(B),
       chat: chat.includes('THE FOUR EDGES (B-78db slice 2') && C.includes(`.chat-img-overlay { box-sizing: border-box; ${pad4} }`) && /\.voice-preview-back \{ padding: calc\(12px \+ env\(safe-area-inset-top, 0px\)\)/.test(C)
@@ -249,6 +250,10 @@ console.log('⑤c the four edges, every iPhone shape (B-78db slice 2 — the aud
   const compactNow = lineOf(CSS, /^  html\[data-vc="compact"\] #mobile-nav \{ height: calc\(44px/), laptopNow = lineOf(CSS, /^  html\[data-vc="regular"\]\[data-fold="laptop"\] #mobile-nav \{ padding-right:/);
   const compactOk = (css) => /html\[data-vc="compact"\] #mobile-nav \{ height: calc\(44px \+ env\(safe-area-inset-top, 0px\)\); padding-top: env\(safe-area-inset-top, 0px\); \}/.test(css);
   const mC = { compact: compactOk(CSS.replace(compactNow, COMPACT_OLD)) }, mL = edges4(CSS.replace(laptopNow, LAPTOP_OLD), CHAT);
+  const HID_OLD = '  html[data-vc="regular"].vs-list-hidden #main-wrapper { margin-left: env(safe-area-inset-left, 0px) !important; }';  // stale-pins: kept — a red control's mutant: f4499e926's unscoped form put back
+  const hidNow = lineOf(CSS, /^  html:not\(\[data-fold="book"\]\)\[data-vc="regular"\]\[data-standalone\]\.vs-list-hidden/);   // the book guard FIRST: test-fold-posture's census reads a [data-fold="book"] only before a data-vc
+  ok(!!hidNow && /:not\(\[data-fold="book"\]\)/.test(hidNow) && /\[data-standalone\]/.test(hidNow) && !edges4(CSS.replace(hidNow, HID_OLD), CHAT).list,
+    '⑤c the list-hidden margin reaches ONLY the home-screen copy (its own mark) and NEVER the book pose (主开发 r4187: unscoped, it outranked the book\'s own margin at inset 0) — RED CONTROL: f4499e926\'s unscoped rule is caught');
   ok(!!compactNow && !!laptopNow && compactOk(CSS) && !mC.compact && !mL.bars, '⑤c RED CONTROLS, one rule each: 17c6dd081\'s compact bar (the inset as padding in a 44 px box — its buttons crushed under the clock) and its laptop bar (6 px lost at inset 0) are caught by their own pins', { mC: mC.compact, mL: mL.bars });
   // EVERY CURE IS A NO-OP AT INSET ZERO (the unit's own law; r4115 MUST 3): each value with every env() at 0 equals the release's
   const atZero = (v) => { const z = v.replace(/env\(safe-area-inset-[a-z]+, 0px\)/g, '0px'); let m;
@@ -306,11 +311,18 @@ console.log('⑤d the launch for every theme (B-78db line 914 cure — 主开发
   ok(n === 6 && headOrder === 'title,/xterm.css,/style.css,/viewers.css,/chat.css,/theme-editor.css,/fonts.css,vs-lazy-bundle,icon' && before === 6 && sheetsIn(A.body).length === 0 && tiesWon(A),
     `⑤d MUST 1: the six sheets back at their release place in the head (${headOrder}); the body twins kept until each clone loads (${before}), then gone — a style appended to the head afterwards (a custom theme, a plugin's own) comes after every sheet and wins its ties as at the release`);
   const B = page(); SO.restoreSheetOrder(B, W); const cl = B.head.kids.filter((k) => k.attrs.rel === 'stylesheet');
-  cl[1].fire('error'); cl[0].sheet = {}; for (const f of frames.splice(0)) f();
+  cl[1].fire('error'); cl[0].sheet = { cssRules: [] }; for (const f of frames.splice(0)) f();
   ok(!cl[1].isConnected && sheetsIn(B.body).map((l) => l.attrs.href).includes('/style.css') && !sheetsIn(B.body).map((l) => l.attrs.href).includes('/xterm.css'),
     '⑤d a clone that fails to load is dropped and its twin KEPT (the page never loses a sheet); a clone whose sheet is seen on a later frame without a load event lets its twin go');
   ok(!tiesWon(page()), '⑤d RED CONTROL: 17c6dd081\'s order (the sheets in the body, nothing restored) — a head-injected theme rule stands BEFORE the sheets and loses every tie');
-  ok(/try \{ restoreSheetOrder\(\); \} catch \{ \}[^\n]*\ntry \{ installSideColumn\(\); \} catch \{ \}/.test(CL) && CL.indexOf('restoreSheetOrder();') < CL.indexOf('const exitHop = continueExit();'),
+  // r4187 (a): the two ways a sheet keeps the body's order are SAID (one telemetry line); a .sheet whose rules cannot be read yet is not ready
+  const said = [], frames2 = [], C = page(); SO.restoreSheetOrder(C, { requestAnimationFrame: (f) => frames2.push(f) }, { onMiss: (m) => said.push(m.why + ':' + m.href) });
+  const cc = C.head.kids.filter((k) => k.attrs.rel === 'stylesheet');
+  cc[0].fire('error'); cc[1].sheet = { get cssRules() { throw new Error('InvalidAccessError'); } };
+  for (let k = 0; k < 400 && frames2.length; k++) for (const f of frames2.splice(0)) f();
+  ok(said.includes('error:/xterm.css') && said.filter((x) => x.startsWith('frames:')).length === 5 && sheetsIn(C.body).length === 6,
+    `⑤d a clone that fails, and one whose sheet never shows within its frames (a Gecko-style .sheet whose rules throw counts as not loaded), each keep their twin and are SAID: ${said.length} line(s)`, said);
+  ok(/try \{ restoreSheetOrder\(document, window, \{ onMiss: \(m\) => track\('event', 'sheet-order-miss', m\) \}\); \} catch \{ \}[^\n]*\ntry \{ installSideColumn\(\); \} catch \{ \}/.test(CL) && CL.indexOf('restoreSheetOrder(') < CL.indexOf('const exitHop = continueExit();'),
     '⑤d the client restores the order FIRST, before any of the app is built (src/client.js)');
   // r4115 (c) + the reach: the probe only in an iPhone's / iPad's home-screen copy, at most once a frame
   const SC = await import(pathToFileURL(path.join(REPO, 'src/lib/side-column.js')).href);

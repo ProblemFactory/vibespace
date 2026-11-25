@@ -16,7 +16,7 @@ import { wakeKind, fellBehind, WAKE_GAP_MS, CATCH_UP_SETTLE_MS } from './lib/pag
 // shared (src/lib/shared-gets.js). Installed here, before the exit hop and the App: every fetch from then on goes through it. The
 // imports above run first: a fetch at a module's top level goes unshared
 try { window.fetch = sharedGets(window.fetch.bind(window)); } catch { }
-try { restoreSheetOrder(); } catch { } // B-78db (主开发 r4115): the six sheets back at their release place in the head — every style injected later wins its ties as at the release
+try { restoreSheetOrder(document, window, { onMiss: (m) => track('event', 'sheet-order-miss', m) }); } catch { } // B-78db (主开发 r4115): the six sheets back at their release place in the head — every style injected later wins its ties as at the release
 try { installSideColumn(); } catch { } // B-78db (主开发 r3933): cover for the home-screen copy BEFORE the app lays out; html[data-sidecol] read at every resize
 const exitHop = continueExit();
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
