@@ -52,6 +52,7 @@ export function fsErrorText(d) {
   // r3333 unit 2 (src/routes/files.js): the extraction journal HELD unread, or torn in this run — refused before anything starts
   if (d && d.code === 'extract_journal_unread') return t("the extraction journal could not be read, so it is not known whether an earlier extraction into this folder was cut short — try again when it reads (it is read again by itself)");
   if (d && d.code === 'extract_journal_torn') return t("the extraction journal's earlier record did not parse (it is kept aside), so it is not known whether an earlier extraction into this folder was cut short — extract it into a new or empty folder");
+  if (d && d.code === 'extract_journal_unwritten') return t('the extraction journal could not be written, so an extraction cut short here could not be repaired by a later one — nothing was extracted; try again when VibeSpace can write its data folder again');   // B-574d: the mark not on disk — nothing started
   // B-3b03: the file pool had no live worker (its readers restart after a storage that did not answer) — refused, never run on the hub's loop
   if (d && d.code === 'storage_no_worker') return t('the file readers are restarting — try again in a moment');
   if (d && d.code === 'storage_path_trying') return t('this folder or file is still being tried — wait for the answer to the first press');   // B-23e5's remainder

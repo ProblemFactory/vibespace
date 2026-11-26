@@ -1165,6 +1165,10 @@ const SR = require('../store-read.js');
 const SRH = require('../store-read-hold.js');   // the family's hold (one read again off the loop, torn bytes kept aside once)
 const EXTRACT_JOURNAL_WORDS = 'the extraction journal could not be read, so it is not known whether an earlier extraction into this folder was cut short — try again when it reads (it is read again by itself)';
 const EXTRACT_TORN_WORDS = 'the extraction journal\'s earlier record did not parse (it is kept aside), so it is not known whether an earlier extraction into this folder was cut short — extract it into a new or empty folder';
+// B-574d (lane nl-journals): a mark that could not reach the disk starts NOTHING — the extraction it guards would be lost to the next retry
+const EXTRACT_UNWRITTEN_WORDS = 'the extraction journal could not be written, so an extraction cut short here could not be repaired by a later one — nothing was extracted; try again when VibeSpace can write its data folder again';
+const FCJ = require('../fd-close.js');   // B-574d: the tree's one synced replace (renameSynced) — the journal's mark is on disk before the spawn
+let journalNoSyncSaid = false;   // a file system that does no sync at all: said once (the mark still lands)
 const journalValid = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 let extractJournal = null, journalHold = null, journalTorn = false;
 function journalLoad() {
@@ -1188,21 +1192,34 @@ function extractTornRefusal(names) {
 }
 function readExtractJournal() { journalLoad(); return extractJournal || {}; }
 function writeExtractJournal(j) {
-  // atomic tmp+rename (persistence invariant); never over a held journal (nothing written over a file that could not be read)
+  // B-574d (lane nl-journals): THE MARK IS ON DISK BEFORE ITS NAME POINTS AT IT — its temp written, SYNCED, closed, then renamed (src/
+  // fd-close.js renameSynced): after a power cut the next start reads the mark (#23), never a name over no bytes. A write that fails
+  // (the sync, the close, the rename) is a FAILED WRITE — false, and the memory keeps what the disk holds: a start is refused by its
+  // caller; a clear takes the memory anyway (the extraction ended whole — clearExtractMark). A file system that does no sync lands it, said once.
+  // Never over a held journal (nothing written over a file that could not be read).
   if (!journalHold || !journalHold.writable('a mark of the extraction journal')) return;
+  const f = EXTRACT_JOURNAL_AT.file;
+  try { FCJ.renameSynced(f + '.tmp', f, JSON.stringify(j), { where: '[extract] the extraction journal', say: (w) => { if (!journalNoSyncSaid) { journalNoSyncSaid = true; console.warn(w); } } }); }
+  catch (e) { console.warn(`[extract] the extraction journal could not be written (${(e && e.code) || (e && e.message) || e})`); return false; }
   extractJournal = j;
-  try { const f = EXTRACT_JOURNAL_AT.file, tmp = f + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(j)); fs.renameSync(tmp, f); } catch {}
+  return true;
 }
 function markExtractStart(fp, destDir) {
   const j = { ...readExtractJournal() };
   j[fp + '\n' + destDir] = Date.now();
   const keys = Object.keys(j);
   if (keys.length > 200) for (const k of keys.sort((a, b) => j[a] - j[b]).slice(0, keys.length - 200)) delete j[k];
-  writeExtractJournal(j);
+  return writeExtractJournal(j) === true;   // B-574d: false = the mark is not on disk (a failed write, or a held journal) — its caller starts nothing
 }
 function clearExtractMark(fp, destDir) {
   const j = { ...readExtractJournal() };
-  if ((fp + '\n' + destDir) in j) { delete j[fp + '\n' + destDir]; writeExtractJournal(j); }
+  if ((fp + '\n' + destDir) in j) {
+    delete j[fp + '\n' + destDir];
+    // B-574d: an extraction that ENDED WHOLE is known whole in this run even when its clear did not reach the disk — the memory takes
+    // the clear (a later extraction into that folder is never turned into an overwrite in this run, over the person's edits since);
+    // the mark left on disk goes at the journal's next write (every write is the whole journal)
+    if (writeExtractJournal(j) === false) { extractJournal = j; console.warn('[extract] an ended extraction\'s mark stays on disk until the journal\'s next write'); }
+  }
 }
 function hadInterruptedExtract(fp, destDir) {
   return (fp + '\n' + destDir) in readExtractJournal();
@@ -1271,7 +1288,8 @@ router.post('/api/archive/extract', async (req, res) => {
     const startExtract = () => {
       if (op.status === 'cancelled') return;
       op.status = 'running';
-      markExtractStart(fp, destDir); // #23: journal BEFORE spawning; cleared only on clean completion
+      // #23: journal BEFORE spawning (on disk — B-574d); cleared only on clean completion. A mark not written starts nothing, by name
+      if (!markExtractStart(fp, destDir)) { Object.assign(op, { status: 'error', error: EXTRACT_UNWRITTEN_WORDS, code: 'extract_journal_unwritten' }); setTimeout(() => extractOps.delete(opId), 5 * 60 * 1000).unref(); return; }
       const args = type === 'zip'
         ? [effOverwrite ? '-o' : '-n', fp, '-d', destDir]          // verbose by default: one " inflating:" line per entry
         : [effOverwrite ? '-xvf' : '-xvkf', fp, '-C', destDir];    // -v: one line per entry
@@ -1305,7 +1323,7 @@ router.post('/api/archive/extract', async (req, res) => {
   let cmd, args;
   if (type === 'zip') { cmd = 'unzip'; args = [effOverwrite ? '-o' : '-n', '-q', fp, '-d', destDir]; }
   else { cmd = 'tar'; args = [effOverwrite ? '-xf' : '-xkf', fp, '-C', destDir]; }
-  markExtractStart(fp, destDir); // #23
+  if (!markExtractStart(fp, destDir)) return res.status(503).json({ error: EXTRACT_UNWRITTEN_WORDS, code: 'extract_journal_unwritten' }); // #23 + B-574d: on disk before the spawn, or nothing starts
   execFile(cmd, args, { timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024 }, (err, _o, stderr) => {
     // tar -k exits non-zero when files already existed — treat as success (skip-existing semantics)
     if (err && !(cmd === 'tar' && !effOverwrite && /(already |: File )exists/i.test(stderr || ''))) {
