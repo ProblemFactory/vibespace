@@ -143,7 +143,7 @@ function create({ tasks = null, userTodos = null, sessionStatus = null, getJobs 
     }
     if (kind === 'job') {
       const jm = getJobs && getJobs();
-      if (!jm || !jm.ready) return { error: RC.refuse('unavailable') };
+      if (!jm || !jm.ready) return { error: jm && typeof jm.lockHeldWords === 'function' && jm.lockHeldWords() ? { ...RC.refuse('unavailable'), why: jm.lockHeldWords() } : RC.refuse('unavailable') };   // B-f276 (s1126, r5017): the lock's hold by name
       // B-44f3 (the verdict's M4): the cascade below clears the job's For-you items — while For you is held unread its list is empty
       // because it is unread, so the job would be cleared and its items (with its name) back at the read: the WHOLE clear waits
       if (userTodos && userTodos.isHeldUnread?.()) return { error: RC.refuse('todos_unread') };

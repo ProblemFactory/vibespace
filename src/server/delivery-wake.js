@@ -279,7 +279,7 @@ function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf =
   return {
     'jobs.wakeGrant': async (args, { caller, keyId, identity, reach }) => {   // (async: THE ONE DOOR lands the change off the loop — src/jobs.js changeWakeGrants)
       const jm = jobs();
-      if (!jm || !jm.ready) return { ok: false, code: 'not_ready', why: 'the jobs engine is starting — try again in a moment' };
+      if (!jm || !jm.ready) return { ok: false, code: 'not_ready', why: (jm && typeof jm.lockHeldWords === 'function' && jm.lockHeldWords()) || 'the jobs engine is starting — try again in a moment' };   // B-f276 (s1126, r5017): the lock's hold by name
       const job = jm.jobs.get(args.job);
       if (!job) return { ok: false, code: 'not_found', why: 'no job by that id' };
       // REACH FIRST (主开发 12:46Z): the conversation that owns the job (a run's: its schedule's), judged by the engine's ONE reach

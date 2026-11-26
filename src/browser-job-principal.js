@@ -46,6 +46,7 @@ function isRunningJob(job) { return !!job && typeof job === 'object' && RUNNING_
 function jobsUnknownCode(jm) {
   if (!jm) return 'jobs_engine_absent';
   if (jm.initError) return 'jobs_engine_failed';
+  if (typeof jm.lockHeldWords === 'function' && jm.lockHeldWords()) return 'jobs_lock_unread';   // B-f276 (s1126, r5017): the lock held — said by its own code (the handle kept)
   if (jm.ready !== true) return 'jobs_engine_not_ready';
   return null;
 }
