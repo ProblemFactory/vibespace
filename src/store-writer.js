@@ -44,6 +44,7 @@
  */
 const P = require('./store-pace.js');
 const LC = require('./server/loop-counts.js');   // loop-day-report M5: the hour's counts (a property add)
+const { syncUnsupportedWords } = require('./fd-close.js');   // r5010: the hub door's one spelling of a sync the file system does not do (Node builtins only)
 
 const GRACE = P.stopGraceOf(process.env);   // what the service manager allows a stop (systemd 90 s, a pod 30 s, or stated) — round 6: the exit's only bound
 const SLOW_MS = 1000;           // a single write slower than this is said
@@ -138,7 +139,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   const noSyncSeen = (s, code) => {
     if (!code || noSyncSaid) return;
     noSyncSaid = true;
-    say(`[store-write] ${require('./fd-close.js').syncUnsupportedWords(s ? s.name : 'a store', code)} (said once: every later write of this writer whose sync is refused so lands the same way)`);
+    say(`[store-write] ${syncUnsupportedWords(s ? s.name : 'a store', code)} (said once: every later write of this writer whose sync is refused so lands the same way)`);
   };
   const W = () => require('./store-writer-worker.js');   // writeJob (the main thread's own road uses the SAME code)
 
@@ -146,7 +147,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (l.worker || l.mainOnly || stopped) return l.worker;
     try {
       const { Worker } = require('worker_threads');
-      const sab = new SharedArrayBuffer(64);   // [0..3] the cells, then a failed job's error code (≤ 32 bytes), then the own numbers (dev, ino) of the file an own-only job wrote — store-writer-worker.js
+      const sab = new SharedArrayBuffer(64);   // [0..3] the cells, then a failed job's error code (≤ 32 bytes; r5010: or a landed job's no-sync code), then the own numbers (dev, ino) of the file an own-only job wrote — store-writer-worker.js
       l.S = new Int32Array(sab); l.posted = 0;
       const w = new Worker(workerPath || path.join(__dirname, 'store-writer-worker.js'), { workerData: { sab }, stdout: false, stderr: false });
       l.worker = w;
@@ -562,7 +563,8 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       return true;
     } catch (e) { if (e && e.own) s.own = e.own; if (!p.append) { try { fs.unlinkSync(tmp); } catch { } } fail(s, since, e); return false; }   // r2593 (2): a FIRST own-only append that made the file and then failed hands its numbers to the store's cell here too
   }
-  /** the failed job's own error code, from the shared cells (round 6's amend: the exit road said «EWRITE» for an EIO) */
+  /** the failed job's own error code, from the shared cells (round 6's amend: the exit road said «EWRITE» for an EIO) — r5010: the same
+   *  cells carry a LANDED job's no-sync code (its outcome 1) */
   function jobErrorCode(l) {
     const S = l.S;
     try { const n = Atomics.load(S, 3); if (n > 0 && S.byteLength >= 48) return Buffer.from(new Uint8Array(S.buffer, 16, Math.min(32, n))).toString('latin1'); } catch { }

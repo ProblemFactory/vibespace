@@ -7,7 +7,8 @@
 // SHARED: the hub (hosts.js, channel-store.js), the wrappers under data/bin (required eagerly as kept-copies.js is; each carries
 // a one-line fallback that says THESE words — one spelling, pinned by test-fd-close-census ⑤), and the channels CLI (the
 // cli-call road: the checkout's copy, else the copy beside it at boot — src/server/agent-tool-generators.js). Node builtins only
-// (fs); no network; no path in its words (the site's name and the code only).
+// (fs); no network; no path in its words (the site's name and the code only). Its SYNC_UNSUPPORTED is the store writer's too
+// (src/store-writer-worker.js, 主开发 r5010: one set for both doors), and syncUnsupportedWords its one no-sync line (src/store-writer.js).
 const fs = require('fs');
 
 /** THE words of a failed close (the one spelling) */
