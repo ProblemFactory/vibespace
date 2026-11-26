@@ -2488,7 +2488,7 @@ class JobManager {
     entry.hold = HOLD.create({ file: f, valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), code: 'stamp_record_unread', aside: (m) => f + '.corrupt-' + m,
       words: (x) => `the process record of ${job.id}'s run could not be read (${x && x.code}) — the run is judged once it reads; nothing is decided or signalled from it meanwhile`,
       log: (l) => this.d.log(`[jobs] ${job.id}: ${l}`),
-      onLift: (value) => { if (holds.get(f) !== entry) return; holds.delete(f); entry.hold.stop(); this._stampLift(job, run, value || null); } });
+      onLift: (value, facts) => { if (holds.get(f) !== entry) return; holds.delete(f); entry.hold.stop(); if (facts && facts.setAside) { this._stampTornLift(job, run, facts.setAside); return; } this._stampLift(job, run, value || null); } });   // r5291: a TORN lift is no «missing»
     holds.set(f, entry);
     entry.hold.start(a);
     this._touch(job, { what: `its process record could not be read at the start (${code}) — VibeSpace reads it again by itself; the run is judged once it reads, and nothing is started beside it, signalled from it or removed meanwhile (a Stop ends it on purpose)` });
@@ -2512,6 +2512,7 @@ class JobManager {
       if (done) return; done = true; stops.delete(run);
       if (this._unreadStopped || this.readOnly || this.jobs.get(job.id) !== job || run.endedAt) return;
       this._finalizeRun(job, run, { code: null, endedAt: now() }, 'stop');
+      this._vaultAskOver(job);   // r5291's should: a stopped job's approval card is over, as on the ordinary Stop (after the forward)
       this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
       this._save();
     };
@@ -4239,6 +4240,14 @@ class JobManager {
     this._touch(job, { what: `its wrapper is gone and its exit record could not be read (${a.state === 'corrupt' ? 'torn bytes' : a.code}) — the run is judged once the record reads; nothing is decided from it meanwhile` });
     return { state: 'held' };
   }
+  /** the stamp unit, r5291's REQUIRED FOLLOW: the boot's hold met TORN bytes — it set them aside (pid.json.corrupt-<ms>) and lifted with
+   *  nothing, while the live file stays torn. That is no «missing»: the run MAY STILL RUN, so nothing is judged, ended, woken or
+   *  replayed; every later asker reads the torn file as unknown, and the way out stays a person's Stop (or rm --orphan) — said once */
+  _stampTornLift(job, run, copy) {
+    if (this._unreadStopped || this.readOnly || this.jobs.get(job.id) !== job || run.endedAt || job.runs[job.runs.length - 1] !== run) return;
+    const what = `its process record is torn (its bytes kept aside as ${path.basename(String(copy))}) — VibeSpace cannot tell whether that run still runs, so nothing is judged or signalled from it: Stop the job to end that run on purpose, or remove it with --orphan`;
+    this.d.log(`[jobs] ${job.id}: ${what}`); this._touch(job, { what });
+  }
   /** B-f276, the stamp unit (主开发 r5015 (a)): a run the BOOT met with its PROCESS RECORD held, at its LIFT — the boot's own adoption of
    *  it ONCE, then the boot's replay (the start's own door and conditions). NOTHING when the engine ended or owns no lock, the job is gone,
    *  or the run is no longer the job's live last run (a person's word ended it meanwhile: their Stop) */
@@ -4674,6 +4683,9 @@ class JobManager {
     for (const job of this.jobs.values()) {
       if (!['up', 'starting', 'awaiting-user'].includes(job.state)) continue;
       const run = job.runs && job.runs[job.runs.length - 1];
+      // the stamp unit (r5291's should): a run the boot HOLDS is judged at the hold's lift alone — the tick reads nothing of it on the
+      // loop beside the hold's own off-loop read (it read the record at the base: a tick that won ended the run by its own road)
+      if (run && !run.endedAt && this._stampHolds && this._stampHolds.has(path.join(this._ctlDir(job, run.startedAt), 'pid.json'))) continue;
       const stamp = this._readStamp(job);
       if (stamp && job.state === 'starting') { job.state = 'up'; this._touch(job); }
       if (stamp && run) run._stamped = true;   // B-91aa's remainder: its wrapper's stamp seen — the bounded look never judges this run again (a later unreadable read is no «never wrote»)
@@ -5457,7 +5469,12 @@ class JobManager {
       return { ok: true, ...(vaultWait ? { vaultWait } : {}) }; }
     // a refusal names the job by ID (lane-redact verify r7): the panel toasts it and the device's toast history (the For-you
     // Notifications tab) keeps every toast — `<name> is already running` outlived the job's "Clear content…" there
-    if (['up', 'starting'].includes(job.state)) return { error: `${job.id} is already running` }; // a live process is never re-judged into 'failed'
+    if (['up', 'starting'].includes(job.state)) {   // a live process is never re-judged into 'failed'
+      // the stamp unit (r5291's should, word (b)): a live run whose process record is unknown — the refusal names the way out too
+      const sa = this._runLive(job, run0) ? this._stampAnswer(job) : null;
+      if (sa && sa.state === 'unknown') return { error: `${job.id} is already running — its process record could not be read (${sa.code}): Stop it to end that run on purpose (nothing is signalled from that record), then start it again` };
+      return { error: `${job.id} is already running` };
+    }
     // round 5: a service's run never starts beside what its last run left — round 6: EVERY start of a service goes through
     // _startAfter (it starts at once when nothing is pending; a deferred reap, a kept process, a scope never seen empty is awaited)
     if (job.kind === 'service') {
