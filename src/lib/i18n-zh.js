@@ -14498,6 +14498,7 @@ export default {
   "another document is being parsed — try again in a moment": "另一个文档正在解析——请稍后再试",
   "the extraction journal could not be read, so it is not known whether an earlier extraction into this folder was cut short — try again when it reads (it is read again by itself)": "读不出解压记录，因此不知道之前解压到这个文件夹时是否中途被打断——等它能读出时再试（它会自己再读）",   // lane lg-group-parents r3333 unit 2: the extraction journal held / torn
   "the extraction journal's earlier record did not parse (it is kept aside), so it is not known whether an earlier extraction into this folder was cut short — extract it into a new or empty folder": "解压记录的早先内容无法解析（已另存），因此不知道之前解压到这个文件夹时是否中途被打断——请解压到新的或空的文件夹",   // lane lg-group-parents r3333 unit 2: the extraction journal held / torn
+  "the extraction journal could not be written, so an extraction cut short here could not be repaired by a later one — nothing was extracted; try again when VibeSpace can write its data folder again": "解压记录写不进去，因此这次解压若中途被打断，之后的解压也无法修复它——什么都没有解压；等 VibeSpace 能再写入它的数据文件夹时再试",   // lane nl-journals B-574d: the extraction journal's mark not written — nothing started
   "this folder or file did not answer in time — try again in {s} s": "这个文件夹或文件没有及时响应 — 请 {s} 秒后再试",
   "the file readers are restarting — try again in a moment": "文件读取进程正在重启 — 请稍后再试",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "“{machine}” 已离线——只有机器连接时，此文件夹才会显示它的文件",

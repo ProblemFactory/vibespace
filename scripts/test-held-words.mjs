@@ -105,6 +105,7 @@ const NOT_HELD = {
   'count-failed': 'a usage count that failed — a retry',
   LOADING: 'the usage history still loading at the start — a wait',
   'not-on-disk': 'a person\'s start refused because its run could not be saved (a write, not a read)',
+  extract_journal_unwritten: 'B-574d (lane nl-journals): an extraction refused because the journal\'s mark could not reach the disk (a write, not a read) — the files page words it by its own code (src/lib/file-explorer-ops.js fsErrorText, zh / ja)',
   proposal_door_not_ready: 'the proposal card not on this instance yet — the job\'s row says what to tick',
   write_never_started: 'a write to a machine that never started — not saved, said',
   write_unknown: 'a write to a machine that did not answer — it may have been saved, said',
