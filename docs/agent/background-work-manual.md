@@ -522,6 +522,8 @@ VibeSpace runs as its service. Start or restart it with `systemctl --user restar
   - in an older scope, the kernel stops ONE of the job's processes, which can be VibeSpace or a conversation;
   - where each process has its own limit (RLIMIT_DATA, as on a pod), a process that passes it fails its own allocation, VibeSpace's
     too.
+  Where ONE process ends (an older scope, or RLIMIT_DATA), a launcher in the job such as `./run.sh` (it starts VibeSpace again
+  after each exit) can bring VibeSpace back, under the same bound; where the scope is stopped whole, the launcher ends with it.
   A job of this VibeSpace that ran VibeSpace itself is never started again by itself; another VibeSpace's service job may be,
   once. The boot says which rung in its journal, and the job's card says it too.
 - **Another checkout:** a VibeSpace of another checkout run as a job IS that job's main. The job's stop ends it, with every

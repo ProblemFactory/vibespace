@@ -19,6 +19,9 @@
 //     mark (a hub started there drops the floor names, the device roots with them; the instance name stays); the two services
 //     (the OpenCode serve, the plugin loader) and the two roads that hand a shell no VibeSpace name (the Desktop start, the tmux
 //     attach) each have their row, held to their spawn's shape.
+//  ③ B-2c5c (4c): a VibeSpace started INSIDE a job says its bound in force, what passing it does and its start again by RUNG
+//     (r4564, r4673); its REDS are placed in a copy of src/job-model.js (the start again by holder alone, the spawn figure cut, a
+//     cron read as itself)
 //  REDS (ten plants, nine checks): the act ignoring the mark; the family catch-all back; each fixed clause cut (the app mark, the
 //  page helpers); each exemption cut (the session names, the credential rows, the instance name); a name the prelude exports and a
 //  prefix assignment on the program, neither in the mark; the Desktop start handed the agent env.
@@ -200,7 +203,7 @@ const plainRed = (read) => PLAIN.filter(([, f, , re]) => !re.test(read(f))).map(
   const CG_POLICY = 'a scope of the user systemd (vs-job-x.scope, MemoryMax, OOMPolicy=stop)', CG_OLD = 'a scope of the user systemd (vs-job-x.scope, MemoryMax; systemd 249 has no OOMPolicy for a scope)';
   const jobOf = (bound, extra = {}) => ({ id: 'jb-made-up-1', name: 'build-box', runs: bound === undefined ? [] : [{ startedAt: 1, memoryBound: bound }], ...extra });
   // M1: a job with NO figure of its own, its run holding the ladder's default bound — the line says that size
-  const j1 = jobOf({ mb: 4096, by: 'cgroup', why: CG_POLICY }), b1 = inForce(j1, {}), l1 = say('jb-made-up-1', { label: 'build box', ...b1 });
+  const j1 = jobOf({ mb: 4096, by: 'cgroup', why: CG_POLICY }), b1 = inForce(j1, {}), l1 = say('jb-made-up-1', { label: 'build box', mainIsHub: true, ...b1 });
   ok(!!(b1.mb === 4096 && /started INSIDE the background job "build box" \(jb-made-up-1\)/.test(l1) && /its memory bound of 4 GB holds VibeSpace and every conversation it starts — past it the whole job is stopped, VibeSpace and every conversation with it/.test(l1) && /VibeSpace does not start again by itself/.test(l1) && /«VibeSpace itself is never a job»/.test(l1)),
     '③ M1 + the cgroup rung with OOMPolicy=stop: a job with NO figure of its own whose run holds 4096 — the line says «4 GB» and the WHOLE job stopped (true there) — RED: no size', { line: l1 });
   const tipMb = (j1.memoryBound && j1.memoryBound.mb) || j1.memoryMb, lTip = say('jb-made-up-1', { label: 'build box', mb: tipMb });
@@ -217,8 +220,43 @@ const plainRed = (read) => PLAIN.filter(([, f, , re]) => !re.test(read(f))).map(
   const lN = say('jb-made-up-1', { label: 'free', ...inForce(jobOf({ mb: 0, by: 'none', why: 'unbounded (the owner set 0)' }), {}) });
   ok(!!(/it runs under no memory bound of its own/.test(lN) && !/start again/.test(lN) && !/stopped/.test(lN)), '③ M2 no bound (the owner\'s 0): said unbounded — no consequence claimed', { line: lN });
   const lU = say('jb-made-up-2', null);
-  ok(!!(/jb-made-up-2 \(a job this VibeSpace does not hold now: another VibeSpace's, or one it archived\)/.test(lU) && /its memory bound can end VibeSpace and the conversations it started/.test(lU) && /only that job's own VibeSpace may start it again/.test(lU) && !/whole job is stopped/.test(lU)),
-    '③ the small: a job this VibeSpace does not hold NOW (another\'s, or one it archived) — the soft sentence, and its start-again is its own holder\'s', { line: lU });
+  ok(!!(/jb-made-up-2 \(a job this VibeSpace does not hold now: another VibeSpace's, or one it archived\)/.test(lU) && /its memory bound can end VibeSpace and the conversations it started/.test(lU) && !/whole job is stopped/.test(lU)),
+    '③ the small: a job this VibeSpace does not hold NOW (another\'s, or one it archived) — the soft sentence', { line: lU });
+  // r4673 (line 1031's cure round 2): THE START AGAIN is the RUNG's as well as the holder's. A launcher in the job (./run.sh: a
+  // `while true` loop that runs the hub again after each exit) lives on where ONE process ends — the kernel's pick in an older scope,
+  // a process's own data limit, a rung not read — and brings VibeSpace back inside the same scope or under the same inherited limit;
+  // only a scope stopped WHOLE takes the launcher with it, and only a run whose main WAS this hub is never started again by itself
+  const LAUNCH = "; if the job's own command starts VibeSpace again (a launcher such as ./run.sh), it comes back under the same bound.";
+  const RL_WHY = 'RLIMIT_DATA on each process (no user systemd)';
+  const SEEN_OWN = { label: 'pod', mainIsHub: true, ...inForce(jobOf({ mb: 4096, by: 'rlimit-data', why: RL_WHY }), {}) };
+  const SEEN_OLD = { label: 'old scope', mainIsHub: true, ...inForce(jobOf({ mb: 4096, by: 'cgroup', why: CG_OLD }), {}) };
+  const launcherSaid = (l) => l.includes(LAUNCH) && !/does not start again by itself/.test(l) && !/only that job's own VibeSpace may start it again/.test(l);
+  const legA = (f) => launcherSaid(f('jb-made-up-1', SEEN_OWN)), legB = (f) => launcherSaid(f('jb-made-up-2', null)), legC = (f) => launcherSaid(f('jb-made-up-1', SEEN_OLD));
+  ok(legA(say), '③ r4673 (a) the data-limit rung (a pod): ONE process passes its own limit, the launcher lives — the line says a launcher brings VibeSpace back under the same bound, never «does not start again by itself» — RED: the tip\'s holder sentence', { line: say('jb-made-up-1', SEEN_OWN) });
+  ok(legB(say), '③ r4673 (b) a job this VibeSpace does not hold (its rung never read): the launcher clause, never «only that job\'s own VibeSpace may start it again» — RED: the tip\'s holder sentence', { line: lU });
+  ok(legC(say) && launcherSaid(l0), '③ r4673 (c) an older scope (systemd < 253: the kernel stops ONE process) and a rung not read yet: the same launcher clause', { old: say('jb-made-up-1', SEEN_OLD), unread: l0 });
+  const lW0 = say('jb-made-up-1', { label: 'build box', ...b1 }), lW2 = say('jb-made-up-1', { label: 'build box', mainIsHub: false, ...b1 });
+  ok(!!(/; VibeSpace does not start again by itself\./.test(l1) && !l1.includes(LAUNCH) && ![lW0, lW2].some((l) => /start again by itself/.test(l) || l.includes(LAUNCH)) && !/start again|starts VibeSpace again/.test(lN)),
+    '③ r4673 (d) a scope stopped WHOLE (the launcher stopped with it): «does not start again by itself» only when the run\'s main WAS this hub (the engine\'s hub-main fact); without that fact no restart is claimed; unbounded claims none', { l1, lW0, lW2 });
+  // r4673's shoulds (lens two): a run not adopted yet holds the figure recorded AT ITS SPAWN; a cron's figure is its task's
+  const SPAWNED = () => ({ id: 'jb-made-up-1', memoryMb: 16384, runs: [{ startedAt: 1, memoryMb: 6144, memoryAskedMb: 16384, memoryCap: { limitMb: 8192 } }] });
+  const CRON = () => ({ id: 'jb-made-up-3', kind: 'cron', action: { task: { memoryMb: 2048 } }, runs: [] });
+  const spawnLeg = (f) => f(SPAWNED(), { instanceMb: 32768 }).mb === 6144, cronLeg = (f) => f(CRON(), {}).mb === 2048;
+  ok(spawnLeg(inForce) && cronLeg(inForce), '③ r4673 the bound in force with no wrapper record yet: the run\'s OWN spawn figure (6 GB, capped on the 8 GB instance it started on), never today\'s ladder (16 GB on a 32 GB instance); a cron\'s figure is its task\'s (2 GB), never the ladder\'s default', { spawned: inForce(SPAWNED(), { instanceMb: 32768 }), cron: inForce(CRON(), {}) });
+  // THE REDS, placed in a copy of src/job-model.js (anchored edits): the tip 847a3050a's start again by its holder alone, on every rung;
+  // the spawn figure's line cut; a cron read as itself
+  {
+    const JMSRC = fs.readFileSync(path.join(REPO, 'src/job-model.js'), 'utf8'), MJ = mutantCopies('hub-handed-drop-again', REPO);
+    const AGAIN = `  const again = rung === 'none' ? '' : rung !== 'whole' ? "; if the job's own command starts VibeSpace again (a launcher such as ./run.sh), it comes back under the same bound"\n    : held && seen.mainIsHub === true ? '; VibeSpace does not start again by itself' : '';`;
+    const TIP = `  const again = rung === 'none' ? '' : held ? '; VibeSpace does not start again by itself' : "; only that job's own VibeSpace may start it again";`;
+    const Holder = MJ.load('src/job-model.js', anchored(JMSRC, AGAIN, TIP, 'r4673: the start again by its holder alone (847a3050a)'), 'again-holder');
+    const reds = { a: !legA(Holder.startedInJobLine), b: !legB(Holder.startedInJobLine), c: !legC(Holder.startedInJobLine) };
+    ok(!!(reds.a && reds.b && reds.c && /does not start again by itself/.test(Holder.startedInJobLine('jb-made-up-1', SEEN_OWN)) && /only that job's own VibeSpace may start it again/.test(Holder.startedInJobLine('jb-made-up-2', null))),
+      'CONTROL (r4673): the tip\'s clause placed back (the holder alone, on every rung) — legs (a), (b) and (c) are red: «does not start again by itself» on the data-limit rung and in an older scope, «only that job\'s own VibeSpace may start it again» for a job not held', reds);
+    const SpawnCut = MJ.load('src/job-model.js', anchored(JMSRC, "  if (run && finiteMb(run.memoryMb) !== null) return { mb: finiteMb(run.memoryMb), by: null, why: '' };\n", '', 'r4673: the spawn figure cut'), 'spawn-cut');
+    const CronSelf = MJ.load('src/job-model.js', anchored(JMSRC, '  const m = memoryMbOf(own, ctx || {});', '  const m = memoryMbOf(job, ctx || {});', 'r4673: a cron read as itself'), 'cron-self');
+    ok(!!(!spawnLeg(SpawnCut.boundInForceOf) && !cronLeg(CronSelf.boundInForceOf)), 'CONTROL (r4673\'s shoulds): the spawn figure\'s line cut reads today\'s ladder (16 GB), a cron read as itself the ladder\'s default (4 GB) — red', { spawnCut: SpawnCut.boundInForceOf(SPAWNED(), { instanceMb: 32768 }), cronSelf: CronSelf.boundInForceOf(CRON(), {}) });
+  }
   const lNL = say('jb-made-up-1', { label: 'two\nlines', ...b1 });
   ok(!!(!/\n/.test(lNL) && /"two lines"/.test(lNL) && !/jbt-made-up/.test(l1 + l0 + lP + lR + lN + lU)), '③ one journal line: a label\'s line break is folded (never a second, forged line); never a value');
   // the CARD's hub note, by the same law (src/lib/jobs-layout.js hubBoundNote; the view carries the run's memoryBound)
@@ -228,11 +266,22 @@ const plainRed = (read) => PLAIN.filter(([, f, , re]) => !re.test(read(f))).map(
   ok(!!(cW && /they all end together/.test(cW) && /kernel stops one of its processes/.test(cP || '') && !/end together/.test(cP || '') && /gets no more memory/.test(cR || '') && /can end VibeSpace/.test(cU || '') && cN === ''
     && card({ mb: 4096, by: 'cgroup', why: CG_POLICY }, true) === 'Runs VibeSpace: its memory bound ends it whole.' && card({ mb: 4096, by: 'rlimit-data', why: 'x' }, true) === 'Runs VibeSpace: its memory bound can end it.'),
     '③ THE CARD (B-2c5c r1263 / r1610), by the same law: «they all end together» only on a scope stopped whole; one process in an older scope; each process its own limit on RLIMIT_DATA; the soft sentence with no record; nothing unbounded — RED: «they all end together» on every rung', { cW, cP, cR, cU, cN });
+  ok(!!(card({ mb: 4096, by: 'cgroup', why: CG_OLD }, true) === 'Runs VibeSpace: its memory bound can end it.' && card(null, true) === 'Runs VibeSpace: its memory bound can end it.' && card({ mb: 0, by: 'none', why: 'x' }, true) === ''),
+    '③ r4673 (lens one\'s should) THE CARD\'s compact form on the older scope and with no record: «can end it», never «ends it whole»; nothing unbounded');
+  // r4673 (both lenses' should): THE RUNG LAW is written twice — src/job-model.js boundRungOf (CJS) and the card's hubBoundNote (ESM,
+  // imports nothing). The same record shapes, odd ones too, fed to both: one law
+  const NOTE = { whole: /they all end together/, process: /kernel stops one of its processes/, own: /gets no more memory/, unknown: /its memory bound can end VibeSpace and the conversations it started/ };
+  const noteRung = (b) => { const c = card(b); return c === '' ? 'none' : Object.keys(NOTE).find((k) => NOTE[k].test(c || '')) || '?'; };
+  const rungOf = typeof M.boundRungOf === 'function' ? M.boundRungOf : () => '?';
+  const SHAPES = [null, { mb: 4096, by: 'cgroup', why: CG_POLICY }, { mb: 4096, by: 'cgroup', why: CG_OLD }, { mb: 4096, by: 'rlimit-data', why: RL_WHY }, { mb: 0, by: 'none', why: 'x' }, { mb: 4096, by: 'none', why: 'x' }, { mb: 0, by: 'cgroup', why: CG_POLICY },
+    { mb: 4096, by: null, why: '' }, { by: 'cgroup', why: CG_POLICY }, { mb: 0.5, by: 'rlimit-data', why: RL_WHY }, { mb: -1, by: 'cgroup', why: CG_OLD }, { mb: 4096, by: 'other', why: CG_POLICY }];
+  const drift = SHAPES.map((b) => [JSON.stringify(b), rungOf(b), noteRung(b)]).filter(([, a, c]) => a !== c);
+  ok(!!(drift.length === 0 && new Set(SHAPES.map((b) => rungOf(b))).size === 5), '③ r4673 THE RUNG LAW is one law: the journal\'s rung (boundRungOf) and the card\'s (hubBoundNote) agree on all twelve record shapes, the five rungs among them', drift);
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/jobs-wiring.js'), 'utf8'), manual = fs.readFileSync(path.join(REPO, 'docs/agent/background-work-manual.md'), 'utf8'), panel = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf8');
-  const iInit = wiring.indexOf("try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }"), iSay = wiring.indexOf('M.startedInJobLine(id, job ? { label: jm.labelOf(job), ...M.boundInForceOf(job,');
+  const iInit = wiring.indexOf("try { jm.init(); } catch (e) { log('[jobs] init threw (isolated):', e.message); }"), iSay = wiring.indexOf("M.startedInJobLine(id, job ? { label: jm.labelOf(job), mainIsHub: !!(run && typeof jm._hubMainOf === 'function' && jm._hubMainOf(run, null)), ...M.boundInForceOf(job,");
   ok(!!(iInit > 0 && iSay > iInit && iSay - iInit < 800 && wiring.split('M.startedInJobLine(').length === 2 && /catch \(e\) \{ log\('\[jobs\] the boot could not say which job holds this VibeSpace —', e && e\.message\); \}/.test(wiring) && panel.includes('hubBoundNote(j, t, compact)')),
-    '③ production\'s names: the line is said ONCE (one call), right after the job engine\'s init, with the bound IN FORCE (boundInForceOf over the engine\'s context) and the name through labelOf; its failure is logged; the card takes the note by rung');
-  ok(!!(manual.includes('### VibeSpace itself is never a job') && /the whole job is stopped, VibeSpace and every\s+conversation it started together/.test(manual) && /in an older scope, the kernel stops ONE of the job's processes/.test(manual) && /RLIMIT_DATA, as on a pod/.test(manual) && /another VibeSpace's service job may be,\s+once/.test(manual) && /on a pod, the pod's own restart/.test(manual) && /another checkout's VibeSpace/.test(manual) && /clock steps\n?\s*forward/.test(manual) && /lost from the job's log/.test(manual)),
-    '③ the Background Work manual, by the same law: what passing the bound does, rung by rung; the start-again by holder; a pod\'s own restart; another checkout, a clock step, its output');
+    '③ production\'s names: the line is said ONCE (one call), right after the job engine\'s init, with the bound IN FORCE (boundInForceOf over the engine\'s context), the name through labelOf and the run\'s hub-main fact through the engine\'s one accessor (r4673); its failure is logged; the card takes the note by rung');
+  ok(!!(manual.includes('### VibeSpace itself is never a job') && /the whole job is stopped, VibeSpace and every\s+conversation it started together/.test(manual) && /in an older scope, the kernel stops ONE of the job's processes/.test(manual) && /RLIMIT_DATA, as on a pod/.test(manual) && /another VibeSpace's service job may be,\s+once/.test(manual) && /Where ONE process ends \(an older scope, or RLIMIT_DATA\), a launcher in the job such as `\.\/run\.sh` \(it starts VibeSpace again\s+after each exit\) can bring VibeSpace back, under the same bound; where the scope is stopped whole, the launcher ends with it\./.test(manual) && /on a pod, the pod's own restart/.test(manual) && /another checkout's VibeSpace/.test(manual) && /clock steps\n?\s*forward/.test(manual) && /lost from the job's log/.test(manual)),
+    '③ the Background Work manual, by the same law: what passing the bound does, rung by rung; a launcher\'s start again where one process ends (r4673); the job\'s start-again by holder; a pod\'s own restart; another checkout, a clock step, its output');
 }
 report();

@@ -235,7 +235,10 @@ export function publishBlockedNote(j, t) {
 export function hubBoundNote(j, t, compact = false) {
   if (!j || !j.runsHub) return '';
   const b = j.memoryBound;
-  const rung = !b ? 'unknown' : (b.by === 'none' || b.mb === 0) ? 'none' : b.by === 'cgroup' ? (/OOMPolicy=stop/.test(String(b.why || '')) ? 'whole' : 'process') : b.by === 'rlimit-data' ? 'own' : 'unknown';
+  // r4673: THE RUNG LAW's twin of src/job-model.js boundRungOf (this module imports nothing) — one law, held by test-hub-handed-drop ③'s
+  // parity leg (the same records fed to both); a record with no finite size is 'unknown' in both
+  const sized = !!b && typeof b.mb === 'number' && Number.isFinite(b.mb) && b.mb >= 1;   // = job-model's finiteMb(mb) > 0 (it floors)
+  const rung = !b ? 'unknown' : (b.by === 'none' || b.mb === 0) ? 'none' : !sized ? 'unknown' : b.by === 'cgroup' ? (/OOMPolicy=stop/.test(String(b.why || '')) ? 'whole' : 'process') : b.by === 'rlimit-data' ? 'own' : 'unknown';
   if (rung === 'none') return '';
   if (compact) return rung === 'whole' ? t('Runs VibeSpace: its memory bound ends it whole.') : t('Runs VibeSpace: its memory bound can end it.');
   if (rung === 'whole') return t('This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.');
