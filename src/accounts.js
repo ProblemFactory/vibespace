@@ -77,6 +77,7 @@ const LOGIN_UNKNOWN = () => ({ state: 'unknown', refreshExpiresAt: null, accessE
 // (spawn, engine, manual route, signed-out self-heal, account removal all go
 // through them), so no caller can create a hole by forgetting to record one.
 const { SlotTransitions } = require('./slot-transitions.js');
+const { isLedgerHeld } = require('./slot-transitions.js');   // B-f276 slot-ledger-gap: the held ledger's one answer
 // THE PROVIDER OF A POOL MEMBER (q-053 P0b, lane pool-provider-aware): every account answers ONE provider — the record
 // the provider store answers for it (the lookup that store registers: setProviderLookup(account → record)), else
 // its harness's FIRST-PARTY subscription, read off the harness's own creds row (`loginLabel` — "Claude subscription",
@@ -2957,7 +2958,9 @@ class AccountManager {
       const fromBase = from ? path.basename(String(from)) : null;
       const fromId = fromBase && this.get(fromBase) ? fromBase : null; // unresolvable ⇒ say nothing, never guess
       const ts = Number(at) || Date.now();
-      if (this.slotTransitions.all().some((r) => r.at === ts && r.to === to && (r.sessionId || null) === sessionId)) return null;
+      let seen = false;
+      try { seen = this.slotTransitions.all().some((r) => r.at === ts && r.to === to && (r.sessionId || null) === sessionId); } catch (e) { if (!isLedgerHeld(e)) throw e; }   // HELD: the dedup cannot look — the row appends (an identical row is one fact to every reader)
+      if (seen) return null;
       const row = this.slotTransitions.record({ sessionId, poolId, from: fromId, to, at: ts, why });
       // the daemon moved a link this server's clients still show on its OLD member (lane badge-stale):
       // a per-session link is the payload's auth.poolTarget, the pool default is also the list's `current`
@@ -3029,7 +3032,7 @@ class AccountManager {
       // disagreement is a re-point the ledger never saw, and then the ledger
       // cannot say which side of it the process started on.
       let rows = null;
-      try { rows = this.slotTransitions.all(); } catch { rows = null; }
+      try { rows = this.slotTransitions.all(); } catch (e) { rows = null; if (isLedgerHeld(e)) return { id: link(), held: false, origin: 'unknown', why: 'ledger-held' }; }   // HELD: nothing names the member — nothing may spend on it
       if (rows && rows.length) {
         let before = null, after = null;
         for (const r of rows) {

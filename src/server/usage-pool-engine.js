@@ -201,6 +201,7 @@ const { UsageAnchors, identityKeyFor, costBetweenMulti } = require('../usage-anc
 // Every re-point now appends {sessionId, from, to, at, why} here, so the past
 // is a lookup. Bounded + archive-never-destroy: src/slot-transitions.js.
 const { SlotTransitions } = require('../slot-transitions.js');
+const { isLedgerHeld } = require('../slot-transitions.js');   // B-f276 slot-ledger-gap: the held ledger's one answer (every caller of its doors asks it)
 // THE credential-state readers, BOTH of them (src/login-state.js documents the
 // split): `loginState` answers for a credential SLOT — the file a re-pointed
 // symlink hands a running CLI — and `accountLoginState` answers for an ACCOUNT,
@@ -1477,7 +1478,7 @@ function probeUsageForAccountKey(key, opts = {}) {
     if (!cliUsageRung(s.backend) || s.mode !== 'chat' || s.host || !s.pty) continue;
     if (!ids.has(resolveUsageKey(s))) continue;
     const sh = inLagShadow(s);
-    if (sh) { skipped.push({ sessionId: s._webuiId || null, why: `re-pointed ${nameOf(sh.from)} → ${nameOf(sh.to)} ${Math.round(sh.ageMs / 1000)}s ago and no reading has ended the lag shadow yet` }); continue; }
+    if (sh) { skipped.push({ sessionId: s._webuiId || null, why: sh.held ? 'the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again — no reading is asked' : `re-pointed ${nameOf(sh.from)} → ${nameOf(sh.to)} ${Math.round(sh.ageMs / 1000)}s ago and no reading has ended the lag shadow yet` }); continue; }
     return probeUsageViaSession(s).then((parsed) => {
       // the ANSWER comes from a live session's CLI, so it is the credentials
       // that session holds that produced it — the ⟳ target is only who we
@@ -1878,7 +1879,7 @@ function apiWitnessEligibility(session, slot, key) {
     if (slot.shadowed) return { ok: false, why: 'inside a re-point lag shadow' };
     const now = Date.now();
     const row = recentRepointRow(session, now);
-    if (row) return { ok: false, why: `re-pointed ${nameOf(row.from)} → ${nameOf(row.to)} ${Math.round((now - row.at) / 1000)}s ago` };
+    if (row) return { ok: false, why: row.held ? 'the slot ledger is held' : `re-pointed ${nameOf(row.from)} → ${nameOf(row.to)} ${Math.round((now - row.at) / 1000)}s ago` };
     const pin = session && session._turnReadingSlot;
     if (pin && pin.at && lastRepointRow(session, { at: now, minAt: pin.at })) return { ok: false, why: 'the turn pin predates a re-point' };
     // THE OTel LEG IS RETIRED (lane-hot-switch, 2026-09-30). inc-mu6djxxt-8166
@@ -2395,7 +2396,8 @@ function requestSlotFor(session, at = Date.now(), { requestOutAt = null } = {}) 
     if (heldPoolMemberFor(session, poolId)) { const w = wallSlotFor(session); return { key: w.key, slotOk: !!w.slotOk, reqAt: t }; }
     const sid = session?._webuiId || null;
     const hasOwnLink = sessionHasOwnLink(poolId, sid);
-    const rows = slotTransitions.all();
+    let rows;
+    try { rows = slotTransitions.all(); } catch (e) { if (isLedgerHeld(e)) return { key: null, held: true, reqAt: t }; throw e; }   // HELD: the request's account cannot be read — filed nowhere (readingSlotFor)
     let first = null; // rows ascend: walking back from the newest, the last row seen after the request is the FIRST move after it
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i];
@@ -2428,11 +2430,21 @@ function saidUnknownHolderReading(session, what) {
   if (!/^10*$/.test(String(n))) return;
   console.log(`[pool] ${sid}: a ${what} reading is filed nowhere (${n} so far) — this process's held member cannot be named (no spawn stamp, no ledger row before its start), so it is never filed under the pool's current member`);
 }
+// B-f276 slot-ledger-gap (主开发 r4989 / r4993): a reading whose slot the HELD ledger would decide is filed NOWHERE — never put on an
+// account by a guess, and never later (the lift attributes nothing back). Said with its COUNT at the 1st, 10th, 100th … reading,
+// naming the ledger and no account
+let ledgerHeldReadings = 0;
+function ledgerHeldSlot(session, at) {
+  ledgerHeldReadings++;
+  if (/^10*$/.test(String(ledgerHeldReadings))) console.log(`[pool] a reading is filed nowhere (${ledgerHeldReadings} so far): ${'the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again'} — while it is held no reading is put on an account, and none is put there later`);
+  return { key: null, slotOk: false, slotReason: 'ledger-held', at, held: true };
+}
 function readingSlotFor(session, at = Date.now(), opts = {}) {
   // ⓪ THE REQUEST (P1): the account the reading's request went out on — before the turn pin, which it replaces wherever a
   // request is known (the shape the owner's instance showed: a pin re-made by a reading that trailed the turn's result outlived the turn,
   // the deferred move fired at its stop, and the next turn's readings — the new member's — were filed on the old one)
   const req = requestSlotFor(session, at);
+  if (req && req.held) return ledgerHeldSlot(session, at);   // B-f276: the slot ledger held — filed nowhere, never the pin nor the link now
   if (req && req.key) return { key: req.key, slotOk: !!req.slotOk, slotReason: 'request-stamped', at, reqAt: req.reqAt, ...(req.movedAt ? { movedAt: req.movedAt } : {}) };
   try {
     const pin = session && session._turnReadingSlot;
@@ -2445,6 +2457,7 @@ function readingSlotFor(session, at = Date.now(), opts = {}) {
   // whole turn then bills where its requests actually went.
   if (opts.window && key) {
     shadow = lagShadowFor(session, key, opts.window, opts.fingerprint || null, at);
+    if (shadow && shadow.held) return ledgerHeldSlot(session, at);   // B-f276: the shadow cannot be judged — filed nowhere
     if (shadow && shadow.shadowed) {
       key = shadow.key;
       slotReason = 'lag-shadow:' + shadow.why;
@@ -2475,6 +2488,9 @@ function recentRepointRow(session, at = Date.now()) { return lastRepointRow(sess
  *  the turn pin's birth (a pin older than a re-point files a turn's readings
  *  on the member the CLI has already left — correct for the cache, never a
  *  witness). */
+// B-f276: the held ledger's row — every caller of lastRepointRow answers it as INSIDE a shadow: the reading held off (lagShadowFor),
+// no witness (apiWitnessEligibility), NO panel asked of the vendor (inLagShadow), the falling lanes held (heldFallOf)
+const LEDGER_HELD_ROW = Object.freeze({ held: true, from: null, to: null, at: 0, why: 'ledger-held' });
 function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHADOW_MS } = {}) {
   try {
     const poolId = session?._accountId || null;
@@ -2490,7 +2506,8 @@ function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHAD
     // horizon (the shadow's 10 minutes, or the turn pin's age) is O(that
     // span), not O(the whole 20k ledger) on every reading — and a row older
     // than the horizon could not shadow anyway.
-    const rows = slotTransitions.all();
+    let rows;
+    try { rows = slotTransitions.all(); } catch (e) { if (isLedgerHeld(e)) return LEDGER_HELD_ROW; throw e; }   // HELD: every reader answers as INSIDE a shadow
     let row = null;
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i];
@@ -2510,6 +2527,7 @@ function lastRepointRow(session, { at = Date.now(), minAt = at - readingLag.SHAD
 function inLagShadow(session, at = Date.now()) {
   const row = recentRepointRow(session, at);
   if (!row) return null;
+  if (row.held) return { held: true, from: null, to: null, at, ageMs: 0 };   // B-f276: the ledger held — no panel is asked
   if (session && session._readingShadowEndedAt === row.at) return null;
   return { from: row.from, to: row.to, at: row.at, ageMs: at - row.at };
 }
@@ -2518,6 +2536,7 @@ function lagShadowFor(session, freshKey, readingWindow, readingFingerprint, at) 
     const sid = session?._webuiId || null;
     const row = recentRepointRow(session, at);
     if (!row) return null;
+    if (row.held) return { shadowed: true, held: true, key: null, why: 'ledger-held' };   // B-f276: whose numbers these are cannot be judged
     const windows = establishedWindows();
     const last = session._lastReadingFp && session._lastReadingFp.key === row.from ? session._lastReadingFp.fp : null;
     const d = readingLag.decideLagShadow({
@@ -3529,7 +3548,7 @@ function wallAttributionFor(session, poolId, b, pinnedKey) {
     } catch { return null; }
   };
   let led = null;
-  try { led = slotTransitions.slotAt(session._webuiId, atMs, { poolId }); } catch { }
+  try { led = slotTransitions.slotAt(session._webuiId, atMs, { poolId }); } catch (e) { if (isLedgerHeld(e)) return { action: 'archive', key: null, held: true, reason: 'the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again — the rejection is marked on no account' }; }
   const ledId = led && led.id && !led.ownLinkUnknown && led.scope === 'session' ? led.id : null;
   return quotaModel.wallAttribution({
     kind: b.kind,
@@ -3585,6 +3604,7 @@ function wallRecordTarget(session, key, ev) {
     try { session._turnWallRefile = { from: key, to: d.key, at: Date.now() }; } catch { }
     return d.key;
   }
+  if (d.held) { heldLedgerWall(session, b, d); return null; }   // B-f276: marked on no account, and no account named (never «refuted»: nothing was judged)
   archiveWall(session, { id: key }, b, d, d.reason, 'rejection');
   // THE REFUTATION IS KEPT FOR THE TURN (lane-hot-switch): the banner that
   // follows this record states no time of its own and would otherwise fall
@@ -3610,6 +3630,7 @@ function wallTargetFor(session, poolId, b, pinned) {
     global.__vsEvent?.('wall-refiled', `${pinned.id}→${d.key}:${label}`);
     return { member: to, why: 'ledger+window' };
   }
+  if (d.held) return heldLedgerWall(session, b, d);   // B-f276: the turn-end half, the same: no account named
   return archiveWall(session, pinned, b, d, d.reason);
 }
 
@@ -3619,6 +3640,13 @@ function wallTargetFor(session, poolId, b, pinned) {
  *  distinguishes the two writes of one rejection ('rejection' = the record as
  *  it arrived, 'wall' = the turn's folded signals), because refusing both is
  *  two facts, not one line written twice. */
+/** B-f276 slot-ledger-gap: a rejection while the slot ledger is HELD — marked on no account, its line names the ledger and no account
+ *  (主开发 r4993 (e)); nothing is filed in the reading archive under an account's key */
+function heldLedgerWall(session, b, d) {
+  const label = b.kind === 'scoped' ? b.scopedName : BUCKET_LABEL[b.kind] || b.kind;
+  console.log(`[wall] ${session._webuiId}: a ${label} rejection is marked on no account — ${d.reason}`);
+  return { member: null, why: d.reason };
+}
 function archiveWall(session, pinned, b, d, reason, moment = 'wall') {
   const label = b.kind === 'scoped' ? b.scopedName : BUCKET_LABEL[b.kind] || b.kind;
   console.log(`[wall] ${session._webuiId}: refusing to mark ${nameOf(pinned.id)} ${label} — ${reason}`);
@@ -4249,6 +4277,7 @@ function recordRateLimitEventNow(session, msg) {
     // buckets; this is the same fact in this producer's own shape.
     const fp = win ? `${readingLag.windowFingerprint(win)}|k:${ev.kind}|u:${ev.utilization ?? '-'}` : null;
     const slot = ev.status === 'rejected' ? rejectionSlotFor(session) : readingSlotFor(session, Date.now(), { window: win, fingerprint: fp });
+    if (slot && slot.held) return;   // B-f276: the slot ledger held — this reading is filed nowhere (said by ledgerHeldSlot)
     let key = (slot && slot.key) || usageCacheKeyFor(session);
     let refiled = false; // the guard moved this reading off the slot's key — then the slot is not the witness for it
     // THE WITNESS ELIGIBILITY of this reading is judged BEFORE the guard, on
@@ -5108,7 +5137,7 @@ function turnAskedFamily(session, key, fam) {
     const asked = (session._turnAsks && session._turnAsks[key]) || [];
     if (asked.includes(fam)) return true;
     const req = requestSlotFor(session);
-    if (!req) return true;   // no request of this hub's life is known (a restart mid-turn keeps neither the asks nor the request's instant): unjudged (the closure look, M2)
+    if (!req || req.held) return true;   // B-f276: the slot ledger held — unjudged   // no request of this hub's life is known (a restart mid-turn keeps neither the asks nor the request's instant): unjudged (the closure look, M2)
     return !!(req.key === key && familyOfModel(sessionModelFor(session)) === fam);
   } catch { return true; } // a question we cannot answer refuses nothing
 }
@@ -6386,7 +6415,9 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
   // 主开发 r3197 (the round's MUST): THE SECOND ROAD OF THE READINGS — a conversation that names an account while the list is UNREAD files
   // NOTHING here either (its key would fall to liveQuotaKeyFor: the pool's own id), on every source, said once a conversation
   if (!forKey && session && session._accountId) { const lh = accountsHeld(); if (lh) { sayHeldOnce('reading:' + (session._webuiId || '?'), lh, `[usage] codex:${source}: ${session._webuiId || '?'}'s readings are not filed — the accounts list could not be read (${lh.code || 'unread'})`); return { key: null, snap, archived: true, why: 'accounts-held' }; } }
-  const _k0 = forKey || readingSlotFor(session).key || liveQuotaKeyFor(session);
+  const _rs = forKey ? null : readingSlotFor(session);
+  if (_rs && _rs.held) return { key: null, snap, archived: true, why: 'ledger-held' };   // B-f276: filed nowhere while the slot ledger is held
+  const _k0 = forKey || _rs.key || liveQuotaKeyFor(session);
   const key = guardReadingTarget(_k0, readingLag.windowOf(snap), { session, what: 'codex:' + source, entry: snap });
   // an ARCHIVED reading is not an unparseable one — the waiter must be told
   // which of the two happened (a probe that says "unparseable" about a
