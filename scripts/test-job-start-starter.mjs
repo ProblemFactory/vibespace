@@ -22,6 +22,9 @@
 //      RED a starter without the job's mark ⇒ the mark gone (the hub's walks would never find the job's processes)
 //   ⑨ A BOOT OVER A START NEVER ANSWERED (r4683 (d)): the next hub's boot removes that run's spec before it judges the run (off the
 //      loop) and looks at it late; RED the boot's step cut ⇒ the spec stays readable, nothing looks
+//   ⑩ THE MARK ON DISK BEFORE THE ASK (r4767), on the supervised restart road (no save of its own after the spawn): a kill placed in
+//      the reply window (the folder as it stands on disk, booted by a fresh engine) — the mark there, the spec dropped, the run looked at
+//      late; RED cfaed91bd's form (the mark after the intent's save) ⇒ no mark on disk, nothing dropped
 // FAST, in-process: the real engine, the real wrapper over scratch data folders, the real starter (small node children); every
 // process is this suite's own child, ended at exit by identity.
 import './scratch.mjs';
@@ -199,6 +202,11 @@ const failScene = async (Mod, tag, answer) => {
   ok(nos.a && nos.a.error === 'spawn failed: the starter could not be started — its wrapper was not started' && nos.state === 'failed' && !nos.specs.length && !(nos.jm._lateStarts && nos.jm._lateStarts.size),
     '④ no starter at all: «the starter could not be started — its wrapper was not started» (no 15 s wait was had; nothing to look at late)', { a: nos.a, state: nos.state });
   nos.jm.shutdown();
+  const NOS = ": noStarter ? 'the starter could not be started — its wrapper was not started'";
+  const NoNos = MJ.load('src/jobs.js', anchored(JSRC, NOS, ": false ? 'the starter could not be started — its wrapper was not started'", 'red-no-starter-words'), 'no-starter-words');
+  const nosR = await failScene(NoNos, 'no-starter-red', { unknown: true, why: 'no starter' });
+  ok(!!nosR.a && nosR.a.error !== 'spawn failed: the starter could not be started — its wrapper was not started' && /may have started/.test(nosR.a.error || ''), 'RED (the no-starter case cut, r4767): «no starter at all» told as a lost reply — a wait and a start that never were', { a: nosR.a });
+  nosR.jm.shutdown();
   // ⑤ A LATE WRAPPER of that failed start: its own stamp appears in its own run folder (placed: a process of ours, its identity written as
   // the wrapper writes it) — the next sweep stops it BY THAT STAMP, said; RED the late look cut
   console.log('⑤ a wrapper that shows up after its start was failed is stopped by its own stamp');
@@ -314,6 +322,37 @@ console.log('⑨ a hub that ended between a start\'s ask and its answer: the nex
   const NoBoot = MJ.load('src/jobs.js', anchored(JSRC, BOOT, "        if (false) {", 'red-boot-keeps-spec'), 'boot-keeps-spec');
   const red = await scene(NoBoot, 'red');
   ok(red.asked && !red.gone && !red.looked, 'RED (the boot\'s step cut): the spec stays readable after the boot and nothing looks late at that run', red);
+}
+
+// ════════ ⑩ THE «ASKED» MARK IS ON DISK BEFORE THE STARTER IS ASKED — the supervised restart road (r4767) ════════
+console.log('⑩ a supervised restart: the run\'s «asked» mark is on disk before the starter is asked — a hub killed in the reply window leaves it');
+{
+  const scene = async (Mod, tag) => {
+    const dd = folder('restart-ask-' + tag), id = 'jb-91aa0e0' + (tag === 'red' ? '2' : '1');
+    fs.writeFileSync(path.join(dd, 'jobs.json'), JSON.stringify([{ id, kind: 'service', name: 'restart-ask-' + tag, state: 'down', desiredUp: false, owner: {}, access: { view: 'all', control: 'all' }, cmd: { argv: ['sleep', '30'], cwd: dd }, runs: [], supervise: { consecutiveFails: 0, parkedAt: null }, createdAt: Date.now() - 3600000 }]));
+    CS.setChildStarter({ run: () => new Promise(() => { }), stats: () => ({}), noteDirect() { } });   // PLACED: the reply window held open
+    const j1 = engine(Mod, dd), job = j1.jobs.get(id);
+    if (job) { try { j1._startAfter(job, 'restart-policy', () => true); } catch { } }   // the supervised restart road (no save of its own after the spawn)
+    const run = job && lastRun(job), ctl = run ? j1._ctlDir(job, run.startedAt) : '', spec = run ? path.join(ctl, `spec.${run.startedAt}.json`) : '';
+    // THE KILL, placed in the window: the data folder AS IT STANDS ON DISK now (no later save: the engine's timers are cleared) — copied
+    // without the lock, and a fresh engine boots over the copy, as the next hub would
+    let onDisk = null; try { const rec = JSON.parse(fs.readFileSync(path.join(dd, 'jobs.json'), 'utf8')).find((r) => r.id === id); onDisk = rec && rec.runs && rec.runs.length ? rec.runs[rec.runs.length - 1].ask || null : null; } catch { }
+    const dd2 = dd + '-after-kill';
+    fs.cpSync(dd, dd2, { recursive: true, filter: (s) => path.basename(s) !== 'jobs.lock' });
+    CS.setChildStarter(S);
+    const spec2 = spec ? spec.replace(dd, dd2) : '';
+    const j2 = engine(JM, dd2);
+    const dropped = !!spec2 && await until(() => !fs.existsSync(spec2), tag === 'red' ? 500 : 3000);
+    const looked = !!(ctl && j2._lateStarts && j2._lateStarts.has(ctl.replace(dd, dd2)));
+    j2.shutdown(); j1.shutdown();
+    return { asked: !!run && !!spec, onDisk, dropped, looked };
+  };
+  const good = await scene(JM, 'now');
+  ok(good.asked && good.onDisk === 'asked' && good.dropped && good.looked, '⑩ a SUPERVISED RESTART asked of the starter: its run\'s «asked» mark is ON DISK before the ask (in the intent\'s own save); a hub killed in the reply window — the next boot drops the run\'s spec and looks at it late', good);
+  const PUSH = "    job.runs.push({ startedAt: runTs, trigger, ask: vj ? 'direct' : 'asked', log:";
+  const Late = MJ.load('src/jobs.js', anchored(JSRC, PUSH, "    job.runs.push({ startedAt: runTs, trigger, log:", 'red-mark-late'), 'mark-late');
+  const red = await scene(Late, 'red');
+  ok(red.asked && red.onDisk === null && !red.dropped && !red.looked, 'RED (cfaed91bd\'s form: the mark set after the intent\'s save): on disk the run carries NO mark — the next boot drops nothing and looks nothing late (a slow wrapper could run beside the replayed run, unheld)', red);
 }
 
 for (const jm of engines) { try { jm.shutdown(); } catch { } }
