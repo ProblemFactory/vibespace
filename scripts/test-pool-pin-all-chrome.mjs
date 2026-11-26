@@ -154,6 +154,7 @@ try {
   // when it is still, on top under its own point, and the click landed on it
   const press = stillPresser({ evalJs: ev, cdp, sleep });
   const clickEl = async (expr, what) => {
+    await ev(`(() => { const el = (${expr}); if (el) el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); return !!el; })()`);   // a person scrolls the dialog to the row first
     if (!(await press('JS:' + expr))) throw new Error('not pressed: ' + what + ' ' + J(press.last && { verdict: press.last.verdict, landed: press.last.landed, under: press.last.look && press.last.look.under }));
   };
   const DLG = (title) => `[...document.querySelectorAll('.dialog')].find((d) => (d.textContent || '').includes(${J(title)}))`;
@@ -176,9 +177,10 @@ try {
 
   console.log('§0 THE PAINTED START — the dialog on screen, each member row\'s ⋯ where it is drawn');
   const opened = await open('/?lang=en');
-  const painted = await ev(`[${J(A)}, ${J(B)}, ${J(C)}].map((id) => { const el = document.querySelector('.pool-prio-menu[data-id=' + JSON.stringify(id) + ']'); if (!el) return false; const b = el.getBoundingClientRect();
+  const painted = await ev(`[${J(A)}, ${J(B)}, ${J(C)}].map((id) => { const el = document.querySelector('.pool-prio-menu[data-id=' + JSON.stringify(id) + ']'); if (!el) return false;
+    el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }); const b = el.getBoundingClientRect();
     const top = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return b.width > 0 && !!top && (top === el || el.contains(top)); })`);
-  ok(opened === true && Array.isArray(painted) && painted.every((x) => x === true), '§0 the members dialog is open and painted; the ⋯ of A, B and C each on top where it is drawn (a person can press it)', painted);
+  ok(opened === true && Array.isArray(painted) && painted.every((x) => x === true), '§0 the members dialog is open and painted; the ⋯ of A, B and C each on top where it is drawn once scrolled to (a person can press it)', painted);
   await shot('0-members-en.png');
 
   console.log('§1 the row\'s menu');
