@@ -17,6 +17,14 @@
 //          nothing. CONTROL: a start that drops the stamps of an account with no record — red.
 //   (m10d) (r4699) an entry whose account was ADDED AGAIN under the same id between the purge and the start: not purged a second time —
 //          its new stamps stand, nothing asked. CONTROL: a start blind to the account's record — red.
+//   (m10e) r4995 M1: the accounts' records UNREAD at the start (a PLACED refusal of the read) with an entry noting the fetch times; the
+//          records' hold lifts during the run; «Try again» lands and the row ENDS. CONTROL: the tip f26f47203's purge (its ask not
+//          recorded for a note that came from disk) — the row stands — red.
+//   (m10f) r4995 M2: the records UNREAD at the start (placed, not lifted) with an entry noting a LIVE account's id: every stamp kept,
+//          nothing asked on the file, no row listed. CONTROL: the guard cut (an anchored edit) — the live account's stamps dropped.
+//   (m10g) r4995 M2 + the small one: the fetch times' OWN file unread at the start (placed): nothing asked on it; the row says the held
+//          family's sentence (stampsHeld) and the press answers it, never «erased at the next write». CONTROL: the guard cut — red.
+//   (m10h) the page's words pinned: the stamps-only, the held and the mixed rows; purgeLeftText names the kind.
 //   The mark's law «nothing removes an account's data at a start or on a timer» (test-channel-store-forget) has
 //   the ONE named exception (r4666 (2)): the poll times an entry notes owed («stamps») leave at a start, by its names only.
 // Run: node scripts/test-channel-stamps-mark.mjs
@@ -130,11 +138,11 @@ console.log('(m10) B-360d: the removal\'s row for its poll times — noted, ende
       const before = text(path.join(dir, 'poll-stamps.json')).includes('"gone/');
       const w = SW.create({ log: quiet, workerPath: STAND, pace: PACED });
       const st = loadCut(cut).createChannelStore({ dir, log: quiet, writer: w, stampsDebounceMs: DEB });   // the START
-      const listedAtStart = !!listed(st);
+      const listedAtStart = !!listed(st), askedAtOpen = w.pending(st.stamps.file);   // the start's ask is synchronous at the open
       const landed = await until(() => st.stamps.stats().compactions >= 1, START_BOUND_MS);
       const ended = await until(() => !listed(st) && !markOnDisk(dir), ONE_PACE_MS * 4);
       await settle(w, st);
-      r = { ...r, before, listedAtStart, landed, ended, listedAfter: listed(st), ...names(st) };
+      r = { ...r, before, listedAtStart, askedAtOpen, landed, ended, listedAfter: listed(st), ...names(st) };
       w.stop();
     } finally { failOn('poll-stamps.json', false); }
     return r;
@@ -143,10 +151,10 @@ console.log('(m10) B-360d: the removal\'s row for its poll times — noted, ende
   ok(rs.first.noted && rs.before && rs.listedAtStart && rs.landed && rs.ended && !rs.inSide && !rs.inJournal && rs.keepOnDisk,
     `(m10b) A RESTART BEFORE THE LANDING: the first life noted «stamps» (${rs.first.noted}) and was killed with the names on disk (${rs.before}); the start listed the row (${rs.listedAtStart}), asked the compaction at once and it landed (${rs.landed}) — no name in the side file (${rs.inSide}) or the journal (${rs.inJournal}), the other account kept; the row ended (${rs.ended})`, rs);
   const rsc = await restartRun('restart-c', NOSTARTREAD);
-  ok(rsc.first.noted && !rsc.landed && rsc.inSide && !!rsc.listedAfter, `(m10b) CONTROL: a start that ignores the note — no compaction within forty stated paces, the names stay on disk (${rsc.inSide}) and the row stays — red`, rsc);
+  ok(rsc.first.noted && !rsc.askedAtOpen && rsc.inSide && !!rsc.listedAfter, `(m10b) CONTROL: a start that ignores the note — nothing asked at the open (${rsc.askedAtOpen}), the names stay on disk (${rsc.inSide}) and the row stays — red`, rsc);
 
   // (m10c) LAW (a): a start drops nothing by a missing record or row; a torn mark drops nothing
-  const DROPBYRECORD = ['    const owed = recordsReadNow ? noted.filter((id) => !hasRecord(id)) : [];', "    const owed = [...new Set([...stampMap.keys()].map((k) => String(k).split('/')[0]))].filter((id) => !hasRecord(id));"];
+  const DROPBYRECORD = ['    const owed = noted.filter((id) => !hasRecord(id));', "    const owed = [...new Set([...stampMap.keys()].map((k) => String(k).split('/')[0]))].filter((id) => !hasRecord(id));"];
   const lawRun = async (tag, cut, { torn = false } = {}) => {
     const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
     await seed(dir);   // 'gone' and 'keep': no account record for either, no entry for either
@@ -164,8 +172,87 @@ console.log('(m10) B-360d: the removal\'s row for its poll times — noted, ende
   const lwc = await lawRun('law-c', DROPBYRECORD);
   ok(lwc.kept < 30, `(m10c) CONTROL: a start that drops the stamps of an account with no record — ${lwc.kept} of 30 kept — red`, lwc);
 
+  // r4995: THE PLACED REFUSAL of a read call (fs.readFileSync answers EIO for the named file while `refuseRead` says so)
+  let refuseRead = null;
+  const origRFS = fs.readFileSync;
+  fs.readFileSync = function (f, ...a) { if (refuseRead && refuseRead(String(f))) throw Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' }); return origRFS.call(this, f, ...a); };
+  const noteFile = (dir, live = false) => {
+    fs.writeFileSync(path.join(dir, 'purge-pending.json'), JSON.stringify({ v: 1, ids: { gone: { at: T, left: ['stamps'], codes: { stamps: 'owed' }, name: { service: 'Gmail', label: 'work' } } } }));
+    if (live) fs.writeFileSync(path.join(dir, 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'gone', kind: 'gmail', label: 'Mail', enabled: true }] }));
+  };
+  const openRefused = (M, dir, refuse, o = {}) => { const w = SW.create({ log: quiet, workerPath: STAND, pace: PACED }); refuseRead = refuse; try { return { w, st: M.createChannelStore({ dir, log: quiet, writer: w, stampsDebounceMs: DEB, ...o }) }; } finally { refuseRead = null; } };
+  const isAdapters = (f) => path.basename(f) === 'adapters.json', isSide = (f) => path.basename(f) === 'poll-stamps.json';
+
+  // (m10e) r4995 M1: a note from disk, the records' hold lifted during the run, Try again ends the row
+  const NOASKRECORD = ['    if (notedNow && (purgedStamps || stampsOnDisk)) stampsMarked.set(adapterId, Math.max(stampsMarked.get(adapterId) || 0, stampsAskOf));\n', ''];
+  const liftRun = async (tag, cut) => {
+    const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    await seed(dir); noteFile(dir);
+    fs.writeFileSync(path.join(dir, 'adapters.json'), JSON.stringify({ v: 1, adapters: [] }));   // the records are THERE (no record for 'gone'): unread only at this start — a file not there would stay held (a start judges absence)
+    const { w, st } = openRefused(loadCut(cut), dir, isAdapters, { heldRetry: { firstMs: DEB, maxMs: DEB * 2 } });
+    const listedHeld = !!listed(st);
+    const lifted = await until(() => !!listed(st));   // the records' hold reads again on its own ladder: the row is listed
+    const again = await st.purgeAccount('gone');
+    const answer = await Promise.race([again.stamps, sleep(BOUND_MS).then(() => 'timeout')]);
+    const ended = await until(() => !listed(st) && !markOnDisk(dir), ONE_PACE_MS * 4);
+    await settle(w, st);
+    const r = { listedHeld, lifted, answer, ended, listedAfter: listed(st), ...names(st) };
+    w.stop();
+    return r;
+  };
+  const le = await liftRun('lift', null);
+  ok(!le.listedHeld && le.lifted && le.answer === true && le.ended && !le.inSide, `(m10e) M1: the records unread at the start (no row then: ${le.listedHeld}), their hold lifted (the row listed: ${le.lifted}); «Try again» answered ${le.answer} and its landing ENDED the row (${le.ended}) — no name on disk`, le);
+  const lec = await liftRun('lift-c', NOASKRECORD);
+  ok(lec.lifted && lec.answer === true && !lec.ended && !!lec.listedAfter, `(m10e) CONTROL: the tip's purge, its ask not recorded for a note from disk — the erasure landed and the row STANDS (${JSON.stringify(lec.listedAfter && lec.listedAfter.left)}) — red`, lec);
+
+  // (m10f) r4995 M2: the records unread at the start — a LIVE account under a noted id loses nothing
+  const NORECORDSGUARD = ['    if (noted.length && !recordsReadNow) warn(', '    if (false) warn('];   // the ONE guard of the records read, cut
+  const unreadRun = async (tag, cut) => {
+    const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    await seed(dir); noteFile(dir, true);   // 'gone' is a LIVE account's id (its record is on disk) — unread at this start
+    const { w, st } = openRefused(loadCut(cut), dir, isAdapters);   // no heldRetry: the hold stays for the check
+    const kept = [...Array(30).keys()].filter((i) => (st.stamps.get(`gone/g${i}`) || {}).lastPollAt === T + i).length;
+    const r = { kept, pending: w.pending(st.stamps.file), listed: !!listed(st) };
+    w.stop();
+    return r;
+  };
+  const ur = await unreadRun('unread', null);
+  ok(ur.kept === 30 && !ur.pending && !ur.listed, `(m10f) M2: the accounts' records UNREAD at the start (a placed refusal) with an entry noting a live account's id — ${ur.kept} of its 30 stamps kept, nothing asked on the file (${ur.pending}), no row listed (${ur.listed})`, ur);
+  const urc = await unreadRun('unread-c', NORECORDSGUARD);
+  ok(urc.kept < 30, `(m10f) CONTROL: the records' guard cut — the live account's stamps dropped (${urc.kept} of 30 kept) — red`, urc);
+
+  // (m10g) r4995 M2 + the small one: the fetch times' own file unread at the start
+  const NOHELDGUARD = ['    else if (owed.length && (psLoad.blocked || ixLoad.blocked)) warn(', '    else if (false) warn('];
+  const heldSideRun = async (tag, cut) => {
+    const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    await seed(dir); noteFile(dir);
+    const sideBefore = fs.readFileSync(path.join(dir, 'poll-stamps.json'), 'utf8');
+    const { w, st } = openRefused(loadCut(cut), dir, isSide);
+    const pending = w.pending(st.stamps.file), row = listed(st);
+    const again = await st.purgeAccount('gone');
+    const answer = await Promise.race([again.stamps, sleep(BOUND_MS).then(() => 'timeout')]);
+    await sleep(ONE_PACE_MS);
+    const r = { pending, rowHeld: !!(row && row.stampsHeld), pressHeld: !!again.stampsHeld, answer, sideSame: fs.readFileSync(path.join(dir, 'poll-stamps.json'), 'utf8') === sideBefore };
+    w.stop();
+    return r;
+  };
+  const hs = await heldSideRun('heldside', null);
+  ok(!hs.pending && hs.rowHeld && hs.pressHeld && hs.answer === false && hs.sideSame, `(m10g) the fetch times' OWN file unread at the start: nothing asked on it (${hs.pending}), the row carries the held family's sentence (${hs.rowHeld}), the press answers it (${hs.pressHeld}, stamps ${hs.answer}) — the file untouched`, hs);
+  const hsc = await heldSideRun('heldside-c', NOHELDGUARD);
+  ok(hsc.pending, `(m10g) CONTROL: the held family's guard cut — the start asks a compaction on a file it could not read (${hsc.pending}) — red`, hsc);
+
+  // (m10h) the page's words, pinned
+  { const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf8'), DLG = fs.readFileSync(path.join(REPO, 'src/lib/channel-account-dialogs.js'), 'utf8');
+    const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    const K1 = "The removed account {name}: its conversations' fetch times are not erased from disk yet — Try again asks for it now";
+    const K2 = "The removed account {name}: its conversations' fetch times are not erased from disk yet — their file could not be read at this start; they are erased after the next start that reads it";
+    const pin = (p, d) => p.includes(`t("${K1}"`) && p.includes(`t("${K2}"`) && p.includes("owesStamps && Array.isArray(folders) && !folders.length ? stampsWords : owesStamps ? foldersWords + ' ' + stampsWords : foldersWords") && p.includes('else if (r.done && r.stampsHeld) showToast(') && /stamps: tr\("its conversations' fetch times"\)/.test(d) && [ZH, JA].every((x) => x.includes(JSON.stringify(K1) + ':') && x.includes(JSON.stringify(K2) + ':'));
+    ok(pin(PANEL, DLG), '(m10h) the page: the stamps-only row, the held row and the mixed row (the folders\' sentence names the folders only, the fetch times\' sentence beside it); the press\'s held answer; purgeLeftText names the kind; zh and ja carry both sentences');
+    ok(!pin(PANEL.replace('else if (r.done && r.stampsHeld) showToast(', 'else if (false) showToast('), DLG), '(m10h) CONTROL: the press without the held family\'s sentence — the pin above would go red');
+  }
+
   // (m10d) r4699: an account added AGAIN under the id between the purge and the start keeps its new stamps
-  const NORECORDCHECK = ['    const owed = recordsReadNow ? noted.filter((id) => !hasRecord(id)) : [];', '    const owed = recordsReadNow ? noted : [];'];
+  const NORECORDCHECK = ['    const owed = noted.filter((id) => !hasRecord(id));', '    const owed = noted;'];
   const readdRun = async (tag, cut) => {
     const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
     await seed(dir);   // the account under the id 'gone' as it is NOW (added again): its rows and its new stamps

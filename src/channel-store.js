@@ -3483,7 +3483,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     pending.ids[id] = { at: (was && was.at) || now(), left: [...(was ? was.left : []), 'stamps'], codes: { ...((was && was.codes) || {}), stamps: 'owed' }, ...(nm ? { name: nm } : {}) };
     pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — ${id}'s poll times are noted owed in memory only`));
   }
-  function stampsMarkLanded() {
+  function stampsMarkLanded() {   // (its count alone, no version gate: a synchronous make runs only at close or the exit, after which the store is gone)
     if (!stampsMarked.size) return;
     let changed = false;
     for (const [id, ask] of [...stampsMarked]) {
@@ -3508,9 +3508,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // the id since its purge keeps its new stamps (L3 ends that entry when it is listed)
     const recordsReadNow = !adLoad.held && !adLoad.blocked;
     const hasRecord = (id) => ((ad && ad.adapters) || []).some((a) => a && a.id === id);
-    const owed = recordsReadNow ? noted.filter((id) => !hasRecord(id)) : [];
+    const owed = noted.filter((id) => !hasRecord(id));   // read only past the ONE guard below (the records read)
     if (noted.length && !recordsReadNow) warn(`[channels] ${noted.length} removed account(s) owe their poll times' erasure, but the accounts' records are not read — no poll time leaves at this start (an id may be a live account's)`);
-    else if (owed.length && (psLoad.blocked || ixLoad.blocked)) warn(`[channels] ${owed.length} removed account(s) owe their poll times' erasure, but ${psLoad.blocked ? 'poll-stamps.json' : 'index.json'} is held — no poll time leaves at this start; they leave once it reads`);
+    else if (owed.length && (psLoad.blocked || ixLoad.blocked)) warn(`[channels] ${owed.length} removed account(s) owe their poll times' erasure, but ${psLoad.blocked ? 'poll-stamps.json' : 'index.json'} is held — no poll time leaves at this start; they leave at the next start that reads it, or by a person's Try again once it reads`);
     else if (owed.length) {
       const pres = owed.map((id) => `${id}/`);
       let n = 0;
@@ -3564,7 +3564,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (removing.has(id) || purging.has(id)) continue;
       if (!recordsRead()) continue;   // r3021 (6): the accounts' records not read — the id is left off until they read (it may be a live account's)
       if (recordOf(id)) { if (!ending.has(id) && adaptersOnDisk()) endMark(id, 'an account with this id has a record'); continue; }   // r3131 (2): only once its record is on disk
-      out.push({ id, at: Number(e && e.at) || null, left: e && Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null, name: markName(e && e.name) });
+      out.push({ id, at: Number(e && e.at) || null, left: e && Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null, name: markName(e && e.name), ...(psLoad.blocked || ixLoad.blocked ? { stampsHeld: true } : {}) });   // r4995: the fetch times' family held — no ask can be made this life
     }
     if (dropped) pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — its bad ids are dropped in memory`));
     return out;
@@ -3639,6 +3639,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // until a compaction made after this purge's ask lands (a held family asks nothing now: the next ask's landing, a later life's)
     const stampsAskOf = (purgedStamps || stampsOnDisk) && (psLoad.blocked || ixLoad.blocked) ? ++stampsPurgeAsks : stampsPurgeAsks;
     const stampsNameOf = markName(pending.ids[adapterId] && pending.ids[adapterId].name);
+    // r4995 M1: a note the entry holds — by whichever road it reached the list (this life's answer, a start's read, a mark or records
+    // that lifted during the run) — ends by THIS purge's landing: its ask is recorded before that landing can come
+    const notedNow = !!(pending.ids[adapterId] && Array.isArray(pending.ids[adapterId].left) && pending.ids[adapterId].left.includes('stamps'));
+    if (notedNow && (purgedStamps || stampsOnDisk)) stampsMarked.set(adapterId, Math.max(stampsMarked.get(adapterId) || 0, stampsAskOf));
     stampsGone.then((ok) => { if (!ok) stampsMarkOwed(adapterId, stampsAskOf, stampsNameOf); }, () => stampsMarkOwed(adapterId, stampsAskOf, stampsNameOf));
     lruCache.delete(adapterId);
     lruDirty.delete(adapterId);
@@ -3691,14 +3695,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (pdLoad.blocked) markUnwritten = 'held';
     else {
       const was = pending.ids[adapterId] || null, name = markName(was && was.name);
-      const owesStamps = !!(was && Array.isArray(was.left) && was.left.includes('stamps')) || (stampsMarked.get(adapterId) || 0) > stampsLandedAfter;   // r4666 (2): the poll times' note ends ONLY by its landing (an answer that came before this write is in stampsMarked)
+      const owesStamps = (!!(was && Array.isArray(was.left) && was.left.includes('stamps')) && (purgedStamps || stampsOnDisk)) || (stampsMarked.get(adapterId) || 0) > stampsLandedAfter;   // r4995 M1: nothing of the poll times on disk — the note ends here   // r4666 (2): the poll times' note ends ONLY by its landing (an answer that came before this write is in stampsMarked)
       const kinds = [...left.map((x) => x.what), ...(owesStamps ? ['stamps'] : [])];
       if (kinds.length) pending.ids[adapterId] = { at: (was && was.at) || now(), left: kinds, codes: { ...Object.fromEntries(left.map((x) => [x.what, x.code])), ...(owesStamps ? { stamps: (was && was.codes && was.codes.stamps) || 'owed' } : {}) }, ...(name ? { name } : {}) };
       else delete pending.ids[adapterId];
       try { await pendingWrite(); } catch (e) { markUnwritten = (e && e.code) || 'error'; }
     }
     if (markUnwritten) warn(`[channels] ${adapterId}: purge-pending.json not written (${markUnwritten}) — ${left.length ? 'what is left of it is not noted on disk' : 'its finished purge is not noted on disk'}`);
-    return { logs: r.logs.state === 'removed', files: r.files.state === 'removed', own: r.own.state === 'removed', states: r, left, done: !left.length, stamps: stampsGone, ...(markUnwritten ? { markUnwritten } : {}) };
+    return { logs: r.logs.state === 'removed', files: r.files.state === 'removed', own: r.own.state === 'removed', states: r, left, done: !left.length, stamps: stampsGone, ...((purgedStamps || stampsOnDisk) && (psLoad.blocked || ixLoad.blocked) ? { stampsHeld: true } : {}), ...(markUnwritten ? { markUnwritten } : {}) };
   }
 
   acctWarmStart();   // B-dfa4 cut 3: a big index's per-account keys, in slices from the load (keysOf finishes them if it asks first)
