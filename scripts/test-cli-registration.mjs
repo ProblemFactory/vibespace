@@ -370,15 +370,20 @@ console.log('⑥ B-574d (主开发 r4764): the state through the STORE WRITER �
     const landed = await r.landed();
     const mine = w.seen.filter((x) => x.f === fileW), last = mine.length ? JSON.parse(mine[mine.length - 1].o.produce()) : null;
     return { mine: mine.length, names: [...new Set(mine.map((x) => x.name))].join(), latest: !!(last && last.seen && last.seen['2.1.501'] && last.seen['2.1.501'].sources.join() === 'hub,conversation'),
-      landed, said: said.filter((l) => /could not keep data\/cli-registration\.json/.test(l)).length, whole: fs.readFileSync(fileW, 'utf8') === OLD };
+      landed, said: said.filter((l) => /could not keep data\/cli-registration\.json/.test(l)).length, whole: fs.readFileSync(fileW, 'utf8') === OLD };   // `whole` cannot fail here (the stand-in never touches disk): the answer and the saying decide the leg
   };
   const g = await writerLeg(REG, 'real');
-  ok(`the registry's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), the last one the LATEST state (both sources), a failed landing answers false (${g.landed}) and is SAID (${g.said}), the old file stands whole`,
+  ok(`the registry's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), the last one the LATEST state (both sources; that a burst becomes ONE write is the real writer's own property, not shown at this seam), a failed landing answers false (${g.landed}) and is SAID (${g.said}), the old file stands whole`,
     g.mine === 2 && g.names === 'cli-registration.write' && g.latest && g.landed === false && g.said === 1 && g.whole, JSON.stringify(g));
   const RED = mutantCopies('cli-reg-writer', REPO).load('src/server/cli-registration.js', anchored(fs.readFileSync(REG_FILE, 'utf8'),
     "onWritten: (ok, e) => { if (!ok) { log('[cli-registration] could not keep data/cli-registration.json:'", "onWritten: (ok, e) => { if (false) { log('[cli-registration] could not keep data/cli-registration.json:'", 'reg-fail-cut'), 'reg-fail-cut');
   const r = await writerLeg(RED, 'red');
   ok('RED CONTROL: the failure branch taken out — the failed landing is said by nobody', r.said === 0 && r.landed === false, JSON.stringify(r));
+  // 主开发 r4992: landed() is the writer's landing passed through — a second red cuts that pass-through to a constant true
+  const ANS = mutantCopies('cli-reg-answer', REPO).load('src/server/cli-registration.js', anchored(fs.readFileSync(REG_FILE, 'utf8'),
+    '  const landed = () => Promise.resolve(writer().durable(stateFile));', '  const landed = () => Promise.resolve(true);', 'reg-answer-cut'), 'reg-answer-cut');
+  const r2 = await writerLeg(ANS, 'answer');
+  ok('RED CONTROL: the landing\'s answer not passed through (a constant true) — a refused landing answers true', r2.landed === true, JSON.stringify(r2));
 }
 
 console.log(fail ? `\n✗ (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

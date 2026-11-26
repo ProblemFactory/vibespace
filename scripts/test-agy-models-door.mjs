@@ -787,7 +787,7 @@ console.log('⑤b B-574d (主开发 r4764): the cache through the STORE WRITER �
     const mine = w.seen.filter((x) => x.f === f), last = mine.length ? JSON.parse(mine[mine.length - 1].o.produce()) : null;
     return { mine: mine.length, names: [...new Set(mine.map((x) => x.name))].join(), mode: mine.length ? mine[mine.length - 1].o.mode : null,
       latest: !!(last && last.schema === 1 && last.harnesses && last.harnesses.antigravity && last.harnesses.antigravity[A]), answer,
-      said: logs.filter((l) => /the cache was not written: EIO/.test(l)).length, whole: fs.readFileSync(f, 'utf8') === OLD };
+      said: logs.filter((l) => /the cache was not written: EIO/.test(l)).length, whole: fs.readFileSync(f, 'utf8') === OLD };   // `whole` cannot fail here (the stand-in never touches disk): the answer and the saying decide the leg
   };
   const g = await writerLeg(DOOR, 'real');
   ok(`the cache's save goes to the writer by name (${g.names}), 0600, its bytes the LATEST state (the listed account's rows); a failed landing: the save answers false (${g.answer}), the failure SAID (${g.said}), the old file stands whole`,
@@ -797,6 +797,12 @@ console.log('⑤b B-574d (主开发 r4764): the cache through the STORE WRITER �
   const noSay = M2.load('src/server/cli-models-door.js', editAnchor(DSRC2, FAILW, "        onWritten: (ok, e) => { if (false) log(`[cli-models] the cache was not written:", "src/server/cli-models-door.js"), 'writer-fail-cut');
   const r = await writerLeg(noSay, 'red');
   ok('RED CONTROL: the failure branch taken out — the failed landing is said by nobody', r.said === 0 && r.answer === false, JSON.stringify(r));
+  // 主开发 r4992: the save's ANSWER is the writer's landing passed through — a second red cuts that pass-through to a constant true
+  const ANSW = '    return (writing = Promise.resolve(writer().durable(file)));';
+  ok('the answer control\'s line exists', DSRC2.includes(ANSW));
+  const noAnswer = mutantCopies('agy-models-door-answer', REPO).load('src/server/cli-models-door.js', editAnchor(DSRC2, ANSW, '    return (writing = Promise.resolve(true));', 'src/server/cli-models-door.js'), 'writer-answer-cut');
+  const r2 = await writerLeg(noAnswer, 'answer');
+  ok('RED CONTROL: the landing\'s answer not passed through (a constant true) — a refused landing answers true', r2.answer === true, JSON.stringify(r2));
 }
 
 console.log('⑥ negative controls (patched copies outside the tree)');

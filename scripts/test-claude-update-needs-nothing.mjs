@@ -503,17 +503,22 @@ try {
       const a1 = await Mod._saveNow(), a2 = await Mod._saveNow();   // a burst of saves, every landing refused
       const mine = w.seen.filter((x) => x.f === fileW), bytes = mine.map((x) => x.o.produce());
       const out = { mine: mine.length, names: [...new Set(mine.map((x) => x.name))].join(), latest: bytes.length > 0 && bytes.every((b) => b === JSON.stringify(led)), a1, a2,
-        said: said.filter((l) => /the ledger could not be written \(EIO\)/.test(l)).length, whole: fs.readFileSync(fileW, 'utf8') === OLD };
+        said: said.filter((l) => /the ledger could not be written \(EIO\)/.test(l)).length, whole: fs.readFileSync(fileW, 'utf8') === OLD };   // `whole` cannot fail here (the stand-in never touches disk): the answer and the saying decide the leg
       Mod._writer(null); Mod._reset();
       return out;
     };
     const g = await writerLeg(CAT, 'real');
     ok(g.mine >= 2 && g.names === 'cli-model-catalog.write' && g.latest && g.a1 === false && g.a2 === false && g.said === 1 && g.whole,
-      `the ledger's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), each hands the LATEST state (the bytes equal the ledger in memory: a burst writes the latest), a failed landing answers false and is SAID ONCE (${g.said}), the old file stands whole`, JSON.stringify(g));
+      `the ledger's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), each hands the LATEST state (the bytes equal the ledger in memory; that a burst becomes ONE write is the real writer's own property, src/store-writer.js, not shown at this seam), a failed landing answers false and is SAID ONCE (${g.said}), the old file stands whole`, JSON.stringify(g));
     const RED = mutantCopies('cunn-writer', ROOT).load('src/server/cli-model-catalog.js', anchored(fs.readFileSync(CAT_FILE, 'utf8'),
       "      onWritten: (ok, e) => { if (ok) { st.saveSaid = false; return; } if (!st.saveSaid) {", "      onWritten: (ok, e) => { if (ok) { st.saveSaid = false; return; } if (false) {", 'catalog-fail-cut'), 'catalog-fail-cut');
     const r = await writerLeg(RED, 'red');
     ok(r.said === 0 && r.a1 === false, 'RED CONTROL: the failure branch taken out — the failed landing is said by nobody', JSON.stringify(r));
+    // 主开发 r4992: the save's ANSWER is the writer's landing passed through — a second red cuts that pass-through to a constant true
+    const ANS = mutantCopies('cunn-answer', ROOT).load('src/server/cli-model-catalog.js', anchored(fs.readFileSync(CAT_FILE, 'utf8'),
+      'return st.dataDir ? Promise.resolve(writer().durable(path.join(st.dataDir, LEDGER))) : Promise.resolve(true); }', 'return st.dataDir ? Promise.resolve(true) : Promise.resolve(true); }', 'catalog-answer-cut'), 'catalog-answer-cut');
+    const r2 = await writerLeg(ANS, 'answer');
+    ok(r2.a1 === true && r2.a2 === true, 'RED CONTROL: the landing\'s answer not passed through (a constant true) — a refused landing answers true', JSON.stringify(r2));
   }
 } catch (e) { fail++; console.log('  ✗ the drill threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skip} skipped)` : `\nALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
