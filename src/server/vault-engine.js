@@ -579,13 +579,14 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
    *  record write shreds the new file). A name holding a TEXT value is refused (the owner's D5: never upgraded).
    *  The sealed file is written OFF the main loop (vault-files' fs.promises) — so the lock, the name and a text entry of the
    *  same name are asked again once it is on disk. → a promise of { ok, name, file (its public facts) } | { ok: false, code, words? }. */
-  async function filePut(name, bytes, { filename = null, prov = null, actor = null, label = null, note = null, noteShared = false, owner = null, askedBy = null, hosts = null, expect = null } = {}) {
+  async function filePut(name, bytes, { filename = null, prov = null, actor = null, label = null, note = null, noteShared = false, owner = null, askedBy = null, hosts = null, expect = null, keepWords = false } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     const fv = VF.fileVerdict(bytes, filename);
     if (!fv.ok) return fv;
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
     const prev = record.entries[name];
     if (prev && !prev.file) return { ok: false, code: 'not_a_file', words: VF.WORDS.not_a_file };
+    if (keepWords && !(prev && prev.file)) return { ok: false, code: 'entry_unknown' };   // 主开发 r5048 «Replace file…»: a replace needs the file it replaces
     let id = mintFileId();
     const key = files.mintKey(), ep0 = epoch;   // r4628: never an id an entry, the dropped list or a put in flight holds   // round 3: the lock EPOCH — a lock-then-unlock during a slow write is a lock too
     filesInFlight.add(id);
@@ -604,7 +605,12 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (record.entries[name] && !record.entries[name].file) { key.fill(0); shredLater(id); return { ok: false, code: 'not_a_file', words: VF.WORDS.not_a_file }; }   // the sender's digest: what arrived is what was sent
     const file = { id, name: fv.name, size: fv.size, lines: fv.lines, kind: fv.kind, encrypted: fv.encrypted };   // the cure (RULE 5′, test-key-file-law): NO digest of the bytes is kept — vault.json is not sealed field by field, and a short token file's sha256 is a guess away; the sender's digest is checked in memory above, the seal's GCM tag (the id its AAD) proves the bytes
     let r;
-    try { r = secretPut(name, key, { prov, actor, label, note, noteShared, owner, askedBy, hosts, file }); } finally { key.fill(0); }
+    // 主开发 r5048 «Replace file…» (`keepWords`): the entry KEEPS its words — read from the box it replaces AT this write (a drop meanwhile
+    // replaces nothing: the new file is shredded); only the file's facts and the sealed time change
+    const was = keepWords ? record.entries[name] : null;
+    if (keepWords && !(was && was.file)) { key.fill(0); shredLater(id); return { ok: false, code: 'entry_unknown' }; }
+    const words = keepWords ? { prov: was.prov || null, actor: was.actor || null, label: was.label || null, note: was.note || null, noteShared: was.noteShared === true, owner: was.owner || null, askedBy: was.askedBy || null, hosts: Array.isArray(was.hosts) ? was.hosts : null } : { prov, actor, label, note, noteShared, owner, askedBy, hosts };
+    try { r = secretPut(name, key, { ...words, file }); } finally { key.fill(0); }
     if (!r.ok) { shredLater(id); return r; }
     return { ok: true, name, file: VF.publicFactsOf(file) };
     } finally { filesInFlight.delete(id); }

@@ -310,6 +310,7 @@ export const EXCUSES = {
   'dialog:static:dialog-grid': 'no phone door: the desk\'s «add a grid» (src/phone-doors.js PHONE_TWINS btn-add-grid: none)',
   'dialog:static:dialog-presets': 'no phone door: the desk\'s arrangements (src/phone-doors.js PHONE_TWINS btn-presets: none)',
   'dialog:self-update-dialog': 'runs the hub\'s self-update — never opened by a census',
+  'dialog:vault-file-replace': 'needs an owner\'s FILE row (a keyfile entry in the vault) — opened by «Replace file…» on that row (lane lg-vault-file, 主开发 r5048); the walk\'s pictures draw it',
   'dialog:update-confirm-dialog': 'needs an update on offer from the hub',
   'view:live-view': 'needs a live agent browser (a running keeper and its view) — the seeded hub starts none',
   'menu:chat-input:constructor>uploadBtn.onclick': 'the desk composer\'s upload menu — on a phone the composer\'s row is rebuilt around its «+» sheet and this button leaves the page',

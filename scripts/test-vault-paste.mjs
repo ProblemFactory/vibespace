@@ -1185,6 +1185,109 @@ console.log('⑧b 添加 › 文件… — THE OWNER\'S FILE (lane lg-vault-file
     'delete again / a name that is no file id ⇒ 404; a name holding a dot segment never reaches the route — the auth layer refuses it 400 path_dot_segment (src/path-dot-segment.js, the release)', { again: again.status, notId: notId.status, dotted: dotted.status, code: dotted.json && dotted.json.code });
 }
 
+console.log('⑧b2 «Replace file…» (主开发 r5048): new bytes under the SAME entry — its reference, who may use it and its words kept; a refusal leaves the old file whole; both crash points read by the next start; a person only');
+{
+  const VF = require(path.join(REPO, 'src/vault-file.js'));
+  const pem = (n) => Buffer.from('-----BEGIN CERTIFICATE-----\n' + crypto.randomBytes(n).toString('base64') + '\n-----END CERTIFICATE-----\n');   // built at run time
+  const VFSm = require(path.join(REPO, 'src/server/vault-files.js')), realC = VFSm.create;
+  let hold = {};
+  VFSm.create = (o) => { const st = realC(o); return { ...st, write: async (...a) => { const r = await st.write(...a); if (hold.write) await hold.write; return r; }, shred: async (...a) => { if (hold.shred) await hold.shred; return st.shred(...a); } }; };
+  const never = () => new Promise(() => {});
+  const placeOf = async (E = VE, logTo = log) => {
+    const dataDir = path.join(ROOT, `r5048-${crypto.randomBytes(3).toString('hex')}`); fs.mkdirSync(dataDir, { recursive: true });
+    const vault = E.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: logTo, idleTimer: false, bcast: () => {} });
+    await vault.setup(PW);
+    const store = GS.create({ memory: true });
+    const useGrants = VUG.create({ grants: () => store, vault, dataDir, log: (m) => LOGS.push(String(m)) });
+    return { dataDir, vault, store, useGrants, paste: require(path.join(REPO, 'src/server/vault-paste-door.js')).create({ vault, useGrants, log: (m) => LOGS.push(String(m)) }) };
+  };
+  const sealedIn = (dataDir) => { try { return fs.readdirSync(path.join(dataDir, 'vault-files')).filter((x) => x.endsWith('.vfile')).sort(); } catch { return []; } };
+  const OLD = pem(120), NEW = pem(180);
+  try {
+    // THE SWAP: the same entry, its reference, its use-grant row and its words kept — the new file's facts; the old sealed file dropped
+    const P1 = await placeOf();
+    const a = await P1.paste.addFile({ label: 'Build chain', note: 'the build server chain', filename: 'build.pem', bytes: OLD });
+    const entry = a.entry, id = entry.slice(8), rowId = `secrets:${entry}#file`;
+    const g = P1.useGrants.addMember(rowId, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['build.example.test'] });
+    const was = P1.vault.fileOf(entry);
+    const r = await P1.paste.replaceFile(id, { filename: 'build-2027.pem', bytes: NEW });
+    await P1.vault.filesSettled();
+    const now = P1.vault.fileOf(entry), words = P1.vault.secretNames().find((x) => x.name === entry) || {}, op = await P1.vault.fileOpen(entry);
+    const listed = JSON.parse(fs.readFileSync(path.join(P1.dataDir, 'vault.json'), 'utf8')).filesDropped || [];
+    ok(a.ok && g && g.ok && r.ok && r.entry === entry && r.ref === `vault://secrets/${entry}/file` && now.id !== was.id && now.name === 'build-2027.pem' && now.size === NEW.length && op.ok && op.bytes.equals(NEW)
+      && words.label === 'Build chain' && words.note === 'the build server chain' && P1.useGrants.rowsOf(rowId).length === 1 && listed.includes(was.id) && !sealedIn(P1.dataDir).includes(`${was.id}.vfile`),
+      'REPLACE ⇒ the SAME entry (its reference, its use-grant row, its name and description kept) holds the NEW bytes under a new sealed file; the old one is listed dropped and shredded', { r, words: { label: words.label, note: words.note }, listed });
+    if (op.bytes) op.bytes.fill(0);
+    // EVERY REFUSAL LEAVES THE FILE IN PLACE WHOLE — no sealed file left behind
+    const c0 = sealedIn(P1.dataDir).join();
+    const tries = [
+      ['empty', () => P1.paste.replaceFile(id, { filename: 'x.pem', bytes: Buffer.alloc(0) }), 'file_empty'],
+      ['over 1 MB', () => P1.paste.replaceFile(id, { filename: 'x.pem', bytes: Buffer.alloc(VF.FILE_MAX + 1, 7) }), 'file_too_large'],
+      ['a bad name', () => P1.paste.replaceFile(id, { filename: '../', bytes: NEW }), 'file_name_bad'],
+      ['no such file', () => P1.paste.replaceFile('0f0f0f0f0f', { filename: 'x.pem', bytes: NEW }), 'entry_unknown_id'],
+    ];
+    const got = []; for (const [w, f] of tries) { const x = await f(); got.push([w, x.code]); }
+    P1.vault.lock('test'); const lk = await P1.paste.replaceFile(id, { filename: 'x.pem', bytes: NEW }); await P1.vault.unlock(PW);
+    await P1.vault.filesSettled();
+    const op2 = await P1.vault.fileOpen(entry);
+    ok(tries.every(([, , code], i) => got[i][1] === code) && lk.code === 'vault_locked' && sealedIn(P1.dataDir).join() === c0 && op2.ok && op2.bytes.equals(NEW),
+      'each refusal (empty, over 1 MB, a bad name, no such file, LOCKED) answers by name and leaves the file in place whole and opening — no sealed file left behind', { got, lk: lk.code });
+    if (op2.bytes) op2.bytes.fill(0);
+    const dropFirst = mutant('src/server/vault-paste-door.js', '    const r = await vault.filePut(entry, bytes, { filename: fname, keepWords: true });', '    vault.secretDrop(entry); const r = await vault.filePut(entry, bytes, { filename: fname, keepWords: true });');
+    const P2 = await placeOf(); const a2 = await P2.paste.addFile({ label: 'Chain', filename: 'c.pem', bytes: OLD });
+    const p2 = dropFirst.create({ vault: P2.vault, useGrants: P2.useGrants, log: (m) => LOGS.push(String(m)) });
+    const big = await p2.replaceFile(a2.entry.slice(8), { filename: 'x.pem', bytes: Buffer.alloc(VF.FILE_MAX + 1, 7) });
+    ok(!big.ok && !P2.vault.fileOf(a2.entry), 'red control: «a door that drops first and puts after» — a refused replace leaves NEITHER file (the old one gone)', big.code);
+    // CRASH (i): the new file landed, the record not written — the next start KEEPS it and says it; the old one opens
+    const crashLanded = async (E) => {
+      const said = [], cap = { log: () => {}, warn: (m) => said.push(String(m)), error: () => {} };
+      const P = await placeOf(E, cap); const ax = await P.paste.addFile({ label: 'Chain', filename: 'c.pem', bytes: OLD }); await P.vault.filesSettled();
+      const before = sealedIn(P.dataDir);
+      hold = { write: never() }; P.paste.replaceFile(ax.entry.slice(8), { filename: 'c2.pem', bytes: NEW });   // its write lands and holds: then the process «dies»
+      for (let n = 0; n < 400 && sealedIn(P.dataDir).length === before.length; n++) await new Promise((res) => setTimeout(res, 5));
+      const landed = sealedIn(P.dataDir).filter((x) => !before.includes(x));
+      hold = {}; P.vault.close();
+      const v2 = E.create({ dataDir: P.dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: cap, idleTimer: false, bcast: () => {} });
+      await v2.unlock(PW); await v2.filesSettled();
+      const o = await v2.fileOpen(ax.entry); const old = !!(o.ok && o.bytes.equals(OLD)); if (o.bytes) o.bytes.fill(0);
+      const kept = landed.length === 1 && sealedIn(P.dataDir).includes(landed[0]);
+      v2.close();
+      return { landed: landed.length, old, kept, said: said.filter((s) => /files_unnamed/.test(s)).length };
+    };
+    const ci = await crashLanded(VE);
+    ok(ci.landed === 1 && ci.old && ci.kept && ci.said === 1, 'CRASH (i) after the new file lands, before the record write: the record names the OLD file — it opens; the new one is KEPT and said (files_unnamed), never neither', ci);
+    const releaseForm = mutant('src/server/vault-engine.js', '    const r = await files.sweep(fileLive, { dropped: fileDropped });', '    const r = await files.sweep(fileLive, { dropped: (id) => !fileLive(id) });');
+    const cir = await crashLanded(releaseForm);
+    ok(cir.landed === 1 && !cir.kept, 'red control: «the release-form sweep» shreds the landed file the record does not name (r4625\'s law broken)', cir);
+    // CRASH (ii): the record written, the old file's shred not done — the next start shreds what the record lists dropped; the new one opens
+    {
+      const P = await placeOf(); const ax = await P.paste.addFile({ label: 'Chain', filename: 'c.pem', bytes: OLD }); await P.vault.filesSettled();
+      const oldId = P.vault.fileOf(ax.entry).id;
+      hold = { shred: never() };
+      const rr = await P.paste.replaceFile(ax.entry.slice(8), { filename: 'c2.pem', bytes: NEW });
+      const stillThere = sealedIn(P.dataDir).includes(`${oldId}.vfile`);
+      hold = {}; P.vault.close();
+      const v2 = VE.create({ dataDir: P.dataDir, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, bcast: () => {} });
+      await v2.unlock(PW); await v2.filesSettled();
+      const o = await v2.fileOpen(ax.entry); const isNew = !!(o.ok && o.bytes.equals(NEW)); if (o.bytes) o.bytes.fill(0);
+      ok(rr.ok && stillThere && !sealedIn(P.dataDir).includes(`${oldId}.vfile`) && isNew, 'CRASH (ii) after the record write, before the old file\'s shred: the next start shreds what the record lists dropped; the entry opens the NEW file', { stillThere, isNew });
+      v2.close();
+    }
+  } finally { VFSm.create = realC; hold = {}; }
+  // THE ROUTE: a person's page only (a bearer ⇒ 403 human_only, no byte back); a person ⇒ 200, the same entry
+  const B1 = pem(90), B2 = pem(140);
+  const add = await S.hit('/api/vault/files', { body: { filename: 'route.pem', bytes: B1.toString('base64'), size: B1.length } });
+  const rid = add.json.entry.slice(8);
+  const bearer = await S.hit(`/api/vault/files/${rid}/replace`, { headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN }, body: { filename: 'x.pem', bytes: B2.toString('base64'), size: B2.length } });
+  const person = await S.hit(`/api/vault/files/${rid}/replace`, { body: { filename: 'route-2.pem', bytes: B2.toString('base64'), size: B2.length } });
+  await W.vault.filesSettled();
+  const ro = await W.vault.fileOpen(add.json.entry);
+  ok(bearer.status === 403 && bearer.json.code === 'human_only' && !JSON.stringify(bearer.json).includes(B2.toString('base64').slice(0, 24)) && person.status === 200 && person.json.entry === add.json.entry && ro.ok && ro.bytes.equals(B2),
+    'POST /api/vault/files/<id>/replace: a bearer ⇒ 403 human_only (no agent, job or automation replaces a file); the person ⇒ 200, the same entry opens the new bytes', { bearer: bearer.status, person: person.status });
+  if (ro.bytes) ro.bytes.fill(0);
+  await S.hit(`/api/vault/files/${rid}`, { method: 'DELETE' }); await W.vault.filesSettled();
+}
+
 console.log('⑨ A RESTART — the item is the record');
 {
   const a = await S.agent(W.OTHER_TOKEN, { words: 'the agentcore secret', purpose: 'a cloud browser', into: 'cloud:agentcore.secretAccessKey' });

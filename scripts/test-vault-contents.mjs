@@ -351,14 +351,14 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
   const JDIR = scratch('vault-contents-row'); fs.mkdirSync(JDIR, { recursive: true });
   const STUBS = {
     './i18n.js': 'export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);',
-    './utils.js': 'const P = () => globalThis.__vfr; export const createModalShell = () => ({ dialog: null, body: null, close() {}, raised: true }); export const fetchJson = async () => ({ ok: false }); export const showToast = (m, o) => P().toast(String(m), o);',
+    './utils.js': 'const P = () => globalThis.__vfr; export const createModalShell = (o) => (P() && P().shell ? P().shell(o) : { dialog: null, body: null, close() {}, raised: true }); export const fetchJson = async (u, o) => (P() && P().fetch ? P().fetch(u, o) : { ok: false }); export const showToast = (m, o) => P().toast(String(m), o);',
     './vault-reveal.js': 'const P = () => globalThis.__vfr; export const revealValue = (id) => P().reveal(id); export const revealWords = () => "refused";',
     './vault-paste-box.js': 'export const wordsRefusalWords = () => "";',
   };
   const SRC = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8');
   let nb = 0;
   const rowOf = async (src) => {   // the module bundled from TEXT (its imports stubbed; ../vault-file.js the real one), with its two inner functions exported for the legs only
-    const out = await esbuild.build({ stdin: { contents: src + '\nexport { downloadFile, filePickEl };\n', resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'vault-file-row.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+    const out = await esbuild.build({ stdin: { contents: src + '\nexport { downloadFile, filePickEl, showFileReplaceDialog };\n', resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'vault-file-row.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
       plugins: [{ name: 'vfr', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|vault-reveal|vault-paste-box)\.js$/ }, (a) => ({ path: a.path, namespace: 'vfr' })); b.onLoad({ filter: /.*/, namespace: 'vfr' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
     const f = path.join(JDIR, `row-${++nb}.cjs`); fs.writeFileSync(f, out.outputFiles[0].text); return require(f);
   };
@@ -409,6 +409,37 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
     ok(e0.lastPick === null && e0.label === 'or drop it here' && /could not be read/.test(e0.err || ''), '(d) a read error clears the pick (onPick(null)) and its label, and says it — no old file is left to save', e0);
     const e1 = await readError(await rowOf(cut(SRC, "rd.onerror = () => { onPick(null); label.textContent = t('or drop it here'); onError(t('That file could not be read')); };", "rd.onerror = () => onError(t('That file could not be read'));", 'the old read-error branch')));
     ok(e1.lastPick !== null || e1.label !== 'or drop it here', 'red control: «the old read-error branch» keeps the old pick\'s label (a save would send the earlier file)', e1);
+    // 主开发 r5048 — «Replace file…»: the OWNER's file row carries the door; its dialog passes the entry's name as TEXT (the shell draws its
+    // title as a text node: utils buildShell `h3.textContent = title`), writes no HTML, says the ONE sentence about runs and agents, and
+    // the press posts the picked file to the entry's own replace route; red: a copy that writes the name into the dialog as HTML
+    const replaceLeg = async (M) => {
+      const ownerRow = { id: 'secrets/keyfile:0a0b0c0d0e/file', store: 'secrets', entry: 'keyfile:0a0b0c0d0e', label: MARK, file: row.file };
+      made.length = 0; html.length = 0;
+      const doors = M.fileExtras(ownerRow).doors, rp = doors.find((d) => /^Replace file/.test(d.textContent));
+      const noDoor = M.fileExtras({ ...ownerRow, store: 'secrets', entry: 'agent:conv-1/key' }).doors.length;
+      let opts = null, parts = null; const posts = [];
+      globalThis.__vfr.shell = (o) => { opts = o; parts = { dialog: mkEl('div'), body: mkEl('div') }; return { ...parts, close: noop, raised: false }; };
+      globalThis.__vfr.fetch = async (u, o) => { posts.push({ u, body: JSON.parse(o.body) }); return { ok: true }; };
+      globalThis.FileReader = class { readAsArrayBuffer(f) { this.result = new Uint8Array(f.bytes).buffer; setTimeout(() => this.onload && this.onload(), 0); } };
+      if (rp) rp.onclick();
+      const help = parts && parts.body.children[0], box = parts && parts.body.children[1];
+      const input = box && box.children.find((c) => c.className === 'vault-file-input');
+      const NB = Buffer.from('-----BEGIN CERTIFICATE-----\nMIIC' + crypto.randomBytes(20).toString('base64') + '\n-----END CERTIFICATE-----\n');
+      if (input) { input.files = [{ name: 'chain-2027.pem', size: NB.length, bytes: NB }]; input.onchange(); await new Promise((r) => setTimeout(r, 20)); }
+      const save = parts && parts.dialog.children[0] && parts.dialog.children[0].children[1];
+      if (save) await save.onclick();
+      delete globalThis.__vfr.shell; delete globalThis.__vfr.fetch;
+      return { door: !!rp, noDoor, title: opts && opts.title, html: html.slice(), help: help && help.textContent, post: posts[0] || null, nb: NB };
+    };
+    const rl = await replaceLeg(REAL);
+    ok(rl.door && rl.noDoor === 1 && rl.title === `Replace «${MARK}»` && rl.html.length === 0
+      && rl.help === 'Runs and agents that may use this file get the new file from their next run on; its name, its description and who may use it stay as they are.'
+      && rl.post && rl.post.u === '/api/vault/files/0a0b0c0d0e/replace' && rl.post.body.filename === 'chain-2027.pem' && rl.post.body.size === rl.nb.length && Buffer.from(rl.post.body.bytes, 'base64').equals(rl.nb),
+      '«Replace file…» (r5048): on the OWNER\'s file row only; its dialog takes the name with markup as TEXT (no HTML written), says the one sentence, and posts the picked file to the entry\'s own replace route', { door: rl.door, noDoor: rl.noDoor, title: rl.title, html: rl.html, post: rl.post && rl.post.u });
+    const rlHtml = await replaceLeg(await rowOf(cut(SRC, "  if (raised) return null;\n  const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');\n  const runNote = mk('div', 'vault-file-run-note'); runNote.setAttribute('role', 'status'); runNote.hidden = true;\n  const sayFit",
+      "  if (raised) return null;\n  dialog.innerHTML = name;\n  const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');\n  const runNote = mk('div', 'vault-file-run-note'); runNote.setAttribute('role', 'status'); runNote.hidden = true;\n  const sayFit", 'the replace dialog writing the name as HTML')));
+    ok(rlHtml.html.includes(MARK), 'red control: «the replace dialog writes the name as HTML» is RED', rlHtml.html);
+    ok(/h3\.textContent = title;/.test(fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8')), 'the shell draws a dialog\'s title as TEXT (utils buildShell: h3.textContent = title) — the name the replace dialog hands it is never HTML');
   } finally {
     for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
     URL.createObjectURL = keepURL.create; URL.revokeObjectURL = keepURL.revoke;

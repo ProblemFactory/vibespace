@@ -51,7 +51,16 @@ export function fileExtras(row) {
   const dl = btn(t('Download'), 'vw-btn vw-file-download');   // the window's own door style (src/lib/vault-window.js btnEl)
   dl.title = t('Save the file on this device — asks for the second password unless this page verified it in the last 5 minutes; the file is never shown on the page');   // 主开发 r5043 (a): the reveal door's own 5-minute window per page, as for a text value
   dl.onclick = () => downloadFile(row, dl);
-  return { box, chips, doors: [dl] };
+  const doors = [dl];
+  // 主开发 r5048 — «Replace file…» on the OWNER's file row (a keyfile entry): new bytes under the same entry (its run switch, who may use
+  // it and every reference stand)
+  if (row.store === 'secrets' && /^keyfile:/.test(String(row.entry || ''))) {
+    const rp = btn(t('Replace file…'), 'vw-btn vw-file-replace');
+    rp.title = t('Put a new file in its place — its name, its description and who may use it stay');
+    rp.onclick = () => showFileReplaceDialog(row);
+    doors.push(rp);
+  }
+  return { box, chips, doors };
 }
 
 /** base64 → bytes (the browser's own decoder). */
@@ -78,6 +87,7 @@ async function downloadFile(row, b = null) {
 /** A file's refusal in a person's words. */
 function fileRefusalWords(code) {
   if (code === 'file_too_large') return t('The vault keeps files up to 1 MB — this one is bigger');
+  if (code === 'entry_unknown_id') return t('That file is no longer in the vault');
   if (code === 'file_empty') return t('That file is empty');
   if (code === 'file_too_small') return t('A file under 8 bytes cannot be kept as a file — add it as a key or password instead');
   if (code === 'file_name_bad') return t('That file\'s name cannot be used — rename the file and choose it again');
@@ -130,6 +140,40 @@ function filePickEl({ onPick = () => {}, onError = () => {} } = {}) {
   zone.addEventListener('dragleave', (e) => { e.stopPropagation(); zone.classList.remove('vault-file-over'); });
   zone.addEventListener('drop', (e) => { stop(e); zone.classList.remove('vault-file-over'); const dt = e.dataTransfer || {}; const fl = dt.files || []; take(fl[0], { items: dt.items || null, count: fl.length || 0 }); });
   return { el: zone, clear: () => { input.value = ''; label.textContent = t('or drop it here'); onPick(null); } };
+}
+
+/** 主开发 r5048 — «Replace file…»: the file box alone (its name and description stay — Edit… keeps those) → POST
+ *  /api/vault/files/<id>/replace. The dialog says what the press changes for others, in one sentence; the entry's name is drawn
+ *  as TEXT (the shell's title is a text node). The old file stays whole until the hub's one record write names the new one. */
+function showFileReplaceDialog(row) {
+  const entry = String((row && row.entry) || ''), id = entry.startsWith('keyfile:') ? entry.slice(8) : '';
+  if (!id) return null;
+  const name = String((row && row.label) || (row && row.file && row.file.name) || 'file');
+  let picked = null, saveNow = () => {};
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-file-replace', key: entry, title: t('Replace «{name}»', { name }), dialogClass: 'vault-file-add-dialog', escapeToClose: true,   // §103: its subject is the entry it replaces
+    unsaved: { isDirty: () => !!picked, save: () => saveNow(), discard: () => { picked = null; } }, kind: 'form' });
+  if (raised) return null;
+  const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');
+  const runNote = mk('div', 'vault-file-run-note'); runNote.setAttribute('role', 'status'); runNote.hidden = true;
+  const sayFit = (p) => { const over = !!p && p.size > RUN_FILE_BYTES_MAX; runNote.textContent = over ? t('Larger than a run can carry ({max} in all) — the vault keeps it and you can download it, but a command an agent runs cannot get it', { max: sizeWords(RUN_FILE_BYTES_MAX) }) : ''; runNote.hidden = !over; };
+  const pick = filePickEl({ onPick: (p) => { picked = p; sayFit(p); }, onError: (w) => { err.textContent = w; } });
+  const help = mk('div', 'vault-words-help', t('Runs and agents that may use this file get the new file from their next run on; its name, its description and who may use it stay as they are.'));
+  const foot = mk('div', 'dialog-footer');
+  const cancel = btn(t('Cancel'), 'btn-cancel');
+  const save = btn(t('Replace'), 'btn-create');
+  foot.append(cancel, save);
+  body.append(help, pick.el, runNote, err);
+  dialog.append(foot);
+  cancel.onclick = () => { picked = null; close(); };
+  save.onclick = saveNow = async () => {
+    if (!picked) { err.textContent = t('Choose a file first'); return; }
+    save.disabled = true;
+    const r = await fetchJson(`/api/vault/files/${encodeURIComponent(id)}/replace`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: picked.name, size: picked.size, bytes: picked.b64 }) });
+    save.disabled = false;
+    if (r && r.ok) { picked = null; close(); showToast(t('Replaced the file of {name}', { name })); return; }
+    err.textContent = fileRefusalWords(r && r.code);
+  };
+  return { dialog, close };
 }
 
 /** 添加 › 文件… — the owner's FILE: the file, a name (default: the file's name without its extension), a description →

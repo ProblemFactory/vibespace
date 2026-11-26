@@ -481,6 +481,22 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     audit('vault-file-added', { by: String(by).slice(0, 40), entry, size: r.file.size, kind: r.file.kind });   // the name, the size, the kind — never a byte
     return { ok: true, entry, ref: `vault://secrets/${entry}/file`, label: m.label, file: r.file, ...(r.file.encrypted ? { encrypted: VF.WORDS.encrypted_kept } : {}) };
   }
+  /** 主开发 r5048 — «Replace file…»: the owner's file entry takes NEW bytes under its OWN name (so its run switch, who may use it and every
+   *  reference stand; its words stay), by the engine's file re-put road — the new file landed first, ONE record write names it and
+   *  lists the old one dropped, the old one shredded. Every refusal comes before that write: the old file stays whole. A person only. */
+  async function replaceFile(id, { filename = null, bytes = null, by = 'user' } = {}) {
+    const entry = `${VF.KEYFILE_PREFIX}${String(id || '')}`;
+    if (!VF.KEYFILE_RE.test(entry)) return named('entry_unknown_id');
+    const fname = VF.cleanName(filename);
+    if (!fname) return named('file_name_bad', { words: VF.WORDS.file_name_bad });
+    const st = vault.state();
+    if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
+    if (!(typeof vault.fileOf === 'function' && vault.fileOf(entry))) return named('entry_unknown_id');
+    const r = await vault.filePut(entry, bytes, { filename: fname, keepWords: true });
+    if (!r || !r.ok) { const c = String((r && r.code) || ''); return c.includes('vault_locked') ? named('vault_locked') : c === 'entry_unknown' ? named('entry_unknown_id') : VF.WORDS[c] ? { ok: false, code: c, words: VF.WORDS[c] } : named('store_failed'); }
+    audit('vault-file-replaced', { by: String(by).slice(0, 40), entry, size: r.file.size, kind: r.file.kind });   // the name, the size, the kind — never a byte
+    return { ok: true, entry, ref: `vault://secrets/${entry}/file`, file: r.file, ...(r.file.encrypted ? { encrypted: VF.WORDS.encrypted_kept } : {}) };
+  }
   /** The owner's file's delete door — `id` = the 10 hex after `keyfile:`. Who may use it goes FIRST (as a free entry's), then
    *  the entry; the engine shreds its sealed file with it. */
   function dropFile(id, { by = 'user' } = {}) {
@@ -702,7 +718,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   /** The open requests of ONE conversation (`vibespace-vault uses` — words, places, times; never a value). */
   function openFor(conv) { index(); return [...open.values()].filter((q) => q.conv === String(conv || '') || q.scope === String(conv || '')).map((q) => ({ requestId: q.requestId, words: q.words, purpose: q.purpose, place: q.target ? (q.target.kind === 'field' ? P.intoOf(q.target) : q.target.kind === P.LOGIN_KIND ? `a website login on ${q.target.origin}` : `a new ${q.target.entryKind} entry «${q.target.label}»`) : null })); }
 
-  return { request, answer, addEntry, dropEntry, dropAgentEntry, addFile, dropFile, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
+  return { request, answer, addEntry, dropEntry, dropAgentEntry, addFile, replaceFile, dropFile, openFor, statusOf, words: (code) => MORE_WORDS[code] || P.WORDS[code] || code, propose, answerWords, ownerWords, proposalsOpen, setLoginChannel };
 }
 
 module.exports = { create, MORE_WORDS, STATUS, FROM_NAME };
