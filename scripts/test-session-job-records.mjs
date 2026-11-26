@@ -3,8 +3,9 @@
 // or a job leaves at its end or its birth, each written by its own temp and rename on the hub's loop with no sync, now each
 // shaped by its RATE (the family's rulings: (a) a cadence or an event nobody pressed takes THE STORE WRITER; (b) a record made
 // once at an END says who causes it and how often at worst; (c) a buffer nobody needs after a power loss asks no sync).
-//   ① THE EXIT TOMB (src/server/session-stdout.js finishTeardown → keepTomb): A MASS STOP — N teardowns in ONE turn of the loop —
-//      makes N jobs of the store writer and NO write of a tomb's meta on the loop (counted), each tomb whole on disk after the
+//   ① THE EXIT TOMB'S META (src/server/session-stdout.js finishTeardown → keepTomb): A MASS STOP — N teardowns in ONE turn of the
+//      loop — makes N jobs of the store writer and NO write of a tomb's META on the loop (counted; WHAT IS LEFT on the loop at each
+//      teardown, not counted here: the .tail's read and write and the 7-day sweep), each tomb whole on disk after the
 //      writer's landing and its entry forgotten; RED the release's write (its temp and rename in the teardown) ⇒ 2N writes on the
 //      loop, no job. A PLACED FAILED WRITE (the tombs folder a file) is SAID ONCE for its conversation and stays the writer's: the
 //      folder back, it lands; RED the word cut ⇒ nothing said
@@ -12,15 +13,19 @@
 //      in one boot pass — makes N writer jobs and NO write of a copy on the loop (counted), and each live meta is removed only
 //      AFTER its copy landed (the copy on disk at its delete, every time); RED the release's write ⇒ 2N writes on the loop; RED the
 //      delete before the landing ⇒ no copy on disk at a delete. A PLACED FAILED COPY (a folder where the copy goes) keeps its live
-//      meta (never deleted), SAID ONCE; the folder gone, the copy lands and then the meta goes; RED the delete before the landing ⇒
-//      the meta gone with no copy
+//      meta AND its dead socket (never deleted), SAID ONCE; the folder gone, the copy lands and then both go; RED the delete before
+//      the landing ⇒ the meta gone with no copy. A KILL BETWEEN THE RETIRE AND THE LANDING (主开发 r5005; the copy's write held on a
+//      stand-in writer thread, the thread ended): the dead socket is still there, and a SECOND START retires it again — listed
+//      stopped with its name; RED e90ddbfcc (the socket removed at once) ⇒ a meta with no socket and no copy, never listed. A COPY
+//      REMOVED WHILE ITS WRITE FLIES (a resume consumed it): gone after the landing; RED an unlink without the writer's forget ⇒ back
 //   ③ AN END'S RECORD (keepEnded): a Terminate's record is ON DISK when keepEnded answers, written by the writer (no write of it from
 //      this thread, its async forms counted too); RED the release's write ⇒ 2 from this thread. A PLACED FAILED RECORD answers null,
 //      SAID («kept nothing»), lists no stopped row and leaves no writer entry; RED its road cut ⇒ a row listed with nothing on disk
 //   ④ THE CONVERSATION INDEX (src/conversation-index.js, ruling (a): a cadence): A DISCOVERY'S BURST of claims makes ONE writer job
 //      (owed, paced — the writer's exit flush writes what is owed at a stop) and NO write on the loop; no exit listener of its own;
 //      the index whole after the landing; RED a write on the loop at a claim (the release's temp and rename) ⇒ 2 a claim
-// FAST, in-process: the real engine module over scratch roots, the real store writer (its own thread).
+// FAST, in-process: the real engine module over scratch roots, the real store writer (its own thread); for ② the kill window and the
+// in-flight removal, a stand-in writer thread (scripts/fixtures/store-stand-writer.cjs: the real writeJob after a placed hold).
 import './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -86,7 +91,7 @@ const teardown = (eng, root, id) => {
 };
 const quiet = (fn) => { const orig = console.log; console.log = (...a) => { const s = a.join(' '); if (!s.includes('[session] exited')) orig(...a); }; try { return fn(); } finally { console.log = orig; } };
 
-console.log('— ① the exit tomb: the store writer, one job a teardown, never a write on the loop —');
+console.log('— ① the exit tomb\'s meta: the store writer, one job a teardown (the .tail and the 7-day sweep stay on the loop: what is left) —');
 const TOMB_CALL = 'keepTomb(path.join(tombDir, `${id}.meta.json`), JSON.stringify(tomb), id);';
 const RELEASE_TOMB = "const tombPath = path.join(tombDir, `${id}.meta.json`), tmp = tombPath + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify(tomb)); fs.renameSync(tmp, tombPath);";
 async function massStop(modPath, tag, n = 24) {
@@ -106,7 +111,7 @@ async function massStop(modPath, tag, n = 24) {
 }
 {
   const real = await massStop(path.join(ROOT, SS_REL), 'tomb');
-  ok(real.onLoop === 0 && real.jobs === real.n, `① a MASS STOP (${real.n} teardowns in one turn of the loop): ${real.jobs} jobs of the store writer, ${real.onLoop} writes of a tomb's meta on the loop`, real);
+  ok(real.onLoop === 0 && real.jobs === real.n, `① a MASS STOP (${real.n} teardowns in one turn of the loop): ${real.jobs} jobs of the store writer, ${real.onLoop} writes of a tomb's meta on the loop (the .tail's write and the 7-day sweep at each teardown stay on it: what is left, not counted here)`, real);
   ok(real.landed && real.whole === real.n && real.temps === 0 && real.left === 0, '① …each tomb is whole on disk after the writer\'s landing (the wrapper\'s meta + the teardown\'s facts), no temp left, the writer\'s entries forgotten', real);
   const red = await massStop(M.write(SS_REL, anchored(SSTXT, TOMB_CALL, RELEASE_TOMB, 'red-tomb-on-loop'), 'tomb-on-loop'), 'tomb-red');
   ok(red.onLoop === 2 * red.n && red.jobs === 0, `RED (the release's write: its temp and rename in the teardown) ⇒ ${red.onLoop} writes on the loop for ${red.n} teardowns, ${red.jobs} jobs`, red);
@@ -168,8 +173,8 @@ const said = async (fn) => { const lines = [], ol = console.log, ow = console.wa
 const withPath = async (W, fn) => { const p0 = process.env.PATH; process.env.PATH = W.bin + ':' + p0; try { return await fn(); } finally { process.env.PATH = p0; } };
 const RETIRE_NEW = /      let W = null;\n[\s\S]*?waits for the landing too\n/;
 const RETIRE_RELEASE = '      try { const tmp = `${stopped}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(kept)); fs.renameSync(tmp, stopped); } catch (e) { console.warn(`    ↳ ${sockFile}: its stopped copy could not be written (${e.message}) — the meta is left as it is, never deleted`); return; }\n      deleteSessionMeta(sockFile);\n';
-const AFTER_LANDING = "      const landed = W.afterLanding(stopped, () => deleteSessionMeta(sockFile), { what: 'the live meta, removed once its stopped copy landed', timeoutMs: null });";
-const DELETE_FIRST = '      deleteSessionMeta(sockFile); const landed = Promise.resolve();';
+const AFTER_LANDING = "      const landed = W.afterLanding(stopped, () => { dropSocket(socketPath); deleteSessionMeta(sockFile); }, { what: 'the dead socket and the live meta, removed once its stopped copy landed', timeoutMs: null });";
+const DELETE_FIRST = '      dropSocket(socketPath); deleteSessionMeta(sockFile); const landed = Promise.resolve();';
 
 console.log('— ② a dead socket\'s stopped copy: the store writer; the live meta removed only after the copy landed —');
 async function reboot(modPath, tag, n = 12) {
@@ -179,13 +184,13 @@ async function reboot(modPath, tag, n = 12) {
   const lines = await withPath(W, () => said(async () => { await A.probeSockets(); A.restoreSessions(); await A.stoppedSettled(); }));
   const onLoop = onLoopSince(i0, W.META, /\.json\.stopped/);
   let whole = 0; for (const s of socks) { try { const k = JSON.parse(fs.readFileSync(W.copy(s), 'utf8')); if (k.status === 'stopped' && k.stopReason === 'dead-socket-at-boot' && k.accountId === 'agy-e0e0e0e0e0e0') whole++; } catch { } }
-  const live = socks.filter((s) => fs.existsSync(path.join(W.META, s + '.json'))).length;
-  return { n, onLoop, whole, live, deletes: W.deletes.length, copyAtDelete: W.deletes.filter((x) => x.copy).length, left: jobsUnder(W.META), lines: lines.filter((l) => /stopped copy/.test(l)) };
+  const live = socks.filter((s) => fs.existsSync(path.join(W.META, s + '.json'))).length, sockets = socks.filter((s) => fs.existsSync(path.join(W.SOCK, s))).length;
+  return { n, onLoop, whole, live, sockets, deletes: W.deletes.length, copyAtDelete: W.deletes.filter((x) => x.copy).length, left: jobsUnder(W.META), lines: lines.filter((l) => /stopped copy/.test(l)) };
 }
 {
   const real = await reboot(path.join(ROOT, BR_REL), 'reboot');
   ok(real.onLoop === 0 && real.whole === real.n && real.left === 0, `② A REBOOT (${real.n} dead local conversations in one boot pass): ${real.onLoop} writes of a copy on the loop; each copy whole on disk after the writer's landing, the writer's entries forgotten`, real);
-  ok(real.deletes === real.n && real.copyAtDelete === real.n && real.live === 0, '② …each LIVE META is removed only AFTER its copy landed (the copy on disk at every delete)', real);
+  ok(real.deletes === real.n && real.copyAtDelete === real.n && real.live === 0 && real.sockets === 0, '② …each LIVE META and its DEAD SOCKET are removed only AFTER its copy landed (the copy on disk at every delete)', real);
   const rel = await reboot(M.write(BR_REL, anchored(BRTXT, RETIRE_NEW, RETIRE_RELEASE, 'red-copy-on-loop'), 'copy-on-loop'), 'reboot-red');
   ok(rel.onLoop === 2 * rel.n, `RED (the release's write: its temp and rename in the retire) ⇒ ${rel.onLoop} writes on the loop for ${rel.n} dead sockets`, rel);
   const first = await reboot(M.write(BR_REL, anchored(BRTXT, AFTER_LANDING, DELETE_FIRST, 'red-delete-first'), 'delete-first'), 'reboot-first');
@@ -200,18 +205,75 @@ async function failedCopy(modPath, tag) {
     await until(() => jobsUnder(W.META) === 1 && SW.stats().some((s) => s.file === W.copy(sock) && s.failures >= 1), 3000);
     SW.flushSync([W.copy(sock)]);   // a second failed attempt (the writer's retry, now)
   }));
-  const kept = { live: fs.existsSync(path.join(W.META, sock + '.json')), owed: jobsUnder(W.META), said: lines.filter((l) => l.includes(`${sock}: its stopped copy is not written yet`)).length, deletesBefore: W.deletes.length };   // AT the failure (before the folder goes)
+  const kept = { live: fs.existsSync(path.join(W.META, sock + '.json')), owed: jobsUnder(W.META), said: lines.filter((l) => l.includes(`${sock}: its stopped copy is not written yet`)).length, deletesBefore: W.deletes.length, socket: fs.existsSync(path.join(W.SOCK, sock)) };   // AT the failure (before the folder goes)
   fs.rmSync(W.copy(sock), { recursive: true, force: true });   // the folder gone
   SW.flushSync([W.copy(sock)]);
   let k = null; try { k = JSON.parse(fs.readFileSync(W.copy(sock), 'utf8')); } catch { }
-  return { ...kept, landed: !!(k && k.status === 'stopped'), liveAfter: fs.existsSync(path.join(W.META, sock + '.json')), deletes: W.deletes, left: jobsUnder(W.META) };
+  return { ...kept, landed: !!(k && k.status === 'stopped'), liveAfter: fs.existsSync(path.join(W.META, sock + '.json')), socketAfter: fs.existsSync(path.join(W.SOCK, sock)), deletes: W.deletes, left: jobsUnder(W.META) };
 }
 {
   const real = await failedCopy(path.join(ROOT, BR_REL), 'copy-fail');
-  ok(real.live && real.owed === 1 && real.said === 1 && real.deletesBefore === 0, '② a PLACED FAILED COPY (a folder where it goes): the live meta is LEFT AS IT IS, never deleted; said ONCE over two failed attempts; the copy stays the writer\'s', real);
-  ok(real.landed && !real.liveAfter && real.deletes.length === 1 && real.deletes[0].copy && real.left === 0, '② …the folder gone, the copy lands, THEN the live meta goes; the writer keeps no entry', real);
+  ok(real.live && real.socket && real.owed === 1 && real.said === 1 && real.deletesBefore === 0, '② a PLACED FAILED COPY (a folder where it goes): the live meta and its dead socket are LEFT AS THEY ARE, never deleted; said ONCE over two failed attempts; the copy stays the writer\'s', real);
+  ok(real.landed && !real.liveAfter && !real.socketAfter && real.deletes.length === 1 && real.deletes[0].copy && real.left === 0, '② …the folder gone, the copy lands, THEN the live meta and the socket go; the writer keeps no entry', real);
   const red = await failedCopy(M.write(BR_REL, anchored(BRTXT, AFTER_LANDING, DELETE_FIRST, 'red-delete-first-fail'), 'delete-first-fail'), 'copy-fail-red');
   ok(!red.live && red.deletesBefore === 1 && !red.deletes[0].copy, 'RED (the delete before the landing) ⇒ the live meta GONE while its copy never landed', red);
+}
+// ── ② THE KILL WINDOW (主开发 r5005) and A COPY REMOVED IN FLIGHT: a stand-in writer thread (scripts/fixtures/store-stand-writer.cjs,
+// the REAL writeJob after a placed hold) is the process's writer while a life runs (boot-restore asks storeWriter() at each call)
+const SWmod = require(path.join(ROOT, 'src/store-writer.js'));
+const STAND = require(path.join(ROOT, 'scripts/fixtures/store-stand-writer.cjs'));
+async function withStand(tag, fn) {
+  const S = STAND.make(path.join(D, tag + '-ctl')), lw = SWmod.create({ log: { warn() { }, log() { } }, workerPath: S.path });
+  const real = SWmod.storeWriter; SWmod.storeWriter = () => lw;
+  try { return await fn(S, lw); } finally { SWmod.storeWriter = real; try { lw.stop(); } catch { } }
+}
+async function killWindow(modPath, tag) {
+  const W = world(tag), sock = W.add(1), copy = W.copy(sock);
+  const window = await withStand(tag, async (S, lw) => {
+    S.hold(path.basename(copy), 600000);   // the copy's write held on the writer's thread
+    const A = api(modPath, W);
+    await withPath(W, () => said(async () => { await A.probeSockets(); A.restoreSessions(); }));
+    const flying = await until(() => lw.stats().some((s) => s.file === copy && s.inflight), 3000);
+    lw.stop(); S.unhold(path.basename(copy));   // THE KILL: the hub ends here — its writer's thread with it, the copy unwritten, no step run
+    return { flying, socket: fs.existsSync(path.join(W.SOCK, sock)), meta: fs.existsSync(path.join(W.META, sock + '.json')), copy: fs.existsSync(copy) };
+  });
+  // THE SECOND START: a new hub over the same data folder (the real module, the process's own writer)
+  const A2 = api(path.join(ROOT, BR_REL), W);
+  await withPath(W, () => said(async () => { await A2.probeSockets(); A2.restoreSessions(); await A2.stoppedSettled(); }));
+  const row = (await A2.stoppedSessions()).find((r) => r.backendSessionId === UUID(1)) || null;
+  return { window, listed: !!row, name: row ? row.name : null, socketAfter: fs.existsSync(path.join(W.SOCK, sock)), metaAfter: fs.existsSync(path.join(W.META, sock + '.json')), copyAfter: fs.existsSync(copy) };
+}
+{
+  const real = await killWindow(path.join(ROOT, BR_REL), 'kill');
+  ok(real.window.flying && real.window.socket && real.window.meta && !real.window.copy, '② A KILL BETWEEN THE RETIRE AND THE LANDING (the copy\'s write held on the writer\'s thread, the thread ended): the dead SOCKET is still there beside its live meta, no copy yet', real);
+  ok(real.listed && real.name === 'Kept 1' && real.copyAfter && !real.socketAfter && !real.metaAfter, '② …a SECOND START retires it again: the conversation is listed stopped WITH ITS NAME, its copy on disk, the socket and the live meta gone', real);
+  const KILL_TIP = [["      const landed = W.afterLanding(stopped, () => { dropSocket(socketPath); deleteSessionMeta(sockFile); }, {", "      const landed = W.afterLanding(stopped, () => deleteSessionMeta(sockFile), {"],
+    ["      socketRides = true;   // the dead socket leaves in that step, never before it\n", "      dropSocket(socketPath); socketRides = true;\n"]];
+  let tip = BRTXT; for (const [a, b] of KILL_TIP) tip = anchored(tip, a, b, 'red-socket-first');
+  const red = await killWindow(M.write(BR_REL, tip, 'socket-first'), 'kill-red');
+  ok(red.window.flying && !red.window.socket && red.window.meta && !red.listed, 'RED (e90ddbfcc: the dead socket removed at once, before the landing) ⇒ after the kill a live meta with no socket and no copy: the second start retires nothing, the conversation is not listed', red);
+}
+async function removedInFlight(modPath, tag) {
+  const W = world(tag), sock = W.add(1), copy = W.copy(sock);
+  return withStand(tag, async (S, lw) => {
+    S.hold(path.basename(copy), 400);   // the copy's write flies 0.4 s on the writer's thread
+    const A = api(modPath, W);
+    await withPath(W, () => said(async () => { await A.probeSockets(); A.restoreSessions(); }));
+    const flying = await until(() => lw.stats().some((s) => s.file === copy && s.inflight), 3000);
+    S.unhold(path.basename(copy));   // what follows it (a removal's own unlink) is not held
+    // THE REMOVAL while the write flies: a resume of the conversation ran a turn well — consumeKeptOf takes its copy (unlinkKept)
+    const consumed = await A.consumeKeptOf({ backend: 'antigravity', backendSessionId: UUID(1), mode: 'chat' }, { type: 'result', subtype: 'success', is_error: false });
+    const landed = await until(() => !lw.stats().some((s) => s.file === copy), 3000);
+    await sleep(150);   // the writer's own removal after that landing runs on its thread next
+    return { flying, consumed, landed, copy: fs.existsSync(copy) };
+  });
+}
+{
+  const real = await removedInFlight(path.join(ROOT, BR_REL), 'inflight');
+  ok(real.flying && real.consumed === 'cw-1-1793300000001' && real.landed && !real.copy, '② A COPY REMOVED WHILE ITS WRITE FLIES (a resume consumed it mid-write): the write lands, and the copy is GONE after it: a removed copy never comes back', real);
+  const UNLINK_KEPT = "  try { storeWriter().forget(file); } catch { }\n  fs.unlink(file, (err) => { saidUnlinkFailure(sockFile, err); if (done) done(); });";
+  const red = await removedInFlight(M.write(BR_REL, anchored(BRTXT, UNLINK_KEPT, "  fs.unlink(file, (err) => { saidUnlinkFailure(sockFile, err); if (done) done(); });", 'red-unlink-only'), 'unlink-only'), 'inflight-red');
+  ok(red.flying && red.consumed === 'cw-1-1793300000001' && red.landed && red.copy, 'RED (the removal without the writer\'s forget: an unlink alone, as the release) ⇒ the write in flight lands AFTER the unlink: the removed copy is back on disk', red);
 }
 
 console.log('— ③ an end\'s record: the store writer, on disk when keepEnded answers —');
