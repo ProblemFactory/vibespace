@@ -47,10 +47,12 @@ const unread = (m) => !!(SMV && SMV.isUnread(m));
 // the copy is DONE when the record's own row says so (the production list the notice reads), never when its file first appears:
 // the helper sets the fact once the copy's write has ended (a lane's read under load, 11-24: the file was there, the fact not yet)
 const copyOf = (s) => ((SMV && typeof SMV.rows === 'function' ? SMV.rows() : []).find((r) => r.file === s + '.json') || {}).copy || null;
-const copied = async (s) => { for (let i = 0; i < 400 && !(fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')) && copyOf(s)); i++) await sleep(25); return !!copyOf(s); };
+// r5145 (2.369.420's laws: a wait is on the FACT it judges, a generous bound, its expiry a NAMED harness line): the suite's one fact-wait
+const waitFact = async (pred, what, ms = 15000, step = 25) => { const end = Date.now() + ms; let v = await pred(); while (!v && Date.now() < end) { await sleep(step); v = await pred(); } if (!v) console.log(`  · HARNESS: ${what} did not come within ${ms} ms`); return v; };
+const copied = async (s) => { await waitFact(() => fs.readdirSync(META_DIR).some((n) => n.startsWith(s + '.json.corrupt-')) && copyOf(s), `${s}: its torn bytes copied`); return !!copyOf(s); };
 const RECORD = (n) => ({ webuiSessionId: 'sess-made-up-' + n, name: 'a made-up conversation ' + n, cwd: '/made/up/folder-' + n, accountId: 'acct-made-up', groups: ['g-made-up'], lockedModel: 'made-up-model', claudeSessionId: 'cid-made-up-' + n });
 const born = (n) => { const sock = 'vs-smheld-sock-' + n; SS.writeSessionMeta(sock, RECORD(n)); land(sock); return sock; };
-const readAgain = async (sock) => { if (typeof HOLD.readAgainOf === 'function') { for (let i = 0; i < 20; i++) { if (await HOLD.readAgainOf(sock + '.json')) return true; await sleep(20); } } return false; };
+const readAgain = async (sock) => (typeof HOLD.readAgainOf === 'function' ? !!(await waitFact(() => HOLD.readAgainOf(sock + '.json'), `${sock}: the held record read again`)) : false);
 
 console.log('① THE VERDICT at the one read');
 {
@@ -109,7 +111,7 @@ console.log('④ TORN BYTES — kept aside once; the record STAYS UNREAD until a
   const m = SS.readSessionMeta(d);
   SS.writeSessionMeta(d, { ...m, seenMarks: ['after-torn'] });   // a class A writer: it never restates a record
   land(d);
-  for (let i = 0; i < 40 && !fs.readdirSync(META_DIR).some((n) => n.startsWith(d + '.json.corrupt-')); i++) await sleep(25);
+  await waitFact(() => fs.readdirSync(META_DIR).some((n) => n.startsWith(d + '.json.corrupt-')), `${d}: its corrupt copy made`);
   await sleep(50); land(d);
   const copies = fs.readdirSync(META_DIR).filter((n) => n.startsWith(d + '.json.corrupt-'));
   const copyBytes = copies[0] ? realReadSync.call(fs, path.join(META_DIR, copies[0]), 'utf8') : null;
@@ -198,7 +200,7 @@ console.log('⑨ r3199 / r3920 — a torn record the person removes is «not the
   fs.promises.link = function (src, dst, ...a) { return heldAt(dst, realLink, [src, dst, ...a]); };
   const hold = (sock) => { const g = {}; g.p = new Promise((res) => { g.go = res; }); HELD.set(path.join(META_DIR, sock + '.json.corrupt-'), g); return g; };
   const fileThere = (sock) => fs.readdirSync(META_DIR).some((n) => n.startsWith(sock + '.json.corrupt-'));
-  const until = async (pred) => { for (let i = 0; i < 400 && !pred(); i++) await sleep(25); return pred(); };
+  const until = async (pred, what = '⑨: its placed fact') => waitFact(pred, what);
   const r = 'vs-smheld-sock-torn-2r', rf = path.join(META_DIR, r + '.json');
   fs.writeFileSync(rf, '{"name":"the torn conversation, the red control","cwd":"/made/up');
   const gR = hold(r); SS.readSessionMeta(r);
@@ -247,7 +249,7 @@ console.log('⑪ r3245 — the whole restatement carries the LIVE conversation\'
   SS.readSessionMeta(s);
   await copied(s);
   SS.writeSessionMeta(s, { ...SS.readSessionMeta(s), name: 'the fourth live conversation', cwd: '/made/up/live-4', webuiSessionId: 'sess-made-up-live-4' }, { durable: true, whole: true });
-  for (let i = 0; i < 80 && !((onDisk(s) || {}).accountId); i++) { land(s); await sleep(25); }   // (r3749: a wait on the record, not a fixed sleep)
+  await waitFact(() => { land(s); return !!(onDisk(s) || {}).accountId; }, `${s}: the restated record's account on disk`);   // (r3749: a wait on the record, not a fixed sleep)
   const d = onDisk(s);
   ACTIVE.delete('sess-made-up-live-4');
   ok(!!(d && d.accountId === 'acct-made-up-live' && d.host === 'a-made-up-machine' && d.taskId === 'g-made-up-live' && d.poolPin && d.poolPin.pool === 'pool-made-up'),
@@ -376,7 +378,7 @@ console.log('⑬ r3302 / r3749 — an owed patch is written AGAIN BY ITSELF, the
   const sockOfKey = (k) => String(k).replace(/^meta-owed:/, '').replace(/:\d+$/, '');
   const NOTICES = [], WARNS = [], realWarn = console.warn;
   console.warn = (...a) => { WARNS.push(a.join(' ')); };
-  const mk = (mod, clock) => mod.create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null, patchClock: clock, serverNotice: (key, text, o) => { const s = sockOfKey(key), left = NOPAGE.get(s) || 0; NOTICES.push({ key, text, o, pages: left > 0 ? 0 : 1 }); if (left > 0) { NOPAGE.set(s, left - 1); return 0; } return 1; } });
+  const mk = (mod, clock) => mod.create({ rootDir: TMP, BUFFERS_DIR, META_DIR, activeSessions: ACTIVE, engine: {}, getHosts: () => null, patchClock: clock, serverNotice: (key, text, o) => { const s = sockOfKey(key), left = NOPAGE.get(s) || 0; NOTICES.push({ key, text, o, warnsSeen: WARNS.length, pages: left > 0 ? 0 : 1 }); if (left > 0) { NOPAGE.set(s, left - 1); return 0; } return 1; } });
   const mut = (from, to, tag) => MUT.load('src/server/session-stdout.js', anchored(SSsrc, from, to, tag), tag);
   const cured = mk(require(SSP), CLOCK), curedFar = mk(require(SSP), CLOCK_FAR);
   const todayM = mut(AGAIN, '    else owedPatch.set(fp, full);   // TODAY: owed to the NEXT patch only', 'owed'), today = todayM && mk(todayM, CLOCK);
@@ -400,30 +402,54 @@ console.log('⑬ r3302 / r3749 — an owed patch is written AGAIN BY ITSELF, the
   SWx.dirty = function (file, o) {
     const h = HOOK.get(file);
     if (h && !h.fired && o && typeof o.produce === 'function') { const p0 = o.produce; o = { ...o, produce: (x) => { const b = p0(x); if (!h.fired && typeof b === 'string') { h.fired = true; h.during(); } return b; } }; }
+    else if (h && h.fired && h.hold && !h.go) { h.hold.push([this, file, o]); return; }   // r5145: the PLACED flight — the write after the first HELD until let go
     return realDirty.call(this, file, o);
   };
-  const flightScene = async (SSx, s) => {
+  // r5145: the flight's second write is waited for ON ITS LANDING (a generous bound, a named expiry) — never a fixed 200 × 10 ms poll
+  // (box row 029d04ded at load 40: «landed false» both ways, the write not yet on disk). `held`: the PLACED red — the second write HELD
+  // (the store writer's dirty for it deferred) past the old poll: read as the leg stood it «never landed»; let go, the wait reads it
+  const flightScene = async (SSx, s, { held = false } = {}) => {
     const first = await press(SSx, s, Infinity);   // dropped at its bound: owed; its own try far off
-    HOOK.set(path.join(META_DIR, s + '.json'), { fired: false, during: () => SSx.writeSessionMeta(s, { ...SSx.readSessionMeta(s), lastRequestAt: 2 }) });
+    const file = path.join(META_DIR, s + '.json'), landedNow = () => (onDisk(s) || {}).lastRequestAt === 2;
+    HOOK.set(file, { fired: false, during: () => SSx.writeSessionMeta(s, { ...SSx.readSessionMeta(s), lastRequestAt: 2 }), hold: held ? [] : null, go: false });
     SSx.writeSessionMeta(s, { ...SSx.readSessionMeta(s), apiKeySource: 'a-whole-writer' });   // a whole writer of the boot backfill's shape
-    for (let i = 0; i < 200 && !((onDisk(s) || {}).lastRequestAt === 2); i++) await sleep(10);
-    return { first, fired: HOOK.get(path.join(META_DIR, s + '.json')).fired, landed: (onDisk(s) || {}).lastRequestAt === 2 };
+    let asStood = null, heldAtOld = null;
+    if (held) {
+      for (let i = 0; i < 200 && !landedNow(); i++) await sleep(10);   // the old poll, read as the leg stood (the hold in force)
+      const h = HOOK.get(file); asStood = landedNow(); heldAtOld = h.hold.length;
+      h.go = true; for (const [self, f, o] of h.hold.splice(0)) realDirty.call(self, f, o);   // let go
+    }
+    const landed = !!(await waitFact(landedNow, `⑬ ${s}: the flight's second write landed`, 30000, 10));
+    return { first, fired: HOOK.get(file).fired, landed, asStood, heldAtOld };
   };
   const t0 = Date.now();
   // (a) the storage answers again after the held read; (b) it stays held off the loop, the hub's own synchronous read of the record
   // answers (its whole writers read it so); (b2) held, and no read answers since: the stop must not block on it; (c) the flight
-  const [firsts, fl, flT] = await Promise.all([
+  const [firsts, fl, flT, flH] = await Promise.all([
     Promise.all([press(cured, 'vs-owed-a', 1), press(cured, 'vs-owed-b', Infinity), press(cured, 'vs-owed-b2', Infinity), press(cured, 'vs-owed-e', Infinity), press(once, 'vs-owed-e-today', Infinity), press(curedFar, 'vs-owed-d', Infinity), press(quietStop, 'vs-owed-d-today', Infinity),
       ...['vs-owed-m', 'vs-owed-m-today'].map((s, i) => { ACTIVE.set('sess-' + s, { sockName: s, name: NAME(s) }); return (i ? missingT : cured).patchSessionMeta(s, { autoResume: false }, { owner: 'sess-' + s }); }), ...(today ? [press(today, 'vs-owed-a-today', 1), press(today, 'vs-owed-b-today', Infinity)] : []), ...(silent ? [press(silent, 'vs-owed-b-silent', Infinity)] : [])]),
-    flightScene(curedFar, 'vs-owed-c'), flight ? flightScene(flight, 'vs-owed-c-today') : null]);
-  const whileTrying = NOTICES.filter((n) => n.key.startsWith('meta-owed:vs-owed-b:')).length;   // a try still owed: no word yet
+    flightScene(curedFar, 'vs-owed-c'), flight ? flightScene(flight, 'vs-owed-c-today') : null, flightScene(curedFar, 'vs-owed-c-held', { held: true })]);
+  // r5145: «none while a try was still owed» is read on the PRODUCT's ORDER, never at a moment: the tries' end says its journal line
+  // first and then the word (src/server/session-stdout.js), so a notice of b's that came before that line came while a try was owed
+  // (the old read — b's notices right after the scene's first await — moved with whatever that await held: the placed flight's 2 s)
+  const triesEndAt = () => WARNS.findIndex((w) => /vs-owed-b: a change of its record \(autoResume\) could not be written in 1 tries of its own/.test(w));
+  const whileTryingOf = () => { const i = triesEndAt(); return NOTICES.filter((n) => n.key.startsWith('meta-owed:vs-owed-b:') && (i < 0 || n.warnsSeen <= i)).length; };
   // until the cured (a) is on disk and the cured (b) has spent its tries: its bound, the try's wait, the try's bound
   const spent = CLOCK.linkMs + CLOCK.againMs[0] + CLOCK.linkMs;
   const toldTo = (s) => NOTICES.filter((n) => sockOfKey(n.key) === s);
   // until the cured (a) is on disk, the cured (b) has spent its tries and (e)'s word, said to no page at its tries' end, is said again
   // to a page (its word-again: one more tellAgainMs) — each by its own fact, the clock's sum only as the bound
-  const bound = spent + CLOCK.tellAgainMs + 2 * CLOCK.linkMs;
-  while (Date.now() - t0 < bound && !(autoOf('vs-owed-a') === false && toldTo('vs-owed-b').length && toldTo('vs-owed-e').some((n) => n.pages === 1) && toldTo('vs-owed-m-today').length && toldTo('vs-owed-e-today').length)) await sleep(50);
+  const bound = spent + CLOCK.tellAgainMs + 2 * CLOCK.linkMs;   // the OLD wait's bound: the sum of the product's own test clocks
+  const facts = () => !!(autoOf('vs-owed-a') === false && toldTo('vs-owed-b').length && toldTo('vs-owed-e').some((n) => n.pages === 1) && toldTo('vs-owed-m-today').length && toldTo('vs-owed-e-today').length);
+  // r5145: the wait is ON THESE FACTS (a generous bound, a named expiry) — never a bound made of the product's own test clocks, which a
+  // loaded loop spends before those clocks' timers run (box row 029d04ded at load 40: nothing told yet). PLACED, RED AT WILL: the loop
+  // STALLED (a synchronous stall of the leg's own) from inside the window past that old bound — WITNESS: it began before the bound with
+  // the facts not in, and ended past it — read as the leg stood (its bound spent) nothing had landed or been told; the wait reads them
+  const stall = { bound, from: Date.now() - t0, before: facts() };
+  stall.placed = stall.from < bound && !stall.before;
+  if (stall.placed) { const tk = new Int32Array(new SharedArrayBuffer(4)), end = t0 + bound + 300; while (Date.now() < end) Atomics.wait(tk, 0, 0, Math.max(1, end - Date.now())); }
+  stall.to = Date.now() - t0; stall.asStood = facts();
+  const factsIn = !!(await waitFact(facts, '⑬: the presses\' facts (a on disk OFF, b told, e told to a page, m-today and e-today told)', 30000, 50));
   const silentBeforeStop = NOTICES.filter((n) => n.key.startsWith('meta-owed:vs-owed-b-silent:'));
   const eBeforeStop = toldTo('vs-owed-e'), eTBeforeStop = toldTo('vs-owed-e-today');   // r3920 (1) is judged on the words BEFORE the stop (the stop's own word is (2)'s)
   const beforeStop = { a: autoOf('vs-owed-a'), aToday: autoOf('vs-owed-a-today'), b: autoOf('vs-owed-b'), bToday: autoOf('vs-owed-b-today'), at: Date.now() - t0 };
@@ -436,7 +462,11 @@ console.log('⑬ r3302 / r3749 — an owed patch is written AGAIN BY ITSELF, the
   const after = Object.fromEntries(['vs-owed-a', 'vs-owed-b', 'vs-owed-b2', 'vs-owed-c', 'vs-owed-a-today', 'vs-owed-b-today', 'vs-owed-c-today'].map((s) => [s, fresh.readSessionMeta(s).autoResume]));
   const atStop = { d: toldTo('vs-owed-d'), dToday: toldTo('vs-owed-d-today') };
   fs.promises.readFile = before; console.warn = realWarn;
-  for (const s of ['a', 'b', 'b2', 'c', 'd', 'e', 'm', 'a-today', 'b-today', 'b-silent', 'c-today', 'd-today', 'e-today', 'm-today']) ACTIVE.delete('sess-vs-owed-' + s);
+  for (const s of ['a', 'b', 'b2', 'c', 'c-held', 'd', 'e', 'm', 'a-today', 'b-today', 'b-silent', 'c-today', 'd-today', 'e-today', 'm-today']) ACTIVE.delete('sess-vs-owed-' + s);
+  if (stall.placed) ok(stall.to > bound && !stall.asStood && factsIn, `⑬ PLACED (r5145): the loop STALLED from ${stall.from} ms to ${stall.to} ms past the old bound (${bound} ms, the product's test clocks summed) — read as the leg stood nothing had landed or been told (${stall.asStood}): the old wait's red; the wait on the facts reads them (${factsIn})`, stall);
+  else console.log(`  · SKIP ⑬ PLACED stall — the window had closed before it could be placed (from ${stall.from} ms of ${bound}; the facts already in: ${stall.before}): not a judgement`);
+  if (flH && flH.heldAtOld >= 1) ok(!!(flH.asStood === false && flH.landed), `⑬ PLACED (r5145): the flight's second write HELD (${flH.heldAtOld} write deferred when the old poll ended) — read as the leg stood (200 × 10 ms) it «never landed» (${flH.asStood}): the old poll's red; let go, the wait on its landing reads it (${flH.landed})`, flH);
+  else console.log(`  · SKIP ⑬ PLACED flight — its second write was never held (the hook did not see it): not a judgement`);
   ok(!!(firsts[0] === false && firsts[1] === false && beforeStop.a === false && after['vs-owed-a'] === false),
     `the person's press whose link the held read dropped (${firsts[0]}) is written AGAIN BY ITSELF, off the loop, with no later patch: on disk before any stop (${beforeStop.a} at ${beforeStop.at} ms) and the new start reads automatic continue OFF (${after['vs-owed-a']})`, { firsts, beforeStop, after });
   ok(!!(beforeStop.b === true && after['vs-owed-b'] === false),
@@ -448,6 +478,7 @@ console.log('⑬ r3302 / r3749 — an owed patch is written AGAIN BY ITSELF, the
     `r3749 THE MUST: a whole writer that spreads the record WHILE the write carrying the owed change is in flight spreads the person's value — both writes land and the new start reads OFF (${after['vs-owed-c']}); RED (e4bcad50b's form, the owed keys in the bytes only): the second write puts the old value back and the new start reads ON (${after['vs-owed-c-today']}) — a turn nobody typed`, { fl, flT, after });
   const told = NOTICES.filter((n) => n.key.startsWith('meta-owed:vs-owed-b:')), toldSilent = silentBeforeStop;   // (its tries' end; the stop's own word is r3920 (2)'s, judged below)
   const saidOnce = WARNS.filter((w) => /vs-owed-b: a change of its record \(autoResume\) could not be written in 1 tries of its own/.test(w)).length;
+  const whileTrying = whileTryingOf();
   ok(!!(whileTrying === 0 && told.length === 1 && told[0].o && told[0].o.i18n && /^Automatic continue OFF for “\{name\}” is not saved on disk yet/.test(told[0].o.i18n.key) && told[0].o.i18n.params.name === NAME('vs-owed-b') && told[0].text.includes(NAME('vs-owed-b')) && saidOnce === 1 && silent && toldSilent.length === 0),
     `r3749: THE PERSON IS TOLD — when the tries end without a landing, ONE notice naming the conversation by what the person calls it («${told[0] && told[0].text}»), none while a try was still owed (${whileTrying}), the journal's line said once (${saidOnce}); RED (the tries' end without its word): no notice (${toldSilent.length})`, { told, whileTrying, saidOnce });
   const e = eBeforeStop, eT = eTBeforeStop;
