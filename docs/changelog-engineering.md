@@ -4,6 +4,21 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.422 — 2026-11-26
+
+### bl-machines-b — B-93e7: the device agent's own files take their name only after ONE sync (主开发 r4381 / r4387)
+- THE CURE: src/agentd/durable-file.js (NEW, a DEVICE input) `writeDurable`. It removes a stale temp, opens the temp exclusive at its mode, writes it whole, syncs it ONCE, closes it and renames it. The 13 RECORDS go through it: agentd.js 10 (writeDialStatus, the allow list, the dial file at the start and in learnHub, pinTrust, writeFloor, pinHub, the orders' _persist, the secret file the hub hands, the socket witness), self-retire's hook rewrite and the mac helper's state and version. A record's refused sync is SAID once a file in the agent's own log, and the record still lands.
+- THE USAGE CURSOR IS A CACHE (主开发 r4671, the round's must): it asks no sync on any road. An old, lost or torn cursor only walks again, and the hub drops every row it holds by its own id. A sync at its hot rate (about every 1.5 s while a transcript grows) would hold the agent's loop; on macOS it is a full cache flush. It keeps the release's temp + rename. The census names it «derived», a cache of a source still on disk.
+- THE TEMPS CARRY THE PROCESS ID (r4671 (1)): the orders, the cursor and the mac helper's state and version, as the others did. Two agent processes during a hand-over could rename each other's half-written temp: the release's own race, closed here.
+- THE BUNDLE (r4387: a bundle is not a record): landBundle takes the verdict, then ONE sync of the temp, then its name, then `current`.
+  - A sync that FAILS refuses the landing by name (`bundle-not-synced`): the temp is removed, `current` is untouched, and the hub tries again. The ssh road answers VS-AGENTD-DEFERRED: the hub (src/hosts.js, src/server/dial-pairing.js) keeps the connect going on the old agent and does not cache it as installed. The stream road's code is outside SIG.REFUSALS.
+  - A close that fails after the sync is always a failed sync. The sync opens the temp read-only on POSIX (a bundle staged read-only lands), read-write on Windows. EISDIR (Windows' «no flush») is «not offered». The mac screen helper's binary is synced before its name too: a failed sync keeps it out.
+  - A sync NOT OFFERED (ENOTSUP / EOPNOTSUPP / ENOSYS / EINVAL, `syncRefusal`'s table) is said once and the landing goes on.
+  - The stream road's own sync before landBundle moved into landBundle (one rule at one place).
+- LEGS: scripts/test-device-durable-writes.mjs (NEW, fast), each with its red. Also moved: test-device-self-retire's hook-mode control anchor and its wiring pin, test-dial-facts' dial-file pin, test-device-install-check's (heavy) control anchor.
+- A FACT FOR THE ROUND: every sync is synchronous on the agent's loop, as its write was. The hot one is the usage cursor's commit, about one sync per push batch (kicks grouped over 1.5 s) while transcripts are written. On macOS libuv's fsync is a full cache flush. The client's local proof (client.js _writeLocalProof) is the hub's write and stays with B-574d.
+- CENSUS: test-temp-rename-census — the family «device» goes. A new family `device-door` (synced) covers the door and landBundle, and the ssh road's staged move is a named move. OWED_MAX 141 → 125. A new leg: the class's TWO doors (the device's here, the hub wrappers' in src/fd-close.js, B-bcb8), and a third is red (two planted red controls). The mac helper binary's renames read «synced».
+
 ## 2.369.421 — 2026-11-26
 
 ### 2.369.421: the hotfix of 2.369.420
