@@ -10,8 +10,10 @@
 //   ② KEPT CURRENT: a mail update of 1 000 rows (their times and subjects moved) — its longest turn ≤ 50 ms (the index's own update
 //      included; the same update before the map was built PRINTED beside it); the map applied exactly those 1 000 rows, no build
 //   ③ a judged row's facts read through the kept map: printed
-//   RED: today's one-turn build (the release's walk over every live row, in a copy of the engine over the same stand-in): its one
-//   turn over the bound
+//   THE HEAP (主开发 r5106 (1)): the kept map's cost read after full collections around ①, a row's bytes ≤ HEAP_BOUND_B (judged
+//   everywhere — not a clock); RED: df8fcedfb's map (a Map a bucket, the subject's string a row) in a copy — over the bound
+//   RED: an equivalent of today's one-turn build (one synchronous turn over every live row's key through the map's own apply, in a
+//   copy of the engine over the same stand-in — the release's work, not its literal lines): its one turn over the bound
 // THE CLOCK IS THE BOX's (主开发 r4850's form, scripts/test-channel-walks-hold.mjs): on the hosted runner (GITHUB_ACTIONS=true —
 // never a guess from speed) every leg still runs; a leg that judges a TIME prints its reading and is a named skip; what is not a
 // clock is judged everywhere; the closing line there names how many legs were printed, not judged.
@@ -41,6 +43,10 @@ function clock(cond, words, why, detail) {
 const ROOT = scratch('attention-facts-hold');
 const T = Date.parse('2026-11-26T12:00:00Z');
 const BOUND_MS = 50;   // the family's bound (B-360d): 50 ms a turn at the stand-in's size
+const HEAP_BOUND_B = 400;   // 主开发 r5106 (1): the kept map's bytes a row at the stand-in — a probe on the kit (615c53d11-20261126134337-box, never lined) read the follow's layout at 286 / 329 B a row and df8fcedfb's at 505 B a row over 173 306 mail rows: a bound between them
+require('node:v8').setFlagsFromString('--expose-gc');
+const gc = require('node:vm').runInNewContext('gc');
+const heap = () => { gc(); gc(); return process.memoryUsage().heapUsed; };
 const quiet = { info() { }, warn() { }, error() { }, log() { }, debug() { } };
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -51,6 +57,24 @@ const ESRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), '
 const WALK_LINE = '          const ok = await walkMail(j);\n';
 const RED_SRC = anchored(ESRC, WALK_LINE, "          const ok = (() => { const live = store.index.live(); for (const key of Object.keys(live)) apply(j.m, key); return true; })();   /* RED: the release's one-turn build over every live row */\n", 'red: the one-turn build');
 const ENGR = MB.load('src/server/channels-engine.js', RED_SRC, 'one-turn-build');
+// THE MEMORY RED: df8fcedfb's map shape — a Map a bucket and the subject's string a row (unlink + apply as they were)
+const A0 = ESRC.indexOf('    function unlink(m, key) {\n'), A1 = ESRC.indexOf('      m.keyOf.set(key, e);\n    }\n', A0);
+const SHAPE = A0 >= 0 && A1 > A0 ? ESRC.slice(A0, A1 + '      m.keyOf.set(key, e);\n    }\n'.length) : '(the map\'s unlink + apply not found)';
+const ENGM = MB.load('src/server/channels-engine.js', anchored(ESRC, SHAPE, [
+  "    function unlink(m, key) { const k0 = m.keyOf.get(key); if (k0 !== undefined) { const b = m.byKey.get(k0); if (b) { b.delete(key); if (!b.size) m.byKey.delete(k0); } m.keyOf.delete(key); } }",
+  "    function apply(m, key) {   /* RED: df8fcedfb's map — a Map a bucket, the subject's string a row */",
+  "      unlink(m, key);",
+  "      const rows = store.index.rows();",
+  "      const en = Object.prototype.hasOwnProperty.call(rows, key) ? rows[key] : null;",
+  "      if (!en || !m.mailIds.has(en.adapterId) || en.unlistedAt) return;",
+  "      const k = DM.inboxKey(en.title, attnSenderOf(en));",
+  "      if (!k) return;",
+  "      let b = m.byKey.get(k);",
+  "      if (!b) m.byKey.set(k, (b = new Map()));",
+  "      b.set(key, { adapterId: en.adapterId, lastAt: Number(en.lastAt) || 0 });",
+  "      m.keyOf.set(key, k);",
+  "    }",
+  ''].join('\n'), 'red: the map shape'), 'map-shape');
 
 /** THE METER: the loop's longest turn while `fn` runs (its own awaits included) — the gap between two beats of a setImmediate
  *  chain, and the delay histogram's max; a synchronous `fn` is one turn */
@@ -115,10 +139,14 @@ console.log(`  · PRINTED: a 1 000-row mail update BEFORE the map is built (the 
 
 // ═══ ① THE BUILD ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 console.log('① the duplicate-inbox map built at the first judged row\'s need: slices over the mail account\'s kept keys');
+const hb0 = heap();
 const b = await holdOf(() => eng.attentionFacts.ready());
+const hb1 = heap();
 const sb = eng.attentionFacts.stats();
-ok(b.err === null && b.out === true && sb.builds === 1 && sb.walks === 1 && sb.kept && sb.keys > 0 && sb.fallback === 0 && sb.slices > 1, `① the map BUILT once (one walk, ${sb.slices} slices, no snapshot of every key: fallback ${sb.fallback}) and kept — ${sb.keys} subject keys over the mail account's ${SIZES[0]} rows`, { sb, err: b.err });
+const bpr = Math.round((hb1 - hb0) / Math.max(1, sb.rows)), mb = Math.round((hb1 - hb0) / 1048576 * 10) / 10;
+ok(b.err === null && b.out === 'whole' && sb.builds === 1 && sb.walks === 1 && sb.kept && sb.keys > 0 && sb.fallback === 0 && sb.slices > 1, `① the map BUILT once (one walk, ${sb.slices} slices, no snapshot of every key: fallback ${sb.fallback}) and kept — ${sb.keys} subject keys over the mail account's ${SIZES[0]} rows`, { sb, err: b.err });
 clock(b.turn <= BOUND_MS, `① …to its landing the loop's longest turn ${b.turn} ms (histogram ${b.hist} ms; its longest slice ${sb.maxSliceMs} ms) of ${b.total} ms — ≤ ${BOUND_MS} ms`, LAW_WHY, { turn: b.turn, total: b.total, sb });
+ok(hb1 > hb0 && bpr <= HEAP_BOUND_B, `① THE HEAP: the kept map holds ${mb} MB after full collections — ${bpr} B a row over its ${sb.rows} rows (${sb.keys} subject keys), ≤ ${HEAP_BOUND_B} B (r5106 (1): one plain entry a bucket, the subject's string once)`, { hb0, hb1, rows: sb.rows });
 
 // ═══ ② KEPT CURRENT ═══════════════════════════════════════════════════════════════════════════════════════════════════════
 console.log('② a 1 000-row mail update with the map kept: one row\'s work a touch, no build');
@@ -144,11 +172,24 @@ console.log('RED: the release\'s one-turn build over every live row (a copy of t
   await engR.store.index.keysReady();
   const r = await holdOf(() => engR.attentionFacts.ready());
   const sr = engR.attentionFacts.stats();
-  ok(r.err === null && sr.kept && sr.keys > 0, `RED's plant: the copy built the same map (${sr.keys} subject keys) — its walk is the release's, one turn over every live row`, { sr, err: r.err });
+  ok(r.err === null && sr.kept && sr.keys > 0, `RED's plant: the copy built the same map (${sr.keys} subject keys) — its walk an equivalent of the release's, one turn over every live row`, { sr, err: r.err });
   // AN ABSOLUTE TIME (r4841 (b)'s note): machine 1 reads this one-turn build far over the bound; a much faster machine could read it under it — the control would go red falsely
-  clock(r.turn > BOUND_MS, `RED: the release's one-turn build — the loop's longest turn ${r.turn} ms (histogram ${r.hist} ms) of ${r.total} ms, OVER the bound`, RED_WHY, { turn: r.turn });
+  clock(r.turn > BOUND_MS, `RED: an equivalent of the release's one-turn build — the loop's longest turn ${r.turn} ms (histogram ${r.hist} ms) of ${r.total} ms, OVER the bound`, RED_WHY, { turn: r.turn });
   try { engR.stop(); } catch { }
   try { engR.store.close(); } catch { }
 }
-for (const x of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 1, label: 'B-0f37 facts hold ' })) ok(x.pass, x.name, x.pass ? undefined : x.detail);
+console.log('RED (the heap): df8fcedfb\'s map shape — a Map a bucket, the subject\'s string a row (a copy of the engine, the same stand-in)');
+{
+  const engM = open(ENGM);
+  await engM.store.index.keysReady();
+  const m0 = heap();
+  const r = await engM.attentionFacts.ready();
+  const m1 = heap();
+  const sm = engM.attentionFacts.stats();
+  const mbpr = Math.round((m1 - m0) / Math.max(1, sm.rows)), mmb = Math.round((m1 - m0) / 1048576 * 10) / 10;
+  ok(r === 'whole' && sm.kept && sm.rows === sb.rows && mbpr > HEAP_BOUND_B, `RED (the heap, in a copy): df8fcedfb's map holds ${mmb} MB — ${mbpr} B a row over its ${sm.rows} rows, OVER the bound ${HEAP_BOUND_B} B (the follow's: ${bpr} B)`, { m0, m1, sm });
+  try { engM.stop(); } catch { }
+  try { engM.store.close(); } catch { }
+}
+for (const x of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 2, label: 'B-0f37 facts hold ' })) ok(x.pass, x.name, x.pass ? undefined : x.detail);
 report();

@@ -64,7 +64,7 @@ const STOP = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'daily-budget
 const hash16 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
 
 function create({ dataDir, decision = null, serverSetting = () => undefined, now = () => Date.now(), tailOf = () => [], notify = () => { },
-  accountNever = () => false, viewNow = null, log = console, policy = () => null, facts = () => () => ({}), rowState = () => null } = {}) {
+  accountNever = () => false, viewNow = null, log = console, policy = () => null, facts = () => () => ({}), factsOff = () => { }, rowState = () => null } = {}) {
   const FILE = path.join(dataDir, 'decision-examples.json');
   // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no label» and the
   // person's next Needs / Not wrote over the file: every label taught to the attention judge gone. HELD: a label is refused by name
@@ -82,7 +82,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   const queue = new Map();      // row key → the rowView it was queued with
   const flying = new Set();     // row keys whose call is in flight (a read meanwhile must not queue them again — one call per row)
   let inFlight = 0, timer = null, lastWhy = null;
-  const stats = { calls: 0, memo: 0, refused: 0, scans: 0, implicit: 0 };
+  const stats = { calls: 0, memo: 0, refused: 0, scans: 0, implicit: 0, factsHalf: 0 };
   let scanFacts = null;   // the engine's facts of THIS scan (built once at its first call, dropped when the scan ends)
   let learnedAt = -Infinity;
   // lane attention-policy: the owner's readout — "today: judged N · M needed you" (the local day, counted where a verdict lands)
@@ -156,7 +156,7 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
 
   /** The rows a read built: queue the candidates (cheap — no I/O here; the drain runs after a short delay). */
   function note(views) {
-    if (!decision || !on()) return 0;
+    if (!decision || !on()) { try { factsOff(); } catch { } return 0; }   // B-0f37 follow (r5106 (1)): the judge off keeps no facts map
     const t = now();
     learn(t);
     let n = 0;
@@ -209,7 +209,9 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
   }
   async function judgeOne(queued) {
     // B-0f37: the facts current FIRST (a wait, never a paid call), then the row and its facts read in one synchronous run
-    { const w = factsReady(); if (w) await w; }
+    // r5106 (2): a map the engine knows is HALF (its walks kept meeting whole-map touches) is never read as current — the row is not
+    // judged now (no paid call; a later read queues it again, and its wait walks the map again)
+    { const w = factsReady(); if (w && (await w) === 'half') { stats.factsHalf++; return; } }
     // THE ROW AS IT IS NOW, asked again right before the call: a row queued by an earlier read may since have been
     // handed to an agent, answered by the owner or labeled (the census caught a hand-over landing between the two)
     const v = typeof viewNow === 'function' ? viewNow(queued.key) : queued;
