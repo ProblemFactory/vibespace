@@ -129,6 +129,20 @@ export const driverArgs = (...switches) => {
   if (!r.ok) throw new Error(`driverArgs: ${r.error}`);
   return r.args;
 };
+/** DOOR (a) (B-8695's follow, 主开发 r4974 (1)): THE HOME a suite hands a REAL driver (a child's HOME, a keeper's homeDir) holds the
+ *  driver's line from its FIRST launch: `<home>/.agent-browser/config.json` with `args` = driverArgs(CHROME_QUIET, ...args) (DRIVER_NAMES
+ *  among them) beside the keys handed (`config`). The driver reads that file when no config is named, and the keeper builds every
+ *  launch config FROM it with its args kept (src/server/browser-keeper.js machineConfigFile), so the product's own launches carry it
+ *  too — the product's own switches after it, untouched. Only into a home under a temp root (a suite's own scratch): a real home is
+ *  refused by name. → the home. scripts/chrome-store-census.mjs homeCensus + test-architecture §47g: a real-driver suite's home with
+ *  no such config is red. */
+export function driverHome(home, { args = [], config = {} } = {}) {
+  const r = resolveFs(home) || path.resolve(String(home || '')), roots = [...TMP_ROOTS, os.tmpdir()].map((t) => resolveFs(t) || t);
+  if (!home || !HV.tempRootOf(r, roots)) throw new Error(`driverHome: ${home} is under no temp root — the driver's line is written only into a suite's own scratch home`);
+  fs.mkdirSync(path.join(home, '.agent-browser'), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(home, '.agent-browser', 'config.json'), JSON.stringify({ ...config, args: driverArgs(CHROME_QUIET, ...args) }));
+  return home;
+}
 // B-8695 (主开发 r4611 / r4612): THE ATTACH ROAD's OWN CHROME. A keeper wired with a real display keeper starts stock Chrome ITSELF
 // (src/browser-attach.js launchRoad → src/server/browser-attach-launch.js spawnChrome) with the product's own argv: the driver's line
 // (driverArgs) never reaches it, and the egress probe read its network service speaking to the vendor (row 912). That road finds its
@@ -424,41 +438,79 @@ const isDriverShim = (p) => { try { const fd = fs.openSync(p, 'r'); try { const 
  *  test-browser-live-fit, test-browser-profiles-ui; test-browser-live uses them when there), and a suite's own home — re-homed, or
  *  a row's scratch — has none. The driver documents NO variable for that folder (agent-browser.dev/configuration: only
  *  AGENT_BROWSER_EXECUTABLE_PATH, «Custom browser executable path», ONE executable — the suites list builds), so THE SAME LAW AS THE
- *  DOOR: the folder VS_AGENT_BROWSER_BROWSERS names (as handed; the driver's layout, chrome-<version>/chrome) is linked as
- *  <home>/.agent-browser/browsers (placeBrowsers: quiet when it is already that folder, caught, the link left with the home); named and not a folder is none, said by name; with no name, none — never found, never fetched.
+ *  DOOR: the folder VS_AGENT_BROWSER_BROWSERS names (as handed; the driver's layout, chrome-<version>/chrome) reaches the suite at
+ *  <home>/.agent-browser/browsers — since B-8695's follow (主开发 r4974 (2)) as the HARNESS's builds over it (placeBrowsers below),
+ *  never a link of it; named and not a folder is none, said by name; with no name, none — never found, never fetched.
  *  PURE over its probe (`isDir`). */
 export function browsersDoor({ named = '', isDir = () => false } = {}) {
   if (!named) return { path: null, named: false };
   return named.startsWith('/') && isDir(named) ? { path: named, named: true } : { path: null, named: true, why: `${DRIVER.browsersEnv} names ${named}: no folder of installed browsers there` };
 }
 const isDirAt = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
-/** places the named folder as <home>/.agent-browser/browsers → null (no name) | { at, target } | { at: null, why[, same] }. QUIET when
- *  what stands there already IS the named folder (a child of a named run, a sibling that placed it first — between this one's look and
- *  its link too: EEXIST is «there already»); one that is another folder is never covered, said; a home that cannot take the link is
- *  none, said by the variable's name — never a stack trace (r2825). THE LINK STAYS (r2825 (3), the choice said): a re-homed home is
- *  removed whole at exit (the link, never its target — rmSync follows no link), and a left-alone home is the RUNNER's (a box row's
- *  own scratch, removed with its row, r2203): nothing takes it back, so a suite sharing that home never loses it mid-run. */
+/** DOOR (b) (B-8695's follow, 主开发 r4974 (2)): THE DRIVER's OWN LAUNCH meets the harness's Chrome program through the driver's OWN
+ *  lookup. agent-browser 0.38.2, when no executable is named (the product names one only for a build a person chose), takes the Chrome
+ *  of ITS CACHE first — cli/src/native/cdp/chrome.rs find_chrome → cli/src/install.rs find_installed_chrome: `<home>/.agent-browser/
+ *  browsers`, the entries whose name starts with «chrome-», the highest name first, in each `chrome` else `chrome-linux64/chrome`
+ *  (DRIVER_CACHE) — and only then `which google-chrome`. A box row names that cache (VS_AGENT_BROWSER_BROWSERS), so a program on the
+ *  PATH was never reached there: the probe row 1024's driver-launched Chromes ran with no names rule. So the cache a suite's home
+ *  holds is THE HARNESS's: a folder of that home's own, one build folder per build of the named folder, its `chrome` the harness's
+ *  Chrome program (chromeNamesProgramText) over that build's REAL binary BY ITS REAL PATH — the names rule first, the driver's argv
+ *  after it whole; exec keeps the pid and the real path, so Chrome finds its own files and the product's build list
+ *  (src/browser-builds.js, `chrome-<version>/chrome`, an executable file) reads the same versions. THE BOUNDS (r4974 (2)): the named
+ *  folder is only READ (listed, resolved) — nothing is written into, renamed in or linked over it; the builds are made only in a home
+ *  under a temp root (the re-home's own, or a left-alone suite's row scratch: r2203) — a real home is refused by name. A stamp
+ *  (BROWSERS_STAMP: the form, the named folder's real path, the builds) tells «placed there already by a sibling of this run» from
+ *  another folder, which is never covered. The folder stays with its home, as the link did (r2825 (3)). → null (no name) |
+ *  { at, target, builds } | { at: null, why[, same] }. test-home-verdict judges it through the import; its RED control is the
+ *  release's link (the driver's lookup then finds the build's real binary: no rule). */
+export const DRIVER_CACHE = Object.freeze({ rel: ['.agent-browser', 'browsers'], prefix: 'chrome-', binaries: Object.freeze(['chrome', 'chrome-linux64/chrome']) });
+export const BROWSERS_STAMP = '.vs-browsers.json', BROWSERS_FORM = 'vs-browsers-1';
+const existsAt = (p) => { try { fs.statSync(p); return true; } catch { return false; } };
+/** the driver's own pick in a cache folder (its rule, DRIVER_CACHE) → the binary's path | null — PURE over `list` / `exists` */
+export function driverCachedChrome(dir, { list = (d) => { try { return fs.readdirSync(d); } catch { return []; } }, exists = existsAt } = {}) {
+  for (const e of list(dir).filter((n) => n.startsWith(DRIVER_CACHE.prefix)).sort().reverse()) for (const bn of DRIVER_CACHE.binaries) { const f = path.join(dir, e, bn); if (exists(f)) return f; }
+  return null;
+}
 function placeBrowsers(home, me) {
   const b = browsersDoor({ named: HANDED[DRIVER.browsersEnv], isDir: isDirAt });
   if (!b.named) return null;
   const none = (why) => { process.stderr.write(`[scratch] ${me}: ${why} — its installed-browser legs cannot run\n`); return Object.freeze({ at: null, why }); };
   if (!b.path) return none(b.why);
   let real = b.path; try { real = fs.realpathSync(b.path); } catch { }
-  const parent = path.join(home, '.agent-browser'), at = path.join(parent, 'browsers');
+  const roots = [...TMP_ROOTS, os.tmpdir()].map((t) => resolveFs(t) || t), homeAt = resolveFs(home) || path.resolve(home);
+  if (!HV.tempRootOf(homeAt, roots)) return none(`${DRIVER.browsersEnv} names ${b.path}: ${home} is under no temp root — the harness's builds are placed only in a scratch home, never a real one`);
+  // THE PLAN, read from the named folder (never written): each build whose binary the driver would take, by its real path
+  let names = []; try { names = fs.readdirSync(real); } catch { }
+  const builds = [];
+  for (const e of names.filter((n) => n.startsWith(DRIVER_CACHE.prefix)).sort()) for (const bn of DRIVER_CACHE.binaries) {
+    const f = path.join(real, e, bn); if (!existsAt(f)) continue;
+    let rb = f; try { rb = fs.realpathSync(f); } catch { }
+    builds.push({ name: e, real: rb }); break;
+  }
+  if (!builds.length) return none(`${DRIVER.browsersEnv} names ${b.path}: no build there holds a Chrome the driver would take (${DRIVER_CACHE.prefix}*/${DRIVER_CACHE.binaries.join(' or ')})`);
+  const parent = path.join(home, ...DRIVER_CACHE.rel.slice(0, -1)), at = path.join(home, ...DRIVER_CACHE.rel);
   const stands = () => { try { fs.lstatSync(at); return true; } catch { return false; } };
   const thereAlready = () => {
-    let same = false; try { same = fs.realpathSync(at) === real; } catch { }
-    if (same) return Object.freeze({ at: null, why: 'the named folder is there already', same: true });
+    let st = null; try { st = JSON.parse(fs.readFileSync(path.join(at, BROWSERS_STAMP), 'utf8')); } catch { }
+    if (st && st.form === BROWSERS_FORM && st.named === real) return Object.freeze({ at: null, why: 'the named builds are placed there already', same: true });
     process.stderr.write(`[scratch] ${me}: ${at} is there already — ${DRIVER.browsersEnv} left unplaced\n`);
     return Object.freeze({ at: null, why: `${at} is there already` });
   };
   if (stands()) return thereAlready();
-  try { fs.mkdirSync(parent, { recursive: true }); fs.symlinkSync(real, at); }
-  catch (e) {
-    if (e && e.code === 'EEXIST' && stands()) return thereAlready();   // placed by another between the look and the link
-    return none(`${DRIVER.browsersEnv} names ${b.path}: ${at} cannot take it (${(e && (e.code || e.message)) || 'refused'})`);
+  const rule = chromeNames();
+  let tmp = null;
+  try {
+    fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
+    tmp = fs.mkdtempSync(path.join(parent, '.browsers-'));
+    for (const x of builds) { const d = path.join(tmp, x.name); fs.mkdirSync(d, { mode: 0o700 }); fs.writeFileSync(path.join(d, 'chrome'), chromeNamesProgramText(x.real, rule), { mode: 0o700 }); }
+    fs.writeFileSync(path.join(tmp, BROWSERS_STAMP), JSON.stringify({ form: BROWSERS_FORM, named: real, builds: builds.map((x) => x.name), pid: process.pid }));
+    fs.renameSync(tmp, at); tmp = null;   // whole or not at all: a sibling never reads a half-made cache
+  } catch (e) {
+    if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } }
+    if (e && ['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR'].includes(e.code) && stands()) return thereAlready();   // placed by another between the look and the rename
+    return none(`${DRIVER.browsersEnv} names ${b.path}: ${at} cannot take it (the harness's builds: ${(e && (e.code || e.message)) || 'refused'})`);
   }
-  return Object.freeze({ at, target: real });
+  return Object.freeze({ at, target: real, builds: Object.freeze(builds.map((x) => x.name)) });
 }
 export const makeResolver = HL.makeResolver;
 export const resolveFs = HL.resolveFs;

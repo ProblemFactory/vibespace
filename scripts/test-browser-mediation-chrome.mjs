@@ -100,7 +100,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';   // lane browser-login: ⑩'s fixture passwords, built at run time
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, CHROME_STORE, CHROME_QUIET, driverArgs } from './scratch.mjs';
+import { scratch, freePort, CHROME_STORE, CHROME_QUIET, driverArgs, driverHome } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // a picture is of the page in front (r1125)
@@ -931,6 +931,7 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
     const KR = scratch('mc4'); fs.rmSync(KR, { recursive: true, force: true });
     const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x');
     for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    driverHome(KH);   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch
     const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
     const quiet = { log() { }, warn() { }, error() { } };
     const KA4 = 'bk-00006b01', KB4 = 'bk-00006b02', KC4 = 'bk-00006b03', KD4 = 'bk-00006b04';

@@ -38,7 +38,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, chromeNamesProgram } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, chromeNamesProgram, driverHome } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 // the suite's own copy of its WHOLE output (VIBESPACE_XPIC_LOG=<file>): ci.mjs keeps a GREEN suite's output nowhere, and the hotfix's
@@ -164,6 +164,7 @@ const ORIGIN = `http://127.0.0.1:${CP}`;
 
 const D = path.join(ROOT, 'w'); const INST = path.join(D, 'i'), HOME = path.join(D, 'h'), XDG = path.join(D, 'x'), BIN = path.join(D, 'b'), ENVS = path.join(D, 'e'), CWD = path.join(D, 'c');
 for (const d of [INST, HOME, BIN, ENVS, CWD]) fs.mkdirSync(d, { recursive: true });
+driverHome(HOME);   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch (the scratch hub's keeper builds its launch config from it)
 fs.mkdirSync(XDG, { recursive: true, mode: 0o700 });
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.cpSync(path.join(REPO, f), path.join(INST, f), { recursive: true });
 fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(INST, 'node_modules'));

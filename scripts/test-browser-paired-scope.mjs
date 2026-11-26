@@ -29,7 +29,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, CHROME_QUIET, CHROME_STORE, endDaemonsAndWait, DRIVER } from './scratch.mjs';
+import { scratch, freePort, CHROME_QUIET, CHROME_STORE, endDaemonsAndWait, DRIVER, driverHome } from './scratch.mjs';
 import { agentdBundle } from './agentd-bundle.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -118,6 +118,7 @@ const { DeviceManager } = require('../src/agentd/client.js');
 // root (its ~/.agent-browser) — handed to its daemon at the FIRST dial only, then this process's own PATH / HOME are put back (a later
 // leg never inherits them; a re-dial joins the running daemon, it spawns none)
 const DEVICE_HOME = path.join(ROOT, 'device-home'); fs.mkdirSync(DEVICE_HOME, { recursive: true, mode: 0o700 });
+driverHome(DEVICE_HOME);   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch (the device's browser-serve starts the driver here)
 const withDeviceEnv = async (fn) => { const keep = { PATH: process.env.PATH, HOME: process.env.HOME }; process.env.PATH = `${path.dirname(REAL_AB)}:${keep.PATH || ''}`; process.env.HOME = DEVICE_HOME; try { return await fn(); } finally { process.env.PATH = keep.PATH; process.env.HOME = keep.HOME; } };
 const dial = async () => { const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => { } }); dm.installLocal(); await dm.connect(); return dm; };
 current = await withDeviceEnv(dial);
@@ -245,6 +246,7 @@ ok(left1.code !== 0 && left1.code !== 'timeout' && left1.ms <= ANSWER_BOUND_MS +
 const K = require('../src/server/browser-keeper.js');
 const LIMITS = require('../src/keeper-limits.js');
 const KHOME = path.join(ROOT, 'khome'); fs.mkdirSync(KHOME, { recursive: true, mode: 0o700 });
+driverHome(KHOME);   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch
 const k = K.create({ dataDir: path.join(ROOT, 'kdata'), homeDir: KHOME, env: () => ({ PATH: `${path.dirname(REAL_AB)}:${BASE_ENV.PATH || ''}`, HOME: KHOME }), broadcast: () => { }, serverSetting: () => undefined, serverNotice: () => { },
   getTelemetry: () => null, liveKeys: () => new Set(), limits: { ...LIMITS, CONCURRENT_CAP: 4 }, log: { log() { }, warn() { }, error() { } }, tickMs: 3600e3, install: false, access, hostKnown: (h) => access.hostKnown(h), mediator: med });
 const KA = 'bk-0000a7a1', KB = 'bk-0000b7b1';

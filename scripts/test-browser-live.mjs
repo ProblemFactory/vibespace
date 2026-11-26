@@ -101,7 +101,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET, driverArgs, chromeNamesProgram } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, CHROME_QUIET, driverArgs, chromeNamesProgram, driverHome } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { gitEnvFrom } from './git-env.mjs';
@@ -200,7 +200,7 @@ async function legAttach() {
   const B9 = require('../src/browser-profiles.js');
   const R9 = path.join(ROOT, 'b1'); const SB = scratch('b1s'); // the socket root must stay short (≤ 103-byte socket paths)
   for (const d of [R9, SB, path.join(R9, 'home'), path.join(R9, 'xdg'), path.join(R9, 'data'), path.join(R9, 'desk')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
-  const env = { ...envBase, HOME: path.join(R9, 'home'), XDG_RUNTIME_DIR: path.join(R9, 'xdg') };
+  const env = { ...envBase, HOME: driverHome(path.join(R9, 'home')), XDG_RUNTIME_DIR: path.join(R9, 'xdg') };   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch
   for (const k of ['DBUS_SESSION_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY']) delete env[k]; // never the owner's bus or display
   const PNG = process.env.VIBESPACE_B1_PNG_DIR || null; if (PNG) fs.mkdirSync(PNG, { recursive: true });
   const hidden = { log() { }, warn() { }, error() { } };
@@ -364,6 +364,7 @@ async function legSharedFreeze() {
   const express = require('express');
   const RT = path.join(ROOT, 'freeze'), KH = path.join(RT, 'h'), KXD = path.join(RT, 'x'), CWD = path.join(RT, 'cwd');
   for (const d of [path.join(KH, '.agent-browser'), KXD, CWD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  driverHome(KH);   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch
   const env = { ...envBase, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const HOLD = 8000; // the page's own hold (a heavy page's script; the measurement used 20 s)
   const holds = new Set();
@@ -629,6 +630,7 @@ async function legTypedKinds() {
   const express = require('express');
   const RT = path.join(ROOT, 'typed'), KH = path.join(RT, 'h'), KXD = path.join(RT, 'x'), CWD = path.join(RT, 'cwd'), CTL = path.join(RT, 'ctl');
   for (const d of [path.join(KH, '.agent-browser'), KXD, CWD, CTL]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  driverHome(KH);   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch
   const env = { ...envBase, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const pages = http.createServer((req, res) => { res.setHeader('content-type', 'text/html; charset=utf-8'); res.setHeader('cache-control', 'no-store'); res.end(TYPED_FORM); });
   await new Promise((r) => pages.listen(0, '127.0.0.1', r));
@@ -1643,14 +1645,14 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     const K = require('../src/server/browser-keeper.js');
     const D = path.join(ROOT, 'real-norecord'); fs.mkdirSync(path.join(D, 'sock'), { recursive: true, mode: 0o700 }); fs.mkdirSync(path.join(D, 'data'), { recursive: true });
     const env = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) env[k] = v;
-    env.HOME = path.join(D, 'home'); fs.mkdirSync(env.HOME, { recursive: true }); // never the user's ~/.agent-browser
+    const H4a = driverHome(path.join(D, 'home')); env.HOME = H4a; // never the user's ~/.agent-browser; B-8695 follow (r4974 (1)): the driver's line in this home from its first launch
     const ns = 'vs-bk-' + crypto.randomBytes(4).toString('hex');
     const pairs = [`AGENT_BROWSER_SESSION=${ns}`, `AGENT_BROWSER_NAMESPACE=${ns}`, `AGENT_BROWSER_SOCKET_DIR=${path.join(D, 'sock')}`, 'AGENT_BROWSER_IDLE_TIMEOUT_MS=60000'];
     const rt = F.createBrowserRuntime({ env, log: null });
     const underD = () => { const out = []; for (const pid of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) { try { if (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(path.join(D, 'sock'))) out.push(Number(pid)); } catch { } } return out; };
     const reap = () => { for (const pid of underD()) { try { process.kill(pid, 'SIGTERM'); } catch { } } };
     try {
-      const keeper = K.create({ dataDir: path.join(D, 'data'), homeDir: path.join(D, 'home'), env: () => env, runtime: rt, facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3 });
+      const keeper = K.create({ dataDir: path.join(D, 'data'), homeDir: H4a, env: () => env, runtime: rt, facts: F.createBrowserFacts({ env }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3 });
       const v = await keeper.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: ns, envPairs: pairs });
       await sleep(500);
       const info = await rt.info(null, { extraEnv: S.pairsToEnv(pairs) });
@@ -1690,14 +1692,14 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     const run = async (Kmod, tag, pairIdle = 900000) => {
       const D = path.join(ROOT, 'real-r2-' + tag);
       for (const d of ['sock', 'data', 'home']) fs.mkdirSync(path.join(D, d), { recursive: true, mode: 0o700 });
-      const env = { ...envBase, HOME: path.join(D, 'home') }; // never the user's ~/.agent-browser
+      const env = { ...envBase, HOME: driverHome(path.join(D, 'home')) }; // never the user's ~/.agent-browser; B-8695 follow (r4974 (1)): the driver's line in this home from its first launch (probe row 1024's three temporary-profile Chromes were this leg's)
       const calls = [];
       const { execFile } = require('child_process');
       const rt = F.createBrowserRuntime({ cmd: realBin, env, execFileImpl: (bin, args, opts, cb) => { const c = { args: args.join(' '), begin: Date.now(), end: null, out: '' }; calls.push(c); return execFile(bin, args, opts, (err, so, se) => { c.end = Date.now(); c.out = String(so || ''); cb(err, so, se); }); } });
       const KEY = 'bk-' + crypto.randomBytes(4).toString('hex');
       const pairs = [...B.browserEnvFor({ browserKey: KEY, variant: B.VARIANTS.N, idleMs: pairIdle }), `AGENT_BROWSER_SOCKET_DIR=${path.join(D, 'sock')}`];
       const underD = () => { const out = []; for (const pid of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) { try { const e = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); if (!e.includes(path.join(D, 'sock'))) continue; let exe = ''; try { exe = path.basename(fs.readlinkSync(`/proc/${pid}/exe`)); } catch { } out.push({ pid: Number(pid), exe, idle: (e.split('\0').find((x) => x.startsWith('AGENT_BROWSER_IDLE_TIMEOUT_MS=')) || '=').split('=')[1] || null }); } catch { } } return out; };
-      const keeper = Kmod.create({ dataDir: path.join(D, 'data'), homeDir: path.join(D, 'home'), env: () => env, runtime: rt, facts: F.createBrowserFacts({ env }), serverSetting: (k) => ({ 'browser.idleTimeoutMs': 600000 })[k], log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, liveKeys: () => new Set([KEY]) });
+      const keeper = Kmod.create({ dataDir: path.join(D, 'data'), homeDir: env.HOME, env: () => env, runtime: rt, facts: F.createBrowserFacts({ env }), serverSetting: (k) => ({ 'browser.idleTimeoutMs': 600000 })[k], log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, liveKeys: () => new Set([KEY]) });
       try {
         const pend = keeper.ensureEphemeral({ browserKey: KEY, sessionId: 'sess-r2', envPairs: pairs, sessionName: 'r2' });
         await until(() => calls.some((c) => /^open /.test(c.args)), 15000, 10);

@@ -20,7 +20,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, endRootedProcesses, driverArgs } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, driverArgs, driverHome } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 import { mutantCopies } from './mutant-copy.mjs';
 // 2.369.200 integration (lane hooks-create H5 × this suite): with no desktop and Xvfb on the keeper's PATH an UNSET window
@@ -77,6 +77,7 @@ async function world(tag, { Kmod = Kk, ephemeral = false, second = false } = {})
   const W = path.join(ROOT, tag);
   const KH = path.join(W, 'h'), KXD = path.join(W, 'x');
   for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  driverHome(KH);   // B-8695 follow (r4974 (1)): the driver's line in this home from its first launch
   const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
   const KEY = tag === 'ctl' ? 'bk-0000c7a1' : tag === 'eph' ? 'bk-0000e7a1' : 'bk-0000d7a1';
   const live = new Set([KEY]);

@@ -948,27 +948,53 @@ console.log(JSON.stringify({ rehomed: !!S.REHOMED, left: S.DRIVER_LEFT_ALONE || 
   // <home>/.agent-browser/browsers — where the driver and the suites (os.homedir()) look: in the re-home's own home, or in a left-alone
   // suite's home only where none is there (the link stays with that home: r2825 (3)); no name, none; a name that is no folder, none, said by name; one
   // already there is never covered. RED CONTROL: the release's scratch (no such door) — the suite's home has none (row 401's skip)
-  const BR = fake(path.join(LA, 'builds/chrome-151.0.7922.34/chrome'), REAL_BODY), BR_DIR = path.dirname(path.dirname(BR));
-  const PROBE_BR = (url) => `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
+  // B-8695's follow (主开发 r4974 (2)): the named build's «real» binary PRINTS its argv, one word a line, so the harness's program run
+  // over it shows what reaches it; the named folder's whole tree is read before any scene and judged unchanged after the last
+  const ARGV_BODY = '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done\n';
+  const BR = fake(path.join(LA, 'builds/chrome-151.0.7922.34/chrome'), ARGV_BODY), BR_DIR = path.dirname(path.dirname(BR));
+  const snapTree = (root) => { const out = []; const walk = (d) => { for (const n of fs.readdirSync(d).sort()) { const f = path.join(d, n), st = fs.lstatSync(f); out.push([path.relative(root, f), st.isDirectory() ? 'd' : st.isSymbolicLink() ? 'l' : 'f', st.size, st.mtimeMs, st.mode]); if (st.isDirectory()) walk(f); } }; walk(root); return JSON.stringify(out); };
+  const SNAP_BR = snapTree(BR_DIR);
+  const PROBE_BR = (url) => `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { execFileSync } from 'node:child_process';
 const S = await import(${JSON.stringify(url)});
 const at = path.join(os.homedir(), '.agent-browser', 'browsers');
 let real = null; try { real = fs.realpathSync(at); } catch { }
 let builds = null; try { builds = fs.readdirSync(at); } catch { }
-console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, builds, placed: (S.REHOMED ? S.REHOMED.browsers : S.DRIVER_LEFT_ALONE && S.DRIVER_LEFT_ALONE.browsers) || null }));`;
+let link = null; try { link = fs.lstatSync(at).isSymbolicLink(); } catch { }
+let stamp = null; try { stamp = JSON.parse(fs.readFileSync(path.join(at, S.BROWSERS_STAMP), 'utf8')); } catch { }
+const pick = typeof S.driverCachedChrome === 'function' ? S.driverCachedChrome(at) : null;   // the DRIVER's own lookup in that cache
+let prog = null; try { prog = pick && fs.readFileSync(pick, 'utf8').slice(0, 800); } catch { }
+let ran = null; try { ran = pick && execFileSync(pick, ['--x=1', 'a, b'], { encoding: 'utf8', timeout: 10000 }); } catch (e) { ran = 'threw ' + (e && e.message); }
+console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, builds, link, stamp, pick, prog, ran, placed: (S.REHOMED ? S.REHOMED.browsers : S.DRIVER_LEFT_ALONE && S.DRIVER_LEFT_ALONE.browsers) || null }));`;
   const brHome = (tag) => { const h = path.join(LA, `br-${tag}`); fs.mkdirSync(h, { recursive: true }); return h; };
   const BH = { left: brHome('left'), none: brHome('none'), gone: brHome('gone'), there: brHome('there'), cut: brHome('cut') };
   fs.mkdirSync(path.join(BH.there, '.agent-browser', 'browsers', 'chrome-1.0.0.0'), { recursive: true });   // a folder already there: never covered
   const brEnv = (h, extra = {}) => ({ HOME: h, PATH: LA_PATH, LANG: 'C.UTF-8', ...extra });
   const DB = scene('browsers', () => ({ env: { VS_AGENT_BROWSER_BROWSERS: BR_DIR } }));   // a stand-in the re-home takes
   const BR_CUT = mutant('brcut', 'function placeBrowsers(home, me) {\n', 'function placeBrowsers(home, me) {\n  return null;\n');
+  // r4974 (2) RED: the release's shape — the named folder LINKED as the cache (the driver then takes the build's real binary, no rule)
+  const BR_LINK = mutant('brlink', '    fs.renameSync(tmp, at); tmp = null;   // whole or not at all: a sibling never reads a half-made cache\n', '    fs.rmSync(tmp, { recursive: true, force: true }); tmp = null; fs.symlinkSync(real, at);   // the release\'s link\n');
+  // r4974 (2): a home under NO temp root is refused by name and nothing is made there (planted: the re-home hands one)
+  const NOT_TEMP_HOME = '/home/vs-hv-not-a-temp-home';
+  const BR_REAL = mutant('brreal', '  const browsers = placeBrowsers(home, me);   // the driver\'s installed browsers the run NAMES (r2777), in this home of its own\n', `  const browsers = placeBrowsers(${JSON.stringify(NOT_TEMP_HOME)}, me);   // planted: a home under no temp root\n`);
   const goBR = (tag, env, url = SCRATCH_URL, dir = DIR, o = { clean: true }) => start(path.join(dir, `test-hv-drvbr-${tag}.mjs`), env, PROBE_BR(url), o);
   const [b1, b2, b3, b4, b5, bc] = await Promise.all([goBR('left', brEnv(BH.left, { VS_AGENT_BROWSER_BROWSERS: BR_DIR })), goBR('rehomed', { ...DB.s.env, ...DB.env }, SCRATCH_URL, DIR, {}),
     goBR('noname', brEnv(BH.none)), goBR('gone', brEnv(BH.gone, { VS_AGENT_BROWSER_BROWSERS: path.join(LA, 'no-builds') })),
     goBR('there', brEnv(BH.there, { VS_AGENT_BROWSER_BROWSERS: BR_DIR })), goBR('cut', brEnv(BH.cut, { VS_AGENT_BROWSER_BROWSERS: BR_DIR }), BR_CUT.url, path.dirname(BR_CUT.probe))]);
+  const BHL = brHome('link');
+  const [bl, br] = await Promise.all([goBR('link', brEnv(BHL, { VS_AGENT_BROWSER_BROWSERS: BR_DIR }), BR_LINK.url, path.dirname(BR_LINK.probe)), goBR('realhome', { ...DB.s.env, ...DB.env }, BR_REAL.url, path.dirname(BR_REAL.probe), {})]);
   const BUILD = 'chrome-151.0.7922.34', realOf = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
-  ok(!!b1.j && b1.j.rehomed === false && b1.j.real === BR_DIR && (b1.j.builds || []).includes(BUILD) && !!b1.j.placed && b1.j.placed.at === path.join(BH.left, '.agent-browser', 'browsers') && realOf(path.join(BH.left, '.agent-browser', 'browsers')) === BR_DIR
-    && !!b2.j && b2.j.rehomed === true && b2.j.real === BR_DIR && (b2.j.builds || []).includes(BUILD) && b2.j.home !== DB.s.home,
-    'THE INSTALLED BROWSERS (r2777): the folder VS_AGENT_BROWSER_BROWSERS names reaches the suite at <home>/.agent-browser/browsers — a left-alone suite\'s home (the link stays with it after the exit) and the re-home\'s own — where the driver and the suites look', { b1: b1.j, b2: b2.j, err: (b1.err + b2.err).slice(-300) });
+  const AT_LEFT = path.join(BH.left, '.agent-browser', 'browsers'), NAMED_REAL = realOf(BR_DIR);
+  ok(!!b1.j && b1.j.rehomed === false && b1.j.link === false && (b1.j.builds || []).includes(BUILD) && !!b1.j.placed && b1.j.placed.at === AT_LEFT && !!b1.j.stamp && b1.j.stamp.named === NAMED_REAL && fs.lstatSync(AT_LEFT).isDirectory()
+    && !!b2.j && b2.j.rehomed === true && b2.j.link === false && (b2.j.builds || []).includes(BUILD) && b2.j.home !== DB.s.home && !!b2.j.stamp && b2.j.stamp.named === NAMED_REAL,
+    'THE INSTALLED BROWSERS (r2777; door (b) of r4974): every build of the folder VS_AGENT_BROWSER_BROWSERS names reaches the suite at <home>/.agent-browser/browsers — a left-alone suite\'s home (the folder stays with it after the exit) and the re-home\'s own — as a folder of THAT home\'s own, never a link of the named one, stamped with the named folder', { b1: b1.j, b2: b2.j, err: (b1.err + b2.err).slice(-300) });
+  const RULE_B = SM.chromeNames(), progOk = (j) => !!j && typeof j.prog === 'string' && j.prog.includes(SM.NAMES_PROGRAM_MARK) && j.prog.includes(`exec '${realOf(BR)}' `);
+  const ranIs = (j, words) => !!j && typeof j.ran === 'string' && JSON.stringify(j.ran.split('\n')) === JSON.stringify([...words, '']);
+  ok([b1, b2].every((r) => !!r.j && r.j.pick === path.join(r.j.home, '.agent-browser', 'browsers', BUILD, 'chrome') && progOk(r.j) && ranIs(r.j, [RULE_B, '--x=1', 'a, b'])),
+    'DOOR (b) (r4974 (2)): the DRIVER\'s own lookup in that cache (agent-browser 0.38.2: the highest «chrome-» build, its `chrome` first) finds the harness\'s Chrome program over the build\'s REAL binary by its real path — run, it hands the names rule FIRST and every argument after it whole (a comma inside one kept)', { b1: b1.j && { pick: b1.j.pick, ran: b1.j.ran }, b2: b2.j && { pick: b2.j.pick, ran: b2.j.ran } });
+  ok(BR_LINK.present && !!bl.j && bl.j.link === true && realOf(bl.j.pick || '') === realOf(BR) && !progOk(bl.j) && ranIs(bl.j, ['--x=1', 'a, b']),
+    'RED CONTROL (r4974 (2)): the release\'s link of the named folder as the cache — the driver\'s own lookup then takes the build\'s REAL binary, and no names rule reaches it (probe row 1024\'s driver-launched Chromes, made at will)', { j: bl.j && { link: bl.j.link, pick: bl.j.pick, ran: bl.j.ran }, err: bl.err.slice(-300) });
+  ok(BR_REAL.present && !!br.j && !!br.j.placed && br.j.placed.at === null && /under no temp root/.test(br.j.placed.why || '') && /under no temp root/.test(br.err) && !fs.existsSync(NOT_TEMP_HOME),
+    'A HOME UNDER NO TEMP ROOT is refused by name (r4974 (2): the harness\'s builds go only into a suite\'s own scratch home): none placed, said on stderr, nothing made there', { placed: br.j && br.j.placed, err: br.err.slice(-300) });
   ok(!!b3.j && b3.j.real === null && b3.j.placed === null && !fs.existsSync(path.join(BH.none, '.agent-browser'))
     && !!b4.j && b4.j.real === null && !!b4.j.placed && b4.j.placed.at === null && /VS_AGENT_BROWSER_BROWSERS names .*no-builds: no folder of installed browsers there/.test(b4.err),
     'NO NAME, NO BROWSERS: nothing is placed; a NAMED folder that is not there is none, said by name on stderr — never found, never fetched', { b3: b3.j, b4: b4.j, err: b4.err.slice(-300) });
@@ -983,25 +1009,42 @@ console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, bui
   // (no test-* / dbg-* name, outside scripts/) with both names and a throwaway home gets NOTHING
   ok(fs.existsSync(BR) && (fs.readdirSync(BR_DIR) || []).join() === BUILD, 'THE NAMED BUILDS FOLDER IS WHOLE after the left-alone child\'s exit and the re-homed child\'s (its home removed whole): no remover follows the link', fs.readdirSync(BR_DIR));
   const BH2 = { same: brHome('same'), file: brHome('file'), race: brHome('race'), shared: brHome('shared'), notsuite: brHome('notsuite') };
-  fs.mkdirSync(path.join(BH2.same, '.agent-browser')); fs.symlinkSync(BR_DIR, path.join(BH2.same, '.agent-browser', 'browsers'));   // a named run's link, already there
   fs.writeFileSync(path.join(BH2.file, '.agent-browser'), 'a file where the folder would go\n');   // a home that cannot take the link
-  fs.mkdirSync(path.join(BH2.race, '.agent-browser')); fs.symlinkSync(BR_DIR, path.join(BH2.race, '.agent-browser', 'browsers'));   // placed «between» (the copy never looks)
   const BR_RACE = mutant('brrace', '  if (stands()) return thereAlready();\n', '  if (false) return thereAlready();\n');   // its look misses: the link meets EEXIST
   const named = (h) => brEnv(h, { VS_AGENT_BROWSER_BROWSERS: BR_DIR });
+  // a sibling's placement, made first by a run of this harness (the stamped folder); the release's LINK of the named folder: another's
+  const BH3 = { oldlink: brHome('oldlink') };
+  fs.mkdirSync(path.join(BH3.oldlink, '.agent-browser')); fs.symlinkSync(BR_DIR, path.join(BH3.oldlink, '.agent-browser', 'browsers'));
+  const [p0, p1] = await Promise.all([goBR('same0', named(BH2.same)), goBR('race0', named(BH2.race))]);
   const NOTSUITE = path.join(LA, 'probe-hv-notsuite.mjs');   // no suite name, outside the scripts folder: REHOMES is false
   const [q1, q2, q3, s1, s2, s3, ns] = await Promise.all([goBR('same', named(BH2.same)), goBR('file', named(BH2.file)), goBR('race', named(BH2.race), BR_RACE.url, path.dirname(BR_RACE.probe)),
     goBR('shared1', named(BH2.shared)), goBR('shared2', named(BH2.shared)), goBR('shared3', named(BH2.shared)),
     start(NOTSUITE, brEnv(BH2.notsuite, { VS_AGENT_BROWSER_BROWSERS: BR_DIR, VS_AGENT_BROWSER_BIN: LA_WANT }), PROBE_LA(SCRATCH_URL), { clean: true })]);
-  ok(!!q1.j && q1.j.real === BR_DIR && !!q1.j.placed && q1.j.placed.same === true && !/is there already|cannot take/.test(q1.err),
-    'QUIET when what stands there IS the named folder (a child of a named run, a sibling that placed it first): no line on stderr, the builds read', { j: q1.j, err: q1.err.slice(-300) });
+  const ol = await goBR('oldlink', named(BH3.oldlink));
+  const ours = (j) => !!j && j.link === false && !!j.stamp && j.stamp.named === NAMED_REAL && (j.builds || []).includes(BUILD);
+  ok(ours(p0 && p0.j) && ours(q1.j) && !!q1.j.placed && q1.j.placed.same === true && !/is there already|cannot take/.test(q1.err),
+    'QUIET when what stands there IS this harness\'s placement of the named builds (a child of a named run, a sibling that placed it first: its stamp names the same folder): no line on stderr, the builds read', { j: q1.j, err: q1.err.slice(-300) });
+  ok(!!ol.j && ol.j.link === true && !!ol.j.placed && ol.j.placed.at === null && !ol.j.placed.same && /is there already/.test(ol.err) && fs.lstatSync(path.join(BH3.oldlink, '.agent-browser', 'browsers')).isSymbolicLink(),
+    'the RELEASE\'s link of the named folder, already in a home, is ANOTHER\'s folder: never covered, said by name, left as it stood', { j: ol.j && { link: ol.j.link, placed: ol.j.placed }, err: ol.err.slice(-300) });
   ok(!!q2.j && q2.j.real === null && !!q2.j.placed && q2.j.placed.at === null && /VS_AGENT_BROWSER_BROWSERS names .*cannot take it/.test(q2.err) && !/\n\s+at /.test(q2.err) && q2.status === 0,
     'a home that CANNOT take the link (its .agent-browser a file): none, said by the variable\'s name — never a stack trace, the suite goes on', { j: q2.j, err: q2.err.slice(-300), status: q2.status });
-  ok(BR_RACE.present && !!q3.j && q3.j.real === BR_DIR && !!q3.j.placed && q3.j.placed.same === true && q3.status === 0 && !/\n\s+at /.test(q3.err),
-    'a link placed by ANOTHER between the look and the link (a copy whose look misses meets EEXIST) is «there already»: quiet, read, no crash', { j: q3.j, err: q3.err.slice(-300) });
-  ok([s1, s2, s3].every((r) => !!r.j && r.j.real === BR_DIR && (r.j.builds || []).includes(BUILD) && r.status === 0) && realOf(path.join(BH2.shared, '.agent-browser', 'browsers')) === BR_DIR && fs.existsSync(BR),
-    'THREE SUITES ON ONE SHARED HOME at once: each reads the builds, none crashes, and after every exit the link still stands on the folder — none takes it from another (the link stays with the home)', { s: [s1.j, s2.j, s3.j], err: (s1.err + s2.err + s3.err).slice(-400) });
+  ok(BR_RACE.present && ours(p1 && p1.j) && ours(q3.j) && !!q3.j.placed && q3.j.placed.same === true && q3.status === 0 && !/\n\s+at /.test(q3.err),
+    'a placement made by ANOTHER between the look and the rename (a copy whose look misses meets the folder there) is «there already»: quiet, read, no crash', { j: q3.j, err: q3.err.slice(-300) });
+  const AT_SHARED = path.join(BH2.shared, '.agent-browser', 'browsers');
+  ok([s1, s2, s3].every((r) => ours(r.j) && r.status === 0) && fs.lstatSync(AT_SHARED).isDirectory() && JSON.parse(fs.readFileSync(path.join(AT_SHARED, SM.BROWSERS_STAMP), 'utf8')).named === NAMED_REAL && fs.existsSync(BR),
+    'THREE SUITES ON ONE SHARED HOME at once: each reads the builds, none crashes, and after every exit the placement still stands with its stamp — none takes it from another (it stays with the home)', { s: [s1.j, s2.j, s3.j], err: (s1.err + s2.err + s3.err).slice(-400) });
   ok(!!ns.j && ns.j.rehomed === false && ns.j.left === null && ns.j.path === LA_PATH && !fs.existsSync(path.join(BH2.notsuite, '.agent-browser')),
     'A SCRIPT THAT IS NOT A SUITE (no test-* / dbg-* name, outside scripts/) with a throwaway home and BOTH names set gets nothing: no door, the PATH as handed, the home untouched — never the tier runner', { j: ns.j, err: ns.err.slice(-300) });
+  ok(snapTree(BR_DIR) === SNAP_BR,
+    'THE NAMED FOLDER IS ONLY READ (r4974 (2)): after every scene above — placed, quiet, raced, shared, refused, linked — its whole tree is as it was: no file written, renamed, linked or changed in it', { before: SNAP_BR.slice(0, 300), after: snapTree(BR_DIR).slice(0, 300) });
+  // DOOR (a) (r4974 (1)): scratch.mjs driverHome writes a home's driver line — the quiet set through driverArgs (DRIVER_NAMES among it)
+  // beside the keys handed — and refuses a home under no temp root by name, nothing written there
+  const DHH = path.join(DIR, 'dh-home'); SM.driverHome(DHH, { config: { headed: false }, args: ['--no-sandbox'] });
+  let dh = null; try { dh = JSON.parse(fs.readFileSync(path.join(DHH, '.agent-browser/config.json'), 'utf8')); } catch { }   // one segment: a read, never a driver line (§47e)
+  let dhRefused = null; try { SM.driverHome(NOT_TEMP_HOME); } catch (e) { dhRefused = String(e && e.message); }
+  const dhWords = dh ? String(dh.args).split(',') : [];
+  ok(!!dh && dh.headed === false && dh.args === SM.driverArgs(SM.CHROME_QUIET, '--no-sandbox') && dhWords.includes(SM.DRIVER_NAMES) && dhWords.includes('--no-sandbox') && SM.CHROME_QUIET.filter((x) => x !== SM.chromeNames()).every((x) => dhWords.includes(x)) && /under no temp root/.test(dhRefused || '') && !fs.existsSync(NOT_TEMP_HOME),
+    'DOOR (a) (r4974 (1)): driverHome writes <home>/.agent-browser/config.json — every quiet switch and DRIVER_NAMES through driverArgs, the keys handed beside them — and a home under no temp root is refused by name, nothing made there', { dh, dhRefused });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

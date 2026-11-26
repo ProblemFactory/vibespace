@@ -2315,6 +2315,31 @@ await section(async () => {
       JSON.stringify({ ran, withProg, without, mark: MARK47f }));
     ok(after === realChrome && throwsOf47f(() => TXT('chrome', rule)),
       '§47f CONTROLS: the program put AFTER the real Chrome on the PATH is not the one found (the seam is the order); a real Chrome named by no absolute path is refused', JSON.stringify({ after }));
+    // §47g B-8695's follow (主开发 r4974 (1)): A REAL-DRIVER RUN's HOME HOLDS THE DRIVER's LINE. Every home a real-driver suite hands
+    // (an object's HOME: / homeDir:, or an assignment of one) resolves, in its own scope, to a home whose .agent-browser/config.json
+    // the suite writes, a scratch.mjs driverHome, or an object naming its config outright; every other is a HOME_ROWS row, each read.
+    // RED: test-browser-live ④'s F2 home as at the release; PLANTED: the same name in another function with no config, an assignment
+    // of a bare home and the process's own home are open; a written config, an explicit one, an alias and an object's field are not
+    const h47g = CS.homeCensus(process.cwd(), { acorn });
+    const LIVE47g = fs.readFileSync('scripts/test-browser-live.mjs', 'utf8'), F2_47g = "HOME: driverHome(path.join(D, 'home')) }";
+    const rel47g = CS.homeCensus(process.cwd(), { acorn, patch: { 'scripts/test-browser-live.mjs': LIVE47g.split(F2_47g).join("HOME: path.join(D, 'home') }") } });
+    const PL47g = ["import { driverHome } from './scratch.mjs';", '// a real-driver file: DRIVER' + '.skip',   // assembled: this file is no real-driver file of its own
+      "function a() { const KH = path.join(R, 'a'); fs.writeFileSync(path.join(KH, '.agent-browser', 'config." + "json'), '{}'); return { HOME: KH }; }",   // split: this file writes no driver line (§47e)
+      "function b() { const KH = path.join(R, 'b'); return { HOME: KH }; }",
+      "function c() { const H = path.join(R, 'c'); return { HOME: H, AGENT_BROWSER_CONFIG: '/x.json' }; }",
+      "function d() { const H = driverHome(path.join(R, 'd')); const env = { HOME: H }; return { homeDir: env.HOME }; }",
+      "function e() { const env = {}; env.HOME = path.join(R, 'e'); return env; }",
+      'const f = { HOME: process.env.HOME };'].join('\n') + '\n';
+    const pl47g = CS.homeCensus(process.cwd(), { acorn, extra: { 'scripts/test-planted-homes.mjs': PL47g } });
+    const plOpen47g = pl47g.open.filter((o) => o.file === 'scripts/test-planted-homes.mjs').map((o) => o.line);
+    const row47g = Object.keys(CS.HOME_ROWS)[0];
+    const stale47g = CS.homeCensus(process.cwd(), { acorn, rows: { ...CS.HOME_ROWS, 'scripts/test-planted-gone.mjs': { n: 0, why: 'a planted row' } } });
+    const moved47g = row47g ? CS.homeCensus(process.cwd(), { acorn, rows: { ...CS.HOME_ROWS, [row47g]: { ...CS.HOME_ROWS[row47g], n: CS.HOME_ROWS[row47g].n + 1 } } }) : { moved: [] };
+    ok(h47g.open.length === 0 && h47g.moved.length === 0 && h47g.unpinned.length === 0 && h47g.stale.length === 0 && h47g.unparsed.length === 0 && LIVE47g.split(F2_47g).length === 2
+      && rel47g.open.some((o) => o.file === 'scripts/test-browser-live.mjs') && JSON.stringify(plOpen47g) === '[4,7,8]'
+      && stale47g.stale.includes('scripts/test-planted-gone.mjs') && moved47g.moved.length === 1 && moved47g.moved[0].file === row47g,
+      `§47g every home a real-driver suite hands its driver or keeper holds the driver's line from its first launch (${h47g.sites} homes in ${h47g.files} files: ${h47g.configured} configured; apart, no driver launch: ${h47g.versionReads} version reads, ${h47g.chromeSpawns} Chromes the suites spawn, ${h47g.attaches} attaches; the rest HOME_ROWS, ${Object.keys(CS.HOME_ROWS).length} files, each read); RED: test-browser-live ④'s F2 home as at the release is open; PLANTED: the same name in another function with no config, an assignment of a bare home and the process's own home are open, a written config, an explicit one, an alias and a field are not; a stale row and a moved count are red`,
+      JSON.stringify({ open: h47g.open.slice(0, 12), moved: h47g.moved, unpinned: h47g.unpinned, stale: h47g.stale, unparsed: h47g.unparsed, rel: rel47g.open.filter((o) => o.file === 'scripts/test-browser-live.mjs').slice(0, 3), plOpen47g }));
   }
   const L = (src) => CS.launchesOf(src, { acorn });
   const planted = L("import { scratch } from './scratch.mjs';\nconst c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0']);\n");
