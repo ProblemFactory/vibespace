@@ -485,6 +485,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
     const job = jm ? jm.jobs.get(q.jobId) : null;
     const lines = (op, extra = {}) => { for (const e of q.entries) audit({ op, job: q.jobId, entry: refOf(q.jobId, e).ref, ...extra, askId: id }); };   // ONE line an entry, the card's one askId
     const over = (code) => { const keys = keysOf(q); settle(q, 'ask-over'); lines('over'); return named(code, keys ? { key: keys } : {}); };
+    if (!job && jm && typeof jm.lockHeldWords === 'function' && jm.lockHeldWords()) return { ok: false, code: 'records-unread', words: jm.lockHeldWords() };   // B-f276 (s1126, r5017): the lock HELD — the engine could not look for the job: the hold by name, the card stays open, nothing settled or written
     // B-f276 family unit 2 (the census's J2): jobs.json HELD — its memory is EMPTY because it is unread, never «the job is over»: the
     // press is refused by name and the card stays open (it is judged once the records read)
     if (!job && jm && jm._unread && jm._unread.store) return { ok: false, code: 'records-unread', words: typeof jm.unreadWords === 'function' ? jm.unreadWords() : 'the Background Work records cannot be read right now' };
@@ -623,6 +624,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   function revokeAll(jobId, { by = 'user' } = {}) {
     const j = String(jobId || '');
     const job = jm && JOB_RE.test(j) ? jm.jobs.get(j) : null;
+    if (!job && jm && typeof jm.lockHeldWords === 'function' && jm.lockHeldWords()) return { ok: false, code: 'records-unread', words: jm.lockHeldWords() };   // B-f276 (s1126, r5017): the lock HELD — the engine could not look for the job: the hold by name, the card stays open, nothing settled or written
     // B-f276 family unit 2 (round wgbjnr750): jobs.json HELD — the job is unknown, never «a bad revoke»: refused by name, nothing taken back
     if (!job && jm && jm._unread && jm._unread.store) return { ok: false, code: 'records-unread', words: typeof jm.unreadWords === 'function' ? jm.unreadWords('a job\'s approvals cannot be taken back while the job records cannot be read') : 'the Background Work records cannot be read right now' };   // its own words: the press's line above is a control's anchor
     if (!job) return named('bad_revoke');

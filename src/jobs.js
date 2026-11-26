@@ -4178,7 +4178,8 @@ class JobManager {
     if (exit) this._finalizeRun(job, run, exit, 'boot');
     else if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); }
     else { const sample = run && !run.endedAt ? this._ctlJson(job, run, 'pressure.json') : null; this._bootNoExit(job, run, M.bootEndCause(sample, sample ? this._cgroupNow() : null)); }
-    this._bootReplayOne(job);   // r4994: and the boot's REPLAY of it, once (a wanted service up again, an update window's task run) — its words true
+    try { this._bootReplayOne(job); }   // r4994: and the boot's REPLAY of it, once (a wanted service up again, an update window's task run) — its words true
+    catch (e) { if (e && e.code === 'memory-budget' && job.kind === 'service' && job.state === 'down' && job.desiredUp) this._budgetLadder(job, e); else this.d.log(`[jobs] the late replay of ${job.id} (its exit record read at last) refused:`, e.message); }   // r5017 (lens two): as _retryRefused — never out of the sweep's pass
   }
   /** THE LADDER's inputs (lane jobs-memory-bound): the owner's setting `jobs.memoryMb` (undefined while never set) and the
    *  cluster's default (the chart's env) — read live, per run */
