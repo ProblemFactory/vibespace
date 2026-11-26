@@ -399,7 +399,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     main.append(label);
     const meta = [];
     if (row.detail && row.store !== 'automation' && !(hasWords(row) && row.note && row.note.startsWith(row.detail))) meta.push(WORDED.has(row.store) ? t(row.detail) : row.detail);   // lane vault-entry-description r2: a free entry's detail IS its description — said once, on its own line   // an integration's field label is an English key (the registry's); an automation key's why is its 显示's help, never a line beside it (the owner's confusion note)
-    meta.push(kindWord(row.kind));
+    if (!row.file) meta.push(kindWord(row.kind));   // lane lg-vault-file (主开发 r5043 (e)): a FILE's row says its kind ONCE — on its file line (fileExtras: SSH key · Certificate or PEM · File)
     if (!(row.store === 'secrets' && row.size === 'unknown') && !row.file) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
     if (row.createdAt) meta.push(t('saved {when}', { when: when(row.createdAt, { words: true }) }));
     if (Array.isArray(row.hosts) && row.hosts.length) meta.push(t('for {hosts}', { hosts: row.hosts.join(', ') }));   // lane vault-use-grants: the hosts its request named

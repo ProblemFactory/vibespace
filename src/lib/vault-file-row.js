@@ -49,7 +49,7 @@ export function fileExtras(row) {
     chips.push(c);
   }
   const dl = btn(t('Download'), 'vw-btn vw-file-download');   // the window's own door style (src/lib/vault-window.js btnEl)
-  dl.title = t('Save the file on this device — asks for the second password; the file is never shown on the page');
+  dl.title = t('Save the file on this device — asks for the second password unless this page verified it in the last 5 minutes; the file is never shown on the page');   // 主开发 r5043 (a): the reveal door's own 5-minute window per page, as for a text value
   dl.onclick = () => downloadFile(row, dl);
   return { box, chips, doors: [dl] };
 }
@@ -112,7 +112,7 @@ function filePickEl({ onPick = () => {}, onError = () => {} } = {}) {
     if (file.size > FILE_MAX) { onPick(null); label.textContent = t('or drop it here'); onError(fileRefusalWords('file_too_large')); return; }
     if (file.size < FILE_MIN) { onPick(null); label.textContent = t('or drop it here'); onError(fileRefusalWords(file.size ? 'file_too_small' : 'file_empty')); return; }
     const rd = new FileReader();
-    rd.onerror = () => onError(t('That file could not be read'));
+    rd.onerror = () => { onPick(null); label.textContent = t('or drop it here'); onError(t('That file could not be read')); };   // r5043 (d): the pick and its label cleared, as the too-large branch does
     rd.onload = () => {
       const u8 = new Uint8Array(rd.result);
       let s = '';

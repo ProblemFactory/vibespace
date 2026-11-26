@@ -12414,7 +12414,7 @@ export default {
   "Certificate or PEM": "证书或 PEM",
   "Needs its passphrase": "需要口令",
   "A private key protected by its passphrase, stored as it is — a command run with it needs that passphrase, and VibeSpace never types it": "受口令保护的私钥，按原样保存——用它运行的命令需要这个口令，VibeSpace 从不替你输入",
-  "Save the file on this device — asks for the second password; the file is never shown on the page": "把文件保存到这台设备——会要求输入第二密码；文件内容从不在页面上显示",
+  "Save the file on this device — asks for the second password unless this page verified it in the last 5 minutes; the file is never shown on the page": "在此设备上保存文件——除非此页面在最近 5 分钟内已验证过，否则会要求输入第二密码；文件内容从不在页面上显示",
   "The vault keeps files up to 1 MB — this one is bigger": "保险库只保存 1 MB 以内的文件——这个文件更大",
   "That file is empty": "这个文件是空的",
   "A file under 8 bytes cannot be kept as a file — add it as a key or password instead": "小于 8 字节的文件不能作为文件保存——请作为密钥或密码添加",

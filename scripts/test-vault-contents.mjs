@@ -315,7 +315,7 @@ console.log('㉑ THE RUN FIT ON THE FILE ROW (主开发 r4378 (a)(b), B-0830 U1b
   const mkEl = (tag) => { const e = { tagName: String(tag || 'div').toUpperCase(), children: [], listeners: {}, dataset: {}, style: {}, className: '', textContent: '', hidden: false, type: '', title: '', disabled: false,
     classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, append(...c) { this.children.push(...c); }, appendChild(c) { this.children.push(c); return c; }, addEventListener: noop, removeEventListener: noop,
     setAttribute: noop, getAttribute: () => null, querySelector: () => null, querySelectorAll: () => [], closest: () => null, focus: noop, remove: noop }; return e; };
-  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };   // never navigator: Node 22's is a getter
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener, removeEventListener: globalThis.removeEventListener };   // never navigator: Node 22's is a getter
   globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
   globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
   globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl('body'), head: mkEl('head') };
@@ -343,6 +343,80 @@ console.log('㉑ THE RUN FIT ON THE FILE ROW (主开发 r4378 (a)(b), B-0830 U1b
   const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const words = ['Too large for a run ({lines} lines, {size})', 'Too large for a run ({size})', 'Larger than a run can carry ({max} in all)'];
   ok(words.every((w) => ZH.includes(JSON.stringify(w).slice(0, -1)) && JA.includes(JSON.stringify(w).slice(0, -1))), 'its words in zh and ja beside the English (the row\'s two forms and the door\'s note)');
+}
+
+console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an octet-stream SAVE through a download link, a name with markup is drawn as text, a read error clears the pick — each with its red copy');
+{
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const JDIR = scratch('vault-contents-row'); fs.mkdirSync(JDIR, { recursive: true });
+  const STUBS = {
+    './i18n.js': 'export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);',
+    './utils.js': 'const P = () => globalThis.__vfr; export const createModalShell = () => ({ dialog: null, body: null, close() {}, raised: true }); export const fetchJson = async () => ({ ok: false }); export const showToast = (m, o) => P().toast(String(m), o);',
+    './vault-reveal.js': 'const P = () => globalThis.__vfr; export const revealValue = (id) => P().reveal(id); export const revealWords = () => "refused";',
+    './vault-paste-box.js': 'export const wordsRefusalWords = () => "";',
+  };
+  const SRC = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8');
+  let nb = 0;
+  const rowOf = async (src) => {   // the module bundled from TEXT (its imports stubbed; ../vault-file.js the real one), with its two inner functions exported for the legs only
+    const out = await esbuild.build({ stdin: { contents: src + '\nexport { downloadFile, filePickEl };\n', resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'vault-file-row.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+      plugins: [{ name: 'vfr', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|vault-reveal|vault-paste-box)\.js$/ }, (a) => ({ path: a.path, namespace: 'vfr' })); b.onLoad({ filter: /.*/, namespace: 'vfr' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    const f = path.join(JDIR, `row-${++nb}.cjs`); fs.writeFileSync(f, out.outputFiles[0].text); return require(f);
+  };
+  const cut = (src, from, to, what) => { if (src.split(from).length !== 2) throw new Error(`the anchor of the control «${what}» is not in the source once`); return src.replace(from, to); };
+  // a small DOM that RECORDS: every innerHTML write, every element's text, the anchors clicked, the Blobs made
+  const noop = () => {};
+  const made = [], html = [], clicks = [], blobs = [];
+  const mkEl = (tag) => { const e = { tagName: String(tag || 'div').toUpperCase(), children: [], dataset: {}, style: {}, className: '', textContent: '', hidden: false, type: '', title: '', disabled: false, value: '', href: '', download: undefined, target: '',
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, append(...c) { this.children.push(...c); }, appendChild(c) { this.children.push(c); return c; }, addEventListener: noop, removeEventListener: noop,
+    setAttribute: noop, getAttribute: () => null, querySelector: () => null, querySelectorAll: () => [], closest: () => null, focus: noop, remove: noop, click() { clicks.push({ tag: this.tagName, href: this.href, download: this.download, target: this.target }); if (typeof this.onclick === 'function') this.onclick(); } };
+    Object.defineProperty(e, 'innerHTML', { set(v) { html.push(String(v)); }, get() { return ''; } }); made.push(e); return e; };
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, FileReader: globalThis.FileReader, addEventListener: globalThis.addEventListener, removeEventListener: globalThis.removeEventListener, __vfr: globalThis.__vfr };
+  const keepURL = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  globalThis.window = globalThis; globalThis.addEventListener = noop; globalThis.removeEventListener = noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl('body'), head: mkEl('head') };
+  URL.createObjectURL = (b) => { blobs.push(b); return 'blob:vfr-' + blobs.length; }; URL.revokeObjectURL = noop;
+  const toasts = [];
+  try {
+    const MARK = '<img src=x onerror=alert(1)>.pem', BYTES = Buffer.from('-----BEGIN CERTIFICATE-----\nMIIB' + crypto.randomBytes(24).toString('base64') + '\n-----END CERTIFICATE-----\n');
+    globalThis.__vfr = { toast: (m) => toasts.push(m), reveal: async () => ({ ok: true, bytes: BYTES.toString('base64'), file: { name: MARK } }) };
+    const row = { id: 'secrets/keyfile:0a0b0c0d0e/file', file: { name: MARK, size: BYTES.length, kind: 'pem', lines: 3, forRun: { fits: true, size: BYTES.length, lines: 3, max: 24576 } } };
+    const pressDownload = async (M) => { made.length = 0; html.length = 0; clicks.length = 0; blobs.length = 0; toasts.length = 0; await M.downloadFile(row, null); const b = blobs[0]; const text = made.map((e) => e.textContent).join('\n') + toasts.join('\n'); return { type: b && b.type, size: b && b.size, click: clicks[0] || null, html: html.length, toasts: toasts.slice(), bytesShown: text.includes(BYTES.toString().slice(30, 50)) || text.includes(BYTES.toString('base64').slice(10, 40)) }; };
+    const REAL = await rowOf(SRC);
+    const d0 = await pressDownload(REAL);
+    ok(d0.type === 'application/octet-stream' && d0.size === BYTES.length && d0.click && d0.click.tag === 'A' && d0.click.download === MARK && /^blob:/.test(d0.click.href) && !d0.bytesShown,
+      '(b) Download SAVES the bytes: a Blob of type application/octet-stream behind a link WITH the download attribute (the file\'s name), pressed once — no byte in any element\'s text or toast', d0);
+    const asHtml = await pressDownload(await rowOf(cut(SRC, "new Blob([bytes], { type: 'application/octet-stream' })", "new Blob([bytes], { type: 'text/html' })", 'the file\'s own type')));
+    ok(asHtml.type !== 'application/octet-stream', `red control: «the Blob typed text/html» is RED (type ${asHtml.type})`, asHtml);
+    const noAttr = await pressDownload(await rowOf(cut(SRC, "a.href = url; a.download = (r.file && r.file.name) || (row.file && row.file.name) || 'file'; a.hidden = true;", "a.href = url; a.target = '_blank'; a.hidden = true;", 'the link without the download attribute')));
+    ok(!(noAttr.click && noAttr.click.download), 'red control: «the blob opened without the download attribute» is RED (the link would show it in a tab)', noAttr.click);
+    // (c) a name with markup lands as TEXT on the row (and in the download's link and toast above); red: a copy that draws it as HTML
+    const drawRow = (M) => { made.length = 0; html.length = 0; const x = M.fileExtras(row); const name = x.box && x.box.children.find((c) => c.className === 'vw-file-name'); return { text: name && name.textContent, html: html.slice() }; };
+    const r0 = drawRow(REAL);
+    ok(r0.text === MARK && r0.html.length === 0 && d0.html === 0 && d0.toasts.join(' ').includes(MARK), '(c) a file name holding markup is drawn as TEXT on its row, in the download link and its toast — nothing is written as HTML', r0);
+    const asMarkup = drawRow(await rowOf(cut(SRC, "box.append(mk('span', 'vw-file-name', f.name), ", "box.append(Object.assign(mk('span', 'vw-file-name'), { innerHTML: f.name }), ", 'the name drawn as HTML')));
+    ok(asMarkup.html.includes(MARK), 'red control: «the name drawn as HTML» is RED (the markup reached innerHTML)', asMarkup);
+    // (d) a READ ERROR of the picked file clears the pick and its label (as the too-large branch does); red: the old branch
+    const readError = async (M) => {
+      globalThis.FileReader = class { readAsArrayBuffer() { setTimeout(() => this.onerror && this.onerror(new Error('a read error')), 0); } };
+      const picks = [], errs = []; const box = M.filePickEl({ onPick: (p) => picks.push(p), onError: (w) => errs.push(w) });
+      const label = box.el.children.find((c) => c.className === 'vault-file-picked'); label.textContent = 'old.pem · 3 KB';   // a pick before it
+      const input = box.el.children.find((c) => c.className === 'vault-file-input'); input.files = [{ name: 'new.pem', size: 64 }]; input.onchange();
+      for (let n = 0; n < 200 && !errs.some(Boolean); n++) await new Promise((r) => setTimeout(r, 5));
+      return { lastPick: picks.length ? picks[picks.length - 1] : 'none', label: label.textContent, err: errs.filter(Boolean).pop() || null };
+    };
+    const e0 = await readError(REAL);
+    ok(e0.lastPick === null && e0.label === 'or drop it here' && /could not be read/.test(e0.err || ''), '(d) a read error clears the pick (onPick(null)) and its label, and says it — no old file is left to save', e0);
+    const e1 = await readError(await rowOf(cut(SRC, "rd.onerror = () => { onPick(null); label.textContent = t('or drop it here'); onError(t('That file could not be read')); };", "rd.onerror = () => onError(t('That file could not be read'));", 'the old read-error branch')));
+    ok(e1.lastPick !== null || e1.label !== 'or drop it here', 'red control: «the old read-error branch» keeps the old pick\'s label (a save would send the earlier file)', e1);
+  } finally {
+    for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
+    URL.createObjectURL = keepURL.create; URL.revokeObjectURL = keepURL.revoke;
+  }
+  // (a) the Download door's words say the reveal's own rule; (e) a file's row says its kind once (the window's kind word is not added)
+  const FRS = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8'), VWS = fs.readFileSync(path.join(REPO, 'src/lib/vault-window.js'), 'utf8');
+  ok(FRS.includes("asks for the second password unless this page verified it in the last 5 minutes") && /if \(!row\.file\) meta\.push\(kindWord\(row\.kind\)\);/.test(VWS),
+    '(a) the Download door says it asks for the second password unless this page verified it in the last 5 minutes; (e) a file row\'s kind is said once, on its file line');
 }
 
 console.warn = warn0;

@@ -12413,7 +12413,7 @@ export default {
   "Certificate or PEM": "証明書または PEM",
   "Needs its passphrase": "パスフレーズが必要",
   "A private key protected by its passphrase, stored as it is — a command run with it needs that passphrase, and VibeSpace never types it": "パスフレーズで保護された秘密鍵をそのまま保存しています — これを使って実行するコマンドにはそのパスフレーズが必要で、VibeSpace が入力することはありません",
-  "Save the file on this device — asks for the second password; the file is never shown on the page": "このデバイスにファイルを保存します — 第二パスワードを求めます。ファイルの内容がページに表示されることはありません",
+  "Save the file on this device — asks for the second password unless this page verified it in the last 5 minutes; the file is never shown on the page": "このデバイスにファイルを保存します — このページで直近 5 分以内に確認済みでなければ 2 つ目のパスワードを求めます。ファイルの内容がページに表示されることはありません",
   "The vault keeps files up to 1 MB — this one is bigger": "保管庫に保存できるファイルは 1 MB までです — このファイルはそれより大きいです",
   "That file is empty": "このファイルは空です",
   "A file under 8 bytes cannot be kept as a file — add it as a key or password instead": "8 バイト未満のファイルはファイルとして保存できません — キーまたはパスワードとして追加してください",
