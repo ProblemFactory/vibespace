@@ -108,10 +108,12 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
     if (facts.size != null && out.length !== Number(facts.size)) { out.fill(0); throw err('file_damaged', 'the sealed file is not the one the entry names'); }   // the GCM tag under the entry's own key (the id its AAD) proved the bytes; the size is the box's
     return out;
   }
-  /** Overwrite the file's bytes in place and unlink it (never through a link). → (a promise of) true when a file was there. */
+  /** Overwrite the file's bytes in place and unlink it (never through a link). → (a promise of) true when a file was there and is
+   *  gone, 'absent' when the file system said by its name that it is not there (ENOENT), false when a look failed otherwise
+   *  (主开发 r4774 A 1: only true and 'absent' let an id leave the record's dropped list — a failed look prunes nothing) */
   async function shredPath(file) {
     let st;
-    try { st = await fsp.lstat(file); } catch { return false; }
+    try { st = await fsp.lstat(file); } catch (e) { return e && e.code === 'ENOENT' ? 'absent' : false; }
     if (st.isFile() && st.size > 0) {
       try {
         const fh = await fsp.open(file, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));
@@ -124,34 +126,41 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
         } finally { await fh.close(); }
       } catch (e) { said('a file being shredded could not be overwritten (it is unlinked below)')(e); }
     }
-    try { await fsp.unlink(file); } catch { return false; }
+    try { await fsp.unlink(file); } catch (e) { return e && e.code === 'ENOENT' ? 'absent' : false; }
     return true;
   }
-  /** → (a promise of) true when the sealed file of `id` was there and is gone. */
+  /** → (a promise of) true when the sealed file of `id` was there and is gone, 'absent' when it is not there by name, else false. */
   const shred = (id) => (VF.ID_RE.test(String(id)) ? shredPath(fileOf(id)) : Promise.resolve(false));
+  /** Is the sealed file of `id` on disk? → 'yes' | 'no' (ENOENT: the file system says so by its name) | 'unknown' (any other failure) */
+  const has = async (id) => { try { await fsp.lstat(fileOf(id)); return 'yes'; } catch (e) { return e && e.code === 'ENOENT' ? 'no' : 'unknown'; } };
   /** THE START's SWEEP (主开发 r4625, the MUST: NOTHING REMOVES A PERSON's FILE AT A START BECAUSE A RECORD IS SILENT ABOUT IT) — it
    *  shreds only (i) its own unfinished TEMP files past their age and (ii) a sealed file the record NAMES as dropped (`dropped`:
    *  a Set of ids or a function id → bool — a re-put and a drop write that name down in the same record write that stops naming
    *  the file, before its shred). A sealed file no entry names and no list drops is KEPT and counted. `live` = a Set of ids or
    *  a function id → bool, asked at the moment a file would go (the sweep runs beside puts): TRUE for a put in flight too; a temp
    *  file of another LIVE process newer than a minute is its put in flight (the vault.json sweep's rule, sweepStaleVaultTmp).
-   *  → (a promise of) { shredded, kept } */
+   *  → (a promise of) { shredded, kept, owed, done, top }: `kept` the sealed files no list drops, `owed` the dropped ones whose
+   *  shred failed (the next start takes them — never counted as unnamed), `done` the dropped ids shredded, `top` the highest
+   *  file id met on disk (主开发 r4774 A 3: a broken or missing counter mints past it) */
   async function sweep(live, { at = Date.now(), dropped = () => false } = {}) {
     const isLive = typeof live === 'function' ? live : (id) => !!(live && live.has(id));
     const isDropped = typeof dropped === 'function' ? dropped : (id) => !!(dropped && dropped.has(id));
     let names;
-    try { names = await listQ(); } catch { return { shredded: 0, kept: 0 }; }
-    let shredded = 0, kept = 0;
+    try { names = await listQ(); } catch { return { shredded: 0, kept: 0, owed: 0, done: [], top: -1 }; }
+    let shredded = 0, kept = 0, owed = 0, top = -1;
+    const done = [];
     for (const name of names) {   // round 4: each file is its OWN queued operation (a long sweep on a slow mount never holds the queue whole)
       const m = VFILE_RE.exec(name), tm = !m && TMP_RE.exec(name);
       if (!m && !tm) continue;
+      if (m) top = Math.max(top, parseInt(m[1], 16));
       if (m && isLive(m[1])) continue;
       if (m && !isDropped(m[1])) { kept++; continue; }
       let gone = false;
       try { gone = await sweepOneQ(name, m, tm, isLive, isDropped, at); } catch { /* stuck or gone: the next start sweeps */ }
-      if (gone) shredded++; else if (m && !isLive(m[1])) kept++;
+      if (gone === true) { shredded++; if (m) done.push(m[1]); } else if (gone === 'absent' && m) done.push(m[1]);
+      else if (m && !isLive(m[1])) { if (isDropped(m[1])) owed++; else kept++; }
     }
-    return { shredded, kept };
+    return { shredded, kept, owed, done, top };
   }
   /** One name of the sweep: asked again at its own turn (an entry may have been written, or the record gone, meanwhile), then shredded. */
   async function sweepOne(name, m, tm, isLive, isDropped, at) {
@@ -180,7 +189,7 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
     return p;
   };
   const listQ = one(() => fsp.readdir(DIR)), sweepOneQ = one(sweepOne);
-  return { dir: DIR, mintId, mintKey, write: one(write), read: one(read), shred: one(shred), sweep };
+  return { dir: DIR, mintId, mintKey, write: one(write), read: one(read), shred: one(shred), has: one(has), sweep };
 }
 
 module.exports = { create, MAGIC };

@@ -8,6 +8,7 @@
 //   ⑳ A FILE ENTRY — a run gets it as a 0600 file named for it, masked whole and line by line, never as text; the one scrubber;
 //      «as it is» set by the file road alone; the file figure (24 KB) and its refusal by name
 //   ㉑ THE CURE OF LINE 1043 — the checks after the read, the figure on the sum, no facts before the use, the give-back on the codes
+import crypto from 'node:crypto';   // the bound's ㉑ leg (主开发 r4774 A) builds a text value at run time (test-vault-run imports it at the top too)
 import fs from 'node:fs';
 import path from 'node:path';
 import { anchored } from './scratch.mjs';   // FIRST after node's own (§113)
@@ -295,23 +296,22 @@ console.log('㉑ THE CURE OF LINE 1043 (主开发 r4625): the checks after the r
   const c8 = { ...w.caller, conversationId: 'conv-8', sessionKey: 'claude:conv-8', name: 'Lane Eight', scope: 'webui-8' };
   const SMALL = fileOf(2048), REFO = 'vault://secrets/keyfile:6a6b6c6d6e/file', ARGSO = ['--file', 'K=' + REFO, '--', NODE, FILESHOW, '$VAULT_FILE{K}'];
   row('keyfile:6a6b6c6d6e', SMALL.length, 'Service chain', 'file', false);
-  const onceLeg = async (fault, doorOpts = null) => {
+  const onceLeg = async (fault, doorOpts = null, { mod = DOOR, entries = [REFO] } = {}) => {
     const wo = await world();
-    if (doorOpts) wo.door = wo.mk(DOOR, doorOpts);
+    if (doorOpts || mod !== DOOR) wo.door = wo.mk(mod, doorOpts || {});
     const put = await wo.vault.filePut('keyfile:6a6b6c6d6e', SMALL, { filename: 'svc.pem', prov: 'uploaded', label: 'Service chain' });
-    const q = wo.door.request({ caller: c8, entry: REFO, purpose: 'a run whose file read fails' });
-    wo.door.answerRequest(q.askId, { answer: 'once', reauthed: true, person: true });
+    for (const entry of entries) { const q = wo.door.request({ caller: c8, entry, purpose: 'a run whose file read fails' }); wo.door.answerRequest(q.askId, { answer: 'once', reauthed: true, person: true }); }
     const keepOpen = wo.vault.fileOpen;
     let r;
     try { r = await fault(wo, keepOpen); } finally { wo.vault.fileOpen = keepOpen; }
-    const back = [...wo.door._grants.values()].filter((g) => g.conv === c8.scope && g.once);
+    const back = [...wo.door._grants.values()].filter((g) => g.conv === c8.scope && g.once && !g.spent);
     const out = { put: put.ok, code: r.code, killed: !!r.killed, back: back.length, spent: back.some((g) => g.spent === true), ended: (wo.door.usesFor(c8).ended[0] || {}).endedBy || null, dirs: runDirs(wo).length };
     try { wo.door.closeAll && wo.door.closeAll(); } catch { }
     return out;
   };
-  const run8 = async (wo, extra = {}) => {   // a card, if one is drawn, is answered «once» (the request's grant may or may not admit without one)
+  const run8 = async (wo, extra = {}, args = ARGSO) => {   // a card, if one is drawn, is answered «once» (the request's grant may or may not admit without one)
     let settled = false;
-    const p = wo.door.run({ caller: c8, args: ARGSO, cwd: wo.work, ...extra }).then((r) => { settled = true; return r; });
+    const p = wo.door.run({ caller: c8, args, cwd: wo.work, ...extra }).then((r) => { settled = true; return r; });
     for (const t0 = Date.now(); !settled && Date.now() - t0 < 3000;) { const c = cardsOf(wo); if (c.length) { wo.door.answer(c[c.length - 1].action.askId, { answer: 'once' }); break; } await sleep(5); }
     return p;
   };
@@ -321,15 +321,25 @@ console.log('㉑ THE CURE OF LINE 1043 (主开发 r4625): the checks after the r
     ['caller_gone', async (wo) => { let opened = false; wo.vault.fileOpen = () => { opened = true; return new Promise(() => { }); }; const ac = new AbortController(); const p = run8(wo, { signal: ac.signal }); for (let n = 0; n < 400 && !opened; n++) await sleep(5); ac.abort(); return p; }],
     ['file_too_large_for_a_run', async (wo, keepOpen) => { wo.vault.fileOpen = async (name) => { wo.vault.fileOpen = keepOpen; await wo.vault.filePut('keyfile:6a6b6c6d6e', BIG, { filename: 'svc.pem', prov: 'uploaded', label: 'Service chain' }); return keepOpen(name); }; return run8(wo); }],
   ];
+  // the round's should (r4676 page): file_needs_file AFTER the read, with once-grants — the spec reads --file before --stdin, so the
+  // file's read re-puts the stdin's owner TEXT entry as a FILE under the same name; the stdin then carries a file's bytes
+  const flip2 = 'f2' + crypto.randomBytes(14).toString('hex');
+  row('secret:flip-two', flip2.length, 'Flip two', 'secret', false, flip2);
+  const REFT = 'vault://secrets/secret:flip-two/secret', ARGSN = ['--file', 'K=' + REFO, '--stdin', REFT, '--', NODE, FILESHOW, '$VAULT_FILE{K}'];
+  const needsFault = async (wo, keepOpen) => { wo.vault.fileOpen = async (name) => { wo.vault.fileOpen = keepOpen; await wo.vault.filePut('secret:flip-two', fileOf(2048), { filename: 'flip2.pem', prov: 'uploaded', label: 'Flip two' }); return keepOpen(name); }; return run8(wo, {}, ARGSN); };
   const gb = [];
   for (const [code, fault, opts] of FAULTS) { const x = await onceLeg(fault, opts || null); gb.push([code, x]); }
+  { const x = await onceLeg(needsFault, null, { entries: [REFO, REFT] }); gb.push(['file_needs_file', { ...x, back: x.back === 2 ? 1 : x.back }]); }   // its two once-grants (the file's and the text's) both come back
   console.log(`    judged (the once-grant per code): ${JSON.stringify(gb.map(([c, x]) => [c, x.code, x.back, x.spent, x.ended]))}`);
-  ok(gb.every(([c, x]) => x.put && x.code === c && !x.killed && x.back === 1 && !x.spent && x.dirs === 0), 'each new BURNED code, met with a ONCE-GRANT spent: nothing ran, and the once-grant is GIVEN BACK unspent (file_missing · file_unreadable · caller_gone before the spawn · file_too_large_for_a_run after the read)', gb);
+  ok(gb.every(([c, x]) => x.put && x.code === c && !x.killed && x.back === 1 && !x.spent && x.dirs === 0), 'each new BURNED code, met with a ONCE-GRANT spent: nothing ran, and the once-grant is GIVEN BACK unspent (file_missing · file_unreadable · caller_gone before the spawn · file_too_large_for_a_run and file_needs_file after the read)', gb);
   const lk = await onceLeg(async (wo) => { wo.vault.fileOpen = async () => { wo.vault.lock('agent'); return { ok: false, code: 'key-unreadable:vault_locked' }; }; return run8(wo); });
   ok(lk.put && lk.code === 'vault_locked' && lk.back === 0 && lk.ended === 'lock' && lk.dirs === 0, 'a lock in the file\'s read: vault_locked, nothing ran — its once-grant ENDS «lock» (never «used», never given back across a lock)', lk);
-  const keepBurned = M.load('src/server/vault-run-door.js', anchored(DSRC, ", 'file_needs_file', 'file_too_large_for_a_run']);", "]);", 'test-vault-run ㉑ the two codes not BURNED'), 'notburned');
+  const keepBurned = M.load('src/server/vault-run-door.js', anchored(DSRC, ", 'file_needs_file', 'file_too_large_for_a_run']);", ", 'file_needs_file']);", 'test-vault-run ㉑ file_too_large_for_a_run not BURNED'), 'notburned');
+  const noNeeds = M.load('src/server/vault-run-door.js', anchored(DSRC, ", 'file_needs_file', 'file_too_large_for_a_run']);", ", 'file_too_large_for_a_run']);", 'test-vault-run ㉑ file_needs_file not BURNED'), 'noneeds');
+  const nn = await onceLeg(needsFault, null, { mod: noNeeds, entries: [REFO, REFT] });
+  ok(nn.code === 'file_needs_file' && nn.back === 0, `red control: «file_needs_file not BURNED» ends both once-grants «used» for a run that never ran (${JSON.stringify(nn)})`, nn);
   const big8 = await (async () => { const wo = await world(); wo.door = wo.mk(keepBurned); await wo.vault.filePut('keyfile:6a6b6c6d6e', SMALL, { filename: 'svc.pem', prov: 'uploaded', label: 'Service chain' }); const q = wo.door.request({ caller: c8, entry: REFO, purpose: 'a run whose file grows' }); wo.door.answerRequest(q.askId, { answer: 'once', reauthed: true, person: true }); const keepOpen = wo.vault.fileOpen; wo.vault.fileOpen = async (name) => { wo.vault.fileOpen = keepOpen; await wo.vault.filePut('keyfile:6a6b6c6d6e', BIG, { filename: 'svc.pem', prov: 'uploaded', label: 'Service chain' }); return keepOpen(name); }; const r = await run8(wo); const back = [...wo.door._grants.values()].filter((g) => g.conv === c8.scope && g.once).length; try { wo.door.closeAll && wo.door.closeAll(); } catch { } return { code: r.code, back }; })();
-  ok(big8.code === 'file_too_large_for_a_run' && big8.back === 0, `red control: «the two codes not BURNED» ends the once-grant «used» for a run that never ran — nothing given back (${JSON.stringify(big8)})`, big8);
+  ok(big8.code === 'file_too_large_for_a_run' && big8.back === 0, `red control: «file_too_large_for_a_run not BURNED» ends the once-grant «used» for a run that never ran — nothing given back (${JSON.stringify(big8)})`, big8);
 }
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)
 try { fs.chmodSync(GHBIN, 0o755); } catch { }   // B-f1d3: GHBIN too

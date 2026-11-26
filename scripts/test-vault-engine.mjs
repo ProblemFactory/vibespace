@@ -1019,15 +1019,23 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     ok(!lost.ok && ['file_moved', 'entry_unknown'].includes(lost.code) && !('bytes' in lost), 'a read that loses to a drop ⇒ file_moved / entry_unknown, no byte — never file_damaged / file_missing', lost.code);
     v5.close();
   }
-  fs.writeFileSync(orphan, 'orphan');
-  const recText = fs.readFileSync(path.join(d, 'vault.json'), 'utf8');
-  fs.writeFileSync(path.join(d, 'vault.json'), '{ not a record');
-  const v3 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
-  await v3.filesSettled();
-  ok(fs.existsSync(orphan) && fs.existsSync(fA), 'a vault.json that cannot be read ⇒ NOTHING is swept (which files are live is unknown then)');
-  v3.close();
-  fs.writeFileSync(path.join(d, 'vault.json'), recText);
-  fs.rmSync(orphan, { force: true });
+  // the round's should (r4676 page): the read REFUSED at its call (a placed EIO — the store-read family's rule), with a file ON the
+  // dropped list: the record is HELD (record_unreadable), nothing is swept, the listed file stays. (Its red is structural: with the
+  // record unread there is no list to carry out — droppedOf(null) is empty — so no guard can be cut to make a start shred it.)
+  {
+    const recText = fs.readFileSync(path.join(d, 'vault.json'), 'utf8'), rec = JSON.parse(recText);
+    rec.filesDropped = [...(Array.isArray(rec.filesDropped) ? rec.filesDropped : []), 'abcdefabcd'];
+    fs.writeFileSync(path.join(d, 'vault.json'), JSON.stringify(rec, null, 2) + '\n'); fs.writeFileSync(orphan, 'a listed file');
+    const cfs = require('fs'), keepRead = cfs.readFileSync; let placed = 0;
+    cfs.readFileSync = function (f, ...a) { if (!placed && String(f) === path.join(d, 'vault.json')) { placed++; throw Object.assign(new Error('EIO: placed'), { code: 'EIO' }); } return keepRead.call(this, f, ...a); };
+    let v3 = null, st3 = null;
+    try { v3 = VE.create({ dataDir: d, kdf: CHEAP, log: quiet, idleTimer: false, register: false }); } finally { cfs.readFileSync = keepRead; }
+    await v3.filesSettled(); st3 = v3.state();
+    ok(placed === 1 && fs.existsSync(orphan) && fs.existsSync(fA), 'vault.json\'s read REFUSED at its call (a placed EIO) ⇒ the record is held, NOTHING is swept — a file the record lists as dropped stays (nothing at a start removes a file because a record is unread)', { placed, state: st3 });
+    v3.close();
+    fs.writeFileSync(path.join(d, 'vault.json'), recText);
+    fs.rmSync(orphan, { force: true });
+  }
   // 主开发 r4625 — THE MUST: A RECORD OLDER THAN THE FOLDER (vault.json restored from an earlier copy, which file_missing's own words
   // invite) names no file put after it: the next start KEEPS that file and says it; the right record put back, it opens again.
   // THE DROPPED LIST: a re-put and a drop name the old file dropped in the same record write that stops naming it (append-only); an
@@ -1062,43 +1070,141 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
     const releaseForm = MO.load('src/server/vault-engine.js', anchored(ESo, '    const r = await files.sweep(fileLive, { dropped: fileDropped });', '    const r = await files.sweep(fileLive, { dropped: (id) => !fileLive(id) });', 'test-vault-engine the release-form sweep'), 'releaseform');
     const olr = await olderLeg(releaseForm);
     ok(!olr.keptB && !olr.opens, 'red control: «the release-form sweep» (what the record does not name goes) SHREDS it — the right record put back, the file is gone for good', olr);
-    // the list: a re-put and a drop write the old id down in the same record write; append-only; a crash's instruction is carried out
+    // r4774 (A): THE FILE ID IS THE RECORD's OWN COUNTER, AND THE DROPPED LIST HOLDS ONLY THE INSTRUCTIONS NOT YET CARRIED OUT
+    const recOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'vault.json'), 'utf8'));
+    const mkE = (E, dir, extra = {}) => E.create({ dataDir: dir, kdf: CHEAP, log: quiet, idleTimer: false, register: false, ...extra });
     const dl = path.join(ROOT, 'file-dropped-list'); fs.mkdirSync(dl, { recursive: true });
-    const vl = VE.create({ dataDir: dl, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
+    const vl = mkE(VE, dl);
     await vl.setup(PW, {});
-    await vl.filePut('keyfile:0c2c3c4c5c', bin, { filename: 'a.bin', prov: 'uploaded' }); const id1 = vl.fileOf('keyfile:0c2c3c4c5c').id;
+    await vl.filePut('keyfile:0c2c3c4c5c', bin, { filename: 'a.bin', prov: 'uploaded' }); const id1 = vl.fileOf('keyfile:0c2c3c4c5c').id, seq1 = recOf(dl).fileSeq;
     await vl.filePut('keyfile:0c2c3c4c5c', Buffer.concat([bin, Buffer.from('2')]), { filename: 'a.bin', prov: 'uploaded' }); const id2 = vl.fileOf('keyfile:0c2c3c4c5c').id;
-    const afterRePut = JSON.parse(fs.readFileSync(path.join(dl, 'vault.json'), 'utf8')).filesDropped || [];
+    const afterRePut = recOf(dl);
+    ok(id1 === '0000000000' && seq1 === 1 && id2 === '0000000001' && afterRePut.fileSeq === 2 && (afterRePut.filesDropped || []).join() === id1,
+      'THE FILE ID IS THE RECORD\'s COUNTER (r4774 A): the first file 0000000000, the next 0000000001, fileSeq raised in the write that names each; a re-put names the old file DROPPED in that same write', { id1, id2, seq1, fileSeq: afterRePut.fileSeq, list: afterRePut.filesDropped });
+    await vl.filesSettled();   // the re-put's shred is CONFIRMED
     vl.secretDrop('keyfile:0c2c3c4c5c'); await vl.filesSettled();
-    const afterDrop = JSON.parse(fs.readFileSync(path.join(dl, 'vault.json'), 'utf8')).filesDropped || [];
-    ok(afterRePut.join() === id1 && afterDrop.join() === [id1, id2].join() && !fs.existsSync(path.join(dl, 'vault-files', `${id1}.vfile`)) && !fs.existsSync(path.join(dl, 'vault-files', `${id2}.vfile`)),
-      'a re-put names the old file DROPPED in its record write, a drop names its file — append-only — and each is shredded after', { afterRePut, afterDrop });
-    await vl.filePut('keyfile:0d2d3d4d5d', bin, { filename: 'b.bin', prov: 'uploaded' }); const id3 = vl.fileOf('keyfile:0d2d3d4d5d').id;
+    const afterDrop = recOf(dl).filesDropped || [];
+    await vl.filePut('keyfile:0f2f3f4f5f', bin, { filename: 'z.bin', prov: 'uploaded' }); await vl.filesSettled();   // one more record write
+    const afterNext = recOf(dl).filesDropped || [];
+    ok(afterDrop.join() === id2 && afterNext.length === 0 && !fs.existsSync(path.join(dl, 'vault-files', `${id1}.vfile`)) && !fs.existsSync(path.join(dl, 'vault-files', `${id2}.vfile`)),
+      'an id LEAVES the list at the next record write after its shred is CONFIRMED (the re-put\'s at the drop\'s write, the drop\'s at the next) — the list holds only instructions not yet carried out', { afterDrop, afterNext });
+    vl.secretDrop('keyfile:0f2f3f4f5f'); await vl.filesSettled();
+    await vl.filePut('keyfile:0e2e3e4e5e', bin, { filename: 'b.bin', prov: 'uploaded' }); const id3 = vl.fileOf('keyfile:0e2e3e4e5e').id;
     await vl.filesSettled(); vl.close();
     const keep3 = fs.readFileSync(path.join(dl, 'vault-files', `${id3}.vfile`));
-    const rec3 = JSON.parse(fs.readFileSync(path.join(dl, 'vault.json'), 'utf8')); delete rec3.entries['keyfile:0d2d3d4d5d']; rec3.filesDropped = [...rec3.filesDropped, id3];
+    const rec3 = recOf(dl); delete rec3.entries['keyfile:0e2e3e4e5e']; rec3.filesDropped = [...(rec3.filesDropped || []), id3];
     fs.writeFileSync(path.join(dl, 'vault.json'), JSON.stringify(rec3));   // a crash between the drop's record write and its shred: the instruction left, the file still there
-    const vc = VE.create({ dataDir: dl, kdf: CHEAP, log: quiet, idleTimer: false, register: false }); await vc.filesSettled();
+    const vc = mkE(VE, dl); await vc.filesSettled();
     ok(keep3.length > 40 && !fs.existsSync(path.join(dl, 'vault-files', `${id3}.vfile`)), 'a crash between a drop\'s record write and its shred leaves an INSTRUCTION: the next start shreds what the record names dropped', id3);
-    // r4628: AN ID ON THE LIST IS NEVER USED AGAIN — the id source drawn again past every listed id (its red: a mint that never asks)
-    await vc.unlock(PW);
-    const listed = JSON.parse(fs.readFileSync(path.join(dl, 'vault.json'), 'utf8')).filesDropped;
     vc.close();
-    const reuseLeg = async (E) => {
-      const seq = [...listed, '0e2e3e4e5e'];
-      const vr = E.create({ dataDir: dl, kdf: CHEAP, log: quiet, idleTimer: false, register: false, fileIds: () => seq.shift() || '0f2f3f4f5f' });
-      await vr.unlock(PW); await vr.filesSettled();
-      const r = await vr.filePut('keyfile:0e3e4e5e6e', bin, { filename: 'c.bin', prov: 'uploaded' });
-      const id = r.ok ? vr.fileOf('keyfile:0e3e4e5e6e').id : null;
-      if (r.ok) { vr.secretDrop('keyfile:0e3e4e5e6e'); await vr.filesSettled(); }
-      vr.close();
-      return { id, reused: listed.includes(id) };
+    // THE COUNTER ACROSS A RESTART, the list pruned (its red: the counter not raised — the next start would mint a dropped file's id again)
+    const counterLeg = async (E) => {
+      const dc = path.join(ROOT, `file-counter-${Math.random().toString(16).slice(2, 8)}`); fs.mkdirSync(dc, { recursive: true });
+      const a = mkE(E, dc); await a.setup(PW, {});
+      await a.filePut('keyfile:0a4a5a6a7a', bin, { filename: 'a.bin', prov: 'uploaded' }); const idA = a.fileOf('keyfile:0a4a5a6a7a').id;
+      a.secretDrop('keyfile:0a4a5a6a7a'); await a.filesSettled();
+      await a.filePut('keyfile:0b4b5b6b7b', bin, { filename: 'b.bin', prov: 'uploaded' }); await a.filesSettled();   // its write prunes A's confirmed id
+      a.secretDrop('keyfile:0b4b5b6b7b'); await a.filesSettled(); const idB = '0000000001';
+      a.agentPut('agent:conv-9/prune-carrier', 'a text value whose write carries the prune', { actor: 'Lane X' });   // a record write: B's confirmed id leaves the list
+      a.close();
+      const b = mkE(E, dc); await b.unlock(PW); await b.filesSettled();
+      await b.filePut('keyfile:0c4c5c6c7c', bin, { filename: 'c.bin', prov: 'uploaded' }); const idC = b.fileOf('keyfile:0c4c5c6c7c').id;
+      b.close();
+      return { idA, idB, idC, again: [idA, idB].includes(idC) };
     };
-    const ru = await reuseLeg(VE);
-    ok(ru.id === '0e2e3e4e5e' && !ru.reused, `r4628: a file id on the record's dropped list is NEVER minted again — the source offered every listed id first (${listed.length}) and the put got a fresh one`, ru);
-    const neverAsks = MO.load('src/server/vault-engine.js', anchored(ESo, '    const id = files.mintId(fileIdTaken), key = files.mintKey(), ep0 = epoch;', '    const id = files.mintId(), key = files.mintKey(), ep0 = epoch;', 'test-vault-engine a mint that never asks'), 'neverasks');
-    const rur = await reuseLeg(neverAsks);
-    ok(rur.reused, 'red control: «a mint that never asks» takes a listed id — a stale list could then name a live file', rur);
+    const cl = await counterLeg(VE);
+    ok(cl.idA === '0000000000' && cl.idC === '0000000002' && !cl.again, 'r4628 by construction: a restart, the list pruned — the next file takes the COUNTER\'s id, never a dropped file\'s', cl);
+    const noSeq = MO.load('src/server/vault-engine.js', anchored(ESo, "  const withSeq = (rec, id) => ({ ...rec, fileSeq: Math.max(Number.isInteger(rec.fileSeq) && rec.fileSeq >= 0 ? rec.fileSeq : 0, idNum(id) + 1) });", '  const withSeq = (rec) => rec;', 'test-vault-engine the counter not raised'), 'noseq');
+    const clr = await counterLeg(noSeq);
+    ok(clr.again, 'red control: «the counter not raised» mints a dropped file\'s id again after a restart', clr);
+    // A KEPT FILE ON DISK AT THE COUNTER: the write refuses it (file_id_taken), the mint steps past, the kept file untouched
+    {
+      const dk = path.join(ROOT, 'file-counter-kept'); fs.mkdirSync(dk, { recursive: true });
+      const k = mkE(VE, dk); await k.setup(PW, {}); await k.filesSettled();
+      await k.filePut('keyfile:0d4d5d6d7d', bin, { filename: 'd.bin', prov: 'uploaded' });   // id 0000000000, fileSeq 1
+      const planted = path.join(dk, 'vault-files', '0000000001.vfile'); fs.writeFileSync(planted, 'a kept file at the counter');
+      const r = await k.filePut('keyfile:0e4e5e6e7e', bin, { filename: 'e.bin', prov: 'uploaded' });
+      ok(r.ok && k.fileOf('keyfile:0e4e5e6e7e').id === '0000000002' && fs.readFileSync(planted, 'utf8') === 'a kept file at the counter' && recOf(dk).fileSeq === 3,
+        'a kept file AT the counter: the write refuses its id (file_id_taken), the mint STEPS PAST it — the kept file untouched, fileSeq past both', { ok: r.ok, id: r.ok && k.fileOf('keyfile:0e4e5e6e7e').id, fileSeq: recOf(dk).fileSeq });
+      k.close();
+    }
+    // A BROKEN COUNTER mints past every id the record names or lists AND every file the start met on disk (r4774 A 3)
+    {
+      const db = path.join(ROOT, 'file-counter-broken'); fs.mkdirSync(db, { recursive: true });
+      const k = mkE(VE, db); await k.setup(PW, {});
+      await k.filePut('keyfile:0f4f5f6f7f', bin, { filename: 'f.bin', prov: 'uploaded' }); await k.filesSettled(); k.close();
+      const rb = recOf(db); rb.fileSeq = 'broken'; rb.filesDropped = ['0000000007']; fs.writeFileSync(path.join(db, 'vault.json'), JSON.stringify(rb));
+      fs.writeFileSync(path.join(db, 'vault-files', '000000000c.vfile'), 'a kept file met at the start');
+      const k2 = mkE(VE, db); await k2.unlock(PW); await k2.filesSettled();
+      await k2.filePut('keyfile:0a5a6a7a8a', bin, { filename: 'g.bin', prov: 'uploaded' });
+      const idG = k2.fileOf('keyfile:0a5a6a7a8a').id; k2.close();
+      ok(idG === '000000000d', 'a BROKEN counter mints from one past the highest id the record names (0) or lists (7) AND past every file the start met on disk (c) ⇒ 000000000d', idG);
+    }
+    // A FILE LIVE UNDER THE RECORD is never shredded, even if the record's own list names it (a stale or crafted list): the proof of r4625
+    {
+      const dv = path.join(ROOT, 'file-live-listed'); fs.mkdirSync(dv, { recursive: true });
+      const k = mkE(VE, dv); await k.setup(PW, {});
+      await k.filePut('keyfile:0b5b6b7b8b', bin, { filename: 'h.bin', prov: 'uploaded' }); const idH = k.fileOf('keyfile:0b5b6b7b8b').id; await k.filesSettled(); k.close();
+      const rv = recOf(dv); rv.filesDropped = [idH]; fs.writeFileSync(path.join(dv, 'vault.json'), JSON.stringify(rv));
+      const k2 = mkE(VE, dv); await k2.unlock(PW); await k2.filesSettled();
+      const o = await k2.fileOpen('keyfile:0b5b6b7b8b'); const opens = !!(o.ok && o.bytes.equals(bin)); if (o.bytes) o.bytes.fill(0); k2.close();
+      ok(opens, 'a file the record NAMES is never shredded at a start, even when its list names it too — a stale list can never take a file live under it', idH);
+    }
+    // A DROPPED FILE WHOSE SHRED FAILED is counted apart (files_drop_owed), never as unnamed (the round's should)
+    {
+      const dw = path.join(ROOT, 'file-drop-owed'); fs.mkdirSync(dw, { recursive: true });
+      const k = mkE(VE, dw); await k.setup(PW, {}); await k.filesSettled(); k.close();
+      const rw = recOf(dw); rw.filesDropped = ['0000000009']; fs.writeFileSync(path.join(dw, 'vault.json'), JSON.stringify(rw));
+      fs.mkdirSync(path.join(dw, 'vault-files', '0000000009.vfile'), { recursive: true });   // a «file» that cannot be unlinked (a folder)
+      const said = [], cap = { log() {}, warn: (s) => said.push(String(s)) };
+      const k2 = mkE(VE, dw, { log: cap }); await k2.filesSettled(); k2.close();
+      ok(said.some((s) => /\b1 sealed file\(s\)/.test(s) && /files_drop_owed/.test(s)) && !said.some((s) => /files_unnamed/.test(s)), 'a dropped file whose shred failed at a start is SAID apart (files_drop_owed — the next start takes it), never as a file the record does not name', said);
+    }
+    // A FAILED LOOK PRUNES NOTHING (r4774 A 1): a shred that fails otherwise, a start whose look fails otherwise — the id stays listed;
+    // its red: a prune on any shred's answer
+    {
+      const VFSm = require(path.join(REPO, 'src/server/vault-files.js')), realC = VFSm.create;
+      let fail = true;
+      VFSm.create = (o) => { const st = realC(o); return { ...st, shred: async (id) => (fail ? false : st.shred(id)), has: async (id) => (fail ? 'unknown' : st.has(id)) }; };
+      const failLeg = async (E) => {
+        fail = true;
+        const df = path.join(ROOT, `file-failed-look-${Math.random().toString(16).slice(2, 8)}`); fs.mkdirSync(df, { recursive: true });
+        const k = mkE(E, df); await k.setup(PW, {});
+        await k.filePut('keyfile:0c5c6c7c8c', bin, { filename: 'i.bin', prov: 'uploaded' }); const idI = k.fileOf('keyfile:0c5c6c7c8c').id;
+        k.secretDrop('keyfile:0c5c6c7c8c'); await k.filesSettled();   // its shred FAILS
+        await k.filePut('keyfile:0d5d6d7d8d', bin, { filename: 'j.bin', prov: 'uploaded' }); await k.filesSettled();   // the next record write
+        const listed = (recOf(df).filesDropped || []).includes(idI), onDisk = fs.existsSync(path.join(df, 'vault-files', `${idI}.vfile`));
+        k.close(); fail = false;
+        const k2 = mkE(E, df); await k2.unlock(PW); await k2.filesSettled(); k2.close();   // the next start carries the instruction out
+        return { listed, onDisk, goneAfterStart: !fs.existsSync(path.join(df, 'vault-files', `${idI}.vfile`)) };
+      };
+      try {
+        const fl = await failLeg(VE);
+        ok(fl.listed && fl.onDisk && fl.goneAfterStart, 'a shred that FAILS keeps the id on the list (a look that failed otherwise prunes nothing) — the next start shreds it', fl);
+        const pruneAny = MO.load('src/server/vault-engine.js', anchored(ESo, "if (g === true || g === 'absent') confirmedGone.add(String(id));", 'confirmedGone.add(String(id));', 'test-vault-engine a prune on any shred answer'), 'pruneany');
+        const flr = await failLeg(pruneAny);
+        ok(!flr.listed && flr.onDisk && !flr.goneAfterStart, 'red control: «a prune on any shred answer» drops the instruction — the file is left on disk, no start ever takes it', flr);
+      } finally { VFSm.create = realC; }
+    }
+    // the suites' id seam (fileIds) asks the same taken check: a listed id offered first is passed over (its red: a mint that never asks)
+    {
+      const ds = path.join(ROOT, 'file-seam'); fs.mkdirSync(ds, { recursive: true });
+      const k = mkE(VE, ds); await k.setup(PW, {}); await k.filesSettled(); k.close();
+      const rs = recOf(ds); rs.filesDropped = ['0a0a0a0a0a']; fs.writeFileSync(path.join(ds, 'vault.json'), JSON.stringify(rs));
+      const seamLeg = async (E) => {
+        const seq = ['0a0a0a0a0a', '0b0b0b0b0b'];
+        const k2 = mkE(E, ds, { fileIds: () => seq.shift() || '0c0c0c0c0c' }); await k2.unlock(PW);
+        const r = await k2.filePut('keyfile:0e5e6e7e8e', bin, { filename: 'k.bin', prov: 'uploaded' }); const id = r.ok ? k2.fileOf('keyfile:0e5e6e7e8e').id : null;
+        if (r.ok) { k2.secretDrop('keyfile:0e5e6e7e8e'); } await k2.filesSettled(); k2.close();
+        const back = recOf(ds); back.filesDropped = ['0a0a0a0a0a']; fs.writeFileSync(path.join(ds, 'vault.json'), JSON.stringify(back));
+        return { id };
+      };
+      const sl = await seamLeg(VE);
+      ok(sl.id === '0b0b0b0b0b', 'the suites\' id source (fileIds) is asked through the same taken check: a listed id offered first is passed over', sl);
+      const neverAsks = MO.load('src/server/vault-engine.js', anchored(ESo, '    if (typeof fileIds === \'function\') return files.mintId(fileIdTaken);', '    if (typeof fileIds === \'function\') return files.mintId();', 'test-vault-engine a mint that never asks'), 'neverasks');
+      const slr = await seamLeg(neverAsks);
+      ok(slr.id === '0a0a0a0a0a', 'red control: «a mint that never asks» takes a listed id', slr);
+    }
   }
   // THE CURE (主开发 11-18, MUST 2 — «nothing of a file holds the hub's main loop»; the data folder may sit on a network mount):
   // a boot sweep, a put, an open and a drop make NO synchronous fs call on data/vault-files — every *Sync of the engine's own fs
@@ -1256,7 +1362,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       ok(em && em.stored, 'MUTANT «the state asked, not the epoch»: the patch hits once and the leg goes RED — the put that was in flight across the lock landed', em);
       const one = await oneLeg(realCreate);
       ok(one === 1, `round 3: ONE sealed-file operation at a time — 8 writes and 8 reads at once never open two files of data/vault-files together (most ${one})`, one);
-      const mQ = patch('src/server/vault-files.js', SF3, 'write: one(write), read: one(read), shred: one(shred), sweep };', 'write, read, shred, sweep };', 'noqueue');   // stale-pins: kept (the replacement IS the round-2 store, unqueued)
+      const mQ = patch('src/server/vault-files.js', SF3, 'write: one(write), read: one(read), shred: one(shred), has: one(has), sweep };', 'write, read, shred, has, sweep };', 'noqueue');   // stale-pins: kept (the replacement IS the round-2 store, unqueued)
       const qm = mQ ? await oneLeg(mQ.create) : null;
       ok(qm != null && qm > 1, `MUTANT «the store's operations unqueued»: the patch hits once and the leg goes RED — ${qm} opens in flight together`, qm);
       // ROUND 4 (the third read: one HUNG operation held the queue for ever — every put unanswered, its bytes and its key in memory):

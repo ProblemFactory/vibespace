@@ -204,25 +204,68 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   // record whether an id is live at the moment a file would go (puts may land meanwhile); never while the record is unreadable
   const filesInFlight = new Set();   // round 2: a put's id from its mint to its record (or its refusal) — the sweep never takes it
   const fileLive = (id) => filesInFlight.has(id) || !record || Object.values(record.entries).some((b) => b && b.file && b.file.id === id);   // the census's find: a record unread while the sweep walks keeps EVERY file (it read «none live» before)
-  // 主开发 r4625 (the MUST) + r4628: THE RECORD's OWN LIST OF DROPPED FILES — a re-put and a drop add the old file's id in the SAME
-  // record write that stops naming it, before its shred (a crash between the two leaves an instruction, not a guess). The list is
-  // APPEND-ONLY and an id on it is never minted again (fileIdTaken), so a record restored from an older copy can never name a
-  // file that is live under it
+  // 主开发 r4625 (the MUST) + r4628 + r4774 (A): THE RECORD's OWN LIST OF DROPPED FILES — a re-put and a drop add the old file's id
+  // in the SAME record write that stops naming it, before its shred (a crash between the two leaves an instruction, not a guess).
+  // The list holds only the instructions NOT YET CARRIED OUT: an id leaves it at the next record write after its shred is
+  // CONFIRMED, or after a start found the file truly not there (the file system said so by its name) — a look that failed
+  // otherwise prunes nothing. «Never minted again» is the ID's own: a file id is the record's counter (`fileSeq`, below)
   const droppedOf = (rec) => (rec && Array.isArray(rec.filesDropped) ? rec.filesDropped.filter((x) => VF.ID_RE.test(String(x))) : []);
   const withDropped = (rec, id) => ({ ...rec, filesDropped: [...new Set([...droppedOf(rec), String(id)])] });
   const fileDropped = (id) => !!record && droppedOf(record).includes(id) && !fileLive(id);   // asked at each file's own turn: a record gone mid-walk drops nothing
   const fileIdTaken = (id) => filesInFlight.has(id) || !record || droppedOf(record).includes(id) || Object.values(record.entries).some((b) => b && b.file && b.file.id === id);
+  // r4774 (A): THE FILE ID IS THE RECORD's OWN COUNTER — `fileSeq` (the next id, 10 hex), raised in the SAME record write that names
+  // the new file. A broken or missing counter mints from one past the highest id the record names or lists AND past every file on
+  // disk the start met (and past every id this process minted); a write never goes over a file already there (file_id_taken: the
+  // mint steps past it). A record restored from an older copy carries a lower counter, but every id on its list is below it and
+  // every file minted after the copy is on disk — so no id is ever minted twice
+  const idNum = (id) => (VF.ID_RE.test(String(id)) ? parseInt(String(id), 16) : -1);
+  const idOf = (n) => n.toString(16).padStart(10, '0');
+  let diskTop = -1, seqMinted = -1;
+  const seqBase = () => {
+    const counter = record && Number.isInteger(record.fileSeq) && record.fileSeq >= 0 ? record.fileSeq : 0;
+    let n = Math.max(counter, diskTop + 1, seqMinted + 1);
+    if (record) { for (const b of Object.values(record.entries)) if (b && b.file && b.file.id) n = Math.max(n, idNum(b.file.id) + 1); for (const x of droppedOf(record)) n = Math.max(n, idNum(x) + 1); }
+    return n;
+  };
+  /** A new file id: the counter's next free one (suites may hand their own source: `fileIds`, asked through the same taken check) */
+  const mintFileId = () => {
+    if (typeof fileIds === 'function') return files.mintId(fileIdTaken);
+    let n = seqBase();
+    while (fileIdTaken(idOf(n))) n++;
+    if (n >= 2 ** 40) throw Object.assign(new Error('no file id left'), { code: 'file_id_unavailable' });
+    seqMinted = n;
+    return idOf(n);
+  };
+  const withSeq = (rec, id) => ({ ...rec, fileSeq: Math.max(Number.isInteger(rec.fileSeq) && rec.fileSeq >= 0 ? rec.fileSeq : 0, idNum(id) + 1) });
+  // r4774 (A) 1: the ids whose shred is CONFIRMED (or whose file a start found truly not there) — pruned from the list at the next
+  // record write (writeRecord), then forgotten
+  const confirmedGone = new Set();
+  const pruneDropped = (rec) => {
+    if (!confirmedGone.size || !rec || !Array.isArray(rec.filesDropped)) return [];
+    const gone = rec.filesDropped.filter((x) => confirmedGone.has(String(x)));
+    if (gone.length) rec.filesDropped = rec.filesDropped.filter((x) => !confirmedGone.has(String(x)));
+    return gone;
+  };
   const pendingFiles = new Set();   // the sweep and every shred in flight (filesSettled waits for them: a clean close, the suites)
   const track = (p) => { pendingFiles.add(p); p.then(() => pendingFiles.delete(p), () => pendingFiles.delete(p)); return p; };
   /** THE START's SWEEP: what the record names as dropped goes; a sealed file it says nothing of is KEPT — and SAID, one journal line
    *  with its count and its code (the page's door for such a file belongs to a later unit: it leaves only by the owner's act) */
   const sweepAtStart = async () => {
     const r = await files.sweep(fileLive, { dropped: fileDropped });
-    if (r && r.kept > 0) { try { (log.warn || log.log).call(log, `[vault] ${r.kept} sealed file(s) in ${VF.FILE_DIR} that the record does not name were KEPT (files_unnamed) — a file leaves only by the owner's act`); } catch { /* a logger that throws changes nothing */ } }
+    if (r) {
+      diskTop = Math.max(diskTop, Number.isInteger(r.top) ? r.top : -1);
+      for (const id of r.done || []) confirmedGone.add(id);
+      // a listed id whose file the walk did not meet: pruned only when the file system says by its name that it is not there
+      const met = new Set(r.done || []);
+      for (const id of droppedOf(record)) { if (met.has(id) || fileLive(id)) continue; try { if (await files.has(id) === 'no') confirmedGone.add(id); } catch { /* a failed look prunes nothing */ } }
+    }
+    const say = (m) => { try { (log.warn || log.log).call(log, m); } catch { /* a logger that throws changes nothing */ } };
+    if (r && r.kept > 0) say(`[vault] ${r.kept} sealed file(s) in ${VF.FILE_DIR} that the record does not name were KEPT (files_unnamed) — a file leaves only by the owner's act`);
+    if (r && r.owed > 0) say(`[vault] ${r.owed} sealed file(s) in ${VF.FILE_DIR} that the record names as dropped could not be shredded (files_drop_owed) — the next start takes them`);
     return r;
   };
   if (record) track(sweepAtStart().catch(() => null));
-  const shredLater = (id) => { track(files.shred(id).catch(() => false)); };   // a failed shred of a DROPPED file: the next start's sweep takes it (the record names it dropped); of a put's own unrecorded file: it is kept and said
+  const shredLater = (id) => { track(files.shred(id).then((g) => { if (g === true || g === 'absent') confirmedGone.add(String(id)); }, () => false)); };   // a failed shred of a DROPPED file: the next start's sweep takes it (the record names it dropped); of a put's own unrecorded file: it is kept and said
   /** → a promise that resolves once the boot sweep and every shred in flight have ended. */
   const filesSettled = async () => { while (pendingFiles.size) await Promise.all([...pendingFiles]); };
 
@@ -282,8 +325,10 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       batchDirty = true;
       return;
     }
+    const pruned = pruneDropped(rec);   // r4774 (A) 1: the dropped list loses only the ids whose shred is CONFIRMED
     writeAtomic(FILE, JSON.stringify(rec, null, 2) + '\n');
     contentsChanged('record');
+    for (const id of pruned) confirmedGone.delete(id);   // after the write (and its notice): the two lines above stay one block (test-vault-use-grants' «silent» anchor)
   }
   /** Coalesce synchronous in-memory `record` mutations into AT MOST ONE atomic `vault.json` write,
    *  rolling back `record` on failure and running `afterCommit` side effects only after that write succeeds. */
@@ -479,7 +524,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       const boxRev = Number.isInteger(rev) && rev >= 1 ? rev : (prevBox && Number.isInteger(prevBox.rev) && prevBox.rev >= 1 ? prevBox.rev : null);
       if (boxRev !== null) box.rev = boxRev;
       if (file) box.file = file;   // lane lg-vault-file: a FILE entry's facts (filePut) — a name, a size, a kind, `encrypted`; never a byte, never a digest of the bytes
-      const next0 = { ...record, entries: { ...record.entries, [name]: box } };
+      const next0 = file ? withSeq({ ...record, entries: { ...record.entries, [name]: box } }, file.id) : { ...record, entries: { ...record.entries, [name]: box } };   // r4774 (A): the counter raised in the write that names the file
       const next = prevBox && prevBox.file && file && prevBox.file.id !== file.id ? withDropped(next0, prevBox.file.id) : next0;   // r4625: the old file NAMED dropped in the write that stops naming it
       writeRecord(next); record = next;
       if (prevBox && prevBox.file && file && prevBox.file.id !== file.id) shredLater(prevBox.file.id);   // a re-put: the old sealed file goes once the record names the new one
@@ -539,11 +584,18 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }
     const prev = record.entries[name];
     if (prev && !prev.file) return { ok: false, code: 'not_a_file', words: VF.WORDS.not_a_file };
-    const id = files.mintId(fileIdTaken), key = files.mintKey(), ep0 = epoch;   // r4628: never an id an entry, the dropped list or a put in flight holds   // round 3: the lock EPOCH — a lock-then-unlock during a slow write is a lock too
+    let id = mintFileId();
+    const key = files.mintKey(), ep0 = epoch;   // r4628: never an id an entry, the dropped list or a put in flight holds   // round 3: the lock EPOCH — a lock-then-unlock during a slow write is a lock too
     filesInFlight.add(id);
     try {
     let sha256;
-    try { sha256 = await files.write(id, key, bytes); } catch (e) { key.fill(0); if (!(e && e.code === 'file_id_taken')) shredLater(id); return e && (e.code === 'files_stuck' || e.code === 'file_id_taken') ? { ok: false, code: 'file_not_stored', words: VF.WORDS.file_not_stored } : { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }   // round 4: a stuck store (vault-files' bound) is said as a put that did not happen
+    try { for (let step = 0; ; step++) {   // r4774 (A) 4: an id whose file is already on disk (a kept file) — the mint steps past it
+      try { sha256 = await files.write(id, key, bytes); break; } catch (e) {
+        if (!(e && e.code === 'file_id_taken') || step >= 8 || typeof fileIds === 'function') throw e;
+        filesInFlight.delete(id); diskTop = Math.max(diskTop, idNum(id)); id = mintFileId(); filesInFlight.add(id);
+      }
+    }
+    } catch (e) { key.fill(0); if (!(e && e.code === 'file_id_taken')) shredLater(id); return e && (e.code === 'files_stuck' || e.code === 'file_id_taken') ? { ok: false, code: 'file_not_stored', words: VF.WORDS.file_not_stored } : { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }   // round 4: a stuck store (vault-files' bound) is said as a put that did not happen
     if (expect && expect.sha256 != null && String(expect.sha256).toLowerCase() !== sha256) { key.fill(0); shredLater(id); return { ok: false, code: 'bytes_bad', words: VF.WORDS.bytes_bad }; }
     // the write awaited: a lock (its epoch moved — a lock then an unlock too), or a TEXT entry of this name, may have landed meanwhile
     if (state() !== 'unlocked' || epoch !== ep0) { key.fill(0); shredLater(id); blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: state() === 'unlocked' ? KF.VAULT_LOCKED : lockedCode() }; }
