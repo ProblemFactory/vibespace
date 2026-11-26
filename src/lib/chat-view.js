@@ -213,6 +213,21 @@ const SCOPED_REFUSAL_CODES = new Set([
   'queue-op-unsupported',  // the harness has no such input-queue operation
 ]);
 /** Is this `error` frame a refusal of one action (vs. "this session is gone")? */
+/** B-5a4d root unit 3: a Send again / Dismiss the hub's door refused — said by its name, in the window that pressed. */
+function undeliveredRefusalWords(m) {
+  switch (m && m.reason) {
+    case 'human_only': return t('Only a press on this page can do that');
+    case 'pending': return t('Already on its way — wait for its answer');
+    case 'already-resent': return t('The words already went — it was sent again');
+    case 'dismissed': return t('It was removed');
+    case 'wrapper-old': return t('This conversation’s agent started before this update — resume the conversation to send it again or dismiss it');
+    case 'not-live': return t('The conversation is not running — resume it first');
+    case 'no-words': return t('It has no words to send again');
+    case 'send-refused': return (m.error && String(m.error)) || t('Not sent again');
+    case 'write-failed': return t('The conversation could not be reached — nothing was done');
+    default: return t('That message is not waiting to be sent any more');
+  }
+}
 function isScopedRefusal(msg) {
   return msg?.scope === 'action' || (!!msg?.code && SCOPED_REFUSAL_CODES.has(msg.code));
 }
@@ -1836,7 +1851,7 @@ class ChatView {
     // render (and on the partial views the suite drives) — the STATE is what
     // matters, the element is repainted from it on the next render anyway.
     const el = this._elements?.get(msg.id);
-    if (el) ChatRenderers.applyQueueChip(el, msg, null);
+    if (el) ChatRenderers.applyQueueChip(el, msg, null, this._undeliveredActsOf ? this._undeliveredActsOf(msg) : null);
   }
 
   /** A row the WRAPPER says is not in the queue any more ('gone': it listed
@@ -2011,7 +2026,7 @@ class ChatView {
     if (!queued.size) return;   // nothing on screen claims a queue state
     for (const [id, el] of this._elements) {
       const msg = queued.get(id);
-      if (msg && el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg));
+      if (msg && el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg), this._undeliveredActsOf ? this._undeliveredActsOf(msg) : null);
     }
   }
 
@@ -2138,6 +2153,9 @@ class ChatView {
     // queueSupported and the same reason (2.361.1/2.364.1): the harness caps
     // row is about the PROTOCOL, this is about the process that is running.
     if ('responseStyleLive' in meta) this._statusBar?.setResponseStyleLive?.(meta.responseStyleLive);
+    // B-5a4d root unit 3: does the RUNNING wrapper end a «not delivered» message by the person's Send again / Dismiss? (its own
+    // sidecar advert; an agent started before the update says no) — the chips redraw with or without their two acts
+    if ('undeliveredActs' in meta) { const was = this._undeliveredActsLive === true; this._undeliveredActsLive = meta.undeliveredActs === true; if (was !== this._undeliveredActsLive) this._refreshQueueChips(); }
     // The harness's own turn state + the tool ids it says are running (§2.5).
     // Carries-the-key guards, and `null` is a real value here: "this session
     // has never reported one" — the chip stays off rather than claiming idle.
@@ -5213,7 +5231,7 @@ class ChatView {
     // the whole bubble (markdown, images, fold state) for a one-word badge.
     if ('queueState' in fields || 'settling' in fields) {
       const el = this._elements.get(id);
-      if (el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg));
+      if (el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg), this._undeliveredActsOf ? this._undeliveredActsOf(msg) : null);
     }
 
     // Status transitions
@@ -7581,6 +7599,30 @@ class ChatView {
     el.appendChild(line);
   }
   /** «End them»: ONE request; the hub re-checks every pid of THIS line's list (start time, not held, this conversation's mark) and says what ended */
+  /** B-5a4d root unit 3: what a «not delivered» / «not confirmed» bubble's chip offers in THIS view — the two acts only where the
+   *  conversation is live here AND its running agent advertised them; { stopped } in a stopped view (the chip's words teach the road:
+   *  resume, then …); null otherwise (an agent started before the update: no act, the words of before). */
+  _undeliveredActsOf(msg) {
+    const st = msg && msg.queueState;
+    if ((st !== 'undelivered' && st !== 'unconfirmed') || !msg.webuiMsgId) return null;
+    if (this._readOnly) return { stopped: true };
+    if (this._disconnected || this._undeliveredActsLive !== true) return null;
+    return { resend: st === 'undelivered' ? (b) => this._undeliveredAct('resend', msg, b) : null, dismiss: (b) => this._undeliveredAct('dismiss', msg, b) };
+  }
+  /** ONE request per press (the hub's door, src/server/undelivered-door.js — the person only, once); the answer is THIS window's,
+   *  said here when refused; the end state reaches every window by the agent's own word (the chip changes, the acts go). */
+  _undeliveredAct(kind, msg, btn) {
+    const box = btn && btn.parentElement, btns = box ? [...box.querySelectorAll('.chat-undelivered-act')] : [btn].filter(Boolean);
+    for (const b of btns) b.disabled = true;
+    const reqId = 'ud-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), type = 'undelivered-' + kind;
+    this.ws.request({ type, sessionId: this.sessionId, reqId, msgId: msg.webuiMsgId }, (m) => {
+      if (!m || m.type !== type + '-result' || m.sessionId !== this.sessionId || m.reqId !== reqId) return false;
+      if (m.ok) { if (kind === 'resend' && Number(m.pictures) > 0) showToast(t('Sent again — its words only: the pictures it carried did not go with it; attach them again'), { duration: 8000 }); return true; }
+      for (const b of btns) b.disabled = false;
+      showToast(undeliveredRefusalWords(m), { type: 'error', duration: 6000 });
+      return true;
+    }, { isAlive: () => !this._disposed, timeoutMs: 15000, onTimeout: () => { for (const b of btns) b.disabled = false; showToast(t('No answer yet — nothing is known to have happened; press again'), { duration: 5000 }); } });
+  }
   _endLeftBehind(btn, words, at) {
     btn.disabled = true;
     const reqId = 'lb-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);

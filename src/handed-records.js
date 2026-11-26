@@ -23,7 +23,7 @@ const DIRNAME = 'handed';
 const FILE_MAX = 8 * 1024 * 1024;
 const CACHE_MAX = 400;
 const WARM_MS = 2000;
-const RANK = { handed: 0, undelivered: 1, landed: 2, 'own-turn': 2, kept: 2 };   // r3282: as the wrapper's — a word of the CLI or the person beats a proven absence
+const RANK = { handed: 0, undelivered: 1, landed: 2, 'own-turn': 2, kept: 2, resent: 2, dismissed: 2 };   // r3282: as the wrapper's — a word of the CLI or the person beats a proven absence
 // = server.js BUFFERS_DIR (the wrapper's buffers' folder) — ONLY in the hub's own process: a suite or a tool that builds a history reads
 // no records unless it names its own folder (`dir`), so nothing outside its scratch is ever read for it
 const HUB_MAIN = (() => { try { return !!require.main && require.main.filename === path.join(__dirname, '..', 'server.js'); } catch { return false; } })();

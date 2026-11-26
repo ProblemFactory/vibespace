@@ -20,7 +20,7 @@ import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf, subagentView } from './agent-meta.js';
 import { subagentCardHtml, isSubagentToolRow, markConversationLinks, conversationLinksHtml } from './subagent-card.js'; // lane agy-subagent-cards: the card an Antigravity subagent shows + conversation:// links (PURE)
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
 import { fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js'; // lane file-preview-mount: a refusal the hub sent as a CODE (storage_sync_refused …) in the reader's words
 import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model echo spelling (PURE, shared with chat-view + the server)
@@ -965,7 +965,7 @@ class ChatRenderers {
       : parts;
 
     this.wrapMsg(el, 'user', t('You'), textHtml);
-    ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null);
+    ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null, this._undeliveredActsOf ? this._undeliveredActsOf(msg) : null);
     return el;
   }
 
@@ -982,7 +982,7 @@ class ChatRenderers {
       // B-51dd: the pictures the reply carried — the plain bubble's own media card (a picture alone is a reply)
       + content.filter((b) => b && b.type === 'image' && !b.gone && b.data).map((b) => imageMediaHtml({ dataUrl: `data:${b.mediaType || 'image/png'};base64,${b.data}`, mediaType: b.mediaType || 'image/png', name: t('Image') })).join('');
     this.wrapMsg(el, 'user', t('You'), html);
-    ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null);
+    ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null, this._undeliveredActsOf ? this._undeliveredActsOf(msg) : null);
     return el;
   }
 
@@ -1012,21 +1012,24 @@ class ChatRenderers {
     return !!msg && ((msg.noticeKind === 'unknown-record' && msg.content?.[0]?.type === 'unknown_record') || (msg.noticeKind === 'unknown-fields' && msg.content?.[0]?.type === 'unknown_fields'));
   }
 
-  static applyQueueChip(el, msg, onSteer) {
+  static applyQueueChip(el, msg, onSteer, acts = null) {
     if (!el) return null;
     const prev = el.querySelector(':scope > .chat-queue-chip');
     if (prev) prev.remove();
+    const prevActs = el.querySelector(':scope > .chat-undelivered-acts');   // B-5a4d root unit 3: the two acts beside the chip
+    if (prevActs) prevActs.remove();
     const state = msg?.queueState;
-    if (state !== 'queued' && state !== 'steered' && state !== 'removed' && state !== 'stopped' && state !== 'handed' && state !== 'kept' && state !== 'undelivered' && state !== 'unconfirmed') return null;
+    if (state !== 'queued' && state !== 'steered' && state !== 'removed' && state !== 'stopped' && state !== 'handed' && state !== 'kept' && state !== 'undelivered' && state !== 'unconfirmed' && state !== 'resent' && state !== 'dismissed') return null;
     const chip = document.createElement('button');
     chip.className = `chat-queue-chip chat-queue-chip-${state}`;
     chip.type = 'button';
     chip.dataset.queueState = state;
-    const icon = state === 'queued' ? UI_ICONS.clock : state === 'steered' || state === 'handed' ? UI_ICONS.bolt : state === 'stopped' || state === 'kept' ? UI_ICONS.reply : UI_ICONS.close;
+    const icon = state === 'queued' ? UI_ICONS.clock : state === 'steered' || state === 'handed' ? UI_ICONS.bolt : state === 'stopped' || state === 'kept' || state === 'resent' ? UI_ICONS.reply : UI_ICONS.close;
     // HELD WHILE THE TURN SETTLES (lane claude-steer-inject r5, the deadline-card law): a window in which the CLI owes a turn
     // holds it — the chip says so and counts down to the backstop (ChatView's one-second ticker rewrites the seconds)
     const settling = state === 'queued' && msg?.settling ? msg.settling : null;
     const label = settling ? (settling.running ? t('Held — the previous turn’s follow-up is running') : t('Held — the turn is settling')) : state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped') : state === 'undelivered' ? t('Not delivered') : state === 'unconfirmed' ? t('Not confirmed')
+      : state === 'resent' ? t('Sent again') : state === 'dismissed' ? t('Removed, not delivered')
       : state === 'handed' ? t('Handed to the turn') : state === 'kept' ? t('Unread when stopped — goes with your next message') : t('Removed');
     // a countdown only while a timer exists, on THIS browser's clock (r6, the hub-clock law: ChatView turned the hub's `until`
     // into `localUntil` with the hub's `now` when the edit arrived; a restored page has no such pair and shows no seconds)
@@ -1040,17 +1043,37 @@ class ChatRenderers {
       ? t('Waiting behind the running turn — steering it injects it now, at the agent’s next reply')
       : state === 'steered' ? t('Injected into the running turn')
         : state === 'stopped' ? t('It had already started when Stop cut it off — its words are back in the input box')
-        : state === 'undelivered' ? t('The conversation ended before the agent read this message — send it again')
-        : state === 'unconfirmed' ? t('The conversation ended while this message was being handed to the agent — it may not have reached it')
+        // B-5a4d root unit 3: the words say the road that is open HERE — the two acts beside the chip (a live conversation whose agent
+        // ends such a message), «resume, then …» in a stopped view, and the words of before where the agent started before the update
+        : state === 'undelivered' ? (acts && acts.resend ? t('The conversation ended before the agent read this message — send it again or dismiss it') : acts && acts.stopped ? t('The conversation ended before the agent read this message — resume the conversation, then send it again or dismiss it') : t('The conversation ended before the agent read this message — send it again'))
+        : state === 'unconfirmed' ? (acts && acts.dismiss ? t('The conversation ended while this message was being handed to the agent — it may not have reached it; dismiss it to take it off here') : acts && acts.stopped ? t('The conversation ended while this message was being handed to the agent — it may not have reached it; resume the conversation to dismiss it') : t('The conversation ended while this message was being handed to the agent — it may not have reached it'))
+        : state === 'resent' ? t('You sent this message again — the new one is below')
+        : state === 'dismissed' ? t('You removed this message — it was never delivered; it goes when the conversation is opened again')
           : state === 'handed' ? t('Handed to the running turn — the agent reads it at its next tool call')
             : state === 'kept' ? t('Stop came before the agent read it. It stays in the conversation and reaches the agent with the next message it gets — yours, or a notice that wakes it — so there is no need to send it again')
               : t('Removed from the queue — it will not run');
     if (state === 'queued' && typeof onSteer === 'function') {
       chip.onclick = (e) => { e.stopPropagation(); onSteer(msg); };
+    } else if (state === 'undelivered' || state === 'unconfirmed' || state === 'resent' || state === 'dismissed') {
+      chip.onclick = (e) => { e.stopPropagation(); showToast(chip.title, { duration: 6000 }); };   // unit 3: a phone has no hover — a press shows the words
     } else {
       chip.disabled = true;
     }
     el.appendChild(chip);
+    // unit 3: «Send again» («Not delivered» only) and «Dismiss», small, beside the chip — only where the view handed them (a live
+    // conversation whose running agent ends such a message); never a greyed button: no act is drawn where none can act
+    if (acts && (acts.resend || acts.dismiss) && (state === 'undelivered' || state === 'unconfirmed')) {
+      const box = document.createElement('span');
+      box.className = 'chat-undelivered-acts';
+      for (const [kind, label] of [['resend', t('Send again')], ['dismiss', tc('undelivered', 'Dismiss')]]) {
+        if (typeof acts[kind] !== 'function') continue;
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = `chat-undelivered-act chat-undelivered-${kind}`; b.dataset.act = kind; b.textContent = label;
+        b.onclick = (e) => { e.stopPropagation(); acts[kind](b); };
+        box.appendChild(b);
+      }
+      el.appendChild(box);
+    }
     return chip;
   }
 

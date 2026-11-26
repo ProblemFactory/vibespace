@@ -178,6 +178,7 @@ const CLAUDE_HOLD_VERBS = ['remove', 'reorder', 'edit'];
 // asks (`webui_receipt` — the person's CLI never stays attached; never the replay buffer) and refuses a TORN line with `_stdin_nack`
 const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true }, queue: [] };
 meta.caps.receipts = true;   // lane human-cli: the receipts road (an ack by id, a torn line's nack — <id>.receipts beside the buffer)
+meta.caps.undeliveredActs = 1;   // B-5a4d root unit 3 (r4664): this process ends a «not delivered» record by the person's Send again (resent) or Dismiss (dismissed)
 // THE SAID JOURNAL (row B-cd4b, the wrapper's hold — 主开发 r1132; src/said-journal.js says the law): every line this wrapper SAYS is
 // APPENDED to the file before it is said (one write per input), between the timer's whole rewrites — a hub that restarts, or a kill
 // of this process, never beats it. A tree without the module keeps the timer alone, and adverts no fence. Set BEFORE the boot write of the sidecar (below): its caps say the fence from the first write.
@@ -262,8 +263,8 @@ const HANDED_FILE_MAX = 8 * 1024 * 1024; // its file's bound — the read refuse
 const RECORD_COPY_MAX = 2 * 1024 * 1024; // one record's resolved copy: past it its pictures stay out (the words kept), said
 const DEAD_TAIL_MAX = 4 * 1024 * 1024;   // the transcript's tail read
 const DEAD_READ_MS = 2000;               // that read's bound, from before its stat: past it nothing is settled, said once
-const RANK = { handed: 0, undelivered: 1, landed: 2, 'own-turn': 2, kept: 2 };   // r3282: what the CLI or the person said (landed / own-turn / kept) beats a proven absence
-const FINISHED = new Set(['landed', 'own-turn', 'kept']);
+const RANK = { handed: 0, undelivered: 1, landed: 2, 'own-turn': 2, kept: 2, resent: 2, dismissed: 2 };   // r3282: what the CLI or the person said (landed / own-turn / kept) beats a proven absence
+const FINISHED = new Set(['landed', 'own-turn', 'kept', 'resent', 'dismissed']);   // unit 3: the person's two acts end a record too
 const IS_FORK = args.includes('--fork-session');   // a requested fork: a new conversation — it takes none of its parent's records
 let convId = IS_FORK ? null : (argSettings(args, '--resume')[0] || null);   // the conversation's id (the CLI's); the CLI's init may move it
 let HR = new Map();                      // THIS wrapper's records: msgId → { msgId, cliUuid, copy, cli: {pid, start, boot} | null, state, at, settledAt, via }
@@ -352,6 +353,69 @@ function keptCopyOf(line) {
   if (Buffer.byteLength(copy) <= RECORD_COPY_MAX) return { copy, note: null };
   copy = JSON.stringify(KC.resolveRecord(rec, read('text'), log));
   return { copy, note: 'its pictures pass the record\'s bound — the words are kept, the pictures not' };
+}
+/** B-5a4d root unit 3 (r4664): the record of ONE message — this wrapper's own, else the conversation's file (a record a dead wrapper
+ *  settled «not delivered» at its exit is in the file, never in this wrapper's memory) → { rec, why } (rec null: `why` names it). */
+function recordOfMsg(id) {
+  if (HR.has(id)) return { rec: HR.get(id), why: null };
+  const file = recordsFileOf(recordsName());
+  if (!file) return { rec: null, why: 'no-records' };
+  const got = readRecordsFile(file);
+  if (got.kind === 'refused' || got.kind === 'torn') return { rec: null, why: 'unreadable' };
+  return got.map.has(id) ? { rec: { ...got.map.get(id) }, why: null } : { rec: null, why: 'gone' };
+}
+const ACT_REFUSAL = {
+  'no-records': 'this conversation keeps no record of handed messages here',
+  unreadable: 'its record could not be read',
+  gone: 'no record of that message is kept any more',
+  'already-resent': 'it was already sent again',
+  dismissed: 'it was removed',
+  'not-undelivered': 'it is not a message proven not delivered',
+  'in-flight': 'it is still being handed to the agent running now',
+  'not-a-message': 'that is not a message of yours',
+  'not-written': 'its record could not be written — press again',
+};
+const actRefused = (op, reason, fields) => { record('queue_op_result', { op, ok: false, reason, detail: ACT_REFUSAL[reason] || reason, ...fields }); log(`handed records: ${op} refused (${reason})`); return null; };
+const endedWhy = (st) => (st === 'resent' ? 'already-resent' : st === 'dismissed' ? 'dismissed' : 'not-undelivered');
+/** SEND AGAIN (unit 3): a person's frame stamped `webui_resend_of` (src/server/undelivered-door.js, on the person's own send road). The
+ *  old record must still say «not delivered», else the frame is DROPPED and refused by name — a second press, a second window, a
+ *  record ended meanwhile: the words reach the CLI once. ONE WRITE ends the old record as `resent` AND carries this message's own
+ *  record, `handed`, before anything is handed on: a kill after the write leaves the new one to the next wrapper, which settles it
+ *  «not delivered» (its words drawn again with their acts) — never «resent» in the file and the words nowhere. → the stamped line | null */
+function resendGate(line, o) {
+  const old = String(o.webui_resend_of), msgId = typeof o.webui_msg_id === 'string' ? o.webui_msg_id : '';
+  const fields = { msg_id: msgId, resend_of: old };
+  if (!HANDED_DIR) return actRefused('resend', 'no-records', fields);
+  if (!msgId || msgId === old || !isPersonFrame(o) || !opensTurn(o)) return actRefused('resend', 'not-a-message', fields);
+  const { rec: was, why } = recordOfMsg(old);
+  if (!was) return actRefused('resend', why, fields);
+  if (was.state !== 'undelivered') return actRefused('resend', endedWhy(was.state), fields);
+  const st = stampFrame(line, o);
+  const { copy, note } = keptCopyOf(copyLineOf(o, msgId, new Date().toISOString(), st.uuid));
+  if (note) log(`handed records: ${msgId}: ${note}`);
+  HR.set(old, { ...was, state: 'resent', settledAt: Date.now(), via: 'resend', resentAs: msgId });
+  HR.set(msgId, { msgId, cliUuid: st.uuid, copy, cli: cliNow(), state: 'handed', at: Date.now(), settledAt: 0, via: 'resend' });
+  if (!writeRecords()) { HR.set(old, was); HR.delete(msgId); return actRefused('resend', 'not-written', fields); }
+  record('input_handover', { state: 'resent', msg_ids: [old], resent_as: msgId, via: 'resend' });   // in the file already: said now
+  return st.line;
+}
+/** DISMISS (unit 3; the WIP b193779a4's form, never lined): the person removes a message proven not delivered (or one whose fate is
+ *  unknown — «Not confirmed» — unless this wrapper's own CLI is the one it is being handed to). The end state into the file FIRST, then
+ *  said; a write that fails is refused by name, nothing said as done. */
+function dismissUndelivered(msgId) {
+  const id = String(msgId || '');
+  const fields = { msg_id: id };
+  if (!HANDED_DIR) return actRefused('dismiss', 'no-records', fields);
+  const { rec: was, why } = id ? recordOfMsg(id) : { rec: null, why: 'gone' };
+  if (!was) return actRefused('dismiss', why, fields);
+  const open = was.state === 'handed' || !knownState(was.state);
+  if (was.state !== 'undelivered' && !open) return actRefused('dismiss', endedWhy(was.state), fields);
+  const mine = cliNow();
+  if (open && was.cli && mine && Number(was.cli.pid) === mine.pid && String(was.cli.start || '') === mine.start) return actRefused('dismiss', 'in-flight', fields);
+  HR.set(id, { ...was, state: 'dismissed', settledAt: Date.now(), via: 'dismiss' });
+  if (!writeRecords()) { HR.set(id, was); return actRefused('dismiss', 'not-written', fields); }
+  record('input_handover', { state: 'dismissed', msg_ids: [id], via: 'dismiss' });   // in the file already: said now
+  return true;
 }
 /** THE ONE WRITER OF A VERDICT (record() calls it for every hand-over word this wrapper says). */
 function noteHandWord(type, f) {
@@ -1107,6 +1171,7 @@ function settleStopCopies(why) {
  *  (`webui_steer` — plain Enter on a Claude conversation) AND this CLI has proven its state words AND no Stop is
  *  settling, else HELD (published + `queued_input` for its bubble) — a stamp is a request, never a bypass of the gate. */
 function submitUser(line, o, { buffered = false } = {}) {
+  if (o && typeof o.webui_resend_of === 'string' && o.webui_resend_of) { const gated = resendGate(line, o); if (gated === null) return; line = gated; }   // unit 3: Send again (above)
   // THE PERSON'S FRAME CARRIES ITS STAMP WHATEVER THE TURN (B-437e — rewind in place): the CLI keeps a frame's uuid as
   // the uuid of its own user record of those words (measured on 2.1.312 — a mid-turn frame, a held frame drained into a
   // turn of its own), and that record uuid is what `rewind_conversation` names. Only a MID-TURN frame used to be stamped,
@@ -1843,6 +1908,7 @@ try {
         // THE QUEUE'S OWN VERBS (2.369.354) — never forwarded to the CLI
         if (parsed.type === 'queue-op') { handleQueueOp(parsed); continue; }
         if (parsed.type === 'queue-resync') { publishQueue(); continue; }
+        if (parsed.type === 'undelivered-dismiss') { dismissUndelivered(parsed.msg_id); continue; }   // unit 3: the person's Dismiss — never the CLI's
         // Stop: what is held is dropped (and put back) BEFORE the interrupt reaches the CLI — then the interrupt goes
         // through as it always did (the server's 2 s SIGINT fallback is unchanged); a handed frame stays with the turn
         if (parsed.type === 'control_request' && parsed.request && parsed.request.subtype === 'interrupt' && holdSecondStop(line)) continue;

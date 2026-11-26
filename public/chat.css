@@ -1196,6 +1196,14 @@
    phone's 360 px, a long message) the chip goes UNDER the bubble, and its own words wrap */
 .chat-msg-user:has(> .chat-queue-chip) { flex-wrap: wrap; }
 .chat-queue-chip { max-width: 100%; white-space: normal; text-align: left; }
+/* B-5a4d root unit 3: «Send again» / «Dismiss» beside a «not delivered» chip — small, the chip's own measures (a flex item of the bubble:
+   they wrap under it with the chip on a phone); a press on the chip itself shows its words (no hover there) */
+.chat-undelivered-acts { display: inline-flex; align-items: center; align-self: flex-end; gap: 4px; margin: 0 0 2px 4px; flex-shrink: 0; }
+.chat-undelivered-act { font-size: 10px; line-height: 1.8; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: none; color: var(--text); font-family: inherit; cursor: pointer; }
+.chat-undelivered-act:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.chat-undelivered-act:disabled { opacity: 0.5; cursor: default; }
+.chat-queue-chip-undelivered, .chat-queue-chip-unconfirmed, .chat-queue-chip-resent, .chat-queue-chip-dismissed { cursor: pointer; }
 /* r4: on a phone every chip goes under its bubble in bubble mode — a SHORT chip («Steered») no longer shares the row and
    pushes its bubble left of the other right-aligned bubbles */
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-view:not(.chat-compact) .chat-msg-user:has(> .chat-queue-chip) { flex-direction: column; align-items: flex-end; } }

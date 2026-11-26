@@ -2050,7 +2050,7 @@ class MessageManager extends MessageWindow {
     // that happened while the agent has not read it, in its place once it has (src/queue-chips.js `place`)
     this._placeByChip(msg, state);
     // a frame Stop put back (or the person removed) never ran: no later record of the CLI is ITS record
-    if (state === 'removed' || state === 'stopped' || state === 'undelivered' || state === 'unconfirmed') this._webuiCopies.delete(String(msgId));
+    if (state === 'removed' || state === 'stopped' || state === 'undelivered' || state === 'unconfirmed' || state === 'resent' || state === 'dismissed') this._webuiCopies.delete(String(msgId));
     // the hub's `now` is re-said at every emit (r6): it pairs with `until` for the client's own deadline
     const settling = state === 'queued' && this._settling ? (this._settling.until ? { ...this._settling, now: Date.now() } : this._settling) : null;
     const settleMoved = JSON.stringify(msg.settling || null) !== JSON.stringify(settling) && !(msg.settling && settling && msg.settling.until === settling.until && !!msg.settling.running === !!settling.running);
@@ -2074,9 +2074,13 @@ class MessageManager extends MessageWindow {
    *  window `_processQueueDropped`); a 'kept' state here is still read (a record of an earlier build). No bubble ⇒ nothing to mark:
    *  the frame reached the agent, which is never a silence worth a card. */
   _processInputHandover(raw, emit) {
-    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept', undelivered: 'undelivered' }[raw.state];
+    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept', undelivered: 'undelivered', resent: 'resent', dismissed: 'dismissed' }[raw.state];
     if (state === undefined) return;
     for (const msgId of Array.isArray(raw.msg_ids) ? raw.msg_ids : []) {
+      // B-5a4d root unit 3: the person's Send again / Dismiss ended a «not delivered» message — LIVE, every window keeps its bubble with
+      // the end chip (its words selectable: a slip loses nothing until the next rebuild); a REBUILD draws it no more
+      if (state === 'resent' || state === 'dismissed') this._noteAct(msgId);
+      if ((state === 'resent' || state === 'dismissed') && !emit) { this._dropEnded(String(msgId)); continue; }
       // every state here means the frame was WRITTEN to the CLI — a batch's last witness, in the order said (r9)
       const c = this._webuiCopies.get(String(msgId));
       if (c && !c.ran) c.ran = ++this._handOrder;
@@ -2133,6 +2137,9 @@ class MessageManager extends MessageWindow {
    *  (Stop's per-item results included), and a visible card for every failure. */
   _processQueueOpResult(raw, emit) {
     const ok = raw.ok !== false;
+    // unit 3: a Send again the wrapper refused (its old record ended meanwhile) — the new bubble the person's send drew was never sent
+    if (!ok && raw.op === 'resend' && (raw.msg_id || raw.msgId)) this._stampQueueChip(raw.msg_id || raw.msgId, 'removed', emit);
+    if (raw.op === 'resend' && raw.resend_of) this._noteAct(raw.resend_of); else if (raw.op === 'dismiss' && raw.msg_id) this._noteAct(raw.msg_id);   // the door's pending press: its word came
     const text = ok ? '' : MessageManager.queueOpFailureText(raw);
     if (emit) this._emit({ op: 'meta', subtype: 'queue-result', queueOp: raw.op, id: String(raw.id || ''), ok, reason: raw.reason || null, text: text || null });
     if (ok) {
@@ -2145,6 +2152,7 @@ class MessageManager extends MessageWindow {
 
   /** PURE: the sentence for a failed queue op on claude (every branch says what is true for the message NOW). */
   static queueOpFailureText(rec) {
+    if (rec.op === 'resend' || rec.op === 'dismiss') return MessageManager.undeliveredActText(rec);   // unit 3
     switch (rec.reason) {
       case 'gone': return 'That message is no longer queued — it already ran.';
       // the claude wrapper says WHY a held row may not join the turn (lane claude-steer-inject r2); no `why` = a command
@@ -2163,6 +2171,45 @@ class MessageManager extends MessageWindow {
       }
     }
   }
+
+  /** PURE (B-5a4d root unit 3): the sentence for a Send again / Dismiss the wrapper refused — what is true for the message NOW. */
+  static undeliveredActText(rec) {
+    const resend = rec.op === 'resend';
+    switch (rec.reason) {
+      case 'already-resent': return resend ? 'Not sent again — it was already sent again.' : 'Not removed — it was already sent again.';
+      case 'dismissed': return resend ? 'Not sent again — it was removed.' : 'It was already removed.';
+      case 'in-flight': return 'Not removed — it is still being handed to the agent running now.';
+      case 'not-written': return resend ? 'Not sent again — its record could not be written. Press again.' : 'Not removed — its record could not be written. Press again.';
+      default: return resend ? 'Not sent again — no message proven not delivered is kept under that name any more.' : 'Not removed — no message proven not delivered is kept under that name any more.';
+    }
+  }
+
+  /** B-5a4d root unit 3: a REBUILD meets the person's Send again or Dismiss of a «not delivered» message — its bubble is not drawn
+   *  (its copy and its id go; nothing else moves). A live view keeps the bubble with its end chip instead. */
+  _dropEnded(msgId) {
+    const id = this.userMessageIds.get(msgId);
+    const msg = id ? this.messageIndex.get(id) : null;
+    this.userMessageIds.delete(msgId);
+    this._webuiCopies.delete(msgId);
+    if (!msg) return;
+    const i = this.messages.indexOf(msg);
+    if (i >= 0) this.messages.splice(i, 1);
+    this.messageIndex.delete(id);
+    if (Array.isArray(this._afloat)) this._afloat = this._afloat.filter((x) => x !== msg);
+  }
+
+  /** unit 3: the door's ONE read of a bubble (src/server/undelivered-door.js) — its chip state and its words → null | { state, words,
+   *  pictures } (words: its text blocks joined; pictures: how many other blocks it carries — they are not sent again). */
+  undeliveredOf(msgId) {
+    const id = this.userMessageIds.get(String(msgId || ''));
+    const msg = id ? this.messageIndex.get(id) : null;
+    if (!msg || msg.role !== 'user') return null;
+    const blocks = Array.isArray(msg.content) ? msg.content : [{ type: 'text', text: String(msg.content || '') }];
+    const words = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n\n');
+    return { state: msg.queueState || null, words, pictures: blocks.filter((b) => b && b.type !== 'text').length, acts: this._acts ? this._acts.get(String(msgId)) || 0 : 0 };
+  }
+  /** unit 3: a word on one message's act came (its end state, or the wrapper's refusal) — the door's pending press is answered. */
+  _noteAct(msgId) { const id = String(msgId || ''); if (!id) return; if (!this._acts) this._acts = new Map(); this._acts.set(id, (this._acts.get(id) || 0) + 1); }
 
   _processUser(raw, emit) {
     this._finalizeStreaming(emit);

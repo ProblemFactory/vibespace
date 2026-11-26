@@ -33,6 +33,8 @@ const QUEUE_CHIPS = Object.freeze({
   kept: Object.freeze({ inTurn: true, place: 'next-turn' }),     // claude: Stop came before the agent read it — it rides the NEXT message (its turn opens at that delivery)
   stopped: Object.freeze({ inTurn: false, place: 'here' }),      // codex (lane codex-interrupted-putback): it had STARTED its own turn when Stop cut it off
   unconfirmed: Object.freeze({ inTurn: true, place: 'here' }),   // claude (B-5a4d root, unit 1): its CLI died with no word on its fate (a remote or paired machine, a wrapper killed) — it may not have reached the agent
+  resent: Object.freeze({ inTurn: true, place: 'here' }),        // claude (B-5a4d root unit 3): the person sent a «not delivered» message again — the new one is its own bubble below; this one stays where it stood until a rebuild
+  dismissed: Object.freeze({ inTurn: true, place: 'here' }),     // claude (unit 3): the person removed a «not delivered» message — it stays, words selectable, until a rebuild draws it no more
   undelivered: Object.freeze({ inTurn: true, place: 'here' }),   // claude (B-5a4d's root): a dead wrapper had handed it and the CLI never took it — it never reached the agent; it starts no turn and claims nothing of the input box
 });
 /** Every chip state, in the table's order. */

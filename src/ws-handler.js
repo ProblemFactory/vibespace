@@ -1275,6 +1275,17 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        case 'undelivered-resend':
+        case 'undelivered-dismiss': {   // B-5a4d root unit 3: «Send again» / «Dismiss» on a message proven not delivered — a PERSON's press only
+          // (the page verdict proved at this socket's handshake); the answer goes to THIS window alone, the end state to every window by the
+          // wrapper's own word (src/server/undelivered-door.js)
+          const session = activeSessions.get(data.sessionId), D = require('./server/undelivered-door.js'), by = ws._personPage === true ? byOfWs(ws) : null;
+          const msgId = typeof data.msgId === 'string' ? data.msgId : null;
+          const r = data.type === 'undelivered-resend' ? D.resend(session, data.sessionId, { by, msgId, sendUserInput }) : D.dismiss(session, data.sessionId, { by, msgId });
+          try { ws.send(JSON.stringify({ type: data.type + '-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId, ...r })); } catch { }
+          break;
+        }
+
         case 'end-left-behind': {   // B-69a7: «End them» — a PERSON's press only (the page verdict proved at this socket's handshake)
           const session = activeSessions.get(data.sessionId);
           require('./server/left-behind-door.js').endLeft(session, { by: ws._personPage === true ? byOfWs(ws) : null, at: data.at, hosts })
@@ -1907,6 +1918,7 @@ function registerWsHandler(wss, ctx) {
               // doing that twice inside the ws attach handler is the 2.369.16 law
               // (no avoidable sync work here).
               const wcapsAttach = wrapperCaps(BUFFERS_DIR, data.sessionId, session.socketPath);
+              session._undeliveredActs = !!(wcapsAttach.caps && wcapsAttach.caps.undeliveredActs);   // B-5a4d root unit 3: what the page is told — the door's one fact (no read at a press)
               // THE QUEUE ADVERT, hoisted out of the payload literal because
               // the RESYNC decision below needs the same two facts (2026-09-09).
               const queueAdvert = (() => {
@@ -1967,6 +1979,9 @@ function registerWsHandler(wss, ctx) {
                 // cannot" — the client keeps its "try it" state instead of
                 // wearing a restart row it does not need.
                 responseStyleLive: wcapsAttach.reason === 'no-sidecar' ? null : !!wcapsAttach.responseStyle,
+                // B-5a4d root unit 3: the running wrapper ends a «not delivered» message by the person's Send again / Dismiss — the bubble
+                // draws the two acts only where it says so (a wrapper started before the update draws none)
+                undeliveredActs: session._undeliveredActs,
                 // The harness's OWN turn state and the tool ids it says are
                 // running (§2.5). TRI-STATE like responseStyleLive: null = this
                 // session has never emitted one (old CLI / spawned before the
