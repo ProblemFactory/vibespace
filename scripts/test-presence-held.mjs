@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-// test-presence-held — B-f276, package s1126 (lane login-request-card, 主开发 r4722): A STORE THAT DECIDED BY AN EXISTENCE CHECK,
+// test-presence-held — B-f276, package s1126 (lane login-request-card, 主开发 r4722): TWO STORES THAT DECIDED BY AN EXISTENCE CHECK,
 // UNDER THE STORE-READ LAW. `fs.existsSync` answers false on ANY failure, so an I/O error read as «not there» and the next write
 // went over what was there:
 //   ① agy-subs/<account>/ (src/harnesses/antigravity.js): seedHomeRoot, run at every spawn of an Antigravity account, wrote the
 //     machine's settings.json over the account's OWN (its allow rules), rewrote the account mark, unlinked a link whose machine file
 //     only could not be read, and emptied the farm when the machine's HOME could not be listed; its sign-in stat answered «signed out»
 //     for an unreadable login file
+//   ② data/.agent-hooks-optout (src/server/agent-tool-generators.js, server.js): a start whose read of the mark failed WROTE BACK
+//     the hooks a person had removed, every run of this machine's config carried our hook rows (hooksWanted), the status said «not
+//     opted out», and an Install whose removal of the mark failed installed (the next start stripped it again)
 // THE LAW: ENOENT is the only «missing» (a first run); any other failure is UNREAD by its code — nothing is written, linked, removed
-// on it, it is said once, and the next good read decides (the heal). The unreadable read is a PLACED refusal of the
+// or registered on it, it is said once, and the next good read decides (the heal). The unreadable read is a PLACED refusal of the
 // call for that one path (EIO), never a permission or a broken disk; existsSync is placed to answer what it answers on that failure
-// (false) so the release's road is reproduced by its own call. No torn-bytes leg: the store is not parsed by us (the account's
-// settings are the CLI's own file). The REDs are the release's lines planted back in copies
+// (false) so the release's road is reproduced by its own call. No torn-bytes leg: neither store is parsed by us (the account's
+// settings are the CLI's own file; the mark's presence is the fact). The REDs are the release's lines planted back in copies
 // (scripts/mutant-copy.mjs), each anchored (a gone anchor fails by name). In-process, a scratch HOME, no vendor call, no real CLI.
 // Run: node scripts/test-presence-held.mjs
 import { scratch, anchored } from './scratch.mjs';
@@ -45,6 +48,7 @@ const warn0 = console.warn, log0 = console.log;
 console.warn = (...a) => { said.push(a.map(String).join(' ')); };
 const HOME0 = process.env.HOME, FORCE0 = process.env.VIBESPACE_FORCE_AGENT_HOOKS;
 const read = (f) => real.readFileSync(f, 'utf8');
+let worldN = 0;
 
 try {
   log0('— ① agy-subs/<account>/: the account root seeded by the law (src/harnesses/antigravity.js)');
@@ -146,6 +150,98 @@ try {
     let un = null; try { un = AGT.parseAgyAuthDir(r.root); } finally { lift(); }
     ok(JSON.stringify(ab) === JSON.stringify(un), 'RED (the release\'s reader): a missing login file and an unreadable one answer the same', { ab, un }); }
 
+  log0('— ② data/.agent-hooks-optout: the opt-out mark by the law (src/server/agent-tool-generators.js, server.js)');
+  const G_REL = 'src/server/agent-tool-generators.js';
+  const GSRC = read(path.join(REPO, G_REL));
+  const GM = require(path.join(REPO, G_REL));
+  const mutG = (anchor, to, name) => require(M.write(G_REL, anchored(GSRC, anchor, to, name), name.replace(/\W+/g, '-')));
+  const home = path.join(ROOT, 'home'); fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  process.env.HOME = home; process.env.VIBESPACE_FORCE_AGENT_HOOKS = '1';   // a scratch HOME: the generators write only there
+  const genWorld = async (Gmod, name) => {
+    const rootDir = path.join(ROOT, name); fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true });
+    const applied = [];
+    const G = Gmod.create({ rootDir, port: 0, applyThisMachine: (o) => { applied.push({ reason: o.reason, hooks: !!o.hooks, strip: !!o.strip }); return Promise.resolve({ ok: true, receipts: [], created: [], after: {} }); },
+      homeRead: (fn) => Promise.resolve().then(fn).then((value) => ({ value }), (error) => ({ error })) });
+    if (typeof G.rootFactsNow === 'function') await G.rootFactsNow();
+    return { G, applied, mark: G.HOOK_OPTOUT_FILE };
+  };
+  const PERSON = 'opted out by the person\n';
+  {
+    const { G, applied, mark } = await genWorld(GM, 'gen-a');
+    fs.writeFileSync(mark, PERSON);
+    ok(G.optOutMarkNow() === 'opted-out' && (await G.optOutMark()) === 'opted-out', 'THE MARK THERE ⇒ opted out (the start\'s reader and the synchronous one)');
+    said.length = 0;
+    place(mark, 'stat');
+    let st = null, now = null, status = null;
+    try { st = await G.ensureAgentHooks({ auto: true }); now = G.optOutMarkNow(); status = await G.agentHooksStatus(); } finally { lift(); }
+    ok(!!st && st.skipped === true && st.optOutUnread === 'EIO' && st.optedOut === true && /opt-out mark could not be read \(EIO\)/.test(st.error || '') && applied.length === 0,
+      'UNREAD (a placed EIO on the mark): the start decides at its call and registers NOTHING, removes nothing — no run of this machine\'s config is asked; its answer says why', { st, applied });
+    // the answer's readers say it by name (the adversarial read's must): the switch's answer, the Apply press, the hook-root watch
+    const LA = require(path.join(REPO, 'src/server/landing-answer.js'));
+    ok(/opt-out mark could not be read \(EIO\)/.test(LA.notLanded(st) || ''), 'THE SWITCH\'s ANSWER says why (landing-answer notLanded), never a bare «skipped»', LA.notLanded(st));
+    const routes = {}, app = { post: (p, h) => { routes[p] = h; } };
+    require(path.join(REPO, 'src/server/hooks-late.js')).create({ activeSessions: new Map(), getSessionStatus: () => null, getUserTodos: () => null, sessionStatusKey: () => '', harnesses: { get: () => null, list: () => [] } })
+      .registerApplyRoute(app, { ensureAgentHooks: () => st, agentHooksStatus: async () => ({}), integrationEnabled: () => true, harnessConfig: { syncCliConfig: async () => ({}), cliConfigStatus: async () => ({}) }, hookRegistrationSafe: () => true });
+    const out = {}, res = { status: (c) => { out.code = c; return res; }, json: (j) => { out.body = j; return res; } };
+    await routes['/api/cli-config/apply']({ body: {} }, res);
+    ok(!!out.body && out.body.ok === false && /opt-out mark could not be read \(EIO\)/.test(out.body.error || ''), 'THE APPLY PRESS says it by name (hooks-late), never «applied» over a mark it could not read', out.body && { ok: out.body.ok, error: out.body.error });
+    const RW_REL = 'src/server/hook-root-watch.js', RWSRC = read(path.join(REPO, RW_REL));
+    const watchOn = async (RW) => { const d = path.join(ROOT, `rw-${++worldN}`); fs.mkdirSync(d, { recursive: true }); const timers = [];
+      const w = RW.create({ dataDir: d, ensureAgentHooks: () => st, rootRecovery: () => null, ownerWriteRefusal: () => null, serverNotice: () => 1, setTimer: (fn, ms) => { timers.push(ms); return { unref() {} }; } });
+      await w.sync(); return timers.length; };
+    ok((await watchOn(require(path.join(REPO, RW_REL)))) === 1, 'THE HOOK-ROOT WATCH reads it again (its backoff armed) — never left until the six-hourly probe');
+    const RWX = require(M.write(RW_REL, anchored(RWSRC, ' && (r.settingsHeld || r.optOutUnread)) arm();', ' && r.settingsHeld) arm();', 'the watch reading a held settings skip only'), 'rw-held-only'));   // stale-pins: kept (the release's line, planted back for the red)
+    ok((await watchOn(RWX)) === 0, 'RED (the watch\'s release line): an unread mark is never read again by the backoff');
+    ok(!!now && now.unread === 'EIO', 'server.js\'s synchronous callers get the same answer, unread by its code: hooksWanted is false (a run carries no hook rows) and the health probe returns', now);
+    ok(!!status && status.optedOut === true && status.optOutUnread === 'EIO', 'THE STATUS: unread answers as the start acts on it (nothing will be created: no «will be created at the next start») and says why', status && { optedOut: status.optedOut, optOutUnread: status.optOutUnread });
+    ok(read(mark) === PERSON, 'the mark byte for byte after every reader and writer was asked');
+    ok(said.filter((l) => /opt-out mark .* could not be read \(EIO\)/.test(l)).length === 1, 'SAID ONCE by its code (three asks, one line)', said);
+  }
+  {
+    const { G, applied, mark } = await genWorld(GM, 'gen-b');
+    fs.writeFileSync(mark, PERSON);
+    place(mark, 'rm');
+    let inst = null; try { inst = await G.ensureAgentHooks({ auto: false }); } finally { lift(); }
+    const answers = Object.values(inst || {});
+    ok(answers.length >= 1 && answers.every((x) => !!x && x.ok === false && /could not be removed \(EIO\)/.test(x.error || '')) && applied.length === 0 && read(mark) === PERSON,
+      'THE INSTALL whose removal of the mark FAILED (a placed EIO on its rm): nothing installed, each CLI told why by name, the mark as it was', { inst, applied });
+  }
+  {
+    const { G, applied, mark } = await genWorld(GM, 'gen-c');
+    fs.writeFileSync(mark, PERSON);
+    const opted = await G.ensureAgentHooks({ auto: true });   // the scratch HOME holds none of our rows: nothing to remove
+    const n0 = applied.length;
+    fs.rmSync(mark);
+    await G.ensureAgentHooks({ auto: true });
+    ok(!!opted && opted.optedOut === true && n0 === 0, 'HEAL — the mark read: opted out, nothing registered', { opted, applied });
+    ok(applied.filter((x) => x.reason === 'hooks' && x.hooks && !x.strip).length === 1 && G.optOutMarkNow() === 'not', 'HEAL — the mark truly absent (ENOENT, the only «no»): the start registers once', { applied });
+  }
+  {
+    const { G, applied, mark } = await genWorld(GM, 'gen-d');
+    place(mark, 'write');
+    let rm = null; try { rm = await G.removeAgentHooks(); } finally { lift(); }
+    ok(!!rm && rm.ok === false && /could not be written \(EIO\)/.test(rm.why || '') && applied.length === 0 && !real.existsSync(mark),
+      'THE REMOVE whose mark could not be WRITTEN (a placed EIO; the adversarial read\'s find): nothing removed, said by name (the route\'s «the removal did not land»)', { rm, applied });
+  }
+  const ANSWER = "const optOutAnswer = (error) => { const a = SR.storeAnswer({ error }); if (a.state === 'missing') return 'not';";
+  const GR = mutG(ANSWER, "const optOutAnswer = (error) => { const a = SR.storeAnswer({ error }); if (a) return 'not';", 'every failure read as no mark');
+  { const { G, applied, mark } = await genWorld(GR, 'gen-red'); fs.writeFileSync(mark, PERSON); place(mark, 'stat');
+    try { await G.ensureAgentHooks({ auto: true }); } finally { lift(); }
+    ok(applied.some((x) => x.hooks && !x.strip), 'RED (the release\'s reading — a failed read is «no mark»): the same placed EIO REGISTERS the hooks the person removed', { applied }); }
+  const STUCK = "  if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch (e) { return Promise.resolve(optOutMarkStuck(e)); } }";
+  const GS2 = mutG(STUCK, '  if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }', 'the release silent catch');   // stale-pins: kept (the release's line, planted back for the red)
+  { const { G, applied, mark } = await genWorld(GS2, 'gen-red2'); fs.writeFileSync(mark, PERSON); place(mark, 'rm');
+    try { await G.ensureAgentHooks({ auto: false }); } finally { lift(); }
+    ok(applied.some((x) => x.hooks) && real.existsSync(mark), 'RED (the release\'s silent catch): the Install installs with the mark left behind — the next start strips it', { applied }); }
+  const WRITE = "} catch (e) { const why = `the opt-out mark could not be written (";
+  const GW = mutG(WRITE, "} catch (e) { } if (0) { const why = `the opt-out mark could not be written (", 'the release silent catch of the mark write');
+  { const { G, applied, mark } = await genWorld(GW, 'gen-red3'); place(mark, 'write');
+    try { await G.removeAgentHooks(); } finally { lift(); }
+    ok(applied.some((x) => x.strip) && !real.existsSync(mark), 'RED (the release\'s silent catch): the Remove strips with no mark written — the next start puts the hooks back', { applied }); }
+  const SV = read(path.join(REPO, 'server.js'));
+  ok(SV.includes("hooksWanted: () => integrationEnabled() && optOutMarkNow() === 'not',") && SV.includes("|| optOutMarkNow() !== 'not') return;") && !SV.includes('HOOK_OPTOUT_FILE'),
+    'WIRING: server.js asks the mark only through the generators\' answer — a run carries hook rows only on «not» (ENOENT), the health probe returns on anything else; no existsSync of the mark is left there');
+  ok(!GSRC.includes('existsSync(HOOK_OPTOUT_FILE)'), 'no existsSync of the mark is left in the generators');   // stale-pins: kept (an absence check)
 } finally {
   fs.statSync = real.statSync; fs.existsSync = real.existsSync; fs.readdirSync = real.readdirSync; fs.rmSync = real.rmSync; fs.promises.access = real.access; fs.readFileSync = real.readFileSync; fs.writeFileSync = real.writeFileSync;
   console.warn = warn0;

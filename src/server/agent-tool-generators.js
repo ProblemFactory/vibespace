@@ -9,6 +9,7 @@ const fs = require('fs');
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const path = require('path');
 const os = require('os');
+const SR = require('../store-read.js');   // B-f276 (s1126): the opt-out mark's ENOENT is «missing», any other failure is unread
 const { execFileSync } = require('child_process');
 
 function create({ rootDir, port, onHookFileCreated = null, applyThisMachine = null, homeRead = null }) { // onHookFileCreated({harness, file, rel, at}) — the registration that CREATED a hook file (lane hooks-create: src/server/late-hooks.js tells the sessions that predate it)
@@ -487,6 +488,20 @@ const HOOK_EVENTS_FOR = (harness) => { const h = listHarnesses().find((x) => x.i
 // Persisted opt-out: when the user clicks Remove in Manage Agents, we drop this
 // marker so startup does NOT silently re-register the hooks they removed.
 const HOOK_OPTOUT_FILE = path.join(rootDir, 'data', '.agent-hooks-optout');
+// B-f276 (lane login-request-card, s1126 — THE STORE-READ LAW on the opt-out mark): the release asked `fs.existsSync`, which answers
+// false on ANY failure. A start whose read of the mark failed WROTE BACK the hooks a person had removed (the next good start stripped
+// them: they ran in between), every run of this machine's config wrote our hook rows (server.js hooksWanted), the status said «not
+// opted out», and an Install whose removal of the mark failed installed — then the next start stripped it. Now the mark answers
+// 'opted-out' (there), 'not' (ENOENT: store-read's «missing», the only «no») or { unread: code } — nothing is written for an unread
+// mark, it is said once per code, and the next read decides (the heal). No call is added on the loop: optOutMarkNow is the stat in
+// place of the existsSync the start (it decides at its call: r1518) and server.js's two synchronous callers made; the status reads
+// it off the loop (optOutMark).
+const optOutSaid = new Set();
+const optOutAnswer = (error) => { const a = SR.storeAnswer({ error }); if (a.state === 'missing') return 'not'; if (!optOutSaid.has(a.code)) { optOutSaid.add(a.code); console.warn(`[hooks] the opt-out mark (data/.agent-hooks-optout) could not be read (${a.code}) — no hook entry is written or removed for it until it reads`); } return { unread: a.code }; };
+/** the opt-out mark, read OFF the loop → 'opted-out' | 'not' | { unread: code } */
+const optOutMark = () => fs.promises.access(HOOK_OPTOUT_FILE).then(() => 'opted-out', optOutAnswer);
+/** the same answer for a caller that is synchronous already (the start, decided at its call; server.js: hooksWanted, the health probe) */
+const optOutMarkNow = () => { try { fs.statSync(HOOK_OPTOUT_FILE); return 'opted-out'; } catch (error) { return optOutAnswer(error); } };
 // The CAS writer (read → mutate → compare-and-swap → tmp+rename), the
 // hook-entry finder and the two mutators live in src/harness-config.js since
 // 2.369.123 — ONE implementation for this machine AND the remote helper (which
@@ -518,7 +533,8 @@ async function agentHooksStatus() {
   // the spelling the SHIPPED HELPER writes on this machine (B-ddf3 unit 2 line 1, r1407 (e)): the stable node path (B-b83c)
   const hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);
-  const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE), refused: ownerWriteRefusal(), registeredAfterError: _registeredAfterError }; // verify r2 ①: the chip says "registered at HH:MM after an earlier read error"
+  const mark = await optOutMark();   // B-f276 (s1126): UNREAD answers as the start acts on it — nothing will be created — and says why
+  const out = { hookPath: HOOK_CMD, optedOut: mark !== 'not', ...(mark && mark.unread ? { optOutUnread: mark.unread } : {}), refused: ownerWriteRefusal(), registeredAfterError: _registeredAfterError }; // verify r2 ①: the chip says "registered at HH:MM after an earlier read error"
   const r = typeof homeRead === 'function' ? await homeRead(hookFileFacts, STATUS_READ_MS, { cls: 'hook-status' }) : await hookFileFacts().then((value) => ({ value }), (error) => ({ error }));   // r2592 (2): one read out for every page and check that asks
   if (!r.value) {
     const why = `the hook files were not read (${r.why || (r.error && r.error.message) || r.error || 'no answer'})`;
@@ -721,8 +737,16 @@ function ensureAgentHooks({ auto = false } = {}) {
   if (refused) return Promise.resolve({ skipped: true, refused });
   const held = settingsHeldNow();
   if (held) { replayAtLift(); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }   // B-225b: no write while the settings are held
-  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return (typeof homeRead === 'function' ? homeRead(ourRowsOnDisk, undefined, { cls: 'opted-out-look' }) : ourRowsOnDisk().then((value) => ({ value }))).then((r) => (r.value ? (r.value.some((x) => x.ours) ? stripAgentHookEntries({ ifOptedOut: true }).then((removed) => ({ optedOut: true, removed })) : { optedOut: true }) : optedOutUnread(r)));   // r1675: opted out AND our rows still there (a removal the hub's stop lost) ⇒ ONE removal queued; r2224 (1): that look is a read under the home OUTSIDE a job — through the runner's guard (bounded, counted, refused while an earlier read is out), an unanswered look queues no removal and says why
-  if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
+  // B-f276 (s1126): THE START DECIDES AT ITS CALL (r1518: its registration is queued at the call, so a removal asked after it runs after
+  // it) — by optOutMarkNow, the stat in place of the release's existsSync; an UNREAD mark registers and removes NOTHING, by name
+  if (auto) { const mark = optOutMarkNow(); return mark === 'not' ? registerHooks() : mark === 'opted-out' ? optedOutLook() : Promise.resolve(optOutMarkUnread(mark.unread)); }
+  // B-f276 (s1126): the Install press removes the mark FIRST — a removal that FAILED (not «there was none») installs nothing, by name:
+  // the mark left behind would have the next start strip what the person just asked for
+  if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch (e) { return Promise.resolve(optOutMarkStuck(e)); } }
+  return registerHooks();
+  function optedOutLook() { return (typeof homeRead === 'function' ? homeRead(ourRowsOnDisk, undefined, { cls: 'opted-out-look' }) : ourRowsOnDisk().then((value) => ({ value }))).then((r) => (r.value ? (r.value.some((x) => x.ours) ? stripAgentHookEntries({ ifOptedOut: true }).then((removed) => ({ optedOut: true, removed })) : { optedOut: true }) : optedOutUnread(r))); }   // r1675: opted out AND our rows still there (a removal the hub's stop lost) ⇒ ONE removal queued; r2224 (1): that look is a read under the home OUTSIDE a job — through the runner's guard (bounded, counted, refused while an earlier read is out), an unanswered look queues no removal and says why
+  function registerHooks() {
+  { const r = refuseOwnerWrite(); if (r) return Promise.resolve({ skipped: true, refused: r }); }   // B-f276 (s1126): the root verdict asked at the write itself (test-server-root ④: a writer's guard sits within 12 lines above it)
   if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
   const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`;
   // our entries' commands BEFORE the run, read at its own start (r1407 (e): a rewrite journalled by name); r1518: QUEUED AT THE CALL
@@ -773,6 +797,20 @@ function ensureAgentHooks({ auto = false } = {}) {
     if (_lastRootError && !_registeredAfterError && Object.values(results).some((x) => x && x.ok)) _registeredAfterError = { at: Date.now(), error: _lastRootError.error, since: _lastRootError.at };
     return results;
   }
+  }   // registerHooks (B-f276 s1126: the release's body, unchanged, under one name the two roads call)
+}
+// B-f276 (s1126): the mark UNREAD at a start — registered NOTHING and removed nothing (either could undo the person's own choice). Its
+// shape is the one its readers already say by name: `optedOut` + `error` (the Apply press, hooks-late — never «applied» over it),
+// `error` beside `skipped` (the switch's answer, landing-answer notLanded), `optOutUnread` (the hook-root watch reads again, its backoff)
+function optOutMarkUnread(code) {
+  const why = `the opt-out mark could not be read (${code}) — the hooks were neither registered nor removed; VibeSpace reads it again`;
+  return { skipped: true, optedOut: true, optOutUnread: code, error: why };
+}
+// B-f276 (s1126): the Install press could not remove the mark — nothing installed, each CLI's answer says why
+function optOutMarkStuck(e) {
+  const why = `the opt-out mark could not be removed (${(e && e.code) || (e && e.message) || e}) — nothing was installed: the next start would have removed it again. Try again`;
+  console.warn(`[hooks] ${why}`);
+  return Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: why }]));
 }
 // r2224 (1): the opted-out start's look at our rows did not answer (or was refused by the guard): no removal is queued, said by name
 function optedOutUnread(r) {
@@ -819,8 +857,9 @@ function stripAgentHookEntries({ ifOptedOut = false } = {}) {
   });
 }
 function removeAgentHooks() {
-  // Durable: record the opt-out so startup won't re-register (finding #3).
-  try { fs.writeFileSync(HOOK_OPTOUT_FILE, new Date().toISOString() + '\n'); } catch {}
+  // Durable: record the opt-out so startup won't re-register (finding #3). B-f276 (s1126): a mark that could not be WRITTEN removes
+  // nothing, by name (the Remove route says it) — the next start, finding no mark, would put the hooks back
+  try { fs.writeFileSync(HOOK_OPTOUT_FILE, new Date().toISOString() + '\n'); } catch (e) { const why = `the opt-out mark could not be written (${(e && e.code) || (e && e.message) || e}) — the hooks were not removed: the next start would have put them back. Try again`; console.warn(`[hooks] ${why}`); return Promise.resolve({ ok: false, receipts: [], created: [], why }); }
   return stripAgentHookEntries();
 }
   return {
@@ -829,7 +868,7 @@ function removeAgentHooks() {
     ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
     rootVerdict, ownerWriteRefusal, refuseOwnerWrite, readRootFacts, rootRecovery, rootFactsNow, onRootLanded, rootReadStats, _setRootFs, _setRootReadMs, // B-1425: the facts a caller awaits; the single-flight's counts and the suite seams // verify r1: the facts reader, for the gate's real-filesystem shapes; r2: the recovery fact
     agentHooksStatus,
-    HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
+    HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined, optOutMark, optOutMarkNow,   // B-f276 (s1126)
   };
 }
 // Known CLI death signatures → { reason, detail } (2.226.0, probe batch).

@@ -2211,7 +2211,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         };
         const rw = await watchSkip(require(path.join(REPO, RWREL)));
         ok(rw.memoKept && rw.said === false && rw.armed === 1 && rw.attempt === 4, '⑪ (k) the hook-root watch reads a held skip as NOTHING registered: no recovery (the memo kept, no «registered after an earlier read error»), its backoff armed to read again', rw);
-        const RW_A = /^ {6}else if \(r && r\.skipped && r\.settingsHeld\) arm\(\);[^\n]*\n/m;
+        const RW_A = /^ {6}else if \(r && r\.skipped && \(r\.settingsHeld \|\| r\.optOutUnread\)\) arm\(\);[^\n]*\n/m;   // B-f276 (s1126): the line also reads an unread opt-out mark
         const xrw = await watchSkip(mutantCopies('swc-root-watch-skip', REPO).load(RWREL, anchored(RWSRC, RW_A, '', 'root-watch-skip'), 'root-watch-skip'));
         ok(xrw.armed === 0 && xrw.attempt === 3, 'CONTROL (the watch\'s skip read cut, in a copy): a held skip is never read again — no backoff armed, the attempt never moves (red; since B-ddf3 unit 2 the recovery itself is read by landing-answer notLanded, which never takes a held skip for one)', xrw);
         // the lift REPLAYS the skipped sync whatever its rows say (every row at its default: no row differs from no «before»)

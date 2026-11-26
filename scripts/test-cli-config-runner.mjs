@@ -332,8 +332,8 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       };
       const op = await optLegs(GEN);
       ok(op.r.optedOut === true && op.r.removed === true && !op.left, 'r1675: a start with the opt-out mark and our rows still in the file queues ONE removal — the rows are gone', op);
-      const OPT_NOW = /  if \(auto && fs\.existsSync\(HOOK_OPTOUT_FILE\)\) return \(typeof homeRead[^\n]*/;
-      const GENO = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), OPT_NOW, '  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });', 'the cure\'s early return'), 'opt-out-early')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });   // stale-pins: kept (the cure's line, rebuilt for the red control)
+      const OPT_NOW = /  function optedOutLook\(\) \{ return \(typeof homeRead[^\n]*/;   // B-f276 (s1126): the opted-out start's look, its own function now
+      const GENO = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), OPT_NOW, '  function optedOutLook() { return Promise.resolve({ optedOut: true }); }', 'the cure\'s early return'), 'opt-out-early')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });   // stale-pins: kept (the cure's line, rebuilt for the red control)
       const opm = await optLegs(GENO);
       ok(opm.r.optedOut === true && !opm.r.removed && opm.left, 'RED (the cure\'s early return): opted out, nothing removed — our rows stay in the person\'s file', opm);
       // r2224 (1): that look at our rows is a read under the home made OUTSIDE a job — it goes through the runner's guard: while an
@@ -478,10 +478,10 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       ok(llt.shownS1 === 0, 'RED (the mark latched before anyone saw it — line 454\'s follow\'s form): a start with no page open latches the mark, and the next stalled start with a page open is not told', llt);
       // r2513 (3): THE SIX-HOURLY CHECK's SKIP BY BEHAVIOUR — the check lifted from server.js and run: an unread entry calls no repair
       const SJ4 = src('server.js'), c0 = SJ4.indexOf('async function checkAgentHookHealth() {'), c1 = SJ4.indexOf('\n}\n', c0) + 2;
-      const runCheck = async (text, st) => {
+      const runCheck = async (text, st, mark = 'not') => {   // B-f276 (s1126): `mark`, the opt-out mark's answer the check is handed
         const calls = [];
-        const fn = new Function('hookRootWatch', 'integrationEnabled', 'fs', 'HOOK_OPTOUT_FILE', 'HOOK_CMD', 'createHookHelper', 'agentHooksStatus', 'ensureAgentHooks', 'serverNotice', text + '\nreturn checkAgentHookHealth;')(
-          { probeMayRun: () => true, saidRecoveryInstead: () => false }, () => true, { existsSync: (f) => f === '/hook-cmd' }, '/opt-out', '/hook-cmd', () => {},
+        const fn = new Function('hookRootWatch', 'integrationEnabled', 'fs', 'optOutMarkNow', 'HOOK_CMD', 'createHookHelper', 'agentHooksStatus', 'ensureAgentHooks', 'serverNotice', text + '\nreturn checkAgentHookHealth;')(   // B-f276 (s1126): the mark's answer, not an existsSync
+          { probeMayRun: () => true, saidRecoveryInstead: () => false }, () => true, { existsSync: (f) => f === '/hook-cmd' }, () => mark, '/hook-cmd', () => {},
           async () => st, (a) => { calls.push(a); return { claude: { ok: true } }; }, () => {});
         await fn(); await tick();
         return calls.length;
@@ -494,20 +494,32 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
       const SKIP = '      if (!info.fileExists || info.parseError) continue; // that CLI isn\'t set up here / unreadable\n';
       const nRed = chk.includes(SKIP) ? await runCheck(chk.replace(SKIP, ''), { hookPath: '/hook-cmd', optedOut: false, claude: UNREAD, codex: UNREAD }) : -1;
       ok(nRed === 2, 'RED (the skip taken out): an unread entry (installed null) reads «not installed» and the check calls a repair for each', { nRed });
+      const nHeldMark = await runCheck(chk, { hookPath: '/hook-cmd', optedOut: false, claude: STALE, codex: UNREAD }, { unread: 'EIO' });
+      ok(nHeldMark === 0, 'B-f276 (s1126): the six-hourly check with the opt-out mark UNREAD returns before its probe — no repair asked (the same stale entry called one above)', { nHeldMark });
       // r1813 (2): an Install pressed WHILE the start reads the mark and the rows (outside the queue): the start's removal reads the
-      // mark again INSIDE its job — the Install, answered «ok», is never stripped after it
-      const pressLegs = async (G) => {
+      // mark again INSIDE its job — the Install, answered «ok», is never stripped after it. B-f276 (s1126): the start reads the mark
+      // OFF the loop now, so the press is PLACED in the start's wait by a fact: the start's look at our rows is asked (the mark was
+      // read «opted out») and held on a gate; the press comes then, and the gate opens after it (never a clock)
+      const pressLegs = async (Gmod) => {
+        let lookAsked = null, openLook = null;
+        const asked = new Promise((r) => { lookAsked = r; }), lookGate = new Promise((r) => { openLook = r; });
+        const G = Gmod.create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => { lookAsked(); return lookGate.then(() => SYNC.homeRead(fn)); } });
         await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
         fs.writeFileSync(G.HOOK_OPTOUT_FILE, new Date().toISOString() + '\n');
-        const [st, inst] = await Promise.all([G.ensureAgentHooks({ auto: true }), G.ensureAgentHooks({ auto: false })]);   // the press in the start's wait
+        const stP = G.ensureAgentHooks({ auto: true });
+        let bound = null; const askedIn = await Promise.race([asked.then(() => true), new Promise((r) => { bound = setTimeout(() => r(false), 30000); })]); clearTimeout(bound);   // the start read the mark («opted out») and asked its look
+        if (!askedIn) { openLook(); return { harness: 'HARNESS (B-f276 s1126): the start never asked its look at our rows within 30 s (the wait\'s bound, never the product\'s answer)' }; }
+        const instP = G.ensureAgentHooks({ auto: false });   // the press in the start's wait
+        openLook();
+        const [st, inst] = await Promise.all([stP, instP]);
         const left = oursIn(JSON.parse(fs.readFileSync(sf, 'utf8')));
         fs.rmSync(G.HOOK_OPTOUT_FILE, { force: true });
         return { start: st && { optedOut: st.optedOut, removed: st.removed && { ok: st.removed.ok, skipped: st.removed.skipped || null } }, install: inst.claude && inst.claude.ok, left };
       };
-      const pl = await pressLegs(GEN);
+      const pl = await pressLegs(require(path.join(REPO, 'src/server/agent-tool-generators.js')));
       ok(!!(pl.install === true && pl.left && pl.start && pl.start.removed && /no longer asked/.test(pl.start.removed.skipped || '')), 'r1813: an Install pressed during the start\'s wait is answered ok and STAYS — the start\'s removal finds the mark gone in its own job and is not run', pl);
       const WHEN = "when: ifOptedOut ? stillOptedOut : null,";
-      const GENW = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), WHEN, 'when: null,', 'the mark read outside the queue'), 'no-when')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o), homeRead: (fn) => SYNC.homeRead(fn) });
+      const GENW = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), WHEN, 'when: null,', 'the mark read outside the queue'), 'no-when'));   // B-f276 (s1126): pressLegs builds it on its own gate
       const plm = await pressLegs(GENW);
       ok(plm.install === true && !plm.left, 'RED (the mark read outside the queue — the r1675 form): the Install is answered ok, then the start\'s removal strips it', plm);
       // r1813 (3) the true words: a run that broke BEFORE its check says the run's own reason, never «the check … broke»
