@@ -657,7 +657,8 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     for (const l of LANES) {
       const busy = l.inflight && !l.inflight.unlink ? l.inflight : null;
       if (!busy || (names && !names.includes(busy.name))) continue;
-      if (!settleInflight(l, deadline, waitedBy)) { held.add(l); const s0 = stores.get(busy.name); left.push({ name: s0 ? s0.name : busy.name, file: busy.name, why: `its write was still held by the storage after ${((now() - busy.startedAt) / 1000).toFixed(1)} s` }); }
+      if (!settleInflight(l, deadline, waitedBy)) { held.add(l); l.heldBy = l.inflight; const s0 = stores.get(busy.name);   // r4812 M1: the job given up on IN FLIGHT is held too (laneHeld)
+        left.push({ name: s0 ? s0.name : busy.name, file: busy.name, why: `its write was still held by the storage after ${((now() - busy.startedAt) / 1000).toFixed(1)} s` }); }
     }
     // the jobs MADE and waiting for a lane (their bytes are this turn's or older): written next, in the order they were made
     for (const l of LANES) for (const j of l.parked.filter((x) => (!names || names.includes(x.s.file)) && (!only || only(x.s)))) {   // the exit's rank-0 pass: its own list only (r1388 (5))

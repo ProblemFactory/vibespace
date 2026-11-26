@@ -68,7 +68,7 @@ function answerWords(r) {
   if (code === 'not_running') return t('Auto-continue is not running on this hub — reopen VibeSpace and try again.');
   if (code === 'in_flight') return t('A resume of these sessions is already running — following it here.');
   if (code === 'not_a_page') return t('The bulk acts are pressed on this VibeSpace page only.');
-  if (code === 'auto_resume_unread') return t('The record of waiting continues could not be read, so a resume nobody pressed waits until it reads — press Resume on this page to continue them now.');
+  if (code === 'auto_resume_unread') return t('The record of waiting continues could not be read, so nothing is resumed until it reads — VibeSpace reads it again by itself every few minutes; press Resume again then.');   // r4812 REQUIRED 1: a press waits for the read too
   return null;
 }
 /** The spend ceiling's refusal of a WHOLE batch, in the person's words: the bucket, what it has left, what the batch needs. */

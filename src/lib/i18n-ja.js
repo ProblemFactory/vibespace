@@ -3851,7 +3851,7 @@ export default {
   'CLI default': 'CLI 既定',
   'A running session cannot change style — the CLI only reads it at startup.': '実行中のセッションはスタイルを変更できません（CLI は起動時のみ読み込みます）。',
   'Usage limit hit — this session will continue by itself at {t}. Click to cancel.': '利用上限に到達 — このセッションは {t} に自動で続行します。クリックで取消。',
-  "The record of waiting continues could not be read, so a resume nobody pressed waits until it reads — press Resume on this page to continue them now.": "待機中の続行の記録を読み込めないため、誰も押していない再開は読み込めるまで待ちます — このページで「再開」を押すと今すぐ続行します。", // r3104 (lane bl-loop-b)
+  "The record of waiting continues could not be read, so nothing is resumed until it reads — VibeSpace reads it again by itself every few minutes; press Resume again then.": "待機中の続行の記録を読めないため、読めるまで何も再開されません — VibeSpace は数分ごとに自動で読み直します。読めたらもう一度「再開」を押してください。",
   "Auto-continue is on, but the record of waiting continues could not be read — this session does not continue by itself until it reads; open it to continue": "自動続行はオンですが、待機中の続行の記録を読み込めません — 読み込めるまでこのセッションは自動で続行しません。開いて続行してください", // r3104 (lane bl-loop-b)
   "The record of waiting continues was damaged; its damaged bytes are kept beside it as {copy}. If this session was waiting to continue, it does not continue by itself: open it to continue, or mend its file by hand and restart VibeSpace.": "待機中の続行の記録が壊れていました。壊れた内容はその隣に {copy} として保存しています。このセッションが続行を待っていた場合、自動では続行しません：開いて続行するか、ファイルを手で直してから VibeSpace を再起動してください。", // r3104 (lane bl-loop-b)
   "Usage limit hit — the record of waiting continues could not be read, so this session does not continue by itself until it reads; VibeSpace reads it again every few minutes.": "利用上限に到達 — 待機中の続行の記録を読み込めないため、読み込めるまでこのセッションは自動で続行しません。VibeSpace は数分ごとに読み直します。", // r3104 (lane bl-loop-b)

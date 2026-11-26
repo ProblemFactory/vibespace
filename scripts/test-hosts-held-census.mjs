@@ -605,7 +605,7 @@ console.log('§6 wiring: the re-adoption waits at its caller; the installers say
 {
   const SV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   const SH = fs.readFileSync(path.join(ROOT, 'scripts/vibespace-agentd-install.sh'), 'utf8'), PS = fs.readFileSync(path.join(ROOT, 'scripts/vibespace-agentd-install.ps1'), 'utf8');
-  ok(SV.includes("const held = !!(hosts.held && hosts.held() && hosts.whenRead); (held ? (keep(), Promise.resolve()) : go()).finally(() => { if (resumeRoad) resumeRoad.adopted(); });") && SV.includes(".finally(() => { if (resumeRoad) resumeRoad.adoptedRemote(); });"),
+  ok(SV.includes("const held = !!(hosts.held && hosts.held() && hosts.whenRead); (held ? (keep(), Promise.resolve()) : go()).finally(() => { if (resumeRoad) resumeRoad.adopted(); });") && SV.includes(".finally(() => { _arRestoreSettled = true; if (resumeRoad) resumeRoad.adoptedRemote(); });"),
     'server.js: the boot\'s re-adoption of remote sessions waits for the read while hosts.json is held (its get threw: the pass ended, a later resume killed the agent it would adopt) — the LOCAL resume road opens at once then, the REMOTE one when the re-adoption settles (§10 drives it)');
   const i16 = SH.indexOf('if [ "$CHECK_RC" -eq 16 ]; then'), ine = SH.indexOf('if [ "$CHECK_RC" -ne 0 ]; then'), p16 = PS.indexOf('if ($checkRc -eq 16) {'), pne = PS.indexOf('if ($checkRc -ne 0) {');
   ok(i16 > 0 && ine > i16 && /run this same command again in a few minutes/.test(SH.slice(i16, ine)) && p16 > 0 && pne > p16 && /run this same command again in a few minutes/.test(PS.slice(p16, pne)),

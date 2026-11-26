@@ -3851,7 +3851,7 @@ export default {
   'CLI default': 'CLI 默认',
   'A running session cannot change style — the CLI only reads it at startup.': '运行中的会话改不了风格——CLI 只在启动时读它。',
   'Usage limit hit — this session will continue by itself at {t}. Click to cancel.': '已达用量上限——本会话将在 {t} 自动继续。点击取消。',
-  "The record of waiting continues could not be read, so a resume nobody pressed waits until it reads — press Resume on this page to continue them now.": "无法读取等待继续的记录，因此无人按下的恢复会等到读取成功——在此页面按「恢复」即可立即继续它们。", // r3104 (lane bl-loop-b)
+  "The record of waiting continues could not be read, so nothing is resumed until it reads — VibeSpace reads it again by itself every few minutes; press Resume again then.": "等待续跑的记录读不到，在读到之前不会恢复任何会话 —— VibeSpace 每隔几分钟会自己再读一次；读到后再按「恢复」。",
   "Auto-continue is on, but the record of waiting continues could not be read — this session does not continue by itself until it reads; open it to continue": "自动继续已开启，但无法读取等待继续的记录——在读取成功之前，此会话不会自动继续；打开它即可继续", // r3104 (lane bl-loop-b)
   "The record of waiting continues was damaged; its damaged bytes are kept beside it as {copy}. If this session was waiting to continue, it does not continue by itself: open it to continue, or mend its file by hand and restart VibeSpace.": "等待继续的记录已损坏；损坏的内容另存在它旁边，名为 {copy}。如果此会话原本在等待继续，它不会自动继续：打开它即可继续，或手动修好该文件后重启 VibeSpace。", // r3104 (lane bl-loop-b)
   "Usage limit hit — the record of waiting continues could not be read, so this session does not continue by itself until it reads; VibeSpace reads it again every few minutes.": "已达用量上限——无法读取等待继续的记录，因此在读取成功之前此会话不会自动继续；VibeSpace 每隔几分钟会重新读取。", // r3104 (lane bl-loop-b)

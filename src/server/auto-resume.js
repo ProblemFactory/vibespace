@@ -567,11 +567,16 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     try { save(); } finally { saveHeld = was; }
     let r = null;
     try { r = W.flushSync([file], { waitedBy: `auto-resume.json: ${why}` }); } catch (e) { r = { left: [{ file, why: (e && e.message) || 'the writer threw' }] }; }
-    const landed = !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === file);
+    // r4812 REQUIRED 2: LANDED means this store is among the files the flush WROTE — a flush that wrote nothing and left nothing (the
+    // save's hand-over threw, the producer gave nothing) is no landing
+    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write');
     if (!landed) { landingRefused = true; refusedWhy = r && r.deferred ? 'stopping' : 'not-durable'; }
     return landed;
   }
+  // r4812 M2: WHILE THE STORE IS HELD NOTHING TOUCHES THE ARMS OR THE FIRE RECORDS — recordBeforeDelivery refuses before either is
+  // touched (an arm taken off there would be remembered as «gone» by the held bookkeeping and deleted from the file at the lift)
   function recordBeforeDelivery(id, key, kind, origin = null) {
+    if (hold.held()) { refusedWhy = 'held'; return null; }
     const arm = armed.has(id) ? armed.get(id) : undefined;
     const fire = fires.has(id) ? JSON.parse(JSON.stringify(fires.get(id))) : undefined;
     const back = () => { if (arm !== undefined) armed.set(id, arm); else armed.delete(id); if (fire !== undefined) fires.set(id, fire); else fires.delete(id); };
@@ -830,7 +835,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // THE PERSON'S OWN ACT (the owner's ruling 2026-11-18, B): the press starts all N, ATTENDED — none counted against the
     // unattended caps, no stamp; every slot still asked before each continue (paid overage refused by name). A batch no door
     // pressed is N automatic continues: its gated twin, each counted like any auto-resume
-    if (hold.held() && !isPress(pressed)) return { ok: false, why: 'held', code: 'auto_resume_unread', error: hold.words() };   // r3004: N automatic continues on a guess — they wait
+    if (hold.held()) return { ok: false, why: 'held', code: 'auto_resume_unread', error: hold.words() };   // r3004: N automatic continues on a guess — they wait; r4812 REQUIRED 1: a person's press too — refused up front by name, the hold's own words (no row can land its record while the file is unread)
     const paid = isPress(pressed) ? { spendReason: 'bulk-resume' } : { spendReason: 'auto-resume' };
     const now = Date.now();
     const plan = stoppedPlan(now);
@@ -986,7 +991,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
         const carried = { note: e.kind === 'overload' ? '模型过载后的批量恢复' : '因用量停止后的批量恢复' };
         let ok = false;
         const wasArmed = armed.has(e.id), putBack = recordBeforeDelivery(e.id, ident2 ? ident2.key : null, 'timed');   // R9: the record on disk BEFORE the delivery
-        if (!putBack) { log(`[auto-resume] ${e.id}: the record of this continue could not be written to auto-resume.json — nothing was sent (the bulk resume ${batchId})`); giveBack(); if (refusedWhy === 'held') rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); else { busy = true; rec.failed.push({ id: e.id, name: e.name, why: 'storage-busy' }); } continue; }
+        if (!putBack) { log(`[auto-resume] ${e.id}: the record of this continue could not be written to auto-resume.json — nothing was sent (the bulk resume ${batchId})`); giveBack(); busy = true; rec.failed.push({ id: e.id, name: e.name, why: 'storage-busy' }); continue; }   // (a hold begun mid-batch too: answered at once, its row said)
         try { ok = deliverContinue(session, verb, prompt, (s2, text) => sentNoted(s2, text, sendToSession(e.id, s2, text, carried))); }   // B-3d90: the batch's continue has its own record too
         catch (err) { log(`[auto-resume] ${e.id}: the '${verb.form}' resume verb threw in the bulk resume: ${err.message}`); ok = false; }
         if (!ok) { putBack(); giveBack(); rec.failed.push({ id: e.id, name: e.name, why: 'not-delivered' }); continue; }

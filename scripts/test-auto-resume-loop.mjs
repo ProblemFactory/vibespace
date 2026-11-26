@@ -861,7 +861,9 @@ if (!probe) {
   arm(); ar.fireNow('s1', '账号池已切换到 Account A');
   await new Promise((r) => setTimeout(r, 20));
   ok('a gate that RE-POINTS the link keys the fire to the account the continue landed on', sent.length === 2 && ar._fires.get('s1').last.key === 'sub-b', JSON.stringify(ar._fires.get('s1').last));
-  ok('…and says so in the journal (the name in the line is the account that was billed)', journal.some((l) => /the gate moved this session onto Account B/.test(l)) || journal.some((l) => /\(landed on Account B\) — continued immediately/.test(l)), journal.join(' | '));
+  // r4784: the continue's journal line names no account — it says the continue landed on another one (the billed account is the
+  // fire record's key, pinned just above)
+  ok('…and says so in the journal (the continue landed on another account; the line names none)', journal.some((l) => /the gate moved this session onto Account B/.test(l)) || journal.some((l) => /\(landed on another account\) — continued immediately/.test(l) && !/landed on Account/.test(l)), journal.join(' | '));
   ok('…so the rejection quarantines the REAL rejector, not the account we came from', (() => {
     ar.noteFireOutcome('s1', false, 'limit rejection');
     return ar.recentFireFailures('s1').join(',') === 'sub-b' && journal.some((l) => /the continue onto sub-b was rejected again/.test(l));

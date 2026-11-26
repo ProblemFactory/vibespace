@@ -22,6 +22,14 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// 主开发 r5135 law 1: A CONTROL IS JUDGED ON THE FACT THAT ITS PLANT WAS IN FORCE — the red copies of row B-9a24's legs (16b, 19a) mark
+// their planted site when the product reaches it (MARK, counted here); a plant never read in the window is a NAMED SKIP the gate
+// counts, never a red and never a green
+const PLANTS = new Map();
+globalThis.__arPlantRead = (n) => { PLANTS.set(n, (PLANTS.get(n) || 0) + 1); };
+const MARK = (n) => ` globalThis.__arPlantRead && globalThis.__arPlantRead(${JSON.stringify(n)});`;
+const plantRead = (n) => PLANTS.get(n) || 0;
+const redIf = (inForce, witness, n, c, e) => { if (inForce) return ok(n, c, e); console.log(`  ⊘ SKIP: ${n} — NOT JUDGED: its plant was not read in the window (${witness}; 主开发 r5135 law 1)`); return true; };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
 // crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
@@ -2451,14 +2459,18 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
   ok('19b. THE READ AGAIN lifts it: the file\'s promised continue and its loop-breaker record come back BESIDE the arm made meanwhile — the file then holds both',
     lifted && H.a.ar._hold.held() === null && H.a.ar._armed.has('w1') && H.a.ar._armed.has('w2') && H.a.ar._fires.has('w1') && !!after.armed.w1 && !!after.armed.w2 && !!after.fires.w1, JSON.stringify({ armed: Object.keys(after.armed || {}), fires: Object.keys(after.fires || {}) }));
   // (row B-9a24 R9 / B-574d: the store writer's producer refuses a held store too — EHELD — so the release's form is BOTH guards gone)
-  const mSave = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, "    if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file\n", '', 'auto-resume.js'), "        if (hold.held()) throw Object.assign(new Error('auto-resume.json is held (it could not be read) \u2014 nothing is written over it until it reads'), { code: 'EHELD' });\n", '', 'auto-resume.js'));
+  const mSave = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, "    if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file\n", '   ' + MARK('19a-save') + '\n', 'auto-resume.js'), "        if (hold.held()) throw Object.assign(new Error('auto-resume.json is held (it could not be read) \u2014 nothing is written over it until it reads'), { code: 'EHELD' });\n", '', 'auto-resume.js'));
+  PLANTS.clear();
   const HX = heldScene(mSave.create), axf = JSON.parse(fs.readFileSync(HX.z.f, 'utf8'));
-  ok('19a RED control (the save not held — the release): the new arm writes the file over — the other conversation\'s promise and its loop-breaker record are GONE from it (red)', !HX.fileSame && !axf.armed.w1 && !(axf.fires || {}).w1, JSON.stringify(axf));
-  // (row B-9a24 R9: the record a continue lands before its delivery is refused while held too — recordBeforeDelivery's landRecord — so the
-  // fault's form is BOTH guards gone)
-  const mFire = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(AR_SRC, /    if \(hold\.held\(\)\) \{ if \(!heldSaid\.has\('fire:' \+ id\)\)[^\n]*\n/, '', 'auto-resume.js'), "    if (hold.held()) { refusedWhy = 'held'; return false; }   // held: nothing is written over its file (no record, so no continue \u2014 r3004 already refuses there)\n", '', 'auto-resume.js'));
-  const HF = heldScene(mFire.create);
-  ok('19a RED control (the fire not held): a continue goes on a guess while the loop-breaker\'s memory is unread (red)', HF.timed + (HF.now2 ? 1 : 0) > 0 && HF.a.sent.length > 0, JSON.stringify({ timed: HF.timed, now: HF.now2, sent: HF.a.sent.length }));
+  const hxW = { read: plantRead('19a-save'), held: !!HX.a.ar._hold.held() };
+  redIf(hxW.read > 0 && hxW.held, `the copy's save without its held guard read ${hxW.read} time(s), the placed unreadable start ${hxW.held ? 'in force' : 'NOT in force'}`, '19a RED control (the save not held — the release): the new arm writes the file over — the other conversation\'s promise and its loop-breaker record are GONE from it (red)', !HX.fileSame && !axf.armed.w1 && !(axf.fires || {}).w1, JSON.stringify(axf));
+  // (row B-9a24 R9: the record a continue lands before its delivery is refused while held too — recordBeforeDelivery and its landRecord;
+  // r4812: a landing must WRITE the store, and a held save writes nothing — writable() and the producer's EHELD — so the fault's form is
+  // EVERY guard gone: the fire's, the record step's, the landing's and the save's two)
+  const mFire = MUTX.load('src/server/auto-resume.js', editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(AR_SRC, /    if \(hold\.held\(\)\) \{ if \(!heldSaid\.has\('fire:' \+ id\)\)[^\n]*\n/, '', 'auto-resume.js'), "    if (hold.held()) { refusedWhy = 'held'; return false; }   // held: nothing is written over its file (no record, so no continue \u2014 r3004 already refuses there)\n", '', 'auto-resume.js'), "    if (hold.held()) { refusedWhy = 'held'; return null; }\n", '   ' + MARK('19a-fire') + '\n', 'auto-resume.js'), "    if (!hold.writable('an auto-continue change')) return;   // r3004: held — nothing is written over the file\n", '', 'auto-resume.js'), "        if (hold.held()) throw Object.assign(new Error('auto-resume.json is held (it could not be read) \u2014 nothing is written over it until it reads'), { code: 'EHELD' });\n", '', 'auto-resume.js'));
+  PLANTS.clear();
+  const HF = heldScene(mFire.create), hfW = { read: plantRead('19a-fire'), held: !!HF.a.ar._hold.held() };
+  redIf(hfW.read > 0 && hfW.held, `the copy's record step without its held refusal read ${hfW.read} time(s), the placed unreadable start ${hfW.held ? 'in force' : 'NOT in force'}`, '19a RED control (the fire not held): a continue goes on a guess while the loop-breaker\'s memory is unread (red)', HF.timed + (HF.now2 ? 1 : 0) > 0 && HF.a.sent.length > 0, JSON.stringify({ timed: HF.timed, now: HF.now2, sent: HF.a.sent.length }));
   // 19c. a RECOVERY while held: the conversation armed only in the unread file recovers — its promise must not come back at the lift
   const recScene = (createFn) => {
     const z = seed();
@@ -2501,11 +2513,13 @@ console.log('\n19. r3004 the store-read law: a failed read HOLDS the waits and t
     const z = seed();
     const a = refusedRead(z.f, () => mkWith(create, z.dir));
     const r = a.ar.resumeBatch({ pressed: null });
+    // r4812 REQUIRED 1: a PERSON's press while held is refused the same way, up front, by its code (no row can land its record)
+    const rp = a.ar.resumeBatch({ pressed: require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } }) });
     a.ar.stop();
     const routes = read('src/server/bulk-resume-routes.js'), dlg = read('src/lib/bulk-resume.js'), zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
-    const KEY = 'The record of waiting continues could not be read, so a resume nobody pressed waits until it reads — press Resume on this page to continue them now.';
-    ok('19g. r3104 (b): a batch no door pressed, while held, is refused by its code (auto_resume_unread); the route answers 503 with it, and the dialog words it in en / zh / ja (never the hub\'s English)',
-      r && r.ok === false && r.code === 'auto_resume_unread' && /if \(r && r\.ok === false && r\.code === 'auto_resume_unread'\) return res\.status\(503\)\.json\(r\);/.test(routes)
+    const KEY = 'The record of waiting continues could not be read, so nothing is resumed until it reads — VibeSpace reads it again by itself every few minutes; press Resume again then.';
+    ok('19g. r3104 (b) / r4812: a batch no door pressed — and a person\'s press too — while held, is refused by its code (auto_resume_unread); the route answers 503 with it, and the dialog words it in en / zh / ja (never the hub\'s English)',
+      r && r.ok === false && r.code === 'auto_resume_unread' && rp && rp.ok === false && rp.code === 'auto_resume_unread' && /if \(r && r\.ok === false && r\.code === 'auto_resume_unread'\) return res\.status\(503\)\.json\(r\);/.test(routes)
       && dlg.includes("msg.startsWith('the record of waiting continues could not be read') ? 'auto_resume_unread'") && dlg.includes(`if (code === 'auto_resume_unread') return t('${KEY}');`) && [zh, ja].every((d) => d.includes('\n  ' + JSON.stringify(KEY) + ': ')), JSON.stringify(r));
   }
   // 19h. r3104: TORN BYTES TOLD IN PLACE — a conversation stopped by a usage limit, auto-continue on, no wait: its status carries the
@@ -2734,8 +2748,10 @@ console.log('\n16. B-9a24 (主开发 r3434 (8)): a restart whose conversation co
   const AR_MOD = require(path.join(REPO, 'src/server/auto-resume.js'));
   const k = late(AR_MOD);
   ok('16a. a due arm whose conversation is not live yet is KEPT while the restore has not settled; once it is back the tick continues it (one continue, the arm spent)', k.keptBefore && k.sent.join() === 'w1' && !k.armedAfter, JSON.stringify(k));
-  const kx = late(MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC0, '      if (!session) { let settled = true; try { settled = restoreSettled() !== false; } catch { } if (!settled) continue; armed.delete(id); save(); continue; }   // gone: nothing to continue\n', '      if (!session) { armed.delete(id); save(); continue; }          // gone: nothing to continue\n', 'src/server/auto-resume.js')));
-  ok('16b. RED CONTROL (the release\'s tick: not live = gone): the first tick deletes the arm before the conversation is back — it is never continued — red', !kx.keptBefore && kx.sent.length === 0, JSON.stringify(kx));
+  PLANTS.clear();
+  const kx = late(MUTX.load('src/server/auto-resume.js', editAnchor(AR_SRC0, '      if (!session) { let settled = true; try { settled = restoreSettled() !== false; } catch { } if (!settled) continue; armed.delete(id); save(); continue; }   // gone: nothing to continue\n', '      if (!session) {' + MARK('16b') + ' armed.delete(id); save(); continue; }          // gone: nothing to continue\n', 'src/server/auto-resume.js')));   // stale-pins: kept (the red copy plants the release's tick on purpose)
+  const kxW = plantRead('16b');
+  redIf(kxW > 0, `the copy's release tick dropped a not-live arm ${kxW} time(s)`, '16b. RED CONTROL (the release\'s tick: not live = gone): the first tick deletes the arm before the conversation is back — it is never continued — red', !kx.keptBefore && kx.sent.length === 0, JSON.stringify(kx));
   const ks = (() => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-')); const m = new Map([['w9', sess()]]); const a = AR_MOD.create({ dataDir: d, activeSessions: m, serverSetting: AR_ON, sendToSession: () => true, log: () => { } }); a.armIfEnabled('w9', m.get('w9'), Date.now() + 60000, '5h'); m.delete('w9'); a.tick(Date.now() + 60000 + GRACE_MS + 1000); const r = a._armed.has('w9'); a.stop(); return r; })();
   ok('16c. …and with no restore pending (the default: every boot that settled, a suite\'s own world) a conversation that is gone still drops its arm, as the release', ks === false);
 }

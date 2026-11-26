@@ -6,13 +6,35 @@
 // SUITE's thread — the bytes on disk are the product's own write, never a suite's copy. Other stores are untouched.
 const path = require('path');
 const SW = require(path.join(__dirname, '..', '..', 'src', 'store-writer.js'));
+// r4812 REQUIRED 2 (the product's landing reads «this store is among the files the flush WROTE»): the record step saves and then flushes
+// that one file in one run. The landing here writes that very version inside the save, so the product's own flush finds nothing left to
+// write; its answer then names the write this landing really made, ONLY while the store is still at that version and clean. A hand-over
+// that threw leaves no landing to name (the last one is forgotten before each hand-over), so the product refuses as it would alone.
 function landEveryAutoResumeSave() {
   const W = SW.storeWriter();
   if (W._autoResumeLanded) return W;
-  const dirty0 = W.dirty;
+  const isAR = (f) => path.basename(String(f)) === 'auto-resume.json';
+  const row = (file) => W.stats().find((x) => x.file === file) || null;
+  const landed = new Map();   // file → { version, written }: this landing's own write of that version
+  const dirty0 = W.dirty, flush0 = W.flushSync;
   W.dirty = function (file, opts) {
+    if (isAR(file)) landed.delete(file);
     const r = dirty0.call(this, file, opts);
-    if (path.basename(String(file)) === 'auto-resume.json') { try { W.flushSync([file], { waitedBy: 'a suite: auto-resume.json read right after an act' }); } catch { } }
+    if (isAR(file)) {
+      try {
+        const v = row(file) ? row(file).version : null;
+        const f = flush0.call(W, [file], { waitedBy: 'a suite: auto-resume.json read right after an act' });
+        if (v != null && f && !f.deferred && Array.isArray(f.written) && f.written.length && !(f.left || []).length) landed.set(file, { version: v, written: f.written.slice() });
+      } catch { }
+    }
+    return r;
+  };
+  W.flushSync = function (names, opts) {
+    const r = flush0.call(this, names, opts);
+    if (r && !r.deferred && Array.isArray(names) && names.length === 1 && isAR(names[0]) && !(r.written || []).length && !(r.left || []).length) {
+      const e = landed.get(names[0]), now = row(names[0]);
+      if (e && now && now.version === e.version && !now.dirty && !now.inflight) return { ...r, written: e.written.slice() };
+    }
     return r;
   };
   Object.defineProperty(W, '_autoResumeLanded', { value: true });

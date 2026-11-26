@@ -251,10 +251,10 @@ console.log('THE ROUND\'s SHOULDS (r4721\'s round)');
   const SFX = require(path.join(repo, 'scripts/fixtures/store-stand-writer.cjs'));
   const SWm = require(path.join(repo, 'src/store-writer.js')), realSW = SWm.storeWriter;
   const ctl = path.join(ROOT, 'k8-ctl'), S = SFX.make(ctl);
-  const HOLD_LINE = "if (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0);";
+  const HOLD_LINE = "if (fs.existsSync(hold)) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'hold '); } catch { } Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0); }";   // the stand-in writer's hold line as lane lg-store-writes' row B-9a24 left it (its applied record — law 1's witness — kept first)
   const stand = realRF.call(fs, S.path, 'utf8');
   // the stall the leg OWNS: the writer thread holds THIS file's write while its hold file stands, and says it holds (the witness)
-  if (stand.split(HOLD_LINE).length === 2) fs.writeFileSync(S.path, stand.replace(HOLD_LINE, "if (fs.existsSync(hold)) { try { fs.writeFileSync(path.join(CTL, 'reached-' + b), '1'); } catch { } while (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, 5); }"));
+  if (stand.split(HOLD_LINE).length === 2) fs.writeFileSync(S.path, stand.replace(HOLD_LINE, "if (fs.existsSync(hold)) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'hold '); } catch { } try { fs.writeFileSync(path.join(CTL, 'reached-' + b), '1'); } catch { } while (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, 5); }"));
   else ok(false, 'harness: the stand-in writer\'s hold line is not there once (scripts/fixtures/store-stand-writer.cjs moved) — K8 builds no stall');
   const K_53A = MUT.load('src/server/host-tokens.js', anchored(K_SRC, "          if (renewing.get(hostId) !== tok) { if (ok) shredLanded(hostId, f, tok).catch(() => false); return; }   // r5353: unpaired while its write was in flight\n", "          if (renewing.get(hostId) !== tok) return;\n", 'the follow 53a85686d: a landing after an unpair is left'), 'token-53a');
   const scene = async (Mod, tag) => {
