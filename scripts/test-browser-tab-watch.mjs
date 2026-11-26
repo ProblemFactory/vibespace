@@ -54,8 +54,8 @@ console.log('— ① PURE: the kernel\'s own spelling, the probe\'s boolean row,
   const body = { installed: true, executable: true, version: '1.2.3', protocol: ENG.PROTOCOL, kinds: ['chromium'], features: [] };
   const pv = (b) => ENG.engineAnswerVerdict('probe', { status: 200, body: b }, { id: 'acme.engine', label: 'Acme' });
   const pr = { on: pv({ ...body, tabWatch: true }), off: pv({ ...body, tabWatch: false }), absent: pv(body), nul: pv({ ...body, tabWatch: null }), str: pv({ ...body, tabWatch: 'yes' }) };
-  ok(pr.on.ok && pr.on.fact.tabWatch === true && [pr.off, pr.absent, pr.nul, pr.str].every((x) => x.ok && x.fact.tabWatch === false),
-    'the probe MEASURES it: a top-level boolean kept in the fact, true ONLY when true — absent, false, null or another shape read false, never a refusal (the owner\'s rule for the kernel\'s top-level facts)', { on: pr.on.fact && pr.on.fact.tabWatch, str: pr.str.ok && pr.str.fact.tabWatch });
+  ok(pr.on.ok && pr.on.fact.tabWatch === true && [pr.off, pr.absent, pr.nul, pr.str].every((x) => x.ok && !('tabWatch' in x.fact)),
+    'the probe MEASURES it: true ONLY when true — absent, false, null or another shape read false, never a refusal (the owner\'s rule for the kernel\'s top-level facts); r4745: the flag rides the fact only when true, so every other engine\'s fact is unchanged', { on: pr.on.fact && pr.on.fact.tabWatch, str: pr.str.ok && pr.str.fact });
   const A = ENG.tabWatchAnswer;
   const an = { on: A({ result: { ok: true, targetId: T(1), watching: true, activeCount: 2 } }), off: A({ result: { ok: true, targetId: T(1), watching: false, activeCount: 1 } }),
     cap: A({ result: { ok: false, code: 'too_many_watched_tabs', targetId: T(5), watching: false, activeCount: 4, limit: 4 } }), gone: A({ result: { ok: false, code: 'no_such_target', targetId: T(6), watching: false, activeCount: 0, limit: 4 } }),
@@ -72,9 +72,19 @@ console.log('— ① PURE: the kernel\'s own spelling, the probe\'s boolean row,
     'STOCK, byte for byte: the four watch lines a view reads today (named / unnamed, moving / every half second)', today);
   const EFFECT = 'While you watch this tab, its page runs its timers at full speed and a playing video keeps playing.';
   const w = { live: L({ watched: 'Docs', current: 'Cart', live: true }), livePoll: L({ watched: 'Docs', current: 'Cart', mode: 'polling', live: true }), cap: L({ watched: 'Docs', current: 'Cart', mode: 'polling', capped: 4 }), liveAnon: L({ live: true }) };
-  ok(w.live === `${today.named} ${EFFECT}` && w.liveAnon === `${today.anon} ${EFFECT}` && w.livePoll === today.namedPoll && w.cap === `${today.namedPoll} This browser shows at most 4 tabs live while they are not in front — this one stays a still.`
+  ok(w.live === `${today.named} ${EFFECT}` && w.liveAnon === `${today.anon} ${EFFECT}` && w.livePoll === `${today.namedPoll} ${EFFECT}` && w.cap === `${today.namedPoll} This browser shows at most 4 tabs live while they are not in front — this one stays a still.`
     && !/Docs.*Docs/.test(w.cap) && !/\b[0-9A-F]{32}\b/.test(J(w)),
-    'r4691: the watch line tells the ONE effect where the watcher reads it (only while the picture moves); the kernel\'s cap by its count (never which tabs, never whose)', w);
+    'r4691 / r4745 M1: the watch line tells the ONE effect wherever the kernel holds the watch — moving AND in the half-second mode (a page that does not repaint keeps its timers at full rate); the kernel\'s cap by its count (never which tabs, never whose)', w);
+  const M1_ANCH = "  if (live === true) return `${base} ${t('";
+  const wsrc = fs.readFileSync(path.join(REPO, 'src/browser-windows.js'), 'utf8');
+  if (!wsrc.includes(M1_ANCH)) ok(false, 'the anchor of the control «the effect only while moving» is not in the source (src/browser-windows.js)');
+  else { const Wc = M.load('src/browser-windows.js', anchored(wsrc, M1_ANCH, "  if (live === true && !polling) return `${base} ${t('"), 'tw-effect-moving-only');
+    ok(Wc.watchLineWords({ watched: 'Docs', current: 'Cart', mode: 'polling', live: true }) === today.namedPoll, 'CONTROL (the effect only while the picture moves, as at c92f2c341): the half-second mode drops the sentence while the lease is on — RED'); }
+  // r4745: the client wiring of law (7) — the page keeps live / capped from the record and hands them to the words (a pin: removing
+  // either line left every suite green)
+  const lsrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  ok(lsrc.includes("live: m.live === true, capped: Number.isInteger(m.capped) ? m.capped : null }") && lsrc.includes("mode: st.watch.mode, live: st.watch.live === true, capped: st.watch.capped }, t);"),
+    'PIN: the live view keeps the record\'s live / capped on its watch and hands both to the watch line\'s words');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const keys = [EFFECT, 'This browser shows at most {n} tabs live while they are not in front — this one stays a still.'];
   ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')), 'both new sentences have a zh and a ja row', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
@@ -102,7 +112,7 @@ console.log('— ② statesTabWatch: the loader\'s own list, one ask');
 console.log('— ③ the keeper: ON before the screencast, counted per tab, the cap\'s still, stock untouched');
 const K = require('../src/server/browser-keeper.js');
 const ksrc3 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false } = {}) => {
+const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed = false, reset = false } = {}) => {
   const log = [];
   const shots = new Map();
   const watchTarget = async (url, id, hooks) => { log.push(`screencast ${id.slice(0, 4)}`); const r = { ok: true, close: () => log.push(`screencast-closed ${id.slice(0, 4)}`) }; if (!shots.has(id)) shots.set(id, r); return r; }; // the FIRST watch's own screencast (the stock leg's identity)
@@ -112,9 +122,10 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false } = {}) => {
   kw._reg().browsers[PID] = { profileId: PID, state: 'ready', cdpUrl: 'ws://127.0.0.1:9/devtools/browser/stand-in', browserChoice: tabWatch ? { kind: 'plugin', id: 'acme.engine', tabWatch: true } : { kind: 'default' } };
   let active = 0;
   kw.setPaintWatch({ paintFacts: () => null, freezePaint: async () => ({ ok: false }), thawPaint: async () => ({ ok: true }),
-    setTabWatch: async (pid, id, on) => { log.push(`${on ? 'ON' : 'OFF'} ${id.slice(0, 4)}`); if (on && cap) return { ok: false, code: 'too_many_watched_tabs', activeCount: 4, limit: 4 }; active += on ? 1 : -1; return { ok: true, watching: !!on, activeCount: active }; } });
+    setTabWatch: async (pid, id, on) => { log.push(`${on ? 'ON' : 'OFF'} ${id.slice(0, 4)}`); if (on && cap) return { ok: false, code: 'too_many_watched_tabs', activeCount: 4, limit: 4 }; if (on && unconfirmed) return { ok: false, code: 'tab_watch_unanswered' }; active += on ? 1 : -1; return { ok: true, watching: !!on, activeCount: active }; } });
   const target = { ok: true, kind: 'attachment', profileId: PID };
   const one = await kw.watchTabFor(target, T(1), {});
+  if (reset) kw.tabWatchReset(PID); // r4745 (S1): the page watch reopened — the kernel ended the old socket's leases
   const two = await kw.watchTabFor(target, T(1), {});
   const logAfterTwo = log.slice();
   // the keeper sends OFF on a microtask after a close: each capture waits for what that close queued to run (setImmediate runs
@@ -135,8 +146,12 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false } = {}) => {
   const Korder = M.load('src/server/browser-keeper.js', anchored(anchored(ksrc3, ON_ANCH, ORDER_TO), AFTER_ANCH, "    kw = await kwLater();\n    if (!kw) return r;\n"), 'tw-order');
   const Kcount = M.load('src/server/browser-keeper.js', anchored(ksrc3, COUNT_ANCH, "    // (the control: no count)\n"), 'tw-count');
   const Kstock = M.load('src/server/browser-keeper.js', anchored(ksrc3, STOCK_ANCH, "    if (!rec || !paintWatch || typeof paintWatch.setTabWatch !== 'function') return null; // (the control: asked of every browser)\n"), 'tw-stock');
-  const [now, cap, stock, cOrder, cCount, cStock] = await Promise.all([keeperLeg(K, 'now'), keeperLeg(K, 'cap', { cap: true }), keeperLeg(K, 'stock', { tabWatch: false }),
-    keeperLeg(Korder, 'c-order'), keeperLeg(Kcount, 'c-count'), keeperLeg(Kstock, 'c-stock', { tabWatch: false })]);
+  const UNC_ANCH = "    if (code === 'tab_watch_unanswered' || code === 'tab_watch_failed') Promise.resolve().then(() => paintWatch.setTabWatch(pid, id, false)).catch(() => { /* the kernel ends it with the socket anyway */ });\n";
+  if (!ksrc3.includes(UNC_ANCH)) ok(false, 'the anchor of the control «no OFF after an unconfirmed ON» is not in the source (src/server/browser-keeper.js)');
+  const Kunc = M.load('src/server/browser-keeper.js', anchored(ksrc3, UNC_ANCH, "    // (the control: no OFF after an unconfirmed ON, as at c92f2c341)\n"), 'tw-unconfirmed');
+  const [now, cap, stock, cOrder, cCount, cStock, unc, cUnc, rst] = await Promise.all([keeperLeg(K, 'now'), keeperLeg(K, 'cap', { cap: true }), keeperLeg(K, 'stock', { tabWatch: false }),
+    keeperLeg(Korder, 'c-order'), keeperLeg(Kcount, 'c-count'), keeperLeg(Kstock, 'c-stock', { tabWatch: false }),
+    keeperLeg(K, 'unconfirmed', { unconfirmed: true }), keeperLeg(Kunc, 'c-unconfirmed', { unconfirmed: true }), keeperLeg(K, 'reset', { reset: true })]);
   const A1 = T(1).slice(0, 4);
   ok(J(now.logAfterTwo) === J([`ON ${A1}`, `screencast ${A1}`, `screencast ${A1}`]) && now.one.tabWatch && now.one.tabWatch.live === true,
     'LAW: the kernel\'s watch ON BEFORE the screencast starts (a never-shown tab gets its bounds then) — and a second viewer of the same tab asks no second ON', now.logAfterTwo);
@@ -149,6 +164,33 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false } = {}) => {
   ok(cOrder.logAfterTwo.indexOf(`screencast ${A1}`) < cOrder.logAfterTwo.indexOf(`ON ${A1}`), 'CONTROL (the screencast first): the kernel\'s watch lands after the screencast started — RED', cOrder.logAfterTwo);
   ok(cCount.afterFirst.includes(`OFF ${A1}`), 'CONTROL (no count): the first viewer\'s leave switches the tab OFF under the second viewer — RED', cCount.afterFirst);
   ok(cStock.log.some((x) => x.startsWith('ON ')), 'CONTROL (asked of every browser): a stock browser is sent the kernel\'s command — RED', cStock.log);
+  const onsU = unc.log.filter((x) => x === `ON ${A1}`).length, offsU = unc.log.filter((x) => x === `OFF ${A1}`).length;
+  ok(onsU === 2 && offsU === 2 && unc.log.indexOf(`OFF ${A1}`) > unc.log.indexOf(`ON ${A1}`) && unc.log.indexOf(`OFF ${A1}`) < unc.log.indexOf(`screencast-closed ${A1}`) && unc.one.tabWatch && unc.one.tabWatch.live === false && unc.one.tabWatch.code === 'tab_watch_unanswered',
+    'r4745 M2 (law 5): an ON the kernel did NOT confirm (no answer in its bound) may still have been taken — ONE OFF follows it at once (idempotent), never left for a close that would not send it; the watch is today\'s still', unc.log);
+  ok(cUnc.log.filter((x) => x === `OFF ${A1}`).length === 0, 'CONTROL (no OFF after an unconfirmed ON, as at c92f2c341): the lease the kernel may hold is never switched off — RED', cUnc.log);
+  ok(rst.logAfterTwo.filter((x) => x === `ON ${A1}`).length === 2 && rst.two.tabWatch && rst.two.tabWatch.live === true,
+    'r4745 (S1): the page watch reopened (the kernel ended the old socket\'s leases) — the profile\'s counts go, so the next viewer of the tab asks ON again, never told «live» over a lease nobody holds', rst.logAfterTwo);
+}
+
+// ═══ ③b the launch's rule, by behaviour: the keeper's own launchEngineOf over a stand-in engine registry ═══
+console.log('— ③b the launch: tabWatch recorded only when the manifest STATES it AND the probe MEASURES it');
+{
+  const launchLeg = async (states, measured, tag) => {
+    const fact = { id: 'acme.engine', installed: true, executable: true, binaryPath: '/opt/acme/kernel', version: '1.0.0', protocol: ENG.PROTOCOL, kinds: ['chromium'], features: [], egress: null, label: 'Acme', ...(measured ? { tabWatch: true } : {}) };
+    const engines = { rows: () => [{ id: 'acme.engine', label: 'Acme' }], probe: async () => ({ ok: true, fact }), launchOptions: async () => ({ ok: true, launch: { executablePath: '/opt/acme/kernel', args: [], env: {} } }),
+      statesEnvironment: () => true, statesTabWatch: () => states, kernelPath: () => null, sourceOf: () => 'plugin' };
+    const kl = K.create({ dataDir: path.join(ROOT, 'kl-' + tag), homeDir: path.join(ROOT, 'hl-' + tag), env: () => ({}), serverSetting: () => undefined, liveKeys: () => new Set(), log: quiet, install: false, engines });
+    kl.list();
+    const p = { id: 'bp-0000d0c' + tag.length, label: 'Kernel ' + tag, browser: { kind: 'plugin', id: 'acme.engine' } };
+    let choice = null, err = null;
+    try { choice = await kl._engineChoiceOf(p, p.browser); } catch (e) { err = String(e && e.message).slice(0, 200); }
+    try { kl.shutdown?.(); } catch { /* */ }
+    return { choice, err };
+  };
+  const [both, statesOnly, measuresOnly, neither] = await Promise.all([launchLeg(true, true, 'both'), launchLeg(true, false, 'states'), launchLeg(false, true, 'measures'), launchLeg(false, false, 'none')]);
+  if ([both, statesOnly, measuresOnly, neither].some((x) => x.err)) ok(false, 'the launch leg: the keeper\'s launch over the stand-in registry threw — the leg cannot judge', { both: both.err, statesOnly: statesOnly.err, measuresOnly: measuresOnly.err, neither: neither.err });
+  else ok(both.choice.tabWatch === true && !('tabWatch' in statesOnly.choice) && !('tabWatch' in measuresOnly.choice) && !('tabWatch' in neither.choice) && both.choice.kind === 'plugin' && both.choice.id === 'acme.engine',
+    'LAW (a), by behaviour: the launch records tabWatch only when the manifest STATES the word AND the probe MEASURES it — states-only and measures-only are both off', { both: both.choice, statesOnly: statesOnly.choice, measuresOnly: measuresOnly.choice });
 }
 
 // ═══ ④ the page watch's setTabWatch and the freeze ═══
@@ -157,7 +199,7 @@ const { WebSocketServer: WSS } = require('ws');
 const T0 = T(0x10), T1 = T(0x11), T2 = T(0x12), T3 = T(0x13), T4 = T(0x14), T5 = T(0x15);
 const PAGES = [T0, T1, T2, T3, T4, T5];
 const standIn = async () => {
-  const st = { watched: new Set(), frozen: new Set(), cmds: [], urls: new Map() };
+  const st = { watched: new Set(), frozen: new Set(), cmds: [], urls: new Map(), late: new Set() }; // late: tabs whose ON the kernel takes but never answers in the bound
   const wss = new WSS({ port: 0, host: '127.0.0.1' }); await new Promise((r) => wss.once('listening', r));
   wss.on('connection', (sock) => sock.on('message', (raw) => {
     let m; try { m = JSON.parse(String(raw)); } catch { return; }
@@ -169,7 +211,8 @@ const standIn = async () => {
     if (m.method === 'Page.setWebLifecycleState') { if (p.state === 'frozen') st.frozen.add(String(m.sessionId || '').slice(1)); else st.frozen.delete(String(m.sessionId || '').slice(1)); return re({}); }
     // THE KERNEL's command, as it spells it: on the browser's own connection (no sessionId), {targetId, watch}; ≤ 4 at once
     if (m.method === 'VibeSpace.setTabWatch') {
-      st.cmds.push({ on: !!p.watch, tid: p.targetId, session: m.sessionId || null });
+      st.cmds.push({ on: !!p.watch, tid: p.targetId, session: m.sessionId || null, keys: Object.keys(p).sort().join(',') });
+      if (p.watch && st.late.has(p.targetId)) { st.watched.add(p.targetId); return; } // TAKEN, answered never (a busy kernel past the hub's bound)
       if (!PAGES.includes(p.targetId)) return re({ ok: false, code: 'no_such_target', targetId: p.targetId, watching: false, activeCount: st.watched.size, limit: 4 });
       if (p.watch && !st.watched.has(p.targetId) && st.watched.size >= 4) return re({ ok: false, code: 'too_many_watched_tabs', targetId: p.targetId, watching: false, activeCount: st.watched.size, limit: 4 });
       if (p.watch) st.watched.add(p.targetId); else st.watched.delete(p.targetId);
@@ -190,11 +233,12 @@ const dialogsLeg = async (Dmod) => {
     const opened = await until(() => !!D.paintFacts(PID), 3000);
     const on = [];
     for (const t of [T1, T2, T3, T4, T5]) on.push(await D.setTabWatch(PID, t, true));
+    const keys = SI.st.cmds.map((c) => c.keys);
     const fz = opened ? await D.freezePaint(PID) : null;
     const frozenAtFreeze = [...SI.st.frozen];
     const off = await D.setTabWatch(PID, T1, false);
     const idle = await D.freezePaint('bp-0000ffff');
-    return { opened, on: on.map((a) => (a.ok ? `ok ${a.activeCount}` : a.code)), cmds: SI.st.cmds, fz, frozenAtFreeze, off, idle };
+    return { opened, on: on.map((a) => (a.ok ? `ok ${a.activeCount}` : a.code)), cmds: SI.st.cmds, keys, fz, frozenAtFreeze, off, idle };
   } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
 };
 {
@@ -205,12 +249,52 @@ const dialogsLeg = async (Dmod) => {
   const Dc = dsrc.includes(FZ_ANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, FZ_ANCH, "    const tabs = [...w.targets.values()].filter((e) => e.sid);\n"), 'tw-freeze-all') : null;
   const [d, dc] = await Promise.all([dialogsLeg(DD), Dc ? dialogsLeg(Dc) : Promise.resolve(null)]);
   const watched4 = [T1, T2, T3, T4];
-  ok(d.opened && J(d.on) === J(['ok 1', 'ok 2', 'ok 3', 'ok 4', 'too_many_watched_tabs']) && d.cmds.every((c) => c.session === null) && d.off.ok && d.off.watching === false && d.off.activeCount === 3,
-    'the command rides the browser\'s OWN connection (no target session), {targetId, watch}: four watched, the fifth refused by the kernel\'s own code, OFF answered', d.on);
+  ok(d.opened && J(d.on) === J(['ok 1', 'ok 2', 'ok 3', 'ok 4', 'too_many_watched_tabs']) && d.cmds.every((c) => c.session === null) && d.keys.every((k) => k === 'targetId,watch') && d.off.ok && d.off.watching === false && d.off.activeCount === 3,
+    'the command rides the browser\'s OWN connection (no target session) with EXACTLY {targetId, watch}: four watched, the fifth refused by the kernel\'s own code, OFF answered', { on: d.on, keys: [...new Set(d.keys)] });
   ok(!!d.fz && d.fz.ok && watched4.every((t) => !d.frozenAtFreeze.includes(t)) && d.frozenAtFreeze.includes(T0) && d.frozenAtFreeze.includes(T5),
     'the kernel\'s law, ours: the idle freeze never puts a WATCHED tab frozen — the front and the unwatched tab are frozen as today', { frozen: d.frozenAtFreeze.map((x) => x.slice(0, 4)) });
   if (dc) ok(!!dc.fz && dc.fz.ok && watched4.some((t) => dc.frozenAtFreeze.includes(t)), 'CONTROL (the freeze without that rule): a watched tab is put frozen under its viewer — RED', { frozen: dc.frozenAtFreeze.map((x) => x.slice(0, 4)) });
   ok(d.idle && d.idle.ok === false, 'a browser with no page watch is no browser to freeze (its answer as today)', d.idle);
+  // r4745 M2 (law 5), the page watch's half: an ON the kernel TOOK but never answered in the bound keeps the tab in the watched set,
+  // so the freeze still skips it (an OFF confirmed, or this socket's end, takes it out). RED: any unconfirmed answer drops it
+  const lateLeg = async (Dmod) => {
+    const SI = await standIn(); SI.st.late.add(T1); const PID = 'bp-0000d0e3';
+    const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, leaseCountOf: () => 1, tabsOf: () => [], callTimeoutMs: 400 });
+    try {
+      await D.arm(PID, { budgetMs: 3000 });
+      const opened = await until(() => !!D.paintFacts(PID), 3000);
+      const a = opened ? await D.setTabWatch(PID, T1, true) : null;
+      const fz = opened ? await D.freezePaint(PID) : null;
+      return { opened, a, fz, frozen: [...SI.st.frozen], kernelWatched: [...SI.st.watched] };
+    } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+  };
+  const UNC_ANCH = "    else if (a.code === 'tab_watch_unanswered' || a.code === 'tab_watch_failed') w.tabWatched.add(tid);\n";
+  if (!dsrc.includes(UNC_ANCH)) ok(false, 'the anchor of the control «an unconfirmed answer drops the tab» is not in the source (src/server/browser-dialogs.js)');
+  const Du = dsrc.includes(UNC_ANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, UNC_ANCH, "    else if (a.code === 'tab_watch_unanswered' || a.code === 'tab_watch_failed') w.tabWatched.delete(tid); // (the control: as at c92f2c341)\n"), 'tw-unconfirmed-drop') : null;
+  // r4745 (S2): the idle sweep's second look (stillIdle) runs on EVERY browser, stock Chrome too — a viewer arriving while the fronts
+  // were read cancels the freeze (it used to freeze, then thaw). Named here and in the line. RED: the freeze without that look
+  const lookLeg = async (Dmod) => {
+    const SI = await standIn(); const PID = 'bp-0000d0e4';
+    const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true }, log: quiet, leaseCountOf: () => 1, tabsOf: () => [] });
+    try {
+      await D.arm(PID, { budgetMs: 3000 });
+      const opened = await until(() => !!D.paintFacts(PID), 3000);
+      const busy = opened ? await D.freezePaint(PID, { stillIdle: () => false }) : null;
+      const frozenAfterBusy = SI.st.frozen.size;
+      const idle = opened ? await D.freezePaint(PID, { stillIdle: () => true }) : null;
+      return { opened, busy, frozenAfterBusy, idle, frozen: SI.st.frozen.size };
+    } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+  };
+  const LOOK_ANCH = "    if (typeof stillIdle === 'function' && !stillIdle()) return { ok: false, why: 'viewer' }; // r4689: a viewer arrived while the fronts were read (it may be watching a tab)\n";
+  if (!dsrc.includes(LOOK_ANCH)) ok(false, 'the anchor of the control «the freeze without its second look» is not in the source (src/server/browser-dialogs.js)');
+  const Dl = dsrc.includes(LOOK_ANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, LOOK_ANCH, "    // (the control: no second look, as at the release)\n"), 'tw-no-look') : null;
+  const [lt, ltc, lk, lkc] = await Promise.all([lateLeg(DD), Du ? lateLeg(Du) : Promise.resolve(null), lookLeg(DD), Dl ? lookLeg(Dl) : Promise.resolve(null)]);
+  ok(lt.opened && lt.a && lt.a.code === 'tab_watch_unanswered' && lt.kernelWatched.includes(T1) && !!lt.fz && lt.fz.ok && !lt.frozen.includes(T1) && lt.frozen.includes(T0),
+    'r4745 M2: an ON the kernel took but never answered in the bound — the tab stays in the watched set, so the idle freeze skips it while the kernel may hold it', { a: lt.a, frozen: lt.frozen.map((x) => x.slice(0, 4)) });
+  if (ltc) ok(!!ltc.fz && ltc.fz.ok && ltc.frozen.includes(T1), 'CONTROL (an unconfirmed answer drops the tab, as at c92f2c341): the freeze puts a tab the kernel holds watched frozen — RED', { frozen: ltc.frozen.map((x) => x.slice(0, 4)) });
+  ok(lk.opened && lk.busy && lk.busy.ok === false && lk.busy.why === 'viewer' && lk.frozenAfterBusy === 0 && lk.idle && lk.idle.ok && lk.frozen > 0,
+    'r4745 (S2), STOCK TOO: the freeze\'s second look — a viewer counted right before the frozen call cancels it (nothing frozen); with none, the freeze runs as today', lk);
+  if (lkc) ok(!!lkc.busy && lkc.busy.ok === true && lkc.frozenAfterBusy > 0, 'CONTROL (no second look, as at the release): a browser whose viewer arrived during the fronts\' read is frozen anyway — RED', lkc);
 }
 
 // ═══ ⑤ the bridge's watching record ═══
@@ -219,10 +303,11 @@ console.log('— ⑤ the bridge: `live` / `capped` ride the watching record on t
   const { WebSocket, WebSocketServer } = require('ws');
   const KA = 'bk-0000d0a1';
   const bridgeLeg = async (tabWatch) => {
+    let closes = 0;
     const fk = { setFor: () => ({ attachments: [{ profileId: 'bp-0000d0f1', alias: 'work', isDefault: true, label: 'Work' }], handles: ['work'], defaultId: 'bp-0000d0f1', children: [] }), list: () => ({ profiles: [{ id: 'bp-0000d0f1', label: 'Work' }] }),
       streamPortFor: async () => ({ ok: true, port: upPort }), inputStateFor: () => ({ input: 'agent' }), noteViewers: () => {},
       tabOwnersFor: async () => ({ ok: true, owners: { [T(1)]: 'agent', [T(2)]: 'agent' }, mediated: false, adoptable: false }),
-      watchTabFor: async (target, id, hooks) => ({ ok: true, close: () => {}, ...(tabWatch ? { tabWatch } : {}) }) };
+      watchTabFor: async (target, id, hooks) => ({ ok: true, close: () => { closes++; }, ...(tabWatch ? { tabWatch } : {}) }) };
     const up = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await new Promise((r) => up.on('listening', r)); const upPort = up.address().port;
     up.on('connection', (ws) => { ws.send(JSON.stringify({ type: 'status', connected: true })); ws.send(JSON.stringify({ type: 'tabs', tabs: [{ tabId: 't1', targetId: T(1), title: 'A', url: 'https://a.example/', active: true }, { tabId: 't2', targetId: T(2), title: 'B', url: 'https://b.example/', active: false }] })); });
     const br = require('../src/server/browser-stream.js').create({ keeper: fk, activeSessions: new Map([['sess-w', { _browserKey: KA, webuiId: 'sess-w' }]]), requestAuthed: () => true, log: quiet });
@@ -232,17 +317,22 @@ console.log('— ⑤ the bridge: `live` / `capped` ride the watching record on t
     await new Promise((r, e) => { ws.on('open', r); ws.on('error', e); });
     const owners = await until(() => got.some((x) => x.type === 'tab-owners'), 3000); // the fact the watch's judge reads: the tab is one of this browser's
     ws.send(JSON.stringify({ type: 'watch-tab', targetId: T(2) }));
-    const settled = await until(() => got.filter((x) => x.type === 'watching' && !x.pending).length >= (tabWatch ? 1 : 0) && got.some((x) => x.type === 'watching'), 3000);
-    await sleep(50);
+    // the fact each road judges: the watch's own record (on the kernel's road its live / capped record; on stock its first record)
+    const want = (x) => x.type === 'watching' && x.targetId === T(2) && !x.refused && (tabWatch && (tabWatch.live || tabWatch.code === 'too_many_watched_tabs') ? ('live' in x || 'capped' in x) : true);
+    const settled = await until(() => got.some(want), 3000);
+    // THE BRIDGE's OFF ROAD (r4745): the viewer follows the agent's tab again ⇒ the watch's close (the keeper's OFF) runs, once
+    ws.send(JSON.stringify({ type: 'watch-tab', targetId: null }));
+    const closed = await until(() => closes >= 1, 3000);
     ws.close(); br.shutdown?.(); up.close();
-    return { owners, settled, watching: got.filter((x) => x.type === 'watching') };
+    return { owners, settled, closed, closes, watching: got.filter((x) => x.type === 'watching') };
   };
   const [live, capped, stock] = await Promise.all([bridgeLeg({ live: true }), bridgeLeg({ live: false, code: 'too_many_watched_tabs', limit: 4 }), bridgeLeg(null)]);
-  if (!live.owners || !capped.owners || !stock.owners) ok(false, 'the bridge leg: the tab owners never reached the viewer within 3 s — the leg cannot judge', { live: live.owners, capped: capped.owners, stock: stock.owners });
+  if (!live.owners || !capped.owners || !stock.owners || !live.settled || !capped.settled || !stock.settled) ok(false, 'the bridge leg: the tab owners or the watch\'s own record never reached the viewer within 3 s — the leg cannot judge', { live: [live.owners, live.settled], capped: [capped.owners, capped.settled], stock: [stock.owners, stock.settled] });
   else {
     ok(live.watching.some((x) => x.targetId === T(2) && x.live === true) && !J(live.watching).includes('example'), 'the watching record says `live` on the kernel\'s road (a target id and a word, no address)', live.watching);
     ok(capped.watching.some((x) => x.targetId === T(2) && x.capped === 4) && !capped.watching.some((x) => x.live === true), 'the kernel\'s cap rides the record as its limit (`capped: 4`), never `live`', capped.watching);
-    ok(stock.watching.length >= 1 && stock.watching.every((x) => !('live' in x) && !('capped' in x)), 'STOCK: the watching records carry neither word — today\'s records', stock.watching);
+    ok(stock.watching.some((x) => x.targetId === T(2) && !x.refused) && stock.watching.every((x) => !('live' in x) && !('capped' in x)), 'STOCK: the watch\'s own record (the tab, no refusal) and every record carry neither word — today\'s records', stock.watching);
+    ok([live, capped, stock].every((x) => x.closed && x.closes === 1), 'the bridge\'s OFF road: a viewer that follows the agent\'s tab again ends its watch — the close (the keeper\'s OFF on the kernel\'s road) runs once', [live.closes, capped.closes, stock.closes]);
   }
 }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: '⑥ ' })) ok(r.pass, r.name, r.detail);

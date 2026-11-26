@@ -9605,9 +9605,15 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     try { a = await paintWatch.setTabWatch(pid, id, true); } catch { a = null; }
     if (a && a.ok && a.watching === true) { tabWatchCounts.set(k, (tabWatchCounts.get(k) || 0) + 1); return { on: true }; }
     const code = (a && a.code) || 'tab_watch_failed';
+    // r4745 M2 (law 5, no lease left on): an ON the kernel did not CONFIRM (no answer in the bound, an odd answer) may still have been
+    // taken — ONE OFF goes out (the command is idempotent); the page watch keeps the tab in its watched set until an OFF is confirmed
+    if (code === 'tab_watch_unanswered' || code === 'tab_watch_failed') Promise.resolve().then(() => paintWatch.setTabWatch(pid, id, false)).catch(() => { /* the kernel ends it with the socket anyway */ });
     log.log?.(`[browser] ${pid}: a viewer's watched tab is not drawn by its kernel (${code}${a && a.activeCount != null ? `, ${a.activeCount} watched` : ''}) — it stays a still every half second`);
     return { on: false, code, limit: a && a.limit ? a.limit : null };
   }
+  /** r4745 (S1): the page watch of `profileId` (re)opened — the kernel ended every lease of the old socket: this profile's counts
+   *  go, so the next viewer of a tab asks ON again (never told «live» over a lease nobody holds). */
+  function tabWatchReset(profileId) { const pre = `${String(profileId || '')}|`; for (const k of [...tabWatchCounts.keys()]) if (k.startsWith(pre)) tabWatchCounts.delete(k); }
   function tabWatchOff(target, id) {
     const pid = profileOfTarget(target);
     if (!pid) return;
@@ -9720,7 +9726,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     setEnvironment, // B-9584 U3: the profile's environment — the person's save in its «Environment…» dialog
     // P6 (§6.2 / §6.5): is `sharing:"instance"` a value here; the proxy (the routes ask it nothing directly)
     mediationOn, isMediated, mediator: () => (mediationOn() ? mediator : null),
-    storeFile, STORE_FILE, uid, _reg: () => reg, _takeBackFacts: () => takeBackSeen.slice(), _takeBack: async (profileId, browserKey) => { const p = profile(profileId); const o = p ? await leaseCliOpts(p.id, browserKey) : null; return o ? takeBackOwnTab(p, browserKey, o, !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles)) : null; }, /* row B-0e4a: a suite's seam — the take-back alone, as the rebind calls it */ _proxyCredHeld: (id) => proxyCreds.has(String(id || '')), /* a suite's seam: whether the forwarders' login entry holds this profile (a yes/no — no secret crosses) */ _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
+    storeFile, STORE_FILE, uid, _reg: () => reg, _engineChoiceOf: async (p, c) => recordedChoice(p, await launchEngineOf(p, c)), /* r4745: a suite's seam — the launch's recorded choice (tabWatch: states AND measures) */ tabWatchReset, /* r4745: the page watch reopened */ _takeBackFacts: () => takeBackSeen.slice(), _takeBack: async (profileId, browserKey) => { const p = profile(profileId); const o = p ? await leaseCliOpts(p.id, browserKey) : null; return o ? takeBackOwnTab(p, browserKey, o, !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles)) : null; }, /* row B-0e4a: a suite's seam — the take-back alone, as the rebind calls it */ _proxyCredHeld: (id) => proxyCreds.has(String(id || '')), /* a suite's seam: whether the forwarders' login entry holds this profile (a yes/no — no secret crosses) */ _forwardersClose: () => Promise.all([...egressProxies.values()].map((e) => e.px.close({ cut: true }).catch(() => { }))).then(() => { egressProxies.clear(); }), /* B-8b87 cure: a suite's stand-in for this process's end (its forwarders' ports free for the next keeper's re-bind) */ _facts: bf, _runtime: rt,
     floorFacts, checkFloorNow, // B-0b8c (lane browser-probe-transient): the facts API + the For-you notice's Check again
     detachGrants, // lane lg-store-writes, the moved2 cure 2: a keeper that ends (a migration's private one) answers no grant change
     whenLanded, // lane lg-store-writes, the moved2 cure 2: a reply / a login fill waits (bounded) for the registry as it is now

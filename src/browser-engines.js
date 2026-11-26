@@ -52,7 +52,7 @@ const TAB_WATCH_CODES = Object.freeze(['no_such_target', 'not_a_page', 'target_c
 const TAB_WATCH_LIMIT = 4;
 /** The probe's top-level BOOLEAN facts this VibeSpace reads — a closed set, ONE ROW each (its meaning). Read true ONLY when true:
  *  absent (an older plugin), false or any other shape reads false, never a refusal — the owner's rule for the kernel's own top-level
- *  facts (B-9584 r2911 / r2916, geolocationIsolated, on the 2.369.420 train: its row joins this table there). */
+ *  facts (B-9584 r2911 / r2916, geolocationIsolated, on the .420 train: its row joins this table there). */
 const PROBE_FLAGS = Object.freeze({ [TAB_WATCH_WORD]: 'a watched tab draws and streams while it is not the front tab of its window (VibeSpace.setTabWatch)' });
 /** Does this manifest's `capabilities` STATE that the engine draws a watched tab that is not in front? */
 function statesTabWatch(capabilities) {
@@ -343,7 +343,7 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     if (!(ig === undefined || ig === null || (isObj(ig) && typeof ig.verified === 'boolean' && (ig.sha256 == null || /^[0-9a-f]{64}$/.test(String(ig.sha256)))))) return bad('browser_engine_protocol', 'answered an integrity of another shape ({verified, sha256, verifiedAt})');
     return { ok: true, fact: { id: String(id), installed: body.installed, executable: body.executable, binaryPath: typeof body.binaryPath === 'string' ? body.binaryPath : null, version: body.version === null ? null : clip(body.version, 120), protocol: body.protocol, kinds: body.kinds.slice(0, 64).map((k) => clip(k, 40)), features, egress: egress ? { setting: egressRowPath(id), default: egress.default } : null,
       declaredVersion: typeof dv === 'string' && dv ? clip(dv, 64) : null, integrity: isObj(ig) ? { verified: ig.verified, sha256: ig.sha256 == null ? null : String(ig.sha256), verifiedAt: Number.isFinite(Number(ig.verifiedAt)) && ig.verifiedAt != null ? Number(ig.verifiedAt) : null } : null,
-      ...Object.fromEntries(Object.keys(PROBE_FLAGS).map((k) => [k, body[k] === true])), // r4691: each probe flag a boolean in the fact (absent ⇒ false)
+      ...Object.fromEntries(Object.keys(PROBE_FLAGS).filter((k) => body[k] === true).map((k) => [k, true])), // r4691: a probe flag rides the fact only when TRUE (r4745: every other engine's fact unchanged)
       // B-9584, the owner's decision (主开发 r2911 / r2916): the kernel's OWN fact that it has no source of the machine's real place (a
       // build carrying the isolation patch; the plugin reads it from the binary, never VibeSpace) — the TOP-LEVEL boolean only; absent (an
       // older plugin), false or any other shape reads as false, never a refusal

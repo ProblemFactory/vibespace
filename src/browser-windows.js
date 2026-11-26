@@ -423,9 +423,10 @@ function watchLineWords({ watched = '', current = '', mode = 'screencast', live 
     ? (polling ? t('Watching “{watched}” — a new picture every half second; the agent is on “{current}”', { watched: w, current: c }) : t('Watching “{watched}” — the agent is on “{current}”', { watched: w, current: c }))
     : (polling ? t('Watching a background tab of the agent’s — a new picture every half second; the agent’s current tab is unchanged') : t('Watching another tab of the agent’s — the agent’s current tab is unchanged'));
   // 主开发 r4689 / r4691: on an engine that states AND measures tabWatch the kernel draws the watched tab — its ONE EFFECT is told here,
-  // where the watcher reads the line (a phone has no hover); the kernel's cap is said by its count (never which tabs, never whose).
-  // A view with neither (stock Chrome, every other engine) reads today's line byte for byte
-  if (live === true && !polling) return `${base} ${t('While you watch this tab, its page runs its timers at full speed and a playing video keeps playing.')}`;
+  // where the watcher reads the line (a phone has no hover), in BOTH modes (r4745 M1: a page that does not repaint for a second falls to
+  // the half-second mode while the lease stays on and its timers run at full rate); the kernel's cap is said by its count (never which
+  // tabs, never whose). A view with neither (stock Chrome, every other engine) reads today's line byte for byte
+  if (live === true) return `${base} ${t('While you watch this tab, its page runs its timers at full speed and a playing video keeps playing.')}`;
   if (Number.isInteger(capped) && capped > 0) return `${base} ${t('This browser shows at most {n} tabs live while they are not in front — this one stays a still.', { n: capped })}`;
   return base;
 }
