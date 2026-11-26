@@ -424,18 +424,15 @@ try {
     check('an IDN site: the punycode origin the fill compares, its Unicode form beside it — on the first line and in the fixed field', !!c9 && c9.text.includes('https://xn--bcher-kva.example.test (https://bücher.example.test)') && c9.site === 'https://xn--bcher-kva.example.test (https://bücher.example.test)', c9 && [c9.text, c9.site]);
     await realClick(boxOf(l9.id) + ' .ut-secret-deny');
     await until(`!document.querySelector(${JSON.stringify(boxOf(l9.id))})`, { timeout: 10000 });
-    // r2 (the rebase onto .388, 主开发's question): a card whose words hold a MASKED link (the door's belt «redacted» inside it) is
-    // drawn by THE row's own rule — the login card exactly as a free-entry paste card with the same words; never the link whole
+    // r2 (the rebase onto .388, 主开发's question) — B-ab6c (主开发 r5287 must 2): words holding a link the door's belt would mask
+    // («redacted» inside them) are now REFUSED AT SUBMIT, a login card's and a free-entry paste's alike: words_masked, nothing filed,
+    // the agent told the way to say it and never its words — no card draws a masked link from an ask's words any more (the For-you
+    // rows' own drawing of a masked link stays read by test-masked-note-chrome)
     const TOK8 = ['ya29', 'a0' + crypto.randomBytes(20).toString('hex')].join('.');
     const MW = `sign in from https://shop.example.test/cb?access_token=${TOK8}&state=x`;
-    const lm = await ask([MW, '--purpose', 'sign in for the order', '--kind', 'login', '--host', 'https://masked.example.test'], TOKEN);
-    const fm = await ask([MW, '--purpose', 'sign in for the order', '--kind', 'password', '--name', 'Masked link entry'], TOKEN);
-    await until(`!!document.querySelector(${JSON.stringify(boxOf(lm.id))}) && !!document.querySelector(${JSON.stringify(boxOf(fm.id))})`, { timeout: 10000 });
-    const rowFacts = (id) => evalJs(`(() => { const it = document.querySelector(${JSON.stringify(boxOf(id))}).closest('.ut-item'); const plan = it.querySelector('.ut-secret-plan'); return { planNote: !!(plan && plan.querySelector('.fy-masked + .masked-link-note, .fy-masked ~ .masked-link-note')), notes: it.querySelectorAll('.masked-link-note').length, masked: it.querySelectorAll('.fy-masked').length, links: [...it.querySelectorAll('a')].filter((a) => /access_token/.test(a.href)).length, redacted: /access_token=«redacted»/.test(plan ? plan.textContent : ''), whole: it.textContent.includes(${JSON.stringify(TOK8)}), inPre: !!it.querySelector('pre .masked-link-note') }; })()`);
-    const fl = await rowFacts(lm.id), ff = await rowFacts(fm.id);
-    console.log(`    (the masked link in the tray — login card ${JSON.stringify(fl)} · free-entry card ${JSON.stringify(ff)})`);
-    check('a login card whose words hold a MASKED link draws them by THE For-you rows\' own rule, as a free-entry paste card does: every masked link its words + THE note inline in the prose (the paste plan included), never the link whole, never a live link to it, no note inside a verbatim block', [fl, ff].every((f) => f.planNote && f.masked >= 1 && f.notes === f.masked && !f.whole && f.links === 0 && f.redacted && !f.inPre), { login: fl, free: ff });
-    for (const r of [lm, fm]) { await realClick(boxOf(r.id) + ' .ut-secret-deny'); await until(`!document.querySelector(${JSON.stringify(boxOf(r.id))})`, { timeout: 10000 }); }
+    const lm = await cli(['request', MW, '--purpose', 'sign in for the order', '--kind', 'login', '--host', 'https://masked.example.test'], TOKEN);
+    const fm = await cli(['request', MW, '--purpose', 'sign in for the order', '--kind', 'password', '--name', 'Masked link entry'], TOKEN);
+    check('B-ab6c r5287: words holding a masked link are refused AT SUBMIT for a login card and a free-entry paste alike — exit 1, words_masked with the way to say it, never the words', [lm, fm].every((r) => r.code === 1 && /\(words_masked\)/.test(r.out || '') && /Say what happened without it/.test(r.out || '') && !String(r.out || '').includes(TOK8)), [lm, fm].map((r) => ({ code: r.code, out: String(r.out || '').slice(0, 300) })));   // the helper's `out` holds stdout and stderr
     await focusType(boxOf(l1.id) + ' input.vault-login-user', 'Owner@Shop.Example');
     const ck = await evalJs(C(l1.id));
     check('the user name as the vault will keep it — «Saved as «owner@shop.example»» (lower case: what the fill uses)', ck.kept === 'Saved as «owner@shop.example» — the vault keeps user names in lower case', ck.kept);

@@ -9877,7 +9877,7 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
 .vw-own-rule { color: var(--text-dim); margin-top: 2px; font-size: 11px; line-height: 1.35; }   /* lane vault-agent-own: an agent row's rule — wraps, never clipped */
 .vw-empty { padding: 8px 0 10px; color: var(--text-dim); }
 /* lane vault-window-v2 (design q-047 §3.3): a row = name + meta · kind / provenance / state chips · last use · the value and its doors; 技术细节 under it */
-.vw-row { display: grid; grid-template-columns: minmax(200px, 1.2fr) minmax(170px, 1fr) 140px minmax(250px, auto); align-items: center; gap: 4px 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.vw-row { display: grid; grid-template-columns: minmax(200px, 1.2fr) minmax(170px, 1fr) 140px minmax(min-content, auto); align-items: center; gap: 4px 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
 .vw-row.vw-flash { animation: highlight-flash 1.2s ease-out; }
 .vw-label { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vw-meta { color: var(--text-dim); margin-top: 2px; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -10122,6 +10122,14 @@ button.vw-chip { cursor: pointer; }
 }
 /* THE PHONE (design q-047 §3.6) — and any window this narrow: the rail becomes a chip strip, the filters one 筛选…, a row stacks
    (name / meta → chips → the value and its doors → last use → 技术细节); the band's words wrap above their buttons */
+/* B-ab6c (主开发 r5287 / r5317, must 1): EVERY door of EVERY kind of row stands inside the pane, at every width — the list never scrolls
+   sideways. The value-and-doors cell takes no fixed floor (its doors wrap inside it, the widest door its least width), and below
+   1000 px it goes on its own line under the name, as at 390 (the 640 px rules below still win under 640) */
+@container vw (max-width: 1000px) {
+  .vw-row { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 140px; }
+  .vw-row > .vw-act { grid-column: 1 / -1; justify-content: flex-start; }
+  .vw-row > .vw-act .vw-doors { justify-content: flex-start; }
+}
 @container vw (max-width: 640px) {
   .vw-body { flex-direction: column; }
   .vw-rail { width: auto; flex-direction: row; gap: 6px; padding: 6px 10px; border-right: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; flex: none; }

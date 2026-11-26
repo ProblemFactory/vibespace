@@ -626,7 +626,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       b.onclick = async () => { await inbox.runAction(item, answer); };
       return b;
     }
-    const label = { allow: t('Allow'), once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row'), paste: t('Paste and save…') }[door];
+    const upd = !!(item && item.action && item.action.update);   // B-ab6c (主开发 r5287 must 3): an UPDATE ask says the card's own words — one ask, one set of words
+    const label = { allow: t('Allow'), once: t('Allow once'), always: t('Always for this conversation'), deny: upd ? t('It still works') : t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row'), paste: upd ? t('Change password') : t('Paste and save…') }[door];
     const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'allow' || door === 'unlock' || door === 'paste' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
     b.dataset.door = door;
     b.onclick = async () => {

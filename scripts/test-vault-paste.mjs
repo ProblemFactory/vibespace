@@ -1289,7 +1289,7 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
 
   // AN UPDATE: the same account again — B-ab6c: the card says it FIRST (login_would_update, nothing written, the item open); the
   // person's second press (expect update) ⇒ UPDATED (the old password kept one revision — the add door's)
-  const c = await S.agent(W.SESSION_TOKEN, { words: 'the shop login again', purpose: 'the password changed', kind: 'login', hosts: SITE });
+  const c = await S.agent(W.SESSION_TOKEN, { words: 'the shop login again', purpose: 'the sign-in stopped working', kind: 'login', hosts: SITE });
   const warn = await S.hit(`/api/vault/secret-requests/${c.json.requestId}/answer`, { body: { answer: 'store', username: 'owner@shop.example', loginPassword: S_LOGIN2, allow: true } });
   ok(warn.status !== 200 && warn.json.code === 'login_would_update' && openReqs(W).some((i) => i.action.requestId === c.json.requestId), 'B-ab6c: the same account again on a card ⇒ FIRST login_would_update (nothing written, the item open) — never a silent overwrite', warn.json);
   const sc = await S.hit(`/api/vault/secret-requests/${c.json.requestId}/answer`, { body: { answer: 'store', username: 'owner@shop.example', loginPassword: S_LOGIN2, allow: true, expect: 'update' } });
@@ -1396,7 +1396,7 @@ console.log('⑩b2 B-ab6c — AN UPDATE of a stored login the conversation may u
   const site2 = await S.agent(W.SESSION_TOKEN, { words: 'w', purpose: 'p', kind: 'login', update: NAME, hosts: 'https://other.example.test' });
   const noKind = await S.agent(W.SESSION_TOKEN, { words: 'w', purpose: 'p', update: NAME });
   ok(bad.json.code === 'login_update_name' && site2.json.code === 'login_update_site' && noKind.json.code === 'login_update_kind', 'no login reference, a --host of another site, an --update without --kind login: each refused by name before any card', [bad.json.code, site2.json.code, noKind.json.code]);
-  const a = await S.agent(W.SESSION_TOKEN, { words: 'the shop says the password is wrong', purpose: 'order the replacement parts', kind: 'login', update: NAME });
+  const a = await S.agent(W.SESSION_TOKEN, { words: 'the shop refused the sign-in', purpose: 'order the replacement parts', kind: 'login', update: NAME });
   const it = openReqs(W).find((i) => i.action.requestId === a.json.requestId);
   ok(a.status === 200 && a.json.target && a.json.target.update === NAME && !!it && it.action.update === NAME && it.action.kind === 'login' && it.action.hosts === SITE, 'filed: ONE item on the same road, naming the login it asks to update', it && it.action);
   ok(!!it && it.text === `Lane asker says the stored password for ${SITE} as ${USER} no longer signs in: order the replacement parts` && it.i18n.text.key === '{who} says the stored password for {site} as {user} no longer signs in: {purpose}',
@@ -1414,6 +1414,10 @@ console.log('⑩b2 B-ab6c — AN UPDATE of a stored login the conversation may u
   await S.hit(`/api/vault/secret-requests/${b.json.requestId}/answer`, { body: { answer: 'deny' } });
   const rcb = stashOf('cid-asker-1').filter((e) => e.ref === b.json.requestId);
   ok(rcb.length === 1 && /the user says the stored password still works/.test(rcb[0].text), '«It still works» (the update card\'s Deny): the receipt tells the agent so — it stops asking', rcb[0] && rcb[0].text);
+  // B-ab6c (主开发 r5287 must 3): the settled line of «It still works» says what the person PRESSED — never «refused by you»
+  const bItem = (W.userTodos.snapshot().resolved || []).find((i) => i && i.action && i.action.requestId === b.json.requestId);
+  const bSt = bItem ? require(path.join(REPO, 'src/foryou-actions.js')).decidedStamp(bItem) : null;
+  ok(!!bSt && bSt.verb === 'you said it still works' && !/refused/.test(bSt.text), 'the settled line of «It still works» says what the person pressed — «you said it still works», never «refused by you»', bSt);
   const quiet = await S.agent(W.SESSION_TOKEN, { words: 'w3', purpose: 'p3', kind: 'login', update: NAME });
   ok(quiet.json.code === 'request_quiet', '…and the same login is quiet for 10 minutes after it', quiet.json);
   MAY_USE = null;
@@ -1430,7 +1434,7 @@ console.log('⑩b3 B-ab6c\'s round (主开发 r5200) — WHOSE a login is stands
   const ownOf = (cid) => { const r = W.logins.mayUseFor({ conversationKeys: [cid] }).find((x) => x.resource === NAME); return r && r.ok ? r.via : null; };
   const saved = W.logins.addAgent({ origin: SITE, username: USER, password: P1 }, { owner: 'cid-asker-1', actor: 'Lane asker' });   // the agent's OWN save (the fill's road: owner = its conversation)
   const own0 = ownOf('cid-asker-1');
-  const a = await S.agent(W.SESSION_TOKEN, { words: 'the site says the password is wrong', purpose: 'renew the order', kind: 'login', update: NAME });
+  const a = await S.agent(W.SESSION_TOKEN, { words: 'the site refused the sign-in', purpose: 'renew the order', kind: 'login', update: NAME });
   const st = await S.hit(`/api/vault/secret-requests/${a.json.requestId}/answer`, { body: { answer: 'store', loginPassword: P2 } });
   const own1 = ownOf('cid-asker-1');
   const sw = await S.hit('/api/vault/web-logins/use-previous', { body: { name: NAME, rev: recNow().rev } });
@@ -1455,6 +1459,21 @@ console.log('⑩b3 B-ab6c\'s round (主开发 r5200) — WHOSE a login is stands
   ok(bw.status === 403 && bw.json.code === 'human_only' && bs.status === 403 && bs.json.code === 'human_only' && recNow().rev === before.rev && recNow().current.password === before.current.password,
     'an agent\'s sign-in (its vsst_ bearer) at Change password…\'s write and at «Use the previous password» ⇒ 403 human_only, the login as it was', { bw: bw.json, bs: bs.json });
   MAY_USE = null;
+}
+
+console.log('⑩b4 B-ab6c (主开发 r5287 must 2) — AN ASK\'s WORDS ARE READ BY THE SECRET BELT AT SUBMIT: words it would mark file NOTHING, and the agent is told the way to say them — ONE check for every ask whose words the card belts (the paste request\'s words and purpose, the run grant\'s purpose; a name and a note keep the entry\'s own words rule)');
+{
+  const BSITE = 'https://belt.example.test', before = openReqs(W).length;
+  const r1 = await S.agent(W.SESSION_TOKEN, { words: 'the shop says the password is wrong', purpose: 'order the parts', kind: 'login', hosts: BSITE });
+  const r2 = await S.agent(W.SESSION_TOKEN, { words: 'the shop refused the sign-in', purpose: 'the passphrase changed again', kind: 'login', hosts: BSITE });
+  ok(r1.status === 400 && r1.json.code === 'words_masked' && /Say what happened without it/.test(r1.json.error || '') && /the site refused the sign-in/.test(r1.json.error || '') && r2.status === 400 && r2.json.code === 'words_masked' && /--purpose/.test(r2.json.error || '') && openReqs(W).length === before,
+    'the paste request: words or a purpose the belt would mark («password is …», «passphrase changed …») file NOTHING — 400 words_masked, naming the part and the way to say it', { r1: r1.json, r2: r2.json });
+  ok(!JSON.stringify(r1.json).includes('«redacted»') && !/password is wrong/.test(r1.json.error || ''), '…and the answer never echoes what the agent wrote', r1.json);
+  const r4 = await S.hit('/api/agent/vault/request', { headers: { authorization: 'Bearer ' + W.SESSION_TOKEN }, body: { entry: 'vault://secrets/x', purpose: 'log in with the password hunter-two' } });
+  ok(r4.status === 400 && r4.json.code === 'words_masked' && /--purpose/.test(r4.json.error || ''), 'the run grant\'s request: a purpose the belt would mark files nothing (words_masked, --purpose)', r4.json);
+  const r5 = await S.agent(W.SESSION_TOKEN, { words: 'the shop refused the sign-in', purpose: 'order the parts', kind: 'login', hosts: BSITE });
+  ok(r5.status === 200 && openReqs(W).length === before + 1, 'the same ask said without a value files as before', r5.json);
+  if (r5.json.requestId) await S.hit(`/api/vault/secret-requests/${r5.json.requestId}/answer`, { body: { answer: 'deny' } });
 }
 
 console.log('⑩d A TWO-STEP CODE — one ask, one card with the two-step dialog\'s own fields, one totp entry (lane totp-request-card)');
@@ -2124,8 +2143,8 @@ async function runRoad(name, { door, routes } = {}) {
   // no grant record of its own) — then a RESTART: its paste request's record kept the grant's facts (whose, which entry, until when,
   // the request's words; never a value), so the start ends it «restart» through the one writer of use ends: `uses` lists it with the
   // request's words. REDs: the start that reads no paste record; the paste that keeps no grant facts
-  async function pastedRestart(name, { door, run, deleteFirst = false, purpose = 'the restart leg' } = {}) {
-    const w = makeWorld(name, { door });
+  async function pastedRestart(name, { door, run, routes, deleteFirst = false, purpose = 'the restart leg' } = {}) {
+    const w = makeWorld(name, { door, routes });
     await w.vault.setup(PW);
     const s = await serve(w);
     const a = await s.agent(w.SESSION_TOKEN, { words: 'a key to paste', purpose, kind: 'secret' });
@@ -2157,10 +2176,15 @@ async function runRoad(name, { door, routes } = {}) {
   // r2175 (5): the request's words BELTED AT THE WRITE of the record (the ask belts them too — lineOf): a purpose holding a secret
   // shape lands «redacted» on the record even when the ask's belt is passed by. REDs: neither belt ⇒ the shape on the record
   const SHAPE = ['sk', '-', 'b'.repeat(40)].join('');
-  const pBelt = await pastedRestart('m-pasted-belt', { purpose: `upload with ${SHAPE}` });
-  const pBelt2 = await pastedRestart('m-pasted-belt2', { purpose: `upload with ${SHAPE}`, door: mutant('src/server/vault-paste-door.js', 'who, words: v.words, purpose: v.purpose, target: v.target, place, grant });', 'who, words: v.words, purpose: String(purpose), target: v.target, place, grant });') });
-  ok(pBelt.stored && pBelt.purposeHas === false && pBelt.purposeRedacted && pBelt2.stored && pBelt2.purposeHas === false && pBelt2.purposeRedacted, 'r2175 (5): a purpose holding a secret shape lands «redacted» on the paste record — and still does with the ask\'s own belt passed by (the write\'s belt)', { pBelt: [pBelt.purposeHas, pBelt.purposeRedacted], pBelt2: [pBelt2.purposeHas, pBelt2.purposeRedacted] });
-  const pBeltR = await pastedRestart('m-pasted-nobelt', { purpose: `upload with ${SHAPE}`, door: (() => { const abs = path.join(REPO, 'src/server/vault-paste-door.js'); let src = fs.readFileSync(abs, 'utf8'); src = anchored(src, 'who, words: v.words, purpose: v.purpose, target: v.target, place, grant });', 'who, words: v.words, purpose: String(purpose), target: v.target, place, grant });', 'test-vault-paste r2175 (5): the ask belt passed by'); src = anchored(src, "purpose: SS.redactSecrets(String(q.purpose || '')).text.slice(0, 400) }", "purpose: String(q.purpose || '').slice(0, 400) }", 'test-vault-paste r2175 (5): the write unbelted'); const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs)); m._compile(src, abs); return m.exports; })() });   // stale-pins: kept — a RED control: the unbelted write restored on purpose
+  // B-ab6c (主开发 r5287 must 2): such a purpose is now REFUSED AT SUBMIT (words_masked, nothing filed — ⑩b4); the two belts behind
+  // that check are read past it: the routes' copy whose check passes everything (NOCHECK), the doors as they are
+  const pSubmit = await (async () => { const w = makeWorld('m-pasted-submit'); await w.vault.setup(PW); const s = await serve(w); const a = await s.agent(w.SESSION_TOKEN, { words: 'a key to paste', purpose: `upload with ${SHAPE}`, kind: 'secret' }); s.srv.close(); const n = openReqs(w).length; w.userTodos.stop(); return { status: a.status, code: a.json && a.json.code, n }; })();
+  ok(pSubmit.status === 400 && pSubmit.code === 'words_masked' && pSubmit.n === 0, 'r2175 (5) + B-ab6c r5287: a purpose holding a secret shape is refused AT SUBMIT — words_masked, nothing filed', pSubmit);
+  const NOCHECK = mutant('src/routes/vault.js', 'function wordsBeltRefusal(fields) {\n', 'function wordsBeltRefusal(fields) {\n  return null;\n');
+  const pBelt = await pastedRestart('m-pasted-belt', { purpose: `upload with ${SHAPE}`, routes: NOCHECK });
+  const pBelt2 = await pastedRestart('m-pasted-belt2', { purpose: `upload with ${SHAPE}`, routes: NOCHECK, door: mutant('src/server/vault-paste-door.js', 'who, words: v.words, purpose: v.purpose, target: v.target, place, grant });', 'who, words: v.words, purpose: String(purpose), target: v.target, place, grant });') });
+  ok(pBelt.stored && pBelt.purposeHas === false && pBelt.purposeRedacted && pBelt2.stored && pBelt2.purposeHas === false && pBelt2.purposeRedacted, 'r2175 (5): past the check at submit, a purpose holding a secret shape lands «redacted» on the paste record — and still does with the ask\'s own belt passed by (the write\'s belt)', { pBelt: [pBelt.purposeHas, pBelt.purposeRedacted], pBelt2: [pBelt2.purposeHas, pBelt2.purposeRedacted] });
+  const pBeltR = await pastedRestart('m-pasted-nobelt', { purpose: `upload with ${SHAPE}`, routes: NOCHECK, door: (() => { const abs = path.join(REPO, 'src/server/vault-paste-door.js'); let src = fs.readFileSync(abs, 'utf8'); src = anchored(src, 'who, words: v.words, purpose: v.purpose, target: v.target, place, grant });', 'who, words: v.words, purpose: String(purpose), target: v.target, place, grant });', 'test-vault-paste r2175 (5): the ask belt passed by'); src = anchored(src, "purpose: SS.redactSecrets(String(q.purpose || '')).text.slice(0, 400) }", "purpose: String(q.purpose || '').slice(0, 400) }", 'test-vault-paste r2175 (5): the write unbelted'); const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs)); m._compile(src, abs); return m.exports; })() });   // stale-pins: kept — a RED control: the unbelted write restored on purpose
   ok(pBeltR.stored && pBeltR.purposeHas === true, 'RED control: neither belt ⇒ the secret shape lands raw on the paste record', { has: pBeltR.purposeHas });
   const pNoFact = await pastedRestart('m-pasted-nofact', { door: mutant('src/server/vault-paste-door.js', "    if (grantFact) q.fact = { ...(q.fact || {}), ...grantFact };", '    if (false) { }') });
   ok(pNoFact.stored && !pNoFact.facts.grantedFor && pNoFact.listed.length === 0, 'MUTANT r1823 the paste that keeps no grant facts ⇒ nothing names the conversation × entry at the start (RED)', pNoFact);

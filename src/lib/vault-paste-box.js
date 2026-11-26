@@ -435,7 +435,7 @@ export async function postSecretAnswer(item, answer, { value = null, name, note,
     return true;
   }
   if (r && r.ok && login && r.outcome === 'stored') { showToast(r.allowed ? t('Saved to the vault — the agent may sign in with it on that site; VibeSpace never hands it the password') : login.allow ? t('Saved to the vault, but the permission could not be written — allow it in Vault ▸ Web logins ▸ Use for…') : t('Saved to the vault — the agent cannot sign in with it until you allow it'), login.allow && !r.allowed ? { type: 'error' } : undefined); return true; }   // lane login-request-card
-  if (r && r.ok) { showToast(r.outcome === 'stored' ? t('Saved to the vault — the agent is told it is there, never the value') : t('Refused — the agent is told on its next turn')); return true; }
+  if (r && r.ok) { showToast(r.outcome === 'stored' ? t('Saved to the vault — the agent is told it is there, never the value') : item && item.action && item.action.update ? t('The agent is told the stored password still works') : t('Refused — the agent is told on its next turn')); return true; }
   const code = r && r.code;
   if (typeof onRefusal === 'function') { try { onRefusal(code, r); } catch { } }
   showToast(login ? loginSay(code, r) : refusalSay(code, r), { type: 'error' });   // a login's refusal: the box's own sentence

@@ -25,6 +25,7 @@ const OF = require('../server/owner-facts.js'); // lane agent-context-owner-fact
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const { runOfToken } = require('../server/vault-totp.js');
 const V = require('../vault.js');   // PURE: the agent-secret namespace builder + mint verdict (lane vault-mint-put)
+const SS = require('../secret-shapes.js');   // B-ab6c (主开发 r5287 must 2): THE belt an ask's words go through on the card (redactSecrets), read at submit
 const PW = require('../vault-paste.js');   // PURE (lane vault-entry-description): THE words rule of an entry (wordsOf) — mint / put `--note`
 const UGC = require('../server/vault-use-grants.js');   // lane vault-standing-request r11 (MINOR 2): the «谁可以用…» writer's codes (STATUS / WORDS below)
 const VF = require('../vault-file.js');   // PURE (lane lg-vault-file, B-0830): a FILE entry's wire bytes, its cap, its words
@@ -512,8 +513,9 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
       return answerLink(code === 'error' ? 500 : STATUS[code], { ok: false, code, error: (e && e.message) || WORDS.vault_locked }, { again });
     }
   });
-  if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste, jobAsks });
-  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take, who, jobSecrets, loginMayUse });   // B-3fb5 (the read): + who — the agent entry's delete names who pressed; B-ef1b (the read): + jobSecrets — its door is the paste routes'
+  // B-ab6c must 2: ONE check at submit for every ask whose words the card belts (wordsBeltRefusal, handed as is)
+  if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste, jobAsks, wordsBelt: wordsBeltRefusal });
+  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take, who, jobSecrets, loginMayUse, wordsBelt: wordsBeltRefusal });   // B-3fb5 (the read): + who — the agent entry's delete names who pressed; B-ef1b (the read): + jobSecrets — its door is the paste routes'
 }
 
 /**
@@ -541,7 +543,27 @@ function pasteCallerIn(activeSessions, req) {
   }
   return null;
 }
-function registerPasteRoutes(app, { paste, activeSessions, person, take, who = () => null, jobSecrets = null, loginMayUse = null }) {   // loginMayUse: B-ab6c
+/** B-ab6c (主开发 r5287 must 2) — AN ASK's WORDS ARE READ BY THE SECRET BELT AT SUBMIT (the owner's rules: validated at submit; teach the
+ *  recipe, not the refusal). The asks' words reach the person's card through secret-shapes' redactSecrets (the paste door's lineOf;
+ *  the run door's purpose), so words it would mark read broken there («the password «redacted» wrong»). ONE check, the SAME rule, for
+ *  every ask of vibespace-vault whose words the card belts: the paste request's words and purpose (every --kind: secret, login,
+ *  totp, --update) and the run grant's request's purpose. A name and a note (the paste request's --name / --note, the words
+ *  proposal `describe`) go through the entry's own words rule instead (src/vault-paste.js wordsOf): a secret's shape is refused there
+ *  by name (name_secret / note_secret) and they are never redacted on a card. Words this rule would mark file NOTHING; the agent is
+ *  answered at once with the way to say it, never its words. The doors' own belts stay (the record's write belts too). → a refusal | null */
+const BELT_FIELDS = Object.freeze({ words: 'the words of your request', purpose: '--purpose' });
+function wordsBeltRefusal(fields) {
+  for (const [field, text] of Object.entries(fields || {})) {
+    if (typeof text !== 'string') continue;
+    const t = text.replace(/\s+/g, ' ').trim();   // as the doors fold it before they belt it
+    if (!t) continue;
+    let masked = t;
+    try { masked = SS.redactSecrets(t).text; } catch { continue; }
+    if (masked !== t) return { code: 'words_masked', field, words: `${BELT_FIELDS[field] || field}: the secret belt reads part of it as a value (a word right after «password» or «passphrase», a «token: …» value, or a key-shaped string), so nothing was asked. Say what happened without it, e.g. «the site refused the sign-in»` };
+  }
+  return null;
+}
+function registerPasteRoutes(app, { paste, activeSessions, person, take, who = () => null, jobSecrets = null, loginMayUse = null, wordsBelt = () => null }) {   // loginMayUse, wordsBelt: B-ab6c
   const pasteCallerOf = (req) => pasteCallerIn(activeSessions, req);
   const refusal = (res, r) => res.status(paste.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || paste.words(r.code), ...Object.fromEntries(['until', 'fields'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
   const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
@@ -553,6 +575,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take, who = (
     const caller = pasteCallerOf(req);
     if (!caller) return refusal(res, { code: 'unauthorized' });
     if (carried) return refusal(res, { code: 'value_in_request', words: 'a paste request never carries a value — the user pastes it into the box in their tray' });
+    { const wb = wordsBelt({ words: b.words, purpose: b.purpose }); if (wb) return refusal(res, wb); }   // B-ab6c must 2: the belt at submit — nothing filed
     let r;
     // B-ab6c: an UPDATE ask (`--update web-login:…`) names a login; whether THIS conversation may use it is read here, server-side
     const update = typeof b.update === 'string' && b.update.trim() ? b.update.trim() : undefined;
@@ -608,7 +631,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take, who = (
  * command, the egress fence is P1; ③ THE SCRUBBER IS A SIEVE — it reads stdout and stderr only: a value WRITTEN TO A FILE
  * and then `cat`-ed by the agent's own shell never meets it (write-then-cat is accepted and audited, not closed).
  */
-function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste = null, jobAsks = null }) {
+function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste = null, jobAsks = null, wordsBelt = () => null }) {   // wordsBelt: B-ab6c
   const DOOR = require('../server/vault-run-door.js');
   const tokenOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');   // lane vault-manual-and-lock seam (int331): renamed from bearerOf so test-record-clear-census keeps use-law's bearerOf (the person doors' jobs-stash reads)
   /** The vsst_'s conversation, as the door reads a caller — or { job } / null. */
@@ -674,6 +697,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     const caller = runCallerOf(req);
     if (!caller) return refusal(res, { code: 'unauthorized', words: DOOR.MORE_WORDS.unauthorized });
     const b = req.body && typeof req.body === 'object' ? req.body : {};
+    { const wb = wordsBelt({ purpose: b.purpose }); if (wb) return refusal(res, wb); }   // B-ab6c must 2: the belt at submit — nothing filed
     let r;
     try { r = await run.request({ caller, entry: typeof b.entry === 'string' ? b.entry : '', purpose: typeof b.purpose === 'string' ? b.purpose : '', standing: b.standing === true, hosts: Array.isArray(b.hosts) ? b.hosts : null, command: typeof b.command === 'string' ? b.command : null, tool: typeof b.tool === 'string' ? b.tool : null, cwd: typeof b.cwd === 'string' ? b.cwd : null }); }   // lane vault-standing-request: --standing [--host … [--tool …]] [--command …] (+ the CLI's folder, where a relative script is read)
     catch (e) { return refusal(res, { code: 'failed', words: DOOR.MORE_WORDS.failed }); }

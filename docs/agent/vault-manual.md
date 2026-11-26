@@ -190,8 +190,13 @@ list` shows an entry you may use as yours «with no card for <hosts>».
 When a site no longer accepts the password VibeSpace fills for a login you may use, ask the user for its new one — name the login
 by the reference you fill with (`web-login:<origin>#<user>`, or the `<site>#<user>` of your `--vault`: the same login):
 
-    vibespace-vault request "the shop's new password" --purpose "the shop says the password is wrong" --kind login --update web-login:https://shop.example.com#alice
+    vibespace-vault request "the shop's new password" --purpose "the shop refused the sign-in" --kind login --update web-login:https://shop.example.com#alice
 
+- **Say what happened, never a value.** An ask's words — a request's `"<what>"` and `--purpose` (every `--kind`), a run
+  request's `--purpose` — are read by VibeSpace's secret belt when you send them. Words it would mark (a word after «password» or
+  «passphrase», a `token: …` value, a key-shaped string) file NOTHING: the answer `words_masked` names the part, and you say it
+  again without the value — «the shop refused the sign-in», not «the password … is wrong». A `--name` and a `--note` keep their own
+  rule: a secret's shape there is refused as `name_secret` / `note_secret`.
 - **One card**, whose first line is YOUR claim and purpose («<this conversation> says the stored password for <site> as <user> no
   longer signs in: <purpose>») — VibeSpace has not checked it. The form is the Vault window's own, the site and the user fixed.
 - **Its two answers.** The user types the new password (it replaces the stored one; the old one is kept as the previous one),

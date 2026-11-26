@@ -165,4 +165,15 @@ console.log('— ③ the routes and the card carry what the form means');
   ok(ROW.includes("t('Change password…')") && ROW.includes("if (entry.hasPrevious) {") && ROW.includes("expect: 'update' });") && ROW.includes("if (r && r.code === 'login_would_update') { expect = 'update';"), 'the page: the row\'s Change password… door, the swap only where a previous one exists, the change form saves an update, the Add dialog turns to an update only after the server named one');
 }
 
+console.log('— ⑤ one ask, one set of words (主开发 r5287 must 3): an update ask says the card\'s words wherever it is answered');
+{
+  const VW = fs.readFileSync(path.join(REPO, 'src/lib/vault-window.js'), 'utf8'), IW = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window.js'), 'utf8'), BX = fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8'), FA = require(path.join(REPO, 'src/foryou-actions.js'));
+  ok(VW.includes("deny: upd ? t('It still works') : t('Deny')") && VW.includes("paste: upd ? t('Change password') : t('Paste and save…')"), 'the Vault window\'s «Needs you» strip: an update ask\'s doors are «Change password» and «It still works» (the paste door opens the same box: secretBoxEl picks the update box)');
+  ok(IW.includes("actBtn('secret-paste', UI_ICONS.check, t('Change password')") && IW.includes("actBtn('secret-deny', UI_ICONS.close, t('It still works')"), 'the For-you window: the same two words for the same ask');
+  ok(BX.includes("item && item.action && item.action.update ? t('The agent is told the stored password still works')"), 'the toast after «It still works» says what was pressed, never «Refused»');
+  const item = { action: { type: 'secret-request', update: NAME, requestId: 'sr-0123456789ab' }, resolvedBy: 'denied', resolvedFact: { decidedBy: 'person', decidedAt: Date.now() }, createdAt: Date.now() };
+  const st = FA.decidedStamp(item), plain = FA.decidedStamp({ ...item, action: { type: 'secret-request', requestId: 'sr-0123456789ab' } });
+  ok(!!st && st.verb === 'you said it still works' && !!plain && plain.verb === 'refused by you', 'the settled line: an update ask\'s «It still works» reads «you said it still works»; any other paste ask keeps «refused by you»', { st, plain });
+}
+
 report();

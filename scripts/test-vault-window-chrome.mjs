@@ -359,6 +359,53 @@ console.log('②e lane browser-login: 添加… ▸ 网站登录… — a websit
   check('the window reopens', !!(await openWindow()));
 }
 
+console.log('②f B-ab6c (主开发 r5287 / r5317, must 1): EVERY door of EVERY kind of row inside the pane — a login row with every door it draws and a file row with all of its (where the tree draws one), en and zh, at 768 and in the default window at 1280: the list never scrolls sideways');
+{
+  const postJ = (p, body) => evalJs(`fetch(${JSON.stringify(p)}, { method: 'POST', headers: { 'content-type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json())`);
+  const P1 = ['fit', crypto.randomBytes(6).toString('hex'), 'A1'].join('-'), P2 = ['fit', crypto.randomBytes(6).toString('hex'), 'B2'].join('-');   // built at run time
+  await postJ('/api/vault/web-logins', { origin: 'https://fit.example.test', username: 'fit-user', loginPassword: P1, expect: 'new' });
+  await postJ('/api/vault/web-logins', { origin: 'https://fit.example.test', username: 'fit-user', loginPassword: P2, expect: 'update' });   // a previous one kept: «Use the previous password» is drawn
+  const FILE_ROWS = fs.existsSync(path.join(wt, 'src/lib/vault-file-row.js'));   // lane lg-vault-file's file row: only where the tree draws one
+  const f1 = FILE_ROWS ? await postJ('/api/vault/files', { label: 'fit file', filename: 'fit.bin', bytes: Buffer.from('invented-fit-bytes').toString('base64'), size: 18 }) : null;
+  const LOGIN = '.vw-row[data-purpose="web-logins"]:has(.vw-login-previous)', FILE = '.vw-row:has(.vw-file-download)';
+  const fitOf = (sel) => `(() => { const list = document.querySelector('.vw-list'); const row = document.querySelector(${JSON.stringify(sel)}); if (!list || !row) return null; row.scrollIntoView({ block: 'center' }); const L = list.getBoundingClientRect(); const doors = [...row.querySelectorAll('.vw-doors button')].filter((b) => b.getBoundingClientRect().width > 0); return { sw: list.scrollWidth, cw: list.clientWidth, pane: Math.round(L.width), n: doors.length, doors: doors.map((b) => b.textContent.trim()), inside: doors.every((b) => { const r = b.getBoundingClientRect(); return r.left >= L.left - 0.5 && r.right <= L.right + 0.5; }) }; })()`;
+  const sizes = [['768', 768, 1000], ['the default window at 1280', 1280, 800]];
+  const reopen = async () => { await closeVaultWindow(); await sleep(200); await openWindow(); };
+  for (const lang of ['en', 'zh']) {
+    if (lang === 'zh') { await closeVaultWindow(); await evalJs(`localStorage.setItem('vibespace.lang', 'zh')`); await cdp('Page.navigate', { url: URL }); await until(`!!(window.app && app.wm)`, { timeout: 30000 }); await splashGone(); }
+    for (const [tag, w, h] of sizes) {
+      await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      await reopen();
+      const lf = await until(fitOf(LOGIN), { timeout: 8000 });
+      check(`②f the login row at ${tag} (${lang}): every door the row draws (${lf ? lf.n : '?'}: ${lf ? lf.doors.join(' · ') : '?'}) inside the pane, and the list does not scroll sideways (scrollWidth ${lf && lf.sw}, clientWidth ${lf && lf.cw})`, !!lf && lf.n >= 4 && lf.doors.some((d) => /Change password|修改密码/.test(d)) && lf.doors.some((d) => /previous password|上一个密码/.test(d)) && lf.inside && lf.sw <= lf.cw, lf);
+      if (FILE_ROWS) { const ff = await until(fitOf(FILE), { timeout: 8000 }); check(`②f the file row at ${tag} (${lang}): every door inside the pane, no sideways scroll`, !!ff && ff.n >= 2 && ff.inside && ff.sw <= ff.cw, ff); }
+      await shot(`vw-fit-${lang}-${w}.png`);
+      if (lang === 'en' && w === 768) {
+        // RED CONTROL BY PLACEMENT (r5135 law 1, its witness): the release's rule ABOVE 640 px planted back as page CSS exactly (its 640 px rules stand below) — read in force (the doors' cell
+        // on the name's line, four tracks) — and the same row goes past the pane; and the RELEASE's row (its three doors: the two new hidden)
+        // read under the same plant, said, so the line says whether the release already overflowed at 768
+        await evalJs(`(() => { const st = document.createElement('style'); st.id = 'vw-fit-plant'; st.textContent = '@container vw (min-width: 641px) { .vw-row { grid-template-columns: minmax(200px, 1.2fr) minmax(170px, 1fr) 140px minmax(250px, auto) !important; } .vw-row > .vw-act { grid-column: auto !important; } }'; document.head.appendChild(st); return true; })()`);
+        await sleep(300);
+        const witness = await evalJs(`(() => { const row = document.querySelector(${JSON.stringify(LOGIN)}); const a = row && row.querySelector('.vw-act'), m = row && row.querySelector('.vw-main'); return !!(a && m) && Math.abs(a.getBoundingClientRect().top - m.getBoundingClientRect().top) < 30 && getComputedStyle(row).gridTemplateColumns.split(' ').length === 4; })()`);
+        const pf = await evalJs(fitOf(LOGIN));
+        check('②f RED CONTROL (the release\'s grid planted back, read in force): the same row with all its doors goes past the pane at 768 — the leg above can fail', witness === true && !!pf && (pf.sw > pf.cw || !pf.inside), { witness, pf });
+        await evalJs(`(() => { const st = document.createElement('style'); st.id = 'vw-fit-three'; st.textContent = '.vw-login-change, .vw-login-previous { display: none !important; }'; document.head.appendChild(st); return true; })()`);
+        await sleep(300);
+        const rf = await evalJs(fitOf(LOGIN));
+        console.log(`    THE RELEASE's login row (three doors, the release's grid) at 768 (the pane ${rf && rf.pane} px): scrollWidth ${rf && rf.sw}, clientWidth ${rf && rf.cw} — ${rf && rf.sw > rf.cw ? 'it ALREADY scrolled sideways' : 'it fit'}${rf && !rf.inside ? ', a door outside the pane' : ''}`);
+        await evalJs(`for (const id of ['vw-fit-plant', 'vw-fit-three']) document.getElementById(id)?.remove(); true`);
+      }
+    }
+  }
+  if (!FILE_ROWS) console.log('  ~ SKIP (named): the file row — this tree draws none (src/lib/vault-file-row.js is lane lg-vault-file\'s); its leg runs where the row is: the trial of this cure onto that lane\'s 6562a0f62');
+  // the suite's own state again: English, its own size, the window; the rows this leg added leave
+  await cdp('Emulation.clearDeviceMetricsOverride');
+  await closeVaultWindow(); await evalJs(`localStorage.removeItem('vibespace.lang')`); await cdp('Page.navigate', { url: URL }); await until(`!!(window.app && app.wm)`, { timeout: 30000 }); await splashGone();
+  await evalJs(`fetch('/api/vault/web-logins/' + encodeURIComponent('web-login:https://fit.example.test#fit-user'), { method: 'DELETE' }).then((r) => r.status)`);
+  if (FILE_ROWS && f1 && (f1.entry || f1.id)) await evalJs(`fetch('/api/vault/files/' + encodeURIComponent(${JSON.stringify(String((f1 && (f1.id || f1.entry)) || ''))}), { method: 'DELETE' }).then((r) => r.status)`);
+  await openWindow();
+}
+
 console.log('③ 显示 ⇒ 验证是你 ⇒ the value');
 await click(ROW_INT + ' .vw-show');
 check('「显示」 asks for the second password (the 验证是你 modal)', !!(await until(visible('#vault-reveal-dialog'), { timeout: 5000 })));

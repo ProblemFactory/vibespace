@@ -828,6 +828,7 @@ const STAMPS = Object.freeze({
   approve: Object.freeze({ allowed: i18nKey('approved by you'), denied: i18nKey('denied by you') }),
   allow: Object.freeze({ allowed: i18nKey('allowed by you'), 'allowed:late': i18nKey('let through once by you · waiting for it to run again'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),   // r7c: a LATE Allow (`resolvedFact.late`) — the agent's next run of the command goes through once
   store: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('refused by you') }),
+  storeUpdate: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('you said it still works') }),   // B-ab6c (主开发 r5287 must 3): an UPDATE ask's «It still works» — what the person pressed, never «refused»
   deliver: Object.freeze({ delivered: i18nKey('delivered by you'), discarded: i18nKey('discarded by you') }),   // r6: a held digest's Deliver / Discard
   grant: Object.freeze({ 'granted:once': i18nKey('allowed once by you'), 'granted:8h': i18nKey('allowed by you for 8 h'), 'granted:standing': i18nKey('allowed by you until you revoke it'), denied: i18nKey('denied by you') }),   // lane vault-standing-request: + a STANDING request's Allow   // r4: vault-grant-ask's three verbs — r6: keyed `granted:<grantedFor>` (the record's fact); an old `granted` (no duration) has no stamp — its own words, «allowed»
 });
@@ -880,7 +881,7 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   const gw = by === 'granted' || by === 'always' ? grantWords(item, { t, now }) : null;
   if (gw && gw.state !== 'live') return { verb: gw.verb, time: gw.when, text: gw.text, denied: false, ended: gw.state };
   if (gw && gw.window) return { verb: gw.verb, time: gw.when, text: gw.text, denied: false };   // r7: a live 1-hour window — its end and where to take it back, whoever pressed
-  const words = STAMPS[ROW_OF[item.action.type].stamp] || STAMPS.approve;
+  const kind = ROW_OF[item.action.type].stamp, words = (kind === 'store' && item.action.update ? STAMPS.storeUpdate : STAMPS[kind]) || STAMPS.approve;   // B-ab6c: an update ask's own words
   const key = by === 'granted' && fact && (fact.grantedFor === 'once' || fact.grantedFor === '8h' || fact.grantedFor === 'standing') ? `granted:${fact.grantedFor}` : by === 'allowed' && fact && fact.late === true ? 'allowed:late' : by;
   if (!Object.prototype.hasOwnProperty.call(words, key)) return null;
   if (!fact || fact.decidedBy !== 'person') return null;
