@@ -661,7 +661,7 @@ function boundRungOf(b) {
  *  what the record names: the size the bound IN FORCE; the consequence its RUNG's; the start again its RUNG's AND its holder's (r4673):
  *  only where the scope is stopped WHOLE (a launcher in the job stopped with it) and the run's main WAS this hub (`mainIsHub`: the
  *  engine's one hub-main fact, proven at the boot's adopt — such a run is never started again by itself, B-2c5c unit 2) does VibeSpace
- *  stay down; where ONE process ends (an older scope, its own data limit, a rung not read, a job not held) a launcher in the job
+ *  stay down, a cron's run (`scheduled`) until its schedule fires again (r4695: a fire starts a new run); where ONE process ends (an older scope, its own data limit, a rung not read, a job not held) a launcher in the job
  *  (./run.sh's loop) may start VibeSpace again, inside the same scope or under the same inherited limit */
 function startedInJobLine(id, seen = null) {
   const held = !!seen;
@@ -675,7 +675,7 @@ function startedInJobLine(id, seen = null) {
         : rung === 'none' ? 'it runs under no memory bound of its own'
           : `${bound} can end VibeSpace and the conversations it started`;
   const again = rung === 'none' ? '' : rung !== 'whole' ? "; if the job's own command starts VibeSpace again (a launcher such as ./run.sh), it comes back under the same bound"
-    : held && seen.mainIsHub === true ? '; VibeSpace does not start again by itself' : '';   // 'whole' is a held job's (a job not held has no record: 'unknown')
+    : held && seen.mainIsHub === true ? `; VibeSpace does not start again by itself${seen.scheduled === true ? ", unless the job's schedule fires again" : ''}` : '';   // 'whole' is a held job's (a job not held has no record: 'unknown')
   return `[jobs] this VibeSpace was started INSIDE the background job ${who}: ${what}${again}. Start VibeSpace as its service (the Background Work manual: «VibeSpace itself is never a job»)`;
 }
 /** the NAMED end the journal says (the card words the same through its own t()) */
