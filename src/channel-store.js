@@ -1202,17 +1202,25 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  until now (a row touched later is in dirtyKeys again, the next write takes it); a row born joins the last chunk, as
    *  applyTouched; a whole touch makes it stale (the next write lays out whole); a synchronous write meanwhile takes its
    *  rows back (never lost). The writer is answered LATER until it lands. */
-  /** Do the rows touched since the last write fall in more than `limit` chunks (a row born counts as the last one)? */
-  /** B-360d found holder 4 (主开发 r4997): do the rows touched since the last write hold more than `limit` the layout does not
-   *  hold yet (BIRTHS: each joins the last chunk)? A new row is in no chunk, so touchedChunksOver never counted it, and a write
-   *  after a burst of births laid every one of them out in its own turn (296 / 679 / 1 344 ms at 28 000 / 55 000 / 115 043 births,
-   *  the probe of r4987). Counted until it passes `limit`. */
-  function bornOver(limit) { let n = 0; for (const k of dirtyKeys) { if (!layout.chunkOf.has(k) && hasOwn(ix.conversations, k) && ++n > limit) return true; } return false; }
-  function touchedChunksOver(limit) {
-    const seen = new Set();
-    for (const k of dirtyKeys) { seen.add(layout.chunkOf.get(k) || null); if (seen.size > limit) return true; }
+  /** IS THE TOUCHED SET's LAYOUT WORK PAST ONE TURN? — more BIRTHS than LAYOUT_SYNC_ROWS (B-360d found holder 4, 主开发 r4997: a new
+   *  row is in no chunk, and the release counted chunks only, so a write after a burst of births laid every one of them out in its
+   *  own turn: 296 / 679 / 1 344 ms at 28 000 / 55 000 / 115 043 births), or, on a laid-out index past that size, touched rows in
+   *  more than APPLY_SYNC_CHUNKS chunks (a birth counts as the last chunk, as before). ONE pass over the touched rows, stopped at
+   *  whichever bound is passed first (r5065: the births counted first walked every touched row of a mass touch with few births). */
+  function sliceDue() {
+    const seen = layout.chunks.length * INDEX_CHUNK > LAYOUT_SYNC_ROWS ? new Set() : null;
+    let born = 0;
+    for (const k of dirtyKeys) {
+      const c = layout.chunkOf.get(k);
+      if (seen) { seen.add(c || null); if (seen.size > APPLY_SYNC_CHUNKS) return true; }
+      if (!c && hasOwn(ix.conversations, k) && ++born > LAYOUT_SYNC_ROWS) return true;
+    }
     return false;
   }
+  /** A JOB's ROWS BACK IN dirtyKeys, IN ORDER (主开发 r5065): the job's own Set FIRST — its births not yet placed keep their place
+   *  before a row born after the job began (the map's own order) — then the rows touched since behind it. A synchronous write
+   *  taking the job over (the exit, the LATER_MAX road) or a failed job: never the job's keys appended after a later birth. */
+  function takeBack(keys) { const later = dirtyKeys; dirtyKeys = keys; for (const k of later) dirtyKeys.add(k); }
   function warmApply() {
     if (warm && !warm.stale) return warm.promise;
     const job = { stale: false, promise: null, keys: dirtyKeys };   // THE STATED SNAPSHOT: the touched rows' Set itself (B-360d found holder 4: the release COPIED it here, a pass over every touched row in the caller's turn)
@@ -1242,7 +1250,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       await new Promise((r) => setImmediate(r));
       while (more && alive()) {
         const s0 = Date.now();
-        do { const r = it.next(); if (r.done) { more = false; break; } place(r.value); placed++; } while (Date.now() - s0 < LAYOUT_SLICE_MS);
+        do { const r = it.next(); if (r.done) { more = false; break; } place(r.value); placed++; } while ((placed & 63) || Date.now() - s0 < LAYOUT_SLICE_MS);   // the clock read once every 64 keys
         const ms = Date.now() - s0; st.slices++; if (ms > st.maxSliceMs) st.maxSliceMs = ms;
         if (more) { await new Promise((r) => setImmediate(r)); if (layoutSeam) await layoutSeam(placed, 'layout-keys'); }
       }
@@ -1255,7 +1263,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (job.stale) { flushStats.layoutRestarts++; markDirty(); return; }   // a whole touch meanwhile: the next write lays out whole
       flushStats.incremental++; flushStats.applySliced++;
       markDirty();   // the write owed since it began (+ the rows touched meanwhile)
-    })().catch((e) => { if (warm === job) warm = null; for (const k of job.keys) dirtyKeys.add(k); allDirty = true; warmFailed = true; warn('[channels] the index chunks build failed:', (e && e.message) || e, '— the next write lays it out whole'); markDirty(); });
+    })().catch((e) => { if (warm === job) warm = null; takeBack(job.keys); allDirty = true; warmFailed = true; warn('[channels] the index chunks build failed:', (e && e.message) || e, '— the next write lays it out whole'); markDirty(); });
     return job.promise;
   }
   function buildLayout(conv) {
@@ -1324,7 +1332,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const conv = ix.conversations;
     if (!sync && (laterOwed || laterJobs >= LATER_MAX)) { if (!laterOwed) warn(`[channels] the index's write waited for ${laterJobs} sliced builds (rows touched faster than they are laid out) — this write is made in one turn`); laterOwed = false; laterJobs = 0; sync = true; }
     if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; ix.updatedAt = now(); const s0 = JSON.stringify(ix, INDEX_KEYS, 1); allDirty = false; dirtyKeys.clear(); bytesOwed = true; lastTop = null; return { parts: [Buffer.from(s0, 'utf8')], top: null }; }
-    if (sync && warm) { if (warm.keys) for (const k of warm.keys) dirtyKeys.add(k); warm.stale = true; warm = null; }   // B-dfa4 cut 3: a synchronous write takes over a sliced build (its rows back in dirtyKeys)
+    if (sync && warm) { if (warm.keys) takeBack(warm.keys); warm.stale = true; warm = null; }   // B-dfa4 cut 3: a synchronous write takes over a sliced build (its rows back in dirtyKeys)
     if (full || allDirty || !layout) {
       if (!sync && !full && !warmFailed) { const keys0 = Object.keys(conv); if (keys0.length > LAYOUT_SYNC_ROWS) { warmLayout({ keys: keys0 }); return NOT_READY; } }   // B-dfa4 cut 3 — B-360d found holder 1: the size test's snapshot IS the build's (one pass over the map, not two)
       warmFailed = false;
@@ -1332,7 +1340,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       const before = layout ? liveBufs() : null;
       buildLayout(conv); flushStats.full++;
       if (!before || !sameJoined(before, liveBufs())) bytesOwed = true;
-    } else if (!sync && !warmFailed && (warm || bornOver(LAYOUT_SYNC_ROWS) || (layout.chunks.length * INDEX_CHUNK > LAYOUT_SYNC_ROWS && touchedChunksOver(APPLY_SYNC_CHUNKS)))) {   // B-360d found holder 4: births count too   // B-dfa4 cut 3: a mass of touched rows (a boot's passes): their chunks in slices
+    } else if (!sync && !warmFailed && (warm || sliceDue())) {   // B-360d found holder 4: births count too, one pass (r5065)   // B-dfa4 cut 3: a mass of touched rows (a boot's passes): their chunks in slices
       warmApply(); return NOT_READY;
     } else { applyTouched(conv); flushStats.incremental++; }
     const wasFull = full || allDirty;
@@ -1597,7 +1605,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!e && !create) return null;
     if (!e) {
       unlanded.set(key, ++bornGen); bornSeq.delete(key);   // B-526c r937: not on the disk's index until a write that carries it lands (B-360d: its NEW line, or a whole write) — r1850 (1): a whole write produced BEFORE this birth carries the old row, never this one
-      if (layout && layout.chunkOf.has(key)) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order
+      if (layout && (layout.chunkOf.has(key) || (warm && warm.keys && warm.keys.has(key)))) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order — r5065: or before a sliced apply in flight placed it (its old place in the job's Set)
       if (stampMap.delete(key)) { stampsDirty = true; stampSeq++; stampsSince.add(key); journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps — B-360d (r4642 (3)): a change of that key for the compaction's window (its removal line kept by the fold)
       e = ix.conversations[key] = {
         key, id: convId, adapterId, vendorId: convId, title: '', kind: 'group',

@@ -10,7 +10,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { startWorkMeter, measure } from '../work-meter.mjs';
-const [, , MOD, DIR, BIRTHS] = process.argv;
+const [, , MOD, DIR, BIRTHS, MODE = 'births'] = process.argv;   // MODE 'touched' (r5065 (2)): a laid-out index of 16 × `n` rows (the larger size's every 8th row fits), `n` EXISTING rows touched (every 8th: the same rows a chunk at both sizes), no births
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 startWorkMeter();
 const require = createRequire(import.meta.url);
@@ -37,9 +37,11 @@ async function workOf(births, tag) {
     return d0(file, o);
   };
   const st = createChannelStore({ dir, log: quiet, writer: w, walk: { syncRows: 64, sliceMs: 0 } });
-  await st.index.update(() => { for (let i = 0; i < 10; i++) { const e = st.index.entry('acct', `a${i}`); e.title = `t${i}`; e.lastAt = 1_700_000_000_000 + i; } });
-  await st.index.fold();   // the small index on disk: the next write is the births'
-  for (let p = 0; p < births; p += 500) await st.index.update(() => { for (let i = p; i < Math.min(births, p + 500); i++) { const e = st.index.entry('acct', `b${i}`); e.title = `t${i}`; e.lastAt = 1_700_000_000_000 + i; } });   // pages of 500: under BURST_ROWS, both sizes the journaled road
+  const BASE = MODE === 'touched' ? 16 * Number(BIRTHS) : 10;
+  for (let p = 0; p < BASE; p += 500) await st.index.update(() => { for (let i = p; i < Math.min(BASE, p + 500); i++) { const e = st.index.entry('acct', `a${i}`); e.title = `t${i}`; e.lastAt = 1_700_000_000_000 + i; } });
+  await st.index.fold();   // the index on disk (a small one, or the touched scene's 16 × n rows laid out): the next write is the births' or the touches'
+  if (MODE === 'touched') { for (let p = 0; p < births; p += 500) await st.index.update(() => { for (let i = p; i < Math.min(births, p + 500); i++) st.index.entry('acct', `a${i * 8}`, { create: false }).title = `touched ${i}`; }); }   // every 8th row: 32 a chunk at both sizes
+  else for (let p = 0; p < births; p += 500) await st.index.update(() => { for (let i = p; i < Math.min(births, p + 500); i++) { const e = st.index.entry('acct', `b${i}`); e.title = `t${i}`; e.lastAt = 1_700_000_000_000 + i; } });   // pages of 500: under BURST_ROWS, both sizes the journaled road
   got.armed = true;
   const done = st.index.fold().then((v) => v !== false, () => false);
   for (let i = 0; i < 6000 && got.f === null; i++) await pause(2);
