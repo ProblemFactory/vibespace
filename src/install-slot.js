@@ -137,11 +137,12 @@ const INSTALL_LOCK_PREFIX = 'vibespace-xpra-install-';
 const INSTALL_RUNNER = [
   'P=$1; L=$2; X=$3; K=$4; shift 4',
   'st() { sed \'s/^.*) //\' "/proc/$1/stat" 2>/dev/null | cut -d\' \' -f20; }',
-  'w=; fin() { echo "$1 $(date +%s%N) $K" > "$X.tmp" && mv -f "$X.tmp" "$X"; [ -z "$w" ] || rm -f "$P"; exit "$1"; }', // r5 L1: nanoseconds
+  'sync_not_done() { case $1 in *\'Invalid argument\'*|*\'not supported\'*|*\'Function not implemented\'*) printf \'%s - its file system does not do a sync: its new bytes take their name unsynced\\n\' "$1" >&2; return 0 ;; esac; return 1; }',   // B-bcb8 unit D (主开发 r5211 / r5214): a sync its file system does not do lands, said (the one spelling, test-synced-installs)
+  'w=; fin() { echo "$1 $(date +%s%N) $K" > "$X.tmp" && { e=$(LC_ALL=C sync -- "$X.tmp" 2>&1) || sync_not_done "$e"; } && mv -f "$X.tmp" "$X"; [ -z "$w" ] || rm -f "$P"; exit "$1"; }', // r5 L1: nanoseconds
   'flock -n 9 2>/dev/null || { echo "+ [vibespace] this install does not hold the install lock ($K) - it was not run" >> "$L"; exit 125; }', // FIRST: the inherited lock, re-asserted; not held ⇒ the slot's files are another install's: untouched
   's=$(st $$); [ -n "$s" ] || { sleep 0.05; s=$(st $$); }', // one retry: a refusal is for a /proc that cannot be read, never a blip
   '[ -n "$s" ] || { echo "+ [vibespace] cannot read /proc/$$/stat on this machine - the install slot needs it; nothing was run" >> "$L"; fin 125; }',
-  'echo "$$ $s $K" > "$P.tmp" && mv -f "$P.tmp" "$P"; w=1',
+  'echo "$$ $s $K" > "$P.tmp" && mv -f "$P.tmp" "$P" || { rm -f "$P.tmp"; echo "+ [vibespace] the install slot\'s pid record could not be written - nothing was run" >> "$L"; fin 125; }; w=1',   // B-bcb8 unit D: NOT synced — a record of a LIVE run only (after a power cut the run is gone, and an empty or torn pid reads as not live), and a sync here would sit inside the launcher's 10 s wait for it (a whole-system sync on uutils); a failed write or move refused by name, never an install the launcher cannot see
   '"$@" >> "$L" 2>&1 < /dev/null',
   'fin $?',
 ].join('\n');

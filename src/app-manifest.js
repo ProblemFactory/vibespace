@@ -701,18 +701,23 @@ const APP_SCRIPT = [
   'own() { if [ -L "$1" ]; then refuse not-root-owned "$1"; fi; if [ -d "$1" ]; then [ "$(stat -c %u "$1")" = 0 ] && m=$(stat -c %a "$1") && [ $(( 0$m & 022 )) -eq 0 ] || refuse not-root-owned "$1"; elif [ -e "$1" ]; then refuse not-a-directory "$1"; else install -d -m 0755 -o root -g root "$1"; chmod g-s "$1"; fi; }',
   'for d in "$D" "$D/partial" "$R" "$R/entries" "$R/keys" "$R/sources" "$R/base" "$V"; do own "$d"; done',
   'T=$(mktemp -d); trap \'rm -rf "$T"\' EXIT',
+  // B-bcb8 unit D (主开发 r5211 / r5214): a record of the app system takes its name only after a sync of its temp (`sync -- <file>`; a
+  // sync that does not take a file — GNU coreutils before 8.24, busybox without its fancy options — ignores the operand, syncs the
+  // whole system and exits 0: the string goes on). A failed sync of the file is a failed write; a sync its file system does not do at
+  // all (EINVAL, ENOTSUP, ENOSYS: read off the words of a C-locale sync) lands, said on stderr — sync_not_done, the one spelling
+  'sync_not_done() { case $1 in *\'Invalid argument\'*|*\'not supported\'*|*\'Function not implemented\'*) printf \'%s - its file system does not do a sync: its new bytes take their name unsynced\\n\' "$1" >&2; return 0 ;; esac; return 1; }',
   ': > "$T/from"',
   `LOCK="-o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S}"`,
   'CACHE="-o Dir::Cache::archives=$D/ -o APT::Keep-Downloaded-Packages=true -o APT::Sandbox::User=root"', // P15: apt's _apt user cannot enter a 0700 ~/.vibespace
   "q() { dpkg-query -W -f='${db:Status-Abbrev} ${Package}:${Architecture} ${Version}\\n' 2>/dev/null | awk 'substr($1, 2, 1) == \"i\" { print $2 \" \" $3 }' | sort -u; }", // verify-r1 F5: INSTALLED whatever the want flag (a held package is "hi") — the same set the PURE parseDpkgStatus reads
   // the drift tripwire: every dpkg run touches a marker; VibeSpace's own runs end by stamping slot-ended after it
   `hook() { [ -f ${DRIFT_HOOK} ] || printf '%s\\n' '// VibeSpace: marks a dpkg run so the Desktop apps dialog can name what was installed outside VibeSpace' 'DPkg::Post-Invoke { "if [ -d ${MARKER_DIR} ]; then touch ${DRIFT_MARKER}; fi"; };' > ${DRIFT_HOOK}; }`,
-  `finish() { pins; q > "$V/last-dpkg.list.tmp" && mv -f "$V/last-dpkg.list.tmp" "${LAST_LIST}"; touch "${SLOT_ENDED}"; }`,
+  `finish() { pins; q > "$V/last-dpkg.list.tmp" && { e=$(LC_ALL=C sync -- "$V/last-dpkg.list.tmp" 2>&1) || sync_not_done "$e"; } && mv -f "$V/last-dpkg.list.tmp" "${LAST_LIST}"; touch "${SLOT_ENDED}"; }`,
   // verify-r1 F4: the replay marker says THIS root filesystem has every entry back — only a replay that put every entry
   // back writes it (an install / a partial replay never: the next boot would believe a replay that did not happen)
   `replayed() { [ -e "${REPLAY_MARKER}" ] || date +%s > "${REPLAY_MARKER}"; }`,
   // the image's own dpkg set, once per root filesystem (a replay on a fresh one re-takes it)
-  'base() { if [ ! -s "$R/base/status" ]; then cp /var/lib/dpkg/status "$R/base/status.tmp" && mv -f "$R/base/status.tmp" "$R/base/status"; q | sha256sum | cut -d" " -f1 > "$R/base/sha"; fi; say base "$(cat "$R/base/sha")"; }',
+  'base() { if [ ! -s "$R/base/status" ]; then cp /var/lib/dpkg/status "$R/base/status.tmp" && { e=$(LC_ALL=C sync -- "$R/base/status.tmp" 2>&1) || sync_not_done "$e"; } && mv -f "$R/base/status.tmp" "$R/base/status"; q | sha256sum | cut -d" " -f1 > "$R/base/sha"; fi; say base "$(cat "$R/base/sha")"; }',
   // the image's base is re-taken only on a root filesystem VibeSpace never ran on (no slot-ended): a replay on one where an
   // install already ran would record the image PLUS the apps as "the image"
   `rebase() { if [ ! -e "${SLOT_ENDED}" ]; then rm -f "$R/base/status"; fi; base; }`,
@@ -754,9 +759,10 @@ const APP_SCRIPT = [
   '    pkgok "$p" || { rm -f "$f"; continue; }',
   '    case "$v$a" in ""|*[!A-Za-z0-9.+~:-]*) rm -f "$f"; continue ;; esac',
   '    n=${p}_$(printf %s "$v" | sed "s/^[0-9]*://")_$a.deb',
-  '    if [ "${f##*/}" != "$n" ]; then mv -f "$f" "$D/$n"; f=$D/$n; fi',
+  '    if [ "${f##*/}" != "$n" ]; then { e=$(LC_ALL=C sync -- "$f" 2>&1) || sync_not_done "$e"; } || continue; mv -f "$f" "$D/$n"; f=$D/$n; fi',   // B-bcb8 unit D: a .deb on disk before it takes its canonical name (a failed sync: the .deb KEPT as it is — a person's own one exists nowhere else — and indexed at a later run)
   '    s=${f%.deb}.stanza',
   '    if [ -s "$s" ] && [ ! "$f" -nt "$s" ]; then continue; fi',
+  '    { e=$(LC_ALL=C sync -- "$f" 2>&1) || sync_not_done "$e"; } || continue',   // B-bcb8 unit D: a NEW stanza takes the digest of bytes on disk (a failed sync: the .deb kept, no stanza this run)
   "    { dpkg-deb -f \"$f\" | sed '/^$/d'; printf 'Filename: ./%s\\nSize: %s\\nSHA256: %s\\n' \"$n\" \"$(stat -c %s \"$f\")\" \"$(sha256sum \"$f\" | cut -d' ' -f1)\"; } > \"$s.tmp\" && mv -f \"$s.tmp\" \"$s\"",
   '  done',
   '  for s in "$D"/*.stanza; do [ -f "$s" ] || continue; [ -f "${s%.stanza}.deb" ] || rm -f "$s"; done',
@@ -792,7 +798,7 @@ const APP_SCRIPT = [
   '  for p in $(cat "$T/req"); do dpkg -L "$p" 2>/dev/null | grep -E "^/usr(/local)?/share/applications/[A-Za-z0-9@._+-]+\\.desktop$" | while read -r f; do say desktop "$p" "$f"; echo "$f" >> "$T/desktop"; done; done',
   '  comm -13 "$T/before" "$T/after" | while read -r p v; do dpkg -L "$p" 2>/dev/null | grep -E "^(/usr)?/lib/systemd/system/[A-Za-z0-9@._-]+\\.service$" | while read -r f; do say service "${p%%:*}" "${f##*/}"; done; done',
   '}',
-  'list() { cp "$T/req" "$R/entries/$ID.list.tmp" && mv -f "$R/entries/$ID.list.tmp" "$R/entries/$ID.list"; cp "$T/desktop" "$R/entries/$ID.desktop.tmp" && mv -f "$R/entries/$ID.desktop.tmp" "$R/entries/$ID.desktop"; sort -u "$T/from" > "$R/entries/$ID.pin.tmp" && mv -f "$R/entries/$ID.pin.tmp" "$R/entries/$ID.pin"; }',
+  'list() { cp "$T/req" "$R/entries/$ID.list.tmp" && { e=$(LC_ALL=C sync -- "$R/entries/$ID.list.tmp" 2>&1) || sync_not_done "$e"; } && mv -f "$R/entries/$ID.list.tmp" "$R/entries/$ID.list"; cp "$T/desktop" "$R/entries/$ID.desktop.tmp" && { e=$(LC_ALL=C sync -- "$R/entries/$ID.desktop.tmp" 2>&1) || sync_not_done "$e"; } && mv -f "$R/entries/$ID.desktop.tmp" "$R/entries/$ID.desktop"; sort -u "$T/from" > "$R/entries/$ID.pin.tmp" && { e=$(LC_ALL=C sync -- "$R/entries/$ID.pin.tmp" 2>&1) || sync_not_done "$e"; } && mv -f "$R/entries/$ID.pin.tmp" "$R/entries/$ID.pin"; }',
   'all() { cat "$R"/entries/*.list 2>/dev/null | sort -u; }',
   // verify r1: EVERY run pins the approved sources BEFORE any apt runs (finish re-pins with what the run took): a source
   // approved before the pin existed is never fetched from unpinned, not even by the first Refresh after the update

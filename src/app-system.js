@@ -248,6 +248,10 @@ const SYS_SCRIPT = [
   "if [ \"${1:-}\" = -- ]; then shift; fi",
   "say() { printf '= %s\\n' \"$*\"; }",
   "refuse() { say refused \"$@\"; exit 125; }",
+  // B-bcb8 unit D (主开发 r5211 / r5214): a sync its file system does not do lands, said (the one spelling, test-synced-installs); a sync
+  // with no -f (older than coreutils 8.24) syncs the whole system instead
+  "sync_not_done() { case $1 in *'Invalid argument'*|*'not supported'*|*'Function not implemented'*) printf '%s - its file system does not do a sync: its new bytes take their name unsynced\\n' \"$1\" >&2; return 0 ;; esac; return 1; }",
+  "sync_fs_none() { case $1 in *'nvalid option'*|*'nrecognized option'*) sync; return 0 ;; esac; sync_not_done \"$1\"; }",
   "pkgok() { case $1 in [a-z0-9]?*) ;; *) return 1 ;; esac; case $1 in *[!a-z0-9+.-]*) return 1 ;; esac; [ ${#1} -le 64 ]; }",
   "case $ID in \"\"|-*|*[!a-z0-9-]*) refuse bad-id ;; esac",
   "case $NONCE in \"\"|*[!a-z0-9]*) refuse bad-nonce ;; esac",
@@ -339,7 +343,7 @@ const SYS_SCRIPT = [
   "create)",
   "  [ ! -e \"$R\" ] || refuse exists \"$R\"",
   "  mk \"$S/rootfs.new\" \"$1\" \"$2\" \"${3:-}\"; srcsync \"$S/rootfs.new\"",
-  "  mv \"$S/rootfs.new\" \"$R\"",
+  "  { e=$(LC_ALL=C sync -f -- \"$S/rootfs.new\" 2>&1) || sync_fs_none \"$e\"; } || refuse not-synced \"$S/rootfs.new\"; mv \"$S/rootfs.new\" \"$R\"",   // B-bcb8 unit D: the new tree on disk before it takes the name (a sync of its file system)
   "  echo \"+ apt-get update (inside the app system)\"; X apt-get $LOCK update || say warn update-failed",
   "  say ok ;;",
   "install)",
@@ -402,7 +406,7 @@ const SYS_SCRIPT = [
   "    for x in list desktop deb bin; do cpin \"$E\" \"$e.$x\" \"$EN\" || true; done",
   "    if [ -f \"$E/$e.desktop\" ]; then while read -r f; do case $f in /usr/*) [ -e \"$NX$f\" ] || say gone \"$e\" \"$f\" ;; esac; done < \"$E/$e.desktop\"; fi",
   "  done",
-  "  mv \"$R\" \"$P\"; mv \"$NX\" \"$R\"; say rebased \"$bad\"; say ok ;;",
+  "  { e=$(LC_ALL=C sync -f -- \"$NX\" 2>&1) || sync_fs_none \"$e\"; } || refuse not-synced \"$NX\"; mv \"$R\" \"$P\"; mv \"$NX\" \"$R\"; say rebased \"$bad\"; say ok ;;",   // B-bcb8 unit D: the rebased tree on disk before the swap
   "rollback)",
   "  [ -d \"$P\" ] && [ ! -L \"$P\" ] || refuse no-prev \"$P\"",
   "  sysok \"$P\"",
