@@ -110,7 +110,7 @@ if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && ali
 // lane B: the fake keeps TABS (the measured 0.38.1 shapes: open / tab new answer the tab's targetId, a tab new makes
 // the new tab the active one, a CDP target id is a tab ref) and logs every command it ran (the suite reads the sequence)
 const tid = () => Array.from({ length: 32 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('');
-const write = (s) => fs.writeFileSync(f, JSON.stringify(s));
+const write = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // r4929 (round wf_04439b92): a temp file and a rename — no read ever meets a torn state (two fake processes at once read it at each verb's start)
 fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ ns, argv: argv.filter((x) => x !== '--json') }) + '\\n');
 const failUrl = process.env.FAKE_AB_FAIL_URL || '';
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, config: process.env.AGENT_BROWSER_CONFIG || null, n: 1, tabs: [{ tabId: 't1', targetId: tid(), url: 'about:blank', label: null, active: true }] }; write(s); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, pid: s.pid, config: s.config }) + '\\n'); }
@@ -1393,10 +1393,13 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
       const ctl14 = { reads: reads.n, bind: { binds: bindHold.ids.length, onePage, bothIssued: bindHold.met, boundReached: bindHold.bound, inTurn: !bindHold.turnBound, answers: bindHold.answers }, d1: d1.rebound && { how: d1.rebound.how, targetId: d1.rebound.targetId }, d2: d2.rebound && { how: d2.rebound.how, targetId: d2.rebound.targetId }, tabs: fakeTabs(nsn).length };
       console.log(`    ⑭b CONTROL's facts: ${JSON.stringify(ctl14)}`);
       const placed = onePage && bindHold.met === true && !bindHold.bound && !bindHold.turnBound && answered;
-      const unplaced = [bindHold.ids.length !== 2 && `${bindHold.ids.length} bind(s) held, not 2`, bindHold.ids.length === 2 && !onePage && 'the two binds named two pages', bindHold.bound && `the binds' hold reached its ${HOLD_BOUND_MS / 1000} s bound`, bindHold.turnBound && `the second bind's wait for the first one's answer reached its ${HOLD_BOUND_MS / 1000} s bound`, bindHold.ids.length === 2 && !answered && `a held bind did not answer ok (${JSON.stringify(bindHold.answers)})`].filter(Boolean).join('; ');
-      ok(placed, placed ? `⑭b CONTROL setup: the holds placed EVERY window — both first commands picked the one page and issued their bind before either landed, and the binds landed one after the other, each answered ok (${reads.n} page-list reads counted, 2 binds held)`
-        : `HARNESS (⑭b CONTROL's placement): ${unplaced || 'the holds did not both meet'} — the race was not placed, so the control's verdict below says nothing of the product`, ctl14);
-      ok(d1.rebound && d2.rebound && d1.rebound.targetId === d2.rebound.targetId && fakeTabs(nsn).length === 1, '⑭b CONTROL: an unserialized rebind binds BOTH concurrent sessions to the one page — the leg above catches it', ctl14);
+      const unplaced = [bindHold.ids.length !== 2 && `${bindHold.ids.length} bind(s) held, not 2`, bindHold.ids.length === 2 && !onePage && 'the two binds named two pages', bindHold.bound && `the binds' hold reached its ${HOLD_BOUND_MS / 1000} s bound`, bindHold.turnBound && `the second bind's wait for the first one's answer reached its ${HOLD_BOUND_MS / 1000} s bound`, bindHold.ids.length === 2 && !answered && `a held bind did not answer ok (${JSON.stringify(bindHold.answers)}: the fake's own answer, or a change of the unserialized copy's bind road — read it before the product's)`].filter(Boolean).join('; ');
+      // r4929 (the round's should): a race NOT placed says the HARNESS line ALONE — the control's verdict is not judged after it
+      if (!placed) ok(false, `HARNESS (⑭b CONTROL's placement): ${unplaced || 'the holds did not both meet'} — the race was not placed, so the control's verdict is not judged (it would say nothing of the product)`, ctl14);
+      else {
+        ok(true, `⑭b CONTROL setup: the holds placed EVERY window — both first commands picked the one page and issued their bind before either landed, and the binds landed one after the other, each answered ok (${reads.n} page-list reads counted, 2 binds held)`, ctl14);
+        ok(d1.rebound && d2.rebound && d1.rebound.targetId === d2.rebound.targetId && fakeTabs(nsn).length === 1, '⑭b CONTROL: an unserialized rebind binds BOTH concurrent sessions to the one page — the leg above catches it', ctl14);
+      }
       try { await kn.stop(pn.id, { why: 'user' }); } catch { /* none */ }
       kn.shutdown();
     }
