@@ -524,25 +524,24 @@ function provingText(d, { when = (ms) => new Date(ms).toISOString().slice(0, 16)
 // decidePoolSwitch, rankPoolMembers (the live evict path and the device's sealed orders) and soonestUsableMember (the default's
 // fallback). Tier 0 = a member with quota; 1 = a usage-credits member (B-ad05: pay-per-use past its quota, the release's own rule,
 // asked first of the two); 2 = a member BILLING PAID OVERAGE — «paying» is decided HERE, once, in whatever band its reading stands.
-// A row «can serve now» when no bucket of its reading is under its hard bar (servesNow). The last-resort tiers are asked in order,
-// and one whose every row is spent is PASSED OVER when a later tier holds a row that can serve now: it sorts after every tier. The
-// quota tier is never passed over (the default's fallback waits for a member with quota rather than bill one, as the release did).
-// With nobody paying a member's tier is 0 or 1 and nothing is passed over: every walk's order is the release's, byte for byte.
+// A row «can serve now» when no bucket of its reading is under its hard bar (servesNow). RULE 3's ONE ORDER, on EVERY pool (row B-d74f,
+// 主开发 r5239: with nobody paying too): a member that can serve now before every member that cannot, the tiers in order inside each
+// half — so a tier whose every row is spent is passed over when a later tier holds a row that can serve now, and a walled ordinary
+// member comes last (the default's fallback alone keeps one, to park on). With nobody paying, the two walks' answers differ from the
+// release's only there (test-pool-tier-invariants I6 restated: the difference set, counted and pinned; the decision's answers do not).
 const TIER_QUOTA = 0, TIER_CREDITS = 1, TIER_PAYING = 2;
 const servesNow = (brs) => !brs.some((b) => b.remaining < THRESH[b.kind].hard);
 function poolTiers({ creditsIds = null, payingIds = null, overageIds = null } = {}) {
   const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
   const paying = new Set([...(payingIds || []), ...(overageIds || [])]);
   const tierOf = (id) => ((credits && credits.has(id)) ? TIER_CREDITS : paying.has(id) ? TIER_PAYING : TIER_QUOTA);
-  // orderOf(rows [{tier, live}], the walk's own candidates) → keyOf(row): where a row stands in the order. RULE 3 (主开发 r4780): with
-  // a member paying, ONE order for every walk — a member that can serve now before every member that cannot (a tier with none that
-  // can is passed over, whichever tier), the tiers in order inside each half: ordinary, credits, paying that can serve; then credits
-  // and paying billing past their quota; then a walled ordinary member (the fallback alone keeps one, to park on). With nobody
-  // paying the key is the tier itself: every walk's order is the release's, byte for byte (I6).
-  const orderOf = (rows) => {
-    if (!(rows || []).some((r) => r.tier === TIER_PAYING)) return (r) => r.tier;
-    return (r) => (r.live ? r.tier : r.tier === TIER_QUOTA ? TIER_PAYING + 3 : r.tier + 2);
-  };
+  // orderOf(rows [{tier, live}]) → keyOf(row): where a row stands in the order. RULE 3 (主开发 r4780; on every pool since r5239, B-d74f):
+  // ONE order for every walk — a member that can serve now before every member that cannot (a tier with none that can is passed over,
+  // whichever tier), the tiers in order inside each half: ordinary, credits, paying that can serve; then credits and paying billing past
+  // their quota; then a walled ordinary member. The release keyed the tier alone where nobody paid: its fallback parked the default on a
+  // walled ordinary member before a credits member that could serve, its device list kept a spent credits member before one with quota.
+  // (`rows` is kept for the callers' shape: the order no longer depends on who else pays.)
+  const orderOf = (rows) => (r) => (r.live ? r.tier : r.tier === TIER_QUOTA ? TIER_PAYING + 3 : r.tier + 2);
   return { tierOf, orderOf, credits, paying };
 }
 
@@ -569,7 +568,7 @@ function decideStart({ family = null, hinted = false, defaultStale = false, base
   return decidePoolSwitch({ ...args, placing: !hinted, starting: pays });
 }
 
-function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, payingIds = null, priority = null, providerOf = null, fromProvider = null }) {
+function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, payingIds = null, overageIds = null, priority = null, providerOf = null, fromProvider = null }) {
   const out = [];
   // THE PROVIDER (q-053 P0b): the snapshot is a list of HOT re-points the device makes by itself — a member of another
   // provider is a COLD move (hotSwitchFor) the owner must allow, and a fallback-only member is never a reflex target, so
@@ -578,8 +577,9 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
   // USAGE CREDITS (B-ad05): a member whose org bills pay-per-use past 100 %
   // ranks after EVERY member with quota left — the daemon's reflex walks this
   // list top-down, so it may only reach a credits member with nothing else.
-  // B-87fd (1) (主开发 r4711 / r4744): a member BILLING PAID OVERAGE walks in a tier of its OWN — the tiers' order from poolTiers
-  const tiers = poolTiers({ creditsIds, payingIds });
+  // B-87fd (1) (主开发 r4711 / r4744): a member BILLING PAID OVERAGE walks in a tier of its OWN — the tiers' order from poolTiers; the
+  // avoid-overage setting's set (`overageIds`) is read as the decision reads it (B-d74f, r5239 (4)); the one order on every pool
+  const tiers = poolTiers({ creditsIds, payingIds, overageIds });
   const last = [];
   const lastTier = new Map();   // row → { tier, live } — kept OFF the row (the snapshot's rows are the release's)
   for (const m of members) {
@@ -1367,12 +1367,14 @@ function decidePinnedPlacement(opts = {}) {
  * list's first entry (the store's no-engine fallback): the member usable SOONEST by the pool's own
  * hard bars (a reading that says usable, or no reading at all ⇒ now; else the reset its blocking
  * buckets wait for — `quotaVerdict(…, {tier:'hard'}).blockedUntil`, grace included; no stated reset
- * ⇒ last), then the owner's priority order, then the member-list order; a usage-credits member
- * (pay-per-use past its quota, B-ad05) only after every other, and a member billing paid overage (B-87fd (1), `payingIds`)
- * after every credits member. `members` = the caller's candidates
+ * ⇒ last), then the owner's priority order, then the member-list order — inside RULE 3's ONE ORDER (poolTiers; on every pool since
+ * B-d74f, 主开发 r5239): an ordinary member that can serve now first, then a usage-credits member that can (B-ad05: it bills only past
+ * its quota), then a paying one (B-87fd (1), `payingIds`); then the credits and paying members billing past their quota; a walled
+ * ordinary member last — EXCEPT where nobody pays and no candidate can serve now (r5252, reading B): there the release's own park, a
+ * walled ordinary member before a credits member billing past its quota. `members` = the caller's candidates
  * (logged-in members the pool lists, the member being left excluded). → id | null
  */
-function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null, payingIds = null, readLogin = null, providerOf = null, fromProvider = null, conversationModel = null, crossProvider = 'never' } = {}) {
+function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null, payingIds = null, overageIds = null, readLogin = null, providerOf = null, fromProvider = null, conversationModel = null, crossProvider = 'never' } = {}) {
   const rank = priorityRankOf(priority);
   // THE PROVIDER (q-053 P0b): parking is a placement too — under 'never' never on another provider or a fallback-only
   // member; under 'allow' only one that serves the conversation's model, after every member of the same provider
@@ -1390,7 +1392,7 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
   // a LAPSED subscription (verify r1 ④, r2 ①) is NEVER a pick — removing the default must never park the pool (and every
   // NEW conversation) on it; every candidate lapsed ⇒ null, exactly like a pool whose candidates are all signed out
   const lapsed = (id) => !!(readLogin && memberLapsed(readLogin(id)));
-  const tiers = poolTiers({ creditsIds, payingIds });   // B-87fd (1) (主开发 r4711 / r4744): the tiers' order, from the one place
+  const tiers = poolTiers({ creditsIds, payingIds, overageIds });   // B-87fd (1) (主开发 r4711 / r4744): the tiers' order, from the one place; the setting's set read as the decision reads it, and rule 3's one order on every pool (B-d74f, r5239)
   const rows = [];
   (members || []).forEach((m, i) => {
     if (!m || typeof m.id !== 'string' || lapsed(m.id)) return;
@@ -1403,7 +1405,12 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     rows.push({ id: m.id, at, tier: tiers.tierOf(m.id), rank: rank ? rank(m.id) : 0, i, ap });
   });
   for (const r of rows) r.live = r.at === 0;
-  const keyOf = tiers.orderOf(rows);
+  // READING B (主开发 r5252, row B-d74f): where nobody pays and NO candidate can serve now — no ordinary member, no usage-credits member
+  // with quota left — the fallback keeps the RELEASE's park, byte for byte: a walled ordinary member before a credits member billing past
+  // its quota. The fallback's pick is the pool's DEFAULT, where every later conversation starts: a default on the wall heals by itself at
+  // its reset; one on a billing member would go on starting conversations on money (whether a pool may park there is the owner's choice)
+  const keepPark = !rows.some((r) => r.live || r.tier === TIER_PAYING);
+  const keyOf = keepPark ? (r) => r.tier : tiers.orderOf(rows);
   rows.sort((x, y) => (x.ap - y.ap) || (keyOf(x) - keyOf(y)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
   return rows.length ? rows[0].id : null;
 }

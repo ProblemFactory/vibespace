@@ -91,8 +91,15 @@ const guessOf = (k) => !k.family || k.hinted;
 // the chooser's entry: decideStart; a tree without it (before r4986) is asked as ITS chooser asked — the release's call (so a red tree
 // shows what its starts did, counted by kind), and its absence is a red of its own below
 const startOf = (mod, pool, k) => (typeof mod.decideStart === 'function' ? mod.decideStart(startArgs(pool, k)) : releaseStart(mod, pool, k));
-const rankOf = (mod, pool) => mod.rankPoolMembers({ members: pool.others, readCache: pool.readCache, nowSec: NOW, readLogin: pool.readLogin, creditsIds: pool.creditsIds, payingIds: pool.payingIds });
-const fallbackOf = (mod, pool) => { const x = mod.soonestUsableMember({ members: pool.others, readCache: pool.readCache, nowSec: NOW, readLogin: pool.readLogin, creditsIds: pool.creditsIds, payingIds: pool.payingIds }); return x && typeof x === 'object' ? x.id : x; };
+const rankOf = (mod, pool, ov = pool.overageIds) => mod.rankPoolMembers({ members: pool.others, readCache: pool.readCache, nowSec: NOW, readLogin: pool.readLogin, creditsIds: pool.creditsIds, payingIds: pool.payingIds, overageIds: ov });
+const fallbackOf = (mod, pool, ov = pool.overageIds) => { const x = mod.soonestUsableMember({ members: pool.others, readCache: pool.readCache, nowSec: NOW, readLogin: pool.readLogin, creditsIds: pool.creditsIds, payingIds: pool.payingIds, overageIds: ov }); return x && typeof x === 'object' ? x.id : x; };
+// THE WALK's OWN STATE (主开发 r5239 (3), B-d74f): the fallback is asked when the default is LEFT (removed, or lapsed); the device list
+// when the member a conversation runs on can no longer serve (a failed sign-in, a wall). The DECISION asked there: the current member
+// no longer a member (the fallback's), its sign-in dead (the list's)
+const DEAD_LOGIN = { state: 'logged-out', msLeft: -1 };
+const leftDecision = (mod, pool) => decide(mod, pool, 'm0', { members: pool.others, membership: pool.others.map((m) => m.id) });   // the default LEFT: no longer a member, no longer a candidate (the engine's healthyPoolMembers)
+const deadDecision = (mod, pool) => decide(mod, pool, 'm0', { readLogin: (id) => (id === 'm0' ? DEAD_LOGIN : pool.readLogin(id)) });
+const bills = (s) => s.kind === 'p' || (s.kind === 'c' && !hasQuota(s));   // a paying member, or a credits member past its quota
 const IN_TURN = [{ warm: true, inTurn: true, agoSec: 10, ttlSec: 300 }, { warm: false, inTurn: true, agoSec: 400, ttlSec: 300 }];
 
 // every multiset of up to three others
@@ -121,7 +128,12 @@ const heldStarts = (mod, pool, others) => {
   }
   return out;
 };
-const INV = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10'];
+// READING A (主开发 r5252): the one order with no exception — this tree's fallback with the kept shape taken out, in a copy: the walk
+// counts where it parks elsewhere (the kept kind) and re-finds the money pin's states under it
+let READ_A = null; const A_SPEND = [];
+{ const src = fs.readFileSync(path.join(REPO, 'src/account-pool-auto.js'), 'utf8');
+  try { READ_A = M.load('src/account-pool-auto.js', anchored(src, '  const keyOf = keepPark ? (r) => r.tier : tiers.orderOf(rows);', '  const keyOf = tiers.orderOf(rows);', 'reading A: no kept park'), 'reading-a'); } catch { READ_A = null; } }   // stale-pins: kept (reading A's text IS 1a163d9b9's fallback key, the one order with no exception)
+const INV = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10', 'I11'];
 // each failure is filed under its invariant AND its KIND (a short name of the road that broke it), with the first scenes of each kind
 const bad = Object.fromEntries(INV.map((k) => [k, { n: 0, shapes: new Set(), kinds: new Map() }]));
 const miss = (k, scene, kind, what) => {
@@ -132,21 +144,99 @@ const miss = (k, scene, kind, what) => {
   if (!g.shapes.has(shape)) { g.shapes.add(shape); if (g.ex.length < 2) g.ex.push(`${shape} | ${scene.hot} | setting ${scene.setting} | ${scene.arr} — ${what}`); }
 };
 // THE WALKS' OWN CHECKS (the device list's head, the fallback's pick) on one pool — shared with the walks' REDs below
+// THE KEPT SHAPE (主开发 r5252, reading B): nobody pays among the candidates and none can serve now — the fallback keeps the release's
+// park (a walled ordinary member before a credits member billing past its quota), so its own I1 / I2 checks are named apart there
+const keptShape = (others) => !others.some((s) => s.kind === 'p') && !others.some((s) => s.q !== 'lapsed' && hasQuota(s));
+let keptApart = 0;
 function walkChecks(mod, pool, others, scene, report) {
   const S = (id) => pool.st.get(id);
-  const anyQuota = others.some(hasQuota), anyTurn = others.some(takesTurn);
+  const anyQuota = others.some(hasQuota), anyTurn = others.some(takesTurn), kept = keptShape(others);
   const rk = rankOf(mod, pool), r0 = rk.length ? rk[0].id : null, fb = fallbackOf(mod, pool);
   if (r0) {
     if (anyQuota && !hasQuota(S(r0))) report('I2', scene, 'device list head cannot serve, one that can there', `the device list's head is ${fmt(S(r0))} while a member that can serve exists`);
     if (!takesTurn(S(r0))) report('I2', scene, 'device list head takes no turn', `the device list's head ${fmt(S(r0))} takes no turn`);
     if (S(r0).kind === 'p' && others.some((s) => s.kind !== 'p' && hasQuota(s))) report('I5', scene, 'device list', 'the device list puts a paying member first while an earlier tier can serve');
   }
-  if (fb) {
+  if (fb && kept) keptApart++;
+  if (fb && !kept) {
     if (anyTurn && !takesTurn(S(fb))) report('I2', scene, 'fallback onto a member taking no turn', `the fallback parks on ${fmt(S(fb))}, which takes no turn, while a member takes one`);
     if (anyQuota && !hasQuota(S(fb))) report('I2', scene, 'fallback onto a member that cannot serve, one that can there', `the fallback parks on ${fmt(S(fb))} while a member that can serve exists`);
     if (S(fb).kind === 'p' && others.some((s) => s.kind !== 'p' && hasQuota(s))) report('I5', scene, 'fallback', 'the fallback parks on a paying member while an earlier tier can serve');
   }
   return { r0, fb };
+}
+// I6 RESTATED (主开发 r5239 (3), row B-d74f): where nobody pays among a walk's candidates the two walks (the device list, the fallback)
+// take rule 3's ONE order too, and their answers differ from the release's ONLY where the release named a member that cannot serve now
+// while one that can, or one that takes a turn, was there: each difference is filed under its KIND, counted and PINNED; any other
+// difference is an I6 failure. Every other answer (the decision, in a turn and out, each start) equals the release byte for byte.
+// THE MONEY PIN: where the new answer names a member that BILLS, the release's own DECISION asked in that walk's own state lands in
+// that same place of the order (the walks come to agree with where the decision already moves a conversation); a state where it does
+// not is a NEW SPEND — the owner's to decide: the leg names it with its pool written out, and the unit STOPS on it
+const DIFF = new Map(), NEW_SPEND = [];
+const KINDS = { list: 'the device list: a credits member past its quota no longer stands before one that can serve', fbLive: 'the fallback: a credits member that can serve before an ordinary member that cannot', fbBill: 'the fallback: a credits member billing past its quota before a walled ordinary member (who takes no turn)', kept: 'the one shape (主开发 r5252, reading B): no candidate can serve now — the fallback keeps the release\'s park, where reading A would park on a credits member past its quota' };
+const noteDiff = (k, scene) => { if (!DIFF.has(k)) DIFF.set(k, { n: 0, shapes: new Set(), ex: [] }); const g = DIFF.get(k); g.n++; const sh = `${scene.cur} | ${scene.others}`; if (!g.shapes.has(sh)) { g.shapes.add(sh); if (g.ex.length < 2) g.ex.push(`${sh} | ${scene.hot} | setting ${scene.setting} | ${scene.arr}`); } };
+const writeOut = (pool, scene) => `${scene.arr}, ${scene.hot}, setting ${scene.setting}: ` + [...pool.st].map(([id, s]) => `${id} ${fmt(s)}`).join(', ');
+const moneyPin = (pool, scene, who, to, dr, into = NEW_SPEND) => { const S = (id) => pool.st.get(id); if (!(dr && dr.to && place(S(dr.to)) === place(S(to)))) { into.push(`${who} names ${fmt(S(to))} (${to}); the release's own decision in its state ${dr && dr.to ? `lands on ${fmt(S(dr.to))} (${dr.to})` : `moves nobody (${dr ? dr.reason : '-'})`} — the pool: ${writeOut(pool, scene)}`); return true; } return false; };
+function walkDiff(pool, scene, same) {
+  if (!rel) return;
+  const S = (id) => pool.st.get(id), ids = (l) => l.map((r) => r.id), cr = (l) => l.filter((r) => S(r.id).kind === 'c');
+  const mine = rankOf(P, pool), theirs = rankOf(rel, pool);
+  if (JSON.stringify(mine) !== JSON.stringify(theirs)) {
+    const expect = [...theirs.filter((r) => S(r.id).kind !== 'c'), ...cr(theirs).filter((r) => hasQuota(S(r.id))), ...cr(theirs).filter((r) => !hasQuota(S(r.id)))];
+    const released = cr(theirs).some((r, i, a) => !hasQuota(S(r.id)) && a.slice(i + 1).some((x) => hasQuota(S(x.id))));
+    if (released && JSON.stringify(ids(mine)) === JSON.stringify(ids(expect))) { noteDiff('list', scene); if (mine.length && bills(S(mine[0].id))) moneyPin(pool, scene, 'the device list', mine[0].id, deadDecision(rel, pool)); }
+    else same('device list (nobody among the others paying)', mine, theirs);
+  }
+  const fm = fallbackOf(P, pool), ft = fallbackOf(rel, pool);
+  if (fm !== ft) {
+    const A = fm && S(fm), B = ft && S(ft);
+    const kind = A && B && B.kind === 'o' && !hasQuota(B) && B.q !== 'lapsed' && A.kind === 'c' ? (hasQuota(A) ? 'fbLive' : 'fbBill') : null;
+    if (kind) { noteDiff(kind, scene); if (bills(A)) moneyPin(pool, scene, 'the fallback', fm, leftDecision(rel, pool)); }
+    else same('fallback (nobody among the others paying)', fm, ft);
+  }
+  // r5252: READING A (the one order with no exception, a copy) parks elsewhere only in the one shape — there this tree keeps the release's
+  // park; the money pin's 80 states are re-found under A, and in each the clock is stepped past the walled member's weekly reset
+  if (READ_A) { const fa = fallbackOf(READ_A, pool);
+    if (fa !== fm) { noteDiff('kept', scene); if (fm !== ft) same('fallback in the kept shape (r5252: the release\'s park, byte for byte)', fm, ft);
+      if (fa && bills(S(fa)) && moneyPin(pool, scene, 'reading A\'s fallback', fa, leftDecision(rel, pool), A_SPEND)) resetFacts(pool, scene, ft, fa); } }
+}
+// THE CLOCK PAST THE WALL (主开发 r5252 (i)–(iii)), measured in the 80 states: just past the walled ordinary member's weekly reset, where
+// (i) the release starts a new conversation (its default is that member), (ii) reading A's tree starts one (its default is the credits
+// member billing past its quota), and (iii) what reading A's own default pass decides there — the decision the engine asks for the pool's
+// default (src/server/usage-pool-engine.js maybePoolAutoSwitchForPool → decideDefault, on a pool whose automatic switching is on)
+const RESET = { i: new Map(), ii: new Map(), iii: new Map() };
+const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+function resetFacts(pool, scene, park, aPark) {
+  const S = (id) => pool.st.get(id), t1 = Number(pool.readCache(park).sevenDay.resetsAt) + 120;
+  const resetBy = (id) => { const c = pool.readCache(id); return !!(c && c.sevenDay && Number(c.sevenDay.resetsAt) + 60 <= t1); };
+  const desc = (id) => `${S(id).kind === 'o' ? 'the ordinary member' : S(id).kind === 'c' ? 'the credits member' : 'the paying member'}${id === park ? ' the release parked on' : id === aPark ? ' reading A parked on' : ''} (${fmt(S(id))}${resetBy(id) ? ', its week reset by then' : ''})`;
+  const left = { members: pool.others, membership: pool.others.map((m) => m.id), nowSec: t1 };
+  const startAt = (mod, cur, k) => { const { family, hinted, defaultStale, baseReadCache, ...rest } = { ...startArgs(pool, k), ...left, currentId: cur };
+    const d = typeof mod.decideStart === 'function' ? mod.decideStart({ family, hinted, defaultStale, baseReadCache, ...rest }) : (!family ? null : mod.decidePoolSwitch({ ...rest, placing: !hinted }));
+    return (d && d.to) || cur; };
+  for (const [n, k] of START_KINDS) { bump(RESET.i, `${n}: ${desc(startAt(rel, park, k))}`); bump(RESET.ii, `${n}: ${desc(startAt(READ_A, aPark, k))}`); }
+  const dd = decide(READ_A, pool, aPark, { ...left, proactive: pool.hot, hot: pool.hot });
+  bump(RESET.iii, dd && dd.to ? `moves the default to ${desc(dd.to)} (${dd.reason})` : `keeps the default on ${desc(aPark)} (${dd ? dd.reason : '-'})`);
+}
+// PLACE 3 (r5239 (2): OUT of this unit, named apart, never counted as cured): the soft band moves a conversation in the middle of a turn
+// on a cold cache, off a member that can still serve, where nobody pays — the letter of I7 the release breaks; counted here, judged not
+let place3 = 0; const place3Ex = [];
+// I1, I2 and I7 on the pools where NOBODY pays (r5165 / r5239): the decision's landing, the walks' own checks, the one place
+function plainChecks(pool, cur, others, scene) {
+  const S = (id) => pool.st.get(id), d = decide(P, pool, 'm0'), anyQuota = others.some(hasQuota);
+  if (d.to) {
+    const T = S(d.to);
+    if (!takesTurn(T)) miss('I2', scene, 'decision onto a member taking no turn', `the decision lands on ${fmt(T)}, which takes no turn`);
+    if (anyQuota && !hasQuota(T)) miss('I2', scene, 'decision onto a member that cannot serve, one that can there', `the decision moves onto ${fmt(T)} while a member that can serve exists`);
+    if (hasQuota(cur) && !settles(T)) miss('I2', scene, 'voluntary move under the settle bar', `a VOLUNTARY move (the current can serve) lands on ${fmt(T)}, under the settle bar`);
+    if (!hasQuota(cur) && cur.kind !== 'o' && cur.q !== 'lapsed' && !hasQuota(T)) miss('I2', scene, 'billed onto billed', `a member billing past its quota hops onto ${fmt(T)}, billed onto billed`);
+  }
+  const { r0, fb } = walkChecks(P, pool, others, scene, miss);
+  if (d.to && (cur.q === 'lapsed' || (cur.kind === 'o' && !hasQuota(cur)))) {
+    const pd = place(S(d.to)), pr = r0 ? place(S(r0)) : null, pf = fb && !keptShape(others) ? place(S(fb)) : (fb ? pd : null);   // r5252: the kept shape's fallback, named apart
+    if (pr !== pd || pf !== pd) miss('I1', scene, `places, nobody paying: decision ${pd}, list ${pr}, fallback ${pf}`, `the decision lands on ${fmt(S(d.to))}, the list's head is ${r0 ? fmt(S(r0)) : 'nobody'}, the fallback ${fb ? fmt(S(fb)) : 'nobody'}`);
+  }
+  for (const w of IN_TURN) { const dw = decide(P, pool, 'm0', { warm: w }); if (dw.to && hasQuota(cur)) { place3++; if (place3Ex.length < 3) place3Ex.push(`${scene.cur} | ${scene.others} | ${scene.hot} | ${w.warm ? 'warm' : 'cold'} cache → ${fmt(S(dw.to))} (${dw.reason}/${dw.band || '-'})`); } }
 }
 let pools = 0, payingPools = 0, plainPools = 0;
 for (const against of [false, true]) for (const cur of STATES) for (const ms of multisets) for (const hot of [false, true]) for (const setting of [false, true]) {
@@ -162,8 +252,8 @@ for (const against of [false, true]) for (const cur of STATES) for (const ms of 
     same('decision', decide(P, pool, 'm0'), decide(rel, pool, 'm0'));
     for (const w of IN_TURN) same('decision in a turn', decide(P, pool, 'm0', { warm: w }), decide(rel, pool, 'm0', { warm: w }));
     if (hot) for (const [n, k] of START_KINDS) same(`a start (${n})`, startOf(P, pool, k) ?? null, releaseStart(rel, pool, k));
-    same('device list', rankOf(P, pool), rankOf(rel, pool));
-    same('fallback', fallbackOf(P, pool), fallbackOf(rel, pool));
+    walkDiff(pool, scene, same);   // r5239: the two walks — the difference set, each difference of its kind
+    plainChecks(pool, cur, others, scene);
     continue;
   }
   pools++; payingPools++;
@@ -198,11 +288,13 @@ for (const against of [false, true]) for (const cur of STATES) for (const ms of 
   // read there; with nobody paying among them the walk asks the release's own question — and I6 is ASSERTED for it (r4903)
   const walksPay = others.some((s) => s.kind === 'p');
   let r0 = null, fb = null;
-  if (walksPay) ({ r0, fb } = walkChecks(P, pool, others, scene, miss));
-  else if (rel) { same('device list, only the current member paying', rankOf(P, pool), rankOf(rel, pool)); same('fallback, only the current member paying', fallbackOf(P, pool), fallbackOf(rel, pool)); }
+  ({ r0, fb } = walkChecks(P, pool, others, scene, miss));   // r5239: rule 3's one order whoever pays — the walks' own checks on every pool
+  if (!walksPay) walkDiff(pool, scene, same);   // nobody among the others paying: the difference set against the release (I6 restated)
+  // I11 (r5239 (4)): the avoid-overage setting is read by the two walks as the decision reads it — its set changes neither walk's order
+  if (setting && (JSON.stringify(rankOf(P, pool)) !== JSON.stringify(rankOf(P, pool, null)) || fallbackOf(P, pool) !== fallbackOf(P, pool, null))) miss('I11', scene, 'the setting moves a walk', 'with the setting on, the device list or the fallback differs from the setting off');
   // I1: a current member that cannot serve (walled, lapsed): the decision's landing, the list's head and the fallback stand in ONE place
-  if (d.to && walksPay && (cur.q === 'lapsed' || (cur.kind === 'o' && !hasQuota(cur)))) {
-    const pd = place(S(d.to)), pr = r0 ? place(S(r0)) : null, pf = fb ? place(S(fb)) : null;
+  if (d.to && (cur.q === 'lapsed' || (cur.kind === 'o' && !hasQuota(cur)))) {
+    const pd = place(S(d.to)), pr = r0 ? place(S(r0)) : null, pf = fb && !keptShape(others) ? place(S(fb)) : (fb ? pd : null);   // r5252: the kept shape's fallback, named apart
     if (pr !== pd || pf !== pd) miss('I1', scene, `places: decision ${pd}, list ${pr}, fallback ${pf}`, `the decision lands on ${fmt(S(d.to))}, the list's head is ${r0 ? fmt(S(r0)) : 'nobody'}, the fallback ${fb ? fmt(S(fb)) : 'nobody'}`);
   }
   // I7: in a turn (warm or cold cache) nothing moves off a paying member, or onto one, unless the current member cannot serve
@@ -241,12 +333,32 @@ console.log(`  · the space: ${pools} pools (${payingPools} with a member paying
 let wantPaying = 0, wantPlain = 0;
 for (const c of STATES) for (const m of multisets) { if (c.kind === 'p' || m.some((i) => STATES[i].kind === 'p')) wantPaying += 8; else wantPlain += 4; }
 ck(`the space was built whole: ${payingPools} pools with a member paying, ${plainPools} with none (counted apart: ${wantPaying} and ${wantPlain})`, payingPools === wantPaying && plainPools === wantPlain && wantPaying > 0 && wantPlain > 0);
-const WHAT = { I1: 'the walks stand in the same place of the one order', I2: 'nothing lands on a member that cannot serve while one can; a voluntary move only past the settle bar; never billed onto billed', I3: 'no ping-pong', I4: 'never blocked while a paying member can take a turn', I5: 'a paying member only when no earlier tier can serve — EVERY START included (a model sent, a hint, no family; a guess judged fail closed)', I6: 'with nobody paying (and for the walks where only the current member pays), byte for byte the release', I7: 'in a turn nothing moves off or onto a paying member while the current can serve', I8: 'the same readings give the same answer, on every pool', I9: 'a paying member beside a member that settles (under the reserve floor too) leaves it: out of a turn it moves, in one it is owed', I10: 'a landing on a paying member is marked (toPaying), whatever the setting' };
+const WHAT = { I1: 'the walks stand in the same place of the one order', I2: 'nothing lands on a member that cannot serve while one can; a voluntary move only past the settle bar; never billed onto billed', I3: 'no ping-pong', I4: 'never blocked while a paying member can take a turn', I5: 'a paying member only when no earlier tier can serve — EVERY START included (a model sent, a hint, no family; a guess judged fail closed)', I6: 'with nobody paying (and for the walks where only the current member pays), byte for byte the release', I7: 'in a turn nothing moves off or onto a paying member while the current can serve', I8: 'the same readings give the same answer, on every pool', I9: 'a paying member beside a member that settles (under the reserve floor too) leaves it: out of a turn it moves, in one it is owed', I10: 'a landing on a paying member is marked (toPaying), whatever the setting' , I11: 'the avoid-overage setting is read by the two walks as the decision reads it: its set changes neither walk\'s order' };
 for (const k of INV) {
   const b = bad[k];
   ck(`${k} — ${WHAT[k]}: ${b.n} failing decisions in ${b.shapes.size} shapes`, b.n === 0);
   for (const [kind, g] of b.kinds) { console.log(`      [${kind}] ${g.n} in ${g.shapes.size} shapes`); for (const e of g.ex) console.log('        ' + e); }
 }
+// I6 RESTATED (r5239 (3)): the difference set against the release, counted by kind and PINNED (a count that moves is red — a new kind
+// of difference, or one more of a kind, is a change of the release's answers to read again)
+const DIFF_PIN = { list: 2024, fbLive: 2288, fbBill: 0, kept: 352 };   // measured at the cure (r5239 / r5252): RUN 606a0f752-20261126203032-box for list and fbLive, the kept shape = that run's fbBill
+const diffCount = (k) => (DIFF.get(k) || { n: 0 }).n;
+console.log('  · I6 restated, the difference set against the release (eb7608d5): ' + Object.keys(KINDS).map((k) => `${k} ${diffCount(k)}`).join(' · '));
+for (const [k, g] of DIFF) { console.log(`      [${KINDS[k]}] ${g.n} in ${g.shapes.size} shapes`); for (const e of g.ex) console.log('        ' + e); }
+ck(`I6 restated: the two walks differ from the release only by the named kinds, each count pinned (${Object.keys(KINDS).map((k) => `${k} ${diffCount(k)}`).join(', ')})`, !!DIFF_PIN && Object.keys(KINDS).every((k) => diffCount(k) === DIFF_PIN[k]) && [...DIFF.keys()].every((k) => k in KINDS));
+// THE MONEY PIN (r5239 (3)): no state where a walk names a billing member while the release's own decision in that walk's state keeps
+// every conversation off one — a NEW SPEND, the owner's to decide: the unit STOPS on it (each one written out below)
+ck(`I6 restated — THE MONEY PIN: no new spend (${NEW_SPEND.length} states where a walk names a billing member the release's own decision there does not)`, NEW_SPEND.length === 0);
+for (const s of NEW_SPEND.slice(0, 12)) console.log('    NEW SPEND: ' + s);
+// r5252: under READING A the money pin names its 80 states (pinned: the page msgs/bl-accounts-B-d74f-money-pin-stop.md), all inside the
+// kept shape — where this tree keeps the release's park
+const A_SPEND_PIN = 80;
+ck(`r5252 reading A (a copy without the kept park) is read, and its money pin names ${A_SPEND.length} states, the page's ${A_SPEND_PIN}, all in the kept shape`, !!READ_A && A_SPEND.length === A_SPEND_PIN);
+console.log(`  · r5252, the kept shape: ${keptApart} fallback answers where nobody pays and no candidate can serve — the release's park, the walks' fallback checks named apart there`);
+console.log("  · r5252, the clock just past the walled ordinary member's weekly reset, in those states:");
+for (const [k, label] of [['i', '(i) the RELEASE starts a new conversation on'], ['ii', "(ii) reading A's tree starts it on"], ['iii', "(iii) reading A's own default pass (maybePoolAutoSwitchForPool → decideDefault)"]]) console.log(`    ${label}: ` + [...RESET[k]].map(([w, n]) => `${w} ×${n}`).join(' · '));
+// PLACE 3 (r5239 (2)): OUT of this unit — counted, never judged; the line names it apart
+console.log(`  · place 3, out of this unit (r5239): ${place3} decisions in a turn move a conversation off a member that can serve, where nobody pays (the soft band on a cold cache); first: ${place3Ex.join(' ;; ') || 'none'}`);
 
 // THE WALKS' REDs (r4903 M1): with its tier sort taken out — the device list's last tier back on the release's own sort, the fallback
 // without its tier key — the walks' own checks go red over the arrangement against the tiers (a cold pool, the setting off)
@@ -282,13 +394,33 @@ const heldOnly = (mod) => {
   const nP = heldOnly(P), nH = heldOnly(holds);
   ck(`the starts on a held paying member: green at this tree (${nP} failing checks)`, nP === 0);
   ck(`RED: the no-data hold standing on a start too turns them red (${nH} failing checks)`, nH > 0); }
+// THE ONE ORDER's RED (r5239, B-d74f): with the release's shortcut put back (with nobody paying the key is the tier), the walks' own
+// checks on the pools where nobody pays go red; its witness: the copy's order key keeps a walled ordinary member at the tier's own key
+const plainWalks = (mod) => {
+  let n = 0;
+  for (const against of [false, true]) for (const cur of STATES) for (const m of multisets) {
+    const others = m.map((i) => STATES[i]), all = [cur, ...others];
+    if (all.some((s) => s.kind === 'p')) continue;
+    walkChecks(mod, poolOf(cur, others, false, false, against), others, { cur: '', others: '', hot: '', setting: '', arr: '' }, () => { n++; });
+  }
+  return n;
+};
+{ const src = fs.readFileSync(path.join(REPO, 'src/account-pool-auto.js'), 'utf8');
+  let short = null;
+  try { short = M.load('src/account-pool-auto.js', anchored(src, '  const orderOf = (rows) => (r) => (r.live ? r.tier : r.tier === TIER_QUOTA ? TIER_PAYING + 3 : r.tier + 2);', "  const orderOf = (rows) => { if (!(rows || []).some((r) => r.tier === TIER_PAYING)) return (r) => r.tier; return (r) => (r.live ? r.tier : r.tier === TIER_QUOTA ? TIER_PAYING + 3 : r.tier + 2); };", 'the nobody-pays shortcut'), 'one-order-red'); } catch (e) { ck('RED CONTROL built (the nobody-pays shortcut, from this tree\'s order line)', false); }   // stale-pins: kept (the RED's text IS a92ccc273's order key)
+  const walled = { tier: 0, live: false }, key = (mod) => mod.poolTiers({}).orderOf([walled])(walled);
+  const nP = plainWalks(P);
+  ck(`the walks' checks on the pools where nobody pays: green at this tree (${nP} failing checks)`, nP === 0);
+  if (short) { const nS = plainWalks(short);
+    ck(`RED CONTROL in force: the copy's order keeps a walled ordinary member at the tier's own key where nobody pays (${key(short)}; this tree ${key(P)})`, key(short) === 0 && key(P) > 0);
+    ck(`RED: the release's shortcut put back turns them red (${nS} failing checks)`, nS > 0); } }
 // THE PIN (r4986; r5067: the pin road too): the engine's chooser asks decideStart exactly as this leg does — the start's family, its hint, the default's staleness,
 // the bare reading, hot: true, no `placing` of its own, and no decision of its own beside it
 { const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   const i = eng.indexOf('\nfunction poolChooserForModel('), j = eng.indexOf('\nfunction ', i + 10), body = i < 0 ? '' : eng.slice(i, j < 0 ? undefined : j);
   const call = (body.match(/const chooseNow = \(\) => decideStart\(\{[^\n]*\}\);/) || [''])[0];
   ck('THE PIN: the chooser\'s decision is decideStart\'s, called as this leg calls it (family, hint, stale default, bare reading, hot: true, no placing of its own), and the pin road asks it too (r5067): no decidePoolSwitch or decidePinnedPlacement of the chooser\'s own', typeof P.decideStart === 'function' && /decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(call) && /hot: true/.test(call) && !/placing:/.test(call) && !/decidePoolSwitch\(/.test(body) && !/decidePinnedPlacement\(/.test(body) && /decideStart\(\{ family: fam, hinted, baseReadCache: base, pin, currentId: cur,/.test(body)); }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 4 : 3, label: 'tier-invariants: ' })) ck(r.name, r.pass);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 6 : 5, label: 'tier-invariants: ' })) ck(r.name, r.pass);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

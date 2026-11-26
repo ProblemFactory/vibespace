@@ -95,7 +95,7 @@ const M = mutantCopies('pool-overage-last', REPO);
   { const ref = rel || today;   // ref-free half (a shallow clone): today's ranking
     let seed = 11; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const ids = ['a', 'b', 'c', 'd', 'e'];
-    let same = 0, n = 0, diff = null;
+    let same = 0, n = 0, diff = null, oneOrder = 0;   // oneOrder: the fallback's rule 3 order where nobody pays (B-d74f, 主开发 r5239)
     for (let i = 0; i < 400; i++) {
       const caches = {}; for (const id of ids) caches[id] = rnd() < 0.1 ? null : acct(Math.round(rnd() * 100) / 100, Math.round(rnd() * 6 * D) + H, { u5: Math.round(rnd() * 100) / 100, uf: rnd() < 0.5 ? Math.round(rnd() * 100) / 100 : null });
       const memI = ids.filter(() => rnd() < 0.85).map((id) => ({ id, name: id.toUpperCase() }));
@@ -110,9 +110,14 @@ const M = mutantCopies('pool-overage-last', REPO);
       }
       const rk = { members: memI, readCache: (id) => caches[id] ?? null, nowSec: NOW, creditsIds: base.creditsIds };
       n++; if (JSON.stringify(ref.rankPoolMembers(rk)) === JSON.stringify(P.rankPoolMembers({ ...rk, payingIds: null }))) same++; else if (!diff) diff = { i, rank: true };
-      n++; if (JSON.stringify(ref.soonestUsableMember(rk)) === JSON.stringify(P.soonestUsableMember({ ...rk, payingIds: null }))) same++; else if (!diff) diff = { i, soonest: true };
+      // the fallback: the release's pick, or (B-d74f, r5239: rule 3's ONE order where nobody pays) the credits member where the release
+      // parked on an ordinary member that cannot serve now — the one kind the two may differ by, counted
+      n++; { const a = ref.soonestUsableMember(rk), b = P.soonestUsableMember({ ...rk, payingIds: null });
+        if (JSON.stringify(a) === JSON.stringify(b)) same++;
+        else if (rel && b === 'e' && rk.creditsIds && a && a !== 'e' && P.quotaVerdict(caches[a] ?? null, NOW, { tier: 'hard' }).usable === false) { same++; oneOrder++; }
+        else if (!diff) diff = { i, soonest: true, release: a, now: b }; }
     }
-    ck(`overage-last: THE NO-OVERAGE IDENTITY — ${n} seeded placements, switches, ranks and fallbacks with NO member in overage are byte-identical to ${rel ? 'the release (eb7608d5)' : 'today\'s ranking (ref-free)'}`, same === n);
+    ck(`overage-last: THE NO-OVERAGE IDENTITY — ${n} seeded placements, switches, ranks and fallbacks with NO member in overage are byte-identical to ${rel ? 'the release (eb7608d5)' : 'today\'s ranking (ref-free)'}, but for the fallback's one order (B-d74f: ${oneOrder} seeds where the release parked on an ordinary member that cannot serve now, the one order on the credits member)`, same === n);
     if (same !== n) console.log('    first difference: ' + JSON.stringify(diff).slice(0, 600)); }
   // THE ENGINE's READER, pinned to the RAW reading (P7: a stated overage, never an estimate), and handed beside EVERY credits set
   { const ENG = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
@@ -143,7 +148,9 @@ const M = mutantCopies('pool-overage-last', REPO);
     const clausesOf = (i18n) => [{ key: i18n.key, params: i18n.params }, ...Object.values(i18n.params || {}).filter((v) => v && typeof v === 'object')];
     const ph = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
     const PLAIN = new Set(['pool', 'title', 'target', 'from', 'rank', 'pct', 'fam', 'min', 'label', 'line', 'inMin', 'rate', 'n']);
-    const ENGLISH = /\b(moved to|switched to|billing|resort|restarting|re-login|answered|quota|projected|remaining|login|subscription|removed|draining|conversations? start)\b/;
+    // B-9369's round (wf_246aa015-cf4, a small): the list widened to overage, pay-per-use, expires, Manage Agents and priority; «(usage
+    // credits)» stays in the zh and ja rows on purpose (the term the panels show), so the word «credits» is not on it
+    const ENGLISH = /\b(moved to|switched to|billing|resort|restarting|re-login|answered|quota|projected|remaining|login|subscription|removed|draining|conversations? start|overage|pay-per-use|expires|Manage Agents|priority)\b/;
     const variants = (W) => {
       const base = { pool: 'Pool A', title: 'conv', target: 'Member B' }, EARLY = { label: '5h', line: 10, inMin: 4, rate: 0.5 };
       const move = (o) => W.sessionMove({ ...base, hot: true, ...o }), sw = (o) => W.poolSwitch({ pool: 'Pool A', target: 'Member B', from: 'Member A', hot: true, ...o });

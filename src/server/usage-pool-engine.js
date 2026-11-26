@@ -493,7 +493,7 @@ async function pushSealedOrders(poolId) {
     // meantime would be an unreachable fallback. Members near/past their
     // login deadline never enter the snapshot.
     readLogin: poolReadLogin(),
-    creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), // usage-credits members walk LAST (B-ad05)
+    creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), overageIds: overageMemberIds(members), // usage-credits members walk LAST (B-ad05); the setting's set as the decision reads it (B-d74f)
     priority: poolPriorityOf(a), // the owner's manual order walks first (2026-09-28)
     providerOf: pv, fromProvider: pv(defMember), // (q-053 P0b) a reflex is a HOT re-point: never another provider
   }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
@@ -7791,7 +7791,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
     }
-    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), payingIds: overageInUseIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), payingIds: overageInUseIds(alive), overageIds: overageMemberIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { return RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid)); } catch { return false; } })();
@@ -9063,7 +9063,7 @@ function fallbackDefaultTarget(poolId, fromId = null) {
     const members = switchCandidates(poolId).filter((m) => m && m.id !== fromId && membership.includes(m.id));
     // (q-053 P0b) parking never lands on another provider: the default's own (a deleted member's = the pool's own)
     const pv = poolProviderOf(a), fromProv = pv(fromId || accounts.poolCurrent(poolId));
-    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: nowSecOf(), priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
+    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: nowSecOf(), priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), overageIds: overageMemberIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
   } catch (e) { console.warn('[pool] default fallback failed:', e.message); return null; }
 }
 /** THE ONE ENTRY POINT: members `removedIds` no longer belong to `poolId` — move
