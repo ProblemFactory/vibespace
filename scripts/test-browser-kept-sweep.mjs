@@ -853,35 +853,63 @@ const BBS4 = fs.readFileSync(path.join(REPO, 'src/server/browser-bindings.js'), 
 const twoHoursOld = (p) => { const t = (Date.now() - 2 * 3600e3) / 1000; fs.utimesSync(p, t, t); };
 
 console.log('㉛ r3961 (1): ONE WRITE AT A TIME A FOLDER — a rename held past the bound, then a second start: the second waits (inside ITS bound) for the first to truly end, and a take-back removes only its own file — never «kept» over a folder with no note');
+// THE SECOND START'S ONE BOUND (B-3dbd, 主开发 r5212 (2)): the store's noteWriteMs is the start's ONE bound from its ask, its wait for the
+// folder's previous write included (ensureNote's left()). A scene below needs the SECOND start to say «kept» inside it: in the shipped
+// scene after the first truly ended (its landing and its take-back), in the control at once (the chain moved on). On a loaded disk its
+// own read, temp write, sync and rename can pass the bound (the box zone at load 68 to 73: «both starts kept_note_timeout») — the
+// product's verdict at its clock, never the scene's fault. So the scene is judged only when it FORMED (r5135 law 2), read by the
+// second write's own times against its bound; one that did not form is a named skip the gate counts, its why measured. The bound
+// stays the scene's 300 ms (nothing widened). The run's own waits are on their facts: the first write's take-back look and its unlinks.
+const NW31 = 300;   // the scene's noteWriteMs (the second start's ONE bound)
+const lateOf = (p, ms) => { let t = null; return Promise.race([p.then(() => false), new Promise((r) => { t = setTimeout(() => r(true), ms); })]).finally(() => clearTimeout(t)); };   // true when the fact did not come inside ms
 async function oneAtATimeRun(KS, { releaseAfterSecond = false } = {}) {
   const K = freshKey();
   const dir = noteWorld({});
   let release; const gateP = new Promise((r) => { release = r; });
-  let held = 0, firstLanded = null;
-  const flags = { lstatDone: 0, unlinkIssued: 0, unlinkDone: 0 };
-  const isNote = (p) => String(p).endsWith(NOTE);
+  let held = 0, firstLanded = null, firstIn = false, opens = 0, lookDone = null;
+  const firstLook = new Promise((r) => { lookDone = r; });   // the first write's take-back look (its lstat after its late landing)
+  const unlinks = [], at = { ask2: 0, open2: null, rename2: null, landed2: null, firstEnd: null, released: null };
+  const isNote = (p) => String(p).endsWith(NOTE), isTmp = (p) => String(p).includes(NOTE + '.tmp-');
   const noteFs = { ...fs.promises,
-    rename: (a, b) => { if (isNote(b) && held++ === 0) { firstLanded = gateP.then(() => fs.promises.rename(a, b)); return firstLanded; } return fs.promises.rename(a, b); },   // PLACED: the FIRST note's rename held
-    lstat: (p) => fs.promises.lstat(p).finally(() => { if (firstLanded && isNote(p)) flags.lstatDone++; }),
-    unlink: (p) => { if (isNote(p)) flags.unlinkIssued++; return fs.promises.unlink(p).finally(() => { if (isNote(p)) flags.unlinkDone++; }); } };
-  const S = mkStore(KS, dir, { noteFs, noteWriteMs: 300 });   // a bound wide enough for a loaded machine's fsync (the second start's whole wait and write)
+    open: (p, ...a) => { if (isTmp(p) && ++opens === 2) at.open2 = Date.now(); return fs.promises.open(p, ...a); },   // the SECOND write's temp opened
+    rename: (a, b) => { if (isNote(b) && held++ === 0) { firstLanded = gateP.then(() => fs.promises.rename(a, b)).finally(() => { firstIn = true; }); return firstLanded; }   // PLACED: the FIRST note's rename held
+      if (isNote(b)) at.rename2 = Date.now(); return fs.promises.rename(a, b).finally(() => { if (isNote(b)) at.landed2 = Date.now(); }); },
+    lstat: (p) => { const look = firstIn && isNote(p); return fs.promises.lstat(p).finally(() => { if (look) { at.firstEnd = Date.now(); lookDone(); } }); },   // the take-back look after the first landed
+    unlink: (p) => { const mine = firstIn && isNote(p) && at.open2 === null; const u = fs.promises.unlink(p).finally(() => { if (mine) at.firstEnd = Date.now(); }); if (isNote(p)) unlinks.push(u.then(() => { }, () => { })); return u; } };
+  const S = mkStore(KS, dir, { noteFs, noteWriteMs: NW31 });
   fs.mkdirSync(S.dirOf(K), { recursive: true });
   const g1 = await S.startGate(K);   // past its bound: not kept — its write still runs (its rename held)
+  at.ask2 = Date.now();
   const g2p = S.startGate(K);        // the next start of the same folder
   let g2;
-  if (releaseAfterSecond) { g2 = await g2p; release(); } else { release(); g2 = await g2p; }
-  // the first write's late landing and its take-back look (then its unlink, when it took its own file back): waited for by their own events
-  await firstLanded; await until(() => flags.lstatDone > 0, 3000); await new Promise((r) => setImmediate(r)); await until(() => flags.unlinkDone >= flags.unlinkIssued, 3000);
+  if (releaseAfterSecond) { g2 = await g2p; at.released = Date.now(); release(); } else { at.released = Date.now(); release(); g2 = await g2p; }
+  // the first write's late landing, its take-back look, then its unlinks: waited for by their own facts (a bound's end is a red)
+  await firstLanded;
+  const lookLate = await lateOf(firstLook, 10000);
+  await new Promise((r) => setImmediate(r));
+  const unlinkLate = await lateOf(Promise.all(unlinks), 10000);
   const note = noteOf(S.dirOf(K));
   try { S.shutdown(); } catch { }
-  return { first: g1.kept ? 'kept' : g1.code, second: g2.kept ? 'kept' : g2.code, note: !!note && note.key === K, keptOverNone: !!g2.kept && !(note && note.key === K) };
+  const rel = (t) => (t === null ? null : t - at.ask2);
+  const times = { open2: rel(at.open2), rename2: rel(at.rename2), landed2: rel(at.landed2), firstEnd: rel(at.firstEnd), released: rel(at.released), bound: NW31 };
+  return { first: g1.kept ? 'kept' : g1.code, second: g2.kept ? 'kept' : g2.code, note: !!note && note.key === K, keptOverNone: !!g2.kept && !(note && note.key === K), lookLate, unlinkLate, times };
 }
+// the shipped scene FORMED: the second said «kept», or the product could have acted inside its bound — the first truly ended before it
+// and (when the second wrote) its own write landed inside it; otherwise the machine took the bound (a named skip)
+const formedA = (r) => r.second === 'kept' || (r.times.open2 === null ? r.times.firstEnd !== null && r.times.firstEnd < NW31 : r.times.landed2 !== null && r.times.landed2 < NW31);
+const whyNot = (r) => `the second start answered ${r.second} at its ${NW31} ms bound — ${r.times.open2 === null ? `its write never began (the first truly ended at +${r.times.firstEnd} ms)` : `its own write opened at +${r.times.open2} ms, its rename ${r.times.landed2 !== null ? `landed at +${r.times.landed2} ms` : r.times.rename2 !== null ? `issued at +${r.times.rename2} ms, not landed` : 'never issued'}`} — the machine took the bound`;
 const N31a = await oneAtATimeRun(KS0), N31b = await oneAtATimeRun(KS0, { releaseAfterSecond: true });
 console.log(`    facts: ${JSON.stringify({ N31a, N31b })}`);
-ok(N31a.first === 'kept_note_timeout' && N31a.second === 'kept' && N31a.note && !N31b.keptOverNone && N31b.second === 'kept_note_timeout',
-  'the first write past its bound (its rename held): not kept; a second start WAITS for it to end, then writes the folder\'s note — kept, its note there; when the first is still held through the second\'s whole bound, the second is not kept either (it writes nothing): never «kept» over a folder with no note', { N31a, N31b });
+ok(!N31a.lookLate && !N31a.unlinkLate && !N31b.lookLate && !N31b.unlinkLate, 'the first write\'s late landing is taken back by its own look in both scenes (its look and its unlinks waited for as facts, inside 10 s each)', { N31a, N31b });
+ok(N31b.first === 'kept_note_timeout' && !N31b.keptOverNone && N31b.second === 'kept_note_timeout',
+  'when the first is still held through the second\'s whole bound, the second is not kept either (it writes nothing): never «kept» over a folder with no note', N31b);
+if (!formedA(N31a)) console.log(`  ⊘ SKIP ㉛ the second waits for the first to end (not formed): ${whyNot(N31a)} — that leg is PARTIAL in this run`);
+else ok(N31a.first === 'kept_note_timeout' && N31a.second === 'kept' && N31a.note,
+  'the first write past its bound (its rename held): not kept; a second start WAITS for it to end, then writes the folder\'s note — kept, its note there', N31a);
 const N31x = await oneAtATimeRun(overKN(anchored(KNSRC, '  const end = run.then(() => (ran ? held : prev), () => null).then(() => null, () => null);', '  const end = run.then(() => null, () => null);', 'r3786 the chain moves on at the bound'), 'kept-sweep-chain-bound').KS, { releaseAfterSecond: true });
-ok(N31x.keptOverNone, 'RED CONTROL (the chain moves on at the bounded answer): the second start writes and says kept, then the first lands over its note and takes it back — a browser told «kept» on a folder with NO note — red', N31x);
+// the control FORMED only when its second start said «kept» while the first was held (the chain moved on at the bounded answer)
+if (N31x.second !== 'kept') console.log(`  ⊘ SKIP ㉛ CONTROL the chain moves on at the bounded answer (not formed): ${whyNot(N31x)} — the never-kept-over-none leg is PARTIAL in this run`);
+else ok(N31x.keptOverNone, 'RED CONTROL (the chain moves on at the bounded answer): the second start writes and says kept, then the first lands over its note and takes it back — a browser told «kept» on a folder with NO note — red', N31x);
 
 console.log('㉜ r3961 (2): TWO TRUE NOTES NAME ONE CONVERSATION — bound by the bindings\' own rebuild rule (a conversation keeps its FIRST key: the earliest first time), whatever the listing\'s order');
 async function twoNotesRun(KS, order) {
