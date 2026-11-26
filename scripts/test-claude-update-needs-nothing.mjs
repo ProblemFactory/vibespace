@@ -86,7 +86,7 @@ try {
   const cli900 = fakeCli({ version: '2.1.900', builtAt: '2026-12-01T00:00:00Z', catalog: NEW });
   const e900 = await note(cli900, '2.1.900');
   ok(e900 && e900.state === 'read' && e900.cli === '2.1.900' && e900.builtAt === '2026-12-01T00:00:00Z' && e900.models.length === 26 && e900.refused.length === 0, 'read once, never run: 2.1.900, built 2026-12-01, 26 models, nothing refused', JSON.stringify(e900 && { state: e900.state, cli: e900.cli, n: e900.models.length, refused: e900.refused, reason: e900.reason }));
-  const ledger = JSON.parse(fs.readFileSync(path.join(dir, 'data', CAT.LEDGER), 'utf8'));
+  await CAT._landed(); const ledger = JSON.parse(fs.readFileSync(path.join(dir, 'data', CAT.LEDGER), 'utf8'));
   ok(ledger.schema === 1 && Object.keys(ledger.binaries).length === 1 && ledger.binaries[ledger.current].evidence.anchor === CMC.ANCHOR && ledger.binaries[ledger.current].evidence.versionAgrees === true, 'the ledger keeps it (keyed by version + the file identity) with the evidence: the anchor, its offset, the version string agreeing with --version', JSON.stringify(ledger.binaries[ledger.current].evidence));
 
   console.log('§B the new model is pickable — in its 1M form; any catalog id resolves when typed');
@@ -280,7 +280,7 @@ try {
   console.log('§A what the hub read is in force from the FIRST answer after a restart — before any tick, no re-read (acceptance r1, law A)');
   {
     const ledgerFile = path.join(dir, 'data', CAT.LEDGER);
-    const ledgerBytes = fs.readFileSync(ledgerFile, 'utf8');
+    await CAT._landed(); const ledgerBytes = fs.readFileSync(ledgerFile, 'utf8');
     const nEv = events.length;
     CAT._reset(); UHM.setCatalogPricing(null); FAM.setCatalogFamilies({});
     CAT.apply({ save: false }); // a fresh process: no ledger loaded yet ⇒ every reader on the shipped tables
@@ -295,7 +295,7 @@ try {
     ok(uh4._tier('claude-fable-6') === 'fable-6' && uh4.pricingView().sources['fable-6'].from === 'catalog' && uh3._tier('claude-fable-6') === 'fable-6', '…its prices too, for an instance made after boot AND one made before it (the Source column says «From Claude Code»)');
     ok(FAM.familyOfModel('claude-quill-1') === 'quill', '…and its families');
     ok(/\nconst CMCS = require\('\.\/cli-model-catalog\.js'\);[\s\S]*?try \{ CMCS\.boot\(\{ dataDir: path\.join\(rootDir, 'data'\) \}\); \} catch \{ \}\n/.test(fs.readFileSync(path.join(ROOT, 'src/server/cli-env.js'), 'utf8')), 'the SERVER\'s boot call: cli-env create() boots the ledger from <root>/data (the drill\'s restart is that call; the hub leg proves it on a real second process)');
-    ok(events.length === nEv && fs.readFileSync(ledgerFile, 'utf8') === ledgerBytes, 'nothing re-read, nothing said again, the ledger untouched');
+    await CAT._landed(); ok(events.length === nEv && fs.readFileSync(ledgerFile, 'utf8') === ledgerBytes, 'nothing re-read, nothing said again, the ledger untouched');
   }
 
   console.log('§D2 THE LOOP LAW on every file, and a read that never finishes bounds only itself (acceptance r1, law D)');
@@ -330,11 +330,11 @@ try {
   {
     const d2 = path.join(dir, 'data-e'); fs.mkdirSync(d2, { recursive: true });
     fs.writeFileSync(path.join(d2, CAT.LEDGER), JSON.stringify({ schema: 1, binaries: { x: null, y: 5, z: { state: 'read' } }, said: ['a', 3] }));
-    fs.writeFileSync(path.join(d2, CAT.LEDGER + '.tmp-99999'), 'a kill between write and rename');
+    fs.writeFileSync(path.join(d2, CAT.LEDGER + '.tmp-99999'), 'a kill between write and rename');   // stale-pins: kept — a planted leftover temp's BYTES (an older build's), not an anchor
     const ne = events.length;
     CAT._reset();
     const e1 = await CAT.noteBinary({ cmd: cli900, version: '2.1.900', dataDir: d2, which: (c) => c, event: ev, log: () => { } });
-    const saved = JSON.parse(fs.readFileSync(path.join(d2, CAT.LEDGER), 'utf8'));
+    await CAT._landed(); const saved = JSON.parse(fs.readFileSync(path.join(d2, CAT.LEDGER), 'utf8'));
     ok(e1 && e1.state === 'read' && !('x' in saved.binaries) && !('y' in saved.binaries) && !('z' in saved.binaries) && Object.keys(saved.binaries).length === 1, 'a ledger holding non-entries ({"x":null}, 5, a half entry): what the load accepts the save writes — dropped, read once, saved');
     ok(!fs.existsSync(path.join(d2, CAT.LEDGER + '.tmp-99999')), 'the tmp file a kill left between write and rename is removed at the next save');
     const ne2 = events.length;
@@ -364,7 +364,7 @@ try {
     ok(rp === null && after && after.state === 'read', 'a realpath that never answers is bounded (null, nothing stored) and the next tick for another binary proceeds');
     // small r2 (3): an entry the reader could not have produced is dropped at load — never a menu that throws for ever
     const d3 = path.join(dir, 'data-shape'); fs.mkdirSync(d3, { recursive: true });
-    const good = JSON.parse(fs.readFileSync(path.join(d2, CAT.LEDGER), 'utf8'));
+    await CAT._landed(); const good = JSON.parse(fs.readFileSync(path.join(d2, CAT.LEDGER), 'utf8'));
     const k0 = Object.keys(good.binaries)[0];
     fs.writeFileSync(path.join(d3, CAT.LEDGER), JSON.stringify({ schema: 1, current: 'bad1', said: [], binaries: { bad1: { ...good.binaries[k0], models: [null] }, bad2: { ...good.binaries[k0], aliases: { fable: { toString: 1 } } } } }));
     CAT._reset();
@@ -374,20 +374,20 @@ try {
     // TIDY (acceptance r3, 1): the «said» set forgets nothing still true — 10 000 padding lines after the current ones, two
     // restarts: 0 repeats; a save leaves only lines that are still true
     const dS = path.join(dir, 'data'); const lf = path.join(dS, CAT.LEDGER);
-    const ledger0 = JSON.parse(fs.readFileSync(lf, 'utf8'));
+    await CAT._landed(); const ledger0 = JSON.parse(fs.readFileSync(lf, 'utf8'));
     const pad = []; for (let k = 0; k < 10000; k++) pad.push(k % 2 ? `cli-unknown-model-price|claude-pad-${k}|{}|{}|catalog` : `pad-${k}|x`);
     fs.writeFileSync(lf, JSON.stringify({ ...ledger0, said: [...ledger0.said, ...pad] }));
     const nS = events.length;
     for (let r = 0; r < 2; r++) { CAT._reset(); CAT.boot({ dataDir: dS, event: ev, log: () => { } }); new UHM.UsageHistory({ dataDir: path.join(dir, 'uh'), homeDir: path.join(dir, 'uh') }); await note(cli900, '2.1.900'); }
     ok(events.length === nS, `10 000 padding lines after the current ones, two restarts: ${events.length - nS} line(s) said again (r3's load kept only the newest 2 000 and said 7 price lines again)`, JSON.stringify(events.slice(nS).map((x) => x.n)));
     CAT.apply(); // a save
-    const saidNow = JSON.parse(fs.readFileSync(lf, 'utf8')).said;
+    await CAT._landed(); const saidNow = JSON.parse(fs.readFileSync(lf, 'utf8')).said;
     ok(saidNow.length < 100 && !saidNow.some((k) => k.startsWith('pad-') || k.includes('claude-pad-')) && ledger0.said.every((k) => saidNow.includes(k) || !k.startsWith('cli-model-catalog-read|')), `a save keeps only what is still true (${saidNow.length} lines: the kept builds, their models, the current disagreements) — the file is bounded by that`, String(saidNow.length));
     // …and a save BEFORE any price table has recomputed keeps every price line (unknown is not «ended»): the ledger loaded with
     // no reader fed, a save, THEN a usage-history built ⇒ 0 lines said again (主开发's mutant 2: the clause removed ⇒ all said again)
-    const priced = JSON.parse(fs.readFileSync(lf, 'utf8')).said.filter((k) => k.startsWith('cli-unknown-model-price|'));
+    await CAT._landed(); const priced = JSON.parse(fs.readFileSync(lf, 'utf8')).said.filter((k) => k.startsWith('cli-unknown-model-price|'));
     CAT._reset(); CAT._load(dS); CAT._saveNow();
-    const keptP = JSON.parse(fs.readFileSync(lf, 'utf8')).said.filter((k) => k.startsWith('cli-unknown-model-price|'));
+    await CAT._landed(); const keptP = JSON.parse(fs.readFileSync(lf, 'utf8')).said.filter((k) => k.startsWith('cli-unknown-model-price|'));
     const nP = events.length;
     CAT.boot({ dataDir: dS, event: ev, log: () => { } }); new UHM.UsageHistory({ dataDir: path.join(dir, 'uh'), homeDir: path.join(dir, 'uh') });
     ok(priced.length > 0 && keptP.length === priced.length && events.length === nP, `a save before any price table reported keeps all ${priced.length} price line(s); the first recomputation after it says ${events.length - nP} again`, JSON.stringify({ priced: priced.length, kept: keptP.length, said: events.slice(nP).map((x) => x.d) }));

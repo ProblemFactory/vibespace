@@ -61,7 +61,11 @@ try {
   ok(t && t['fable-6'] && t['fable-6'].input === 6 && t['fable-6'].output === 30 && s['fable-6'].from === 'catalog' && s['fable-6'].cli === '2.1.900' && t['quill-1'] && t['quill-1'].input === 1, '/api/usage-stats/pricing: Fable 6 and Quill 1 priced from the catalog, the source said', JSON.stringify({ f6: t && t['fable-6'], src: s && s['fable-6'] }));
   const disk = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'usage-history', 'pricing.json'), 'utf8'));
   ok(!('fable-6' in disk.tiers) && !('quill-1' in disk.tiers), 'nothing catalog-derived is written to the hub\'s pricing.json');
-  const led = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'cli-model-catalog.json'), 'utf8'));
+  // B-574d: the hub's store writer lands the ledger OFF its loop — the read waits ON THAT FACT (the file holding the read), its bound said by name
+  const ledOf = () => { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'cli-model-catalog.json'), 'utf8')); return j && j.current && j.binaries && j.binaries[j.current] ? j : null; } catch { return null; } };
+  let led = ledOf(); for (let i = 0; i < 120 && !led; i++) { await sleep(250); led = ledOf(); }
+  if (!led) console.log('  · HARNESS: data/cli-model-catalog.json never held the read within 30 s — the claim below reads a file that did not land');
+  led = led || { binaries: {}, current: null };
   const cur = led.binaries[led.current];
   ok(cur && cur.state === 'read' && cur.cli === '2.1.900' && cur.models.length === 26, 'data/cli-model-catalog.json holds the read (2.1.900, 26 models)', JSON.stringify(cur && { state: cur.state, cli: cur.cli, n: cur.models.length }));
   const tel = await get('/api/telemetry/summary?days=14&drift=1');

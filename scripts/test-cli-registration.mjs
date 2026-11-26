@@ -87,6 +87,7 @@ console.log('② the registry — said ONCE per build, kept across a restart');
   const st = reg.status();
   ok('…every later sighting — the 15-min tick again, a conversation\'s drift card — adds no line and no event; the build lists both sources', lines.length === 1 && events.length === 1 && st.unregistered.length === 1 && st.unregistered[0].version === '2.1.399' && st.unregistered[0].sources.join() === 'hub,conversation' && st.unregistered[0].firstSeen === 1792652400000 && st.unregistered[0].draft === null, { lines, st });
   ok('…an unparseable version or an unknown source is ignored', reg.note('unparsed', 'hub') === null && reg.note('2.1.400', 'elsewhere') === null && lines.length === 1);
+  await reg.landed();   // B-574d: the store writer lands the state off the loop — the restart reads it once ON DISK (its own answer)
   const again = mk();
   again.note('2.1.399', 'hub');
   ok('a RESTART (a new registry over the same data dir) does not say it again — data/cli-registration.json keeps the build', lines.length === 1 && events.length === 1 && JSON.parse(fs.readFileSync(path.join(dataDir, 'cli-registration.json'), 'utf8')).seen['2.1.399'].sources.join() === 'hub,conversation');

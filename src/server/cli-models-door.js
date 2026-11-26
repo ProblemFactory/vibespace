@@ -147,7 +147,7 @@ function cleanEntry(e) {
  *  @param {Function} [o.spawnImpl] @param {()=>number} [o.now] @param {(l:string)=>void} [o.log] @param {object} [o.fsx] */
 function createCliModelsDoor({ accounts, harnessOf, cliCmds, dataDir = null, agentEnv = () => ({ ...process.env }), onListed = () => { },
   verdict = (req) => require('../routes/vault.js').personVerdict(req),
-  spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), fsx = fs, homeDir = os.homedir,
+  spawnImpl = spawn, now = Date.now, log = (l) => console.log(l), fsx = fs, homeDir = os.homedir, writer: W = null,
   floorMs = FLOOR_MS, failFloorMs = FAIL_FLOOR_MS, paceMs = PACE_MS, dailyMax = DAILY_MAX, timeoutMs = TIMEOUT_MS, drainMs = DRAIN_MS, cacheMax = CACHE_MAX,
   pressTtlMs = PRESS_TTL_MS, proc = PI } = {}) {
   const file = dataDir ? path.join(dataDir, FILE) : null;
@@ -156,8 +156,8 @@ function createCliModelsDoor({ accounts, harnessOf, cliCmds, dataDir = null, age
   const inflight = new Map();       // `${backend}\n${key}` → the listing in flight (every act shares it)
   const presses = new WeakSet();    // the presses the ONE person gate minted — a flag a caller writes is not one
   const said = new Set();           // what was said once
-  let writing = Promise.resolve();  // writes in order
-  let tmpSeq = 0;
+  let writing = Promise.resolve();  // the last save's landing (the store writer's own answer)
+  const writer = () => W || require('../store-writer.js').storeWriter();   // B-574d: the store writer (W: a suite's stand-in)
   const sayOnce = (k, line) => { if (said.has(k)) return; said.add(k); log(line); };
   const slot = (be, key) => `${be}\n${key}`;
   const descOf = (be) => { let h = null; try { h = harnessOf(be); } catch { } const d = h && h.modelsReport; return d && Array.isArray(d.argv) && typeof d.parse === 'function' ? { h, d } : null; };
@@ -210,14 +210,13 @@ function createCliModelsDoor({ accounts, harnessOf, cliCmds, dataDir = null, age
       if (!Object.keys(st.harnesses[be]).length) delete st.harnesses[be];
     }
     const body = JSON.stringify({ schema: SCHEMA, harnesses: st.harnesses }, null, 1) + '\n';
-    writing = writing.then(async () => {
-      const tmp = `${file}.${process.pid}.${++tmpSeq}.tmp`;
-      try {
-        await fsx.promises.writeFile(tmp, body, { mode: 0o600 });
-        await fsx.promises.rename(tmp, file);
-      } catch (e) { try { await fsx.promises.unlink(tmp); } catch { } log(`[cli-models] the cache was not written: ${e.code || e.message}`); }
-    });
-    return writing;
+    // B-574d (lane lg-text-legs-3): THE STORE WRITER writes it — off the hub's loop, every byte or nothing, synced, 0600 (src/store-writer.js);
+    // the answer is its landing (true / false), a failed write said as before
+    try {
+      writer().dirty(file, { name: 'cli-models.write', mode: 0o600, makeDir: true, produce: () => body,
+        onWritten: (ok, e) => { if (!ok) log(`[cli-models] the cache was not written: ${(e && (e.code || e.message)) || e}`); } });
+    } catch (e) { log(`[cli-models] the cache was not written: ${(e && (e.code || e.message)) || e}`); return (writing = Promise.resolve(false)); }
+    return (writing = Promise.resolve(writer().durable(file)));
   }
   function put(be, key, e) {
     if (!accountOk(be, key) || !state) return Promise.resolve(); // removed while it listed: nothing kept

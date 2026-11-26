@@ -33,7 +33,7 @@ const DRAFT_TIMEOUT_MS = 120e3;
 const KEEP_BUILDS = 20;
 const vcmp = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; };
 
-function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIONS, log = (...a) => console.log(...a), event = (n, d) => global.__vsEvent?.(n, d), now = Date.now, timeoutMs = DRAFT_TIMEOUT_MS } = {}) {
+function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIONS, log = (...a) => console.log(...a), event = (n, d) => global.__vsEvent?.(n, d), now = Date.now, timeoutMs = DRAFT_TIMEOUT_MS, writer: W = null } = {}) {
   if (!dataDir || !rootDir) throw new Error('cli-registration: dataDir and rootDir are required');
   const stateFile = path.join(dataDir, 'cli-registration.json');
   const dumpsDir = path.join(dataDir, 'claude-cli-dumps');
@@ -72,11 +72,15 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
   { let read; try { read = { text: fs.readFileSync(stateFile, 'utf8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: isRecord });   // the record of the builds said: THE ANCHOR (test-data-store-census)
     if (hold.start(a) === 'data') seen = prune(isRecord(a.value.seen) ? a.value.seen : {}); }
+  const writer = () => W || require('../store-writer.js').storeWriter();   // W: a suite's stand-in
   const save = () => {
     if (!hold.writable('a write of the record of the claude builds said')) return;   // HELD: never over a file that could not be read
     const keep = Object.keys(seen).sort(vcmp).slice(-KEEP_BUILDS);
     seen = Object.fromEntries(keep.map((v) => [v, seen[v]]));
-    try { fs.mkdirSync(dataDir, { recursive: true }); const tmp = stateFile + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify({ v: 1, seen }, null, 1) + '\n'); fs.renameSync(tmp, stateFile); } catch (e) { log('[cli-registration] could not keep data/cli-registration.json:', (e && e.message) || e); }
+    // B-574d (lane lg-text-legs-3): THE STORE WRITER writes it — off the hub's loop, every byte or nothing, synced (src/store-writer.js);
+    // the latest «seen» is written (a burst of sightings is one write), a failed write said as before
+    const body = JSON.stringify({ v: 1, seen }, null, 1) + '\n';
+    try { writer().dirty(stateFile, { name: 'cli-registration.write', makeDir: true, produce: () => body, onWritten: (ok, e) => { if (!ok) { log('[cli-registration] could not keep data/cli-registration.json:', (e && e.message) || e); } } }); } catch (e) { log('[cli-registration] could not keep data/cli-registration.json:', (e && e.message) || e); }
   };
   let hub = null, inFlight = null;
 
@@ -130,7 +134,9 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
     }).finally(() => { inFlight = null; });
     return inFlight;
   }
-  return { note, noteHub: (v) => note(v, 'hub'), status, draft, held: () => hold.held(), stop: () => hold.stop() };
+  /** (suites, a restart's read) the state's last save ON DISK — the writer's own answer */
+  const landed = () => Promise.resolve(writer().durable(stateFile));
+  return { note, noteHub: (v) => note(v, 'hub'), status, draft, held: () => hold.held(), stop: () => hold.stop(), landed };
 }
 
 /** the routes + the drift hook; returns the registry (its noteHub is oat-file-sync's onCliVersion) */

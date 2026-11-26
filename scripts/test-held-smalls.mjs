@@ -213,10 +213,10 @@ console.log('④ the model catalog\'s ledger');
     CAT._reset();
     const l = CAT._load(w.dir);
     l.binaries[NEW] = entry(); l.current = NEW;   // this run's read of the binary in use (in memory)
-    CAT._saveNow();
+    await CAT._saveNow();   // held: nothing dirtied, its answer at once
     const during = { rows: Object.keys(l.binaries), bytes: realSync(w.file, 'utf8') === w.bytes, held: heldNamed('cli-model-catalog.json') };
     const lifted = await liftOf(w.file);
-    const after = JSON.parse(realSync(w.file, 'utf8'));
+    await CAT._landed(); const after = JSON.parse(realSync(w.file, 'utf8'));   // B-574d: the lift's save lands off the loop — read once ON DISK
     CAT._reset();
     ok(during.rows.join() === NEW && during.bytes && during.held === 1, 'HELD (EIO): this run\'s read is kept in memory, the save writes nothing over the ledger, the family\'s list names it', during);
     ok(lifted === true && !!after.binaries[OLD] && !!after.binaries[NEW] && after.current === NEW, 'LIFTED: the row of the build no longer installed is back, this run\'s read goes over the file\'s, written once', { lifted, rows: Object.keys(after.binaries || {}), current: after.current });
@@ -280,6 +280,7 @@ console.log('④ the model catalog\'s ledger');
       await liftOf(file);
       release();
       await p;
+      await Mod._landed();   // B-574d: the store writer lands the save off the loop — the disk read once it is ON DISK (its own answer)
       const live = Mod._load(dir), disk = JSON.parse(realSync(file, 'utf8'));
       const ids = Object.values((layer && layer.rows) || {}).map((r) => r.id).sort().join();
       return { KEY, liveHas: !!live.binaries[KEY], liveCur: live.current === KEY, diskHas: !!(disk.binaries && disk.binaries[KEY]), diskCur: disk.current === KEY, liveState: live.binaries[KEY] && live.binaries[KEY].state, liveRetry: !!(live.binaries[KEY] && live.binaries[KEY].retry), old: !!live.binaries[OLD], ids };

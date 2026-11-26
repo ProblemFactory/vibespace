@@ -122,6 +122,9 @@ const STORES = Object.freeze({
   'remote-jsonl-meta.write': row('write', 'remote-jsonl/<host>/<transcript>.meta', 'src/hosts.js', ['_landCacheMeta']),   // B-0248 unit 4: its record (the .meta), after the bytes it names
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js
   // `_holdIO` says one that waits, at the time); r4–r7 timed its appends here (`_holdWrite`, `_dropCompact`)
+  'cli-model-catalog.write': row('write', 'cli-model-catalog', 'src/server/cli-model-catalog.js', ['saveLedger']),   // B-574d (lane lg-text-legs-3): the model catalog's ledger, through the store writer
+  'cli-models.write': row('write', 'cli-models', 'src/server/cli-models-door.js', ['save']),   // B-574d: the CLI models cache (0600), through the store writer — its answer the landing
+  'cli-registration.write': row('write', 'cli-registration', 'src/server/cli-registration.js', ['create']),   // B-574d: the unregistered builds seen, through the store writer
   'otel-token.write': row('write', 'usage-history/otel-token', 'src/server/otel-ingest.js', ['create']),   // B-f276 family unit 2: the sign-in value written as the file's when its hold lifts not there or torn — through the store writer, 0600
   'telemetry-id.write': row('write', 'telemetry/.instance-id', 'src/telemetry.js', ['_instanceId']),   // B-f276 (r4721, lane lg-vault-stages): this life's id written as the file's when its hold lifts not there or torn — through the store writer
   'host-token.write': row('write', 'agentd/host-<id>.token', 'src/server/host-tokens.js', ['renew']),   // B-f276 (r4721): a fresh link token written over torn bytes kept aside — through the store writer, 0600

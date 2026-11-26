@@ -149,6 +149,7 @@ function ledgerOf(l) {
   }
   return out;
 }
+const writer = () => st.writer || require('../store-writer.js').storeWriter();   // st.writer: a suite's stand-in
 function saveLedger() {
   if (!st.dataDir || !st.ledger) return;
   if (st.hold && !st.hold.writable('the model catalog\'s ledger')) return;   // r3333 unit 3: never over a held ledger (said once)
@@ -156,12 +157,13 @@ function saveLedger() {
     const b = st.ledger.binaries;
     const keys = Object.keys(b).sort((x, y) => String((b[y] && b[y].readAt) || '').localeCompare(String((b[x] && b[x].readAt) || '')));
     for (const k of keys.slice(KEEP)) if (k !== st.ledger.current) delete b[k];
-    fs.mkdirSync(st.dataDir, { recursive: true });
-    for (const f of fs.readdirSync(st.dataDir)) if (f.startsWith(LEDGER + '.tmp-')) { try { fs.unlinkSync(path.join(st.dataDir, f)); } catch { } } // a kill between write and rename left one
+    if (fs.existsSync(st.dataDir)) for (const f of fs.readdirSync(st.dataDir)) if (f.startsWith(LEDGER + '.tmp-')) { try { fs.unlinkSync(path.join(st.dataDir, f)); } catch { } } // an older build's kill between write and rename left one
     prune();
-    const f = path.join(st.dataDir, LEDGER), tmp = `${f}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, JSON.stringify(st.ledger)); fs.renameSync(tmp, f);
-    st.saveSaid = false;
+    // B-574d (lane lg-text-legs-3): THE STORE WRITER writes it — off the hub's loop, every byte or nothing, synced (src/store-writer.js); the ledger
+    // in memory stays the truth, the latest state is written (a burst of saves is one write); a failed write is said once, as before
+    const f = path.join(st.dataDir, LEDGER), led = st.ledger;
+    writer().dirty(f, { name: 'cli-model-catalog.write', makeDir: true, produce: () => JSON.stringify(led),
+      onWritten: (ok, e) => { if (ok) { st.saveSaid = false; return; } if (!st.saveSaid) { st.saveSaid = true; say('log', `[cli-model-catalog] the ledger could not be written (${(e && e.code) || (e && e.message) || e}) — what was read stays in force until the next start`); } } });
   } catch (e) {
     if (!st.saveSaid) { st.saveSaid = true; say('log', `[cli-model-catalog] the ledger could not be written (${(e && e.code) || (e && e.message) || e}) — what was read stays in force until the next start`); }
   }
@@ -396,9 +398,12 @@ function status() {
   return cur ? { cli: cur.cli, builtAt: cur.builtAt, state: cur.state, models: cur.models.length, refused: cur.refused.length, reason: cur.reason || null, ms: cur.evidence && cur.evidence.ms } : null;
 }
 /** tests only: forget the in-process state (the ledger file stays — a «restart»; the subscribers are wiring and stay) */
-function _reset() { if (st.hold) { st.hold.stop(); st.hold = null; } st.dataDir = null; st.ledger = null; st.key = null; st.reading = null; st.event = null; st.log = null; st.saveSaid = false; st.pricesBy = new Map(); } // the subscribers stay (module wiring)
+function _reset() { if (st.dataDir) { try { writer().flushSync([path.join(st.dataDir, LEDGER)]); } catch { } }   // a suite's RESTART: its pending save lands first, as a real stop's exit flush writes it
+  if (st.hold) { st.hold.stop(); st.hold = null; } st.dataDir = null; st.ledger = null; st.key = null; st.reading = null; st.event = null; st.log = null; st.saveSaid = false; st.pricesBy = new Map(); } // the subscribers stay (module wiring)
 
 /** tests only: the ledger loaded with no reader fed (no apply, no listener) / a save now (prune + write) */
 function _load(dataDir) { return loadLedger(dataDir); }
-function _saveNow() { saveLedger(); }
-module.exports = { boot, noteBinary, readBinary, onView, view, plans, levelSignalOf, status, apply, LEDGER, READ_TIMEOUT_MS, PLAN_SCAN_MAX, LEVEL_SCAN_MAX, _reset, _load, _saveNow };
+function _saveNow() { saveLedger(); return _landed(); }
+/** (suites) the ledger's last save ON DISK: the writer's own answer, never a fixed wait */
+function _landed() { return st.dataDir ? Promise.resolve(writer().durable(path.join(st.dataDir, LEDGER))) : Promise.resolve(true); }
+module.exports = { boot, noteBinary, readBinary, onView, view, plans, levelSignalOf, status, apply, LEDGER, READ_TIMEOUT_MS, PLAN_SCAN_MAX, LEVEL_SCAN_MAX, _reset, _load, _saveNow, _landed };
