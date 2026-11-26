@@ -89,6 +89,7 @@ const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, prob
 
 const STATE_FILE = 'auto-cli-state.json';
 const ATTEMPT_KEEP_MS = 24 * 3600e3; // an attempt older than a day paces nothing (the longest backoff is 5 min × 2^6 = 5.3 h)
+const READ_AGAIN_MS = 30e3;   // 主开发 r5030 (a): the read again at the wait's end answers within this — past it the read is UNREADABLE (the wait starts again, said once): a hung folder never holds the tick for ever in silence
 const STAMP_LANDING_MS = 30e3;   // B-574d (主开发 r4732 3): the stamp's landing waited for at most this long — past it a FAILED landing (no spawn, said once), never a tick held for ever
 const UNKNOWN_WAIT_MS = 5 * 60e3 * Math.pow(2, 6); // a state that could not be read: every unasked account waits the longest backoff (the ban-safety law)
 const CLOCK_SKEW_MS = 60e3; // a stamp further in the future than this is a clock that stepped back, not a race
@@ -192,6 +193,7 @@ function lastBoughtInstant(reads) {
  */
 function createAutoCliLoop(d) {
   const landingMs = Number.isFinite(d.stampLandingMs) ? d.stampLandingMs : STAMP_LANDING_MS;   // a suite's short bound; the real one otherwise
+  const readAgainMs = Number.isFinite(d.readAgainMs) ? d.readAgainMs : READ_AGAIN_MS;   // the same: a suite's short bound for the read again
   let stampUnlanded = false;   // B-574d: «a stamp did not land» said once until one lands
   let afterUnlanded = false;   // r4764: «an after-write did not land» said once until one lands (the same latch)
   let owed = [];   // r4732 (5): saves of this tick that are not the stamp's — awaited before the tick ends
@@ -228,13 +230,21 @@ function createAutoCliLoop(d) {
   async function readAgain(now) {
     if (!d.dataDir) { st.unknownAt = null; return; }
     const statePath = path.join(d.dataDir, STATE_FILE);   // its own name: the sync-fs census reads a path by its name across the file
-    let read; try { read = { text: await fs.promises.readFile(statePath, 'utf-8') }; } catch (error) { read = { error }; }
+    // r5030 (a): BOUNDED — a read with no answer past readAgainMs is an error of the file system (ETIMEDOUT): the wait starts again, said once;
+    // the read left in flight holds one thread of the pool until the folder answers (at most one a wait, 320 min apart)
+    let timer = null;
+    const bound = new Promise((resolve) => { timer = setTimeout(() => resolve({ error: Object.assign(new Error(`no answer in ${Math.round(readAgainMs / 1000)} s`), { code: 'ETIMEDOUT' }) }), readAgainMs); if (timer.unref) timer.unref(); });
+    const read = await Promise.race([fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error })), bound]);
+    clearTimeout(timer);
     const a = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
     if (a.state === 'data') { mergeState(st, fieldsOf(a.value, now, warn)); st.unknownAt = null; warn('[auto-cli] pacing state read again at the end of its unknown wait — merged into memory (every stamp the later, every count the larger, every bucket kept)'); return; }
     if (a.state === 'missing') { st.unknownAt = null; return; }
     if (a.state === 'corrupt') {
       const aside = `${statePath}.damaged-${new Date(now).toISOString().replace(/[:.]/g, '-')}`;
       let kept = null, why = null; try { await fs.promises.rename(statePath, aside); kept = path.basename(aside); } catch (e) { why = (e && (e.code || e.message)) || String(e); }
+      // r5030 (b): WHERE THIS STORE DIFFERS FROM THE STORE-READ LAW (src/store-read.js afterSetAside: torn bytes that could not be set
+      // aside are «unreadable», never written over): here the next save writes over them — torn pacing bytes carry no readable stamp,
+      // and r4771 ruled the loop never paused for ever on a file nobody can mend
       st.unknownAt = null;
       warn(kept ? `[auto-cli] pacing state's bytes are torn (${a.code}) — kept aside as ${kept}; the loop goes on with its memory`
         : `[auto-cli] pacing state's bytes are torn (${a.code}) and could not be kept aside (${why}) — the loop goes on with its memory; its next save writes over them`);
@@ -252,9 +262,9 @@ function createAutoCliLoop(d) {
       // THE TIMER ROW (B-360d, 主开发 r1221): the sign-in facts confirmed OFF the loop first — awaited, each ask bounded by the
       // file door's deadline — then the decision road's rows; a row not confirmed decides NOTHING: no probe this tick
       const { since: factsSince } = await d.accounts.signinFactsSettled();
-      const now = clock();
+      let now = clock();
       if (clampStamps(st, now)) warn('[auto-cli] the clock stepped back — pacing stamps clamped to now');
-      if (st.unknownAt != null) { if (st.unknownAt > now) st.unknownAt = now; else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) await readAgain(now); }   // the unknown state's wait: its end (a step back starts it at now)
+      if (st.unknownAt != null) { if (st.unknownAt > now) st.unknownAt = now; else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) { await readAgain(now); now = clock(); } }   // r5030 (c): the clock read again after the read (a slow read never makes this tick's stamps older than its spawns); the unknown state's wait: its end (a step back starts it at now)
       const list = [];
       // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
       // a wandering threshold, not a fixed cadence
@@ -381,4 +391,4 @@ function createAutoCliLoop(d) {
   };
 }
 
-module.exports = { createAutoCliLoop, loadState, saveState, mergeState, fieldsOf, clampStamps, lastBoughtInstant, STATE_FILE, UNKNOWN_WAIT_MS, STAMP_LANDING_MS, projectionBucketBought };
+module.exports = { createAutoCliLoop, loadState, saveState, mergeState, fieldsOf, clampStamps, lastBoughtInstant, STATE_FILE, UNKNOWN_WAIT_MS, STAMP_LANDING_MS, READ_AGAIN_MS, projectionBucketBought };

@@ -657,7 +657,7 @@ parentPort.on('message', (m) => {
   const NO_PROFILE_LOOP = mutant('no-profile', "    if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;\n", PREMISE);
   const NO_MEASURE_LOOP = mutant('no-measure', "    if (!(row.oatCli && row.oatCli.measured === true)) return CLI_UNMEASURED;\n", PREMISE);
   const T0 = 1_800_000_000_000, H = 3600e3;
-  const world = ({ loopFile = REAL_LOOP, stateFile = null } = {}) => {
+  const world = ({ loopFile = REAL_LOOP, stateFile = null, readAgainMs = undefined } = {}) => {
     const { createAutoCliLoop } = require(loopFile);
     const dir = fs.mkdtempSync(path.join(scratch, 'w-')), cacheDir = path.join(dir, 'usage-cache'), dataDir = path.join(dir, 'data');
     fs.mkdirSync(cacheDir, { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
@@ -674,7 +674,7 @@ parentPort.on('message', (m) => {
     const calls = [], logs = [], verdicts = {};
     const deps = {
       storeWriter: { pending: new Map(), dirty(f, o) { this.pending.set(f, o); }, durable(f) { const o = this.pending.get(f); this.pending.delete(f); if (o) fs.writeFileSync(f, o.produce()); return Promise.resolve(true); } },   // B-574d: each save lands at once (the release's timing)
-      now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {},
+      now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {}, readAgainMs,
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
       accounts: { list: () => ({ accounts: rows }), decisionList: () => ({ accounts: rows }), signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }, autoCliReady: () => true, usageIdentityGroupsCached: () => [],
       usageEstimator: { estimateFor: () => null }, projectionRereadFor: () => null, lastMemberReadAt: () => 0,
@@ -700,6 +700,7 @@ parentPort.on('message', (m) => {
       async run(minutes) { for (let i = 0; i < minutes; i++) { await loop.tick(); T += 60e3; } },
       restart() { loop = createAutoCliLoop(deps); },
       mem() { return loop.state; },   // r4771: the loop's memory (what a read again merges into)
+      bump(ms) { T += ms; },   // r5030 (c): the world's clock moved while a read runs (placed)
       get now() { return T; },
     };
   };
@@ -813,13 +814,16 @@ parentPort.on('message', (m) => {
     // (never a look on a cadence). An error of the FILE SYSTEM (it may heal): the wait starts again, said once a wait. TORN bytes (they
     // never heal): kept aside ONCE, the loop goes on with its memory. The state: MERGED (every stamp the later, every count the larger,
     // every bucket kept). Every fault PLACED: the read's answer through fs.promises (EIO, once), or torn bytes really on disk.
-    const placeAgain = (eio = 0) => { const real = fs.promises.readFile; let n = 0, all = 0;
-      fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && p.endsWith(STATE_TAIL)) { all++; if (n < eio) { n++; return Promise.reject(Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' })); } } return real.call(this, p, ...a); };
-      return { reads: () => all, restore: () => { fs.promises.readFile = real; } }; };
+    const placeAgain = (eio = 0, { hang = false, during = null } = {}) => { const real = fs.promises.readFile; let n = 0, all = 0, hung = 0;
+      fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && p.endsWith(STATE_TAIL)) { all++; if (hang) { hung++; return new Promise(() => { }); } if (n < eio) { n++; return Promise.reject(Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' })); } if (during) during(); } return real.call(this, p, ...a); };
+      return { reads: () => all, hung: () => hung, restore: () => { fs.promises.readFile = real; } }; };
     const loopCut = (name, from, to) => { const f = path.join(scratch, name + '.js'); fs.writeFileSync(f, anchored(loopTxt, from, to, name)); return f; };
-    const NO_REREAD = loopCut('loop-no-reread', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) await readAgain(now); }', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) st.unknownAt = null; }');   // the release: the wait ends with no read (stale-pins: kept — the release's wait end, planted back as the RED)
+    const NO_REREAD = loopCut('loop-no-reread', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) { await readAgain(now); now = clock(); } }', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) st.unknownAt = null; }');   // the release: the wait ends with no read (stale-pins: kept — the release's wait end, planted back as the RED)
     const NO_RETRY = loopCut('loop-no-retry', "    st.unknownAt = now;\n    warn(`[auto-cli] pacing state still unreadable", "    st.unknownAt = null;\n    warn(`[auto-cli] pacing state still unreadable");   // an error of the file system ends the wait
     const TORN_WAITS = loopCut('loop-torn-waits', "    if (a.state === 'corrupt') {", "    if (false) {");   // torn bytes taken for an error that may heal
+    // 主开发 r5030: the read again with no bound (a hung folder holds the tick), and the tick's clock not read again after it
+    const NO_READ_BOUND = loopCut('loop-no-read-bound', "    const read = await Promise.race([fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error })), bound]);", "    const read = await fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error }));");
+    const NO_RECLOCK = loopCut('loop-no-reclock', '{ await readAgain(now); now = clock(); } }', '{ await readAgain(now); } }');
     const saidN = (w, re) => w.logs.filter((l) => re.test(l)).length;
     const STILL = /pacing state still unreadable/, MERGED = /pacing state read again at the end of its unknown wait — merged/, TORNED = /pacing state's bytes are torn/;
     { // (a) AN ERROR OF THE FILE SYSTEM at the wait's end: the wait starts again, said once a wait; the next wait's end reads it again
@@ -876,6 +880,35 @@ parentPort.on('message', (m) => {
       const FILE_WINS = require(loopCut('loop-file-wins', 'const later = (m, k, v) => { const h = m.get(k); if (h == null || v > h) m.set(k, v); };', 'const later = (m, k, v) => { m.set(k, v); };'));
       const x = FILE_WINS.mergeState(M({ attempts: { a: 200 }, fails: { b: 4 } }), M({ attempts: { a: 150 }, fails: { b: 2 } }));
       ok(x.attempts.get('a') === 150 && x.fails.get('b') === 2, `§ban-safety r4771 (d) RED CONTROL (the file's values taken whole): an older stamp and a smaller count replace this process's own (a ${x.attempts.get('a')}, b ${x.fails.get('b')})`);
+    }
+    { // (e) 主开发 r5030 (a): A READ THAT NEVER ANSWERS at the wait's end (a hung folder, placed): past its bound it is unreadable — the wait
+      //     starts again, said once, the tick returns. The run is awaited under a REF'D HARNESS timer of the suite's own (the hung read and the
+      //     loop's unref'd bound hold no process open — leg (3)'s lesson): once the placed read has begun, the tick has graceMs to return, or the
+      //     HARNESS line names it; RED: the bound cut — the tick held for ever
+      const heldRun = async (w, minutes, began, graceMs, maxLooks = 4000) => { let h = null, iv = null, looks = 0;
+        const cut = new Promise((r) => { iv = setInterval(() => { looks++; if (began() || looks > maxLooks) { clearInterval(iv); iv = null; h = setTimeout(() => r(`HARNESS: the tick did not return ${graceMs} ms after its read began (${began() ? 'the read began' : 'the read never began'}) — the read's bound never ended it`), graceMs); } }, 5); });
+        try { return await Promise.race([w.run(minutes).then(() => null, (e) => `the run threw: ${(e && e.message) || e}`), cut]); } finally { if (iv) clearInterval(iv); clearTimeout(h); } };
+      const hungRead = async (loopFile, graceMs) => { const pa = placeAgain(0, { hang: true });
+        try { const { w, file } = placed('eio', { stateFile: STATE, loopFile, readAgainMs: 50 }); const harness = await heldRun(w, WAIT_MIN + 1, () => pa.hung() > 0, graceMs);
+          return { w, file, harness, hung: pa.hung() }; } finally { pa.restore(); } };
+      const e0 = await hungRead(REAL_LOOP, 5000);
+      if (e0.harness) console.error('  ' + e0.harness);
+      const said5 = e0.w.logs.filter((l) => /pacing state still unreadable \(ETIMEDOUT\)/.test(l)).length;
+      const again = e0.harness ? 'not run' : await heldRun(e0.w, WAIT_MIN - 1, () => false, 5000);   // the wait started again: to its last minute, no read
+      ok(!e0.harness && again === null && e0.hung === 1 && said5 === 1 && e0.w.calls.length === 0 && fs.readFileSync(e0.file, 'utf8') === JSON.stringify(STATE),
+        `§ban-safety r5030 (a): a read that NEVER ANSWERS at the wait's end (placed) — past its bound (50 ms here; READ_AGAIN_MS = ${require(REAL_LOOP).READ_AGAIN_MS / 1000} s) it is unreadable: the tick returned, said once (${said5}), the wait started again — no call in ${2 * WAIT_MIN} min (${e0.w.calls.length}), the file whole`, { harness: e0.harness, again, hung: e0.hung, said5 });
+      const e1 = await hungRead(NO_READ_BOUND, 1000);
+      ok(!!e1.harness && /the read began/.test(e1.harness) && e1.hung === 1 && e1.w.calls.length === 0, `§ban-safety r5030 (a) RED CONTROL (the read with no bound): a hung folder holds the tick — ${e1.harness}`, { harness: e1.harness, hung: e1.hung });
+    }
+    { // (f) 主开发 r5030 (c): the tick's clock READ AGAIN after the read — a read that takes three minutes (placed: the world's clock moves while it
+      //     reads) never makes this tick's stamps older than its spawns; RED: the clock not read again — those stamps three minutes older
+      const slowRead = async (loopFile) => { let w = null; const pa = placeAgain(0, { during: () => w.bump(3 * 60e3) });
+        try { w = placed('eio', { stateFile: STATE, loopFile }).w; await w.run(WAIT_MIN + 1);
+          const end = w.calls.filter((c) => c.t === T0 + (WAIT_MIN + 3) * 60e3), disk = w.state();
+          return { asks: end.map((c) => c.key), at: end.map((c) => c.t), stamps: end.map((c) => (disk && disk.attempts ? disk.attempts[c.key] : null)) }; } finally { pa.restore(); } };
+      const f0 = await slowRead(REAL_LOOP), f1 = await slowRead(NO_RECLOCK);
+      ok(f0.asks.length >= 1 && f0.stamps.every((s, i) => s === f0.at[i]), `§ban-safety r5030 (c): a read of three minutes at the wait's end — the ${f0.asks.length} ask(s) of that tick (${f0.asks.join(', ')}) are stamped with the clock AFTER the read (the minute they start)`, f0);
+      ok(f1.asks.length >= 1 && f1.stamps.every((s, i) => s === f1.at[i] - 3 * 60e3), `§ban-safety r5030 (c) RED CONTROL (the clock not read again): that tick's stamps are three minutes older than its asks`, f1);
     }
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts
