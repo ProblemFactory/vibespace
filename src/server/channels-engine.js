@@ -578,6 +578,7 @@ function create(deps = {}) {
     tailOf: (v, o) => attentionTail(v, o),
     // lane decision-attention-facts: the facts of ONE scan (built once per drain) + the row's read line / own newest message
     facts: () => attentionScanFacts(),
+    factsOff: () => { try { attnInbox.drop(); } catch { } },   // B-0f37 follow (r5106 (1)): the judge switched off — the kept map dropped
     rowState: (key) => { const en = store.index.live()[key]; return en ? { readAt: Number(en.readAt) || 0, selfAt: Number(en.selfAt) || 0, lastAt: Number(en.lastAt) || 0 } : null; } });
   // A store file whose bytes did not parse at boot was SET ASIDE (r2 — never
   // silently read as empty and overwritten): ONE "For you" item per file,
@@ -7671,14 +7672,15 @@ function create(deps = {}) {
     const view = (v) => {
       const en = v && store.index.live()[v.key];
       if (!en) return {};
-      const m = attnInbox.served();
-      const mail = !!m && m.mailIds.has(en.adapterId);
-      const k = mail ? DM.inboxKey(en.title, attnSenderOf(en)) : '';
+      // B-0f37 follow (主开发 r5106 (3)): «is this row mail» is read from the ACCOUNTS at the call (as the release), never from the
+      // map — and the inbox count is said only from a WHOLE, current map (none while it is failed, half or being walked)
+      const mail = attnMailIds().has(en.adapterId);
+      const m = attnInbox.whole();
+      const k = mail && m ? DM.inboxKey(en.title, attnSenderOf(en)) : '';
       const aud = en.convCaps && en.convCaps.audience;
-      const seen = k && m.byKey.get(k);
       return { dm: en.kind === 'dm', app: !!en.app, mail, members: aud && Number.isInteger(aud.members) ? aud.members : null,
         selfAt: 'selfAt' in en || Number(v.touch && v.touch.selfAt) > 0 ? Math.max(Number(en.selfAt) || 0, Number(v.touch && v.touch.selfAt) || 0) : null, readAt: Number(en.readAt) || 0, unread: Number(en.unread) || 0,
-        inboxes: k ? DM.inboxCount(seen ? [...seen.values()] : [], en.adapterId, en.lastAt) : 0 };
+        inboxes: k ? DM.inboxCount(attnInbox.seenOf(m, k), en.adapterId, en.lastAt) : (mail ? null : 0) };
     };
     view.ready = () => attnInbox.ready();
     return view;
@@ -7689,33 +7691,55 @@ function create(deps = {}) {
   // emptied: a row a later poll queued was judged without «the same message reached 2 of the reader's inboxes». Now the map is
   // built ONCE after a start (the first judged row's need: a hub whose judge is off builds nothing), in slices over each mail
   // account's own kept keys (the store's per-account map through a held iterator — no snapshot of every key in one turn — at
-  // most WALK.sliceMs a turn, built aside), and kept current by the index's touch hook: ONE row's work a touch (its old entry
-  // out, its new key in; a touch during the walk lands in the map being built). A judged row waits for `ready()`, then reads
-  // the index as it stands: the facts of its own moment. A whole-map touch or a change of the mail accounts walks it again (the
-  // judged rows wait); whole touches during a walk start one more after it, at most ATTN_RESTARTS in a row, then it lands as it
-  // stands (said once) — never a wait without end. The facts stay input, never memo material: no paid call added, none again.
+  // most WALK.sliceMs a turn and a turn of its own for each account, built aside), and kept current by the index's touch hook:
+  // ONE row's work a touch (its old entry out, its new key in; a touch during the walk lands in the map being built). A judged
+  // row waits for `ready()`, then reads the index as it stands: the facts of its own moment. A whole-map touch or a change of the
+  // mail accounts walks it again (the judged rows wait); whole touches during a walk start one more after it, at most
+  // ATTN_RESTARTS in a row. The facts stay input, never memo material: no paid call added, none asked again.
+  // THE FOLLOW (主开发 r5106): (1) THE MAP COSTS NO MORE THAN IT MUST — a subject's bucket is ONE plain entry until a second row
+  // joins it (then an array), the subject's key string is kept ONCE (every entry of a bucket points at the bucket's own string),
+  // and the map is DROPPED when the judge is switched off (src/server/channels-attention.js note: `factsOff`) — no map kept, no
+  // work at a touch — and built again at the next judged row's need; (2) A HALF MAP IS NEVER SERVED AS CURRENT: past the
+  // restarts' bound it lands MARKED STALE, the rows waiting on it are not judged now ('half': no paid call, judged at a later
+  // read) and the next judged row's wait walks again, by the same ladder; (3) A FAILED BUILD (a throw, the engine stopped) serves
+  // no map ('none': each row judged with its mail read from the accounts and no inbox count), is said once and tried again only
+  // after ATTN_BACKOFF_MS, never at every row.
   const ATTN_RESTARTS = 3;
+  const ATTN_BACKOFF_MS = 30e3;
   const attnSenderOf = (en) => (Array.isArray(en.authors) && en.authors[0] && en.authors[0].name) || '';
+  const attnMailList = () => adapterRecords().adapters.filter((r) => registry.capsOf(r.kind).glyph === 'mail').map((r) => r.id).sort();
+  const attnMailIds = () => new Set(attnMailList());
   const attnInbox = (() => {
-    const stats = { builds: 0, walks: 0, slices: 0, maxSliceMs: 0, applied: 0, landedAsItStood: 0, fallback: 0 };
-    const mailList = () => adapterRecords().adapters.filter((r) => registry.capsOf(r.kind).glyph === 'mail').map((r) => r.id).sort();
+    const stats = { builds: 0, walks: 0, slices: 0, maxSliceMs: 0, applied: 0, landedAsItStood: 0, failed: 0, dropped: 0, fallback: 0 };
+    // byKey: subject key → ONE entry {k, a, t} (k = the bucket's own key string, a = the row's account, t = its time) or, from the
+    // second row of the same subject, an array of them; keyOf: row key → its entry (its removal finds its bucket by e.k)
     const blank = (ids) => ({ byKey: new Map(), keyOf: new Map(), mailIds: new Set(ids), sig: ids.join('\n') });
-    let served = null, stale = false, job = null, stoodSaid = false;
-    /** ONE row's work: its old entry out of its key's bucket, its key from the live row (a listed mail row) in */
+    let served = null, stale = false, job = null, stoodSaid = false, failedAt = null, failSaid = false;
+    function unlink(m, key) {
+      const e = m.keyOf.get(key);
+      if (e === undefined) return;
+      m.keyOf.delete(key);
+      const b = m.byKey.get(e.k);
+      if (b === e) { m.byKey.delete(e.k); return; }
+      if (Array.isArray(b)) { const i = b.indexOf(e); if (i >= 0) b.splice(i, 1); if (b.length === 1) m.byKey.set(e.k, b[0]); else if (!b.length) m.byKey.delete(e.k); }
+    }
+    /** ONE row's work: its old entry out of its bucket, its subject key from the live row (a listed mail row) in */
     function apply(m, key) {
-      const k0 = m.keyOf.get(key);
-      if (k0 !== undefined) { const b = m.byKey.get(k0); if (b) { b.delete(key); if (!b.size) m.byKey.delete(k0); } m.keyOf.delete(key); }
+      unlink(m, key);
       const rows = store.index.rows();   // read-only (a hook runs after its update closed; a walk reads between updates)
       const en = Object.prototype.hasOwnProperty.call(rows, key) ? rows[key] : null;
       if (!en || !m.mailIds.has(en.adapterId) || en.unlistedAt) return;
       const k = DM.inboxKey(en.title, attnSenderOf(en));
       if (!k) return;
-      let b = m.byKey.get(k);
-      if (!b) m.byKey.set(k, (b = new Map()));
-      b.set(key, { adapterId: en.adapterId, lastAt: Number(en.lastAt) || 0 });
-      m.keyOf.set(key, k);
+      const b = m.byKey.get(k), t = Number(en.lastAt) || 0;
+      let e;
+      if (b === undefined) { e = { k, a: en.adapterId, t }; m.byKey.set(k, e); }   // a new subject: its string kept once, here
+      else if (Array.isArray(b)) { e = { k: b[0].k, a: en.adapterId, t }; b.push(e); }
+      else { e = { k: b.k, a: en.adapterId, t }; m.byKey.set(b.k, [b, e]); }   // the second row: the bucket becomes an array
+      m.keyOf.set(key, e);
     }
     const yieldTurn = () => new Promise((r) => setImmediate(r));
+    const gone = (j) => stopped || j.again || j.dropped;
     /** a held iterator over a kept Map's keys, at most WALK.sliceMs a turn (a Map's iterator survives its writes between turns) */
     async function walkKeys(j, it) {
       for (;;) {
@@ -7727,64 +7751,83 @@ function create(deps = {}) {
         if (n.done) return true;
         await yieldTurn();
         if (WALK.onSlice) await WALK.onSlice(stats.slices, 'attention-inbox');
-        if (stopped || j.again) return false;
+        if (gone(j)) return false;
       }
     }
-    /** one walk of every mail account's kept keys (and the keys whose row and account disagree) into j.m */
+    /** one walk of every mail account's kept keys (and the keys whose row and account disagree) into j.m — each account in a turn
+     *  of its own (a slice never spans two accounts) */
     async function walkMail(j) {
-      await yieldTurn();   // nothing of it in the asking turn
       for (const id of j.m.mailIds) {
+        await yieldTurn();   // nothing of it in the asking turn, and each account starts a turn of its own
+        if (gone(j)) return false;
         let kept = store.index.keysKept(id);
-        if (!kept && store.index.keysStats().warming) { await store.index.keysReady(); kept = store.index.keysKept(id); }
-        if (!kept) {   // no kept per-account map (a big index whose rows are not plain): every key, read in slices after one snapshot
+        while (!kept && store.index.keysStats().warming) { await store.index.keysReady(); if (gone(j)) return false; kept = store.index.keysKept(id); }
+        if (!kept) {   // the store keeps no per-account map now (rows that are not plain, or none built yet): one snapshot, read in slices
           stats.fallback++;
           const keys = Object.keys(store.index.rows()).filter((k) => k.startsWith(`${id}/`));
           if (!(await walkKeys(j, keys[Symbol.iterator]()))) return false;
           continue;
         }
         if (!(await walkKeys(j, kept.keys.keys()))) return false;
-        if (stopped || j.again) return false;
       }
+      if (gone(j)) return false;
       const odd = j.m.mailIds.size ? store.index.keysKept(j.m.mailIds.values().next().value) : null;   // the odd keys are every account's
       if (odd && odd.odd && odd.odd.size) for (const k of odd.odd.keys()) apply(j.m, k);
       return true;
     }
     function start() {
-      const j = job = { m: blank(mailList()), again: false, restarts: 0, done: null };
+      const j = job = { m: blank(attnMailList()), again: false, dropped: false, restarts: 0, done: null };
       stats.builds++;
       j.done = (async () => {
+        let full = false;
         for (;;) {
           stats.walks++;
           const ok = await walkMail(j);
-          if (stopped) break;
-          if (ok && !j.again) break;
-          if (j.restarts >= ATTN_RESTARTS) {   // whole touches kept coming: land as it stands — every single touch is in it
+          if (stopped || j.dropped) return 'none';
+          if (ok && !j.again) { full = true; break; }
+          if (j.restarts >= ATTN_RESTARTS) {   // whole touches kept coming: it lands MARKED STALE (r5106 (2)) — never served as current
             stats.landedAsItStood++;
-            if (!stoodSaid) { stoodSaid = true; log.warn(`[channels] the attention facts' duplicate-inbox map landed as it stood after ${ATTN_RESTARTS} whole-map touches in a row during its walk — the rows touched one by one are current; it walks again at the next whole touch`); }
+            if (!stoodSaid) { stoodSaid = true; log.warn(`[channels] the attention facts' duplicate-inbox map did not finish a walk: ${ATTN_RESTARTS + 1} walks in a row each met a whole-map touch — it is kept STALE (no inbox count is said from it) and the next judged row walks it again`); }
             break;
           }
-          j.restarts++; j.again = false; j.m = blank(mailList());
+          j.restarts++; j.again = false; j.m = blank(attnMailList());
         }
-        if (job === j) { served = j.m; stale = false; job = null; }
-        return !stopped;
-      })().catch((e) => { if (job === j) job = null; log.warn(`[channels] the attention facts' duplicate-inbox map could not be built: ${(e && e.message) || e}`); return false; });
+        if (job === j) { served = j.m; stale = !full; job = null; }
+        if (full) { failedAt = null; failSaid = false; }
+        return full ? 'whole' : 'half';
+      })().catch((e) => {
+        if (job === j) job = null;
+        failedAt = now(); stats.failed++;
+        if (!failSaid) { failSaid = true; log.warn(`[channels] the attention facts' duplicate-inbox map could not be built: ${(e && e.message) || e} — judged rows say no inbox count meanwhile; it is tried again after ${Math.round(ATTN_BACKOFF_MS / 1000)} s`); }
+        return 'none';
+      });
       return j.done;
     }
     store.index.onTouch((key) => {
+      if (!job && !served) return;   // no map (the judge off, or never asked): no work at a touch
       if (key === null || key === undefined) { if (job) job.again = true; if (served) stale = true; return; }
       const k = String(key);
       if (job) apply(job.m, k);
       if (served) apply(served, k);
-      if (job || served) stats.applied++;
+      stats.applied++;
     });
-    /** the map CURRENT (built, no whole touch since, the same mail accounts) → resolves true; a walk under way is awaited */
+    /** the map CURRENT → 'whole'; a walk under way is awaited; 'half' (the ladder's bound: kept stale), 'none' (failed: backing off, or stopped) */
     function ready() {
-      if (stopped) return Promise.resolve(false);
+      if (stopped) return Promise.resolve('none');
       if (job) return job.done;
-      if (served && !stale && served.sig === mailList().join('\n')) return Promise.resolve(true);
+      if (served && !stale && served.sig === attnMailList().join('\n')) return Promise.resolve('whole');
+      if (failedAt !== null && now() - failedAt < ATTN_BACKOFF_MS) return Promise.resolve('none');
       return start();
     }
-    return { ready, served: () => served, stats: () => ({ ...stats, kept: !!served && !stale, walking: !!job, keys: served ? served.byKey.size : 0 }) };
+    /** the judge switched off (r5106 (1)): no map kept, no work at a touch — built again at the next judged row's need */
+    function drop() {
+      if (!served && !job) return;
+      if (job) job.dropped = true;
+      served = null; stale = false; job = null; stats.dropped++;
+    }
+    const whole = () => (served && !stale && !job && served.sig === attnMailList().join('\n') ? served : null);
+    const seenOf = (m, k) => { const b = m.byKey.get(k); return b === undefined ? [] : (Array.isArray(b) ? b : [b]).map((e) => ({ adapterId: e.a, lastAt: e.t })); };
+    return { ready, drop, whole, seenOf, served: () => served, stats: () => ({ ...stats, kept: !!served && !stale, walking: !!job, keys: served ? served.byKey.size : 0, rows: served ? served.keyOf.size : 0 }) };
   })();
   /** lane decision-attention: "needs" / "not" on a judged row — a labeled example (src/server/channels-attention.js). */
   function labelJudged(key, lastAt, label) {
@@ -10943,7 +10986,7 @@ function create(deps = {}) {
     resurfacePointers, openAccessPointers,   // r4: the 2026-10-closed-access-pointers-hidden migration (src/server/migrations.js) goes through these
     agentWatch, agentUnwatch, agentWatchesFor, agentWatchCount, setAgentDirectory, directoryLists,   // lane channel-agent-watch; B-526c r937: agentWatchCount — what an agent's own limit and its wake-ask card count
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
-    attentionFacts: { ready: () => attnInbox.ready(), stats: () => attnInbox.stats() },   // B-0f37: the kept duplicate-inbox map (its suites' reads)
+    attentionFacts: { ready: () => attnInbox.ready(), drop: () => attnInbox.drop(), stats: () => attnInbox.stats() },   // B-0f37: the kept duplicate-inbox map (its suites' reads; drop = the judge switched off)
     owedPass, judgedRoadFor,
     heldPass, membershipChanged: () => { if (heldDigest.size) heldDigestPass(); return heldUnread.size ? track(heldPass()) : Promise.resolve(0); },   // B-43bc cure: the kept deliveries' look (the store's signal; a suite drives heldPass by hand)   // lane judged-watch-state: the owed re-judgment's look (a suite drives it by hand) + the doors' reading of a judged road
     onFresh,   // lane channel-agent-watch: the hit dispatch, driven by test-channel-agent-watch ⑤ with records the store already holds

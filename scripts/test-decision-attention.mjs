@@ -387,12 +387,13 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
   const asksOf = (eng) => { const st = eng.attention.status(); return { calls: st.calls, memo: st.memo, refused: st.refused }; };
   const asksExact = (a) => a.calls === TITLES10.length && a.memo === 0 && a.refused === 0;
   const missingLine = (T) => (T.missing.length ? T.missing.map((t) => `the row «${t}» was never judged`).join('; ') : 'none missing');
-  const factsWorld = async (EM, tag, { early = false } = {}) => {
+  const factsWorld = async (EM, tag, { early = false, walk = null, hold = null } = {}) => {   // walk/hold: B-0f37 follow's placed map walks
     const dataDir = path.join(ROOT, tag);
     fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
     fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acct('chat', 'chatx', 'Team chat'), acct('mail1', 'mailx', 'Work mail'), acct('mail2', 'mailx', 'Old mail')] }));
     const decision = decisionEngine(dataDir);
-    const eng = EM.create({ dataDir, registry, env: {}, now, broadcast: () => { }, serverSetting: (k) => settings[k], liveSessions: () => [], deliver: null, log: quiet, decisionEngine: decision });
+    const eng = EM.create({ dataDir, registry, env: {}, now, broadcast: () => { }, serverSetting: (k) => settings[k], liveSessions: () => [], deliver: null, log: quiet, decisionEngine: decision, ...(walk ? { walk } : {}) });
+    if (hold) hold.eng = eng;
     const n0 = got.length;
     let openAll = null, placed = false, nBase = n0;
     if (early) holdAll = new Promise((r) => { openAll = r; });
@@ -470,6 +471,71 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
     await eng.attentionFacts.ready();
     const s2 = eng.attentionFacts.stats();
     ok(s0.builds === 1 && s0.kept && s1.builds === 1 && s1.applied === s0.applied + 1 && !kept2 && s2.builds === 2 && s2.kept, `B-0f37: the content world's map was built once; a row's touch is ONE row's work (builds ${s1.builds}, applied ${s0.applied} → ${s1.applied}); a whole-map touch makes it stale and the next need walks it again ONCE (builds ${s2.builds})`, { s0, s1, s2 });
+  }
+  // B-0f37 follow (主开发 r5106 (1)): THE JUDGE SWITCHED OFF DROPS THE MAP — a read while it is off (its note) leaves no map and no
+  // work at a touch; switched on, the next need builds it again
+  {
+    const d0 = eng.attentionFacts.stats();
+    plug = { enabled: true, config: { attention: false } };
+    eng.digest();
+    const d1 = eng.attentionFacts.stats();
+    await eng.store.index.update(() => { Object.assign(eng.store.index.entry('mail1', 'q1'), { unread: 4 }); });
+    const d2 = eng.attentionFacts.stats();
+    plug = { enabled: true, config: { attention: true } };
+    const back = await eng.attentionFacts.ready();
+    const d3 = eng.attentionFacts.stats();
+    ok(d0.kept && !d1.kept && d1.rows === 0 && d1.dropped === d0.dropped + 1 && d2.applied === d1.applied && back === 'whole' && d3.builds === d1.builds + 1 && d3.kept && d3.rows > 0, `B-0f37 follow: the judge switched OFF drops the map at its next read (kept ${d1.kept}, rows ${d1.rows}); a touch then does no work (applied ${d1.applied} → ${d2.applied}); switched on, the next need builds it again (builds ${d1.builds} → ${d3.builds}, ${d3.rows} rows)`, { d0, d1, d2, d3, back });
+  }
+  {
+    const MF = mutantCopies('decision-attention-b0f37-follow', REPO);
+    const ESRC1 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+    const notices = (W, T2) => TITLES10.filter((t) => /Action Required/.test(t)).map((t) => (T2 || W.T).last(t)).filter(Boolean).map((g) => factsOf(g) || '');
+    // (2) A HALF MAP IS NEVER SERVED AS CURRENT: the engine's walk seam — one row a slice, a WHOLE-map touch placed between two
+    // slices of every walk of the map while the seam stands (never load): each walk is cut, the ladder's bound is met
+    const halfWorld = async (EM, tag) => {
+      const hold = { eng: null, seam: true };
+      const onSlice = async (i, what) => { if (hold.seam && what === 'attention-inbox' && hold.eng) await hold.eng.store.index.update((x) => { void Object.keys(x.conversations).length; }); };
+      const W = await factsWorld(EM, tag, { walk: { sliceMs: 0, onSlice }, hold });
+      const during = { calls: W.mine.length, st: W.eng.attentionFacts.stats(), half: W.eng.attention.status().factsHalf };
+      hold.seam = false;
+      const n1 = got.length;
+      W.eng.digest();
+      await idle(W.eng);
+      const after = got.slice(n1);
+      return { W, during, after, T2: factsTable(after), st2: W.eng.attentionFacts.stats() };
+    };
+    const H = await halfWorld(ENG, 'facts-half');
+    ok(H.W.placed && H.during.calls === 0 && H.during.half >= TITLES10.length && H.during.st.landedAsItStood >= 1 && !H.during.st.kept, `B-0f37 follow (r5106 (2)): with a whole-map touch in EVERY walk the map is never served as current — it lands STALE past the bound (${H.during.st.landedAsItStood} time(s), ${H.during.st.walks} walks), and the ${H.during.half} rows that waited on it are NOT judged now (0 calls, no paid call)`, H.during);
+    ok(exactOnce(H.T2, H.after) && notices(H.W, H.T2).length === 2 && notices(H.W, H.T2).every((l) => l.includes('the same message reached 2 of the reader\'s inboxes')) && H.st2.kept, `B-0f37 follow: the seam lifted, the next read judges each row ONCE with a whole map — the notices WITH the fact (${notices(H.W, H.T2).join(' | ')})`, { st2: H.st2, n: H.after.length });
+    const LAND = "        if (job === j) { served = j.m; stale = !full; job = null; }\n        if (full) { failedAt = null; failSaid = false; }\n        return full ? 'whole' : 'half';\n";
+    const VIEW = "      const mail = attnMailIds().has(en.adapterId);\n";
+    const BACK = "      if (failedAt !== null && now() - failedAt < ATTN_BACKOFF_MS) return Promise.resolve('none');\n";
+    ok([LAND, VIEW, BACK].every((x) => ESRC1.split(x).length === 2), 'control setup: the map\'s landing, the view\'s mail and the back-off are present once each');
+    const HR = await halfWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, LAND, "        if (job === j) { served = j.m; stale = false; job = null; }\n        if (full) { failedAt = null; failSaid = false; }\n        return 'whole';   /* RED: df8fcedfb's landing — the half map served as current */\n", 'src/server/channels-engine.js'), 'half-current'), 'facts-half-red');
+    const hrn = notices(HR.W);
+    ok(HR.during.calls > 0 && hrn.length >= 1 && hrn.some((l) => !l.includes('reached 2')), `RED (df8fcedfb's landing, in a copy): the half map is served as current — ${HR.during.calls} rows judged while the seam stood, a notice WITHOUT the fact (${hrn.join(' | ')})`, HR.during);
+    // (3) A FAILED BUILD: a throw placed in the map's walk (the same seam) — no map is served; each row is judged with its mail read
+    // from the ACCOUNTS and no inbox count; said once; tried again only after the back-off (the suite's clock moved past it)
+    const failWorld = async (EM, tag) => {
+      const hold = { eng: null, seam: true };
+      const onSlice = async (i, what) => { if (hold.seam && what === 'attention-inbox') throw new Error('a placed throw of the map build'); };
+      const W = await factsWorld(EM, tag, { walk: { sliceMs: 0, onSlice }, hold });
+      const st = W.eng.attentionFacts.stats();
+      hold.seam = false;
+      const c0 = clock; clock += 31e3;   // past ATTN_BACKOFF_MS (30 s)
+      let back; try { back = await W.eng.attentionFacts.ready(); } finally { clock = c0; }
+      return { W, st, back, st2: W.eng.attentionFacts.stats() };
+    };
+    const F = await failWorld(ENG, 'facts-fail');
+    const fn = notices(F.W);
+    ok(F.W.placed && exactOnce(F.W.T, F.W.mine) && F.st.failed === 1 && F.st.builds === 1 && fn.length === 2 && fn.every((l) => l.includes('kind: an email thread') && !l.includes('reached 2')), `B-0f37 follow (r5106 (3)): a FAILED build serves no map — the ${F.W.mine.length} rows are judged once each, the notices AS EMAIL THREADS (mail read from the accounts) with no inbox count, and the build is tried ONCE in the back-off (failed ${F.st.failed}, builds ${F.st.builds})`, { st: F.st, fn });
+    ok(F.back === 'whole' && F.st2.builds === 2 && F.st2.kept && F.st2.failed === 1, `B-0f37 follow: past the back-off the next need builds it again, whole (builds ${F.st2.builds})`, F.st2);
+    const FR = await failWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, VIEW, "      const mail = !!attnInbox.whole() && attnInbox.whole().mailIds.has(en.adapterId);   /* RED: df8fcedfb's view — mail read from the map */\n", 'src/server/channels-engine.js'), 'mail-from-map'), 'facts-fail-red');
+    const frn = notices(FR.W);
+    ok(frn.length === 2 && frn.every((l) => !l.includes('kind: an email thread')), `RED (df8fcedfb's view, in a copy): on a failed build the mail rows are described to the paid judge as NOT mail (${frn.join(' | ')})`, frn);
+    const FB = await failWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, BACK, "      /* RED: no back-off — every judged row walks the map again */\n", 'src/server/channels-engine.js'), 'no-backoff'), 'facts-fail-nobackoff');
+    ok(FB.st.builds > 1, `RED (no back-off, in a copy): every judged row starts another walk of the failed map (builds ${FB.st.builds}) — the leg above (once) is red on it`, FB.st);
+    for (const x of copiesCensus(MF.files, MF.dir, REPO, { minCopies: 3, label: 'B-0f37 follow ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   }
   ok(mine.length > 0 && mine.every((g) => g.body.questions.length === 8 && String(g.body.input).includes('Rubric v2 — ') && !String(g.body.input).includes(M.RUBRIC.clauses[0].instructions)), 'with the person\'s block: 8 questions; the [rubric] part is one line — no question\'s instructions ride twice');
   const journal = fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.use === 'attention' && r.outcome === 'ok');

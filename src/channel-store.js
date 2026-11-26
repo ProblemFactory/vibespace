@@ -985,7 +985,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   /** B-360d item 4 (lane bl-loop-a, 主开发 r4317 / r4325): THE CHANNEL WALKS' READ of ONE account's keys — a road (the agents' reach
    *  count, list and search) NEVER builds the per-account map whole in its own turn. → { keys: the KEPT Map itself, key → its slot { place, at,
-   *  dm } (read-only: the caller reads it within one synchronous run and never changes it), odd: the keys whose row and account
+   *  dm } (read-only: the caller reads it within one synchronous run and never changes it — one reader holds its iterator ACROSS turns, the attention facts' map walk (B-0f37, channels-engine.js attnInbox): sound, a Map's iterator is live and every move or birth also reaches the touch hook, which applies that row again), odd: the keys whose row and account
    *  disagree (every account's, as keysOf answers them; key → slot) } — or null while the map is VOID or being built in slices on a big index: the road then
    *  answers by the release's walk (slow and right, never by a partial map). A void map's sliced build is started here (the roads'
    *  need, nothing more: keysOf and the index's writers keep their own road); a small index (≤ LAYOUT_SYNC_ROWS rows) is built at
