@@ -135,6 +135,8 @@ const R = require('../window-reach'); // lane E: reach + the share mode + the pi
 const UN = require('../window-unshown'); // B-dbb4: the app's windows a pixel image does not show, named (PURE; never in the device bundle)
 const GM = require('../grant-model.js'); // lane grants-unify: THE grant model (admits)
 const GS = require('./grants-store.js'); // lane grants-unify: the ONE store a window's share rows live in
+const SR = require('../store-read.js');          // B-f276 slice window-targets (lane lg-recovery, 主开发 r4720): the two stores' reads under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and their holds
 const PIN = require('../desktop-pin'); // lane e2b (§E2.2): who may pin a window's pixel size (PURE)
 const DBA = require('../desktop-browser-app'); // lane e2c (§E2.3): which browser families' accessibility switch is measured
 // verify r6 (lane channel-withdraw, 2026-09-27): THE ONE PREDICATE behind "which key does this live session answer to" —
@@ -230,20 +232,49 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const execP = (bin, args, opts = {}) => new Promise((resolve) => execFile(bin, args, { timeout: 8000, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8', ...opts }, (err, stdout, stderr) => resolve({ err, stdout: String(stdout || ''), stderr: String(stderr || '') })));
 
   // ── the persisted lease ──
+  // B-f276 slice window-targets (lane lg-recovery, 主开发 r4720): window-leases.json AND window-reach.json UNDER THE STORE-READ LAW. The
+  // release read ANY failure of either read as «nothing stored» (one journal line) and the next commit — an attach, a drop, a share, the
+  // reconcile — wrote that empty memory over the file: every agent's hold of its window, or every window's share mode, gone. Now each
+  // store's ONE read is answered through store-read (src/store-read.js) to its hold (src/store-read-hold.js). An ABSENT file is a first
+  // run. HELD (unreadable, or torn while its bytes are copied aside): every verb that reads the store is refused BY NAME
+  // (`window_leases_unread` / `window_reach_unread`, 503, the hold's words), its save writes nothing, the reconcile drops, ends and
+  // prunes nothing by it, and no list of it is broadcast; it is read again off the loop and LIFTS at the next good read (the records
+  // read are ADDED, then one broadcast and the tick). Nothing deletes or resets. The stream's per-input gate (inputPolicy, leaseInput)
+  // and the browser verbs' hint (agentBrowserFor) answer «no lease» while the leases are held: no agent verb runs while they are (each
+  // is refused by name), so no agent injects — a person's own input is never cut by a store that could not be read.
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const LEASES_UNREAD = 'window_leases_unread', REACH_UNREAD = 'window_reach_unread';
+  const leaseHold = HOLD.create({ file: leaseFile, valid: isObj, code: 'window_leases_unread', aside: (m) => leaseFile + '.corrupt-' + m,
+    words: (h) => `the record of which agent holds which window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and the agents' window verbs wait until it reads`,
+    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) applyLeases(v); publish(); if (leases.size || openerLost.size) ensureTimer(); } });
+  const reachHold = HOLD.create({ file: reachFile, valid: isObj, code: 'window_reach_unread', aside: (m) => reachFile + '.corrupt-' + m,
+    words: (h) => `the share mode of each window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and no agent reaches a window and no share changes until it reads`,
+    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) applyReach(v); publishReach(); if (shareHandles().length) ensureTimer(); } });
+  /** a held store's refusal BY NAME: its code, 503, the hold's words (null: it reads) */
+  const heldError = (hold, code) => { const w = hold.words(); return w ? namedError(code, w, { status: 503 }) : null; };
   function load() {
-    if (loaded) return;
-    loaded = true;
-    try {
-      const j = JSON.parse(fs.readFileSync(leaseFile, 'utf8'));
-      // lane e2a r4 (verify r2 #2): an agent browser's pending end (its opener gone / its own stop waiting on the user) survives a restart
-      for (const [h, p] of Object.entries((j && j.agentEnds) || {})) if (p && Number.isFinite(Number(p.at))) openerLost.set(String(h), { at: Number(p.at), told: !!p.told, why: p.why === 'opener-stopped' ? 'opener-stopped' : 'opener-ended', restored: true });
-      for (const l of Object.values((j && j.leases) || {})) {
-        if (!l || typeof l !== 'object' || !l.handle || !l.sessionId) continue;
-        leases.set(String(l.handle), { handle: String(l.handle), sessionId: String(l.sessionId), browserKey: l.browserKey || null, since: Number(l.since) || 0, origin: leaseOriginOf(l.origin), refs: null, snapshotAt: null, carrierLostAt: null, mode: null });
-      }
-    } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[window] ${LEASE_FILE} unreadable — starting with no leases: ${e.message}`); }
+    if (!loaded) {
+      loaded = true;
+      let read; try { read = { text: fs.readFileSync(leaseFile, 'utf8') }; } catch (error) { read = { error }; }
+      const a = SR.storeAnswer(read, { valid: isObj }); if (leaseHold.start(a) === 'data') applyLeases(a.value);
+    }
+    const e = heldError(leaseHold, LEASES_UNREAD); if (e) throw e;   // HELD: every reader and writer of the leases is refused by name
   }
+  /** a good read's leases → memory, ADDED: a lift never replaces a lease made since (none can be — every verb waited) */
+  function applyLeases(j) {
+    // lane e2a r4 (verify r2 #2): an agent browser's pending end (its opener gone / its own stop waiting on the user) survives a restart
+    for (const [h, p] of Object.entries((j && j.agentEnds) || {})) if (p && Number.isFinite(Number(p.at))) openerLost.set(String(h), { at: Number(p.at), told: !!p.told, why: p.why === 'opener-stopped' ? 'opener-stopped' : 'opener-ended', restored: true });
+    for (const l of Object.values((j && j.leases) || {})) {
+      if (!l || typeof l !== 'object' || !l.handle || !l.sessionId) continue;
+      if (leases.has(String(l.handle))) continue;
+      leases.set(String(l.handle), { handle: String(l.handle), sessionId: String(l.sessionId), browserKey: l.browserKey || null, since: Number(l.since) || 0, origin: leaseOriginOf(l.origin), refs: null, snapshotAt: null, carrierLostAt: null, mode: null });
+    }
+  }
+  /** a background pass's question (the reconcile, the kill path, the boot, the stream's gate): are the leases held? — their one read
+   *  made first; never throws for the hold */
+  const leasesHeld = () => { try { load(); return false; } catch (e) { if (e && e.code === LEASES_UNREAD) return true; throw e; } };
   function save() {
+    if (!leaseHold.writable('a write of the window leases')) return;   // HELD: never over a file that could not be read
     try {
       fs.mkdirSync(dataDir, { recursive: true });
       const out = {};
@@ -252,7 +283,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       writeJsonAtomic(leaseFile, { v: 1, savedAt: now(), leases: out, ...(openerLost.size ? { agentEnds } : {}) });
     } catch (e) { log.warn?.(`[window] ${LEASE_FILE} not written: ${e.message}`); }
   }
-  function publish() { if (!broadcast) return; try { broadcast({ type: 'window-leases-updated', leases: allViews() }); } catch (e) { log.warn?.(`[window] broadcast failed: ${e.message}`); } }
+  function publish() { if (!broadcast || leaseHold.held()) return; try { broadcast({ type: 'window-leases-updated', leases: allViews() }); } catch (e) { log.warn?.(`[window] broadcast failed: ${e.message}`); } }
   function commit() { save(); publish(); }
 
   // ── who is asking ──
@@ -272,13 +303,21 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   // ── lane E: THE REACH STORE (data/window-reach.json) ──
   function loadReach() {
-    if (reachLoaded) return;
-    reachLoaded = true;
-    try {
-      const j = JSON.parse(fs.readFileSync(reachFile, 'utf8'));
-      for (const [h, r] of Object.entries((j && j.windows) || {})) reach.set(String(h), r && typeof r === 'object' && !Array.isArray(r) ? { ...r } : {});
-    } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[window] ${REACH_FILE} unreadable — every window starts in auto mode: ${e.message}`); }
+    if (!reachLoaded) {
+      reachLoaded = true;
+      let read; try { read = { text: fs.readFileSync(reachFile, 'utf8') }; } catch (error) { read = { error }; }
+      const a = SR.storeAnswer(read, { valid: isObj }); if (reachHold.start(a) === 'data') applyReach(a.value);
+    }
+    const e = heldError(reachHold, REACH_UNREAD); if (e) throw e;   // HELD: every reader and writer of the share modes is refused by name
   }
+  /** a good read's share modes → memory, ADDED (a lift never replaces a mode set since — none can be: every share change waited) */
+  function applyReach(j) {
+    for (const [h, r] of Object.entries((j && j.windows) || {})) if (!reach.has(String(h))) reach.set(String(h), r && typeof r === 'object' && !Array.isArray(r) ? { ...r } : {});
+  }
+  /** …the same question for the share modes (the reconcile's prune, the boot) */
+  const reachHeld = () => { try { loadReach(); return false; } catch (e) { if (e && e.code === REACH_UNREAD) return true; throw e; } };
+  /** both stores read (the verbs that write both: a launch's self-open share, the launch mode) — refused by name BEFORE any act */
+  const loadBoth = () => { load(); loadReach(); };
   /** lane held-except-doors: a share principal's key in the grant model's spelling (what a write names) — through the record's
    *  own mapping (a session id `<backend>:<cid>` is stored as the conversation `cid`). */
   const winKey = (p) => { try { const x = R.rowOfRecord({ windowId: '-', rows: [], except: [p] }).except[0]; return x ? GM.principalKey(x) : null; } catch { return null; } };
@@ -293,6 +332,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   // lane held-except-doors: `named` = the exceptions this write takes away BY NAME (principal keys) — a principal shared with by
   // name (its grant lifts it), the person's own ✕ in the share's «除了» row; one left out unnamed ⇒ the ONE writer's except_unnamed
   function putReach(h, record, by = 'user', named = [], widenGroup = null) {
+    loadReach();   // B-f276 slice window-targets: HELD — refused by name before the grants write (nothing changed)
     const g = grantsOf();
     const row = R.rowOfRecord({ ...record, windowId: String(h) });
     // the chain's cure (C): a Task Group switched OFF «仅本组» is said explicitly (only:false) — the ONE writer widens only then
@@ -318,6 +358,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     reach.delete(String(h));
   }
   function saveReach() {
+    if (!reachHold.writable('a write of the windows\' share modes')) return;   // HELD: never over a file that could not be read
     try {
       fs.mkdirSync(dataDir, { recursive: true });
       const out = {};
@@ -353,7 +394,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return { handle: h, ...R.viewOf(rec, { resolved: res }), summary: R.shareSummary(rec, res) };
   }
   function reachViews() { loadReach(); return shareHandles().map(reachView); }
-  function publishReach() { if (!broadcast) return; try { broadcast({ type: 'window-reach-updated', reach: reachViews() }); } catch (e) { log.warn?.(`[window] reach broadcast failed: ${e.message}`); } }
+  function publishReach() { if (!broadcast || reachHold.held()) return; try { broadcast({ type: 'window-reach-updated', reach: reachViews() }); } catch (e) { log.warn?.(`[window] reach broadcast failed: ${e.message}`); } }
   function commitReach() { saveReach(); publishReach(); if (shareHandles().length) ensureTimer(); }
   /** Who the caller IS for reach: every key it answers to + the Task Groups it belongs to RIGHT NOW (D2).
    *  Lane E verify r2 (L4): a membership read that THROWS is `unreadable: true` — never folded into "no groups" (that
@@ -758,7 +799,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  the answer would be the rows decided before the await). */
   function stillListed(facts, a11yApps) { return sharedRows(facts, a11yApps); }
   async function list(facts) {
-    load();
+    loadBoth();   // B-f276 slice window-targets: a list reads both stores — a held one answers by name before anything is probed
     const base = env();
     const a11y = await wt.probeA11y({ env: base, ...helperOpts() });
     let a11yApps = [];
@@ -800,7 +841,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   // ── open / attach / detach ──
   function newLease(rec, facts) { return { handle: rec.id, sessionId: facts.sessionId, browserKey: facts.browserKey, since: now(), origin: leaseOriginOf(rec.origin) /* E2b's pin is the RECORD's fact (the keeper's setPin), never the lease's */, mode: null /* E2c (interaction mode) — reserved, never set here */, refs: null, snapshotAt: null, carrierLostAt: null }; }
   async function open(body, facts) {
-    load();
+    loadBoth();   // B-f276 slice window-targets: both stores read (refused by name) before the launch — its self-open share writes the modes
     // AN EXEC IS A HUMAN'S (design-desktop-apps §5, design §5.1.1's `open <app>`): the
     // registry row or the user's launch dialog names an executable — never an
     // agent. Refused BY NAME before the keeper is asked (2026-09-21, the verifier's
@@ -846,7 +887,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  `desktop-app-opened {sessionId, appId, origin}` — the client SHOWING that chat opens it beside it (D3).
    *  `v` = src/browser-profiles.js desktopAppNewVerdict's answer (label, url, keepProfile). */
   async function openAgentBrowser(v, facts) {
-    load();
+    loadBoth();   // B-f276 slice window-targets: both stores read (refused by name) before the launch — its self-open share writes the modes
     if (!v || v.door !== 'desktop-app') throw namedError('bad-request', 'openAgentBrowser takes the desktop-app door verdict');
     // the families in BROWSER_KINDS order (the chromium family first: its a11y switch is measured — §E2.1), an available row first
     const order = Object.keys(M.BROWSER_KINDS || {});
@@ -915,7 +956,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    *  accessibility tree stays pixels (PURE launchModeVerdict says why); `auto` re-runs the probe now. E2b's pin untouched. */
   async function setLaunchMode(handle, mode, facts) {
     refuseSubjectSync(handle, facts, 'mode'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
-    load();
+    loadBoth();   // B-f276 slice window-targets: the mode lands in the share modes — both stores read (refused by name) first
     const rec = liveRecord(handle);
     if (!rec) throw namedError('not-found', notFoundMsg(handle));
     if (rec.origin !== AGENT_BROWSER_ORIGIN) throw namedError('not_your_window', `${rec.id} is a window the user shared — its mode is the user's to set from the window's menu; you read it as shared`);
@@ -959,7 +1000,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return { handle: rec.id, stopped: true, profile };
   }
   function agentBrowserFor(handle, browserKey) {
-    load();
+    if (leasesHeld()) return null;   // B-f276 slice window-targets: HELD — a hint only; never a browser verb refused by a window store
     const l = handle ? leases.get(String(handle)) : null;
     if (!l || l.origin !== AGENT_BROWSER_ORIGIN || !browserKey || l.browserKey !== browserKey) return null;
     const rec = liveAny(String(handle));
@@ -1050,7 +1091,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function detach(handle, facts) {
     refuseSubjectSync(handle, facts, 'detach'); // B-dbb4 (r946): the one door — a window's own handle never reaches this verb
     load();
-    { const live = liveRecord(handle); if (live) { try { requireReach(live, facts, 'detach'); } catch (e) { if (e.code !== 'reach_unreadable') throw e; } } } // lane E: a revoked holder's lease is already gone — said by name; r2 (L4): giving a window up never waits on the Task Group store
+    { const live = liveRecord(handle); if (live) { try { requireReach(live, facts, 'detach'); } catch (e) { if (e.code !== 'reach_unreadable' && e.code !== REACH_UNREAD) throw e; } } } // lane E: a revoked holder's lease is already gone — said by name; r2 (L4): giving a window up never waits on the Task Group store
     const rec = keeper.get(String(handle || ''));
     const l = leases.get(String(handle || ''));
     if (!l || l.sessionId !== facts.sessionId) throw namedError('not_attached', `this session holds no lease on ${handle}`);
@@ -1087,6 +1128,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   /** The opener-ended sweep (reconcile: openers no longer live, after `graceMs`; dropSession: `endedId`, at once). */
   function endAgentBrowsers({ graceMs = 0, busyMs = LEASE_DROP_GRACE_MS, endedId = null } = {}) {
+    if (leaseHold.held()) return [];   // B-f276 slice window-targets: the leases HELD — the pending ends are the held file's: nothing is ended by an empty memory
     const t = now(); const ended = [];
     for (const rec of agentBrowsers()) {
       const opener = rec.by && rec.by.sessionId;
@@ -1114,7 +1156,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     }
     return ended;
   }
-  function dropSession(sessionId) { load(); let n = 0; for (const [h, l] of [...leases]) if (l.sessionId === sessionId) { dropLease(h, `session ${sessionId} ended`); n++; } endAgentBrowsers({ endedId: sessionId }); // r4 (verify r2 #4): the kill path ends its desktop browsers too (busy ⇒ the same bounded wait, finished by the tick)
+  // B-f276 slice window-targets: the leases HELD — nothing to drop by (a lease read at the lift whose holder is gone is the tick's)
+  function dropSession(sessionId) { if (leasesHeld()) return 0; let n = 0; for (const [h, l] of [...leases]) if (l.sessionId === sessionId) { dropLease(h, `session ${sessionId} ended`); n++; } endAgentBrowsers({ endedId: sessionId }); // r4 (verify r2 #4): the kill path ends its desktop browsers too (busy ⇒ the same bounded wait, finished by the tick)
     if (n) commit(); return n; }
 
   /**
@@ -1125,7 +1168,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    */
   let reconcileHeldSaid = false;   // r3085: the held reconcile said once a hold
   function reconcile({ graceMs = LEASE_DROP_GRACE_MS } = {}) {
-    load();
+    // B-f276 slice window-targets: the leases HELD — the lease half waits (an empty memory drops, stamps and ends nothing)
+    const leasesUnread = leasesHeld();
     // r3085 (lane bl-machines-a, the family's second law r3019): desktop-apps.json HELD (desktop-serve's own hold — its read failed)
     // keeps an EMPTY memory, so «no live record» is UNKNOWN there, never «gone»: while the hold stands no lease is dropped and no share
     // is pruned by it (the holder-gone and agent-browser ends read the sessions, not the store, and keep their road)
@@ -1155,9 +1199,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (dropped.length) commit();
     const ended = endAgentBrowsers({ graceMs }); // lane e2a r3: D6 on the RECORD's opener
     // lane E: a share lives as long as its window — carried to a relaunch's successor first, then pruned
-    loadReach();
+    const reachUnread = reachHeld();   // B-f276 slice window-targets: the share modes HELD — nothing carried, nothing pruned
     let pruned = 0;
-    for (const h of shareHandles()) {
+    for (const h of reachUnread ? [] : shareHandles()) {
       if (liveRecord(h)) continue;
       if (storeHeld) continue;   // r3085: unknown while desktop-apps.json is held — the share kept
       const next = successorOf(h);
@@ -1166,7 +1210,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       resolutions.delete(h); pruned++;
     }
     if (pruned) commitReach();
-    return { dropped, stamped, pruned, ended };
+    return { dropped, stamped, pruned, ended, ...(leasesUnread ? { leasesHeld: true } : {}), ...(reachUnread ? { reachHeld: true } : {}) };
   }
 
   // ── §4.3 / §6.6: the input side — takeover, handback, idle, the bridge policy ──
@@ -1229,7 +1273,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    * the user launched behaves as before).
    */
   function inputPolicy(handle, viewerId) {
-    load();
+    if (leasesHeld()) return { relay: true, code: null, why: null };   // B-f276 slice window-targets: HELD — no agent verb runs, none injects
     const h = String(handle || '');
     const l = leases.get(h);
     if (!l) return { relay: true, code: null, why: null };
@@ -1246,7 +1290,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
    * viewer). Server-side only: the holder is the socket's secret.
    */
   function leaseInput(handle) {
-    load();
+    if (leasesHeld()) return null;   // B-f276 slice window-targets: HELD — no agent drives (each verb is refused by name): the person's election decides
     const h = String(handle || '');
     if (!leases.has(h)) return null;
     const s = inputs.get(h);
@@ -1274,8 +1318,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function tick() { enforceConsent(); const r = reconcile({ graceMs: LEASE_DROP_GRACE_MS }); const idle = sweepIdleTakeovers(now()); if (!leases.size && !inputs.size && !shareHandles().length && timer) { clearInterval(timer); timer = null; } return { ...r, idle }; }
   function ensureTimer() { if (!timer) { timer = setInterval(() => { try { tick(); } catch (e) { log.warn?.(`[window] tick failed: ${e && e.message}`); } }, TICK_MS); timer.unref?.(); } }
   /** The boot path (after restoreSessions, so the live-session set is final): load, drop what nobody carries or nothing serves, start the tick. */
-  function boot() { load(); loadReach(); enforceConsent(); bootAt = now(); const r = reconcile({ graceMs: 0 }); if (openerLost.size) ensureTimer(); if (leases.size || shareHandles().length) ensureTimer(); return { leases: leases.size, dropped: r.dropped.length, shared: shareHandles().length, pruned: r.pruned || 0 }; }
-  function shutdown() { if (timer) clearInterval(timer); timer = null; }
+  function boot() { const held = [leasesHeld() && LEASE_FILE, reachHeld() && REACH_FILE].filter(Boolean); enforceConsent(); bootAt = now(); const r = reconcile({ graceMs: 0 }); if (openerLost.size) ensureTimer(); if (leases.size || shareHandles().length) ensureTimer(); return { leases: leases.size, dropped: r.dropped.length, shared: shareHandles().length, pruned: r.pruned || 0, ...(held.length ? { held } : {}) }; }   // B-f276 slice window-targets: a held store is said (`held`), never thrown
+  function shutdown() { if (timer) clearInterval(timer); timer = null; leaseHold.stop(); reachHold.stop(); }   // B-f276 slice window-targets: + the holds' reads again
   /** What the session card / status route may publish for ONE session: 'user' while somebody drives a window it holds, 'agent' when it holds one, null when none. */
   function inputSummaryFor(sessionId) {
     load();
@@ -1752,7 +1796,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const record = reachRecord(rec.id);
     return { ...v, rows: v.rows.map((r) => { const x = reachedOf(r, record); return { ...r, live: x.live, ...(x.state === 'undecided' ? { undecided: true } : {}) }; }), label: rec.label, browser: isHumanBrowser(rec), stream: streamOf(rec), lease: leaseOf(rec.id), modeInfo: modeInfo(rec.id) };
   }
-  function requireWindow(handle) { const rec = liveRecord(handle); if (!rec) throw namedError('not-found', notFoundMsg(handle)); return rec; }
+  function requireWindow(handle) { loadBoth(); const rec = liveRecord(handle); if (!rec) throw namedError('not-found', notFoundMsg(handle)); return rec; }   // B-f276 slice window-targets: both stores read (refused by name) before a share act
   /** After a revoke / a mode change: the holder that no longer reaches the window loses its lease NOW (by:user). */
   function dropUnreached(rec, why) {
     const l = leases.get(rec.id);

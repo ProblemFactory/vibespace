@@ -81,6 +81,7 @@ const STATUS = {
   // lane E (src/window-reach.js REFUSALS): reach, the share mode, the pixel road, the user's share routes
   not_exposed: 403, excepted: 403, unknown_shape: 409, except_conflicts: 400, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, fork_pending: 409, not_live: 404,
   reach_unreadable: 503, // lane E verify r2 (L4): the Task Group store could not be read — try again (the lease is kept)
+  window_leases_unread: 503, window_reach_unread: 503, // B-f276 slice window-targets (lane lg-recovery): the leases / the share modes HELD — nothing changed, read again by itself
   outside_window: 400, bad_principal: 400, bad_mode: 400, share_local_only: 400,
   'bad-size': 400, size_out_of_bounds: 400, pin_unsupported: 400, not_your_window: 403, // lane e2b + launch-picture-size: a pinned size refused by name
   desktop_injection_refused: 409, no_live_view: 409, tier3_is_a_window_target: 409, no_lease: 409, held: 409, not_taken: 409,

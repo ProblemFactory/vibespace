@@ -174,6 +174,7 @@ const CALLERS = { 'src/server/decision-engine.js': ['decision-memo.json', 'decis
   // r3314: the units picked into the hotfix's trial after the chain
   'src/channels/webhook.js': ['callers.json', 'pair-pending.json'], 'src/server/vault-totp.js': ['vault-grants.json'], 'src/usage-reset-claim.js': ['usage-reset-claims.json'],
   'src/server/vault-run-door.js': ['vault-grant-ends.json'],   // r3377: lg-vault-env's grant ends
+  'src/server/window-targets-engine.js': ['window-leases.json', 'window-reach.json'],   // lg-recovery (B-f276 slice window-targets, 主开发 r4720): the agents' window holds and the windows' share modes
   'src/server/agent-listener.js': ['agent-door.json'],   // r3333 unit 1: the agent door's record (its port)
   // B-f276 (lane hub-loop-stalls, r4719): four said-once records
   'src/server/hook-root-watch.js': ['hook-root-notice.json'], 'src/server/tls.js': ['state.json'], 'src/server/browser-logins.js': ['browser-login-reminders.json'], 'src/server/cli-registration.js': ['cli-registration.json'],

@@ -244,10 +244,13 @@ function fail(res, e) {
       || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
       || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'changed_outside' || code === 'lease' ? 409
       : code === 'agent_forbidden' || code === 'not_your_window' || code === 'remoteapp_door' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' || code === 'except_conflicts' ? 400 : code === 'store_unreadable' || code === 'except_unnamed' ? 409
-      : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
+      : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' || code === 'window_leases_unread' || code === 'window_reach_unread' ? 503 : code === 'install_timeout' ? 504 : 500;
   res.status(D014_STATUS[code] || status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}), ...(e && e.vnc ? { vnc: e.vnc, platform: e.platform || null } : {}) });
 }
 const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
+/** B-f276 slice window-targets (lane lg-recovery): the engine's lease of a window in an answer AFTER the act — null while the leases are
+ *  held (no agent verb runs while they are, so no agent holds it now; the person's act never waited on them) */
+const leaseAfterAct = (engine, id) => { try { return engine.leaseOf(id); } catch (e) { if (e && e.code === 'window_leases_unread') return null; throw e; } };
 
 router.get('/api/desktop/apps', async (req, res) => {
   // lane app-launch-singleton: `?records=1` = the records alone (every machine's), no catalog read — the Desktop list's
@@ -821,7 +824,7 @@ router.post('/api/desktop/apps/:id/relaunch', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   // B-5ee0 ②: an agent holding the window's lease ⇒ refused HERE too (the menu's 'lease' is only the window's word)
   let lease = null;
-  try { lease = ctx.windowEngine ? ctx.windowEngine.leaseOf(req.params.id) : null; } catch { lease = null; }
+  try { lease = ctx.windowEngine ? ctx.windowEngine.leaseOf(req.params.id) : null; } catch (e) { if (e && e.code === 'window_leases_unread') return fail(res, e); lease = null; }   // B-f276 slice window-targets: the leases HELD — unknown is never «no agent holds it» (refused by name)
   const lv = relaunchLeaseVerdict(ctx.keeper.get(req.params.id), lease);
   if (lv) return fail(res, { code: lv.code, message: lv.error });
   try { res.json(await ctx.keeper.relaunch(req.params.id, req.body || {})); } catch (e) { fail(res, e); }
@@ -986,7 +989,7 @@ router.post('/api/desktop/apps/:id/viewers/takeover', (req, res) => {
     }
     const v = ctx.keeper.takeoverViewer(id, viewerId);
     if (!v.ok) return fail(res, { code: v.code, message: v.error });
-    res.json({ ok: true, already: !!v.already, viewers: v.viewers, lease: leaseView || (engine ? engine.leaseOf(id) : null) });
+    res.json({ ok: true, already: !!v.already, viewers: v.viewers, lease: leaseView || (engine ? leaseAfterAct(engine, id) : null) });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/handback', (req, res) => {

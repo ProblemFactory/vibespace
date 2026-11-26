@@ -4666,6 +4666,10 @@ export default {
   "the record of messages already handed to agents": "エージェントに渡したメッセージの記録",
   "The record of messages already handed to agents could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A message an agent hands back waits until it reads.": "エージェントに渡したメッセージの記録は今は読み込めませんでした。VibeSpace が自動でもう一度読み込みます。失われても変わってもいません。エージェントから戻されたメッセージは読み込めてから扱います。",
   "the record of the login warnings already filed": "提出済みのログイン警告の記録",
+  "the record of which agent holds which window": "どのエージェントがどのウィンドウを使っているかの記録",   // lg-recovery (B-f276 slice window-targets): the window engine's two stores
+  "the share mode of each window": "各ウィンドウの共有モード",
+  "The record of which agent holds which window can’t be read right now — nothing was changed, and the agents’ window commands wait until it reads. VibeSpace reads it again by itself in a few minutes.": "どのエージェントがどのウィンドウを使っているかの記録を今は読み取れません —— 何も変更していません。エージェントのウィンドウ操作は読み取れるまで待ちます。VibeSpace が数分のうちに自動でもう一度読み取ります。",
+  "The share mode of each window can’t be read right now — nothing was changed, and no agent reaches a window and no share changes until it reads. VibeSpace reads it again by itself in a few minutes.": "各ウィンドウの共有モードを今は読み取れません —— 何も変更していません。読み取れるまで、どのエージェントもウィンドウを使えず、共有も変わりません。VibeSpace が数分のうちに自動でもう一度読み取ります。",
   "The record of the login warnings already filed could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A new login warning waits until it reads.": "提出済みのログイン警告の記録は今は読み込めませんでした。VibeSpace が自動でもう一度読み込みます。失われても変わってもいません。新しいログイン警告は読み込めてから提出されます。",
   "the record of the conversations a restart interrupted": "再起動で中断された会話の記録",
   "this hub’s record of the Claude Code builds it measured": "このハブが測定した Claude Code ビルドの記録",
