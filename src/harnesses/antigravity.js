@@ -28,6 +28,7 @@ const { HARNESS_SETTINGS } = require('../harness-settings');
 const AS = require('../agy-store');
 const AGY_ARTIFACTS = require('./artifacts-of.js').antigravity; // lane agy-status-bar-facts: reads agy's own write_file/edit_file (abs Path), else the ACP reader
 const AGY_BACKFILL = require('../agy-backfill'); // a sub that ALREADY RAN under an older wrapper: its card from the store
+const SR = require('../store-read.js'); // B-f276 (s1126): a stat that failed is «missing» only when it says ENOENT — never «not there»
 
 /** The model slugs, each with its PROVENANCE. «measured»: `agy models` under a signed-in account on agy 1.5.5, 2026-11-10
  *  (Gemini 4 Carbon, generally available that day, first as agy orders it; the «low» level of Argon and 3.8 Flash).
@@ -84,12 +85,36 @@ const OWN_GEMINI = ['antigravity-cli', 'antigravity', 'antigravity-ide'];
 const OWN_CONFIG = ['antigravity'];
 const SHARED_CLI = ['hooks.json', 'skills', 'plugins', 'workflows'];
 const machineHome = () => os.homedir();
+// B-f276 (lane login-request-card, s1126 — THE STORE-READ LAW on the account's root): the release asked `fs.existsSync`, which
+// answers false on ANY failure — an I/O error, a refusal, a timeout on the storage — and then wrote over what was there (the
+// account's own settings.json, its allow rules with it, replaced by the machine's copy or «{}»), unlinked a link whose target only
+// could not be read, or emptied the whole farm when the machine's HOME could not be listed. Now a failed stat or listing is
+// «missing» only when it says ENOENT (store-read's own answer); any other code is UNREAD: nothing is written, linked or removed on
+// it, and it is said once per path and code (the next spawn's seed reads again — the heal). The same calls, no new one on the loop.
+/** → { state: 'there' } | { state: 'missing' } | { state: 'unreadable', code } — whether `p` is there, by the law (stat follows a link,
+ *  as existsSync did) */
+function presenceOf(p) {
+  try { fs.statSync(p); return { state: 'there' }; } catch (error) { const a = SR.storeAnswer({ error }); return a.state === 'missing' ? { state: 'missing' } : { state: 'unreadable', code: a.code }; }
+}
+const UNREAD_SAID = new Set();   // `${path}|${code}` said once (bounded: a long outage over many accounts clears it, then says again)
+function saidUnread(p, code, what) {
+  const k = `${p}|${code}`;
+  if (UNREAD_SAID.has(k)) return;
+  if (UNREAD_SAID.size >= 256) UNREAD_SAID.clear();
+  UNREAD_SAID.add(k);
+  try { console.warn(`[antigravity] ${what} could not be read (${code}): ${p} — nothing was written over it; the next start of this account reads it again`); } catch { }
+}
 
 /** Mirror `real`'s entries into `dir` as symlinks, `own` excepted. Idempotent (a spawn refreshes it): a link whose
  *  target left is removed, a new entry is linked; a REAL file or dir in `dir` is never touched. */
 function linkFarm(dir, real, own) {
   let names = [];
-  try { names = fs.readdirSync(real); } catch { names = []; }
+  try { names = fs.readdirSync(real); } catch (error) {
+    // B-f276 (s1126): a HOME that could not be LISTED is no empty HOME — the farm is kept as it is (its pass would unlink every link)
+    const a = SR.storeAnswer({ error });
+    if (a.state !== 'missing') { saidUnread(real, a.code, 'the folder the account mirrors'); return; }
+    names = [];
+  }
   const want = new Set(names.filter((n) => !own.includes(n)));
   let have = [];
   try { have = fs.readdirSync(dir); } catch { have = []; }
@@ -109,7 +134,9 @@ const mkdir700 = (d) => { try { fs.mkdirSync(d, { recursive: true, mode: 0o700 }
 /** Build (or refresh) an account's HOME root `dir` from the machine's HOME `real`. */
 function seedHomeRoot(dir, real = machineHome()) {
   mkdir700(dir);
-  try { if (!fs.existsSync(path.join(dir, ACCOUNT_MARK))) fs.writeFileSync(path.join(dir, ACCOUNT_MARK), 'An Antigravity account home kept by VibeSpace.\n', { mode: 0o600 }); } catch { }
+  { const mark = path.join(dir, ACCOUNT_MARK), m = presenceOf(mark);   // B-f276 (s1126): written only when truly missing
+    if (m.state === 'missing') { try { fs.writeFileSync(mark, 'An Antigravity account home kept by VibeSpace.\n', { mode: 0o600 }); } catch { } }
+    else if (m.state === 'unreadable') saidUnread(mark, m.code, 'the account mark'); }
   mkdir700(path.join(dir, LOGIN_CWD));
   linkFarm(dir, real, OWN_TOP);
   mkdir700(path.join(dir, '.gemini'));
@@ -122,20 +149,29 @@ function seedHomeRoot(dir, real = machineHome()) {
     const p = path.join(cli, n), t = path.join(realCli, n);
     let st = null; try { st = fs.lstatSync(p); } catch { st = null; }
     if (st && !st.isSymbolicLink()) continue;
-    if (!fs.existsSync(t)) { if (st) { try { fs.unlinkSync(p); } catch { } } continue; }
+    const tp = presenceOf(t);   // B-f276 (s1126): the machine's file UNREAD keeps the account's link as it is
+    if (tp.state === 'unreadable') { saidUnread(t, tp.code, 'a shared Antigravity file'); continue; }
+    if (tp.state === 'missing') { if (st) { try { fs.unlinkSync(p); } catch { } } continue; }
     if (!st) { try { fs.symlinkSync(t, p); } catch { } }
   }
   const sp = path.join(cli, 'settings.json');
-  if (!fs.existsSync(sp)) {
-    let seed = '{}\n';
-    try { const raw = fs.readFileSync(path.join(realCli, 'settings.json'), 'utf8'); JSON.parse(raw); seed = raw; } catch { }
-    try { fs.writeFileSync(sp, seed, { mode: 0o600 }); } catch { }
+  const spHere = presenceOf(sp);   // B-f276 (s1126): the account's OWN settings (its allow rules) — seeded ONLY when missing (a first run)
+  if (spHere.state === 'unreadable') saidUnread(sp, spHere.code, "the account's own Antigravity settings");
+  if (spHere.state === 'missing') {
+    // B-f276 (s1126, the adversarial read's find): the machine's settings UNREAD is no «the machine has none» — a «{}» seeded then would
+    // keep the account off the machine's rules for good (a file there is never seeded again): it is seeded at the next spawn that reads
+    let seed = '{}\n', machineUnread = null;
+    try { const raw = fs.readFileSync(path.join(realCli, 'settings.json'), 'utf8'); try { JSON.parse(raw); seed = raw; } catch { } } catch (error) { const a = SR.storeAnswer({ error }); if (a.state !== 'missing') machineUnread = a.code; }
+    if (machineUnread) saidUnread(path.join(realCli, 'settings.json'), machineUnread, "the machine's Antigravity settings (the account's first copy)"); else { try { fs.writeFileSync(sp, seed, { mode: 0o600 }); } catch { } }
   }
 }
-/** Signed in? A STAT of the login file — never a read (it is the account's secret). */
+/** Signed in? A STAT of the login file — never a read (it is the account's secret). B-f276 (s1126): a MISSING file is said apart
+ *  from an unreadable one, as claude's reader says it (`absent`; any other failure carries its code as `unread`) — the accounts
+ *  list's kept snapshot already holds an unreadable folder by name (account-display-facts seed) and never asks this then. */
 function parseAgyAuthDir(dir, rd = null) {   // rd: the accounts list's kept snapshot (B-360d); none = the file itself
-  let st = null; try { st = rd ? rd.stat(path.join(dir, TOKEN_REL)) : fs.statSync(path.join(dir, TOKEN_REL)); } catch { st = null; }
-  return st && st.isFile() && st.size > 0 ? { loggedIn: true, authMode: 'google-login', email: null, subscriptionType: null } : { loggedIn: false };
+  let st = null, failed = null; try { st = rd ? rd.stat(path.join(dir, TOKEN_REL)) : fs.statSync(path.join(dir, TOKEN_REL)); } catch (error) { st = null; failed = SR.storeAnswer({ error }); }
+  if (st && st.isFile() && st.size > 0) return { loggedIn: true, authMode: 'google-login', email: null, subscriptionType: null };
+  return failed && failed.state === 'missing' ? { loggedIn: false, absent: true } : failed ? { loggedIn: false, unread: failed.code } : { loggedIn: false };
 }
 const shq = (v) => "'" + String(v).replace(/'/g, "'\\''") + "'";
 /** The spawn env of an account: its root as HOME and the bus disabled (the login is the root's file). */
