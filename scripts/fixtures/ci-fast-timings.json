@@ -1,6 +1,6 @@
 {
  "about": "THE CLASS CENSUS (lane bl-release, 主开发 r1154, 2026-11-21): per-suite wall ms of ONE WHOLE fast tier on the test machine — the kit's RESULTS lines «<suite> <rc> <ms>», counted from the suite's own lock grant, both zones (box and @UTC), the LARGER kept; only the table's fast rows. test-ci-gate §2 judges every fast row against it: a row stating under a tenth of its reading here is red by name, and the readings must cover the table (a row without one is said, ≤ 5 %). A whole tier runs its lanes side by side, so a reading is the row's time UNDER LOAD — a ceiling for the rule's tenth, never a row's statement (a row is restated from readings ALONE). Refresh: copy a newer whole fast tier's RESULTS (both zones + its machine-1 part) the same way, and say its run in `source`.",
- "source": "run ddac4bd65-20261126042622-both (the integrator's second whole fast tier at the train 2.369.420's cured tip ddac4bd65, machine 2: 1840 suites, both zones, its machine-1 part folded into its RESULTS; the larger of box and UTC kept) — EXCEPT four rows read ALONE on machine 1 (see «machine1»); machine1: test-store-read-three 7445 ms from run ddac4bd65-20261126044614-both (alone, both zones, the other zone 7375 ms; machine 2 under the tier read it 8584 ms), test-creds-merge 1364 ms from run ddac4bd65-20261126044614-both (alone, both zones, the other zone 1294 ms; machine 2 under the tier read it 2097 ms), test-message-origin 662 ms from run ddac4bd65-20261126044614-both (alone, both zones, the other zone 662 ms; machine 2 under the tier read it 1501 ms), test-account-pool 1008 ms from run ddac4bd65-20261126044614-both (alone, both zones, the other zone 897 ms; machine 2 under the tier read it 1547 ms)",
+ "source": "run ddac4bd65-20261126042622-both (the integrator's second whole fast tier at the train 2.369.420's cured tip ddac4bd65, machine 2: 1840 suites, both zones, its machine-1 part folded into its RESULTS; the larger of box and UTC kept) — EXCEPT three rows read ALONE on machine 1 (see «machine1») and one row restated at a later tip (see «restated»); machine1: test-creds-merge 1364 ms from run ddac4bd65-20261126044614-both (alone, both zones, the other zone 1294 ms; machine 2 under the tier read it 2097 ms), test-message-origin 662 ms from run ddac4bd65-20261126044614-both (alone, both zones, the other zone 662 ms; machine 2 under the tier read it 1501 ms), test-account-pool 1008 ms from run ddac4bd65-20261126044614-both (alone, both zones, the other zone 897 ms; machine 2 under the tier read it 1547 ms); restated: test-store-read-three 2782 ms from run cc60cdd1d-20261126052222-both (the lane bl-chat-b's alone run on the kit after its cure cc60cdd1d, both zones, the other zone 2755 ms; the larger of its three alone runs; 主开发 r4831; it was 7445 ms alone on machine 1 before the cure, its red controls then waiting out a test clock)",
  "ms": {
   "test-account-identity": 319,
   "test-account-policy-door": 857,
@@ -772,7 +772,7 @@
   "test-stopped-by": 251,
   "test-store-held-page": 1708,
   "test-store-read-law": 3213,
-  "test-store-read-three": 7445,
+  "test-store-read-three": 2782,
   "test-store-write-census": 9317,
   "test-store-writer-lanes": 4889,
   "test-store-writer-laws": 11355,
