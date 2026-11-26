@@ -15,6 +15,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent's own browser timeout or debug setting no longer restarts its browser between commands, which made it lose the page's element references.
 - A message you held behind a long running turn now keeps its bubble and its queue row when the page is opened again before it runs.
 - On a paired machine, OpenCode now starts below that machine's agent, as its other conversations do, when VibeSpace's lower CPU priority is on.
+- On a paired machine with many installed apps, the app launcher's list and its running apps load again: overlong lists are shortened, not failed.
 
 ## 2.369.419 — 2026-11-25
 
