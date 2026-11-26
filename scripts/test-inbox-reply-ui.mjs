@@ -70,7 +70,7 @@
 //      toast ticks it in place, showing the page clears it (the tabs node never
 //      rebuilt), a switch back keeps the typed reply as a draft; the filter is
 //      per device (survives a close/open)
-//   ⑱c (r2) the HELD filter: Login expiry chosen, its only notice dismissed
+//   ⑱c (r2) the HELD filter: Accounts and sign-ins chosen, its only notice dismissed
 //      elsewhere, the popup reopened ⇒ All shown AND stored; the notice
 //      reopened elsewhere (it ARRIVES by broadcast) ⇒ every group stays shown,
 //      All still active (r1 re-applied the stored login: every other group hid)
@@ -814,10 +814,10 @@ try {
     const groupsNow = `[...document.querySelectorAll('${P} .ut-notices > .ut-notice-groups > .ut-notice-group')].map((g) => ({ o: g.dataset.origin, name: g.querySelector('.ut-group-name').textContent, n: g.querySelector('.ut-group-n').textContent, shown: getComputedStyle(g).display !== 'none', ids: [...g.querySelectorAll(':scope > .ut-item')].map((r) => r.dataset.id) }))`;
     const x17 = await evalJs(`({ chips: ${chipsNow}, groups: ${groupsNow}, strip: (() => { const e = document.querySelector('${P} .ut-notices > .ut-chips'); return e ? getComputedStyle(e).display : 'absent'; })(), xss: window.__xss })`);
     const total = Object.values(want).reduce((a, v) => a + v.length, 0);
-    check(`the chip strip shows: All ${total} · Spending 3 · Login expiry 1 · Channels 1 · Agents ${agentN.length} (in the set's order, All first, "All" active)`,
-      x17.strip !== 'none' && JSON.stringify(x17.chips.map((c) => [c.o, c.label, c.n])) === JSON.stringify([['all', 'All', String(total)], ['spend', 'Spending', '3'], ['login', 'Login expiry', '1'], ['channels', 'Channels', '1'], ['agent', 'Agents', String(agentN.length)]]) && x17.chips[0].on && x17.chips[0].pressed === 'true' && x17.chips.slice(1).every((c) => !c.on && c.pressed === 'false'), x17.chips);
+    check(`the chip strip shows: All ${total} · Spending 3 · Accounts and sign-ins 1 · Channels 1 · Agents ${agentN.length} (in the set's order, All first, "All" active)`,
+      x17.strip !== 'none' && JSON.stringify(x17.chips.map((c) => [c.o, c.label, c.n])) === JSON.stringify([['all', 'All', String(total)], ['spend', 'Spending', '3'], ['login', 'Accounts and sign-ins', '1'], ['channels', 'Channels', '1'], ['agent', 'Agents', String(agentN.length)]]) && x17.chips[0].on && x17.chips[0].pressed === 'true' && x17.chips.slice(1).every((c) => !c.on && c.pressed === 'false'), x17.chips);
     check('one group per origin in the same order, each head naming its producer with its OPEN count, every group shown',
-      JSON.stringify(x17.groups.map((g) => [g.o, g.name, g.n, g.shown])) === JSON.stringify([['spend', 'Spending', '3', true], ['login', 'Login expiry', '1', true], ['channels', 'Channels', '1', true], ['agent', 'Agents', String(agentN.length), true]]), x17.groups);
+      JSON.stringify(x17.groups.map((g) => [g.o, g.name, g.n, g.shown])) === JSON.stringify([['spend', 'Spending', '3', true], ['login', 'Accounts and sign-ins', '1', true], ['channels', 'Channels', '1', true], ['agent', 'Agents', String(agentN.length), true]]), x17.groups);
     const byO = Object.fromEntries(x17.groups.map((g) => [g.o, g.ids]));
     check('each group lists exactly its producer\'s notices — the LEGACY spend notice (no origin) under Spending, the forged origin under Agents', Object.entries(want).every(([o, ids]) => (byO[o] || []).length === ids.length && ids.every((id) => byO[o].includes(id))), { byO, want });
     // lane ci-337-reds: `data-origin` is not For-you's alone — the New Session dialog's browser-profile <select> keeps its
@@ -893,12 +893,12 @@ try {
     check('…and the reply typed before the page switch comes back as the box\'s draft', await waitFor(`document.querySelector(${JSON.stringify(after12Row + ' .ut-reply textarea')})?.value === 'typing while the board moves'`, 3000), await evalJs(`document.querySelector(${JSON.stringify(after12Row + ' .ut-reply textarea')})?.value`));
     console.log('⑱b the filter is per DEVICE: it survives a close and an open');
     const clickChip = (o) => realClick(`${P} .ut-chips > .ut-chip[data-origin="${o}"]`);
-    check('a click on the Login expiry chip', await clickChip('login') && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000));
+    check('a click on the Accounts and sign-ins chip', await clickChip('login') && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000));
     await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
     await sleep(200);
     await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
     await openNotices();
-    check('closed and reopened: only the Login expiry group shows, its chip active', await waitFor(`(() => { const p = document.getElementById('user-todos-popup'); if (p.classList.contains('hidden')) return false; const gs = [...p.querySelectorAll('.ut-notice-group')]; return gs.length >= 4 && gs.every((g) => (getComputedStyle(g).display !== 'none') === (g.dataset.origin === 'login')) && p.querySelector('.ut-chip[data-origin="login"]').classList.contains('on'); })()`, 3000),
+    check('closed and reopened: only the Accounts and sign-ins group shows, its chip active', await waitFor(`(() => { const p = document.getElementById('user-todos-popup'); if (p.classList.contains('hidden')) return false; const gs = [...p.querySelectorAll('.ut-notice-group')]; return gs.length >= 4 && gs.every((g) => (getComputedStyle(g).display !== 'none') === (g.dataset.origin === 'login')) && p.querySelector('.ut-chip[data-origin="login"]').classList.contains('on'); })()`, 3000),
       await evalJs(`[...document.querySelectorAll('#user-todos-popup .ut-notice-group')].map((g) => [g.dataset.origin, getComputedStyle(g).display])`));
     check('(back to All)', await clickChip('all') && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'all' && [...document.querySelectorAll('#user-todos-popup .ut-notice-group')].every((g) => getComputedStyle(g).display !== 'none')`, 3000));
   } catch (e) { check('⑱ ran to its end', false, e.message); }
@@ -918,7 +918,7 @@ try {
     const setStatus = async (id, status) => (await fetch(`http://127.0.0.1:${PORT}/api/user-todos/${id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) })).json();
     check('(the panel is open on All)', await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden') && JSON.stringify(${onNow}) === '["all"]'`), await evalJs(state));
     await openNotices();
-    check('a real click on the Login expiry chip: the device stores login', await realClick(`${P} .ut-chips > .ut-chip[data-origin="login"]`) && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000), await evalJs(state));
+    check('a real click on the Accounts and sign-ins chip: the device stores login', await realClick(`${P} .ut-chips > .ut-chip[data-origin="login"]`) && await waitFor(`localStorage.getItem('vibespace.ut-notice-filter') === 'login'`, 3000), await evalJs(state));
     const d = await setStatus(LOGIN, 'dismissed');
     check('the only login notice is dismissed elsewhere (POST /api/user-todos/:id) — its row resolves in place, the chip at 0', d?.success && d.item?.status === 'dismissed' && await waitFor(`document.querySelector('${P} .ut-chip[data-origin="login"] > .ut-chip-n')?.textContent === '0'`, 4000), d);
     await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);

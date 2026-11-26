@@ -34,7 +34,7 @@ const OPTIONS_MAX = 6;           // option chips per item
 const OPTION_MAX_CHARS = 40;     // chars per option label
 // Keys owned by a server producer (the spend guard / login watch / jobs): the
 // answer surface is Manage Agents or the job panel, never a conversation.
-const SERVER_KEYS = ['accounts', 'jobs'];
+const SERVER_KEYS = ['accounts', 'jobs', 'webui:oat-identity'];   // r4654: the long-lived token identity check's key (src/server/oat-identity.js INBOX_KEY) spells a conversation's shape but names none — nothing to reply to, so no reply is drawn
 
 const i18nKey = (s) => s; // an English KEY the client renders with t() (lane ui-needs-a-button: the census reads it)
 const REPLY_WHY = Object.freeze({

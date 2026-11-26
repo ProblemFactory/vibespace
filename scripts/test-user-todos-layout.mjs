@@ -359,7 +359,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   eq(G(L.noticeGroups(notices, 'all', { prev: ['agent', 'spend'] })), ['agent:a1,a2:2/2', 'spend:s1,s2,s3✓:2/3', 'login:l1✓:0/1', 'channels:c1:1/1'], 'while open (prev = the last paint): the listed groups keep their slots, new origins APPEND in set order (the slot law for groups)');
   eq(G(L.noticeGroups([N('s1', { origin: 'spend' })], 'all', { prev: ['agent', 'spend'] })), ['spend:s1:1/1'], 'a prev origin no longer present is dropped');
   eq(L.noticeGroups([], 'spend'), [], 'no notices ⇒ no groups');
-  eq(L.noticeGroups(notices).map((g) => g.label), ['Spending', 'Login expiry', 'Channels', 'Agents'], 'each group carries its English t() key');
+  eq(L.noticeGroups(notices).map((g) => g.label), ['Spending', 'Accounts and sign-ins', 'Channels', 'Agents'], 'each group carries its English t() key');
   eq(L.noticeChips(notices).map((c) => `${c.origin}:${c.count}`), ['all:5', 'spend:2', 'login:0', 'channels:1', 'agent:2'], "chips: 'all' first with the total OPEN, then every PRESENT origin with its open count (an all-resolved origin keeps its chip at 0 while its rows hold their slots)");
   eq(L.noticeChips(notices, { prev: ['agent'] }).map((c) => c.origin), ['all', 'agent', 'spend', 'login', 'channels'], 'chips follow the groups\' order');
   eq(L.noticeChips([]).map((c) => `${c.origin}:${c.count}`), ['all:0'], 'no notices ⇒ only the all chip (the panel hides a strip of ≤ 2)');

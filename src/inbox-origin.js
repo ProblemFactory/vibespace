@@ -78,7 +78,7 @@ const FIELDS_FILERS = Object.freeze({ jobs: Object.freeze(['src/server/jobs-wiri
 const i18nKey = (s) => s;
 const ORIGIN_LABELS = Object.freeze({
   spend: i18nKey('Spending'),
-  login: i18nKey('Login expiry'),
+  login: i18nKey('Accounts and sign-ins'),   // r4654 (B-8703's picture): three producers file under it — a sign-in's expiry, the accounts list that cannot be read, a long-lived token that bills another account — so its head names all three, never «expiry» alone
   pool: i18nKey('Account pool'),
   jobs: i18nKey('Background Work'),
   channels: i18nKey('Channels'),
