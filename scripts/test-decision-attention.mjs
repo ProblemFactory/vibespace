@@ -54,6 +54,7 @@ const now = () => clock;
 const got = [];
 let inflight = 0, maxIn = 0;
 let holdAt = 0, holdP = null, heldNow = false;   // r2988: the call numbered `holdAt` is HELD on `holdP` (a promise) — its flight a state, never a 40 ms window
+let holdAll = null, heldCount = 0;   // r5012: while `holdAll` stands EVERY call waits on it (section ⑩'s window, placed — never load); heldCount = the calls sitting there
 const recordPart = (input) => String(input).split('———').pop();
 // the judge's request body is a ONE-SHOT stream (lane judge-one-shot-body) — a fake reads it like the wire does
 const bodyText = (init) => (typeof init.body === 'string' ? init.body : new Response(init.body).text());
@@ -62,6 +63,7 @@ async function fakeFetch(url, opts) {
   const raw = await bodyText(opts), body = JSON.parse(raw);
   got.push({ url, body, raw, auth: opts.headers.authorization });
   if (holdP && got.length === holdAt) { heldNow = true; try { await holdP; } finally { heldNow = false; } }   // r4310: the hold's own fact
+  if (holdAll) { heldCount++; try { await holdAll; } finally { heldCount--; } }   // r5012: the whole window held
   await sleep(40);
   inflight--;
   const hot = /URGENT/.test(recordPart(body.input));
@@ -347,41 +349,107 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
       };
     },
   });
-  const dataDir = path.join(ROOT, 'facts');
-  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
   const acct = (id, kind, label) => ({ id, kind, label, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: true, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null });
-  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acct('chat', 'chatx', 'Team chat'), acct('mail1', 'mailx', 'Work mail'), acct('mail2', 'mailx', 'Old mail')] }));
   const registry = CH.createChannelRegistry();
   registry.register(mod('chatx', null));
   registry.register(mod('mailx', 'mail'));
   // the at-you / replied / direct facts claim those rows on the first screen: off here, so the judge sees them (preset "judge only")
   for (const r of ['at-you', 'replied', 'direct']) settings[`channels.attention.rule.${r}`] = false;
-  const decision = decisionEngine(dataDir);
-  const eng = ENG.create({ dataDir, registry, env: {}, now, broadcast: () => { }, serverSetting: (k) => settings[k], liveSessions: () => [], deliver: null, log: quiet, decisionEngine: decision });
-  for (const a of ['chat', 'mail1', 'mail2']) await eng.pass(a, { force: true });
-  await eng.markRead('chat', 'ops', CHAT.get('ops').recs[9].at);   // the owner read up to line 9 ⇒ 20 unread
-  const n0 = got.length;
-  eng.digest();
-  await idle(eng);
-  const mine = got.slice(n0);
-  const byTitle = (t) => mine.find((g) => recordPart(g.body.input).includes(`title: ${t}\n`));
+  // r5012 (主开发) — THE COUNT IS EXACT, OVER EACH WORLD's WHOLE LIFE (the thing counted is the paid judge's calls, and the judge's
+  // ASKS: a memo answer is an ask too — a row asked twice with unchanged facts costs no call, so the asks are counted beside the calls).
+  // Each world is fresh (its own data folder and decision engine), so every call after n0, taken BEFORE its first pass, is its own.
+  // Each pass's own broadcast queues its rows (channels-engine notify → digest with keys → attention.note) and the drain's kick
+  // (KICK_MS) judges them whenever it fires: on a loaded machine before the leg's own digest — the sighting at 35992274a (the UTC
+  // zone): 7 rows judged, 4 counted, because the release took its count base after the passes and the mark. TWO PLACED WORLDS:
+  //   · THE CONTENT WORLD: the attention switch (the plugin's own setting) is OFF while the passes and the mark land, ON for the
+  //     leg's digest — nothing is queued before it, so every row is judged in ONE scan over the whole index (the facts lines read)
+  //   · THE EARLY WORLD (the sighting's road, every run): the vendor holds every call while `holdAll` stands; the leg waits on the
+  //     FACT that the chat pass's four rows are queued and its first calls sit on the hold; the hold opens after the leg's digest.
+  //     Its scan began before the mail passes landed, so its facts lines are not read here (the scan's facts are the index's at its
+  //     first call — said to 主开发 as a product find); its COUNT is read, and the release's count base, red.
+  // WHICH ROW MAY BE ASKED TWICE, AND WHY: only Ops room — the mark moves its read line, so its facts truly change between two asks.
+  // In both worlds it is asked ONCE, after the mark (the content world asks nothing before it; the early world holds the three chat
+  // rows ahead of it, and the drain asks a row as it is now): each world's exact count is 7 asks, 7 calls, each row once.
+  const TITLES10 = ['Ops room', 'Launch', 'Review', 'Ada K', 'Re: licensing', '[Action Required] Mark AI agent OAuth clients', 'Re: [Action Required] Mark AI agent OAuth clients'];
   const factsOf = (g) => { const m = /\[record\]\nfacts: ([^\n]*)\n/.exec(String(g && g.body.input)); return m ? m[1] : null; };
-  ok(mine.length === 7 && mine.every((g) => factsOf(g) !== null && recordPart(g.body.input).startsWith('\n\n[record]\nfacts: ')), `all 7 rows judged, each record's FIRST line is its facts line (${mine.length} calls)`, mine.map((g) => recordPart(g.body.input).slice(0, 90)));
-  const F = Object.fromEntries(['Ops room', 'Launch', 'Review', 'Ada K', 'Re: licensing'].map((t) => [t, factsOf(byTitle(t))]));
-  const notices = mine.filter((g) => /Action Required/.test(recordPart(g.body.input)));
-  ok(/^addressed: no mention of the reader; kind: a group; .*20 messages since the reader last read, 3\d min ago$/.test(F['Ops room']), '"Ops room": no mention, a group, 20 messages since the read line (markRead at line 9)', F['Ops room']);
-  ok(F.Launch.startsWith('addressed: @-mentioned the reader; kind: a group') && F.Review.startsWith('addressed: a reply to the reader\'s message; kind: a group; the reader last spoke here 20 min ago') && F['Ada K'].startsWith('addressed: a direct message; kind: a direct message'), 'an @ of the owner (the at-you rule\'s predicate), a reply to the owner\'s message (+ when they last spoke), a direct message', F);
-  ok(notices.length === 2 && notices.every((g) => factsOf(g).includes('kind: an email thread') && factsOf(g).includes('the same message reached 2 of the reader\'s inboxes')) && notices.filter((g) => factsOf(g).includes('an automated or bulk sender (notification)')).length === 1, 'the notice in BOTH mail accounts (19 min apart, one subject with "Re:"): "the same message reached 2 of the reader\'s inboxes"; the copy whose headers said so: "an automated or bulk sender (notification)"', notices.map(factsOf));
-  ok(notices.every((g) => recordPart(g.body.input).includes('You are receiving this') && !recordPart(g.body.input).includes('©') && !recordPart(g.body.input).includes('Unsubscribe')) && !recordPart(byTitle('Re: licensing').body.input).includes('QUOTED-TAIL') && !/wrote:|Partnerships/.test(recordPart(byTitle('Re: licensing').body.input)), 'mail bodies are trimmed before the cut: the notice\'s footer, the thread\'s signature and quoted reply are gone; the notice\'s opening line stays');
-  const ops = recordPart(byTitle('Ops room').body.input).split('body: ')[1].split('\n');
-  ok(ops[0] === 'userR Q: ops line 29: the quota for next week' && ops.filter((l) => /^(userR Q|Kato Y): ops line/.test(l)).length === 12 && ops.includes('(8 earlier unread messages omitted)') && !ops.some((l) => /ops line [0-9]:/.test(l)), 'the body = what the owner has not read: the 12 newest past the read line NEWEST FIRST + "(8 earlier unread messages omitted)" — nothing at or before the read line', ops.slice(0, 2).concat(ops.slice(-2)));
+  /** the world's calls by row: each title's calls, the rows never judged (by name), each row's facts from its LAST call (as it is now) */
+  const factsTable = (calls) => {
+    const per = Object.fromEntries(TITLES10.map((t) => [t, calls.filter((g) => recordPart(g.body.input).includes(`title: ${t}\n`))]));
+    const missing = TITLES10.filter((t) => !per[t].length);
+    const last = (t) => (per[t].length ? per[t][per[t].length - 1] : null);
+    return { per, missing, last, F: Object.fromEntries(TITLES10.map((t) => [t, factsOf(last(t)) || ''])), counts: Object.fromEntries(TITLES10.map((t) => [t, per[t].length])) };
+  };
+  const exactOnce = (T, calls) => calls.length === TITLES10.length && TITLES10.every((t) => T.counts[t] === 1);
+  const asksOf = (eng) => { const st = eng.attention.status(); return { calls: st.calls, memo: st.memo, refused: st.refused }; };
+  const asksExact = (a) => a.calls === TITLES10.length && a.memo === 0 && a.refused === 0;
+  const missingLine = (T) => (T.missing.length ? T.missing.map((t) => `the row «${t}» was never judged`).join('; ') : 'none missing');
+  const factsWorld = async (EM, tag, { early = false } = {}) => {
+    const dataDir = path.join(ROOT, tag);
+    fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acct('chat', 'chatx', 'Team chat'), acct('mail1', 'mailx', 'Work mail'), acct('mail2', 'mailx', 'Old mail')] }));
+    const decision = decisionEngine(dataDir);
+    const eng = EM.create({ dataDir, registry, env: {}, now, broadcast: () => { }, serverSetting: (k) => settings[k], liveSessions: () => [], deliver: null, log: quiet, decisionEngine: decision });
+    const n0 = got.length;
+    let openAll = null, placed = false, nBase = n0;
+    if (early) holdAll = new Promise((r) => { openAll = r; });
+    else plug = { enabled: true, config: { attention: false } };   // the content world: nothing queued before the leg's digest
+    try {
+      await eng.pass('chat', { force: true });
+      if (early) placed = await until(() => { const st = eng.attention.status(); return heldCount > 0 && heldCount === st.inFlight && st.inFlight + st.queued === 4; },
+        () => { const st = eng.attention.status(); return `${tag}: the chat pass's own four rows queued, its first calls sitting on the hold (${heldCount} held, ${st.inFlight} in flight, ${st.queued} queued)`; });
+      for (const a of ['mail1', 'mail2']) await eng.pass(a, { force: true });
+      await eng.markRead('chat', 'ops', CHAT.get('ops').recs[9].at);   // the owner read up to line 9 ⇒ 20 unread
+      if (!early) { placed = got.length === n0 && eng.attention.status().queued === 0 && eng.attention.status().inFlight === 0; plug = { enabled: true, config: { attention: true } }; }
+      nBase = got.length;   // ← where the release took its count base: after the passes and the mark
+      eng.digest();
+    } finally { if (early) { holdAll = null; openAll(); } plug = { enabled: true, config: { attention: true } }; }
+    await idle(eng);
+    const mine = got.slice(n0);
+    return { eng, dataDir, placed, mine, afterBase: got.length - nBase, asks: asksOf(eng), T: factsTable(mine) };
+  };
+  const W = await factsWorld(ENG, 'facts');
+  const eng = W.eng, dataDir = W.dataDir, mine = W.mine, T = W.T, F = T.F;
+  const judged7 = exactOnce(T, mine) && asksExact(W.asks) && T.missing.length === 0;
+  ok(W.placed && exactOnce(T, mine) && asksExact(W.asks), `THE COUNT, EXACT over the content world (r5012): ${TITLES10.length} asks, ${TITLES10.length} calls, each row judged exactly ONCE — nothing queued before the leg's digest; Ops room the one row whose facts change at the mark, asked once, after it (${mine.length} calls; asks ${JSON.stringify(W.asks)})`, T.counts);
+  ok(T.missing.length === 0, `every row of the world judged — ${missingLine(T)}`);
+  ok(mine.length > 0 && mine.every((g) => factsOf(g) !== null && recordPart(g.body.input).startsWith('\n\n[record]\nfacts: ')), `each record's FIRST line is its facts line (${mine.length} calls)`, mine.map((g) => recordPart(g.body.input).slice(0, 90)));
+  {
+    const E = await factsWorld(ENG, 'facts-early', { early: true });
+    ok(E.placed && exactOnce(E.T, E.mine) && asksExact(E.asks), `THE COUNT, EXACT over the EARLY world (the sighting's road, placed): ${TITLES10.length} asks, ${TITLES10.length} calls, each row once — the chat pass's three rows judged on the drain's own kick (held), Ops room behind them, asked once after the mark (${E.mine.length} calls; asks ${JSON.stringify(E.asks)})`, E.T.counts);
+    ok(E.afterBase < TITLES10.length, `RED (the release's count base, after the passes and the mark, in the early world): it counts ${E.afterBase} of the world's ${E.mine.length} calls — the held chat calls are outside it, EVERY run`, { afterBase: E.afterBase, all: E.mine.length });
+  }
+  const notices = TITLES10.filter((t) => /Action Required/.test(t)).map((t) => T.last(t)).filter(Boolean);
+  ok(/^addressed: no mention of the reader; kind: a group; .*20 messages since the reader last read, 3\d min ago$/.test(F['Ops room']), '"Ops room": no mention, a group, 20 messages since the read line (markRead at line 9)', F['Ops room'] || missingLine(T));
+  ok(F.Launch.startsWith('addressed: @-mentioned the reader; kind: a group') && F.Review.startsWith('addressed: a reply to the reader\'s message; kind: a group; the reader last spoke here 20 min ago') && F['Ada K'].startsWith('addressed: a direct message; kind: a direct message'), 'an @ of the owner (the at-you rule\'s predicate), a reply to the owner\'s message (+ when they last spoke), a direct message', T.missing.length ? missingLine(T) : F);
+  ok(notices.length === 2 && notices.every((g) => factsOf(g).includes('kind: an email thread') && factsOf(g).includes('the same message reached 2 of the reader\'s inboxes')) && notices.filter((g) => factsOf(g).includes('an automated or bulk sender (notification)')).length === 1, 'the notice in BOTH mail accounts (19 min apart, one subject with "Re:"): "the same message reached 2 of the reader\'s inboxes"; the copy whose newest message carries the automated fact says it', T.missing.length ? missingLine(T) : notices.map(factsOf));
+  // THE NEVER-CLAUSES (r5012): read only when the product could have acted — the seven rows judged; else each says it was NOT READ
+  const NOT_READ = (what) => ok(false, `NOT READ: ${what} — the ${TITLES10.length} rows were not all judged once (${missingLine(T)}; ${mine.length} calls)`);
+  const lic = T.last('Re: licensing'), opsCall = T.last('Ops room');
+  if (judged7) ok(notices.every((g) => recordPart(g.body.input).includes('You are receiving this') && !recordPart(g.body.input).includes('©') && !recordPart(g.body.input).includes('Unsubscribe')) && !recordPart(lic.body.input).includes('QUOTED-TAIL') && !/wrote:|Partnerships/.test(recordPart(lic.body.input)), 'mail bodies are trimmed before the cut: the notice\'s footer, the thread\'s signature and quoted tail never ride');
+  else NOT_READ('the mail bodies carry no footer, signature or quoted tail');
+  const ops = judged7 ? recordPart(opsCall.body.input).split('body: ')[1].split('\n') : [];
+  if (judged7) ok(ops[0] === 'userR Q: ops line 29: the quota for next week' && ops.filter((l) => /^(userR Q|Kato Y): ops line/.test(l)).length === 12 && ops.includes('(8 earlier unread messages omitted)') && !ops.some((l) => /ops line [0-9]:/.test(l)), 'the body = what the owner has not read: the 12 newest past the read line NEWEST FIRST + "(8 earlier unread messages omitted)" — nothing at or before the read line', ops.slice(0, 4));
+  else NOT_READ('Ops room\'s body holds nothing at or before the read line');
   const NAMES = ['userR', 'Kato', 'Will R', 'Ada K', 'Owner Person', 'Workspace Team', 'Ann L', 'me1', 'u2', 'u5', 'mail1', 'mail2', 'workspace-noreply', 'Ops room', 'Launch', 'licensing'];
-  const leaked = mine.flatMap((g) => NAMES.filter((x) => factsOf(g).includes(x)));
-  ok(leaked.length === 0, 'CENSUS: no facts line names a person, an account, an id, an address or a title (16 needles over 7 lines)', leaked);
+  const leaked = mine.flatMap((g) => NAMES.filter((x) => (factsOf(g) || '').includes(x)));
+  if (judged7) ok(leaked.length === 0, 'CENSUS: no facts line names a person, an account, an id, an address or a title (16 needles over 7 lines)', leaked);
+  else NOT_READ('no facts line names a person, an account, an id, an address or a title');
   ok(eng.attention.status().scans === 1, `the scan's facts (the duplicate-inbox map over the live index) were built ONCE for the 7 rows (${eng.attention.status().scans})`);
-  ok(mine.every((g) => g.body.questions.length === 8 && String(g.body.input).includes('Rubric v2 — ') && !String(g.body.input).includes(M.RUBRIC.clauses[0].instructions)), 'with the person\'s block: 8 questions; the [rubric] part is one line — no question\'s instructions ride twice');
+  ok(mine.length > 0 && mine.every((g) => g.body.questions.length === 8 && String(g.body.input).includes('Rubric v2 — ') && !String(g.body.input).includes(M.RUBRIC.clauses[0].instructions)), 'with the person\'s block: 8 questions; the [rubric] part is one line — no question\'s instructions ride twice');
   const journal = fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.use === 'attention' && r.outcome === 'ok');
   ok(journal.length === 7 && journal.every((r) => r.p === 0.22 && r.rubric === 2), 'each journal line carries p (needs_now, 2 decimals) and rubric 2 — the next quality check needs no memo join', journal.map((r) => r.p));
+  // RED (r5012, the fourth): a copy whose note() queues a row again while it is IN FLIGHT (section ⑨'s copy, the guard removed) judges the
+  // three held chat rows TWICE with unchanged facts — the exact count reads red (the paid judge's double calls are seen)
+  {
+    const D = await factsWorld(engMut3, 'facts-double', { early: true });
+    ok(D.placed && !asksExact(D.asks) && D.asks.calls + D.asks.memo > TITLES10.length, `RED (a copy that queues a row again while it flies, the early road): rows asked twice with unchanged facts — the second ask is the memo's (no paid call), and the exact count of ASKS reads ${D.asks.calls + D.asks.memo}, red`, { asks: D.asks, calls: D.T.counts });
+  }
+  // RED (c): a world where one row never reaches the judge — the planted calls without «Launch»: the table names it, nothing crashes
+  {
+    let named = null, threw = null;
+    try { const P = factsTable(mine.filter((g) => !recordPart(g.body.input).includes('title: Launch\n'))); named = { line: missingLine(P), once: exactOnce(P, mine.filter((g) => !recordPart(g.body.input).includes('title: Launch\n'))), launch: P.F.Launch.startsWith('addressed: @-mentioned') }; } catch (e) { threw = e && e.message; }
+    ok(!threw && !!named && named.line === 'the row «Launch» was never judged' && named.once === false && named.launch === false, 'CONTROL: a row with no call is a NAMED red line («the row «Launch» was never judged»), never a crash on its absent facts', { named, threw });
+  }
   // an EMPTY block: 7 questions, no `matters`, the [userBlock] part absent; the memo key moved (the block hash) ⇒ judged again
   const blockWas = settings['decision.attentionBlock'];
   settings['decision.attentionBlock'] = '';
