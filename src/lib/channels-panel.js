@@ -110,14 +110,19 @@ function heldName(file) {
 }
 function purgeLeftLine(p) {
   // B-360d r4666 (2): a row whose ONLY note is the poll times says what is not erased yet and that Try again asks for it now
-  const stampsOnly = Array.isArray(p.left) && p.left.length === 1 && p.left[0] === 'stamps';
-  const purgeNote = noteLine('chan-purge-left-note', stampsOnly ? t("The removed account {name}: its conversations' fetch times are not erased from disk yet — Try again asks for it now", { name: removedName(p) }) : t('The removed account {name}: {left} could not be removed from disk — nothing removes it by itself', { name: removedName(p), left: purgeLeftText(p.left) }), { warn: true });
+  // r4995: the poll times have their own sentence beside the folders' (they DO leave by a landing or a start); while their file is
+  // held (unread at this start) the sentence says so and promises no ask
+  const folders = Array.isArray(p.left) ? p.left.filter((k) => k !== 'stamps') : p.left, owesStamps = Array.isArray(p.left) && p.left.includes('stamps');
+  const stampsWords = p.stampsHeld ? t("The removed account {name}: its conversations' fetch times are not erased from disk yet — their file could not be read at this start; they are erased after the next start that reads it", { name: removedName(p) }) : t("The removed account {name}: its conversations' fetch times are not erased from disk yet — Try again asks for it now", { name: removedName(p) });
+  const foldersWords = t('The removed account {name}: {left} could not be removed from disk — nothing removes it by itself', { name: removedName(p), left: purgeLeftText(folders) });
+  const purgeNote = noteLine('chan-purge-left-note', owesStamps && Array.isArray(folders) && !folders.length ? stampsWords : owesStamps ? foldersWords + ' ' + stampsWords : foldersWords, { warn: true });
   let busy = null;
   purgeNote.appendChild(btn(t('Try again'), () => {
     if (busy) return;
     busy = (async () => {
       const r = await fetchJson(`/api/channels/purge-left/${encodeURIComponent(p.id)}/retry`, { method: 'POST' });
       if (!r || r.error) showToast(routeErrorText(r), { type: 'error' });
+      else if (r.done && r.stampsHeld) showToast(t("The removed account {name}: its conversations' fetch times are not erased from disk yet — their file could not be read at this start; they are erased after the next start that reads it", { name: removedName(p) }), { type: 'warn', duration: 9000 });   // r4995: the held family's own sentence
       else if (r.done && r.journalOwed) showToast(t('Removed "{name}" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write', { name: removedName(p) }), { type: 'warn', duration: 9000 });   // B-360d (r4642 (1)): its poll stamps not off the disk yet — the first removal's own words
       else if (r.done) showToast(t('The rest of the removed account {name} was removed from disk', { name: removedName(p) }));
       else showToast(t('{left} of the removed account {name} could still not be removed — it stays listed', { name: removedName(p), left: purgeLeftText(r.purgeLeft) }), { type: 'warn', duration: 9000 });
