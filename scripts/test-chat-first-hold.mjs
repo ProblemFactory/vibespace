@@ -306,7 +306,7 @@ const NOTCH_BEFORE = `(async () => {
       const seq0 = (v._traceRing || []).length ? v._traceRing[v._traceRing.length - 1].seq : 0, pos = (e) => Math.round(e.getBoundingClientRect().top - list.getBoundingClientRect().top);
       K.ck = ck; K.p0 = pos(K.held); K.q0 = pos(ck);
       requestAnimationFrame(() => {   // the frame of the growth
-        if (!K.held.isConnected || !R.isConnected) { K.why = 'the card read before the notch or the row was detached before the growth'; K.armed = 0; return; }
+        if (!K.held.isConnected || !R.isConnected) { K.detached = (K.detached || 0) + 1; K.why = 'the card read before the notch or the row was detached before the growth (' + K.detached + ' time(s))'; K.armed = 0; return; }
         K.dt = Math.round(performance.now() - t0); const h0 = R.offsetHeight;
         const pad = document.createElement('div'); pad.style.height = K.px + 'px'; R.appendChild(pad); K.g = R.offsetHeight - h0;
         requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { K.p1 = K.held.isConnected ? pos(K.held) : null; K.q1 = ck.isConnected ? pos(ck) : null;
@@ -513,19 +513,27 @@ const LINE_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.arm
   const skip = (why) => { R.step = -1; R.skip = 1; R.why = why; return true; };
   const red = (why) => { R.step = -1; R.why = why; return true; };   // reachable by the product: a PRECONDITION NOT MET, red, saying what it met (r5148)
   const endWhy = () => { const e = (v._traceRing || []).filter((x) => x.tag === 'gapUp:settleEnd').pop(); return e ? String(e.why) : 'no settleEnd in the trace ring'; };
+  // THE WATCH's CHECK STANDS IN FRONT OF EVERY SKIP (主开发 r5223): every way the product tears the slab down (its drop, the reset after a
+  // jump, a teleport) also ends the watch, so a row gone with a watch the product ended reads RED with its end reason; the named skip is
+  // for a redraw under a live watch only. The watch's ceiling (8 s from the insert) is out of reach here: the leg acts about 1.5 s after
+  // the landing and again 400 ms later, and the driver gives up after 4 s, so a watch ended here is the product's own end, by its name
   if (R.step === 0 && !R.natural && now - R.landedAt < 1500) return false;
-  if (R.step === 0) { const A = topCard(), r2 = above(A), B = above(r2), r1 = above(B);
+  if (R.step === 0) { if (!v._gapSettle) return red('the watch had ended before the first scroll (its own end: ' + endWhy() + ')');
+    const A = topCard(), r2 = above(A), B = above(r2), r1 = above(B);
     if (!A || !r2 || !B || !r1) return skip('fewer than three rows above the card at the top (' + [r2, B, r1].filter(Boolean).length + ')');
-    if (!v._gapSettle) return red('the watch had ended before the first scroll (its own end: ' + endWhy() + ')');
     R.L0 = list.scrollTop; R.A = A; R.r2 = r2; R.B = B; R.r1 = r1;
     list.scrollTop = B.offsetTop + Math.min(8, Math.floor(B.offsetHeight / 2)); R.bAt = B.offsetTop - list.scrollTop; R.step = 1; R.at = now; return false; }   // notch 1: B to the top; the watch records it
   if (R.step === 1) { if (now - R.at < 400) return false;
+    if (R.dropSlab && !R.dropped) { R.dropped = 1; v._dropGapSlab('leg: the red copy, the slab dropped between the two scrolls'); }   // THE RED COPY's FAULT (r5223), placed
+    if (!v._gapSettle) return red('the watch had ended before the second scroll (its own end: ' + endWhy() + ')');
     const L1 = list.scrollTop, B = topCard();
     const gone = ['A', 'r2', 'B', 'r1'].filter((k) => !R[k].isConnected);
-    if (gone.length) return skip('an identity is gone: ' + gone.join(', ') + ' detached or drawn again between the two scrolls');   // a row re-rendered: the scene is not there to judge
-    if (!v._gapSettle) return red('the watch had ended before the second scroll (its own end: ' + endWhy() + ')');
-    if (B !== R.B) return red('the card B is no longer the card at the top after its wait: it moved ' + Math.round(R.B.offsetTop - L1 - R.bAt) + ' px in the view (the card at the top is ' + (B ? 'another' : 'none') + ')');
-    if (above(B) !== R.r1 || above(R.A) !== R.r2 || above(R.r2) !== B) return skip('a row was drawn between the four rows taken (their order no longer A, R2, B, R1)');
+    if (gone.length) return skip('an identity is gone under a live watch: ' + gone.join(', ') + ' detached or drawn again between the two scrolls');   // a row re-rendered: the scene is not there to judge
+    if (B !== R.B) {   // read once more at the painted frame before calling it red (a late settle in the gap before a frame is not a move: r5080)
+      if (!R.reread) { R.reread = 1; requestAnimationFrame(() => setTimeout(() => { R.rereadDone = 1; }, 0)); return false; }
+      if (!R.rereadDone) return false;
+      return red('the card B is no longer the card at the top after its wait, read at the painted frame: it moved ' + Math.round(R.B.offsetTop - L1 - R.bAt) + ' px in the view (B ' + (isRow(R.B) ? 'shown' : 'folded or hidden') + '; the card at the top is ' + (B ? 'another' : 'none') + ')'); }
+    if (above(B) !== R.r1 || above(R.A) !== R.r2 || above(R.r2) !== B) return skip('a row drawn between the four rows taken, or a taken row folded or hidden, under a live watch (their order no longer A, R2, B, R1)');
     list.scrollTop = R.r1.offsetTop - 1; const L2 = list.scrollTop;                       // the second notch's scroll: R1 just into view …
     R.lines = [Math.round(R.L0), Math.round(L1), Math.round(L2)];
     if (!(L2 < L1 && R.r1.offsetTop >= L2 && R.r1.offsetTop + R.r1.offsetHeight <= Math.min(L1, B.offsetTop) && R.r2.offsetTop >= B.offsetTop + B.offsetHeight && R.r2.offsetTop + R.r2.offsetHeight <= R.A.offsetTop))
@@ -600,13 +608,13 @@ const WINDOW_UNTIL = (kind) => `(() => { const R = window.__ral; if (!R) return 
     const painted = () => {   // THE PAINTED FRAME before the growth: what the person sees, and the rows the scroll brought in
       ck = top(list, list.getBoundingClientRect().top); const rows = [];
       if (ck && ck !== held && held.isConnected) for (let el = ck.nextElementSibling; el && el !== held; el = el.nextElementSibling) { const cl = el.classList; if (cl && cl.contains('chat-msg') && !cl.contains('chat-run-header') && !cl.contains('chat-run-footer') && el.offsetParent !== null && el.offsetHeight >= 8) rows.push(el); }
-      if (!rows.length) { R.step = -1; R.why = 'no row the scroll brought in between the card at the top and the card read before it'; return; }
+      if (!rows.length) { v._trace = tr; R.step = -1; R.why = 'no row the scroll brought in between the card at the top and the card read before it'; return; }
       row = rows[0]; R.between = rows.length; hP = pos(held); cP = pos(ck); R.step = 2;
       ${kind === 'coincide' || kind === 'stopped' ? "pad(rows[rows.length > 1 ? 1 : 0]); R.lateAt = Math.round(performance.now() - t0);   // THE COINCIDENCE: in the gap between this paint and the frame of the growth; nothing read after it" : ''}
       requestAnimationFrame(grow);
     };
     const grow = () => {   // the frame of the growth
-      if (!held.isConnected || !ck.isConnected || !row.isConnected) { R.step = -1; R.why = 'the card read before the scroll, the card at the top or the row was detached before the growth'; return; }
+      if (!held.isConnected || !ck.isConnected || !row.isConnected) { v._trace = tr; R.step = -1; R.why = 'the card read before the scroll, the card at the top or the row was detached before the growth'; return; }
       ${kind === 'stopped' ? "v._stopGapSettle('leg: the painted measure control'); list.style.overflowAnchor = 'none';   // nothing answers" : ''}
       plant(v._gapSettle); R.readsAtGrowth = R.plantReads;   // the plant placed again where the product reads, at the growth
       R.dt = Math.round(performance.now() - t0); const h0 = pos(held), r0 = row.offsetHeight;   // h0: the in-frame starting point of before
@@ -627,6 +635,7 @@ const BLIND = {
   'edge placed, control': EDGE_PLANTED(true),
   'line placed': LINE_PLANTED(false),
   'line placed, control': LINE_PLANTED(true),
+  'line placed, slab dropped': withPlant(`(() => { window.__ral.dropSlab = 1; return { placed: 'the slab dropped between the two scrolls (the red copy)' }; })()`),
   'stamp placed': STAMP_PLANTED(false),
   'stamp placed, control': STAMP_PLANTED(true),
   'race placed': RACE_PLANTED(false),
@@ -913,9 +922,9 @@ const searchScene = async (tail) => {
     edgeScene(eC) && Math.abs(eC.after.topMoved) > NOTCH_TOL_PX && eC.after.read === true, JSON.stringify(eC.after));
   // LINE 960's FOLLOW (r4397 (2)): ONE READER — the settle's own answer, in the task of a notch the frame has not recorded
   const LN = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, why: R.why || null, skip: !!R.skip, lines: R.lines || null, bMoved: R.bMoved ?? null, alive: !!R.alive } : null; })()';
-  const lineHold = async (label, control) => {
+  const lineHold = async (label, control, blind) => {
     globalThis.__firstNotchUntil = LINE_UNTIL;
-    try { return await firstHold(label, control ? 'line placed, control' : 'line placed', { after: LN, cadence: 'shortHold' }); } finally { globalThis.__firstNotchUntil = null; }
+    try { return await firstHold(label, blind || (control ? 'line placed, control' : 'line placed'), { after: LN, cadence: 'shortHold' }); } finally { globalThis.__firstNotchUntil = null; }
   };
   const ln = await lineHold('the settle answers in the task of a notch, before the watch records it', false), lnc = await lineHold('the settle answers in the task of a notch, before the watch records it, control', true);
   const lnScene = (h) => !!h.after && h.after.landed === 1 && h.after.step === 3 && h.after.alive && h.after.bMoved != null;
@@ -927,6 +936,11 @@ const searchScene = async (tail) => {
   };
   lnJudge(ln, "ONE READER: THE SETTLE's ANSWER IN THE TASK OF A NOTCH, BEFORE THE WATCH RECORDS IT (line 960's follow, r4397 (2))", `the answer reads the line as the frame would record it: the row above it answered, the row below it not — the card read before the latest notch keeps its place (it moved ${ln.after?.bMoved} px; ± ${NOTCH_TOL_PX}; the lines ${JSON.stringify(ln.after?.lines)})`, (a) => Math.abs(a.bMoved) <= NOTCH_TOL_PX);
   lnJudge(lnc, 'CONTROL', `the answer handed the view's top as its line (the record's line once old) ⇒ the row above the line read before the notch goes unanswered and that card moves by it (${lnc.after?.bMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red`, (a) => Math.abs(a.bMoved) > NOTCH_TOL_PX);
+  // THE RED COPY (主开发 r5223): the slab dropped by the product's own drop between the two scrolls — the leg reads RED by the watch's end,
+  // never a skip (the rows are gone with the watch)
+  const lnd = await lineHold('the settle answers in the task of a notch, the slab dropped between the scrolls (the red copy)', false, 'line placed, slab dropped');
+  check(`§4h RED COPY: the slab dropped between the two scrolls ⇒ ONE READER reads RED by the watch's own end, not a skip (${lnd.after?.skip ? 'a SKIP: ' : ''}${lnd.after?.why})`,
+    !!lnd.after && lnd.after.step === -1 && !lnd.after.skip && /the watch had ended before the second scroll \(its own end: gapDrop\)/.test(String(lnd.after.why)), JSON.stringify(lnd.after));
   // LINE 960's FOLLOW (r4397 (3)): a stamped write whose re-seed is still queued is recorded — the watch's card stays the landing's own
   const SP = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, why: R.why || null, same: R.same ?? null, wrote: R.wrote ?? null, alive: !!R.alive } : null; })()';
   const stampHold = async (label, control) => {
