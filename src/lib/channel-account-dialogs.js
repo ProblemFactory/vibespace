@@ -1001,7 +1001,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
 /** r2878 + r2943 (B-92fc): what is left of a removed account's local copy, by kind, in the person's words (none named = its local copy) —
  *  the removal's toast, the Channels panel's line and the add's note read the same words */
 export function purgeLeftText(left) {
-  const KINDS = { logs: tr('its messages'), files: tr('its fetched files'), own: tr('its pictures and memos') };
+  const KINDS = { logs: tr('its messages'), files: tr('its fetched files'), own: tr('its pictures and memos'), stamps: tr("its conversations' fetch times") };   // stamps: B-360d r4666 (2)
   return Array.isArray(left) && left.length ? left.map((k) => KINDS[k] || tr('its local copy')).join(', ') : tr('its local copy');
 }
 /** r2943 (B-92fc, L3): an account added under the id of a removed one whose local copy was not all removed — said ONCE, at the add */

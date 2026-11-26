@@ -5847,6 +5847,8 @@ export default {
   "its messages": "そのメッセージ",
   "its fetched files": "取得したファイル",
   "its pictures and memos": "その画像とメモ",
+  "its conversations' fetch times": "その会話の取得時刻",
+  "The removed account {name}: its conversations' fetch times are not erased from disk yet — Try again asks for it now": "削除したアカウント（{name}）：その会話の取得時刻はまだディスクから消えていません — 「再試行」で今すぐもう一度依頼します",
   "Removed \"{name}\" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write": "「{name}」を削除しました — 保存データの一部はまだディスクから消えていません。ディスクが次の書き込みを受け付けたときに消えます",
   "reach: {who} may see the whole account": "閲覧権限：{who} がアカウント全体を閲覧可能",
   "outbox: {n} proposal(s) awaiting approval": "Outbox：承認待ちの提案 {n} 件",

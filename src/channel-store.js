@@ -801,7 +801,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // B-360d (r4642, must 2 + (2)): THE PURGE's ONE DOOR — the purges asked so far; the asks the bytes being made cover (taken when they
   // are MADE); the asks a LANDED compaction covered. A purge's «done» is true only once bytes made after its ask have landed
   let stampsPurgeAsks = 0, stampsMadeAfter = 0, stampsLandedAfter = 0;
+  const stampsMarked = new Map();   // r4666 (2): the purge mark's ids owing their poll times' erasure → the ask whose LANDING ends that note
   let stampsHanded = false;   // r4676: bytes handed to the writer that have no answer yet (landed or failed) — a thread lost in flight never answers
+  // (r4892: a stale true — after a blocked family's turn, a stopped writer, a parked job a sync flush left — acts only with the compaction
+  // OWED and nothing dirty: a make whose answer never came, where making the bytes again is the right act; every owe sets dirty too)
   let stampsSideBytes = (() => { try { return fs.statSync(stampsFile).size; } catch { return -1; } })();   // -1: no side file (its first write once the journal holds a line)
   const stampStats = { writes: 0, healed: 0, lostAtLoad: 0, compactions: 0, slices: 0 };
   let journalFd = null, journalTorn = false, journalSaidAt = 0, journalWas = false;   // journalWas: a journal there at the start (or opened since)
@@ -3310,11 +3313,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  side file rewritten without the account's names, the journal folded down to the keys set since (none of the account's). It is
    *  the writer's own durable(): the store's NEXT write after this ask, urgent (its pace set aside), the process kept up until it
    *  lands; a compaction being made before the purge is begun again (its bytes may hold the names). → Promise<boolean> */
-  function stampsOwePurge() {
+  function stampsAskPurge() {   // the ask alone (r4666 (2): the start's road for the mark's names asks it without waiting) → its number
     stampsBuild = null;
     const ask = ++stampsPurgeAsks;
     stampSeq++; stampsDirty = true; stampsCompactNow = true; stampsCompactOwed = true;
     owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });
+    return ask;
+  }
+  function stampsOwePurge() {
+    const ask = stampsAskPurge();
     // r4642 (2): the writer's answer alone is not the door — a family held between this ask and its turn writes nothing (produce
     // answers null, «equal to the disk») and a write lost with its thread is settled the same way: true only when bytes MADE after
     // this ask LANDED. BOTH gates are needed: a synchronous make during an older write's flight can carry a newer count to that older
@@ -3354,13 +3361,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (psLoad.blocked || ixLoad.blocked) { stampsBuild = null; stampsCompactOwed = false; warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixLoad.blocked)); return null; }
     if (o && o.sync) {   // close, the exit, a suite's flush: the whole file in this turn (a compaction being made is begun again whole)
       if (stampsBuild) { stampsBuild = null; stampsDirty = true; }
-      if (!stampsDirty) { stampsCompactOwed = false; return null; }
+      if (!stampsDirty && !(stampsCompactOwed && stampsHanded)) { stampsCompactOwed = false; return null; }   // r4892: the same guard — a thread lost in flight, then a close or the exit before the re-make
       return handed(wholeStamps());
     }
     if (stampsBuild && stampsBuild.ready != null) { const text = stampsBuild.ready; stampsBuild = null; return handed(text); }
     if (stampsBuild) return LATER;   // still being made, a slice a turn
-    // r4676 (r4666: the compaction STAYS owed): bytes HANDED that never got their answer — the writer's thread lost in flight; its
-    // requeue asks again with no onWritten — are made again, never answered «equal to the disk»
+    // r4676 (r4666: the compaction STAYS owed): bytes HANDED that never got their answer — the writer's thread lost in flight (the
+    // requeue marks the file dirty again; the handed bytes' answer never comes) — are made again, never answered «equal to the disk»
     if (!stampsDirty && !(stampsCompactOwed && stampsHanded)) { stampsCompactOwed = false; return null; }
     if (!stampsCompactOwed) return null;   // the writer asking on its own (a stray dirty): the side file is written ONLY when its compaction is owed (the bound, a failed line)
     stampsMadeNow();
@@ -3375,6 +3382,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!ok) { stampsDirty = true; stampsCompactOwed = true; return; }   // owed: the writer keeps it and retries (its failure said there) — the compaction stays OWED
     stampsLandedAfter = Math.max(stampsLandedAfter, stampsMadeAfter);
     stampsCompactOwed = false;
+    stampsMarkLanded();   // r4666 (2): the mark's poll-times notes this landing covers end — ONLY here
     stampStats.writes++; stampStats.compactions++;
     stampsSideBytes = stampsMadeBytes;
     foldJournal(stampSeq === stampsMadeSeq ? null : [...stampsSince]);   // cure r1 (C2): every line before the bytes is in the file just renamed; the keys set since are kept, one line each
@@ -3448,7 +3456,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // 主开发 r2878 → r2943 (round wv0o00cct, THE NEW SHAPE): THE PURGES NOT FINISHED — data/channels/purge-pending.json ({ v, ids: { <id>:
   // { at, left, codes } } }). It only REMEMBERS (L1): written before the record leaves (purgeBegin) and by each purge (what COULD NOT BE
   // REMOVED, by kind), read by the panel's line (pendingList) so the person is shown what is left and can press «Try again» (the remove
-  // road's purgeAgain). NOTHING removes an account's data at a start or on a timer. A small FAMILY under the store-read law (L4): «not
+  // road's purgeAgain). NOTHING removes an account's data at a start or on a timer — but for
+  // the ONE named exception (r4666 (2)): the poll times an entry notes owed («stamps») leave at a start, by its names only. A small FAMILY under the store-read law (L4): «not
   // there» = nothing pending; any other failed read, or bytes that do not parse, HOLD it — nothing is written over it, said once (the
   // held-file notice), read again by its hold and then taken in place
   const pendingFile = path.join(dir, 'purge-pending.json');
@@ -3461,6 +3470,56 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // mount_<id>, an account kind:hex's kind_hex): a name of that shape is an API log's folder, and no minted account id holds «_»
   const accountIdOk = (id) => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9@:+-]{0,79}$/.test(id) && !OWN_NAMES.has(id);
   const badSaid = new Set();
+  /** r4666 (2): THE MARK's POLL TIMES — a purge whose stamps answer is not «landed» notes «stamps» on the account's entry (beside the
+   *  folders left, its row on the panel with Try again); ONLY the landing of a compaction made after that purge's ask ends the note
+   *  (the entry ends when nothing is left). A held mark notes nothing (L4: never written over). */
+  function stampsMarkOwed(id, ask, name) {
+    if (pdLoad.blocked || !accountIdOk(id) || stampsLandedAfter >= ask) return;
+    stampsMarked.set(id, Math.max(stampsMarked.get(id) || 0, ask));
+    const was = pending.ids[id] || null;
+    if (was && !Array.isArray(was.left)) return;   // its purge still running (its entry «not known» until the purge's own mark write, which reads stampsMarked)
+    if (was && was.left.includes('stamps')) return;
+    const nm = markName(was && was.name) || name;
+    pending.ids[id] = { at: (was && was.at) || now(), left: [...(was ? was.left : []), 'stamps'], codes: { ...((was && was.codes) || {}), stamps: 'owed' }, ...(nm ? { name: nm } : {}) };
+    pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — ${id}'s poll times are noted owed in memory only`));
+  }
+  function stampsMarkLanded() {
+    if (!stampsMarked.size) return;
+    let changed = false;
+    for (const [id, ask] of [...stampsMarked]) {
+      if (ask > stampsLandedAfter) continue;
+      stampsMarked.delete(id);
+      const e = pending.ids[id];
+      if (pdLoad.blocked || !e || !Array.isArray(e.left) || !e.left.includes('stamps')) continue;
+      const left = e.left.filter((k) => k !== 'stamps'), codes = { ...(e.codes || {}) };
+      delete codes.stamps;
+      if (left.length) pending.ids[id] = { ...e, left, codes }; else delete pending.ids[id];
+      changed = true;
+      warn(`[channels] ${id}: the removed account's poll times left the disk (a compaction made after its purge landed)${left.length ? '' : ' — nothing of it is noted any more'}`);
+    }
+    if (changed) pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — the ended poll-times notes are ended in memory`));
+  }
+  // r4666 (2) LAW (a): AT A START the only poll times that leave are the names an entry notes owed for a purge the person asked for —
+  // never a key because its row or its account is missing or unread. A held mark notes nothing (its hold says so); a held stamps
+  // family or index drops nothing and is said; each noted account's keys leave memory and the compaction is asked at once
+  {
+    const noted = Object.entries(pending.ids || {}).filter(([id, e]) => accountIdOk(id) && e && Array.isArray(e.left) && e.left.includes('stamps')).map(([id]) => id);
+    // L2 + L3 (r4699): only while the accounts' records are READ, and never an id a record carries — an account added again under
+    // the id since its purge keeps its new stamps (L3 ends that entry when it is listed)
+    const recordsReadNow = !adLoad.held && !adLoad.blocked;
+    const hasRecord = (id) => ((ad && ad.adapters) || []).some((a) => a && a.id === id);
+    const owed = recordsReadNow ? noted.filter((id) => !hasRecord(id)) : [];
+    if (noted.length && !recordsReadNow) warn(`[channels] ${noted.length} removed account(s) owe their poll times' erasure, but the accounts' records are not read — no poll time leaves at this start (an id may be a live account's)`);
+    else if (owed.length && (psLoad.blocked || ixLoad.blocked)) warn(`[channels] ${owed.length} removed account(s) owe their poll times' erasure, but ${psLoad.blocked ? 'poll-stamps.json' : 'index.json'} is held — no poll time leaves at this start; they leave once it reads`);
+    else if (owed.length) {
+      const pres = owed.map((id) => `${id}/`);
+      let n = 0;
+      for (const k of [...stampMap.keys()]) if (pres.some((p) => k.startsWith(p))) { stampMap.delete(k); n++; }
+      const ask = stampsAskPurge();
+      for (const id of owed) stampsMarked.set(id, ask);
+      warn(`[channels] ${owed.length} removed account(s) noted owing their poll times: ${n} left memory at this start, the compaction asked now`);
+    }
+  }
   // L2: the accounts' records READ — not held, not blocked (a file that appeared since is HELD for the length of its read: tookAppeared);
   // a held read's empty stand-in is never «no record»
   const recordsRead = () => !adLoad.held && !adLoad.blocked;
@@ -3576,6 +3635,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // made, in flight or waiting on a retry: memory cannot tell what an older write still holds
     const stampsOnDisk = stampsSideBytes >= 0 || journalWas || journalFd !== null;
     const stampsGone = !(purgedStamps || stampsOnDisk) ? Promise.resolve(true) : (psLoad.blocked || ixLoad.blocked) ? Promise.resolve(false) : stampsOwePurge();
+    // r4666 (2): an answer that is not «landed» notes the poll times on the account's mark — the person's row with its Try again —
+    // until a compaction made after this purge's ask lands (a held family asks nothing now: the next ask's landing, a later life's)
+    const stampsAskOf = (purgedStamps || stampsOnDisk) && (psLoad.blocked || ixLoad.blocked) ? ++stampsPurgeAsks : stampsPurgeAsks;
+    const stampsNameOf = markName(pending.ids[adapterId] && pending.ids[adapterId].name);
+    stampsGone.then((ok) => { if (!ok) stampsMarkOwed(adapterId, stampsAskOf, stampsNameOf); }, () => stampsMarkOwed(adapterId, stampsAskOf, stampsNameOf));
     lruCache.delete(adapterId);
     lruDirty.delete(adapterId);
     lruRebuilding.delete(adapterId); lruUnfinished.delete(adapterId); lruAdmitted.delete(adapterId);   // r3279 (10): a rebuild in flight ends with the account
@@ -3627,7 +3691,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (pdLoad.blocked) markUnwritten = 'held';
     else {
       const was = pending.ids[adapterId] || null, name = markName(was && was.name);
-      if (left.length) pending.ids[adapterId] = { at: (was && was.at) || now(), left: left.map((x) => x.what), codes: Object.fromEntries(left.map((x) => [x.what, x.code])), ...(name ? { name } : {}) };
+      const owesStamps = !!(was && Array.isArray(was.left) && was.left.includes('stamps')) || (stampsMarked.get(adapterId) || 0) > stampsLandedAfter;   // r4666 (2): the poll times' note ends ONLY by its landing (an answer that came before this write is in stampsMarked)
+      const kinds = [...left.map((x) => x.what), ...(owesStamps ? ['stamps'] : [])];
+      if (kinds.length) pending.ids[adapterId] = { at: (was && was.at) || now(), left: kinds, codes: { ...Object.fromEntries(left.map((x) => [x.what, x.code])), ...(owesStamps ? { stamps: (was && was.codes && was.codes.stamps) || 'owed' } : {}) }, ...(name ? { name } : {}) };
       else delete pending.ids[adapterId];
       try { await pendingWrite(); } catch (e) { markUnwritten = (e && e.code) || 'error'; }
     }

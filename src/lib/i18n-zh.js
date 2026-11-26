@@ -5848,6 +5848,8 @@ export default {
   "its messages": "它的消息",
   "its fetched files": "它已获取的文件",
   "its pictures and memos": "它的头像和备忘",
+  "its conversations' fetch times": "它的会话获取时间",
+  "The removed account {name}: its conversations' fetch times are not erased from disk yet — Try again asks for it now": "已移除的账号（{name}）：它的会话获取时间尚未从磁盘抹去 —— 点「重试」立即再次请求",
   "Removed \"{name}\" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write": "已移除 \"{name}\" —— 它的部分已保存数据尚未从磁盘上抹去；磁盘接受下一次写入时会抹去",
   "reach: {who} may see the whole account": "可见性授权：{who} 可见整个账号",
   "outbox: {n} proposal(s) awaiting approval": "Outbox：{n} 条待审批的提议",
