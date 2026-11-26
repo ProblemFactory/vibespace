@@ -47,6 +47,7 @@ const PS = require('./plugin-settings.js'); // PURE: one settings table per buil
 const SB = require('./secret-box.js');       // the data dir's vault (a plugin's secret is its entry)
 const SR = require('./store-read.js');
 const HOLD = require('./store-read-hold.js');   // B-f276 family unit 1: plugins.json under the store-read law
+let noSyncSaid = false;   // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): plugins.json's file system with no sync at all is said once a run
 const PLUGINS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.plugins === undefined || (!!v.plugins && typeof v.plugins === 'object' && !Array.isArray(v.plugins)));
 
 // the verbs a declared capability obliges (the manager's relay surface calls these on the 'relay' provider; lane engine-plugin:
@@ -130,11 +131,11 @@ class PluginManager {
 
   _save({ loud = false } = {}) {
     if (!this._hold.writable('a plugin change')) { if (loud) throw this._hold.refusal('this one-time move'); return; }   // held: nothing written over it
+    // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through src/fd-close.js renameSynced — a failed sync or
+    // close is a failed write (the temp removed, the old file stands): loud, thrown; quiet, SAID (it was swallowed in silence)
     try {
-      const tmp = this._file + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
-      fs.renameSync(tmp, this._file);
-    } catch (e) { if (loud) throw e; }   // a migration's write is loud (a failed run is retried, never recorded)
+      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'plugins.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[plugins] ${w}`); } } });
+    } catch (e) { if (loud) throw e; console.warn(`[plugins] plugins.json not written (${(e && e.code) || 'error'}) — the old file stands on disk`); }   // a migration's write is loud (a failed run is retried, never recorded)
   }
 
   _readSettings() { try { return this._settings.read() || {}; } catch { return {}; } }

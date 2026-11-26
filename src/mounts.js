@@ -76,6 +76,7 @@ const PROBE_OUT_MAX = 1024 * 1024;   // B-323e: a probe's output bound — the o
 const LIVENESS = require('./mount-liveness.js');
 const SR = require('./store-read.js');
 const HOLD = require('./store-read-hold.js');   // B-f276 family unit 1: mounts.json under the store-read law
+let noSyncSaid = false;   // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): mounts.json's file system with no sync at all is said once a run
 const MOUNTS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // lane mount-liveness: THE sweep's verdict table (PURE)
 const MW = require('./mount-error-words.js');   // B-af94: a row's words BY CODE — the page words them in its language
 const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
@@ -571,9 +572,10 @@ class MountManager {
 
   _save() {
     if (!this._hold.writable('a storage change')) return;   // held: nothing is written over the file
-    const tmp = this._file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });
-    fs.renameSync(tmp, this._file);
+    // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js
+    // renameSynced) — written on a person's act or a mount's own rare event, never at a cadence; a failed sync or close is a failed write
+    // THROWN to the caller as before (the temp removed, the old file stands); only a file system with no sync at all lands, said once a run
+    require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[mounts] ${w}`); } } });
   }
 
   _notify() { this.broadcast({ type: 'mounts-updated', mounts: this.list() }); }

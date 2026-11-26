@@ -25,6 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js'); // remainder of B-f276 (bl-jobs): a read that FAILED is no answer — held, never written over
 const HOLD = require('./store-read-hold.js');   // B-f276 family unit 2 commit 3: the kept copies' question (copiesOf)
+let noSyncSaid = false;   // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): machine-mounts.json's file system with no sync at all is said once a run
 const { execFile } = require('child_process');   // (B-323e: its two probe children — ls, realpath — ride THE STARTER)
 const PI = require('./proc-identity.js');   // B-323e: a probe child's end the hub may never hear, asked of /proc by its pid
 const MD = require('./server/push-mount-door.js'); // B-7f0b (r1220): a push mount's tunnel ends at its OWN door (that mount's /dav, its own pass), never the hub's whole web port
@@ -231,9 +232,9 @@ class MachineMounts {
     if (nPush === -1 || nPull === -1) this._state.legacyOwed = true;   // r5127: torn bytes owed too — a repaired file is read at the next start
     if (nPush === null && nPull === null) return;
     try {
-      const t = this._file + '.tmp';
-      fs.writeFileSync(t, JSON.stringify(this._state, null, 2), { mode: 0o600 });
-      fs.renameSync(t, this._file);
+      // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace (src/fd-close.js renameSynced) — a failed sync or
+      // close is a failed save HERE (the legacy stores kept, re-run next boot): never renamed away beside a store not on disk
+      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } });
       JSON.parse(fs.readFileSync(this._file, 'utf-8')); // verify before renaming legacy stores
     } catch (e) { this.log('migration save FAILED — legacy stores kept, will re-run next boot: ' + e.message); return; }
     try { if (nPush >= 0 && fs.existsSync(hmF)) fs.renameSync(hmF, hmF + '.migrated'); } catch { }
@@ -350,7 +351,9 @@ class MachineMounts {
   }
   _save() {
     if (!this._hold.writable('a machine-mounts.json write')) return;   // (said once a hold, by the helper)
-    try { const t = this._file + '.tmp'; fs.writeFileSync(t, JSON.stringify(this._state, null, 2), { mode: 0o600 }); fs.renameSync(t, this._file); } catch { }
+    // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace (src/fd-close.js renameSynced); a failed sync or close
+    // is a failed write — the old file stands, and it is SAID (it was swallowed in silence); no sync at all lands, said once a run
+    try { require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } }); } catch (e) { this.log(`machine-mounts.json not written (${(e && e.code) || 'error'}) — the old list stands on disk`); }
   }
   _notify() { this.broadcast({ type: 'machine-mounts-updated', mounts: this.list() }); }
 

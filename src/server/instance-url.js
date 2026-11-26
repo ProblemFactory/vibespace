@@ -39,9 +39,13 @@ const SR = require('../store-read.js');
 const PROXY_NAME = 'vibespace-instance';
 const SUB_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
+// B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js
+// renameSynced) — written on a person's Publish / Unpublish or the publish's own rare event, never at a cadence; a failed sync or close
+// is a failed write thrown to save (said there; the temp removed, the old file stands); only a file system with no sync at all lands,
+// said once a run
+let noSyncSaid = false;
 function writeJsonAtomic(file, obj) {
-  fs.writeFileSync(file + '.tmp', JSON.stringify(obj, null, 2));
-  fs.renameSync(file + '.tmp', file);
+  require('../fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'instance-url.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[instance-url] ${w}`); } } });
 }
 
 function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, authEnabled = () => true, broadcast = () => { }, log = () => { } }) {

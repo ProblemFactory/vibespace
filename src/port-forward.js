@@ -51,10 +51,12 @@ const NONWEB_PROCS = new Set([
 ]);
 const NONWEB_PORTS = new Set([22, 25, 53, 111, 631]);
 
+// B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js
+// renameSynced) — written on an act or a forward's own rare event, never at a cadence; a failed sync or close is a failed write thrown
+// to _persist (said there; the temp removed, the old file stands); only a file system with no sync at all lands, said once a run
+let noSyncSaid = false;
 function writeJsonAtomic(file, obj) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, file);
+  require('./fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'port-forwards.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[ports] ${w}`); } } });
 }
 
 // r3009 (B-f276 family, lane bl-machines-a): port-forwards.json under THE STORE-READ LAW (src/store-read-hold.js, one helper for
