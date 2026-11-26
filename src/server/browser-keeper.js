@@ -9562,29 +9562,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const VP = require('./browser-viewport.js');
     return withCdpUrl(target, (url) => VP.captureTarget(url, String(targetId).toUpperCase()));
   }
-  /** lane browser-windows (U3): WATCH a tab the session is not on — the screencast, else ≤ 2 fps captures (said by mode).
-   *  The tab must be one the VIEW may show: the bridge judged its owner (the viewed conversation's own, his own). */
-  async function watchTabFor(target, targetId, hooks = {}) {
-    ensureLoaded();
-    if (!target || !target.ok || !TBS.TARGET_ID_RE.test(String(targetId || ''))) return { ok: false, code: 'no_tab', error: 'no tab' }; // live-watch-polish G5: the code the client words
-    const VP = require('./browser-viewport.js');
-    const id = String(targetId).toUpperCase();
-    // 主开发 r4689 / r4691: on a browser whose engine stated AND measured tabWatch at its launch, the kernel's command ON BEFORE the
-    // screencast starts (a never-shown tab gets its bounds then), OFF when this watch ends; every other browser: null, today's road
-    // r4779: the watch's HOLD lives from its ask to its leaving; a reopen of the page watch asks again for it and tells `hooks.onTabWatch`
-    const h = tabWatchHoldOf(target, id, hooks.onTabWatch);
-    if (h) await tabWatchOn(h);
-    const leave = () => { if (h && tabWatchHolds.delete(h)) tabWatchRelease(h, true); };
-    let r;
-    const watchTarget = typeof watchTargetFn === 'function' ? watchTargetFn : VP.watchTarget;
-    try { r = await withCdpUrl(target, (url) => watchTarget(url, id, { ...hooks, firstFrameMs: WIN.WATCH_FIRST_FRAME_MS, pollMs: WIN.WATCH_POLL_MS })); }
-    catch (e) { leave(); throw e; }
-    if (!h) return r;
-    if (!r || !r.ok) { leave(); return r; }
-    let closed = false;
-    const close0 = r.close;
-    return { ...r, tabWatch: tabWatchSaid(h), close: () => { if (closed) return; closed = true; try { if (typeof close0 === 'function') close0(); } finally { leave(); } } };
-  }
+  // (r4779's holds sit ABOVE watchTabFor: the registry-save census reads each save by the declaration above it, and the api's
+  // saves below stay watchTabFor's, as at the release)
   /** r4689: the watched tabs of each browser, COUNTED — two viewers of one tab hold it until both leave (`profileId|TARGET` → n). In
    *  memory only: a hub restart keeps none, and the kernel ends every lease when the page watch's socket that took it disconnects.
    *  r4779 (law 5: «a watcher's leaving releases only what THAT watcher took»): ONE hold per watch on this road, `counted` from its ask
@@ -9657,6 +9636,29 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   const tabWatchTell = (h) => { if (tabWatchHolds.has(h) && h.told) { try { h.told(tabWatchSaid(h)); } catch { /* the watch's own */ } } };
 
+  /** lane browser-windows (U3): WATCH a tab the session is not on — the screencast, else ≤ 2 fps captures (said by mode).
+   *  The tab must be one the VIEW may show: the bridge judged its owner (the viewed conversation's own, his own). */
+  async function watchTabFor(target, targetId, hooks = {}) {
+    ensureLoaded();
+    if (!target || !target.ok || !TBS.TARGET_ID_RE.test(String(targetId || ''))) return { ok: false, code: 'no_tab', error: 'no tab' }; // live-watch-polish G5: the code the client words
+    const VP = require('./browser-viewport.js');
+    const id = String(targetId).toUpperCase();
+    // 主开发 r4689 / r4691: on a browser whose engine stated AND measured tabWatch at its launch, the kernel's command ON BEFORE the
+    // screencast starts (a never-shown tab gets its bounds then), OFF when this watch ends; every other browser: null, today's road
+    // r4779: the watch's HOLD lives from its ask to its leaving; a reopen of the page watch asks again for it and tells `hooks.onTabWatch`
+    const h = tabWatchHoldOf(target, id, hooks.onTabWatch);
+    if (h) await tabWatchOn(h);
+    const leave = () => { if (h && tabWatchHolds.delete(h)) tabWatchRelease(h, true); };
+    let r;
+    const watchTarget = typeof watchTargetFn === 'function' ? watchTargetFn : VP.watchTarget;
+    try { r = await withCdpUrl(target, (url) => watchTarget(url, id, { ...hooks, firstFrameMs: WIN.WATCH_FIRST_FRAME_MS, pollMs: WIN.WATCH_POLL_MS })); }
+    catch (e) { leave(); throw e; }
+    if (!h) return r;
+    if (!r || !r.ok) { leave(); return r; }
+    let closed = false;
+    const close0 = r.close;
+    return { ...r, tabWatch: tabWatchSaid(h), close: () => { if (closed) return; closed = true; try { if (typeof close0 === 'function') close0(); } finally { leave(); } } };
+  }
   const api = {
     /** lane hub-loop-stalls «loop-day-report» M6: the browsers this keeper holds READY (a live record) and how many had no command for
      *  over an hour (their profile's last verb) — counts only, read in memory; null before the registry was loaded (never a load) */
