@@ -297,6 +297,13 @@ console.log('⑧ the routes — the owner\'s cookie only');
   const g1 = await get(kept);
   ok(g1.code === 200 && g1.headers['content-disposition'] === require(path.join(REPO, 'src/file-disposition.js')).contentDisposition(kept, 'attachment') && g1.headers['content-disposition'].startsWith(`attachment; filename="${kept}"`) && g1.chunks.join('') === '{"nodes":[]}', 'a kept file downloads by its name, as an attachment — the header is contentDisposition()\'s (THE one spelling)', { code: g1.code, h: g1.headers, body: g1.chunks.join('') });
   const g2 = await get('../secret.json'), g3 = await get('2026-11-11T06-00-01-000Z-door.cpuprofile'), g4 = await get(kept, bearer);
+  // B-574d (lane nl-journals, 主开发 r4761 — «derived»): a TORN capture (a power cut inside its write: cut-off bytes, or none) is read as
+  // none — the folder is listed by NAME and a download hands the bytes AS THEY ARE: never parsed, nothing throws, nothing held as damaged
+  const tornA = '2026-11-11T06-00-02-000Z-auto.cpuprofile', tornB = '2026-11-11T06-00-03-000Z-door.cpuprofile', cut = '{"nodes":[{"id":1,"callFrame":{"fun';
+  fs.writeFileSync(path.join(dir, tornA), cut); fs.writeFileSync(path.join(dir, tornB), '');
+  const t1 = await get(tornA), t2 = await get(tornB), listed = C.keptFiles(fs.readdirSync(dir)).keep.map((x) => x.name);
+  ok(t1.code === 200 && t1.chunks.join('') === cut && t2.code === 200 && t2.chunks.join('') === '' && listed.includes(tornA) && listed.includes(tornB),
+    '⑧ B-574d a TORN capture (cut-off bytes, or none) is read as none: listed by its name, downloaded as it is (never parsed), nothing held — a diagnostic, «derived» (no sync)', { t1: [t1.code, t1.chunks.join('').length], t2: [t2.code, t2.chunks.join('').length], listed });
   ok(g2.code === 404 && !g2.chunks.join('').includes('"no"') && g3.code === 404 && g4.code === 403, 'a path or another name ⇒ 404 (nothing outside the directory is read); a bearer ⇒ 403');
 }
 } finally { fs.rmSync(TMP, { recursive: true, force: true }); }
