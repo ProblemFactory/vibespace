@@ -4150,6 +4150,9 @@ export default {
   "Started, then stopped": "開始後に停止",
   "Not delivered": "未配信",
   "Not confirmed": "未確認",
+  "The conversation ended before the agent read this message — it has no words to send again: dismiss it, and attach the picture to a new message": "エージェントがこのメッセージを読む前に会話が終了しました — 再送信できる文字がありません。削除して、画像を新しいメッセージに添付してください",
+  "Not sent again — it is not a message of yours that can be sent again (a command, or VibeSpace's own).": "再送信されませんでした — 再送信できるあなたのメッセージではありません（コマンド、または VibeSpace 自身のメッセージ）。",
+  "Not removed — it is not a message of yours.": "削除されませんでした — あなたのメッセージではありません。",
   "Sent again": "再送信済み",   // B-5a4d root unit 3
   "Removed, not delivered": "削除済み・未配信",
   "The conversation ended before the agent read this message — send it again or dismiss it": "エージェントがこのメッセージを読む前に会話が終了しました — もう一度送信するか、削除してください",

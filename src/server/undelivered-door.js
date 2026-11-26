@@ -50,7 +50,7 @@ function resend(session, sessionId, { by = null, msgId, sendUserInput }) {
   const pend = pendingOf(session);
   pend.set(msgId, g.bubble.acts);   // before the write: a second press on this loop meets it
   const r = sendUserInput(sessionId, frame, { msgId: newMsgId(), origin: 'ws', door: 'enter' });   // THE typing path (test-spend-paths: its ALLOW row for this file)
-  if (!r || !r.ok) { pend.delete(msgId); return refused('send-refused', { code: (r && r.code) || null, error: (r && r.error) || null, left: (r && r.left) || null }); }
+  if (!r || !r.ok) { pend.delete(msgId); return refused('send-refused', { code: (r && r.code) || null, error: (r && r.error) || null, i18n: (r && r.i18n) || null, left: (r && r.left) || null }); }
   return { ok: true, pictures: g.bubble.pictures };
 }
 
@@ -66,4 +66,4 @@ function dismiss(session, sessionId, { by = null, msgId }) {
   return { ok: true };
 }
 
-module.exports = { resend, dismiss, _pendingOf: pendingOf };
+module.exports = { resend, dismiss };

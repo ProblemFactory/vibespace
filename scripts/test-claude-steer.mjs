@@ -178,7 +178,7 @@ await guard('§4 the normalizer', () => {
   ok(ops.filter((o) => o.op === 'edit' && o.fields && 'queueState' in o.fields).length === 6 && !mm.messages.some((x) => x.noticeKind === 'unknown-record'), 'one edit op per change, live to every client; no unknown-record card');
   ok(/'input_handover',/.test(read('server.js')), 'server.js CLAUDE_STREAM_TYPES knows the record (the unhandled-type breadcrumb stays quiet)');
   const rend = read('src/lib/chat-renderers.js');
-  ok(/state === 'handed' \? t\('Handed to the turn'\)/.test(rend) && /state === 'kept' \? t\('Unread when stopped — goes with your next message'\)/.test(rend) && /&& state !== 'handed' && state !== 'kept' && state !== 'undelivered' && state !== 'unconfirmed'\) return null;/.test(rend), 'the chip renderer draws both new states, each with its own words');
+  ok(/state === 'handed' \? t\('Handed to the turn'\)/.test(rend) && /state === 'kept' \? t\('Unread when stopped — goes with your next message'\)/.test(rend) && /&& state !== 'handed' && state !== 'kept' && state !== 'undelivered' && state !== 'unconfirmed' && state !== 'resent' && state !== 'dismissed'\) return null;/.test(rend), 'the chip renderer draws both new states, each with its own words');
 });
 
 // ── §5 STOP'S PUT-BACK COUNTS WHAT STAYS ──

@@ -13,6 +13,7 @@ import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
 import { t, tc } from './i18n.js';
+import { undeliveredActsFor } from './undelivered-acts.js';   // B-5a4d root unit 3: the PURE rule of a «not delivered» chip's acts
 import { confirmModel, drawnOf, filesOutcomeWords, pressRefusalWords, keptLineModel, keptOrderOf, putBackDoorWords, putBackPlanWords, putBackOutcomeWords } from './rewind-files-words.js'; // B-437e U3: the files tier's page (PURE)
 import { pressVerdict } from './press-arm.js'; // B-ef04: a card row that opens a conversation counts a press only on what sat still
 /** B-ef04: the transcript's rows that OPEN A CONVERSATION — a channel card's row, a peer's name — a press on one that the list just
@@ -223,7 +224,7 @@ function undeliveredRefusalWords(m) {
     case 'wrapper-old': return t('This conversation’s agent started before this update — resume the conversation to send it again or dismiss it');
     case 'not-live': return t('The conversation is not running — resume it first');
     case 'no-words': return t('It has no words to send again');
-    case 'send-refused': return (m.error && String(m.error)) || t('Not sent again');
+    case 'send-refused': return m.i18n && m.i18n.key ? t(m.i18n.key, m.i18n.params || {}) : (m.error && String(m.error)) || t('Not sent again');   // r4682: the send road's own words, in the page's language
     case 'write-failed': return t('The conversation could not be reached — nothing was done');
     default: return t('That message is not waiting to be sent any more');
   }
@@ -593,6 +594,7 @@ class ChatView {
       getPermissionPromptCount: () => { const ids = new Set(); for (const m of this._messages || []) { const p = m?.permission; if (p && p.requestId != null && p.kind !== 'user_input' && m.toolName !== 'AskUserQuestion') ids.add(String(p.requestId)); } for (const a of this._pendingAsks || []) if (a && a.kind === 'main') ids.add(String(a.requestId)); return ids.size; },
       getSourceWinId: () => this.winInfo?.id || null, // split tabs v2 (F2): a path opened here is born beside THIS window — never the active one
       onOpenArtifact: (b) => this._openArtifact(b, { pressed: true }), // lane artifacts-registries: the card and the chip's row share ONE door (B-23e5: pressed)
+      undeliveredActsOf: (m) => this._undeliveredActsOf(m), // B-5a4d root unit 3 (r4682 M2): every render and re-render asks the view — the two acts, or the stopped view's words
       // In-chat ACTION buttons (Compact now): product-authored text, so the
       // send owns neither the draft slot nor the store — `carriesUserText`
       // stays false EXPLICITLY (round-8: the flag is the difference between
@@ -7603,11 +7605,7 @@ class ChatView {
    *  conversation is live here AND its running agent advertised them; { stopped } in a stopped view (the chip's words teach the road:
    *  resume, then …); null otherwise (an agent started before the update: no act, the words of before). */
   _undeliveredActsOf(msg) {
-    const st = msg && msg.queueState;
-    if ((st !== 'undelivered' && st !== 'unconfirmed') || !msg.webuiMsgId) return null;
-    if (this._readOnly) return { stopped: true };
-    if (this._disconnected || this._undeliveredActsLive !== true) return null;
-    return { resend: st === 'undelivered' ? (b) => this._undeliveredAct('resend', msg, b) : null, dismiss: (b) => this._undeliveredAct('dismiss', msg, b) };
+    return undeliveredActsFor(msg, { readOnly: !!this._readOnly, live: !this._disconnected, advertised: this._undeliveredActsLive === true, act: (k, m, b) => this._undeliveredAct(k, m, b) });   // r4682 M3: Send again only with words
   }
   /** ONE request per press (the hub's door, src/server/undelivered-door.js — the person only, once); the answer is THIS window's,
    *  said here when refused; the end state reaches every window by the agent's own word (the chip changes, the acts go). */
@@ -7817,6 +7815,7 @@ class ChatView {
     this._messageList?.querySelectorAll?.('.chat-rewind-btn').forEach((b) => b.remove()); // B-437e: nothing to rewind in a read-only view
     if (this._chatInput) this._chatInput.setReadOnly();
     this._showResumeBar();
+    this._refreshQueueChips();   // unit 3 (r4682 M2): a «not delivered» chip now teaches the road (resume, then …) and offers no act
   }
 
   /** A per-session `error` frame. TWO meanings, and conflating them is a

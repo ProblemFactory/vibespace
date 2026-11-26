@@ -390,6 +390,7 @@ function resendGate(line, o) {
   const { rec: was, why } = recordOfMsg(old);
   if (!was) return actRefused('resend', why, fields);
   if (was.state !== 'undelivered') return actRefused('resend', endedWhy(was.state), fields);
+  delete o.webui_resend_of; line = JSON.stringify(o);   // the stamp is the wrapper's and the door's alone: never handed on to the CLI (r4682)
   const st = stampFrame(line, o);
   const { copy, note } = keptCopyOf(copyLineOf(o, msgId, new Date().toISOString(), st.uuid));
   if (note) log(`handed records: ${msgId}: ${note}`);
@@ -398,6 +399,16 @@ function resendGate(line, o) {
   if (!writeRecords()) { HR.set(old, was); HR.delete(msgId); return actRefused('resend', 'not-written', fields); }
   record('input_handover', { state: 'resent', msg_ids: [old], resent_as: msgId, via: 'resend' });   // in the file already: said now
   return st.line;
+}
+/** A SEND AGAIN TAKEN BACK (unit 3's cure, r4682 M1): resendGate wrote the new message's record `handed` before submitUser held it; a
+ *  held frame that leaves the queue WITHOUT reaching the CLI (the Stop's put-back, the person's removal) ends that record in the same road,
+ *  in the file before the queue's own word — else the CLI's exit would settle it «not delivered» and offer Send again on words the person
+ *  took back (a typed message taken back has no record at all). Ended `dismissed` (finished: never drawn, never settled again). */
+function endTakenBack(ids, via) {
+  let changed = false;
+  for (const id of ids) { const r = id && HR.get(id); if (r && r.state === 'handed') { HR.set(id, { ...r, state: 'dismissed', settledAt: Date.now(), via }); changed = true; } }
+  if (changed && !writeRecords()) log(`handed records: ${ids.join(', ')} taken back (${via}) — its record could not be written`);
+  return changed;
 }
 /** DISMISS (unit 3; the WIP b193779a4's form, never lined): the person removes a message proven not delivered (or one whose fate is
  *  unknown — «Not confirmed» — unless this wrapper's own CLI is the one it is being handed to). The end state into the file FIRST, then
@@ -1238,6 +1249,7 @@ function dropHeldForStop() {
   handed.length = 0; landedThisTurn = []; cliOwesTurn = false;
   if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, named: stopping && stopping.named ? stopping.named : new Set(), namesSaid: !!(stopping && stopping.namesSaid), kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))), followRun: stopping ? stopping.followRun || null : null }; armBound(); }   // B-28b1: a second Stop inside the follow-up keeps its mark — it is still judged at its result
   const dropped = promptQueue.splice(0, promptQueue.length);
+  endTakenBack(dropped.map((q) => q.msgId), 'stop');   // unit 3's cure: a held Send again put back — its record ends here
   settleCopies(dropped.map((q) => q.msgId)); // put back (or VibeSpace's own): never run — its kept files go
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
   const putBack = dropped.filter((q) => !q.origin);
@@ -1380,6 +1392,7 @@ function handleQueueOp(msg) {
     return;
   }
   const [dropped] = promptQueue.splice(idx, 1);
+  endTakenBack([dropped.msgId], 'remove');   // unit 3's cure: a held Send again removed — its record ends here
   record('queue_op_result', { op, id, ok: true, msg_id: dropped.msgId });
   settleCopy(dropped.msgId); // removed: it never runs — its kept files go
   publishQueue();

@@ -2083,7 +2083,7 @@ class MessageManager extends MessageWindow {
       if ((state === 'resent' || state === 'dismissed') && !emit) { this._dropEnded(String(msgId)); continue; }
       // every state here means the frame was WRITTEN to the CLI — a batch's last witness, in the order said (r9)
       const c = this._webuiCopies.get(String(msgId));
-      if (c && !c.ran) c.ran = ++this._handOrder;
+      if (c && !c.ran && state !== 'resent' && state !== 'dismissed') c.ran = ++this._handOrder;   // unit 3: the person's two acts write nothing to the CLI
       this._stampQueueChip(msgId, state, emit);
       if (raw.via === 'successor' || raw.via === 'exit') this._webuiCopies.delete(String(msgId));   // B-5a4d's root: a settle at the CLI's exit (or a next wrapper's) is the frame's last word
     }
@@ -2179,6 +2179,7 @@ class MessageManager extends MessageWindow {
       case 'already-resent': return resend ? 'Not sent again — it was already sent again.' : 'Not removed — it was already sent again.';
       case 'dismissed': return resend ? 'Not sent again — it was removed.' : 'It was already removed.';
       case 'in-flight': return 'Not removed — it is still being handed to the agent running now.';
+      case 'not-a-message': return resend ? 'Not sent again — it is not a message of yours that can be sent again (a command, or VibeSpace\'s own).' : 'Not removed — it is not a message of yours.';
       case 'not-written': return resend ? 'Not sent again — its record could not be written. Press again.' : 'Not removed — its record could not be written. Press again.';
       default: return resend ? 'Not sent again — no message proven not delivered is kept under that name any more.' : 'Not removed — no message proven not delivered is kept under that name any more.';
     }

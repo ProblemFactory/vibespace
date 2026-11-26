@@ -773,7 +773,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onRewind, canRewind, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold, subagentKnown = null, getPermissionPromptCount = null }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, onRewind, canRewind, onMsgMenu, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, onOpenArtifact = null, getWorkflowVerdict, getSourceWinId, peerFold, subagentKnown = null, getPermissionPromptCount = null, undeliveredActsOf = null }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -786,6 +786,7 @@ class ChatRenderers {
     this._onSendText = onSendText || null; // in-chat action buttons send through the live input (null = view-only)
     this._onQueueChipClick = onQueueChipClick || null; // clicking a 'queued' chip steers that message (live windows only)
     this._getQueueCaps = getQueueCaps || null; // the VIEW's queue capability (harness row ∧ running wrapper); absent = view-only ⇒ inert chip
+    this._undeliveredActsOf = undeliveredActsOf || null; // B-5a4d root unit 3 (r4682 M2): the VIEW's answer — what a «not delivered» chip offers (src/lib/undelivered-acts.js)
     this.ws = ws;
     this.sessionId = sessionId;
     this.app = app;
@@ -1045,7 +1046,7 @@ class ChatRenderers {
         : state === 'stopped' ? t('It had already started when Stop cut it off — its words are back in the input box')
         // B-5a4d root unit 3: the words say the road that is open HERE — the two acts beside the chip (a live conversation whose agent
         // ends such a message), «resume, then …» in a stopped view, and the words of before where the agent started before the update
-        : state === 'undelivered' ? (acts && acts.resend ? t('The conversation ended before the agent read this message — send it again or dismiss it') : acts && acts.stopped ? t('The conversation ended before the agent read this message — resume the conversation, then send it again or dismiss it') : t('The conversation ended before the agent read this message — send it again'))
+        : state === 'undelivered' ? (acts && acts.resend ? t('The conversation ended before the agent read this message — send it again or dismiss it') : acts && acts.dismiss ? t('The conversation ended before the agent read this message — it has no words to send again: dismiss it, and attach the picture to a new message') : acts && acts.stopped ? t('The conversation ended before the agent read this message — resume the conversation, then send it again or dismiss it') : t('The conversation ended before the agent read this message — send it again'))
         : state === 'unconfirmed' ? (acts && acts.dismiss ? t('The conversation ended while this message was being handed to the agent — it may not have reached it; dismiss it to take it off here') : acts && acts.stopped ? t('The conversation ended while this message was being handed to the agent — it may not have reached it; resume the conversation to dismiss it') : t('The conversation ended while this message was being handed to the agent — it may not have reached it'))
         : state === 'resent' ? t('You sent this message again — the new one is below')
         : state === 'dismissed' ? t('You removed this message — it was never delivered; it goes when the conversation is opened again')
