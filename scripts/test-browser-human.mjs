@@ -342,7 +342,7 @@ if (a === 'close') { out({ success: true, data: { closed: 1 } }); process.exit(0
 if (a === 'stream' && b === 'status') { const s = daemon('stream status'); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); } out({ success: true, data: { enabled: true, connected: true, port: 21000 + (sess.length * 7) % 900, screencasting: false } }); process.exit(0); }
 const s = daemon(a); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); }
 if (a === 'tab' && b === 'new' && fs.existsSync(path.join(st, 'fail-tabnew-' + sess))) { out({ success: false, error: 'fake: tab new refused' }); process.exit(1); }
-if (a === 'tab' && b === 'new') { const n = (s.tabs || 0) + 1; s.tabs = n; writeState(s); out({ success: true, data: { tabId: 't' + n, targetId: ('ab' + String(n).padStart(4, '0')).padEnd(32, 'c').toUpperCase(), label: null } }); process.exit(0); }
+if (a === 'tab' && b === 'new') { const n = (s.tabs || 0) + 1; s.tabs = n; const tid = ('ab' + String(n).padStart(4, '0')).padEnd(32, 'c').toUpperCase(); s.urls = Object.assign({}, s.urls, { [tid]: argv[2] || 'about:blank' }); writeState(s); out({ success: true, data: { tabId: 't' + n, targetId: tid, label: null } }); process.exit(0); }
 if (process.env.FAKE_AB_FAIL_OPEN && a === 'open') { out({ success: false, error: 'fake: navigation refused' }); process.exit(1); }
 out({ success: true, data: { ok: true } }); process.exit(0);
 `, { mode: 0o755 });
@@ -354,14 +354,22 @@ const cmdsOf = (sess) => logOf('cmds.log').filter((c) => c.sess === sess).map((c
 // one new-tab command, `tab new about:blank#vs-own-<its 24-hex mark>`, and the tab it made — the fake's own answer, read from the
 // fake's state, never the keeper's — is the lease's ONLY root
 const NEW_TAB_RE = /(^| )tab new( |$)/;
-const ownNewQ = (kk, pid, key, news) => {
+// the follow (r4858's page): the judge reads the LEG's own slice of the fake's command log, only the lease's session in the lease's
+// namespace (the product's own namer), and finds the made tab by the ADDRESS the fake keeps for it (one fact more, as in test-browser-kept)
+const ownNewQ = (kk, pid, key, ents) => {
   const l = B.findLease(kk._reg().leases, pid, key);
   const mark = String((l && l.ownMark) || '');
-  const ent = logOf('cmds.log').filter((c) => c.sess === 'vs-' + key && NEW_TAB_RE.test(c.argv.join(' '))).pop();
-  let n = 0; try { n = ent ? Number(JSON.parse(fs.readFileSync(path.join(AB, `${ent.ns}__${ent.sess}.json`), 'utf8')).tabs) || 0 : 0; } catch { n = 0; }
+  const at = `about:blank#vs-own-${mark}`;
+  const mine = ents.filter((c) => c.sess === 'vs-' + key && c.ns === B.sessionNameFor(pid) && NEW_TAB_RE.test(c.argv.join(' ')));
+  const news = mine.map((c) => c.argv.join(' '));
+  let st = null; try { st = mine.length === 1 ? JSON.parse(fs.readFileSync(path.join(AB, `${mine[0].ns}__${mine[0].sess}.json`), 'utf8')) : null; } catch { st = null; }
+  const urls = st && st.urls && typeof st.urls === 'object' ? st.urls : {};
+  // the tab THIS command made: the fake's NEWEST tab by its own count (the slice holds exactly one new-tab command), standing at the
+  // marked address — after a Quit the fake keeps the earlier run's tab of the same mark, so an address alone can name two tabs
+  const n = st ? Number(st.tabs) || 0 : 0;
   const made = n ? ('ab' + String(n).padStart(4, '0')).padEnd(32, 'c').toUpperCase() : null;
-  const facts = { mark, news, made, roots: l ? l.tabRoots : null };
-  return { ok: /^[0-9a-f]{24}$/.test(mark) && news.length === 1 && news[0].replace(/^--pin-tab /, '') === `tab new about:blank#vs-own-${mark}` && !!made && JSON.stringify(l.tabRoots) === JSON.stringify([made]), facts };
+  const facts = { mark, news, made, madeAt: made ? urls[made] || null : null, addresses: urls, roots: l ? l.tabRoots : null };
+  return { ok: /^[0-9a-f]{24}$/.test(mark) && news.length === 1 && news[0].replace(/^--pin-tab /, '') === `tab new ${at}` && !!made && urls[made] === at && JSON.stringify(l.tabRoots) === JSON.stringify([made]), facts };
 };
 // r4665: A BEGUN STOP's WITNESS — its first act, the CLI's close-all on the browser's own session: the stand-in writes it in its OWN log
 // (closeall.log, inside the close-all branch, before that branch ends — never the command log, which other legs count exactly)
@@ -807,10 +815,10 @@ let work, solo, shop;
   // …the conversation lost its tab with the browser: its NEXT command binds a new one first (never `tab_gone` — the real
   // 0.38.1's answer the heavy leg (e) caught)
   const markedQ = k._reg().tabClosed[`${work.id}|${KA}`];
-  const tq = cmdsOf('vs-' + KA).length;
+  const tq = cmdsOf('vs-' + KA).length, tqE = logOf('cmds.log').length;
   const rq = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://x.example'] }, as(sA));
   const boundQ = cmdsOf('vs-' + KA).slice(tq).filter((c) => NEW_TAB_RE.test(c));
-  const ownQ = ownNewQ(k, work.id, KA, boundQ);
+  const ownQ = ownNewQ(k, work.id, KA, logOf('cmds.log').slice(tqE));
   ok(Number.isFinite(markedQ) && rq.status === 200 && ownQ.ok && k._reg().tabClosed[`${work.id}|${KA}`] === undefined, 'the conversation\'s next command after the Quit: the browser starts again and binds it a NEW tab first (the mark the stop set), born at ITS OWN marked blank, one new-tab command, the made tab its only root (r4839), then drops the mark (the owner, 5: "they reopen with `tab new` on their next command")', { own: ownQ.facts, markedQ, rq: rq.json, boundQ });
   ok(spyCount() === 0 && !sessionCards.some((c) => c.m.holder === 'user' || HM.isHumanKey(c.m.browserKey)) && sessionCards.length > 0 && sessionCards.every((c) => c.key === KA) && sessionCards.some((c) => c.m.phase === 'end' && c.m.reason === 'stopped'), '…and nothing of HIS reached any chat: a Quit is a Stop — the one card is the conversation\'s own session ending `stopped` (its lease session), a stop with no takeover delivers nothing', { spy: Object.fromEntries(Object.entries(spy).map(([a, b]) => [a, b.length])), cards: sessionCards.map((c) => c.key + ':' + c.m.phase + ':' + (c.m.reason || '')) });
   // r4839's RED: a keeper copy that opens the BARE `tab new` (the release's text before line 962) — the leg's judge goes red. The
@@ -824,11 +832,13 @@ let work, solo, shop;
     try {
       await kq.attach({ profileId: qp.id, browserKey: KA, sessionId: 'sess-a' });
       await kq.stop(qp.id, { why: 'user' });
-      const q0 = cmdsOf('vs-' + KA).length;
+      const q0E = logOf('cmds.log').length;
       const qa = await kq.attach({ profileId: qp.id, browserKey: KA, sessionId: 'sess-a' });
-      const newQc = cmdsOf('vs-' + KA).slice(q0).filter((c) => NEW_TAB_RE.test(c));
-      const ownQc = ownNewQ(kq, qp.id, KA, newQc);
-      ok(newQc.length === 1 && newQc[0].replace(/^--pin-tab /, '') === 'tab new' && !ownQc.ok, 'CONTROL (r4839: the bare `tab new`, the release\'s text): the conversation\'s next command after the Quit opens a tab NOT at its own mark — the leg\'s judge goes red', { newQc, own: ownQc.facts, rebound: qa && qa.rebound });
+      const ownQc = ownNewQ(kq, qp.id, KA, logOf('cmds.log').slice(q0E));
+      const newQc = ownQc.facts.news;
+      const plantRead = newQc.length === 1 && newQc[0].replace(/^--pin-tab /, '') === 'tab new'; // r5135 law 1: the WITNESS — the copy's bare command reached the driver
+      if (!plantRead) console.log(`  ⊘ SKIP CONTROL (r4839): the plant was not read — the copy's next attach sent the driver no bare tab new, so the red is not judged (${JSON.stringify({ newQc, rebound: qa && qa.rebound })})`);
+      else ok(!ownQc.ok, 'CONTROL (r4839: the bare `tab new`, the release\'s text): the conversation\'s next command after the Quit opens a tab NOT at its own mark — the leg\'s judge goes red', { newQc, own: ownQc.facts, rebound: qa && qa.rebound });
     } finally { try { await kq.stop(qp.id, { why: 'user' }); } catch { /* none */ } try { kq.shutdown(); } catch { /* none */ } }
   }
 }

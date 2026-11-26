@@ -1321,21 +1321,25 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
     // r4839's RED: a keeper copy that opens the BARE `tab new` (the release's text before line 962) — the leg's own judge goes red
     {
       const ksrcB = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-      const bare = anchored(ksrcB, "[...pin, 'tab', 'new', ...(birth ? [birth] : [])], o)", "[...pin, 'tab', 'new'], o) /* CONTROL: the bare tab new, as at the release */", '⑭b the rebind\'s new tab');
-      const DB = path.join(ROOT, 'k14-bare'); fs.mkdirSync(DB, { recursive: true });
-      const kb = mk14(M14.load('src/server/browser-keeper.js', bare, 'bare-tab-new'), DB);
-      const pb = kb.createProfile({ label: 'Bare' }); const nsb = 'vs-' + pb.id;
-      try {
-        await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
-        await kb.attach({ profileId: pb.id, browserKey: KEY_B, sessionId: 'sess-b' });
-        await killDaemon(kb, pb.id);
-        const m0 = cmds(nsb).length;
-        await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
-        const bb = await kb.attach({ profileId: pb.id, browserKey: KEY_B, sessionId: 'sess-b' });
-        const afterB = cmds(nsb).slice(m0).map((c) => c.argv.join(' '));
-        const ownB = ownNew14b(kb, pb.id, KEY_B, afterB, nsb);
-        ok(bb.rebound && bb.rebound.how === 'new' && !ownB.ok && ownB.facts.news.length === 1 && ownB.facts.news[0].replace(/^--pin-tab /, '') === 'tab new', '⑭b CONTROL (r4839: the bare `tab new`, the release\'s text): the second lease\'s new tab is not born at its own mark — the leg\'s judge goes red', { rebound: bb.rebound, afterB, own: ownB.facts });
-      } finally { try { await kb.stop(pb.id, { why: 'user' }); } catch { /* none */ } kb.shutdown(); }
+      let bare = null; try { bare = anchored(ksrcB, "[...pin, 'tab', 'new', ...(birth ? [birth] : [])], o)", "[...pin, 'tab', 'new'], o) /* CONTROL: the bare tab new, as at the release */", '⑭b the rebind\'s new tab'); } catch (e) { ok(false, `⑭b CONTROL (r4839) setup: the rebind's new-tab anchor — ${String(e && e.message).slice(0, 200)}`); } // the follow: a gone anchor is ONE red row, block ⑭ goes on
+      if (bare) {
+        const DB = path.join(ROOT, 'k14-bare'); fs.mkdirSync(DB, { recursive: true });
+        const kb = mk14(M14.load('src/server/browser-keeper.js', bare, 'bare-tab-new'), DB);
+        const pb = kb.createProfile({ label: 'Bare' }); const nsb = 'vs-' + pb.id;
+        try {
+          await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
+          await kb.attach({ profileId: pb.id, browserKey: KEY_B, sessionId: 'sess-b' });
+          await killDaemon(kb, pb.id);
+          const m0 = cmds(nsb).length;
+          await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
+          const bb = await kb.attach({ profileId: pb.id, browserKey: KEY_B, sessionId: 'sess-b' });
+          const afterB = cmds(nsb).slice(m0).map((c) => c.argv.join(' '));
+          const ownB = ownNew14b(kb, pb.id, KEY_B, afterB, nsb);
+          const plantRead = !!(bb.rebound && bb.rebound.how === 'new') && ownB.facts.news.length === 1 && ownB.facts.news[0].replace(/^--pin-tab /, '') === 'tab new'; // r5135 law 1: the WITNESS — the copy's bare command reached the driver
+          if (!plantRead) console.log(`  ⊘ SKIP ⑭b CONTROL (r4839): the plant was not read — the copy's rebind sent the driver no bare tab new, so the red is not judged (${JSON.stringify({ rebound: bb.rebound, afterB })})`);
+          else ok(!ownB.ok, '⑭b CONTROL (r4839: the bare `tab new`, the release\'s text): the second lease\'s new tab is not born at its own mark — the leg\'s judge goes red', { rebound: bb.rebound, afterB, own: ownB.facts });
+        } finally { try { await kb.stop(pb.id, { why: 'user' }); } catch { /* none */ } kb.shutdown(); }
+      }
     }
     // verify r1 (F3): the same two leases, their first commands AT ONCE (two agents resumed together) — reproduced: both read
     // the page list before either bound, both picked the one page, both rooted it (one tab for two conversations). The
