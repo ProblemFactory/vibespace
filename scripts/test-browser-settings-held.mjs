@@ -386,7 +386,7 @@ console.log('B15 the two sweeps say their wait once a hold, not once a pass; the
   ok(!!(k1 === 1 && t1 === 1 && k2 === 2 && t2 === 1), 'B15 — THE LAW: three passes while held say the wait ONCE for each sweep (never once a pass); after a read pass, the kept sweep\'s next hold says it once again — RED: once a pass', { kept: [k1, k2], trace: [t1, t2] });
   kept.shutdown(); tr.shutdown();
   const route = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8'), view = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
-  ok(!!(route.includes("res.json({ ok: true, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed,") && view.includes('+ sweepHeldText(r.held), { duration: 8000 }); } else if (r) showToast(')),
+  ok(!!(route.includes("res.json({ ok: true, scopesHeld: r.scopesHeld || 0, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed,") && view.includes("+ sweepHeldText(r.held) + (notDone ? ' ' + notDone : ''), { duration: 8000 }); } else if (r) showToast(")),
     'B15 — the Sweep press while held: its reply carries the hold (the trace\'s and the kept sweep\'s), and the page says it — never «removed 0» as if it had looked');
 }
 
