@@ -109,7 +109,9 @@ function heldName(file) {
   return plain[stem] || String(file || '');
 }
 function purgeLeftLine(p) {
-  const purgeNote = noteLine('chan-purge-left-note', t('The removed account {name}: {left} could not be removed from disk — nothing removes it by itself', { name: removedName(p), left: purgeLeftText(p.left) }), { warn: true });
+  // B-360d r4666 (2): a row whose ONLY note is the poll times says what is not erased yet and that Try again asks for it now
+  const stampsOnly = Array.isArray(p.left) && p.left.length === 1 && p.left[0] === 'stamps';
+  const purgeNote = noteLine('chan-purge-left-note', stampsOnly ? t("The removed account {name}: its conversations' fetch times are not erased from disk yet — Try again asks for it now", { name: removedName(p) }) : t('The removed account {name}: {left} could not be removed from disk — nothing removes it by itself', { name: removedName(p), left: purgeLeftText(p.left) }), { warn: true });
   let busy = null;
   purgeNote.appendChild(btn(t('Try again'), () => {
     if (busy) return;

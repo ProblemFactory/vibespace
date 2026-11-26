@@ -19,7 +19,8 @@
 //   ⑦ THE PERSON IS TOLD: the removal names what is left and that the Channels panel lists it with «Try again» (or that it could
 //      not be noted; a journal owed beside it in the same toast); the panel's line and its press; the add's note (zh, ja); the remove
 //      road marks before the record leaves. RED: the dialog without its branch; the panel without its line.
-//   r2943 (round wv0o00cct, THE NEW SHAPE — nothing deletes an account's data at a start or on a timer):
+//   r2943 (round wv0o00cct, THE NEW SHAPE — nothing deletes an account's data at a start or on a timer; it has
+//   the ONE named exception (r4666 (2)): the poll times an entry notes owed («stamps») leave at a start, by its names only: test-channel-stamps-mark):
 //   ⑧ L1 + L2: a start with adapters.json HELD (EIO placed) and the mark naming a LIVE account: nothing is removed, nothing runs by
 //      itself; a press is refused by name. RED: the cure's start pass (a48ee5788), blind to the held records.
 //   ⑨ L3: a RE-ADD under the marked id ends its mark (said once in the journal, the add's answer once), then a press: refused, the

@@ -22,6 +22,8 @@
 //         asks the store again with no answer for the handed bytes — they are made again and land on the restarted thread; the
 //         side file holds none of the names and the purge answers true. CONTROL: the release's line — produce answers «equal to
 //         the disk» (nothing set since), the compaction no longer owed: the names stay and the purge answers false — red.
+//   (m8g) (r4892 (3)) THE OTHER LOSS: the thread renamed the purge's side file and died before its answer — the bytes are made again and
+//         land, the purge answers true. CONTROL: the release's line — the purge never hears its landing (false) — red.
 //   (m8e) (r4646 (2)) THE COST: for an account with NO stamps the purge's compaction is one write more than the tip's — its
 //         bytes and its time on the writer's thread printed over the largest stand-in these suites build (1000 stamped keys);
 //         ONE write a removal, never one a row.
@@ -190,8 +192,8 @@ console.log('(m8b–m8e) B-360d: a purge\'s ONE door — «done» only once a co
 
 
   // (m8f) r4676: the writer's thread lost in flight — the handed bytes are made again
-  const NOREMAKE = ['    if (!stampsDirty && !(stampsCompactOwed && stampsHanded)) { stampsCompactOwed = false; return null; }', '    if (!stampsDirty) { stampsCompactOwed = false; return null; }'];   // stale-pins: kept (the RED control restores the release's line)
-  const lostRun = async (tag, cut) => {
+  const NOREMAKE = ['    if (!stampsDirty && !(stampsCompactOwed && stampsHanded)) { stampsCompactOwed = false; return null; }\n    if (!stampsCompactOwed) return null;', '    if (!stampsDirty) { stampsCompactOwed = false; return null; }\n    if (!stampsCompactOwed) return null;'];   // the paced branch (the line after it is its own)   // stale-pins: kept (the RED control restores the release's line)
+  const lostRun = async (tag, cut, { after = false } = {}) => {
     const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
     const said = [];
     const log = { log() { }, info() { }, warn: (m) => said.push(String(m)), error: (m) => said.push(String(m)) };
@@ -205,7 +207,7 @@ console.log('(m8b–m8e) B-360d: a purge\'s ONE door — «done» only once a co
     }
     const w = SW.create({ log, workerPath: STAND, pace: PACED });
     const st = loadCut(cut).createChannelStore({ dir, log: quiet, writer: w, stampsDebounceMs: DEB });   // the side file read at the start
-    SAND.die('poll-stamps.json');   // PLACED: the thread exits as the side file's next write reaches it (once)
+    if (after) SAND.dieAfter('poll-stamps.json'); else SAND.die('poll-stamps.json');   // PLACED: the thread exits as the side file's next write reaches it — or right after it renamed the file, before its answer (once)
     let r = null;
     try {
       const pr = await st.purgeAccount('gone');
@@ -216,7 +218,7 @@ console.log('(m8b–m8e) B-360d: a purge\'s ONE door — «done» only once a co
       if (!lost) console.error(`  HARNESS (m8f ${tag}): the writer never said its thread stopped — the placed loss did not happen`);
       const sw = statOf(w, st.stamps.file), ss = st.stamps.stats();
       r = { lost, answer, ...onDiskOf(st), writes: sw.writes, failures: sw.failures, why: w.whyNotDurable(st.stamps.file), compactions: ss.compactions, said: said.filter((m) => /store-write/.test(m)).map((m) => m.slice(0, 160)) };
-    } finally { try { fs.unlinkSync(path.join(ROOT, 'stand', 'die-poll-stamps.json')); } catch { } }
+    } finally { for (const f of ['die-poll-stamps.json', 'dieafter-poll-stamps.json']) { try { fs.unlinkSync(path.join(ROOT, 'stand', f)); } catch { } } }
     w.stop();
     return r;
   };
@@ -224,6 +226,12 @@ console.log('(m8b–m8e) B-360d: a purge\'s ONE door — «done» only once a co
   ok(ls.lost && ls.answer === true && !ls.inSide && !ls.inJournal && ls.keepOnDisk, `(m8f) THE WRITER's THREAD LOST IN FLIGHT with the purge's compaction (${ls.lost}): the handed bytes made again and landed on the restarted thread — no byte of the names in the side file (${ls.inSide}) or the journal (${ls.inJournal}), the other account kept; the purge answered ${ls.answer}`, ls);
   const lsc = await lostRun('lost-c', NOREMAKE);
   ok(lsc.lost && lsc.inSide && lsc.answer === false, `(m8f) CONTROL: the release's line — the requeued ask answered «equal to the disk», the compaction no longer owed: the names stay in the side file (${lsc.inSide}) and the purge answers ${lsc.answer} — red`, lsc);
+
+  // (m8g) r4892 (3): the OTHER loss — the thread RENAMED the purge's side file, then died before its answer
+  const la = await lostRun('lost-after', null, { after: true });
+  ok(la.lost && la.answer === true && !la.inSide && !la.inJournal && la.keepOnDisk, `(m8g) THE THREAD DIED AFTER ITS RENAME, before its answer (${la.lost}): the bytes made again and landed — no byte of the names on disk (${la.inSide}, ${la.inJournal}), the other account kept; the purge answered ${la.answer}`, la);
+  const lac = await lostRun('lost-after-c', NOREMAKE, { after: true });
+  ok(lac.lost && lac.answer === false, `(m8g) CONTROL: the release's line — the requeued ask answered «equal to the disk»: the purge never hears its landing (${lac.answer}) — red`, lac);
 
   // (m8e) THE COST (主开发 r4646 (2)) — one write a removal, never one a row
   const costRun = async () => {

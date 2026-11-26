@@ -59,7 +59,7 @@ console.log('(m) B-360d: quiet is free — the side file is the journal\'s compa
   // round wkovlam1t's MUST, the tip that was sent back: the one-slice compaction re-dirtied the writer from its own produce, and
   // produce began a compaction whenever the writer asked
   const HALF_A = ['    if (!b.inProduce) W().dirty(stampsFile', '    if (true) W().dirty(stampsFile'], HALF_B = ['    if (!stampsCompactOwed) return null;', '    if (false) return null;'];
-  const NOPURGEOWE = ["    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });\n    // r4642 (2)", '    // r4642 (2)'];
+  const NOPURGEOWE = ["    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });\n    return ask;", '    return ask;'];
   const NORETRY = ['    if (!ok) { stampsDirty = true; stampsCompactOwed = true;', '    if (!ok) { stampsDirty = true;'];
   const T = Date.UTC(2026, 10, 21, 6, 0, 0);
   const jLines = (st) => { try { return fs.readFileSync(st.stamps.log, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };

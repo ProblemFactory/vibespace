@@ -3,7 +3,8 @@
 // test-channel-store-writer-laws). It runs the REAL writeJob (src/store-writer-worker.js) after the milliseconds named in
 // `<ctl>/hold-<basename>` (if that file exists); `<ctl>/fail-<basename>` = that file's write fails (EIO, the storage
 // refusing); `<ctl>/die-<basename>` = the thread EXITS as that file's write reaches it (once: the switch is removed — the writer's
-// thread lost in flight; the writer restarts it). `make(ctl)` writes the worker script into `ctl` and returns its path with the switches:
+// thread lost in flight; the writer restarts it); `<ctl>/dieafter-<basename>` = the thread exits right AFTER that file's write, before
+// its answer (once: the file renamed, the reply lost). `make(ctl)` writes the worker script into `ctl` and returns its path with the switches:
 //   const S = make(dir); SW.create({ workerPath: S.path, ... }); S.hold('adapters.json', 600); S.unhold(...); S.failOn(..., true)
 const fs = require('fs');
 const path = require('path');
@@ -19,12 +20,13 @@ const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuff
 parentPort.on('message', (m) => {
   if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
   Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
-  const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b), die = path.join(CTL, 'die-' + b);
+  const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b), die = path.join(CTL, 'die-' + b), dieAfter = path.join(CTL, 'dieafter-' + b);
   if (m.ev === 'write' && fs.existsSync(die)) { try { fs.unlinkSync(die); } catch { } process.exit(7); }
   if (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0);
   if (fs.existsSync(path.join(CTL, 'fail-' + b))) err = { code: 'EIO', message: 'the storage failed' };
   else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
   else { try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; try { fs.unlinkSync(m.tmp); } catch { } } }
+  if (m.ev === 'write' && fs.existsSync(dieAfter)) { try { fs.unlinkSync(dieAfter); } catch { } process.exit(8); }
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
   if (err && S.byteLength >= 48) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else Atomics.store(S, 3, 0);
   Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 1);
@@ -36,6 +38,7 @@ parentPort.on('message', (m) => {
     hold: (base, ms) => fs.writeFileSync(path.join(ctl, 'hold-' + base), String(ms)),
     unhold: (base) => { try { fs.unlinkSync(path.join(ctl, 'hold-' + base)); } catch { } },
     die: (base) => fs.writeFileSync(path.join(ctl, 'die-' + base), '1'),
+    dieAfter: (base) => fs.writeFileSync(path.join(ctl, 'dieafter-' + base), '1'),
     failOn: (base, on) => { const f = path.join(ctl, 'fail-' + base); if (on) fs.writeFileSync(f, '1'); else try { fs.unlinkSync(f); } catch { } },
   };
 }
