@@ -16,7 +16,7 @@
 //   §7 RED COPY of manage-agents.js (ONE anchored edit: the press falls through to the order move) — judged only on its plant's witness
 //      (the copy's line ran at the press): no plan asked, no confirm shown; without the witness it is a named SKIP, never a red
 // The Chrome's own version is printed first and in the closing lines. PNGs only into $PIN_ALL_PNG_DIR (none kept without it).
-import { freePort, ONBOARDED_SOURCE, CHROME_QUIET, CHROME_STORE, anchored } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE, CHROME_QUIET, CHROME_STORE, anchored, stillPresser } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -150,13 +150,11 @@ try {
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
 
-  // a person's click: the element the page expression names, at its centre, only where it is drawn and on top (hit-tested)
+  // a person's click through THE still door (scripts/scratch.mjs stillPresser): the element the page expression names, pressed only
+  // when it is still, on top under its own point, and the click landed on it
+  const press = stillPresser({ evalJs: ev, cdp, sleep });
   const clickEl = async (expr, what) => {
-    const at = await ev(`(() => { const el = (${expr}); if (!el) return null; el.scrollIntoView({ block: 'nearest' }); const b = el.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + b.height / 2;
-      const top = document.elementFromPoint(x, y); return { x, y, w: b.width, h: b.height, hit: !!top && (top === el || el.contains(top)) }; })()`);
-    if (!at || !at.hit || !(at.w > 0 && at.h > 0)) throw new Error('not on screen to press: ' + what + ' ' + J(at));
-    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: at.x, y: at.y, button: 'left', clickCount: type === 'mouseMoved' ? 0 : 1 });
-    return at;
+    if (!(await press('JS:' + expr))) throw new Error('not pressed: ' + what + ' ' + J(press.last && { verdict: press.last.verdict, landed: press.last.landed, under: press.last.look && press.last.look.under }));
   };
   const DLG = (title) => `[...document.querySelectorAll('.dialog')].find((d) => (d.textContent || '').includes(${J(title)}))`;
   const menuBtn = (id) => `document.querySelector('.pool-prio-menu[data-id=' + ${J(J(id))} + ']')`;

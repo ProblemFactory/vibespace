@@ -8971,7 +8971,7 @@ function pinAllPlan(poolId, memberId, now = Date.now()) {
   }
   return out;
 }
-/** THE PRESS: setConversationPin(sid, memberId) ONCE a conversation (quiet), then ONE notice; answers what was done, in the plan's counts */
+/** THE PRESS: the one writer once a conversation (quiet), then ONE notice; answers what was done, in the plan's counts */
 function pinAll(poolId, memberId, { by = 'user', now = Date.now() } = {}) {
   const no = pinAllRefusal(poolId, memberId); if (no) return no;
   const a = accounts.get(poolId);

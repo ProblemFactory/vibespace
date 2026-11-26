@@ -63,6 +63,10 @@ export const ROWS = Object.freeze([
   ['poolCurrentFor', 'src/accounts.js', 'setPoolTarget', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'crossVerdictNow', 'pool', 1],   // B-d578 F2: crossMoveNow's verdict, shared with the fallback queue's re-judgement
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'gatherPlan', 'pool', 1],
+  ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'pinAllRoadOf', 'pool', 1],   // B-2083 unit B (lane lg-recovery): the member row's one press — the conversation's member now, for the provider check
+  ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'pinAllRoadOf', 'pool', 1],
+  ['setConversationPin', 'src/server/usage-pool-engine.js', 'pinAll', 'pool', 1],   // B-2083 unit B: one pin a conversation through the one writer
+  ['setConversationPin', 'src/server/usage-pool-engine.js', 'clearPinsTo', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'linkMemberOf', 'pool', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'refreshCodexForPerson', 'readings', 1],
   ['poolCurrentFor', 'src/server/usage-pool-engine.js', 'maybePoolAutoSwitchForPool', 'pool', 2],
@@ -577,6 +581,9 @@ export const CONSUMERS = Object.freeze({
   "ensureSessionPoolLink": {"file": "src/accounts.js", "fields": [], "why": "Re-points a session's pool link; poolCurrentFor only feeds the slot ledger's from field, and it returns the link's file path."},
   "evaluateOnHost": {"file": "src/accounts.js", "fields": ["dirEmail"], "why": "Usability verdict for an account on a machine; poolCurrent only checks a pool has a target; dirEmail names a mismatched dir login in a refusal."},
   "gatherPlan": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Plans which conversations may move onto a member; the billing member only gates the provider check; returns sids and skip reasons."},
+  "pinAllRoadOf": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-2083 unit B: how the member row's one press would treat one conversation; the billing member only gates the provider check; returns a kind, a why and whether it was pinned elsewhere — no account."},
+  "pinAll": {"file": "src/server/usage-pool-engine.js", "fields": ["member"], "why": "B-2083 unit B: the member row's one press — setConversationPin once a conversation (the one writer decides and places); returns counts and the member the person pressed, echoed to the page only."},
+  "clearPinsTo": {"file": "src/server/usage-pool-engine.js", "fields": ["member"], "why": "B-2083 unit B: «Back to automatic» — clears every pin to the member through the one writer; returns how many and the member the person pressed, echoed to the page only."},
   "handOverGroups": {"file": "src/server/stash-handover.js", "fields": [], "why": "the group hand-over's spend check per group; returns {ok, code, error} and counts — the verdict's identity is said in words only"},
   "handleResetCreditResult": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Settles a reset-credit answer; liveQuotaKeyFor names the attempt's key for the lookup and the ladder walk; returns nothing."},
   "heldPoolUnknown": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (the held member's origin is unknown): a gate that refuses money moves and (B-87fd) files no reading, never the member itself."},

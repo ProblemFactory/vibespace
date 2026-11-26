@@ -32,6 +32,7 @@
   "/api/accounts/:id/reset-credit",
   "/api/accounts/:id/signin",
   "/api/accounts/:id/signin/screen",
+  "/api/accounts/:poolId/pin-all",
   "/api/active",
   "/api/agent-hooks",
   "/api/agent/apps",
