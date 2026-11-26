@@ -108,6 +108,22 @@ const [mode, arg] = process.argv.slice(2);
 `);
 const CURL = path.join(BIN, 'curl');
 fs.writeFileSync(CURL, `#!/usr/bin/env node\nprocess.stdout.write('curl got ' + process.env.T + '\\n');\n`, { mode: 0o555 });
+// lane lg-vault-file (B-0830): a program that prints a FILE it was given the way real tools do — cat (raw), base64 (76 columns),
+// xxd -p (60 columns of hex, on stderr), upper hex, each long line by itself — and the file's mode, its name and its size
+const FILESHOW = path.join(BIN, 'fileshow.js');
+fs.writeFileSync(FILESHOW, `
+const fs = require('fs'), path = require('path');
+const f = process.argv[2], b = fs.readFileSync(f), st = fs.statSync(f);
+if (process.argv[3] === 'trim') { process.stdout.write('X-Key: ' + b.toString('utf8').trim() + '\\n' + 'DONE fileshow\\n'); process.exit(0); }   // what $(cat "$f") hands a header: no newline
+if (process.argv[3] === 'basic') { const t = b.toString('utf8').trim(); process.stdout.write('> Authorization: Basic ' + Buffer.from('x-access-token:' + t).toString('base64') + '\\n  token: ' + Buffer.from(t).toString('base64') + '\\nDONE fileshow\\n'); process.exit(0); }   // curl -v -u "x-access-token:$(cat …)" · kubectl create secret … -o yaml
+if (process.argv[3] === 'size') { process.stdout.write('FILE ' + (st.mode & 0o777).toString(8) + ' ' + path.basename(f) + ' ' + b.length + '\\nDONE fileshow\\n'); process.exit(0); }
+process.stdout.write('FILE ' + (st.mode & 0o777).toString(8) + ' ' + path.basename(f) + ' ' + b.length + '\\n');
+process.stdout.write(b);
+process.stdout.write('\\n' + b.toString('base64').replace(/(.{76})/g, '$1\\n') + '\\n');
+process.stderr.write(b.toString('hex').replace(/(.{60})/g, '$1\\n') + '\\n' + b.toString('hex').toUpperCase() + '\\n');
+for (const l of b.toString('utf8').split('\\n')) if (l.trim().length >= 16) process.stdout.write('line> ' + l.trim() + ' <\\n');
+process.stdout.write('DONE fileshow\\n');
+`);
 const WCURL = path.join(ROOT, 'wbin', 'curl');   // the same fake in a folder an agent can write (no «always» for it)
 fs.mkdirSync(path.dirname(WCURL), { recursive: true }); fs.copyFileSync(CURL, WCURL); fs.chmodSync(WCURL, 0o755);
 fs.chmodSync(BIN, 0o555);   // read-only: the door's programWritable is false for BIN/curl (given back at the end)
@@ -222,4 +238,23 @@ const SRCD = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'u
 const doorCopy = (from, to, tag) => M.load('src/server/vault-run-door.js', (Array.isArray(from) ? from : [[from, to]]).reduce((t, [f, x], k) => anchored(t, f, x, `${tag} (${k + 1})`), SRCD), tag.replace(/\W+/g, '-'));   // one edit, or a list of [from, to] pairs
 const workerCopy = (from, to, tag) => M.write('src/server/vault-run-scrub-worker.js', anchored(SRCW, from, to, tag), tag.replace(/\W+/g, '-'));
 const SMALL = { scrubSteps: { push: 64, run: 1 << 30 } };
-export { fs, os, path, createRequire, pathToFileURL, scratchDir, anchored, mutantCopies, copiesCensus, require, REPO, R, pass, fail, ok, editAnchor, sleep, VE, DOOR, VR, UserTodoManager, DETAIL_MAX, ROOT, SUITE_HOME, SUITE_TMP, SUITE_ENV, M, PW, VALUE, VALUE2, VALUE3, SHORT, BIN, PRINTER, CURL, WCURL, NODE, GHBIN, WSEAL, NOTYET, TRUSTED_ROOT, isRootOwnedTest, EventEmitter, VIEWS_OF, unb32, leaks, leaksIn, ROWS, sourceOf, CALLER, worldN, world, cardsOf, waitCardOrEnd, waitCard, runAnswered, openRow, ENV, auditOf, runLines, runDirs, alive, PH1, splitLeg, SRCD, SRCW, doorCopy, workerCopy, SMALL };
+/** ROUND 3 of the U1a cure (its second read, BLOCKER) — THE LEG the «caller_gone burned whatever happened» mutant is judged by: a
+ *  once-GRANT (a request the owner allowed once), a run whose child RAN, then its caller went away ⇒ the run answers caller_gone
+ *  `killed` and the grant is SPENT — its record ends «used», it never comes back. */
+async function onceGoneLeg(w) {
+  const caller = { ...w.caller, scope: 'webui-1' }, M1 = 'vault://mounts/m1/secretKey';
+  const q = w.door.request({ caller, entry: M1, purpose: 'the once-grant a gone caller spends' });
+  const it = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.askId === q.askId);
+  const g = w.door.answerRequest(q.askId, { answer: 'once', reauthed: true, person: true });
+  const ac = new AbortController(), pidF = path.join(w.work, `gone-once-${worldN}.pid`);
+  const p = w.door.run({ caller, args: ENV('sleep', pidF), cwd: w.work, signal: ac.signal });
+  const c = await waitCard(w, 1500); if (c) w.door.answer(c.action.askId, { answer: 'once' });
+  for (let k = 0; k < 300 && !fs.existsSync(pidF); k++) await sleep(10);
+  const ran = fs.existsSync(pidF);
+  ac.abort();
+  const r = await p;
+  const i2 = it && w.userTodos.get(it.id);
+  return { granted: !!(g && g.ok), ran, code: r.code, killed: r.killed === true, grants: w.door._grants.size, endedBy: i2 && i2.resolvedFact ? i2.resolvedFact.endedBy : null };
+}
+
+export { fs, os, path, createRequire, pathToFileURL, scratchDir, anchored, mutantCopies, copiesCensus, require, REPO, R, pass, fail, ok, editAnchor, sleep, VE, DOOR, VR, UserTodoManager, DETAIL_MAX, ROOT, SUITE_HOME, SUITE_TMP, SUITE_ENV, M, PW, VALUE, VALUE2, VALUE3, SHORT, BIN, PRINTER, CURL, WCURL, NODE, GHBIN, WSEAL, NOTYET, TRUSTED_ROOT, isRootOwnedTest, EventEmitter, VIEWS_OF, unb32, leaks, leaksIn, ROWS, sourceOf, CALLER, worldN, world, cardsOf, waitCardOrEnd, waitCard, runAnswered, openRow, ENV, auditOf, runLines, runDirs, alive, PH1, splitLeg, SRCD, SRCW, doorCopy, workerCopy, SMALL, FILESHOW, onceGoneLeg };
