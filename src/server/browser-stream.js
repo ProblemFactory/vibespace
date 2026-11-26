@@ -1465,6 +1465,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!keeper || typeof keeper.watchTabFor !== 'function') { say({ targetId: null, refused: 'unavailable', error: 'this server cannot show another tab' }); return; }
     const seq = ++viewer.watchSeq;
     const w = { targetId: id, mode: 'screencast', stop: null, lastAt: 0, pending: null, timer: null, kw: null }; // kw (r4689): the kernel's draw of this tab, said with every record of the watch
+    const kwOf = (tw) => (tw && tw.live ? { live: true } : tw && tw.code === 'too_many_watched_tabs' ? { capped: Number(tw.limit) || 4 } : null);
     viewer.watch = w;
     xFollow(relay, viewer); // hotfix 2026-11-17: the watched tab's window is the X picture
     const live = () => viewer.watch === w && relay.viewers.has(viewer.id) && relays.get(relay.key) === relay;
@@ -1483,12 +1484,13 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       onFrame: (f) => { if (live()) push(JSON.stringify({ type: 'frame', data: f.data, metadata: { ...(f.metadata || {}), watched: id } })); },
       onMode: (m) => { if (live()) { w.mode = m; say({ targetId: id, mode: m, ...(w.kw || {}) }); } },
       onEnd: (why) => { if (live() && why !== 'closed') stopViewerWatch(relay, viewer, why); },
+      onTabWatch: (tw) => { if (live() && seq === viewer.watchSeq) { w.kw = kwOf(tw); say({ targetId: id, mode: w.mode, ...(w.kw || {}) }); } }, // r4779: the page watch reopened — the keeper asked the kernel again; the record says its answer (live, capped, or neither word)
     })).catch((e) => ({ ok: false, error: String(e && e.message) })).then((r) => {
       if (!r || !r.ok) { if (live()) { viewer.watch = null; xFollow(relay, viewer); say({ targetId: null, refused: 'unreadable', ...(r && r.code ? { why: String(r.code) } : {}), error: String((r && r.error) || 'the tab could not be shown') }); } return; } // live-watch-polish G5: `why` = the capture's code
       if (live() && seq === viewer.watchSeq) w.stop = r.close; else { try { r.close(); } catch { /* ended */ } }
       // 主开发 r4689: on an engine that states AND measures tabWatch the keeper asked the kernel to draw this tab — `live` (a moving
       // picture: the page told the one effect) or the kernel's cap (`capped`: its limit, a count only — which tabs or whose, never)
-      if (live() && seq === viewer.watchSeq && r.tabWatch) { w.kw = r.tabWatch.live ? { live: true } : r.tabWatch.code === 'too_many_watched_tabs' ? { capped: Number(r.tabWatch.limit) || 4 } : null; if (w.kw) say({ targetId: id, mode: w.mode, ...w.kw }); }
+      if (live() && seq === viewer.watchSeq && r.tabWatch) { w.kw = kwOf(r.tabWatch); if (w.kw) say({ targetId: id, mode: w.mode, ...w.kw }); }
     });
   }
   // ── LANE BROWSER-X-IN-WINDOW (design q-026 r1 §2.1 / §3 row B2): THE X PICTURE'S TICKET + THE WINDOW'S FIT ──
