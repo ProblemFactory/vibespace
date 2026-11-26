@@ -471,7 +471,7 @@ const DELETION_CALLS = Object.freeze({
   'src/hosts.js': 8, 'src/interface/main.js': 2, 'src/job-logs-sweep-worker.js': 11, 'src/jobs.js': 3,
   'src/kept-copies.js': 2, 'src/machine-probes.js': 2, 'src/mounts.js': 5, 'src/node-runtime.js': 3,
   'src/opencode-serve.js': 2, 'src/opslog.js': 1, 'src/owner-mark.js': 5, 'src/plugins/frp.js': 6,
-  'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 17,
+  'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 18,   /* r4828 (lane nl-journals): + the extraction journal's temp removed on a failed write */
   'src/routes/persistence.js': 6, 'src/routes/window-targets.js': 1, 'src/safe-fs-worker.js': 9, 'src/search-index-worker.js': 1,
   'src/secret-box.js': 1, 'src/secret-file.js': 4, 'src/server/agent-listener.js': 1, 'src/server/agent-tool-generators.js': 2,
   'src/server/apps-ops-door.js': 2, 'src/server/automation-engine.js': 1, 'src/server/boot-restore.js': 14, 'src/server/browser-attach-launch.js': 1,
@@ -483,7 +483,7 @@ const DELETION_CALLS = Object.freeze({
   // the temp's inode could not be read (only a note still holding this write's own three fields) — none keeps a list
   'src/server/browser-kept-note.js': 6,
   'src/server/browser-trace.js': 4, 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
-  'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
+  'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/csp-reports.js': 1 /* r4828: the re-judge's temp removed on a failed rewrite */, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
   'src/server/engine-distribution.js': 15, 'src/server/handed-sweep.js': 1, 'src/server/home-rename.js': 2, 'src/server/hook-root-watch.js': 1, 'src/server/host-tokens.js': 3,
   'src/server/hub-tmp.js': 1, 'src/server/incident-wiring.js': 2, 'src/server/job-secrets-door.js': 2, 'src/server/jobs-wiring.js': 1,
   'src/server/local-index.js': 1, 'src/server/migrations.js': 5, 'src/server/oat-mint.js': 3, 'src/server/otel-ingest.js': 1, 'src/server/ops-routes.js': 1,

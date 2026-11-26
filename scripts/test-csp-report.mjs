@@ -555,7 +555,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       ok(Object.keys(was[0]).join() === 'at,directive,blocked,source,line,column,document,disposition,noticed', 'the old judge\'s line has the fields 2.369.361\'s shipped sink wrote, in its order (r3: measured on 5055b9ad6\'s own sink + store)', Object.keys(was[0]));
       store.stop(); // its debounced write flushed: what a hub on .361 left in data/
       const homes = {};
-      for (const n of ['mutant', 'null', 'throw', 'mutnull', 'stuck', 'synced', 'syncfail', 'nosync', 'release']) { homes[n] = path.join(ROOT, 'upgrade-' + n); fs.cpSync(UH, homes[n], { recursive: true }); }
+      for (const n of ['mutant', 'null', 'throw', 'mutnull', 'stuck', 'synced', 'syncfail', 'nosync', 'release', 'renfail', 'renkept', 'bound', 'boundfail', 'boundred']) { homes[n] = path.join(ROOT, 'upgrade-' + n); fs.cpSync(UH, homes[n], { recursive: true }); }
       // THE BOOT AS server.js DOES IT (r3 — nothing else starts the re-judge): server.js's OWN sink line (⑤), verbatim, its
       // For-you store made after it as server.js's top-level `const userTodos` is (the getter reads it at the boot's next
       // tick), NO rejudge() call; the one thing added: publicDir = this suite's build (the fast tier runs no npm run build)
@@ -641,14 +641,14 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       await HS2.close();
       // B-574d (lane nl-journals): THE REWRITE IS ON DISK BEFORE ITS NAME POINTS AT IT — every call on a `.rejudge` temp of that
       // home, in order; a PLACED answer of its sync (an errno name), never a mount
-      const tracedRe = async (home, fn, { sync = null } = {}) => {
+      const tracedRe = async (home, fn, { sync = null, rename = null } = {}) => {
         const D = path.join(home, 'data') + path.sep, isTmp = (p0) => String(p0).startsWith(D) && String(p0).endsWith('.rejudge');
         const o = { openSync: fs.openSync, fsyncSync: fs.fsyncSync, closeSync: fs.closeSync, renameSync: fs.renameSync }, log = [];
         let tfd = null;
         fs.openSync = function (p0, ...a) { const fd = o.openSync.call(this, p0, ...a); if (isTmp(p0)) { tfd = fd; log.push('open'); } return fd; };
         fs.fsyncSync = function (fd, ...a) { if (fd === tfd) { log.push('sync'); if (sync) throw Object.assign(new Error(`${sync}: a placed answer of the sync`), { code: sync }); } return o.fsyncSync.call(this, fd, ...a); };
         fs.closeSync = function (fd, ...a) { if (fd === tfd) { log.push('close'); tfd = null; } return o.closeSync.call(this, fd, ...a); };
-        fs.renameSync = function (a0, b0, ...a) { if (isTmp(a0)) log.push('rename'); return o.renameSync.call(this, a0, b0, ...a); };
+        fs.renameSync = function (a0, b0, ...a) { if (isTmp(a0)) { log.push('rename'); if (rename) throw Object.assign(new Error(`${rename}: a placed answer of the rename`), { code: rename }); } return o.renameSync.call(this, a0, b0, ...a); };
         try { return { ...(await fn()), calls: log.join(' ') }; } finally { Object.assign(fs, o); }
       };
       const bootRe = (mod, home) => async () => { const H = await lateBoot(mod, home, (st) => st); const r = await H.sink.rejudge(); return { H, r }; };
@@ -673,6 +673,29 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const s4 = await tracedRe(homes.release, bootRe(REL, homes.release));
       ok(s4.r.lines === 1 && !/sync/.test(s4.calls) && /rename/.test(s4.calls), 'RED B-574d the release\'s rewrite: renamed over the lines with NO sync of its temp — a power cut can leave the name over no bytes after the notice closed', { calls: s4.calls, r: s4.r });
       await s4.H.close();
+      // r4828: a RENAME that fails leaves NO temp (the door keeps its temp then; the re-judge removes it) — and THE BOUND: one rewrite a process
+      const FR = path.join(homes.renfail, 'data', SINK.FILE), beforeR = fs.readFileSync(FR, 'utf8');
+      const s5 = await tracedRe(homes.renfail, bootRe(SINK, homes.renfail), { rename: 'EIO' });
+      ok(s5.r.lines === 0 && s5.r.closed === 0 && s5.calls === 'open sync close rename' && fs.readFileSync(FR, 'utf8') === beforeR && !fs.existsSync(FR + '.rejudge') && openOf(s5.H.store) === 1 && s5.H.told.some((x) => /was not re-judged — EIO/.test(x)),
+        'r4828 a RENAME that fails (a placed EIO) is a failed rewrite with NO temp left: the old lines whole, its notice open, said', { calls: s5.calls, r: s5.r, told: s5.H.told });
+      await s5.H.close();
+      const RK = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(srcK, "try { fs.unlinkSync(f + '.rejudge'); } catch { /* the door removed it, or it was never made */ } ", '', 'src/server/csp-reports.js'));
+      const s6 = await tracedRe(homes.renkept, bootRe(RK, homes.renkept), { rename: 'EIO' });
+      ok(fs.existsSync(path.join(homes.renkept, 'data', SINK.FILE + '.rejudge')), 'RED r4828: the failed rewrite without its temp removal leaves the .rejudge temp behind (the door keeps it on a failed rename)', { calls: s6.calls });
+      await s6.H.close();
+      const boundOf = (mod, home) => async () => { const H = await lateBoot(mod, home, (st) => st); const r = await H.sink.rejudge(), again = await H.sink.rejudge(); const posted = (await post(H, PROBE)).status; const third = await H.sink.rejudge(); return { H, r, posted, same: again === r && third === r }; };
+      const s7 = await tracedRe(homes.bound, boundOf(SINK, homes.bound));
+      ok(s7.r.lines === 1 && s7.same && s7.posted === 204 && s7.calls === 'open sync close rename', 'r4828 THE BOUND of the re-judge\'s synchronous rewrite on the hub\'s loop: ONCE A PROCESS — a second ask and a report\'s ask after it answer the same run; ONE rewrite (at most two files; only a hub that met the bug)', { calls: s7.calls, r: s7.r, same: s7.same });
+      await s7.H.close();
+      // …where the bound MATTERS: after a FAILED rewrite (a placed rename EIO — its lines still stale), a second ask and a report's ask
+      // answer the same run: no second synchronous fsync on a failing folder (the next BOOT tries again). RED: the run reset — every ask a new rewrite
+      const s8 = await tracedRe(homes.boundfail, boundOf(SINK, homes.boundfail), { rename: 'EIO' });
+      ok(s8.r.lines === 0 && s8.same && s8.posted === 204 && s8.calls === 'open sync close rename', 'r4828 THE BOUND after a FAILED rewrite: ONE attempt a process — a second ask and a report\'s ask answer the same run, no second fsync on the failing folder (the next boot tries again)', { calls: s8.calls, r: s8.r, posted: s8.posted });
+      await s8.H.close();
+      const RB = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(srcK, '    if (rejudging) return rejudging;\n', '', 'src/server/csp-reports.js'));
+      const s9 = await tracedRe(homes.boundred, boundOf(RB, homes.boundred), { rename: 'EIO' });
+      ok((s9.calls.match(/rename/g) || []).length >= 2, 'RED r4828: the re-judge without its once (the run reset at every ask) — a failed rewrite is tried again at the next ask and at a report, a synchronous fsync each time', { calls: s9.calls });
+      await s9.H.close();
     }
   }
 }

@@ -101,7 +101,7 @@ const markFacts = (R, name, place) => {
   ok(eio.answer === false && eio.disk === MARKED && !eio.had && !eio.tmpLeft && eio.said.some((l) => /the extraction journal could not be written \(EIO\)/.test(l)),
     '④ a sync that FAILS (a placed EIO) is a FAILED WRITE: the mark answers false, the old bytes stand, no temp is left, and the memory keeps what the disk holds (no mark)', eio);
   const ren = markFacts(files, 'rename-eio', { rename: 'EIO' });
-  ok(ren.answer === false && ren.disk === MARKED && !ren.had, '④ …a rename that fails is a failed write too (false; the memory keeps what the disk holds)', ren);
+  ok(ren.answer === false && ren.disk === MARKED && !ren.had && !ren.tmpLeft, '④ …a rename that fails is a failed write too (false; the memory keeps what the disk holds) — and no temp is left (r4828: the door keeps it on a failed rename, the journal removes it)', ren);
   const f = world('nosync', MARKED);
   J.at(f);
   const two = warned(() => [traced(f, () => J.mark('/a/n1.zip', '/a/o1'), { sync: 'EINVAL' }).value, traced(f, () => J.mark('/a/n2.zip', '/a/o2'), { sync: 'EINVAL' }).value]);
@@ -120,6 +120,9 @@ const markFacts = (R, name, place) => {
   const W3 = 'the extraction journal could not be written, so an extraction cut short here could not be repaired by a later one — nothing was extracted; try again when VibeSpace can write its data folder again';
   ok(OPS.includes("d.code === 'extract_journal_unwritten'") && OPS.includes(JSON.stringify(W3).slice(1, -1)) && ZH.includes(JSON.stringify(W3)) && JA.includes(JSON.stringify(W3)) && SRC.includes(`const EXTRACT_UNWRITTEN_WORDS = '${W3}';`),
     '④ the page words the refusal in the reader\'s language (fsErrorText; zh / ja rows), the same words the hub sends');
+  const RT = mutantCopies('extract-journal-held', REPO).load('src/routes/files.js', anchored(SRC, "try { fs.unlinkSync(f + '.tmp'); } catch { /* the door removed it, or it was never made */ } ", '', 'the failed write without its temp removal'), 'rename-temp-kept');
+  const rRen = markFacts(RT, 'red-rename-temp', { rename: 'EIO' });
+  ok(rRen.answer === false && rRen.tmpLeft === true, 'RED ④ (r4828) the failed write without its temp removal: a RENAME that fails leaves the journal\'s temp behind (the door keeps it)', rRen);
   // a CLEAR that fails (a placed EIO): the run knows the extraction ended whole — no overwrite turned on in this run; the disk's mark
   // goes at the journal's next write
   const clearFacts = (R, name) => {
@@ -137,7 +140,7 @@ const markFacts = (R, name, place) => {
   const rcf = clearFacts(RC, 'red-clear');
   ok(rcf.had === true, 'RED ④ the failed clear left to the memory as the disk holds it: THIS run turns the next extraction into that folder into an overwrite', rcf);
   // RED: the release's write (unsynced, its failure swallowed, the memory set first) and its mark that answers nothing
-  let mut = anchored(SRC, "  try { FCJ.renameSynced(f + '.tmp', f, JSON.stringify(j), { where: '[extract] the extraction journal', say: (w) => { if (!journalNoSyncSaid) { journalNoSyncSaid = true; console.warn(w); } } }); }\n  catch (e) { console.warn(`[extract] the extraction journal could not be written (${(e && e.code) || (e && e.message) || e})`); return false; }\n  extractJournal = j;\n  return true;\n",
+  let mut = anchored(SRC, "  try { FCJ.renameSynced(f + '.tmp', f, JSON.stringify(j), { where: '[extract] the extraction journal', say: (w) => { if (!journalNoSyncSaid) { journalNoSyncSaid = true; console.warn(w); } } }); }\n  catch (e) { try { fs.unlinkSync(f + '.tmp'); } catch { /* the door removed it, or it was never made */ } console.warn(`[extract] the extraction journal could not be written (${(e && e.code) || (e && e.message) || e})`); return false; }\n  extractJournal = j;\n  return true;\n",
     "  extractJournal = j;\n  try { const tmp = f + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(j)); fs.renameSync(tmp, f); } catch {}\n", 'the release: an unsynced write, its failure swallowed');
   mut = anchored(mut, '  return writeExtractJournal(j) === true;', '  writeExtractJournal(j);', 'the release: a mark that answers nothing');   // stale-pins: kept (the release's mark line — this red control's own text)
   const Rel = mutantCopies('extract-journal-held', REPO).load('src/routes/files.js', mut, 'release-unsynced');

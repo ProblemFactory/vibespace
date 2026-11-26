@@ -1734,16 +1734,17 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     // exit — then the held rename goes on: it finds no temp (the exit took it away first); the file holds the exit's rows, the newest
     const raceOf = async (Mod, name) => {
       const d = scratch('helper-ask-writes-lost-' + name); fs.mkdirSync(d, { recursive: true });
-      const f = path.join(d, 'writes-lost.json'), st = Mod.create({ dataDir: d, now: () => t0 + 9800, log: () => { }, retryMs: 36e5 }), r0 = fs.promises.rename;
-      let release, asked; const gate = new Promise((r) => { release = r; }), at = new Promise((r) => { asked = r; });
+      const f = path.join(d, 'writes-lost.json'), said = [], st = Mod.create({ dataDir: d, now: () => t0 + 9800, log: (...a) => { if (afterStop) said.push(a.join(' ')); }, retryMs: 36e5 }), r0 = fs.promises.rename;
+      let release, asked, afterStop = false; const gate = new Promise((r) => { release = r; }), at = new Promise((r) => { asked = r; });
       fs.promises.rename = async function (a0, b0, ...a) { if (String(a0) === f + '.w.tmp') { asked(); await gate; } return r0.call(this, a0, b0, ...a); };
       let ok;
-      try { st.note(rec({ uuid: 'u-race-1' })); await at; st.note(rec({ uuid: 'u-race-2' })); ok = st.stop(); release(); await st.flush(); } finally { fs.promises.rename = r0; }
+      const T0 = globalThis.setTimeout; let timers = 0;   // r4828: a retry timer armed after the stop (none may be)
+      try { st.note(rec({ uuid: 'u-race-1' })); await at; st.note(rec({ uuid: 'u-race-2' })); ok = st.stop(); afterStop = true; globalThis.setTimeout = function (fn, ms, ...a) { if (ms === 36e5) timers++; return T0.call(this, fn, ms, ...a); }; release(); await st.flush(); } finally { fs.promises.rename = r0; globalThis.setTimeout = T0; }
       const disk = JSON.parse(fs.readFileSync(f, 'utf8')).byConversation[CID].map((x) => x.uuid).join();
-      return { ok, disk, tmpLeft: fs.existsSync(f + '.w.tmp') };
+      return { ok, disk, tmpLeft: fs.existsSync(f + '.w.tmp'), timers, said };
     };
     const race = await raceOf(WL, 'race');
-    check('⑱f B-574d THE RACE CLOSED: a write off the loop HELD at its rename when the exit comes — the exit takes its temp away first, so the held rename lands nothing; the file holds the exit\'s rows (the newest, noted after that write began)', race.ok === true && race.disk === 'u-race-1,u-race-2' && !race.tmpLeft, race);
+    check('⑱f B-574d THE RACE CLOSED: a write off the loop HELD at its rename when the exit comes — the exit takes its temp away first, so the held rename lands nothing; the file holds the exit\'s rows (the newest, noted after that write began)', race.ok === true && race.disk === 'u-race-1,u-race-2' && !race.tmpLeft && race.timers === 0 && race.said.length === 0, race);   // r4828: and the held write's failure after the stop arms no retry timer and says nothing
     const onceOf = async (Mod, name) => {
       const d = scratch('helper-ask-writes-lost-' + name), j = []; fs.mkdirSync(d, { recursive: true });
       let tries = 0; const st = Mod.create({ dataDir: d, now: () => t0 + 9500, log: (...a) => j.push(a.join(' ')), write: () => { tries++; throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); }, retryMs: 36e5 });
@@ -1771,6 +1772,52 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     const R4 = wlMut("    if (writing) { dirty = true; try { fs.unlinkSync(file + '.w.tmp'); } catch { /* not there yet, or gone */ } }\n", '    if (writing) dirty = true;\n', 'wl-exit-race');
     const race4 = await raceOf(R4, 'red-race');
     check('⑱f RED CONTROL B-574d: the exit WITHOUT taking the in-flight temp away — the held rename lands its older rows after the exit\'s (the row noted since is gone from the file)', race4.disk === 'u-race-1', race4);
+    const R5 = wlMut('      if (stopped) return false;   // r4828: the store stopped meanwhile — its exit wrote the rows itself: no retry timer outlives it, nothing said\n', '', 'wl-stopped-arms');
+    const race5 = await raceOf(R5, 'red-arms');
+    check('⑱f RED CONTROL r4828: a stopped store that still handles its in-flight write\'s failure as a live one — it says «held in memory, retrying» after the exit wrote the rows (arm() itself refuses the timer now: its own red is R7)', race5.said.length === 1 && /held in memory, retrying/.test(race5.said[0]), race5);
+    // …and on EVERY road: a read refused at the stop (a folder where the file goes — EISDIR) arms no timer after the stop either
+    const armAfterStop = async (Mod, name) => {
+      const d = scratch('helper-ask-writes-lost-' + name); fs.mkdirSync(path.join(d, 'writes-lost.json'), { recursive: true });
+      const st = Mod.create({ dataDir: d, now: () => t0 + 9950, log: () => { }, retryMs: 36e5 });
+      st.note(rec({ uuid: 'u-arm-1' }));
+      const T0 = globalThis.setTimeout; let timers = 0, ok;
+      globalThis.setTimeout = function (fn, ms, ...a) { if (ms === 36e5) timers++; return T0.call(this, fn, ms, ...a); };
+      try { ok = st.stop(); } finally { globalThis.setTimeout = T0; }
+      return { ok, timers };
+    };
+    const arm0 = await armAfterStop(WL, 'arm-read');
+    check('⑱f r4828 a stopped store arms NO timer on any road — a read refused at the stop (EISDIR) answers false and leaves nothing armed after it', arm0.ok === false && arm0.timers === 0, arm0);
+    const R7 = wlMut('    if (stopped || timer || !dirty || !(retryMs > 0)) return;', '    if (timer || !dirty || !(retryMs > 0)) return;', 'wl-arm-stopped');   // stale-pins: kept (the guard-less arm — this red control's own text)
+    const arm7 = await armAfterStop(R7, 'red-arm-read');
+    check('⑱f RED CONTROL r4828: arm() without its stopped guard — the read refused at the stop arms a retry timer that outlives the store', arm7.timers === 1, arm7);
+    // r4828 — THE EXIT'S ORDER: its synchronous write through the door, every call on its temp in order (open · sync · close · rename);
+    // a PLACED failure of that sync: the stop answers false, says it, the old record whole, no temp left
+    const exitTrace = (file, fn, { sync = null } = {}) => {
+      const tmp = file + '.tmp', o = { openSync: fs.openSync, fsyncSync: fs.fsyncSync, closeSync: fs.closeSync, renameSync: fs.renameSync }, calls = [];
+      let tfd = null, value;
+      fs.openSync = function (p0, ...a) { const fd = o.openSync.call(this, p0, ...a); if (String(p0) === tmp) { tfd = fd; calls.push('open'); } return fd; };
+      fs.fsyncSync = function (fd, ...a) { if (fd === tfd) { calls.push('sync'); if (sync) throw Object.assign(new Error(`${sync}: a placed answer of the sync`), { code: sync }); } return o.fsyncSync.call(this, fd, ...a); };
+      fs.closeSync = function (fd, ...a) { if (fd === tfd) { calls.push('close'); tfd = null; } return o.closeSync.call(this, fd, ...a); };
+      fs.renameSync = function (a0, b0, ...a) { if (String(a0) === tmp && String(b0) === file) calls.push('rename'); return o.renameSync.call(this, a0, b0, ...a); };
+      try { value = fn(); } finally { Object.assign(fs, o); }
+      return { value, calls: calls.join(' ') };
+    };
+    const exitOf = async (Mod, name, place = {}) => {
+      const d = scratch('helper-ask-writes-lost-' + name), j = []; fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'writes-lost.json'), st = Mod.create({ dataDir: d, now: () => t0 + 9900, log: (...a) => j.push(a.join(' ')), retryMs: 36e5 });
+      st.note(rec({ uuid: 'u-x-1' })); await st.flush();
+      const before = fs.readFileSync(f, 'utf8');
+      st.note(rec({ uuid: 'u-x-2' }));
+      const t = exitTrace(f, () => st.stop(), place);
+      await st.flush();
+      return { ok: t.value, calls: t.calls, whole: fs.readFileSync(f, 'utf8') === before, rows: rowsOn(d), tmpLeft: fs.existsSync(f + '.tmp'), said: j };
+    };
+    const ex1 = await exitOf(WL, 'exit-order'), ex2 = await exitOf(WL, 'exit-eio', { sync: 'EIO' });
+    check('⑱f r4828 THE EXIT\'S ORDER: its synchronous write through the door — its temp opened, written, SYNCED, closed, THEN renamed; both rows on disk when stop() returns', ex1.ok === true && ex1.calls === 'open sync close rename' && ex1.rows === 2 && !ex1.tmpLeft, ex1);
+    check('⑱f r4828 …a sync that FAILS at the exit (a placed EIO): the stop answers false and says it by name (the write, then the loss), the old record whole, no temp left', ex2.ok === false && ex2.calls === 'open sync close' && ex2.whole && ex2.rows === 1 && !ex2.tmpLeft && ex2.said.some((l) => /could not reach .* at the stop \(EIO\)/.test(l)) && ex2.said.some((l) => /never reached/.test(l)), ex2);
+    const R6 = wlMut("  try { FC.renameSynced(tmp, file, text, { where: '[writes-lost] the kept warnings', say }); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }", '  try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }', 'wl-exit-unsynced');   // stale-pins: kept (the release's writeAtomic — this red control's own text)
+    const ex6 = await exitOf(R6, 'red-exit-order');
+    check('⑱f RED CONTROL r4828: the exit\'s write as the release had it — renamed over the record with NO sync of its temp', !/sync/.test(ex6.calls) && /rename/.test(ex6.calls), ex6);
     const once3 = await onceOf(R3, 'red-once');
     check('⑱f RED CONTROL B-574d: the exit without its ONCE — a failing folder is written at every stop() (here twice), the loss said twice', once3.atStop === 2 && once3.said === 2, once3);
     // r3 M1 (round-2 acceptance): A ROW HELD AFTER A FAILED WRITE IS WRITTEN AT SHUTDOWN. The person frees the space and restarts the hub inside the 60-s retry
