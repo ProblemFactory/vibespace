@@ -2770,7 +2770,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     // 主开发 r5164 (2): the answer read whole (src/browser-tabs.js handBackAnswerWords) — a stash_refused DID hand the browser back (the
     // takeover ended, the card shown): said as a hand-back with its warning, never «could not hand back: <the stash's file>»
     const w = handBackAnswerWords(r, t);
-    if (!w.handedBack) { renderMode(); showToast(t('Could not hand the browser back: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error', duration: 7000 }); return; }
+    if (!w.handedBack) { renderMode(); showToast(w.text || t('Could not hand the browser back: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error', duration: 7000 }); return; }
     st.resumedHere = false; st.handedBack = true;
     showToast(w.text, w.warn ? { type: 'warn', duration: 9000 } : { duration: 5000 });
     renderMode();

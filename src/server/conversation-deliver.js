@@ -222,7 +222,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     try { fs.writeFileSync(stashFile + '.tmp', stashBody(), { mode: 0o600 }); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; noteLanded(); return true; }   // r3988 (A): what LANDED is the stash's word
     catch (e) {
       landingOwed = true;
-      lastWriteError = { at: Date.now(), message: String(e && e.message || e) };
+      lastWriteError = { at: Date.now(), message: String(e && e.message || e), code: (e && e.code) || null };
       log('[deliver] stash persist failed:', e.message);
       if (!retryTimer) { retryTimer = setTimeout(() => { retryTimer = null; writeStashNow(); }, STASH_RETRY_MS); retryTimer.unref?.(); }   // an empty queue is written too: a stale file would re-deliver at boot
       return false;
@@ -232,8 +232,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // Said by name now, the stash's health says it, and its own 30 s retry writes it again (the next start would release the same claims
   // again with the same lines: nothing is lost, the entries wait again in memory)
   if (bootReleaseFailed) {
-    lastWriteError = { at: Date.now(), message: String((bootReleaseFailed && bootReleaseFailed.message) || bootReleaseFailed) };
-    log(`[deliver] the release of the earlier hand-over claims of ${releasedAtBoot.length} conversation${releasedAtBoot.length === 1 ? '' : 's'} could not be saved to disk (${lastWriteError.message}) — the entries wait again in memory; the file still holds the claims, so the next start releases them again; written again in ${STASH_RETRY_MS / 1000} s`);
+    lastWriteError = { at: Date.now(), message: String((bootReleaseFailed && bootReleaseFailed.message) || bootReleaseFailed), code: (bootReleaseFailed && bootReleaseFailed.code) || null };
+    landingOwed = true;   // r5235 should: a landing after this spell tells the landing listeners, as writeStashNow's own catch does
+    log(`[deliver] the release of the earlier hand-over claims of ${releasedAtBoot.length} conversation${releasedAtBoot.length === 1 ? '' : 's'} could not be saved to disk (${lastWriteError.code || 'an error'}) — the entries wait again in memory; the file still holds the claims, so the next start releases them again; written again in ${STASH_RETRY_MS / 1000} s`);
     if (!retryTimer) { retryTimer = setTimeout(() => { retryTimer = null; writeStashNow(); }, STASH_RETRY_MS); retryTimer.unref?.(); }
   }
   const persistStash = () => {
@@ -244,7 +245,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // 主开发 r5164 (2), a silence of the release: the health read only the last write's ERROR — while the list is HELD (unread: every write
   // refused, what comes kept in memory) it answered «durable» over a file nothing is written to. A hold and an owed landing count now;
   // a failed write answers as before (durable false, its error), a healed one durable again
-  const stashHealth = () => { const held = !!stashHold.held(), owed = !held && !lastWriteError && landingOwed; return { durable: !lastWriteError && !held && !landingOwed, error: lastWriteError ? lastWriteError.message : held ? 'the list of messages waiting for conversations could not be read — nothing is written over it until it reads' : owed ? 'a write is owed: it has not landed yet' : null, since: lastWriteError ? lastWriteError.at : null, ...(held ? { held: true } : {}), ...(owed ? { owed: true } : {}) }; };
+  const stashHealth = () => { const held = !!stashHold.held(), owed = !held && !lastWriteError && landingOwed; return { durable: !lastWriteError && !held && !landingOwed, error: lastWriteError ? lastWriteError.message : held ? 'the list of messages waiting for conversations could not be read — nothing is written over it until it reads' : owed ? 'a write is owed: it has not landed yet' : null, since: lastWriteError ? lastWriteError.at : null, ...(lastWriteError && lastWriteError.code ? { code: lastWriteError.code } : {}), ...(held ? { held: true } : {}), ...(owed ? { owed: true } : {}) }; };
   // SIGTERM/SIGINT belt (review-caught): a debounced-only write loses a
   // just-stashed "queued" promise on the ROUTINE restart path — same law as
   // every other data/*.json store.
@@ -841,7 +842,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       if (!parkFailing) {
         parkFailing = { at: clock.now(), n: 0 };
         const n = Object.values(out).reduce((k, q) => k + (Array.isArray(q) ? q.length : 0), 0);
-        log(`[deliver] the retry park could not be saved to disk (${(e && e.message) || e}) — its ${n} parked entr${n === 1 ? 'y is' : 'ies are'} held in memory only: ${retryClosed ? 'the stop\'s own write, so they are lost with this stop' : `lost if VibeSpace restarts before it is written; written again every ${STASH_RETRY_MS / 1000} s`} (counted at this first failure)`);
+        log(`[deliver] the retry park could not be saved to disk (${(e && e.code) || 'an error'}) — its ${n} parked entr${n === 1 ? 'y is' : 'ies are'} held in memory only: ${retryClosed ? 'the stop\'s own write, so they are lost with this stop' : `lost if VibeSpace restarts before it is written; written again every ${STASH_RETRY_MS / 1000} s`} (counted at this first failure)`);
       }
       parkFailing.n++;
       if (!parkRetryTimer && !retryClosed) parkRetryTimer = clock.setTimeout(() => { parkRetryTimer = null; if (!retryClosed) writeRetryNow(); }, STASH_RETRY_MS);   // the park's own clock (unref'd); never after the stop
@@ -1974,11 +1975,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     try { offGateFree(); } catch { }   // B-ef83 unit 1's cure (r4410 (g)): a closed park hears no lift
     // line 494's follow (r2695 (2)): A STOP WHILE HELD — what was parked in memory is not written (the file is kept as it is): said, with its count
     if (retryHeld) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); if (n) log(`[deliver] the retry park stops HELD (data/msg-retry.json could not be read): ${n} deliver${n === 1 ? 'y' : 'ies'} parked during the hold lived in memory only and ${n === 1 ? 'is' : 'are'} not written — the file is kept as it is`); }
+    const flushedNow = !!retryWriteTimer, failedBefore = parkFailing ? parkFailing.n : 0;   // r5235 should: the stop's write is ONE write
     flushRetryWrite();
     // r5164 (2): a failing park's retry clock ends at the stop with ITS last write (closeRetries is reached after retryClosed: no timer after
     // it); a last write that fails is said by name — what memory alone held is lost with this stop
     if (parkRetryTimer) { clock.clearTimeout(parkRetryTimer); parkRetryTimer = null; }
-    if (parkFailing && !retryHeld && !writeRetryNow()) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); log(`[deliver] the retry park stops NOT on disk: its last write failed — ${n} parked entr${n === 1 ? 'y' : 'ies'} held in memory only ${n === 1 ? 'is' : 'are'} lost with this stop`); }
+    if (parkFailing && !retryHeld && (flushedNow ? parkFailing.n > failedBefore : !writeRetryNow())) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); log(`[deliver] the retry park stops NOT on disk: its last write failed — ${n} parked entr${n === 1 ? 'y' : 'ies'} held in memory only ${n === 1 ? 'is' : 'are'} lost with this stop`); }
     if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; }
   }
   function retryInFlightCount() { return retryInFlight.size; }

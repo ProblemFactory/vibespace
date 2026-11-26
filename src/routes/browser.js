@@ -303,7 +303,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   browser_cli_unconfirmed: 503, // B-7a30 unit 1': the door's fresh judgment of the browser's CLI got no answer within its bound (failVerdict)
   // lane browser-resume B (ruling 2): a Resume's refusals (a helper's browser is never kept; its directory became a named
   // profile; the conversation is not running) and the hand-back's (a browser this conversation does not hold; the stash)
-  child_not_kept: 409, resume_adopted: 409, no_live_session: 409, not_yours: 403, stash_refused: 503,
+  child_not_kept: 409, resume_adopted: 409, no_live_session: 409, not_yours: 403, stash_refused: 503, no_conversation_id: 409,
   // verify r2: a hand-back with nothing new while the previous one still waits for the agent's next turn (one carrier, once)
   already_handed_back: 409,
   // lane browser-resume C (§3.9, ruling 3): tabs — nothing ran (the verdict precedes every exec); the act itself failed
