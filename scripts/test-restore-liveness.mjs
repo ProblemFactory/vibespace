@@ -1018,8 +1018,15 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     return f;
   };
   // r4863: THE DEATH's OWN WORDS — the error the hub's uncaught handler printed (server.js: console.error(e), then its exit flush): its
-  // first line and the next, kept whole for the judged lines (a journal's last 600 characters showed only the exit flush)
-  const deathOf = (out) => { const L = String(out).split('\n'); for (let i = L.length - 1; i >= 0; i--) if (/^[A-Za-z]*Error(?: \[[A-Z_]+\])?: /.test(L[i])) return L.slice(i, i + 2).map((x) => x.trim()).join(' ⏎ ').slice(0, 300); return null; };
+  // first line and the next, kept whole for the judged lines (a journal's last 600 characters showed only the exit flush).
+  // r5058 (a)(b): read from the ERROR STREAM ALONE (the merged journal can split a long line of the other stream around the death) and
+  // only in its tail written after the install was asked (an error logged before the death's window is never the death)
+  // r5058 (b), as the kit read it (run 086530a3d-20261126114046h-box): the hub's helper child (src/server/child-starter.js) SHARES its
+  // error stream, and when the hub is dead the helper's own write to it fails — its «Error: write EPIPE … WriteWrap.onWriteComplete»
+  // lands AFTER the hub's death line. So the death is the FIRST error line of the tail (the hub's handler prints before anything that
+  // shares its stream can react to its death); every later one is printed beside it, never read as the death
+  const errorLinesOf = (text) => { const L = String(text).split('\n'), o = []; for (let i = 0; i < L.length; i++) if (/^[A-Za-z]*Error(?: \[[A-Z_]+\])?: /.test(L[i])) o.push(L.slice(i, i + 2).map((x) => x.trim()).join(' ⏎ ').slice(0, 300)); return o; };
+  const deathOf = (text) => errorLinesOf(text)[0] || null;
   const DRAIN_MS7 = 10000;   // r4928: the bound on a dead copy's output draining after its exit (named when it runs out)
   // r4928 (B) BESIDE (A): what the copy died of, by its death's own words — the plant, a real pipe error on the stream it writes
   // (WRITE_ERR7: a write's EPIPE / ECONNRESET, a destroyed stream), something else, or no words at all
@@ -1043,13 +1050,14 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     const root7 = path.join(ROOT, 'daemons', 'dead-' + tag); daemonRoots.add(root7);
     const env = { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_AGENTD_ROOT: root7, VIBESPACE_NODE_MODULES: path.join(REPO, 'node_modules'), PATH: `${sc.bin}:${process.env.PATH}` };
     const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] }); servers.add(srv);
-    let out = ''; srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; });
+    let out = '', errOut = ''; srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; errOut += d; });   // r5058 (a): the error stream ALSO alone
     let ends = 0; srv.stdout.on('end', () => { ends++; }); srv.stderr.on('end', () => { ends++; });   // r4928: its output DRAINED = both streams ended
     let exited = null; srv.on('exit', (c, sig) => { exited = { code: c, sig }; });
     const t0 = Date.now(); while (!out.includes('Ready.') && exited == null && Date.now() - t0 < 120000) await sleep(100);
     const bootMs = Date.now() - t0;
     const call = async (p, body) => { try { const c = new AbortController(); const tm = setTimeout(() => c.abort(), 15000); const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined, signal: c.signal }); clearTimeout(tm); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; } catch (e) { return { status: 'NO ANSWER', err: String(e.message || e) }; } };
     const steps = {};
+    const errAtInstall = errOut.length;   // r5058 (b): the death is read only in the error stream's tail written after the install was asked
     steps.install = await call('/api/hosts/h-dead/agent-tools/install', {});
     let deathWaitMs = 0;
     { const t1 = Date.now(); while (exited == null && Date.now() - t1 < (expectDeath ? 15000 : 800)) await sleep(100); deathWaitMs = Date.now() - t1; } // the control's death is AT this road
@@ -1064,10 +1072,11 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     steps.recent = await call('/api/hosts/h-dead/recent-cwds');
     steps.home = await call('/api/home?host=h-dead');
     steps.next = await call('/api/home');
-    const r = { steps, exited, exitedAfterInstall, deathWaitMs, bootMs, drained, ready: out.includes('Ready.'), writeErr: (out.match(WRITE_ERR7) || [''])[0], neverClosed: out.includes(NEVER_CLOSED7), planted: out.includes(PLANT_WORDS7), death: deathOf(out), journal: () => out };
+    const r = { steps, exited, exitedAfterInstall, deathWaitMs, bootMs, drained, ready: out.includes('Ready.'), writeErr: (out.match(WRITE_ERR7) || [''])[0], neverClosed: out.includes(NEVER_CLOSED7), planted: out.includes(PLANT_WORDS7), death: deathOf(errOut.slice(errAtInstall)), errorLines: errorLinesOf(errOut.slice(errAtInstall)), journal: () => out };
     try { srv.kill('SIGKILL'); } catch { }
     // THE SCENE ENDS: its ssh gone (its own «gone» file, bounded), then every file of the scene removed — nothing reaches the next scene
     { const t2 = Date.now(); while (!fs.existsSync(sc.gone) && Date.now() - t2 < 5000) await sleep(50); r.sshGone = fs.existsSync(sc.gone); }
+    r.plantReached = fs.existsSync(sc.written);   // r5058 (c): the copy's own mark that its planted write ran — read before the folder goes
     try { fs.rmSync(sc.dir, { recursive: true, force: true }); } catch { }
     return r;
   };
@@ -1120,10 +1129,10 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     // read after the copy's output drained; red when the copy lived, died of something else, or died with no words
     const ctlKind = deathKindOf(ctl.death);
     ok(ctl.exitedAfterInstall != null && ctl.exitedAfterInstall.code === 1 && (ctlKind === 'the plant' || ctlKind === 'a real pipe error on the stream') && ctl.steps.next.status === 'NO ANSWER',
-      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of an 'error' on the child's stdin — of ${ctlKind}, by its death's own words «${ctl.death || 'no error line printed'}» (its output ${ctl.drained === true ? 'drained to its end' : ctl.drained === false ? `NOT drained in ${DRAIN_MS7} ms` : 'not asked'}, exit ${JSON.stringify(ctl.exitedAfterInstall)}, looked for ${ctl.deathWaitMs} ms, the stream's write error «${ctl.writeErr}», the next request ${ctl.steps.next.status})`, `${ctl.death || '(no death line)'}\n${ctl.journal().slice(-600)}`);
+      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of an 'error' on the child's stdin — of ${ctlKind}, by its death's own words «${ctl.death || 'no error line printed'}» (its output ${ctl.drained === true ? 'drained to its end' : ctl.drained === false ? `NOT DRAINED in ${DRAIN_MS7} ms` : 'not asked'}, ${ctl.plantReached ? (ctl.exitedAfterInstall == null ? 'it SURVIVED the plant' : 'the plant was reached') : 'the plant was NEVER reached'}, ${ctl.errorLines.length > 1 ? `then ${ctl.errorLines.length - 1} more error line(s) on its stream after the death, never read as it «${ctl.errorLines.slice(1).join(' | ').slice(0, 240)}», ` : ''}exit ${JSON.stringify(ctl.exitedAfterInstall)}, looked for ${ctl.deathWaitMs} ms, the stream's write error «${ctl.writeErr}», the next request ${ctl.steps.next.status})`, `${ctl.death || '(no death line)'}\n${ctl.journal().slice(-600)}`);
     const live = await deadHub('planted-fixed', (sc) => plantedFixed7(sc), { expectDeath: true, kind: 'written-then-ends' });
-    ok(live.ready && live.exitedAfterInstall == null && live.exited == null && live.steps.next.status === 200,
-      `§7 …and the FIXED hub with the SAME plant LIVES and answers the next request (exit ${JSON.stringify(live.exited)}, the install ${live.steps.install.status}, the next request ${live.steps.next.status})`, live.journal().slice(-600));
+    ok(live.ready && live.plantReached === true && live.exitedAfterInstall == null && live.exited == null && live.steps.next.status === 200,
+      `§7 …and the FIXED hub with the SAME plant LIVES and answers the next request (${live.plantReached ? 'the plant reached' : 'the plant NEVER reached'}, exit ${JSON.stringify(live.exited)}, the install ${live.steps.install.status}, the next request ${live.steps.next.status})`, live.journal().slice(-600));
     // r4863: THE THIRD FORM's ORDER, PLACED — OBSERVED, NEVER JUDGED. The lane first judged it «dies of the REAL pipe error first»: on
     // the box (Node 24, two tries of run 18f78a0f3-20261126070603h-box) it died of the PLANT even with the write after the close — a
     // write's own failure reaches its 'error' at least two ticks later, behind the plant's one. What killed the hosted copy is not
