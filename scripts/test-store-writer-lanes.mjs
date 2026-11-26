@@ -336,7 +336,7 @@ parentPort.on('message', (m) => {
       return { order: r.order.join(' → '), disk: fs.readFileSync(file, 'utf8'), err: done && done.err ? done.err.code : null, tempLeft: fs.existsSync(tmp) };
     };
     const srcK = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf8');
-    const NO_SYNC = M12.load('src/store-writer-worker.js', anchored(srcK, 'try { writeAll(fs, cur.fd, m.parts); if (m.last) fs.fsyncSync(cur.fd); } catch (e) { cur.err = e; }', 'try { writeAll(fs, cur.fd, m.parts); } catch (e) { cur.err = e; }', 'a write in pieces renamed with no sync'), 'pieces-no-sync');
+    const NO_SYNC = M12.load('src/store-writer-worker.js', anchored(srcK, 'try { writeAll(fs, cur.fd, m.parts); if (m.last) { try { fs.fsyncSync(cur.fd); } catch (e) { cur.noSync = unsynced(e); } } } catch (e) { cur.err = e; }', 'try { writeAll(fs, cur.fd, m.parts); } catch (e) { cur.err = e; }', 'a write in pieces renamed with no sync'), 'pieces-no-sync');
     const h1 = byPieces(WK, 'real'), h0 = byPieces(NO_SYNC, 'no-sync'), hA = byPieces(WK, 'abort', true);
     ok(h1.order === 'open temp → write temp → fsync temp → close temp → rename temp > file' && h1.disk === '{"a":1}' && !h1.err && !h1.tempLeft, `⑫ (h) the pieces road: ${h1.order}`, h1);
     ok(!/fsync/.test(h0.order) && /rename temp > file/.test(h0.order), `⑫ (h) RED (the sync removed): ${h0.order}`, h0);
@@ -452,8 +452,8 @@ parentPort.on('message', (m) => {
       } finally { try { w.stop(); } catch { } }
     };
     const srcK0 = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf8');
-    const asThread = (src) => anchored(src, 'if (parentPort && require.main === module) {', 'if (parentPort) {', 'the copy is the thread\'s own script');
-    const plantFail = (src) => anchored(src, '      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);', "      if (FS.existsSync(m.file + '.fail')) { FS.unlinkSync(m.file + '.fail'); throw Object.assign(new Error('a planted failure after the create'), { code: 'EIO' }); }\n      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);", 'an append that fails after its create');
+    const asThread = (src) => anchored(src, 'if (parentPort && require.main === module) serve(parentPort, S);', 'if (parentPort) serve(parentPort, S);', 'the copy is the thread\'s own script');
+    const plantFail = (src) => anchored(src, '      writeAll(fs, fd, m.parts);\n      try { fs.fsyncSync(fd); }', "      if (FS.existsSync(m.file + '.fail')) { FS.unlinkSync(m.file + '.fail'); throw Object.assign(new Error('a planted failure after the create'), { code: 'EIO' }); }\n      writeAll(fs, fd, m.parts);\n      try { fs.fsyncSync(fd); }", 'an append that fails after its create');
     const ANSWER = M12.write('src/store-writer-worker.js', plantFail(asThread(srcK0)), 'answer');
     const ANSWER_RED = M12.write('src/store-writer-worker.js', anchored(plantFail(asThread(srcK0)), '  const ownNow = (m, own, was) => own || (m.ownOnly && m.file && OWN.get(m.file) !== was ? OWN.get(m.file) || null : null);', '  const ownNow = (m, own, was) => own || null;', 'an answer that carries only a job\'s own result'), 'answer-red');
     const ownAnswer = async (workerPath, tag) => {

@@ -15,6 +15,15 @@
 const { parentPort, workerData } = require('worker_threads');
 const FS = require('fs');   // the real fs — each function names the one it was handed `fs` (a suite's short-write stand-in), so every census reads its calls
 const path = require('path');
+// 主开发 r5002 / r5010 — ONE SET FOR BOTH DOORS: a SYNC the file system does not do at all (src/fd-close.js SYNC_UNSUPPORTED, the hub
+// door's one constant — no second list: EINVAL, Linux vfs_fsync_range's answer for a file system with no fsync operation; ENOTSUP /
+// EOPNOTSUPP; ENOSYS) LANDS here too: the job goes on exactly as a synced one and its answer carries the code (`noSync`) — the
+// writer says it ONCE for its whole life (src/store-writer.js noSyncSeen). Every other failed sync, write, close or rename is a
+// failed write, as before. Before this, such a data folder failed EVERY store write of the writer, retried for ever: nothing landed
+const { SYNC_UNSUPPORTED } = require('./fd-close.js');
+/** a refused sync of a temp, judged ALONE (a write's own error never reaches it): a code of the set → that code; any other → thrown */
+const unsynced = (e) => { if (!e || !SYNC_UNSUPPORTED.has(e.code)) throw e; return e.code; };
+const withNoSync = (res, code) => (code ? Object.assign(res || {}, { noSync: code }) : res);
 
 const S = workerData && workerData.sab ? new Int32Array(workerData.sab) : null;
 
@@ -101,7 +110,7 @@ function rewriteJob(m, fs) {
     throw Object.assign(new Error(`${m.tmp} is still a second name of ${m.file} (its removal failed) — not rewritten through it`), { code: 'ETEMPLINKED' });
   }
   const ranges = m.rewrite.ranges, size = m.rewrite.size;
-  let src = null, out = null, err = null;
+  let src = null, out = null, err = null, noSync = null;
   try {
     src = fs.openSync(m.file, 'r');
     const now = fs.fstatSync(src).size;
@@ -127,7 +136,7 @@ function rewriteJob(m, fs) {
     if (now > size && last !== 10) { if (o === PIECE) flush(); buf[o++] = 10; }   // a torn tail past the read: the job's lines start on a new line
     flush();
     writeAll(fs, out, m.parts);
-    fs.fsyncSync(out);
+    try { fs.fsyncSync(out); } catch (e) { noSync = unsynced(e); }   // r5010: judged alone — a sync the file system does not do lands, said once
   } catch (e) { err = e; }
   if (out != null) { try { fs.closeSync(out); } catch (e) { if (!err) err = e; } }
   if (src != null) { try { fs.closeSync(src); } catch (e) { if (!err) err = e; } }   // a close that fails is the job's (every byte or nothing)
@@ -138,12 +147,13 @@ function rewriteJob(m, fs) {
   // a failure from here on comes AFTER the rename: the file IS rewritten (its lines in it) — said by its own code, ERENAMEDNOSYNC,
   // never as a failed rewrite (主开发 r915 2)
   let after = null, dfd = null;
-  try { dfd = fs.openSync(path.dirname(m.file), 'r'); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; }
+  try { dfd = fs.openSync(path.dirname(m.file), 'r'); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; else noSync = noSync || e.code; }   // r5010: a let-be code is said by the writer's one no-sync line
   if (dfd != null) {
-    try { fs.fsyncSync(dfd); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; }
+    try { fs.fsyncSync(dfd); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; else noSync = noSync || e.code; }
     try { fs.closeSync(dfd); } catch (e) { if (!after) after = e; }
   }
   if (after) throw Object.assign(new Error(`the rewrite landed (renamed over the file); its directory's fsync did not: ${(after && (after.code || after.message)) || after}`), { code: 'ERENAMEDNOSYNC' });
+  return noSync ? { noSync } : undefined;
 }
 /** ONE job. A whole-file write: temp, every byte, fsync (B-9275), close (its error is the write's), rename — NOTHING is renamed
  *  over the store unless every byte was written, synced and the temp closed without error. An APPEND (the acts journal): every byte,
@@ -175,7 +185,7 @@ function writeJob(m, fs = FS) {
       if (mine.length && !mine.some((x) => st.ino === x.ino && st.dev === x.dev)) { let ce = null; try { fs.closeSync(fd); } catch (e) { ce = e; } throw Object.assign(notOwn(m.file), ce ? { closeError: ce.code || String(ce) } : {}); }   // the close's error rides the refusal
       res = { own: { dev: st.dev, ino: st.ino } }; OWN.set(m.file, res.own);
     }
-    let err = null, size0 = null;
+    let err = null, size0 = null, noSync = null;
     try {
       size0 = fs.fstatSync(fd).size;
       // B-48a4: A RING (the hub's two audits): past `rotateAt` the live file moves to `.1` HERE — on the writer's thread, in
@@ -186,12 +196,13 @@ function writeJob(m, fs = FS) {
         fd = openA();
         size0 = fs.fstatSync(fd).size;
       }
-      writeAll(fs, fd, m.parts); fs.fsyncSync(fd);
+      writeAll(fs, fd, m.parts);
+      try { fs.fsyncSync(fd); } catch (e) { noSync = unsynced(e); }   // r5010: judged alone — a sync the file system does not do lands, said once
     } catch (e) { err = e; }
     if (err && size0 != null && fd != null) { try { fs.ftruncateSync(fd, size0); } catch { } }
     if (fd != null) { try { fs.closeSync(fd); } catch (e) { if (!err) err = e; } }
     if (err) { if (res && res.own && typeof err === 'object') err.own = res.own; throw err; }   // r2593 (2): the numbers THIS job made ride its error — the main-thread road (writeHere) feeds the store's cell on a failure too
-    return res;
+    return withNoSync(res, noSync);
   }
   sweepTemps(fs, m.file, m.tmp);
   // channel-store-off-loop (commit 1): A MISSING PARENT DIRECTORY IS MADE HERE, on the writer's thread — a store whose
@@ -206,11 +217,12 @@ function writeJob(m, fs = FS) {
     fs.mkdirSync(path.dirname(m.file), { recursive: true, mode: 0o700 });
     fd = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode);
   }
-  let err = null;
+  let err = null, noSync = null;
   // B-9275 — A STORE'S NEW BYTES ARE ON DISK BEFORE ITS NAME POINTS AT THEM: the temp is synced HERE, before its close and the
   // rename (a power loss or a machine's crash after a rename of unsynced bytes left the name on an empty or half file — the old
-  // whole version gone). A sync that fails is a failed write, as a short write or a close's error is: nothing is renamed.
-  try { writeAll(fs, fd, m.parts); fs.fsyncSync(fd); } catch (e) { err = e; }
+  // whole version gone). A sync that fails is a failed write, as a short write or a close's error is: nothing is renamed — except a
+  // sync the file system does not do at all (r5010: judged alone, never a write's error): the write goes on and lands, said once.
+  try { writeAll(fs, fd, m.parts); try { fs.fsyncSync(fd); } catch (e) { noSync = unsynced(e); } } catch (e) { err = e; }
   try { fs.closeSync(fd); } catch (e) { if (!err) err = e; }   // an error at close (an NFS server's ENOSPC) is the write's
   if (err) throw err;   // the caller removes the temp: the store keeps its previous whole version
   // `mode` applies when the temp file is CREATED; a leftover temp from a killed write keeps its old bits
@@ -222,17 +234,17 @@ function writeJob(m, fs = FS) {
     const cur = idOf(fs, m.file), mine = [m.own, OWN.get(m.file)].filter(Boolean);   // the store's own cell, then the thread's map (r1588 (3))
     if (cur && !mine.some((x) => cur.ino === x.ino && cur.dev === x.dev)) throw notOwn(m.file);
     const made0 = !cur ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): the temp's own numbers, read BEFORE the link (after it: the same inode)
-    if (!cur && linkedHere(fs, m.tmp, m.file)) { res = { own: made0 }; OWN.set(m.file, made0); return res; }
+    if (!cur && linkedHere(fs, m.tmp, m.file)) { res = { own: made0 }; OWN.set(m.file, made0); return withNoSync(res, noSync); }
   }
   const made1 = m.exclusive && m.ownOnly ? idOf(fs, m.tmp) : null;   // B-f276 1c (S2): read from the temp, before the link
   if (m.exclusive && linkedHere(fs, m.tmp, m.file)) {   // B-f276 1b: a store read missing — its first write never lands over a file that appeared
     if (m.ownOnly) { res = { own: made1 }; OWN.set(m.file, made1); }
-    return res;
+    return withNoSync(res, noSync);
   }
   const made = m.ownOnly ? idOf(fs, m.tmp) : null;
   fs.renameSync(m.tmp, m.file);   // THE commit point: the store's file is the old whole version or the new one, never half
   if (made) { res = { own: made }; OWN.set(m.file, made); }
-  return res;
+  return withNoSync(res, noSync);
 }
 
 /** A WHOLE WRITE IN PIECES (the writer unit, 主开发 r1328 — law 1, NO WHOLE WRITE HOLDS A TURN): the main thread hands one turn's
@@ -259,7 +271,7 @@ function pieceJob(m, cur, fs = FS) {
   }
   if (!cur || cur.id !== m.id) return { cur, done: m.last ? { err: Object.assign(new Error('a piece of a write whose first piece never came'), { code: 'EPIECE' }), ms: 0 } : null };
   if (m.abort && !cur.err) cur.err = Object.assign(new Error(m.why || 'the write was given up by the main thread'), { code: m.code || 'EABORT' });
-  if (!cur.err) { try { writeAll(fs, cur.fd, m.parts); if (m.last) fs.fsyncSync(cur.fd); } catch (e) { cur.err = e; } }   // THE BYTES ON DISK BEFORE THE NAME (B-9275)
+  if (!cur.err) { try { writeAll(fs, cur.fd, m.parts); if (m.last) { try { fs.fsyncSync(cur.fd); } catch (e) { cur.noSync = unsynced(e); } } } catch (e) { cur.err = e; } }   // THE BYTES ON DISK BEFORE THE NAME (B-9275); r5010: a sync the file system does not do lands, said once
   cur.ms += Number(process.hrtime.bigint() - t0) / 1e6;
   if (!m.last) return { cur, done: null };
   if (cur.fd != null) { try { fs.closeSync(cur.fd); } catch (e) { if (!cur.err) cur.err = e; } cur.fd = null; }
@@ -285,18 +297,21 @@ function pieceJob(m, cur, fs = FS) {
     } catch (e) { cur.err = e; }
   }
   if (cur.err) { try { fs.unlinkSync(m.tmp); } catch { } }
-  return { cur: null, done: { err: cur.err, ms: cur.ms + Number(process.hrtime.bigint() - t0) / 1e6, dropped: cur.dropped, own: cur.err ? null : (cur.own || null) } };
+  return { cur: null, done: { err: cur.err, ms: cur.ms + Number(process.hrtime.bigint() - t0) / 1e6, dropped: cur.dropped, own: cur.err ? null : (cur.own || null), noSync: cur.err ? null : (cur.noSync || null) } };
 }
 
-if (parentPort && require.main === module) {   // the thread's own script (a suite's stand-in thread requires writeJob alone)
+/** THE THREAD'S OWN ANSWER (r5010 — one function): the thread's own script runs it over the real fs (below), a suite's stand-in thread
+ *  over a placed one — so a leg reads the REAL cells and the REAL message of every road */
+function serve(parentPort, S, fs = FS) {   // its port named as the thread's own (test-memory-census reads the loop's first line)
   const { answerMemory } = require('./worker-memory.js');
-  const fs = FS;
   let cur = null;   // this thread's one whole write in pieces (pieceJob)
   /** a job's end in the shared cells: its outcome, its error code, the done count (this thread its ONE writer), then the wake */
-  const settleCells = (err, own = null) => {
+  const settleCells = (err, own = null, noSync = null) => {
     if (!S) return;
     if (S.byteLength >= 64) { const B = new BigUint64Array(S.buffer, 48, 2); B[0] = own ? BigInt(own.dev) : 0n; B[1] = own ? BigInt(own.ino) : 0n; }   // the own numbers, read by a settle before this answer is
-    if (err && S.byteLength >= 48) { const c = Buffer.from(String(err.code || 'EWRITE').slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else if (S.length > 3) Atomics.store(S, 3, 0);
+    // r5010: a LANDED job whose sync its file system does not do carries that code in the same cells (its outcome ok — the waited road reads it)
+    const code = err ? String(err.code || 'EWRITE') : noSync ? String(noSync) : null;
+    if (code && S.byteLength >= 48) { const c = Buffer.from(code.slice(0, 32), 'latin1'); new Uint8Array(S.buffer, 16, 32).set(c); Atomics.store(S, 3, c.length); } else if (S.length > 3) Atomics.store(S, 3, 0);
     Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1);   /* this thread is the count's ONE writer */ Atomics.store(S, 0, 0); Atomics.notify(S, 1);   // the cell the main thread waits on
   };
   // THE FILE ITS STORE MADE (B-f276 1c × the lanes): this thread's map is not the other lane's — a FIRST append that created the
@@ -314,8 +329,9 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
       if (!r.done) return;
       const err = r.done.err ? { code: (r.done.err && r.done.err.code) || null, message: (r.done.err && r.done.err.message) || String(r.done.err) } : null;
       const own = r.done.own || null;   // the piece road: the job's own result alone (r2593 (1))
-      settleCells(err, own);
-      parentPort.postMessage({ ev: 'written', id: m.id, ms: r.done.ms, err, file: m.file, own, ...(r.done.dropped ? { dropped: r.done.dropped } : {}) });   // own: as the plain road's (B-f276 1c)
+      const noSync = err ? null : r.done.noSync || null;   // r5010
+      settleCells(err, own, noSync);
+      parentPort.postMessage({ ev: 'written', id: m.id, ms: r.done.ms, err, file: m.file, own, ...(r.done.dropped ? { dropped: r.done.dropped } : {}), ...(noSync ? { noSync } : {}) });   // own: as the plain road's (B-f276 1c)
       return;
     }
     if (S) Atomics.store(S, 0, m.id);
@@ -324,12 +340,15 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
     let res = null;
     const was = m.ownOnly && m.file ? OWN.get(m.file) : undefined;   // the thread's entry before the job (r2593 (1))
     if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch (e) { if (!e || e.code !== 'ENOENT') err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; } }
-    else { try { res = writeJob(m); } catch (e) { err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } } }
+    else { try { res = writeJob(m, fs); } catch (e) { err = { code: (e && e.code) || null, message: (e && e.message) || String(e) }; if (!m.append) { try { fs.unlinkSync(m.tmp); } catch { } } } }
     const ms = Number(process.hrtime.bigint() - t0) / 1e6;
     const own = m.ev === 'unlink' ? null : ownNow(m, res && res.own, was);
-    settleCells(err, own);
-    parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own });   // own: the numbers of the file an own-only store made
+    const noSync = !err && res && res.noSync ? res.noSync : null;   // r5010: the code of a sync its file system does not do — the writer says it once
+    settleCells(err, own, noSync);
+    parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own, ...(noSync ? { noSync } : {}) });   // own: the numbers of the file an own-only store made
   });
 }
+if (parentPort && require.main === module) serve(parentPort, S);   // the thread's own script, over the real fs
 
 module.exports = { writeJob, pieceJob, writeAll, sweepTemps, linkedHere, rewriteJob };
+module.exports.serve = serve;   // r5010: a suite's stand-in thread runs THIS answer over a placed fs

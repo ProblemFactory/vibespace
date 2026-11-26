@@ -638,7 +638,7 @@ console.log('④ the store writer syncs (B-9275 unit 1) — RED: today\'s writeJ
   const { anchored } = await import('./scratch.mjs');
   const rel = 'src/store-writer-worker.js', real = fs.readFileSync(path.join(REPO, rel), 'utf8');
   const wj = (src) => renameSites(rel, src, AC).sites.filter((s) => s.scope === 'writeJob' && s.from === 'm.tmp').map((s) => s.cls).join(',');
-  const today = anchored(real, 'try { writeAll(fs, fd, m.parts); fs.fsyncSync(fd); } catch (e) { err = e; }', 'try { writeAll(fs, fd, m.parts); } catch (e) { err = e; }', 'today: a whole write renamed with no sync');   // stale-pins: kept (today's line, the RED copy)
+  const today = anchored(real, 'try { writeAll(fs, fd, m.parts); try { fs.fsyncSync(fd); } catch (e) { noSync = unsynced(e); } } catch (e) { err = e; }', 'try { writeAll(fs, fd, m.parts); } catch (e) { err = e; }', 'today: a whole write renamed with no sync');   // stale-pins: kept (today's line, the RED copy)
   ok(wj(real) === 'synced', `the store writer's whole write reads synced (${wj(real)})`);
   const swapped = all.sites.filter((s) => s.file !== rel).concat(renameSites(rel, today, AC).sites);
   const Jt = judge(swapped, ROWS);

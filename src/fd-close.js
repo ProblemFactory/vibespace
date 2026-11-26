@@ -32,7 +32,9 @@ async function closeWrittenHandle(fh, where, say) {
  *  system (some network and FUSE ones) answering that it does not support the operation (one number on Linux, two names elsewhere);
  *  ENOSYS — the call itself not implemented (Linux's FUSE layer turns a daemon's ENOSYS into success; another kernel may pass it on).
  *  EVERY OTHER CODE (EIO, ENOSPC, EDQUOT, EROFS, an unknown one) is where a WRITE error first shows on a network folder: the bytes may
- *  not be there — a FAILED WRITE */
+ *  not be there — a FAILED WRITE. ONE SET FOR BOTH DOORS (主开发 r5010): the store writer's thread (src/store-writer-worker.js) reads THIS
+ *  constant, no second list. The kernel's own code, read at v7.0.14: fs/sync.c vfs_fsync_range answers -EINVAL when the file's
+ *  operations have no fsync; fs/fuse/file.c fuse_fsync turns a daemon's -ENOSYS into success and asks it no more */
 const SYNC_UNSUPPORTED = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
 /** THE words of a sync the file system does not do (the one spelling) */
 function syncUnsupportedWords(where, code) { return `${where}: its file system does not do a sync (${code}) — its new bytes took their name unsynced`; }
