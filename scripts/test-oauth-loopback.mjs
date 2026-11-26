@@ -74,14 +74,24 @@ const quiet = { warn() {}, log() {}, error() {} };
 
 // ── B-3dbd PLACED (r4792): the window the old head left, made red at will by a stand-in of the suite's own ──
 {
-  const [p] = await freePorts(1);                 // the OLD shape: a port chosen, then released at once
-  const standIn = await hold(p);                  // a stand-in takes it inside the window (the tier's other process, placed)
-  let oldTake = null; try { (await hold(p)).close(); } catch (e) { oldTake = e.code; }
-  standIn.close();
+  // r4825 (both readers): THE PLACEMENT MAKES THE VERY WINDOW IT SHOWS — its own stand-in takes a chosen-then-released port, and another
+  // process may take that port first. So the stand-in's hold is in a try: a port taken there is a NAMED line that the placement could not
+  // be made this run (never the product's red, never a silent pass), and the leg is tried ONCE more on a fresh port
+  const placeOnce = async () => {
+    const [p] = await freePorts(1);               // the OLD shape: a port chosen, then released at once
+    let standIn = null;
+    try { standIn = await hold(p); } catch (e) { return { made: false, why: (e && e.code) || String(e) }; }   // a stand-in takes it inside the window (the tier's other process, placed)
+    let oldTake = null; try { (await hold(p)).close(); } catch (e) { oldTake = e.code; }
+    standIn.close();
+    return { made: true, oldTake };
+  };
+  let pl = await placeOnce();
+  if (!pl.made) { console.log(`  (the placement could not be made on its first port: another process took it before the suite's stand-in (${pl.why}) — tried once more on a fresh port)`); pl = await placeOnce(); }
   const h = await held();                         // the NEW shape: held from the moment it is chosen
   let standInNow = null; try { (await hold(h.port)).close(); } catch (e) { standInNow = e.code; }
   await h.handOver();
-  ok(oldTake === 'EADDRINUSE' && standInNow === 'EADDRINUSE', `PLACED: a port chosen then released is lost to a stand-in that takes it inside the window — the old shape's later take reads ${oldTake} (the candidate's crash, at will); a port HELD from its choice keeps the stand-in out (${standInNow}) until it is handed over`);
+  if (!pl.made) ok(false, `the placement could not be made this run — another process took the chosen port before the suite's stand-in, twice (${pl.why}): a harness line, never the product's verdict`);
+  else ok(pl.oldTake === 'EADDRINUSE' && standInNow === 'EADDRINUSE', `PLACED: a port chosen then released is lost to a stand-in that takes it inside the window — the old shape's later take reads ${pl.oldTake} (the candidate's crash, at will); a port HELD from its choice keeps the stand-in out (${standInNow}) until it is handed over`);
 }
 
 // ── ① EPHEMERAL: a fresh port, the consent URL carries it, the loopback lands ──
