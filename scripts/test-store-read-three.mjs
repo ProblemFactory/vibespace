@@ -981,9 +981,9 @@ try {
       ok(lg.legacyLeft && lg.owed && lg.ingested && lg.migrated, 'r3982 (3): after a torn boot the one-time ingest of the legacy mount stores is OWED (marked in the list the lift saves) and runs at the NEXT start', lg);
       ok(!lgx.ingested && !lgx.migrated, 'RED CONTROL — no mark (in a copy): the torn lift saves, the next start reads data, and the legacy store is never ingested', lgx);
       const lgN = await legacyRun(MMv, 'legacy-owed-none', { noLegacy: true }), lgD = await legacyRun(MMv, 'legacy-owed-dup', { dup: true });
-      const PAID = "this._migrateLegacy(); this._save(); }   // r4039 (f)", SKIP = ".filter((r) => !have.has(r.id) && !(r.mountpoint && have.has(r.mountpoint)));";
+      const PAID = "this._migrateLegacy(); this._save(); }   // r4039 (f)", SKIP = "      if (!meets.length) added.push(r);\n";   // r4985 (lane lg-remote-hardening): the skip is _ingestLegacy's now (a record that meets the list is added only when nothing holds its id or mount point)
       const lgNx = await legacyRun(mutant('src/machine-mounts.js', [[PAID, 'this._migrateLegacy(); }   // r4039 (f)']]).MachineMounts, 'legacy-owed-none-ctl', { noLegacy: true });
-      const lgDx = await legacyRun(mutant('src/machine-mounts.js', [[SKIP, ';']]).MachineMounts, 'legacy-owed-dup-ctl', { dup: true });
+      const lgDx = await legacyRun(mutant('src/machine-mounts.js', [[SKIP, '      if (true) added.push(r);\n']]).MachineMounts, 'legacy-owed-dup-ctl', { dup: true });
       ok(lg.markGone && lgN.markGone && lgD.ids === 'mm-same08', 'r4039 (f): the owed mark is SAVED AWAY once it is paid — with no legacy store there too; the owed ingest SKIPS a record whose mount point the list already holds', { lg, lgN, lgD });
       ok(!lgNx.markGone && lgDx.ids === 'mm-same08,old-made08', 'RED CONTROLS (each in a copy) — the mark kept after its ingest (every start says it again); the owed ingest adding the same mount point twice', { lgNx, lgDx });
       // r3982 (4): the machines list's lift ORDER — the records loaded, THEN the waits run (a wait sees the machines)

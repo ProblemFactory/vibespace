@@ -141,6 +141,7 @@ class MachineMounts {
     this.log = log || (() => {});
     this._doors = new Map();   // B-7f0b: a push mount's id → the PROMISE of its own door (src/server/push-mount-door.js; r1317 (2): kept while it opens, so two re-owns share one)
     this._file = path.join(dataDir, 'machine-mounts.json');
+    this._legacyHolds = new Map();   // B-f276 slice legacy-mounts-gap (主开发 r4985): a legacy store whose read FAILED → its hold (one a store)
     // 2b commit 3 (主开发 r3648 / r3790): the hold is the FAMILY HELPER's (src/store-read-hold.js) — torn bytes at a start HOLD while
     // they are copied aside off the loop (once a content), then the list starts empty (its time cut marked at the lift); a failed read
     // holds, read again off the loop (past the helper's bound, said); the one-time legacy ingest is the boot's road only — after a
@@ -197,16 +198,19 @@ class MachineMounts {
   _migrateLegacy() {
     const hmF = path.join(this.dataDir, 'host-mounts.json');
     const dvF = path.join(this.dataDir, 'device-mounts.json');
+    // B-f276 slice legacy-mounts-gap (主开发 r4985, lane lg-remote-hardening): each store read ONCE through store-read's answer — never
+    // existsSync (false for a stat that FAILED too: an EACCES or an EIO was «nothing to do») and never one catch for a failed read and
+    // torn bytes alike (both were -1, and the list was saved without that store's records: no later start ingested it again). MISSING:
+    // nothing to do. DATA: ingested. TORN: kept in place, said with the words that name the kept file (a person's file to fix). A read that
+    // FAILED: HELD and OWED (-2) — the family helper reads it again off the loop (its records join the list at its lift) and the list saved
+    // below carries the owed mark, so a later start ingests it again; nothing of it is renamed until a start's verified save
     const ingest = (file, map) => {
-      if (!fs.existsSync(file)) return null; // nothing to do
-      try {
-        const st = JSON.parse(fs.readFileSync(file, 'utf-8'));
-        // r4039 (f): an OWED ingest meets a list that may hold the same mount already — a record whose id or mount point is there is skipped
-        const have = new Set(this._state.mounts.flatMap((m) => [m.id, m.mountpoint].filter(Boolean)));
-        const recs = (st.mounts || []).map(map).filter((r) => !have.has(r.id) && !(r.mountpoint && have.has(r.mountpoint)));
-        this._state.mounts.push(...recs);
-        return recs.length;
-      } catch (e) { this.log(`legacy store unreadable — kept in place (fix or remove it, then delete machine-mounts.json to re-migrate): ${file}: ${e.message}`); return -1; }
+      let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+      const la = SR.storeAnswer(read, { valid: STORE_SHAPE });   // a legacy store's answer
+      if (la.state === 'missing') return null; // nothing to do
+      if (la.state === 'unreadable') { this._legacyHeld(file, map, la); return -2; }   // HELD (said by the helper: held and read again)
+      if (la.state !== 'data') { this.log(`legacy store unreadable — kept in place (fix or remove it, then delete machine-mounts.json to re-migrate): ${file}: ${(la.error && la.error.message) || la.why}`); return -1; }
+      return this._ingestLegacy(file, la.value, map).length;
     };
     const nPush = ingest(hmF, (m) => ({ ...m, dir: 'push' }));
     const nPull = ingest(dvF, (m) => ({
@@ -217,6 +221,7 @@ class MachineMounts {
       hostId: (this.hosts.held?.() ? null : this.hosts.findByDeviceId?.(m.deviceId)?.id) || (/^grad-/.test(String(m.deviceId || '')) ? String(m.deviceId).slice(5) : 'host-dial-' + String(m.deviceId || '').replace(/[^\w-]/g, '')),
       remotePath: m.remotePath, mountpoint: m.mountpoint, createdAt: m.createdAt,
     }));
+    if (nPush === -2 || nPull === -2) this._state.legacyOwed = true;   // OWED (r4985): the next start ingests it again (the mark _loadAnswer reads)
     if (nPush === null && nPull === null) return;
     try {
       const t = this._file + '.tmp';
@@ -228,6 +233,50 @@ class MachineMounts {
     try { if (nPull >= 0 && fs.existsSync(dvF)) fs.renameSync(dvF, dvF + '.migrated'); } catch { }
     const migrated = (nPush > 0 ? nPush : 0) + (nPull > 0 ? nPull : 0);
     if (migrated) this.log(`migrated ${migrated} legacy mount record(s) into machine-mounts.json`);
+  }
+
+  /** one legacy store's records into the list (`st` its whole value) → the records ADDED. r4039 (f): a record the list already holds (the
+   *  SAME record: its id, mount point and birth — an owed ingest after a lift) is skipped in silence; one whose id or mount point a
+   *  DIFFERENT record of the list holds (a person's newer mount, made while the store was held) is PASSED OVER — the live one wins — and
+   *  said by its store and count, once a run (主开发 r4985 (b)): never dropped in silence */
+  _ingestLegacy(file, st, map) {
+    const same = (r, m) => m.id === r.id && (m.mountpoint || null) === (r.mountpoint || null) && (m.createdAt || null) === (r.createdAt || null);
+    const added = [], passed = [];
+    for (const r of (Array.isArray(st && st.mounts) ? st.mounts : []).map(map)) {
+      const meets = this._state.mounts.filter((m) => m.id === r.id || (r.mountpoint && m.mountpoint === r.mountpoint));
+      if (!meets.length) added.push(r);
+      else if (!meets.every((m) => same(r, m))) passed.push(r);
+    }
+    this._state.mounts.push(...added);
+    if (passed.length) this.log(`${path.basename(file)}: ${passed.length} legacy mount record(s) passed over — a mount the list already holds has the same id or mount point (that newer one is kept): ${passed.map((r) => r.mountpoint || r.id).join(', ')}`);
+    return added;
+  }
+  /** HELD (主开发 r4985): a legacy store whose read FAILED — the family helper's hold over it, read again off the loop on its ladder. Its
+   *  journal line says it is held and read again (never the advice to delete a store); the family's notice names it while it holds */
+  _legacyHeld(file, map, a) {
+    let h = this._legacyHolds.get(file);
+    if (!h) {
+      const base = path.basename(file);
+      h = HOLD.create({ file, valid: STORE_SHAPE, code: 'legacy_mounts_unread', aside: (mark) => file + '.corrupt-' + mark,
+        words: (f) => `${base} (an older list of this hub's mounts with its machines) could not be read (${f && f.code}) — VibeSpace reads it again by itself; its mounts join the list when it reads, and nothing of it is renamed or removed until then`,
+        log: (m) => this.log(m), onLift: (value, info) => this._legacyLifted(file, map, value, info) });
+      this._legacyHolds.set(file, h);
+    }
+    if (!h.held()) h.start(a);
+  }
+  /** the legacy hold LIFTED: `value` the records read (null: torn bytes, a copy kept aside as `setAside`, or the file gone). Its records
+   *  join the list NOW (from the helper's value: no synchronous read of the data folder on the loop) and are saved, their machines healed
+   *  if linked; the file keeps its name and the mark stays — the next start ingests it again (the same records: no second copy) and
+   *  renames it after its verified save (主开发 r4985 (c): nothing of a legacy store renamed or removed while any part of it is unread) */
+  _legacyLifted(file, map, value, { setAside = null } = {}) {
+    if (!value) { this.log(setAside ? `legacy store unreadable — kept in place (fix or remove it, then delete machine-mounts.json to re-migrate): ${file}: torn bytes (a copy kept aside as ${path.basename(setAside)})` : `${path.basename(file)} is gone — nothing of it to ingest`); return; }
+    const added = this._ingestLegacy(file, value, map);
+    this._state.legacyOwed = true;
+    this._save();
+    this.log(`${path.basename(file)} read again: ${added.length} legacy mount record(s) listed now — the file keeps its name until a start saves the list`);
+    if (!added.length) return;
+    this._notify();
+    for (const hostId of new Set(added.map((r) => r.hostId))) { try { if (this._online(hostId)) this.onMachineLinked(hostId); } catch { } }
   }
 
   /** remainder of B-f276 (bl-jobs, the store-read law over machine-mounts.json — every mount of a paired machine, each push
@@ -1305,6 +1354,9 @@ class MachineMounts {
    *  displayed meaningfully, or torn down through the app. */
   gcOrphanTokens() {
     if (this._unread) return 0;   // remainder of B-f276: a held store knows no record — every push token would read as an orphan
+    // 主开发 r4985 (lane lg-remote-hardening): a LEGACY store held — its push records are not in the list yet, so their tokens would read
+    // as orphans; the sweep revokes nothing until it reads (said once)
+    { const lh = (this._legacyHolds ? [...this._legacyHolds.values()] : []).find((h) => h.held()); if (lh) { if (!this._legacySweepSaid) { this._legacySweepSaid = true; this.log(`the orphan reverse-mount token sweep waits — ${path.basename(lh.file)} could not be read, and a token its records name would read as an orphan; nothing is revoked until it reads`); } return 0; } }
     let n = 0;
     try {
       const referenced = new Set(this._state.mounts.filter((m) => m.dir === 'push').map((m) => m.tokenId));
