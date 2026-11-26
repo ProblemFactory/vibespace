@@ -155,6 +155,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     let panel = null;
     try { panel = await probePanel({ root: configOf(m.dir), env: { ...childEnv(m.dir), CLAUDE_CODE_OAUTH_TOKEN: token } }); } catch { panel = null; }
     if (!live(m)) return; // cancelled or timed out during the read
+    // B-5279: usage reads are off — nothing was started; the person picks, as when no read answers (the journal says why)
+    if (panel && panel.refused) return ask(m, token, panel.why || 'Claude usage refresh is off in Settings — nothing was asked');
     const pv = panel ? panelVerdict(m.accountId, panel) : { verdict: 'none', why: 'the /usage read failed' };
     if (pv.verdict === 'match') return save(m, token, 'fingerprint-proven');
     if (pv.verdict === 'mismatch' && pv.own) return refuse(m, `this token's usage window differs from the one confirmed for ${nameOf(m.accountId)}'s token — not saved (remove that token first to confirm another account)`, { on: 'confirmed anchor', fp: pv.fp }, 'anchor_mismatch');
@@ -334,7 +336,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
  *  any failure is null (⇒ the pick, never a silent save). */
 function panelProbeVia(spawnOnce, parse) {
   return ({ root, env }) => new Promise((resolve) => {
-    try { spawnOnce({ root, env }, (err, stdout) => { if (err) return resolve(null); try { resolve(parse(String(stdout || '')) || null); } catch { resolve(null); } }); } catch { resolve(null); }
+    // B-5279: the door's refusal by the row (usage-routes panelDoorRefusal) is said as such — `{refused, why}`, never a failed read
+    try { spawnOnce({ root, env }, (err, stdout) => { if (err && err.refusedByRow) return resolve({ refused: err.code, why: err.message }); if (err) return resolve(null); try { resolve(parse(String(stdout || '')) || null); } catch { resolve(null); } }); } catch { resolve(null); }
   });
 }
 

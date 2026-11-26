@@ -580,6 +580,10 @@ console.log('\n⑧ the cures\' behaviour (round wldn7whag):');
   const back = mkLoop({ rows: [rowRead], verdictCode: 'sign-in-unknown' }); await back.loop.tick(); await back.loop.tick();
   const kept = mkLoop({ rows: [rowRead], verdictCode: 'login' }); await kept.loop.tick(); await kept.loop.tick();
   ck(`(d) the door refused «sign-in-unknown»: the attempt is given back — the next tick probes again (${back.probes.length}); CONTROL: a «login» refusal keeps its attempt (${kept.probes.length})`, back.probes.length === 2 && kept.probes.length === 1, JSON.stringify({ back: back.probes.length, kept: kept.probes.length }));
+  // B-5279: the usage-refresh row turned off inside a tick — the door refused BY THE ROW (refresh-off): nothing was asked, so the attempt
+  // is given back like sign-in-unknown's (no failure booked, no backoff) — the same control («login» keeps its attempt) above
+  const off = mkLoop({ rows: [rowRead], verdictCode: 'refresh-off' }); await off.loop.tick(); await off.loop.tick();
+  ck(`(d) B-5279: the door refused BY THE ROW «refresh-off»: the attempt is given back — no failure booked (${off.probes.length} asks over two ticks)`, off.probes.length === 2, JSON.stringify({ off: off.probes.length }));
 }
 
 // ── ⑥ the census ─────────────────────────────────────────────────────────────────────────────────────────────────────

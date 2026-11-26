@@ -1,6 +1,7 @@
 import { billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the billing pill's forms (its «对话设置» row says the full one)
 import { escHtml, showInputDialog, showConfirmDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress, followContent, heldWordsOf } from './utils.js';
 import { renderArtifactList } from './artifact-card.js'; // lane artifacts-model: the Artifacts chip's list
+import { settingsDoor } from './need-line.js'; // B-5279: the door to ONE setting (the usage-reads-off chip opens its row)
 import { outboxChipFace } from './outbox-feed.js'; // lane outbox-session-chip: the Outbox chip's words (the PURE verdict's numbers)
 import { apiFateLookup, onApiCards } from './channel-api-card-view.js'; // B-d3d3: a raw API row's words say its proposal's fate (and follow the records while the menu is open)
 import { UI_ICONS } from './icons.js';
@@ -1117,7 +1118,10 @@ export class ChatStatusBar {
       const arLabel = a.armed && heldAr ? ' ' + escHtml(t('waiting')) : a.armed ? (ck ? ' ' + escHtml(t('checking…')) : a.watch ? ' ' + escHtml(t('waiting')) : ' ' + escHtml(t('continues at {t}', { t: resetAt }))) : (a.enabled ? ' ' + escHtml(t('auto')) : offWords);
       title = title.replace(CANCEL_TAIL, '');   // a press OPENS the panel now and cancelling is its own row: the old «Click to cancel.» is not said (the acceptance reader)
       this._autoResumeTitle = title;   // the panel's first line (the reset, whose account) — the same words as the tooltip
-      (a.armed ? chip : inDoor)('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}<span class="chat-status-words">${arLabel}</span>`);   // ARMED: its time on row 1; else a row of «对话设置»
+      (a.armed ? chip : inDoor)('autoresume', `chat-status-autoresume chat-status-clickable${arState}`, title, `${UI_ICONS.autoContinue}<span class="chat-status-words">${arLabel}</span>`);
+      // B-5279 (主开发 r4896): usage reads are OFF and the wall named no reset — the ladder asks no more, so THIS conversation
+      // continues when a person resumes it: said here, beside the wall's own chip, to the person only; its press opens the setting
+      if (a.readsOff && !a.armed) chip('readsoff', 'chat-status-readsoff chat-status-clickable', t('Usage reads are off, so this conversation continues when you resume it — press to open the setting.'), `<span class="chat-status-words" data-reads-off-door="1" title="${escHtml(t('Usage reads are off, so this conversation continues when you resume it — press to open the setting.'))}">${UI_ICONS.autoContinue} ${escHtml(t('Usage reads are off'))}</span>`);   // ARMED: its time on row 1; else a row of «对话设置»
     }
 
     // Design canvas entry (2.366.0): rendered like the goal chip — the
@@ -1612,6 +1616,9 @@ export class ChatStatusBar {
   }
 
   _onClick(e) {
+    // B-5279: the usage-reads-off chip's door — the setting's own row in Settings (need-line settingsDoor), never a menu path
+    const roDoor = e.target.closest('[data-reads-off-door]');
+    if (roDoor) { e.stopPropagation(); const d = settingsDoor(this._app, 'accounts.onDemandQuotaRefresh'); if (d) d.run(); return; }
     if (e.target.closest('.chat-status-fb-press')) { e.stopPropagation(); this._fbPress(); return; }   // (B-d578 r3918) the conversation's own press — the BUTTON, never its words
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits

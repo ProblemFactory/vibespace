@@ -258,7 +258,7 @@ function createAutoCliLoop(d) {
         // (in memory: the next save carries it — a restart before it keeps the stamped attempt, which only paces the next try)
         if (!ok) {
           let pv0 = null; try { pv0 = d.usage.panelVerdictFor?.(key); } catch { }
-          if (pv0 && pv0.at >= now && pv0.code === 'sign-in-unknown') { if (attemptWas.get(key) == null) attempts.delete(key); else attempts.set(key, attemptWas.get(key)); continue; }
+          if (pv0 && pv0.at >= now && /^(sign-in-unknown|refresh-off|refresh-unread)$/.test(pv0.code)) { if (attemptWas.get(key) == null) attempts.delete(key); else attempts.set(key, attemptWas.get(key)); continue; }
         }
         // A FAILED PROBE NAMES ITS REASON (lane auto-cli-oat-unprobeable): the probe door's verdict for THIS attempt (stamped
         // after this tick's clock) — its class and the CLI's first line, scrubbed there (probeWhyText again here: the ONE

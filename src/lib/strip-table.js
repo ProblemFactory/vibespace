@@ -40,6 +40,7 @@ export const STRIP_ROWS = Object.freeze([
   row('turnstate', 'I', 'row1', 10, { exists: true }),                       // «waiting for you» — jumps to the ask
   row('remote', 'I', 'row1', 20, { exists: true }),                          // a lost link / a locked vault (no protection: a settings row)
   row('autoresume', 'I', 'row1', 30, { exists: true, alsoIn: DOORS.settings }), // ARMED with its time on row 1; its switch is a settings row
+  row('readsoff', 'I', 'row1', 31, { exists: true }),                        // B-5279: usage reads are off and the wall named no reset — this conversation continues when a person resumes it; the press opens the setting
   row('fallback', 'I', 'row1', 35, { exists: true }),                       // (B-d578 r3918) on a pool's fallback (billed there) or waiting for one — its words and, when it can act, ONE button beside them
   row('model', 'I', 'row1', 40, { door: DOORS.model }),                      // the model + the thinking level, one door
   row('perm', 'I', 'row1', 50),                                              // the permission mode in words (the settled fork: row 1)

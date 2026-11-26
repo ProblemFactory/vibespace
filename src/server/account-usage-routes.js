@@ -797,7 +797,9 @@ const usageRoutesMod = require('../usage-routes.js');
 // sessions spawn — THE accessor, the boot constant only before the registry exists
 const claudeBin = () => (cliCmds && typeof cliCmds.current === 'function' && cliCmds.current('claude')) || CLAUDE_CMD;
 const oatMint = require('./oat-mint.js').create({ accounts, claudeCmd: claudeBin, broadcastAll, exitHook: true,
-  probePanel: require('./oat-mint.js').panelProbeVia((o, done) => usageRoutesMod.spawnPanelProbe(claudeBin(), o, done), usageRoutesMod.parseCliUsageText),
+  // B-5279: the mint's identity proof passes the one door WITH the row's reader — under «Off (never contact Anthropic)» the door
+  // refuses before the program starts and the mint asks the person, as it does when no read answers
+  probePanel: require('./oat-mint.js').panelProbeVia((o, done) => usageRoutesMod.spawnPanelProbe(claudeBin(), { ...o, setting: serverSetting }, done), usageRoutesMod.parseCliUsageText),
   windows: () => (typeof engine.establishedWindows === 'function' ? engine.establishedWindows() : {}),
   journal: (rec) => { try { require('./usage-probe-log.js').appendProbeLog(accounts.dataDir, { rung: 'oat-mint', ...rec }); } catch { } } });
 require('./oat-mint.js').registerMintRoutes(app, { mint: oatMint, isAgentBearer });

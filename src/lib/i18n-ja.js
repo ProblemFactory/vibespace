@@ -5712,6 +5712,8 @@ export default {
   // lane ui-controls-and-bugs pick 1 — the auto-continue chip says what it is; «All subscriptions» says so instead of greyed boxes
   "continues at {t}": "{t} に自動で続行",
   "Auto-continue: off": "自動続行：オフ",
+  "Usage reads are off": "使用量の読み取りはオフです",   // B-5279
+  "Usage reads are off, so this conversation continues when you resume it — press to open the setting.": "使用量の読み取りがオフのため、この会話はあなたが再開したときに続きます。押すとこの設定を開きます。",   // B-5279
   "Turn auto-continue on": "自動続行をオンにする",
   "Turn auto-continue off": "自動続行を取り消す",
   // lane auto-resume-bulk (.349): WHY a session stopped (the card's mark, the filter) + the two bulk acts + the batch's cost (src/stopped-by.js, src/bulk-resume-cost.js, src/lib/bulk-resume.js)

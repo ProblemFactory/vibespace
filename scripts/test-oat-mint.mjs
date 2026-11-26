@@ -187,9 +187,11 @@ const loadOrch = (src) => {
   const m = new Module(ORCH, null); m.filename = ORCH; m.paths = Module._nodeModulePaths(path.dirname(ORCH)); m._compile(src, ORCH); return m.exports;
 };
 // the fake's knobs ride in a wrapper (the child env is an allowlist); `probe` = the production probePanel over the same fake
-const mk = (O, mode, { ident = IDENT.work, panel = null, probe = false, gate = null, ...over } = {}) => (spy) => {
+// B-5279: the one panel door asks the usage-refresh row (the production wiring hands serverSetting); `readsOff` stands it at Off
+const mk = (O, mode, { ident = IDENT.work, panel = null, probe = false, gate = null, readsOff = false, ...over } = {}) => (spy) => {
   const cmd = fakeClaudeCmd(tmpBase, { MODE: mode, TOKEN, RECORD: rec, IDENTITY: ident, PANEL: panel, GATE: gate });
-  return O.create({ accounts: am, claudeCmd: cmd, env: baseEnv(), tmpRoot: scratchRoot, ...(probe ? { probePanel: O.panelProbeVia((o, done) => UR.spawnPanelProbe(cmd, o, done), UR.parseCliUsageText) } : {}), ...spy, ...over });
+  const setting = (k) => (readsOff && k === 'accounts.onDemandQuotaRefresh' ? 'off' : undefined);
+  return O.create({ accounts: am, claudeCmd: cmd, env: baseEnv(), tmpRoot: scratchRoot, ...(probe ? { probePanel: O.panelProbeVia((o, done) => UR.spawnPanelProbe(cmd, { ...o, setting }, done), UR.parseCliUsageText) } : {}), ...spy, ...over });
 };
 
 /** One full mint through an ORCH copy; returns what leaked where. */
@@ -526,6 +528,14 @@ console.log('§5 F1 — a token is saved only under the account it PROVES');
     ok(r.m.phase === 'confirm' && !am.getOat(sub) && r.js.some((j) => j.outcome === 'awaiting-owner'), `${what} ⇒ the pick, never a silent save`, { m: r.m, js: r.js });
     r.mint.cancel(r.id);
   }
+  // B-5279 (主开发 r4896): «Off (never contact Anthropic)» refuses the mint's identity proof too, a person's act included — the
+  // program is NOT started (the fake records no probe) and the person is asked (the pick), the journal saying why
+  { const before = readRec().filter((x) => x.probe).length;
+    r = await runMint(O, sub, { ident: null, probe: true, panel: PANEL_A, windows: () => anchors, readsOff: true });
+    const after = readRec().filter((x) => x.probe).length;
+    ok(r.m.phase === 'confirm' && !am.getOat(sub) && after === before && r.js.some((j) => j.outcome === 'awaiting-owner' && /usage refresh is off/i.test(String(j.why || ''))),
+      'B-5279: with the usage-refresh row Off the mint starts NO /usage read (no probe recorded) and asks the person — the pick, its journal naming the row', { m: r.m, js: r.js, probes: after - before });
+    r.mint.cancel(r.id); }
   am.clearOat(sub);
   const rc2 = await runMint(loadOrch(unchecked), sub, { ident: null, probe: true, panel: PANEL_B, windows: () => anchors });
   console.log(`    RED control (the base, no probe): Second's window during Work Max's mint ⇒ phase ${rc2.m.phase}, stored under Work Max: ${am.getOat(sub) === TOKEN}`);
@@ -682,8 +692,8 @@ setInterval(() => { }, 1000);
   const withHook = await runChild(true);
   ok(withHook && !withHook.dirLeft && !withHook.alive, 'exitHook: SIGTERM mid-mint ⇒ stopAll ran — the CLI is gone and its scratch dir removed', withHook);
   const wiring = fs.readFileSync(path.join(REPO, 'src/server/account-usage-routes.js'), 'utf8');
-  ok(/require\('\.\/oat-mint\.js'\)\.create\(\{[^\n]*exitHook: true/.test(wiring) && /probePanel: require\('\.\/oat-mint\.js'\)\.panelProbeVia\(\(o, done\) => usageRoutesMod\.spawnPanelProbe\(claudeBin\(\), o, done\)/.test(wiring), // claudeBin = THE accessor (lane cli-shell-truth r2: the binary the sessions spawn)
-    'the server wires exitHook: true and the probe through usage-routes spawnPanelProbe (the one allowlisted /usage spawn)');
+  ok(/require\('\.\/oat-mint\.js'\)\.create\(\{[^\n]*exitHook: true/.test(wiring) && /probePanel: require\('\.\/oat-mint\.js'\)\.panelProbeVia\(\(o, done\) => usageRoutesMod\.spawnPanelProbe\(claudeBin\(\), \{ \.\.\.o, setting: serverSetting \}, done\)/.test(wiring), // claudeBin = THE accessor (lane cli-shell-truth r2: the binary the sessions spawn)
+    'the server wires exitHook: true and the probe through usage-routes spawnPanelProbe (the one allowlisted /usage spawn) WITH the usage-refresh row\'s reader (B-5279: the fence)');
 }
 // §8 (lane pool-oat-materialize, q-035 invariants 1 + 2): THE MATERIALIZED FILE IS THE TOKEN'S ONE
 // PLACE ON DISK. With the hub's CLI measured (2.1.296) a mint for a member whose login is dead also

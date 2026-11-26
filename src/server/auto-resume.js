@@ -602,7 +602,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const verb = session ? verbFor(session) : null;
     return {
       ...(hold.held() ? { held: hold.words() } : {}),   // r3004: its records unread — nothing continues by itself
-      ...(!a && damagedNow() && session && enabledFor(session) && (normalizeStoppedBy(session._stoppedBy) || {}).kind === 'quota' ? { lost: damagedNow().copy } : {}),   // r3104: stopped by a limit, no wait, the record damaged since — its continue may be lost
+      ...(!a && damagedNow() && session && enabledFor(session) && (normalizeStoppedBy(session._stoppedBy) || {}).kind === 'quota' ? { lost: damagedNow().copy } : {}),
+      // B-5279: the wall ladder stopped under «Off (never contact Anthropic)» with no known reset (the engine's readsOffStop): this
+      // stopped conversation continues when a person resumes it — the client says the words beside the wall's own
+      ...(!a && session && session._readsOffWall && (normalizeStoppedBy(session._stoppedBy) || {}).kind === 'quota' ? { readsOff: true } : {}),   // r3104: stopped by a limit, no wait, the record damaged since — its continue may be lost
       enabled: enabledFor(session),
       explicit: session && session._autoResume !== undefined ? !!session._autoResume : null,
       globalDefault: globalDefault(),

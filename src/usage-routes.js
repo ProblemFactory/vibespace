@@ -54,6 +54,21 @@ const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWo
 // one file per probe. `--strict-mcp-config` with no `--mcp-config` = none loaded;
 // the probe's one vendor call is the panel. One spelling: the spawn and the log.
 const PANEL_PROBE_ARGS = Object.freeze(['-p', '/usage', '--strict-mcp-config']);
+// THE FENCE OF «Off (never contact Anthropic)» (B-5279, 主开发 r4896): the Claude descriptor's row (quota.readsRow —
+// accounts.onDemandQuotaRefresh) set to off refuses EVERY start of the panel program — a person's ⟳, the auto-cli rung, the
+// pool's five roads (the wall ladder, the gate before an automatic continue, the reset-credit hold and its re-read, the check
+// after a login) and the mint's identity proof — HERE, at the one door all of them pass, before the program starts. BY NAME:
+// an Error with `code` PANEL_OFF and `refusedByRow`, never a spawn failure — the read records it as not probed and books
+// nothing against the account. The row's MEANING is unchanged (a value that cannot be read is the default, manual, as the
+// route has always read it); a door handed NO reader refuses (fail closed: a new caller cannot start the program unasked).
+const PANEL_OFF = 'refresh-off';
+const PANEL_NO_READER = 'refresh-unread';
+const CLAUDE_READS_ROW = require('./harnesses/claude-quota.js').readsRow;
+function panelDoorRefusal(setting) {
+  if (typeof setting !== 'function') return Object.assign(new Error('the usage-refresh row could not be asked — nothing was started'), { code: PANEL_NO_READER, refusedByRow: true });
+  let mode = 'manual'; try { mode = setting(CLAUDE_READS_ROW) || 'manual'; } catch { mode = 'manual'; }
+  return mode === 'off' ? Object.assign(new Error('Claude usage refresh is off in Settings (never contact Anthropic) — nothing was started'), { code: PANEL_OFF, refusedByRow: true }) : null;
+}
 // THE ONE PANEL SPAWN: the auto-cli rung below and the long-lived token mint's
 // second look (src/server/oat-mint.js, oat-verify F1) — one site, one argv, and
 // ONE ISOLATION (B-855a c1). A caller passes the isolated config dir it proves
@@ -63,7 +78,10 @@ const PANEL_PROBE_ARGS = Object.freeze(['-p', '/usage', '--strict-mcp-config']);
 // the mint made this spawn shared, each caller handed in its own env + cwd and
 // the isolation left the site. No root = the machine login's own probe
 // (__global__): no account dir to isolate into.
-function spawnPanelProbe(bin, { root, env: identityEnv }, done) {
+function spawnPanelProbe(bin, { root, env: identityEnv, setting }, done) {
+  // THE FENCE (B-5279): asked first, before anything is made or started; the refusal answers on a later turn, like an answer
+  const no = panelDoorRefusal(setting);
+  if (no) { setImmediate(() => done(no, '', '')); return null; }
   const { execFile } = require('child_process');
   const probeConfigDir = root || null;
   const env = { ...identityEnv };
@@ -792,6 +810,9 @@ function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, 
   return { refused, verified, shared, movedLikely, org, phase, why, expected: expected || null, panel: panelIdent, matched, panelWindow, apiWindow: apiWin || null };
 }
 async function refreshViaCliPanel(key) {
+  // THE FENCE, ASKED FIRST (B-5279): the door's own verdict — under Off no account folder is read, no probe dir is seeded, and
+  // the read is recorded as NOT PROBED with the door's code: no failed probe, no serve failure, no backoff, no «re-login» word
+  { const no = panelDoorRefusal(serverSetting); if (no) { panelSays(key, { at: Date.now(), outcome: 'not-probed', code: no.code, identityVerified: false, why: no.message, rung: 'panel' }); return false; } }
   const isGlobal = key === '__global__';
   let acctMeta = null;
   if (!isGlobal) {
@@ -867,7 +888,8 @@ async function refreshViaCliPanel(key) {
       const bin = (cliCmds && typeof cliCmds.current === 'function' && cliCmds.current('claude')) || CLAUDE_CMD || 'claude'; // THE accessor (lane cli-shell-truth r2)
       probeRec.argv = [bin, ...PANEL_PROBE_ARGS];
       const t0 = Date.now();
-      spawnPanelProbe(bin, { root: probeConfigDir, env }, (err, stdout, stderr) => {
+      spawnPanelProbe(bin, { root: probeConfigDir, env, setting: serverSetting }, (err, stdout, stderr) => {
+        if (err && err.refusedByRow) { probeRec.refused = err.code; return resolve(null); }   // the row turned off after the read's own ask (B-5279)
         probeRec.ms = Date.now() - t0;
         probeRec.exitCode = err ? (typeof err.code === 'number' ? err.code : (err.killed ? 'killed' : String(err.code || err.signal || 'error'))) : 0;
         probeRec.rawStdout = stdout == null ? '' : String(stdout);
@@ -881,6 +903,7 @@ async function refreshViaCliPanel(key) {
       });
     } catch (e) { probeRec.why = 'spawn threw: ' + (e && e.message); resolve(null); }
   });
+  if (probeRec.refused) { panelSays(key, { at: Date.now(), outcome: 'not-probed', code: probeRec.refused, identityVerified: false, why: 'Claude usage refresh is off in Settings — nothing was started', rung: 'panel' }); return false; }   // B-5279: nothing booked
   if (!(cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay))) {
     // A LAPSED SUBSCRIPTION answers this probe with the CLI's lapse sentence (2026-10-08): handed to the engine, whose
     // harness census decides — a lapse opens the episode or only moves `lastFail`; any other answer changes nothing
@@ -1962,7 +1985,10 @@ function usageAnswer(req, res) {
 }
 
 
+  // B-5279: the read's callers (the pool engine's probe) learn the door's refusal by asking the door — never a second rule
+  refreshViaCliPanel.refusal = () => panelDoorRefusal(serverSetting);
   return { refreshViaCliPanel, panelVerdictFor, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
 module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe, getOAuthToken };   // getOAuthToken: the machine login's kept read (r2575's legs, scripts/test-cli-usage-parse)
+Object.assign(module.exports, { panelDoorRefusal, PANEL_OFF, PANEL_NO_READER });   // B-5279: the fence's verdict and its two codes (the mint's wiring, the suites)

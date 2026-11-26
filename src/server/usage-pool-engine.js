@@ -3239,6 +3239,7 @@ function noteStoppedBy(session, verdict) {
 /** Clear it — the session runs again. Cheap when there is nothing to clear:
  *  noteSessionProduced calls this on every main-thread record. */
 function clearStoppedBy(session, why = 'ran again') {
+  if (session && session._readsOffWall) { session._readsOffWall = null; try { getAutoResume()?.refreshStatus?.(session._webuiId); } catch { } }   // B-5279: the wall's word goes with it
   if (!session || !session._stoppedBy) return false;
   session._stoppedBy = null;
   persistStoppedBy(session);
@@ -3997,6 +3998,9 @@ async function probeQuotaForKey(target, { session = null, timeoutMs = 20000, fre
     const probe = getQuotaProbe?.();
     if (!probe) return { ok: false, rung, backend, reason: 'cli-usage probe not wired' };
     const ok = await Promise.resolve(probe(target)).catch(() => false);
+    // B-5279: a read the door refused by the row («Off (never contact Anthropic)») is NO answer and NO failure — said by its code,
+    // asked of the door itself (usage-routes refreshViaCliPanel.refusal): its callers stop asking and book nothing
+    if (!ok) { let no = null; try { no = typeof probe.refusal === 'function' ? probe.refusal() : null; } catch { no = null; } if (no) return { ok: false, rung, backend, reason: no.message, refused: no.code }; }
     return { ok: !!ok, rung, backend, reason: ok ? null : 'cli panel did not answer' };
   }
   if (liveReadSource(backend)) {
@@ -4069,21 +4073,39 @@ function scheduleWallProbe(session, scope, model, attempt, { once = false } = {}
       if (!getAutoResume()?.enabledFor?.(session)) return;
       const a = accounts.get(scope);
       const target = a && a.type === 'pooled' ? sessionBillingMember(session, scope).id : scope; // the member whose credentials the CLI reads (2026-09-07: the link, slot-validated)
-      if (target) await probeQuotaForKey(target, { session }).catch(() => { }); // caps-routed: never a claude spawn for a codex identity
+      let pr = null;
+      if (target) pr = await probeQuotaForKey(target, { session }).catch(() => null); // caps-routed: never a claude spawn for a codex identity
+      // B-5279: the door refused by the row — this ladder asks NO MORE (a known reset still arms the continue below, as ever);
+      // with none, the conversation waits for a person and is TOLD, once, in its own view (readsOffStop)
+      const readsOff = !!(pr && pr.refused);
       const v = quotaVerdictFor(scope, { model, session });
       const ar = getAutoResume();
       // the fire's last check, asked here too (acceptance r4): a pool usable only through a member the link did not move
       // to is no «usable again» — that near-arm re-ran the gate into the same hold. The link's member decides
       const lv = v.usable === true ? linkHold(session, scope, model, v, Date.now()) : null;
-      if (lv) { if (lv.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, lv.blockedUntil, lv.reason, { cause: withChecking(armCauseFor(lv, null, null, 0), session) }); return; } scheduleWallProbe(session, scope, model, attempt + 1); return; }
+      if (lv) { if (lv.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, lv.blockedUntil, lv.reason, { cause: withChecking(armCauseFor(lv, null, null, 0), session) }); return; } if (readsOff) { readsOffStop(session, scope, pr.refused); return; } scheduleWallProbe(session, scope, model, attempt + 1); return; }
       if (v.usable === true) { ar?.armIfEnabled?.(id, session, Date.now() + 45000, 'account usable again'); return; }
       if (v.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, v.blockedUntil, v.reason, { cause: withChecking(armCauseFor(v, null, null, 0), session) }); return; }
+      if (readsOff) { readsOffStop(session, scope, pr.refused); return; }
       scheduleWallProbe(session, scope, model, attempt + 1);
     } catch (e) { console.warn('[wall] probe failed:', e.message); }
   }, WALL_PROBE_BACKOFF[attempt]);
   if (session._wallProbeTimer.unref) session._wallProbeTimer.unref();
 }
 
+/** B-5279: THE LADDER STOPPED UNDER OFF with no known reset. The conversation now waits for a person, so it is TOLD — ONCE a wall,
+ *  in its OWN view (auto-resume's status, the chip where the wall's words stand: statusFor `readsOff`), to the PERSON only: nothing
+ *  is typed to the agent and no turn starts. The fact lives on the session beside its stop and is dropped when the session runs
+ *  again (clearStoppedBy); a later wall says it again. */
+function readsOffStop(session, scope, code) {
+  const id = session && session._webuiId;
+  if (!id || session._readsOffWall) return;
+  // a continue already armed (a reset the wall itself named) waits for a time: nothing to tell
+  try { const ids = getAutoResume()?.armedIds?.(); if (Array.isArray(ids) && ids.includes(id)) return; } catch { }
+  session._readsOffWall = { at: Date.now(), scope: scope || null, code: code || null };
+  console.log(`[wall] ${id}: usage reads are off in Settings (${code || 'off'}) and no reset time is known — this conversation continues when a person resumes it (said once, in its view)`);
+  try { getAutoResume()?.refreshStatus?.(id); } catch { }
+}
 /** The pre-fire gate (auto-resume beforeFire): probe fresh quota, re-check
  *  the verdict — false vetoes the spend and re-arms to the new blockedUntil. */
 // ONE PROBE PER TARGET, SHARED (acceptance r3, reproduced: repro/accept-r2/skeptic-gate-two-trace.mjs): b552c972 stamped
@@ -4913,7 +4935,8 @@ function probeDuringResetHold(key, p) {
   p.probes++;
   try {
     const s = activeSessions.get(p.sid) || null;
-    Promise.resolve(probeQuotaForKey(key, { session: s, fresh: true })).catch(() => { }); // a re-ask after silence is written even while an older read waits
+    // B-5279: a read the door refused by the row lifts the hold AT ONCE — no ten-minute wait for a reading that cannot come
+    Promise.resolve(probeQuotaForKey(key, { session: s, fresh: true })).then((r) => { if (r && r.refused && _resetCreditPending.get(key) === p) releaseResetHold(key, `usage reads are off in Settings (${r.refused}) — no post-reset reading can come; the next evaluation decides on the cache as it stands`, { force: false }); }).catch(() => { }); // a re-ask after silence is written even while an older read waits
   } catch { }
 }
 function onResetHoldTimer(key, p) {
@@ -9790,6 +9813,7 @@ function maybeStopOnFallback(session, id, from, to) {
     repairIdentityAnchors, // B-855a c2: the STANDING identity repair (boot + POST /api/usage/repair-identity)
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
+    _scheduleWallProbe: scheduleWallProbe, _holdForResetReading: holdForResetReading,   // B-5279: the wall ladder and the reset-credit hold, driven by test-usage-reads-off
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, _poolDecisions, _basisOf, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageAnchors, usageCacheKeyFor,
