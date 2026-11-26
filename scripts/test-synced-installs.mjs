@@ -28,8 +28,9 @@ try {
   const stub = (name, body) => { fs.writeFileSync(path.join(BIN, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(BIN, name), 0o755); };
   stub('install', 'while [ $# -gt 2 ]; do shift; done; echo "install $2" >> "$LOG"; [ -z "$INSTALL_FAIL" ] || exit 1; cp "$1" "$2"');
   stub('visudo', 'echo "visudo $*" >> "$LOG"; [ -z "$VISUDO_FAIL" ]');
-  stub('sync', 'echo "sync $*" >> "$LOG"; if [ -n "$SYNC_OLD" ]; then [ "$1" != -f ] || { echo "sync: invalid option -- f" >&2; exit 1; }; [ $# -eq 0 ] || echo "sync: ignoring all arguments" >&2; exit 0; fi; if [ -n "$SYNC_NOTDONE" ] && [ $# -gt 0 ]; then echo "sync: error syncing x: Invalid argument" >&2; exit 1; fi; if [ -n "$SYNC_FAIL_ON" ]; then case "$*" in *"$SYNC_FAIL_ON"*) echo "sync: error syncing x: Input/output error" >&2; exit 1 ;; esac; fi; [ -z "$SYNC_FAIL" ]');   // B-bcb8 unit D: SYNC_OLD = a sync older than coreutils 8.24 (an operand ignored, a whole sync; -f an invalid option); SYNC_NOTDONE = a file system that does not do a sync (EINVAL); SYNC_FAIL_ON = only that file's sync fails (EIO)
+  stub('sync', 'if [ "$1" = --help ]; then if [ -n "$SYNC_OLD" ]; then echo "Usage: sync [OPTION]"; else echo "  -d, --data             sync only file data, no unneeded metadata"; echo "  -f, --file-system      sync the file systems that contain the files"; fi; exit 0; fi; echo "sync $*" >> "$LOG"; if [ -n "$SYNC_UUTILS" ] && [ "$1" != -d ] && [ "$1" != -f ]; then echo "WHOLE-MACHINE" >> "$LOG"; exit 0; fi; if [ -n "$SYNC_OLD" ]; then [ $# -eq 0 ] || { echo "sync: invalid option" >&2; exit 1; }; exit 0; fi; if [ -n "$SYNC_NOTDONE" ] && [ $# -gt 0 ]; then echo "sync: error syncing x: Invalid argument" >&2; exit 1; fi; if [ -n "$SYNC_FAIL_ON" ]; then case "$*" in *"$SYNC_FAIL_ON"*) echo "sync: error syncing x: Input/output error" >&2; exit 1 ;; esac; fi; [ -z "$SYNC_FAIL" ]');   // B-bcb8 unit D: --help names the data and file-system forms (none: SYNC_OLD, a sync before coreutils 8.24); SYNC_UUTILS = a plain operand is a WHOLE-MACHINE sync (uutils sync.rs: no flag → sync()); SYNC_NOTDONE = EINVAL; SYNC_FAIL_ON = EIO on one file
   stub('mv', `echo "mv $*" >> "$LOG"; [ -z "$MV_FAIL" ] || exit 1; exec ${real('mv')} "$@"`);
+  stub('dpkg-deb', 'echo "Package: hello"');   // B-bcb8 unit D: index()'s stanza reads a .deb's control fields; dash refuses a function named dpkg-deb
   stub('stat', `case "$*" in *%u*) echo 0 ;; *%a*) echo 755 ;; *) exec ${real('stat')} "$@" ;; esac`);
   const sh = (script, env = {}) => { const log = path.join(T0, `log-${Math.random().toString(36).slice(2)}`); fs.writeFileSync(log, ''); const r = cp.spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, LOG: log, ...env } }); return { rc: r.status, out: r.stdout + r.stderr, err: r.stderr, log: fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) }; };
   const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -145,103 +146,113 @@ try {
   const g0 = drive(anchored(fnOf(wsrc), fnOf(wsrc).slice(newBlockAt, newBlockEnd), OLD_AGY + '\n', 'the release\'s allow-rule write'));
   ok(g0.r.ok === true && g0.order === 'writeFile temp → rename temp > file', `④ RED (the release's write): ${g0.order} — no sync before the name`, g0);
 
-  // ⑤–⑦ B-bcb8 unit D (lane bl-scratch, 主开发 r5211 / r5214): THE APP FAMILY's RECORDS — the app manifest's records and fetched .debs,
-  // the app system's new tree, the install slot's records — each SYNCED in its own string before its rename (`sync -- <file>`; the tree
-  // `sync -f -- <tree>`). A failed sync of the file is a failed write (the record from before stands; the tree refused by name; the pid
-  // record refused by name, nothing run). A sync its file system does not do (EINVAL) lands, said (sync_not_done, ONE spelling in the
-  // three root scripts). A sync older than coreutils 8.24 ignores the operand and syncs the whole system: the string goes on (its -f is
-  // an invalid option: the tree takes a whole sync). RED: each release line, in a copy — moved unsynced.
-  const ND = (script) => lineOf(script, /^sync_not_done\(\) \{/);
-  const NDs = [ND(AM.APP_SCRIPT), ND(AS.SYS_SCRIPT), ND(IS.INSTALL_RUNNER)];
-  ok(!!NDs[0] && NDs.every((l) => l === NDs[0]) && /\\n' "\$1" >&2; return 0 ;; esac; return 1; }$/.test(NDs[0]), `⑤ ONE SPELLING: the sync its file system does not do is the same ONE line in the three root scripts (${NDs[0]})`, NDs);
-  const FSN = lineOf(AS.SYS_SCRIPT, /^sync_fs_none\(\) \{/);
+  // ⑤–⑦ B-bcb8 unit D (lane bl-scratch, 主开发 r5211 / r5214 / r5309): THE APP FAMILY's RECORDS — the app manifest's records, its
+  // stanzas and the .debs it renames, the app system's new trees, the install slot's exit record — each synced in its own string
+  // before its rename, and THAT FILE's DATA only (sync_file: `sync -d -- <file>`), never the machine: a plain `sync FILE` is a
+  // whole-system sync() where the coreutils are uutils (sync.rs: no flag → sync()). The trees: their file system (sync_tree: `sync -f`).
+  // A failed sync is a failed write, said (the record from before stands; the .deb kept; the tree refused by name; no exit record). A
+  // machine whose sync names no data or file-system form in its --help (coreutils before 8.24) makes NO sync, said once. A sync its
+  // file system does not do (EINVAL) lands, said. The pid record is a live run's: no sync. RED: 64fafc5be's spelling (a plain `sync --`:
+  // a whole-machine sync on uutils) and each release line, in copies.
+  const SF = (script) => lineOf(script, /^sync_file\(\) \{/);
+  const SFs = [SF(AM.APP_SCRIPT), SF(IS.INSTALL_RUNNER)], ST = lineOf(AS.SYS_SCRIPT, /^sync_tree\(\) \{/);
+  ok(!!SFs[0] && SFs[0] === SFs[1] && /sync -d -- "\$1"/.test(SFs[0]) && /sync -f -- "\$1"/.test(ST), `⑤ ONE SPELLING: sync_file is the same ONE line in the app script and the install runner, and it syncs a file's DATA (sync -d); sync_tree syncs a tree's file system (sync -f)`, { SFs, ST });
   const rel = (scene) => scene.log.map((l) => l.trim().split(scene.d).join('D')).join(' · ');   // every path of the scene named from its folder
+  const whole = (scene) => scene.log.filter((l) => l === 'WHOLE-MACHINE').length;
   const SAID = /its file system does not do a sync: its new bytes take their name unsynced/;
-  console.log('⑤ the app manifest\'s records and its fetched .debs: synced before they take their names');
+  console.log('⑤ the app manifest\'s records, stanzas and renamed .debs: their data synced before they take their names');
   const HEAD_A = String(AM.APP_SCRIPT).split('\n')[0];
   const FIN = lineOf(AM.APP_SCRIPT, /^finish\(\) \{/), BASE = lineOf(AM.APP_SCRIPT, /^base\(\) \{/), LIST = lineOf(AM.APP_SCRIPT, /^list\(\) \{/);
-  const DEB_MV = lineOf(AM.APP_SCRIPT, /^ {4}if \[ "\$\{f##\*\/\}" != "\$n" \]; then \{ e=\$\(LC_ALL=C sync -- "\$f" 2>&1\) \|\| sync_not_done "\$e"; \} \|\| continue; mv -f "\$f" "\$D\/\$n"; f=\$D\/\$n; fi$/);
-  const LINES_A = String(AM.APP_SCRIPT).split('\n'), iStanza = LINES_A.findIndex((l) => /^ {4}\{ dpkg-deb -f "\$f" \| sed/.test(l));
-  const STANZA_SYNC = iStanza > 0 ? LINES_A[iStanza - 1] : '';
-  ok(!!FIN && !!BASE && !!LIST && !!DEB_MV && STANZA_SYNC === '    { e=$(LC_ALL=C sync -- "$f" 2>&1) || sync_not_done "$e"; } || continue', 'the app script\'s finish(), base(), list(), the .deb\'s rename and the sync just before a NEW stanza are found', { FIN: !!FIN, BASE: !!BASE, LIST: !!LIST, DEB_MV: !!DEB_MV, STANZA_SYNC });
-  const app = (lines, call, env = {}) => {
+  const LINES_A = String(AM.APP_SCRIPT).split('\n'), iSkip = LINES_A.findIndex((l) => /^ {4}s=\$D\/\$\{n%\.deb\}\.stanza; if \[ "\$\{f##\*\/\}" = "\$n" \]/.test(l));
+  const DEB = iSkip > 0 ? LINES_A.slice(iSkip, iSkip + 6) : [];   // the skip, the one sync, the rename, the stanza's name, its up-to-date check, the stanza
+  ok(!!FIN && !!BASE && !!LIST && DEB.length === 6 && DEB[1] === '    sync_file "$f" || continue' && /sync_file "\$s\.tmp" && mv -f "\$s\.tmp" "\$s"$/.test(DEB[5]), 'the app script\'s finish(), base(), list() and index()\'s .deb lines (one sync, then the rename; the stanza\'s own sync) are found', { FIN: !!FIN, BASE: !!BASE, LIST: !!LIST, DEB });
+  const app = (lines, call, env = {}, pre = '') => {
     const d = fs.mkdtempSync(path.join(T0, 'app-')); for (const x of ['V', 'R/base', 'R/entries', 'T', 'Dd']) fs.mkdirSync(path.join(d, x), { recursive: true });
     fs.writeFileSync(path.join(d, 'status'), 'the dpkg status\n'); fs.writeFileSync(path.join(d, 'T/req'), 'hello\n'); fs.writeFileSync(path.join(d, 'T/desktop'), '/usr/share/applications/x.desktop\n'); fs.writeFileSync(path.join(d, 'T/from'), 'src hello\n');
     fs.writeFileSync(path.join(d, 'V/last-dpkg.list'), 'the list from before\n'); fs.writeFileSync(path.join(d, 'R/entries/e1.list'), 'the entry from before\n');
     fs.writeFileSync(path.join(d, 'Dd/x.deb'), 'deb bytes');   // a .deb apt fetched under a name that is not its canonical one
     const body = lines.map((l) => l.split(AM.LAST_LIST).join(path.join(d, 'V/last-dpkg.list')).split(AM.SLOT_ENDED).join(path.join(d, 'V/slot-ended')).split('/var/lib/dpkg/status').join(path.join(d, 'status'))).join('\n');
-    const r = sh(`${HEAD_A}; say() { printf '= %s\\n' "$*"; }; q() { echo 'hello:amd64 1.0'; }; pins() { :; }; V=${shq(path.join(d, 'V'))}; R=${shq(path.join(d, 'R'))}; T=${shq(path.join(d, 'T'))}; D=${shq(path.join(d, 'Dd'))}; ID=e1\n${NDs[0]}\n${body}\n${call}\nsay done`, env);
+    const r = sh(`${HEAD_A}; say() { printf '= %s\\n' "$*"; }; q() { echo 'hello:amd64 1.0'; }; pins() { :; }; V=${shq(path.join(d, 'V'))}; R=${shq(path.join(d, 'R'))}; T=${shq(path.join(d, 'T'))}; D=${shq(path.join(d, 'Dd'))}; ID=e1\n${pre || SFs[0]}\n${body}\n${call}\nsay done`, env);
     const rd = (x) => (fs.existsSync(path.join(d, x)) ? fs.readFileSync(path.join(d, x), 'utf8') : null);
-    return { ...r, d, list: rd('V/last-dpkg.list'), base: rd('R/base/status'), entry: rd('R/entries/e1.list'), desk: rd('R/entries/e1.desktop'), pin: rd('R/entries/e1.pin'), debs: fs.readdirSync(path.join(d, 'Dd')).sort() };
+    return { ...r, d, list: rd('V/last-dpkg.list'), base: rd('R/base/status'), entry: rd('R/entries/e1.list'), desk: rd('R/entries/e1.desktop'), pin: rd('R/entries/e1.pin'), debs: fs.readdirSync(path.join(d, 'Dd')).sort(), stanza: rd('Dd/hello_1.0_amd64.stanza') };
   };
-  const DEB_LOOP = (a, b) => `for f in "$D"/*.deb; do n=hello_1.0_amd64.deb\n${a}\n${b}\ndone`;
+  const LOOP = (lines) => `for f in "$D"/*.deb; do n=hello_1.0_amd64.deb\n${lines.join('\n')}\ndone`;
   {
     const f1 = app([FIN], 'finish'), f2 = app([FIN], 'finish', { SYNC_FAIL_ON: 'last-dpkg.list.tmp' }), f3 = app([FIN], 'finish', { SYNC_OLD: '1' }), f4 = app([FIN], 'finish', { SYNC_NOTDONE: '1' });
-    ok(f1.rc === 0 && f1.list === 'hello:amd64 1.0\n' && rel(f1) === 'sync -- D/V/last-dpkg.list.tmp · mv -f D/V/last-dpkg.list.tmp D/V/last-dpkg.list', `⑤ the package list at a run's end: synced, then moved (${rel(f1)})`, f1);
-    ok(f2.rc === 0 && f2.list === 'the list from before\n' && !f2.log.some((l) => /^mv /.test(l)) && !SAID.test(f2.err), `⑤ its sync FAILED (EIO): the list from before stands, nothing moved (${rel(f2)})`, f2);
-    ok(f3.rc === 0 && f3.list === 'hello:amd64 1.0\n' && rel(f3) === 'sync -- D/V/last-dpkg.list.tmp · mv -f D/V/last-dpkg.list.tmp D/V/last-dpkg.list', `⑤ a sync older than coreutils 8.24 (the operand ignored, the whole system synced): the string goes on (${rel(f3)})`, f3);
+    ok(f1.rc === 0 && f1.list === 'hello:amd64 1.0\n' && rel(f1) === 'sync -d -- D/V/last-dpkg.list.tmp · mv -f D/V/last-dpkg.list.tmp D/V/last-dpkg.list', `⑤ the package list at a run's end: its DATA synced, then moved (${rel(f1)})`, f1);
+    ok(f2.rc === 0 && f2.list === 'the list from before\n' && !f2.log.some((l) => /^mv /.test(l)) && /Input\/output error/.test(f2.err), `⑤ its sync FAILED (EIO): the list from before stands, nothing moved, the failure SAID (${f2.err.trim()})`, f2);
+    ok(f3.rc === 0 && f3.list === 'hello:amd64 1.0\n' && rel(f3) === 'mv -f D/V/last-dpkg.list.tmp D/V/last-dpkg.list' && /no data-only sync/.test(f3.err), `⑤ a sync whose --help names no data form (coreutils before 8.24): NO sync made — never the machine's — said, and the list moves (${rel(f3)})`, f3);
     ok(f4.rc === 0 && f4.list === 'hello:amd64 1.0\n' && SAID.test(f4.err) && f4.err.split('\n').filter((l) => SAID.test(l)).length === 1, `⑤ a file system that does not do a sync (EINVAL): said once, the list lands (${f4.err.trim()})`, f4);
     const b1 = app([BASE], 'base'), b2 = app([BASE], 'base', { SYNC_FAIL_ON: 'status.tmp' });
-    ok(b1.rc === 0 && b1.base === 'the dpkg status\n' && /sync -- D\/R\/base\/status\.tmp · mv -f D\/R\/base\/status\.tmp D\/R\/base\/status/.test(rel(b1)), `⑤ the base's dpkg status: synced, then moved (${rel(b1)})`, b1);
-    ok(b2.base === null && !b2.log.some((l) => /^mv /.test(l)), `⑤ its sync FAILED: no base taken (made at the next run, as when absent), nothing moved (${rel(b2)})`, b2);
-    const l1 = app([LIST], 'list'), l2 = app([LIST], 'list', { SYNC_FAIL_ON: 'e1.list.tmp' });
-    ok(l1.rc === 0 && l1.entry === 'hello\n' && !!l1.desk && !!l1.pin && l1.log.filter((l) => /^sync -- /.test(l)).length === 3 && l1.log.every((l, i) => !/^mv /.test(l) || /^sync -- /.test(l1.log[i - 1] || '')), `⑤ an app's entries (.list, .desktop, .pin): each synced, then moved (${rel(l1)})`, l1);
-    ok(l2.entry === 'the entry from before\n' && !l2.log.some((l) => /^mv .*e1\.list\.tmp/.test(l)) && !!l2.desk && !!l2.pin, `⑤ the .list's sync FAILED: its entry from before stands, its temp never moved; the other two land (${rel(l2)})`, l2);
-    const d1 = app([DEB_LOOP(DEB_MV, ':')], ':'), d2 = app([DEB_LOOP(DEB_MV, ':')], ':', { SYNC_FAIL_ON: 'x.deb' });
-    ok(d1.rc === 0 && d1.debs.join() === 'hello_1.0_amd64.deb' && rel(d1) === 'sync -- D/Dd/x.deb · mv -f D/Dd/x.deb D/Dd/hello_1.0_amd64.deb', `⑤ a .deb apt fetched: synced, then renamed to its canonical name (${rel(d1)})`, d1);
-    ok(d2.rc === 0 && d2.debs.join() === 'x.deb' && !d2.log.some((l) => /^mv /.test(l)), `⑤ its sync FAILED: the .deb KEPT as it is (a person's own one exists nowhere else), never renamed, indexed at a later run (${rel(d2)})`, d2);
-    const s1 = app([DEB_LOOP(STANZA_SYNC, 'echo made-stanza')], ':'), s2 = app([DEB_LOOP(STANZA_SYNC, 'echo made-stanza')], ':', { SYNC_FAIL_ON: 'x.deb' });
-    ok(/made-stanza/.test(s1.out) && rel(s1) === 'sync -- D/Dd/x.deb' && !/made-stanza/.test(s2.out) && s2.debs.join() === 'x.deb', `⑤ a NEW stanza takes the digest of bytes on disk: the .deb synced first; its sync failed, no stanza this run and the .deb kept (${rel(s1)} | ${rel(s2)})`, { s1: s1.log, s2: s2.log });
-    const relFin = anchored(FIN, ' && { e=$(LC_ALL=C sync -- "$V/last-dpkg.list.tmp" 2>&1) || sync_not_done "$e"; }', '', 'the release\'s finish()');
+    ok(b1.rc === 0 && b1.base === 'the dpkg status\n' && /sync -d -- D\/R\/base\/status\.tmp · mv -f D\/R\/base\/status\.tmp D\/R\/base\/status/.test(rel(b1)), `⑤ the base's dpkg status: its data synced, then moved (${rel(b1)})`, b1);
+    ok(b2.base === null && !b2.log.some((l) => /^mv /.test(l)) && /Input\/output error/.test(b2.err), `⑤ its sync FAILED: no base taken (made at the next run, as when absent), said (${rel(b2)})`, b2);
+    const l1 = app([LIST], 'list; echo after-list'), l2 = app([LIST], 'list; echo after-list', { SYNC_FAIL_ON: 'e1.pin.tmp' });
+    ok(l1.rc === 0 && l1.entry === 'hello\n' && !!l1.desk && !!l1.pin && l1.log.filter((l) => /^sync -d -- /.test(l)).length === 3 && l1.log.every((l, i) => !/^mv /.test(l) || /^sync -d -- /.test(l1.log[i - 1] || '')), `⑤ an app's entries (.list, .desktop, .pin): each its data synced, then moved (${rel(l1)})`, l1);
+    ok(l2.rc === 0 && /after-list/.test(l2.out) && l2.pin === null && !!l2.desk && /Input\/output error/.test(l2.err), `⑤ the LAST entry's sync failed (.pin): said, its temp never moved — and the run goes on (list() still ends 0 under set -e)`, { rc: l2.rc, out: l2.out, err: l2.err });
+    const d1 = app([LOOP(DEB)], ':'), d2 = app([LOOP(DEB)], ':', { SYNC_FAIL_ON: 'x.deb' });
+    ok(d1.rc === 0 && d1.debs.join() === 'hello_1.0_amd64.deb,hello_1.0_amd64.stanza' && rel(d1) === 'sync -d -- D/Dd/x.deb · mv -f D/Dd/x.deb D/Dd/hello_1.0_amd64.deb · sync -d -- D/Dd/hello_1.0_amd64.stanza.tmp · mv -f D/Dd/hello_1.0_amd64.stanza.tmp D/Dd/hello_1.0_amd64.stanza', `⑤ a .deb renamed and given a stanza: its data synced ONCE, then renamed; the stanza's OWN bytes synced before its name (${rel(d1)})`, d1);
+    ok(d2.rc === 0 && d2.debs.join() === 'x.deb' && !d2.log.some((l) => /^mv /.test(l)), `⑤ its sync FAILED: the .deb KEPT as it is (a person's own one exists nowhere else), never renamed, no stanza this run (${rel(d2)})`, d2);
+    const d3 = app([LOOP(DEB)], ':'), up = path.join(d3.d, 'Dd');
+    const again = sh(`${HEAD_A}; D=${shq(up)}\n${SFs[0]}\n${LOOP(DEB)}`);
+    ok(again.rc === 0 && again.log.length === 0, `⑤ an up-to-date .deb under its canonical name asks NOTHING at the next index (no sync, no move): ${again.log.length} calls`, again.log);
+    // THE PIN (r5309): no WHOLE-MACHINE sync where a plain operand is one (uutils) — RED: 64fafc5be's spelling, in a copy
+    const u = [app([FIN], 'finish', { SYNC_UUTILS: '1' }), app([BASE], 'base', { SYNC_UUTILS: '1' }), app([LIST], 'list', { SYNC_UUTILS: '1' }), app([LOOP(DEB)], ':', { SYNC_UUTILS: '1' })];
+    const OLD_SPELL = (l) => l.split(/sync_file ("[^"]+")/).map((p, k) => (k % 2 ? `{ e=$(LC_ALL=C sync -- ${p} 2>&1) || sync_not_done "$e"; }` : p)).join('');
+    const ND = "sync_not_done() { case $1 in *'Invalid argument'*|*'not supported'*|*'Function not implemented'*) printf '%s\\n' \"$1\" >&2; return 0 ;; esac; return 1; }";   // stale-pins: kept (64fafc5be's helper, the RED)
+    const ur = [app([OLD_SPELL(FIN)], 'finish', { SYNC_UUTILS: '1' }, ND), app([OLD_SPELL(LIST)], 'list', { SYNC_UUTILS: '1' }, ND)];
+    ok(u.every((x) => whole(x) === 0) && u.reduce((n, x) => n + x.log.filter((l) => /^sync -d -- /.test(l)).length, 0) === 7 && ur.every((x) => whole(x) > 0),
+      `⑤ PINNED: every sync of these strings is \`sync -d -- <file>\` — NO whole-machine sync on uutils (${u.map(whole).join(', ')}); RED (64fafc5be's plain \`sync -- <file>\`, in copies): ${ur.map(whole).join(' + ')} whole-machine syncs`, { tip: u.map((x) => rel(x)), red: ur.map((x) => rel(x)) });
+    const relFin = anchored(FIN, ' && sync_file "$V/last-dpkg.list.tmp"', '', 'the release\'s finish()');
+    const relList = anchored(LIST, / && sync_file "[^"]+"/, '', 'the release\'s list()', { count: 3 });
     const relDeb = '    if [ "${f##*/}" != "$n" ]; then mv -f "$f" "$D/$n"; f=$D/$n; fi';   // stale-pins: kept (the release's .deb rename, the RED)
-    const relList = anchored(LIST, / && \{ e=\$\(LC_ALL=C sync -- "[^"]+" 2>&1\) \|\| sync_not_done "\$e"; \}/, '', 'the release\'s list()', { count: 3 });
-    const x1 = app([relFin], 'finish'), x2 = app([relList], 'list'), x3 = app([DEB_LOOP(relDeb, ':')], ':');
+    const x1 = app([relFin], 'finish'), x2 = app([relList], 'list'), x3 = app([LOOP([relDeb])], ':');
     ok(rel(x1) === 'mv -f D/V/last-dpkg.list.tmp D/V/last-dpkg.list' && x2.log.length === 3 && x2.log.every((l) => /^mv /.test(l)) && rel(x3) === 'mv -f D/Dd/x.deb D/Dd/hello_1.0_amd64.deb',
       `⑤ RED (the release's finish(), list() and .deb rename, in copies): each moved with NO sync (${rel(x1)} | ${rel(x2)} | ${rel(x3)})`, { x1: x1.log, x2: x2.log, x3: x3.log });
   }
   console.log('⑥ the app system\'s new tree: its file system synced before it takes the name; a failed sync refused by name');
   {
-    const CREATE = lineOf(AS.SYS_SCRIPT, /^ {2}\{ e=\$\(LC_ALL=C sync -f -- "\$S\/rootfs\.new"/), REBASE = lineOf(AS.SYS_SCRIPT, /^ {2}\{ e=\$\(LC_ALL=C sync -f -- "\$NX"/);
-    ok(!!CREATE && !!REBASE && !!FSN, 'the system script\'s create and rebase moves, and its sync_fs_none, are found', { CREATE, REBASE, FSN });
+    const CREATE = lineOf(AS.SYS_SCRIPT, /^ {2}sync_tree "\$S\/rootfs\.new" \|\| refuse not-synced/), REBASE = lineOf(AS.SYS_SCRIPT, /^ {2}sync_tree "\$NX" \|\| refuse not-synced/);
+    ok(!!CREATE && !!REBASE && !!ST, 'the system script\'s create and rebase moves, and its sync_tree, are found', { CREATE, REBASE, ST });
     const sys = (line, env = {}) => {
       const d = fs.mkdtempSync(path.join(T0, 'sys-')); for (const x of ['rootfs.new', 'rootfs.next', 'rootfs']) { fs.mkdirSync(path.join(d, x)); fs.writeFileSync(path.join(d, x, 'who'), x); }
-      const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }; S=${shq(d)}; R=${shq(path.join(d, 'rootfs'))}; P=${shq(path.join(d, 'rootfs.prev'))}; NX=${shq(path.join(d, 'rootfs.next'))}; bad=0\n${NDs[1]}\n${FSN}\ncase x in x)\n${line}\nesac`, env);
+      const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }; S=${shq(d)}; R=${shq(path.join(d, 'rootfs'))}; P=${shq(path.join(d, 'rootfs.prev'))}; NX=${shq(path.join(d, 'rootfs.next'))}; bad=0\n${ST}\ncase x in x)\n${line}\nesac`, env);
       const who = (x) => (fs.existsSync(path.join(d, x, 'who')) ? fs.readFileSync(path.join(d, x, 'who'), 'utf8') : null);
       return { ...r, d, root: who('rootfs'), prev: who('rootfs.prev'), next: who('rootfs.next') };
     };
     const C = CREATE.replace(/^ {2}/, '  rm -rf "$R"; ');
-    const c1 = sys(C), c2 = sys(C, { SYNC_FAIL_ON: 'rootfs.new' }), c3 = sys(C, { SYNC_OLD: '1' }), c4 = sys(C, { SYNC_NOTDONE: '1' });
+    const c1 = sys(C), c2 = sys(C, { SYNC_FAIL_ON: 'rootfs.new' }), c3 = sys(C, { SYNC_OLD: '1' }), c4 = sys(C, { SYNC_NOTDONE: '1' }), c5 = sys(C, { SYNC_UUTILS: '1' });
     ok(c1.rc === 0 && c1.root === 'rootfs.new' && rel(c1) === 'sync -f -- D/rootfs.new · mv D/rootfs.new D/rootfs', `⑥ create: the new tree's file system synced, then moved into place (${rel(c1)})`, c1);
     ok(c2.rc === 125 && /= refused not-synced \S*rootfs\.new/.test(c2.out) && c2.root === null && !c2.log.some((l) => /^mv /.test(l)), `⑥ create's sync FAILED (EIO): refused by name (not-synced), the new tree never moved (${rel(c2)})`, c2);
-    ok(c3.rc === 0 && c3.root === 'rootfs.new' && rel(c3) === 'sync -f -- D/rootfs.new · sync · mv D/rootfs.new D/rootfs', `⑥ a sync with no -f (older than coreutils 8.24): a whole-system sync, then the move (${rel(c3)})`, c3);
+    ok(c3.rc === 0 && c3.root === 'rootfs.new' && rel(c3) === 'mv D/rootfs.new D/rootfs' && /no file-system sync/.test(c3.err), `⑥ a sync whose --help names no file-system form: NO sync made — never the machine's — said, the tree moves (${rel(c3)})`, c3);
     ok(c4.rc === 0 && c4.root === 'rootfs.new' && SAID.test(c4.err), `⑥ a file system that does not do a sync: said, the tree moves (${c4.err.trim()})`, c4);
+    ok(c5.rc === 0 && whole(c5) === 0, `⑥ no whole-machine sync on uutils (${rel(c5)})`, c5);
     const r1 = sys(REBASE), r2 = sys(REBASE, { SYNC_FAIL_ON: 'rootfs.next' });
     ok(r1.rc === 0 && r1.root === 'rootfs.next' && r1.prev === 'rootfs' && rel(r1) === 'sync -f -- D/rootfs.next · mv D/rootfs D/rootfs.prev · mv D/rootfs.next D/rootfs', `⑥ rebase: the rebased tree synced, then the swap (${rel(r1)})`, r1);
     ok(r2.rc === 125 && /= refused not-synced/.test(r2.out) && r2.root === 'rootfs' && r2.next === 'rootfs.next' && !r2.log.some((l) => /^mv /.test(l)), `⑥ rebase's sync FAILED: refused, the live system as it was, the new one beside it (${rel(r2)})`, r2);
-    const relC = anchored(CREATE, '{ e=$(LC_ALL=C sync -f -- "$S/rootfs.new" 2>&1) || sync_fs_none "$e"; } || refuse not-synced "$S/rootfs.new"; ', '', 'the release\'s create');
-    const relR = anchored(REBASE, '{ e=$(LC_ALL=C sync -f -- "$NX" 2>&1) || sync_fs_none "$e"; } || refuse not-synced "$NX"; ', '', 'the release\'s rebase');
+    const relC = anchored(CREATE, 'sync_tree "$S/rootfs.new" || refuse not-synced "$S/rootfs.new"; ', '', 'the release\'s create');
+    const relR = anchored(REBASE, 'sync_tree "$NX" || refuse not-synced "$NX"; ', '', 'the release\'s rebase');
     const y1 = sys(relC.replace(/^ {2}/, '  rm -rf "$R"; ')), y2 = sys(relR);
     ok(rel(y1) === 'mv D/rootfs.new D/rootfs' && rel(y2) === 'mv D/rootfs D/rootfs.prev · mv D/rootfs.next D/rootfs', `⑥ RED (the release's create and rebase, in copies): the tree moved with NO sync (${rel(y1)} | ${rel(y2)})`, { y1: y1.log, y2: y2.log });
   }
-  console.log('⑦ the install slot\'s records: synced before they take their names; a failed exit record reads as unrecorded, a failed pid record refused');
+  console.log('⑦ the install slot\'s records: the exit record\'s data synced; the pid record a live run\'s (no sync), its failed write refused');
   {
     const FINR = lineOf(IS.INSTALL_RUNNER, /^w=; fin\(\) \{/), PIDR = lineOf(IS.INSTALL_RUNNER, /^echo "\$\$ \$s \$K" > "\$P\.tmp"/);
     ok(!!FINR && !!PIDR, 'the install runner\'s exit and pid lines are found', { FINR, PIDR });
     const slot = (lines, env = {}) => {
       const d = fs.mkdtempSync(path.join(T0, 'slot-'));
-      const r = sh(`X=${shq(path.join(d, 'exit'))}; P=${shq(path.join(d, 'pid'))}; L=${shq(path.join(d, 'log'))}; K=k1; s=123\n${NDs[2]}\n${lines.join('\n')}`, env);
+      const r = sh(`X=${shq(path.join(d, 'exit'))}; P=${shq(path.join(d, 'pid'))}; L=${shq(path.join(d, 'log'))}; K=k1; s=123\n${SFs[1]}\n${lines.join('\n')}`, env);
       const rd = (x) => (fs.existsSync(path.join(d, x)) ? fs.readFileSync(path.join(d, x), 'utf8') : null);
       return { ...r, d, exit: rd('exit'), pid: rd('pid'), runlog: rd('log') || '', ran: /^ran$/m.test(r.out) };
     };
-    const e1 = slot([FINR, 'fin 0']), e2 = slot([FINR, 'fin 0'], { SYNC_FAIL_ON: 'exit.tmp' }), e3 = slot([FINR, 'fin 0'], { SYNC_OLD: '1' });
-    ok(e1.rc === 0 && /^0 \d+ k1\n$/.test(e1.exit || '') && rel(e1) === 'sync -- D/exit.tmp · mv -f D/exit.tmp D/exit', `⑦ the exit record: synced, then moved (${rel(e1)})`, e1);
+    const e1 = slot([FINR, 'fin 0']), e2 = slot([FINR, 'fin 0'], { SYNC_FAIL_ON: 'exit.tmp' }), e3 = slot([FINR, 'fin 0'], { SYNC_OLD: '1' }), e4 = slot([FINR, 'fin 0'], { SYNC_UUTILS: '1' });
+    ok(e1.rc === 0 && /^0 \d+ k1\n$/.test(e1.exit || '') && rel(e1) === 'sync -d -- D/exit.tmp · mv -f D/exit.tmp D/exit', `⑦ the exit record: its data synced, then moved (${rel(e1)})`, e1);
     ok(e2.rc === 0 && e2.exit === null && !e2.log.some((l) => /^mv /.test(l)), `⑦ its sync FAILED: NO exit record (a follow reads «unrecorded», never a torn one), the runner's own exit unchanged (${rel(e2)})`, e2);
-    ok(e3.rc === 0 && /^0 /.test(e3.exit || '') && rel(e3) === 'sync -- D/exit.tmp · mv -f D/exit.tmp D/exit', `⑦ a sync older than coreutils 8.24: the operand ignored, the whole system synced, the record moved (${rel(e3)})`, e3);
+    ok(e3.rc === 0 && /^0 /.test(e3.exit || '') && rel(e3) === 'mv -f D/exit.tmp D/exit', `⑦ a sync with no data form: no sync made (never the machine's), the record moved (${rel(e3)})`, e3);
+    ok(e4.rc === 0 && whole(e4) === 0, `⑦ no whole-machine sync on uutils (${rel(e4)})`, e4);
     const p1 = slot([FINR, PIDR, 'echo ran']), p2 = slot([FINR, PIDR, 'echo ran'], { MV_FAIL: '1' });
-    ok(p1.rc === 0 && p1.ran && /^\d+ 123 k1\n$/.test(p1.pid || '') && rel(p1) === 'mv -f D/pid.tmp D/pid', `⑦ the pid record (a LIVE run's, named «live-record»): moved with NO sync — none sits inside the launcher's wait for it — and the install runs (${rel(p1)})`, p1);
-    ok(p2.rc === 125 && !p2.ran && p2.pid === null && /the install slot's pid record could not be written - nothing was run/.test(p2.runlog),
-      `⑦ its write or move FAILED: REFUSED by name (exit 125, its line in the log) — the install never runs where the launcher could not see it (${rel(p2)})`, p2);
-    const relF = anchored(FINR, ' && { e=$(LC_ALL=C sync -- "$X.tmp" 2>&1) || sync_not_done "$e"; }', '', 'the release\'s fin()');
+    ok(p1.rc === 0 && p1.ran && /^\d+ 123 k1\n$/.test(p1.pid || '') && rel(p1) === 'mv -f D/pid.tmp D/pid', `⑦ the pid record (a LIVE run's, «live-record»): moved with NO sync — none sits inside the launcher's wait for it — and the install runs (${rel(p1)})`, p1);
+    ok(p2.rc === 125 && !p2.ran && p2.pid === null && /the install slot's pid record could not be written - nothing was run/.test(p2.runlog), `⑦ its write or move FAILED: REFUSED by name (exit 125, its line in the log) — the install never runs where the launcher could not see it (${rel(p2)})`, p2);
+    const relF = anchored(FINR, ' && sync_file "$X.tmp"', '', 'the release\'s fin()');
     const relP = 'echo "$$ $s $K" > "$P.tmp" && mv -f "$P.tmp" "$P"; w=1';   // stale-pins: kept (the release's pid line, the RED)
     const z1 = slot([relF, 'fin 0']), z2 = slot([FINR, relP, 'echo ran'], { MV_FAIL: '1' });
     ok(rel(z1) === 'mv -f D/exit.tmp D/exit' && z2.ran, `⑦ RED (the release's fin() and pid line, in copies): the exit record moved with NO sync (${rel(z1)}); a failed pid move goes on and the install runs unseen (ran: ${z2.ran})`, { z1: z1.log, z2: { log: z2.log, ran: z2.ran } });

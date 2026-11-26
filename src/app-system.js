@@ -248,10 +248,11 @@ const SYS_SCRIPT = [
   "if [ \"${1:-}\" = -- ]; then shift; fi",
   "say() { printf '= %s\\n' \"$*\"; }",
   "refuse() { say refused \"$@\"; exit 125; }",
-  // B-bcb8 unit D (主开发 r5211 / r5214): a sync its file system does not do lands, said (the one spelling, test-synced-installs); a sync
-  // with no -f (older than coreutils 8.24) syncs the whole system instead
-  "sync_not_done() { case $1 in *'Invalid argument'*|*'not supported'*|*'Function not implemented'*) printf '%s - its file system does not do a sync: its new bytes take their name unsynced\\n' \"$1\" >&2; return 0 ;; esac; return 1; }",
-  "sync_fs_none() { case $1 in *'nvalid option'*|*'nrecognized option'*) sync; return 0 ;; esac; sync_not_done \"$1\"; }",
+  // B-bcb8 unit D (主开发 r5211 / r5214 / r5309): a new tree takes its name after a sync of ITS FILE SYSTEM (`sync -f`: syncfs — GNU
+  // coreutils src/sync.c MODE_FILE_SYSTEM, uutils sync.rs --file-system, BusyBox's SYNC_FANCY -f), never of the machine; where this
+  // machine's sync has no file-system form NO sync is made, said; a failed one refuses by name; one not done lands, said (legs:
+  // test-synced-installs ⑥)
+  "sync_tree() { [ -n \"${VS_SF-}\" ] || case $(LC_ALL=C sync --help 2>&1) in *--file-system*|*'[-df]'*) VS_SF=fs ;; *) VS_SF=none ;; esac; if [ \"$VS_SF\" = none ]; then printf '%s - this machine has no file-system sync (sync -f): the tree takes its name unsynced\\n' \"$1\" >&2; return 0; fi; e=$(LC_ALL=C sync -f -- \"$1\" 2>&1) && return 0; case $e in *'Invalid argument'*|*'not supported'*|*'Function not implemented'*) printf '%s - its file system does not do a sync: its new bytes take their name unsynced\\n' \"$e\" >&2; return 0 ;; esac; printf '%s\\n' \"$e\" >&2; return 1; }",
   "pkgok() { case $1 in [a-z0-9]?*) ;; *) return 1 ;; esac; case $1 in *[!a-z0-9+.-]*) return 1 ;; esac; [ ${#1} -le 64 ]; }",
   "case $ID in \"\"|-*|*[!a-z0-9-]*) refuse bad-id ;; esac",
   "case $NONCE in \"\"|*[!a-z0-9]*) refuse bad-nonce ;; esac",
@@ -343,7 +344,7 @@ const SYS_SCRIPT = [
   "create)",
   "  [ ! -e \"$R\" ] || refuse exists \"$R\"",
   "  mk \"$S/rootfs.new\" \"$1\" \"$2\" \"${3:-}\"; srcsync \"$S/rootfs.new\"",
-  "  { e=$(LC_ALL=C sync -f -- \"$S/rootfs.new\" 2>&1) || sync_fs_none \"$e\"; } || refuse not-synced \"$S/rootfs.new\"; mv \"$S/rootfs.new\" \"$R\"",   // B-bcb8 unit D: the new tree on disk before it takes the name (a sync of its file system)
+  "  sync_tree \"$S/rootfs.new\" || refuse not-synced \"$S/rootfs.new\"; mv \"$S/rootfs.new\" \"$R\"",   // B-bcb8 unit D: the new tree on disk before it takes the name (a sync of its file system)
   "  echo \"+ apt-get update (inside the app system)\"; X apt-get $LOCK update || say warn update-failed",
   "  say ok ;;",
   "install)",
@@ -406,7 +407,7 @@ const SYS_SCRIPT = [
   "    for x in list desktop deb bin; do cpin \"$E\" \"$e.$x\" \"$EN\" || true; done",
   "    if [ -f \"$E/$e.desktop\" ]; then while read -r f; do case $f in /usr/*) [ -e \"$NX$f\" ] || say gone \"$e\" \"$f\" ;; esac; done < \"$E/$e.desktop\"; fi",
   "  done",
-  "  { e=$(LC_ALL=C sync -f -- \"$NX\" 2>&1) || sync_fs_none \"$e\"; } || refuse not-synced \"$NX\"; mv \"$R\" \"$P\"; mv \"$NX\" \"$R\"; say rebased \"$bad\"; say ok ;;",   // B-bcb8 unit D: the rebased tree on disk before the swap
+  "  sync_tree \"$NX\" || refuse not-synced \"$NX\"; mv \"$R\" \"$P\"; mv \"$NX\" \"$R\"; say rebased \"$bad\"; say ok ;;",   // B-bcb8 unit D: the rebased tree on disk before the swap
   "rollback)",
   "  [ -d \"$P\" ] && [ ! -L \"$P\" ] || refuse no-prev \"$P\"",
   "  sysok \"$P\"",
