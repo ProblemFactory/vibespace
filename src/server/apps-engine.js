@@ -77,7 +77,11 @@ const WORDS = Object.freeze({
 });
 
 const named = (code, msg, extra = {}) => { const e = new Error(msg); e.code = code; Object.assign(e, extra); return e; };
-function writeJsonAtomic(file, obj) { const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2)); fs.renameSync(tmp, file); }
+// B-574d (r4725, lane lg-group-parents): a SYNCED replace through the tree's one door (src/fd-close.js renameSynced) — written only on a
+// person's or an agent's act; a failed sync or close is a failed write thrown to the caller (the old file stands, the temp removed);
+// only a file system with no sync at all lands, said once a run
+let noSyncSaid = false;
+function writeJsonAtomic(file, obj) { require('../fd-close.js').renameSynced(`${file}.${process.pid}.tmp`, file, JSON.stringify(obj, null, 2), { where: 'app-proposals.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[apps] ${w}`); } } }); }
 const sizeWords = (n) => A.fmtBytes(Math.max(0, Number(n) || 0));
 
 /** A request as a person or an agent sends it → `{ok, request}` | `{ok:false, code, error}` (closed kinds, names by rule). */

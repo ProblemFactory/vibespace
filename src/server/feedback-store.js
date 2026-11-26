@@ -27,10 +27,12 @@ const FF = require('../feedback-forward-model.js');   // lane feedback-forward: 
 const PT = require('../peer-text.js');   // the belt: another agent's words toward an agent (feedback.list)
 const { SyncStore } = require('../sync-store.js');
 
+// B-574d (r4725, lane lg-group-parents): a SYNCED replace through the tree's one door (src/fd-close.js renameSynced) — written only on a
+// person's or an agent's act; a failed sync or close is a failed write thrown to the caller (the old file stands, the temp removed);
+// only a file system with no sync at all lands, said once a run
+let noSyncSaid = false;
 function writeJsonAtomic(file, obj) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj));
-  fs.renameSync(tmp, file);
+  require('../fd-close.js').renameSynced(`${file}.tmp-${process.pid}`, file, JSON.stringify(obj), { where: 'feedback.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[feedback] ${w}`); } } });
 }
 
 /** The server-owned mirror: no file of its own (the store persists), refuses client writes, flushes its owner. */

@@ -77,10 +77,12 @@ const CRASH_WINDOW_MS = 10 * 60 * 1000;
 const MAX_THEME_BYTES = 100 * 1024;
 const MIME = { '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.woff2': 'font/woff2', '.woff': 'font/woff', '.map': 'application/json' };
 
+// B-574d (r4725, lane lg-group-parents): a SYNCED replace through the tree's one door (src/fd-close.js renameSynced) — written only on a
+// person's or an agent's act; a failed sync or close is a failed write thrown to the caller (the old file stands, the temp removed);
+// only a file system with no sync at all lands, said once a run
+let noSyncSaid = false;
 function writeJsonAtomic(file, obj) {
-  const tmp = file + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, file);
+  require('../fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'plugin-registry.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[plugins] ${w}`); } } });
 }
 const STOPPING = Symbol('vibespace.plugin.intentional-stop'); // per-CHILD mark: this process is being stopped on purpose
 const httpErr = (status, msg, payload) => Object.assign(new Error(msg), { status, payload });
