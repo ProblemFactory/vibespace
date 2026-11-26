@@ -4258,6 +4258,61 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const FM = await fScene(M574.load('src/server/migrations.js', anchored(MIG, 'JSON.stringify({ ...prev, ...archived }, null, 2)', 'JSON.stringify({ ...archived }, null, 2)', 'the archive\'s merge'), 'archive-overwrite'), 'f-red');
       ok(FM.f2 === 'ran' && !('t0' in FM.arch2), 'B-574d follow RED (anchored copy: the archive from this run\'s plans alone): the earlier t0 is lost — (f) goes red on an overwrite', FM.arch2);
     }
+    // (s2-a) B-574d «usage-ledger-repairs» (主开发 r4881): the usage ledger's run-once repairs rewrite through src/fd-close.js renameSynced —
+    // the fixture purge (2026-09-purge-test-fixture-ledger) with its shard's sync refused (EIO): failed, NOT recorded, the shard
+    // byte-identical, no temp; the next start purges it and records it (no number of the ledger changes but by the repair itself).
+    // RED (anchored copy): src/fixture-ledger-purge.js's helper back to the bare write + rename — the refused scene reads «applied»
+    {
+      const ID_P = '2026-09-purge-test-fixture-ledger', FXS = 'e2e00000-0000-4000-8000-000000000001', REALS = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+      const prow = (rid, ts, sid, cwd) => JSON.stringify({ rid, ts, sid, be: 'claude', model: 'claude-fable-5', acct: null, atype: 'global', cwd, i: 10, cw5: 0, cw1: 0, cr: 0, o: 5, tier: null });
+      const SHARD0 = [prow('real_1', 1000, REALS, '/home/u/work'), prow('fx_sid_1', 2000, FXS, null), prow('real_2', 9000, REALS, '/home/u/work')].join('\n') + '\n';
+      const archRids = (root) => { const d = path.join(root, 'data', 'archive'); let out = []; try { for (const n of fs.readdirSync(d)) if (n.startsWith('fixture-ledger-rows-')) out = out.concat(fs.readFileSync(path.join(d, n), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.store === 'usage-history').map((x) => x.entry.rid)); } catch { } return out.sort(); };
+      const pScene = async (mod, tag) => {
+        const root = path.join(base, tag), hist = path.join(root, 'data', 'usage-history'), shard = path.join(hist, 'events-2026-08.ndjson');
+        fs.mkdirSync(hist, { recursive: true }); fs.writeFileSync(shard, SHARD0);
+        const runP = (code) => placed(path.sep + 'events-2026-08.ndjson.tmp', code, () => mod.create({ rootDir: root, homeDir: home0, serverNotice: () => { } }).runLocalMigrations({ only: [ID_P] }).find((x) => x.id === ID_P));
+        const p1 = await runP('EIO'), t1 = fs.readFileSync(shard, 'utf8'), rec1 = !!ledgerOf(path.join(root, 'data'))[ID_P], tmp1 = fs.existsSync(shard + '.tmp');
+        const p2 = await runP(null), rids2 = fs.readFileSync(shard, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).rid);
+        return { p1: p1.out && p1.out.status, ev1: p1.events.join(), t1, rec1, tmp1, p2: p2.out && p2.out.status, rec2: !!ledgerOf(path.join(root, 'data'))[ID_P], rids2, archived: archRids(root).join() };
+      };
+      const P1 = await pScene({ create }, 'p-real');
+      ok(P1.p1 === 'failed' && !P1.rec1 && P1.t1 === SHARD0 && !P1.tmp1 && P1.ev1 === 'open,sync' && P1.p2 === 'ran' && P1.rec2 && P1.rids2.join() === 'real_1,real_2' && P1.archived === 'fx_sid_1',
+        'B-574d usage-ledger-repairs (s2-a) the fixture purge whose shard sync is refused (EIO): not recorded, the shard byte-identical, no temp; the next start purges the fabricated row and records it — and its ARCHIVE holds that row ONCE (主开发 r4936 (1): a rerun never archives again what an earlier run archived)', { first: [P1.p1, P1.rec1, P1.ev1], second: [P1.p2, P1.rec2, P1.rids2], archived: P1.archived });
+      const FLP = fs.readFileSync(path.join(REPO_ROOT, 'src/fixture-ledger-purge.js'), 'utf8');
+      const PHELP = "  renameSynced(fp + '.tmp', fp, text, { where: `[migrate] ${path.basename(fp)}`, say: (l) => console.warn(l) });\n";
+      const PB = mutantCopies('migrations-574d-s2', REPO_ROOT);
+      const pPath = PB.write('src/fixture-ledger-purge.js', anchored(FLP, PHELP, "  fs.writeFileSync(fp + '.tmp', text); fs.renameSync(fp + '.tmp', fp);   // MUTANT: the bare temp + rename\n", 'the purge\'s synced replace'), 'bare-purge');
+      // a closed world of copies: the migrations copy requires the purge copy by its path (every other require is the real file's)
+      const MIG2 = anchored(MIG, "require('../fixture-ledger-purge.js')", `require(${JSON.stringify(pPath)})`, 'the purge\'s require');
+      const PM = await pScene(PB.load('src/server/migrations.js', MIG2, 'mig-bare-purge'), 'p-red');
+      ok(PM.p1 === 'ran' && PM.rec1, 'B-574d usage-ledger-repairs RED (anchored copy: the purge\'s helper back to the bare temp + rename): no sync is asked, the refused scene reads «applied»', PM);
+      // (s2-b) the slice's own read (F3): A RUN THAT FAILED PARTWAY IS RESUMED — two shards, the first lands and the second's sync is refused;
+      // an anchor whose interval held ONLY the first shard's fabricated row: the rerun finds that shard clean, and still voids the anchor
+      // (the earlier run's removed instants read from its own archive). RED (anchored copy): the archive not read — the anchor keeps its
+      // inflated costSince for good
+      const hScene = async (mod, tag) => {
+        const root = path.join(base, tag), hist = path.join(root, 'data', 'usage-history'), anch = path.join(root, 'data', 'usage-anchors');
+        fs.mkdirSync(hist, { recursive: true }); fs.mkdirSync(anch, { recursive: true });
+        fs.writeFileSync(path.join(hist, 'events-2026-08.ndjson'), [prow('real_1', 1000, REALS, '/home/u/work'), prow('fx_a', 2000, FXS, null)].join('\n') + '\n');
+        fs.writeFileSync(path.join(hist, 'events-2026-09.ndjson'), [prow('real_2', 4000, REALS, '/home/u/work'), prow('fx_b', 5000, FXS, null)].join('\n') + '\n');
+        fs.writeFileSync(path.join(anch, 'anchors-org_x.ndjson'), [JSON.stringify({ accountId: 'sub-a', fetchedAt: 2500, prevFetchedAt: 1500, costSince: { total: 9 } }), JSON.stringify({ accountId: 'sub-a', fetchedAt: 8000, prevFetchedAt: 6000, costSince: { total: 4 } })].join('\n') + '\n');
+        const runH = (code) => placed(path.sep + 'events-2026-09.ndjson.tmp', code, () => mod.create({ rootDir: root, homeDir: home0, serverNotice: () => { } }).runLocalMigrations({ only: [ID_P] }).find((x) => x.id === ID_P));
+        const h1 = await runH('EIO'), s08 = fs.readFileSync(path.join(hist, 'events-2026-08.ndjson'), 'utf8');
+        const h2 = await runH(null), an = fs.readFileSync(path.join(anch, 'anchors-org_x.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+        return { h1: h1.out && h1.out.status, firstLanded: !s08.includes('fx_a'), h2: h2.out && h2.out.status, rec: !!ledgerOf(path.join(root, 'data'))[ID_P], voided: an.find((x) => x.fetchedAt === 2500).costSince, kept: an.find((x) => x.fetchedAt === 8000).costSince, archived: archRids(root).join() };
+      };
+      const H1 = await hScene({ create }, 'h-real');
+      ok(H1.h1 === 'failed' && H1.firstLanded && H1.h2 === 'ran' && H1.rec && H1.voided === null && H1.kept && H1.kept.total === 4 && H1.archived === 'fx_a,fx_b',
+        'B-574d usage-ledger-repairs (s2-b) a fixture purge that failed PARTWAY (the first shard landed, the second\'s sync refused) is resumed: the rerun voids the anchor whose interval held only the FIRST shard\'s fabricated row (read from its own archive); the anchor that held nothing keeps its cost', H1);
+      const RESUME = "        if (a.store === 'usage-history' && a.entry && typeof a.entry.ts === 'number') removedTs.push(a.entry.ts);\n";
+      const rPath = PB.write('src/fixture-ledger-purge.js', anchored(FLP, RESUME, "        void a;   // MUTANT: the earlier run's archive not read\n", 'the purge\'s resume'), 'purge-no-resume');
+      const HM = await hScene(PB.load('src/server/migrations.js', anchored(MIG, "require('../fixture-ledger-purge.js')", `require(${JSON.stringify(rPath)})`, 'the purge\'s require'), 'mig-no-resume'), 'h-red');
+      ok(HM.h2 === 'ran' && HM.voided && HM.voided.total === 9, 'B-574d usage-ledger-repairs RED (anchored copy: the earlier run\'s archive not read): the anchor keeps its inflated costSince (9) for good — (s2-b) goes red', HM);
+      const SEEN = '  if (seen) rows = rows.filter((r) => !seen.has(_archKey(r)));\n';
+      const dPath = PB.write('src/fixture-ledger-purge.js', anchored(FLP, SEEN, '', 'the archive\'s earlier rows filtered'), 'purge-archives-twice');
+      const DM = await pScene(PB.load('src/server/migrations.js', anchored(MIG, "require('../fixture-ledger-purge.js')", `require(${JSON.stringify(dPath)})`, 'the purge\'s require'), 'mig-archives-twice'), 'p-red2');
+      ok(DM.p2 === 'ran' && DM.archived === 'fx_sid_1,fx_sid_1', 'B-574d usage-ledger-repairs RED (anchored copy: the earlier run\'s rows not filtered): the rerun archives the fabricated row a SECOND time — (s2-a)\'s archive goes red', DM.archived);
+    }
     // RED: the helper back to the bare temp + rename (the release's road) — the EIO scenes read «applied»
     const HELP = "  renameSynced(tmp, file, text, { mode, where: `[migrate] ${path.basename(file)}`, say: (line) => console.warn(line) });\n";
     const bare = M574.load('src/server/migrations.js', anchored(MIG, HELP, "  fs.writeFileSync(tmp, text, mode === undefined ? undefined : { mode }); fs.renameSync(tmp, file);   // MUTANT: the bare temp + rename\n", 'the migrations\' synced replace'), 'bare-replace');

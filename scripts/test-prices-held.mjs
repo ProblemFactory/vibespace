@@ -31,7 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const Module = require('node:module');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -351,6 +351,48 @@ console.log('④ RED CONTROL');
   ok(!!uh && onDisk(f) !== before && JSON.parse(onDisk(f)).tiers.opus.input === atDefault, 'CONTROL: with the hold cut, the start writes the defaults over the unread file — the person\'s edited prices gone (the release\'s shape)', { written: onDisk(f) !== before });
   stopOf(uh);
   undo();
+}
+// ⑥ B-574d «usage-ledger-repairs» (主开发 r4881 (3)): A PERSON'S SAVE THAT FAILED LEAVES MEMORY AS THE DISK IS. pricing.json is written
+// through src/fd-close.js renameSynced; its temp's sync REFUSED (EIO, placed for that one temp): setPricing throws (the route's refusal),
+// the next price read is the OLD table (the table and a cost), the file byte-identical, no temp; with the sync answering, the save lands
+// and is read. RED (anchored copy): the base's lines — the new table taken into memory BEFORE the write
+{
+  const placedSync = (fn) => {
+    const o = fs.openSync, sy = fs.fsyncSync, cl = fs.closeSync, fds = new Set();
+    fs.openSync = function (p, ...a) { const fd = o.call(fs, p, ...a); if (String(p).endsWith(path.sep + 'pricing.json.tmp')) fds.add(fd); return fd; };
+    fs.fsyncSync = function (fd) { if (fds.has(fd)) throw Object.assign(new Error('EIO: a placed answer of the sync'), { code: 'EIO' }); return sy.call(fs, fd); };
+    fs.closeSync = function (fd) { fds.delete(fd); return cl.call(fs, fd); };   // a number is forgotten at its close
+    try { return fn(); } finally { fs.openSync = o; fs.fsyncSync = sy; fs.closeSync = cl; }
+  };
+  const scene = (X, tag) => {
+    const d = dirOf(tag); const f = plant(d); const before = onDisk(f);
+    const uh = make(d, X);
+    const was = JSON.stringify(uh.pricingTable()), cost0 = uh._cost(EV), dis0 = JSON.stringify(uh.priceDisagreements());
+    const told = []; X.onPriceDisagreements((list) => told.push(list));   // the catalog's ear: a refused save tells it nothing
+    let threw = null; placedSync(() => { try { uh.setPricing({ accounts: { 'made-up-key-9': { discount: 0.9 } } }); } catch (e) { threw = (e && e.code) || 'error'; } });
+    const r = { threw, sameFile: onDisk(f) === before, noTemp: !fs.existsSync(f + '.tmp'), oldTable: JSON.stringify(uh.pricingTable()) === was, oldCost: Math.abs(uh._cost(EV) - cost0) < 1e-12, untold: told.length === 0, oldDisagreements: JSON.stringify(uh.priceDisagreements()) === dis0 };
+    let landed = null; try { uh.setPricing({ accounts: { 'made-up-key-9': { discount: 0.9 } } }); landed = JSON.parse(onDisk(f)).accounts['made-up-key-9'].discount === 0.9 && uh.pricingTable().accounts['made-up-key-9'].discount === 0.9; } catch (e) { landed = (e && e.code) || 'error'; }
+    r.landed = landed; r.toldOnLanding = told.length > 0;
+    X.onPriceDisagreements(null);
+    stopOf(uh);
+    return r;
+  };
+  const R6 = scene(UH, 'save-refused');
+  ok(R6.threw === 'EIO' && R6.sameFile && R6.noTemp && R6.oldTable && R6.oldCost && R6.untold && R6.oldDisagreements && R6.landed === true && R6.toldOnLanding,
+    '⑥ B-574d (r4881 (3)): a prices save whose sync is REFUSED (EIO) answers the error and leaves memory as the disk is — the next price read is the OLD table (and an old cost), the catalog told NOTHING (its disagreements as they were), the file byte-identical, no temp; the save with the sync answering lands and is told', R6);
+  const USRC = RAW.call(fs, path.join(REPO, 'src/usage-history.js'), 'utf8');
+  const ORDER = "    this._writeAtomic(this.pricingFile, JSON.stringify(next, null, 2));\n    this._pricingFile = next;\n    this._pricing = this._withCatalog(next);\n";
+  const BASE_ORDER = "    this._pricingFile = next;\n    this._pricing = this._withCatalog(next);\n    this._writeAtomic(this.pricingFile, JSON.stringify(next, null, 2));   // MUTANT: the base's order — memory first\n";
+  const file6 = path.join(REPO, 'src/usage-history.js'), m6 = new Module(file6, null); m6.filename = file6; m6.paths = Module._nodeModulePaths(path.dirname(file6));
+  m6._compile(anchored(USRC, ORDER, BASE_ORDER, 'the prices\' save takes the table once it landed'), file6);
+  const RR = scene(m6.exports, 'save-refused-red');
+  ok(RR.threw === 'EIO' && RR.sameFile && !RR.oldTable, 'RED CONTROL (anchored copy: the base\'s order — the new table in memory before the write): the refused save answers the error while the hub prices with the NEW table — ⑥ goes red', RR);
+  // and the slice's first form (its own read, F4): the table merged WITH its report before the write — the refused save tells the catalog
+  const PURE = "    CP.mergePricing(next, CATALOG_PRICES, { shipped: DEFAULT_PRICING, checked: SHIPPED_PRICES_CHECKED });\n";
+  const file7 = path.join(REPO, 'src/usage-history.js'), m7 = new Module(file7, null); m7.filename = file7; m7.paths = Module._nodeModulePaths(path.dirname(file7));
+  m7._compile(anchored(USRC, PURE, '    this._withCatalog(next);   // MUTANT: the report before the write\n', 'the pure merge before the write'), file7);
+  const RT = scene(m7.exports, 'save-refused-told');
+  ok(RT.threw === 'EIO' && !RT.untold, 'RED CONTROL (anchored copy: the table merged WITH its report before the write): the refused save tells the catalog a table that never landed — ⑥ goes red', RT);
 }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
 process.exit(fail ? 1 : 0);
