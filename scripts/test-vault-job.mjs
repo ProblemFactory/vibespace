@@ -1955,10 +1955,14 @@ async function legOwnLines(wrap, tag) {
 // timers. DEFINITIONS ONLY are evaluated: a range holding any other top-level line is refused, so nothing of the wrapper runs by being
 // loaded. Each rule has its RED: the same pin over a copy with that rule cut
 const ROAD_A = "/** the job's log descriptor:", ROAD_Z = '// lane agent-output-sinks', MASK_A = 'function maskOut(k, b) {', MASK_Z = "process.on('exit', () => { drainOwn('end');";
+const RECORD_SAY = "recordSay = (l) => sayOwn(`[job-wrapper] ${l}`);";   // line 1017's one statement in that range (above: taken out by its text)
 function roadScope(src) {
   const i = src.indexOf(ROAD_A), j = src.indexOf(ROAD_Z), m = src.indexOf(MASK_A), n = src.indexOf(MASK_Z);
   if (i < 0 || j < i || m < 0 || n < m) return null;
-  const text = src.slice(i, j) + src.slice(m, n);
+  // line 1017 (B-bcb8 unit B) put ONE statement inside this range: the records' say moved onto the own lines' road (`recordSay = …`, an
+  // assignment to a name declared OUTSIDE the range) — no definition of the road under test: taken out by its EXACT text; every other line
+  // is still a definition, and a changed spelling of that one fails the scope by name
+  const text = (src.slice(i, j) + src.slice(m, n)).split('\n').filter((l) => !l.startsWith(RECORD_SAY)).join('\n');
   if (text.split('\n').some((l) => l && !/^(function \w+\(.*\) \{|let [^(]*;|\/\/|\/\*\*| |\}$)/.test(l))) return null;
   return (S) => {
     const clock = { now: 0, timers: [] }, log = [];
