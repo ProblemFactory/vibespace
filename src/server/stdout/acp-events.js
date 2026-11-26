@@ -199,6 +199,10 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
                 try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
                 catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
               }
+              // 主开发 r5164 (2), a silence of the release: on every road of a hand-back (the ladder's own stash, a hand-over's restore, the
+              // re-stash) the entry is the ONLY copy of the frame the wrapper handed back — a stash whose file is not current (a held list, a
+              // failed write: its own health) is said by name in the journal (r5176: the journal only)
+              try { const h = cid ? deliverRef?.stashHealth?.() : null; if (h && h.durable === false) console.warn(`[deliver] ${id}: the frame the wrapper handed back (${String(msg.text).length} chars, for ${cid}) is not on disk — ${h.held ? 'the list of messages waiting for conversations could not be read: lost if VibeSpace restarts before it reads again, unless that conversation\'s next turn takes it first' : `the stash could not be written (${h.error || 'its write is owed'}): lost if VibeSpace restarts before it is written, unless that conversation's next turn takes it first`}`); } catch { /* the health is a report */ }
             }
             // ② a notification this harness could not fold into the running turn took another lane — said, like codex's
             // `turn/steer refused` line (an ACP / agy wrapper has no free steer: it waits for its own turn after this one)

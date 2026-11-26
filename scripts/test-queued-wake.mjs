@@ -957,5 +957,38 @@ console.log('⑩ RED CONTROLS — patched copies: each law-1 rule removed, its l
     !!wjLast && wjLast.entries.length === 2 && !wjLast.entries.some((x) => x.id === 'old-1'), JSON.stringify({ wjLast }));
 }
 
+console.log('㉖ 主开发 r5164 (2), a silence of the release: a frame a wrapper hands back that is NOT on disk is said by name, on every road (the ladder\'s own, the re-stash) — ACP, codex — r5176: the journal');
+{
+  const MS = mutantCopies('queued-wake-silence', REPO);
+  const REC = { acp: { type: 'acp', kind: 'peer_result', ok: false, text: 'a frame the wrapper handed back', reason: 'stop' },
+    codex: { type: 'event_msg', payload: { type: 'peer_message_result', ok: false, text: 'a frame the wrapper handed back', reason: 'stop' } } };
+  const scene = (Mod, kind, road) => {
+    let reached = 0, healthReads = 0; const warns = [], noop = () => { };
+    // the plant: the stash is HELD (its health «not durable»). `reached` is its WITNESS (r5135 law 1): the road the frame took was reached —
+    // the ladder's own (noteHandedBack: true, it stashes with its ref) or the reader's re-stash (stashFor)
+    const deliverRef = { noteHandedBack: () => { if (road === 'ours') { reached++; return true; } return false; }, restoreFrame: () => 0,
+      stashFor: () => { if (road === 'restash') reached++; return { stored: false, taken: true, why: 'taken, not on disk' }; },
+      stashHealth: () => { healthReads++; return { durable: false, held: true, error: 'the list of messages waiting for conversations could not be read' }; } };
+    const C = Mod.create({ engine: { noteTurnEnd: noop }, noteHarnessModels: noop, deliverRef, permissionRulesRef: null });
+    const S = { buffer: '', backendSessionId: 'cid-hb' }; let feed = null;
+    C.attach(S, 'w-hb', { onData: (cb) => { feed = cb; } }, { feedLive: noop, broadcastToSession: noop, broadcastActiveSessions: noop, readSessionMeta: () => null, writeSessionMeta: noop, updateSessionTodos: noop });
+    const w0 = console.warn, l0 = console.log; console.warn = (...x) => warns.push(x.join(' ')); console.log = () => { };
+    try { feed(JSON.stringify(REC[kind]) + '\n'); } finally { console.warn = w0; console.log = l0; }
+    return { reached, healthReads, said: warns.some((l) => /the frame the wrapper handed back \(\d+ chars, for cid-hb\) is not on disk — the list of messages waiting for conversations could not be read: lost if VibeSpace restarts before it reads again, unless that conversation's next turn takes it first/.test(l)) };
+  };
+  const NEW = 'try { const h = cid ? deliverRef?.stashHealth?.() : null; if (h && h.durable === false) console.warn(';
+  const OLD = 'try { const h = null; if (h && h.durable === false) console.warn(';
+  for (const [kind, rel] of [['acp', 'src/server/stdout/acp-events.js'], ['codex', 'src/server/stdout/codex-events.js']]) {
+    for (const road of ['restash', 'ours']) {
+      const r = scene(require(path.join(REPO, rel)), kind, road);
+      if (r.reached !== 1) console.log(`  SKIP ㉖ ${kind} ${road}: the hand-back never reached its road (${JSON.stringify(r)})`);
+      else ok(`㉖ ${kind}, the ${road === 'ours' ? 'ladder\'s own' : 're-stash'} road: the handed-back frame not on disk is SAID by name in the journal (its size, its conversation, why and its bound) — the stash's own health read once`, r.said && r.healthReads === 1, JSON.stringify(r));
+    }
+    const rx = scene(MS.load(rel, anchored(read(rel), NEW, OLD, `${kind}: the release (the stash's state not read)`), `silence-${kind}`), kind, 'restash');
+    if (rx.reached !== 1) console.log(`  SKIP ㉖ ${kind} RED: the hand-back never reached the stash (${JSON.stringify(rx)})`);
+    else ok(`㉖ ${kind} RED CONTROL (the release: nothing read after the hand-back): nothing is said`, !rx.said, JSON.stringify(rx));
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
