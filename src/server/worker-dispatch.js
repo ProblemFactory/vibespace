@@ -240,8 +240,12 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     let compaction = null;
     try {
       const byS = liveOf(o.from).s;
+      // THE DISPATCH's OWN DOOR (test-reply-door §3, 主开发 r4711): this types the `/compact` frame a dispatch types — the owed
+      // compaction of the dispatching sender's brief, on THAT sender's behalf (`by`) — and only after the sender's pace and the spend
+      // gate (peer-compact, a hold) answered yes just above; it names its door exactly as the dispatch's own call does
+      const by = { cid: o.from, name: cleanName((byS && byS.name) || '') || String(o.from).slice(0, 8) };
       let sent;
-      try { sent = typeof sendUserInput === 'function' ? sendUserInput(wid, '/compact', { origin: 'dispatch', by: { cid: o.from, name: cleanName((byS && byS.name) || '') || String(o.from).slice(0, 8) } }) : { ok: false, error: 'the typing path is not wired' }; }
+      try { sent = typeof sendUserInput === 'function' ? sendUserInput(wid, '/compact', { origin: 'dispatch', by }) : { ok: false, error: 'the typing path is not wired' }; }
       catch (e) { sent = { ok: false, error: 'the typing path threw: ' + ((e && e.message) || e) }; }   // the round's should: its hold and its pace grant go back like any frame that did not leave
       if (!sent || !sent.ok) { compaction = { sent: false }; if (v && v.hold && releaseSpend) { try { releaseSpend({ hold: v.hold }); } catch { } } giveBack({ attempted: false }); }
       else {
