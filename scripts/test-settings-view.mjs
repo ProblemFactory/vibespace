@@ -260,25 +260,37 @@ console.log('§7 the per-vendor channel rows (B-df40 part 3), derived from src/c
 console.log('§8 the store\'s notifier walks a snapshot of its listeners');
 {
   const { spawnSync } = await import('node:child_process');
-  const drive = (url) => spawnSync(process.execPath, ['--input-type=module', '-e', `
+  // B-3dbd (r4729, lane bl-chat-b): BOTH CHILDREN END BY THEMSELVES ON THE FACT. The re-subscribing listener re-enters at most CAP times
+  // (a cap the leg owns), so a walk of the LIVE Set ends too — CAP + 100 calls, its re-subscriber gone (1 listener) — where the snapshot
+  // calls it once (101 calls, 2 listeners). The child's bound is generous and its expiry a NAMED line, never the verdict (was: a 4 s
+  // timeout that node's own start under load could beat, and a control proven only by that same kill).
+  const CAP = 25, CHILD_MS = 60000;
+  const drive = (url, { holdMs = 0, timeout = CHILD_MS } = {}) => spawnSync(process.execPath, ['--input-type=module', '-e', `
+    if (${holdMs} > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${holdMs});   // a placed stall of the child's own start (the placement leg only)
     globalThis.localStorage = { getItem: () => null, setItem() {} };
     const { SettingsManager } = await import(${JSON.stringify('%URL%')});
-    const s = new SettingsManager(); let calls = 0;
-    const sub = () => { const f = () => { calls++; s.off('channels.guardAttachmentsReview', f); sub(); }; s.on('channels.guardAttachmentsReview', f); };
+    const s = new SettingsManager(); let calls = 0, entries = 0;
+    const sub = () => { const f = () => { calls++; s.off('channels.guardAttachmentsReview', f); if (++entries < ${CAP}) sub(); }; s.on('channels.guardAttachmentsReview', f); };
     sub(); s.on('channels.guardAttachmentsReview', () => { calls += 100; });
     s.set('channels.guardAttachmentsReview', false);
     if (s._saveTimer) clearTimeout(s._saveTimer);
-    console.log(JSON.stringify({ calls, listeners: s._listeners['channels.guardAttachmentsReview'].size }));`.replace('%URL%', url)], { encoding: 'utf8', timeout: 4000 });
-  const verdict = (r) => { let o = null; try { o = JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch {} return { green: r.status === 0 && !!o && o.calls === 101 && o.listeners === 2, o, signal: r.signal, err: String(r.stderr || '').slice(0, 300) }; };
-  const real = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href));
+    console.log(JSON.stringify({ calls, listeners: s._listeners['channels.guardAttachmentsReview'].size }));`.replace('%URL%', url)], { encoding: 'utf8', timeout });
+  const verdict = (r) => { let o = null; try { o = JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch {} return { green: r.status === 0 && !!o && o.calls === 101 && o.listeners === 2, o, signal: r.signal, expired: r.signal === 'SIGTERM', err: String(r.stderr || '').slice(0, 300) }; };
+  const said = (v, who) => { if (v.expired) ok(false, `the ${who} child never answered within its bound — a harness line, never the store's verdict`, JSON.stringify(v)); };
+  const real = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href)); said(real, 'real store\'s');
   ok(real.green, 'a listener that re-subscribes while it runs is called ONCE (the other listener once too), the store returns, 2 listeners stay', JSON.stringify(real));
+  // THE PLACEMENT (the family's law 1): the old leg's verdict leaned on the child beating its deadline — a start HELD past a deadline
+  // shorter than the hold (a stall the leg owns, never load) reads a GREEN store RED by that deadline; the bound of this leg reads it green
+  const HOLD = 400, held = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href, { holdMs: HOLD, timeout: HOLD / 2 }));
+  const heldNow = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href, { holdMs: HOLD }));
+  ok(held.expired && !held.green && heldNow.green, `PLACED: a child whose start is held ${HOLD} ms past a ${HOLD / 2} ms deadline is killed (the old leg's red, made at will) — under this leg's bound the same held child answers green`, JSON.stringify({ held, heldNow }));
   const SNAP = 'for (const cb of [...listeners]) {';
   const ssrc = read('src/lib/settings.js');
   ok(ssrc.split(SNAP).length === 2, 'the notifier walks a snapshot, spelled once where the control reverts it');
   const M = mutantCopies('settings-notify', REPO);
   const mut = M.write('src/lib/settings.js', editAnchor(ssrc, SNAP, 'for (const cb of listeners) {', "src/lib/settings.js"), 'liveset', { esm: true });
-  const red = verdict(drive(pathToFileURL(mut).href));
-  ok(!red.green && red.signal === 'SIGTERM', `CONTROL: a copy walking the LIVE Set never returns — killed at the 4 s deadline (${red.signal}) ⇒ RED`, JSON.stringify(red));
+  const red = verdict(drive(pathToFileURL(mut).href)); said(red, 'live-Set copy\'s');
+  ok(!red.green && !!red.o && red.o.calls === CAP + 100 && red.o.listeners === 1, `CONTROL: a copy walking the LIVE Set re-enters the re-subscribing listener in the same notify — ${red.o ? red.o.calls - 100 : '?'} times, to the cap the leg placed (the snapshot: once) ⇒ RED`, JSON.stringify(red));
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
