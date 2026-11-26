@@ -555,7 +555,7 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
   }
   const order = priorityOrder(priority); // manual priority orders the snapshot too (the device walks it top-down)
   out.sort(order);
-  last.sort(order);
+  last.sort((x, y) => ((x.paying ? 1 : 0) - (y.paying ? 1 : 0)) || order(x, y));   // B-87fd (1) r4696 M3: a paying row after every credits row
   return out.concat(last);
 }
 
@@ -896,7 +896,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     ...(crossRows.length ? { crossHeld: crossRows.map((r) => ({ id: r.id, name: r.name, provider: r.provider, providerId: r.providerId, toModel: r.toModel, fallbackOnly: !!r.fallbackOnly, cross: !!r.cross })) } : {}),
   } : {});
   nearRanked.sort(order);
-  creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || order(x, y));
+  // B-87fd (1) r4696 M3: inside the last-resort tier a member billing per token (a dead credits row or a paying row) comes after every
+  // credits row that still has prepaid quota — the release's own «quota-holding rows first», kept for a paying row too
+  creditsRanked.sort((x, y) => (((x.dead || x.paying) ? 1 : 0) - ((y.dead || y.paying) ? 1 : 0)) || order(x, y));
   // THE PROVING SPAWN (PROVING_HOLD_MS above). Candidates = the members every VOLUNTARY gate admitted (`ranked`: a usable
   // login not about to die, not lapsed, not rejected, this provider, not a credits / overage / reserve-floor member, no
   // bucket under its hard bar) + the default itself when it can serve. Judged on the READING (`readReading`, never the
@@ -943,6 +945,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const usingCredits = !ranked.length && !nearRanked.length && hardDead && creditsRanked.length > 0 && !((curCredits || curPaying) && creditsRanked[0].dead);
   const pool = usingScraps ? nearRanked : usingCredits ? creditsRanked : ranked;
   if (!pool.length) {
+    // B-87fd (1): a member billing paid overage with NOWHERE to go stays — the release's own answer for it (it read healthy there):
+    // 'healthy' to an ordinary decision, 'no-better' to a proactive scan — never a «no member can serve it»
+    if (curPayingOnly && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
     // A HEALTHY CURRENT MEMBER IS NEVER "NO MEMBER CAN SERVE IT" (2026-09-13).
     // On a HOT pool the candidate ranking runs PROACTIVELY — before anyone has
     // asked whether the current member is exhausted — so an empty candidate
@@ -959,6 +964,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // member is EXHAUSTED (soft or hard); otherwise this is an ordinary
     // proactive scan that found nowhere better — `no-better`, which the engine
     // renders as nothing at all.
+    if (curPayingOnly) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });   // B-87fd (1): a proactive scan on a paying member that found nowhere — the release's answer for it
     if (!exhausted) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
     // THE PROVIDER, 'allow' (rule 2): nothing of this provider can take it and the current member cannot serve at all —
     // the COLD move to the held-apart member (another provider's: the model re-resolved; a fallback-only one: last)
@@ -988,7 +994,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // serve it), `blockedWhy` keeps the sentence's own reason (all-rejected / all-logins-expired / …).
     if (notMember) {
       const listed = membership == null ? null : (typeof membership.has === 'function' ? membership : new Set(membership));
-      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode });
+      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, payingIds: paying, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode });
       return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
     }
     return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
@@ -1064,7 +1070,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // so only move somewhere that can actually SETTLE
     // B-87fd (1): a paying member with no quota member able to settle STAYS — the release's own answer for it ('healthy'), never a
     // «no member can settle» (the engine files that as a blocked pool)
-    if (!bestSettle && curPayingOnly) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
+    if (!bestSettle && curPayingOnly) return !proactive && !prioRank && !placing ? none('healthy', { fromRemaining: cur.known ? cur.remaining : null }) : none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true });
     if (!bestSettle) return none('no-settleable', { fromRemaining: cur.known ? cur.remaining : null, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...notBetterDetail(), ...bucketDetail(curBr) });
     // THE FIRST STOP (2026-09-22, owner: "软耗尽的话 热对话切走时机晚一点，普通10%，热对话
     // 的话就5%这样。如果一个对话到达了冷对话切走的标准但还热着，就在停下来的第一时间切走。").
@@ -1074,7 +1080,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // when `inTurn` is false and this branch returns the move (a cache still warm
     // at that instant is accepted). A cold conversation, or one not in a turn,
     // moves at once; the HARD band above never defers.
-    if (warm && warm.warm && warm.inTurn) {
+    // B-87fd (1) r4696 M2: leaving a PAYING member is a voluntary move the release never made on a cold pool — it waits for the
+    // conversation's STOP like the priority return (held on «in a turn» alone, never on the cache's warmth): never cut mid-turn
+    if (warm && warm.inTurn && (warm.warm || curPayingOnly)) {
       const tripped = curBr.filter(soft).sort((x, y) => (x.remaining - THRESH[x.kind].hot) - (y.remaining - THRESH[y.kind].hot))[0];
       return none('warm-soft-defer', {
         agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: bestSettle.id, wouldToName: bestSettle.name, band: 'soft',
@@ -1276,9 +1284,10 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     if (rd && typeof rd === 'object' && typeof rd.held === 'string') return;   // r3136 / B-6a92 (r2855): never parked on a member whose reading cannot be told (unread, or held on another account's instant)
     const v = quotaVerdict(rd, nowSec, { tier: 'hard' });
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
-    rows.push({ id: m.id, at, credits: !!((credits && credits.has(m.id)) || (paying && paying.has(m.id))), rank: rank ? rank(m.id) : 0, i, ap });
+    const isPay = !!(paying && paying.has(m.id) && !(credits && credits.has(m.id)));
+    rows.push({ id: m.id, at, credits: !!(credits && credits.has(m.id)) || isPay, paying: isPay, rank: rank ? rank(m.id) : 0, i, ap });
   });
-  rows.sort((x, y) => (x.ap - y.ap) || ((x.credits ? 1 : 0) - (y.credits ? 1 : 0)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
+  rows.sort((x, y) => (x.ap - y.ap) || ((x.credits ? 1 : 0) - (y.credits ? 1 : 0)) || ((x.paying ? 1 : 0) - (y.paying ? 1 : 0)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));   // B-87fd (1) r4696 M3: paying after every credits member
   return rows.length ? rows[0].id : null;
 }
 

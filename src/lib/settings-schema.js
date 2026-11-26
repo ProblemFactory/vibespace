@@ -1523,8 +1523,8 @@ const SETTINGS_SCHEMA = {
   },
   'pool.avoidOverageMembers': {
     type: 'boolean', default: false,
-    label: t('Do not switch conversations onto an account billing paid overage'),
-    description: t('While an account is using paid overage its utilization stays under 100% even though every token costs money, so the pool\u2019s \u201cmost remaining\u201d ranking actively prefers it. With this on, such a member is not a voluntary switch target (an escape from a dead account still uses it, and it keeps serving its own conversations). Off by default: watch the quota panels for a week first — such an account wears a money icon there.'),
+    label: t('Say when a conversation goes to an account billing paid overage'),
+    description: t('An account billing paid overage is always used last: after every account with quota left, and only when nothing else can serve. With this on, a move onto such an account says so; it wears a money icon in the quota panels.'),   // B-87fd (1) (主开发 r4668): the ranking puts such an account last whatever this says; this names the bar only
     category: t('Spending'), liveApply: true,
   },
   'accounts.onDemandQuotaRefresh': {
