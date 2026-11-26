@@ -59,8 +59,30 @@ const portFree = (port) => new Promise((resolve) => {
 const portFreed = async (port, { onTry = () => { } } = {}) => { for (let k = 0; k < 100; k++) { if (await portFree(port)) return true; onTry(k); await sleep(20); } return false; };
 const hold = (port) => new Promise((resolve, reject) => { const s = net.createServer(); s.once('error', reject); s.listen(port, '127.0.0.1', () => resolve(s)); });
 
-const [P_FIXED, P_BUSY, P_CANCEL, P_TIMEOUT] = await freePorts(4);
+// B-3dbd (r4792, lane bl-chat-b): A PORT THIS SUITE WILL USE IS HELD FROM THE MOMENT IT IS CHOSEN. It is chosen by a listen of the
+// suite's own (port 0) and that listener stays up; it is let go only to hand the port to the product's own listen, AT ONCE before that
+// listen (its close landed, then the begin) — never chosen at the head, freed, and taken again legs later (another process of the tier's
+// parallel lanes took one in between: «listen EADDRINUSE» at ③'s hold, the candidate's second whole fast tier, UTC zone). Where a leg's
+// point is «the port is busy», the busy holder IS the suite's own listener from the start. A port a leg released is never taken again:
+// the next leg holds a fresh one.
+const held = async () => {
+  const s = net.createServer();
+  await new Promise((res, rej) => { s.once('error', rej); s.listen(0, '127.0.0.1', res); });
+  return { port: s.address().port, server: s, handOver: () => new Promise((r) => s.close(() => r())) };
+};
 const quiet = { warn() {}, log() {}, error() {} };
+
+// ── B-3dbd PLACED (r4792): the window the old head left, made red at will by a stand-in of the suite's own ──
+{
+  const [p] = await freePorts(1);                 // the OLD shape: a port chosen, then released at once
+  const standIn = await hold(p);                  // a stand-in takes it inside the window (the tier's other process, placed)
+  let oldTake = null; try { (await hold(p)).close(); } catch (e) { oldTake = e.code; }
+  standIn.close();
+  const h = await held();                         // the NEW shape: held from the moment it is chosen
+  let standInNow = null; try { (await hold(h.port)).close(); } catch (e) { standInNow = e.code; }
+  await h.handOver();
+  ok(oldTake === 'EADDRINUSE' && standInNow === 'EADDRINUSE', `PLACED: a port chosen then released is lost to a stand-in that takes it inside the window — the old shape's later take reads ${oldTake} (the candidate's crash, at will); a port HELD from its choice keeps the stand-in out (${standInNow}) until it is handed over`);
+}
 
 // ── ① EPHEMERAL: a fresh port, the consent URL carries it, the loopback lands ──
 {
@@ -93,8 +115,10 @@ const quiet = { warn() {}, log() {}, error() {} };
 // ── ② FIXED: the registered port + path; another path is not this callback ──
 {
   const ol = OL.createOAuthLoopback({ log: quiet });
+  const HF0 = await held(), P_FIXED = HF0.port;   // r4792: held from its choice
   const cb = `http://127.0.0.1:${P_FIXED}/lark/cb`;
   const exchanges = [];
+  await HF0.handOver();   // …handed to the product's own listen, at once
   const f = await ol.begin({
     id: 'lark', mode: 'fixed', callbackUrl: cb, label: 'Lark',
     buildConsentUrl: ({ redirectUri, state }) => `https://accounts.example/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
@@ -120,7 +144,7 @@ const quiet = { warn() {}, log() {}, error() {} };
 
 // ── ③ PRE-BOUND PORT ⇒ NAMED REFUSAL + PASTE-BACK, never an opaque EADDRINUSE ──
 {
-  const holder = await hold(P_BUSY);
+  const HB = await held(), P_BUSY = HB.port, holder = HB.server;   // r4792: the busy holder IS the suite's own listener from the port's choice
   const warned = [];
   const ol = OL.createOAuthLoopback({ log: { warn: (...a) => warned.push(a.join(' ')), log() {}, error() {} } });
   const cb = `http://127.0.0.1:${P_BUSY}/lark/cb`;
@@ -160,20 +184,23 @@ const quiet = { warn() {}, log() {}, error() {} };
     buildConsentUrl: ({ redirectUri, state }) => `https://x.example/a?r=${encodeURIComponent(redirectUri)}&state=${state}`,
     exchange: async () => ({}),
   });
+  const HC = await held(), P_CANCEL = HC.port; await HC.handOver();   // r4792: each leg its own held port, handed over at once
   const c = await mk(P_CANCEL, 60000);
   ok(c.listening === true && !(await portFree(P_CANCEL)), 'cancel leg: the port is held while the flow runs');
   ok(ol.cancel(c.flowId) === true && ol.status(c.flowId).cancelled === 'cancelled' && ol.status(c.flowId).running === false, 'cancel() is terminal and says so');
   ok(await portFreed(P_CANCEL), 'cancel releases the port');
   ok(ol.cancel(c.flowId) === false, 'cancelling twice is a no-op');
 
+  const HT = await held(), P_TIMEOUT = HT.port; await HT.handOver();
   const tmo = await mk(P_TIMEOUT, 120);
   ok(!(await portFree(P_TIMEOUT)), 'timeout leg: the port is held while the flow runs');
   await sleep(250);
   ok(ol.status(tmo.flowId).cancelled === 'timeout' && (await portFreed(P_TIMEOUT)), 'the flow\'s own timeout releases the port and names the reason');
 
   // one flow per id: a second begin() for the same id supersedes the first
-  const a = await mk(P_CANCEL, 60000);
-  const b = await mk(P_CANCEL, 60000);
+  const HS = await held(), P_SUPER = HS.port; await HS.handOver();   // (never the cancel leg's released port again)
+  const a = await mk(P_SUPER, 60000);
+  const b = await mk(P_SUPER, 60000);
   ok(ol.status(a.flowId).cancelled === 'superseded' && ol.status(b.flowId).running === true && ol.runningFor('lark').flowId === b.flowId, 'a second begin() for the same id SUPERSEDES the first (one running flow per id, gmail-sync\'s rule) — and the port moved with it');
   // B-cabe's remainder: stopAll() hands back its servers' own close events — the leg AWAITS them (every connection ended),
   // then judges «free» by the same bounded re-ask as every release (the .367 mirror's 112/1 cause is still unnamed: the listener
@@ -181,7 +208,7 @@ const quiet = { warn() {}, log() {}, error() {} };
   const stopped = ol.stopAll();
   ok(stopped instanceof Promise, 'stopAll() hands back a promise of its servers\' close events (B-cabe)');
   await stopped;
-  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_CANCEL)), 'stopAll() releases everything (the shutdown path) — its promise resolved, the port free by the bounded re-ask');
+  ok(ol.status(b.flowId).cancelled === 'shutdown' && (await portFreed(P_SUPER)), 'stopAll() releases everything (the shutdown path) — its promise resolved, the port free by the bounded re-ask');
   // CONTROL of the shape leg (its plant proves itself first: the line it replaces is in the tree): a copy whose stopAll() only
   // closes (the old shape) hands back nothing to wait on — the «hands back a promise» leg is RED on it (the port leg is not a
   // control of this change: the listener is gone at close() either way)
@@ -208,12 +235,14 @@ const quiet = { warn() {}, log() {}, error() {} };
     const DROP = 'if (drop) { try { srv.closeAllConnections?.(); } catch {} }';
     const TURNS = 50;
     const turn = () => new Promise((r) => setImmediate(r));
-    const heldStop = async (OLm, port) => {
+    const heldStop = async (OLm, hp) => {
+      const port = hp.port;
       const o = OLm.createOAuthLoopback({ log: quiet });
       let entered = null, letGo = null;
       const inExchange = new Promise((r) => { entered = r; }), held = new Promise((r) => { letGo = r; });
       let f = null, threw = '';
       try {
+        await hp.handOver();   // r4792: the held port handed to the product's listen, at once
         f = await o.begin({
           id: 'lark', mode: 'fixed', callbackUrl: `http://127.0.0.1:${port}/lark/cb`, timeoutMs: 60000, chain: { page: 1, total: 2 },
           buildConsentUrl: ({ redirectUri, state }) => `https://x.example/a?r=${encodeURIComponent(redirectUri)}&state=${state}`,
@@ -242,23 +271,25 @@ const quiet = { warn() {}, log() {}, error() {} };
       req.destroy(); agent.destroy();
       return { listening: true, began: true, within: landedTurn >= 0 && landedTurn < TURNS, landedTurn };
     };
-    const D = await heldStop(OL, P_CANCEL);
+    const HD = await held(), PD = HD.port;
+    const D = await heldStop(OL, HD);
     ok(D.listening && D.began && D.within, `B-cabe THE DROP: a keep-alive connection whose response is pending at the stop is dropped — stopAll()'s promise lands within ${TURNS} loop turns (at turn ${D.landedTurn})`, D.began ? undefined : `the held request never reached its exchange: ${D.early || '?'}`);
-    ok(await portFreed(P_CANCEL), 'B-cabe THE DROP: …and the port is free by the bounded re-ask');
+    ok(await portFreed(PD), 'B-cabe THE DROP: …and the port is free by the bounded re-ask');
     ok(src.includes(DROP), 'B-cabe THE DROP control: its plant is where it claims (the drop line is in src/oauth-loopback.js)', src.includes(DROP) ? undefined : 'the anchor of the control «the drop» is not in the source');
     const MD = mutantCopies('oauth-loopback-drop', REPO);
     const OLd = require(MD.write('src/oauth-loopback.js', anchored(src, DROP, '/* the drop cut out (the control) */', 'B-cabe: the drop control')));   // (through anchored(): a moved anchor throws by name)
     for (const c of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 1, label: 'drop control: ' })) ok(c.pass, c.name, c.pass ? undefined : c.detail);
-    const C = OLd ? await heldStop(OLd, P_CANCEL) : { listening: false, began: false, within: true, landedTurn: -1 };
+    const HDc = await held(), PDc = HDc.port;
+    const C = OLd ? await heldStop(OLd, HDc) : (await HDc.handOver(), { listening: false, began: false, within: true, landedTurn: -1 });
     ok(!!OLd && C.listening && C.began && !C.within, `B-cabe THE DROP CONTROL: a copy without the drop — stopAll()'s promise has NOT landed within ${TURNS} loop turns while the connection is held (landed at ${C.landedTurn < 0 ? 'never, not even in the cleanup after the hold ended' : 'turn ' + C.landedTurn + ', after the hold ended'}) — the drop leg is RED on it`);
-    ok(await portFreed(P_CANCEL), 'B-cabe THE DROP control: …its port is free again (the listener went at close())');
+    ok(await portFreed(PDc), 'B-cabe THE DROP control: …its port is free again (the listener went at close())');
   }
   // B-cabe PLACED: a listener that closes only once the FIRST probe has answered «held» (the probe's onTry) — a close landing after
   // the leg's probe. ONE probe reads «held» (the old leg's shape, red); the bounded re-ask reads free. NOTE (the adversarial read):
   // release() closes its server synchronously, so the .367 mirror's 112/1 is NOT proven to be this race — the cause stays unnamed
   {
-    const late = await hold(P_CANCEL), one = await portFree(P_CANCEL);
-    let tries = 0; const freed = await portFreed(P_CANCEL, { onTry: (k) => { tries = k + 1; if (k === 0) late.close(); } });
+    const HL = await held(), late = HL.server, PLate = HL.port, one = await portFree(PLate);   // r4792: the late listener IS the suite's held one
+    let tries = 0; const freed = await portFreed(PLate, { onTry: (k) => { tries = k + 1; if (k === 0) late.close(); } });
     ok(one === false && freed === true && tries >= 1, `B-cabe: a port whose listener closes after the first probe answered «held» is FREE by the bounded re-ask (${tries} re-ask(s)); a single probe reads it held`);
   }
 
@@ -418,7 +449,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     const snapHits = () => { const f = path.join(M.dir, `heap-${Date.now()}.heapsnapshot`); v8.writeHeapSnapshot(f); const n = (fs.readFileSync(f, 'latin1').match(SHAPE) || []).length; fs.rmSync(f); return n; };
     const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
     const lark = require(path.join(REPO, 'src/channels/lark.js'));
-    const [PL] = await freePorts(1);
+    const HPL = await held(), PL = HPL.port;   // r4792: held until the fixed case's begin
     const memTokens = () => ({ read: () => ({ token: null, why: 'never-authenticated' }), write: async () => {}, clear: async () => {} });
     // a FLAT string (a `+` makes a cons string, which a snapshot names "(concatenated string)", its halves apart)
     const mint = () => Buffer.from('GOCSPX-R4HEAP-' + crypto.randomBytes(12).toString('hex'), 'utf8').toString('utf8');
@@ -430,6 +461,7 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     for (const c of [...cases, { ...cases[0], control: true }]) {
       const ol = (c.control ? keep : OL).createOAuthLoopback({ log: quiet, fixedCallbackUrl: `http://127.0.0.1:${PL}/lark/cb` });
       const a = c.mod.create({ id: c.kind, kind: c.kind, options: {}, credentialKey: 'custom' }, { now: () => Date.now(), fetch: async () => { throw new Error('no vendor call'); }, tokens: memTokens(), oauth: ol, resolveIntegration: () => c.resolve(), onAuthDone: () => {}, log: quiet });
+      if (c.mode === 'fixed') await HPL.handOver();   // (the one case that binds it, at once before its begin)
       const f = await a.auth.begin();
       const running = snapHits();
       ol.cancel(f.flowId, 'cancelled');
@@ -468,11 +500,12 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
   }
   // (d) begin()'s own exits
   {
-    const [PF] = await freePorts(1);
-    const mkOl = (mod) => mod.createOAuthLoopback({ log: quiet, fixedCallbackUrl: `http://127.0.0.1:${PF}/lark/cb` });
+    const HPF = await held(), PF = HPF.port, HPF2 = await held(), PF2 = HPF2.port;   // r4792: the leg's port and its control's, each held
+    const mkOl = (mod, port = PF) => mod.createOAuthLoopback({ log: quiet, fixedCallbackUrl: `http://127.0.0.1:${port}/lark/cb` });
     const twice = async (ol, mode) => { const base = listeners(); const [a, b] = await Promise.all([ol.begin({ id: 'same', mode, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) }), ol.begin({ id: 'same', mode, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) })]); await sleep(10); const held = listeners() - base; ol.stopAll(); await sleep(20); return { a, b, held, left: listeners() - base }; };
     for (const mode of ['ephemeral', 'fixed']) {
       const ol = mkOl(OL);
+      if (mode === 'fixed') await HPF.handOver();   // at once before the fixed begins
       const r = await twice(ol, mode);
       const next = await ol.begin({ id: 'next', mode, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
       // (in fixed mode the older bind may WIN the port and close it at once, leaving the newer flow on paste-back: 0 held — the port is free for the next begin either way)
@@ -485,13 +518,14 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     // CONTROL: a copy whose post-bind step ignores the flow's end (the r3 shape) keeps the listener — in fixed mode the port
     const B = "    const bound = () => { if (st.cancelled || st.done) { try { srv.close(); } catch {} return; } st.server = srv; st.listening = true; };\n";
     ok(src.split(B).length === 2, '(d) CONTROL setup: the post-bind check is present once');
-    const olm = mkOl(require(M.write('src/oauth-loopback.js', editAnchor(src, B, '    const bound = () => { st.server = srv; st.listening = true; };\n', "src/oauth-loopback.js"), 'binds-after-end')));
+    const olm = mkOl(require(M.write('src/oauth-loopback.js', editAnchor(src, B, '    const bound = () => { st.server = srv; st.listening = true; };\n', "src/oauth-loopback.js"), 'binds-after-end')), PF2);
+    await HPF2.handOver();   // the control's own held port (never the leg's released one)
     const rm = await twice(olm, 'fixed');
     const nextm = await olm.begin({ id: 'next', mode: 'fixed', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
     ok(rm.left === 1 && nextm.refusal && nextm.refusal.code === 'port-busy', `(d) CONTROL: a copy that binds after the end keeps ${rm.left} listener past stopAll and the next fixed begin is ${nextm.refusal && nextm.refusal.code} — the checks above would be red`);
     olm.stopAll();
     // the leaked control listener is closed by hand (it is nobody's flow now)
-    for (const h of process._getActiveHandles()) if (h instanceof net.Server && h.listening && h.address() && h.address().port === PF) { try { h.close(); } catch {} }
+    for (const h of process._getActiveHandles()) if (h instanceof net.Server && h.listening && h.address() && h.address().port === PF2) { try { h.close(); } catch {} }
   }
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
 }
@@ -526,10 +560,12 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
     if (page.status === 302 && page.location) { const back = await get(page.location); await sleep(40); return { ...page, back }; }
     return page;
   };
-  const [P9, P9b, P9c] = await freePorts(3);
-  const run9 = async (OLm, port) => {
+  const H9 = await held(), H9b = await held(), H9c = await held(), P9 = H9.port, P9b = H9b.port, P9c = H9c.port;   // r4792: each held
+  const run9 = async (OLm, hp) => {
+    const port = hp.port;
     const ol = OLm.createOAuthLoopback({ log: quiet });
     const ex = []; const done = [];
+    await hp.handOver();   // at once before its begin
     const f = await ol.begin({
       id: 'lark', mode: 'fixed', callbackUrl: `http://127.0.0.1:${port}/lark/cb`, label: 'Lark', optionalScopes: [OPT, OPT, 7],
       buildConsentUrl: ({ redirectUri, state, without = [] }) => `https://accounts.example/open-apis/authen/v1/authorize?` + new URLSearchParams({ redirect_uri: redirectUri, state, scope: ['im:message', 'im:chat:readonly', OPT].filter((x) => !without.includes(x)).join(' ') }),
@@ -539,7 +575,7 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
     return { ol, f, ex, done };
   };
   {
-    const { ol, f, ex, done } = await run9(OL, P9);
+    const { ol, f, ex, done } = await run9(OL, H9);
     ok(JSON.stringify(f.optional) === JSON.stringify([OPT]) && f.narrowed === null && new URL(f.consentUrl).searchParams.get('scope').split(' ').includes(OPT), 'the flow names its optional scopes (deduped, strings only) and the FIRST consent asks for them', JSON.stringify([f.optional, f.narrowed]));
     const p1 = await browse(f.consentUrl);
     ok(p1.status === 200 && /20027/.test(p1.body) && !p1.location && ex.length === 0 && ol.status(f.flowId).running === true, 'the fake vendor refuses the whole consent ON ITS PAGE (200, 20027, no redirect) — nothing reaches the loopback, the flow is still running');
@@ -565,14 +601,14 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
   }
   {
     // THE VENDOR'S ERROR REDIRECT: `?error=access_denied&state=<ours>` (the person pressed Deny) ENDS the flow by name
-    const { ol, f, ex, done } = await run9(OL, P9b);
+    const { ol, f, ex, done } = await run9(OL, H9b);
     const st = new URL(f.consentUrl).searchParams.get('state');
     const r = await get(`http://127.0.0.1:${P9b}/lark/cb?error=access_denied&state=${st}`);
     await sleep(30);
     const s9 = ol.status(f.flowId);
     ok(r.status === 200 && /did not grant the sign-in \(access_denied\)/.test(r.body) && !/connected — you can close/.test(r.body) && ex.length === 0, 'the tab says the vendor did not grant it (access_denied) — never "connected"; nothing exchanged', r.body);
     ok(s9.done === true && s9.ok === false && s9.running === false && /Lark did not grant the sign-in \(access_denied\)/.test(s9.error || '') && done.length === 1 && done[0].ok === false && (await portFree(P9b)), 'the flow ENDS by name (done, the error sentence, reported once, the port released)', JSON.stringify(s9));
-    const hostile = await (async () => { const x = await run9(OL, P9c); const st2 = new URL(x.f.consentUrl).searchParams.get('state'); const rr = await get(`http://127.0.0.1:${P9c}/lark/cb?error=${encodeURIComponent('<img src=x onerror=alert(1)>' + 'e'.repeat(5000))}&state=${st2}`); await sleep(30); const e = x.ol.status(x.f.flowId).error || ''; x.ol.stopAll(); return { body: rr.body, e }; })();
+    const hostile = await (async () => { const x = await run9(OL, H9c); const st2 = new URL(x.f.consentUrl).searchParams.get('state'); const rr = await get(`http://127.0.0.1:${P9c}/lark/cb?error=${encodeURIComponent('<img src=x onerror=alert(1)>' + 'e'.repeat(5000))}&state=${st2}`); await sleep(30); const e = x.ol.status(x.f.flowId).error || ''; x.ol.stopAll(); return { body: rr.body, e }; })();
     ok(!/<img/.test(hostile.body) && !/<img/.test(hostile.e) && hostile.e.length < 200, 'a hostile error parameter is bounded and reduced to a code\'s alphabet before it is said (no markup, < 200 chars)', hostile.e);
     ol.stopAll();
   }
@@ -585,13 +621,13 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
     const ERRB = "        if (verr) {";
     ok(src9.split(ONCE).length === 2 && src9.split(ERRB).length === 2, 'CONTROL setup: the once-guard and the error branch are each present once');
     const OLa = require(M9.write('src/oauth-loopback.js', editAnchor(src9, ONCE, "    if (false) {", "src/oauth-loopback.js"), 'narrow-twice'));
-    const [Pa, Pb] = await freePorts(2);
-    const a = await run9(OLa, Pa);
+    const HA = await held(), HBb = await held(), Pb = HBb.port;
+    const a = await run9(OLa, HA);
     a.ol.narrow(a.f.flowId); let twice = null; try { twice = a.ol.narrow(a.f.flowId); } catch { twice = null; }
     ok(!!twice, 'CONTROL: a copy without the once-guard narrows TWICE — the "ONCE" assert above would be red');
     a.ol.stopAll();
     const OLb = require(M9.write('src/oauth-loopback.js', editAnchor(src9, ERRB, '        if (false) {', "src/oauth-loopback.js"), 'no-error-branch'));
-    const b = await run9(OLb, Pb);
+    const b = await run9(OLb, HBb);
     const rb = await get(`http://127.0.0.1:${Pb}/lark/cb?error=access_denied&state=${new URL(b.f.consentUrl).searchParams.get('state')}`);
     await sleep(30);
     ok(/connected — you can close this tab/.test(rb.body) && b.ol.status(b.f.flowId).running === true, 'CONTROL: a copy without the error branch answers "connected" over a DENIED consent and leaves the flow running — the two asserts above would be red');
@@ -603,9 +639,11 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
   // exchange hears everything dropped, and `already-narrowed` comes only once every group is gone
   {
     const RX = 'im:message.reactions:read', P2P = 'im:message.p2p_msg:get_as_user', S = 'search:message';
-    const runG = async (port) => {
+    const runG = async (hp) => {
+      const port = hp.port;
       const ol = OL.createOAuthLoopback({ log: quiet });
       const ex = [];
+      await hp.handOver();   // r4792: at once before its begin
       const f = await ol.begin({
         id: 'lark-g', mode: 'fixed', callbackUrl: `http://127.0.0.1:${port}/lark/cb`, label: 'Lark', optionalScopes: [[RX], [P2P], [S], [RX]],
         buildConsentUrl: ({ redirectUri, state, without = [] }) => `https://accounts.example/open-apis/authen/v1/authorize?` + new URLSearchParams({ redirect_uri: redirectUri, state, scope: ['im:message', 'im:chat:readonly', RX, P2P, S].filter((x) => !without.includes(x)).join(' ') }),
@@ -613,7 +651,7 @@ console.log('\n⑨ optional scopes: the one narrowing retry against a fake autho
       });
       return { ol, f, ex };
     };
-    const [G1, G2] = await freePorts(2);
+    const G1 = await held(), G2 = await held();   // r4792: each held until its begin
     {
       // the fake app enabled the search and the single-chat read, NOT reactions ⇒ ONE press, the search kept
       ENABLED.add(P2P); ENABLED.add(S);
