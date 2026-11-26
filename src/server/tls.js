@@ -31,6 +31,8 @@ const crypto = require('crypto');
 const os = require('os');
 const { execFile } = require('child_process');
 const TP = require('../tls-plan.js');
+const SR = require('../store-read.js');   // B-f276 (lane hub-loop-stalls, r4719): data/tls/state.json under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and its hold: a record that could not be read is HELD, never a first run
 
 const STATUS_TIMEOUT_MS = 10000;
 const CERT_TIMEOUT_MS = 90000;
@@ -125,9 +127,34 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
   const tailscaleBin = binArg === null ? null : binArg || env.VIBESPACE_TAILSCALE_BIN || 'tailscale';
   const dir = path.join(dataDir, 'tls');
   const stateFile = path.join(dir, 'state.json');
-  let state = { domain: null, certAnswer: null, noticed: null, itemId: null };
-  try { Object.assign(state, JSON.parse(fs.readFileSync(stateFile, 'utf8')) || {}); } catch { }
-  const saveState = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state, null, 2)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn?.(`[tls] state not saved — ${e.message}`); } };
+  const FRESH = () => ({ domain: null, certAnswer: null, noticed: null, itemId: null });
+  let state = FRESH();
+  // B-f276 (lane hub-loop-stalls, r4719) — THE STORE-READ LAW. The release read a failed read or torn bytes as a FIRST RUN: the HTTPS
+  // For-you item was filed AGAIN and the open one's id lost (never resolved: two items, the old one open for good), and the next save
+  // wrote that over the file. Now through store-read's answer to the hold (code `tls_state_unread`). HELD: notice() files and resolves
+  // NOTHING (said once a hold) and saveState writes nothing — the serving plan itself goes on (the record only says what was told);
+  // LIFTED: the record read (this run's own Tailscale facts kept: its domain and cert answer are the newer), notice() rules again.
+  // TORN: kept aside once, then empty (the hold's own law)
+  const isState = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  let heldSaid = false, certWhileHeld = null;   // a cert call that answered while the record was held: the newer answer
+  const stateHold = HOLD.create({ file: stateFile, valid: isState, code: 'tls_state_unread', aside: (m) => stateFile + '.corrupt-' + m,
+    words: (h) => `the HTTPS record (the For-you item it opened) could not be read (${h && h.code}) — VibeSpace reads it again by itself; nothing is written over it, and the HTTPS item waits until it reads`,
+    log: (l) => log.warn?.(`[tls] ${l}`),
+    onLift: (v) => {
+      const mem = state; state = Object.assign(FRESH(), isState(v) ? v : {}); heldSaid = false;
+      let moved = false;
+      // this run's Tailscale named ANOTHER domain while held: its facts are the newer (its cert answer with it); the SAME domain keeps
+      // the record's cert answer — never reset by the failed read (the adversarial read's note) — unless a cert call answered meanwhile
+      if (mem.domain && mem.domain !== state.domain) { state.domain = mem.domain; state.certAnswer = mem.certAnswer; moved = true; }
+      else if (certWhileHeld && certWhileHeld.answer !== state.certAnswer) { state.certAnswer = certWhileHeld.answer; moved = true; }
+      certWhileHeld = null;
+      if (moved) saveState();
+      if (plan) notice(plan);
+    } });
+  { let read; try { read = { text: fs.readFileSync(stateFile, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: isState });   // the HTTPS record: THE ANCHOR (test-data-store-census)
+    if (stateHold.start(a) === 'data') Object.assign(state, a.value); }
+  const saveState = () => { if (!stateHold.writable('a write of the HTTPS record')) return; try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state, null, 2)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn?.(`[tls] state not saved — ${e.message}`); } };
   const setting = () => { try { return serverSetting('server.https') || 'auto'; } catch { return 'auto'; } };
 
   let httpsServer = null, liveFp = null, plan = null, lastLine = null, inFlight = null, timer = null, planSetting = null;
@@ -209,6 +236,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
     notice(p);
   }
   function notice(p) {
+    if (stateHold.held()) { if (!heldSaid && (p.notice || state.noticed)) { heldSaid = true; log.warn?.(`[tls] the HTTPS For-you item waits — ${stateHold.words()}`); } return; }   // B-f276: HELD — nothing filed or resolved
     const todos = getUserTodos && getUserTodos();
     if (p.notice && state.noticed !== p.why) {
       if (!todos) return; // filed at the next pass, when the For-you tray exists
@@ -255,6 +283,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
       try { fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); } catch { }
       const r = await run(tailscaleBin, ['cert', '--cert-file', path.join(dir, p.domain + '.crt'), '--key-file', path.join(dir, p.domain + '.key'), p.domain], CERT_TIMEOUT_MS);
       const answer = r.code === 0 ? null : (r.err || r.out || String(r.code)).trim().slice(0, 500);
+      if (stateHold.held()) certWhileHeld = { answer };   // B-f276: kept for the lift (the record is not written while held)
       if (answer !== state.certAnswer) { state.certAnswer = answer; saveState(); }
       if (answer) failed('cert', r, CERT_TIMEOUT_MS);
       ({ args, pem } = await facts());
@@ -304,7 +333,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
   function status() {
     const p = plan || { mode: 'off', why: 'starting', words: '', i18n: null };
     const probe = lastProbe && p.mode === 'off' ? { cmd: lastProbe.cmd, code: lastProbe.code, ms: lastProbe.ms, bytes: lastProbe.bytes, err: lastProbe.err, bound: lastProbe.cmd === 'cert' ? CERT_TIMEOUT_MS : statusTimeoutMs } : null;
-    return { mode: p.mode, setting: setting(), serving: serving(), url: url(), domain: p.domain || null, why: p.why, words: p.words, i18n: p.i18n, notAfter: p.notAfter || null, port, probe, nextPassMs: started ? nextMs : null };
+    return { mode: p.mode, setting: setting(), serving: serving(), url: url(), domain: p.domain || null, why: p.why, words: p.words, i18n: p.i18n, notAfter: p.notAfter || null, port, probe, nextPassMs: started ? nextMs : null, recordHeld: stateHold.held() ? { code: 'tls_state_unread', words: stateHold.words() } : null };   // B-f276: the record unread, said by name
   }
   function registerRoutes(a) {
     a.get('/api/tls', (req, res) => {
@@ -319,7 +348,7 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
     });
   }
   return { front, attachToServers, listen: (...a) => front.listen(...a), address: () => front.address(), start, stop, pass, url, bootSuffix, status, registerRoutes, turn, holding: () => !!held,
-    _https: () => httpsServer, _state: () => ({ ...state }), _cadence: () => ({ started, liveOnce, misses, nextMs }), INBOX_KEY };
+    _https: () => httpsServer, _state: () => ({ ...state }), stateHeld: () => stateHold.held(), stopHold: () => stateHold.stop(), _cadence: () => ({ started, liveOnce, misses, nextMs }), INBOX_KEY };
 }
 
 module.exports = { create, acceptAs, runChild, runViaStarter, readPair, INBOX_KEY, STATUS_TIMEOUT_MS, CERT_TIMEOUT_MS, PASS_MS, KILL_AFTER_MS };

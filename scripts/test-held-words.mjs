@@ -114,6 +114,11 @@ const NOT_HELD = {
   voice_suggestions_unread: 'r3333 unit 3: the voice suggestions\' ledger held — no word is proposed; a person\'s act goes on and its change waits — no route answers it',
   cli_unmeasured_memory_unread: 'r3333 unit 3: the unmeasured-CLI item\'s memory held — the tick waits; no route answers it',
   cli_model_catalog_unread: 'r3333 unit 3: the model catalog\'s ledger held — this run\'s reads stay in memory; no route answers it',
+  // B-f276 (lane hub-loop-stalls, r4719, the slice said-once-memos): four said-once records held that no route refuses with
+  hook_notice_unread: 'r4719: the hooks notice\'s memo held — the notice is said once a hold; no route answers it',
+  tls_state_unread: 'r4719: the HTTPS record held — the HTTPS item waits; GET /api/tls names the hold (recordHeld), no route refuses with it',
+  pending_reminders_unread: 'r4719: the sign-in reminders\' ledger held — the pass reminds nothing; no route answers it',
+  cli_registration_unread: 'r4719: the record of the claude builds said held — a build waits in memory; GET /api/cli-registration names the hold (held), no route refuses with it',
 };
 
 // A LIST HOLD WORDED BY ITS OWN DOOR (r3284: its own class, not «not a hold»): a 503 that IS a held list, whose own door words it — the
@@ -163,6 +168,7 @@ const LEFT_ALONE = [
   ['not', 'r3333 unit 3: held stores no route answers — a pass waits (the voice proposals, the unmeasured-CLI tick) or the reads stay in memory (the model catalog)', ['voice_suggestions_unread', 'cli_unmeasured_memory_unread', 'cli_model_catalog_unread']],
   ['not', 'a row state, a batch item\'s why or a notice\'s key — no refusal code a route answers (the Vault window\'s unverified mark, the pages batch\'s per-item why, the setting holds\' notice key, the content stores\' `why` words)', ['marks_unread', 'pages-unread', 'setting-holds-unread', 'decision-unread', 'designs-unread', 'labels-unread', 'status-unread']],
   ['not', 'internal to the feedback forwarder (its own outbox, its own retry) — no person\'s route answers it', ['outbox_unread']],
+  ['not', 'r4719 (B-f276, said-once-memos): four said-once records held that no route refuses with — a notice said once a hold, a pass that waits, a status that names the hold', ['hook_notice_unread', 'tls_state_unread', 'pending_reminders_unread', 'cli_registration_unread']],
   // r3857 (the moved MG1 chain, lane lg-group-parents): the migration ledger's codes, classed by who reads them
   ['own', 'r3857 (MG1): the migration ledger unread — a result row\'s code; the ledger\'s own For-you item words it in three languages (src/migration-runner.js LEDGER_WORDS), and the vault\'s restore answers its own migration_failed', ['ledger-unread']],
   ['not', 'r3857 (MG1): a migration\'s input unread — the error a migration throws; the runner\'s one failed road says it (the For-you failed item, the journal), no route answers it', ['migration-input-unread']],

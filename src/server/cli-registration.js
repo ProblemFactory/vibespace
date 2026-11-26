@@ -25,6 +25,8 @@ const { execFile } = require('child_process');
 const { SCHEMA_CLI_VERSIONS } = require('../record-shape.js');
 const { cliVersionOf } = require('../cli-caps.js');
 const { serviceEnv } = require('../agent-env.js');
+const SR = require('../store-read.js');   // B-f276 (lane hub-loop-stalls, r4719): cli-registration.json under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and its hold: a failed read is HELD, never «no build seen yet»
 
 const SOURCES = Object.freeze(['hub', 'conversation']);
 const DRAFT_TIMEOUT_MS = 120e3;
@@ -38,10 +40,40 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
   const script = path.join(rootDir, 'scripts', 'claude-cli-dump.mjs');
   const known = (v) => pinned.includes(v);
   let seen = {};
-  try { const j = JSON.parse(fs.readFileSync(stateFile, 'utf8')); if (j && j.seen && typeof j.seen === 'object') seen = j.seen; } catch { }
   // a build this release registers is no longer owed: its row goes (the file then holds only what is still unknown)
-  for (const v of Object.keys(seen)) if (!cliVersionOf(v) || known(v) || !seen[v] || !Array.isArray(seen[v].sources)) delete seen[v];
+  const prune = (o) => { for (const v of Object.keys(o)) if (!cliVersionOf(v) || known(v) || !o[v] || !Array.isArray(o[v].sources)) delete o[v]; return o; };
+  // B-f276 (lane hub-loop-stalls, r4719) — THE STORE-READ LAW. The release read ANY failed read or torn bytes as «no build seen»: a
+  // build already said was said AGAIN (its journal line and its `cli-unknown-version` event), its first-seen date reset, and the next
+  // note wrote that over the file. Now through store-read's answer to the hold (code `cli_registration_unread`). HELD: note() keeps
+  // what it sees IN MEMORY (`pending`) and says nothing new; save writes nothing; status() names the hold. LIFTED: the record loaded,
+  // what the hold kept merged into it (the OLDER first-seen wins, the sources joined), ONLY a build the record never had is said, and
+  // the record written once. TORN: kept aside once, then empty (the hold's own law)
+  const isRecord = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  let pending = {};
+  const say = (v, source) => {
+    log(`[cli-registration] claude ${v} is newer than this release's record table — a record kind it adds is listed in Diagnostics, conversations are not affected (seen ${source === 'hub' ? 'as the hub\'s CLI' : 'on a conversation\'s records'}; this release knows ${pinned[pinned.length - 1]} and older. Record draft: Manage agents ▸ claude ▸ 生成记录草稿, or node scripts/claude-cli-dump.mjs --auto)`);
+    try { event('cli-unknown-version', `claude ${v} · ${source}`); } catch { }
+  };
+  const hold = HOLD.create({ file: stateFile, valid: isRecord, code: 'cli_registration_unread', aside: (m) => stateFile + '.corrupt-' + m,
+    words: (h) => `the record of the claude builds already said could not be read (${h && h.code}) — VibeSpace reads it again by itself; nothing is written over it, and a build seen meanwhile is said once it reads`,
+    log: (l) => log(`[cli-registration] ${l}`),
+    onLift: (v) => {
+      seen = prune(v && isRecord(v.seen) ? v.seen : {});
+      const kept = pending; pending = {};
+      const fresh = [];
+      for (const [ver, rec] of Object.entries(kept)) {
+        const had = seen[ver];
+        if (had) seen[ver] = { ...had, firstSeen: Math.min(had.firstSeen || rec.firstSeen, rec.firstSeen || had.firstSeen), sources: [...new Set([...had.sources, ...rec.sources])] };
+        else { seen[ver] = rec; fresh.push([ver, rec.sources[0]]); }
+      }
+      if (Object.keys(kept).length) save();
+      for (const [ver, source] of fresh) say(ver, source);
+    } });
+  { let read; try { read = { text: fs.readFileSync(stateFile, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: isRecord });   // the record of the builds said: THE ANCHOR (test-data-store-census)
+    if (hold.start(a) === 'data') seen = prune(isRecord(a.value.seen) ? a.value.seen : {}); }
   const save = () => {
+    if (!hold.writable('a write of the record of the claude builds said')) return;   // HELD: never over a file that could not be read
     const keep = Object.keys(seen).sort(vcmp).slice(-KEEP_BUILDS);
     seen = Object.fromEntries(keep.map((v) => [v, seen[v]]));
     try { fs.mkdirSync(dataDir, { recursive: true }); const tmp = stateFile + '.tmp-' + process.pid; fs.writeFileSync(tmp, JSON.stringify({ v: 1, seen }, null, 1) + '\n'); fs.renameSync(tmp, stateFile); } catch (e) { log('[cli-registration] could not keep data/cli-registration.json:', (e && e.message) || e); }
@@ -54,14 +86,16 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
     if (!v || !SOURCES.includes(source)) return null;
     if (source === 'hub') hub = v;
     if (known(v)) return { version: v, registered: true, said: false };
+    if (hold.held()) {   // HELD: kept in memory, said nothing (the record may already hold it) — judged at the lift
+      const p = pending[v];
+      if (!(p && p.sources.includes(source))) pending[v] = p ? { ...p, sources: [...p.sources, source] } : { firstSeen: now(), sources: [source] };
+      return { version: v, registered: false, said: false, held: true };
+    }
     const rec = seen[v];
     if (rec && rec.sources.includes(source)) return { version: v, registered: false, said: false };
     seen[v] = rec ? { ...rec, sources: [...rec.sources, source] } : { firstSeen: now(), sources: [source] };
     save();
-    if (!rec) {
-      log(`[cli-registration] claude ${v} is newer than this release's record table — a record kind it adds is listed in Diagnostics, conversations are not affected (seen ${source === 'hub' ? 'as the hub\'s CLI' : 'on a conversation\'s records'}; this release knows ${pinned[pinned.length - 1]} and older. Record draft: Manage agents ▸ claude ▸ 生成记录草稿, or node scripts/claude-cli-dump.mjs --auto)`);
-      try { event('cli-unknown-version', `claude ${v} · ${source}`); } catch { }
-    }
+    if (!rec) say(v, source);
     return { version: v, registered: false, said: !rec };
   }
   function draftOf(v) {
@@ -76,6 +110,7 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
       newest: pinned[pinned.length - 1],
       hub: hub ? { version: hub, registered: known(hub) } : null,
       unregistered: Object.keys(seen).filter((v) => !known(v)).sort(vcmp).map((v) => ({ version: v, sources: seen[v].sources.slice(), firstSeen: seen[v].firstSeen || null, draft: draftOf(v) })),
+      held: hold.held() ? { code: 'cli_registration_unread', words: hold.words() } : null,   // B-f276: the record unread — what it holds is not shown as nothing
     };
   }
   /** HUMAN-TRIGGERED ONLY: the static dump of the hub's installed claude (one at a time) ⇒ {ok, version, file, changes, wrote} | {ok:false, code, error} */
@@ -95,7 +130,7 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
     }).finally(() => { inFlight = null; });
     return inFlight;
   }
-  return { note, noteHub: (v) => note(v, 'hub'), status, draft };
+  return { note, noteHub: (v) => note(v, 'hub'), status, draft, held: () => hold.held(), stop: () => hold.stop() };
 }
 
 /** the routes + the drift hook; returns the registry (its noteHub is oat-file-sync's onCliVersion) */

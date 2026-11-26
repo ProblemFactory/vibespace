@@ -23,6 +23,9 @@ import { fileURLToPath } from 'url';
 import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// B-f276 (lane hub-loop-stalls, r4719): tls.js reads its record through the store-read hold — a copy written outside the tree
+// reaches the two helpers by their full path, as it reaches tls-plan.js
+const holdAbs = (t) => anchored(anchored(t, "require('../store-read.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/store-read.js')) + ')', 'tls-store-read-path'), "require('../store-read-hold.js')", 'require(' + JSON.stringify(path.join(REPO, 'src/store-read-hold.js')) + ')', 'tls-store-read-hold-path');
 const { WebSocketServer, WebSocket } = require(path.join(REPO, 'node_modules/ws'));
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
@@ -164,7 +167,7 @@ try {
 
   console.log('§4 CONTROL');
   {
-    const src = fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8');
+    const src = holdAbs(fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8'));
     const from = '      for (const [e, f] of listeners) httpsServer.on(e, f);\n';
     ok(src.includes(from), 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control.js');
@@ -227,7 +230,7 @@ try {
       c.on('error', () => resolve(b));
     });
     ok(/^HTTP\/1\.1 101/.test(up) && up.includes('ws:hi') && lastHead === frame.length, `an upgrade whose first write carries a frame: the head buffer (${lastHead} B) reaches ws, the echo answers`);
-    const src = fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8');
+    const src = holdAbs(fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8'));
     const from = 'function acceptAs(server, socket) {\n';
     ok(src.includes(from), 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control-bare.js');
@@ -263,7 +266,7 @@ try {
       return { names, warns, ev: ev.filter((x, i) => x !== 'turn' || ev[i - 1] !== 'turn'), ended, answered, holding, after: r.hub.holding(), ok: /http GET \/held 0$/.test(body) };
     };
     const g6 = await scene(TLS, { tag: 'g' });
-    const src = fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8');
+    const src = holdAbs(fs.readFileSync(path.join(REPO, 'src/server/tls.js'), 'utf8'));
     const from = '      if (held) held.then(() => setImmediate(hand));';
     ok(src.split(from).length === 2, 'the control\'s anchor is in the module');
     const cp = path.join(DIR, 'tls-control-nohold.js');
