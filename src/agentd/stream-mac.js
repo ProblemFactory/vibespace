@@ -108,7 +108,7 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch { return false; } };
   const installed = () => { try { return fs.readFileSync(P.version, 'utf8').trim() || null; } catch { return null; } };
   const readState = () => { try { const o = JSON.parse(fs.readFileSync(P.state, 'utf8')); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
-  const writeState = (o) => { try { fs.mkdirSync(P.dir, { recursive: true }); DFILE.writeDurable({ fs, file: P.state, tmp: P.state + '.tmp', data: JSON.stringify(o), log, what: 'the mac screen helper\'s state' }); } catch (e) { log(`[stream] mac helper state not written (${e && e.code})`); } };
+  const writeState = (o) => { try { fs.mkdirSync(P.dir, { recursive: true }); DFILE.writeDurable({ fs, file: P.state, tmp: `${P.state}.${process.pid}.tmp`, data: JSON.stringify(o), log, what: 'the mac screen helper\'s state' }); } catch (e) { log(`[stream] mac helper state not written (${e && e.code})`); } };
   const sha256Of = (f) => { try { return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
   /** A refusal / a pending judgment is a fact about BYTES of THIS helper version judged by THIS agent (round 3) — any other is stale.
    *  Round 4: a refusal born of unanswered codesign runs (`until`) stands only in the process that recorded it and before its time. */
@@ -236,7 +236,7 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
         keep();
         return { state: 'missing', code: 'no_helper', error: why || `the Mac has no screen helper ${version} and no compiler to build it — ${RECIPE}`, ...miss };
       }
-      try { DFILE.writeDurable({ fs, file: P.version, tmp: P.version + '.tmp', data: version, log, what: 'the mac screen helper\'s version' }); }   /* B-93e7 */ catch (e) { return { state: 'missing', code: 'no_helper', error: `the helper's version could not be written (${e && e.code})`, dir: P.dir, version, have, canBuild: !!swiftc }; }
+      try { DFILE.writeDurable({ fs, file: P.version, tmp: `${P.version}.${process.pid}.tmp`, data: version, log, what: 'the mac screen helper\'s version' }); }   /* B-93e7 */ catch (e) { return { state: 'missing', code: 'no_helper', error: `the helper's version could not be written (${e && e.code})`, dir: P.dir, version, have, canBuild: !!swiftc }; }
       const regrant = MI.regrantVerdict({ wasGranted, from, to: identity });
       writeState({ version, how, buildMs: ms, at: now(), granted: false, regrant, rowAsked: null, identity, ...(refused ? { refused } : {}) });
       const replaced = have ? ` (replaces ${have}${have === version ? ', the ad-hoc build of the same version' : ''}${regrant ? (identity && identity.kind === 'developer-id' ? ' — its Screen Recording grant does not carry over ONE LAST time: helper_signed_regrant (a Developer ID helper keeps it from now on)' : ' — its Screen Recording grant does not carry over: helper_changed_regrant') : wasGranted ? ' — the same Developer ID identity: the grant carries over' : ''})` : '';

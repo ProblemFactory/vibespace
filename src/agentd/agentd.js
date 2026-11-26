@@ -1453,7 +1453,7 @@ const sealedOrders = {
   _persist() {
     try {
       if (this.pools.size) {
-        DFILE.writeDurable({ fs, file: ORDERS_FILE, tmp: ORDERS_FILE + '.tmp', data: JSON.stringify(Object.fromEntries(this.pools)), log });   // B-93e7
+        DFILE.writeDurable({ fs, file: ORDERS_FILE, tmp: ORDERS_FILE + '.' + process.pid + '.tmp', data: JSON.stringify(Object.fromEntries(this.pools)), log });   // B-93e7 (r4671: the pid in its temp)
       } else fs.rmSync(ORDERS_FILE, { force: true });
     } catch { }
   },
@@ -2601,7 +2601,12 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             st.commit = (cur) => {   // the cursor file, written temp-plus-rename (a walk with no new events, or the hub's ack)
               try {
                 fs.mkdirSync(path.dirname(cursorFile), { recursive: true });
-                DFILE.writeDurable({ fs, file: cursorFile, tmp: cursorFile + '.tmp', data: JSON.stringify(cur), log, what: 'a usage cursor' });   // B-93e7
+                // B-93e7 (主开发 r4671): THE CURSOR IS A CACHE and asks no sync on any road — an old, lost or torn cursor only walks again
+                // (read as nothing: bounded), and the hub drops every row it already holds by its own id; a sync here would hold the loop
+                // at the hot rate (a full cache flush on macOS). Temp + rename as the release, its temp carrying the pid (a hand-over's two writers)
+                const ctmp = cursorFile + '.' + process.pid + '.tmp';
+                fs.writeFileSync(ctmp, JSON.stringify(cur));
+                fs.renameSync(ctmp, cursorFile);
               } catch { }
             };
             // THE PUSH's LOOP is answer-caps.js usagePushLoop (B-5278; the suite runs it): one walk at a time, a kick coalesced, a
