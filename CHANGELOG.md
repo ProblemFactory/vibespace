@@ -14,6 +14,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - VibeSpace no longer pauses while it trims the browser action history every hour, and the Sweep now button says how many profiles it could not sweep.
 - An Antigravity account's own settings, with the rules you allowed there, are no longer replaced by this computer's copy when VibeSpace briefly cannot read them.
 - If VibeSpace cannot read that you removed its hooks from your CLIs, it no longer puts them back; Install and Remove say so when they cannot save your choice.
+- The model menu no longer loses the models it learned when their list could not be read for a moment.
 
 ## 2.369.422 — 2026-11-27
 
