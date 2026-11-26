@@ -52,13 +52,23 @@ const DEDUP_MS = 60000;       // an identical consecutive (session → to) insid
 // array of frozen rows, and a write replaces the array (copy on write), so an array a caller holds never changes under it and a
 // caller's own sort, push or edit throws instead of changing what the next reader gets.
 const LOOK_EVERY_MS = 10 * 1000;
+// THE STORE-READ LAW (B-f276 gap row «slot-ledger-gap», 主开发 r4989 / r4993): a read of the live file, a shard or the archive folder
+// that FAILS (anything but «not there») HOLDS the ledger — it is never «no move recorded». While held its three doors (all, slotAt,
+// transitionsFor) refuse BY NAME (code LEDGER_HELD; every caller answers it by isLedgerHeld and fails CLOSED on the money roads), a
+// record still APPENDS (append-only: nothing written over), the trim never runs, and the ledger reads itself again OFF the loop on
+// the store hold's ladder (silent rungs, then 30 s doubling to 5 min; one read out) — never a synchronous read a call. Its one
+// line, said once past the silent rungs, names the ledger and never an account. Inside a migration MG1's strict road is unchanged.
+const LEDGER_HELD = 'ELEDGERHELD';
+const SILENT_RUNGS_MS = [1000, 2000, 4000, 8000], LADDER_FIRST_MS = 30000, LADDER_MAX_MS = 300000;
+const isLedgerHeld = (e) => !!(e && e.code === LEDGER_HELD);
+const heldError = (h) => Object.assign(new Error(`the slot ledger (slot-transitions.jsonl) could not be read (${h.code}) — it is held: no move is read from it until it reads again`), { code: LEDGER_HELD, held: { ...h } });
 const _files = new Map();     // resolved file path → { rows, bytes, clean, seen, lookAt, lookOut, gen }
 const _test = {};             // the suite's seam (test-slot-ledger-reads): a clock, the look's stat
 const lookNow = () => (_test.now ? _test.now() : Date.now());
 function fileState(file) {
   const k = path.resolve(file);
   let st = _files.get(k);
-  if (!st) { st = { rows: null, bytes: -1, clean: true, seen: null, lookAt: 0, lookOut: false, gen: 0, lines: null }; _files.set(k, st); }
+  if (!st) { st = { rows: null, bytes: -1, clean: true, seen: null, lookAt: 0, lookOut: false, gen: 0, lines: null, held: null, tries: 0, timer: null, readOut: false }; _files.set(k, st); }
   return st;
 }
 
@@ -134,11 +144,12 @@ class SlotTransitions {
    *  archived shard (the migration must not go blind at a rotation). */
   all() {
     const st = this._st;
+    if (st.held) throw heldError(st.held);   // HELD: refused by name, never a synchronous read a call (its ladder reads it again off the loop)
     if (st.rows) { this._lookMaybe(); return st.rows; }   // from memory: no stat, no read (the backstop's look is off the loop)
     const rows = [];
-    let bytes = -1, clean = true, lines = null;
+    let bytes = -1, clean = true, lines = null, failed = null;
     const eat = (fp, live = false) => {
-      let buf; try { buf = fs.readFileSync(fp); } catch (e) { MR.absentOr(e, fp); return; }   // MG1: inside a migration an unread record = not run
+      let buf; try { buf = fs.readFileSync(fp); } catch (e) { MR.absentOr(e, fp); if (!failed && e && e.code !== 'ENOENT') failed = { file: path.basename(fp), code: e.code || 'EREAD' }; return; }   // MG1: inside a migration an unread record = not run; outside, a failed read HOLDS (below)
       // the live file's size is its BYTES before decoding — the backstop compares it with the size on disk (a byte that is no
       // valid text, left by a hand, decodes to more bytes and would make them differ for ever)
       if (live) { bytes = buf.length; clean = !buf.length || buf[buf.length - 1] === 0x0a; }
@@ -154,14 +165,59 @@ class SlotTransitions {
       for (const f of fs.readdirSync(this.archiveDir)) {
         if (/^slot-transitions-\d+\.jsonl$/.test(f)) eat(path.join(this.archiveDir, f));
       }
-    } catch (e) { if (e && e.code === MR.CODE) throw e; MR.absentOr(e, this.archiveDir); }
+    } catch (e) { if (e && e.code === MR.CODE) throw e; MR.absentOr(e, this.archiveDir); if (!failed && e && e.code !== 'ENOENT') failed = { file: 'archive', code: e.code || 'EREAD' }; }
     eat(this.file, true);
+    if (failed) { this._hold(failed); throw heldError(st.held); }
     rows.sort((a, b) => a.at - b.at);
     for (const r of rows) Object.freeze(r);
     st.rows = Object.freeze(rows); st.bytes = bytes; st.clean = clean; st.lines = lines; st.seen = null; st.lookAt = lookNow(); st.gen++;
     return rows;
   }
 
+  /** HOLD the ledger (a read that failed): nothing of that read kept; the ladder armed */
+  _hold(failed) {
+    const st = this._st;
+    st.rows = null; st.lines = null; st.gen++;
+    if (!st.held) { st.held = { ...failed, since: lookNow() }; st.tries = 0; }
+    this._armReadAgain();
+  }
+  _armReadAgain() {
+    const st = this._st;
+    if (!st.held || st.timer || st.readOut) return;
+    const rungs = _test.rungs || SILENT_RUNGS_MS;
+    const ms = st.tries < rungs.length ? rungs[st.tries] : Math.min(LADDER_MAX_MS, LADDER_FIRST_MS * 2 ** Math.min(6, st.tries - rungs.length));
+    st.timer = setTimeout(() => { st.timer = null; this._readAgain(); }, ms);
+    if (st.timer.unref) st.timer.unref();
+  }
+  /** ONE read again OFF the loop (fs.promises): the archive folder, every shard, the live file — whole, or held still */
+  async _readAgain() {
+    const st = this._st;
+    if (!st.held || st.readOut) return;
+    st.readOut = true;
+    const gen = st.gen;
+    try {
+      const texts = [];
+      let names = [];
+      try { names = await fs.promises.readdir(this.archiveDir); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+      for (const f of names) if (/^slot-transitions-\d+\.jsonl$/.test(f)) { try { texts.push([await fs.promises.readFile(path.join(this.archiveDir, f)), false]); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; } }
+      let live = null;
+      try { live = await fs.promises.readFile(this.file); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+      if (st.gen !== gen && !st.held) return;
+      const rows = [];
+      for (const [buf] of texts) for (const line of buf.toString('utf-8').split('\n')) { if (!line) continue; try { const r = JSON.parse(line); if (r && r.to && Number.isFinite(r.at)) rows.push(r); } catch { } }
+      let lines = 0;
+      if (live) for (const line of live.toString('utf-8').split('\n')) { if (!line) continue; lines++; try { const r = JSON.parse(line); if (r && r.to && Number.isFinite(r.at)) rows.push(r); } catch { } }
+      rows.sort((a, b) => a.at - b.at);
+      for (const r of rows) Object.freeze(r);
+      const was = st.held;
+      st.held = null; st.tries = 0;
+      st.rows = Object.freeze(rows); st.bytes = live ? live.length : -1; st.clean = !live || !live.length || live[live.length - 1] === 0x0a; st.lines = live ? lines : 0; st.seen = null; st.lookAt = lookNow(); st.gen++;
+      if (was && was.said) console.warn('[pool] the slot ledger (slot-transitions.jsonl) reads again — its moves are read from it again; what was filed nowhere while it was held stays nowhere');
+    } catch (e) {
+      st.tries++;
+      if (st.held) { st.held.code = (e && e.code) || st.held.code; const rungs = _test.rungs || SILENT_RUNGS_MS; if (!st.held.said && st.tries >= rungs.length) { st.held.said = true; console.warn(`[pool] the slot ledger (slot-transitions.jsonl) could not be read (${st.held.code}) — it is held: readings of pooled conversations are filed nowhere, rejections are marked on no account and no panel is asked until it reads again (${st.tries} reads tried)`); } }
+    } finally { st.readOut = false; this._armReadAgain(); }
+  }
   /** THE BACKSTOP's look (above): off the loop, at most one out a file, started by a read whose last look is older than the bound */
   _lookMaybe() {
     const st = this._st, t = lookNow();
@@ -233,6 +289,7 @@ class SlotTransitions {
    *  the count is not known or has passed the bound, and the cut judges the lines it read, never the count */
   _maybeTrim() {
     const st = this._st;
+    if (st.held) return;   // held: nothing is moved between files until the ledger reads again
     if (st.lines != null && st.lines <= this.max) return;
     let txt; try { txt = fs.readFileSync(this.file, 'utf-8'); } catch { st.lines = null; return; }
     const lines = txt.split('\n').filter(Boolean);
@@ -255,4 +312,4 @@ class SlotTransitions {
   }
 }
 
-module.exports = { SlotTransitions, MAX_LINES, DEDUP_MS, LOOK_EVERY_MS, _ledgerTestSeam: (o) => { for (const k of Object.keys(_test)) delete _test[k]; Object.assign(_test, o || {}); } };
+module.exports = { SlotTransitions, MAX_LINES, DEDUP_MS, LOOK_EVERY_MS, LEDGER_HELD, isLedgerHeld, _ledgerTestSeam: (o) => { for (const k of Object.keys(_test)) delete _test[k]; Object.assign(_test, o || {}); } };

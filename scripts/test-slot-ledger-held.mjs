@@ -102,6 +102,7 @@ const world = () => {
   const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: 'w-held', claudeSessionId: 'c-held', _accountId: P, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), name: 'work', pty: { write(x) { written.push(String(x)); } } };
   sessions.set(s._webuiId, s);
   am.ensureSessionPoolLink(P, s._webuiId, B, { why: 'spawn' });
+  { const rows = am.slotTransitions.all(); const last = rows[rows.length - 1]; if (last) s._readingShadowEndedAt = last.at; }   // its spawn's lag shadow ended (a reading came): the ordinary state, so an ask follows its own rule
   const caches = () => Object.fromEntries([A, B].map((id) => [id, origRFS(path.join(cacheDir, id + '.json'), 'utf8')]));
   const getUsageAsks = () => written.filter((w) => w.includes('get_usage')).length;
   return { am, eng, s, A, B, P, R5, R7, caches, getUsageAsks, written };
