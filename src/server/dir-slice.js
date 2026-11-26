@@ -113,7 +113,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const F = await c.collect(P.wire, { signal: args.signal || null });
     return shape(P, F, { took: now() - t0, now });
   }
-  return { slice, self: c.self, selfWhole: c.selfWhole, stats: c.stats, _caches: c._caches, _counters: c._counters };
+  return { slice, self: c.self, selfWhole: c.selfWhole, folderMade: c.folderMade /* r4927: the collector's one door */, stats: c.stats, _caches: c._caches, _counters: c._counters };
 }
 
 module.exports = { create, plan, shape, poolBusy, LIST_FRESH_MS: DC.LIST_FRESH_MS, INDEX_TTL_MS: DC.INDEX_TTL_MS, SELF_TTL_MS: DC.SELF_TTL_MS, PROBE_LATE_MS: DC.PROBE_LATE_MS, LANDED_FRESH_MS: DC.LANDED_FRESH_MS, LINE_SLOTS: DC.LINE_SLOTS, ROW_SLOTS: DC.ROW_SLOTS, FACT_SLOTS: DC.FACT_SLOTS, KID_FACTS: DC.KID_FACTS, LINK_FACTS: DC.LINK_FACTS };

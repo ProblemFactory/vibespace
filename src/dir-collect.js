@@ -95,6 +95,7 @@ const LATE_WAIT_MS = 1000;
 function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = [], mounts = () => [], now = Date.now, poolBusy, log = (m) => console.log(m) } = {}) {
   if (typeof poolBusy !== 'function') throw new Error('dir-collect: the pool\'s own busy word (poolBusy) is required');
   const listCache = new Map();   // abs → { at, entry }
+  const madeGen = new Map();     // abs → how many folders were made at or under it (r4927): a listing SENT before one keeps nothing
   const kidFacts = new Map();    // abs → { at, f }: a kid's own facts (B-5561: pathStat `facts`), kept PROBE_LATE_MS
   const selfFacts = new Map();   // a home folder → { at, pkg, homeAt }: its package.json name for `self`, kept while the home's mtime holds (S2)
   const indexCache = new Map();  // root + skip → { at, dirs, links, partial, p }
@@ -283,11 +284,13 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
     if (c && (!files || c.entry.files) && now() - c.at < LIST_FRESH_MS) return Promise.resolve({ ok: c.entry });
     return once(`list:${files ? 'f' : ''}:${a}`, 'rows', a, () => {
       const c0 = listCache.get(a), base = c0 && (!files || c0.entry.files) ? c0 : null;   // `same` answers THIS entry
+      const g0 = madeGen.get(a) || 0;   // r4927: the folder-made count at the SEND
       // B-1c27: a RACY listing (read within a timestamp tick of the folder's mtime — a kid made in that tick left the mtime as it was)
       // is never kept by its mtime: no `known`, the folder is listed again
       return call('dirSlice', { path: a, dirs: [{ path: a, known: base && !base.entry.racy ? base.entry.mtime : undefined }], files }, IDLE_ONLY).then((r) => {
         const d = ((r && r.dirs) || [])[0] || null;
         if (!d) return null;
+        if ((madeGen.get(a) || 0) !== g0) return d;   // r4927: a folder was made in it while this call was out — answered to its asker, never KEPT
         if (d.same) { if (!base) return null; listCache.set(a, { at: now(), entry: base.entry }); return base.entry; }
         if (d.exists && d.isDir !== false && Array.isArray(d.kids)) listCache.set(a, { at: now(), entry: d });
         else listCache.delete(a);
@@ -526,7 +529,30 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
       await new Promise((r) => setTimeout(r, 40));
     }
   }
-  return { collect, self, selfWhole, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts, sent }, _counters: C };
+  // THE FOLDER-MADE DOOR (主开发 r4927 — the folder picker's leg 11, lane mask-value-shape): the collector's ONE invalidation of what it
+  // keeps. A folder made at `p` (a make-folder that may make its parents too, mkdir -p) DROPS the kept listing of every folder above it
+  // and of `p` itself, and the made path's own kept facts (its bare stat, its row probe, its kid facts), so the next ask lists them
+  // again — never the kept rows of before the folder was made (LIST_FRESH_MS: a parent listed under 2 s before named no new folder);
+  // a listing of one of them already OUT at that moment is answered to its asker but never kept, and no later ask joins it.
+  // The hub's make-folder route calls it on the hub's collector (src/routes/files.js → src/server/dir-slice.js), and a paired
+  // machine's agent on its own after its fs op made the folder (src/agentd/agentd.js): ONE implementation, both sides. Map deletes
+  // only — nothing is asked, nothing waits; the folder index (30 s, the search) is not dropped here. → how many entries it dropped
+  function folderMade(p) {
+    const s = String(p == null ? '' : p);
+    if (!s || !path.isAbsolute(s)) return 0;
+    const a = path.resolve(s);
+    let n = 0;
+    for (const m of [known, landed, kidFacts]) if (m.delete(a)) n++;
+    for (let d = a; ; d = path.dirname(d)) {
+      if (listCache.delete(d)) n++;
+      madeGen.set(d, (madeGen.get(d) || 0) + 1);   // a listing of it already OUT lands answered, never kept
+      for (const k of [`list::${d}`, `list:f:${d}`]) { const e = sent.get(k); if (e && e.hungAt == null) sent.delete(k); }   // …and no new ask joins it (a hung call's mark stays: one dead path, one call)
+      if (path.dirname(d) === d) break;
+    }
+    if (madeGen.size > 4000) madeGen.clear();
+    return n;
+  }
+  return { collect, self, selfWhole, folderMade, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts, sent }, _counters: C };
 }
 
 /** r1651 (the collect's reply: 4 MiB the HARD cap): the facts measured as they will be sent; over `cap` they are CUT, and every cut is
