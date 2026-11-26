@@ -132,6 +132,9 @@ const OWN_DOOR = {
   // helper's 503), worded by the drafter card's table (src/lib/learn-card.js REFUSALS) and the engine's own one notice
   'spend-unread': 'the paid judge\'s own refusal (decision-engine.js storesUnread): the drafter card words it (learn-card REFUSALS) and the engine says one notice — never the generic sentence',
   'memo-unread': 'the paid judge\'s own refusal (decision-engine.js storesUnread): the engine\'s one notice says it — the judge never answers a route with the helper\'s 503',
+  // B-f276 (r4721, lane lg-vault-stages): two single values on the helper, with their own parse
+  instance_id_unread: 'the telemetry instance id (src/telemetry.js): no route refuses with it — this life answers its own id while the file is held; the family\'s notice names the file by its plain name',
+  link_token_unread: 'a paired machine\'s link token in the no-vault window (src/server/host-tokens.js): its refusal carries its own words (the machine named) wherever the link\'s error is said; the family\'s notice names the file by its shape',
 };
 function census(codes, table) {
   const red = [], held = [], generic = [];

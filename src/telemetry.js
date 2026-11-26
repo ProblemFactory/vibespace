@@ -13,6 +13,11 @@
 const fs = require('fs');
 const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-read clock (design 011 lane 1, store-timing) — the instance id's one read
+const SR = require('./store-read.js');            // B-f276 (r4721): the store-read law — the instance id's read has three answers
+const HOLD = require('./store-read-hold.js');     // … and its HOLD when the read fails or its bytes are torn (never a new id over the file)
+const IID_PARSE = (t) => String(t).trim();
+const IID_SHAPE = (v) => typeof v === 'string' && /^[\x21-\x7e]{1,200}$/.test(v);   // one printable word (the release mints `vs-` + 12 hex)
+const IID_MINT = () => 'vs-' + require('crypto').randomBytes(6).toString('hex');
 const { isBrowserNote } = require('./browser-notes.js'); // B-402f: the browser's ResizeObserver loop note — never an error group (older pages sent it as one)
 
 class Telemetry {
@@ -171,13 +176,37 @@ class Telemetry {
   _instanceId() {
     // Stable anonymous id per instance (not per user identity).
     if (this._iid) return this._iid;
+    if (this._iidHeld) return this._iidHeld.mine;   // B-f276 (r4721): HELD — this life's own id (memory only); the file is read again off the loop
     const f = path.join(this.dir, '.instance-id');
-    try { this._iid = timedSync('telemetry.read', () => fs.readFileSync(f, 'utf-8')).trim(); } catch {}   // the folder's one read left on the loop (timed)
-    if (!this._iid) {
-      this._iid = 'vs-' + require('crypto').randomBytes(6).toString('hex');
-      try { fs.writeFileSync(f, this._iid); } catch {}
+    let read;
+    try { read = { text: timedSync('telemetry.read', () => fs.readFileSync(f, 'utf-8')) }; } catch (error) { read = { error }; }   // the folder's one read left on the loop (timed)
+    const a = SR.storeAnswer(read, { parse: IID_PARSE, valid: IID_SHAPE });
+    if (a.state === 'data') return (this._iid = a.value);
+    if (a.state === 'missing') {   // a first run: minted and written, as the release
+      this._iid = IID_MINT();
+      try { timedSync('telemetry-id.write', () => fs.writeFileSync(f, this._iid)); } catch {}   // its one sync write, timed (§72)
+      return this._iid;
     }
-    return this._iid;
+    // B-f276 (r4721, lane lg-vault-stages): a read that FAILED, or torn bytes, is HELD (src/store-read-hold.js) — never a new id over
+    // the file. This life answers its own id from memory (a batch forwarded meanwhile carries it: the collector sees this life apart,
+    // and the file keeps its id for the next one); the file is read again off the loop: its id back ⇒ this life takes it; not there
+    // twice, or its torn bytes kept aside ⇒ this life's id becomes the file's (written off the loop)
+    const mine = IID_MINT();
+    const hold = HOLD.create({
+      file: f, parse: IID_PARSE, valid: IID_SHAPE, aside: (m) => `${f}.corrupt-${m}`, code: 'instance_id_unread', log: (l) => console.warn(`[telemetry] ${l}`),
+      words: (h) => `this VibeSpace's anonymous usage id could not be read${h && h.code ? ` (${h.code})` : ''} — nothing is written over it, and it is read again by itself`,
+      onLift: (value) => {
+        this._iid = value || mine; this._iidHeld = null;
+        if (!value) {   // THE STORE WRITER's thread writes it (whole, synced, then put in place) — never the hub's loop
+          const id = this._iid;
+          try { require('./store-writer.js').storeWriter().dirty(f, { name: 'telemetry-id.write', rank: 0, makeDir: true, produce: () => id }); }
+          catch (e) { console.warn(`[telemetry] .instance-id: this run's id could not be handed to the store writer (${(e && e.code) || 'error'}) — this run keeps it`); }
+        }
+      },
+    });
+    this._iidHeld = { mine, hold };
+    hold.start(a);
+    return mine;
   }
 
   /** THE HELD SECONDS PER DAY BY CAUSE (lane hub-loop-stalls, «the number»: the owner's hub, 2026-11-16) — PURE, DERIVED

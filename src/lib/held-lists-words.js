@@ -59,9 +59,11 @@ const NAMES = Object.freeze({
   'decision-memo.json': i18nKey('the language model plugin’s saved answers'),
   'decision-journal.jsonl': i18nKey('the language model plugin’s journal of calls'),   // r4121: the journal's own hold, an older row of the list (the engine's heldRow)
   'otel-token': i18nKey('the sign-in value your conversations report their usage with'),   // B-f276 family unit 2: the OTel sign-in value's own hold, an older row of the list
+  '.instance-id': i18nKey('this VibeSpace’s anonymous usage id'),   // B-f276 (r4721, lane lg-vault-stages): data/telemetry/.instance-id on the helper
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
-const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')])]);
+const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')]),
+  Object.freeze([/^host-[\w.-]+\.token$/, i18nKey('a paired machine’s link token')])]);   // B-f276 (r4721): data/agentd/host-<id>.token (the no-vault window), one file a machine
 /** the names this module knows (a lane whose store joins adds its name here — the census reds a held store with none) */
 export const HELD_NAMED = Object.freeze(Object.keys(NAMES));
 const nameKey = (what) => { const w = String(what || ''); return Object.prototype.hasOwnProperty.call(NAMES, w) ? NAMES[w] : (NAMED_BY_SHAPE.find(([re]) => re.test(w)) || [])[1] || null; };

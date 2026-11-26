@@ -24,6 +24,10 @@ const KF = require('../key-file.js');
 const { replaceShredding } = require('../secret-file.js');
 
 const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped (lane vault-locked-refusal-notice)
+const SR = require('../store-read.js');            // B-f276 (r4721): the store-read law — the legacy token file's read has three answers
+const HOLD = require('../store-read-hold.js');     // … and its HOLD when the read fails or its bytes are torn (never a token minted over it)
+const TOKEN_PARSE = (t) => String(t).trim();
+const TOKEN_SHAPE = (v) => typeof v === 'string' && /^[\x21-\x7e]{16,512}$/.test(v);   // one printable word (a minted token: its prefix + hex)
 const FILE_RE = /^host-([\w.-]+)\.token$/;
 const CFG_RE = /^session-.+\.json$/;
 const entryOf = (hostId) => 'host:' + hostId;
@@ -45,14 +49,49 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   if (!dataDir) throw new TypeError('host-tokens: dataDir is required');
   const fileOf = (hostId) => path.join(agentdDir, 'host-' + hostId + '.token');
   const ensureDir = () => { if (!fs.existsSync(agentdDir)) fs.mkdirSync(agentdDir, { recursive: true }); };
-  /** the migration window (no vault set up): the 0600 file beside the data, read or minted — byte for byte the pre-vault code */
+  /** the migration window (no vault set up): the 0600 file beside the data, read or minted.
+   *  B-f276 (r4721, lane lg-vault-stages): ITS READ UNDER THE STORE-READ LAW. Not there ⇒ the first pairing (minted, written 0600, as
+   *  before). A read that FAILED, or torn bytes ⇒ HELD (src/store-read-hold.js): the link is refused BY NAME (`link_token_unread`, the
+   *  machine named), nothing is written over the file, and it is read again off the loop; its token back ⇒ the next link reads it.
+   *  Torn bytes (not a token's shape) are kept aside ONCE (0600, beside the file) and a FRESH token is written over them off the loop:
+   *  the machine is paired again — the torn bytes were no token, said by name. The value is never in a log, an error, a held row or a
+   *  copy's name. (A token the machine already has is never minted over: that refused every hello until a person paired it again.) */
+  const holds = new Map();   // hostId → its hold (from its first failed or torn read)
+  const fresh = new Map();   // hostId → a fresh token being written over torn bytes (the file's once the write lands)
+  const machineOf = (hostId) => { let n = null; try { n = nameOf(hostId); } catch { n = null; } return VB.actorName(n, 'a paired machine'); };
   function legacy(hostId) {
     ensureDir();
     const f = fileOf(hostId);
-    try { return fs.readFileSync(f, 'utf-8').trim(); } catch { }
+    if (fresh.has(hostId)) return fresh.get(hostId);
+    const h = holds.get(hostId);
+    if (h && h.held()) throw h.refusal(`the link to ${machineOf(hostId)}`);
+    let read;
+    try { read = { text: fs.readFileSync(f, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { parse: TOKEN_PARSE, valid: TOKEN_SHAPE });
+    if (a.state === 'data') return a.value;
+    if (a.state === 'missing') {   // the first pairing
+      const tok = mint();
+      fs.writeFileSync(f, tok, { mode: 0o600 });
+      return tok;
+    }
+    const hold = h || HOLD.create({
+      file: f, parse: TOKEN_PARSE, valid: TOKEN_SHAPE, aside: (m) => `${f}.corrupt-${m}`, code: 'link_token_unread', log: (l) => log.warn?.(`[host-tokens] ${l}`),
+      words: (x) => `the link token of this machine could not be read${x && x.code ? ` (${x.code})` : ''} — nothing is written over it, and it is read again by itself; no link to the machine until it reads`,
+      onLift: (value, facts) => { if (facts && facts.setAside) renew(hostId, f, facts.setAside); },
+    });
+    holds.set(hostId, hold);
+    hold.start(a);
+    throw hold.refusal(`the link to ${machineOf(hostId)}`);
+  }
+  /** torn bytes kept aside (their copy named): a FRESH token, written over the torn file off the loop (0600) — the machine is paired again */
+  function renew(hostId, f, copyName) {
     const tok = mint();
-    fs.writeFileSync(f, tok, { mode: 0o600 });
-    return tok;
+    fresh.set(hostId, tok);
+    log.warn?.(`[host-tokens] the link token of ${machineOf(hostId)} was torn — its bytes are kept aside as ${copyName}; a new one is written: pair the machine again`);
+    try {   // THE STORE WRITER's thread writes it (whole, synced, then put in place) — never the hub's loop
+      require('../store-writer.js').storeWriter().dirty(f, { name: 'host-token.write', rank: 0, mode: 0o600, makeDir: true, produce: () => tok,
+        onWritten: (ok, e) => { if (ok) { if (fresh.get(hostId) === tok) fresh.delete(hostId); } else log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be written (${(e && e.code) || 'error'}) — this run keeps it, the writer tries again`); } });
+    } catch (e) { log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be handed to the store writer (${(e && e.code) || 'error'}) — this run keeps it`); }
   }
   /** → 'not_set_up' | 'locked' | 'unlocked' — as THIS process sees the dir (no engine over a sealed dir = locked) */
   function stateOf() {
@@ -166,6 +205,7 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   function lockedWhy(hostId) { return stateOf() === 'locked' ? lockedError(hostId).message : null; }
   /** An unpaired machine: its file (if any) and its entry, gone. */
   function drop(hostId) {
+    const h = holds.get(hostId); if (h) { h.stop(); holds.delete(hostId); } fresh.delete(hostId);   // B-f276 (r4721): an unpaired machine's hold ends with it
     try { fs.unlinkSync(fileOf(hostId)); } catch { }
     const v = SB.vaultForDir(dataDir);
     if (v && v.state() !== 'not_set_up') { const r = v.secretDrop(entryOf(hostId)); if (!r.ok) log.warn?.(`[vault] the link token of ${hostId} was not dropped (${r.code})`); }

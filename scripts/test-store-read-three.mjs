@@ -322,7 +322,7 @@ try {
     ok(!!amy && amy.meetArmed && !amy.failArmed, 'RED CONTROL — the next try armed only on a meeting (in a copy): a try whose own read fails arms nothing, and the tries end', amy);
 
     console.log('⑤ the helper (2b): a read that hangs — one read at most while it hangs, and its late answer is used');
-    const LATE = '      if (!held || stopped) return false;\n      a = SR.storeAnswer(read, { valid });\n';
+    const LATE = '      if (!held || stopped) return false;\n      a = SR.storeAnswer(read, { parse, valid });\n';   // (r4721: the helper's read again takes the store's parse)
     ok(HSRC.split(LATE).length === 2, 'control setup: the read again judges its answer on the line after the read (found once)');
     const hungScene = async (Mod, tag) => {
       const d = dirOf(tag), f = path.join(d, 'b.json'), body = '{"rows": [1]}'; fs.writeFileSync(f, body);
@@ -344,7 +344,7 @@ try {
     ok(!!hg && hg.during === 1 && hg.heldDuring && hg.second === false && hg.third === false && hg.late === true && hg.lifted && hg.lifts === 1 && hg.rows === '1', 'while a read hangs two more tries start NO second read (the store stays held); the storage answering late lifts the hold with its records', hg);
     const hgx = await hungScene(mutant('src/store-read-hold.js', [[BUSY, '    if (active >= CEILING) return false;\n']]), 'hung-busy-ctl');
     ok(!!hgx && hgx.during > 1, 'RED CONTROL — the in-flight mark cut (in a copy): each try while the read hangs starts another read', hgx);
-    const hgy = await hungScene(mutant('src/store-read-hold.js', [[LATE, '      if (!held || stopped || read) return false;\n      a = SR.storeAnswer(read, { valid });\n']]), 'hung-late-ctl');
+    const hgy = await hungScene(mutant('src/store-read-hold.js', [[LATE, '      if (!held || stopped || read) return false;\n      a = SR.storeAnswer(read, { parse, valid });\n']]), 'hung-late-ctl');
     ok(!!hgy && hgy.late === false && !hgy.lifted, 'RED CONTROL — the answer dropped (in a copy): the storage answers and the hold stands', hgy);
   }
   {
