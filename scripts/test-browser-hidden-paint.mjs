@@ -36,6 +36,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort, endRootedProcesses, driverArgs, ONBOARDED_SOURCE } from './scratch.mjs';   // leg h navigates a page by hand: §47's harness mark first
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
+import { anchored } from './scratch.mjs';   // leg i's red: a keeper copy on an anchor found once
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const express = require('express');
@@ -599,6 +601,59 @@ try {
   } catch (e) { h5 = { threw: String(e && e.message).slice(0, 160) }; }
   const tb5 = h5 && h5.takeBack;
   console.log(`    MEASURE r4282 (not a proof): a relaunch with ${h5before == null ? '?' : h5before} page(s) before it, ${h5opened} opened in the background and never brought to front — ${h5 && h5.threw ? 'not measured (' + h5.threw + ')' : tb5 ? `take-back ${tbSay(tb5)}; ${tb5.unread ? 'NOT every restored page answered its history read: the verdict is «unknown»' : 'every restored page answered its history read'}; the agent on its own page again: ${h5 && h5.own.includes(U('/a?h5')) ? 'yes' : 'no'}; ${h5.pages} page(s) after` : 'no take-back read'}`);
+  // ══ i (主开发 r4886 — B-0e4a, line 962 in the .420 candidate): THE REBIND's NEW TAB ON THE REAL DRIVER. Leg h never sends it: after
+  // its relaunch the attach's own-window road takes the tab back or opens the root over CDP and binds it with `tab <id>`, so the mark
+  // is spent and the rebind block (the ONLY sender of `tab new about:blank#vs-own-<mark>`) never runs. It runs when no window can be
+  // made — here by the keeper's own `openWindow` seam answering «not now». The scene: a profile of its own, two conversations, the
+  // keeper's stop, A's next attach, then B's — B's rebind sends the real driver its new-tab command at B's own marked blank. Judged by
+  // the keeper's own sent argv (the runtime, recorded) and by CHROME's own target list: exactly one new-tab command at B's own
+  // 24-hex mark, the tab it made standing at that address with the mark as its first history entry, B's only root. RED: the same
+  // scene on a keeper copy that sends the bare `tab new` (the release's text) — the made tab stands at a plain blank
+  console.log('— i: B-0e4a — the rebind\'s new tab on the REAL driver: `tab new` at the lease\'s own marked blank, the made tab at that address in Chrome');
+  const rebindLeg = async (Kmod, tag) => {
+    const sent = [];
+    const rt0 = Ff.createBrowserRuntime({ env: kenv });
+    const rt = new Proxy(rt0, { get(t, k) { if (k === 'exec') return (ns, argv, o) => { sent.push({ ns, argv: Array.isArray(argv) ? [...argv] : [] }); return t.exec(ns, argv, o); }; const v = t[k]; return typeof v === 'function' ? v.bind(t) : v; } });
+    const KI1 = 'bk-0000c3c3', KI2 = 'bk-0000d4d4';
+    const kr = Kmod.create({ dataDir: path.join(ROOT, 'data-i-' + tag), homeDir: KH, env: () => kenv, serverSetting: (k) => SET[k], liveKeys: () => new Set([KI1, KI2]), runtime: rt, facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false,
+      openWindow: async () => ({ ok: false, error: 'leg i: no window can be made now' }) });
+    const pr = kr.createProfile({ label: 'Rebind ' + tag }, { owner: { kind: 'instance', id: null } });
+    const out = { tag };
+    try {
+      await kr.attach({ profileId: pr.id, browserKey: KI1, sessionId: 'sess-i1' });
+      await kr.attach({ profileId: pr.id, browserKey: KI2, sessionId: 'sess-i2' });
+      await kr.stop(pr.id, { why: 'user' }); // the keeper's own end: every lease marked, each next attach binds a tab first
+      const a = await kr.attach({ profileId: pr.id, browserKey: KI1, sessionId: 'sess-i1' });
+      const n0 = sent.length;
+      const b = await kr.attach({ profileId: pr.id, browserKey: KI2, sessionId: 'sess-i2' });
+      const news = sent.slice(n0).map((x) => x.argv.join(' ')).filter((x) => /(^| )tab new( |$)/.test(x));
+      const l2 = ((kr._reg() || {}).leases || []).find((l) => l.profileId === pr.id && l.browserKey === KI2) || null;
+      const mark = String((l2 && l2.ownMark) || ''); const at = `about:blank#vs-own-${mark}`;
+      const rec = kr.browserOf(pr.id);
+      const pages = rec && rec.cdpUrl ? await pagesNow(rec).catch(() => []) : [];
+      const roots = l2 && Array.isArray(l2.tabRoots) ? l2.tabRoots.map((x) => String(x).toUpperCase()) : [];
+      const made = roots.length === 1 ? pages.find((t) => String(t.targetId).toUpperCase() === roots[0]) || null : null;
+      const carrier = made && rec ? (await VP.firstEntryIs(rec.cdpUrl, made.targetId, at)) === true : false;
+      Object.assign(out, { a: a && a.rebound ? a.rebound.how : null, b: b && b.rebound ? b.rebound.how : null, news, mark, at, made: made ? { id: String(made.targetId).slice(0, 8), url: String(made.url) } : null, carrier, roots: roots.length, pages: pages.map((t) => shortOf(t.url)) });
+    } catch (e) { out.threw = String(e && e.message).slice(0, 200); }
+    finally { try { await kr.stop(pr.id, { why: 'user' }); } catch { /* none */ } try { kr.shutdown(); } catch { /* none */ } }
+    console.log(`    (i [${tag}]: A ${out.a || '-'}, B ${out.b || '-'}; sent to the driver for B: ${JSON.stringify(out.news || [])}; Chrome's pages: ${JSON.stringify(out.pages || [])}${out.threw ? '; threw: ' + out.threw : ''})`);
+    return out;
+  };
+  const judgeI = (x) => /^[0-9a-f]{24}$/.test(x.mark || '') && Array.isArray(x.news) && x.news.length === 1 && x.news[0].replace(/^--pin-tab /, '') === `tab new ${x.at}` && !!x.made && x.made.url === x.at && x.carrier === true && x.roots === 1;
+  const iSceneOf = (x) => !x.threw && Array.isArray(x.news) && x.news.length >= 1; // the premise, proven before the judge: B's attach took the rebind road (it sent the driver a new-tab command)
+  const I_UNMADE = 'scene not made — B\'s attach sent the driver no new-tab command (the rebind road did not run), so the law\'s line is not judged';
+  const iNow = await rebindLeg(K, 'now');
+  if (!iSceneOf(iNow)) ok(false, `i REBIND: ${I_UNMADE}`, iNow);
+  else ok(judgeI(iNow) && iNow.b === 'new', 'i REBIND ON THE REAL DRIVER: B\'s rebind sends exactly one new-tab command, at its OWN marked blank (the 24-hex form) — the real driver takes it, and Chrome\'s own list shows the made tab at that address, the mark its first history entry, B\'s only root', iNow);
+  const MI = mutantCopies('browser-hidden-paint-i', REPO);
+  let bareSrc = null; try { bareSrc = anchored(fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), "[...pin, 'tab', 'new', ...(birth ? [birth] : [])], o)", "[...pin, 'tab', 'new'], o) /* CONTROL: the bare tab new, as at the release */", 'i the rebind\'s new tab'); } catch (e) { ok(false, `i CONTROL setup: the rebind's new-tab anchor — ${String(e && e.message).slice(0, 200)}`); }
+  if (bareSrc) {
+    const iBare = await rebindLeg(MI.load('src/server/browser-keeper.js', bareSrc, 'bare-tab-new'), 'bare');
+    if (!iSceneOf(iBare)) ok(false, `i CONTROL: ${I_UNMADE}`, iBare);
+    else ok(!judgeI(iBare) && iBare.news.length === 1 && iBare.news[0].replace(/^--pin-tab /, '') === 'tab new' && !(iBare.made && iBare.made.url === iBare.at), 'i CONTROL (the bare `tab new`, the release\'s text): the made tab stands at a plain blank, not at its own mark — the leg\'s judge goes red', iBare);
+    for (const r of copiesCensus(MI.files, MI.dir, REPO, { minCopies: 1, label: 'i ' })) ok(r.pass, r.name, r.detail);
+  }
 } catch (e) { if (!/^no browser$/.test(String(e && e.message))) ok(false, 'the run threw', String(e && e.stack)); }
 finally { try { spy?.close(); } catch { /* */ } try { dialogs.shutdown(); kk.shutdown(); } catch { /* */ } srv.close(); pages.close(); cleanup(); }
 done();
