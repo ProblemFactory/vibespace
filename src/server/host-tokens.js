@@ -144,6 +144,7 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   // a LAWFUL vault name (the engine's SECRET_RE): the `host:` family is the device links' own — `host:hub-identity` can be no
   // machine's id (those are host-<hex> / dial-<device>)
   const IDENTITY_ENTRY = 'host:hub-identity';
+  let mintFailSaid = false;   // B-574d (lane nl-paired): a first mint that could not be written, said once a run
   const identityFile = () => path.join(agentdDir, 'hub-identity.pem');
   const identityLocked = () => Object.assign(new Error('the vault is locked — this hub\'s own key opens after the owner unlocks the vault (no machine link until then)'), { code: 'vault_locked' });
   function readIdentity() {
@@ -165,14 +166,22 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
    *  (src/secret-file.js replaceShredding: the temp synced, renamed, its folder synced, the RETIRED key's bytes overwritten in place;
    *  never through a link); the first mint's temp is written through the tree's one synced replace (src/fd-close.js renameSynced, into
    *  the temp's own name) BEFORE it is linked in. Both stay synchronous: a person's act or the first pairing, read back at once. A sync
-   *  or close that FAILS is a failed write thrown to the caller (the old key stands, the temp removed); only a file system with no sync
-   *  at all lets the first mint land, said in the journal. */
+   *  or close that FAILS is a failed write thrown to the caller (the old key stands, the temp removed), and a first mint's failure is said
+   *  once a run (its callers go on without a key). ONLY a file system that does no sync at all (src/fd-close.js SYNC_UNSUPPORTED) lands,
+   *  said: the first mint through the door; the renew, which the secret family's replace refuses there, through the door too (the renew
+   *  is the ONE way out of hub_identity_lost — it must land; there the retired key's bytes are not overwritten, as at the release).
+   *  KNOWN LIMIT: the first mint's NAME (its link) is not folder-synced — the door syncs no folder for any of its users. */
   function writeIdentity(pem, { replace = false } = {}) {
     const st = stateOf();
     if (st === 'not_set_up') {
       ensureDir(); const f = identityFile(), tmp = f + '.' + process.pid + '.tmp';
-      if (replace) { replaceShredding(f, pem); return pem; }
-      FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: "this hub's key (its first mint)", say: (l) => log.warn?.(`[hub-key] ${l}`) });
+      const say = (l) => log.warn?.(`[hub-key] ${l}`);
+      if (replace) {
+        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: "this hub's key (its renew)", say }); }
+        return pem;
+      }
+      try { FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: "this hub's key (its first mint)", say }); }
+      catch (e) { if (!mintFailSaid) { mintFailSaid = true; say(`this hub's own key could not be written (${(e && e.code) || 'error'}) — no machine can pin it until it is; it is tried again at the next link`); } throw e; }
       try { fs.linkSync(tmp, f); } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }
       try { fs.unlinkSync(tmp); } catch { }
       return fs.readFileSync(f, 'utf8');

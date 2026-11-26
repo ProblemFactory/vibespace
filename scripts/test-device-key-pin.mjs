@@ -642,32 +642,54 @@ console.log('— ⑦ D3 half b: THE HUB PROVES ITS KEY (主开发\'s ruling 2026
   // B-574d (lane nl-paired, 主开发 r4752): THE KEY'S BYTES ARE ON DISK BEFORE ITS NAME (before the vault is set up). The renew is the
   // secret family's replace (src/secret-file.js replaceShredding: synced, renamed, the RETIRED key's bytes overwritten in place); the
   // first mint's temp is synced (src/fd-close.js renameSynced) before its link. A sync REFUSED (placed: fs.fsyncSync throws EIO) is a
-  // FAILED WRITE: a first mint throws and leaves no key and no temp; a renew throws and the old key stands byte for byte.
-  // RED (a copy): the release's unsynced roads — the placed refusal is never met, and the retired key's bytes stay in its inode.
+  // FAILED WRITE: a first mint throws, leaves no key and no temp, and is said ONCE a run; a renew throws and the old key stands byte for
+  // byte. A file system with NO sync at all (EINVAL) lands on both roads, said — the renew is the one way out of hub_identity_lost.
+  // REDs (copies): the release's unsynced roads (the refusal never met, the retired bytes kept); the renew without its no-sync road.
   {
     const placedSync = (code, fn) => { const s0 = fs.fsyncSync; let n = 0; fs.fsyncSync = function () { n++; throw Object.assign(new Error(`${code}: a placed sync refusal`), { code }); }; try { return { r: fn(), n }; } catch (e) { return { threw: (e && e.code) || String(e), n }; } finally { fs.fsyncSync = s0; } };
     const keyScene = (H, tag) => {
       const d = path.join(tmp, 'ht-sync-' + tag); fs.mkdirSync(d, { recursive: true });
-      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn() { } } });
+      const said = [];
+      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn: (l) => said.push(String(l)) } });
       const ad = path.join(d, 'agentd'), k = path.join(ad, 'hub-identity.pem');
       const others = () => fs.readdirSync(ad).filter((f) => f !== 'hub-identity.pem').length;
-      const first = placedSync('EIO', () => h.identity());
+      const first = placedSync('EIO', () => h.identity()), again = placedSync('EIO', () => h.identity());
       const firstKey = fs.existsSync(k), firstLeft = others();
+      const mintSaid = said.filter((l) => /^\[hub-key\] this hub's own key could not be written \(EIO\)/.test(l)).length;
       const made = h.identity(), old = fs.readFileSync(k, 'utf8');
       const oldFd = fs.openSync(k, 'r');   // the inode the renew retires, opened before it
       const renew = placedSync('EIO', () => h.renewIdentity());
       const kept = fs.readFileSync(k, 'utf8') === old;
       const id3 = h.renewIdentity();
       const retired = Buffer.alloc(Buffer.byteLength(old)); fs.readSync(oldFd, retired, 0, retired.length, 0); fs.closeSync(oldFd);
-      return { first: first.threw || 'landed', firstN: first.n, firstKey, firstLeft, renew: renew.threw || 'landed', renewN: renew.n, kept,
+      return { first: first.threw || 'landed', again: again.threw || 'landed', firstN: first.n, firstKey, firstLeft, mintSaid, renew: renew.threw || 'landed', renewN: renew.n, kept,
         renewed: id3.publicKey !== made.publicKey && fs.readFileSync(k, 'utf8') !== old && h.identity().publicKey === id3.publicKey, shredded: retired.toString('utf8') !== old, left: others() };
     };
-    const r = keyScene(HT, 'real');
-    ok(r.first === 'EIO' && r.firstN === 1 && !r.firstKey && r.firstLeft === 0 && r.renew === 'EIO' && r.renewN === 1 && r.kept && r.renewed && r.shredded && r.left === 0,
-      'B-574d: this hub\'s key is SYNCED before its name — a first mint under a refused sync (EIO, placed) leaves no key and no temp; a renew under one throws and the old key stands; the renew that lands overwrites the RETIRED key\'s bytes in place', r);
-    const XH = mutantCopies('hub-key-unsynced', REPO).load('src/server/host-tokens.js', anchored(read('src/server/host-tokens.js'), "      if (replace) { replaceShredding(f, pem); return pem; }\n      FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say: (l) => log.warn?.(`[hub-key] ${l}`) });\n", "      fs.writeFileSync(tmp, pem, { mode: 0o600 });   // MUTANT: the release's unsynced roads\n      if (replace) { fs.renameSync(tmp, f); return pem; }\n", 'hub-key-unsynced'), 'hub-key-unsynced');
+    const noSyncScene = (H, tag) => {
+      const d = path.join(tmp, 'ht-nosync-' + tag); fs.mkdirSync(d, { recursive: true });
+      const said = [];
+      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn: (l) => said.push(String(l)) } });
+      const k = path.join(d, 'agentd', 'hub-identity.pem');
+      const first = placedSync('EINVAL', () => h.identity());
+      const before = fs.existsSync(k) ? fs.readFileSync(k, 'utf8') : null;
+      const renew = placedSync('EINVAL', () => h.renewIdentity());
+      const now = fs.existsSync(k) ? fs.readFileSync(k, 'utf8') : null;
+      return { first: first.threw || 'landed', minted: !!before, renew: renew.threw || 'landed', renewed: !!now && now !== before && renew.r && h.identity().publicKey === renew.r.publicKey,
+        saidMint: said.filter((l) => /^\[hub-key\] this hub's key \(its first mint\): its file system does not do a sync \(EINVAL\)/.test(l)).length,
+        saidRenew: said.filter((l) => /^\[hub-key\] this hub's key \(its renew\): its file system does not do a sync \(EINVAL\)/.test(l)).length };
+    };
+    const r = keyScene(HT, 'real'), u = noSyncScene(HT, 'real');
+    ok(r.first === 'EIO' && r.again === 'EIO' && r.firstN === 1 && !r.firstKey && r.firstLeft === 0 && r.mintSaid === 1 && r.renew === 'EIO' && r.renewN === 1 && r.kept && r.renewed && r.shredded && r.left === 0,
+      'B-574d: this hub\'s key is SYNCED before its name — a first mint under a refused sync (EIO, placed) leaves no key and no temp and is said ONCE a run; a renew under one throws and the old key stands; the renew that lands overwrites the RETIRED key\'s bytes in place', r);
+    ok(u.first === 'landed' && u.minted && u.renew === 'landed' && u.renewed && u.saidMint === 1 && u.saidRenew === 1,
+      'B-574d: a file system with NO sync at all (EINVAL, placed) — the first mint AND the renew land, each said once (the renew is the one way out of hub_identity_lost)', u);
+    const HTS = read('src/server/host-tokens.js');
+    const XH = mutantCopies('hub-key-unsynced', REPO).load('src/server/host-tokens.js', anchored(HTS, "      if (replace) {\n        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n        return pem;\n      }\n      try { FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say }); }\n      catch (e) { if (!mintFailSaid) { mintFailSaid = true; say(`this hub's own key could not be written (${(e && e.code) || 'error'}) \u2014 no machine can pin it until it is; it is tried again at the next link`); } throw e; }\n", "      fs.writeFileSync(tmp, pem, { mode: 0o600 });   // MUTANT: the release's unsynced roads\n      if (replace) { fs.renameSync(tmp, f); return pem; }\n", 'hub-key-unsynced'), 'hub-key-unsynced');
     const x = keyScene(XH, 'red');
     ok(x.first === 'landed' && x.firstN === 0 && x.firstKey && x.renew === 'landed' && x.renewN === 0 && !x.kept && !x.shredded, 'CONTROL (the release\'s unsynced roads, in a copy): no sync asked — the placed refusal is never met, the new key takes its name unsynced, the retired key\'s bytes stay in its inode — red', x);
+    const XN = mutantCopies('hub-key-renew-no-road', REPO).load('src/server/host-tokens.js', anchored(HTS, "        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n", "        replaceShredding(f, pem);   // MUTANT: no road on a file system with no sync\n", 'hub-key-renew-no-road'), 'hub-key-renew-no-road');
+    const xn = noSyncScene(XN, 'red');
+    ok(xn.renew === 'EINVAL' && !xn.renewed && xn.saidRenew === 0, 'CONTROL (the renew with no road for a file system with no sync, in a copy): the renew throws EINVAL and the key is never renewed — red', xn);
   }
   // ②b THE VAULT ROAD (the reader's must 1): a LAWFUL entry — the pre-vault key ADOPTED into the vault (the same key: the machines
   // that pinned it keep working), read back from it, a locked vault ⇒ vault_locked
