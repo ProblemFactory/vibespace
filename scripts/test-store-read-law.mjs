@@ -612,7 +612,7 @@ console.log('§2c the legacy mount stores (host-mounts.json, device-mounts.json 
     const saved = savedOf(d);
     return { M, d, logs, revoked, seen: pl.seen.n, listed: ids(M), hmStands: stands(d, 'host-mounts.json'), dvMigrated: fs.existsSync(path.join(d, 'device-mounts.json.migrated')),
       owed: !!(saved && saved.legacyOwed), held: holdsOf(M).some((h) => !!h.held()), code: (holdsOf(M).map((h) => h.held()).find(Boolean) || {}).code || null,
-      advice: logs.filter((l) => /delete machine-mounts\.json/.test(l)).length, saidHeld: logs.some((l) => /host-mounts\.json could not be read \((EIO|EACCES)\) — held/.test(l)) };
+      advice: logs.filter((l) => /delete machine-mounts\.json/.test(l)).length, saidHeld: logs.some((l) => /host-mounts\.json could not be read \((EIO|EACCES)\) — held/.test(l)) };   // stale-pins: kept (an absence check: no word advises deleting the list)
   };
   // (a) THE MIGRATING BOOT: the pull store in and renamed; the push store HELD and OWED (the list saved with the mark), its token kept
   const A = await migrating(MM, 'legacy-a');
@@ -648,7 +648,7 @@ console.log('§2c the legacy mount stores (host-mounts.json, device-mounts.json 
     const E = await migrating(Mod, name);
     E.M._state.mounts.push({ ...MEET }); E.M._save();   // the person's mount made while the store is held (the list's own record)
     const up = holdsOf(E.M).length ? await holdsOf(E.M)[0].again() : false;
-    const atLift = { listed: ids(E.M), said: E.logs.filter((l) => /host-mounts\.json: 1 legacy mount record\(s\) passed over/.test(l)).length };
+    const atLift = { listed: ids(E.M), said: E.logs.filter((l) => /host-mounts\.json: 1 legacy mount record\(s\) passed over/.test(l)).length, path: E.logs.some((l) => /passed over/.test(l) && l.includes('/mnt/')) };
     stopAll(E.M);
     const logs2 = [], S = boot(Mod, E.d, logs2);
     const atStart = { listed: ids(S), said: logs2.filter((l) => /host-mounts\.json: 1 legacy mount record\(s\) passed over/.test(l)).length, renamed: fs.existsSync(path.join(E.d, 'host-mounts.json.migrated')) };
@@ -656,13 +656,14 @@ console.log('§2c the legacy mount stores (host-mounts.json, device-mounts.json 
     return { up, atLift, atStart };
   };
   const mt = await meeting(MM, 'legacy-meet');
-  ok(mt.up === true && mt.atLift.listed === 'mm-0201,mm-0909' && mt.atLift.said === 1 && mt.atStart.listed === 'mm-0201,mm-0909' && mt.atStart.said === 0 && mt.atStart.renamed,
-    'THE LIFT\'s MEETING (r4985 (b)): a mount the person made on a held legacy record\'s mount point (the same machine) WINS at the lift and at the later start; the legacy record passed over is said by its store and count ONCE, at the lift (the start skips what the lift judged) — never dropped in silence', mt);
-  // (e) TORN BYTES are told apart: kept in place under its own name with the present words (naming the kept file), no hold, not owed
+  ok(mt.up === true && mt.atLift.listed === 'mm-0201,mm-0909' && mt.atLift.said === 1 && mt.atLift.path === false && mt.atStart.listed === 'mm-0201,mm-0909' && mt.atStart.said === 0 && mt.atStart.renamed,
+    'THE LIFT\'s MEETING (r4985 (b)): a mount the person made on a held legacy record\'s mount point (the same machine) WINS at the lift and at the later start; the legacy record passed over is said by its store and count ONCE, at the lift (the start skips what the lift judged) — never dropped in silence; the line names its store and a count, no mount point (r5127)', mt);
+  // (e) TORN BYTES are told apart: kept in place under its own name with words naming the kept file, no hold, and OWED (r5127: a repaired
+  // file is read at the next start — no word advises deleting the list)
   const tn = lay('legacy-e', { hm: '{"mounts": [' }); const logsE = [];
   const Et = boot(MM, tn, logsE); const savedE = savedOf(tn);
-  ok(holdsOf(Et).every((h) => !h.held()) && stands(tn, 'host-mounts.json') && !(savedE && savedE.legacyOwed) && logsE.some((l) => l.includes('legacy store unreadable — kept in place') && l.includes(path.join(tn, 'host-mounts.json'))) && ids(Et) === 'mm-0201',
-    '(e) TORN BYTES are told apart: host-mounts.json kept in place under its own name, said with the words that name the kept file; no hold, not owed (a person\'s file to fix)', { listed: ids(Et), owed: savedE && savedE.legacyOwed });
+  ok(holdsOf(Et).every((h) => !h.held()) && stands(tn, 'host-mounts.json') && !!(savedE && savedE.legacyOwed) && logsE.some((l) => l.includes('legacy store host-mounts.json did not parse') && l.includes(path.join(tn, 'host-mounts.json'))) && !logsE.some((l) => /delete machine-mounts\.json/.test(l)) && ids(Et) === 'mm-0201',   // stale-pins: kept (an absence check: no word advises deleting the list)
+    '(e) TORN BYTES are told apart: host-mounts.json kept in place under its own name, said with words that name the kept file; no hold; OWED, so a repaired file is read at the next start (r5127) — no word advises deleting the list', { listed: ids(Et), owed: savedE && savedE.legacyOwed });
   stopAll(Et);
   // (f) A MISSING store is nothing to do: no hold, no mark, nothing said of it
   const mi = lay('legacy-f', { hm: null }); const logsF = [];
@@ -672,7 +673,7 @@ console.log('§2c the legacy mount stores (host-mounts.json, device-mounts.json 
   // RED COPIES, one a guard of the cure (each in a copy: scripts/mutant-copy.mjs; anchored — a missing anchor is a named red)
   const red = (from, to, tag) => MJ.load('src/machine-mounts.js', anchored(LSRC, from, to, tag), tag);
   const rHeld = await migrating(red("      if (la.state === 'unreadable') { this._legacyHeld(file, map, la); return -2; }   // HELD (said by the helper: held and read again)\n", '', 'lmg-held-as-torn'), 'legacy-red-held');
-  ok(!rHeld.held && !rHeld.owed && rHeld.advice === 1, 'RED (a failed read taken as torn bytes — the release\'s -1, in a copy): not held, not owed, and the journal tells a person to delete a store', { held: rHeld.held, owed: rHeld.owed, advice: rHeld.advice });
+  ok(!rHeld.held && !rHeld.saidHeld, 'RED (a failed read taken as torn bytes — the release\'s -1, in a copy): not held, never read again mid-life, not said as held', { held: rHeld.held, saidHeld: rHeld.saidHeld });
   stopAll(rHeld.M);
   const rEx = await migrating(red("      let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }\n      const la = ", "      if (!fs.existsSync(file)) return null;\n      let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }\n      const la = ", 'lmg-exists-back'), 'legacy-red-exists', { code: 'EACCES', stat: true });
   ok(!rEx.held && !rEx.owed, 'RED (existsSync asked first again, in a copy): a refused stat is «nothing to do» — not held, not owed', { held: rEx.held, owed: rEx.owed });
@@ -687,7 +688,7 @@ console.log('§2c the legacy mount stores (host-mounts.json, device-mounts.json 
   stopAll(rSw.M);
   const rMeet = await meeting(red('    if (passed.length) this.log(', '    if (false && passed.length) this.log(', 'lmg-meeting-silent'), 'legacy-red-meet');
   ok(rMeet.up === true && rMeet.atLift.said === 0 && rMeet.atStart.said === 0 && rMeet.atStart.listed === 'mm-0201,mm-0909', 'RED (the passed-over record not said, in a copy): it is dropped in silence at the lift and at the start', rMeet);
-  const rLift = await migrating(red('    const added = this._ingestLegacy(file, value, map);\n', '    const added = [];\n', 'lmg-lift-ingests-nothing'), 'legacy-red-lift');
+  const rLift = await migrating(red('      added = this._ingestLegacy(file, value, map, { judged: earlier });\n', '      added = [];\n', 'lmg-lift-ingests-nothing'), 'legacy-red-lift');
   const rl = holdsOf(rLift.M).length ? await holdsOf(rLift.M)[0].again() : false;
   ok(rl === true && ids(rLift.M) === 'mm-0201', 'RED (a lift that ingests nothing, in a copy): the push record is not listed until a restart', { lifted: rl, listed: ids(rLift.M) });
   stopAll(rLift.M);
@@ -740,6 +741,34 @@ console.log('§2c the legacy mount stores (host-mounts.json, device-mounts.json 
   ok(!tj.threw && tj.kept && tj.owed && tj.said, '(j) a record\'s lookup that THROWS is no crash of the start: device-mounts.json stays in place under its name, OWED to the next start, said', tj);
   const tjx = throwLife(red("      try { return this._ingestLegacy(file, la.value, map, { judged: this._judgedOf(file) }).length; }\n      catch (e) {", "      return this._ingestLegacy(file, la.value, map, { judged: this._judgedOf(file) }).length;\n      if (0) {", 'lmg-lookup-throws'), 'legacy-j-red');
   ok(tjx.threw, 'RED (the ingest\'s throw not caught, in a copy): the start itself throws', tjx);
+  // (k) r5127 MUST 1: A MOUNT REMOVED AFTER A LIFT STAYS REMOVED WHEN THE STORE IS HELD A SECOND TIME — lift, the person's removal, a HELD
+  // restart, a lift: the earlier judgment handed on, nothing said twice; RED: today's line (the lift blind to the earlier judgment)
+  const PUSH2 = { id: 'mm-0102', hostId: 'h-0102', folder: '/srv/b', mode: 'ro', mountpoint: '/mnt/legacy-k', tokenId: 'tok-0102', createdAt: 13 };
+  const twiceLife = async (Mod, name) => {
+    const d = lay(name, { hm: JSON.stringify({ mounts: [PUSH, PUSH2] }) }); const logs = [];
+    const heldBoot = () => { const pl = place(path.join(d, 'host-mounts.json')); try { return boot(Mod, d, logs); } finally { pl.restore(); } };
+    const M1 = heldBoot(); M1._state.mounts.push({ ...MEET }); M1._save();   // the person's mount on PUSH's mount point (the same machine)
+    if (holdsOf(M1).length) await holdsOf(M1)[0].again();   // lift 1: PUSH passed over, PUSH2 added
+    M1._state.mounts = M1._state.mounts.filter((m) => m.id !== 'mm-0102'); M1._save();   // the person removes PUSH2
+    stopAll(M1);
+    const M2 = heldBoot();   // a HELD restart: the read fails again
+    const heldAgain = holdsOf(M2).some((h) => !!h.held());
+    const up2 = holdsOf(M2).length ? await holdsOf(M2)[0].again() : false;   // lift 2
+    const r = { heldAgain, up2, listed: ids(M2), said: logs.filter((l) => /host-mounts\.json: \d+ legacy mount record\(s\) passed over/.test(l)).length, stands: stands(d, 'host-mounts.json') };
+    stopAll(M2); return r; };
+  const tw = await twiceLife(MM, 'legacy-k');
+  ok(tw.heldAgain && tw.up2 === true && tw.listed === 'mm-0201,mm-0909' && tw.said === 1 && tw.stands, '(k) r5127: lift, the person\'s removal, a HELD restart, a lift — the removed mount stays removed (the earlier judgment handed on) and the passed-over record is said ONCE', tw);
+  const twx = await twiceLife(red('    const earlier = this._judgedOf(file);\n', '    const earlier = null;\n', 'lmg-earlier-unheard'), 'legacy-k-red');
+  ok(twx.listed.includes('mm-0102') && twx.said === 2, 'RED (today\'s line — the lift blind to the earlier judgment, in a copy): the removed mount comes back and the passed-over record is said twice', twx);
+  // (l) r5127's should: the lift's own hook THROWS (a lookup at the lift) — said, the store kept in place under its name and still OWED
+  const hookLife = async (Mod, name) => { const d = lay(name); const logs = []; const pl = place(path.join(d, 'device-mounts.json'));
+    let M; try { M = boot(Mod, d, logs); } finally { pl.restore(); }
+    M.hosts.findByDeviceId = () => { throw Object.assign(new Error('a lookup that throws at the lift (placed)'), { code: 'EPLACED' }); };
+    const up = holdsOf(M).length ? await holdsOf(M)[0].again() : false;
+    const r = { up, said: logs.some((l) => /device-mounts\.json: its records could not be judged at the lift \(EPLACED\) — kept in place, owed to the next start/.test(l)), owed: !!(savedOf(d) || {}).legacyOwed, stands: stands(d, 'device-mounts.json') };
+    stopAll(M); return r; };
+  const hk = await hookLife(MM, 'legacy-l');
+  ok(hk.up === true && hk.said && hk.owed && hk.stands, '(l) a lift whose own hook THROWS (a lookup at the lift) says so; the store stays in place under its name, still owed to the next start', hk);
 }
 console.log('§5 job-notifications.json (src/jobs.js) — every job notice still waiting for its conversation');
 {
