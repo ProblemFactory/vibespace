@@ -588,7 +588,15 @@ function roMountHint(req, p, err) {
 router.post('/api/mkdir', async (req, res) => {
   const R = rfs(req);
   if (R) { try { return res.json(await R.fs.mkdir(R.host, remotePath(req.body.path))); } catch (e) { return res.status(400).json(fsErrorBody(e)); } }
-  try { await sfs(req).call('mkdir', { path: safePath(req.body.path) }); res.json({ success: true }); }
+  try {
+    const made = safePath(req.body.path);
+    await sfs(req).call('mkdir', { path: made });
+    // r4927: the folder field's kept listing above the folder made is dropped at the collector's one door (src/dir-collect.js
+    // folderMade) — this hub's collector, when one was made; a paired machine's agent drops its own (src/agentd/agentd.js)
+    const ds = req.app.locals && req.app.locals._dirSlice;
+    if (ds && typeof ds.folderMade === 'function') { try { ds.folderMade(made); } catch { /* the listing ages out in its 2 s */ } }
+    res.json({ success: true });
+  }
   catch (err) { res.status(err.status || 400).json({ error: err.message + roMountHint(req, req.body.path, err) }); }
 });
 

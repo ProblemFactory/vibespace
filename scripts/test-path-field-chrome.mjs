@@ -45,6 +45,7 @@ import http from 'node:http';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePort, ONBOARDED_SOURCE, CHROME_QUIET, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';   // r4927: ⑪'s red — the files router without the folder-made drop
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -123,7 +124,15 @@ app.locals.getRemoteFs = () => ({ dirSlice: (id, o) => hm.dirSlice(id, o), mkdir
 // B-3b03 (lane hub-loop-stalls): the files router never runs an op in-main — a REAL one-worker pool, as server.js wires one
 process.env.VIBESPACE_DIROPS_TEST = '1';   // r4143: ⑱ this hub's PLACED reads — the dir-ops dead-path stand-in (a vs-dead folder's read HELD in the worker until the suite's .go); set before the pool's worker starts
 app.locals.safeFs = new (require('../src/safe-fs.js').SafeFs)({ poolSize: 1, name: 'test-path-field-chrome' });
-app.use(require('../src/routes/files.js'));
+// r4927 (⑪): THIS hub's folder-field collector is made HERE (the route takes the one it finds, src/routes/files.js dirSliceOf) with a
+// PLACEABLE clock — null = the real one; leg ⑪ freezes it from the parent's listing to the press, so the parent's re-list after a
+// make-folder sits inside LIST_FRESH_MS whatever the runner's speed (the hosted red: that gap fell either side of the 2 s)
+let DIR_CLOCK = null;
+app.locals._dirSlice = require('../src/server/dir-slice.js').create({ call: (op, payload, opts) => app.locals.safeFs.call(op, payload, opts), now: () => (DIR_CLOCK != null ? DIR_CLOCK : Date.now()) });
+// …and the files router behind a switch: ⑪'s red runs a patched copy (the route without the drop), every other leg the real one
+const FILES_REAL = require('../src/routes/files.js');
+let FILES = FILES_REAL;
+app.use((req, res, next) => FILES(req, res, next));
 const D = path.join(TMP, 'www'); fs.mkdirSync(D);
 app.use('/static', express.static(D));
 app.get('/style.css', (req, res) => res.sendFile(path.join(REPO, 'public/style.css')));
@@ -732,6 +741,12 @@ console.log('\n── ⑪ THE PICKER ──');
   ok('the groups\' folders pinned with their badge; the home\'s tree without ~/vibespace or a dot-folder', tree.pins.some((t) => t.includes('~/work/investor-relations') && t.includes('投资者关系')) && tree.names.includes('work') && !tree.names.includes('vibespace') && !tree.names.some((t) => t.startsWith('.')), tree);
   await ev(`(() => { const n = [...document.querySelectorAll('.pf-pk-tree [data-sel]')].find((x) => x.dataset.sel === '~/work'); n.click(); return true; })()`);
   await until(`[...document.querySelectorAll('.pf-pk-tree [data-sel]')].some((x) => x.dataset.sel === '~/work/payments')`, 4000);
+  // r4927 (主开发): THE PRESS BEFORE THE MADE FOLDER's OWN LISTING LANDS — that listing is HELD at the hub's door (ASK_DOOR) until the
+  // press is done, and the hub's collector clock is FROZEN from the parent's listing to the press (both inside LIST_FRESH_MS): the
+  // remembered folder must be the one made (the make-folder route drops the parent's kept listing — src/dir-collect.js folderMade)
+  const gateFor = (p) => { const g = { arrived: 0 }; g.p = new Promise((r) => { g.open = () => { ASK_DOOR.delete(p); r(); }; }); ASK_DOOR.set(p, () => { g.arrived++; return g.p; }); return g; };
+  DIR_CLOCK = Date.now();
+  const g11 = gateFor('~/work/payments/季度对账/');
   await ev(`[...document.querySelectorAll('.pf-pk-tree [data-sel]')].find((x) => x.dataset.sel === '~/work/payments').click(); true`);
   const pv = await until(async () => { const t = await ev(`document.querySelector('.pf-pk-right').innerText`); return /付款审批-10月\.xlsx/.test(t) ? t : null; }, 4000);
   ok('the preview: its folders + files with sizes and dates', !!pv && /发票/.test(pv) && /26\.4 KB|27 KB|26 KB/.test(pv), pv);
@@ -742,7 +757,10 @@ console.log('\n── ⑪ THE PICKER ──');
   await type('季度对账');
   await key('Enter');
   ok('「新建文件夹」 inline makes it on disk and selects it', (await until(() => fs.existsSync(path.join(HOME, 'work/payments/季度对账')), 4000)) && (await until(`document.querySelector('.pf-pk-foot b')?.textContent === '~/work/payments/季度对账'`, 4000)), await ev(`document.querySelector('.pf-pk-foot').innerText`));
+  const held11 = await until(() => (g11.arrived ? true : null), 4000);   // the made folder's own listing asked, and HELD at the door
+  ok('r4927 ⑪ placed: the made folder\'s own listing is asked and HELD at the hub\'s door before the press (the collector\'s clock frozen since the parent\'s listing)', !!held11, { arrived: g11.arrived });
   await ev(`document.querySelector('.pf-pk-foot [data-act="go"]').click(); true`);
+  g11.open(); DIR_CLOCK = null;
   const c = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
   ok('「选这个文件夹」 fills the ~/ form and commits (how picker)', (await cwd()) === '~/work/payments/季度对账' && c && c.how === 'picker' && c.path === HOME + '/work/payments/季度对账' && !(await ev(`!!document.querySelector('.dialog.pf-picker')`)), [await cwd(), c]);
   await reset();
@@ -750,6 +768,37 @@ console.log('\n── ⑪ THE PICKER ──');
   ok('reopened, it remembers its node', await until(`document.querySelector('.pf-pk-foot b')?.textContent === '~/work/payments/季度对账'`, 4000), await ev(`document.querySelector('.pf-pk-foot b')?.textContent`));
   await ev(`document.querySelector('.pf-pk-foot [data-act="cancel"]').click(); true`);
   await reset();
+  // r4927 ⑪ RED CONTROL: the same press, placed the same way, through the files route WITHOUT the drop (the release's, a patched
+  // copy): the parent's re-list is the kept one, the made folder is unknown to the page at the press — the PARENT is remembered
+  {
+    const MUT11 = mutantCopies('path-field-11', REPO);
+    const SRC_FILES = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
+    FILES = require(MUT11.write('src/routes/files.js', anchored(SRC_FILES, "    if (ds && typeof ds.folderMade === 'function') { try { ds.folderMade(made); } catch { /* the listing ages out in its 2 s */ } }\n", '    // (the release: no drop)\n', 'test-path-field-chrome ⑪ the route without the drop'), 'no-drop'));
+    try {
+      await press('.path-field .pf-pick');
+      await until(`!!document.querySelector('.dialog.pf-picker')`, 4000);
+      await until(`[...document.querySelectorAll('.pf-pk-tree [data-sel]')].some((x) => x.dataset.sel === '~/work/payments')`, 4000);
+      DIR_CLOCK = Date.now();
+      const g2 = gateFor('~/work/payments/季度对账-二/');
+      await ev(`[...document.querySelectorAll('.pf-pk-tree [data-sel]')].find((x) => x.dataset.sel === '~/work/payments').click(); true`);
+      await until(async () => (/付款审批-10月\.xlsx/.test(await ev(`document.querySelector('.pf-pk-right').innerText`)) ? true : null), 4000);
+      await ev(`document.querySelector('.pf-pk-right [data-act="mk"]').click(); true`);
+      await until(`!!document.querySelector('.pf-mk-name')`, 2000);
+      await ev(`document.querySelector('.pf-mk-name').focus(); true`);
+      await type('季度对账-二');
+      await key('Enter');
+      const made2 = !!(await until(() => fs.existsSync(path.join(HOME, 'work/payments/季度对账-二')), 4000)) && !!(await until(`document.querySelector('.pf-pk-foot b')?.textContent === '~/work/payments/季度对账-二'`, 4000)) && !!(await until(() => (g2.arrived ? true : null), 4000));
+      await ev(`document.querySelector('.pf-pk-foot [data-act="go"]').click(); true`);
+      g2.open(); DIR_CLOCK = null;
+      await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
+      await reset();
+      await press('.path-field .pf-pick');
+      const remembered2 = await until(`document.querySelector('.pf-pk-foot b')?.textContent || null`, 4000);
+      ok('r4927 ⑪ RED CONTROL (the route without the drop, the release\'s): the same placed press REMEMBERS THE PARENT, one level up', made2 && remembered2 === '~/work/payments', { made2, remembered2 });
+      await ev(`document.querySelector('.pf-pk-foot [data-act="cancel"]').click(); true`);
+      await reset();
+    } finally { FILES = FILES_REAL; DIR_CLOCK = null; ASK_DOOR.delete('~/work/payments/季度对账-二/'); }
+  }
   await press('#cwd'); await type('ir q3'); await sleep(450); await key('Escape');
   await press('.path-field .pf-pick');
   const q = await until(async () => { const v = await ev(`({ q: document.querySelector('.pf-pk-q')?.value, sel: document.querySelector('.pf-pk-foot b')?.textContent })`); return v.q === 'ir q3' && v.sel ? v : null; }, 4000);

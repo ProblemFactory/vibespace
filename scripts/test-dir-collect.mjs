@@ -383,6 +383,27 @@ console.log('⑨ THE LAW (r2752): a listing never costs a person their files on 
   ok(relHeld === 1, `RED: the release's fact reader opens that pipe and its worker waits there (${relHeld} reader let go)`);
 }
 
+console.log('⑪ A FOLDER MADE ON THE MACHINE IS IN ITS PARENT\'S NEXT LISTING (主开发 r4927: the collector\'s one door, in the agent)');
+{
+  // THE REAL AGENT: its collector keeps a listing LIST_FRESH_MS (2 s). A folder made on its disk BEHIND its back (no fs op) stays out
+  // of the kept listing inside that window — the CONTROL that the window is there; a folder made by the agent's OWN fs op (the road
+  // the hub's make-folder takes to a paired machine) drops the kept listing at the collector's door (src/dir-collect.js folderMade,
+  // called by src/agentd/agentd.js): the parent's next listing names both
+  const PARENT = path.join(HOME, 'folder-made'); fs.mkdirSync(PARENT);
+  const P = DS.plan({ text: '~/folder-made/', bases: [], budgetMs: 1500 }, HOME);
+  const kidsOf = (f) => ((DS.shape(P, f, { took: 0 }).listing.dirs['~/folder-made']) || {}).kids || [];
+  const t0 = Date.now();
+  const first = await dm.dirCollect(P.wire, { timeoutMs: 8000 });
+  fs.mkdirSync(path.join(PARENT, 'behind-its-back'));   // the disk, not the agent: no door is called
+  const kept = await dm.dirCollect(P.wire, { timeoutMs: 8000 });
+  const keptMs = Date.now() - t0;
+  const mk = await dm.fsMkdir(path.join(PARENT, 'made-by-the-agent'), { by: 'human:owner' }).then((r) => r, (e) => ({ error: e.message }));
+  const again = await dm.dirCollect(P.wire, { timeoutMs: 8000 });
+  const inside = keptMs < DC.LIST_FRESH_MS;
+  ok(!!(inside && !kidsOf(first).length && !kidsOf(kept).includes('behind-its-back')), `⑪ CONTROL: the agent KEEPS a listing — a folder made on its disk behind its back is not in the parent's listing ${keptMs} ms later (inside its ${DC.LIST_FRESH_MS} ms)`, { keptMs, first: kidsOf(first), kept: kidsOf(kept) });
+  ok(!!(mk && !mk.error && kidsOf(again).includes('made-by-the-agent') && kidsOf(again).includes('behind-its-back')), `⑪ r4927: a folder made by the agent's own fs op drops its kept listing — the parent's next listing names it (${kidsOf(again).join(' ')})`, { mk, again: kidsOf(again) });
+}
+
 POOL.close();
 {
   let e = null; daemonEnded = true;

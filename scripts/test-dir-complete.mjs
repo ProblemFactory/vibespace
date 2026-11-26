@@ -77,7 +77,7 @@ const SECTIONS = [
   ['③b slow probe', 'pool'], ['③c R-a', 'pool'], ['③c R-c', 'pool'], ['③c one match', 'main'], ['③c press mark', 'pool'],
   ['③c walk', 'pool'], ['③c M3', 'pool'], ['③c R-b R-d', 'pool'], ['③c R-i', 'pool'], ['③c R-d seeded', 'pool'], ['③c S4 N5', 'pool'],
   ['③c FAILED', 'pool'], ['③e B-5561', 'main'], ['③b–③d the field', 'main'], ['④', 'main'], ['④ B-1c27', 'main'], ['⑤', 'main'],
-  ['⑦ unreachable', 'main'], ['⑥', 'main'], ['⑦ B-5ce7', 'main'],
+  ['⑦ unreachable', 'main'], ['⑥', 'main'], ['⑦ B-5ce7', 'main'], ['⑧ folder made', 'main'],
 ];
 const MET = new Map();
 const section = async (id, fn) => {
@@ -1128,6 +1128,72 @@ await section('⑦ B-5ce7', async () => {
     ok('CONTROL (the parked branch removed): the parked folder answers «try again in a moment» (red)', c.status === 503 && c.body.error === DOOR.SENTENCE, c);
   }
 });
+lap('\n── ⑧ a folder made is in its parent\'s next listing (主开发 r4927: the collector\'s one door, the make-folder route) ──');
+await section('⑧ folder made', async () => {
+  // THE REAL ROUTE (src/routes/files.js) over the real pool, its collector handed in with a PLACED clock (the route takes the one it
+  // finds): the parent is listed, a folder is made in it through POST /api/mkdir, the parent is listed again AT THE SAME INSTANT —
+  // inside LIST_FRESH_MS. The door (src/dir-collect.js folderMade) dropped the kept listing: the disk was asked again, the folder is
+  // in the rows. RED: the route without the drop (a patched copy) answers the kept rows, the folder missing.
+  const DS = require('../src/server/dir-slice.js'), PARENT = path.join(HOME, 'work', 'made-here'); fs.mkdirSync(PARENT, { recursive: true });
+  const MCm = mutantCopies('dir-complete-folder-made', REPO), fsrNow = read('src/routes/files.js');
+  const NODROP = require(MCm.write('src/routes/files.js', anchored(fsrNow, "    if (ds && typeof ds.folderMade === 'function') { try { ds.folderMade(made); } catch { /* the listing ages out in its 2 s */ } }\n", '    // (the release: no drop)\n', 'test-dir-complete ⑧ the route without the drop'), 'no-drop'));
+  const leg = async (R, name) => {
+    const ck = 3e12, asked = [];   // the PLACED clock: one instant for both listings
+    const app3 = express(); app3.use(express.json()); app3.locals.safeFs = FILE_POOL;
+    app3.locals._dirSlice = DS.create({ home: HOME, repoDir: REPO, now: () => ck, call: async (op, p, o) => { if (op === 'dirSlice') for (const x of p.dirs || []) if (x.path === PARENT) asked.push(op); return (await runOp(op, p)).result; } });
+    app3.use(R);
+    const srv = http.createServer(app3); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const b3 = `http://127.0.0.1:${srv.address().port}`;
+    const list = async () => (await fetch(`${b3}/api/dir-complete?path=${encodeURIComponent('~/work/made-here/')}&bases=${encodeURIComponent('[]')}`)).json();
+    const kidsOf = (r) => (((r && r.listing && r.listing.dirs) || {})['~/work/made-here'] || {}).kids || [];
+    try {
+      const first = await list(), n0 = asked.length;
+      const mk = await fetch(`${b3}/api/mkdir`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: path.join(PARENT, name) }) });
+      const again = await list();
+      return { status: mk.status, onDisk: fs.existsSync(path.join(PARENT, name)), first: kidsOf(first), again: kidsOf(again), askedAgain: asked.length - n0 };
+    } finally { srv.close(); }
+  };
+  const real = await leg(files, 'made-by-the-route'), red = await leg(NODROP, 'made-by-the-release');
+  ok(`⑧ r4927: a folder made inside the two seconds (one placed instant) is in its parent's next listing — the route made it (${real.status}), the disk was asked again (${real.askedAgain} listing), the rows name it (${real.again.join(' ')})`,
+    real.status === 200 && real.onDisk && !real.first.includes('made-by-the-route') && real.again.includes('made-by-the-route') && real.askedAgain >= 1, real);
+  ok(`⑧ RED CONTROL (the route without the drop, the release's): the folder is made (${red.status}) but the parent's next listing is the KEPT one — asked ${red.askedAgain} time(s), the folder missing`,
+    red.status === 200 && red.onDisk && !red.again.includes('made-by-the-release') && red.askedAgain === 0, red);
+  // the door itself: a make-folder that made its parents too (mkdir -p) drops the kept listing of every folder above it
+  const DCm = require('../src/dir-collect.js'), c = DCm.create({ home: HOME, now: () => 1, call: async () => null, poolBusy: () => false });
+  for (const d of [HOME, path.join(HOME, 'work'), PARENT, path.join(HOME, 'code')]) c._caches.listCache.set(d, { at: 1, entry: { kids: [] } });
+  const dropped = c.folderMade(path.join(PARENT, 'a', 'b')), left = [...c._caches.listCache.keys()];
+  ok(`⑧ the door (src/dir-collect.js folderMade): a make-folder of …/a/b drops the kept listing of every folder above it (${dropped} dropped), never another's (${left.map((x) => path.relative(HOME, x) || '~').join(' ')} kept); a relative path drops nothing (${c.folderMade('work/x')})`,
+    dropped === 3 && left.length === 1 && left[0] === path.join(HOME, 'code') && c.folderMade('work/x') === 0, { dropped, left });
+  // A LISTING ALREADY OUT when the folder is made (a PLACED hold: the parent's call read the disk BEFORE the folder existed and its
+  // answer is held until after the door ran): answered to its asker, never KEPT — the next ask at the same placed instant asks the disk
+  // again and names the folder. RED: the collector without that guard (its landing keeps the rows of before)
+  const FLY = path.join(HOME, 'work', 'made-in-flight'); fs.mkdirSync(FLY, { recursive: true });
+  const NOGUARD = withDC(DS, mutantCopies('dir-complete-folder-made-guard', REPO).load('src/dir-collect.js', anchored(read('src/dir-collect.js'), "        if ((madeGen.get(a) || 0) !== g0) return d;", '        if (false) return d;', 'test-dir-complete ⑧ a listing out at the door is kept'), 'no-guard'));
+  const flight = async (D2, name) => {
+    let gateOpen = null, readNow = null; const gate = new Promise((r) => { gateOpen = r; }), read0 = new Promise((r) => { readNow = r; });
+    let hold = true, sentFly = 0;
+    const d = D2.create({ home: HOME, repoDir: REPO, now: () => 4e12, call: async (op, p2) => {
+      const mine = op === 'dirSlice' && (p2.dirs || []).some((x) => x.path === FLY);
+      if (mine) sentFly++;
+      const r = (await runOp(op, p2)).result;
+      if (mine && hold) { hold = false; readNow(); await gate; }   // read BEFORE the folder exists; answered after the door
+      return r;
+    } });
+    const kidsOf = (r) => (((r && r.listing && r.listing.dirs) || {})['~/work/made-in-flight'] || {}).kids || [];
+    const p1 = d.slice({ text: '~/work/made-in-flight/', bases: [] });
+    await read0;
+    fs.mkdirSync(path.join(FLY, name)); d.folderMade(path.join(FLY, name));   // the folder made, the door run, the old call still out
+    gateOpen(); await p1;
+    const again = await d.slice({ text: '~/work/made-in-flight/', bases: [] });
+    return { again: kidsOf(again), sent: sentFly };
+  };
+  const fr = await flight(DS, 'made-while-out'), frRed = await flight(NOGUARD, 'made-while-out-red');
+  ok(`⑧ a listing of the parent already OUT when the folder was made is answered but never kept: the next ask at the same instant asked the disk again (${fr.sent} call(s)) and names it (${fr.again.join(' ')})`,
+    fr.sent === 2 && fr.again.includes('made-while-out'), fr);
+  ok(`⑧ RED CONTROL (no guard at the landing): the old call's rows are kept — the next ask answered from them (${frRed.sent} call), the folder missing`,
+    frRed.sent === 1 && !frRed.again.includes('made-while-out-red'), frRed);
+});
+
 CUR = 'the table';   // r2332 (2): every row of the table met ONE section call, none off it, no leg outside a section
 const unmet = SECTIONS.map(([s]) => s).filter((s) => MET.get(s) !== 1), offTable = [...MET.keys()].filter((s) => !SECTIONS.some(([x]) => x === s));
 ok(`r2332 NO LEG FALLS BETWEEN THE TWO: each of the table's ${SECTIONS.length} rows met ONE section call (${H.mine} run here, ${H.theirs} named for the twin), none off the table, no leg outside a section`,

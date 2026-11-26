@@ -2417,6 +2417,9 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             } else if (FS_ACTIONS[msg.action]) {
               const slow = msg.action === 'copy' || msg.action === 'move' ? 120000 : msg.action === 'du' ? 60000 : 12000; // a folder copy / walk outlives a stat
               const r = await runFs(msg.action, { path: p, to: msg.to === undefined ? undefined : devPath(msg.to), recursive: msg.recursive, data64: msg.data64 }, slow);
+              // r4927: a folder MADE here drops this machine's own kept listing above it — the collector's one door (src/dir-collect.js
+              // folderMade), the same the hub's make-folder route calls; only when this daemon's collector exists (nothing is kept else)
+              if (msg.action === 'mkdir' && r && r.ok && dirCollector && typeof dirCollector.folderMade === 'function') { try { dirCollector.folderMade(p); } catch { /* it ages out in its 2 s */ } }
               const { data, ...rest } = r;
               mux.control({ op: 'fs-result', id: rid, ...rest });
             } else throw new Error('unknown fs action: ' + msg.action);
