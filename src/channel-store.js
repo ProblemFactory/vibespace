@@ -2434,11 +2434,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // A name with more than SEG_IDS_MAX readings, or one log two rows of the account escape to, takes the release's pass for this
   // search, counted (searchStats.fallback). Nothing else of the search changed: its directory read, its order, its scan, its answer
   // (holder 3's follow, the round's shoulds): an id in the CALLER's list that safeSeg refuses ('', '.', '..', a slash, a backslash,
-  // a NUL, null) rejects the whole search by safeSeg's own words, as the release's name map did; a ROW whose id safeSeg refuses (only
-  // a damaged act line makes one, and it has no log) is passed over on EVERY road — the release's pass threw on it and refused the
-  // account's whole search; here the main road, the fallback and the odd rows agree
+  // a NUL, null) rejects the whole search by safeSeg's own words, as the release's name map did; a ROW whose id safeSeg refuses (a
+  // damaged act line makes one, or a vendor id the check refuses — entry() runs no check: a listing's id with a slash or a backslash
+  // makes one too; such a row has no log) is passed over on EVERY road — the release's pass threw on it and refused the account's
+  // whole search; here the main road, the fallback and the odd rows agree, and each one passed over is COUNTED (searchStats.passedOver,
+  // 主开发 r4966: why the release's error went away)
   const LOG_STEP = 2000, WANT_STEP = 10000, SEG_IDS_MAX = 64;
-  const searchStats = { searches: 0, files: 0, rowsRead: 0, fallback: 0 };
+  const searchStats = { searches: 0, files: 0, rowsRead: 0, fallback: 0, passedOver: 0 };
   const SAFE_CH = /^[A-Za-z0-9._@:+-]$/, HEX_DIGITS = /^[0-9a-f]+$/;
   /** every id `x` with safeSeg(x) === seg (null when there are more than SEG_IDS_MAX) */
   function segIds(seg) {
@@ -2463,7 +2465,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return out.length > SEG_IDS_MAX ? null : out;
   }
   const turnBack = () => new Promise((r) => setImmediate(r));
-  const segName = (id) => { try { return `${safeSeg(id)}.ndjson`; } catch { return null; } };   // a row's log name; null for an id safeSeg refuses (a damaged row: passed over on every road)
+  const segName = (id) => { try { return `${safeSeg(id)}.ndjson`; } catch { return null; } };   // a row's log name; null for an id safeSeg refuses (a damaged act line's, or a vendor id the check refuses: passed over on every road, counted)
   async function logFilesOf(adapterId, all, convIds) {
     searchStats.searches++;
     let want = null;
@@ -2491,10 +2493,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
     if (fallback) {   // the release's pass, counted: every row of the account mapped to its file
       searchStats.fallback++; lastAtOf.clear(); titleOf.clear();
-      for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; const n = en && en.adapterId === adapterId && en.id != null ? segName(en.id) : null; if (n) { lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }
+      for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; const own = en && en.adapterId === adapterId && en.id != null, n = own ? segName(en.id) : null; if (own && !n) searchStats.passedOver++; if (n) { lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }
       return { names, lastAtOf, titleOf };
     }
-    for (const k of oddKeys.keys()) { const en = conv[k]; if (en && en.adapterId === adapterId && en.id != null) { searchStats.rowsRead++; const n = segName(en.id); if (!n) continue; lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }   // after the account's own (the release's order); .keys(): the odd keys' Set, or a Map of their slots, read alike
+    for (const k of oddKeys.keys()) { const en = conv[k]; if (en && en.adapterId === adapterId && en.id != null) { searchStats.rowsRead++; const n = segName(en.id); if (!n) { searchStats.passedOver++; continue; } lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }   // after the account's own (the release's order); .keys(): the odd keys' Set, or a Map of their slots, read alike
     return { names, lastAtOf, titleOf };
   }
   async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null, match = null } = {}) {
@@ -3776,7 +3778,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     startDamagedEmpty,   // B-f276 1b: the damaged family's one door (a person's choice — the engine's route asks it)
     appendRecords, readTail, readTailAsync, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
-    searchStats: () => ({ ...searchStats }),   // B-360d found holder 3: the search's own counts (files, rows read, fallbacks)
+    searchStats: () => ({ ...searchStats }),   // B-360d found holder 3: the search's own counts (files, rows read, fallbacks, rows passed over)
     prependRecords, oldestRecord, search, attachmentGet, attachmentGetAsync, attachmentPut, attachmentUsage, attachmentLedgerSettled, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite, peopleHeld, peopleUpdate, onPeopleLift,
     searchMemoRead, searchMemoWrite, searchMemoDrop,
     feedMissRead, feedMissWrite, feedMissDrop,
