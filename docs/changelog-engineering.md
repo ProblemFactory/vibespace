@@ -157,6 +157,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### lg-rewind — test-cache-bounds reads the view's dispose by its own bounds (主开发 r4571, tests only)
 - The pin «a history window says view-close when it goes» allowed at most 1200 characters between dispose()'s start and the view hold's send: 1159 at the train's tip, 1281 once line 995's two commits stand on the first pass's strip press commit — red at the pick's dry tip, the product right. It now takes dispose()'s body WHOLE by its structure (from its head to the line that closes at its own indent) and asserts the send inside it; a RED control: a dispose without the send.
+- Its follow (line 1037's): the helper's positions are named for what they are (headAt, closeAt) and compared to -1 — test-ci-gate's wall-clock census had read «b < 0» as a literal time bound under 1000 ms (two items, both zones).
 
 ## 2.369.419 — 2026-11-25
 
