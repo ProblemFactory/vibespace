@@ -417,8 +417,10 @@ async function unpairDialDevice(deviceId) {
   let proofKey = null;
   try { if (!hostTokenLocked('dial-' + deviceId)) proofKey = PT.tokenHash(agentdHostToken('dial-' + deviceId)); } catch { }
   try { hosts.noteRetiredDial?.(deviceId, hosts.dialTokenHash(deviceId), proofKey); } catch { }
-  try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
-  try { portForwards.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id, { now: true }); } catch { }   // r5036: a person's removal lands at once (port-forwards.json held: at its lift, on the writer)
+  // r5156: a person's removal lands both stores at once — ONE bound for the two landings (a stalled data folder holds the loop once)
+  const removalDeadline = (() => { try { return require('../store-writer.js').storeWriter().flushDeadline(); } catch { return null; } })();
+  try { await machineMounts.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id, { now: true, deadline: removalDeadline }); } catch { }   // r5156: one landing
+  try { portForwards.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id, { now: true, deadline: removalDeadline }); } catch { }   // r5036: a person's removal lands at once (port-forwards.json held: at its lift, on the writer)
   try { exitProxy.onMachineUnpaired(hosts.findByDeviceId(deviceId)?.id); } catch { }
   try { dropHostToken('dial-' + deviceId); } catch { }   // lane vault-e2e-password-fix-r2: the file before the vault, its entry after
   const live = agentdDials.get(deviceId);

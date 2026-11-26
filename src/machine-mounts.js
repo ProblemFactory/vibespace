@@ -358,7 +358,7 @@ class MachineMounts {
   _refuseIfUnread(what) {
     if (this._unread) throw Object.assign(new Error(`${what}: ${this.unreadWords()}`), { code: 'mounts-unread', status: 503 });
   }
-  _save({ now = false, why = 'a mount change' } = {}) {
+  _save({ now = false, why = 'a mount change', deadline = null } = {}) {
     if (!this._hold.writable('a machine-mounts.json write')) return;   // (said once a hold, by the helper)
     // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): machine-mounts.json goes through THE STORE WRITER (src/store-writer.js:
     // its thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the
@@ -367,7 +367,7 @@ class MachineMounts {
     // the routes (server.js passes `now`: a push or pull mount added, a mount removed, a mount again) lands before it answers — the
     // writer's own synchronous road (flushSync); so do the start's one-time saves (the hygiene, the owed ingest paid — r4758) and a
     // lift from torn bytes (once a torn file, at the hold's read again); every caller no person pressed (a pull's landing — see
-    // _stampLanding —, a machine's unpair road) rides the writer off the loop. A failed landing is the writer's own line (its first failure and every
+    // _stampLanding —) rides the writer off the loop; a machine's REMOVAL (r5156) lands once its records are gone. A failed landing is the writer's own line (its first failure and every
     // tenth) and stays owed; nothing is thrown (as the release: a mount's change never failed its act on the file)
     try {
       const W = this._writer(), json = JSON.stringify(this._state, null, 2);
@@ -375,7 +375,7 @@ class MachineMounts {
       W.dirty(this._file, { name: 'machine-mounts.write', mode: 0o600, produce: () => {
         const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
       } });
-      if (now) W.flushSync([this._file], { waitedBy: `machine-mounts.json: ${why}` });
+      if (now) W.flushSync([this._file], { waitedBy: `machine-mounts.json: ${why}`, ...(deadline != null ? { deadline } : {}) });   // r5156: a shared bound when its caller hands one
     } catch (e) { this.log(`machine-mounts.json: its write could not be asked (${(e && e.code) || (e && e.message) || 'an error'})`); }
   }
   _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
@@ -1504,11 +1504,18 @@ class MachineMounts {
   /** B-f276 family unit 2 (r3081): the torn lift of this run — the copy's base name (the Machines section says where it is) or null */
   tornCopy() { return this._tornCopy || null; }
 
-  async onMachineUnpaired(hostId) {
+  /** A machine was removed — its mount records go (each unmount rides the writer). r5156 (主开发): a machine's REMOVAL is a PERSON's act —
+   *  its one caller (unpairDialDevice, src/server/dial-pairing.js — reached only through removeHost) passes `now`: once its records are
+   *  gone, ONE synchronous landing puts machine-mounts.json on disk (a hub killed right after never comes back with that machine's
+   *  mounts), as port-forwards.json since r5036. `deadline` (the writer's flushDeadline): the removal's ONE bound, shared with
+   *  port-forwards.json's landing. A landing that fails or meets the bound is the writer's own line and stays owed (earlier writes of
+   *  its records may land on the writer's own turns while a push's remote unmount is awaited: one LANDING asked, not one write) */
+  async onMachineUnpaired(hostId, { now = false, deadline = null } = {}) {
     if (!hostId) return;
     for (const rec of [...this._state.mounts.filter((m) => m.hostId === hostId)]) {
       try { await this.unmount(rec.id); } catch { }
     }
+    if (now) this._save({ now: true, why: 'a machine removed', deadline });   // r5156: ONE landing for all its records (a person's removal), its bound shared
     // B-f276 family unit 2 (r3081): a PERSON removed this machine — its reverse-mount tokens with no record here (minted before a torn
     // lift: unknown to the sweep) are revoked now, by their owner (the un-pairing asked revokeHeldFor first: the token store reads)
     if (this._state.tornAt) {

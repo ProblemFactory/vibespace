@@ -23,6 +23,11 @@
 //      W6 r5036, a machine's REMOVAL: ONE synchronous landing a removal (one flush, one write of the file), NONE for a machine with
 //         no forward while nothing is owed (an owed write is landed by a person's act, as every Ports press); EVERY call of the store's
 //         unpair in src/ and server.js: the two person roads pass now, the lift's passes none
+//      W7 r5156, the same for machine-mounts.json: a machine removed (all its mount records) is ON DISK when the call returns, ONE
+//         landing a removal; none for a machine with no record while nothing is owed, ONE when a write is owed; every call of the mounts
+//         store's unpair names its side. RED: the writer's road
+//      W8 r5156 (S1): a machine's removal hands BOTH stores ONE bound (the writer's flushDeadline): a bound already spent lands neither at
+//         the return (each left owed, landed later on the writer) — never one bound a store. RED: the bound not handed down
 //   R  THE RATE LEGS — each event repeated N times over a recording writer writes zero or one time. RED each: its gate taken out
 //      R1 port-forwards.json: N dial-ins of a machine with no forward and of one whose forward is live
 //      R2 port-forwards.json: N heal sweeps of a forward that starts while its republish fails (each sweep one 5-min retry)
@@ -252,9 +257,66 @@ try {
     const calls = [], walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (r.endsWith('.js')) srcOf(r).split('\n').forEach((l, i) => { if (/\bportForwards\??\.onMachineUnpaired\(/.test(l)) calls.push([r, l.trim()]); }); } };
     walk('src'); srcOf('server.js').split('\n').forEach((l) => { if (/\bportForwards\??\.onMachineUnpaired\(/.test(l)) calls.push(['server.js', l.trim()]); });
     const own = srcOf(PF).split('\n').filter((l) => /\bthis\.onMachineUnpaired\(/.test(l)).map((l) => l.trim());
-    ok(calls.length === 2 && calls.every(([, l]) => l.includes(', { now: true })')) && calls.some(([f]) => f === 'src/server/exit-routes.js') && calls.some(([f]) => f === 'src/server/dial-pairing.js')
+    ok(calls.length === 2 && calls.every(([, l]) => /, \{ now: true(, deadline: removalDeadline)? \}\)/.test(l)) && calls.some(([f]) => f === 'src/server/exit-routes.js') && calls.some(([f]) => f === 'src/server/dial-pairing.js')
       && own.length === 1 && own[0].includes('try { this.onMachineUnpaired(h); }'),
       `W6 every call of the store's unpair names its side: the two person roads (removeHost, unpairDialDevice) pass now, the lift's passes none (${calls.length} calls, ${own.length} of its own)`, { calls, own });
+  }
+  console.log('W7 r5156: a machine\'s REMOVAL lands machine-mounts.json too — on disk at the return, one landing, its caller passes now');
+  {
+    const recs = (d) => [pull(1, d), pull(2, d), pull(3, d, { hostId: 'host-other' })];
+    // S5: every shape of a call of the MOUNTS store's unpair — by its usual names (machineMounts, getMachineMounts(), mm), optional or not,
+    // and the store calling its own; a call split over lines is read by its first line (its receiver and its opening parenthesis)
+    const MM_CALL = /(\bmachineMounts|getMachineMounts\(\)|\bmm|\bthis)\??\.onMachineUnpaired\??\.?\(/;
+    const scene = async (M) => {
+      const w = machineWorld(M, RW, recs);
+      const writesOf = () => ((RW.stats().find((r) => r.file === w.file) || {}).writes || 0);
+      let flushes = 0; const f0 = RW.flushSync; RW.flushSync = function (...a) { flushes++; return f0.apply(this, a); };
+      let one = null, none = null, owedNone = null;
+      try {
+        const p = w.m.onMachineUnpaired('host-made', { now: true }); await p;
+        const doc = bytes(w.file) || '';
+        one = { flushes, writes: writesOf(), gone: !doc.includes('"mm-made1"') && !doc.includes('"mm-made2"'), kept: doc.includes('"mm-made3"') };
+        flushes = 0; const w0 = writesOf();
+        await w.m.onMachineUnpaired('host-none', { now: true });   // a machine with no record: nothing changed, nothing owed
+        none = { flushes, writes: writesOf() - w0 };
+        // S9: a write OWED (a change riding the writer, not landed yet), then a machine with no record removed: its landing lands the owed write
+        w.m._state.mounts[0].label = 'made-up owed change'; w.m._save(); flushes = 0; const w1 = writesOf();
+        await w.m.onMachineUnpaired('host-none', { now: true });
+        owedNone = { flushes, writes: writesOf() - w1, onDisk: (bytes(w.file) || '').includes('made-up owed change') };
+      } finally { RW.flushSync = f0; }
+      const later = await landed(w.file), docLater = bytes(w.file) || '';
+      return { one, none, owedNone, later, goneLater: !docLater.includes('"mm-made1"') && !docLater.includes('"mm-made2"') };
+    };
+    const t = await scene(require(path.join(REPO, MM)));
+    ok(t.one.flushes === 1 && t.one.writes === 1 && t.one.gone && t.one.kept, 'W7 machine-mounts.json: a machine removed by a person — its two mount records gone from the file when the call returns (the other machine\'s kept), ONE synchronous landing (one flush, one write)', t.one);
+    ok(t.none.flushes === 0 && t.none.writes === 0, 'W7 a machine removed that has no mount record, nothing owed: no landing asked, nothing written', t.none);
+    ok(!!t.owedNone && t.owedNone.flushes === 1 && t.owedNone.writes === 1 && t.owedNone.onDisk, 'W7 a machine removed that has no mount record while a write IS owed: its one landing lands the owed write (a person\'s act lands what is owed)', t.owedNone);
+    let red = null, why = null;
+    try { red = await scene(copyOf(MM, [["    if (now) this._save({ now: true, why: 'a machine removed', deadline });   // r5156: ONE landing for all its records (a person's removal), its bound shared", ""]], 'w7-writer-road')); } catch (e) { why = e.message; }
+    ok(!!red && red.one.gone === false && red.one.flushes === 0 && red.later === true && red.goneLater === true, 'W7 RED CONTROL (the writer\'s road: the removal\'s landing cut): its records are NOT on disk when the call returns (owed), they land later', red || why);
+    const calls = [], walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (r.endsWith('.js')) srcOf(r).split('\n').forEach((l) => { if (MM_CALL.test(l)) calls.push([r, l.trim()]); }); } };
+    walk('src'); srcOf('server.js').split('\n').forEach((l) => { if (MM_CALL.test(l)) calls.push(['server.js', l.trim()]); });
+    const own = calls.filter(([f]) => f === 'src/port-forward.js');   // the forwards store's own lift (its law is W6's)
+    const mine = calls.filter(([f]) => f !== 'src/port-forward.js');
+    ok(mine.length === 1 && mine[0][0] === 'src/server/dial-pairing.js' && /, \{ now: true, deadline: removalDeadline \}\)/.test(mine[0][1]) && own.length === 1, `W7 every call of the mounts store's unpair names its side: its one caller (unpairDialDevice, a person's removal) passes now (${calls.length} call(s))`, calls);
+  }
+  console.log('W8 r5156 (S1): a machine\'s removal hands both stores ONE bound — a bound already spent lands neither at the return');
+  {
+    const scene = async (MMm, PFm) => {
+      const mw = machineWorld(MMm, RW, (d) => [pull(1, d), pull(2, d)]), pw = portsWorld(PFm, RW, [fwd(1, { hostId: 'host-made' }), fwd(2)]);
+      const spent = RW.flushDeadline(-1);   // the removal's one bound, already spent (a stalled storage that took it all)
+      await mw.m.onMachineUnpaired('host-made', { now: true, deadline: spent });
+      pw.pf.onMachineUnpaired('host-made', { now: true, deadline: spent });
+      const atReturn = { mounts: !(bytes(mw.file) || '').includes('"mm-made1"'), forwards: !(bytes(pw.file) || '').includes('"pf-made1"') };
+      const later = { mounts: await landed(mw.file), forwards: await landed(pw.file) };
+      return { atReturn, later, landedLater: !(bytes(mw.file) || '').includes('"mm-made1"') && !(bytes(pw.file) || '').includes('"pf-made1"') };
+    };
+    const t = await scene(require(path.join(REPO, MM)), require(path.join(REPO, PF)));
+    ok(t.atReturn.mounts === false && t.atReturn.forwards === false && t.later.mounts === true && t.later.forwards === true && t.landedLater,
+      'W8 a removal whose ONE bound is already spent: neither store is waited for at the return (each left owed), both land later on the writer — the bound is shared, never one a store', t);
+    let red = null, why = null;
+    try { red = await scene(copyOf(MM, [["      if (now) W.flushSync([this._file], { waitedBy: `machine-mounts.json: ${why}`, ...(deadline != null ? { deadline } : {}) });", "      if (now) W.flushSync([this._file], { waitedBy: `machine-mounts.json: ${why}` });"]], 'w8-own-bound'), require(path.join(REPO, PF))); } catch (e) { why = e.message; }   // stale-pins: kept — the release-shaped text, compiled back in as the red control
+    ok(!!red && red.atReturn.mounts === true && red.atReturn.forwards === false, 'W8 RED CONTROL (the bound not handed down to machine-mounts.json): it takes a bound of its own — landed at the return while the shared one was spent', red || why);
   }
 } finally { /* the real writer stops at the end */ }
 

@@ -621,6 +621,9 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
    *  in flight (that write lands first — settled through the shared cells — then its newer state), until `budgetMs`:
    *  ALWAYS BOUNDED (round 2, law D: a rename the storage never answered held close() for ever). During the exit (after
    *  beginExit) a store's own flush only keeps it dirty — exitFlush writes everything once. → {written, left, ms, budgetMs} */
+  /** r5156 (a removal's read, S1): a deadline in THIS writer's own clock, `budgetMs` (a synchronous flush's bound) from now — two stores
+   *  landed by ONE person's act share it, so a stalled storage holds the loop one bound, never one bound a store */
+  function flushDeadline(budgetMs = syncBound) { return now() + budgetMs; }
   function flushSync(names = null, { budgetMs = syncBound, deadline: dl = null, only = null, waitedBy = 'a synchronous flush' } = {}) {
     const t0 = now(), deadline = dl != null ? dl : t0 + budgetMs, written = [], left = [];
     if (exiting && !exited && names) return { written, left, ms: 0, budgetMs, deferred: true };
@@ -819,7 +822,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   const verifyByRefOn = (on = true) => { verify = !!on; };
   if (keeperOn) startKeeper();   // a suite's own writer may ask for one; the server's is started by bootKeeper() at its boot
   const waits = () => ({ timedOut: waitsTimedOut });   // round 6's amend: waits that ended by their poll, not the write's end
-  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, modes, verifyByRef: verifyByRefOn, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
+  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, flushDeadline, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, modes, verifyByRef: verifyByRefOn, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
 }
 
 /** THE process's writer (one thread, one queue for every store) */
