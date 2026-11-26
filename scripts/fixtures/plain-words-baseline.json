@@ -348,7 +348,6 @@
   "plugin.llm.learn",
   "plugin.llm.learnModel",
   "plugin.tailscale.reachBrowsers",
-  "pool.avoidOverageMembers",
   "pool.reserveFloorPct",
   "ports.watchNew",
   "remote.hubAutomationDefault",

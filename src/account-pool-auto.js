@@ -519,6 +519,31 @@ function provingText(d, { when = (ms) => new Date(ms).toISOString().slice(0, 16)
   return `placed on ${name} to confirm its ${what} reset on ${when(p.window.resetAt)}; a reading follows its first turn`;
 }
 
+// ── THE TIERS (B-87fd item (1), the owner's word «改成永远排最后», 主开发 r4711 / r4744 M1 + M2) ─────────────────────────────────
+// ONE place says which tier a member stands in and the order the tiers are asked in, and EVERY walk takes its order from here:
+// decidePoolSwitch, rankPoolMembers (the live evict path and the device's sealed orders) and soonestUsableMember (the default's
+// fallback). Tier 0 = a member with quota; 1 = a usage-credits member (B-ad05: pay-per-use past its quota, the release's own rule,
+// asked first of the two); 2 = a member BILLING PAID OVERAGE — «paying» is decided HERE, once, in whatever band its reading stands.
+// A row «can serve now» when no bucket of its reading is under its hard bar (servesNow). The last-resort tiers are asked in order,
+// and one whose every row is spent is PASSED OVER when a later tier holds a row that can serve now: it sorts after every tier. The
+// quota tier is never passed over (the default's fallback waits for a member with quota rather than bill one, as the release did).
+// With nobody paying a member's tier is 0 or 1 and nothing is passed over: every walk's order is the release's, byte for byte.
+const TIER_QUOTA = 0, TIER_CREDITS = 1, TIER_PAYING = 2;
+const servesNow = (brs) => !brs.some((b) => b.remaining < THRESH[b.kind].hard);
+function poolTiers({ creditsIds = null, payingIds = null, overageIds = null } = {}) {
+  const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
+  const paying = new Set([...(payingIds || []), ...(overageIds || [])]);
+  const tierOf = (id) => ((credits && credits.has(id)) ? TIER_CREDITS : paying.has(id) ? TIER_PAYING : TIER_QUOTA);
+  // orderOf(rows [{tier, live}], the walk's own candidates) → keyOf(tier): the order the tiers are asked in for THESE rows
+  const orderOf = (rows) => {
+    const has = new Set(), live = new Set();
+    for (const r of rows || []) { has.add(r.tier); if (r.live) live.add(r.tier); }
+    const passed = (t) => t !== TIER_QUOTA && has.has(t) && !live.has(t) && [...live].some((u) => u > t);
+    return (t) => (passed(t) ? TIER_PAYING + 1 + t : t);
+  };
+  return { tierOf, orderOf, credits, paying };
+}
+
 function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, payingIds = null, priority = null, providerOf = null, fromProvider = null }) {
   const out = [];
   // THE PROVIDER (q-053 P0b): the snapshot is a list of HOT re-points the device makes by itself — a member of another
@@ -528,11 +553,10 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
   // USAGE CREDITS (B-ad05): a member whose org bills pay-per-use past 100 %
   // ranks after EVERY member with quota left — the daemon's reflex walks this
   // list top-down, so it may only reach a credits member with nothing else.
-  const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
-  // B-87fd (1) (the owner's word, 主开发 r4668 / r4711): a member BILLING PAID OVERAGE walks in a tier of its OWN, after every credits member
-  const paying = payingIds && (typeof payingIds.has === 'function' ? payingIds : new Set(payingIds));
+  // B-87fd (1) (主开发 r4711 / r4744): a member BILLING PAID OVERAGE walks in a tier of its OWN — the tiers' order from poolTiers
+  const tiers = poolTiers({ creditsIds, payingIds });
   const last = [];
-  const payLast = [];   // B-87fd (1) r4711: the paying tier
+  const lastTier = new Map();   // row → { tier, live } — kept OFF the row (the snapshot's rows are the release's)
   for (const m of members) {
     // A ranked snapshot is a list of FUTURE switch targets (the live evict
     // path picks ranked[0]; the daemon's sealed-orders reflex walks it while
@@ -549,16 +573,16 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
     const row = { id: m.id, name: m.name, eff: r.known ? r.remaining : UNKNOWN_REMAINING_PCT, deadline: weeklyDeadline(c, nowSec), loginPenalty: readLogin ? loginRank(readLogin(m.id)) : 0 };
     // a credits member serves past its quota, so the hard floor does not gate
     // it — it is simply the last resort
-    if (credits && credits.has(m.id)) { last.push({ ...row, credits: true }); continue; }
-    if (paying && paying.has(m.id)) { payLast.push({ ...row, paying: true }); continue; }   // B-87fd (1): it serves past its quota, billed — its own last tier
+    const tier = tiers.tierOf(m.id);
+    if (tier !== TIER_QUOTA) { const x = tier === TIER_CREDITS ? { ...row, credits: true } : { ...row, paying: true }; lastTier.set(x, { tier, live: servesNow(br) }); last.push(x); continue; }   // B-87fd (1): a paying member serves past its quota too, billed — its own tier
     if (r.known && br.some((b) => b.remaining < THRESH[b.kind].hard)) continue;
     out.push(row);
   }
   const order = priorityOrder(priority); // manual priority orders the snapshot too (the device walks it top-down)
   out.sort(order);
-  last.sort(order);
-  payLast.sort(order);
-  return out.concat(last, payLast);
+  const keyOf = tiers.orderOf([...lastTier.values()]);
+  last.sort((x, y) => (keyOf(lastTier.get(x).tier) - keyOf(lastTier.get(y).tier)) || order(x, y));
+  return out.concat(last);
 }
 
 // B-37f9: THE TEN-SECOND EVALUATION GATE FOR KICKS (PURE — the engine only applies it). A KICK (src/server/usage-pool-engine.js
@@ -743,9 +767,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // (in a turn it is never cut: owed to its stop), with none to a credits member's PREPAID quota by the same rules (the ruling,
   // r4711), and with neither it stays ('healthy', the release's own answer). The setting decides only whether a verdict names the
   // bar (toOverage / overageBlocked).
-  const paying = new Set([...(payingIds || []), ...(overageIds || [])]);
-  const curPaying = paying.has(currentId);
-  const curPayingOnly = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(soft)));
+  const tiers = poolTiers({ creditsIds, payingIds, overageIds });
+  const curPaying = tiers.tierOf(currentId) === TIER_PAYING;
+  // r4744 M2: «paying» in WHATEVER band its reading stands — a paying member in its soft band takes every paying path (the move to a
+  // quota member that can settle, the prepaid move, the stays); only a member that can no longer serve leaves by the hard band
+  const curPayingOnly = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(dead)));
   const exhausted = notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(soft)) || curPaying;
   const hardDead = notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(dead));
   // No data on the current target → we cannot judge exhaustion; staying put is
@@ -785,10 +811,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const creditsHeld = [];    // [{id, name}] — usage credits enabled: pay-per-use past 100 % (B-ad05)
   const creditsRanked = [];  // the same members as rows — the LAST resort, after the scraps
   const payingRanked = [];   // B-87fd (1) r4711: members billing paid overage — a tier of their own, after the credits members
+  const creditsSettle = new Set();   // r4744: the credits members a VOLUNTARY move may land on (the release's settle bar) — kept off the rows
   const floor = Number(reserveFloorPct) > 0 ? Number(reserveFloorPct) : 0;
   const overage = overageIds && (typeof overageIds.has === 'function' ? overageIds : new Set(overageIds));
-  const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
-  const curCredits = !!(credits && credits.has(currentId));
+  const credits = tiers.credits;
+  const curCredits = tiers.tierOf(currentId) === TIER_CREDITS;
   // THE PROVIDER (q-053 P0b, the three rules above resolveModel). `crossRows` = members held APART from every ranking:
   // another provider's (a cold move, the model re-resolved) and fallback-only ones (no readings) — chosen only off a
   // hard wall, and then only under 'allow'; under 'never' the best other-provider one is the OFFER (`crossOffer`).
@@ -836,14 +863,17 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // serves past its quota, billed — so it is kept OUT of every ranking and
     // held as the last resort, quota-holding rows first (a credits member
     // that still has quota is not billing yet).
-    if (credits && credits.has(m.id)) {
+    const tier = tiers.tierOf(m.id);
+    if (tier === TIER_CREDITS) {
       creditsHeld.push({ id: m.id, name: m.name });
+      // r4744 (the ruling): a move OFF a paying member is a voluntary one, so its credits target clears the release's settle bar
+      if (r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT)) creditsSettle.add(m.id);
       creditsRanked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk: false, remaining: r.known ? r.remaining : null, weeklyRemaining: weeklyRemaining(br), deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), spare: spareLaneRemaining(c, nowSec), barredWhy: 'credits', dead: r.known && br.some(dead) });
       continue;
     }
     // B-87fd (1) r4711: PAYING IS ITS OWN LAST TIER — a member billing paid overage serves past its quota (billed per token): out of
     // every earlier tier, kept as rows of its own; the bar is NAMED only with the setting on
-    if (paying.has(m.id)) {
+    if (tier === TIER_PAYING) {
       if (overage && overage.has(m.id)) overageBlocked.push({ id: m.id, name: m.name });
       payingRanked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk: false, remaining: r.known ? r.remaining : null, weeklyRemaining: weeklyRemaining(br), deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), spare: spareLaneRemaining(c, nowSec), barredWhy: 'overage', paying: true, dead: r.known && br.some(dead) });
       continue;
@@ -951,22 +981,26 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // quota-bearing candidate AND no scrap left — and never a hop between two
   // credits members that are both spent (that would be a re-point for nothing
   // on every tick: the current one already serves on credits).
-  const usingCreditsTier = !ranked.length && !nearRanked.length && hardDead && creditsRanked.length > 0 && !(curCredits && creditsRanked[0].dead);
-  // B-87fd (1) r4711: THE PAYING TIER is asked only when the credits tier cannot serve — none, or every credits row spent while a
-  // paying row can still serve (a spent tier is passed over) — and never from a paying member onto a spent one (its hop guard). With
-  // no paying row the credits rule above is the release's, byte for byte
-  const usingPaying = !ranked.length && !nearRanked.length && hardDead && payingRanked.length > 0 && !(curPaying && payingRanked[0].dead)
-    && (!usingCreditsTier || (creditsRanked.every((r) => r.dead) && payingRanked.some((r) => !r.dead)));
-  const usingCredits = usingCreditsTier && !usingPaying;
+  // B-87fd (1) (主开发 r4711 / r4744): the last-resort tiers are asked in the order poolTiers states for THESE rows — the credits tier,
+  // then the paying tier; a tier whose every row is spent is passed over when the other holds a row that can serve now. Each keeps its
+  // hop guard: never between two spent credits members (the release's), never onto a spent paying member from one (r4714)
+  const lastResort = !ranked.length && !nearRanked.length && hardDead;
+  const tierKey = tiers.orderOf([...creditsRanked.map((r) => ({ tier: TIER_CREDITS, live: !r.dead })), ...payingRanked.map((r) => ({ tier: TIER_PAYING, live: !r.dead }))]);
+  const creditsOk = creditsRanked.length > 0 && !(curCredits && creditsRanked[0].dead);
+  const payingOk = payingRanked.length > 0 && !(curPaying && payingRanked[0].dead);
+  const usingCredits = lastResort && creditsOk && !(payingOk && tierKey(TIER_PAYING) < tierKey(TIER_CREDITS));
+  const usingPaying = lastResort && payingOk && !usingCredits;
   const pool = usingScraps ? nearRanked : usingCredits ? creditsRanked : usingPaying ? payingRanked : ranked;
   // B-87fd (1) THE RULING (主开发 r4711): a conversation already on a member BILLING PAID OVERAGE, with no quota member able to take it,
   // MOVES to a usage-credits member that still holds PREPAID quota — by the release's soft-band rules: in a turn it is never cut, the
   // move is owed to its stop (warm-soft-defer, the hold); at its stop it goes. A scrap alone (under the reserve floor, a dying login)
   // keeps it where it is, and so does a credits member whose prepaid quota is spent (a hop from billed to billed is for nothing).
-  const prepaid = curPayingOnly ? (creditsRanked.find((r) => !r.dead) || null) : null;
+  // THE BAR (主开发 r4744): the move is a VOLUNTARY one, so the credits target clears the release's SETTLE bar, exactly as a quota target
+  // does — beside a member that cannot settle, in either tier, it stays (a move worth a few turns costs two broken caches)
+  const prepaid = curPayingOnly ? (creditsRanked.find((r) => creditsSettle.has(r.id)) || null) : null;
   const toPrepaid = (r) => ((warm && warm.inTurn)
     ? none('warm-soft-defer', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: r.id, wouldToName: r.name, band: 'soft', fromRemaining: cur.known ? cur.remaining : null, softBucket: null, paying: true, ...bucketDetail(curBr) })
-    : { to: r.id, toName: r.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: r.remaining, reason: 'overage', band: 'soft', toCredits: { id: r.id, name: r.name, dead: false }, ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(r.id) < priority.length ? prioRank(r.id) + 1 : null } : {}) });
+    : { to: r.id, toName: r.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: r.remaining, reason: 'overage', band: 'soft', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(r.id) < priority.length ? prioRank(r.id) + 1 : null } : {}) });
   if (!pool.length) {
     if (prepaid) return toPrepaid(prepaid);
     // B-87fd (1): a member billing paid overage with NOWHERE to go stays — the release's own answer for it (it read healthy there):
@@ -1018,7 +1052,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // serve it), `blockedWhy` keeps the sentence's own reason (all-rejected / all-logins-expired / …).
     if (notMember) {
       const listed = membership == null ? null : (typeof membership.has === 'function' ? membership : new Set(membership));
-      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, payingIds: paying, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode });
+      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, payingIds: tiers.paying, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode });
       return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
     }
     return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
@@ -1299,8 +1333,7 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
   // a LAPSED subscription (verify r1 ④, r2 ①) is NEVER a pick — removing the default must never park the pool (and every
   // NEW conversation) on it; every candidate lapsed ⇒ null, exactly like a pool whose candidates are all signed out
   const lapsed = (id) => !!(readLogin && memberLapsed(readLogin(id)));
-  const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
-  const paying = payingIds && (typeof payingIds.has === 'function' ? payingIds : new Set(payingIds));   // B-87fd (1) r4711: a member billing paid overage — its own tier, after every credits member
+  const tiers = poolTiers({ creditsIds, payingIds });   // B-87fd (1) (主开发 r4711 / r4744): the tiers' order, from the one place
   const rows = [];
   (members || []).forEach((m, i) => {
     if (!m || typeof m.id !== 'string' || lapsed(m.id)) return;
@@ -1310,10 +1343,10 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     if (rd && typeof rd === 'object' && typeof rd.held === 'string') return;   // r3136 / B-6a92 (r2855): never parked on a member whose reading cannot be told (unread, or held on another account's instant)
     const v = quotaVerdict(rd, nowSec, { tier: 'hard' });
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
-    const isCredits = !!(credits && credits.has(m.id));
-    rows.push({ id: m.id, at, tier: isCredits ? 1 : (paying && paying.has(m.id)) ? 2 : 0, rank: rank ? rank(m.id) : 0, i, ap });
+    rows.push({ id: m.id, at, tier: tiers.tierOf(m.id), rank: rank ? rank(m.id) : 0, i, ap });
   });
-  rows.sort((x, y) => (x.ap - y.ap) || (x.tier - y.tier) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));   // B-87fd (1) r4711: the tiers in order (quota, credits, paying)
+  const keyOf = tiers.orderOf(rows.map((r) => ({ tier: r.tier, live: r.at === 0 })));
+  rows.sort((x, y) => (x.ap - y.ap) || (keyOf(x.tier) - keyOf(y.tier)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
   return rows.length ? rows[0].id : null;
 }
 
@@ -1948,6 +1981,6 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   wallDoor, evalGateOpen, EVAL_GATE_MS,
-  quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, poolCheckingNotice, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
+  quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, poolCheckingNotice, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember, poolTiers,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
   classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, recordCacheFact, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };
