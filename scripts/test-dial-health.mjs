@@ -338,7 +338,7 @@ console.log('— B-f276 (主开发 r4718): dial-health.json UNDER THE STORE-READ
   const MH = mutantCopies('dhl-held', REPO);
   /** life one: a second dialer named — ONE item filed and recorded, on disk */
   // B-574d (r4760): the record is the store writer's, written on its thread — ON DISK before the next life meets the file
-  const lifeOne = async (Mod = HW) => { const Wd = world(Mod); const a = Wd.mk(); a.observe(macHost(Wd), { connected: true }); await a.whenWritten(); a.stop();
+  const lifeOne = async (Mod = HW) => { const Wd = world(Mod); const a = Wd.mk(); a.observe(macHost(Wd), { connected: true }); const wrote = await a.whenWritten(); if (wrote !== true) ok(false, `a life's record is on disk before the next life (whenWritten answered ${wrote})`); a.stop();
     const file = path.join(Wd.dir, 'dial-health.json'); return { Wd, file, bytes: fs.readFileSync(file, 'utf8'), itemId: Wd.open()[0].id }; };
   const heldLife = (L) => { const pr = placeReads(L.file); let w = null; try { w = L.Wd.mk(); } finally { pr.restore(); } return { w, seen: pr.seen.n }; };
   const passes = (L, w) => { L.Wd.tick(30e3); const v = w.observe(macHost(L.Wd), { connected: true });   // it still knocks
@@ -397,17 +397,18 @@ console.log('— B-574d (主开发 r4760): dial-health.json is THE STORE WRITER\
 {
   const MWr = mutantCopies('dhl-writer', REPO);
   const WSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-health-watch.js'), 'utf8');
-  /** the main thread's synchronous writes of the ledger (its temp or the file) while `fn` runs */
-  const syncWrites = (file, fn) => { const f = path.resolve(file), real = { w: fs.writeFileSync, r: fs.renameSync }, hits = [];
+  /** the main thread's synchronous writes of the ledger (its temp or the file) while `fn` runs — to its end, its awaits too */
+  const syncWrites = async (file, fn) => { const f = path.resolve(file), real = { w: fs.writeFileSync, r: fs.renameSync }, hits = [];
     fs.writeFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p).startsWith(f)) hits.push('write ' + path.basename(p)); return real.w.call(this, p, ...a); };
     fs.renameSync = function (a, b, ...r) { if (typeof b === 'string' && path.resolve(b) === f) hits.push('rename'); return real.r.call(this, a, b, ...r); };
-    try { fn(); } finally { fs.writeFileSync = real.w; fs.renameSync = real.r; } return hits; };
+    try { await fn(); } finally { fs.writeFileSync = real.w; fs.renameSync = real.r; } return hits; };
   const life = async (Mod) => { const Wd = world(Mod); const a = Wd.mk(); const file = path.join(Wd.dir, 'dial-health.json');
-    const hits = syncWrites(file, () => { a.observe(macHost(Wd), { connected: true }); });
-    const written = await a.whenWritten(); let disk = null; try { disk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { } a.stop(); return { hits, written, disk, item: Wd.open()[0] && Wd.open()[0].id }; };
+    let written = null;   // the main thread watched from the pass to the landing (the writer's own thread writes)
+    const hits = await syncWrites(file, async () => { a.observe(macHost(Wd), { connected: true }); written = await a.whenWritten(); });
+    let disk = null; try { disk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { } a.stop(); return { hits, written, disk, item: Wd.open()[0] && Wd.open()[0].id }; };
   const L = await life(HW);
   const rec = L.disk && L.disk.hosts && L.disk.hosts[`host-dial-Macbook|${DH.SECOND}`];
-  ok(L.hits.length === 0 && L.written === true && !!rec && !!L.item && rec.itemId === L.item, 'WRITTEN OFF THE LOOP: a pass that files the item writes NOTHING on the main thread (no temp, no rename) — the record is on disk after whenWritten(), its item id in it', { hits: L.hits, written: L.written });
+  ok(L.hits.length === 0 && L.written === true && !!rec && !!L.item && rec.itemId === L.item, 'WRITTEN OFF THE LOOP: a pass that files the item writes NOTHING on the main thread from the pass to the landing (no temp, no rename) — the record is on disk after whenWritten(), its item id in it', { hits: L.hits, written: L.written });
   const Rel = MWr.load('src/server/dial-health-watch.js', editAnchor(WSRC, "    try { SW().dirty(file, { name: 'dial-health.write', mode: 0o600, produce: () => JSON.stringify({ version: 1, hosts: ledger }, null, 2) }); }\n", "    try { const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, hosts: ledger }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }\n", 'src/server/dial-health-watch.js'), 'release-save');   // stale-pins: kept (the red copy's own text: the release's save)
   const R = await life(Rel);
   ok(R.hits.length >= 2, 'RED: the release\'s save (an unsynced temp written and renamed ON THE LOOP) — the main thread\'s writes are seen', R.hits);

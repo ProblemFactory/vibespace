@@ -194,7 +194,7 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   const S = { hostKey: 'host-dial-HB1', machine: 'HB1', from: '2.369.199', to: '2.369.201', ...WIN };
   /** life one: a stuck update filed and recorded, and a pending deadline (another device) — on disk */
   // B-574d (r4760): the record is the store writer's, written on its thread — ON DISK before the next life meets the file
-  const lifeOne = async (Mod = DW) => { const a = world(Mod); a.w.stuck(S); a.w.begun({ hostKey: 'host-dial-HB2', machine: 'HB2', from: '2.369.199', to: '2.369.201' }); await a.w.whenWritten(); a.w.stop();
+  const lifeOne = async (Mod = DW) => { const a = world(Mod); a.w.stuck(S); a.w.begun({ hostKey: 'host-dial-HB2', machine: 'HB2', from: '2.369.199', to: '2.369.201' }); const wrote = await a.w.whenWritten(); if (wrote !== true) ok(false, `a life's record is on disk before the next life (whenWritten answered ${wrote})`); a.w.stop();
     const file = path.join(a.dir, 'device-upgrades.json'); return { ...a, file, bytes: fs.readFileSync(file, 'utf8'), itemId: a.open()[0].id }; };
   /** a held life: the same folder, its read refused once */
   const heldLife = (Mod, a, lines = []) => { const pr = placeReads(a.file); let w = null; try { w = Mod.create({ userTodos: a.todos, dataDir: a.dir, log: (l) => lines.push(l), tickMs: 0 }); } finally { pr.restore(); } return { w, lines, seen: pr.seen.n }; };
@@ -277,17 +277,18 @@ console.log('— B-574d (主开发 r4760): device-upgrades.json is THE STORE WRI
 {
   const MWr = mutantCopies('dus-writer', REPO);
   const USRC = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
-  /** the main thread's synchronous writes of the ledger (its temp or the file) while `fn` runs */
-  const syncWrites = (file, fn) => { const f = path.resolve(file), real = { w: fs.writeFileSync, r: fs.renameSync }, hits = [];
+  /** the main thread's synchronous writes of the ledger (its temp or the file) while `fn` runs — to its end, its awaits too */
+  const syncWrites = async (file, fn) => { const f = path.resolve(file), real = { w: fs.writeFileSync, r: fs.renameSync }, hits = [];
     fs.writeFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p).startsWith(f)) hits.push('write ' + path.basename(p)); return real.w.call(this, p, ...a); };
     fs.renameSync = function (a, b, ...r) { if (typeof b === 'string' && path.resolve(b) === f) hits.push('rename'); return real.r.call(this, a, b, ...r); };
-    try { fn(); } finally { fs.writeFileSync = real.w; fs.renameSync = real.r; } return hits; };
+    try { await fn(); } finally { fs.writeFileSync = real.w; fs.renameSync = real.r; } return hits; };
   const life = async (Mod) => { const a = world(Mod); const file = path.join(a.dir, 'device-upgrades.json');
-    const hits = syncWrites(file, () => { a.w.stuck({ hostKey: 'host-dial-WR1', machine: 'WR1', from: '2.369.199', to: '2.369.201', ...WIN }); a.w.begun({ hostKey: 'host-dial-WR2', machine: 'WR2', from: '2.369.199', to: '2.369.201' }); });
-    const written = await a.w.whenWritten(); let disk = null; try { disk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { } a.w.stop(); return { hits, written, disk }; };
+    let written = null;   // the main thread watched from the events to the landing (the writer's own thread writes)
+    const hits = await syncWrites(file, async () => { a.w.stuck({ hostKey: 'host-dial-WR1', machine: 'WR1', from: '2.369.199', to: '2.369.201', ...WIN }); a.w.begun({ hostKey: 'host-dial-WR2', machine: 'WR2', from: '2.369.199', to: '2.369.201' }); written = await a.w.whenWritten(); });
+    let disk = null; try { disk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { } a.w.stop(); return { hits, written, disk }; };
   const L = await life(DW);
   ok(L.hits.length === 0 && L.written === true && !!L.disk && L.disk.devices['host-dial-WR1'] && L.disk.devices['host-dial-WR1'].to === '2.369.201' && L.disk.gone['host-dial-WR2'] && L.disk.gone['host-dial-WR2'].pending === true,
-    'WRITTEN OFF THE LOOP: a stuck update and a push that began write NOTHING on the main thread (no temp, no rename) — the record is on disk after whenWritten(), both in it', { hits: L.hits, written: L.written });
+    'WRITTEN OFF THE LOOP: a stuck update and a push that began write NOTHING on the main thread from the event to the landing (no temp, no rename) — the record is on disk after whenWritten(), both in it', { hits: L.hits, written: L.written });
   const Rel = MWr.load('src/server/device-upgrade-watch.js', editAnchor(USRC, "    try { SW().dirty(file, { name: 'device-upgrades.write', mode: 0o600, produce: () => JSON.stringify({ version: 1, devices: ledger, gone }, null, 2) }); }\n", "    try { const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, devices: ledger, gone }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }\n", 'src/server/device-upgrade-watch.js'), 'release-save');   // stale-pins: kept (the red copy's own text: the release's save)
   const R = await life(Rel);
   ok(R.hits.length >= 2, 'RED: the release\'s save (an unsynced temp written and renamed ON THE LOOP) — the main thread\'s writes are seen', R.hits);

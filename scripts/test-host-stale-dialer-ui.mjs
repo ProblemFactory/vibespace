@@ -74,7 +74,10 @@ try {
   const log = W.serverLog.join('');
   const n2 = (log.match(/a SECOND agent with an old token/g) || []).length, nTold = (log.match(/\[dial-health\] oldmac: a second agent with an old token .* told the user/g) || []).length;
   ok(n2 === 1 && nTold === 1, `the journal: ONE refusal line across 3 knocks (${n2}), ONE "told the user" line (${nTold})`);
-  const ledger = JSON.parse(fs.readFileSync(path.join(W.wt, 'data', 'dial-health.json'), 'utf8'));
+  // B-574d (lane lg-remote-hardening, 主开发 r4760): the record is the store writer's — written on its thread at its own pace, so it is
+  // WAITED for (as the hub id above is), never read once right after the item was filed
+  let ledger = {};
+  for (let i = 0; i < 40; i++) { try { ledger = JSON.parse(fs.readFileSync(path.join(W.wt, 'data', 'dial-health.json'), 'utf8')); } catch { ledger = {}; } if (Object.keys(ledger.hosts || {}).length) break; await sleep(250); }
   const recs = Object.values(ledger.hosts || {});
   ok(recs.length === 1 && recs[0].itemId && recs[0].machine === 'oldmac', 'ONE For-you item filed (the ledger names it)', recs);
 

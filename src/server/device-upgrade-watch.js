@@ -20,7 +20,7 @@
  * spoke (`stuck` needs a device that answers). `begun` arms a deadline per device (persisted: a hub restart keeps it),
  * every hello is `answered`; a device silent GONE_AFTER_MS after its upgrade began gets ONE For-you item per (machine,
  * version) — `sweep()` (a 30 s unref'd tick) files it, `answered` retracts it (`system`) when the device dials in.
- * The ledger is data/device-upgrades.json (atomic tmp+rename): it outlives the in-memory upgrade ledger and restarts.
+ * The ledger is data/device-upgrades.json (the store writer's — written, synced and renamed on its thread, B-574d): it outlives the in-memory upgrade ledger and restarts.
  * A PUSH IS NEWS (lane device-act-audit): `begun` also files the URGENT `upgrade-pushed` item (src/server/device-alerts.js —
  * once per device and from → to; the hub's own daemon never), the third of the three events of design q-042 D10.
  * A REFUSED UPGRADE (lane device-bundle-signing, design q-042 D2): `refused` with the code —
