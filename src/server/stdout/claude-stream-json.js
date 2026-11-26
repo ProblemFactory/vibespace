@@ -196,6 +196,13 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     });
   }
 
+  /** THE FILE ROAD's SEAM (lane lg-group-parents, 主开发 r4661 / r4741): three numbers in memory on the session — `judged` every
+   *  assistant record this road looked at (local or remote, BEFORE its host check), `started` every publish entered (before its
+   *  first await), `settled` every publish ended (its finally). Read by the suites only (a decision NOT to publish is judged on
+   *  judged moving while started does not — no wait); an underscore field like the road's other per-session state: never on
+   *  the wire, in the stored meta, in a snapshot, a broadcast or a page; three numbers, never a list. */
+  const fileRoadOf = (session) => session._fileRoad || (session._fileRoad = { judged: 0, started: 0, settled: 0 });
+
   /**
    * Publish the files ONE SendUserFile call names, then tell the session's
    * clients where they landed. Fire-and-forget and fully async (the
@@ -205,6 +212,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
    * silent failure this product does not tolerate.
    */
   async function publishUserFiles(session, id, block, { broadcastToSession }) {
+    const road = fileRoadOf(session);
+    road.started++;   // THE FILE ROAD's SEAM: counted before the first await (a decision to publish is visible in the same turn)
+    try {
     const rec = userChannelRecord({ toolName: block.name, input: block.input, output: null });
     if (!rec) return;
     const base = session._worktreePath || session.cwd || '';
@@ -267,6 +277,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
     if (!out.length) return;
     try { broadcastToSession(session, id, { type: 'user-file-published', sessionId: id, toolCallId: block.id, files: out }); } catch { }
     global.__vsEvent?.('user-file-published', `${out.filter((f) => f.link).length}/${out.length}`);
+    } finally { road.settled++; }   // THE FILE ROAD's SEAM: every publish's end, whatever its road (a file refused, a page written, a throw)
   }
 
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos }) {
@@ -1057,6 +1068,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // guess). Paths resolve against the directory the CLI ITSELF is in
           // (`_worktreePath` for a --worktree session, else the session cwd) —
           // the tool's own describe says "absolute or relative to cwd".
+          if (msg.type === 'assistant' && Array.isArray(msg.message?.content)) fileRoadOf(session).judged++;   // THE FILE ROAD's SEAM: looked at, before the host check
           if (msg.type === 'assistant' && Array.isArray(msg.message?.content) && !session.host) {
             for (const b of msg.message.content) {
               if (b?.type !== 'tool_use' || userChannelKind(b.name) !== 'file') continue;
