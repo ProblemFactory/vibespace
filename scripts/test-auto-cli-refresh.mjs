@@ -3,7 +3,7 @@
 // function is the whole policy — pin the owner's requirements: fast workflow
 // bursts refresh within minutes (drift trigger), idle accounts are NEVER
 // polled (the ban-postmortem's signal stays impossible), floors serialize.
-import './scratch.mjs';
+import { anchored } from './scratch.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { decideCliRefresh } = require('../src/account-pool-auto.js');
@@ -699,6 +699,7 @@ parentPort.on('message', (m) => {
       state() { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'auto-cli-state.json'), 'utf8')); } catch { return null; } },
       async run(minutes) { for (let i = 0; i < minutes; i++) { await loop.tick(); T += 60e3; } },
       restart() { loop = createAutoCliLoop(deps); },
+      mem() { return loop.state; },   // r4771: the loop's memory (what a read again merges into)
       get now() { return T; },
     };
   };
@@ -807,6 +808,75 @@ parentPort.on('message', (m) => {
     const OLD_LOOP = path.join(scratch, 'loop-old-read.js'); fs.writeFileSync(OLD_LOOP, loopTxt.replace(OLD[0], OLD[1]));   // stale-pins: kept — the read as the release had it, planted back as the RED
     const { w: r0 } = placed('eio', { stateFile: STATE, loopFile: OLD_LOOP }); await r0.run(60);
     ok(bad(r0).length >= 1 && bad(r0)[0].t - T0 < 10 * 60e3, `§ban-safety RED: today's read (a refused read ⇒ the empty state) asks the failing row in its first minutes (min ${bad(r0).length ? (bad(r0)[0].t - T0) / 60e3 : 'none'}; ${bad(r0).length} calls in the hour)`, mins(r0));
+
+    // 主开发 r4748 / r4771 — THE READ AGAIN AT THE WAIT's END (B-574d): one ASYNC read of the file at the tick that ends the unknown wait
+    // (never a look on a cadence). An error of the FILE SYSTEM (it may heal): the wait starts again, said once a wait. TORN bytes (they
+    // never heal): kept aside ONCE, the loop goes on with its memory. The state: MERGED (every stamp the later, every count the larger,
+    // every bucket kept). Every fault PLACED: the read's answer through fs.promises (EIO, once), or torn bytes really on disk.
+    const placeAgain = (eio = 0) => { const real = fs.promises.readFile; let n = 0, all = 0;
+      fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && p.endsWith(STATE_TAIL)) { all++; if (n < eio) { n++; return Promise.reject(Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' })); } } return real.call(this, p, ...a); };
+      return { reads: () => all, restore: () => { fs.promises.readFile = real; } }; };
+    const loopCut = (name, from, to) => { const f = path.join(scratch, name + '.js'); fs.writeFileSync(f, anchored(loopTxt, from, to, name)); return f; };
+    const NO_REREAD = loopCut('loop-no-reread', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) await readAgain(now); }', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) st.unknownAt = null; }');   // the release: the wait ends with no read (stale-pins: kept — the release's wait end, planted back as the RED)
+    const NO_RETRY = loopCut('loop-no-retry', "    st.unknownAt = now;\n    warn(`[auto-cli] pacing state still unreadable", "    st.unknownAt = null;\n    warn(`[auto-cli] pacing state still unreadable");   // an error of the file system ends the wait
+    const TORN_WAITS = loopCut('loop-torn-waits', "    if (a.state === 'corrupt') {", "    if (false) {");   // torn bytes taken for an error that may heal
+    const saidN = (w, re) => w.logs.filter((l) => re.test(l)).length;
+    const STILL = /pacing state still unreadable/, MERGED = /pacing state read again at the end of its unknown wait — merged/, TORNED = /pacing state's bytes are torn/;
+    { // (a) AN ERROR OF THE FILE SYSTEM at the wait's end: the wait starts again, said once a wait; the next wait's end reads it again
+      const pa = placeAgain(1);
+      try {
+        const { w, file } = placed('eio', { stateFile: STATE });
+        await w.run(WAIT_MIN + 1);   // the wait's end at min WAIT_MIN: the read again refused (placed)
+        const first = pa.reads(), said1 = saidN(w, STILL);
+        await w.run(WAIT_MIN - 1);   // the second wait, to its last minute
+        const inWaits = w.calls.length, reads2 = pa.reads(), bytes = fs.readFileSync(file, 'utf8');
+        await w.run(10);             // the second wait's end: a real read — the state, merged; the failing row's backoff long past
+        ok(first === 1 && said1 === 1 && inWaits === 0 && reads2 === 1 && bytes === JSON.stringify(STATE) && pa.reads() === 2 && saidN(w, STILL) === 1 && saidN(w, MERGED) === 1 && bad(w).length >= 1,
+          `§ban-safety r4771 (a): an ERROR OF THE FILE SYSTEM at the wait's end (EIO, placed) — the wait starts again, said once (${said1}); no call in ${2 * WAIT_MIN} min (${inWaits}), the file not written over, ONE async read a wait's end (${reads2}, then ${pa.reads()}); healed: merged (${saidN(w, MERGED)}) and the failing row asked again`, { first, said1, inWaits, reads2, reads: pa.reads(), calls: mins(w) });
+      } finally { pa.restore(); }
+      const pr = placeAgain(1);
+      try {
+        const { w } = placed('eio', { stateFile: STATE, loopFile: NO_RETRY });
+        await w.run(WAIT_MIN + 10);
+        ok(bad(w).length >= 1 && bad(w)[0].t - T0 < WAIT_MIN * 60e3 + 10 * 60e3, `§ban-safety r4771 (a) RED CONTROL (an error of the file system ends the wait): the failing row asked minutes after the refused read (min ${bad(w).length ? (bad(w)[0].t - T0) / 60e3 : 'none'})`, mins(w));
+      } finally { pr.restore(); }
+    }
+    { // (b) TORN BYTES on disk at the wait's end (they never heal): kept aside ONCE under the dated name, the loop goes on with its memory
+      const TORN = JSON.stringify(STATE).slice(0, 30);
+      const torn = async (loopFile) => { const pa = placeAgain(0);
+        try { const { w, file } = placed('torn', { stateFile: STATE, loopFile }); fs.writeFileSync(file, TORN);
+          await w.run(WAIT_MIN + 10);
+          const dir = path.dirname(file), asides = fs.readdirSync(dir).filter((f) => f.startsWith('auto-cli-state.json.damaged-'));
+          return { w, file, asides, asideBytes: asides.length ? fs.readFileSync(path.join(dir, asides[0]), 'utf8') : null, reads: pa.reads() };
+        } finally { pa.restore(); } };
+      const r = await torn(REAL_LOOP);
+      const fresh = r.w.state();
+      ok(r.asides.length === 1 && r.asideBytes === TORN && saidN(r.w, TORNED) === 1 && saidN(r.w, STILL) === 0 && r.reads === 1 && bad(r.w).length >= 1 && (bad(r.w)[0].t - T0) / 60e3 >= WAIT_MIN && !!fresh && typeof fresh === 'object',
+        `§ban-safety r4771 (b): TORN BYTES at the wait's end — kept aside ONCE (${r.asides.join(', ')}: the bytes whole), said once (${saidN(r.w, TORNED)}), ONE async read (${r.reads}); the loop goes on with its memory — the failing row asked at min ${bad(r.w).length ? (bad(r.w)[0].t - T0) / 60e3 : 'none'}, the next save writes the state anew`, { asides: r.asides, reads: r.reads, calls: mins(r.w) });
+      const c = await torn(TORN_WAITS);
+      ok(c.w.calls.length === 0 && c.asides.length === 0 && saidN(c.w, STILL) === 1, `§ban-safety r4771 (b) RED CONTROL (torn bytes taken for an error that may heal): the wait starts again over a file nobody can mend — no call in ${WAIT_MIN + 10} min (${c.w.calls.length}), nothing kept aside`, { calls: mins(c.w), asides: c.asides });
+    }
+    { // (c) THE STATE at the wait's end: MERGED — the failing row's six failures kept (its next failure books the seventh); RED: the release
+      const merged = async (loopFile) => { const pa = placeAgain(0);
+        try { const { w } = placed('eio', { stateFile: STATE, loopFile }); await w.run(WAIT_MIN + 10); return { w, disk: w.state(), reads: pa.reads() }; } finally { pa.restore(); } };
+      const m = await merged(REAL_LOOP), rel = await merged(NO_REREAD);
+      const failsOf = (x) => (x.disk && x.disk.fails ? x.disk.fails['sub-bad'] : null);
+      ok(m.reads === 1 && saidN(m.w, MERGED) === 1 && bad(m.w).length >= 1 && failsOf(m) === 6 + bad(m.w).length, `§ban-safety r4771 (c): the state read again at the wait's end is MERGED — the failing row's count the larger (6 kept: after ${bad(m.w).length} failed ask(s) the file says ${failsOf(m)}), ONE async read (${m.reads})`, { reads: m.reads, asks: mins(m.w), disk: m.disk });
+      ok(rel.reads === 0 && bad(rel.w).length >= 1 && (failsOf(rel) || 0) < 6, `§ban-safety r4771 (c) RED CONTROL (the release: the wait ends with no read): the next save writes the fresh memory over the file — the six failures lost (the file says ${failsOf(rel)})`, { asks: mins(rel.w), disk: rel.disk });
+    }
+    { // (d) THE MERGE LAW, pure (mergeState): every stamp the later, every count the larger, every bucket kept (one label: the later purchase)
+      const { mergeState } = require(REAL_LOOP);
+      const M = (o) => ({ attempts: new Map(Object.entries(o.attempts || {})), fails: new Map(Object.entries(o.fails || {})), projReads: new Map(Object.entries(o.projReads || {})), said: new Map(Object.entries(o.said || {})) });
+      const mem = M({ attempts: { a: 200, b: 100 }, fails: { a: 1, b: 4 }, projReads: { a: { '5h': { at: 9, resetsAt: 0, boughtAt: 300 } } }, said: { 'a|x': 50 } });
+      const got = M({ attempts: { a: 150, b: 180, c: 90 }, fails: { a: 3, b: 2 }, projReads: { a: { '5h': { at: 8, resetsAt: 0, boughtAt: 200 }, '7d': { at: 7, resetsAt: 0, boughtAt: 250 } }, c: { '5h': { at: 6, resetsAt: 0, boughtAt: 100 } } }, said: { 'a|x': 80, 'c|y': 10 } });
+      const o = mergeState(mem, got), J = (m) => Object.fromEntries(m);
+      ok(JSON.stringify(J(o.attempts)) === JSON.stringify({ a: 200, b: 180, c: 90 }) && JSON.stringify(J(o.fails)) === JSON.stringify({ a: 3, b: 4 }) && JSON.stringify(J(o.said)) === JSON.stringify({ 'a|x': 80, 'c|y': 10 })
+        && o.projReads.get('a')['5h'].boughtAt === 300 && o.projReads.get('a')['7d'].boughtAt === 250 && o.projReads.get('c')['5h'].boughtAt === 100,
+        '§ban-safety r4771 (d): the merge — every stamp the later (a 200 kept, b 180 taken), every count the larger (a 3, b 4), every bucket kept (a 5h the later purchase, a 7d and c 5h added)', { attempts: J(o.attempts), fails: J(o.fails), said: J(o.said), projReads: J(o.projReads) });
+      const FILE_WINS = require(loopCut('loop-file-wins', 'const later = (m, k, v) => { const h = m.get(k); if (h == null || v > h) m.set(k, v); };', 'const later = (m, k, v) => { m.set(k, v); };'));
+      const x = FILE_WINS.mergeState(M({ attempts: { a: 200 }, fails: { b: 4 } }), M({ attempts: { a: 150 }, fails: { b: 2 } }));
+      ok(x.attempts.get('a') === 150 && x.fails.get('b') === 2, `§ban-safety r4771 (d) RED CONTROL (the file's values taken whole): an older stamp and a smaller count replace this process's own (a ${x.attempts.get('a')}, b ${x.fails.get('b')})`);
+    }
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts
   const loopSrc = fs.readFileSync(REAL_LOOP, 'utf8'), ur = fs.readFileSync(new URL('../src/usage-routes.js', import.meta.url), 'utf8'), acc = fs.readFileSync(new URL('../src/accounts.js', import.meta.url), 'utf8');

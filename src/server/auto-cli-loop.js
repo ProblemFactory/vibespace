@@ -83,6 +83,7 @@ const usageWrite = require('../usage-cache-write.js');   // lane lg-store-writes
 const { decideCliRefresh, cliRefreshWhy, projectionReadsAfter, projectionBucketBought, PROJECTION_WINDOW_MS } = require('../account-pool-auto.js');
 const { cliRefreshDrift } = require('../usage-estimator.js');
 const { withOwnAbsence } = require('../quota-model.js'); // PURE: a sibling's 5h window never outranks this account's «no 5h limit»
+const SR = require('../store-read.js');   // 主开发 r4771: the ONE classifier of a read's answer (data / missing / torn / unreadable)
 const { capsOf } = require('../backend-caps.js'); // PURE: caps.quotaProbe — the harness whose quota rung IS `<cli> -p /usage`
 const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, probeWhyText, SIGNIN_UNKNOWN } = require('../auto-cli-model.js'); // PURE: may the panel probe PROVE this account (lane auto-cli-oat-unprobeable)
 
@@ -116,6 +117,11 @@ function loadState(dataDir, now, warn = () => {}) {
   let text = null; try { text = fs.readFileSync(fp, 'utf-8'); } catch (e) { return e && e.code === 'ENOENT' ? st : unknown(e.message); }
   let raw = null; try { raw = JSON.parse(text); } catch (e) { return unknown(e.message); }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return unknown(`not an object (${Array.isArray(raw) ? 'array' : typeof raw})`);
+  return fieldsOf(raw, now, warn, st);
+}
+/** the state's fields from a parsed file (an object), through the start's own filters: a stale stamp dropped, a future one clamped
+ *  (said), an expired bucket pruned — the start's read and the read again at the end of the unknown wait (主开发 r4771) share it */
+function fieldsOf(raw, now, warn = () => {}, st = { attempts: new Map(), fails: new Map(), projReads: new Map(), said: new Map() }) {
   const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
   for (const [k, v] of Object.entries(obj(raw.attempts))) if (Number.isFinite(v) && now - v < ATTEMPT_KEEP_MS) st.attempts.set(k, v);
   for (const [k, v] of Object.entries(obj(raw.fails))) if (Number.isFinite(v) && v > 0) st.fails.set(k, v);
@@ -126,6 +132,21 @@ function loadState(dataDir, now, warn = () => {}) {
   for (const [k, v] of [...st.projReads]) {
     const kept = projectionReadsAfter(v, null, now);
     if (Object.keys(kept).length) st.projReads.set(k, kept); else st.projReads.delete(k);
+  }
+  return st;
+}
+/** 主开发 r4748 / r4771: what the file holds MERGED into this process's memory — every stamp the later, every count the larger, every
+ *  bucket kept (one label in both: the later purchase). PURE over the two states; `st` is changed in place → st */
+function mergeState(st, got) {
+  const later = (m, k, v) => { const h = m.get(k); if (h == null || v > h) m.set(k, v); };
+  for (const [k, v] of got.attempts) later(st.attempts, k, v);
+  for (const [k, v] of got.fails) later(st.fails, k, v);
+  if (!st.said) st.said = new Map();
+  for (const [k, v] of (got.said || [])) later(st.said, k, v);
+  for (const [k, reads] of got.projReads) {
+    const mine = { ...(st.projReads.get(k) || {}) };
+    for (const [lab, r] of Object.entries(reads || {})) { const h = mine[lab]; if (!h || (Number(r && r.boughtAt) || 0) > (Number(h.boughtAt) || 0)) mine[lab] = r; }
+    st.projReads.set(k, mine);
   }
   return st;
 }
@@ -199,6 +220,29 @@ function createAutoCliLoop(d) {
   }
   // ONE TICK AT A TIME (round wldn7whag, the owner's rule: never more probes than ruled): the tick awaits its sign-in facts at its
   // head — on a stalled share a second tick could enter meanwhile; it returns at once instead
+  // 主开发 r4748 / r4771: THE ONE READ AGAIN, at the tick that ends the unknown wait — one async read (fs.promises), never a look on a
+  // cadence. Its answer: the state → MERGED into memory (mergeState); no file → nothing to merge; an error of the FILE SYSTEM (it may
+  // heal) → the wait starts again, said once a wait; TORN BYTES (read whole, not the state: they never heal) → kept aside ONCE under
+  // the hold's dated name (src/store-hold.js setAside's), and the loop goes on with its memory, as the release did — never an
+  // automatic read paused for ever on a file nobody can mend. The wait ends only here: while it runs nothing is picked or written.
+  async function readAgain(now) {
+    if (!d.dataDir) { st.unknownAt = null; return; }
+    const statePath = path.join(d.dataDir, STATE_FILE);   // its own name: the sync-fs census reads a path by its name across the file
+    let read; try { read = { text: await fs.promises.readFile(statePath, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
+    if (a.state === 'data') { mergeState(st, fieldsOf(a.value, now, warn)); st.unknownAt = null; warn('[auto-cli] pacing state read again at the end of its unknown wait — merged into memory (every stamp the later, every count the larger, every bucket kept)'); return; }
+    if (a.state === 'missing') { st.unknownAt = null; return; }
+    if (a.state === 'corrupt') {
+      const aside = `${statePath}.damaged-${new Date(now).toISOString().replace(/[:.]/g, '-')}`;
+      let kept = null, why = null; try { await fs.promises.rename(statePath, aside); kept = path.basename(aside); } catch (e) { why = (e && (e.code || e.message)) || String(e); }
+      st.unknownAt = null;
+      warn(kept ? `[auto-cli] pacing state's bytes are torn (${a.code}) — kept aside as ${kept}; the loop goes on with its memory`
+        : `[auto-cli] pacing state's bytes are torn (${a.code}) and could not be kept aside (${why}) — the loop goes on with its memory; its next save writes over them`);
+      return;
+    }
+    st.unknownAt = now;
+    warn(`[auto-cli] pacing state still unreadable (${a.code}) — the longest backoff starts again (${Math.round(UNKNOWN_WAIT_MS / 60e3)} min) before any /usage read`);
+  }
   let ticking = false;
   async function tick() {
     if (ticking) return;
@@ -210,7 +254,7 @@ function createAutoCliLoop(d) {
       const { since: factsSince } = await d.accounts.signinFactsSettled();
       const now = clock();
       if (clampStamps(st, now)) warn('[auto-cli] the clock stepped back — pacing stamps clamped to now');
-      if (st.unknownAt != null) { if (st.unknownAt > now) st.unknownAt = now; else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) st.unknownAt = null; }   // the unknown state's wait: its end (a step back starts it at now)
+      if (st.unknownAt != null) { if (st.unknownAt > now) st.unknownAt = now; else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) await readAgain(now); }   // the unknown state's wait: its end (a step back starts it at now)
       const list = [];
       // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
       // a wandering threshold, not a fixed cadence
@@ -337,4 +381,4 @@ function createAutoCliLoop(d) {
   };
 }
 
-module.exports = { createAutoCliLoop, loadState, saveState, clampStamps, lastBoughtInstant, STATE_FILE, UNKNOWN_WAIT_MS, STAMP_LANDING_MS, projectionBucketBought };
+module.exports = { createAutoCliLoop, loadState, saveState, mergeState, fieldsOf, clampStamps, lastBoughtInstant, STATE_FILE, UNKNOWN_WAIT_MS, STAMP_LANDING_MS, projectionBucketBought };
