@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.422 — 2026-11-26
+
+### Added
+- Settings → Claude has an entry label for chat conversations: off (the CLI's own label, the default), «vibespace», or a name you type.
+
 ## 2.369.421 — 2026-11-26
 
 ### Fixed
