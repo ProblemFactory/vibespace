@@ -329,7 +329,7 @@ console.log('— ④ THE WIRING');
   ok(/\{ value: 'off', label: t\('Off \(never contact Anthropic\)'\) \}/.test(S), 'the row\'s meaning and its words in Settings stay as they are (no default, meaning or sentence changes)');
 }
 
-console.log('— ⑤ RED CONTROLS (主开发 r5135 law 1: each judged on a WITNESS that the product read its plant — a counter the planted text itself bumps; a plant never read is a NAMED SKIP, never a red, never a green)');
+console.log('— ⑤ RED CONTROLS (主开发 r5135 law 1: each judged on a WITNESS that the product read its plant — a counter the planted text itself bumps; a plant never read is named and counted, never a red, never a green)');
 // the witness: every planted text carries this line (or this expression) — the product passing the plant bumps its counter
 const PLANT = (n) => `globalThis.__vsPlant${n} = (globalThis.__vsPlant${n} || 0) + 1;`;
 const plantRead = (n) => globalThis['__vsPlant' + n] || 0;

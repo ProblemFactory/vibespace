@@ -30,6 +30,8 @@
   "scripts/test-spend-paths.mjs": 2,
   "scripts/test-stdout-registry.mjs": 1,
   "scripts/test-unknown-records.mjs": 1,
+  "scripts/test-usage-reads-off-chrome.mjs": 2,
+  "scripts/test-usage-reads-off.mjs": 1,
   "scripts/test-vault-job.mjs": 1,
   "scripts/test-vendor-whitelist.mjs": 1,
   "scripts/test-voice-teach.mjs": 1,
