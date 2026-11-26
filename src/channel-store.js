@@ -2387,14 +2387,21 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // and 50 logs: one turn of 325 to 379 ms on the box). Here each log file finds its own row. A log's name is its conversation id run
   // through safeSeg, which escapes every character outside [A-Za-z0-9._@:+-] as % and its hex (the % sign too): a name with no % IS
   // its id, and a name with % is read back to EVERY id that escapes to it (an escape is 2, 3 or 4 hex digits by its character's size,
-  // so one name can have several readings; each is kept only if it escapes back to the same name). No adapter's ids carry such a
-  // character (read from each kind's own code: Slack [A-Z0-9_], a webhook's slug [a-z0-9-], Lark's oc_ and hex, Gmail's thread id,
-  // the agents' session ids, the fake's names). Its row is the key `adapterId/id` (entry()'s own key), and then the rows whose key is
+  // so one name can have several readings; each is kept only if it escapes back to the same name). The read-back is exact for ANY id;
+  // what makes it cheap is that most kinds' ids carry no such character — Slack's ([A-Z0-9_]), a webhook's slug ([a-z0-9-]) and the
+  // fake's names are held to the safe set by their own code; Lark's chat ids, Gmail's thread ids and the agents' session ids are taken
+  // as the vendor sends them (its format, never a check here: a Lark search hit may carry «=»), so a name of theirs that escapes costs
+  // its readings, or the counted fallback (holder 3's follow: test-channel-search §H's census pins each kind's line). Its row is the key
+  // `adapterId/id` (entry()'s own key), and then the rows whose key is
   // not their account's (oddKeys, as keysOf answers them: after the account's own, as the release read them). The caller's list is
   // read into a Set once and each file asks it once; a file outside it is never opened. The loop is given back every LOG_STEP files
   // and every WANT_STEP ids; the per-account map (for the odd rows) is awaited in its slices, never built whole here on a big index.
   // A name with more than SEG_IDS_MAX readings, or one log two rows of the account escape to, takes the release's pass for this
   // search, counted (searchStats.fallback). Nothing else of the search changed: its directory read, its order, its scan, its answer
+  // (holder 3's follow, the round's shoulds): an id in the CALLER's list that safeSeg refuses ('', '.', '..', a slash, a backslash,
+  // a NUL, null) rejects the whole search by safeSeg's own words, as the release's name map did; a ROW whose id safeSeg refuses (only
+  // a damaged act line makes one, and it has no log) is passed over on EVERY road — the release's pass threw on it and refused the
+  // account's whole search; here the main road, the fallback and the odd rows agree
   const LOG_STEP = 2000, WANT_STEP = 10000, SEG_IDS_MAX = 64;
   const searchStats = { searches: 0, files: 0, rowsRead: 0, fallback: 0 };
   const SAFE_CH = /^[A-Za-z0-9._@:+-]$/, HEX_DIGITS = /^[0-9a-f]+$/;
@@ -2421,10 +2428,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return out.length > SEG_IDS_MAX ? null : out;
   }
   const turnBack = () => new Promise((r) => setImmediate(r));
+  const segName = (id) => { try { return `${safeSeg(id)}.ndjson`; } catch { return null; } };   // a row's log name; null for an id safeSeg refuses (a damaged row: passed over on every road)
   async function logFilesOf(adapterId, all, convIds) {
     searchStats.searches++;
     let want = null;
-    if (convIds) { want = new Set(); let i = 0; for (const c of convIds) { want.add(String(c)); if (++i % WANT_STEP === 0) await turnBack(); } }
+    if (convIds) { want = new Set(); let i = 0; for (const c of convIds) { safeSeg(c); want.add(String(c)); if (++i % WANT_STEP === 0) await turnBack(); } }   // safeSeg(c): the release's refusal of an unsafe id, kept (O(list))
     if (!byAcct) { acctWarmStart(); await keysReady(); if (!byAcct) keysOf(adapterId); }   // the odd rows: a big index's map in its slices; a small one at once, as keysOf builds it
     const conv = ix.conversations, lastAtOf = new Map(), titleOf = new Map(), names = [];
     let fallback = false, wantNames = null;
@@ -2448,10 +2456,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     }
     if (fallback) {   // the release's pass, counted: every row of the account mapped to its file
       searchStats.fallback++; lastAtOf.clear(); titleOf.clear();
-      for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en && en.adapterId === adapterId && en.id != null) { lastAtOf.set(`${safeSeg(en.id)}.ndjson`, Number(en.lastAt) || 0); if (en.title) titleOf.set(`${safeSeg(en.id)}.ndjson`, String(en.title).toLowerCase()); } }
+      for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; const n = en && en.adapterId === adapterId && en.id != null ? segName(en.id) : null; if (n) { lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }
       return { names, lastAtOf, titleOf };
     }
-    for (const k of oddKeys.keys()) { const en = conv[k]; if (en && en.adapterId === adapterId && en.id != null) { searchStats.rowsRead++; const n = `${safeSeg(en.id)}.ndjson`; lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }   // after the account's own (the release's order); .keys(): the odd keys' Set, or a Map of their slots, read alike
+    for (const k of oddKeys.keys()) { const en = conv[k]; if (en && en.adapterId === adapterId && en.id != null) { searchStats.rowsRead++; const n = segName(en.id); if (!n) continue; lastAtOf.set(n, Number(en.lastAt) || 0); if (en.title) titleOf.set(n, String(en.title).toLowerCase()); } }   // after the account's own (the release's order); .keys(): the odd keys' Set, or a Map of their slots, read alike
     return { names, lastAtOf, titleOf };
   }
   async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null, match = null } = {}) {
