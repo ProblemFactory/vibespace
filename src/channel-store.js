@@ -1971,7 +1971,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       return { removed: 0, kept: 0, side };
     }
     const cutoff = retentionCutoff(lines, { days, maxRecords, floorDays });
-    const kept = lines.filter((l) => recAt(l) >= cutoff);
+    const kept = lines.filter((l) => recAtKept(l) >= cutoff);   // B-f276 (s1126): a line that does not parse is kept through any cutoff
     // lane lark-threads (A1): THE PLACE PATCHES ARE FOLDED INTO THE LINES the trim keeps (the rewrite this trim may do
     // anyway) — the message line then carries the place itself and its side line goes (after the rename, never before:
     // a crash between the two leaves the patch applied twice, which is a no-op)
@@ -2025,7 +2025,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (closed) return { removed: 0, kept: 0, side: null };
     const lines = text.split('\n').filter(Boolean);
     const cutoff = retentionCutoff(lines, { days, maxRecords, floorDays });
-    if (placesOf(adapterId, convId).size || lines.some((l) => recAt(l) < cutoff)) return trim(adapterId, convId, { days, maxRecords, floorDays });
+    if (placesOf(adapterId, convId).size || lines.some((l) => recAtKept(l) < cutoff)) return trim(adapterId, convId, { days, maxRecords, floorDays });   // a torn line asks no trim (kept by it)
     let side = null;
     try { side = trimSide(adapterId, convId, { liveIds: null }); } catch (e) { warn('[channels] side-log trim failed:', (e && e.message) || e); }
     if (side && side.removed) wrote(adapterId, convId, { kind: 'trim' });
@@ -2033,6 +2033,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function recVendorId(line) { try { const v = JSON.parse(line).vendorId; return v ? String(v) : null; } catch { return null; } }
   function recAt(line) { try { const n = Number(JSON.parse(line).at); return Number.isFinite(n) ? n : 0; } catch { return 0; } }
+  /** B-f276 (lane bl-loop-a, s1126): a line's time for the RETENTION's keep — a line that does not parse is kept by every cutoff
+   *  (Infinity): the trim never drops what it cannot read */
+  function recAtKept(line) { try { const n = Number(JSON.parse(line).at); return Number.isFinite(n) ? n : 0; } catch { return Infinity; } }
 
   /**
    * BACKFILL (2026-09-26, history on demand): records OLDER than the log's
@@ -2062,13 +2065,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!fresh.length) return { appended: 0, duplicates, widened };
     const fp = logPath(adapterId, convId);
     fs.mkdirSync(path.dirname(fp), { recursive: true, mode: 0o700 });
+    // B-f276 family (lane bl-loop-a, slice s1126, 主开发 r4781): THE REWRITE KEEPS EVERY LINE — a read that fails (an EIO) throws: held,
+    // the log untouched; a line that does not parse (a crash mid-write, a bad byte) is KEPT AS IT IS after the merged records — the
+    // readers skip it, as before — never dropped (the decision journal's rule, r3739); the retention trim keeps it too (recAtKept)
     let lines = [];
-    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-    const parsed = [];
-    for (const l of lines) { try { parsed.push(JSON.parse(l)); } catch { /* an unparseable line stays unparseable: dropped from the rewrite like readTail skips it */ } }
+    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+    const parsed = [], torn = [];
+    for (const l of lines) { try { parsed.push(JSON.parse(l)); } catch { torn.push(l); } }
     const merged = parsed.concat(fresh).sort(cmpRecord);
     const tmp = `${fp}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, merged.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    fs.writeFileSync(tmp, merged.map((r) => JSON.stringify(r)).concat(torn).join('\n') + '\n');
     fs.renameSync(tmp, fp);
     for (const r of fresh) rememberVendorId(set, r.vendorId);
     { const bp = basePlaces.get(`${adapterId}/${convId}`); if (bp) for (const r of fresh) notePlace(bp, r); }

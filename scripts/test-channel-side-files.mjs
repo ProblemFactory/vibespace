@@ -8,6 +8,9 @@
 //      reads as none and is SAID, once a file, with its code; reading it writes nothing (the torn bytes are the file's, byte for byte,
 //      after every reader asked) until the next answer writes a fresh memo (the ruling's road); a good file then reads as it is.
 //      RED: the tip's memoRead — every failure silent.
+//   ② THE MESSAGE LOG (msgs/<account>/<conv>.ndjson): an EIO of its read at a prepend throws (held: the log's bytes untouched); a line
+//      that does not parse is KEPT AS IT IS, byte for byte, by both rewrites — a prepend of an older page and a retention trim past a
+//      bound — and the readers still skip it. RED: the tip's prepend and the tip's trim (the line gone).
 // Run: node scripts/test-channel-side-files.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -92,5 +95,46 @@ for (const kind of ['search', 'feed']) {
   ok(r.unreadable.said.length === 0 && r.torn.said.length === 0, `RED: the tip's memoRead reads an unreadable and a torn memo as none IN SILENCE (said ${r.unreadable.said.length} / ${r.torn.said.length})`, { unreadable: r.unreadable.said, torn: r.torn.said });
 }
 
-for (const r of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 1, label: 'B-f276 side files ' })) ok(r.pass, r.name, r.pass ? undefined : r.detail);
+console.log('② the message log: an EIO of its read held; a line that does not parse kept as it is by the prepend and by the trim');
+const TORN = '{"vendorId":"m-torn","at":' + (T - 2500) + ',"text":"a crash mid-wri';
+async function logLeg(Smod) {
+  const o = open(Smod), A = 'acct-b', C = 'conv-1', file = path.join(o.dir, 'msgs', A, `${C}.ndjson`);
+  const rec = (i, at) => ({ id: `m${i}`, vendorId: `m${i}`, convId: C, at, text: `message ${i}`, author: { id: 'p1', name: 'Pat' } });
+  o.st.appendRecords(A, C, [rec(1, T - 3000), rec(2, T - 2000), rec(3, T - 1000)]);
+  fs.appendFileSync(file, TORN + '\n');   // a line torn by a crash mid-write (its bytes), between whole ones
+  o.st.appendRecords(A, C, [rec(4, T - 500)]);
+  const out = {};
+  const b0 = bytesOf(file), undo = refuseRead(file);   // THE PLACED EIO of the rewrite's read
+  try { o.st.prependRecords(A, C, [rec(0, T - 9000)]); out.eio = 'no throw'; } catch (e) { out.eio = e && e.code; } finally { undo(); }
+  out.eioSame = Buffer.compare(bytesOf(file), b0) === 0;
+  const p = o.st.prependRecords(A, C, [rec(0, T - 9000)]);   // an older page: the log rewritten
+  const t1 = fs.readFileSync(file, 'utf8');
+  out.prepend = { appended: p.appended, kept: t1.split('\n').includes(TORN), older: t1.includes('"vendorId":"m0"'), lines: t1.split('\n').filter(Boolean).length };
+  out.read = o.st.readTail(A, C, { limit: 50 }).map((r) => r.vendorId);
+  const tr = o.st.trim(A, C, { days: 3650, maxRecords: 2, floorDays: 0 });   // past the count bound: the oldest dropped, the log rewritten
+  const t2 = fs.readFileSync(file, 'utf8');
+  out.trim = { removed: tr.removed, kept: t2.split('\n').includes(TORN), left: t2.split('\n').filter(Boolean).length };
+  shut(o);
+  return out;
+}
+{
+  const r = await logLeg(S);
+  ok(r.eio === 'EIO' && r.eioSame, `② a PLACED EIO of the log's read at a prepend: the rewrite throws (${r.eio}) — held, the log's bytes untouched`, r);
+  ok(r.prepend.appended === 1 && r.prepend.older && r.prepend.kept, `② a prepend of an older page rewrote the log (${r.prepend.lines} lines) and KEPT the line that does not parse, byte for byte`, r.prepend);
+  ok(JSON.stringify(r.read) === JSON.stringify(['m0', 'm1', 'm2', 'm3', 'm4']), `② the readers still skip it: readTail answers ${r.read.join(' ')}`, r.read);
+  ok(r.trim.removed > 0 && r.trim.kept, `② a retention trim past its count bound dropped ${r.trim.removed} record(s) and KEPT the line that does not parse (${r.trim.left} lines left)`, r.trim);
+}
+// REDS: the tip's two rewrites — each drops the line
+{
+  const PRE = "    for (const l of lines) { try { parsed.push(JSON.parse(l)); } catch { torn.push(l); } }\n";
+  const Spre = MB.load('src/channel-store.js', anchored(SRC, PRE, "    for (const l of lines) { try { parsed.push(JSON.parse(l)); } catch { /* RED: the tip's prepend drops it */ } }\n", 'red: the tip\'s prepend'), 'tip-prepend');
+  const rp = await logLeg(Spre);
+  ok(rp.prepend.appended === 1 && !rp.prepend.kept, 'RED: the tip\'s prepend rewrites the log WITHOUT the line that does not parse (it is gone)', rp.prepend);
+  const TRIM = "    const kept = lines.filter((l) => recAtKept(l) >= cutoff);";
+  const Strim = MB.load('src/channel-store.js', anchored(SRC, TRIM, "    const kept = lines.filter((l) => recAt(l) >= cutoff); /* RED: the tip's trim */", 'red: the tip\'s trim'), 'tip-trim');
+  const rt = await logLeg(Strim);
+  ok(rt.prepend.kept && rt.trim.removed > 0 && !rt.trim.kept, 'RED: the tip\'s trim drops the line that does not parse with the records past its bound', rt.trim);
+}
+
+for (const r of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 3, label: 'B-f276 side files ' })) ok(r.pass, r.name, r.pass ? undefined : r.detail);
 report();
