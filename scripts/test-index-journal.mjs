@@ -421,12 +421,13 @@ async function engineLeg(EM, tag, rounds = 3, { placed = false } = {}) {
   const from = '      en.lane = { ...(en.lane || {}), lastError: { code, at: now(), why: String((err && err.message) || err).slice(0, 200) } };   // the refusal is a real change of the row…';
   const line = ENGSRC.slice(0, ENGSRC.indexOf(from)).split('\n').length;
   const EM = M.load('src/server/channels-engine.js', anchored(ENGSRC, from, 'void store.index.live(); ' + from.trimStart(), 'a refusal\'s update scope reads live()'), 'refusal-reads-live');
-  // THE FIND, PLACED RED AT WILL: the same red copy, its whole write HELD in flight at the release's one read — written 0 and not owed:
-  // the release's control reads «nothing» there; read after the wait on its fact (the write released), the same storm is written
+  // THE FIND, PLACED RED AT WILL: the red copy, its whole write HELD in flight at the release's one read — written 0 and not owed: the
+  // release's control reads «nothing» there; read after the wait on its fact (the write released), the same storm is written — and the
+  // red control below is judged on that very run (one engine run for both)
   const placedRed = await engineLeg(EM, 'census-red-placed', 1, { placed: true });
   ok(!!placedRed.once && placedRed.once.wholeWrites === 0 && placedRed.once.indexOwed === false && placedRed.waited === null && placedRed.wholeWrites > 0,
     `⑩ THE FIND PLACED: the whole write held in flight at a read made ONCE — written ${placedRed.once && placedRed.once.wholeWrites}, owed ${placedRed.once && placedRed.once.indexOwed} (the release's control red at will); read after the wait on its fact: written ${placedRed.wholeWrites}`, { once: placedRed.once, waited: placedRed.waited, written: placedRed.wholeWrites });
-  const red = await engineLeg(EM, 'census-red', 1);
+  const red = placedRed;   // the same run: the red copy's storm, read after the wait on its fact (one engine run for the find and the control)
   ok(red.waited === null && red.named.some((x) => x.startsWith('update read live() @ ') && /channels-engine/.test(x) && x.includes(`:${line}`)) && (red.wholeWrites > 0 || red.indexOwed),
     `⑩ RED CONTROL: a refusal's update scope that reads live() — the census names it (${red.named.length} whole touches, the first: ${red.named[0] || 'none'}) and the storm owes index.json (written ${red.wholeWrites}, owed ${red.indexOwed}) — both legs above would go red`, { first: red.named.slice(0, 2), line, wholeWrites: red.wholeWrites, indexOwed: red.indexOwed });
 }
