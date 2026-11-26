@@ -882,9 +882,9 @@ function testCallSites(src) {
   const memo = TEST_SITES.get(src); if (memo) return memo;
   const r = testCallSitesOf(src); TEST_SITES.set(src, r); return r;
 }
-function testCallSitesOf(src) {
-  if (!String(src).includes('.test(')) return [];   // B-7e49: every site holds «.test(» — a text without it has none (the scan below finds none)
-  const s = src.replace(/^\s*(\*|\/\/).*$/gm, '');
+function testCallSitesOf(text) {   // (B-0d3e slice 11: «text», not «src» — a scan of a suite's text, never a copy; the census read the name as a product read)
+  if (!String(text).includes('.test(')) return [];   // B-7e49: every site holds «.test(» — a text without it has none (the scan below finds none)
+  const s = text.replace(/^\s*(\*|\/\/).*$/gm, '');
   const handles = new Set(STORE_HANDLE_NAMES);
   for (const m of s.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]+)/g)) if (HANDLE_RHS_RE.test(m[2])) handles.add(m[1]);
   for (const m of s.matchAll(/(?:const|let|var)\s+\{([^}]*)\}\s*=\s*([^;\n]+)/g)) {

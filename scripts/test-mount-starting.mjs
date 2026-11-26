@@ -149,7 +149,7 @@ try {
   const mutant = async (tag, from, to) => {
     const n = src.split(from).length - 1;
     if (n !== 1) { ok(false, `ANCHOR (${tag}, src/mounts.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the control builds nothing`); return null; }
-    return scenario(require(MC.write('src/mounts.js', src.replace(from, to), tag)).MountManager, tag);
+    return scenario(require(MC.write('src/mounts.js', editAnchor(src, from, to, "src/mounts.js"), tag)).MountManager, tag);
   };
   const real = await scenario(MountManager, 'real');
   ok(real.starting && real.blocked && real.alive, '⑦ control baseline: the real module keeps a starting daemon alive and its path blocked', JSON.stringify(real));

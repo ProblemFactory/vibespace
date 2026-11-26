@@ -631,14 +631,14 @@ console.log('§3 P4: idempotency + reconcile');
     ok(hs.after.item === 'done' && hs.after.names === null, '…at the read the heal finds the item by the kept id and closes it; only then is the id forgotten', JSON.stringify(hs.after));
     const { mutantCopies } = await import('./mutant-copy.mjs');
     const MW = mutantCopies('chan-outbox-r2268', REPO);
-    const unqueued = MW.load('src/server/channels-engine.js', esrc.replace(Q, '    for (const p of stuck) await sweepOne(p);'), 'sweep-unqueued');
+    const unqueued = MW.load('src/server/channels-engine.js', editAnchor(esrc, Q, '    for (const p of stuck) await sweepOne(p);', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'sweep-unqueued');
     const wr = await bootWindow(unqueued, 'r2268-window-red', { untilSettled: true });   // r4301: the window held until the copy's press settles
     ok(wr.held === 1 && wr.windowEnd === 'settled' && wr.settledInWindow && wr.ops.includes('outcome') && wr.ops.indexOf('reconcile-outcome') < wr.ops.indexOf('outcome'), 'CONTROL: a copy whose boot sweep runs OUTSIDE the queue settles in the window (held open by a placed hold until its press settles, never a clock) and writes the sweep\'s OUTCOME line AFTER the settle — the window legs would go red', JSON.stringify(wr));
-    const noHeal = MW.load('src/server/channels-engine.js', esrc.replace(H, H + ' return 0;'), 'no-heal');
+    const noHeal = MW.load('src/server/channels-engine.js', editAnchor(esrc, H, H + ' return 0;', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'no-heal');
     const hr = await healAndName(noHeal, 'r2268-heal-red');
     ok(hr.boot.a === 'open' && hr.boot.b === 'open', 'CONTROL: a copy without the heal leaves both leftover items open for proposals already sent — the heal leg would go red', JSON.stringify(hr.boot));
-    const byId = MW.load('src/server/channels-engine.js', esrc.replace(K, '(!!todoId && i.id === todoId)'), 'retract-by-id-only');
-    const forgetFirst = MW.load('src/server/channels-engine.js', esrc.replace(KEEP, KEEP + '    if (todoId) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = null; });\n'), 'forget-before-close');   // stale-pins: kept — the red restores the old order (forget the id before the close) on purpose
+    const byId = MW.load('src/server/channels-engine.js', editAnchor(esrc, K, '(!!todoId && i.id === todoId)', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'retract-by-id-only');
+    const forgetFirst = MW.load('src/server/channels-engine.js', editAnchor(esrc, KEEP, KEEP + '    if (todoId) await store.outbox.update((ob) => { if (ob.proposals[p.id]) ob.proposals[p.id].unknownTodoId = null; });\n', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'forget-before-close');   // stale-pins: kept — the red restores the old order (forget the id before the close) on purpose
     const hr2 = await heldSettle(forgetFirst, 'r2268-held-red');
     ok(hr2.during.names === null && hr2.after.item === 'open', 'CONTROL: a copy that forgets the recorded id BEFORE the close leaves that item open for ever (the read comes, nothing finds it) — the held-list leg would go red', JSON.stringify(hr2));
     const nr = await healAndName(byId, 'r2268-name-red');
@@ -856,10 +856,10 @@ async function replaceLegs(ENGmod, name) {
   ok(esrc.split(MK).length === 2 && esrc.split(EXP).length === 2, 'the make line and the held-decision export are present once (the controls patch exactly them)');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const ME = mutantCopies('chan-outbox-replace', REPO);
-  const early = ME.load('src/server/channels-engine.js', esrc.replace(MK, "      await withdrawNow(oldId, by, why || 'replaced', { notifyNow: false });\n" + MK), 'withdraw-first');
+  const early = ME.load('src/server/channels-engine.js', editAnchor(esrc, MK, "      await withdrawNow(oldId, by, why || 'replaced', { notifyNow: false });\n" + MK, "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'withdraw-first');
   const rc1 = await replaceLegs(early, 'replace-ctl-early');
   ok(rc1.refused.oldState === 'withdrawn', `CONTROL: a copy that withdraws BEFORE the new proposal is accepted loses the old one when the new one is refused (${rc1.refused.oldState}) — the atomic leg would go red`);
-  const unheld = ME.load('src/server/channels-engine.js', esrc.replace(EXP, '    propose, approve, reject, outboxView, expireSweep, pointerSync, receipt,'), 'unheld');
+  const unheld = ME.load('src/server/channels-engine.js', editAnchor(esrc, EXP, '    propose, approve, reject, outboxView, expireSweep, pointerSync, receipt,', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'unheld');
   const rc2 = await replaceLegs(unheld, 'replace-ctl-unheld');
   ok(rc2.hold.oldState === 'sent', `CONTROL: a copy whose Approve does not wait for the replace SENDS the old one beside its replacement (${rc2.hold.oldState}) — the hold leg would go red`);
 }
@@ -893,7 +893,7 @@ async function receiptLegs(ENGmod, name) {
   ok(esrc.split(LINE).length === 2, 'the receipt-block line is present once (the control patches exactly it)');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const ME = mutantCopies('chan-outbox-receipt', REPO);
-  const noDiff = ME.load('src/server/channels-engine.js', esrc.replace(LINE, LINE.replace(', proposed: p.originalText', '')), 'no-proposed');
+  const noDiff = ME.load('src/server/channels-engine.js', editAnchor(esrc, LINE, LINE.replace(', proposed: p.originalText', ''), "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'no-proposed');
   const rc = await receiptLegs(noDiff, 'receipt-diff-ctl');
   ok(!/what the user changed/.test(rc.text) && /final text:/.test(rc.text), 'CONTROL: an engine that does not hand the proposal\'s own words to the block sends only the final text — the diff leg would go red');
 }
@@ -968,7 +968,7 @@ async function sweepWindowLeg(ENGmod, name) {
   ok(esrc.split(GUARD).length === 2, 'the apply-time guard line is present once (the control removes exactly it)');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const MV = mutantCopies('chan-outbox-verify', REPO);
-  const unguarded = MV.load('src/server/channels-engine.js', esrc.replace(GUARD, ''), 'sweep-unguarded');
+  const unguarded = MV.load('src/server/channels-engine.js', editAnchor(esrc, GUARD, '', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'sweep-unguarded');
   const sc = await sweepWindowLeg(unguarded, 'sweep-window-ctl');
   ok(sc.placed && sc.d2 === 'expired' && sc.made === 1 && sc.receipts === 2, `CONTROL: a copy that asks the hold only before the write lets the sweep land between the replace's check and its withdrawal — the new draft made, the old one EXPIRED under it, two receipts (the race placed: ${sc.placed} — held at «${sc.gated}»; d2 ${sc.d2}, made ${sc.made}, ${sc.receipts} receipts) — the leg would go red`);
   // THE LEGACY FATE: a receipt stashed before the stash carried a ref (the owner's three of 2026-09-27) has no
@@ -997,7 +997,7 @@ async function sweepWindowLeg(ENGmod, name) {
   ok(lg.gone === 'handed' && lg.goneAt === null && lg.goneText === 'Handed to Worker with an earlier message' && lg.kept === 'waiting' && lg.bc === 1 && lg.changed.length === 1, `THE LEGACY FATE at boot: the receipt whose stash entry is gone reads "${lg.goneText}" (no time — nobody recorded it); the one still in the stash (matched by the id its text names) keeps "waiting"; ONE broadcast`, JSON.stringify(lg));
   const RECON = "    if (!deliver || typeof deliver.stashPeek !== 'function' || engineCtx.stopped) return [];";   // lane dc-channels-seams: the engine's `stopped` read through its context
   ok(esrc.split(RECON).length === 2, 'the reconcile\'s entry line is present once (the control patches exactly it)');
-  const norecon = MV.load('src/server/channels-engine.js', esrc.replace(RECON, '    return [];'), 'no-reconcile');
+  const norecon = MV.load('src/server/channels-engine.js', editAnchor(esrc, RECON, '    return [];', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'no-reconcile');
   const lc = await legacyLeg(norecon, 'legacy-fate-ctl');
   ok(lc.gone === 'waiting', `CONTROL: an engine without the boot reconcile keeps saying "Waiting for Worker's next message" for a receipt the agent read an hour ago (${lc.gone}) — the leg would go red`);
 }
@@ -2381,7 +2381,7 @@ async function chatReadLegs(ENGmod, name) {
   ok(esrc.split(RULE).length === 2, 'CPC CONTROL setup: the drafter rule is applied once');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const MC = mutantCopies('chan-outbox-cpc', REPO);
-  const rc = await chatReadLegs(MC.load('src/server/channels-engine.js', esrc.replace(RULE, '.map((id) => snap[id]).filter(Boolean).map(proposalView)'), 'no-drafter-rule'), 'cpc-ctl');
+  const rc = await chatReadLegs(MC.load('src/server/channels-engine.js', editAnchor(esrc, RULE, '.map((id) => snap[id]).filter(Boolean).map(proposalView)', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'no-drafter-rule'), 'cpc-ctl');
   ok(rc.v2.length === 2 && rc.v2.some((p) => p.id === rc.ids[0]), 'CPC RED CONTROL: without drafterSees the revoked agent\'s proposal is still answered to its chat (the leg above would be red)', JSON.stringify(rc.v2.map((p) => p.id)));
 }
 
@@ -3258,7 +3258,7 @@ async function chatReadLegs(ENGmod, name) {
           const n = src.split(from).length - 1;
           if (n !== 1) throw new Error(`ANCHOR (${name}, src/outbox-chip.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the mutant builds nothing`);
           const f = path.join(dir, `outbox-chip-${name}.js`);
-          fs.writeFileSync(f, editAnchor(src.replace(from, to), "require('./outbox-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/outbox-census.js'))})`, "src/outbox-chip.js"));
+          fs.writeFileSync(f, editAnchor(editAnchor(src, from, to, "src/outbox-chip.js"), "require('./outbox-census.js')", `require(${JSON.stringify(path.join(REPO, 'src/outbox-census.js'))})`, "src/outbox-chip.js"));
           return require(f);
         };
         await legOSC('MUTANT the chip counting EVERY proposal (no drafter filter) ⇒ RED by name on the «only this conversation» legs', async () => {
@@ -4684,7 +4684,7 @@ async function primeDirect(eng) {
   const esrc = engineSource(REPO);
   const GATE = "if (P.receiptRoad({ ...p, receipt: rc }, { collecting }).road === 'inline') {";
   ok(esrc.split(GATE).length === 2, 'the inline-road gate is present once (the control patches exactly it)');
-  const ungated = MC.load('src/server/channels-engine.js', esrc.replace(GATE, 'if (false) {'), 'collect-ungated');
+  const ungated = MC.load('src/server/channels-engine.js', editAnchor(esrc, GATE, 'if (false) {', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'collect-ungated');
   const W = mkEngine({ name: 'collect-ctl', engine: ungated });
   const { eng, delivered, stash } = W;
   await primeDirect(eng);
@@ -4802,7 +4802,7 @@ async function primeCompose(eng, authority = 'send') {
   const esrc = engineSource(REPO);
   const MARKC = "    await markCollect(created.id, guards, decision);   // lane inline-receipts-compose-api: a NEW mail sent directly is read inline by the CLI that waits, as a reply is\n";
   ok(esrc.split(MARKC).length === 2, 'compose\'s collect mark is present once (the control drops exactly it)');
-  const base = MC.load('src/server/channels-engine.js', esrc.replace(MARKC, ''), 'compose-unmarked');
+  const base = MC.load('src/server/channels-engine.js', editAnchor(esrc, MARKC, '', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'compose-unmarked');
   const W = mkEngine({ name: 'compose-ctl', engine: base });
   const { eng, delivered, stash } = W;
   await primeCompose(eng);
@@ -5073,7 +5073,7 @@ async function pausedLegs(ENGmod, tag) {
     ok(!!ROW, 'CONTROL setup: the start row is where the control cuts it');
     if (ROW) {
       const { mutantCopies: mc2 } = await import('./mutant-copy.mjs');
-      const A2 = mc2('channel-outbox-a2-start', REPO).load('src/server/channels-engine.js', esrcS.replace(ROW[0], "    start: ['paused', 'sync', 'the A2 row'],"), 'a2-start-paused');
+      const A2 = mc2('channel-outbox-a2-start', REPO).load('src/server/channels-engine.js', editAnchor(esrcS, ROW[0], "    start: ['paused', 'sync', 'the A2 row'],", "src/server/channels-engine.js"), 'a2-start-paused');
       const W3 = mkEngine({ name: 'a2-start', engine: A2 });
       await prime(W3.eng); await W3.eng.propose(AGENT, A, C, { text: 'a card' }); try { await W3.eng.stop?.(); } catch { }   // B-f276 1b: an outbox file to hold (the missing law writes no untouched family)
       const ob3 = path.join(W3.dataDir, 'channels', 'outbox.json'); const good3 = fs.readFileSync(ob3, 'utf8');

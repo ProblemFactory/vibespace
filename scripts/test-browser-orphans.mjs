@@ -174,10 +174,10 @@ const silent = net.createServer((sk) => { sk.on('error', () => { }); }); // acce
 await new Promise((r) => silent.listen(0, '127.0.0.1', r));
 const SILENT = silent.address().port;
 const SRCDIR = path.join(REPO, 'src');
-const absReq = (src, dir, map = {}) => src.replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(map[rel] || path.resolve(dir, rel)) + ')');
+const absReq = (src, dir, map = {}) => editAnchor(src, /require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(map[rel] || path.resolve(dir, rel)) + ')', "the text handed to absReq()");
 function keeperCopy(name, patches = [], orphans = null) {
   let ks = fs.readFileSync(path.join(SRCDIR, 'server/browser-keeper.js'), 'utf8');
-  for (const [a, b] of patches) { if (!ks.includes(a)) return null; ks = ks.replace(a, b); }
+  for (const [a, b] of patches) { if (!ks.includes(a)) return null; ks = editAnchor(ks, a, b, "src/server/browser-keeper.js"); }
   const f = path.join(ROOT, `keeper-${name}.js`); fs.writeFileSync(f, absReq(ks, path.join(SRCDIR, 'server'), orphans ? { '../browser-orphans.js': orphans } : {}));
   return require(f);
 }
@@ -213,7 +213,7 @@ async function otherHalf(Kmod, tag) {
   ok(/^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser has not answered CDP for 1 min/.test(oh.notes.h || '') && /^stopped — its browser daemon was ended at \d\d:\d\d UTC: its browser ended \d+ min ago/.test(oh.notes.i || '') && oh.cell === oh.notes.h, '⑤ …and so do the rows and `status` (the record that named it; the mark\'s profile row for the one no record named)', oh.notes);
   const pre = path.join(ROOT, 'orphans-pre-fix.js');
   const osrc = fs.readFileSync(path.join(SRCDIR, 'browser-orphans.js'), 'utf8');
-  fs.writeFileSync(pre, osrc.replace('  if (d.stoppedIdleAt != null && d.starttime != null && !d.cdp) {\n', '  if (false) {\n'));
+  fs.writeFileSync(pre, editAnchor(osrc, '  if (d.stoppedIdleAt != null && d.starttime != null && !d.cdp) {\n', '  if (false) {\n', "src/browser-orphans.js"));
   const Kpre = keeperCopy('pre-other-half', [], pre);
   const ctl = Kpre ? await otherHalf(Kpre, 'pre') : null;
   ok(ctl && !ctl.ended.some((x) => /^910[123]:/.test(x)), '⑤ CONTROL: the pre-fix verdict (no other half) keeps both — the wedged Chrome under a lease and the daemon whose browser is gone — the legs above can go red', ctl && ctl.ended);
@@ -411,7 +411,7 @@ async function unreadLeg(Kmod, tag, waitMs = 6000) {
   ok(u8.alive && !u8.marker && u8.retired && u8.retired.result === 'let-go' && u8.lines.some((l) => /could not be proven .*: let go, never signalled/.test(l)), '⑧ …one whose pid cannot be proven the marker\'s (no starttime) is LET GO — never signalled, said', u8);
   const biSrc = fs.readFileSync(path.join(SRCDIR, 'server/browser-installs.js'), 'utf8');
   const RULE = "    if (m && typeof m === 'object' && !row) {\n";
-  const preBI = biSrc.includes(RULE) ? (() => { const f = path.join(ROOT, 'installs-pre-retired.js'); fs.writeFileSync(f, absReq(biSrc.replace(RULE, '    if (false) {\n'), path.join(SRCDIR, 'server'))); return require(f); })() : null;
+  const preBI = biSrc.includes(RULE) ? (() => { const f = path.join(ROOT, 'installs-pre-retired.js'); fs.writeFileSync(f, absReq(editAnchor(biSrc, RULE, '    if (false) {\n', "src/server/browser-installs.js"), path.join(SRCDIR, 'server'))); return require(f); })() : null;
   const c8 = preBI ? await retiredLeg(preBI, 'pre', true, 300) : null;
   ok(c8 && c8.alive && !c8.marker, '⑧ CONTROL: the pre-L3 slot DROPS the marker and leaves its step running unowned (no wall clock) — the legs above can go red', c8 && { alive: c8.alive, marker: c8.marker });
   // the keeper hands the finding on (the migration reads it: `retiredInstall`)
