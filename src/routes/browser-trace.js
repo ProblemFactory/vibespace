@@ -356,7 +356,7 @@ router.post('/api/browser/housekeeping/sweep', async (req, res) => {
   // (one sweep at a time: the running one finishes by itself); the answer counts the profiles NOT swept (`scopesHeld`, never a path)
   try { const p = tr.sweep(); let to = null; const bound = new Promise((resolve) => { to = setTimeout(() => resolve(null), typeof tr.sweepPressBound === 'function' ? tr.sweepPressBound() : 25000); if (to.unref) to.unref(); }); const r = await Promise.race([p, bound]); clearTimeout(to);
     if (!r) { p.catch(() => { }); return res.json({ ok: true, running: { code: 'sweep_running', since: typeof tr.sweepRunningSince === 'function' ? tr.sweepRunningSince() || null : null }, ...(keptHeld ? { held: { code: 'browser_settings_unread', trace: false, kept: true } } : {}) }); }
-    res.json({ ok: true, scopesHeld: r.scopesHeld || 0, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed, bytesRemoved: r.bytesRemoved, recordingsRemoved: r.recordingsRemoved, recordingBytesRemoved: r.recordingBytesRemoved, plan: r.plan, recordings: r.recordings, at: r.at }); }
+    res.json({ ok: true, scopesHeld: r.scopesHeld || 0, ...(r.held || keptHeld ? { held: { code: 'browser_settings_unread', trace: !!r.held, kept: keptHeld } } : {}), removed: r.removed, bytesRemoved: r.bytesRemoved, recordingsRemoved: r.recordingsRemoved, recordingBytesRemoved: r.recordingBytesRemoved, plan: r.plan, recordings: r.recordings, at: r.at, ...(r.stopped ? { stopped: r.stopped } : {}) /* r4739: a pass stopped at a read that did not answer — said */ }); }
   catch (e) { fail(res, e); }
 });
 /** "Who can use it" as the dialog draws it — FRESH from the registry (mirror-193: never the panel's broadcast copy), with
