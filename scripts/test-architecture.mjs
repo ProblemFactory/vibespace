@@ -2289,8 +2289,13 @@ await section(async () => {
     const req47f = (await import('node:module')).createRequire(import.meta.url);
     const a = CS.attachCensus(process.cwd());
     const unprog = CS.attachCensus(process.cwd(), { patch: { 'scripts/test-browser-live.mjs': fs.readFileSync('scripts/test-browser-live.mjs', 'utf8').split('chromeNamesProgram(').join('chromeNamesProgramX(') } });
-    ok(a.worlds.includes('scripts/test-browser-live.mjs') && a.unprogrammed.length === 0 && unprog.unprogrammed.includes('scripts/test-browser-live.mjs'),
-      `§47f every world that wires a REAL display keeper and a real Chrome hands its keeper the harness's Chrome program (${a.worlds.length} world(s): ${a.worlds.join(', ')}); RED: the same world without it is named`, JSON.stringify({ worlds: a.worlds, unprogrammed: a.unprogrammed, control: unprog.unprogrammed }));
+    // r4685 M1: a SCRATCH-HUB world (a file asserting the attach road — the assertion assembled from pieces here, so this file is no world)
+    const ASSERT47f = 'ok(rec.launch' + " === 'attach', 'started');\n", hubWorld = CS.attachCensus(process.cwd(), { extra: { 'scripts/test-planted-hub-attach.mjs': ASSERT47f } });
+    const staleRow47f = CS.attachCensus(process.cwd(), { rows: { ...CS.ATTACH_ROWS, 'scripts/test-planted-no-world.mjs': 'a planted row' }, extra: { 'scripts/test-planted-no-world.mjs': 'export const X = 1;\n' } });
+    const want47f = ['scripts/test-browser-live.mjs', 'scripts/test-browser-x-picture.mjs', 'scripts/test-browser-human-ui.mjs', 'scripts/test-desktop-xpra-window-close.mjs'];
+    ok(want47f.every((f) => a.worlds.includes(f)) && a.unprogrammed.length === 0 && a.stale.length === 0 && unprog.unprogrammed.includes('scripts/test-browser-live.mjs')
+      && hubWorld.unprogrammed.includes('scripts/test-planted-hub-attach.mjs') && staleRow47f.stale.includes('scripts/test-planted-no-world.mjs'),
+      `§47f every world on the attach road — a keeper with a REAL display keeper in the suite's own process, or a scratch hub the suite asserts the attach road of — hands that keeper the harness's Chrome program, itself or through its boot module (${a.worlds.length} world(s): ${a.worlds.join(', ')}; ${a.rowed.length} counted rows start no real Chrome); RED: the same in-process world without it, a planted scratch-hub world without it, and a stale row are each named`, JSON.stringify({ worlds: a.worlds, unprogrammed: a.unprogrammed, rowed: a.rowed, stale: a.stale, control: unprog.unprogrammed, hub: hubWorld.unprogrammed, staleRow: staleRow47f.stale }));
     const scr47f = fs.readFileSync('scripts/scratch.mjs', 'utf8'), bodyOf = (name) => { const at = scr47f.indexOf(`export const ${name} = `), end = scr47f.indexOf('\n};\n', at); return at >= 0 && end > at ? scr47f.slice(at + `export const ${name} = `.length, end + 2) : ''; };
     const MARK47f = (/^export const NAMES_PROGRAM_MARK = '([^']*)';$/m.exec(scr47f) || [])[1] || null;
     const TXT = (() => { try { return new Function('NAMES_PROGRAM_MARK', `return (${bodyOf('chromeNamesProgramText')});`)(MARK47f); } catch { return null; } })();

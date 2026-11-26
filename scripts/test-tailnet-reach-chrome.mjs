@@ -88,11 +88,11 @@ function makeSampler({ roots: rs, outside: into, ssBin = 'ss', everyMs = 250 } =
   const run = (cmd, args) => new Promise((res) => execFile(cmd, args, { encoding: 'utf8', timeout: 2000, maxBuffer: 32 * 1024 * 1024 }, (e, so) => res(e ? null : String(so || ''))));
   const kidsOf = async (pid) => { const out = []; let tasks = []; try { tasks = await fsp.readdir(`/proc/${pid}/task`); } catch { return out; } for (const t of tasks) { try { for (const c of (await fsp.readFile(`/proc/${pid}/task/${t}/children`, 'utf8')).trim().split(/\s+/)) if (c) out.push(Number(c)); } catch { } } return out; };
   const treeOf = async () => { const all = new Set(), q = [...rs]; while (q.length) { const pid = q.pop(); if (all.has(pid)) continue; all.add(pid); for (const k of await kidsOf(pid)) q.push(k); } return all; };
-  const st = { n: 0, skipped: 0, ms: [], maxTree: 0, maxKids: 0 }; let running = null;
-  const one = async () => { const t0 = Date.now(); try { if (!rs.size) return; const mine = await treeOf(); if (mine.size > st.maxTree) st.maxTree = mine.size; if (mine.size - rs.size > st.maxKids) st.maxKids = mine.size - rs.size; const out = await run(ssBin, ['-tunpH']); if (out !== null) parseSs(out, mine, into); } finally { st.n++; st.ms.push(Date.now() - t0); } };
+  const st = { n: 0, skipped: 0, ms: [], maxTree: 0, maxKids: 0, read: 0, failed: 0, finalRead: null }; let running = null;
+  const one = async () => { const t0 = Date.now(); try { if (!rs.size) return; const mine = await treeOf(); if (mine.size > st.maxTree) st.maxTree = mine.size; if (mine.size - rs.size > st.maxKids) st.maxKids = mine.size - rs.size; const out = await run(ssBin, ['-tunpH']); if (out === null) { st.failed++; return false; } st.read++; parseSs(out, mine, into); return true; } finally { st.n++; st.ms.push(Date.now() - t0); } };   // r4685 M2: a listing that failed is COUNTED, never silent
   const tick = () => { if (running) { st.skipped++; return; } running = one().finally(() => { running = null; }); };
   const iv = setInterval(tick, everyMs); if (iv.unref) iv.unref();
-  return { interval: iv, stop: () => clearInterval(iv), stats: () => st, async final() { if (running) await running; await one(); } };
+  return { interval: iv, stop: () => clearInterval(iv), stats: () => st, async final() { if (running) await running; st.finalRead = (await one()) === true; return st.finalRead; } };
 }
 const LOOP = monitorEventLoopDelay({ resolution: 10 }); LOOP.enable();   // the loop's longest turn while the sampler runs (ms at ⑤)
 const SAMPLER = makeSampler({ roots, outside });
@@ -279,7 +279,7 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
     const v = await door.launch({ label: 'driver' });
     // B-8695 (主开发 r4617): the suite's own driver line and the harness's rule as ONE line built in ONE place (scratch.mjs driverArgs: the PAC
     // switch whole, DRIVER_NAMES — every name to the loopback — last); a --config file is the driver's line too (§47e)
-    const line = { ok: true, args: driverArgs('--no-sandbox', ...QUIET, v.arg) }, cfgFile = path.join(ROOT, 'driver.json'); fs.writeFileSync(cfgFile, JSON.stringify({ args: line.args }));
+    let line; try { line = { ok: true, args: driverArgs('--no-sandbox', ...QUIET, v.arg) }; } catch (e) { line = { ok: false, args: '', error: String((e && e.message) || e) }; } const cfgFile = path.join(ROOT, 'driver.json'); fs.writeFileSync(cfgFile, JSON.stringify({ args: line.args }));   // r4685: a refused line reads red by name below
     const sock = fs.mkdtempSync('/tmp/vs-tn-' + process.pid + '-'); // short: a unix socket path — /tmp itself, never TMPDIR; per pid (test-ci-gate-tiers §6)
     const home = path.join(ROOT, 'abhome'); fs.mkdirSync(home, { recursive: true });
     const env = { PATH: process.env.PATH, HOME: home, TMPDIR: ROOT, AGENT_BROWSER_SOCKET_DIR: sock, AGENT_BROWSER_SESSION: 'tn-driver', AGENT_BROWSER_CONFIG: cfgFile, AGENT_BROWSER_EXECUTABLE_PATH: CHROME, AGENT_BROWSER_IDLE_TIMEOUT_MS: '60000', AGENT_BROWSER_JSON: '1' };
@@ -287,23 +287,24 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
     const run = (args) => new Promise((res) => execFile(ab, args, { env, encoding: 'utf8', timeout: 60000 }, (e, so, se) => res({ ok: !e, out: String(so || '') + (e ? String(se || e.message) : '') })));
     // THIS leg's driver processes (the daemon and its Chrome): their environment names this leg's own socket dir (a mkdtemp) —
     // never a pid by pattern alone
-    const daemons = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x) && Number(x) !== process.pid).filter((d) => { try { return fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').includes(sock) || fs.readFileSync(`/proc/${d}/environ`, 'utf8').split('\0').includes(`AGENT_BROWSER_SOCKET_DIR=${sock}`); } catch { return false; } }).map(Number);
+    // r4685: ASYNC reads (the same kind of loop hold as the sampler's, named by the round): the door and the SOCKS5 stub answer on this loop
+    const daemons = async () => { const out = []; for (const x of await fs.promises.readdir('/proc')) { if (!/^\d+$/.test(x) || Number(x) === process.pid) continue; try { if ((await fs.promises.readFile(`/proc/${x}/cmdline`, 'utf8')).includes(sock) || (await fs.promises.readFile(`/proc/${x}/environ`, 'utf8')).split('\0').includes(`AGENT_BROWSER_SOCKET_DIR=${sock}`)) out.push(Number(x)); } catch { } } return out; };
     const r0 = roots.size;
     const s0 = socksSeen.length;
     const opening = run(['open', `http://peer-alpha:${PEER_PORT}/`]);
-    for (let i = 0; i < 40 && !daemons().length; i++) await sleep(50); // the sampler watches the daemon's tree from its start
-    for (const d of daemons()) roots.add(d);
+    for (let i = 0; i < 40 && !(await daemons()).length; i++) await sleep(50); // the sampler watches the daemon's tree from its start
+    for (const d of await daemons()) roots.add(d);
     const o = await opening;
-    for (const d of daemons()) roots.add(d);
+    for (const d of await daemons()) roots.add(d);
     const t = await run(['get', 'text', 'body']);
-    for (const d of daemons()) roots.add(d);
+    for (const d of await daemons()) roots.add(d);
     const s1 = socksSeen.length;
     const o2 = await run(['open', `http://public.example:${PUB_PORT}/`]);
     const t2 = await run(['get', 'text', 'body']);
     await SAMPLER.final();   // B-8695: the driver's Chrome sampled after its last act, before its close (never skipped)
     await run(['close', '--all']);
     // the daemon this leg started: only a process whose cmdline names THIS leg's socket dir (never a pid by pattern alone)
-    for (const d of daemons()) { try { process.kill(d, 'SIGKILL'); } catch { } }
+    for (const d of await daemons()) { try { process.kill(d, 'SIGKILL'); } catch { } }
     ok('the driver reads its ONE args line back with the switch whole (comma-free)', line.ok && V.driverArgsList(line.args).includes(v.arg), line);
     ok('the real agent-browser\'s Chrome LOADS `http://peer-alpha:<port>/` — through the plugin\'s SOCKS5 (it saw the name)', o.ok && t.ok && /PEER-OK peer-alpha/.test(t.out) && socksSeen.slice(s0, s1).includes(`peer-alpha:${PEER_PORT}`), { o: o.out.slice(0, 300), t: t.out.slice(0, 300), seen: socksSeen.slice(s0) });
     ok('…and the public URL DIRECT (the SOCKS5 stub saw nothing more)', o2.ok && /PUBLIC-OK/.test(t2.out) && socksSeen.length === s1, { o2: o2.out.slice(0, 300), t2: t2.out.slice(0, 300) });
@@ -374,9 +375,10 @@ console.log('④ LAW 2\'s page in the in-page browser (/proxy) AFTER the ordinar
 console.log('⑤ nothing left loopback');
 {
   await SAMPLER.final();   // B-8695: the last sample, after the browsers' last act, is never skipped
+  SAMPLER.stop(); LOOP.disable();   // r4685: the figures below are exactly «while it ran»; ⑥ runs on a quiet loop
   const st = SAMPLER.stats(), srt = st.ms.slice().sort((x, y) => x - y), q = (f) => srt.length ? srt[Math.min(srt.length - 1, Math.floor(f * srt.length))] : 0;
-  console.log(`  · the sampler (B-8695): ${st.n} samples, ${st.skipped} skipped while one ran; per sample median ${q(0.5)} ms, p95 ${q(0.95)} ms, the longest five ${srt.slice(-5).reverse().join(' / ')} ms; the largest tree it walked ${st.maxTree} processes (${st.maxKids} beyond the roots); the loop's longest turn while it ran ${Math.round(LOOP.max / 1e6)} ms`);
-  ok(`the sampler walked the browsers' own trees, children included (at most ${st.maxKids} processes beyond the roots in one sample), and took its last sample after their last act`, st.n > 0 && st.maxKids > 0, { n: st.n, maxTree: st.maxTree, maxKids: st.maxKids, roots: roots.size });
+  console.log(`  · the sampler (B-8695): ${st.n} samples, ${st.skipped} skipped while one ran; per sample median ${q(0.5)} ms, p95 ${q(0.95)} ms, the longest five ${srt.slice(-5).reverse().join(' / ')} ms; ${st.read} listings read, ${st.failed} failed (each counted); the largest tree it walked ${st.maxTree} processes (${st.maxKids} beyond the roots); the loop's longest turn while it ran ${Math.round(LOOP.max / 1e6)} ms`);
+  ok(`the sampler walked the browsers' own trees, children included (at most ${st.maxKids} processes beyond the roots in one sample), and took its last sample after their last act — that last listing READ (r4685: a failed listing is never «none seen»)`, st.n > 0 && st.maxKids > 0 && st.read > 0 && st.finalRead === true, { n: st.n, maxTree: st.maxTree, maxKids: st.maxKids, roots: roots.size, read: st.read, failed: st.failed, finalRead: st.finalRead });
   ok(`no Chrome of this suite held a non-loopback socket (${roots.size} process trees sampled at 4 Hz; every Chrome without background networking)`, outside.length === 0, [...new Set(outside)].slice(0, 20));
 }
 
@@ -403,8 +405,23 @@ console.log('⑥ CONTROL: the sampler with its sample HELD (a stand-in `ss` that
     await sleep(2500); stop(); await sleep(HOLD_MS + 200); h.disable();
     return Math.round(h.max / 1e6);
   };
+  const baseline = await (async () => { const h = monitorEventLoopDelay({ resolution: 10 }); h.enable(); await sleep(2500 + HOLD_MS + 200); h.disable(); return Math.round(h.max / 1e6); })();   // r4685: the loop with NO sampler, the same window
   const relMax = await held('release'), curMax = await held('cured');
+  console.log(`  · the loop's longest turn over the same window: with no sampler ${baseline} ms · the release's held sampler ${relMax} ms · this sampler held ${curMax} ms`);
   ok(`RED CONTROL: the release's sampler with its sample held ${HOLD_MS} ms makes the suite's loop turns that long (its longest ${relMax} ms)`, relMax >= HOLD_MS * 0.8, { relMax });
-  ok(`…and this sampler with the SAME hold leaves the loop's turns short (its longest ${curMax} ms): its work is a child's and async reads, never the loop's`, curMax < HOLD_MS / 3, { curMax });
+  ok(`…and this sampler with the SAME hold leaves the loop's turns short (its longest ${curMax} ms): its work is a child's and async reads, never the loop's`, curMax < relMax / 3, { curMax, relMax, baseline });
+  // r4685 M2: THE POSITIVE CONTROL — a child of the suite's own holds a CONNECTED UDP socket to a documentation address (TEST-NET-1,
+  // 192.0.2.1: a datagram socket's connect sends no packet). The sampler whose roots hold that child must SEE it outside the loopback;
+  // one whose roots do not must not (red when the walk or the parse misses it)
+  const kid = spawn(process.execPath, ['-e', "const d = require('dgram').createSocket('udp4'); d.connect(9, '192.0.2.1', (e) => { process.stdout.write(e ? 'no route\\n' : 'held\\n'); }); setTimeout(() => process.exit(0), 20000);"], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const other = spawn('sleep', ['20'], { stdio: 'ignore' });
+  const said = await new Promise((r) => { let b = ''; kid.stdout.on('data', (d) => { b += d; if (/held|no route/.test(b)) r(b.trim()); }); setTimeout(() => r(b.trim() || 'silent'), 5000); });
+  const seen = [], unseen = [];
+  const withKid = makeSampler({ roots: new Set([kid.pid]), outside: seen }), withoutKid = makeSampler({ roots: new Set([other.pid]), outside: unseen });
+  withKid.stop(); withoutKid.stop();
+  const readWith = await withKid.final(), readWithout = await withoutKid.final();
+  try { process.kill(kid.pid, 'SIGKILL'); } catch { } try { process.kill(other.pid, 'SIGKILL'); } catch { }
+  ok(`POSITIVE CONTROL: a child of the suite holding a socket connected to 192.0.2.1 (a documentation address; no packet sent) is SEEN outside the loopback by the sampler whose roots hold it (${said})`, said === 'held' && readWith === true && seen.some((x) => x.includes('192.0.2.1')), { said, readWith, seen: seen.slice(0, 3) });
+  ok('…and NOT by a sampler whose roots do not hold that child (the walk decides what is the suite\'s)', readWithout === true && !unseen.some((x) => x.includes('192.0.2.1')), { readWithout, unseen: unseen.slice(0, 3) });
 }
 done();

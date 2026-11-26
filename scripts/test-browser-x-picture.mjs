@@ -38,7 +38,7 @@ import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, chromeNamesProgram } from './scratch.mjs';
 import { DRIVER } from './scratch.mjs';   // the ONE sentence a driver-less skip begins with (主开发 r2095)
 const require = createRequire(import.meta.url);
 // the suite's own copy of its WHOLE output (VIBESPACE_XPIC_LOG=<file>): ci.mjs keeps a GREEN suite's output nowhere, and the hotfix's
@@ -174,7 +174,10 @@ fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\ncase " $* " in *" --outpu
 const PORT = await freePort();
 const env = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && !['WAYLAND_DISPLAY', 'DISPLAY', 'XDG_RUNTIME_DIR', 'XAUTHORITY'].includes(k)) env[k] = v;
 fs.symlinkSync(process.execPath, path.join(BIN, 'node'));
-Object.assign(env, { PATH: `${BIN}:${path.dirname(REAL_AB)}:/usr/bin:/bin`, CLAUDE_CMD: path.join(BIN, 'claude'), HOME, XDG_RUNTIME_DIR: XDG, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AT_BRIDGE: '1', MESA_SHADER_CACHE_DISABLE: 'true', DBUS_SESSION_BUS_ADDRESS: 'disabled:' });
+// B-8695 (主开发 r4685 M1): the scratch hub's keeper takes the ATTACH road here (a real Chrome on its xpra display): the harness's
+// own Chrome program, written into this world's folder and FIRST on the PATH this suite builds for the hub, puts the names rule first
+const NP = chromeNamesProgram(path.join(ROOT, 'chrome-bin'), { PATH: `${BIN}:${path.dirname(REAL_AB)}:/usr/bin:/bin` });
+Object.assign(env, { PATH: NP ? NP.env.PATH : `${BIN}:${path.dirname(REAL_AB)}:/usr/bin:/bin`, CLAUDE_CMD: path.join(BIN, 'claude'), HOME, XDG_RUNTIME_DIR: XDG, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AT_BRIDGE: '1', MESA_SHADER_CACHE_DISABLE: 'true', DBUS_SESSION_BUS_ADDRESS: 'disabled:' });
 let journal = '';
 const srv = spawn(process.execPath, ['server.js'], { cwd: INST, env: { ...env, ...VNC, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] });
 procs.add(srv);

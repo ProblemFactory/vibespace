@@ -184,15 +184,30 @@ export const REAL_DISPLAY = /require\(['"]\.\.\/src\/(?:desktop-display|desktop-
 export const KEEPER_DISPLAY = /\bdisplaySessions\s*:/;
 export const REAL_CHROME = /binOf\(['"]google-chrome['"]\)|\bchromeExecutable\(/;
 export const NAMES_PROGRAM = /\bchromeNamesProgram\(/;
+// 主开发 r4685 M1: a world is ALSO a file that drives the attach road through a SCRATCH HUB — read by what it asserts (a launch or a road
+// judged to be the attach road), not by how it requires the product. It is programmed when its own text names the program or a local
+// module it imports does (a boot module: scripts/xpra-window-boot.mjs); a world that starts no real Chrome is a counted row
+export const ATTACH_ASSERT = /\.launch\s*[!=]==\s*'attach'|\bwhy\s*[!=]==\s*'attach'|on the ATTACH road/;
+export const ATTACH_ROWS = Object.freeze({
+  'scripts/test-browser-keeper-launch.mjs': 'the keeper\'s attach road over a FAKE google-chrome in FAKE_BIN (a node stand-in) — no real Chrome starts',
+  'scripts/test-browser-keeper.mjs': 'the PURE launchRoad verdicts and the product\'s launch argv asserted as data — no Chrome starts',
+  'scripts/test-browser-picture.mjs': 'a PURE picture verdict whose `why` is the attach road — no Chrome, no keeper starts one',
+  'scripts/ci.mjs': 'the tier runner (a module suites import): a suite row\'s words name the attach road — it starts no Chrome',
+});
 /** → { worlds: [file], unprogrammed: [file] } over the scope (`patch` / `extra` as census's) */
-export function attachCensus(repo, { patch = {}, extra = {} } = {}) {
-  const out = { worlds: [], unprogrammed: [] };
+export function attachCensus(repo, { patch = {}, extra = {}, rows = ATTACH_ROWS } = {}) {
+  const out = { worlds: [], unprogrammed: [], rowed: [], stale: [] };
+  const textOf = (f) => (f in extra ? extra[f] : f in patch ? patch[f] : (() => { try { return fs.readFileSync(path.join(repo, f), 'utf8'); } catch { return ''; } })());
+  // a BOOT module that hands its hub the program (never scratch.mjs, whose text DEFINES it: every suite imports that one)
+  const viaImport = (src) => [...src.matchAll(/\bfrom\s*'\.\/((?!test-)[\w.-]+\.mjs)'/g)].some((m) => m[1] !== 'scratch.mjs' && NAMES_PROGRAM.test(textOf('scripts/' + m[1])));
   for (const f of [...filesOf(repo), ...Object.keys(extra)]) {
-    const src = f in extra ? extra[f] : f in patch ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
-    if (!(REAL_DISPLAY.test(src) && KEEPER_DISPLAY.test(src) && REAL_CHROME.test(src))) continue;
+    const src = textOf(f);
+    if (!((REAL_DISPLAY.test(src) && KEEPER_DISPLAY.test(src) && REAL_CHROME.test(src)) || ATTACH_ASSERT.test(src))) continue;
     out.worlds.push(f);
-    if (!NAMES_PROGRAM.test(src)) out.unprogrammed.push(f);
+    if (rows[f]) { out.rowed.push(f); continue; }
+    if (!NAMES_PROGRAM.test(src) && !viaImport(src)) out.unprogrammed.push(f);
   }
+  for (const f of Object.keys(rows)) if (!out.worlds.includes(f)) out.stale.push(f);
   return out;
 }
 
