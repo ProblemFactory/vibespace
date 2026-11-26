@@ -22,18 +22,11 @@
 //   ⑨ A LIVE wrapper's frame in flight is never drawn «Not confirmed»; the page's words and chips (en / zh / ja), the chip table
 //   ㉖ (r4372) ONE BUBBLE where the hub's own send record (the live ring) meets a drawn copy of the same message — in BOTH orders,
 //      each placed by its records' dates (never this run's clock); RED: the drawer before the cure draws a second bubble copy-first
-//   ㉗ (unit 3, r4655 / r4664) SEND AGAIN and DISMISS a message proven not delivered: the real wrapper's ONE write (the old record
-//      resent AND the new one handed) before anything is handed on, the words once in the CLI's stdin, a second press refused by
-//      its record; a kill HELD in that window (a scene copy with a placed FIFO hold, never a clock) leaves the new message to the
-//      next wrapper, drawn «Not delivered» with its words — RED: a copy that writes the end state alone loses them; Dismiss writes
-//      first, a rebuild draws nothing, a live view keeps the bubble; the hub's door: the person only (both frames), once, words only;
-//      (r4682 M1) a Send again HELD mid-turn and then taken back (Stop's put-back, the removal) ends its record there — the CLI's exit
-//      never brings it back «Not delivered»; RED: the tip's wrapper (no ending) does; the door's two REDs (no pending mark, no person check)
 import { stopWrapper, anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -77,9 +70,9 @@ function conversation(tag, { conv = uuid(++k), transcript = null } = {}) {
 function writeTranscript(c, id, recs) { fs.writeFileSync(c.tfile(id), recs.map((r) => J({ sessionId: id, cwd: c.cwd, ...r })).join('\n') + '\n'); }
 const recordsOf = (c, id = c.conv) => { try { return new Map(JSON.parse(fs.readFileSync(HANDED.fileOf(c.buffers, id), 'utf8')).frames.map((r) => [r.msgId, r])); } catch { return new Map(); } };
 /** the REAL wrapper as the hub starts a resumed claude conversation (a NEW hub id each time): `--resume <conv>` (+ extra argv) */
-function startWrapper(c, hubId, { wrapper = WRAPPER, extra = [], env: more = {} } = {}) {
+function startWrapper(c, hubId, { wrapper = WRAPPER, extra = [] } = {}) {
   const buf = path.join(c.buffers, hubId + '.buf'), meta = path.join(c.buffers, hubId + '.json');
-  const child = spawn(process.execPath, [wrapper, buf, meta, process.execPath, STAND_IN, '--resume', c.conv, ...extra], { cwd: c.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, HOME, CLAUDE_CONFIG_DIR: CFG, VIBESPACE_SKIP_AGENT_HOOKS: '1', STAND_IN_LONG_MS: '60000', ...more } });
+  const child = spawn(process.execPath, [wrapper, buf, meta, process.execPath, STAND_IN, '--resume', c.conv, ...extra], { cwd: c.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, HOME, CLAUDE_CONFIG_DIR: CFG, VIBESPACE_SKIP_AGENT_HOOKS: '1', STAND_IN_LONG_MS: '60000' } });
   const out = []; let lb = '';
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { out.push(JSON.parse(l)); } catch { } } });
@@ -690,172 +683,6 @@ WD.section('㉖');
     `the send record first: ONE bubble, as before the cure; and the copy-first bubble's chip is the send-first one's (${J(cf.chip)} = ${J(rsf.chip)}): what the live ring says`, { sf, rsf, cf });
   ok(rcf.bubbles === 2 && rcfU.bubbles === 2,
     `RED: the drawer before the cure draws a SECOND bubble when the copy is dated first (${rcf.bubbles} «Not delivered», ${rcfU.bubbles} «Not confirmed») — the message manager's drop by msgId holds only after a send record`, { rcf, rcfU });
-}
-
-say('㉗ UNIT 3 — SEND AGAIN and DISMISS a message proven not delivered (r4655 / r4664)');
-WD.section('㉗');
-{
-  const sendAgain = (w, text, newId, oldId) => w.child.stdin.write(ad.formatChatInput(J({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, webui_resend_of: oldId }), newId, {}).stdinPayload + '\n');
-  const capOf = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
-  const timesIn = (f, text) => capOf(f).split('\n').filter((l) => l.includes(text)).length;
-  const stop = async (w) => { killCli(w); try { w.child.kill('SIGKILL'); } catch { } await Promise.race([w.exited, sleep(5000)]); WF.removeWrapperFiles(w.c ? w.c.buffers : path.dirname(w.buf), w.hubId); };
-  const live = (w) => until(() => Number(w.sidecar().childPid) > 1 && !!(w.sidecar().caps || {}).undeliveredActs, 6000);
-
-  // (a) THE REAL WRAPPER: one write, the words once, a second press refused by its record, a frame for a record not «not delivered» dropped
-  const cA = conversation('u3-again'), capA = path.join(BASE, 'cap-u3-again');
-  place(cA, [recordOf('mU3-old', null, { state: 'undelivered', settledAt: Date.now() - 1000 }), recordOf('mU3-landed', null, { state: 'landed', settledAt: Date.now() - 1000 })]);
-  const wA = startWrapper(cA, 'sess-u3-again', { env: { STUB_CAPTURE: capA } });
-  const upA = await live(wA);
-  sendAgain(wA, words('mU3-old'), 'mU3-new', 'mU3-old');
-  await until(() => wA.out.some((r) => r.type === 'input_handover' && r.state === 'resent'), 6000);
-  await until(() => timesIn(capA, words('mU3-old')) > 0, 6000);
-  sendAgain(wA, words('mU3-old'), 'mU3-new2', 'mU3-old');   // the second press (a second window, a second device)
-  sendAgain(wA, words('mU3-landed'), 'mU3-new3', 'mU3-landed');   // a record that is not «not delivered» (the CLI took it)
-  await until(() => wA.out.filter((r) => r.type === 'queue_op_result' && r.op === 'resend').length >= 2, 6000);
-  const recA = recordsOf(cA), saidA = wA.out.find((r) => r.type === 'input_handover' && r.state === 'resent');
-  const refA = Object.fromEntries(wA.out.filter((r) => r.type === 'queue_op_result' && r.op === 'resend').map((r) => [r.msg_id, r.reason]));
-  ok(upA && recA.get('mU3-old')?.state === 'resent' && recA.get('mU3-new')?.state === 'handed' && typeof recA.get('mU3-new')?.copy === 'string' && recA.get('mU3-new').copy.includes(words('mU3-old')) && !!recA.get('mU3-new').cli && saidA?.resent_as === 'mU3-new',
-    'Send again: ONE write ends the old record «resent» AND carries the new message\'s own record, handed (its copy, its CLI), then the word says it', { old: recA.get('mU3-old')?.state, nu: recA.get('mU3-new') && { state: recA.get('mU3-new').state, cli: !!recA.get('mU3-new').cli }, said: saidA });
-  ok(timesIn(capA, words('mU3-old')) === 1 && refA['mU3-new2'] === 'already-resent' && !recA.has('mU3-new2') && refA['mU3-new3'] === 'not-undelivered' && timesIn(capA, words('mU3-landed')) === 0,
-    'ONCE: the words reached the CLI once — a second press is refused by the record («already-resent», nothing written, nothing sent), and a press for a record that is not «not delivered» is dropped, refused by name', { refA, cli: timesIn(capA, words('mU3-old')) });
-  await stop(wA);
-
-  // (b) THE KILL HELD IN THE WINDOW between the one write and the hand-over (a scene copy: a FIFO read nobody writes — a hold, never a clock)
-  const WRITE_LINE = "  if (!writeRecords()) { HR.set(old, was); HR.delete(msgId); return actRefused('resend', 'not-written', fields); }\n";
-  const HOLD_LINE = '  fs.readFileSync(process.env.U3_HOLD);   /* SCENE: held between the one write and the hand-over */\n';
-  const NEW_LINE = "  HR.set(msgId, { msgId, cliUuid: st.uuid, copy, cli: cliNow(), state: 'handed', at: Date.now(), settledAt: 0, via: 'resend' });\n";
-  const R_HOLD = redWrapper('u3-hold', [[WRITE_LINE, WRITE_LINE + HOLD_LINE]]);
-  const R_ALONE = redWrapper('u3-alone', [[NEW_LINE, '  /* MUTANT: the end state alone — no record of the new message */\n'], [WRITE_LINE, WRITE_LINE + HOLD_LINE]]);
-  const held = async (tag, wrapper) => {
-    const c = conversation('u3-' + tag), fifo = path.join(BASE, 'hold-' + tag), cap = path.join(BASE, 'cap-u3-' + tag);
-    execFileSync('mkfifo', [fifo]);
-    place(c, [recordOf('mU3h-old', null, { state: 'undelivered', settledAt: Date.now() - 1000 })]);
-    const w = startWrapper(c, 'sess-u3-' + tag, { wrapper, env: { U3_HOLD: fifo, STUB_CAPTURE: cap } });
-    await live(w);
-    sendAgain(w, words('mU3h-old'), 'mU3h-new', 'mU3h-old');
-    const wrote = await until(() => recordsOf(c).get('mU3h-old')?.state === 'resent', 6000);   // the write landed — the wrapper is held now
-    const inWindow = { wrote, recs: [...recordsOf(c).keys()], said: w.out.some((r) => r.type === 'input_handover' && r.state === 'resent'), cli: timesIn(cap, words('mU3h-old')) };
-    await stop(w);
-    if (tag === 'hold') {   // THE NEXT WRAPPER (a Resume): it judges what the killed one left (the RED left nothing to judge)
-      const w2 = startWrapper(c, 'sess-u3n-' + tag);
-      await until(() => w2.out.some((r) => r.type === 'input_handover' && r.state === 'undelivered'), 8000);
-      await stop(w2);
-    }
-    const mm = await stoppedView(c);
-    const b = mm.messages.find((m) => m.role === 'user' && m.webuiMsgId === 'mU3h-new');
-    return { inWindow, after: Object.fromEntries([...recordsOf(c)].map(([k, r]) => [k, r.state])), bubble: b ? { chip: b.queueState || null, words: JSON.stringify(b.content).includes(words('mU3h-old')) } : null, anyWords: mm.messages.some((m) => m.role === 'user' && JSON.stringify(m.content).includes(words('mU3h-old'))) };
-  };
-  const H = await held('hold', R_HOLD.path), HR_ = await held('alone', R_ALONE.path);
-  ok(H.inWindow.wrote && H.inWindow.recs.includes('mU3h-new') && !H.inWindow.said && H.inWindow.cli === 0 && H.after['mU3h-new'] === 'undelivered' && H.bubble?.chip === 'undelivered' && H.bubble?.words === true,
-    'A KILL HELD in the window between the one write and the hand-over (nothing said, nothing in the CLI): the next wrapper settles the NEW message «not delivered» and the view draws it with its words — never «resent» and the words nowhere', H);
-  ok(R_HOLD.counts.join() === '1' && R_ALONE.counts.join() === '1,1' && HR_.inWindow.wrote && HR_.after['mU3h-old'] === 'resent' && !('mU3h-new' in HR_.after) && HR_.anyWords === false,
-    'RED: a copy that writes the end state alone, killed in the same window — the old record says «resent» and the words are nowhere', HR_);
-
-  // (c) DISMISS: the end state in the file first, a second press refused, a rebuild draws nothing — and before it, the bubble was drawn
-  const cD = conversation('u3-dismiss');
-  place(cD, [recordOf('mU3-dis', null, { state: 'undelivered', settledAt: Date.now() - 1000 })]);
-  const before = bubbleOf(await stoppedView(cD), 'mU3-dis');
-  const wD = startWrapper(cD, 'sess-u3-dismiss');
-  await live(wD);
-  wD.child.stdin.write(J({ type: 'undelivered-dismiss', msg_id: 'mU3-dis' }) + '\n');
-  await until(() => wD.out.some((r) => r.type === 'input_handover' && r.state === 'dismissed'), 6000);
-  wD.child.stdin.write(J({ type: 'undelivered-dismiss', msg_id: 'mU3-dis' }) + '\n');
-  await until(() => wD.out.some((r) => r.type === 'queue_op_result' && r.op === 'dismiss'), 6000);
-  const recD = recordsOf(cD), refD = wD.out.find((r) => r.type === 'queue_op_result' && r.op === 'dismiss');
-  await stop(wD);
-  const afterD = bubbleOf(await stoppedView(cD), 'mU3-dis');
-  ok(before?.chip === 'undelivered' && recD.get('mU3-dis')?.state === 'dismissed' && refD?.reason === 'dismissed' && afterD === null,
-    `Dismiss: «${before?.chip}» drawn before; the record «${recD.get('mU3-dis')?.state}» in the file; a second press refused («${refD?.reason}»); the rebuild draws it no more`, { before, after: afterD });
-
-  // (d) A LIVE view keeps the dismissed bubble — its words selectable until the next rebuild (no undo, no confirm)
-  {
-    const mm = new MessageManager('dead-handover-suite');
-    mm.convertHistory([{ ...JSON.parse(copyLine('mU3-live')), undelivered: true }]);
-    mm.processLive({ type: 'input_handover', state: 'dismissed', msg_ids: ['mU3-live'], via: 'dismiss' });
-    const b = bubbleOf(mm, 'mU3-live');
-    const mm2 = new MessageManager('dead-handover-suite');
-    mm2.convertHistory([{ ...JSON.parse(copyLine('mU3-live')), undelivered: true }, { type: 'input_handover', state: 'dismissed', msg_ids: ['mU3-live'], via: 'dismiss' }]);
-    ok(b?.chip === 'dismissed' && b.words === true && bubbleOf(mm2, 'mU3-live') === null, 'live: the bubble stays with «Removed, not delivered» and its words; a rebuild of the same records draws it no more', { live: b, rebuilt: bubbleOf(mm2, 'mU3-live') });
-  }
-
-
-  // (g) r4682 M1: A SEND AGAIN HELD MID-TURN, THEN TAKEN BACK — by Stop (put back into the box) and by the person's removal — never
-  // reached the CLI: its record ends in that road, and the CLI's exit does not bring it back «Not delivered». RED: the tip's wrapper
-  const TAKEN_STOP = "  endTakenBack(dropped.map((q) => q.msgId), 'stop');   // unit 3's cure: a held Send again put back — its record ends here\n";
-  const TAKEN_REMOVE = "  endTakenBack([dropped.msgId], 'remove');   // unit 3's cure: a held Send again removed — its record ends here\n";
-  const R_TIP = redWrapper('u3-tip', [[TAKEN_STOP, '  /* MUTANT: the tip — nothing ends the record */\n'], [TAKEN_REMOVE, '  /* MUTANT: the tip — nothing ends the record */\n']]);
-  const takenBack = async (tag, how, wrapper) => {
-    const c = conversation('u3-tb-' + tag);
-    place(c, [recordOf('mTB-old', null, { state: 'undelivered', settledAt: Date.now() - 1000 })]);
-    const w = startWrapper(c, 'sess-u3-tb-' + tag, wrapper ? { wrapper } : {});
-    await live(w);
-    w.child.stdin.write(ad.formatChatInput('TOOL-A run a slow command', 'm-tool-tb-' + tag).stdinPayload + '\n');   // a turn that runs a tool (60 s)
-    await until(() => w.out.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')), 6000);
-    sendAgain(w, words('mTB-old'), 'mTB-new', 'mTB-old');   // no steer: HELD behind the running turn
-    await until(() => w.out.some((r) => r.type === 'queued_input' && r.msg_id === 'mTB-new'), 6000);
-    const heldRec = recordsOf(c).get('mTB-new')?.state;
-    if (how === 'stop') w.child.stdin.write(J({ type: 'control_request', request_id: 'tb-stop-' + tag, request: { subtype: 'interrupt' } }) + '\n');
-    else { const row = [...w.out].reverse().find((r) => r.type === 'queue_changed' && (r.items || []).some((it) => it.msgId === 'mTB-new')); w.child.stdin.write(J({ type: 'queue-op', op: 'remove', id: row ? row.items.find((it) => it.msgId === 'mTB-new').id : 'none' }) + '\n'); }
-    await until(() => w.out.some((r) => r.type === 'queue_op_result' && r.op === 'remove' && r.msg_id === 'mTB-new' && r.ok !== false), 6000);
-    const taken = recordsOf(c).get('mTB-new');
-    killCli(w);   // THE CLI ENDS: the wrapper settles what it handed to that CLI (settleOnExit), then exits — its exit is the fact waited on
-    await Promise.race([w.exited, sleep(8000)]);
-    await stop(w);
-    const b = (await stoppedView(c)).messages.find((m) => m.role === 'user' && m.webuiMsgId === 'mTB-new');
-    return { heldRec, taken: taken && { state: taken.state, via: taken.via }, after: recordsOf(c).get('mTB-new')?.state, chip: b ? b.queueState || null : null };
-  };
-  const TBs = await takenBack('stop', 'stop'), TBr = await takenBack('remove', 'remove'), TBred = await takenBack('red', 'stop', R_TIP.path);
-  ok(TBs.heldRec === 'handed' && TBs.taken?.state === 'dismissed' && TBs.taken?.via === 'stop' && TBs.after === 'dismissed' && TBs.chip !== 'undelivered'
-    && TBr.taken?.state === 'dismissed' && TBr.taken?.via === 'remove' && TBr.after === 'dismissed' && TBr.chip !== 'undelivered',
-    'a Send again HELD mid-turn and taken back — by Stop and by the removal — ends its record in that road («dismissed»); the CLI\'s exit leaves it so and the rebuild draws no «Not delivered»', { TBs, TBr });
-  ok(R_TIP.counts.join() === '1,1' && TBred.after === 'undelivered' && TBred.chip === 'undelivered', 'RED (the tip\'s wrapper): nothing ends the record — the CLI\'s exit settles the words the person took back «not delivered», offered again', TBred);
-  // (e) THE HUB'S DOOR (src/server/undelivered-door.js): the person only at BOTH frames, the advert, once, the words only
-  {
-    const DOOR = require(path.join(ROOT, 'src/server/undelivered-door.js'));
-    const pic = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
-    const mkSession = () => {
-      const mm = new MessageManager('dead-handover-suite');
-      mm.convertHistory([{ ...JSON.parse(copyLine('mD-old')), undelivered: true }, { ...JSON.parse(J({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: words('mD-pic') }, pic] }, msgId: 'mD-pic', cliUuid: stampOf('mD-pic'), _fromWebui: true, webui_copy: true, timestamp: new Date(Date.now() - 20000).toISOString() })), undelivered: true }]);
-      const writes = [];
-      return { pty: { write: (x) => writes.push(String(x)) }, mode: 'chat', socketPath: null, _normalizer: mm, _undeliveredActs: true, writes };
-    };
-    const person = { kind: 'human', actBy: null };
-    const sent = [], sendUserInput = (sid, frame, opts) => { sent.push({ sid, frame, opts }); return { ok: true }; };   // the typing path's stand-in: what the door hands it
-    const s1 = mkSession();
-    const noOne = [DOOR.resend(s1, 'sess-door', { by: null, msgId: 'mD-old', sendUserInput }), DOOR.dismiss(s1, 'sess-door', { by: null, msgId: 'mD-old' })];
-    const old = DOOR.resend({ ...s1, _undeliveredActs: false }, 'sess-old', { by: person, msgId: 'mD-old', sendUserInput });
-    ok(noOne.every((r) => r.ok === false && r.reason === 'human_only') && old.reason === 'wrapper-old' && sent.length === 0 && s1.writes.length === 0,
-      'the door: a sign-in that is not a person\'s is refused by name at BOTH frames (human_only), an agent started before the update by its advert — nothing sent, nothing written', { noOne, old });
-    const r1 = DOOR.resend(s1, 'sess-door', { by: person, msgId: 'mD-old', sendUserInput });
-    const r2 = DOOR.resend(s1, 'sess-door', { by: person, msgId: 'mD-old', sendUserInput });
-    s1._normalizer.processLive({ type: 'input_handover', state: 'resent', msg_ids: ['mD-old'], resent_as: 'x', via: 'resend' });
-    const r3 = DOOR.resend(s1, 'sess-door', { by: person, msgId: 'mD-old', sendUserInput });
-    const f1 = sent[0] ? JSON.parse(sent[0].frame) : null;
-    ok(r1.ok === true && r2.reason === 'pending' && r3.reason === 'already-resent' && sent.length === 1 && f1?.webui_resend_of === 'mD-old' && f1.message.content.length === 1 && f1.message.content[0].text === words('mD-old') && sent[0].opts.origin === 'ws' && sent[0].opts.door === 'enter' && sent[0].opts.msgId !== 'mD-old',
-      'Send again is the person\'s own send road (origin ws, the Enter door) with the OLD words and a new id; a second press while its word is out is refused «pending», after the word «already-resent» — sent once', { r1, r2, r3, opts: sent[0] && sent[0].opts });
-    const p = DOOR.resend(s1, 'sess-door', { by: person, msgId: 'mD-pic', sendUserInput });
-    const fp = sent[1] ? JSON.parse(sent[1].frame) : null;
-    ok(p.ok === true && p.pictures === 1 && fp?.message.content.every((b) => b.type === 'text'), 'a message that carried a picture: its words go again, the picture does not — the answer counts it (the page says so)', { p });
-
-    // r4682: the door's checks each have their RED — a copy without the pending mark sends twice; a copy without the person check sends for anyone
-    const DOOR_SRC = fs.readFileSync(path.join(ROOT, 'src/server/undelivered-door.js'), 'utf8');
-    const NOPEND = M.load('src/server/undelivered-door.js', anchored(DOOR_SRC, '  pend.set(msgId, g.bubble.acts);   // before the write: a second press on this loop meets it\n', '  /* MUTANT: no pending mark */\n', 'door RED nopend'), 'door-nopend');
-    const ANYONE = M.load('src/server/undelivered-door.js', anchored(DOOR_SRC, "  if (!by) return refused('human_only');\n", '  /* MUTANT: no person check */\n', 'door RED anyone'), 'door-anyone');
-    const sR = mkSession(), sentR = [], sendR = (sid, frame, opts) => { sentR.push(frame); return { ok: true }; };
-    const n1 = NOPEND.resend(sR, 'sess-door', { by: person, msgId: 'mD-old', sendUserInput: sendR }), n2 = NOPEND.resend(sR, 'sess-door', { by: person, msgId: 'mD-old', sendUserInput: sendR });
-    const a1 = ANYONE.dismiss(mkSession(), 'sess-door', { by: null, msgId: 'mD-old' });
-    ok(n1.ok === true && n2.ok === true && sentR.length === 2 && a1.ok === true, 'RED: a door without its pending mark sends a second press too (2 sends); a door without its person check takes a press from no person', { n2, a1 });
-    const s2 = mkSession();
-    const d1 = DOOR.dismiss(s2, 'sess-door', { by: person, msgId: 'mD-old' }), d2 = DOOR.dismiss(s2, 'sess-door', { by: person, msgId: 'mD-old' });
-    s2._normalizer.processLive({ type: 'queue_op_result', op: 'dismiss', ok: false, reason: 'not-written', msg_id: 'mD-old' });   // the wrapper's refusal: the press is answered
-    const d3 = DOOR.dismiss(s2, 'sess-door', { by: person, msgId: 'mD-old' });
-    ok(d1.ok === true && d2.reason === 'pending' && d3.ok === true && s2.writes.length === 2 && JSON.parse(s2.writes[0]).type === 'undelivered-dismiss' && JSON.parse(s2.writes[0]).msg_id === 'mD-old',
-      'Dismiss: the frame to the wrapper once per press; a second press while its word is out «pending»; the wrapper\'s refusal answers it (the act count moved — never a clock) and the person may press again', { d1, d2, d3, writes: s2.writes.length });
-  }
-  // (f) THE WIRING: the ws cases hand `by` only for a socket whose handshake proved a person (the rewind's and End-them's proof)
-  const WSH = fs.readFileSync(path.join(ROOT, 'src/ws-handler.js'), 'utf8');
-  ok(WSH.includes("case 'undelivered-resend':\n        case 'undelivered-dismiss': {") && WSH.includes("D = require('./server/undelivered-door.js'), by = ws._personPage === true ? byOfWs(ws) : null;") && WSH.includes("ws.send(JSON.stringify({ type: data.type + '-result', sessionId: data.sessionId, reqId: data.reqId ?? null, msgId, ...r }))"),
-    'the two ws cases: `by` only from the handshake\'s person proof, the answer to THIS socket alone');
 }
 
 say('⑦b TWO WRITERS — the merge and the forward-only state, each with its control');

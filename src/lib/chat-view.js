@@ -7815,7 +7815,7 @@ class ChatView {
     this._messageList?.querySelectorAll?.('.chat-rewind-btn').forEach((b) => b.remove()); // B-437e: nothing to rewind in a read-only view
     if (this._chatInput) this._chatInput.setReadOnly();
     this._showResumeBar();
-    this._refreshQueueChips();   // unit 3 (r4682 M2): a «not delivered» chip now teaches the road (resume, then …) and offers no act
+    this._refreshQueueChips?.();   // unit 3 (r4682 M2): a «not delivered» chip now teaches the road (resume, then …) and offers no act
   }
 
   /** A per-session `error` frame. TWO meanings, and conflating them is a

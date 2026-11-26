@@ -67,6 +67,10 @@ const FIELD = "    this._undeliveredActsOf = undeliveredActsOf || null;";
 const Real = await bundle('real', CR_SRC);
 const Red = await bundle('red', anchored(CR_SRC, FIELD, '    /* MUTANT: the field dropped */', 'the renderer RED no-field'));
 const { undeliveredActsFor } = await import(pathToFileURL(path.join(REPO, 'src/lib/undelivered-acts.js')).href);
+// RED of the words rule (r4746): a copy of the PURE rule whose hasWords says yes to anything — a picture alone would offer Send again
+const UA_SRC = read('src/lib/undelivered-acts.js'), uaRed = path.join(dir, 'undelivered-acts-red.mjs');
+fs.writeFileSync(uaRed, anchored(UA_SRC, "  return blocks.some((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim() !== '');", '  return true;   /* MUTANT: any message has words */', 'the words rule RED'));
+const { undeliveredActsFor: actsRed } = await import(pathToFileURL(uaRed).href);
 
 const WORDS = [{ type: 'text', text: 'the words that never reached the agent' }], PICTURE = [{ type: 'image', mediaType: 'image/png', data: 'iVBORw0KGgo=' }];
 const msgOf = (state, content = WORDS) => ({ id: 'm-' + state, role: 'user', status: 'complete', content, queueState: state, webuiMsgId: 'w-' + state });
@@ -82,7 +86,7 @@ const T = {
   live: 'The conversation ended before the agent read this message — send it again or dismiss it',
   old: 'The conversation ended before the agent read this message — send it again',
   stopped: 'The conversation ended before the agent read this message — resume the conversation, then send it again or dismiss it',
-  picture: 'The conversation ended before the agent read this message — it has no words to send again: dismiss it, and attach the picture to a new message',
+  picture: 'The conversation ended before the agent read this message — it has no words to send again: dismiss it, and attach what it carried to a new message',
   uLive: 'The conversation ended while this message was being handed to the agent — it may not have reached it; dismiss it to take it off here',
 };
 
@@ -93,6 +97,8 @@ ok(a.acts.join() === 'resend,dismiss' && a.title === T.live && a.enabled && pres
 const p = draw(Real, LIVE, msgOf('undelivered', PICTURE)), u = draw(Real, LIVE, msgOf('unconfirmed'));
 ok(p.acts.join() === 'dismiss' && p.title === T.picture && u.acts.join() === 'dismiss' && u.title === T.uLive,
   'a picture alone: Dismiss alone (no button the hub must refuse) and words that say so; «Not confirmed»: Dismiss alone', { p, u });
+const pr = (() => { const r = new Real({ ws: null, sessionId: 's', app: {}, backend: 'claude', compact: false, messageList: mkEl(), undeliveredActsOf: (m) => actsRed(m, LIVE) }); const el = r.renderUserMsg(msgOf('undelivered', PICTURE)); return el.querySelectorAll('.chat-undelivered-act').map((b) => b.dataset.act); })();
+ok(pr.join() === 'resend,dismiss', 'RED: the words rule with a copy that finds words in anything offers Send again on a picture alone — a button the hub must refuse', pr);
 console.log('② LIVE, an agent started before the update');
 const o = draw(Real, OLD, msgOf('undelivered'));
 ok(o.acts.length === 0 && o.title === T.old && o.enabled, `no act; the words of before («${o.title}»); the chip still shows its words on a press`, o);
@@ -106,7 +112,7 @@ console.log('④ the view\'s wiring and the words in both tables');
 const CV = read('src/lib/chat-view.js');
 const ctor = CV.slice(CV.indexOf('this._renderers = new ChatRenderers({'), CV.indexOf('this._renderers = new ChatRenderers({') + 4000);
 ok(ctor.includes('undeliveredActsOf: (m) => this._undeliveredActsOf(m),') && /\n  _undeliveredActsOf\(msg\) \{\n    return undeliveredActsFor\(msg, \{ readOnly: !!this\._readOnly, live: !this\._disconnected, advertised: this\._undeliveredActsLive === true, act:/.test(CV)
-  && /_setReadOnly\(\) \{[\s\S]*?this\._refreshQueueChips\(\);[^\n]*\n  \}/.test(CV),
+  && /_setReadOnly\(\) \{[\s\S]*?this\._refreshQueueChips\?\.\(\);[^\n]*\n  \}/.test(CV),
   'the view builds its renderer WITH its answer, asks the PURE rule with its own facts, and repaints the chips when it turns read-only');
 const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
 const keys = [...Object.values(T), 'Send again', 'undelivered::Dismiss', 'Sent again', 'Removed, not delivered'];

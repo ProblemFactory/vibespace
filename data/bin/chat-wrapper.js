@@ -407,7 +407,7 @@ function resendGate(line, o) {
 function endTakenBack(ids, via) {
   let changed = false;
   for (const id of ids) { const r = id && HR.get(id); if (r && r.state === 'handed') { HR.set(id, { ...r, state: 'dismissed', settledAt: Date.now(), via }); changed = true; } }
-  if (changed && !writeRecords()) log(`handed records: ${ids.join(', ')} taken back (${via}) — its record could not be written`);
+  if (changed && !writeRecords()) log(`handed records: ${ids.join(', ')} taken back (${via}) — its record could not be written now (this wrapper carries it: the next records write takes it)`);
   return changed;
 }
 /** DISMISS (unit 3; the WIP b193779a4's form, never lined): the person removes a message proven not delivered (or one whose fate is
@@ -980,7 +980,8 @@ const settleCopies = (ids) => { for (const id of ids || []) settleCopy(id); };
  *  own user record of those words (a turn they ran as, a held frame drained, a kept frame's interrupted follow-up) and as
  *  the `source_uuid` of the `queued_command` attachment a frame taken in at a tool result becomes (measured on 2.1.312).
  *  The copy names it (`cliUuid`), so the normalizer claims the copy by THAT record, at any distance — never by its words.
- *  A frame that already carries a uuid keeps it; the stamp is spliced in front of the first key (never re-serialized). */
+ *  A frame that already carries a uuid keeps it; the stamp is spliced in front of the first key (never re-serialized — a Send again is the one
+ *  frame re-encoded first, ON PURPOSE: resendGate drops its `webui_resend_of` stamp; a resend carries words only, never a paste's bytes). */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function stampFrame(line, o) {
   if (o && typeof o.uuid === 'string' && UUID_RE.test(o.uuid)) return { line, uuid: o.uuid };
@@ -1387,6 +1388,7 @@ function handleQueueOp(msg) {
     entry.line = JSON.stringify(o);
     entry.text = frameText(o); entry.preview = framePreview(o);
     rewriteCopy(entry.msgId, o);
+    { const hr = HR.get(entry.msgId), c = copies.get(entry.msgId); if (hr && hr.state === 'handed' && c) { hr.copy = keptCopyOf(c.line).copy; writeRecords(); } }   // unit 3: a held Send again EDITED — its record keeps the latest words
     record('queue_op_result', { op, id, ok: true, msg_id: entry.msgId });
     publishQueue();
     return;

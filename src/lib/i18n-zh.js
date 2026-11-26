@@ -4150,7 +4150,7 @@ export default {
   "Started, then stopped": "已开始，被停止",
   "Not delivered": "未送达",
   "Not confirmed": "未确认",
-  "The conversation ended before the agent read this message — it has no words to send again: dismiss it, and attach the picture to a new message": "智能体读到这条消息之前对话已结束 —— 它没有可重新发送的文字：把它移除，再把图片附到一条新消息里",
+  "The conversation ended before the agent read this message — it has no words to send again: dismiss it, and attach what it carried to a new message": "智能体读到这条消息之前对话已结束 —— 它没有可重新发送的文字：把它移除，再把它带的内容附到一条新消息里",
   "Not sent again — it is not a message of yours that can be sent again (a command, or VibeSpace's own).": "未重新发送 —— 它不是你可以重新发送的消息（是一条命令，或 VibeSpace 自己的消息）。",
   "Not removed — it is not a message of yours.": "未移除 —— 它不是你的消息。",
   "Sent again": "已重新发送",   // B-5a4d root unit 3
