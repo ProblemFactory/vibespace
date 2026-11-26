@@ -3,8 +3,8 @@
 // read-only» because the hub was slow to answer its re-attach. A fleet person's report on 2.369.404: ~110 windows on a busy hub
 // said read-only with Resume while every conversation's process was alive. The ladder (src/lib/chat-view.js `_reattach`) used to
 // end after ~2 minutes with the view-only rescue («no longer running») or a sentence and `_setReadOnly()`. Now its end HOLDS:
-// one line, the composer held (its typed text kept), one attach a minute through the reconnect queue's `join`; only the
-// server's explicit words end it.
+// one line, the composer held (its typed text kept), NO attach of its own on a live socket (r4686) — a retry only after a
+// reconnect, in the reconnect queue's pass; only the server's explicit words end it.
 // HEAVY: a scratch hub (hub-boot.mjs) with a stand-in `claude` (init for the resumed id, then idle — no vendor, VS_NO_REAL_CLI),
 // headless Chrome over raw CDP. THE HUB's ANSWER IS HELD, PLACED IN THE HUB (主开发 r4686): a preload of the scratch hub keeps
 // back, for a session named in a hold file, its `attached` answer and the live `msg` frames behind it (in order) until the
@@ -31,6 +31,10 @@
 //      second attach (the hub's door counts one); when the hub answers, that one answer lands. RED at the unit's tip before r4686.
 //   ⑦ A LATE ANSWER AFTER A NEWER ATTACH changes nothing: held, a newer attach goes on the same socket (the window shown again),
 //      then the hub answers both — the late one is dropped by its own id (never applied over the newer one), the newer one lands.
+//   ⑧ THE HELD WINDOW's RETRY AFTER A RECONNECT (the lane's own read of 4c2a64f15, its MUST 1): held, the socket drops again with
+//      a MINIMIZED window beside it (both re-attach in ONE reconnect pass — the person's road); the hub lost the held ask with
+//      the socket and answers from now on: the held window retries ONCE (counted at the hub's door and at the page) and lands.
+//      RED at 4c2a64f15 (its retry had a slot of its own, `join`, cancelled by that very pass: held on a live socket, asking nothing).
 //   CONTROL (①): the hold blinded (the ladder's end as the release: the sentence and read-only) ⇒ ① reads read-only — the leg can go red.
 // EVERY WAIT IS ON THE FACT IT JUDGES (主开发 r4340 law 1): its bound is generous and its expiry is a named harness line. The
 // only spans are ABSENCES (no attach while held in ① and ⑥; no create after a resume press in ④), each said where it is.
@@ -66,7 +70,7 @@ const NOW = Date.now(), DAY = 86400e3;
 const { fixtureLitter } = require(path.join(repo, 'src/fixture-guard.js'));
 const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
-const SIDS = { a: fixtureSid('a26e11'), b: fixtureSid('a26e12'), c: fixtureSid('a26e13'), d: fixtureSid('a26e14'), x: fixtureSid('a26e15'), e: fixtureSid('a26e16'), y: fixtureSid('a26e17'), f: fixtureSid('a26e18'), g: fixtureSid('a26e19') };
+const SIDS = { a: fixtureSid('a26e11'), b: fixtureSid('a26e12'), c: fixtureSid('a26e13'), d: fixtureSid('a26e14'), x: fixtureSid('a26e15'), e: fixtureSid('a26e16'), y: fixtureSid('a26e17'), f: fixtureSid('a26e18'), g: fixtureSid('a26e19'), h: fixtureSid('a26e1a'), i: fixtureSid('a26e1b') };
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'package.json', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
@@ -132,8 +136,8 @@ const SPY = `(() => { window.__creates = []; window.__attachesOut = []; window._
     const s = app.ws.send.bind(app.ws); app.ws.send = (m) => { try { const o = typeof m === 'string' ? JSON.parse(m) : m; if (o && o.type === 'create') window.__creates.push({ at: Date.now(), resumeId: o.resumeId || null, reqId: o.reqId || null }); if (o && o.type === 'attach') window.__attachesOut.push({ at: Date.now(), sid: o.sessionId }); if (o && o.type === 'chat-input') window.__chatOut.push({ at: Date.now(), sid: o.sessionId, text: String(o.text != null ? o.text : (o.content != null ? o.content : '')) }); } catch {} return s(m); };
     const h = app.ws.heard.bind(app.ws); app.ws.heard = (d, how) => { if (window.__noAck && d && d.type === 'attach-ack' && d.sessionId === window.__noAck) return; if (d && d.type === 'attached') { const v = [...app.sessions.values()].find((x) => x && x.sessionId === d.sessionId); const b = v ? v._lastAttachedAt : null; const out = h(d, how); window.__heard.push({ sid: d.sessionId, id: d.attachId != null ? d.attachId : null, applied: !!v && v._lastAttachedAt !== b, at: Date.now() }); return out; } return h(d, how); };
     window.__answers = []; app.ws.onGlobal((m) => { if (m && (m.type === 'created' || m.type === 'error') && m.reqId) window.__answers.push({ type: m.type, code: m.code || null, reqId: m.reqId, sessionId: m.sessionId || null }); }); }, 20);
-  // THE SHORT CLOCK: the ladder's rungs (20 s, 25 s), the release's safety (30 s) and the hold's ask (60 s) at 1/100 — only those
-  // four delays; 'safety' scales the 30 s safety alone (⑤: the free window stays open while the leg sends)
+  // THE SHORT CLOCK: the ladder's rungs (20 s, 25 s), the release's safety (30 s), the 60 s delay (the hold's ask until r4686) and the
+  // 15-minute words (900 s) at 1/100 — only those delays; 'safety' scales the 30 s safety alone (⑤: the free window stays open while the leg sends)
   const st = window.setTimeout.bind(window); window.__shortClock = false; window.setTimeout = (fn, ms, ...a) => st(fn, (window.__shortClock === true && (ms === 20000 || ms === 25000 || ms === 30000 || ms === 60000 || ms === 900000)) || (window.__shortClock === 'safety' && ms === 30000) ? ms / 100 : ms, ...a); })();`;
 
 const BLIND_HOLD = `(() => { const CV = Object.getPrototypeOf([...app.sessions.values()].find((v) => v && v._reattach)); CV._holdAttach = function () { this._renderers.appendSystem('the release: did not answer the re-attach'); this._setReadOnly(); }; return 1; })()`;
@@ -200,7 +204,7 @@ try {
   const typed = 'a draft typed before the drop';
   const f1 = Sa && await holdOn(P, Sa, typed);
   const t1 = await P.ev('Date.now()');
-  check(`① past the whole ladder the window is NOT read-only: it holds — its one line «${f1?.line}»`, !!f1 && !f1.readOnly && f1.hold && f1.line === 'Still attaching — the hub has not answered yet; this window reconnects by itself. Your message waits here and can be sent once it is back.' && !f1.rescued, f1);
+  check(`① past the whole ladder the window is NOT read-only: it holds — its one line «${f1?.line}»`, !!f1 && !f1.readOnly && f1.hold && f1.line === 'Still attaching — waiting for the hub to answer. Your message waits here and can be sent once it is back.' && !f1.rescued, f1);
   check('① …its composer is held (sending blocked) with the text typed before the drop still in it, NOT greyed (a live press answered in words: the owner\'s rule), and no read-only sentence was said', !!f1 && f1.held && !f1.greyed && f1.text === typed && !f1.sentence, f1);
   // IT TAKES TYPING WHILE HELD (主开发 r4529 (a)): the composer's own road for a link that is down keeps the box editable
   const more = ' — and more typed while held';
@@ -325,6 +329,20 @@ try {
   const lateA = heard7 && heard7[0], newB = heard7 && heard7[1];
   const back7 = await waitFor('⑦ the newer attach to land', async () => { const f = await facts(P, Sg); return f && !f.hold && !f.held ? f : null; }, 15000, 100);
   check(`⑦ the LATE answer of the attach the window gave up on changes nothing (id ${lateA?.id}, applied ${lateA?.applied}); the newer one lands (id ${newB?.id}, applied ${newB?.applied})`, !!f7 && f7.hold && !!lateA && lateA.applied === false && !!newB && newB.applied === true && !!back7, { door7, heard7 });
+
+  // ⑧ THE HELD WINDOW's RETRY AFTER A RECONNECT (the lane's own read of 4c2a64f15, MUST 1) — the person's road
+  console.log('── ⑧ the held retry after a reconnect ──');
+  const Si = await living(P, SIDS.i), Sh = await living(P, SIDS.h);
+  await P.ev(`(() => { const e = [...app.sessions].find(([, v]) => v && v.sessionId === ${JSON.stringify(Si)}); if (e) app.wm.minimize(e[0]); return 1; })()`);   // the minimized window beside it
+  const mini8 = Si && await waitFor('⑧ the minimized window to be suspended', () => P.ev(`(() => { const v = ${VIEW(Si)}; return v && v._suspended === true ? true : null; })()`), 15000, 100);
+  const f8 = Sh && await holdOn(P, Sh, null);
+  const t8 = Date.now();
+  await P.ev('(window.__ws8 = app.ws.ws, app.ws.ws.close(), true)');   // the socket drops again: the hub's held answer goes with it
+  const up8 = await waitFor('⑧ the page to reconnect', () => P.ev('(app.ws.ws && app.ws.ws !== window.__ws8 && app.ws.ws.readyState === 1) ? true : null'), 30000, 50);
+  await release(P, Sh);   // the hub answers from now on (its retry's slot is ≥ 1.5 s after the reconnect: never held)
+  const back8 = await waitFor('⑧ the held window\'s retry to land', async () => { const f = await facts(P, Sh); return f && !f.hold && !f.readOnly ? f : null; }, 30000, 100);
+  const door8 = doorOf(Sh, t8).length, out8 = await asksOf(P, Sh, t8);
+  check(`⑧ held, a reconnect with a minimized window beside it (${mini8}): the held window retries ONCE (${door8} at the hub's door, ${out8} from the page) and lands — the bar goes, nothing read-only`, mini8 === true && !!f8 && f8.hold && !!up8 && !!back8 && back8.bars === 0 && door8 === 1 && out8 === 1, { f8, back8, door8, out8 });
 
   // CONTROL: the hold blinded (the ladder's end as the release) ⇒ ① reads read-only
   console.log('── control: the release\'s ladder end ──');

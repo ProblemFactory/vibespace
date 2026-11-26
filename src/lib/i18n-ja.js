@@ -3233,7 +3233,7 @@ export default {
   "{key} queues": "{key} でキュー",
   "Enter sends on touch devices": "タッチデバイスで Enter で送信",
   "On phones and tablets the keyboard’s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.": "スマホ/タブレットではキーボードの改行キーはデフォルトで改行を挿入し（ソフトキーボードには Shift+Enter がないため唯一の改行手段）、メッセージは送信ボタンで送ります。オンにすると Enter で送信します。",
-  "Still attaching — the hub has not answered yet; this window reconnects by itself. Your message waits here and can be sent once it is back.": "接続中です——ハブはまだ応答していません。このウィンドウは自動で接続します。メッセージはここに残り、接続されれば送信できます。",
+  "Still attaching — waiting for the hub to answer. Your message waits here and can be sent once it is back.": "接続中です——ハブの応答を待っています。メッセージはここに残り、接続されれば送信できます。",
   "Still attaching — the hub has not answered for 15 minutes. Reloading the tab asks again; your message waits here.": "接続中です——ハブは 15 分間応答していません。タブを再読み込みすると再度要求します。メッセージはここに残ります。",
   "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "サーバーが劣化状態です——メインスレッドが飽和しています（中央値遅延 {lag}ms）。全体的に遅くなりますが、セッションは生きています。",
   "The CLI prefers a configured apiKeyHelper over the machine’s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.": "CLI はマシンの OAuth ログインより設定済み apiKeyHelper を優先します。下の名前付きサブスクリプションアカウントを選ぶと、そのセッションでは helper がバイパスされます（起動時に無効化）。この「CLI ログイン」項目は引き続き helper 経由の API 課金です。",
