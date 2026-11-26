@@ -396,7 +396,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     w.ws = ws;
     ws.on('open', async () => {
       w.state = 'open'; w.openedAt = now(); w.fencesRearmed = false; w.tabWatched = new Set(); // r4689: a new socket holds no kernel lease (the old one's ended with it)
-      if (keeper && typeof keeper.tabWatchReset === 'function') { try { keeper.tabWatchReset(w.profileId); } catch { /* the keeper's own */ } } // r4745 (S1): …so the keeper's counts of this profile go with them
+      if (keeper && typeof keeper.tabWatchReset === 'function') { try { keeper.tabWatchReset(w.profileId); } catch { /* the keeper's own */ } } // r4745 (S1) + r4779: …so the keeper's counts of this profile go with them, and each watch of it asks again on THIS socket
       // lane browser-passkey: a HEADED browser's passkey window is on this computer's desktop (the banner says so) — the browser's own word
       call(w, 'Browser.getVersion').then((v) => { const ua = v && v.result ? String(v.result.userAgent || '') : ''; w.headed = ua ? !/HeadlessChrome/.test(ua) : null; }).catch(() => { /* unknown */ });
       await probeKernel(w); // lane browser-surfaces: ONE source per browser — known before the first tab is tracked

@@ -9571,21 +9571,28 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const id = String(targetId).toUpperCase();
     // 主开发 r4689 / r4691: on a browser whose engine stated AND measured tabWatch at its launch, the kernel's command ON BEFORE the
     // screencast starts (a never-shown tab gets its bounds then), OFF when this watch ends; every other browser: null, today's road
-    const kw = await tabWatchOn(target, id);
+    // r4779: the watch's HOLD lives from its ask to its leaving; a reopen of the page watch asks again for it and tells `hooks.onTabWatch`
+    const h = tabWatchHoldOf(target, id, hooks.onTabWatch);
+    if (h) await tabWatchOn(h);
+    const leave = () => { if (h && tabWatchHolds.delete(h)) tabWatchRelease(h, true); };
     let r;
     const watchTarget = typeof watchTargetFn === 'function' ? watchTargetFn : VP.watchTarget;
     try { r = await withCdpUrl(target, (url) => watchTarget(url, id, { ...hooks, firstFrameMs: WIN.WATCH_FIRST_FRAME_MS, pollMs: WIN.WATCH_POLL_MS })); }
-    catch (e) { if (kw && kw.on) tabWatchOff(target, id); throw e; }
-    if (!kw) return r;
-    if (!r || !r.ok) { if (kw.on) tabWatchOff(target, id); return r; }
+    catch (e) { leave(); throw e; }
+    if (!h) return r;
+    if (!r || !r.ok) { leave(); return r; }
     let closed = false;
     const close0 = r.close;
-    return { ...r, tabWatch: kw.on ? { live: true } : { live: false, code: kw.code, ...(kw.code === 'too_many_watched_tabs' ? { limit: kw.limit || ENG.TAB_WATCH_LIMIT } : {}) },
-      close: () => { if (closed) return; closed = true; try { if (typeof close0 === 'function') close0(); } finally { if (kw.on) tabWatchOff(target, id); } } };
+    return { ...r, tabWatch: tabWatchSaid(h), close: () => { if (closed) return; closed = true; try { if (typeof close0 === 'function') close0(); } finally { leave(); } } };
   }
   /** r4689: the watched tabs of each browser, COUNTED — two viewers of one tab hold it until both leave (`profileId|TARGET` → n). In
-   *  memory only: a hub restart keeps none, and the kernel ends every lease when the page watch's socket that took it disconnects. */
+   *  memory only: a hub restart keeps none, and the kernel ends every lease when the page watch's socket that took it disconnects.
+   *  r4779 (law 5: «a watcher's leaving releases only what THAT watcher took»): ONE hold per watch on this road, `counted` from its ask
+   *  (an OFF never passes an ON in flight) to its leaving, and only for the page watch's CURRENT socket — a reopen counts every hold
+   *  out (what it held ended with the old socket: its leaving releases nothing) and each asks again on the new one, told the answer.
+   *  Each hold is told «live» only on ITS OWN confirmed answer (the kernel's command is idempotent); the count decides the OFF alone. */
   const tabWatchCounts = new Map();
+  const tabWatchHolds = new Set();
   const profileOfTarget = (target) => {
     if (!target) return null;
     if (target.profileId) return String(target.profileId);
@@ -9593,35 +9600,55 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const e = bk ? ephemeralFor(bk) : null;
     return e && e.profileId ? String(e.profileId) : null;
   };
-  /** → null (not this browser's road: no tabWatch at its launch, no page watch) | {on:true} | {on:false, code, limit?} — bounded (the page
-   *  watch's own call bound), never on the loop's hot path, said once in the journal when the kernel refuses (a code and a count only). */
-  async function tabWatchOn(target, id) {
+  /** → null (not this browser's road: no tabWatch at its launch, no page watch) | the watch's hold `{pid, id, counted, ask, kw, told}` */
+  function tabWatchHoldOf(target, id, told) {
     const pid = profileOfTarget(target);
     const rec = pid ? reg.browsers[pid] : null;
     if (!rec || !rec.browserChoice || rec.browserChoice.tabWatch !== true || !paintWatch || typeof paintWatch.setTabWatch !== 'function') return null;
-    const k = `${pid}|${id}`;
-    if ((tabWatchCounts.get(k) || 0) > 0) { tabWatchCounts.set(k, tabWatchCounts.get(k) + 1); return { on: true }; }   // another viewer holds it ON
+    const h = { pid, id, counted: false, ask: 0, kw: null, told: typeof told === 'function' ? told : null };
+    tabWatchHolds.add(h);
+    return h;
+  }
+  /** the kernel's command ON for one hold — bounded (the page watch's own call bound), never on the loop's hot path, said once in the
+   *  journal when the kernel refuses (a code and a count only). → true when THIS ask decided the hold's `kw` ({on:true} | {on:false,
+   *  code, limit}); false when a reopen or its leaving came first (that one decides) */
+  async function tabWatchOn(h) {
+    const mine = ++h.ask, k = `${h.pid}|${h.id}`;
+    tabWatchCounts.set(k, (tabWatchCounts.get(k) || 0) + 1); h.counted = true;
     let a = null;
-    try { a = await paintWatch.setTabWatch(pid, id, true); } catch { a = null; }
-    if (a && a.ok && a.watching === true) { tabWatchCounts.set(k, (tabWatchCounts.get(k) || 0) + 1); return { on: true }; }
+    try { a = await paintWatch.setTabWatch(h.pid, h.id, true); } catch { a = null; }
+    if (h.ask !== mine || !h.counted) return false;
+    if (a && a.ok && a.watching === true) { h.kw = { on: true }; return true; }
     const code = (a && a.code) || 'tab_watch_failed';
     // r4745 M2 (law 5, no lease left on): an ON the kernel did not CONFIRM (no answer in the bound, an odd answer) may still have been
-    // taken — ONE OFF goes out (the command is idempotent); the page watch keeps the tab in its watched set until an OFF is confirmed
-    if (code === 'tab_watch_unanswered' || code === 'tab_watch_failed') Promise.resolve().then(() => paintWatch.setTabWatch(pid, id, false)).catch(() => { /* the kernel ends it with the socket anyway */ });
-    log.log?.(`[browser] ${pid}: a viewer's watched tab is not drawn by its kernel (${code}${a && a.activeCount != null ? `, ${a.activeCount} watched` : ''}) — it stays a still every half second`);
-    return { on: false, code, limit: a && a.limit ? a.limit : null };
+    // taken — when no other hold counts the tab, ONE OFF goes out at once (idempotent); the kernel's own refusal took nothing
+    tabWatchRelease(h, code === 'tab_watch_unanswered' || code === 'tab_watch_failed');
+    log.log?.(`[browser] ${h.pid}: a viewer's watched tab is not drawn by its kernel (${code}${a && a.activeCount != null ? `, ${a.activeCount} watched` : ''}) — it stays a still every half second`);
+    h.kw = { on: false, code, limit: a && a.limit ? a.limit : null };
+    return true;
   }
-  /** r4745 (S1): the page watch of `profileId` (re)opened — the kernel ended every lease of the old socket: this profile's counts
-   *  go, so the next viewer of a tab asks ON again (never told «live» over a lease nobody holds). */
-  function tabWatchReset(profileId) { const pre = `${String(profileId || '')}|`; for (const k of [...tabWatchCounts.keys()]) if (k.startsWith(pre)) tabWatchCounts.delete(k); }
-  function tabWatchOff(target, id) {
-    const pid = profileOfTarget(target);
-    if (!pid) return;
-    const k = `${pid}|${id}`;
-    const n = tabWatchCounts.get(k) || 0;
-    if (n > 1) { tabWatchCounts.set(k, n - 1); return; }
+  /** what the bridge says of a hold: `{live:true}` | `{live:false, code, limit?}` (a code and a count only) */
+  const tabWatchSaid = (h) => (h.kw && h.kw.on ? { live: true } : { live: false, code: h.kw ? h.kw.code : 'tab_watch_lapsed', ...(h.kw && h.kw.code === 'too_many_watched_tabs' ? { limit: h.kw.limit || ENG.TAB_WATCH_LIMIT } : {}) });
+  /** a hold gives back ITS share, once: the last share of a tab sends the OFF (sent at once, so it never passes a later ON on the socket) */
+  function tabWatchRelease(h, mayHold) {
+    if (!h.counted) return;
+    h.counted = false;
+    const k = `${h.pid}|${h.id}`, n = (tabWatchCounts.get(k) || 0) - 1;
+    if (n > 0) { tabWatchCounts.set(k, n); return; }
     tabWatchCounts.delete(k);
-    Promise.resolve().then(() => (paintWatch && typeof paintWatch.setTabWatch === 'function' ? paintWatch.setTabWatch(pid, id, false) : null)).catch(() => { /* the kernel ends it with the socket anyway */ });
+    if (!mayHold) return;
+    try { const p = paintWatch && typeof paintWatch.setTabWatch === 'function' ? paintWatch.setTabWatch(h.pid, h.id, false) : null; if (p && typeof p.catch === 'function') p.catch(() => { /* the kernel ends it with the socket anyway */ }); } catch { /* the same */ }
+  }
+  /** r4745 (S1) + r4779: the page watch of `profileId` (re)opened — the kernel ended every lease of the old socket: this profile's counts
+   *  go, every hold of it is counted out (its leaving releases nothing) and asks again on the new socket, its watch told the answer */
+  function tabWatchReset(profileId) {
+    const pid = String(profileId || ''), pre = `${pid}|`;
+    for (const k of [...tabWatchCounts.keys()]) if (k.startsWith(pre)) tabWatchCounts.delete(k);
+    for (const h of tabWatchHolds) if (h.pid === pid) { h.counted = false; h.ask++; h.kw = null; Promise.resolve().then(() => tabWatchAgain(h)).catch(() => { /* the hold's own */ }); }
+  }
+  async function tabWatchAgain(h) {
+    if (!tabWatchHolds.has(h) || !(await tabWatchOn(h)) || !tabWatchHolds.has(h) || !h.told) return;
+    try { h.told(tabWatchSaid(h)); } catch { /* the watch's own */ }
   }
 
   const api = {
