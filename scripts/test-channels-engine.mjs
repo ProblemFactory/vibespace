@@ -6626,7 +6626,7 @@ console.log('\n§ design 011 lane 2: the poll stamps — a restart keeps every d
   };
   const h = await run(ENG, 'q011-head');
   ok(h.n > 0 && h.polled === h.n && h.due === 0 && h.same, `design 011 lane 2: after a restart NO conversation is due early — ${h.n} conversations polled by a pass, the engine stopped, a new one on the same data: ${h.due} due, every lastPollAt read back from the side file`, JSON.stringify(h));
-  // the 2.369.203 heavy run's test-channels-e2e ⑰: a KILL before the side file's 120 s write — the journal keeps every stamp
+  // the 2.369.203 heavy run's test-channels-e2e ⑰: a KILL before the side file's compaction — the journal keeps every stamp
   const hk = await run(ENG, 'q011-kill', { kill: true });
   ok(hk.n > 0 && hk.polled === hk.n && hk.due === 0 && hk.same, `design 011 lane 2: after a KILL (the data dir as the kill left it: no close, no side file) NO conversation is due early either — ${hk.due} of ${hk.n} due, every lastPollAt read back from the journal (a lost one read as "never polled": a restored window fetched it ahead of discovery)`, JSON.stringify(hk));
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf8');

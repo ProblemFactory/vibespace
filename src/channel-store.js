@@ -17,9 +17,10 @@
  *     dispatch-ledger.json           atomic JSON — THE DISPATCH LEDGER (lane worker-dispatch verify r1 ②): what each
  *                                    brief (sha256 of sender | worker | text) already did — compactAt / deliveredAt —
  *                                    so a retry after a restart replays instead of compacting and waking again
- *     poll-stamps.json               atomic JSON — each row's poll stamps (design 011 lane 2), written at most
- *                                    every 120 s and at close; poll-stamps.log = APPEND-ONLY, one line per stamp
- *                                    set since that write (a kill -9 keeps every stamp), folded by the next one
+ *     poll-stamps.json               atomic JSON — each row's poll stamps (design 011 lane 2): the JOURNAL's
+ *                                    COMPACTION (B-360d), written past the journal's bound, on a failed line and at
+ *                                    close; poll-stamps.log = APPEND-ONLY, one line per stamp set (a kill -9 keeps
+ *                                    every stamp), folded by the compaction that lands
  *     <file>.corrupt-<ts>            a JSON store that could not be read at boot, SET ASIDE with its
  *                                    bytes intact (r2) — never unlinked, never overwritten
  *     audit.ndjson                   APPEND-ONLY, rolled by DATE into archive/
@@ -770,6 +771,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // B-360d THE COMPACTION's state: owed once until it lands; `Now` = a failed journal line asks it at once; the journal's bytes
   // since its last fold against the side file's own (its bound); the bytes being made, a slice a turn
   let stampsCompactOwed = false, stampsCompactNow = false, stampsJournalLen = 0, stampsBuild = null, stampsMadeBytes = 0;
+  // B-360d (r4642, must 2 + (2)): THE PURGE's ONE DOOR — the purges asked so far; the asks the bytes being made cover (taken when they
+  // are MADE); the asks a LANDED compaction covered. A purge's «done» is true only once bytes made after its ask have landed
+  let stampsPurgeAsks = 0, stampsMadeAfter = 0, stampsLandedAfter = 0;
   let stampsSideBytes = (() => { try { return fs.statSync(stampsFile).size; } catch { return -1; } })();   // -1: no side file (its first write once the journal holds a line)
   const stampStats = { writes: 0, healed: 0, lostAtLoad: 0, compactions: 0, slices: 0 };
   let journalFd = null, journalTorn = false, journalSaidAt = 0, journalWas = false;   // journalWas: a journal there at the start (or opened since)
@@ -822,7 +826,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!psLoad.value) {
       const lost = healed ? 0 : Object.keys(conv).filter((k) => !stampMap.has(k)).length;
       stampStats.lostAtLoad = lost;
-      if (healed) warn(`[channels] poll-stamps.json: ${healed} conversation(s)' poll times taken out of index.json (an index written before the side file) — the side file is written before the index's next write`);
+      if (healed) warn(`[channels] poll-stamps.json: ${healed} conversation(s)' poll times taken out of index.json (an index written before the side file) — journaled now, and carried by the side file's next compaction`);
       else if (lost) warn(`[channels] poll-stamps.json was not read (${psLoad.blocked ? 'blocked' : 'missing or set aside'}) — ${lost} conversation(s) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll`);
     } else if (unreadStamps) warn(`[channels] poll-stamps.json: ${unreadStamps} entr${unreadStamps === 1 ? 'y is' : 'ies are'} not a list of instants — that many conversation(s) carry no last-poll time: each is due at once, and the vendor's budget paces the re-poll`);
     // B-360d: nothing is written at the open (QUIET IS FREE) — a journal replayed here is compacted by the next set past its bound
@@ -1539,7 +1543,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!e) {
       unlanded.add(key); bornSeq.delete(key); if (producedUnlanded) producedUnlanded.delete(key);   // B-526c r937: not on the disk's index until a write that carries it lands (B-360d: its NEW line, or a whole write) — r1850 (1): a whole write produced BEFORE this birth carries the old row, never this one
       if (layout && layout.chunkOf.has(key)) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order
-      if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps
+      if (stampMap.delete(key)) { stampsDirty = true; stampSeq++; stampsSince.add(key); journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps — B-360d (r4642 (3)): a change of that key for the compaction's window (its removal line kept by the fold)
       e = ix.conversations[key] = {
         key, id: convId, adapterId, vendorId: convId, title: '', kind: 'group',
         participants: '', lastAt: null, unread: 0, tracked: false, anchor: null,
@@ -3240,7 +3244,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const sideTextOf = (lines) => `{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length ? `\n${lines.join(',\n')}\n` : ''}}}\n`;
   /** the moment the compaction's bytes are MADE (its first slice, or the one synchronous turn): every key set after it is kept
    *  by the fold (stampsSince — cure r1 C2's rule) */
-  function stampsMadeNow() { stampsDirty = false; stampsMadeSeq = stampSeq; stampsSince.clear(); stampsCompactNow = false; }
+  function stampsMadeNow() { stampsDirty = false; stampsMadeSeq = stampSeq; stampsSince.clear(); stampsCompactNow = false; stampsMadeAfter = stampsPurgeAsks; }
   const stampsPaceOpt = () => (stampsDebounceMs !== undefined ? { debounceMs: stampsDebounceMs } : {});   // a suite may state its own debounce (the hub: the writer's)
   const stampsAsk = () => ({ name: 'channels-stamps.write', produce: produceStamps, ...stampsPaceOpt(), ...firstWrite(stampsFile, stampsWritten) });   // B-f276 1b: a missing side file's first write is the exclusive create, on every road
   /** B-360d (the coordinator's MUST of r1556, kept at the move): A PURGE's «done» waits for a compaction MADE AFTER it to land — the
@@ -3249,9 +3253,13 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  lands; a compaction being made before the purge is begun again (its bytes may hold the names). → Promise<boolean> */
   function stampsOwePurge() {
     stampsBuild = null;
+    const ask = ++stampsPurgeAsks;
     stampSeq++; stampsDirty = true; stampsCompactNow = true; stampsCompactOwed = true;
     owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });
-    return W().durable(stampsFile);
+    // r4642 (2): the writer's answer alone is not the door — a family held between this ask and its turn writes nothing (produce
+    // answers null, «equal to the disk») and a write lost with its thread is settled the same way: true only when bytes MADE after
+    // this ask LANDED
+    return W().durable(stampsFile).then((ok) => ok !== false && stampsLandedAfter >= ask, () => false);
   }
   /** the whole side file in ONE turn — a synchronous flush only (close, the exit, a suite's flush) */
   function wholeStamps() {
@@ -3302,6 +3310,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function stampsWritten(ok) {
     if (!ok) { stampsDirty = true; stampsCompactOwed = true; return; }   // owed: the writer keeps it and retries (its failure said there) — the compaction stays OWED
+    stampsLandedAfter = Math.max(stampsLandedAfter, stampsMadeAfter);
     stampsCompactOwed = false;
     stampStats.writes++; stampStats.compactions++;
     stampsSideBytes = stampsMadeBytes;
@@ -3499,7 +3508,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // B-360d (r1556's MUST, kept at the move): the compaction is owed AT ONCE — with no clock the account's names would stay in the
     // side file and the journal until the next bound; `stamps` resolves when a compaction made after this lands (false: that write
     // failed, or the family is held — the remove road says it, never a silent «done»)
-    const stampsGone = !purgedStamps ? Promise.resolve(true) : (psLoad.blocked || ixLoad.blocked) ? Promise.resolve(false) : stampsOwePurge();
+    // r4642 must 2: owed whenever a stamps file is ON DISK (the side file or the journal), not only when the account's keys are in
+    // memory — a compaction made before the purge may have dropped them (their rows left first) while its bytes are owed, being
+    // made, in flight or waiting on a retry: memory cannot tell what an older write still holds
+    const stampsOnDisk = stampsSideBytes >= 0 || journalWas || journalFd !== null;
+    const stampsGone = !(purgedStamps || stampsOnDisk) ? Promise.resolve(true) : (psLoad.blocked || ixLoad.blocked) ? Promise.resolve(false) : stampsOwePurge();
     lruCache.delete(adapterId);
     lruDirty.delete(adapterId);
     lruRebuilding.delete(adapterId); lruUnfinished.delete(adapterId); lruAdmitted.delete(adapterId);   // r3279 (10): a rebuild in flight ends with the account

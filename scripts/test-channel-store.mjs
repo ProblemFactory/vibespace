@@ -1326,7 +1326,7 @@ console.log('\n⑬ the incremental index write (B-f32b verify r1): an async upda
 // ── ⑭ THE POLL STAMPS LEAVE THE ROW (design 011 lane 2, 2026-10-03) ──
 // userW's 87 MB index was rewritten whole about every 2.3 s: every pass stamped lastPollAt / lastScanAt / walkStartedAt
 // into its row, so a pass that brought nothing still dirtied the file. They live in poll-stamps.json now (memory first,
-// written ≤ every 120 s and at close), the row serializer omits them, a write whose bytes equal the last one is skipped,
+// the journal's compaction since B-360d), the row serializer omits them, a write whose bytes equal the last one is skipped,
 // a legacy row is read and healed. Every rule has a patched-copy control. THE JOURNAL (the 2.369.203 heavy run's
 // test-channels-e2e ⑰): each set appends one line to poll-stamps.log, folded by the side file's write and replayed at the
 // start — a kill -9 before the side file's write keeps every stamp (a lost one read as "never polled": a restored window
@@ -1381,7 +1381,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const OWED = ['    if (took.length) journal(took);', '    if (took.length && false) journal(took);'];
   const LOADHEAL = ['    for (const k of Object.keys(conv)) if (healRow(k, conv[k])) healed++;\n', ''];
   const PRUNE = ['    if (!hasOwn(conv, k)) { stampMap.delete(k); return null; }\n', ''];   // B-360d: ONE helper for the sliced and the whole road
-  const BIRTH = ['      if (stampMap.delete(key)) { stampsDirty = true; journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps\n', ''];
+  const BIRTH = ['      if (stampMap.delete(key)) { stampsDirty = true; stampSeq++; stampsSince.add(key); journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps — B-360d (r4642 (3)): a change of that key for the compaction\'s window (its removal line kept by the fold)\n', ''];
   const SAID = ['      else if (lost) warn(', '      else if (lost && false) warn('];
   const JOURNAL = ['    journal(k);\n    stampsCompactIfDue();', '    stampsCompactIfDue();'];   // B-360d: the side file is the journal's compaction
   const REPLAY = ['      if (Object.keys(st).length) stampMap.set(a[0], st); else stampMap.delete(a[0]);\n', ''];

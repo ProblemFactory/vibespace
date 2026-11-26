@@ -30,7 +30,6 @@ process.on('exit', cleanup);
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const quiet = { log() { }, warn() { }, error() { } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const TICK_MS = 10;
 const SAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs')).make(path.join(ROOT, 'stand'));
 const STAND = SAND.path, failOn = SAND.failOn;
 const DEB = 25;                      // the stamps' debounce every store here states (the hub's: the writer's 0.5 s)
@@ -44,6 +43,7 @@ const ONE_PACE_MS = DEB * 6;         // one debounce + one gap of this suite's s
 //          file once, the store asks the writer once, a stray ask writes nothing. CONTROLS: one per half — red.
 //     (m8) A PURGE's «done» waits for its compaction (r1556's MUST): no byte of the account's names left on disk; a failed
 //          landing answers false. CONTROL: a purge that owes nothing — red.
+//     (m8b)–(m8e), a purge's ONE door and «Try again» (主开发 r4642): test-channel-stamps-purge.
 //     (m9) a failed flush that was never owed keeps its retry (round w5ymfrq4i). CONTROL: the owed mark dropped — red.
 console.log('(m) B-360d: quiet is free — the side file is the journal\'s compaction, made in slices; a rollback reads it');
 {
@@ -59,30 +59,11 @@ console.log('(m) B-360d: quiet is free — the side file is the journal\'s compa
   // round wkovlam1t's MUST, the tip that was sent back: the one-slice compaction re-dirtied the writer from its own produce, and
   // produce began a compaction whenever the writer asked
   const HALF_A = ['    if (!b.inProduce) W().dirty(stampsFile', '    if (true) W().dirty(stampsFile'], HALF_B = ['    if (!stampsCompactOwed) return null;', '    if (false) return null;'];
-  const NOPURGEOWE = ["    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });\n    return W().durable(stampsFile);", '    return W().durable(stampsFile);'];
+  const NOPURGEOWE = ["    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });\n    // r4642 (2)", '    // r4642 (2)'];
   const NORETRY = ['    if (!ok) { stampsDirty = true; stampsCompactOwed = true;', '    if (!ok) { stampsDirty = true;'];
-  const BOUND0 = ['  function stampsBoundBytes() { return stampsSideBytes < 0 ? 0 :', '  function stampsBoundBytes() { return 0; return stampsSideBytes < 0 ? 0 :'];
-  const ONESLICE = ['end = Math.min(b.keys.length, b.i + stampsSlice);', 'end = b.keys.length;'];
-  const CLOSEDROP = ['      if (stampsBuild) { stampsBuild = null; stampsDirty = true; }', '      if (stampsBuild) { stampsBuild = null; }'];
-  const NOFAILASK = ['      stampsCompactNow = true;   // B-360d', '      // B-360d'];
-  const SIDEV2 = ['`{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length', '`{"v":2,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length'];
-  const FR = require(path.join(REPO, 'scripts/fixtures/stamps-reader-414.cjs'));
-  const T = Date.UTC(2026, 10, 21, 6, 0, 0), N = 1000;   // a side file of N keys: under the 64 KB floor of the bound (the journal reaches it in (m2))
-  const keyOf = (i) => `acct/t${i}`;
+  const T = Date.UTC(2026, 10, 21, 6, 0, 0);
   const jLines = (st) => { try { return fs.readFileSync(st.stamps.log, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
   const logBytes = (st) => { try { return fs.statSync(st.stamps.log).size; } catch { return 0; } };
-  const turn = () => new Promise((r) => setImmediate(r));
-  // a folder of N rows and a side file of N stamps (a first store's close wrote it whole and folded its journal)
-  const seedDir = async (tag) => {
-    const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
-    const w = SW.create({ log: quiet, workerPath: STAND, pace: PACED });
-    const st = CS.createChannelStore({ dir, log: quiet, writer: w, stampsDebounceMs: DEB });
-    await st.index.update(() => { for (let i = 0; i < N; i++) st.index.entry('acct', `t${i}`, { create: true }); });
-    for (let i = 0; i < N; i++) st.stamps.set(keyOf(i), { lastPollAt: T - 3600e3 + i });
-    st.close(); w.stop();
-    return dir;
-  };
-  const open = (M, dir, o = {}) => { const w = SW.create({ log: quiet, workerPath: STAND, pace: PACED }); return { w, st: M.createChannelStore({ dir, log: quiet, writer: w, stampsDebounceMs: DEB, ...o }) }; };
   const settle = async (w, st, ms = 4000) => { const end = performance.now() + ms; while (performance.now() < end && w.pending(st.stamps.file)) await sleep(25); };
 
   // (m7) round wkovlam1t's MUST — A WRITE NEVER SCHEDULES THE NEXT WRITE: a small account (40 keys: its compaction is ONE slice)
