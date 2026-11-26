@@ -110,7 +110,7 @@ const portsWorld = (M, W, rows) => {
 function recorder({ owed = false } = {}) {
   const r = { asked: [], stores: new Map(), flushes: 0 };
   Object.assign(r, {
-    dirty: (file, o) => { r.asked.push(path.basename(file)); r.stores.set(file, o); },
+    dirty: (file, o) => { r.asked.push(path.basename(file)); r.stores.set(file, o); if (o && typeof o.produce === 'function') o.produce({ sync: true }); },   // the writer takes the bytes (its landing modelled: the store learns the bytes it handed)
     pending: () => owed, durable: async () => true, whyNotDurable: () => null,   // owed: the store has a write owed (a slow or failing data folder)
     flushSync: (names) => { r.flushes++; for (const f of names || [...r.stores.keys()]) { const o = r.stores.get(f); if (o) fs.writeFileSync(f, o.produce({ sync: true })); } return { written: [], left: [] }; },
   });
@@ -302,8 +302,9 @@ console.log('R THE RATE LEGS — each event repeated N times writes zero or one 
     w.pf._start = async () => { }; w.pf._probeForward = () => { }; w.pf._decideProto = async () => ({ proto: 'http', why: 'override' });
     w.pf._live.set(id, { rec: { localPort: 47998 }, sockets: new Set(), server: { close() { } } });
     w.pf.plugins = { frpPublish: async () => ({ url: 'https://made-up.example.test', name: 'made-up', proto: 'http', subdomain: 'made-up' }), frpUnpublish: async () => { } };
+    const f0 = rec.flushes;   // the list made on the folder: its own «made again» landing is not a restart's
     for (let i = 0; i < N; i++) { await w.pf.forward('__local__', 47006, { label: 'service: made-up', owner }); await w.pf.publish(id); }   // the jobs engine's calls: no `now`
-    return { flushes: rec.flushes, asked: rec.asked.length };
+    return { flushes: rec.flushes - f0, asked: rec.asked.length };
   };
   const a6 = await r6(require(path.join(REPO, PF)));
   ok(a6.flushes === 0 && a6.asked === 0, `R6 port-forwards.json: a store whose write is OWED while ${N} restarts of a service forward and publish the same address — no synchronous landing is ever asked, nothing written`, a6);
