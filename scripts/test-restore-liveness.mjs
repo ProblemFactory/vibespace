@@ -1020,6 +1020,10 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
   // r4863: THE DEATH's OWN WORDS — the error the hub's uncaught handler printed (server.js: console.error(e), then its exit flush): its
   // first line and the next, kept whole for the judged lines (a journal's last 600 characters showed only the exit flush)
   const deathOf = (out) => { const L = String(out).split('\n'); for (let i = L.length - 1; i >= 0; i--) if (/^[A-Za-z]*Error(?: \[[A-Z_]+\])?: /.test(L[i])) return L.slice(i, i + 2).map((x) => x.trim()).join(' ⏎ ').slice(0, 300); return null; };
+  const DRAIN_MS7 = 10000;   // r4928: the bound on a dead copy's output draining after its exit (named when it runs out)
+  // r4928 (B) BESIDE (A): what the copy died of, by its death's own words — the plant, a real pipe error on the stream it writes
+  // (WRITE_ERR7: a write's EPIPE / ECONNRESET, a destroyed stream), something else, or no words at all
+  const deathKindOf = (d) => (!d ? 'no words' : d.includes(PLANT_WORDS7) ? 'the plant' : WRITE_ERR7.test(d) ? 'a real pipe error on the stream' : 'something else');
   const PAD7 = 6 << 20;           // the tools tar's padding: far past any socket buffer, under installAgentTools' 8 MB tar bound
   const WRITE_ERR7 = /write (?:EPIPE|ECONNRESET)|ERR_STREAM_DESTROYED/;
   // ONE SCENE: a REAL worktree server with the dead machine, its own ssh; `srcOf(scene)` gives its src/hosts.js (null: the product's)
@@ -1040,6 +1044,7 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     const env = { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_AGENTD_ROOT: root7, VIBESPACE_NODE_MODULES: path.join(REPO, 'node_modules'), PATH: `${sc.bin}:${process.env.PATH}` };
     const srv = spawn('node', ['server.js'], { cwd: wt, env, stdio: ['ignore', 'pipe', 'pipe'] }); servers.add(srv);
     let out = ''; srv.stdout.on('data', (d) => { out += d; }); srv.stderr.on('data', (d) => { out += d; });
+    let ends = 0; srv.stdout.on('end', () => { ends++; }); srv.stderr.on('end', () => { ends++; });   // r4928: its output DRAINED = both streams ended
     let exited = null; srv.on('exit', (c, sig) => { exited = { code: c, sig }; });
     const t0 = Date.now(); while (!out.includes('Ready.') && exited == null && Date.now() - t0 < 120000) await sleep(100);
     const bootMs = Date.now() - t0;
@@ -1049,13 +1054,17 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     let deathWaitMs = 0;
     { const t1 = Date.now(); while (exited == null && Date.now() - t1 < (expectDeath ? 15000 : 800)) await sleep(100); deathWaitMs = Date.now() - t1; } // the control's death is AT this road
     const exitedAfterInstall = exited;
+    // r4928: THE WORDS ARE READ AT THE END — a copy that died is read only after its output drained to its end (both streams ended),
+    // under a named bound: never a look at a journal whose last line may not have landed
+    let drained = null;
+    if (exited != null) { const t3 = Date.now(); while (ends < 2 && Date.now() - t3 < DRAIN_MS7) await sleep(25); drained = ends >= 2; if (!drained) console.log(`  [harness] §7 ${tag}: the dead copy's output did not drain within ${DRAIN_MS7} ms of its exit — its words are read as they stand`); }
     if (sc.held) fs.writeFileSync(sc.release, '');   // the death was looked for: THIS scene's held child may go now
     steps.harvest = await call('/api/usage-stats/harvest-hosts', { host: 'h-dead', force: true }); await sleep(800);
     steps.slice = await call(`/api/hosts/h-dead/dir-complete?path=Doc&bases=${encodeURIComponent('["~"]')}&probe=%5B%5D&q=Doc&kind=folder`);
     steps.recent = await call('/api/hosts/h-dead/recent-cwds');
     steps.home = await call('/api/home?host=h-dead');
     steps.next = await call('/api/home');
-    const r = { steps, exited, exitedAfterInstall, deathWaitMs, bootMs, ready: out.includes('Ready.'), writeErr: (out.match(WRITE_ERR7) || [''])[0], neverClosed: out.includes(NEVER_CLOSED7), planted: out.includes(PLANT_WORDS7), death: deathOf(out), journal: () => out };
+    const r = { steps, exited, exitedAfterInstall, deathWaitMs, bootMs, drained, ready: out.includes('Ready.'), writeErr: (out.match(WRITE_ERR7) || [''])[0], neverClosed: out.includes(NEVER_CLOSED7), planted: out.includes(PLANT_WORDS7), death: deathOf(out), journal: () => out };
     try { srv.kill('SIGKILL'); } catch { }
     // THE SCENE ENDS: its ssh gone (its own «gone» file, bounded), then every file of the scene removed — nothing reaches the next scene
     { const t2 = Date.now(); while (!fs.existsSync(sc.gone) && Date.now() - t2 < 5000) await sleep(50); r.sshGone = fs.existsSync(sc.gone); }
@@ -1106,8 +1115,12 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     // (A) THE JUDGED CONTROL — one scene pair, the error planted at the stream
     const ctl = await deadHub('planted-prefix', (sc) => plantedPre7(sc), { expectDeath: true, kind: 'written-then-ends' });
     ok(ctl.ready, `§7 RED CONTROL setup: the pre-fix copy with the plant booted (${ctl.bootMs} ms — «did not boot» is this red, never «survived»)`, ctl.journal().slice(-600));
-    ok(ctl.exitedAfterInstall != null && ctl.exitedAfterInstall.code === 1 && !!ctl.death && ctl.death.includes(PLANT_WORDS7) && ctl.steps.next.status === 'NO ANSWER',
-      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of the planted 'error' on the child's stdin — the order made by the scene (exit ${JSON.stringify(ctl.exitedAfterInstall)}, looked for ${ctl.deathWaitMs} ms, its death's own words «${ctl.death || 'no error line printed'}», the stream's write error «${ctl.writeErr}», the next request ${ctl.steps.next.status})`, `${ctl.death || '(no death line)'}\n${ctl.journal().slice(-600)}`);
+    // r4928 THE LAW THE CONTROL PROVES: «a hub that does not listen dies of an error on the child's stdin» — the planted error (A: the
+    // order made by the scene puts it first) OR a real pipe error on that same stream proves it, each named by the death's own words,
+    // read after the copy's output drained; red when the copy lived, died of something else, or died with no words
+    const ctlKind = deathKindOf(ctl.death);
+    ok(ctl.exitedAfterInstall != null && ctl.exitedAfterInstall.code === 1 && (ctlKind === 'the plant' || ctlKind === 'a real pipe error on the stream') && ctl.steps.next.status === 'NO ANSWER',
+      `§7 RED CONTROL: the same hub with a feedStdin that does not listen DIES of an 'error' on the child's stdin — of ${ctlKind}, by its death's own words «${ctl.death || 'no error line printed'}» (its output ${ctl.drained === true ? 'drained to its end' : ctl.drained === false ? `NOT drained in ${DRAIN_MS7} ms` : 'not asked'}, exit ${JSON.stringify(ctl.exitedAfterInstall)}, looked for ${ctl.deathWaitMs} ms, the stream's write error «${ctl.writeErr}», the next request ${ctl.steps.next.status})`, `${ctl.death || '(no death line)'}\n${ctl.journal().slice(-600)}`);
     const live = await deadHub('planted-fixed', (sc) => plantedFixed7(sc), { expectDeath: true, kind: 'written-then-ends' });
     ok(live.ready && live.exitedAfterInstall == null && live.exited == null && live.steps.next.status === 200,
       `§7 …and the FIXED hub with the SAME plant LIVES and answers the next request (exit ${JSON.stringify(live.exited)}, the install ${live.steps.install.status}, the next request ${live.steps.next.status})`, live.journal().slice(-600));
@@ -1120,7 +1133,7 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     // (B) THE REAL-PIPE ORDERS, OBSERVED: each printed with what it did, never judged
     const observe = async (tag, srcOf, kind, words) => {
       const o = await deadHub(tag, srcOf, { expectDeath: true, kind });
-      console.log(`  ⊙ §7 observed, not judged — the pre-fix write ${words}: exit ${JSON.stringify(o.exitedAfterInstall)}, looked for ${o.deathWaitMs} ms, «${o.writeErr}», next ${o.steps.next.status}${o.neverClosed ? `, «${NEVER_CLOSED7}»` : ''}${o.sshGone ? '' : ', its ssh not gone in 5 s'}`);
+      console.log(`  ⊙ §7 observed, not judged — the pre-fix write ${words}: exit ${JSON.stringify(o.exitedAfterInstall)}, looked for ${o.deathWaitMs} ms, «${o.writeErr}», its death's own words «${o.death || '—'}», next ${o.steps.next.status}${o.neverClosed ? `, «${NEVER_CLOSED7}»` : ''}${o.sshGone ? '' : ', its ssh not gone in 5 s'}`);
     };
     await observe('at-once', () => preFix7, 'linger', `made AT ONCE (the release's control; the ssh lingers ${LINGER7_S} s)`);
     await observe('after-closed', formOf(CLOSED_FORM7), 'held', 'made after the child said its stdin closed, the child held');
