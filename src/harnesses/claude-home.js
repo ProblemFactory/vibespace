@@ -137,7 +137,7 @@ function moveUser(home, old, user, ctx = null) {
     const nd = newNameOf(d, old, P);
     const src = path.join(projectsDir, d), dst = path.join(projectsDir, nd);
     try {
-      if (!fs.existsSync(dst)) { fs.renameSync(src, dst); moved++; }
+      if (absentOnDisk(dst)) { fs.renameSync(src, dst); moved++; }   // follow 4 (r5221): a refused look at the destination is no free name either
       else {
         for (const f of fs.readdirSync(src)) {
           if (absentOnDisk(path.join(dst, f))) fs.renameSync(path.join(src, f), path.join(dst, f));   // R6: a refused look is no free name (a rename would replace a transcript)
