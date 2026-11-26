@@ -113,13 +113,13 @@ async function stop(c) {
 function wrapped(ctl) {
   return class extends WS.WebSocket {
     constructor(...a) {
-      super(...a); ctl.sockets.push(this);
-      this.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (m && m.method === 'Target.attachedToTarget' && m.params && m.params.targetInfo) ctl.attached.push({ tid: m.params.targetInfo.targetId, opener: m.params.targetInfo.openerId || null, sid: m.params.sessionId, waiting: !!m.params.waitingForDebugger, at: Date.now() }); if (m && m.id && ctl.relIds.has(m.id)) ctl.relReply.set(ctl.relIds.get(m.id), { at: Date.now(), error: m.error ? m.error.message : null }); });   // the hold's own attach events (r1707 (8): waited on, never a sleep)
+      super(...a); ctl.sockets.push(this); this.vsN = ctl.sockets.length;   // r5261: this socket's own number (a reply is keyed by socket AND id)
+      this.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (m && m.method === 'Target.attachedToTarget' && m.params && m.params.targetInfo) ctl.attached.push({ tid: m.params.targetInfo.targetId, opener: m.params.targetInfo.openerId || null, sid: m.params.sessionId, waiting: !!m.params.waitingForDebugger, at: Date.now() }); if (m && m.id && ctl.relIds.has(`${this.vsN}:${m.id}`)) ctl.relReply.set(ctl.relIds.get(`${this.vsN}:${m.id}`), { at: Date.now(), error: m.error ? m.error.message : null }); });   // the hold's own attach events (r1707 (8): waited on, never a sleep)
     }
     send(data, ...rest) {
       let m = null; try { m = JSON.parse(String(data)); } catch { m = null; }
       if (m && m.method === 'Emulation.setGeolocationOverride' && m.sessionId) { ctl.asked.add(m.sessionId); if (!ctl.askedAt.has(m.sessionId)) ctl.askedAt.set(m.sessionId, Date.now()); }   // when the hold SENT a tab's place (one machine, one clock: the page's own callAt is compared)
-      if (m && m.method === 'Runtime.runIfWaitingForDebugger' && m.sessionId) { ctl.released.add(m.sessionId); if (!ctl.releasedAt.has(m.sessionId)) ctl.releasedAt.set(m.sessionId, Date.now()); ctl.relIds.set(m.id, m.sessionId); }
+      if (m && m.method === 'Runtime.runIfWaitingForDebugger' && m.sessionId) { ctl.released.add(m.sessionId); if (!ctl.releasedAt.has(m.sessionId)) ctl.releasedAt.set(m.sessionId, Date.now()); ctl.relIds.set(`${this.vsN}:${m.id}`, m.sessionId); }
       if (m && m.method === 'Emulation.setGeolocationOverride' && ctl.place !== 'pass') {
         if (ctl.place === 'refuse') { setImmediate(() => this.emit('message', Buffer.from(J({ id: m.id, error: { code: -32000, message: 'refused (a stand-in)' } })), false)); return; }
         if (ctl.place === 'swallow') { if (m.sessionId) ctl.swallowed.add(m.sessionId); return; }   // B-1217: the plant's witness — this tab's place was asked and never sent
@@ -208,13 +208,15 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED']]) {
 // plant's witness — else a named skip: the scene did not form); the product's acts (released unplaced inside the bound, said «not
 // answered»); then its read, waited from the RELEASE. A read that never comes is told apart: a tab that RAN with no read reaching the
 // suite is a named skip (the page's report, never the product's act); a released tab that never ran is RED — a stuck tab a person sees.
-const tabState = async (c, tid) => {
+const tabState = async (c, tid, k) => {
   try {
     const t = ((await c.cdp.send('Target.getTargets')).targetInfos || []).find((x) => x.targetId === tid) || null;
     if (!t) return { gone: true };
     const at = await c.cdp.send('Target.attachToTarget', { targetId: tid, flatten: true });
     const v = await Promise.race([c.cdp.send('Runtime.evaluate', { expression: 'document.readyState + " " + location.href', returnByValue: true }, at.sessionId).then((r) => (r && r.result ? r.result.value : null)).catch(() => null), sleep(3000).then(() => null)]);
-    return { url: t.url, ran: typeof v === 'string', rs: v };
+    // r5261: «ran» only when the leg's OWN page is complete — any other answer (a blank first page, another address) goes the red road
+    const [rs, href] = typeof v === 'string' ? [v.slice(0, v.indexOf(' ')), v.slice(v.indexOf(' ') + 1)] : [null, null];
+    return { url: t.url, ran: rs === 'complete' && typeof href === 'string' && href.startsWith(`${ORIGIN}/geo?k=${encodeURIComponent(k)}&`), rs: v };
   } catch (e) { return { threw: String(e && e.message) }; }
 };
 async function fiveLeg(G, tag) {
@@ -228,8 +230,9 @@ async function fiveLeg(G, tag) {
   if (!r.scene) {
     const relAt = await untilV(() => ctl.releasedAt.get(child.sid) || null, 1500 + 3000);   // the product's act: released (its bound 1.5 s, a margin)
     const un = evs.find((e) => e.kind === 'unplaced') || null;
+    if (relAt) await untilV(() => ctl.relReply.get(child.sid) || null, 1500 + 3000);   // r5261: the browser's own answer to the release
     r.released = relAt ? relAt - child.at : null; r.why = un ? un.why : null; r.reply = ctl.relReply.get(child.sid) || null; r.got = [];
-    if (relAt) { r.got = await reportsOf((x) => x.k === k, 1, READ_MS + 6000); if (!r.got.length) r.state = await tabState(c, child.tid); }   // the read, waited from the release
+    if (relAt) { r.got = await reportsOf((x) => x.k === k, 1, READ_MS + 6000); if (!r.got.length) r.state = await tabState(c, child.tid, k); }   // the read, waited from the release
   }
   h.dispose(); await stop(c);
   return r;
@@ -238,11 +241,13 @@ async function fiveLeg(G, tag) {
   const f5 = await fiveLeg(GH, 'r');
   if (f5.scene) console.log(`  SKIP (named, counted): ⑤ the scene did not form — ${f5.scene}`);
   else {
-    ok(f5.released !== null && f5.why === 'not answered', `⑤ the place NEVER ANSWERED: the tab it opened is RELEASED unplaced inside the bound and said («${f5.why}», released ${f5.released} ms after its attach)`, f5);
-    if (f5.released !== null) {
+    // r5261: the release is the BROWSER's acknowledgement (its reply, no error) inside a NUMBER — the hold's bound (1.5 s) and a 3 s margin
+    const RELEASE_BY_MS = 1500 + 3000, relOk = f5.released !== null && f5.released <= RELEASE_BY_MS && !!f5.reply && !f5.reply.error;
+    ok(relOk && f5.why === 'not answered', `⑤ the place NEVER ANSWERED: the tab it opened is RELEASED unplaced inside the bound and said («${f5.why}», released ${f5.released} ms after its attach, ≤ ${RELEASE_BY_MS} ms; the browser answered the release ${f5.reply ? (f5.reply.error ? 'with an ERROR: ' + f5.reply.error : 'without error') : 'NOTHING'})`, f5);
+    if (relOk) {
       if (f5.got.length) ok(f5.got.length === 1 && f5.got[0].err === 1 && f5.got[0].perm === 'denied' && f5.got[0].lat === undefined, `⑤ …and it reads «denied» (the profile's own setting), never this machine's position (${J(f5.got[0])})`, f5.got);
       else if (f5.state && f5.state.ran) console.log(`  SKIP (named, counted): ⑤ the released tab ran (${f5.state.rs}) but its read never reached the suite within ${(READ_MS + 6000) / 1000} s of its release — the page's report, not judged`);
-      else ok(false, '⑤ the tab the hold RELEASED never ran (still paused after its release) — a stuck tab a person would see', f5);
+      else ok(false, `⑤ the tab the hold RELEASED never reached its page (${f5.state && f5.state.rs ? 'its document: ' + f5.state.rs : 'no answer of its document in 3 s — still paused'}) — a stuck tab a person would see`, f5);
     }
   }
   // RED (B-1217): a hold copy that never releases a tab it could not place — the leg above sees no release (the tab stays paused)
