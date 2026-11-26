@@ -193,7 +193,7 @@ ok(roadErrs.length === 0, `② every road answered every asker on every run, no 
     const runs = [];
     for (let i = 0; i < 3; i++) runs.push(await holdOf(() => ROADS[rn](RELI, ASKERS['no row names it']())));
     rel.push(`${rn} ${runs.map((r) => r.turn).join(' / ')} ms`);
-    ok(runs.every((r) => r.err === null && !!r.out && r.out.ok === true), `RED's plant: the release's walk in its copy (three anchored edits, each throws unless its line is there once; the copy in the census below) answered ${rn} for the asker no row names on every run — no error`, runs.map((r) => r.err).filter(Boolean));
+    ok(runs.every((r) => r.err === null && !!r.out && r.out.ok === true), `RED's plant: the release's walk in its copy (three anchored edits, each throws unless its line is there once; the copy in the census below) answered ${rn} for the asker no row names on every run, no error — the copy answered; whether it walks is judged on the box`, runs.map((r) => r.err).filter(Boolean));
     // AN ABSOLUTE TIME (r4841 (b)): machine 1 reads the list at 64–73 ms (the directory's 74–89) — a machine about 1.4 times faster reads it under the bound: red falsely
     clock(median(runs.map((r) => r.turn)) > BOUND_MS, `RED: the release's walk (its text in a copy, the same engine) — ${rn} for the asker no row names: ${runs.map((r) => r.turn).join(' / ')} ms, over the bound (the meter sees the walk by conversation)`, RED_WHY);
   }
