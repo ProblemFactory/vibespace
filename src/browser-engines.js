@@ -36,6 +36,42 @@ const ENGINE_CODES = Object.freeze(['browser_engine_missing', 'browser_engine_ke
 const ENVIRONMENT_WORD = 'environment';
 const APPLIED_ECHO = 'appliedEnvironment';
 const APPLIED_LOCATIONS = Object.freeze(['machine', 'fixed', 'blocked']);
+/** 主开发 r4689 / r4691 — A WATCHED TAB DRAWS WHILE IT IS NOT IN FRONT (the custom kernel conversation's own spelling, verified by it
+ *  against its source at its pinned version; each name lives HERE only). TAB_WATCH_WORD: the word an engine plugin STATES in its
+ *  manifest's `capabilities.browserEngine`, beside ENVIRONMENT_WORD, AND the probe's top-level boolean of the same name (a row of
+ *  PROBE_FLAGS) that MEASURES it — the keeper asks the command only of a browser whose launch had both (never on a name).
+ *  TAB_WATCH_COMMAND: sent on the browser's OWN connection, `{targetId, watch}` → `{ok:true, targetId, watching, activeCount}` |
+ *  `{ok:false, code ∈ TAB_WATCH_CODES, targetId, watching:false, activeCount, limit}`; idempotent (also `watch:false` after the tab
+ *  closed); at most TAB_WATCH_LIMIT watched tabs a browser; its frames come by the ordinary screencast of that target; its leases end
+ *  at `watch:false`, at the tab's close, and when the websocket that took them disconnects. The keeper: ON before the screencast
+ *  starts, never the frozen lifecycle state on a watched tab. THE ONE EFFECT the person is told: the page still reads itself hidden,
+ *  but while watched its timers and animation frames run at the foreground rate and a video already playing decodes again. */
+const TAB_WATCH_WORD = 'tabWatch';
+const TAB_WATCH_COMMAND = 'VibeSpace.setTabWatch';
+const TAB_WATCH_CODES = Object.freeze(['no_such_target', 'not_a_page', 'target_crashed', 'too_many_watched_tabs']);
+const TAB_WATCH_LIMIT = 4;
+/** The probe's top-level BOOLEAN facts this VibeSpace reads — a closed set, ONE ROW each (its meaning). Read true ONLY when true:
+ *  absent (an older plugin), false or any other shape reads false, never a refusal — the owner's rule for the kernel's own top-level
+ *  facts (B-9584 r2911 / r2916, geolocationIsolated, on the 2.369.420 train: its row joins this table there). */
+const PROBE_FLAGS = Object.freeze({ [TAB_WATCH_WORD]: 'a watched tab draws and streams while it is not the front tab of its window (VibeSpace.setTabWatch)' });
+/** Does this manifest's `capabilities` STATE that the engine draws a watched tab that is not in front? */
+function statesTabWatch(capabilities) {
+  const w = capabilities && typeof capabilities === 'object' ? capabilities.browserEngine : null;
+  return Array.isArray(w) && w.includes(TAB_WATCH_WORD);
+}
+/** The kernel's answer to TAB_WATCH_COMMAND, judged — `reply` = the CDP reply as the page watch's `call` resolves it (`{result}` |
+ *  `{error}` | `{timeout}`). → `{ok:true, watching, activeCount}` | `{ok:false, code, limit?, activeCount?}`: the kernel's own four codes
+ *  by name; no answer in the bound ⇒ `tab_watch_unanswered`; anything else (an error, another shape) ⇒ `tab_watch_failed`. No address
+ *  or title is in either (a target id at most, never carried on). */
+function tabWatchAnswer(reply) {
+  if (!reply || reply.timeout) return { ok: false, code: 'tab_watch_unanswered' };
+  const r = isObj(reply.result) ? reply.result : null;
+  if (!r) return { ok: false, code: 'tab_watch_failed' };
+  const count = (v) => (Number.isInteger(v) && v >= 0 && v <= 64 ? v : null);
+  if (r.ok === true && typeof r.watching === 'boolean') return { ok: true, watching: r.watching, activeCount: count(r.activeCount) };
+  if (r.ok === false && TAB_WATCH_CODES.includes(r.code)) return { ok: false, code: r.code, activeCount: count(r.activeCount), limit: count(r.limit) || TAB_WATCH_LIMIT };
+  return { ok: false, code: 'tab_watch_failed' };
+}
 /** Does this manifest's `capabilities` STATE that the engine reads a profile's environment? */
 function statesEnvironment(capabilities) {
   const w = capabilities && typeof capabilities === 'object' ? capabilities.browserEngine : null;
@@ -307,6 +343,7 @@ function engineAnswerVerdict(verb, reply, { id = '', label = '', settings = null
     if (!(ig === undefined || ig === null || (isObj(ig) && typeof ig.verified === 'boolean' && (ig.sha256 == null || /^[0-9a-f]{64}$/.test(String(ig.sha256)))))) return bad('browser_engine_protocol', 'answered an integrity of another shape ({verified, sha256, verifiedAt})');
     return { ok: true, fact: { id: String(id), installed: body.installed, executable: body.executable, binaryPath: typeof body.binaryPath === 'string' ? body.binaryPath : null, version: body.version === null ? null : clip(body.version, 120), protocol: body.protocol, kinds: body.kinds.slice(0, 64).map((k) => clip(k, 40)), features, egress: egress ? { setting: egressRowPath(id), default: egress.default } : null,
       declaredVersion: typeof dv === 'string' && dv ? clip(dv, 64) : null, integrity: isObj(ig) ? { verified: ig.verified, sha256: ig.sha256 == null ? null : String(ig.sha256), verifiedAt: Number.isFinite(Number(ig.verifiedAt)) && ig.verifiedAt != null ? Number(ig.verifiedAt) : null } : null,
+      ...Object.fromEntries(Object.keys(PROBE_FLAGS).map((k) => [k, body[k] === true])), // r4691: each probe flag a boolean in the fact (absent ⇒ false)
       // B-9584, the owner's decision (主开发 r2911 / r2916): the kernel's OWN fact that it has no source of the machine's real place (a
       // build carrying the isolation patch; the plugin reads it from the binary, never VibeSpace) — the TOP-LEVEL boolean only; absent (an
       // older plugin), false or any other shape reads as false, never a refusal
@@ -471,6 +508,7 @@ function placeIsolatedVerdict({ choice = null, host = null, ephemeral = false, r
 
 module.exports = { placeIsolatedVerdict, ENGINE_CODES, PROTOCOL, ENGINE_ENV_KEYS, ENGINE_VERBS, ID_RE, OWN_ARG_RE, ENGINE_FEATURES, EGRESS_FEATURE, EGRESS_ROW_KEY,
   ENVIRONMENT_WORD, APPLIED_ECHO, APPLIED_LOCATIONS, statesEnvironment, appliedEchoOf, echoMismatch,   // B-9584 U2a
+  TAB_WATCH_WORD, TAB_WATCH_COMMAND, TAB_WATCH_CODES, TAB_WATCH_LIMIT, PROBE_FLAGS, statesTabWatch, tabWatchAnswer,   // 主开发 r4689 / r4691: a watched tab draws while not in front
   platformOf, engineWords, engineAnswerVerdict, kernelLiveVerdict, KERNEL_FEATURES, unansweredOf, missingOf, majorOfVersion, engineChoiceVerdict, engineArgs, engineLaunchEnv, engineWrapperText, choiceOfDefault, isDefaultEngineValue, defaultEngineOf,
   egressRowOf, egressRowPath, egressArgs, PROXY_ARG_RE, withoutProxyArgs, PROXY_UDP_ARG, PROXY_UDP_RE,
   BINARY_ROW_KEY, binaryRowOf, binaryRowPath, ENGINE_OWNER_ROW_RE, engineSourceOf, programMagicOk, userBinaryVerdict, // lane engine-spi-egress L1b

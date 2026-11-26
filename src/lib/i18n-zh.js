@@ -8529,6 +8529,8 @@ export default {
   "Could not show that tab: {why}": "无法显示那个标签页：{why}",
   "Back on the agent’s tab — the tab you watched is gone": "已回到 agent 的标签页 — 你查看的那个标签页已经关闭",
   "Watching “{watched}” — the agent is on “{current}”": "正在查看“{watched}” — agent 在“{current}”上",
+  "While you watch this tab, its page runs its timers at full speed and a playing video keeps playing.": "你查看这个标签页时，它的页面会以全速运行计时器，正在播放的视频也会继续播放。",
+  "This browser shows at most {n} tabs live while they are not in front — this one stays a still.": "这个浏览器最多同时实时显示 {n} 个不在前台的标签页 — 这一个仍是静止画面。",
   "Watching “{watched}” — a new picture every half second; the agent is on “{current}”": "正在查看“{watched}” — 每半秒一张新画面；agent 在“{current}”上",
   "Watch — {title}": "查看 — {title}",
   "Back to the agent’s tab — {title}": "回到 agent 的标签页 — {title}",

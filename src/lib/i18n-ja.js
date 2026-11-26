@@ -8528,6 +8528,8 @@ export default {
   "Could not show that tab: {why}": "そのタブを表示できません: {why}",
   "Back on the agent’s tab — the tab you watched is gone": "エージェントのタブに戻りました — 表示していたタブは閉じられました",
   "Watching “{watched}” — the agent is on “{current}”": "「{watched}」を表示中 — エージェントは「{current}」にいます",
+  "While you watch this tab, its page runs its timers at full speed and a playing video keeps playing.": "このタブを表示している間、そのページはタイマーを全速で動かし、再生中の動画は再生を続けます。",
+  "This browser shows at most {n} tabs live while they are not in front — this one stays a still.": "このブラウザが前面にないタブをライブで表示できるのは同時に {n} 個までです — このタブは静止画のままです。",
   "Watching “{watched}” — a new picture every half second; the agent is on “{current}”": "「{watched}」を表示中 — 0.5 秒ごとに新しい画面。エージェントは「{current}」にいます",
   "Watch — {title}": "表示 — {title}",
   "Back to the agent’s tab — {title}": "エージェントのタブに戻る — {title}",

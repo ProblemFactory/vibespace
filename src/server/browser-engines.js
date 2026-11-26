@@ -64,14 +64,19 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
    *  door: update the browser plugin) · `null` = not listed so — switched off, untrusted, not installed, NOT RUNNING (r1120: its true door,
    *  «not running», first), a list that cannot be read: the engine's own verdict names that door (browser_engine_missing with its
    *  For-you line, as at the release). A BUILT-IN engine (in the table, never a plugin) states nothing: `false`. */
-  function statesEnvironment(id) {
-    if (builtinRows().some((r) => r.id === String(id))) return false;   // r1120: a built-in engine reads no environment (its own words by U3 at the latest)
+  function statesEnvironment(id) { return statesWordOf(id, BE.statesEnvironment); }
+  /** 主开发 r4689 / r4691: does the engine `id` STATE that a watched tab draws while not in front (its manifest's
+   *  capabilities.browserEngine holds src/browser-engines.js TAB_WATCH_WORD)? The same three answers as statesEnvironment, by the same
+   *  ONE loader ask; a built-in engine states nothing. The keeper asks the command only where this is `true` AND the probe measured it. */
+  function statesTabWatch(id) { return statesWordOf(id, BE.statesTabWatch); }
+  function statesWordOf(id, judge) {
+    if (builtinRows().some((r) => r.id === String(id))) return false;   // r1120: a built-in engine states no word (its own words by U3 at the latest)
     const l = L();
     let list = null;
     try { list = l && typeof l.list === 'function' ? l.list() : null; } catch { list = null; }
     if (!Array.isArray(list)) return null;
     const p = list.find((x) => x && String(x.id) === String(id) && x.valid && x.enabled && x.trusted && x.state === 'running' && x.contributes && x.contributes.browserEngine === true);
-    return p ? BE.statesEnvironment(p.capabilities) : null;
+    return p ? judge(p.capabilities) : null;
   }
   async function askManifest(row, verb, input) {
     const v = BE.ENGINE_VERBS[verb];
@@ -166,7 +171,7 @@ function create({ loader = null, plugins = null, dataDir = null, platform = proc
   /** B-f276 (主开发 r3305 (a)): the plugin registry HELD → { file, code, since, words } (the table above lists no manifest engine then:
    *  which plugins are on is unknown — never «none») | null */
   const held = () => { const l = L(); let f = null; try { f = l && typeof l.held === 'function' ? l.held() : null; } catch { f = null; } if (!f) return null; let w = ''; try { w = l.heldWords(); } catch { w = ''; } return { ...f, words: w || 'the plugin registry could not be read' }; };
-  return { rows, providerFor, probe, launchOptions, kernelPath, sourceOf, binaryPathOf, tag, statesEnvironment, held };
+  return { rows, providerFor, probe, launchOptions, kernelPath, sourceOf, binaryPathOf, tag, statesEnvironment, statesTabWatch, held };
 }
 /** A GET's query values are strings (express parses them so) — the probe input as one. */
 function stringQuery(o) { const q = {}; for (const [k, v] of Object.entries(o || {})) if (v != null && v !== '') q[k] = String(v); return q; }

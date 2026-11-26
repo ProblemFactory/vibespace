@@ -1698,7 +1698,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       // live-watch-polish G2: the line names BOTH tabs (a page chose each title — bounded, set as textContent)
       const rows = (st.tabRow && st.tabRow.rows) || [];
       const wr = rows.find((x) => x.targetId === st.watch.targetId), cur = rows.find((x) => x.active);
-      text = watchLineWords({ watched: (wr && wr.title) || st.watch.title || '', current: cur ? cur.title : '', mode: st.watch.mode }, t);
+      text = watchLineWords({ watched: (wr && wr.title) || st.watch.title || '', current: cur ? cur.title : '', mode: st.watch.mode, live: st.watch.live === true, capped: st.watch.capped }, t);
       btn = t('Back to the agent’s tab'); act = () => watchTab(null);
     } else if (st.bg && st.bg.state === 'unresponsive') {
       // B-d635 (userW's inc-murizo36-ecri): a tab that sends no picture and does not answer is SAID — never a blank canvas with no words
@@ -2485,7 +2485,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'watching': {
         // live-watch-polish G5: a refusal is said by its code, in the device's words (never the server's English sentence)
         if (m.refused) { const why = watchRefusalWords({ refused: m.refused, why: m.why, error: m.error }, t); showToast(t('Could not show that tab: {why}', { why }), { type: 'error' }); }
-        if (m.targetId) st.watch = { targetId: String(m.targetId), mode: m.mode === 'polling' ? 'polling' : 'screencast', pending: !!m.pending, title: st.watch && st.watch.targetId === String(m.targetId) ? st.watch.title : '' };
+        if (m.targetId) st.watch = { targetId: String(m.targetId), mode: m.mode === 'polling' ? 'polling' : 'screencast', pending: !!m.pending, title: st.watch && st.watch.targetId === String(m.targetId) ? st.watch.title : '', live: m.live === true, capped: Number.isInteger(m.capped) ? m.capped : null }; // r4689: the kernel's draw / its cap
         else { if (st.watch && m.ended) showToast(t('Back on the agent’s tab — the tab you watched is gone'), { duration: 3000 }); st.watch = null; }
         renderTabRow(); renderWatchLine(); renderPicture(); // its read's S3: a watch moves the picture's verdict
         break;
