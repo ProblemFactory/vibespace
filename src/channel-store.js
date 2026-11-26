@@ -2065,16 +2065,20 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!fresh.length) return { appended: 0, duplicates, widened };
     const fp = logPath(adapterId, convId);
     fs.mkdirSync(path.dirname(fp), { recursive: true, mode: 0o700 });
-    // B-f276 family (lane bl-loop-a, slice s1126, 主开发 r4781): THE REWRITE KEEPS EVERY LINE — a read that fails (an EIO) throws: held,
-    // the log untouched; a line that does not parse (a crash mid-write, a bad byte) is KEPT AS IT IS after the merged records — the
-    // readers skip it, as before — never dropped (the decision journal's rule, r3739); the retention trim keeps it too (recAtKept)
+    // B-f276 family (lane bl-loop-a, slice s1126, 主开发 r4781 / r4906): THE REWRITE KEEPS EVERY LINE — a read that fails (an EIO) throws:
+    // held, the log untouched; a line that does not parse (a crash mid-write, a bad byte) is KEPT AS IT IS IN ITS PLACE: right after the
+    // parsed line that stood before it in the file (before any parsed line: first), several in their own order, its text as the log
+    // reads it (UTF-8, as every reader) — so the only copy of a message stays beside the neighbours that date it; the readers skip it,
+    // as before. The retention trim keeps it in its place too (recAtKept). Never dropped (the decision journal's rule, r3739)
     let lines = [];
     try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
-    const parsed = [], torn = [];
-    for (const l of lines) { try { parsed.push(JSON.parse(l)); } catch { torn.push(l); } }
-    const merged = parsed.concat(fresh).sort(cmpRecord);
+    const head = [], olds = [];   // each parsed line with the lines that do not parse right after it; before any parsed line: head
+    for (const l of lines) { let r; try { r = JSON.parse(l); } catch { (olds.length ? olds[olds.length - 1].torn : head).push(l); continue; } olds.push({ r, torn: [] }); }
+    const merged = olds.concat(fresh.map((r) => ({ r, torn: [] }))).sort((a, b) => cmpRecord(a.r, b.r));
+    const out = head.slice();
+    for (const x of merged) { out.push(JSON.stringify(x.r)); for (const t of x.torn) out.push(t); }
     const tmp = `${fp}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, merged.map((r) => JSON.stringify(r)).concat(torn).join('\n') + '\n');
+    fs.writeFileSync(tmp, out.join('\n') + '\n');
     fs.renameSync(tmp, fp);
     for (const r of fresh) rememberVendorId(set, r.vendorId);
     { const bp = basePlaces.get(`${adapterId}/${convId}`); if (bp) for (const r of fresh) notePlace(bp, r); }
@@ -2805,14 +2809,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const memoBytes = (file) => () => { const v = memoHeld.get(file); return v ? JSON.stringify(v, RUNTIME_KEYS, 1) : null; };
   // B-f276 family (主开发 r3183 / r3188: THE TWO MEMOS ARE DERIVED — lost, the next vendor answer rebuilds them and nothing of the
   // person's is lost; lane bl-loop-a, slice s1126, r4781): a MISSING memo is none (the first answer writes it); an UNREADABLE or TORN
-  // one is none too — the next remembered answer writes a fresh memo, as the ruling allows — but SAID, once a file, with its code
+  // one is none too — the next remembered answer writes a fresh memo, as the ruling allows — but SAID, once a failing stretch of a
+  // file, with its code (a good read clears the mark: the next failure is said again, r4906)
   const memoSaid = new Set();
   const memoSay = (file, why) => { if (memoSaid.has(file)) return; memoSaid.add(file); warn(`[channels] ${path.basename(path.dirname(file))}/${path.basename(file)} could not be read (${why}) — a derived memo: read as none, the next answer writes it again`); };
   function memoRead(file) {
     if (memoHeld.has(file)) return memoHeld.get(file);
     let text;
     try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { if (!e || e.code !== 'ENOENT') memoSay(file, (e && e.code) || 'unreadable'); return null; }
-    try { return JSON.parse(text); } catch { memoSay(file, 'torn'); return null; }
+    try { const v = JSON.parse(text); memoSaid.delete(file); return v; } catch { memoSay(file, 'torn'); return null; }   // read again: a later failure is said again (r4906)
   }
   const memoForget = (file) => { memoHeld.set(file, null); try { W().forget(file); } catch { } };   // before the unlink
   function searchMemoRead(adapterId) {
