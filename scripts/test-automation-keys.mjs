@@ -121,7 +121,7 @@ const G = (o = {}) => ({ id: 'ag-00000000000' + (o.n || 1), keyId: 'ak-000000000
 
 console.log('① the closed table, the record and the grant');
 {
-  eq(A.VERBS, ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'conversations.resume', 'groups.invite', 'conversations.status', 'conversations.archive', 'conversations.list', 'jobs.wakeGrant', 'conversations.propose', 'browsers.stop', 'feedback.handled', 'feedback.list'], 'the closed table (+ lane login-request-card piece 3b conversations.propose; + the manager design\'s piece 7 jobs.wakeGrant, before the feedback pair; + the manager design\'s piece 4 conversations.resume, after end): the five verbs the dispatcher needs, in order (+ lane browsers-stop\'s browsers.stop, an act: the keeper\'s own stop of a browser nobody uses, after conversations.propose; + lane conversation-facts\' conversations.list, a READ: one snapshot of what the key reaches; + lane automation-verbs\' conversations.status, a READ: the ids an open reports a moment later; + lane feedback-handled-verb\'s feedback.handled and feedback.list, a READ; + lane conversations-archive-verb\'s conversations.archive, the opener\'s lifecycle\'s end)');
+  eq(A.VERBS, ['conversations.open', 'conversations.rename', 'conversations.bind', 'conversations.end', 'conversations.resume', 'groups.invite', 'conversations.status', 'conversations.archive', 'conversations.list', 'jobs.wakeGrant', 'conversations.propose', 'conversations.pin', 'browsers.stop', 'feedback.handled', 'feedback.list'], 'the closed table (+ B-2083 unit A conversations.pin, an act after conversations.propose: a conversation\'s pool pin through the person\'s own pin road, DARK; + lane login-request-card piece 3b conversations.propose; + the manager design\'s piece 7 jobs.wakeGrant, before the feedback pair; + the manager design\'s piece 4 conversations.resume, after end): the five verbs the dispatcher needs, in order (+ lane browsers-stop\'s browsers.stop, an act: the keeper\'s own stop of a browser nobody uses, after conversations.propose; + lane conversation-facts\' conversations.list, a READ: one snapshot of what the key reaches; + lane automation-verbs\' conversations.status, a READ: the ids an open reports a moment later; + lane feedback-handled-verb\'s feedback.handled and feedback.list, a READ; + lane conversations-archive-verb\'s conversations.archive, the opener\'s lifecycle\'s end)');
   ok(A.SCOPES.every((s) => (['conversations.status', 'conversations.list', 'feedback.list'].includes(s.verb) ? s.layer === 'read' : s.layer === 'act') && typeof s.args === 'function' && typeof s.label === 'string') && A.SCOPES.filter((s) => s.billed).map((s) => s.verb).join() === 'conversations.open' && Object.isFrozen(A.SCOPES), 'each row {verb, layer act, billed, args validator, label}; only conversations.open is billed (a turn nobody typed — L2 wires it through the spend guard)');
   eq([A.CODES.vault_locked, A.CODES.not_granted, A.CODES.verb_not_wired, A.CODES.bad_args, A.CODES.session_only], [423, 403, 501, 400, 403], 'the door\'s statuses: locked 423 · a refusal 403 · not wired 501 · bad args 400');
   const planted = A.keyOf({ ...K(), value: 'vsak_' + 'x'.repeat(43), secret: 'y' });
@@ -1571,9 +1571,9 @@ console.log('⑱ THE KEY ROW, BOUNDED (lane vault-key-row-compact — the owner 
   ok(A.limitsWords(OWNER) === `folders all paths · accounts any · permission modes ${PERMS.join(', ')} · models any · modes any` && CLI.limitsWords(OWNER) === A.limitsWords(OWNER),
     'without a table the permission modes stay NAMED (an agent reads what it may ask for); the modes\' table is the module\'s own — the CLI\'s twin agrees (chat + terminal ⇒ any)', [A.limitsWords(OWNER), CLI.limitsWords(OWNER)]);
   // THE VERBS' FAMILIES (the popover's heads)
-  ok(JSON.stringify(A.verbFamilies(A.VERBS).map((f) => [f.id, f.verbs.length])) === '[["conversations",9],["groups",1],["jobs",1],["feedback",2],["browsers",1]]' && A.FAMILIES.map((f) => f.label).join() === 'Conversations,Agent groups,Background Work,Feedback,Browsers'
+  ok(JSON.stringify(A.verbFamilies(A.VERBS).map((f) => [f.id, f.verbs.length])) === '[["conversations",10],["groups",1],["jobs",1],["feedback",2],["browsers",1]]' && A.FAMILIES.map((f) => f.label).join() === 'Conversations,Agent groups,Background Work,Feedback,Browsers'
     && A.verbFamilies(['feedback.list', 'conversations.rename']).map((f) => f.verbs.join()).join('|') === 'conversations.rename|feedback.list' && A.VERBS.every((v) => A.familyOf(v) !== 'other'),
-    'the verbs grouped by FAMILY (the table\'s own groups, in its order): 对话 9 · Agent 群组 1 · 后台工作 1 · 反馈 2 · 浏览器 1 (lane conversation-facts: + conversations.list; the manager design\'s piece 4: + conversations.resume; piece 7: + jobs.wakeGrant, family 后台工作; lane login-request-card piece 3b: + conversations.propose; lane browsers-stop: + browsers.stop, family 浏览器); a key\'s own verbs only; every verb has its family (a new family = a FAMILIES row)');
+    'the verbs grouped by FAMILY (the table\'s own groups, in its order): 对话 10 · Agent 群组 1 · 后台工作 1 · 反馈 2 · 浏览器 1 (B-2083 unit A: + conversations.pin; lane conversation-facts: + conversations.list; the manager design\'s piece 4: + conversations.resume; piece 7: + jobs.wakeGrant, family 后台工作; lane login-request-card piece 3b: + conversations.propose; lane browsers-stop: + browsers.stop, family 浏览器); a key\'s own verbs only; every verb has its family (a new family = a FAMILIES row)');
   // ENDED + THE ORDER
   const live = new Set(['session:c-live']);
   ok(!A.grantEnded({ subject: 'session:c-live' }, live) && A.grantEnded({ subject: 'session:c-gone' }, live) && !A.grantEnded({ subject: 'group:T-1' }, live) && A.grantEnded({ subject: 'session:x' }, []) && !A.grantEnded({ subject: 'session:c-live' }, ['session:c-live']) && !A.grantEnded(null, live),
@@ -2203,6 +2203,165 @@ console.log('\nB-119d THE OWNER\'S NOTICE OF A REFUSED VERB NAMES THE TARGET —
   ok(cur.notes.length === 1 && cur.notes[0].target === PRIV && cur.notes[0].code === 'not_granted' && cur.notes[0].verb === 'conversations.rename', 'THE LAW B-119d: the owner\'s notice names the target by its NAME', cur.notes);
   ok(rel.notes.length === 1 && rel.notes[0].target === 'conv-n2', 'B-119d RED CONTROL (the release\'s two lines, in a copy): the notice named only the id the caller gave — the leg above tells the two apart', rel.notes);
   ok(leak.bytes.includes(PRIV), 'B-119d RED CONTROL (noticeName kept with a refusal\'s fields, in a copy): the reply carries the name — the «no reply» leg above goes red on it', leak.bytes);
+}
+
+console.log('㉓ B-2083 unit A — conversations.pin: the person\'s pin road for a key the owner granted it by hand; never onto money (主开发 r5167 / r5180)');
+{
+  const SA = R('src/spend-authorizer.js');
+  const AUR = R('src/server/account-usage-routes.js');
+  const PIN = 'conversations.pin';
+  // ── PURE: the row, its arguments, its codes, the audit's args ──
+  const row = A.scopeOf(PIN);
+  ok(row && row.layer === 'act' && row.billed === false && row.label === 'Pin a conversation to a pool member' && A.VERBS.indexOf(PIN) === A.VERBS.indexOf('conversations.propose') + 1 && A.familyOf(PIN) === 'conversations',
+    'the row: act, billed false (a pin starts no turn — test-spend-paths §10b), «Pin a conversation to a pool member», after conversations.propose, family conversations');
+  const pa = (a) => row.args(a);
+  ok(JSON.stringify(pa({ target: 'c-1', member: 'sub-1' })) === '{"ok":true,"args":{"target":"c-1","member":"sub-1"}}' && JSON.stringify(pa({ target: 'c-1', automatic: 'yes' })) === '{"ok":true,"args":{"target":"c-1","automatic":true}}' && pa({ target: 'c-1', automatic: true }).ok,
+    'args: the target and ONE of member (an id) or automatic (yes)');
+  const bads = [[{ target: 'c-1', member: 'sub-1', automatic: true }, /ONE of member/], [{ target: 'c-1' }, /member <id> or automatic is required/], [{ target: 'c-1', automatic: false }, /is required/], [{ member: 'sub-1' }, /target is required/], [{ target: 'c-1', member: 'a b' }, /member must be an id/], [{ target: 'c-1', member: 'sub-1', pool: 'p-1' }, /unknown argument "pool"/]];
+  const badOut = bads.map(([a, re]) => [a, pa(a)]).filter(([a, v], i) => !(v.code === 'bad_args' && bads[i][1].test(v.why)));
+  ok(!badOut.length, `both · neither · automatic no · no target · a member that is not an id · an unknown field ⇒ bad_args, each by name (${bads.length} cases)`, badOut);
+  ok(A.CODES.paid_member === 403 && A.CODES.pin_not_saved === 503 && A.CODES.no_session === 404 && A.CODES.not_pooled === 400 && A.CODES.remote_session === 400 && A.CODES.not_member === 400,
+    'the door\'s statuses: paid_member 403 · pin_not_saved 503 · no_session 404 · not_pooled / remote_session / not_member 400 (the person\'s route\'s own)');
+  ok(JSON.stringify(A.argsSummary(PIN, { target: 'worker-p', member: 'sub-free' })) === '{"target":"worker-p","member":"sub-free"}' && JSON.stringify(A.argsSummary(PIN, { target: 'worker-p', automatic: true })) === '{"target":"worker-p","automatic":"true"}',
+    'the journal keeps the conversation and the member by their ids — nothing more');
+  // THE MONEY LAW (PURE) over the REAL overageState (src/spend-authorizer.js — what the spend guard's overageFor answers)
+  const nowMs = Date.now();
+  const OV = {
+    free: SA.overageState({ overage: { inUse: false, status: 'rejected', disabledReason: 'org_level_disabled', asOf: nowMs } }),
+    credits: SA.overageState({ overage: { inUse: false, status: 'allowed', asOf: nowMs } }),
+    over: SA.overageState({ overage: { inUse: true, status: 'allowed', asOf: nowMs - 60e3, resetsAt: Math.floor(nowMs / 1000) + 3600 } }),
+    unknown: SA.overageState({}),
+    unread: { ...SA.overageState(null), unread: true },
+  };
+  ok(OV.free.mode === 'disabled' && OV.credits.mode === 'allowed' && OV.over.mode === 'inUse' && OV.unknown.mode === 'unknown', 'the four readings are the reader\'s own four modes (disabled · allowed · inUse · unknown)', OV);
+  const mv = Object.fromEntries(Object.entries({ ...OV, none: null }).map(([k, o]) => [k, A.pinMoneyVerdict(o, 'sub-' + k)]));
+  ok(mv.free.ok === true && ['credits', 'over', 'unknown', 'unread', 'none'].every((k) => mv[k].ok === false && mv[k].code === 'paid_member' && mv[k].why.startsWith('sub-' + k + ': ') && /a key never moves a conversation onto money/.test(mv[k].why))
+    && /usage credits enabled/.test(mv.credits.why) && /billing paid overage/.test(mv.over.why) && /does not say/.test(mv.unknown.why) && /cannot be told/.test(mv.unread.why) && /not available/.test(mv.none.why),
+    'pinMoneyVerdict: ONLY a member whose reading states paid usage is off passes; usage credits · paid overage · unstated · unread · no reading ⇒ paid_member, each in its words (fail closed)', mv);
+  // ── DARK: no key holds it until the owner ticks it ──
+  const everyOther = A.VERBS.filter((v) => v !== PIN);
+  const kOld = A.keyOf({ id: 'ak-0000000000a1', name: 'every verb of the release', scopes: [...everyOther, 'conversations.pin2'], createdAt: NOW, digest: 'b'.repeat(64) });
+  const darkV = (Mod, key) => Mod.useVerdict({ key, grants: [G({ keyId: key.id })], subject: 'session:conv-1', verb: PIN, vaultState: 'unlocked' });
+  ok(!kOld.scopes.includes(PIN) && darkV(A, kOld).code === 'verb_not_in_scope', 'DARK: a key that held EVERY verb of the release (read back from its store) does not hold conversations.pin — verb_not_in_scope (no migration adds it)');
+  const KO_NEEDLE = "scopes: (Array.isArray(raw.scopes) ? raw.scopes : []).filter((v, i, a) => VERBS.includes(v) && a.indexOf(v) === i),";
+  const Mmig = M.load('src/automation-keys.js', editAnchor(SRC, KO_NEEDLE, "scopes: [...(Array.isArray(raw.scopes) ? raw.scopes : []).filter((v, i, a) => VERBS.includes(v) && a.indexOf(v) === i), 'conversations.pin'].filter((v, i, a) => a.indexOf(v) === i),", 'src/automation-keys.js'), 'pin-migration');
+  const kMig = Mmig.keyOf({ id: 'ak-0000000000a1', name: 'every verb of the release', scopes: everyOther, createdAt: NOW, digest: 'b'.repeat(64) });
+  ok(kMig.scopes.includes(PIN) && darkV(Mmig, kMig).ok === true, 'RED CONTROL (a store read that adds the verb to every key — a migration, in a copy): the old key holds it and the verdict admits it — the DARK leg above tells the two apart', darkV(Mmig, kMig));
+  // the census: the verb's name stands in the product only at its row, its body, its hand-over, its CLI and its words — no file grants it
+  const { execFileSync } = require('node:child_process');
+  const { gitEnvFrom } = await import('./git-env.mjs');
+  const tracked = execFileSync('git', ['ls-files', 'src', 'data/bin', 'server.js'], { encoding: 'utf8', cwd: ROOT, env: gitEnvFrom(process.env) }).split('\n').filter((f) => /\.js$|^data\/bin\//.test(f));
+  const named = tracked.filter((f) => { try { return fs.readFileSync(path.join(ROOT, f), 'utf8').includes(PIN); } catch { return false; } }).sort();
+  ok(tracked.length > 300 && JSON.stringify(named) === JSON.stringify(['data/bin/vibespace-api', 'src/automation-keys.js', 'src/server/account-usage-routes.js', 'src/server/conversation-ops.js']),
+    `DARK census: of ${tracked.length} tracked files, only the row's module, the verb's body, the hand-over and the CLI name conversations.pin (no default scopes list, no migration, no seeded key)`, named);
+  const VW = fs.readFileSync(path.join(ROOT, 'src/lib/vault-automation.js'), 'utf8');
+  ok(VW.includes("cb.type = 'checkbox'; cb.value = s.verb; cb.checked = held.includes(s.verb);") && !/scopes:\s*(\[\s*\.\.\.\s*)?(A\.)?VERBS\b(?!\.filter)/.test(named.map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n')),
+    'DARK: the window\'s verb boxes are ticked only for the verbs a key already holds (mint: none ticked); no product file hands a key the whole table');
+  // ── THE ENGINE: the REAL engine over automationVerbs, the REAL hand-over (account-usage-routes pinRoad) over a stand-in writer ──
+  // The stand-in keeps the writer's shape: its refusals are the writer's own codes, READ OFF its body (a renamed code turns this red)
+  const ENGSRC = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8');
+  const wi = ENGSRC.indexOf('function setConversationPin('), wbody = wi < 0 ? '' : ENGSRC.slice(wi, ENGSRC.indexOf('\n}\n', wi));
+  const WCODES = ['no_session', 'not_pooled', 'remote_session', 'not_member', 'pin_not_saved'];
+  ok(wbody.length > 500 && WCODES.every((c) => wbody.includes(`code: '${c}'`)) && /function setConversationPin\(sid, memberId, \{ by = 'user', now = Date\.now\(\) \} = \{\}\)/.test(wbody), 'the stand-in\'s refusals are the ONE writer\'s own codes (read off setConversationPin: no_session · not_pooled · remote_session · not_member · pin_not_saved) and its signature (sid, memberId, {by})');
+  const POOL = 'pool-p', MEMBERS = ['sub-free', 'sub-credits', 'sub-over', 'sub-unknown', 'sub-unread'];
+  const sessions = new Map([
+    ['sess-p-1', { name: 'coordinator', backend: 'claude', backendSessionId: 'coord-p', mode: 'chat' }],
+    ['sess-p-2', { name: 'worker p', backend: 'claude', backendSessionId: 'worker-p', mode: 'chat', _accountId: POOL, host: null, sockName: 'cw-p2' }],
+    ['sess-p-3', { name: 'remote p', backend: 'claude', backendSessionId: 'remote-p', mode: 'chat', _accountId: POOL, host: 'h-1', sockName: 'cw-p3' }],
+    ['sess-p-4', { name: 'plain p', backend: 'claude', backendSessionId: 'plain-p', mode: 'chat', _accountId: 'sub-free', host: null, sockName: 'cw-p4' }],
+  ]);
+  const accounts = { get: (id) => (id === POOL ? { id, type: 'pooled' } : MEMBERS.includes(id) ? { id, type: 'subscription' } : null), poolMembership: (id) => (id === POOL ? MEMBERS.slice() : null) };
+  const writes = [], asked = [];
+  let broadcasts = 0, saveFails = false, vanish = false;
+  const setConversationPin = (sid, memberId, { by = 'user', now = NOW } = {}) => {
+    if (vanish) sessions.delete(sid);
+    const s = sid ? sessions.get(sid) : null;
+    if (!s) return { ok: false, status: 404, code: 'no_session', error: 'no live session with that id' };
+    const a = s._accountId ? accounts.get(s._accountId) : null;
+    if (!a || a.type !== 'pooled') return { ok: false, status: 400, code: 'not_pooled', error: 'this conversation does not bill a pooled account' };
+    if (s.host) return { ok: false, status: 400, code: 'remote_session', error: 'pooled accounts are local-only — a remote conversation cannot be pinned' };
+    if (memberId != null && !accounts.poolMembership(s._accountId).includes(memberId)) return { ok: false, status: 400, code: 'not_member', error: 'not a member of this pool: ' + String(memberId) };
+    if (saveFails) return { ok: false, status: 503, code: 'pin_not_saved', error: 'the pin could not be saved (EIO) — nothing changed; try again' };
+    s._poolPin = memberId ? { memberId, at: now, by } : null;
+    writes.push([sid, memberId, by]);
+    return { ok: true, pinned: s._poolPin, placed: false, reason: memberId ? 'applies-at-restart' : 'automatic', code: memberId ? 'cold_pool' : null, current: 'sub-free' };
+  };
+  const overageFor = (id) => { asked.push(id); return { 'sub-free': OV.free, 'sub-credits': OV.credits, 'sub-over': OV.over, 'sub-unknown': OV.unknown, 'sub-unread': OV.unread }[id] || SA.overageState(null); };
+  const before = OPS.provide({});   // the shared parts as they stand — given back after this section
+  const road = (eng = { setConversationPin }) => AUR.pinRoad({ engine: eng, activeSessions: sessions, accounts, broadcastActiveSessions: () => { broadcasts++; } });
+  OPS.provide({ pin: road(), spendGuard: { overageFor } });
+  const verbs = OPS.automationVerbs({ activeSessions: sessions, groupsOf: () => [] });
+  const w = await mkWorld('pin', { verbs });
+  const CP = () => caller({ conversationId: 'coord-p', sessionKey: 'claude:coord-p', name: 'coordinator' });
+  // DARK on the engine: the key that holds every other verb, granted to the caller — refused by name, no card, nothing written
+  const mAll = w.engine.mint({ name: 'all-but-pin', scopes: everyOther, limits: OPEN_LIMITS, by: 'user' });
+  w.engine.grant(mAll.key.id, ['session:coord-p'], { by: 'user' });
+  const d0 = await w.engine.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-free' } });
+  ok(mAll.ok && d0.ok === false && d0.code === 'verb_not_in_scope' && !cards(w).length && !writes.length, 'DARK (the real engine): a key granted EVERY other verb is refused conversations.pin by name (verb_not_in_scope) — no card, nothing written', d0);
+  w.engine.revoke(mAll.key.id);
+  const m = w.engine.mint({ name: 'pinner', scopes: [PIN, 'conversations.status'], limits: OPEN_LIMITS, by: 'user' });
+  w.engine.grant(m.key.id, ['session:coord-p'], { by: 'user' });
+  const use = (args) => w.engine.use({ caller: CP(), verb: PIN, args });
+  const r0 = await use({ target: 'worker-p', member: 'sub-free' });
+  ok(r0.ok === false && r0.code === 'not_granted' && !writes.length && !asked.length, 'the target is REACHED first, as every verb\'s: a worker this key did not open ⇒ not_granted (the grant\'s reach: opened) — no money read, nothing written', r0);
+  const g0 = w.engine.list().keys.find((k) => k.id === m.key.id).grants[0];
+  ok(w.engine.setReach(g0.id, 'instance', { by: 'user' }).ok, 'the owner widens the pinner\'s grant to the instance (the window\'s reach chip)');
+  const r1 = await use({ target: 'worker-p', member: 'sub-free' });
+  const s2 = sessions.get('sess-p-2');
+  ok(r1.ok && r1.result.target === 'worker-p' && r1.result.member === 'sub-free' && r1.result.placed === false && r1.result.reason === 'applies-at-restart' && r1.result.note === 'cold_pool' && r1.result.current === 'sub-free'
+    && /while the conversation lives and across a hub restart/.test(r1.result.holds) && /a person's resume after it ends follows the pin saved by that person's own page/.test(r1.result.holds)
+    && JSON.stringify(writes) === JSON.stringify([['sess-p-2', 'sub-free', 'automation:' + m.key.id]]) && s2._poolPin.by === 'automation:' + m.key.id && broadcasts === 1 && JSON.stringify(asked) === '["sub-free"]',
+    'a member whose reading states paid usage is off: pinned through the ONE writer by «automation:<key id>», the session list broadcast once, the reply says how long it holds', { r1, writes, asked, broadcasts });
+  // THE MONEY LAW on the engine: every paying or untold member refused BY NAME, nothing written, nothing broadcast
+  const money = [];
+  for (const id of ['sub-credits', 'sub-over', 'sub-unknown', 'sub-unread']) money.push([id, await use({ target: 'worker-p', member: id })]);
+  ok(money.every(([id, r]) => r.ok === false && r.code === 'paid_member' && new RegExp('^' + id + ': ').test(r.why)) && writes.length === 1 && broadcasts === 1,
+    'THE MONEY LAW: usage credits · paid overage · unstated · unread ⇒ 403 paid_member naming the member — nothing written, nothing broadcast', money);
+  OPS.provide({ spendGuard: null });
+  const nog = await use({ target: 'worker-p', member: 'sub-free' });
+  OPS.provide({ spendGuard: { overageFor } });
+  ok(nog.ok === false && nog.code === 'paid_member' && /not available/.test(nog.why) && writes.length === 1, 'no spend guard wired ⇒ the member\'s paying state is unknown ⇒ paid_member (fail closed), nothing written', nog);
+  // the writer's own refusals, by its names — the money is asked only for a member of a LOCAL conversation's own pool
+  const nAsked = asked.length;
+  const nm = await use({ target: 'worker-p', member: 'sub-stranger' });
+  const rm = await use({ target: 'remote-p', member: 'sub-credits' });
+  const np = await use({ target: 'plain-p', member: 'sub-credits' });
+  ok(nm.code === 'not_member' && rm.code === 'remote_session' && np.code === 'not_pooled' && asked.length === nAsked && writes.length === 1,
+    'the writer\'s own refusals by name — not_member (a stranger id) · remote_session · not_pooled — never said as paid_member (the money is not asked for them)', { nm, rm, np, asked: asked.slice(nAsked) });
+  saveFails = true; const ns = await use({ target: 'worker-p', member: 'sub-free' }); saveFails = false;
+  ok(ns.ok === false && ns.code === 'pin_not_saved' && /nothing changed/.test(ns.why) && writes.length === 1 && broadcasts === 1, 'a record that cannot be written ⇒ 503 pin_not_saved (the writer\'s words), nothing broadcast', ns);
+  const ra = await use({ target: 'worker-p', automatic: true });
+  ok(ra.ok && ra.result.member === null && ra.result.reason === 'automatic' && JSON.stringify(writes.at(-1)) === JSON.stringify(['sess-p-2', null, 'automation:' + m.key.id]) && s2._poolPin === null && asked.length === nAsked + 1 && broadcasts === 2,
+    'automatic clears the pin through the same writer (no member, no money asked: the pool\'s own placement decides again)', { ra, asked: asked.slice(nAsked) });
+  vanish = true; const nv = await use({ target: 'worker-p', member: 'sub-free' }); vanish = false;
+  sessions.set('sess-p-2', s2);
+  ok(nv.ok === false && nv.code === 'no_session', 'a conversation that ended between the reach and the pin ⇒ no_session (the writer\'s own)', nv);
+  OPS.provide({ pin: null });
+  const nr = await use({ target: 'worker-p', member: 'sub-free' });
+  OPS.provide({ pin: road() });
+  ok(nr.ok === false && nr.code === 'not_ready' && /has not handed over its pin writer/.test(nr.why), 'the pool engine has not handed its writer over yet ⇒ not_ready by name', nr);
+  const pinLines = auditOf(w).filter((l) => l.verb === PIN);
+  ok(pinLines.length === 15 && pinLines.every((l) => l.key === null || l.key === m.key.id || l.key === mAll.key.id) && pinLines.every((l) => Object.keys(l.args).every((k) => ['target', 'member', 'automatic'].includes(k)))
+    && pinLines.filter((l) => l.ok).length === 2 && pinLines.filter((l) => l.code === 'paid_member').length === 5 && !JSON.stringify(pinLines).includes('worker p') && !JSON.stringify(pinLines).includes('coordinator'),
+    'every use is ONE journal line under the key — the conversation and the member by their ids, nothing more (no name): 2 ok, 5 paid_member, each refusal by its code', pinLines.map((l) => [l.ok, l.code, l.args]));
+  // ── RED CONTROLS (copies) ──
+  // (a) a body that passes the person's road through (no money law): the paying member is PINNED
+  const OSRC = fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8');
+  const OPSX = M.load('src/server/conversation-ops.js', editAnchor(OSRC, "const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}`, guard });", "const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}` });", 'src/server/conversation-ops.js'), 'pin-no-money');
+  OPSX.provide({ pin: road(), spendGuard: { overageFor } });
+  const wx = await mkWorld('pin-x', { verbs: OPSX.automationVerbs({ activeSessions: sessions, groupsOf: () => [] }) });
+  const mx = wx.engine.mint({ name: 'pinner', scopes: [PIN], limits: OPEN_LIMITS, by: 'user' });
+  wx.engine.grant(mx.key.id, ['session:coord-p'], { by: 'user' });
+  wx.engine.setReach(wx.engine.list().keys[0].grants[0].id, 'instance', { by: 'user' });
+  const xr = await wx.engine.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-credits' } });
+  ok(xr.ok === true && writes.at(-1)[1] === 'sub-credits', 'RED CONTROL (the person\'s road passed through, no money law — in a copy): a key pins the conversation onto a member billing usage credits — the MONEY LAW legs above tell the two apart', xr);
+  // (b) the hand-over that asks the money of ANY id: a stranger is answered paid_member instead of the writer's not_member
+  const RSRC2 = fs.readFileSync(path.join(ROOT, 'src/server/account-usage-routes.js'), 'utf8');
+  const AURX = M.load('src/server/account-usage-routes.js', editAnchor(RSRC2, 'if (members.includes(memberId)) { const g = guard(memberId);', 'if (true) { const g = guard(memberId);', 'src/server/account-usage-routes.js'), 'pin-guard-any');
+  const rx = AURX.pinRoad({ engine: { setConversationPin }, activeSessions: sessions, accounts })('sess-p-2', 'sub-stranger', { by: 'automation:x', guard: (id) => A.pinMoneyVerdict(overageFor(id), id) });
+  ok(rx.code === 'paid_member', 'RED CONTROL (the money asked of any id — in a copy): a stranger id is answered paid_member — the «writer\'s own refusals by name» leg above tells the two apart', rx);
+  sessions.get('sess-p-2')._poolPin = null;
+  OPS.provide(null); OPS.provide(before);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

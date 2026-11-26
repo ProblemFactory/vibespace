@@ -706,6 +706,8 @@ app.post('/api/accounts/:poolId/pin', (req, res) => {
     res.json({ success: true, pinned: r.pinned, placed: r.placed, reason: r.reason, code: r.code || null, current: r.current || null });
   } catch (e) { failAcct(res, e); }
 });
+// B-2083 unit A (主开发 r5167 / r5180): the pin road handed by its owner to the automation verb conversations.pin (pinRoad, below)
+require('./conversation-ops.js').provide({ pin: pinRoad({ engine, activeSessions, accounts, broadcastActiveSessions }) });
 
 // ── Long-lived token (oat01, B-211a) ──────────────────────────────────────
 // Minting one (claude setup-token, 1-year, no refresh) is the per-account
@@ -1124,4 +1126,25 @@ app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
 });
 
 }
-module.exports = { create, answerAfterLanding, failAcct, notDurable };
+/**
+ * B-2083 unit A (主开发 r5167 / r5180): THE PIN ROAD AS ITS OWNER HANDS IT to the automation verb conversations.pin (src/server/conversation-ops.js
+ * pinConversation) — the pin route's own two calls: the ONE writer (engine.setConversationPin), then the session list's broadcast.
+ * `guard(memberId)` is the verb's money law (src/automation-keys.js pinMoneyVerdict): asked only for a member of a LOCAL conversation's own
+ * pool, so every other target or member gets the writer's own refusal by its name; a guard that refuses ⇒ its refusal, nothing written.
+ * → (sid, memberId|null, {by, guard}) => the writer's answer.
+ */
+function pinRoad({ engine, activeSessions, accounts, broadcastActiveSessions = () => { } }) {
+  return (sid, memberId, { by, guard = null } = {}) => {
+    if (!engine || typeof engine.setConversationPin !== 'function') return { ok: false, code: 'not_ready', why: 'the pool engine is not available yet' };
+    const s = sid && activeSessions ? activeSessions.get(sid) : null;
+    if (memberId != null && typeof guard === 'function' && s && !s.host && s._accountId) {
+      let members = [];
+      try { members = accounts.poolMembership(s._accountId) || []; } catch { members = []; }
+      if (members.includes(memberId)) { const g = guard(memberId); if (!g || !g.ok) return g || { ok: false, code: 'paid_member', why: 'the money law refused it' }; }
+    }
+    const r = engine.setConversationPin(sid, memberId, { by });
+    if (r && r.ok) { try { broadcastActiveSessions(); } catch { } }
+    return r;
+  };
+}
+module.exports = { create, answerAfterLanding, failAcct, notDurable, pinRoad };

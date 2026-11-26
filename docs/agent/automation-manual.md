@@ -72,6 +72,7 @@ vibespace-api call conversations.rename --name "Worker 2" --target <conversation
 | `conversations.archive` | `target`, `force?`, `resolveAsks?` — ends it if still live, then archives it exactly as the sidebar's 归档 does (the owner's list no longer shows it); a running turn ⇒ `subject_busy` unless `force`; its open For-you asks ⇒ `asks_open` (their ids) unless `resolveAsks` dismisses them; archived already ⇒ `already_archived` | no |
 | `conversations.list` | none — one snapshot: the machine's memory, the desktops, every conversation and running browser the key reaches (this conversation marked `self`; the rest only counted, `beyondReach`). While this VibeSpace's Task Groups cannot be read, a conversation whose reach the groups would decide is NOT JUDGED: it is not listed, and the answer says so — `groupsUnreadable: true` and a `beyondWhy` sentence (the table prints it) — never a row truly outside the reach. Each row: `key`, state, turn, background tasks, held prompts, CLI timers, open asks, goal, armed continue, jobs, waiting notices, browser, desktop, idle age, memory, `busy` + `endable` (the end verdict), `link`. A fact the hub cannot know is `null` with a `<fact>Why` sentence — never 0, never idle; an unknown fact counts as busy | no (a read) |
 | `conversations.propose` | `targets` (one or more conversation ids or keys — a list, or one string split on commas), `why` (one sentence) — PROPOSES ending them to the person: ONE card in For you per proposing conversation (your next proposal ADDS to it — a conversation named again is redrawn; never a second card; a conversation with no id yet is refused, `no_conversation_id`; what the person just kept is not filed again, `declined`), a row each with what would be cut off. The person ticks rows and presses Terminate, or keeps them all; you read the answer at your next turn (free — nothing wakes you). A target your key does not reach ⇒ `not_visible` naming it, nothing filed. Nothing ends because you proposed it | no |
+| `conversations.pin` | `target`, and ONE of `member` (a member of its own pool) or `automatic` (`true`) — pins the conversation to that member, or places it automatically again, through the person's own pin road; a member that bills usage credits or paid overage, or whose paying state is unknown, ⇒ `paid_member` (below) | no (a pin starts no turn) |
 | `groups.invite` | `group`, `target` (an agent group this conversation is in; added without a wake) | no |
 | `jobs.wakeGrant` | `job`, `grant` (`on` / `off`) — may this job or schedule resume its conversation after that conversation was ended on purpose (a person's Terminate or an agent's end); the job's owner conversation must be one the key reaches; the row records the key, and the resumed window names it — `vibespace-api call jobs.wakeGrant --job <jb-…> --grant on` | no |
 | `feedback.handled` | `id` (`fb-…`), `version` (the release that shipped the fix, `2.369.NNN`), `note?` (≤ 200 characters) | no |
@@ -103,6 +104,7 @@ vibespace-api conversations bind <target> <T-…>
 vibespace-api conversations end <target> [--force]
 vibespace-api conversations resume <target>
 vibespace-api conversations archive <target> [--force] [--resolve-asks]
+vibespace-api conversations pin <target> (--member <id> | --automatic)
 vibespace-api groups invite <g-…|group name> <target>
 vibespace-api list [--json]          conversations.list as a table sorted by memory («unknown (<why>)» where the hub cannot know)
 vibespace-api conversations propose <target>[,<target>…] --why "…"   propose ending them to the person (when your end is refused as busy, or your key may not end them)
@@ -160,6 +162,20 @@ answer's `note` says so).
   - `timer_marked`: reserved for a CLI timer mark; nothing writes that mark yet.
   - `resume_failed`: the start itself failed; the answer gives the reason (a signed-out account, no transcript here, …).
   - After each of these refusals a person can still resume it from its window.
+
+**Pinning a conversation to a pool member.** `conversations pin <target> --member <id>` keeps a conversation that bills a pool on
+that one member, as a person's pick in the conversation's billing menu does; `--automatic` lets the pool place it again. Only a
+key the person gave this verb by hand holds it (no key has it by default). The answer: `member` (null when automatic), `placed`
+(it runs there now), `reason` and `note` (why it waits: `applies-at-restart`, `cold_pool`, `pin-exhausted`, …), `current` (the
+member it runs on now) and `holds`.
+- **Never onto money.** A member billing paid overage, one whose organisation has usage credits enabled (past its limit it bills
+  pay-per-use), or one whose usage reading does not say either (a member with no such record, a Codex member today) ⇒ `paid_member`,
+  nothing changed. Only the person can pin a conversation there.
+- **How long it holds.** While the conversation lives and across a hub restart. When it ends and a person resumes it, the person's
+  own page decides the pin again (the pin that person's page saved). `holds` says this in every answer.
+- Refused by name, nothing changed: `not_pooled` (it bills no pool), `remote_session` (it runs on another machine), `not_member`
+  (not a member of its own pool), `no_session` (it ended meanwhile), `pin_not_saved` (the pin could not be written; ask again).
+- Your call is journaled under the key with the conversation and the member's ids only (`audit`).
 
 **Opening a worker (the coordinator's road):**
 

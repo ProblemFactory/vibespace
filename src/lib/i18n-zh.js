@@ -11313,6 +11313,7 @@ export default {
   "Put a conversation in a task group": "把对话放进任务组", // design q-046 (lane automation-keys-core)
   "End a conversation": "结束一个对话", // design q-046 (lane automation-keys-core)
   "Resume a conversation": "恢复一个对话",
+  "Pin a conversation to a pool member": "把对话固定到池里的一个成员", // B-2083 unit A: the automation pin verb's label
   "Invite a conversation into a group": "把对话邀进群", // design q-046 (lane automation-keys-core)
   "Look up a conversation's ids": "查看对话的 id", // design q-046 (lane automation-verbs)
   "Mark an agent's feedback handled": "把 agent 的反馈标为已处理", // lane feedback-handled-verb

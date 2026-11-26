@@ -40,7 +40,7 @@
 //      VS_CPU_THROTTLE=4 throttles this leg's page 4× (the lane's robustness runs before the pin)
 //   UNSAVED (lane dialog-unsaved-guard, B-bc31): 编辑… with a verb taken away asks on ✕ / Esc (继续编辑 / 放弃 / 保存) — 放弃 writes
 //      nothing, 保存 writes the dialog's own Save; a clean 编辑… closes at once
-//   ⑥b 编辑… (lane key-folder-picker-all — the owner 2026-10-21): the key's row edits its VERBS — the mint's 14 checkboxes (+ conversations.list, + conversations.resume, + piece 7's jobs.wakeGrant, + conversations.propose, + browsers.stop), its own
+//   ⑥b 编辑… (lane key-folder-picker-all — the owner 2026-10-21): the key's row edits its VERBS — the mint's checkboxes, one a verb of the closed table (+ conversations.pin, + conversations.list, + conversations.resume, + piece 7's jobs.wakeGrant, + conversations.propose, + browsers.stop), its own
 //      ticked; 把 agent 的反馈标为已处理 + 读 agent 未处理的反馈 added ⇒ the row says them, the REAL `vibespace-api call feedback.list`
 //      runs at once on the existing grant (no card: its audit line was never asked); taken away ⇒ the next call refused by
 //      name (verb_not_in_scope) · ⑨c 「所有路径」: 铸造… offers it above the browser (red, its title says your home is in it) ⇒
@@ -69,6 +69,7 @@ import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, realClicker, runnerFontEn
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const TABLE_N = require(path.join(repo, 'src/automation-keys.js')).SCOPES.length;   // B-2083 unit A: the closed table's size, read off the table (15 with conversations.pin) — never typed again
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const VNC_ENV = await vncEnv();
@@ -200,7 +201,7 @@ try {
   console.log('③ the Vault window: 铸造… an automation key');
   check('the window opens on «自动化 key» (a group head with 铸造…)', !!(await openWindow()) && (await textOf('.vw-group[data-purpose="automation"] .vw-group-name')) === '自动化 key' && (await textOf('.vw-ak-mint')) === '铸造…');
   await click('.vw-ak-mint');
-  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === 14 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // lane browsers-stop: + browsers.stop (14); lane login-request-card piece 3b: 13 = the closed table (+ conversations.propose; the pin read 11 on piece 7's base, where the table already held 12); lane automation-verbs: + conversations.status (a read); lane feedback-handled-verb: + feedback.handled, feedback.list; lane conversations-archive-verb: + conversations.archive (re-pinned by lane key-instance-scope); lane conversation-facts: + conversations.list; the manager design's piece 4: + conversations.resume
+  check('铸造… opens its dialog: a name and the closed table of verbs (开一个对话 says it bills)', !!(await until(visible('#vault-ak-mint'), 5000)) && /（会开始一个计费回合）/.test(await textOf('#vault-ak-mint')) && (await evalJs(`document.querySelectorAll('#vault-ak-mint .vw-ak-verbs .vw-ak-pick input[type=checkbox]').length`)) === TABLE_N && TABLE_N === 15 && !(await evalJs(visible('#vault-ak-mint .vw-ak-limwrap')))); // B-2083 unit A: + conversations.pin (15, read off the table); lane browsers-stop: + browsers.stop (14); lane login-request-card piece 3b: 13 = the closed table (+ conversations.propose; the pin read 11 on piece 7's base, where the table already held 12); lane automation-verbs: + conversations.status (a read); lane feedback-handled-verb: + feedback.handled, feedback.list; lane conversations-archive-verb: + conversations.archive (re-pinned by lane key-instance-scope); lane conversation-facts: + conversations.list; the manager design's piece 4: + conversations.resume
   await typeInto('#vault-ak-mint .vw-ak-name', 'Lane dispatch');
   await evalJs(`(() => { const c = document.querySelector('#vault-ak-mint input[value="conversations.rename"]'); c.checked = true; return true; })()`);
   await click('.vw-ak-mint-go');
@@ -287,8 +288,8 @@ try {
   const auditLines = () => fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   await clickWait(ROW + ' .vw-ak-edit');
   const editBoxes = await until(`(() => { const d = document.querySelector('#vault-ak-edit'); if (!d) return null; const cbs = [...d.querySelectorAll('.vw-ak-verbs input[type=checkbox]')]; const l = d.querySelector('.vw-ak-limwrap'); const r = l && l.getBoundingClientRect(); return cbs.length ? { n: cbs.length, on: cbs.filter((c) => c.checked).map((c) => c.value).join(), hint: (d.querySelector('.vw-ak-grant-hint') || {}).textContent, title: (d.querySelector('h3') || {}).textContent, lim: !!(r && r.width && r.height) } : null; })()`, 8000);
-  check('编辑… opens on the key\'s own verbs — the same 14 checkboxes as 铸造… (lane conversation-facts: + conversations.list; piece 4: + conversations.resume; piece 7: + jobs.wakeGrant; lane login-request-card piece 3b: + conversations.propose; lane browsers-stop: + browsers.stop) (its own ticked, the others unticked), the grant hint, no limits (it does not open)',
-    editBoxes && editBoxes.n === 14 && editBoxes.on === 'conversations.rename' && /授权是按「key × 会话」给的/.test(editBoxes.hint || '') && editBoxes.title === '编辑「Lane dispatch」' && !editBoxes.lim, editBoxes);
+  check('编辑… opens on the key\'s own verbs — the same checkboxes as 铸造…, one a verb of the closed table (B-2083 unit A: + conversations.pin, 15; lane conversation-facts: + conversations.list; piece 4: + conversations.resume; piece 7: + jobs.wakeGrant; lane login-request-card piece 3b: + conversations.propose; lane browsers-stop: + browsers.stop) (its own ticked, the others unticked), the grant hint, no limits (it does not open)',
+    editBoxes && editBoxes.n === TABLE_N && editBoxes.on === 'conversations.rename' && /授权是按「key × 会话」给的/.test(editBoxes.hint || '') && editBoxes.title === '编辑「Lane dispatch」' && !editBoxes.lim, editBoxes);
   await evalJs(`(() => { for (const v of ['feedback.handled', 'feedback.list']) document.querySelector('#vault-ak-edit input[value="' + v + '"]').click(); return true; })()`);
   await shot('ak-3b-edit-verbs.png');
   await clickWait('.vw-ak-edit-save');
