@@ -31,7 +31,7 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), `vs-ciqueue-${process.pid}-`)
 let seq = 0;
 const scratch = (tag) => { const d = path.join(ROOT, `${tag}-${++seq}`); fs.mkdirSync(d, { recursive: true }); return d; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (pred, ms = 8000, step = 20) => { const t = Date.now() + ms; while (Date.now() < t) { if (pred()) return true; await sleep(step); } return !!pred(); };
+const until = async (pred, ms = 8000, step = 5) => { const t = Date.now() + ms; while (Date.now() < t) { if (pred()) return true; await sleep(step); } return !!pred(); };   // (r5130's trim: an event is seen within 5 ms; an absence window still runs its whole length)
 const CI_URL = pathToFileURL(path.join(REPO, 'scripts', 'ci.mjs')).href;
 const TAG = `ciqueue-${process.pid}`;   // in every child's argv (§8 counts them)
 const CHILD = path.join(ROOT, 'queue-child.mjs');
@@ -44,7 +44,7 @@ const h = acquireMachineLock(lock, { waitMs: Number(waitMs), sha: 'lane ' + name
   onWait: (holder, place, free) => say('wait ' + (holder ? holder.pid : '-') + ' ' + place + (free ? ' FREE' : '')) });
 if (!h.ok) { say(h.timedOut ? 'timedout' : 'error ' + (h.error && h.error.code)); process.exit(3); }
 say('got ' + (h.ticket || 'noticket'));
-while (hold !== '-' && !fs.existsSync(hold)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+while (hold !== '-' && !fs.existsSync(hold)) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
 h.release(); say('released');
 `);
 const kids = [];
@@ -153,9 +153,9 @@ console.log('§2 reaping');
 { const d = scratch('reap'), lock = path.join(d, 'lock'), log = path.join(d, 'log'), relH = path.join(d, 'relH');
   const H = waiter(CI_URL, lock, 'H', log, { hold: relH });
   await until(() => has(log, 'H', 'got'));
-  const W1 = waiter(CI_URL, lock, 'W1', log, { poll: 200 });
+  const W1 = waiter(CI_URL, lock, 'W1', log, { poll: POLL, headPoll: POLL });   // (r5130's trim: §2's waiters poll at the scene's POLL, no leg reads it)
   await until(() => has(log, 'W1', 'wait'));
-  const W2 = waiter(CI_URL, lock, 'W2', log, { poll: 200 });
+  const W2 = waiter(CI_URL, lock, 'W2', log, { poll: POLL, headPoll: POLL });
   await until(() => has(log, 'W2', 'wait'));
   const t1 = tickets(lock).find((n) => n.endsWith('-' + W1.pid));
   process.kill(W1.pid, 'SIGKILL'); await until(() => exited(W1.child));
@@ -167,7 +167,7 @@ console.log('§2 reaping');
   fs.mkdirSync(ticketDirOf(lock));
   const fake = `${String(Date.now() - 60000).padStart(15, '0')}-${process.pid}`;   // OUR pid, alive — but it runs no queued command
   fs.writeFileSync(path.join(ticketDirOf(lock), fake), JSON.stringify({ pid: process.pid, cmd: 'a-command-this-pid-does-not-run', startedAt: Date.now() - 60000 }));
-  const W = waiter(CI_URL, lock, 'W', log, { poll: 200 });
+  const W = waiter(CI_URL, lock, 'W', log, { poll: POLL, headPoll: POLL });
   ok(await until(() => has(log, 'W', 'got'), 5000) && !tickets(lock).includes(fake), 'a ticket whose pid now runs something else (a recycled pid) is reaped — the waiter behind it is served');
   await until(() => exited(W.child)); }
 { const d = scratch('older'), lock = path.join(d, 'lock'), log = path.join(d, 'log');
@@ -175,7 +175,7 @@ console.log('§2 reaping');
   fs.mkdirSync(ticketDirOf(lock));
   const live = `${String(Date.now() - 60000).padStart(15, '0')}-${holder.pid}`;
   fs.writeFileSync(path.join(ticketDirOf(lock), live), JSON.stringify({ pid: holder.pid, cmd: 'sleep', startedAt: Date.now() - 60000 }));
-  const W = waiter(CI_URL, lock, 'W', log, { poll: 200 });
+  const W = waiter(CI_URL, lock, 'W', log, { poll: POLL, headPoll: POLL });
   await until(() => has(log, 'W', 'wait'));
   await sleep(500);
   ok(!has(log, 'W', 'got') && !fs.existsSync(lock), 'a LIVE older ticket is waited for — the free lock is not taken past it');
@@ -207,7 +207,7 @@ console.log('§3 the winner, and a timeout');
   const rec = JSON.parse(fs.readFileSync(lock, 'utf-8')), got = lines(log).find((l) => / W got /.test(l)).split(' ')[3];
   ok(rec.ticket === got && /^\d{15}-\d+$/.test(got) && tickets(lock).length === 0, `the holder's record names its ticket (${rec.ticket}) and the ticket is gone from the queue`);
   ok(rec.cmd === 'queue-child.mjs' && rec.pid === W.pid, `…the record's cmd is the holder's own script name, which pidStillRunning finds in its cmdline (${rec.cmd})`);
-  const T = waiter(CI_URL, lock, 'T', log, { waitMs: 300, poll: 100 });
+  const T = waiter(CI_URL, lock, 'T', log, { waitMs: 120, poll: 40, headPoll: 40 });   // (r5130's trim: the leg reads only that it leaves no ticket)
   ok(await until(() => has(log, 'T', 'timedout'), 5000) && tickets(lock).length === 0, 'a waiter that times out leaves no ticket behind');
   fs.writeFileSync(rel, 'go'); await until(() => exited(W.child) && exited(T.child)); }
 
@@ -316,8 +316,7 @@ fs.appendFileSync(${JSON.stringify(path.join(R, '..', 'builds-' + TAG))},'1\\n')
   { const flag = path.join(R, '..', 'move-' + TAG); fs.writeFileSync(flag, ''); fs.rmSync(buildStampPathOf(R), { force: true });   // no stamp: this claim builds
     const headBefore = g('rev-parse', 'HEAD').stdout.trim(), bm = runBuild({ cwd: R, reuse: true, ...quiet }); fs.unlinkSync(flag);
     const moved = g('rev-parse', 'HEAD').stdout.trim() !== headBefore, w = buildStampWhy(R);
-    ok(bm.ok && moved && !fs.existsSync(buildStampPathOf(R)) && w === 'no build stamp', `a commit made DURING the build leaves no stamp — the bundle was built from the commit before it (${w})`);
-    runBuild({ cwd: R, reuse: true, ...quiet }); }
+    ok(bm.ok && moved && !fs.existsSync(buildStampPathOf(R)) && w === 'no build stamp', `a commit made DURING the build leaves no stamp — the bundle was built from the commit before it (${w})`); }   // (no re-build here: the next block removes the stamp first)
   // … and a build that leaves one output OUT (the unsigned build removes the agentd manifest) is still reused, its absence stamped
   { const flag = path.join(R, '..', 'absent-' + TAG); fs.writeFileSync(flag, ''); fs.rmSync(buildStampPathOf(R), { force: true });   // no stamp: this claim builds
     const n0 = builds(), ba = runBuild({ cwd: R, reuse: true, ...quiet });   // the stamp above names every output: this one builds and stamps the absence
