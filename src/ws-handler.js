@@ -1589,8 +1589,9 @@ function registerWsHandler(wss, ctx) {
           // r4686: THE ATTACH's OWN ID (the page's `attachId`), echoed on its ack and its answer; the newest one this socket asked for a
           // session is kept, so an older attach still in its waits steps aside and never re-registers the socket over the newer one
           const attachId = data.attachId != null ? data.attachId : null;
-          if (attachId != null) (ws.__attachLatest || (ws.__attachLatest = new Map())).set(data.sessionId, attachId);
+          if (attachId != null) { const M = ws.__attachLatest || (ws.__attachLatest = new Map()), was = M.get(data.sessionId); if (was == null || attachId > was) M.set(data.sessionId, attachId); }   // the NEWEST (the page's ids rise), never the last to arrive
           try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, ...(attachId != null ? { attachId } : {}) })); } catch {} try { require('./server/local-index.js').note('attach', data.sessionId); } catch {} // lane human-cli: the person's index notes the attach
+          if (attachId != null && ws.__attachLatest && ws.__attachLatest.get(data.sessionId) > attachId) break;   // r4708 (its delta read): an attach KNOWN older at its arrival (one queued while its socket was closing, flushed after the reconnect's own) does nothing at all — no join, no warm, no read
           // Virtual subagent session: sub-{parentToolUseId} or sub-agent-{agentId}
           if (data.sessionId?.startsWith('sub-')) {
             const subId = data.sessionId;
@@ -1719,7 +1720,7 @@ function registerWsHandler(wss, ctx) {
               if (ws.readyState === 2 || ws.readyState === 3) break;   // closing / closed during the waits: nothing to attach to
             }
           }
-          if (attachId != null && ws.__attachLatest && ws.__attachLatest.get(data.sessionId) !== attachId) break;   // r4686: a newer attach of this session on this socket owns it
+          if (attachId != null && ws.__attachLatest && ws.__attachLatest.get(data.sessionId) > attachId) break;   // r4686: a newer attach of this session on this socket owns it
           const session = activeSessions.get(data.sessionId);   // read AFTER the warm: one that ended meanwhile is gone
           if (session && session._metaUnread) { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, code: 'session-meta-unread', message: `${session._metaUnread.sock}: its record could not be read when the hub started — it keeps running and is not opened here; it opens after the next start once its record reads (Stop ends it)` })); break; }   // r3245 (1): refused BY NAME, never attached
           if (session) {
@@ -1942,6 +1943,7 @@ function registerWsHandler(wss, ctx) {
               // unloaded). r2743 (3) as r2873 (a) meant it: the final word («not found») is never said of a conversation this hub started
               // FRESH (asked before its file is written: it keeps «not known yet» and the re-ask); a restored or resumed one is told —
               // the reader's one rule (finalWordFor). A VIEW carries it too
+              if (attachId != null && ws.__attachLatest && ws.__attachLatest.get(data.sessionId) > attachId) break;   // r4686: AGAIN after the waits above — a newer attach that came meanwhile answers; this one builds and sends nothing
               const livePayload = { type: 'attached', sessionId: data.sessionId, ...(attachId != null ? { attachId } : {}), name: session.name, cwd: session.cwd, mode: 'chat', ...require('./codex-session-store.js').finalWordFor(sm, session), historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
                 totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), pendingPermissions: pendingPerms,
                 // The input queue as the normalizer knows it (the wrapper's

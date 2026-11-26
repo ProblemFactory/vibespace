@@ -15,11 +15,10 @@
 //   · take(view)   — the view was un-hidden before its slot: remove it and let
 //                    the caller attach NOW (no displayed window waits);
 //   · cancel(view) — dispose: remove silently;
-//   · join(view)   — B-a26e: a held view's SLOW re-ask (the attach ladder's slow hold, once a minute) takes the
-//                    NEXT slot after the ones already armed and cancels none of them (a new pass would cancel
-//                    every armed slot: the held windows' asks, coming at different moments, would starve each
-//                    other); it stops only the clock's re-ask — never a person's press, never a reconnect's own
-//                    first attach, never a window shown again (take);
+//   · landed(view) — B-a26e: the view's attach landed (or its hold ended): its held retry no longer counts
+//                    toward the cap. A HELD view (the attach hold) rides the same pass as a hidden one (never a
+//                    slot of its own: the pass would cancel it); its slot is jittered and, when it fires, waits
+//                    while the cap is in flight (below);
 //   · reset()      — the socket dropped again: every pending slot is superseded
 //                    (the next `connected` pass re-enqueues whoever is still
 //                    hidden, exactly like `_reattachGen` supersedes a ladder).
@@ -28,15 +27,20 @@
 // microtask, and a new pass supersedes every older slot.
 import { reconnectSlot } from './view-visibility.js';
 
-// r4686: a HELD window's retry (`join`) is JITTERED and waits while the page has `cap` attaches in flight (its socket's own count)
-export const JOIN_CAP = 4, JOIN_JITTER_MS = 2000, JOIN_RETRY_MS = 750;
+// B-a26e (主开发 r4686): A HELD window's retry after a reconnect rides the reconnect PASS (enqueue — never cancelled by its own pass);
+// its slot is JITTERED and waits while `cap` attaches are in flight across the page: the larger of the held retries released
+// and not landed yet (`landed(view)`; each bounded by `flightMs`, so a retry the hub never answers cannot starve the queue) and
+// the socket's own count (`pageInFlight`, which forgets an attach after 15 s). A view that is not held keeps its slot exactly.
+export const HELD_CAP = 4, HELD_JITTER_MS = 2000, HELD_RETRY_MS = 750, HELD_FLIGHT_MS = 120000;
 export function createReconnectQueue({
   rankOf = () => [0],
-  inFlight = () => 0,
   random = Math.random,
-  cap = JOIN_CAP,
-  jitterMs = JOIN_JITTER_MS,
-  retryMs = JOIN_RETRY_MS,
+  now = () => Date.now(),
+  pageInFlight = () => 0,
+  cap = HELD_CAP,
+  jitterMs = HELD_JITTER_MS,
+  retryMs = HELD_RETRY_MS,
+  flightMs = HELD_FLIGHT_MS,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (h) => clearTimeout(h),
   defer = (fn) => queueMicrotask(fn),
@@ -47,6 +51,8 @@ export function createReconnectQueue({
   let gen = 0;
   const armed = new Map();          // view → { timer, index, delayMs }
   const cancelArmed = () => { for (const a of armed.values()) clearTimer(a.timer); armed.clear(); };
+  const released = new Map();       // a HELD view whose retry went → when (until it lands, or flightMs)
+  const inFlight = () => { const t = now(); let n = 0; for (const [v, at] of released) { if (t - at < flightMs) n++; else released.delete(v); } let p = 0; try { p = Number(pageInFlight()) || 0; } catch { } return Math.max(n, p); };
   const cmp = (a, b) => {
     for (let i = 0; i < Math.max(a.r.length, b.r.length); i++) {
       const x = a.r[i] ?? 0, y = b.r[i] ?? 0;
@@ -66,14 +72,21 @@ export function createReconnectQueue({
       return { view, seq, r: Array.isArray(r) ? r.map((n) => (Number.isFinite(n) ? n : 0)) : [0] };
     }).sort(cmp);
     ordered.forEach(({ view }, index) => {
-      const delayMs = slot({ suspended: true, index });
-      const timer = setTimer(() => {
-        if (myGen !== gen || !armed.has(view)) return;
-        armed.delete(view);
-        try { view._runQueuedReattach?.('slot'); } catch { }
-      }, delayMs);
-      armed.set(view, { timer, index, delayMs });
-      try { view._trace?.('reconnect:queued', { slot: index, delay: delayMs }); } catch { }
+      const heldAtPass = !!view._attachHold;   // B-a26e: a held window's retry — jittered, capped
+      const arm = (delayMs) => {
+        const timer = setTimer(() => {
+          if (myGen !== gen || !armed.has(view)) return;
+          const held = !!view._attachHold;   // read when the slot fires (r4708's read: a hold may begin while the slot waits)
+          if (held && inFlight() >= cap) { arm(retryMs + Math.floor(random() * jitterMs)); return; }   // the cap: wait, jittered, never pile on
+          armed.delete(view);
+          let asked; try { asked = view._runQueuedReattach?.('slot'); } catch { }
+          if (held && asked !== false) released.set(view, now());   // counted only when it asked (a declined slot — a closing socket, a closed view — is no attach in flight)
+        }, delayMs);
+        armed.set(view, { timer, index, delayMs });
+      };
+      const delayMs = slot({ suspended: true, index }) + (heldAtPass ? Math.floor(random() * jitterMs) : 0);
+      arm(delayMs);
+      try { view._trace?.('reconnect:queued', { slot: index, delay: delayMs, held: heldAtPass }); } catch { }
     });
   }
   function enqueue(view) {
@@ -82,22 +95,6 @@ export function createReconnectQueue({
     if (a) { clearTimer(a.timer); armed.delete(view); }
     if (!pending.includes(view)) pending.push(view);
     if (!flushArmed) { flushArmed = true; defer(flush); }
-  }
-  function join(view) {
-    if (!view || armed.has(view) || pending.includes(view)) return;   // already waiting: one slot a view
-    const index = armed.size, myGen = gen;
-    const arm = (delayMs) => {
-      const timer = setTimer(() => {
-        if (myGen !== gen || !armed.has(view)) return;
-        if (inFlight() >= cap) { arm(retryMs + Math.floor(random() * jitterMs)); return; }   // the page's cap: wait, jittered, never pile on
-        armed.delete(view);
-        try { view._runQueuedReattach?.('slow'); } catch { }
-      }, delayMs);
-      armed.set(view, { timer, index, delayMs });
-    };
-    const delayMs = slot({ suspended: true, index }) + Math.floor(random() * jitterMs);   // jittered: held windows never fire in one tick
-    arm(delayMs);
-    try { view._trace?.('reconnect:joined', { slot: index, delay: delayMs }); } catch { }
   }
   /** Remove `view` if it is waiting; true ⇔ it was (the caller attaches now). */
   function take(view) {
@@ -109,8 +106,10 @@ export function createReconnectQueue({
     return true;
   }
   function cancel(view) { take(view); }
-  function reset() { gen++; pending = []; cancelArmed(); }
+  function reset() { gen++; pending = []; cancelArmed(); released.clear(); }   // a drop: the hub lost every retry in flight
+  /** B-a26e: `view`'s attach landed (or its hold ended): its released retry no longer counts toward the cap. */
+  function landed(view) { released.delete(view); }
   function has(view) { return pending.includes(view) || armed.has(view); }
   function snapshot() { return [...armed.values()].map(({ index, delayMs }) => ({ index, delayMs })).concat(pending.map(() => ({ index: null, delayMs: null }))); }
-  return { enqueue, join, take, cancel, reset, has, snapshot, get size() { return pending.length + armed.size; } };
+  return { enqueue, take, cancel, reset, has, snapshot, landed, get inFlight() { return inFlight(); }, get size() { return pending.length + armed.size; } };
 }
