@@ -54,7 +54,7 @@ let pass = 0, fail = 0;
 // product when the browser's back/forward cache showed that page again instead — such a leg is a NAMED, COUNTED skip (the
 // gate's SKIP_LINE), never a red of both legs; and only on POSITIVE evidence, a main-frame BackForwardCacheRestore commit of
 // exactly that page during the road (a product that never goes there leaves none: its leg stays a red).
-const auxKept = []; let skipped = 0;
+const auxKept = [], auxLoaded = []; let skipped = 0;
 const keptSince = (k0, url) => auxKept.slice(k0).some((x) => x.url === url);
 const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, c, e); };
 const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -114,6 +114,7 @@ const onMessage = (d) => {
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); }
   if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.frame.url.startsWith(ORIGIN)) { if (m.params.type === 'BackForwardCacheRestore') restores++; else appLoads++; }
   if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.type === 'BackForwardCacheRestore' && !m.params.frame.url.startsWith(ORIGIN)) auxKept.push({ t: Date.now(), url: m.params.frame.url }); // a page of the other site shown again from the cache (r5133)
+  if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.type !== 'BackForwardCacheRestore' && !m.params.frame.url.startsWith(ORIGIN)) auxLoaded.push({ t: Date.now(), url: m.params.frame.url }); // …and one LOADED (r5197)
   if (m.method === 'Page.backForwardCacheNotUsed') notUsed.push({ t: Date.now(), why: (m.params.notRestoredExplanations || []).map((x) => x.reason) });
   if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
 };
@@ -267,11 +268,15 @@ const keptRoad = async () => {
 const keptForwardRoad = async () => {
   const prev = `${AUX}/plain-${++nth}`;
   const armed = await iframeRoad(prev, 'kept-forward');
-  const i0 = (await incidents()).length;
-  const t0 = Date.now(), k0 = auxKept.length;
+  const i0 = (await incidents()).length, hits = async () => (await (await fetch(AUX + '/hits')).json())[new URL(prev).pathname] || 0;
+  const a0 = await hits(), t0 = Date.now(), k0 = auxKept.length, d0 = auxLoaded.length;
   await browserBack(3500); // the exit
   const out = await nav();
   const kept = keptSince(k0, prev);
+  // POSITIVE evidence that the exit LOADED the page instead of showing it again (主开发 r5197): the stand-in server asked
+  // again, or a main-frame navigation of exactly that page that is no restore — only that makes ⑤'s scene «not formed»;
+  // anything else is JUDGED (an exit that never reached the page, or a restore the run did not see, reads red)
+  const askedAgain = (await hits()) - a0, loadedSeen = auxLoaded.slice(d0).some((x) => x.url === prev), loaded = askedAgain > 0 || loadedSeen;
   const l0 = appLoads, r0 = restores, f0 = Date.now();
   await key('ArrowRight'); // the person goes forward: back into VibeSpace
   let shownIn = null;
@@ -280,7 +285,7 @@ const keptForwardRoad = async () => {
   const n = await nav();
   const stays = onApp(n) && await evalJs(SHOWN).catch(() => false);
   const rows = onApp(n) ? (await diary().catch(() => [])).filter((r) => r.t >= t0 - 500) : [];
-  return { armed, outside: out.url === prev, kept, url: n.url.slice(0, 40), loads: appLoads - l0, restored: restores - r0, shownIn, stays,
+  return { armed, outside: out.url === prev, kept, loaded, askedAgain, loadedSeen, url: n.url.slice(0, 40), loads: appLoads - l0, restored: restores - r0, shownIn, stays,
     filed: rows.filter((r) => r.k === 'cost' || r.k === 'capture').map((r) => r.k + (r.why ? ':' + r.why : '')), incidents: (await incidents()).length - i0, hops: rows.filter((r) => r.k === 'hop').length };
 };
 
@@ -309,8 +314,8 @@ try {
     check(`${C}③ RED (round 2): navigation.activation removed (entries() kept) — the exit, then a FORWARD press inside 10 s: the person is hopped back OUT of the page they went forward onto`, !!R.fwd && R.fwd.api.activation === 'absent' && R.fwd.api.entries && R.fwd.left && !R.fwd.stays && R.fwd.url.startsWith(AUX), R.fwd);
     check(`${C}③ the shipped rules: no key, no hop — the exit writes no intent there, and the page the person went forward onto boots and stays (${G.fwd.restored ? 'kept by the cache and shown again' : 'loaded'})`, G.fwd.api.activation === 'absent' && G.fwd.left && G.fwd.stays && !G.fwd.hops.some((h) => /^n/.test(h)), G.fwd);
     if (G.kept) check(`II④ the cache ON, G7's road as shipped: the exit ends on the page before VibeSpace; the older document it went through was ${G.kept.restored ? 'KEPT by the cache and went on' : `LOADED (the cache said: ${G.kept.cache.join(' · ') || 'nothing'})`}`, G.kept.armed && G.kept.outside && G.kept.loads + G.kept.restored === 1, G.kept);
-    if (G.keptFwd && !G.keptFwd.kept) { skipped++; console.log(`  ⊘ SKIP II⑤ the person's question: PRECONDITION NOT MET (the page before VibeSpace was LOADED by the exit, not shown again from the cache — the scene is a page the browser kept) — not judged in this run`); }
-    else if (G.keptFwd) check(`II⑤ THE PERSON'S QUESTION (r5133), the cache ON: the exit as shipped onto a page the browser KEPT ends on it; a FORWARD press brings VibeSpace back with the App shown (no splash left${G.keptFwd.shownIn !== null ? ', in ' + G.keptFwd.shownIn + ' ms' : ''}), it stays past the intent's 10 s, and NOTHING is filed (no cost or capture row, no incident)`,
+    if (G.keptFwd && G.keptFwd.loaded) { skipped++; console.log(`  ⊘ SKIP II⑤ the person's question: PRECONDITION NOT MET (the page before VibeSpace was LOADED by the exit — ${G.keptFwd.askedAgain ? 'the other site asked again ' + G.keptFwd.askedAgain + ' time(s)' : 'a main-frame load of it, no restore'} — not shown again from the cache; the scene is a page the browser kept) — not judged in this run`); }
+    else if (G.keptFwd) check(`II⑤ THE PERSON'S QUESTION (r5133), the cache ON: the exit as shipped onto a page the browser keeps (${G.keptFwd.kept ? 'shown again from the cache' : 'its restore not seen, no load seen either'}) ends on it; a FORWARD press brings VibeSpace back with the App shown (no splash left${G.keptFwd.shownIn !== null ? ', in ' + G.keptFwd.shownIn + ' ms' : ''}), it stays past the intent's 10 s, and NOTHING is filed (no cost or capture row, no incident)`,
       G.keptFwd.armed && G.keptFwd.outside && G.keptFwd.shownIn !== null && G.keptFwd.stays && G.keptFwd.filed.length === 0 && G.keptFwd.incidents === 0, G.keptFwd);
     await quit();
   }
