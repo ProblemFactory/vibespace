@@ -107,8 +107,8 @@ const secondManager = (d, Client) => { const saved = process.env.VIBESPACE_AGENT
 const record = (dm) => {
   const asked = [];
   const rq = dm._request.bind(dm), so = dm._streamOp.bind(dm);
-  dm._request = (p) => { asked.push({ op: p.op, action: p.action, cmd: p.cmd, path: p.path }); return rq(p); };
-  dm._streamOp = (p, o) => { asked.push({ op: p.op, cmd: p.cmd }); return so(p, o); };
+  dm._request = (p) => { asked.push({ op: p.op, action: p.action, cmd: p.cmd, path: p.path, args: p.args, by: p.by }); return rq(p); };   // (r5034: + args, by — its call unchanged)
+  dm._streamOp = (p, o) => { asked.push({ op: p.op, cmd: p.cmd, args: p.args, by: p.by }); return so(p, o); };
   return asked;
 };
 const hostsOf = (dm, name = 'WIN-DESK1') => ({ get: (id) => ({ id, name, transport: 'dial' }), deviceBounded: async () => dm, dataPlaneOn: () => true, sshArgs: () => [] });
@@ -126,6 +126,24 @@ const rejects = async (p) => { try { await p; return null; } catch (e) { return 
 const RFS = require(path.join(REPO, 'src/remote-fs.js'));
 const BaseRFS = HAVE_BASE ? require(writeCopy('remote-fs-base.cjs', relTop(baseOf('src/remote-fs.js')))) : null;
 const BaseCL = HAVE_BASE ? require(writeCopy('client-base.cjs', rel(baseOf('src/agentd/client.js')))) : null;
+// THE BASE COPY's ASKER (lane bl-vault, 主开发 r5034). The base tree (3452dce38, 10-03) predates the law that every hub act on a paired
+// machine names who asked (int315 f97b0869c, 10-19): today's client refuses an act that names nobody (act_without_by, never sent). A
+// newer base cannot keep this arm (the Windows fix was in the tree the day before that law was born: any base that names an asker holds
+// the fix). So the base copy is handed the SAME DeviceManager through this proxy: the five acts the client gates get the suite's own
+// asker when the call names none; reads pass untouched; the base's code, ops, arguments and order stay its own. The asker is in no
+// comparison here (the head names its own)
+const BASE_BY = 'system:test';
+const ACT_OPTS_AT = { runCmd: 2, runStream: 2, fsWrite: 2, fsMkdir: 1, fsRm: 2 };   // where each gated act takes its options (today's client)
+const askedFor = (dm) => new Proxy(dm, { get(t, k) {
+  const v = Reflect.get(t, k, t); if (typeof v !== 'function') return v;
+  const at = ACT_OPTS_AT[k]; if (at === undefined) return v.bind(t);
+  return (...a) => { const o = a[at]; a[at] = { ...(o && typeof o === 'object' ? o : {}), by: (o && o.by) || BASE_BY }; return v.apply(t, a); };
+} });
+const baseHostsOf = (dm, name) => hostsOf(askedFor(dm), name);
+// A BASE CALL REFUSED BY TODAY's CLIENT IS A NAMED RED LINE (r5034), never an uncaught crash: said once, the leg's comparison skipped
+const REFUSED = Symbol('refused by today\'s client');
+const refusedBy = (e) => !!(e && (e.code === 'act_without_by' || e.stage === 'gate'));
+const baseCall = async (what, f, say = ok) => { try { return await f(); } catch (e) { if (!refusedBy(e)) throw e; say(false, `the BASE copy's ${what} was REFUSED by today's client (${e.code}): the base predates one of its laws, and the asker shim did not reach this call`, e.message); return REFUSED; } };
 const seed = (home) => {
   fs.mkdirSync(path.join(home, 'docs', 'sub'), { recursive: true });
   fs.writeFileSync(path.join(home, 'a.txt'), 'hello from the device\n');
@@ -264,8 +282,23 @@ if (oldSh) {
   const r = await dm.runCmd('sh', ['-c', 'printf %s "$HOME"'], { by: 'system:test' });
   ok(r.code === 0 && r.stdout === oldSh.home, 'F1: too old to say ⇒ asked (today\'s behaviour) — its `sh` answers', r);
   const l = await new RFS.RemoteFs(hostsOf(dm)).list('h', '~');
-  const b = await new BaseRFS.RemoteFs(hostsOf(dm)).list('h', '~');
-  ok(JSON.stringify(l) === JSON.stringify(b) && l.items.some((i) => i.name === 'a.txt') && !asked.some((a) => a.op === 'fs-op' && a.action === 'home'), 'F1: its Files view answers what the base hub answered (over `sh`), and it is never asked an fs op it lacks', [l, b]);
+  const i0 = asked.length;
+  const b = await baseCall('F1 list("~")', () => new BaseRFS.RemoteFs(baseHostsOf(dm)).list('h', '~'));
+  const shimmed = asked.slice(i0);
+  if (b !== REFUSED) ok(JSON.stringify(l) === JSON.stringify(b) && l.items.some((i) => i.name === 'a.txt') && !asked.some((a) => a.op === 'fs-op' && a.action === 'home'), 'F1: its Files view answers what the base hub answered (over `sh`), and it is never asked an fs op it lacks', [l, b]);
+  // the shim judged (r5034): every act the BASE copy sent carried the suite's own asker, and its ops are the ones the base sends over its
+  // OWN client (3452dce38's, which knows no asker law): the same op, command and arguments in the same order — nothing else changed
+  const strip = (a) => JSON.stringify({ op: a.op, action: a.action, cmd: a.cmd, path: a.path, args: a.args });
+  const own = secondManager(oldSh, BaseCL), ownAsked = record(own);
+  await new BaseRFS.RemoteFs(hostsOf(own)).list('h', '~');
+  const isAct = (a) => a.op === 'run-cmd' || a.op === 'run-stream' || (a.op === 'fs-op' && ['write', 'mkdir', 'rm'].includes(a.action));
+  ok(shimmed.some(isAct) && shimmed.filter(isAct).every((a) => a.by === BASE_BY) && shimmed.filter((a) => !isAct(a)).every((a) => a.by === undefined) && shimmed.map(strip).join('\n') === ownAsked.map(strip).join('\n'),
+    `F1: the asker shim — every ACT the BASE copy sent carried the suite's own asker (${shimmed.filter(isAct).length}), its reads none (${shimmed.filter((a) => !isAct(a)).length}), the very ops the base sends over its own client, in order`, { shimmed: shimmed.map(strip), own: ownAsked.map(strip) });
+  // CONTROL: WITHOUT the shim today's client refuses the base copy (rows 1052 and 1054 crashed here) — caught as a value and said by name
+  const bare = await rejects(new BaseRFS.RemoteFs(hostsOf(dm)).list('h', '~'));
+  ok(!!bare && bare.code === 'act_without_by', 'CONTROL: without the asker shim the BASE copy\'s list is REFUSED by today\'s client (act_without_by) — the crash of rows 1052 and 1054, held as a value', bare && bare.message);
+  const heard = [], r0 = await baseCall('F1 list("~") with no asker', () => new BaseRFS.RemoteFs(hostsOf(dm)).list('h', '~'), (c, n) => heard.push([c, n]));
+  ok(r0 === REFUSED && heard.length === 1 && heard[0][0] === false && /the BASE copy's F1 list\("~"\) with no asker was REFUSED by today's client \(act_without_by\)/.test(heard[0][1]), 'CONTROL: a refused BASE call is a NAMED RED LINE (said once, its comparison skipped), never an uncaught crash', heard);
 }
 
 // ── §5 the POSIX path unchanged ──
@@ -274,16 +307,20 @@ const lin = await realDaemon(headBundle, 'linux');
 seed(lin.home);
 if (!BaseRFS) skip('§5 the POSIX path: the head and the base RemoteFs answer alike (every parity leg)'); else {
   const dm = lin.dm, asked = record(dm);
-  const head = new RFS.RemoteFs(hostsOf(dm, 'linux-box')), base = new BaseRFS.RemoteFs(hostsOf(dm, 'linux-box'));
+  const head = new RFS.RemoteFs(hostsOf(dm, 'linux-box')), base = new BaseRFS.RemoteFs(baseHostsOf(dm, 'linux-box'));   // the base copy through the suite's asker (r5034)
   const H = lin.home;
   for (const [n, f] of [['home', (r) => r.home('l')], ['list ~', (r) => r.list('l', '~')], ['list docs', (r) => r.list('l', '~/docs')], ['info', (r) => r.info('l', '~/bin.dat')], ['readText', (r) => r.readText('l', '~/a.txt')], ['stat+du', (r) => r.stat('l', path.join(H, 'docs'), true)]]) {
-    const a = await f(head), b = await f(base);
-    ok(JSON.stringify(a) === JSON.stringify(b), `${n}: the head answers exactly what the base answered`, [a, b]);
+    const a = await f(head), b = await baseCall(n, () => f(base));
+    if (b !== REFUSED) ok(JSON.stringify(a) === JSON.stringify(b), `${n}: the head answers exactly what the base answered`, [a, b]);
   }
   ok(asked.some((a) => a.op === 'run-cmd' && a.cmd === 'sh'), 'the POSIX agent is still asked `sh` where it always was (home, du) — unchanged');
   // verify-r1 item 3: the ERRORS too, not only the answers
   for (const [n, f] of [['list missing', (r) => r.list('l', path.join(H, 'nope'))], ['info missing', (r) => r.info('l', path.join(H, 'nope.txt'))], ['readText missing', (r) => r.readText('l', path.join(H, 'nope.txt'))], ['stat missing', (r) => r.stat('l', path.join(H, 'nope'), true)], ['copy missing', (r) => r.copy('l', path.join(H, 'nope'), path.join(H, 'nope2'))], ['archiveList missing', (r) => r.archiveList('l', path.join(H, 'nope.zip'))]]) {
     const a = await rejects(f(head)), b = await rejects(f(base));
+    if (refusedBy(b)) { ok(false, `the BASE copy's ${n} was REFUSED by today's client (${b.code}): the base predates one of its laws, and the asker shim did not reach this call`, b.message); continue; }
+    // ONE ANSWER CHANGED ON PURPOSE AFTER THE BASE (r5034 read it): r2221 ★7 (B-23e5) — a file NOT THERE is said `file_not_there`
+    // («<path>: no such file yet»), where the base hub (3452dce38) said the raw ENOENT. The head is judged by that law, the base by its own
+    if (n === 'readText missing') { ok(!!a && a.code === 'file_not_there' && / no such file yet$/.test(a.message || '') && !!b && (b.code === 'ENOENT' || /^ENOENT\b/.test(b.message || '')), `${n}: the head says the later law's words (r2221 ★7, B-23e5: file_not_there), the base its own raw ENOENT — a divergence named, never hidden`, [a?.code, a?.message, b?.code, b?.message]); continue; }
     ok(JSON.stringify([a?.message, a?.code, a?.status]) === JSON.stringify([b?.message, b?.code, b?.status]), `${n}: the head fails exactly as the base failed`, [a?.message, b?.message]);
   }
   const mh = new FakeRes(), mb = new FakeRes();
