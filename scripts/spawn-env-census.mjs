@@ -349,7 +349,6 @@ export const ROWS = Object.freeze([
   ['src/routes/files.js', "'du'", 'probe', 1, PROBE + ' (15 s)'],
   ['src/server/cli-env.js', 'CODEX_CMD', 'probe', 1, PROBE + ' (codex sandbox -- true, 20 s)'],
   ['src/server/desktop-access.js', 'launch[0]', 'default', 1, "create()'s default env; server.js hands agentEnv()"],
-  ['src/server/mount-health-watch.js', 'process.execPath', 'probe', 1, PROBE + ' (its own --suspects scan child)'],
   ['src/server/ops-routes.js', "'bash'", 'self', 1, "the self-update script: it restarts the hub, and the next hub is born of it — the successor needs the hub's own config env"],
   ['src/server/permission-rules.js', 'cmd', 'default', 1, 'the permission oracle: `{ ...(agentEnv ? agentEnv() : process.env) }` — server.js hands agentEnv; bounded by its timeout'],
   ['src/server/tls.js', 'bin', 'probe', 1, PROBE + ' (openssl / mkcert)'],

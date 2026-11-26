@@ -13,10 +13,11 @@
  *     (handed over by the canary's held()) → ONE For-you item per mount while it stays open (MH.heldItem: the call — fn
  *     on path from file:line — beside the processes pressing THAT mount, read by the same child); a repeat is a line.
  * The process table is read by a CHILD (this file, --suspects): /proc reads in the server would queue behind the very
- * threadpool the canary says is wedged — spawning needs no pool thread.
+ * threadpool the canary says is wedged — spawning needs no pool thread. That child is asked of the hub's STARTER (B-323e's
+ * remainder, lane nl-starts): an episode and a hold come from the canary's 10 s timer, and a start from the hub's own process
+ * forks the whole hub — the starter's pipe needs no pool thread either.
  */
 const fs = require('fs');
-const { execFile } = require('child_process');
 const MH = require('../mount-health.js');
 
 const INBOX_KEY = 'mount-health';
@@ -55,12 +56,15 @@ function scanProc(mountpoint, { procDir = '/proc', perProc = FD_READS_PER_PROC, 
   return out;
 }
 
+/** B-323e's remainder (lane nl-starts): the scan child through the hub's starter (src/server/child-starter.js) — the same program,
+ *  argv, bound and buffer as its old execFile, the service env. A table it could not read THROWS with its reason, and its caller says
+ *  it («who presses <mp>: not read — <why>», the item then names no process) — never an empty table in silence. */
 function childScan(mountpoint) {
-  return new Promise((resolve) => {
-    execFile(process.execPath, [__filename, '--suspects', mountpoint], { timeout: SCAN_TIMEOUT_MS, maxBuffer: SCAN_MAX_BUFFER }, (err, out) => {
-      if (err) return resolve([]);
-      try { resolve(JSON.parse(String(out))); } catch { resolve([]); }
-    });
+  return Promise.resolve().then(() => require('./child-starter').childStarter().run(process.execPath, [__filename, '--suspects', mountpoint], { timeoutMs: SCAN_TIMEOUT_MS, maxBuffer: SCAN_MAX_BUFFER, capture: true, envAdd: {} })).then((r) => {
+    const why = !r ? 'no answer' : r.unknown ? 'the starter gave no answer' : r.timedOut ? `no answer in ${SCAN_TIMEOUT_MS} ms` : r.overflow ? `the table passed ${SCAN_MAX_BUFFER} bytes`
+      : r.started === false ? `not started (${r.error || 'unknown'})` : r.code !== 0 ? `exit ${r.code}` : null;
+    if (why) throw new Error(why);
+    return JSON.parse(String(r.stdout || ''));   // a table that does not parse throws as well: «not read»
   });
 }
 
