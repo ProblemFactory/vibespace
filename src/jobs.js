@@ -355,7 +355,7 @@ class JobManager {
     }
   }
   shutdown() { for (const t of this._urlTimers || []) clearTimeout(t); this._urlTimers = new Set(); /* B-74f5 r3: the URL checks end with the engine */ this._archiveDisarmed = true; /* B-0248 step 3: an ended engine's archive steps do nothing (the next one reads the files) */ if (this._notifsUnread && this.pendingNotifs.size) this.d.log(`[jobs] job-notifications.json is still held at the engine's end — ${[...this.pendingNotifs.values()].reduce((k, l) => k + l.length, 0)} notice(s) that arrived meanwhile are NOT written (the file is kept as it is)`);   // its read r1 (M2): said
-    if (this._lockHold) { this._lockHold.stop(); this._lockHold = null; } if (this._exitHolds) { for (const e of this._exitHolds.values()) e.hold.stop(); this._exitHolds.clear(); }   // B-f276 (s1126): the holds end with the engine
+    if (this._lockHold) { this._lockHold.stop(); this._lockHold = null; } if (this._exitHolds) { for (const e of this._exitHolds.values()) e.hold.stop(); this._exitHolds.clear(); } if (this._stampHolds) { for (const e of this._stampHolds.values()) e.hold.stop(); this._stampHolds.clear(); }   // B-f276 (s1126): the holds end with the engine
     if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save({ paced: true }); } catch { } this._unlockAfterStore(); this._logsStop(); }
   /** THE LOCK GOES AFTER THE STORE LANDS (lane lg-store-writes U4): the exit's store bytes are the writer's (its exit flush, after
    *  this) — the lock file is removed once jobs.json holds them, never before (an engine taking the lock in between would read
@@ -465,6 +465,7 @@ class JobManager {
         if (this._unreadStopped) return;   // the engine ended meanwhile
         this.readOnly = false;
         this.init({ lockRead: value ? { text: JSON.stringify(value) } : { error: Object.assign(new Error('absent'), { code: 'ENOENT' }) } });
+        try { const door = this._vaultJob || this.d.vaultJob || null; if (this.ready && !this.readOnly && door && typeof door.afterLift === 'function') door.afterLift(); } catch (e) { this.d.log('[jobs] the stops owed at the lock\'s lift failed:', e && e.message); }   // r5074 (1): entries gone while held
       } });
     h.start(a);
   }
@@ -1122,7 +1123,7 @@ class JobManager {
       if (!v.archive) continue;
       // the pid stamp is read only for a record the clock already released —
       // never a per-record /proc read for the whole store every tick
-      if (this._verifyAlive(this._readStamp(job))) continue;
+      { const sa = this._stampAnswer(job); if (sa.state === 'unknown' || this._verifyAlive(sa.stamp)) continue; }   // B-f276, the stamp unit (f): unknown ⇒ KEPT
       const rec = JSON.parse(JSON.stringify(job, (k, val) => (k.startsWith('_') ? undefined : val))); // runtime-only keys never persist
       rec.archivedAt = at; rec.archivedWhy = v.why;
       moved.push(rec); // NOT released yet — the archive copy must be durable first
@@ -2463,10 +2464,59 @@ class JobManager {
   _readStamp(job) {
     const run = job.runs && job.runs[job.runs.length - 1];
     if (!run) return null;
-    const f = path.join(this._ctlDir(job, run.startedAt), 'pid.json');
-    if (this._ctlPre && this._ctlPre.has(f)) { try { return JSON.parse(this._ctlPre.get(f)); } catch { return null; } }   // B-f276 cure r2: read off the loop
-    try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; }
+    const a = this._ctlAnswer(job, run, 'pid.json');   // B-f276, the stamp unit: THROUGH THE STORE READ (the late read's pre-read too) — null for a read that failed or torn bytes, here (the askers that ACT on nothing); the roads that ACT ask _stampAnswer
+    return a.state === 'data' ? a.value : null;
   }
+  /** B-f276, THE STAMP UNIT (lane bl-proposals, 主开发 r5015): a run's PROCESS RECORD (pid.json) as the roads that ACT on it read it →
+   *  { state: 'data', stamp } | { state: 'missing', stamp: null } | { state: 'unknown', code, held? } — a read that FAILED, or torn bytes, is
+   *  UNKNOWN: «may still run», never «dead» (the release read it as «no stamp»: a boot judged a living run dead with no record, a cron fired
+   *  beside its own child, a removal dropped a running job's record, the collapse and the archive took records of runs that may run). The
+   *  BOOT (road 'boot') HOLDS it (src/store-read-hold.js, a hold a run: read again off the loop; its lift runs the boot's own adoption of the
+   *  job once — _stampLift); a hold met first answers unknown with no read. No number from torn bytes is ever used (they have no value) */
+  _stampAnswer(job, road = null) {
+    const run = job && job.runs && job.runs[job.runs.length - 1];
+    if (!run) return { state: 'missing', stamp: null };
+    const f = path.join(this._ctlDir(job, run.startedAt), 'pid.json'), holds = this._stampHolds || (this._stampHolds = new Map());
+    const h = holds.get(f);
+    if (h) return { state: 'unknown', code: h.code, held: true };   // no read while held: the hold reads, off the loop
+    const a = this._ctlAnswer(job, run, 'pid.json');
+    if (a.state === 'data') return { state: 'data', stamp: a.value };
+    if (a.state === 'missing') return { state: 'missing', stamp: null };
+    const code = a.state === 'corrupt' ? 'torn bytes' : String(a.code || 'unreadable');
+    if (road !== 'boot' || this.readOnly) return { state: 'unknown', code };
+    const entry = { code, hold: null };
+    entry.hold = HOLD.create({ file: f, valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), code: 'stamp_record_unread', aside: (m) => f + '.corrupt-' + m,
+      words: (x) => `the process record of ${job.id}'s run could not be read (${x && x.code}) — the run is judged once it reads; nothing is decided or signalled from it meanwhile`,
+      log: (l) => this.d.log(`[jobs] ${job.id}: ${l}`),
+      onLift: (value) => { if (holds.get(f) !== entry) return; holds.delete(f); entry.hold.stop(); this._stampLift(job, run, value || null); } });
+    holds.set(f, entry);
+    entry.hold.start(a);
+    this._touch(job, { what: `its process record could not be read at the start (${code}) — VibeSpace reads it again by itself; the run is judged once it reads, and nothing is started beside it, signalled from it or removed meanwhile (a Stop ends it on purpose)` });
+    return { state: 'unknown', code, held: true };
+  }
+  /** the stamp unit (r5015 (b)): A PERSON'S STOP of a live run whose process record is unknown — the run ends by their word (the stop's
+   *  own end: «interrupted», what it held released), its hold ends, and the doubt's stop (round 8: its scope from bound.json, the
+   *  processes carrying its mark — never a number of the unread record) stops what can be named; a Start then goes on */
+  _stopUnread(job, run, sa) {
+    const code = sa.code;
+    this._dropStampHold(job, run);
+    const what = `stopped by its owner while its process record could not be read (${code}) — nothing was signalled from that record; what carries the job's mark is stopped`;
+    this._finalizeRun(job, run, { code: null, endedAt: now() }, 'stop');
+    this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
+    this._save();
+    this._stopDoubt(job, run).catch((e) => this.d.log(`[jobs] ${job.id}: the stop of what its run left failed:`, e && e.message));
+    return { ok: true, hadProc: false, words: what };
+  }
+  /** the stamp unit (c): a cron's fire SKIPPED because its run's process record could not be read — said ONCE a run, with the way out */
+  _fireSkipUnread(job, child, sa) {
+    const run = child.runs && child.runs[child.runs.length - 1];
+    if (!run || run._fireSkipSaid) return;
+    run._fireSkipSaid = true;
+    const what = `a fire skipped: its run ${child.id}'s process record could not be read (${sa.code}) — it may still run; VibeSpace reads it again by itself and the next fire tries again (a Stop of ${child.id} ends that run on purpose)`;
+    this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
+  }
+  /** the stamp unit: a person's word ended the run (its Stop) — its process record's hold ends with it */
+  _dropStampHold(job, run) { const f = run ? path.join(this._ctlDir(job, run.startedAt), 'pid.json') : null, e = f && this._stampHolds && this._stampHolds.get(f); if (e) { this._stampHolds.delete(f); e.hold.stop(); } }
   _verifyAlive(stamp) {
     if (!stamp || !stamp.pid) return false;
     return stamp.bootId === bootId() && PI.aliveIdentity(stamp) === true; // pid+starttime+bootId, and not a zombie
@@ -4018,41 +4068,7 @@ class JobManager {
   // ── boot: adopt-first, then replay ──────────────────────────────────────
   _adoptAndReplay() {
     for (const job of this.jobs.values()) {
-      try {
-        if (!['up', 'starting', 'awaiting-user'].includes(job.state)) continue;
-        const stamp = this._readStamp(job);
-        if (this._verifyAlive(stamp)) {
-          this.d.log(`[jobs] adopted ${job.id} pid=${stamp.pid}`);
-          // B-2c5c unit 2: IS THIS HUB THAT RUN'S MAIN? asked once here, while our parent chain still reaches its wrapper (a run started
-          // after this boot can never be its main) — the answer is kept on the run (a wrapper killed later moves our parent, not the fact)
-          { const run0 = job.runs && job.runs[job.runs.length - 1]; if (this._hubIsMain(job, run0)) this.d.log(`[jobs] ${job.id}: its main process is this VibeSpace hub (started as this job)`); }
-          // r3228: its publish is the forwards' ONE reconcile after the Ports list's own replay (src/port-forward.js restore → forwardsReconcile)
-          continue;
-        }
-        const run = job.runs && job.runs[job.runs.length - 1];
-        const exA = stamp && run ? this._exitAnswer(job, run, 'boot') : null;   // B-f276 (s1126): a wrapper that stamped and is gone — its record HELD judges nothing
-        if (exA && exA.state === 'held') continue;
-        const exit = exA ? exA.value : this._readExit(job, run);
-        // round 4: its wrapper is gone — what is left in its scope is an ended run's (a service's KEPT processes excepted —
-        // round 5, the ruling: its replay stops them first); round 5: a service's replay AWAITS this reap (_startAfter); round
-        // 6: a reap past its read's bound is never dropped — it enqueues itself and every tick retries it (_reapScope)
-        // B-2c5c unit 1: a run whose MAIN WAS THE HUB (exit.json `hubMain`) left the hub's own conversations and helpers in its scope —
-        // never reaped (never this job's)
-        if (!((exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept))) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { });   // r1263: the kept fact too (a killed wrapper wrote no exit record)
-        // r4683 (d): a start ASKED and never stamped (the hub ended between its ask and the answer) — its spec's removal is asked BEFORE the
-        // run is judged (off the loop), and the run is looked at late: a wrapper that read the spec before the removal landed is stopped by
-        // its own stamp; none starts from it after this boot's read
-        if (run && run.ask === 'asked' && !stamp && !this.readOnly) { this._dropSpec(path.join(this._ctlDir(job, run.startedAt), `spec.${run.startedAt}.json`)); run.startFailed = 'the hub restarted before its start was answered'; this._lateLook(job, run); }
-        if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
-        if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
-        // no live process, no exit record ⇒ died with the environment
-        // THE BOOT'S JUDGE (lane jobs-memory-bound): under memory.oom.group the wrapper dies with its job, so no exit record
-        // says what happened — the wrapper's last pressure sample and the instance's own OOM count do (src/job-model.js
-        // bootEndCause: `oom` only when the SAME cgroup's oom_kill rose and this job held most of its anon memory; page cache
-        // is never pressure). Every verdict — `oom` or env-restart — ends the run through the ONE road of the park law
-        const sample = run && !run.endedAt ? this._ctlJson(job, run, 'pressure.json') : null;
-        this._bootNoExit(job, run, M.bootEndCause(sample, sample ? this._cgroupNow() : null));
-      } catch (e) { this.d.log(`[jobs] adopt failed for ${job.id}:`, e.message); }
+      try { this._bootAdoptOne(job); } catch (e) { this.d.log(`[jobs] adopt failed for ${job.id}:`, e.message); }
     }
     // one-shot collapse of pre-2.343.3 per-fire child records: keep the newest
     // child per cron, drop older TERMINAL ones (stamp-verified not alive)
@@ -4063,7 +4079,7 @@ class JobManager {
       kids.sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
       for (const old of kids.slice(1)) {
         if (!['done', 'interrupted', 'failed', 'missed'].includes(old.state)) continue;
-        if (this._verifyAlive(this._readStamp(old))) continue;
+        { const sa = this._stampAnswer(old); if (sa.state === 'unknown' || this._verifyAlive(sa.stamp)) continue; }   // B-f276, the stamp unit (e): unknown ⇒ KEPT
         this.jobs.delete(old.id); this._dirty = true;
         (this._collapsed = this._collapsed || new Map()).set(old.id, kids[0].id); // poll of a stale id names the survivor
         collapsed.push(old.id);
@@ -4073,6 +4089,45 @@ class JobManager {
     for (const job of this.jobs.values()) {
       try { this._bootReplayOne(job); } catch (e) { this.d.log(`[jobs] replay failed for ${job.id}:`, e.message); }
     }
+  }
+  /** THE BOOT'S ADOPTION of ONE job — the boot's loop, and (B-f276, the stamp unit) a run whose process record was held at the boot, at
+   *  its lift (_stampLift): the same door, once. `stampA` = the lift's answer (no second read) */
+  _bootAdoptOne(job, { stampA = null } = {}) {
+    if (!['up', 'starting', 'awaiting-user'].includes(job.state)) return;
+    const sa = stampA || this._stampAnswer(job, 'boot');   // B-f276, the stamp unit: an UNKNOWN process record is HELD here — the boot judges nothing (its lift runs this again)
+    if (sa.state === 'unknown') return;
+    const stamp = sa.stamp;
+    if (this._verifyAlive(stamp)) {
+      this.d.log(`[jobs] adopted ${job.id} pid=${stamp.pid}`);
+      // B-2c5c unit 2: IS THIS HUB THAT RUN'S MAIN? asked once here, while our parent chain still reaches its wrapper (a run started
+      // after this boot can never be its main) — the answer is kept on the run (a wrapper killed later moves our parent, not the fact)
+      { const run0 = job.runs && job.runs[job.runs.length - 1]; if (this._hubIsMain(job, run0)) this.d.log(`[jobs] ${job.id}: its main process is this VibeSpace hub (started as this job)`); }
+      // r3228: its publish is the forwards' ONE reconcile after the Ports list's own replay (src/port-forward.js restore → forwardsReconcile)
+      return;
+    }
+    const run = job.runs && job.runs[job.runs.length - 1];
+    const exA = stamp && run ? this._exitAnswer(job, run, 'boot') : null;   // B-f276 (s1126): a wrapper that stamped and is gone — its record HELD judges nothing
+    if (exA && exA.state === 'held') return;
+    const exit = exA ? exA.value : this._readExit(job, run);
+    // round 4: its wrapper is gone — what is left in its scope is an ended run's (a service's KEPT processes excepted —
+    // round 5, the ruling: its replay stops them first); round 5: a service's replay AWAITS this reap (_startAfter); round
+    // 6: a reap past its read's bound is never dropped — it enqueues itself and every tick retries it (_reapScope)
+    // B-2c5c unit 1: a run whose MAIN WAS THE HUB (exit.json `hubMain`) left the hub's own conversations and helpers in its scope —
+    // never reaped (never this job's)
+    if (!((exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept))) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { });   // r1263: the kept fact too (a killed wrapper wrote no exit record)
+    // r4683 (d): a start ASKED and never stamped (the hub ended between its ask and the answer) — its spec's removal is asked BEFORE the
+    // run is judged (off the loop), and the run is looked at late: a wrapper that read the spec before the removal landed is stopped by
+    // its own stamp; none starts from it after this boot's read
+    if (run && run.ask === 'asked' && !stamp && !this.readOnly) { this._dropSpec(path.join(this._ctlDir(job, run.startedAt), `spec.${run.startedAt}.json`)); run.startFailed = 'the hub restarted before its start was answered'; this._lateLook(job, run); }
+    if (exit) { this._finalizeRun(job, run, exit, 'boot'); return; }
+    if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); return; }
+    // no live process, no exit record ⇒ died with the environment
+    // THE BOOT'S JUDGE (lane jobs-memory-bound): under memory.oom.group the wrapper dies with its job, so no exit record
+    // says what happened — the wrapper's last pressure sample and the instance's own OOM count do (src/job-model.js
+    // bootEndCause: `oom` only when the SAME cgroup's oom_kill rose and this job held most of its anon memory; page cache
+    // is never pressure). Every verdict — `oom` or env-restart — ends the run through the ONE road of the park law
+    const sample = run && !run.endedAt ? this._ctlJson(job, run, 'pressure.json') : null;
+    this._bootNoExit(job, run, M.bootEndCause(sample, sample ? this._cgroupNow() : null));
   }
   /** THE BOOT'S REPLAY of ONE job — the boot's loop above, and (B-f276 s1126, 主开发 r4994) a run the boot met with its exit record
    *  HELD, at its lift (_bootJudgeLate): what the start would have done for it, through the SAME door and the SAME conditions, read at
@@ -4170,6 +4225,17 @@ class JobManager {
     entry.hold.start(a);
     this._touch(job, { what: `its wrapper is gone and its exit record could not be read (${a.state === 'corrupt' ? 'torn bytes' : a.code}) — the run is judged once the record reads; nothing is decided from it meanwhile` });
     return { state: 'held' };
+  }
+  /** B-f276, the stamp unit (主开发 r5015 (a)): a run the BOOT met with its PROCESS RECORD held, at its LIFT — the boot's own adoption of
+   *  it ONCE, then the boot's replay (the start's own door and conditions). NOTHING when the engine ended or owns no lock, the job is gone,
+   *  or the run is no longer the job's live last run (a person's word ended it meanwhile: their Stop) */
+  _stampLift(job, run, value) {
+    if (this._unreadStopped || this.readOnly || this.jobs.get(job.id) !== job) return;
+    if (run.endedAt || job.runs[job.runs.length - 1] !== run) return;
+    try { this._bootAdoptOne(job, { stampA: value ? { state: 'data', stamp: value } : { state: 'missing', stamp: null } }); }
+    catch (e) { this.d.log(`[jobs] the late adoption of ${job.id} (its process record read at last) failed:`, e.message); return; }
+    try { this._bootReplayOne(job); }
+    catch (e) { if (e && e.code === 'memory-budget' && job.kind === 'service' && job.state === 'down' && job.desiredUp) this._budgetLadder(job, e); else this.d.log(`[jobs] the late replay of ${job.id} (its process record read at last) refused:`, e.message); }
   }
   /** B-f276 (lane bl-proposals s1126): a run the BOOT met with its exit record held is judged at the lift by the boot's own judge (the
    *  boot's lines in _adoptAndReplay, after the record's read): its record's end, else a stamp of no boot unverified, else a wrapper that
@@ -4814,8 +4880,10 @@ class JobManager {
       // RUN in the same child's ring; routine success is SILENT (quiet-success
       // law) — only failures/awaiting-user surface as events.
       let child = [...this.jobs.values()].find((x) => x.cronParent === job.id);
-      if (child && job.singleRun !== false && ['up', 'starting', 'awaiting-user'].includes(child.state) && this._verifyAlive(this._readStamp(child))) {
-        return; // maxConcurrent:1 — previous run still alive; silent skip (visible in the cron's nextFireAt drift)
+      if (child && job.singleRun !== false && ['up', 'starting', 'awaiting-user'].includes(child.state)) {
+        const sa = this._stampAnswer(child);   // B-f276, the stamp unit (c): an UNKNOWN record is «may still run» — never a second run beside it
+        if (sa.state === 'unknown') { this._fireSkipUnread(job, child, sa); return; }
+        if (this._verifyAlive(sa.stamp)) return; // maxConcurrent:1 — previous run still alive; silent skip (visible in the cron's nextFireAt drift)
       }
       if (!child) {
         child = { ...a.task, id: rid(), kind: 'task', name: this._nameWords(`${job.name} run`), owner: job.owner, access: job.access, state: 'starting', runs: [], createdAt: now(), cronParent: job.id };   // r8: a NEW record is belted (a cron an older engine wrote keeps its raw name — its run's record does not); r9: the cron's name is a stored slug — no run row
@@ -5313,6 +5381,9 @@ class JobManager {
     job._stopRequested = true;
     if (job.kind === 'service') this._teardownPublish(job);
     const run = job.runs && job.runs[job.runs.length - 1];
+    // B-f276, the stamp unit (主开发 r5015 (b)/(d)): its run NOT ended and its PROCESS RECORD UNKNOWN — a person's Stop is the WAY OUT:
+    // the run is ended ON PURPOSE (nothing is signalled from that record), then the doubt's own stop (round 8) stops what can be named
+    { const sa = this._runLive(job, run) ? this._stampAnswer(job) : null; if (sa && sa.state === 'unknown') return this._stopUnread(job, run, sa); }
     // round 10: A STOP STEP IS IDEMPOTENT — pressed again while its SIGTERM's grace runs, it delivers nothing and says so (round 9
     // and before signalled the whole group again on every press: a cleanup cut off by its second SIGTERM, code 143)
     if (!force && job._termAt && this._runLive(job, run)) {
@@ -5570,7 +5641,11 @@ class JobManager {
       return ['up', 'starting'].includes(job.state) ? { error: RM_PORTS_HELD, code: 'ports_unread' } : { error: RM_PORTS_HELD_STOPPED, code: 'ports_unread', stopped: true };
     }
     if (this._notifsUnread && job && job.clearedAt) return { error: this._notifsClearedWords(job.id), code: 'notifs-unread' };   // the B-f276 remainder (5), its read r2 (M2)
-    const alive = this._verifyAlive(this._readStamp(job));
+    const sa = this._stampAnswer(job), lastRun = job.runs && job.runs[job.runs.length - 1], unknown = sa.state === 'unknown' && !!lastRun && !lastRun.endedAt;   // B-f276, the stamp unit (d)
+    if (unknown && !orphan && !stop) return { error: `${job.id}'s last run's process record could not be read (${sa.code}) — it may still run, so its record is not removed; VibeSpace reads it again by itself. A person may stop it (vibespace-job stop ${job.id}: ends that run on purpose, nothing signalled from the record), then remove it; or remove it with --orphan (whatever it left runs on, tracked nowhere)` };
+    if (unknown && stop) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; }   // the way out first: that run ended on purpose
+    if (unknown && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — its process record unread, whatever its run left abandoned`);
+    const alive = !unknown && this._verifyAlive(sa.stamp);
     if (alive && !stop && !orphan) return { error: `${job.id} is still running — vibespace-job rm ${job.id} --stop (kill then remove), or --orphan to abandon the live process (tracked nowhere after that)` };
     if (alive && stop) { const s = this.stop(job, { force: false }); if (s && s.code === 'hub-is-main') return s; }   // B-2c5c: never removed while it runs as this hub
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);

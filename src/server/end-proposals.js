@@ -173,6 +173,9 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
       if (pv.verdict === 'ended' || pv.verdict === 'gone') { out.ended.push(d); continue; }
       if (pv.verdict === 'changed') { out.changed.push({ ...d, added: pv.added }); still.push({ ...pv.row, changed: pv.added }); continue; }
       // law 4: the ticks THIS row's jobs carry — only jobs that wake this very conversation, and only when it is really ended
+      // B-f276 (主开发 r5074 (2)): the jobs engine HELD — whose ticks these are cannot be read: the press is NOT done for this row, the hold named
+      { const h = typeof jobOwnerOf === 'function' && ticks.length ? ticks.map((x) => x && typeof x.id === 'string' ? jobOwnerOf(x.id) : null).find((o) => o && o.held) : null;
+        if (h) { out.failed.push({ ...d, failed: 'jobs_unread', why: String(h.held) }); still.push({ ...EP.drawnRow(nowRow), failed: 'jobs_unread' }); continue; } }
       const mine = ticks.filter((x) => x && typeof x.id === 'string' && typeof jobOwnerOf === 'function' && ownId(jobOwnerOf(x.id)) === idOf(d.key)).map((x) => ({ id: x.id, grant: x.grant === true }));
       if (mine.length) {
         if (typeof storeWakeTicks !== 'function') { out.failed.push({ ...d, failed: 'jobs_not_wired' }); still.push({ ...EP.drawnRow(nowRow), failed: 'jobs_not_wired' }); continue; }
@@ -229,6 +232,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     const fresh = [];
     for (const r of (Array.isArray(rows) ? rows : []).filter((x) => x && typeof x.id === 'string' && x.id).slice(0, EP.MAX_TARGETS)) {
       const o = typeof jobOwnerOf === 'function' ? jobOwnerOf(r.id) : null;
+      if (o && o.held) return { ok: false, code: 'records-unread', why: String(o.held) };   // B-f276 (r5074 (2)): a held engine — never «belongs to no conversation»
       if (!o || !o.key) return { ok: false, code: 'no_owner', why: `${r.id} belongs to no conversation — there is nothing for it to wake; nothing was filed` };
       fresh.push({ id: r.id.slice(0, 120), name: typeof r.name === 'string' && r.name ? r.name.slice(0, 120) : r.id.slice(0, 120), kind: r.kind === 'schedule' ? 'schedule' : 'job',
         nextAt: Number.isFinite(r.nextAt) ? r.nextAt : null, grant: r.grant === true, by: r.grant === true && r.by && typeof r.by === 'object' ? { kind: r.by.kind === 'key' ? 'key' : 'person', name: typeof r.by.name === 'string' ? r.by.name.slice(0, 80) : null, at: Number(r.by.at) || null } : null,
@@ -288,6 +292,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     const act = [];
     for (const r of changes) {
       const o = typeof jobOwnerOf === 'function' ? jobOwnerOf(r.id) : null;
+      if (o && o.held) return { ok: false, code: 'records-unread', why: String(o.held), open: true };   // B-f276 (r5074 (2)): a held engine — nothing written, the card stays; never «gone» or «moved»
       if (!o) { out.gone.push(r); continue; }
       if (r.owner && ownId(o) !== ownId(r.owner)) { out.moved.push(r); continue; }
       act.push(r);
@@ -350,6 +355,9 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
 function jobOwnerReader({ getJobs, sessions, addressableId }) {
   return (jobId) => {
     const jm = typeof getJobs === 'function' ? getJobs() : null;
+    // B-f276 (主开发 r5074 (2)): the jobs engine HOLDS its lock or its records — no job can be looked up: a HELD answer (its words), never «no owner»
+    const held = jm && ((typeof jm.lockHeldWords === 'function' && jm.lockHeldWords()) || (jm._unread && jm._unread.store && typeof jm.unreadWords === 'function' && jm.unreadWords('a job\'s owner cannot be read while the job records cannot be read')));
+    if (held) return { held };
     const j = jm && jm.jobs ? jm.jobs.get(String(jobId || '')) : null;
     const t = j && j.cronParent ? (jm.jobs.get(j.cronParent) || j) : j;
     const cid = t && t.owner && t.owner.conversation && t.owner.conversation.id;

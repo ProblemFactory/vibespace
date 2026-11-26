@@ -604,6 +604,7 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   function revoke(entry, jobId, { by = 'user' } = {}) {
     const id = String(entry || ''), j = String(jobId || '');
     if (!VJ.entryOfRow(id) || !JOB_RE.test(j)) return named('bad_revoke');
+    if (jm && typeof jm.lockHeldWords === 'function' && jm.lockHeldWords()) return { ok: false, code: 'records-unread', words: jm.lockHeldWords() };   // B-f276 (主开发 r5074 (1)): the lock HELD — the job cannot be looked up nor stopped: refused by the hold's name, nothing written (its siblings' law)
     const row0 = rowsFor(id)[0] || null;
     if (row0 && !Array.isArray(row0.to)) {   // an unreadable grants store (its fail-closed row): no approval can start the job — and the ✕ still STOPS it (decision ④), said
       let stopped = false;
@@ -681,6 +682,9 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   function entryGone(entry, { label = null, why = 'deleted' } = {}) {
     const id = String(entry || '');
     if (!jm || !VJ.entryOfRow(id)) return 0;
+    // B-f276 (主开发 r5074 (1)): the lock HELD — the jobs that name the entry cannot be looked up: their stop is OWED, done once the engine
+    // starts at the lock's lift (afterLift), never dropped (the vault's delete is already done: its use is refused at the vault meanwhile)
+    if (typeof jm.lockHeldWords === 'function' && jm.lockHeldWords()) { owedGone.set(id, { label, why }); log(`[vault-job] the entry ${id} is gone while Background Work's lock is held — the jobs that name it are stopped once it reads`); return 0; }
     const words = VJ.stopWords(why === 'revoked' ? 'revoked' : 'deleted', label || VJ.entryOfRow(id));
     let n = 0;
     const names = (job) => VJ.refsOf(job).some((r) => { const p = VR.parseRef(r.ref); return !!p && p.id === id; });
@@ -760,7 +764,10 @@ function create({ vault, grants = () => null, log = () => { }, userTodos = null,
   }
 
   const bindJobs = (engine) => { jm = engine || null; };
-  return { gate, payload, noteUses, blocked, waited, onChange, ask, answer, askOver, revoke, revokeAll, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs, factsLanded };
+  const owedGone = new Map();   // B-f276 (r5074 (1)): entries gone while the jobs engine held its lock — their jobs' stop, owed
+  /** the engine's start at its lock's lift: every owed entry-gone stop is done now, once */
+  const afterLift = () => { const owed = [...owedGone]; owedGone.clear(); let n = 0; for (const [id, o] of owed) n += entryGone(id, o); return n; };
+  return { gate, payload, noteUses, blocked, waited, onChange, ask, answer, askOver, revoke, revokeAll, dropRow, entryGone, jobGone, rowFacts, usesOf, bindJobs, factsLanded, afterLift };
 }
 
 module.exports = { create, programFacts, pastWrapper, newReadState, FACTS_MS, WRAP_GRAMMAR };

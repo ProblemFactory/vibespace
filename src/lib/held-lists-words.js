@@ -63,7 +63,8 @@ const NAMES = Object.freeze({
   'otel-token': i18nKey('the sign-in value your conversations report their usage with'),   // B-f276 family unit 2: the OTel sign-in value's own hold, an older row of the list
   '.instance-id': i18nKey('this VibeSpace’s anonymous usage id'),   // B-f276 (r4721, lane lg-vault-stages): data/telemetry/.instance-id on the helper
   'jobs.lock': i18nKey('Background Work’s lock'),   // B-f276 slice jobs-side-files (lane bl-proposals s1126): held, no job starts and no record changes
-  'exit.json': i18nKey('a background job run’s end record'),   // B-f276 slice jobs-side-files (s1126): held, that run waits to be judged
+  'exit.json': i18nKey('a background job run’s end record'),
+  'pid.json': i18nKey('a background job run’s process record'),   // B-f276, the stamp unit (lane bl-proposals): held, that run is judged once it reads   // B-f276 slice jobs-side-files (s1126): held, that run waits to be judged
 });
 /** r3314: a store the hub holds as ONE FILE PER THING is named by the file's shape (a conversation's record: data/session-meta/cw-<seq>-<ms>.json) */
 const NAMED_BY_SHAPE = Object.freeze([Object.freeze([/^cw-\d+-\d+\.json$/, i18nKey('a conversation’s saved details')]),

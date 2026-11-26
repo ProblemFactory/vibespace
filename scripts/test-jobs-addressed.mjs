@@ -401,7 +401,7 @@ const CLASS = {
   'announce#1': 'event', '_reapOnce#1': 'event', '_reapOnce#2': 'event', '_reapOnce#3': 'event', '_reapSaid#1': 'event',
   '_clearKeptOnce#1': 'event', '_clearKeptOnce#2': 'event', '_besideLive#1': 'event', '_doubtBlocks#1': 'event', '_stopDoubt#1': 'event',
   '_stopDoubt#2': 'event', '_clearBefore#1': 'event', '_refuseRun#1': 'alarm', '_settleWait#1': 'event', '_vaultRefuse#1': 'alarm',   // B-a08e: the vault refusal (failed) is _vaultRefuse's, reached from the gate and from a Deny
-  '_waitFor#1': 'event', '_adoptAndReplay#1': 'event', '_bootNoExit#1': 'alarm', '_bootNoExit#2': 'alarm', '_bootNoExit#3': 'event',
+  '_waitFor#1': 'event', '_bootAdoptOne#1': 'event', '_bootNoExit#1': 'alarm', '_bootNoExit#2': 'alarm', '_bootNoExit#3': 'event',
   '_parkForMemory#1': 'alarm', '_finalizeRun#1': 'event', '_finalizeRun#2': 'event', '_finalizeRun#3': 'event', '_finalizeRun#4': 'alarm',
   '_finalizeRun#5': 'end', '_sweepPass#1': 'event', '_sweepPass#2': 'event', '_sweepPass#3': 'event', '_untilScan#1': 'event', '_cronTick#1': 'alarm',
   // B-2c5c: _hubMainDown#1 = a hub-main service not restarted by itself (its end, or the next hub's boot: said, never a failure);
@@ -425,6 +425,9 @@ const CLASS = {
   // B-f276 (lane bl-proposals s1126): a gone wrapper's exit record that could not be read (or is torn) — HELD, said on the row (the run not
   // ended: never a failure); a run the boot met with its record held, judged at the lift by the boot's judge — its stamp of no boot unverified
   '_exitAnswer#1': 'event', '_bootJudgeLate#1': 'event',
+  // B-f276, the stamp unit (lane bl-proposals, 主开发 r5015): a run's process record that could not be read at the boot — HELD, said (the run
+  // not judged: never a failure); a person's Stop of such a run — ended on purpose, said; a cron's fire skipped beside such a run — said once
+  '_stampAnswer#1': 'event', '_stopUnread#1': 'event', '_fireSkipUnread#1': 'event',
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -479,7 +482,7 @@ const DRIVERS = {
   '_vaultRefuse#1': async () => { const j = task('drv-vaultgate'); const un = stub(jm, { _vaultJob: { gate: () => ({ code: 'vault_refused', words: 'a value it names is gone' }) } }); try { jm._vaultGate(j, 'manual'); } catch { } un(); return j; },
   'vaultRevoked#1': async () => { const j = svc('drv-vaultrevoked'); const un = stub(jm, { _vaultLive: () => true, stop: () => ({ ok: true }) }); try { jm.vaultRevoked(j.id, 'stopped: its vault value was taken back'); } finally { un(); } return j; },
   '_waitFor#1': async () => { const j = task('drv-waitfor'); jm._waitFor(j, 'vault', null); return j; },
-  '_adoptAndReplay#1': async () => { const j = svc('drv-adopt'); j.state = 'up'; run0(j); const un = stub(jm, { _readStamp: () => ({ pid: 4244 }), _verifyAlive: () => false, _readExit: () => null, _reapScope: async () => true, _bootJudge: () => null }); const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); try { jm._adoptAndReplay(); } catch { } jm.jobs.clear(); for (const [k, v] of keep) jm.jobs.set(k, v); un(); return j; },
+  '_bootAdoptOne#1': async () => { const j = svc('drv-adopt'); j.state = 'up'; run0(j); const un = stub(jm, { _readStamp: () => ({ pid: 4244 }), _stampAnswer: () => ({ state: 'data', stamp: { pid: 4244 } }), _verifyAlive: () => false, _readExit: () => null, _reapScope: async () => true, _bootJudge: () => null }); const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); try { jm._adoptAndReplay(); } catch { } jm.jobs.clear(); for (const [k, v] of keep) jm.jobs.set(k, v); un(); return j; },
   '_bootNoExit#1': async () => { const j = svc('drv-boot-oom-svc'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 1, park: false }) }); jm._bootNoExit(j, r, { cause: 'oom', at: Date.now(), jobAnonMb: 900, anonMb: 1000, limitMb: 1024 }); un(); return j; },
   '_failedStart#1': async () => { const j = task('drv-failed-start'), r = run0(j); jm._failedStart(j, r, 'manual', 'its wrapper could not be started (ENOENT)'); return j; },   // B-91aa's remainder
   '_lateSweep#1': async () => { const j = task('drv-late-start'), r = run0(j, { startFailed: 'the starter gave no answer' }); const un = stub(jm, { _lateStamp: async () => ({ pid: 4246, starttime: 1, bootId: 'b' }), _verifyAlive: () => true, _hubIsMain: () => false }); jm._lateLook(j, r); await jm._lateSweep(); un(); return j; },   // its planted stamp's birth is no live process's: nothing is signalled
@@ -487,6 +490,9 @@ const DRIVERS = {
   '_bootNoExit#3': async () => { const j = task('drv-boot-env'), r = run0(j); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },
   '_parkForMemory#1': async () => { const j = svc('drv-park-memory'), r = run0(j, { endedAt: Date.now(), cause: 'oom-bound', memoryMb: 512 }); jm._parkForMemory(j, r); return j; },
   '_finalizeRun#1': async () => { const j = svc('drv-end-left'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 0, park: false }) }); jm._finalizeRun(j, r, { code: 0, endedAt: Date.now(), forced: 'its scope was killed after the grace' }, 'exit'); un(); return j; },
+  '_stampAnswer#1': async () => { const j = svc('drv-stamp-held'), r = run0(j); j.state = 'up'; const un = stub(jm, { _ctlAnswer: () => ({ state: 'unreadable', code: 'EIO', why: 'the read failed', error: Object.assign(new Error('a placed refusal'), { code: 'EIO' }) }) }); try { jm._stampAnswer(j, 'boot'); } finally { un(); for (const e of (jm._stampHolds || new Map()).values()) e.hold.stop(); if (jm._stampHolds) jm._stampHolds.clear(); } return j; },   // the stamp unit
+  '_stopUnread#1': async () => { const j = svc('drv-stop-unread'), r = run0(j); j.state = 'up'; const un = stub(jm, { _stampAnswer: () => ({ state: 'unknown', code: 'EIO' }), _stopDoubt: async () => { } }); try { jm.stop(j); } finally { un(); } return j; },   // the stamp unit: the way out
+  '_fireSkipUnread#1': async () => { const c = mkJob(jm, { kind: 'cron', name: 'drv-fire-skip-unread', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'] } } } }), k = task('drv-fire-skip-child'); k.cronParent = c.id; k.state = 'up'; run0(k); jm._fireSkipUnread(c, k, { code: 'EIO' }); return c; },   // the stamp unit (c)
   '_exitAnswer#1': async () => { const j = svc('drv-exit-held'), r = run0(j); j.state = 'up'; const un = stub(jm, { _ctlAnswer: () => ({ state: 'unreadable', code: 'EIO', why: 'the read failed', error: Object.assign(new Error('a placed refusal'), { code: 'EIO' }) }) }); try { jm._exitAnswer(j, r, 'sweep'); } finally { un(); for (const e of (jm._exitHolds || new Map()).values()) e.hold.stop(); if (jm._exitHolds) jm._exitHolds.clear(); } return j; },   // B-f276 (s1126)
   '_bootJudgeLate#1': async () => { const j = svc('drv-boot-late-unverified'), r = run0(j); j.state = 'up'; jm._bootJudgeLate(j, r, { pid: 4244 }, null); return j; },   // B-f276 (s1126): a stamp with no boot id
   '_hubMainTaskEnd#1': async () => { const j = task('drv-boot-hub-task'), r = run0(j, { hubMain: true }); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },   // r1610 (as _bootNoExit#3's road)
