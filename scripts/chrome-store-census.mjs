@@ -223,28 +223,90 @@ export function attachCensus(repo, { patch = {}, extra = {}, rows = ATTACH_ROWS 
  *  DRIVER's LAUNCH, said and counted apart (never a row): the environment of a call whose argv is ['--version'] (a version read), of a
  *  spawn whose program is a Chrome (the suite's own Chrome: §47's launch census judges it), or an attach — an object that names
  *  AGENT_BROWSER_CDP, or the env of a run whose argv begins with '--cdp' (the driver connects to a Chrome already there, starts none). Every other home handed is counted in HOME_ROWS, each READ (a fake driver, a pure keeper,
- *  a stand-in, a run that only attaches by --cdp; `pin` = the text a row's reason rests on): a count that moves is red, as is a pin
- *  that no longer holds and a row whose file is gone. */
+ *  a stand-in, a run that only attaches by --cdp; `pin` = the text a row's reason rests on). A row lists its open SITES BY THEIR LINE's
+ *  TEXT (trimmed, at most 160 characters; 主开发 r5102): a site added, removed, or one home swapped for another with the count kept,
+ *  is red by the texts that differ — as is a pin that no longer holds and a row whose file is gone. */
 export const HOME_KEYS = Object.freeze(['HOME', 'homeDir']);
 export const HOME_EXPLICIT = Object.freeze(['AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_ARGS']);
 export const HOME_ROWS = Object.freeze({
-  'scripts/scratch.mjs': { n: 1, why: 'HANDED: the record of what the process was handed (its home compared by the re-home), never handed to a driver' },
-  'scripts/test-browser-ephemeral-life.mjs': { n: 2, why: 'the world\'s keeper home `w.KH` (a function\'s returned object, which the census does not follow): its config.json is written through driverArgs(...CHROME_QUIET) where the world is made (the pin)', pin: /fs\.writeFileSync\(path\.join\(KH, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(\.\.\.CHROME_QUIET\) \}\)/ },
-  'scripts/test-browser-ephemeral-wired.mjs': { n: 1, why: 'the world\'s keeper home `w.KH`: its config.json is written through driverArgs(...CHROME_QUIET) where the world is made (the pin)', pin: /fs\.writeFileSync\(path\.join\(KH, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(\.\.\.CHROME_QUIET\) \}\)/ },
-  'scripts/test-browser-live.mjs': { n: 2, why: '③ and ③b: worktree servers over a FAKE agent-browser and a fake claude — no real driver runs there', pin: /fake claude \+ fake agent-browser/ },
-  'scripts/test-browser-mediation-chrome.mjs': { n: 14, why: '③ r4\'s shell, whose CLI the stub answers with config = NAVCFG (built by driverArgs: §47e), and ⑧ to ⑩\'s thirteen keeper homes, whose browser is the FAKE kernel (an engine fixture\'s executablePath) — no real Chrome there' },
-  'scripts/test-browser-paired-scope.mjs': { n: 2, why: 'the PATH and HOME saved before the device\'s first dial and put back after it — a copy of the environment and its restore, no run' },
-  'scripts/test-browser-profiles.mjs': { n: 3, why: 'a shell fragment driven under sh (no driver), and a pure keeper whose admission is judged as data (no launch)' },
-  'scripts/test-browser-profiles-ui.mjs': { n: 4, why: '① to ④\'s FAKE driver home; the build list read from the process\'s home (a read); ⑦\'s keeper that reads the account\'s newest build and its run home, whose launches take the keeper\'s explicit config built from b5-home (written there)' },
-  'scripts/test-browser-resources.mjs': { n: 4, why: 'ⓘ\'s two homes of 38 and 39 bytes: their config.json is written through driverArgs in ONE loop over both (a loop name the census does not tie to them: the pin)', pin: /for \(const h of \[H38, H39\]\) \{ fs\.mkdirSync\(path\.join\(h, '\.agent-browser'\), \{ recursive: true \}\); fs\.writeFileSync\(path\.join\(h, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(/ },
-  'scripts/test-browser-stderr-pipe-real.mjs': { n: 1, why: 'the driver\'s line rides AGENT_BROWSER_ARGS built by driverArgs at each run (quietLeg) and an explicit config file: its home holds none on purpose (the pin)', pin: /quietLeg\('bspd', driverArgs\([\s\S]*quietLeg\('bspc', BE\.withQuietLogging\(driverArgs\(/ },
-  'scripts/test-browser-x-picture.mjs': { n: 1, why: 'the VIEWER Chrome the suite spawns itself (launchChrome(bin): §47\'s launch census judges it)' },
-  'scripts/test-home-verdict.mjs': { n: 14, why: 'stand-in programs only: the homes of its scenes and probes — the real driver never runs there' },
+  'scripts/scratch.mjs': { sites: [
+    "const HANDED = Object.freeze({ HOME: HOME_COMPARED, PATH: process.env.PATH || '', EXEC: process.execPath,",
+  ], why: 'HANDED: the record of what the process was handed (its home compared by the re-home), never handed to a driver' },
+  'scripts/test-browser-ephemeral-life.mjs': { sites: [
+    "const composer = (w) => BE.create({ dataDir: w.dataDir, serverSetting: w.setting, homeDir: w.KH, env: w.env, log: w.log, socketDirBase: path.join(w.D, 's'), fac",
+    "const kk = K.create({ dataDir: w.dataDir, homeDir: w.KH, env: () => w.env, serverSetting: w.setting, liveKeys: () => LIVE, log: w.log, install: false,",
+  ], why: 'the world\'s keeper home `w.KH` (a function\'s returned object, which the census does not follow): its config.json is written through driverArgs(...CHROME_QUIET) where the world is made (the pin)', pin: /fs\.writeFileSync\(path\.join\(KH, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(\.\.\.CHROME_QUIET\) \}\)/ },
+  'scripts/test-browser-ephemeral-wired.mjs': { sites: [
+    "const composer = (w) => BE.create({ dataDir: w.dataDir, serverSetting: w.setting, homeDir: w.KH, env: w.env, log: w.log, socketDirBase: path.join(w.D, 's'), fac",
+  ], why: 'the world\'s keeper home `w.KH`: its config.json is written through driverArgs(...CHROME_QUIET) where the world is made (the pin)', pin: /fs\.writeFileSync\(path\.join\(KH, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(\.\.\.CHROME_QUIET\) \}\)/ },
+  'scripts/test-browser-live.mjs': { sites: [
+    "const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPAC",
+    "const srv2 = spawn('node', ['server.js'], { cwd: wt2, env: { ...env2, ...VNC_ENV, PORT: String(PORT2), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PA",
+  ], why: '③ and ③b: worktree servers over a FAKE agent-browser and a fake claude — no real driver runs there', pin: /fake claude \+ fake agent-browser/ },
+  'scripts/test-browser-mediation-chrome.mjs': { sites: [
+    "const shell4 = { ...BASE_ENV, HOME: H4, VIBESPACE_API: `http://127.0.0.1:${stub.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_stub' };",
+    "const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };",
+    "const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set(), runtime: Ff.crea",
+    "const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };",
+    "const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: (k) => (k === 'browser.defaultEngine' ? 'plugin:' + EID : un",
+    "const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };",
+    "const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set([KEY9]), runtime: F",
+    "const env9 = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, VIBESPACE_API: `http://127.0.0.1:${port9}`, VIBESPACE_SESSION_TOKEN: TOKEN9, VIBESPACE_SESSION_CWD: ",
+    "const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };",
+    "const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: (k) => settings[k], liveKeys: () => new Set([KEYG]), runtime",
+    "const envG = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, VIBESPACE_API: `http://127.0.0.1:${portG}`, VIBESPACE_SESSION_TOKEN: TOKENG, VIBESPACE_SESSION_CWD: ",
+    "const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };",
+    "const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set([KEY10]), runtime: ",
+    "const env10 = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, VIBESPACE_API: `http://127.0.0.1:${port10}`, VIBESPACE_SESSION_TOKEN: TOKEN10, VIBESPACE_SESSION_CW",
+  ], why: '③ r4\'s shell, whose CLI the stub answers with config = NAVCFG (built by driverArgs: §47e), and ⑧ to ⑩\'s thirteen keeper homes, whose browser is the FAKE kernel (an engine fixture\'s executablePath) — no real Chrome there' },
+  'scripts/test-browser-paired-scope.mjs': { sites: [
+    "const withDeviceEnv = async (fn) => { const keep = { PATH: process.env.PATH, HOME: process.env.HOME }; process.env.PATH = `${path.dirname(REAL_AB)}:${keep.PATH ",
+    "const withDeviceEnv = async (fn) => { const keep = { PATH: process.env.PATH, HOME: process.env.HOME }; process.env.PATH = `${path.dirname(REAL_AB)}:${keep.PATH ",
+  ], why: 'the PATH and HOME saved before the device\'s first dial and put back after it — a copy of the environment and its restore, no run' },
+  'scripts/test-browser-profiles.mjs': { sites: [
+    "const r = spawnSync(argv[0], argv[1], { cwd, env: { PATH: process.env.PATH, HOME: home, ...extraEnv }, encoding: 'utf8', timeout: 20000 });",
+    "const k = K.create({ dataDir: D, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, log: { log() { }, warn() { }, error() { } } });",
+    "const k = K.create({ dataDir: D, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, log: { log() { }, warn() { }, error() { } } });",
+  ], why: 'a shell fragment driven under sh (no driver), and a pure keeper whose admission is judged as data (no launch)' },
+  'scripts/test-browser-profiles-ui.mjs': { sites: [
+    "const srv = spawn(process.execPath, ['server.js'], { cwd: WT, env: { ...baseEnv, ...VNC_ENV, PATH: `${FAKE_BIN}:${baseEnv.PATH || '/usr/bin:/bin'}`, PORT: Strin",
+    "const L = B.listBuilds({ homeDir: os.homedir() });",
+    "const L = BBm.listBuilds({ homeDir: os.homedir() });",
+    "const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_'))), HOME: RH, XDG_RUNTIME_DIR: XDG, PATH: `${path",
+  ], why: '① to ④\'s FAKE driver home; the build list read from the process\'s home (a read); ⑦\'s keeper that reads the account\'s newest build and its run home, whose launches take the keeper\'s explicit config built from b5-home (written there)' },
+  'scripts/test-browser-resources.mjs': { sites: [
+    "const mkR = (home) => BE.create({ dataDir: path.join(ROOT, 'data-i-' + home.length), homeDir: home, env: {}, socketDirBase: base, log: { warn() { }, log() { } }",
+    "const env = { PATH: process.env.PATH, HOME: home, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(B.DEFAULT_IDLE_TIMEOUT_MS) };",
+    "const bare = tabList({ PATH: process.env.PATH, HOME: H39, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(B.DEFAULT_IDLE_TIMEOUT_MS) });",
+    "closeAll({ PATH: process.env.PATH, HOME: H39 });",
+  ], why: 'ⓘ\'s two homes of 38 and 39 bytes: their config.json is written through driverArgs in ONE loop over both (a loop name the census does not tie to them: the pin)', pin: /for \(const h of \[H38, H39\]\) \{ fs\.mkdirSync\(path\.join\(h, '\.agent-browser'\), \{ recursive: true \}\); fs\.writeFileSync\(path\.join\(h, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(/ },
+  'scripts/test-browser-stderr-pipe-real.mjs': { sites: [
+    "const e = { __bin: extra.__bin || AB, PATH: process.env.PATH, HOME, TMPDIR: path.join(S, 'tmp'), XDG_RUNTIME_DIR: XDG, LANG: 'C.UTF-8', AGENT_BROWSER_SESSION: n",
+  ], why: 'the driver\'s line rides AGENT_BROWSER_ARGS built by driverArgs at each run (quietLeg) and an explicit config file: its home holds none on purpose (the pin)', pin: /quietLeg\('bspd', driverArgs\([\s\S]*quietLeg\('bspc', BE\.withQuietLogging\(driverArgs\(/ },
+  'scripts/test-browser-x-picture.mjs': { sites: [
+    "const ch = spawn(bin, [...CHROME_QUIET, '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${ud}`, '--no-first-run', '--no-default-browser-check', ",
+  ], why: 'the VIEWER Chrome the suite spawns itself (launchChrome(bin): §47\'s launch census judges it)' },
+  'scripts/test-home-verdict.mjs': { sites: [
+    "HOME: H, PATH: `/home/u/.local/bin:${NODE_DIR}:/run/user/1/fnm_multishells/9/bin:/usr/local/bin:/opt/tools/bin::rel/bin:/usr/bin:/bin`, CLAUDE_CONFIG_DIR: H + '",
+    "const r = HV.rehomeEnv({ HOME: home, PATH: `${shims}:${inst}:/usr/bin:/bin` }, { oldHome: home, newHome: nh, platform: process.platform, resolve: SM.resolveFs }",
+    "ok(JSON.stringify(SM.cliCandidatesOf('claude', { HOME: '/home/u', PATH: '/a::/b', VS_CLAUDE_BIN: '/x/claude' })) === JSON.stringify(['/x/claude', '/a/claude', '",
+    "const handed = { HOME: STANDIN, CLAUDE_CONFIG_DIR: `${STANDIN}/.claude-${SECRETISH}`, PATH: `${STANDIN}/.local/bin:${NODE_BIN}:/usr/bin:/bin`, XDG_DATA_HOME: '/",
+    "const env = { PATH: `${home}/.local/bin:${home}/.nvm/bin:/opt/vs-hv-nowhere/bin:/usr/bin:/bin`, HOME: path.join(seam, 'homelink'), LANG: 'C.UTF-8', [SM.NOT_TEMP",
+    "lane: start(path.join(DIR, 'test-hv-lane.mjs'), { HOME: LANE, PATH: `${NODE_BIN}:/usr/bin:/bin` }, PROBE),",
+    "emptyHome: start(path.join(DIR, 'test-hv-emptyhome.mjs'), { HOME: '', PATH: '/usr/bin:/bin' }, A1_PROBE(SCRATCH_URL), { clean: true }),",
+    ": k === 'm14' ? start(m.probe, { HOME: '', PATH: '/usr/bin:/bin' }, A1_PROBE(m.url), { clean: true })",
+    "const STARTED = { PATH: '/usr/bin:/bin', HOME: '/home/u', LANG: 'C.UTF-8', CI: 'true' };",
+    "const ruled = HV.unruledNames({ ...STARTED, HOME: '/tmp/vs-lane-1/home', XDG_RUNTIME_DIR: '/tmp/r', VIBESPACE_CI_RUN: 'ci-fast-pid1@2', VIBESPACE_SUITE_BUDGET_M",
+    "const WAS = { HOME: '/home/u', XDG_RUNTIME_DIR: '/run/user/1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus', VIBESPACE_CI_RUN: 'ci-outer', VIBESPACE_SU",
+    "const today = HV.unruledNames({ ...WAS, HOME: '/tmp/l/home', XDG_RUNTIME_DIR: '/tmp/l/run', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/tmp/l/run/bus', VIBESPACE_CI_R",
+    "const LA_PATH = `${LA_BIN}:/usr/bin:/bin`, laEnv = (extra = {}) => ({ HOME: LA_HOME, PATH: LA_PATH, LANG: 'C.UTF-8', ...extra });",
+    "const brEnv = (h, extra = {}) => ({ HOME: h, PATH: LA_PATH, LANG: 'C.UTF-8', ...extra });",
+  ], why: 'stand-in programs only: the homes of its scenes and probes — the real driver never runs there' },
 });
 const SCOPES = new Set(['Program', 'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'BlockStatement', 'ForStatement', 'ForInStatement', 'ForOfStatement', 'CatchClause', 'StaticBlock']);
 const keyOf = (p) => (p && !p.computed && p.key ? (p.key.type === 'Identifier' ? p.key.name : p.key.type === 'Literal' ? String(p.key.value) : null) : null);
 const calleeName = (c) => (c && c.type === 'Identifier' ? c.name : c && c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier' ? c.property.name : null);
-/** → { files, sites, configured, versionReads, chromeSpawns, attaches, open: [{file, line, key, what}], moved: [{file, n, want, lines}],
+/** → { files, sites, configured, versionReads, chromeSpawns, attaches, open: [{file, line, key, what, text}], moved: [{file, n, want, extra, missing, lines}],
  *  unpinned: [file], stale: [file], unparsed: [file] } */
 // ONE analysis per file text (a census is called with a file patched or planted: only that file is read again)
 const HOME_SITES = new Map();
@@ -252,6 +314,7 @@ function homeSitesOf(f, src, acorn) {
   const key = `${f}\0${src}`;
   if (HOME_SITES.has(key)) return HOME_SITES.get(key);
   const cnt = { configured: 0, attaches: 0, versionReads: 0, chromeSpawns: 0 };
+  const LINES = src.split('\n'), lineText = (n) => (LINES[n - 1] || '').trim().slice(0, 160);
   const r = (() => {
       let ast = null;
       for (const sourceType of ['module', 'script']) { try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true }); break; } catch { } }
@@ -320,7 +383,7 @@ function homeSitesOf(f, src, acorn) {
       visit(ast, [], (n, stack) => {
         if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'MemberExpression' && !n.left.computed && n.left.property.type === 'Identifier' && HOME_KEYS.includes(n.left.property.name)) {
           sites++;
-          if (homeOk(n.right, stack.concat([n]))) cnt.configured++; else open.push({ file: f, line: n.loc.start.line, key: n.left.property.name, what: src.slice(n.right.start, n.right.end).slice(0, 60) });
+          if (homeOk(n.right, stack.concat([n]))) cnt.configured++; else open.push({ file: f, line: n.loc.start.line, key: n.left.property.name, what: src.slice(n.right.start, n.right.end).slice(0, 60), text: lineText(n.loc.start.line) });
           return;
         }
         if (n.type !== 'ObjectExpression') return;
@@ -339,7 +402,7 @@ function homeSitesOf(f, src, acorn) {
           if (version) { cnt.versionReads++; continue; }
           if (chromeSpawn) { cnt.chromeSpawns++; continue; }
           if (explicit || homeOk(p.value, stack.concat([n]))) { cnt.configured++; continue; }
-          open.push({ file: f, line: p.loc.start.line, key: keyOf(p), what: src.slice(p.value.start, p.value.end).slice(0, 60) });
+          open.push({ file: f, line: p.loc.start.line, key: keyOf(p), what: src.slice(p.value.start, p.value.end).slice(0, 60), text: lineText(p.loc.start.line) });
         }
       });
       return { unparsed: false, sites, open };
@@ -360,7 +423,15 @@ export function homeCensus(repo, { acorn, patch = {}, extra = {}, rows = HOME_RO
     if (sites) out.files++;
     out.sites += sites;
     const row = rows[f];
-    if (row) { if (open.length !== row.n) out.moved.push({ file: f, n: open.length, want: row.n, lines: open.map((o) => o.line) }); if (row.pin && !row.pin.test(src)) out.unpinned.push(f); }
+    if (row) {
+      const want = [...(row.sites || [])].sort(), got = open.map((o) => o.text).sort();
+      if (JSON.stringify(want) !== JSON.stringify(got)) {
+        const left = [...want], extra = [];
+        for (const t of got) { const i = left.indexOf(t); if (i >= 0) left.splice(i, 1); else extra.push(t); }
+        out.moved.push({ file: f, n: got.length, want: want.length, extra, missing: left, lines: open.map((o) => o.line) });
+      }
+      if (row.pin && !row.pin.test(src)) out.unpinned.push(f);
+    }
     else out.open.push(...open);
   }
   for (const f of Object.keys(rows)) if (!fs.existsSync(path.join(repo, f)) && !(f in extra)) out.stale.push(f);

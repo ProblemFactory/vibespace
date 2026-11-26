@@ -952,8 +952,10 @@ console.log(JSON.stringify({ rehomed: !!S.REHOMED, left: S.DRIVER_LEFT_ALONE || 
   // over it shows what reaches it; the named folder's whole tree is read before any scene and judged unchanged after the last
   const ARGV_BODY = '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done\n';
   const BR = fake(path.join(LA, 'builds/chrome-151.0.7922.34/chrome'), ARGV_BODY), BR_DIR = path.dirname(path.dirname(BR));
-  const snapTree = (root) => { const out = []; const walk = (d) => { for (const n of fs.readdirSync(d).sort()) { const f = path.join(d, n), st = fs.lstatSync(f); out.push([path.relative(root, f), st.isDirectory() ? 'd' : st.isSymbolicLink() ? 'l' : 'f', st.size, st.mtimeMs, st.mode]); if (st.isDirectory()) walk(f); } }; walk(root); return JSON.stringify(out); };
+  const snapTree = (root) => { const r0 = fs.lstatSync(root), out = [['.', 'd', r0.size, r0.mtimeMs, r0.mode]]; const walk = (d) => { for (const n of fs.readdirSync(d).sort()) { const f = path.join(d, n), st = fs.lstatSync(f); out.push([path.relative(root, f), st.isDirectory() ? 'd' : st.isSymbolicLink() ? 'l' : 'f', st.size, st.mtimeMs, st.mode]); if (st.isDirectory()) walk(f); } }; walk(root); return JSON.stringify(out); };
   const SNAP_BR = snapTree(BR_DIR);
+  // r5102: a SECOND named folder, for the control that writes into what it names (the first stays only read)
+  const BR2 = fake(path.join(LA, 'builds2/chrome-151.0.7922.34/chrome'), ARGV_BODY), BR2_DIR = path.dirname(path.dirname(BR2)), SNAP_BR2 = snapTree(BR2_DIR);
   const PROBE_BR = (url) => `import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path'; import { execFileSync } from 'node:child_process';
 const S = await import(${JSON.stringify(url)});
 const at = path.join(os.homedir(), '.agent-browser', 'browsers');
@@ -975,13 +977,15 @@ console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, bui
   const BR_LINK = mutant('brlink', '    fs.renameSync(tmp, at); tmp = null;   // whole or not at all: a sibling never reads a half-made cache\n', '    fs.rmSync(tmp, { recursive: true, force: true }); tmp = null; fs.symlinkSync(real, at);   // the release\'s link\n');
   // r4974 (2): a home under NO temp root is refused by name and nothing is made there (planted: the re-home hands one)
   const NOT_TEMP_HOME = '/home/vs-hv-not-a-temp-home';
+  // r5102 RED: a placement that WRITES INTO the folder it names — the «only read» judgement must read it red
+  const BR_WRITE = mutant('brwrite', '  let names = []; try { names = fs.readdirSync(real); } catch { }\n', "  let names = []; try { names = fs.readdirSync(real); fs.writeFileSync(path.join(real, '.vs-hv-written'), 'planted\\n'); } catch { }\n");
   const BR_REAL = mutant('brreal', '  const browsers = placeBrowsers(home, me);   // the driver\'s installed browsers the run NAMES (r2777), in this home of its own\n', `  const browsers = placeBrowsers(${JSON.stringify(NOT_TEMP_HOME)}, me);   // planted: a home under no temp root\n`);
   const goBR = (tag, env, url = SCRATCH_URL, dir = DIR, o = { clean: true }) => start(path.join(dir, `test-hv-drvbr-${tag}.mjs`), env, PROBE_BR(url), o);
   const [b1, b2, b3, b4, b5, bc] = await Promise.all([goBR('left', brEnv(BH.left, { VS_AGENT_BROWSER_BROWSERS: BR_DIR })), goBR('rehomed', { ...DB.s.env, ...DB.env }, SCRATCH_URL, DIR, {}),
     goBR('noname', brEnv(BH.none)), goBR('gone', brEnv(BH.gone, { VS_AGENT_BROWSER_BROWSERS: path.join(LA, 'no-builds') })),
     goBR('there', brEnv(BH.there, { VS_AGENT_BROWSER_BROWSERS: BR_DIR })), goBR('cut', brEnv(BH.cut, { VS_AGENT_BROWSER_BROWSERS: BR_DIR }), BR_CUT.url, path.dirname(BR_CUT.probe))]);
-  const BHL = brHome('link');
-  const [bl, br] = await Promise.all([goBR('link', brEnv(BHL, { VS_AGENT_BROWSER_BROWSERS: BR_DIR }), BR_LINK.url, path.dirname(BR_LINK.probe)), goBR('realhome', { ...DB.s.env, ...DB.env }, BR_REAL.url, path.dirname(BR_REAL.probe), {})]);
+  const BHL = brHome('link'), BHW = brHome('write');
+  const [bw, bl, br] = await Promise.all([goBR('write', brEnv(BHW, { VS_AGENT_BROWSER_BROWSERS: BR2_DIR }), BR_WRITE.url, path.dirname(BR_WRITE.probe)), goBR('link', brEnv(BHL, { VS_AGENT_BROWSER_BROWSERS: BR_DIR }), BR_LINK.url, path.dirname(BR_LINK.probe)), goBR('realhome', { ...DB.s.env, ...DB.env }, BR_REAL.url, path.dirname(BR_REAL.probe), {})]);
   const BUILD = 'chrome-151.0.7922.34', realOf = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
   const AT_LEFT = path.join(BH.left, '.agent-browser', 'browsers'), NAMED_REAL = realOf(BR_DIR);
   ok(!!b1.j && b1.j.rehomed === false && b1.j.link === false && (b1.j.builds || []).includes(BUILD) && !!b1.j.placed && b1.j.placed.at === AT_LEFT && !!b1.j.stamp && b1.j.stamp.named === NAMED_REAL && fs.lstatSync(AT_LEFT).isDirectory()
@@ -995,6 +999,8 @@ console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, bui
     'RED CONTROL (r4974 (2)): the release\'s link of the named folder as the cache — the driver\'s own lookup then takes the build\'s REAL binary, and no names rule reaches it (probe row 1024\'s driver-launched Chromes, made at will)', { j: bl.j && { link: bl.j.link, pick: bl.j.pick, ran: bl.j.ran }, err: bl.err.slice(-300) });
   ok(BR_REAL.present && !!br.j && !!br.j.placed && br.j.placed.at === null && /under no temp root/.test(br.j.placed.why || '') && /under no temp root/.test(br.err) && !fs.existsSync(NOT_TEMP_HOME),
     'A HOME UNDER NO TEMP ROOT is refused by name (r4974 (2): the harness\'s builds go only into a suite\'s own scratch home): none placed, said on stderr, nothing made there', { placed: br.j && br.j.placed, err: br.err.slice(-300) });
+  ok(BR_WRITE.present && !!bw.j && snapTree(BR2_DIR) !== SNAP_BR2 && fs.existsSync(path.join(BR2_DIR, '.vs-hv-written')),
+    'RED CONTROL (r5102): a placement that WRITES INTO the folder it names (a planted copy, over a second named folder) — the same «only read» judgement (its whole tree, the root\'s own stat among it) reads that folder CHANGED', { j: bw.j && bw.j.placed, err: bw.err.slice(-300) });
   ok(!!b3.j && b3.j.real === null && b3.j.placed === null && !fs.existsSync(path.join(BH.none, '.agent-browser'))
     && !!b4.j && b4.j.real === null && !!b4.j.placed && b4.j.placed.at === null && /VS_AGENT_BROWSER_BROWSERS names .*no-builds: no folder of installed browsers there/.test(b4.err),
     'NO NAME, NO BROWSERS: nothing is placed; a NAMED folder that is not there is none, said by name on stderr — never found, never fetched', { b3: b3.j, b4: b4.j, err: b4.err.slice(-300) });
@@ -1013,7 +1019,7 @@ console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, bui
   const BR_RACE = mutant('brrace', '  if (stands()) return thereAlready();\n', '  if (false) return thereAlready();\n');   // its look misses: the link meets EEXIST
   const named = (h) => brEnv(h, { VS_AGENT_BROWSER_BROWSERS: BR_DIR });
   // a sibling's placement, made first by a run of this harness (the stamped folder); the release's LINK of the named folder: another's
-  const BH3 = { oldlink: brHome('oldlink') };
+  const BH3 = { oldlink: brHome('oldlink'), other: brHome('other') };
   fs.mkdirSync(path.join(BH3.oldlink, '.agent-browser')); fs.symlinkSync(BR_DIR, path.join(BH3.oldlink, '.agent-browser', 'browsers'));
   const [p0, p1] = await Promise.all([goBR('same0', named(BH2.same)), goBR('race0', named(BH2.race))]);
   const NOTSUITE = path.join(LA, 'probe-hv-notsuite.mjs');   // no suite name, outside the scripts folder: REHOMES is false
@@ -1021,11 +1027,17 @@ console.log(JSON.stringify({ rehomed: !!S.REHOMED, home: os.homedir(), real, bui
     goBR('shared1', named(BH2.shared)), goBR('shared2', named(BH2.shared)), goBR('shared3', named(BH2.shared)),
     start(NOTSUITE, brEnv(BH2.notsuite, { VS_AGENT_BROWSER_BROWSERS: BR_DIR, VS_AGENT_BROWSER_BIN: LA_WANT }), PROBE_LA(SCRATCH_URL), { clean: true })]);
   const ol = await goBR('oldlink', named(BH3.oldlink));
+  // r5102: the stamp compares the LIST of builds — the harness's own placement of OTHER builds is said, never taken for the same
+  const o0 = await goBR('other0', named(BH3.other)), OSTAMP = path.join(BH3.other, '.agent-browser', 'browsers', SM.BROWSERS_STAMP);
+  fs.writeFileSync(OSTAMP, JSON.stringify({ ...JSON.parse(fs.readFileSync(OSTAMP, 'utf8')), builds: ['chrome-150.0.0.0'] }));
+  const ob = await goBR('other', named(BH3.other));
   const ours = (j) => !!j && j.link === false && !!j.stamp && j.stamp.named === NAMED_REAL && (j.builds || []).includes(BUILD);
   ok(ours(p0 && p0.j) && ours(q1.j) && !!q1.j.placed && q1.j.placed.same === true && !/is there already|cannot take/.test(q1.err),
     'QUIET when what stands there IS this harness\'s placement of the named builds (a child of a named run, a sibling that placed it first: its stamp names the same folder): no line on stderr, the builds read', { j: q1.j, err: q1.err.slice(-300) });
   ok(!!ol.j && ol.j.link === true && !!ol.j.placed && ol.j.placed.at === null && !ol.j.placed.same && /is there already/.test(ol.err) && fs.lstatSync(path.join(BH3.oldlink, '.agent-browser', 'browsers')).isSymbolicLink(),
     'the RELEASE\'s link of the named folder, already in a home, is ANOTHER\'s folder: never covered, said by name, left as it stood', { j: ol.j && { link: ol.j.link, placed: ol.j.placed }, err: ol.err.slice(-300) });
+  ok(ours(o0 && o0.j) && !!ob.j && !!ob.j.placed && ob.j.placed.at === null && !ob.j.placed.same && /holds the harness\'s placement of other builds \(chrome-150\.0\.0\.0; the named folder now: chrome-151\.0\.7922\.34\)/.test(ob.err),
+    'THE STAMP COMPARES THE BUILDS (r5102): a home holding the harness\'s placement of OTHER builds than the named folder has now is said by name, both lists, and never taken for the same', { placed: ob.j && ob.j.placed, err: ob.err.slice(-300) });
   ok(!!q2.j && q2.j.real === null && !!q2.j.placed && q2.j.placed.at === null && /VS_AGENT_BROWSER_BROWSERS names .*cannot take it/.test(q2.err) && !/\n\s+at /.test(q2.err) && q2.status === 0,
     'a home that CANNOT take the link (its .agent-browser a file): none, said by the variable\'s name — never a stack trace, the suite goes on', { j: q2.j, err: q2.err.slice(-300), status: q2.status });
   ok(BR_RACE.present && ours(p1 && p1.j) && ours(q3.j) && !!q3.j.placed && q3.j.placed.same === true && q3.status === 0 && !/\n\s+at /.test(q3.err),
