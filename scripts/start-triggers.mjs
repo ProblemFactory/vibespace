@@ -106,7 +106,6 @@ export const ROWS = Object.freeze([
   ['src/server/desktop-access.js', 'launch[0]', 'long', 1, 'a desktop install'],
   ['src/server/engine-distribution.js', 'exe', 'start', 1, 'a browser kernel\'s --version, once per kernel file'],
   ['src/server/git-identity.js', "'git'", 'start', 1, 'a local create, ≤1 per 60 s until settled'],
-  ['src/server/mount-health-watch.js', 'process.execPath', 'timer', 1, 'a wedge episode of the 10 s canary'],
   ['src/server/mounts-plugins-wiring.js', "'ssh'", 'start', 2, 'the auto-graduation after an ssh connect (≤1 per machine per 6 h), a press'],
   ['src/server/mounts-plugins-wiring.js', "'ssh'", 'press', 1, 'a graduation removed'],
   ['src/server/oat-mint.js', 'file', 'press', 1, 'a long-lived token minted (a PTY)'],
@@ -151,7 +150,7 @@ export const SYNC_ROWS = Object.freeze([
     'macOS only, with active usage polling on (opt-in): ≤1 per 5 min (the 90 s timer under the global login floor) + a ⟳ press, ≤3 s, ON THE MAIN LOOP'],
 ]);
 /** THE DEBT: the sum of every timer row's count — it only shrinks (lower it when a row is lowered) */
-export const TIMER_DEBT_SUM = 13;   // B-323e's remainder (lane nl-starts): the boot restore's re-probe ladder rides the starter — 14 → 13. B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): the mount auto-reconnect's six (a CephFS connect's shim, mount and unmount, the rc socket's ask, the cache's witness, its old dir's removal) ride the starter — 20 → 14. B-323e's remainder (lane bl-chat-b, the coordinator's r2681 / r2689): the tailnet lookup, the copy's du, the agy poll and the CLI which ride the starter — 25 → 21; the person's login-shell look through the starter's session option — 21 → 20. 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
+export const TIMER_DEBT_SUM = 12;   // B-323e's remainder (lane nl-starts): the boot restore's re-probe ladder and the mount-health canary's scan of who presses a wedged mount ride the starter — 14 → 12. B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): the mount auto-reconnect's six (a CephFS connect's shim, mount and unmount, the rc socket's ask, the cache's witness, its old dir's removal) ride the starter — 20 → 14. B-323e's remainder (lane bl-chat-b, the coordinator's r2681 / r2689): the tailnet lookup, the copy's du, the agy poll and the CLI which ride the starter — 25 → 21; the person's login-shell look through the starter's session option — 21 → 20. 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
 /** a guard is a PLATFORM FACT — the OS, or /proc — never a setting, a flag, an env word */
 export const PLATFORM_GUARD = /^(?:[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)(?:\|[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)*$/;
 const NOT_PLATFORM = /setting|serverSetting|process\.env|\bflag\b|VS_[A-Z_]+|VIBESPACE_[A-Z_]+/i;
