@@ -534,12 +534,14 @@ function poolTiers({ creditsIds = null, payingIds = null, overageIds = null } = 
   const credits = creditsIds && (typeof creditsIds.has === 'function' ? creditsIds : new Set(creditsIds));
   const paying = new Set([...(payingIds || []), ...(overageIds || [])]);
   const tierOf = (id) => ((credits && credits.has(id)) ? TIER_CREDITS : paying.has(id) ? TIER_PAYING : TIER_QUOTA);
-  // orderOf(rows [{tier, live}], the walk's own candidates) → keyOf(tier): the order the tiers are asked in for THESE rows
+  // orderOf(rows [{tier, live}], the walk's own candidates) → keyOf(row): where a row stands in the order. RULE 3 (主开发 r4780): with
+  // a member paying, ONE order for every walk — a member that can serve now before every member that cannot (a tier with none that
+  // can is passed over, whichever tier), the tiers in order inside each half: ordinary, credits, paying that can serve; then credits
+  // and paying billing past their quota; then a walled ordinary member (the fallback alone keeps one, to park on). With nobody
+  // paying the key is the tier itself: every walk's order is the release's, byte for byte (I6).
   const orderOf = (rows) => {
-    const has = new Set(), live = new Set();
-    for (const r of rows || []) { has.add(r.tier); if (r.live) live.add(r.tier); }
-    const passed = (t) => t !== TIER_QUOTA && has.has(t) && !live.has(t) && [...live].some((u) => u > t);
-    return (t) => (passed(t) ? TIER_PAYING + 1 + t : t);
+    if (!(rows || []).some((r) => r.tier === TIER_PAYING)) return (r) => r.tier;
+    return (r) => (r.live ? r.tier : r.tier === TIER_QUOTA ? TIER_PAYING + 3 : r.tier + 2);
   };
   return { tierOf, orderOf, credits, paying };
 }
@@ -581,7 +583,7 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
   const order = priorityOrder(priority); // manual priority orders the snapshot too (the device walks it top-down)
   out.sort(order);
   const keyOf = tiers.orderOf([...lastTier.values()]);
-  last.sort((x, y) => (keyOf(lastTier.get(x).tier) - keyOf(lastTier.get(y).tier)) || order(x, y));
+  last.sort((x, y) => (keyOf(lastTier.get(x)) - keyOf(lastTier.get(y))) || order(x, y));
   return out.concat(last);
 }
 
@@ -772,6 +774,8 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // r4744 M2: «paying» in WHATEVER band its reading stands — a paying member in its soft band takes every paying path (the move to a
   // quota member that can settle, the prepaid move, the stays); only a member that can no longer serve leaves by the hard band
   const curPayingOnly = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(dead)));
+  // RULE 5 (r4780): a paying member that still TAKES turns (past its quota too: it bills) — it stays quietly with nowhere better
+  const curPayingTakes = curPaying && !(notMember || curLoginDead || curHeldWalled);
   const exhausted = notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(soft)) || curPaying;
   const hardDead = notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(dead));
   // No data on the current target → we cannot judge exhaustion; staying put is
@@ -985,10 +989,15 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // then the paying tier; a tier whose every row is spent is passed over when the other holds a row that can serve now. Each keeps its
   // hop guard: never between two spent credits members (the release's), never onto a spent paying member from one (r4714)
   const lastResort = !ranked.length && !nearRanked.length && hardDead;
-  const tierKey = tiers.orderOf([...creditsRanked.map((r) => ({ tier: TIER_CREDITS, live: !r.dead })), ...payingRanked.map((r) => ({ tier: TIER_PAYING, live: !r.dead }))]);
-  const creditsOk = creditsRanked.length > 0 && !(curCredits && creditsRanked[0].dead);
-  const payingOk = payingRanked.length > 0 && !(curPaying && payingRanked[0].dead);
-  const usingCredits = lastResort && creditsOk && !(payingOk && tierKey(TIER_PAYING) < tierKey(TIER_CREDITS));
+  const lastRows = [...creditsRanked.map((r) => ({ tier: TIER_CREDITS, live: !r.dead })), ...payingRanked.map((r) => ({ tier: TIER_PAYING, live: !r.dead }))];
+  const keyOf = tiers.orderOf(lastRows);
+  const bestKey = (t) => Math.min(...lastRows.filter((r) => r.tier === t).map(keyOf));
+  // RULE 4 (主开发 r4780): a member billing past its quota — a credits member (the release's own guard) or a paying one that still takes
+  // turns — leaves only for a tier holding a member that can serve now: never billed onto billed, WHICHEVER tiers (no ping-pong)
+  const curBilling = curCredits || curPayingTakes;
+  const creditsOk = creditsRanked.length > 0 && !(curBilling && creditsRanked[0].dead);
+  const payingOk = payingRanked.length > 0 && !(curBilling && payingRanked[0].dead);
+  const usingCredits = lastResort && creditsOk && !(payingOk && bestKey(TIER_PAYING) < bestKey(TIER_CREDITS));
   const usingPaying = lastResort && payingOk && !usingCredits;
   const pool = usingScraps ? nearRanked : usingCredits ? creditsRanked : usingPaying ? payingRanked : ranked;
   // B-87fd (1) THE RULING (主开发 r4711): a conversation already on a member BILLING PAID OVERAGE, with no quota member able to take it,
@@ -1005,7 +1014,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     if (prepaid) return toPrepaid(prepaid);
     // B-87fd (1): a member billing paid overage with NOWHERE to go stays — the release's own answer for it (it read healthy there):
     // 'healthy' to an ordinary decision, 'no-better' to a proactive scan — never a «no member can serve it»
-    if (curPayingOnly && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
+    if (curPayingTakes && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
     // A HEALTHY CURRENT MEMBER IS NEVER "NO MEMBER CAN SERVE IT" (2026-09-13).
     // On a HOT pool the candidate ranking runs PROACTIVELY — before anyone has
     // asked whether the current member is exhausted — so an empty candidate
@@ -1022,8 +1031,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // member is EXHAUSTED (soft or hard); otherwise this is an ordinary
     // proactive scan that found nowhere better — `no-better`, which the engine
     // renders as nothing at all.
-    if (curPayingOnly) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });   // B-87fd (1): a proactive scan on a paying member that found nowhere — the release's answer for it
+    if (curPayingTakes) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });   // B-87fd (1): a proactive scan on a paying member that found nowhere — the release's answer for it
     if (!exhausted) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
+    // RULE 5 (r4780): a member that can still serve, beside paying members only (a voluntary move never lands on one), stays quietly —
+    // never the pool's blocked verdict while a paying member takes turns
+    if (!hardDead && payingRanked.length) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...bucketDetail(curBr) });
     // THE PROVIDER, 'allow' (rule 2): nothing of this provider can take it and the current member cannot serve at all —
     // the COLD move to the held-apart member (another provider's: the model re-resolved; a fallback-only one: last)
     if (provOf && hardDead && !placing && xMode === 'allow' && crossRows.length) {
@@ -1044,6 +1056,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // THAT (the engine notices it once per 6 h per (pool, member)) and never
     // feed auto-resume's "no usable member left" clause with it.
     if (why === 'no-members' && curCredits) why = 'on-credits';
+    // RULE 5 (主开发 r4780): beside members that PAY, a credits member that stays (never billed onto billed) still serves on credits —
+    // say THAT, whatever else emptied the list (a lapsed member, say); with nobody paying the line above is the release's
+    if (curCredits && payingRanked.length && why !== 'all-rejected') why = 'on-credits';
     // THE OWNER'S DECISION (2026-09-28, "全B"): a conversation on a member the pool no longer LISTS, with
     // nobody to take it over, is NOT kept running on that member — whatever kind it is (a subscription, a
     // pay-per-use credits member). It STOPS after its current turn and waits at a wall (`removed-hold`):
@@ -1130,6 +1145,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // «no member can settle» (the engine files that as a blocked pool)
     if (!bestSettle && prepaid) return toPrepaid(prepaid);   // B-87fd (1) the ruling: no quota member can settle — the prepaid credits member, at its stop
     if (!bestSettle && curPayingOnly) return !proactive && !prioRank && !placing ? none('healthy', { fromRemaining: cur.known ? cur.remaining : null }) : none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true });
+    if (!bestSettle && payingRanked.length) return none('no-better', { fromRemaining: cur.known ? cur.remaining : null, noBetter: true, ...bucketDetail(curBr) });   // RULE 5 (r4780): it can still serve; nobody settles; a paying member takes turns
     if (!bestSettle) return none('no-settleable', { fromRemaining: cur.known ? cur.remaining : null, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...notBetterDetail(), ...bucketDetail(curBr) });
     // THE FIRST STOP (2026-09-22, owner: "软耗尽的话 热对话切走时机晚一点，普通10%，热对话
     // 的话就5%这样。如果一个对话到达了冷对话切走的标准但还热着，就在停下来的第一时间切走。").
@@ -1345,8 +1361,9 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
     rows.push({ id: m.id, at, tier: tiers.tierOf(m.id), rank: rank ? rank(m.id) : 0, i, ap });
   });
-  const keyOf = tiers.orderOf(rows.map((r) => ({ tier: r.tier, live: r.at === 0 })));
-  rows.sort((x, y) => (x.ap - y.ap) || (keyOf(x.tier) - keyOf(y.tier)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
+  for (const r of rows) r.live = r.at === 0;
+  const keyOf = tiers.orderOf(rows);
+  rows.sort((x, y) => (x.ap - y.ap) || (keyOf(x) - keyOf(y)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
   return rows.length ? rows[0].id : null;
 }
 
