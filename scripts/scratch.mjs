@@ -492,7 +492,12 @@ function placeBrowsers(home, me) {
   const stands = () => { try { fs.lstatSync(at); return true; } catch { return false; } };
   const thereAlready = () => {
     let st = null; try { st = JSON.parse(fs.readFileSync(path.join(at, BROWSERS_STAMP), 'utf8')); } catch { }
-    if (st && st.form === BROWSERS_FORM && st.named === real) return Object.freeze({ at: null, why: 'the named builds are placed there already', same: true });
+    const now = builds.map((x) => x.name);
+    if (st && st.form === BROWSERS_FORM && st.named === real && JSON.stringify(st.builds) === JSON.stringify(now)) return Object.freeze({ at: null, why: 'the named builds are placed there already', same: true });
+    if (st && st.form === BROWSERS_FORM && st.named === real) {   // 主开发 r5102: the harness's own placement of OTHER builds is said, never taken for the same
+      process.stderr.write(`[scratch] ${me}: ${at} holds the harness's placement of other builds (${(st.builds || []).join(', ') || 'none'}; the named folder now: ${now.join(', ')}) — ${DRIVER.browsersEnv} left unplaced\n`);
+      return Object.freeze({ at: null, why: `${at} holds other builds` });
+    }
     process.stderr.write(`[scratch] ${me}: ${at} is there already — ${DRIVER.browsersEnv} left unplaced\n`);
     return Object.freeze({ at: null, why: `${at} is there already` });
   };
