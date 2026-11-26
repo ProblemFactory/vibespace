@@ -22,6 +22,9 @@ const SH = require('../store-hold.js'); // B-225b (lane lg-store-writes): a stor
 // for a person's press, the start or a save the code bounds rare; nothing bounds how often a machine calls that door). The door runs
 // its call inside this scope (router.asMachineCall); every other settings write — a person's press, a timed raise's return, a
 // migration — is synced before its name moves (src/store-hold.js write)
+// (the round's should, wf_8f9d98c0: the scope is INHERITED by what the call starts — a timer or a child's callback armed inside a
+// plugin's config verb carries it for good, so a settings write from there is unsynced too; it began as the machine's call. A
+// person's press arrives on its own request chain and is never inside it)
 const MACHINE_CALL = new (require('async_hooks').AsyncLocalStorage)();
 const UO = require('../user-state-ops.js'); // PURE (lane sidebar-echo-order, inc-mwbn2xp8-ks0b): user state by item, in the server's order (stateRev within a life, stateEpoch)
 const { normalizeCustomThemes } = require('../custom-theme-normalize.js'); // PURE (lane cache-warmth-ramp r3): a value a theme derivation superseded is dropped at the store's ONE writer

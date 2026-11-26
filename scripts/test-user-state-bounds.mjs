@@ -163,7 +163,7 @@ const itemsIn = (p, b, st) => {
   const u = p === '/api/config/import' ? (((b.file || {}).sections || {}).userState || {}) : b;
   return [Object.keys(u).reduce((n, key) => n + itemsOf(u[key]), 0), Object.keys(u).reduce((n, key) => n + itemsOf(st[key]), 0)];
 };
-const add = Set.prototype.add, mset = Map.prototype.set, inc = Array.prototype.includes, iof = Array.prototype.indexOf, ren = fs.renameSync, lnk = fs.linkSync, wfs = fs.writeFileSync, str = JSON.stringify, slc = Array.prototype.slice;
+const add = Set.prototype.add, mset = Map.prototype.set, inc = Array.prototype.includes, iof = Array.prototype.indexOf, ren = fs.renameSync, lnk = fs.linkSync, wfs = fs.writeFileSync, str = JSON.stringify, slc = Array.prototype.slice, osy = fs.openSync, wsy = fs.writeSync, csy = fs.closeSync, usFd = Object.create(null);   // (r5185: the store hold's door writes ON A DESCRIPTOR — open, write, sync, close — its bytes counted too; a plain object, never a counted Set)
 const CB = ['filter', 'map', 'forEach', 'some', 'every', 'find', 'findIndex', 'reduce', 'flatMap'], cbOrig = CB.map((m) => Array.prototype[m]);
 let sets = 0, scans = 0, walks = 0, writes = 0, strBytes = 0, wrote = 0;
 const walked = (a, x, from) => { const s0 = Math.max(0, Math.trunc(Number(from) || 0)), i = iof.call(a, x, s0); return i < 0 ? Math.max(0, a.length - s0) : i - s0 + 1; };
@@ -172,10 +172,13 @@ const on = () => { Set.prototype.add = function (v) { sets++; return add.call(th
   fs.renameSync = function (a, b) { if (path.basename(String(b)) === 'user-state.json') writes++; return ren.call(fs, a, b); };
   fs.linkSync = function (a, b) { if (path.basename(String(b)) === 'user-state.json') writes++; return lnk.call(fs, a, b); };   // (B-225b: a list NOT THERE is created exclusively — its first write is a link)
   fs.writeFileSync = function (f, d, o) { if (path.basename(String(f)).startsWith('user-state.json')) wrote += typeof d === 'string' ? d.length : d && d.length ? d.length : 0; return wfs.call(fs, f, d, o); };
+  fs.openSync = function (f, ...a) { const fd = osy.call(fs, f, ...a); if (path.basename(String(f)).startsWith('user-state.json')) usFd[fd] = 1; return fd; };
+  fs.writeSync = function (fd, ...a) { const n = wsy.call(fs, fd, ...a); if (usFd[fd] === 1) wrote += n; return n; };
+  fs.closeSync = function (fd, ...a) { delete usFd[fd]; return csy.call(fs, fd, ...a); };
   JSON.stringify = function (...a) { const t = str.apply(JSON, a); if (typeof t === 'string') strBytes += t.length; return t; };
   CB.forEach((m, j) => { const o = cbOrig[j]; Array.prototype[m] = function (cb, ...a) { const f = typeof cb === 'function' ? function (...x) { walks++; return cb.apply(this, x); } : cb; return o.call(this, f, ...a); }; });
   Array.prototype.slice = function (...a) { const r = slc.apply(this, a); walks += r.length; return r; }; };
-const off = () => { Set.prototype.add = add; Map.prototype.set = mset; Array.prototype.includes = inc; Array.prototype.indexOf = iof; fs.renameSync = ren; fs.linkSync = lnk; fs.writeFileSync = wfs; JSON.stringify = str;
+const off = () => { Set.prototype.add = add; Map.prototype.set = mset; Array.prototype.includes = inc; Array.prototype.indexOf = iof; fs.renameSync = ren; fs.linkSync = lnk; fs.writeFileSync = wfs; fs.openSync = osy; fs.writeSync = wsy; fs.closeSync = csy; JSON.stringify = str;
   CB.forEach((m, j) => { Array.prototype[m] = cbOrig[j]; }); Array.prototype.slice = slc; };
 // B-0248 (c): the child's route lands each write at its call (the store writer's contract, no latency), as the release's write at the call did
 const landingWriter = () => ({ dirty(lwFile, o) { const b = o.produce(), parts = Array.isArray(b) ? b : [b], lwTmp = lwFile + '.lw.tmp'; for (let i = 0; i < parts.length; i++) fs.writeFileSync(lwTmp, parts[i], { flag: i ? 'a' : 'w' }); fs.renameSync(lwTmp, lwFile); if (o.onWritten) o.onWritten(true, null); }, durable(lwFile, o) { if (o && o.answer) o.answer(true); return Promise.resolve(true); }, pending: () => false, flushSync: () => ({ written: [], left: [] }), whyNotDurable: () => null });

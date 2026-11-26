@@ -189,11 +189,11 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
         // adopted all the same; only a file that arrives inside that instant is not seen (a create with no link has no exclusive door)
         if (!(e && NO_LINK.has(e.code))) { try { fs.unlinkSync(tmp); } catch { /* gone */ } throw e; }
         if (fs.existsSync(file)) throw appeared();
-        fs.renameSync(tmp, file);
+        try { fs.renameSync(tmp, file); } catch (e2) { try { fs.unlinkSync(tmp); } catch { /* gone */ } throw e2; }   // (a rename that fails leaves no temp)
       }
       if (linked) { try { fs.unlinkSync(tmp); } catch { /* the link stands */ } }
       missing = false;
-    } else fs.renameSync(tmp, file);
+    } else { try { fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { /* gone */ } throw e; } }   // r5185's round (wf_8f9d98c0): a rename that FAILS leaves no temp behind — the old file stands, the error thrown by its code
     value = next; text = null;
     return true;
   }
