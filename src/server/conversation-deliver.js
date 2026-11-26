@@ -809,6 +809,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // jobs store writes through the store writer): gone from the park in memory (no taker here sees them), STILL in its file until
   // the producer's landing — a kill first finds the park's copy, never neither (the step that cannot be undone rides the landing)
   const handing = new Set();
+  let parkFailing = null, parkRetryTimer = null;   // r5164 (2): a failed park write, said once a spell; its own retry clock
   const writeRetryNow = () => {
     if (retryHeld) {   // B-f276's remainder: the file could not be read — NOTHING is written over it (said once a hold)
       if (!retryHeld.saidWrite) { retryHeld.saidWrite = true; log('[deliver] the retry park is not written: data/msg-retry.json is HELD (it could not be read) — nothing is written over it until it reads; what is parked now lives in memory'); }
@@ -817,8 +818,23 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const [cid, q] of Object.entries(retry)) if (!Array.isArray(q) || !q.length) delete retry[cid];
     let out = retry;
     if (handing.size) { out = { ...retry }; for (const e of handing) out[e.cid] = [...(out[e.cid] || []), e]; }
-    try { fs.writeFileSync(retryFile + '.tmp', JSON.stringify(out)); fs.renameSync(retryFile + '.tmp', retryFile); return true; }
-    catch (e) { log('[deliver] retry park persist failed:', e.message); return false; }
+    try {
+      fs.writeFileSync(retryFile + '.tmp', JSON.stringify(out)); fs.renameSync(retryFile + '.tmp', retryFile);
+      if (parkFailing) { log(`[deliver] the retry park is on disk again (${parkFailing.n} failed write${parkFailing.n === 1 ? '' : 's'} since ${new Date(parkFailing.at).toISOString()})`); parkFailing = null; }
+      if (parkRetryTimer) { clock.clearTimeout(parkRetryTimer); parkRetryTimer = null; }   // healed by another write: no retry left behind
+      return true;
+    } catch (e) {
+      // 主开发 r5164 (2), a silence of the release: the park's failed write was a log line at every call with NO retry clock (the stash has
+      // its own 30 s one). Now said ONCE A SPELL with what it holds, and written again on its own clock — the stash's form
+      if (!parkFailing) {
+        parkFailing = { at: clock.now(), n: 0 };
+        const n = Object.values(out).reduce((k, q) => k + (Array.isArray(q) ? q.length : 0), 0);
+        log(`[deliver] the retry park could not be saved to disk (${(e && e.message) || e}) — its ${n} parked entr${n === 1 ? 'y is' : 'ies are'} held in memory only: ${retryClosed ? 'the stop\'s own write, so they are lost with this stop' : `lost if VibeSpace restarts before it is written; written again every ${STASH_RETRY_MS / 1000} s`} (counted at this first failure)`);
+      }
+      parkFailing.n++;
+      if (!parkRetryTimer && !retryClosed) parkRetryTimer = clock.setTimeout(() => { parkRetryTimer = null; if (!retryClosed) writeRetryNow(); }, STASH_RETRY_MS);   // the park's own clock (unref'd); never after the stop
+      return false;
+    }
   };
   // THE MERGES ARE COALESCED (the manager design's piece 7, 主开发 12:46Z: a storm of thirty results did thirty whole-file writes
   // in a row on the main thread): a delivery that RIDES an owed wake is written once per 50 ms; the first park and the in-flight
@@ -1947,6 +1963,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // line 494's follow (r2695 (2)): A STOP WHILE HELD — what was parked in memory is not written (the file is kept as it is): said, with its count
     if (retryHeld) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); if (n) log(`[deliver] the retry park stops HELD (data/msg-retry.json could not be read): ${n} deliver${n === 1 ? 'y' : 'ies'} parked during the hold lived in memory only and ${n === 1 ? 'is' : 'are'} not written — the file is kept as it is`); }
     flushRetryWrite();
+    // r5164 (2): a failing park's retry clock ends at the stop with ITS last write (closeRetries is reached after retryClosed: no timer after
+    // it); a last write that fails is said by name — what memory alone held is lost with this stop
+    if (parkRetryTimer) { clock.clearTimeout(parkRetryTimer); parkRetryTimer = null; }
+    if (parkFailing && !retryHeld && !writeRetryNow()) { const n = Object.values(retry).reduce((a, q) => a + (Array.isArray(q) ? q.length : 0), 0); log(`[deliver] the retry park stops NOT on disk: its last write failed — ${n} parked entr${n === 1 ? 'y' : 'ies'} held in memory only ${n === 1 ? 'is' : 'are'} lost with this stop`); }
     if (parkTimer) { clock.clearTimeout(parkTimer); parkTimer = null; }
   }
   function retryInFlightCount() { return retryInFlight.size; }
