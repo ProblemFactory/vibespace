@@ -1501,7 +1501,7 @@ console.log('\n⑳ r5: the floor notice latches on DELIVERY · the conversation 
   ok(b.record(BB.conversationIdOf(meta), meta.browserKey) === true, 'the first record WRITES (this is the call session-stdout.writeSessionMeta makes)');
   ok(b.record(conv, KEY) === false, 'the same binding again writes NOTHING (a session writes its meta dozens of times per turn)');
   ok(b.file === path.join(e.ENV_DIR, 'bindings.json'), `the store lives in the directory browser-env owns (${path.relative(DATA, b.file)})`);
-  ok((fs.statSync(b.file).mode & 0o777) === 0o600, 'and it is 0600 like every file beside it');
+  ok(b.landed() && (fs.statSync(b.file).mode & 0o777) === 0o600, 'and it is 0600 like every file beside it (on disk once the store writer landed it — B-574d browser-stores)');
   fs.unlinkSync(metaFile);
   ok(e.priorKeyFor(conv) === KEY, 'THE FINDING: with the meta file UNLINKED (what the ws kill and the pty-exit path do), priorKeyFor still answers the conversation\'s key');
   ok(B.browserKeyFor({ prior: e.priorKeyFor(conv), resume: true, fork: false, mint: () => 'bk-ffffffff' }).origin === 'conversation', '…so the ladder says `conversation`, not `resume-unknown`');
