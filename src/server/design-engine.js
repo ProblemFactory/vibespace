@@ -6,7 +6,7 @@
  * this module is everything the hub does about them:
  *
  *   REGISTRY   data/designs.json `{designs: [{id, sessionId, conversationId, host, dir, title, createdAt, openedAt}]}`,
- *              one row per (host, dir), written through writeJsonAtomic (async, serialized), a `designs-updated`
+ *              one row per (host, dir), written through the store writer (B-574d: off the loop, synced), a `designs-updated`
  *              broadcast on every write. `host` null = this machine (a PARAMETER, never a branch above the reader).
  *   READ       `read(host, dir)` = ONE operation per machine through ONE implementation, src/design-fs.js (dc-twins M1):
  *              async, bounded fs reads (readdir, then each file through an O_NOFOLLOW handle — a symlink is never
@@ -108,12 +108,6 @@ const STATUS = Object.freeze({
   no_system: 404, no_default: 404, ambiguous: 409, no_tokens: 409, bad_tokens: 400,   // lane design-systems-home
 });
 const fail = (code, error, extra = {}) => ({ ok: false, code, error, ...extra });
-
-async function writeJsonAtomic(file, obj) {
-  const tmp = file + '.tmp-' + process.pid;
-  await fs.promises.writeFile(tmp, JSON.stringify(obj, null, 2));
-  await fs.promises.rename(tmp, file);
-}
 
 /** A folder as the caller names it → its normalized absolute posix path, or null. */
 function dirOf(raw) {
@@ -222,6 +216,7 @@ function create({
   pollMs = POLL_MS,
   serverSetting = () => undefined,   // lane design-systems-home: `design.defaultSystem`
   onDesign = () => { },              // lane artifacts-registries: every registry write → its conversation's `design` row (src/server/artifact-registry.js)
+  writer = null,                     // B-574d: the store writer designs.json is written by (a suite's stand-in; else the process's)
 } = {}) {
   const fsp = fs.promises;
   const storeFile = path.join(dataDir, 'designs.json');
@@ -246,13 +241,18 @@ function create({
   const heldFail = () => fail('designs_unread', hold.words(), { status: 503 });   // a change refused by name while held
   /** r3104 (a): a design looked up in the list — while held its absence is UNREAD: the hold's words, never «not a registered design» */
   const unregistered = (msg) => (hold.held() ? heldFail() : fail('not_registered', msg));
-  let saving = Promise.resolve();
-  const save = () => {
+  // B-574d (r4725, lane lg-group-parents): data/designs.json through THE STORE WRITER (src/store-writer.js: queued, off the main loop,
+  // atomic, synced) — its own unsynced temp + rename is gone. Written on every open (an agent's at its own cadence), Rename, Remove,
+  // ask and answer; the bytes are made AT THE WRITE from memory (the latest list: a burst is one write). A failed write is the
+  // writer's own line and stays owed (written again). Held: nothing is asked (nothing written over the unread file).
+  // `flush()` (the suites' wait): the list owed now ON DISK → true; false when its write failed or passed the writer's bound.
+  const W = () => writer || require('../store-writer.js').storeWriter();
+  function save() {
     if (!hold.writable('a design list change')) return;   // held: nothing written over it
-    const snap = { designs: store.designs.map((r) => ({ ...r })) };
-    saving = saving.then(() => writeJsonAtomic(storeFile, snap)).catch((e) => log('[design] registry save failed:', e.message));
-    return saving;
-  };
+    try { W().dirty(storeFile, { name: 'designs.write', produce: () => JSON.stringify({ designs: store.designs }, null, 2) }); }   // store-timing's row (src/timed-sync.js)
+    catch (e) { log('[design] registry save failed:', e.message); }
+  }
+  const flush = () => { try { return Promise.resolve(W().durable(storeFile)).then((ok) => !!ok, () => false); } catch { return Promise.resolve(false); } };
   const pub = (r) => ({ id: r.id, sessionId: r.sessionId || null, conversationId: r.conversationId || null, host: r.host || null, dir: r.dir, title: r.title || '', kind: r.kind === 'system' ? 'system' : 'design', createdAt: r.createdAt, openedAt: r.openedAt, ...(r.via ? { via: r.via } : {}) });
   const find = (host, dir) => store.designs.find((r) => (r.host || null) === (host || null) && r.dir === dir) || null;
   const notify = (row, extra = {}) => {
@@ -971,7 +971,7 @@ function create({
     ask, pendingAsk, answer, preview, previewLink, previewByTicket,
     tweaks, setTweaks, requestTweaks,
     systems, defaultSystem, systemTokens, rename, unlist, agentSystems, agentSystemTokens,   // lane design-systems-home
-    flush: () => saving, _watches: watches, STATUS, heldWords: () => hold.words(), _hold: hold,
+    flush, _watches: watches, STATUS, heldWords: () => hold.words(), _hold: hold,
     pagesHeldWords: () => { const p = getPublishedPages(); return p && typeof p.heldWords === 'function' ? p.heldWords() : null; },   // r3107: a design's page fact is unread while the pages list is held
   };
 }

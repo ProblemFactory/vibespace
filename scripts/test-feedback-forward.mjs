@@ -56,6 +56,11 @@ const express = require('express');
 const { Auth } = require(path.join(REPO, 'src/auth.js'));
 const FS = require(path.join(REPO, 'src/server/feedback-store.js'));
 const FW = require(path.join(REPO, 'src/server/feedback-forward.js'));
+// B-574d (主开发 r4730): data/feedback-outbox.json is THE STORE WRITER's — a send attempt's save lands paced. This suite reads the file
+// right after a pass, starts an instance again over it and edits it by hand: every outbox save here LANDS on the suite's thread (the
+// process's writer, its synchronous flush of that one file); the deferred landing's own windows are scripts/test-registry-writes.mjs's
+const SWm = require(path.join(REPO, 'src/store-writer.js'));
+const LANDS = { dirty: (f, o) => { const w = SWm.storeWriter(); w.dirty(f, o); w.flushSync([f]); }, flushSync: (names, o) => SWm.storeWriter().flushSync(names, o), durable: (f, o) => SWm.storeWriter().durable(f, o) };
 const FFM = require(path.join(REPO, 'src/feedback-forward-model.js'));
 const PT = require(path.join(REPO, 'src/peer-text.js'));
 const { collectorVerdict } = require(path.join(REPO, 'src/telemetry.js'));
@@ -101,7 +106,7 @@ async function instance(name, { collector = '', target = null, dir = null, port 
   app.use(auth.middleware());
   const json = express.json({ limit: '50mb' });
   app.use((req, res, next) => (OWN_BODY_RE.test(req.path) ? next() : json(req, res, next)));
-  I.fw = FW.create({ dataDir, target: () => (target ? target(I) : {}), instance: () => ({ name, version: I.version }), applyMarks: (m) => I.store.applyMarks(m), backlog: () => I.store.list().reports, personSet: () => personSet, userTodos: todos, fetch: counting(name), now: () => clock, ...fakeT, log: (...a) => I.logs.push(a.join(' ')) });
+  I.fw = FW.create({ dataDir, writer: LANDS, target: () => (target ? target(I) : {}), instance: () => ({ name, version: I.version }), applyMarks: (m) => I.store.applyMarks(m), backlog: () => I.store.list().reports, personSet: () => personSet, userTodos: todos, fetch: counting(name), now: () => clock, ...fakeT, log: (...a) => I.logs.push(a.join(' ')) });
   I.store = FS.create({ dataDir, now: () => clock, onNew: (row) => I.fw.enqueue(row) });
   I.token = 'vsst_' + crypto.createHash('sha256').update(name).digest('hex');
   const sessions = new Map([['w-' + name, { agentToken: I.token, name: 'lane ' + name, _nameExplicit: true, backend: 'claude', claudeSessionId: 'cid-' + name, cwd: '/w', _initialGroupId: 'T-1' }]]);
@@ -279,7 +284,7 @@ console.log('⑧ no forward target ⇒ nothing queued');
   const pn = await N.fw.pump(), qn = await N.fw.pullMarks();
   ok(rn.status === 200 && N.fw.facts().queued === 0 && !fs.existsSync(N.fw.file) && pn.sent === 0 && qn.why === 'no_target' && !requests.some(([t]) => t === 'pod-quiet'), 'filed, answered, nothing queued, no outbox file, no request, no pull', { facts: N.fw.facts(), qn });
   for (const [label, tgt] of [['a URL without a token', { url: 'https://hub.example/api/telemetry/ingest', token: '' }], ['a token without a URL', { url: '', token: TOK }], ['a URL that is not http(s)', { url: 'ftp://hub.example/x', token: TOK }]]) {
-    const F = FW.create({ dataDir: N.dataDir, target: () => tgt, now: () => clock, ...fakeT });
+    const F = FW.create({ dataDir: N.dataDir, writer: LANDS, target: () => tgt, now: () => clock, ...fakeT });
     ok(F.enqueue({ id: 'fb-00000000dd', text: 'x' }).why === 'no_target' && !fs.existsSync(F.file), `${label} ⇒ no target (nothing queued)`);
   }
   await N.close();
@@ -521,7 +526,7 @@ console.log('⑪ THE NO-DOOR PAUSE (lane feedback-forward-404): the target is a 
     const day = async (Mod, tag) => {
       const d = path.join(scratchDir('feedback-forward-ctl-' + tag), 'data');
       fs.mkdirSync(d, { recursive: true }); dirs.push(path.dirname(d));
-      const F = Mod.create({ dataDir: d, target: () => colTarget, instance: () => ({ name: tag, version: '2.369.331' }), fetch: counting(tag), now: () => clock, ...fakeT, log: () => { } });
+      const F = Mod.create({ dataDir: d, writer: LANDS, target: () => colTarget, instance: () => ({ name: tag, version: '2.369.331' }), fetch: counting(tag), now: () => clock, ...fakeT, log: () => { } });
       F.enqueue({ id: 'fb-00000000f1', text: 'one report', at: clock });
       const t0c = clock;
       for (; clock < t0c + DAY - 60e3; clock += 60e3) await F.pump();

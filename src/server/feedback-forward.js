@@ -1,7 +1,7 @@
 'use strict';
 // AGENT FEEDBACK — THE ORIGIN'S FORWARD (lane feedback-forward; the rules are src/feedback-forward-model.js). Every NEW
 // report this instance files (feedback-store `onNew` — a repeat that only bumps a count is not new) goes to the outbox
-// (data/feedback-outbox.json, written whole through tmp + rename before anything is sent) when the instance has a
+// (data/feedback-outbox.json, written whole by the store writer — B-574d: the report queued is on disk before anything is sent) when the instance has a
 // forward target (`target()` = the telemetry forward URL + token: settings first, then the VIBESPACE_TELEMETRY_FORWARD_*
 // env the fleet pods carry). No target ⇒ nothing is queued and nothing is sent. The pump sends the due reports ONE at a
 // time, oldest first, to the hub's POST /api/feedback/forward (bearer = the forward token; X-VibeSpace-Feedback-Origin =
@@ -37,19 +37,22 @@ const keyIdOf = (key) => crypto.createHash('sha256').update(String(key)).digest(
 /** a failed request in a word: timeout / the socket's code / its message */
 const failWord = (err) => (err && err.name === 'TimeoutError' ? 'timeout' : String((err && (err.code || err.message)) || 'unreachable'));
 
-function writeJsonAtomic(file, obj) {
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj), { mode: 0o600 });
-  fs.renameSync(tmp, file);
-}
-
 /** deps: dataDir; target() → {url, token}; instance() → {name, version}; applyMarks(marks) → {applied} (the store's);
  *  backlog() → the OPEN own reports (public rows) the first target forwards once;
  *  lane feedback-forward-404: personSet() → the target is THIS instance's setting (a person's), not the cluster's env;
  *  userTodos → the For-you store (or a getter of it) the no-door notice is filed in;
  *  fetch / now / setTimeout / clearTimeout / log injectable (the suite runs two instances in one process on a fake clock) */
-function create({ dataDir, target = () => ({}), instance = () => ({}), applyMarks = () => ({ applied: 0 }), backlog = () => [], personSet = () => false, userTodos = null, fetch = globalThis.fetch, now = () => Date.now(), setTimeout: setT = setTimeout, clearTimeout: clearT = clearTimeout, log = () => { } }) {
+function create({ dataDir, target = () => ({}), instance = () => ({}), applyMarks = () => ({ applied: 0 }), backlog = () => [], personSet = () => false, userTodos = null, fetch = globalThis.fetch, now = () => Date.now(), setTimeout: setT = setTimeout, clearTimeout: clearT = clearTimeout, log = () => { }, writer = null }) {
   const file = path.join(dataDir, 'feedback-outbox.json');
+  // B-574d (主开发 r4725 / r4730, lane lg-group-parents): data/feedback-outbox.json through THE STORE WRITER (src/store-writer.js: queued,
+  // off the loop, atomic, synced) — it is written at every send attempt that backs off, a cadence on the hub's loop; its own unsynced
+  // temp + rename is gone and the bytes are made AT THE WRITE from memory. TWO WRITES LAND BEFORE THEIR CALL RETURNS (the writer's
+  // synchronous flush of this one file, bounded): a report QUEUED (enqueue, the backfill, the lift's owed ones — a crash after it never
+  // loses it from the outbox) and a NEW ORIGIN KEY (no request names a key that is not on disk: a restart would mint another, and the
+  // maintainers' hub would take the open reports again as another origin's). A send's removal lands PACED: a crash before it sends
+  // that report again at the next start, and the hub answers it as the record it already made (the same key, the same id: duplicate)
+  const W = () => writer || require('../store-writer.js').storeWriter();
+  let keyOwed = false;   // a minted origin key not yet on disk: nothing is sent until it lands
   let state = { v: 1, key: null, queue: [], sent: 0, dropped: 0, refused: 0, fails: 0, holdUntil: 0, marksSince: 0, marksAt: 0, backfilled: false, pause: null, targetVersion: null, lost: [] };
   const str = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
   const pauseOf = (p) => (p && typeof p === 'object' && typeof p.door === 'string' && p.door
@@ -86,7 +89,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
       const derived = open1.filter((r) => r && r.id && r.status !== 'handled' && !r.origin && Number(r.at) > since && !queued.has(r.id) && !lost.has(r.id));
       const rows = [...new Map([...owed.splice(0), ...derived].map((r) => [r.id, r])).values()];
       if (doors()) for (const row of rows) if (!state.queue.some((x) => x.id === row.id)) push(row);
-      if (state.queue.length) { key(); save(); }
+      if (state.queue.length) { key(); save({ land: true }); }   // B-574d: the owed reports queued are on disk before the lift goes on
       schedule();
     },
   });
@@ -94,7 +97,17 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     const a0 = SR.storeAnswer(read, { valid: OUTBOX_SHAPE });
     if (hold.start(a0) === 'data') state = fromRaw(a0.value); }
   let timer = null, marksTimer = null, pumping = null, pulling = null, stopped = false;
-  const save = () => { if (!hold.writable('the feedback outbox')) return false; try { writeJsonAtomic(file, state); return true; } catch (e) { log('[feedback] data/feedback-outbox.json not written:', e.message); return false; } };
+  function save({ land = false } = {}) {
+    if (!hold.writable('the feedback outbox')) return false;
+    try { W().dirty(file, { name: 'feedback-outbox.write', mode: 0o600, produce: () => JSON.stringify(state) }); }   // store-timing's row (src/timed-sync.js)
+    catch (e) { log('[feedback] data/feedback-outbox.json not written:', e.message); return false; }
+    if (!land) return true;
+    try {
+      const w = W(), r = typeof w.flushSync === 'function' ? w.flushSync([file]) : null;
+      if (r && r.left && r.left.length) { log('[feedback] data/feedback-outbox.json not on disk yet:', r.left.map((x) => x.why).join('; '), '— the writer writes it again'); return false; }
+      return true;
+    } catch (e) { log('[feedback] data/feedback-outbox.json not written:', e.message); return false; }
+  }
   const doors = () => {
     const t = target() || {};
     const token = String(t.token || '').trim();
@@ -103,7 +116,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
   };
   const key = () => {
     if (!state.key && hold.held()) return null;   // held: never a new origin key over an unread one
-    if (!state.key) { state.key = 'fk_' + crypto.randomBytes(32).toString('base64url'); save(); }
+    if (!state.key) { state.key = 'fk_' + crypto.randomBytes(32).toString('base64url'); keyOwed = !save({ land: true }); }   // B-574d: on disk before any request names it
     return state.key;
   };
   const headers = (d) => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${d.token}`, [HEADER]: key() });
@@ -189,7 +202,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     for (const r of rows) push(r);
     state.backfilled = true;
     key();
-    save();
+    save({ land: true });   // B-574d: the reports queued are on disk before the call returns
     if (rows.length) log(`[feedback] ${rows.length} open report(s) filed before a forward target queued for the maintainer hub`);
     return rows.length;
   };
@@ -201,7 +214,7 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
     backfillOnce();
     push(row);
     key();
-    save();
+    save({ land: true });   // B-574d: a report queued is on disk before the call returns (a crash after it never loses it)
     schedule();
     return { queued: true };
   };
@@ -218,6 +231,8 @@ function create({ dataDir, target = () => ({}), instance = () => ({}), applyMark
           if (paused(d) || !d || stopped || now() < state.holdUntil) break;   // paused: no request till the re-probe
           const item = state.queue.slice().sort((a, b) => (Number(a.firstAt) || 0) - (Number(b.firstAt) || 0))[0];
           if (!item) break;
+          key();   // B-574d: a NEW origin key is on disk before any request names it
+          if (keyOwed && (keyOwed = !save({ land: true }))) { log('[feedback] the origin key is not on disk yet — no report is sent until it is'); state.holdUntil = now() + FF.backoffMs(1); break; }
           const probe = claimProbe();
           let status = 0, why = '';
           try {

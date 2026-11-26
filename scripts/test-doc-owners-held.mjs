@@ -27,6 +27,7 @@ const DE = require('../src/server/doc-engine.js');
 const CD = require('../src/server/conversation-deliver.js');
 const AR = require('../src/server/artifact-registry.js');
 const HOLD = require('../src/store-read-hold.js');
+const SW = require('../src/store-writer.js');   // B-574d (r4725): the memo is the store writer's — a write lands at its landing, not at the call
 const { registerDocRoutes } = require('../src/routes/doc.js');
 const quiet = { log() { }, warn() { } };
 const CID = '5b0c2e8a-7d1f-4c3e-9a61-0d2f8b7c6e15';
@@ -77,6 +78,7 @@ console.log('H1 the owner memo unreadable at the start: held — the doors say t
   ok(!!(o.body && o.body.owner === null && o.body.hold && o.body.hold.code === 'doc_owners_unread' && o.body.hold.i18n && o.body.hold.i18n.key), 'H1 — THE LAW (the page\'s view): GET /api/doc/owner answers the hold where the strip would say «no conversation»', o.body);
   w.live.owner = { path: '/w/OTHER.md', cid: 'c-live' };   // a lookup that NOTES: a live registry owner and a new holder of another document
   const n = w.call('GET', '/api/doc/owner', { query: { path: '/w/OTHER.md' } });
+  SW.storeWriter().flushSync([w.file]);   // B-574d: anything the lookup asked of the writer lands NOW — a write over the held file would be on disk before the read
   let after = null; w.unplace(); try { after = fs.readFileSync(w.file, 'utf8'); } catch { after = null; }
   ok(!!(n.body && n.body.owner && after === MEMO), 'H1 — THE LAW (held: nothing written over): a lookup that finds a live owner and a new holder answers it, and the unread file keeps its bytes', { owner: n.body && n.body.owner, fileKept: after === MEMO });
   const lifted = await HOLD.readAgainOf('doc-owners.json');   // the read again (the hold's own ladder, asked now): the refusal gone

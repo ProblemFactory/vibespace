@@ -51,10 +51,10 @@ const memoShape = (j) => !!j && typeof j === 'object' && !Array.isArray(j);
  *  activeSessions AND unlinks its data/session-meta file, src/server/session-stdout.js onExit, so a window opened from a
  *  chat that later stopped named a session nobody knew and its comments were refused as `no_owner`). Every owner the
  *  engine resolves while it lives is remembered: the window's `from` session → its conversation, a registry-owned
- *  document → its conversation. Durable in data/doc-owners.json (tmp+rename, written only when a mapping is new or
+ *  document → its conversation. Durable in data/doc-owners.json (the store writer's, written only when a mapping is new or
  *  moves; the oldest fall off past MEMO_CAP each), so a stop — or a restart after it — keeps the addressee. Ids and
  *  paths only, never words. A session never seen live stays unknown ⇒ `no_owner`. */
-function ownerMemo({ dataDir = null, log = () => { } } = {}) {
+function ownerMemo({ dataDir = null, log = () => { }, writer = null } = {}) {
   const file = dataDir ? nodePath.join(dataDir, 'doc-owners.json') : null;
   const fromRaw = (j) => ({ s: j.s && typeof j.s === 'object' ? j.s : {}, d: j.d && typeof j.d === 'object' ? j.d : {}, h: j.h && typeof j.h === 'object' ? j.h : {} });
   let m = { s: {}, d: {}, h: {} };
@@ -71,11 +71,16 @@ function ownerMemo({ dataDir = null, log = () => { } } = {}) {
   const isHeld = () => !!(hold && hold.held());
   const load = () => m;
   const trim = (o) => { const k = Object.keys(o); if (k.length > MEMO_CAP) k.sort((a, b) => (o[a].at || 0) - (o[b].at || 0)).slice(0, k.length - MEMO_CAP).forEach((x) => delete o[x]); };
-  const save = () => {
+  // B-574d (r4725, lane lg-group-parents): data/doc-owners.json through THE STORE WRITER (src/store-writer.js: queued, off the main
+  // loop, atomic, synced) — its own unsynced temp + rename on the loop is gone. Written at a cadence (every lookup that sees an owner
+  // or a holder move); the bytes are made AT THE WRITE from memory (the latest memo: a burst is one write). A failed write is the
+  // writer's own line and stays owed (written again). Held: nothing is asked (nothing written over the unread file).
+  const W = () => writer || require('../store-writer.js').storeWriter();
+  function save() {
     if (!file || (hold && !hold.writable('a document owner noted'))) return;   // held: nothing is written over the unread file
-    try { fs.mkdirSync(nodePath.dirname(file), { recursive: true }); fs.writeFileSync(file + '.tmp', JSON.stringify(m)); fs.renameSync(file + '.tmp', file); }
+    try { W().dirty(file, { name: 'doc-owners.write', makeDir: true, produce: () => JSON.stringify(m) }); }   // store-timing's row (src/timed-sync.js)
     catch (e) { log('[doc] doc-owners.json not written:', e.message); }
-  };
+  }
   /** A live owner → remembered (sid → cid; docKey → {cid, sid}). Writes only when something moved. */
   function note({ sessionId, conversationId }, docKey = null, at = Date.now()) {
     if (!conversationId || isHeld()) return;   // held: no note reaches the memo (its lift loads the file's own rows)
@@ -118,8 +123,8 @@ function ownerMemo({ dataDir = null, log = () => { } } = {}) {
   return { note, of, noteHolders, convOf, held, file, hold: hold_, stop: () => { if (hold && typeof hold.stop === 'function') hold.stop(); } };
 }
 
-function create({ activeSessions = new Map(), getDeliver = () => null, sendUserInput = null, artifacts = null, dataDir = null, now = () => Date.now(), log = () => { } } = {}) {
-  const memo = ownerMemo({ dataDir, log });
+function create({ activeSessions = new Map(), getDeliver = () => null, sendUserInput = null, artifacts = null, dataDir = null, now = () => Date.now(), log = () => { }, writer = null } = {}) {
+  const memo = ownerMemo({ dataDir, log, writer });
   const docKeyOf = (host, path) => (hostOf(host) || 'local') + '\u0001' + String(path || '');
   /** The conversation that owns the file: the registry's row, else the window's `from` chat, else (stopped) the one
    *  either of those named while it lived. → {sessionId, conversationId, via: 'registry'|'from'|'stopped'} | null */

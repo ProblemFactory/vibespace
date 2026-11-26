@@ -30,6 +30,11 @@ const DE = require(ENGINE);
 const CD = require('../src/server/conversation-deliver.js');
 const AR = require('../src/server/artifact-registry.js');
 const { drainStashUnderCap } = require('../src/agent-routes.js');
+// B-574d (r4725): the memo is THE STORE WRITER's (src/store-writer.js — queued, off the loop): a note is on disk at its landing, not
+// at the call. A RESTART here is the hub's STOP, whose exit flush lands every owed store; so before a fresh engine reads the folder,
+// and before the suite reads the file, the process's writer lands the memo (its synchronous flush, this file only)
+const SW = require('../src/store-writer.js');
+const landed = (dir) => SW.storeWriter().flushSync([path.join(dir, 'doc-owners.json')]);
 const quiet = { log() { }, warn() { } };
 const CID = '5b0c2e8a-7d1f-4c3e-9a61-0d2f8b7c6e15', CID2 = '9e4a1b3c-2d5f-4e6a-8b7c-1f0e2d3c4b5a';
 const DOC = '/w/BRIEF.md';
@@ -43,6 +48,7 @@ function patched(edit) {
 }
 let worlds = 0;
 function world({ dir = scratchDir('doc-stopped-owner-' + (++worlds)), engine = DE, sessions = null, registry = null, typing = true, real = false } = {}) {   // real: the REAL registry (ownerOf with prefer, holdersOf)
+  landed(dir);   // a fresh engine over this folder = a start after the hub's stop (B-574d: the stop lands the owed memo)
   const activeSessions = sessions || new Map([['w1', { mode: 'chat', backend: 'claude', claudeSessionId: CID }]]);
   const deliver = CD.create({ dataDir: dir, activeSessions, serverSetting: () => undefined, log: () => { } });
   const sent = [];
@@ -59,6 +65,7 @@ const stop = (w, sid) => w.activeSessions.delete(sid);   // what session-stdout.
 console.log('① a chat that stopped: Send all waits in its stash, in order');
 const w = world();
 ok(w.doc.ownerOf({ path: DOC, from: 'w1' }).via === 'from', 'fixture: the window opened from a live chat (GET /api/doc/owner)');
+landed(w.dir);   // B-574d: the note's landing (the writer's), then the file read
 const memo = JSON.parse(fs.readFileSync(path.join(w.dir, 'doc-owners.json'), 'utf8'));
 ok(memo.s.w1 && memo.s.w1.cid === CID && !JSON.stringify(memo).includes('line 1'), 'the memo on disk: the window\'s session → its conversation (ids and paths only, never words)', memo);
 stop(w, 'w1');
