@@ -10,7 +10,7 @@
 //   ① THE MARK: drawn on the stopped conversation's strip in the language's words for its reason, the long sentence its title, its
 //      whole face the door (data-reads-off-door on the chip and on its words)
 //   ② WHOLE: the mark inside the bar, the bar inside the picture's frame, nothing behind «⋯»
-//   ③ THE PRESS (a real mouse press at the mark's middle): Off ⇒ the Settings window opens on the row's own search, the row
+//   ③ THE PRESS (a real press through THE still door, scratch.mjs stillPresser: the mark stood still, the press landed on it): Off ⇒ the Settings window opens on the row's own search, the row
 //      (accounts.onDemandQuotaRefresh) drawn with its stored value, Off; held ⇒ the Settings window says the settings cannot be
 //      read (the page's own held words, no row drawn: the hub's copy could not be read, nothing is offered to change)
 //   RED CONTROL: the bar built without its door (the click's door line taken out, anchored) ⇒ a press opens nothing — ③ red.
@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, scratch, ONBOARDED_SOURCE, CHROME_QUIET, anchored } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, CHROME_QUIET, anchored, stillPresser } from './scratch.mjs';
 import { checker } from './lib/check.mjs';   // THE ONE assertion helper (B-1747): the condition FIRST, a boolean; a swap throws
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -183,9 +183,8 @@ async function open(reason, lang, S, bundle = 'page') {
   await ev('document.fonts.ready.then(() => true)'); await sleep(150);
   return true;
 }
-const press = async (p) => {
-  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: type === 'mouseMoved' ? 'none' : 'left', clickCount: type === 'mouseMoved' ? 0 : 1 });
-};
+const press = stillPresser({ evalJs: ev, cdp: send });   // THE still door (test-still-press ⑤): the mark measured, still, pressed, its landing checked
+const MARK = '[data-chip="readsoff"]';
 const pictures = [];
 const shot = async (name, clip) => {
   const s = await send('Page.captureScreenshot', { format: 'png', clip: { ...clip, scale: 1 } });
@@ -211,7 +210,7 @@ try {
         const file = `readsoff-${R.tag}-${lang}-${S.w}`;
         ok(await shot(file + '.png', await frameOf('#host')), `${at}: the strip pictured whole (${file}.png)`);
         if (!m || !m.mid) continue;
-        await press(m.mid);
+        if (!ok(await press(MARK), `${at}: a real press on the mark through the still door (it stood still; the press landed on it)`, press.last)) continue;
         const opened = await until('(() => { const o = window.opened(); return o.open && (o.row || !!o.held); })()', `the Settings window after the press (${at})`);
         const o = await ev('window.opened()');
         const label = await ev('window.ROW_LABEL'), offWords = await ev(`T(${J('Off (never contact Anthropic)')})`);
@@ -229,10 +228,10 @@ try {
   const S = SIZES[0];
   if (await open('refresh-off', 'en', S, 'nodoor')) {
     const m = await ev('window.mark()');
-    if (m && m.mid) await press(m.mid);
+    const landed = !!m && !!m.mid && (await press(MARK));
     await sleep(800);
     const o = await ev('window.opened()');
-    ok(!!m && m.chip && !o.open && !o.row, 'RED CONTROL: the bar built without its door (the click\'s door line taken out) — a press on the same mark opens nothing, so ③ goes red', { m: m && m.words, o });
+    ok(landed && !!m && m.chip && !o.open && !o.row, 'RED CONTROL: the bar built without its door (the click\'s door line taken out) — a press that LANDED on the same mark opens nothing, so ③ goes red', { m: m && m.words, landed, o });
   } else ok(false, 'the red control\'s page booted');
   ok(pageErrors.length === 0, `no page error on the way (${pageErrors.length})`, pageErrors.slice(0, 3));
   console.log(`  pictures: ${PNG_DIR} (${pictures.length} PNGs)`);
