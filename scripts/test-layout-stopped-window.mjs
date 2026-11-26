@@ -73,6 +73,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
 import { scratchDir, scratchHome, landingWriter, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -83,6 +84,46 @@ let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
 const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+// B-7e49 (lane card-door-in-chat, s1126, 主开发 r4912): A REAL WAIT RUN BY HAND. Every timer this suite arms from here on is
+// REGISTERED (still armed on the real clock; the handle is the one its caller keeps). heldWait(ms), where a real wait of ms
+// stood, fires BY HAND, in due order, each timer such a wait would have let fire (one a fired callback arms is held and joins
+// in ITS due order), then hands every later one back to the real clock with what such a wait would have left of it: the state
+// after it is the state after the wait. What stays real: the clock a callback reads (Date.now), setInterval, setImmediate
+const realST = globalThis.setTimeout, realCT = globalThis.clearTimeout, timers = new Map(); // handle → { f, a, ms, due, seq, cur }
+let timerSeq = 0, holding = null;
+const realArm = (h, t, ms) => { t.cur = realST(() => { timers.delete(h); t.f(...t.a); }, ms); if (t.refd === false) t.cur.unref(); }; // an unref'd one stays so
+const offClock = (t) => { if (!t.cur) return; t.refd = typeof t.cur.hasRef === 'function' ? t.cur.hasRef() : true; realCT(t.cur); t.cur = null; };
+globalThis.setTimeout = (f, ms = 0, ...a) => {
+  if (typeof f !== 'function') return realST(f, ms, ...a);
+  const t = { f, a, ms: Number(ms) || 0, seq: ++timerSeq, due: (holding ? holding.now : Date.now()) + Math.max(1, Number(ms) || 0), cur: null };
+  let h;
+  if (holding) { h = realST(() => { }, 0x7fffffff); realCT(h); } // held: a handle of its own, armed on the real clock only if it outlives the wait
+  else { h = realST(() => { timers.delete(h); f(...a); }, ms); t.cur = h; }
+  timers.set(h, t); return h;
+};
+globalThis.setTimeout[promisify.custom] = realST[promisify.custom];
+globalThis.clearTimeout = (h) => { const t = h != null && timers.get(h); if (!t) return realCT(h); timers.delete(h); if (t.cur) realCT(t.cur); };
+const heldWait = async (ms, watch = null) => {
+  const end = Date.now() + ms, fired = [], flips = [];
+  holding = { now: Date.now() };
+  try {
+    for (const t of timers.values()) if (t.due <= end) offClock(t); // none of them fires on its own, out of order
+    for (;;) {
+      await new Promise((r) => setImmediate(r)); // a fired callback's continuations run in their own turn, as after a real timer
+      let hk = null, nt = null;
+      for (const [h, t] of timers) if (t.due <= end && (!nt || t.due < nt.due || (t.due === nt.due && t.seq < nt.seq))) { hk = h; nt = t; }
+      if (!nt) break;
+      timers.delete(hk); holding.now = Math.max(holding.now, nt.due);
+      const before = watch ? watch() : null;
+      nt.f(...nt.a); fired.push(nt.ms);
+      if (watch) { const after = watch(); if (after !== before) flips.push({ ms: nt.ms, from: before, to: after }); }
+    }
+  } finally {
+    holding = null;
+    for (const [h, t] of timers) { offClock(t); const left = Math.max(1, t.due - end); t.due = Date.now() + left; realArm(h, t, left); }
+  }
+  return { fired, flips };
+};
 const REAL = { log: console.log, warn: console.warn }; // every quiet stretch restores THESE (two overlapping ones must never leave the console swapped)
 
 // ── a fake DOM just wide enough for the client modules (the placeholder tile is counted node by node) ──
@@ -387,14 +428,18 @@ await section('§2 the live record\'s door — a placeholder broadcast live, reb
   const W = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
   const e6 = bare(6), e7 = { ...named(7), openSpec: undefined, winId: 'win-x-7' };
   W.lm._applyRemoteState({ windows: [e6, e7] }, { writer: 'desktop' });
+  const held1 = W.lm._restoring === true;
   ok(W.wins.get('win-new-6')?._placeholderOf && W.wins.get('win-x-7')?._placeholderOf && tileOf(W.wins.get('win-x-7'))?.dataset?.placeholder === 'stopped', '§2 another client\'s record with two spec-less session entries ⇒ two placeholders here (2.369.363: nothing — «no spec = can\'t recreate»)', [...W.wins.keys()]);
-  await tick(1100); // the apply's cooldown
+  const c1 = await heldWait(1100, () => W.lm._restoring); // the apply's cooldown: the old real 1.1 s wait, run by hand (B-7e49)
   W.lm._applyRemoteState({ windows: [e6, { ...e7, openSpec: { ...named(7).openSpec, serverId: 'sess-77' } }] }, { writer: 'desktop' });
   const w7 = W.wins.get('win-x-7');
+  const held2 = W.lm._restoring === true;
   ok(w7 && !w7._placeholderOf && w7._openSpec?.serverId === 'sess-77' && W.replayed.some(([id]) => id === 'win-x-7'), '§2 a newer record whose entry has an openSpec (the resume answered on its page) REBUILDS it in place under the same id', { w7: w7 && { ph: !!w7._placeholderOf, spec: w7._openSpec }, replayed: W.replayed });
-  await tick(1100);
+  const c2 = await heldWait(1100, () => W.lm._restoring);
   W.lm._applyRemoteState({ windows: [{ ...e7, openSpec: { ...named(7).openSpec, serverId: 'sess-77' } }] }, { writer: 'desktop' });
   ok(!W.wins.has('win-new-6'), '§2 a record without the placeholder\'s entry (the owner closed it elsewhere) closes it here', [...W.wins.keys()]);
+  const opened = (c) => c.flips.length === 1 && c.flips[0].ms === 1000 && c.flips[0].from === true && c.flips[0].to === false;
+  ok(held1 && held2 && opened(c1) && opened(c2), `§2 THE APPLY's COOLDOWN, run by hand where the two real 1.1 s waits stood (B-7e49): the gate HELD right after each apply and OPENED when its own 1000 ms timer fired — every timer the old waits let fire, fired in due order (${c1.fired.join(' / ')} ms; then ${c2.fired.join(' / ')} ms)`, { held1, held2, c1, c2 });
   // the SAME recipe again (it is a placeholder BECAUSE its attach is dead and no transcript is here): it stays one — only a new
   // recipe (an openSpec it lacked, another server session) is built in place (the chrome leg ② caught the first cut rebuilding it)
   const D = world({ records: { 'desk-w': [], 'desk-p': [named(3)], 'desk-r': [] }, active: 'desk-p' });
@@ -1591,6 +1636,16 @@ await section('§5 CONTROL — the server\'s keepNames taken out of the handler'
   const n = H.layouts().desktops['desk-p'].autoSave.windows.filter((w) => !isNamed(w)).length;
   ok(n === 7, `§5 without keepNames the 09:18:22 write is stored with seven nameless windows (§1 can go RED: ${n})`);
   ok(/\{ name: 'test-layout-stopped-window', tier: 'fast'/.test(read('scripts/ci.mjs')), '§5 ci.mjs carries test-layout-stopped-window in the fast tier');
+});
+
+// B-7e49 (s1126): the cooldown row's RED — it runs after the mutant helpers it builds the copy with (§2 runs before them)
+await section('§2 CONTROL (B-7e49): the apply\'s cooldown taken out of a copy — the cooldown row goes RED', async () => {
+  const { LayoutManager: LMn } = await mutantEsm('src/lib/layout.js', 'setTimeout(() => { this._restoring = false; }, 1000);', 'this._restoring = false;');
+  const W = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p', Lm: LMn });
+  const s0 = timerSeq;
+  W.lm._applyRemoteState({ windows: [bare(6)] }, { writer: 'desktop' });
+  const held = W.lm._restoring === true, armed = [...timers.values()].filter((t) => t.seq > s0).map((t) => t.ms);
+  ok(!held && !armed.includes(1000), `§2 CONTROL: a copy whose apply clears its gate at once (no cooldown) — the gate is OPEN right after the apply and no 1000 ms timer is armed (${armed.join(' / ') || 'none'}): the cooldown row's «held» and «its own 1000 ms timer» go RED on it`, { held, armed });
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
