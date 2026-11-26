@@ -519,6 +519,13 @@ function provingText(d, { when = (ms) => new Date(ms).toISOString().slice(0, 16)
   return `placed on ${name} to confirm its ${what} reset on ${when(p.window.resetAt)}; a reading follows its first turn`;
 }
 
+// ── THE HELD PREDICATES (B-6a92 r2688 / r3136 / r3230; shared since B-d74f, 主开发 r5279 MUST 1): a reading the pool CANNOT read — the
+// engine's held mark (a string: 'same-instant', 'unread'), or a file started again whose caps no enumerating reading has stated yet
+// (src/usage-cache-write.js setAsideReading's stub, and every reading over it until one enumerates). ONE place: the decision holds such a
+// member (never a target), the device list skips it, and the default's fallback never counts it as one that can serve now.
+const restartedUnknown = (r) => { const sa = r && typeof r === 'object' ? r.startedAgain : null; return !!(sa && typeof sa === 'object' && !sa.enumerated); };
+const markedHeld = (r) => !!(r && typeof r === 'object' && (typeof r.held === 'string' || restartedUnknown(r)));
+
 // ── THE TIERS (B-87fd item (1), the owner's word «改成永远排最后», 主开发 r4711 / r4744 M1 + M2) ─────────────────────────────────
 // ONE place says which tier a member stands in and the order the tiers are asked in, and EVERY walk takes its order from here:
 // decidePoolSwitch, rankPoolMembers (the live evict path and the device's sealed orders) and soonestUsableMember (the default's
@@ -592,7 +599,7 @@ function rankPoolMembers({ members, readCache, nowSec, readLogin = null, credits
     const c = readCache(m.id);
     // r3136 (the reader table, r3230): a member whose reading cannot be told (the door's mark, or a file started again whose caps no
     // enumerating reading stated) is no FUTURE switch target either — the live evict path picks ranked[0], the device walks the list
-    if (c && typeof c === 'object' && (typeof c.held === 'string' || (c.startedAgain && typeof c.startedAgain === 'object' && !c.startedAgain.enumerated))) continue;
+    if (markedHeld(c)) continue;   // the decision's own predicate (r5279: one place)
     const r = accountRemaining(c, nowSec);
     const br = bucketRems(c, nowSec);
     const row = { id: m.id, name: m.name, eff: r.known ? r.remaining : UNKNOWN_REMAINING_PCT, deadline: weeklyDeadline(c, nowSec), loginPenalty: readLogin ? loginRank(readLogin(m.id)) : 0 };
@@ -702,8 +709,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // — and ON THE BELT TOO (B-6a92 r2923): the move carries `escape: 'held-walled'`, the per-session dwell belt's escape (a known
   // walled member passes it by its 0 %, a held one has no percent to show). The escape rides EVERY held cause, so the engine's
   // notice names the cause it has (r3630: heldWallWhy — the same-instant words only where the pool's same-instant test says so)
-  const restartedUnknown = (r) => { const sa = r && typeof r === 'object' ? r.startedAgain : null; return !!(sa && typeof sa === 'object' && !sa.enumerated); };
-  const markedHeld = (r) => !!(r && typeof r === 'object' && (typeof r.held === 'string' || restartedUnknown(r)));
+  // (restartedUnknown / markedHeld: the module's held predicates above — one place for the decision and both walks, r5279)
   // `held(id)` (B-6a92 r2688) is passed by TESTS only: no engine call passes it — the engine's hold reaches here as the reading's mark
   const isHeld = (id) => (typeof held === 'function' && !!held(id)) || markedHeld(readCache(id)) || (typeof readReading === 'function' && markedHeld(readReading(id)));
   const curHeldStart = !!placing && isHeld(currentId);
@@ -1105,7 +1111,14 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // serve it), `blockedWhy` keeps the sentence's own reason (all-rejected / all-logins-expired / …).
     if (notMember) {
       const listed = membership == null ? null : (typeof membership.has === 'function' ? membership : new Set(membership));
-      const holdTo = soonestUsableMember({ members: (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id))), readCache, nowSec, priority, creditsIds: credits, payingIds: tiers.paying, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode });
+      // r5279 MUST 2: the hold's walk is handed what THIS decision refused — the members it just excluded (a refusal of this
+      // conversation), the ones whose sign-in cannot serve (loginBlocked, lapsedBlocked), the held ones (isHeld) and the members its
+      // billed-onto-billed guard turned down (rule 4: here every credits and paying row is past its quota beside a billing current) —
+      // never parked on while a member it did not refuse is listed; with all of them refused the release's own park stands, so the
+      // conversation never keeps running on the removed member (全B) and never moves onto a bill the release did not make
+      const cands = (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id)));
+      const refused = new Set([...(excluded || []), ...loginBlocked.map((x) => x.id), ...lapsedBlocked.map((x) => x.id), ...(!creditsOk ? creditsRanked.filter((r) => r.dead).map((r) => r.id) : []), ...(!payingOk ? payingRanked.filter((r) => r.dead).map((r) => r.id) : []), ...cands.filter((m) => isHeld(m.id)).map((m) => m.id)]);
+      const holdTo = soonestUsableMember({ members: cands, readCache, nowSec, priority, creditsIds: credits, payingIds: tiers.paying, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode, refused });
       return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
     }
     return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
@@ -1372,10 +1385,12 @@ function decidePinnedPlacement(opts = {}) {
  * its quota), then a paying one (B-87fd (1), `payingIds`); then the credits and paying members billing past their quota; a walled
  * ordinary member last — EXCEPT where nobody pays and no candidate can serve now (r5252, reading B): there the release's own park, a
  * walled ordinary member before a credits member billing past its quota. `members` = the caller's candidates
- * (logged-in members the pool lists, the member being left excluded). → id | null
+ * (logged-in members the pool lists, the member being left excluded); `refused` (r5279 MUST 2, the removed-member hold) = the ones
+ * the caller's decision refused: they come after every other candidate, the release's park among themselves. → id | null
  */
-function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null, payingIds = null, overageIds = null, readLogin = null, providerOf = null, fromProvider = null, conversationModel = null, crossProvider = 'never' } = {}) {
+function soonestUsableMember({ members, readCache, nowSec, priority = null, creditsIds = null, payingIds = null, overageIds = null, readLogin = null, providerOf = null, fromProvider = null, conversationModel = null, crossProvider = 'never', refused = null } = {}) {
   const rank = priorityRankOf(priority);
+  const refusedSet = refused && (typeof refused.has === 'function' ? refused : new Set(refused));
   // THE PROVIDER (q-053 P0b): parking is a placement too — under 'never' never on another provider or a fallback-only
   // member; under 'allow' only one that serves the conversation's model, after every member of the same provider
   // (fallback-only last). `providerOf` absent ⇒ byte-identical.
@@ -1402,16 +1417,26 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     if (rd && typeof rd === 'object' && typeof rd.held === 'string') return;   // r3136 / B-6a92 (r2855): never parked on a member whose reading cannot be told (unread, or held on another account's instant)
     const v = quotaVerdict(rd, nowSec, { tier: 'hard' });
     const at = v.usable === false ? (v.blockedUntil || Infinity) : 0;
-    rows.push({ id: m.id, at, tier: tiers.tierOf(m.id), rank: rank ? rank(m.id) : 0, i, ap });
+    // r5279: a reading whose caps cannot be told (MUST 1), and a sign-in that cannot serve (the decision's loginBlocked; a lapsed one never
+    // reaches here), stay rows — a lone candidate is still the park — but neither is ever «can serve now»: the walk never goes where the
+    // decision refuses or cannot know
+    const li = readLogin ? (readLogin(m.id) || { state: 'unknown' }) : null;
+    rows.push({ id: m.id, at, tier: tiers.tierOf(m.id), rank: rank ? rank(m.id) : 0, i, ap, unknown: restartedUnknown(rd) || !!(li && !loginUsable(li)), ref: !!(refusedSet && refusedSet.has(m.id)) });
   });
-  for (const r of rows) r.live = r.at === 0;
+  for (const r of rows) r.live = r.at === 0 && !r.unknown && !r.ref;   // r5279: what the decision holds or refuses is never «can serve now» — the kept park then stands
   // READING B (主开发 r5252, row B-d74f): where nobody pays and NO candidate can serve now — no ordinary member, no usage-credits member
   // with quota left — the fallback keeps the RELEASE's park, byte for byte: a walled ordinary member before a credits member billing past
   // its quota. The fallback's pick is the pool's DEFAULT, where every later conversation starts: a default on the wall heals by itself at
   // its reset; one on a billing member would go on starting conversations on money (whether a pool may park there is the owner's choice)
-  const keepPark = !rows.some((r) => r.live || r.tier === TIER_PAYING);
-  const keyOf = keepPark ? (r) => r.tier : tiers.orderOf(rows);
-  rows.sort((x, y) => (x.ap - y.ap) || (keyOf(x) - keyOf(y)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
+  // r5279 MUST 3: judged per PROVIDER GROUP (`ap`, the sort's first key) — a live member of another provider (crossProvider 'allow')
+  // never turns the release's park off for the group the pick comes from
+  const lit = new Set(rows.filter((r) => !r.ref && (r.live || r.tier === TIER_PAYING)).map((r) => r.ap));
+  const oneOrder = tiers.orderOf(rows);
+  const keyOf = (r) => (lit.has(r.ap) ? oneOrder(r) : r.tier);
+  // r5279 MUST 2: `refused` = what the CALLER's decision refused (the removed-member hold hands its exclusions, its sign-in blocks, its
+  // held members and its billed-onto-billed guard): such a row comes after every row it did not refuse — the walk never goes there
+  // while a member it did not refuse is listed; with every candidate refused the release's own park stands (主开发 r5279 + the stop page)
+  rows.sort((x, y) => (x.ref === y.ref ? 0 : x.ref ? 1 : -1) || (x.ap - y.ap) || (keyOf(x) - keyOf(y)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
   return rows.length ? rows[0].id : null;
 }
 

@@ -493,7 +493,7 @@ async function pushSealedOrders(poolId) {
     // meantime would be an unreachable fallback. Members near/past their
     // login deadline never enter the snapshot.
     readLogin: poolReadLogin(),
-    creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), overageIds: overageMemberIds(members), // usage-credits members walk LAST (B-ad05); the setting's set as the decision reads it (B-d74f)
+    ...walkTierSets(members), // usage-credits members walk LAST (B-ad05); the setting's set as the decision reads it (B-d74f), one raw read
     priority: poolPriorityOf(a), // the owner's manual order walks first (2026-09-28)
     providerOf: pv, fromProvider: pv(defMember), // (q-053 P0b) a reflex is a HOT re-point: never another provider
   }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
@@ -956,12 +956,15 @@ function overageInUseIds(members) {
 }
 /** THE BAR's NAMING (D3c, `pool.avoidOverageMembers`, default off): with the setting on, the same set is handed as `overageIds`, and a
  *  verdict then NAMES the bar (overageBlocked / toOverage); the ranking is the fact's above, whatever the setting. → Set | null */
-function overageMemberIds(members) {
+function overageMemberIds(members, paying) {
   try {
     if (serverSetting('pool.avoidOverageMembers') !== true) return null;
-    return overageInUseIds(members);
+    return paying !== undefined ? paying : overageInUseIds(members);
   } catch { return null; }
 }
+/** B-d74f (the round's should, wf_c3250651): a WALK's tier sets from ONE raw read — the paying set, and with the setting on the
+ *  setting's set handed from it (the same set: overageMemberIds), never read a second time on the main loop → {creditsIds, payingIds, overageIds} */
+function walkTierSets(members) { const paying = overageInUseIds(members); return { creditsIds: creditsMemberIds(members), payingIds: paying, overageIds: overageMemberIds(members, paying) }; }
 // USAGE CREDITS (B-ad05, ALWAYS on — it is a ranking, not a bar): members
 // whose org has extra usage ENABLED and not in use (`overageState().mode ===
 // 'allowed'`). Past 100 % such a member keeps serving on pay-per-use billing
@@ -7791,7 +7794,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
     }
-    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), payingIds: overageInUseIds(alive), overageIds: overageMemberIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), ...walkTierSets(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { return RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid)); } catch { return false; } })();
@@ -9063,7 +9066,7 @@ function fallbackDefaultTarget(poolId, fromId = null) {
     const members = switchCandidates(poolId).filter((m) => m && m.id !== fromId && membership.includes(m.id));
     // (q-053 P0b) parking never lands on another provider: the default's own (a deleted member's = the pool's own)
     const pv = poolProviderOf(a), fromProv = pv(fromId || accounts.poolCurrent(poolId));
-    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: nowSecOf(), priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), overageIds: overageMemberIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
+    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: nowSecOf(), priority: poolPriorityOf(a), ...walkTierSets(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
   } catch (e) { console.warn('[pool] default fallback failed:', e.message); return null; }
 }
 /** THE ONE ENTRY POINT: members `removedIds` no longer belong to `poolId` — move

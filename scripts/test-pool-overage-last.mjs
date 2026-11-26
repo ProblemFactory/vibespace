@@ -114,18 +114,22 @@ const M = mutantCopies('pool-overage-last', REPO);
       // parked on an ordinary member that cannot serve now — the one kind the two may differ by, counted
       n++; { const a = ref.soonestUsableMember(rk), b = P.soonestUsableMember({ ...rk, payingIds: null });
         if (JSON.stringify(a) === JSON.stringify(b)) same++;
-        else if (rel && b === 'e' && rk.creditsIds && a && a !== 'e' && P.quotaVerdict(caches[a] ?? null, NOW, { tier: 'hard' }).usable === false) { same++; oneOrder++; }
+        else if (rel && b === 'e' && rk.creditsIds && a && a !== 'e' && P.quotaVerdict(caches[a] ?? null, NOW, { tier: 'hard' }).usable === false && P.quotaVerdict(caches.e ?? null, NOW, { tier: 'hard' }).usable !== false) { same++; oneOrder++; }   // the round's should: 'e' can serve
         else if (!diff) diff = { i, soonest: true, release: a, now: b }; }
     }
     ck(`overage-last: THE NO-OVERAGE IDENTITY — ${n} seeded placements, switches, ranks and fallbacks with NO member in overage are byte-identical to ${rel ? 'the release (eb7608d5)' : 'today\'s ranking (ref-free)'}, but for the fallback's one order (B-d74f: ${oneOrder} seeds where the release parked on an ordinary member that cannot serve now, the one order on the credits member)`, same === n);
-    if (same !== n) console.log('    first difference: ' + JSON.stringify(diff).slice(0, 600)); }
+    if (same !== n) console.log('    first difference: ' + JSON.stringify(diff).slice(0, 600));
+    const ONE_ORDER_PIN = 0;   // the round's should: the one order's count pinned — these seeds never meet it (measured at the cure, run 948f5f438-20261126215628-box); the tier-invariants spaces carry it
+    if (rel) ck(`overage-last: the one order's count over the seeds is the pinned one (${oneOrder})`, oneOrder === ONE_ORDER_PIN); }
   // THE ENGINE's READER, pinned to the RAW reading (P7: a stated overage, never an estimate), and handed beside EVERY credits set
   { const ENG = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
     const body = (t) => { const m = /function overageInUseIds\(members\) \{([\s\S]*?)\n\}/.exec(t); return m ? m[1] : ''; };
-    const pin = (t) => /overageState\(readRawUsageCache\(m\.id\)\)\.inUse === 'yes'/.test(body(t)) && !/poolReadCache|readCacheFor|estimat/.test(body(t)) && (t.match(/creditsIds: creditsMemberIds\((\w+)\)(?!, payingIds: overageInUseIds\(\1\))/g) || []).length === 0 && /serverSetting\('pool\.avoidOverageMembers'\) !== true\) return null;\n    return overageInUseIds\(members\);/.test(t);
-    ck('overage-last: the engine\'s in-use reader reads the RAW reading only, the setting gates only the bar\'s naming, and every credits set handed to a decision has the paying set beside it', pin(ENG));
+    const pin = (t) => /overageState\(readRawUsageCache\(m\.id\)\)\.inUse === 'yes'/.test(body(t)) && !/poolReadCache|readCacheFor|estimat/.test(body(t)) && (t.match(/creditsIds: creditsMemberIds\((\w+)\)(?!, payingIds: (?:overageInUseIds\(\1\)|paying, overageIds: overageMemberIds\(\1, paying\)))/g) || []).length === 0 && /serverSetting\('pool\.avoidOverageMembers'\) !== true\) return null;\n    return paying !== undefined \? paying : overageInUseIds\(members\);/.test(t)
+      && /\nfunction walkTierSets\(members\) \{ const paying = overageInUseIds\(members\); return \{ creditsIds: creditsMemberIds\(members\), payingIds: paying, overageIds: overageMemberIds\(members, paying\) \}; \}/.test(t) && (t.match(/\.\.\.walkTierSets\(/g) || []).length === 3;
+    ck('overage-last: the engine\'s in-use reader reads the RAW reading only, the setting gates only the bar\'s naming, every credits set handed to a decision has the paying set beside it, and the three walks take their sets from ONE raw read (walkTierSets: the setting\'s set handed from the paying set, the round\'s should)', pin(ENG));
     ck('overage-last RED: a reader on the pool\'s estimated view turns the pin red', !pin(anchored(ENG, "if (overageState(readRawUsageCache(m.id)).inUse === 'yes') out.add(m.id);\n    return out.size ? out : null;\n  } catch { return null; }\n}\n/** THE BAR", "if (overageState(poolReadCache(m.id)).inUse === 'yes') out.add(m.id);\n    return out.size ? out : null;\n  } catch { return null; }\n}\n/** THE BAR", 'a reader on the estimated view')));
-    ck('overage-last RED: one decision handed no paying set turns the pin red', !pin(anchored(ENG, 'creditsIds: creditsMemberIds(alive), payingIds: overageInUseIds(alive)', 'creditsIds: creditsMemberIds(alive)', 'a decision handed no paying set')));
+    ck('overage-last RED: one decision handed no paying set turns the pin red', !pin(anchored(ENG, 'creditsIds: creditsMemberIds(pm), payingIds: overageInUseIds(pm) })', 'creditsIds: creditsMemberIds(pm) })', 'a decision handed no paying set')));
+    ck('overage-last RED: a walk whose setting\'s set is read a second time turns the pin red', !pin(anchored(ENG, 'overageIds: overageMemberIds(members, paying) }; }', 'overageIds: overageMemberIds(members) }; }', 'the walks\' one read')));
     // r4711 (c) / r4714 2. / r4744, and B-9369 (主开发 r5165): BOTH switch notices (a conversation's move, the pool default's switch) are
     // the builders' words (switchNoticeWords): their English text AND the i18n the client words in the page's language — no clause is
     // written beside them (the last resort, «is billing paid overage, and … has quota left»: the builders' variants below)
