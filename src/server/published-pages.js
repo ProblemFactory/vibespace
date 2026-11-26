@@ -266,6 +266,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
       if (appeared) {
         const ext = mt ? '.bin' : '.html', into = path.join(pagesDir, appeared.id + ext);
         try { await fs.promises.rename(fp, into); } catch (e) { await fs.promises.unlink(fp).catch(() => { }); return { error: 'store failed: ' + e.message }; }
+        if (!store.pages.some((p) => p.id === appeared.id)) { await fs.promises.unlink(into).catch(() => { }); return { error: 'the page was taken down while it was being published — not published' }; }   // taken down during the rename (r4675's should)
         if (snapExt(appeared) !== ext) await fs.promises.unlink(path.join(pagesDir, appeared.id + snapExt(appeared))).catch(() => { });
         rec = appeared; replaced = true; adopted = true;
       }
