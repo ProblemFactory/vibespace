@@ -26,6 +26,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const FC = require('../fd-close.js');   // B-574d (lane nl-journals): the record's replace through the tree's one synced door (renameSynced)
 
 const MAX_CONVERSATIONS = 200;
 const MAX_PER_CONVERSATION = 8;
@@ -61,10 +62,15 @@ function conversationsOf(msg, sessionConversation) {
 }
 const rowOk = (r) => !!r && r.type === 'system' && r.subtype === 'session_writes_lost' && typeof r.uuid === 'string' && Array.isArray(r.lost) && Number.isFinite(Date.parse(r.timestamp));
 
-function writeAtomic(file, text) {
+/** B-574d (lane nl-journals): THE RECORD IS ON DISK BEFORE ITS NAME POINTS AT IT — its temp written, SYNCED, closed, then renamed
+ *  (src/fd-close.js renameSynced): after a power cut the name never points at no bytes (read back as «no store» and set aside — every
+ *  conversation's warning gone, exactly when the person comes back to read it). A sync, a close or a rename that fails is a FAILED
+ *  WRITE, thrown (the temp removed): the store holds the row, says it once and tries again. A file system that does no sync at all
+ *  lands it — `say` (the store's, once). */
+function writeAtomic(file, text, say = null) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
-  try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
+  try { FC.renameSynced(tmp, file, text, { where: '[writes-lost] the kept warnings', say }); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
 }
 
 function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.now(), write = writeAtomic, retryMs = RETRY_MS } = {}) {
@@ -72,7 +78,8 @@ function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.
   // What this store holds: the file's rows once it has been read, plus every row noted since. A row noted before the file could be read waits here,
   // `dirty` until it reaches the disk. A STORE THAT HAS NOT READ ITS FILE NEVER WRITES IT: one transient read error must not replace everyone's rows.
   const rows = new Map();
-  let read = false, dirty = false, timer = null, writeFailing = false, readFailing = false;
+  let read = false, dirty = false, timer = null, writeFailing = false, readFailing = false, noSyncSaid = false;
+  const sayNoSync = (w) => { if (!noSyncSaid) { noSyncSaid = true; log(w); } };   // B-574d: a file system that does no sync — the record lands, said once
   const merged = (a, b) => { const seen = new Set(), out = []; for (const r of [...a, ...b]) if (!seen.has(r.uuid)) { seen.add(r.uuid); out.push(r); } return out.sort((x, y) => Date.parse(x.timestamp) - Date.parse(y.timestamp)).slice(-MAX_PER_CONVERSATION); };
   function arm() {
     if (timer || !dirty || !(retryMs > 0)) return;
@@ -114,7 +121,7 @@ function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.
       for (const [id] of [...rows].sort((a, b) => newest(a[1]) - newest(b[1])).slice(0, rows.size - MAX_CONVERSATIONS)) rows.delete(id);
     }
     try {
-      write(file, JSON.stringify({ v: 1, byConversation: Object.fromEntries(rows) }) + '\n');
+      write(file, JSON.stringify({ v: 1, byConversation: Object.fromEntries(rows) }) + '\n', sayNoSync);
       dirty = false;
       if (writeFailing) log('[writes-lost] the kept warnings reached the disk');
       writeFailing = false;
