@@ -671,8 +671,33 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // index does not list yet. A person's or an agent's grain write on such a conversation keeps the index's durable write before
   // its answer (the act's journal line carries the row whole), so a stop inside the pace never leaves an act whose row the
   // boot's completion cannot find. `landed(key)` asks; a landing clears what it carried (the set at the write's produce)
-  const unlanded = new Set();
-  let producedUnlanded = null;
+  // B-360d FOUND HOLDER 1 (lane bl-loop-b, 主开发 r4598 / r4690): each birth carries a GENERATION in place of the set a produce copied
+  // (a pass over every row born since the last landing, in the produce's turn) and the landing walked (a second pass). The produce
+  // notes the generation it carries (`carriedGen`, one number); a landing that SUCCEEDS moves the landed mark to it (`landedGen`, one
+  // number); a failed one moves nothing, so nothing is merged back. A row born after the produce has a later generation, so the next
+  // produce carries it; a row purged and born again after the produce is a new birth (r1040, r1850 (1): it stays unlanded); a row gone
+  // meanwhile is judged by the map's own key, as landed() did. The entries a landing covered are dropped by a sliced sweep (counted)
+  const unlanded = new Map();   // key → its birth's generation (the rows born since the index file last LANDED)
+  let bornGen = 0, carriedGen = null, landedGen = 0;
+  const isUnlanded = (k) => { const g = unlanded.get(k); return g !== undefined && g > landedGen; };
+  const landedStats = { sweeps: 0, dropped: 0 };
+  let sweepIt = null;   // the sweep's live iterator over `unlanded` (a Map's own: entries deleted or added meanwhile are safe)
+  const UNLANDED_SWEEP_STEP = 2000;
+  function sweepLanded() {
+    if (sweepIt || closed) return;
+    sweepIt = unlanded.entries(); landedStats.sweeps++;
+    const step = () => {
+      if (closed) { sweepIt = null; return; }
+      for (let n = 0; n < UNLANDED_SWEEP_STEP; n++) {
+        const r = sweepIt.next();
+        if (r.done) { sweepIt = null; return; }
+        const [k, g] = r.value;
+        if (g <= landedGen) { unlanded.delete(k); bornSeq.delete(k); landedStats.dropped++; }
+      }
+      setImmediate(step);
+    };
+    setImmediate(step);
+  }
   // B-360d unit 1 × B-526c (主开发 r1765): a born row rides its journal line — `bornSeq` = the seq of the FIRST line that carried
   // this birth; the row lands when an append or a compaction holding that line lands (actsWritten), or a whole write that carried
   // it lands (indexWritten). A row born again (purged inside the pace) needs its NEW line: a birth resets it
@@ -1048,13 +1073,17 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     dirty = false;   // handed to the writer — a failed write dirties it again (indexWritten)
     if (!p) { if (pendingWhole >= wholeOwed) wholeOwed = 0; return null; }   // nothing to write: the disk holds memory (topText holds actsSeq)
     pendingTop = p.top;
-    producedUnlanded = new Set([...unlanded].filter((k) => hasOwn(ix.conversations, k)));   // B-526c r937: what this write carries of the rows born since the last landing — r1040: only rows PRESENT at the produce (one purged and born again inside the pace stays unlanded)
-    return p.parts;
+    carriedGen = bornGen;   // B-526c r937 / r1040: what this write carries of the rows born since the last landing — B-360d found holder 1: every birth up to here, ONE number (the release copied the set in this turn)
+    // B-360d found holder 1: the parts BY REFERENCE (the writer's own road, src/store-writer.js byRef: copied 4 MB a turn, never joined
+    // whole in this turn). No part is written into once built: assemble() makes the top and the separators fresh each write, and a
+    // layout chunk's bytes are REPLACED, never written into (serializeChunk, the one place a part's buffer is made) — each stays as
+    // handed until its landing has ended
+    return require('./store-writer.js').byRef(p.parts);
   }
   function indexWritten(ok) {
     foldAsked = false;
-    if (ok && producedUnlanded) { for (const k of producedUnlanded) { unlanded.delete(k); bornSeq.delete(k); } }   // B-526c r937: those rows are on disk now (the whole write carried them)
-    producedUnlanded = null;
+    if (ok && carriedGen !== null && carriedGen > landedGen) { landedGen = carriedGen; sweepLanded(); }   // B-526c r937: those rows are on disk now (the whole write carried them) — B-360d found holder 1: one number; the covered entries dropped in slices
+    carriedGen = null;
     if (ok) {
       bytesOwed = false; lastTop = pendingTop; flushStats.writes++;
       actsOverSaid = 0;   // round 4 (true words 5): the index LANDED — a later bound is a new episode, never «not landed since»
@@ -1130,7 +1159,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return !old || !old.equals(c.buf);
   }
   /** B-dfa4 cut 3: the layout in slices (see LAYOUT_SYNC_ROWS) → a promise that lands it (or starts again on a whole touch). */
-  function warmLayout({ atOpen = false } = {}) {
+  function warmLayout({ atOpen = false, keys: given = null } = {}) {   // `keys`: a snapshot taken in THIS turn (the size test's), the first round's own — B-360d found holder 1
     if (warm && !warm.stale) return warm.promise;
     const job = { stale: false, promise: null, restarts: 0, atOpen };
     warm = job; layout = null; if (!atOpen) laterJobs++;   // B-360d unit 1: the open's warm-up is no write's LATER
@@ -1138,7 +1167,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       for (;;) {
         job.stale = false;
         const conv = ix.conversations;
-        const keys = Object.keys(conv);   // THE STATED SNAPSHOT: the rows as they are now; a write after it is in dirtyKeys
+        const keys = given || Object.keys(conv); given = null;   // THE STATED SNAPSHOT: the rows as they are now; a write after it is in dirtyKeys
         allDirty = false; dirtyKeys.clear();
         rowFp.clear(); fpReady = false;   // B-360d unit 1 (S11): rebuilt by this walk; meanwhile a touched row counts as changed
         const next = { chunks: [], chunkOf: new Map() };
@@ -1271,7 +1300,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; ix.updatedAt = now(); const s0 = JSON.stringify(ix, INDEX_KEYS, 1); allDirty = false; dirtyKeys.clear(); bytesOwed = true; lastTop = null; return { parts: [Buffer.from(s0, 'utf8')], top: null }; }
     if (sync && warm) { if (warm.keys) for (const k of warm.keys) dirtyKeys.add(k); warm.stale = true; warm = null; }   // B-dfa4 cut 3: a synchronous write takes over a sliced build (its rows back in dirtyKeys)
     if (full || allDirty || !layout) {
-      if (!sync && !full && !warmFailed && Object.keys(conv).length > LAYOUT_SYNC_ROWS) { warmLayout(); return NOT_READY; }   // B-dfa4 cut 3
+      if (!sync && !full && !warmFailed) { const keys0 = Object.keys(conv); if (keys0.length > LAYOUT_SYNC_ROWS) { warmLayout({ keys: keys0 }); return NOT_READY; } }   // B-dfa4 cut 3 — B-360d found holder 1: the size test's snapshot IS the build's (one pass over the map, not two)
       warmFailed = false;
       if (warm) { warm.stale = true; warm = null; }   // the synchronous write lays out in its own turn (a warm in flight yields to it)
       const before = layout ? liveBufs() : null;
@@ -1441,7 +1470,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const seq = ++actSeq;
     // r1850 (4): a row purged and born again inside ONE update with the same bytes gets no line (its print equals the persisted
     // one) and reads unlanded until the next whole write — safe: those bytes are on disk already
-    for (const [k, f] of fps) if (f !== null && unlanded.has(k) && !bornSeq.has(k)) bornSeq.set(k, seq);   // r1765: the line that carries this birth
+    for (const [k, f] of fps) if (f !== null && isUnlanded(k) && !bornSeq.has(k)) bornSeq.set(k, seq);   // r1765: the line that carries this birth
     const lineText = `{"seq":${seq},"rows":{${rows.join(',')}}${topPart}}\n`;
     const line = { seq, text: lineText }; actLines.push(line);
     owedBytes += lb(line);
@@ -1541,7 +1570,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     let e = ix.conversations[key];
     if (!e && !create) return null;
     if (!e) {
-      unlanded.add(key); bornSeq.delete(key); if (producedUnlanded) producedUnlanded.delete(key);   // B-526c r937: not on the disk's index until a write that carries it lands (B-360d: its NEW line, or a whole write) — r1850 (1): a whole write produced BEFORE this birth carries the old row, never this one
+      unlanded.set(key, ++bornGen); bornSeq.delete(key);   // B-526c r937: not on the disk's index until a write that carries it lands (B-360d: its NEW line, or a whole write) — r1850 (1): a whole write produced BEFORE this birth carries the old row, never this one
       if (layout && layout.chunkOf.has(key)) touchAll('a row re-born before its old place was rewritten');   // verify r1: the file keeps the map's order
       if (stampMap.delete(key)) { stampsDirty = true; stampSeq++; stampsSince.add(key); journal(key); }   // design 011 lane 2: a row born under a key that left keeps none of its stamps — B-360d (r4642 (3)): a change of that key for the compaction's window (its removal line kept by the fold)
       e = ix.conversations[key] = {
@@ -3576,7 +3605,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // B-360d unit 1: AT OPEN the layout is built (in slices on a big store) for the fingerprints law 3 compares against — it owes
   // no write; until it lands a touched row counts as changed (journaled)
   try { persistedTop = topCmp(); } catch { persistedTop = null; }   // B-360d unit 1 (M4): the top as loaded (base + journal)
-  if (!ixLoad.blocked && plainRows(ix.conversations)) { try { if (Object.keys(ix.conversations).length > LAYOUT_SYNC_ROWS) warmLayout({ atOpen: true }); else buildLayout(ix.conversations); } catch (e) { warn('[channels] the index layout at open failed:', (e && e.message) || e); } }
+  // B-360d found holder 1: one snapshot at the open, the size test's and the build's
+  if (!ixLoad.blocked && plainRows(ix.conversations)) { try { const keys0 = Object.keys(ix.conversations); if (keys0.length > LAYOUT_SYNC_ROWS) warmLayout({ atOpen: true, keys: keys0 }); else buildLayout(ix.conversations); } catch (e) { warn('[channels] the index layout at open failed:', (e && e.message) || e); } }
   return {
     rootClosed,   // the root closed to other accounts: resolves true once it is (or already was), false when the filesystem refused (said once)
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount, purgeBegin, purgeNotBegun, pendingList, joinedOf, purgeRunning,
@@ -3584,7 +3614,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     index: {
       // B-526c × B-360d unit 1 (主开发 r1765): a row has LANDED exactly when its own change is on disk by the road that carries it —
       // its journal line synced, or the whole write that carried it landed; while the family is HELD nothing is said landed
-      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),
+      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !isUnlanded(key),
+      landedStats: () => ({ ...landedStats, entries: unlanded.size, owed: [...unlanded.values()].filter((g) => g > landedGen).length, sweeping: !!sweepIt }),   // B-360d found holder 1: the generations' counts (the gates')
       // B-360d unit 1 (law 11): `journalDurable()` — the journal as it stands written (a compaction owed: landed), for a purge
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, journalStats: () => ({ journalBytes, owedBytes, lines: actLines.length, actSeq, appendedSeq, compactOwed, wholeOwed, indexOwed: dirty }), journalDurable: () => { if (closed) return Promise.resolve(true); if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); askActs(); return W().durable(actsFile); },   // r1542's law: held — refused by name
       // B-360d unit 1: `fold()` — the index written WHOLE now (the journal folded into it), as the bound asks it — its promise
