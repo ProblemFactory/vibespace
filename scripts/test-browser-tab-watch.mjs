@@ -116,11 +116,11 @@ console.log('— ② statesTabWatch: the loader\'s own list, one ask');
 console.log('— ③ the keeper: ON before the screencast, counted per tab, the cap\'s still, stock untouched');
 const K = require('../src/server/browser-keeper.js');
 const ksrc3 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed = false, down = false } = {}) => {
+const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed = false, down = false, lines = null } = {}) => {
   const log = [];
   const shots = new Map();
   const watchTarget = async (url, id, hooks) => { log.push(`screencast ${id.slice(0, 4)}`); const r = { ok: true, close: () => log.push(`screencast-closed ${id.slice(0, 4)}`) }; if (!shots.has(id)) shots.set(id, r); return r; }; // the FIRST watch's own screencast (the stock leg's identity)
-  const kw = Kmod.create({ dataDir: path.join(ROOT, 'k-' + tag), homeDir: path.join(ROOT, 'h-' + tag), env: () => ({}), serverSetting: () => undefined, liveKeys: () => new Set(), log: quiet, install: false, watchTarget });
+  const kw = Kmod.create({ dataDir: path.join(ROOT, 'k-' + tag), homeDir: path.join(ROOT, 'h-' + tag), env: () => ({}), serverSetting: () => undefined, liveKeys: () => new Set(), log: lines ? { log: (m) => lines.push(String(m)), warn: (m) => lines.push(String(m)), error() { }, info() { } } : quiet, install: false, watchTarget });
   kw.list(); // the registry loaded before the leg writes its record
   const PID = 'bp-0000d0e1';
   kw._reg().browsers[PID] = { profileId: PID, state: 'ready', cdpUrl: 'ws://127.0.0.1:9/devtools/browser/stand-in', browserChoice: tabWatch ? { kind: 'plugin', id: 'acme.engine', tabWatch: true } : { kind: 'default' } };
@@ -144,7 +144,7 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
   const ON_ANCH = "    if (h) await tabWatchOn(h);\n";
   const ORDER_TO = "    const kwLater = () => (h ? tabWatchOn(h) : null); // (the control: the screencast first, as a road without the order)\n";
   const AFTER_ANCH = "    if (!h) return r;\n";
-  const COUNT_ANCH = "    if (n > 0) { tabWatchCounts.set(k, n); return; }\n";
+  const COUNT_ANCH = (ksrc3.split('\n').find((l) => l.startsWith('    if (n > 0) { tabWatchCounts.set(k, n);')) || '\u0000') + '\n';
   const STOCK_ANCH = "    if (!rec || !rec.browserChoice || rec.browserChoice.tabWatch !== true || !paintWatch || typeof paintWatch.setTabWatch !== 'function') return null;\n";
   const UNC_ANCH = "    tabWatchRelease(h, code === 'tab_watch_unanswered' || code === 'tab_watch_failed');\n";
   const ASK_ANCH = "    tabWatchCounts.set(k, (tabWatchCounts.get(k) || 0) + 1); h.counted = true;\n";
@@ -155,9 +155,14 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
   const Kstock = M.load('src/server/browser-keeper.js', anchored(ksrc3, STOCK_ANCH, "    if (!rec || !paintWatch || typeof paintWatch.setTabWatch !== 'function') return null; // (the control: asked of every browser)\n"), 'tw-stock');
   const Kunc = M.load('src/server/browser-keeper.js', anchored(ksrc3, UNC_ANCH, "    tabWatchRelease(h, false); // (the control: no OFF after an unconfirmed ON, as at c92f2c341)\n"), 'tw-unconfirmed');
   const Kshare = M.load('src/server/browser-keeper.js', anchored(ksrc3, ASK_ANCH, "    if ((tabWatchCounts.get(k) || 0) > 0) { tabWatchCounts.set(k, tabWatchCounts.get(k) + 1); h.counted = true; h.kw = { on: true }; return true; } // (the control: a second viewer shares the count, as at 73d130109)\n" + ASK_ANCH), 'tw-share');
-  const [now, cap, stock, cOrder, cCount, cStock, unc, cUnc, dn, cDn] = await Promise.all([keeperLeg(K, 'now'), keeperLeg(K, 'cap', { cap: true }), keeperLeg(K, 'stock', { tabWatch: false }),
+  // r5006 (3): a page watch that is DOWN answers each ask tab_watch_unavailable — the page watch's own state, not the kernel's: no journal line per hold
+  const QUIET_ANCH = "    if (code !== 'tab_watch_unavailable') log.log?.(";
+  if (!ksrc3.includes(QUIET_ANCH)) ok(false, 'the anchor of the control «a line per hold while the page watch is down» is not in the source (src/server/browser-keeper.js)');
+  const Kloud = ksrc3.includes(QUIET_ANCH) ? M.load('src/server/browser-keeper.js', anchored(ksrc3, QUIET_ANCH, "    log.log?.("), 'tw-down-loud') : null;
+  const dnLines = [], dnLinesC = [];
+  const [now, cap, stock, cOrder, cCount, cStock, unc, cUnc, dn, cDn, cDnLog] = await Promise.all([keeperLeg(K, 'now'), keeperLeg(K, 'cap', { cap: true }), keeperLeg(K, 'stock', { tabWatch: false }),
     keeperLeg(Korder, 'c-order'), keeperLeg(Kcount, 'c-count'), keeperLeg(Kstock, 'c-stock', { tabWatch: false }),
-    keeperLeg(K, 'unconfirmed', { unconfirmed: true }), keeperLeg(Kunc, 'c-unconfirmed', { unconfirmed: true }), keeperLeg(K, 'down', { down: true }), keeperLeg(Kshare, 'c-down', { down: true })]);
+    keeperLeg(K, 'unconfirmed', { unconfirmed: true }), keeperLeg(Kunc, 'c-unconfirmed', { unconfirmed: true }), keeperLeg(K, 'down', { down: true, lines: dnLines }), keeperLeg(Kshare, 'c-down', { down: true }), Kloud ? keeperLeg(Kloud, 'c-down-log', { down: true, lines: dnLinesC }) : Promise.resolve(null)]);
   const A1 = T(1).slice(0, 4);
   ok(J(now.logAfterTwo) === J([`ON ${A1}`, `screencast ${A1}`, `ON ${A1}`, `screencast ${A1}`]) && now.one.tabWatch && now.one.tabWatch.live === true && now.two.tabWatch && now.two.tabWatch.live === true,
     'LAW: the kernel\'s watch ON BEFORE the screencast starts (a never-shown tab gets its bounds then) — and r4779: each viewer of the tab is told «live» on ITS OWN confirmed ON (the command is idempotent, the kernel\'s word r4691)', now.logAfterTwo);
@@ -177,6 +182,8 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
   ok(dn.one.tabWatch && dn.one.tabWatch.live === true && dn.two.tabWatch && dn.two.tabWatch.live === false && dn.two.tabWatch.code === 'tab_watch_unavailable' && dn.log.filter((x) => /^OFF/.test(x)).length === 1,
     'r4779: a viewer arriving while the page watch is DOWN (the kernel ended the old socket\'s leases) is told by ITS OWN answer — a still, never «live» over a count the dead socket held', { two: dn.two.tabWatch, log: dn.log });
   ok(cDn.two.tabWatch && cDn.two.tabWatch.live === true, 'CONTROL (a second viewer shares the count, as at 73d130109): told «live» while no socket holds a lease — RED', cDn.two.tabWatch);
+  ok(!dnLines.some((l) => l.includes('tab_watch_unavailable')), 'r5006 (3): an ask while the page watch is DOWN writes no journal line (the page watch\'s own state, not the kernel\'s refusal)', dnLines);
+  if (cDnLog) ok(dnLinesC.some((l) => l.includes('tab_watch_unavailable')), 'CONTROL (a line per hold while the page watch is down, as at f0c44841b): the journal names tab_watch_unavailable — RED', dnLinesC);
   // r4779, THE MUST (law 5's «first leaver» clause): two watchers, the page watch reopens BETWEEN them, the older leaves — the newer
   // still draws. The stand-in kernel keeps leases per socket as the kernel says (its socket's end ends them); the fact judged is the
   // kernel's own lease set after the older left. And the older is TOLD: it asks again on the new socket (never a stale «live»)
@@ -259,6 +266,7 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
     const pa = kw.watchTabFor(target, T(1), {}), pb = kw.watchTabFor(target, T(1), {});
     if (held.length !== 2) return { log, unmade: `the scene was not made: ${held.length} ONs in flight` };
     if (mode === 'u') { held[1](); b = await pb; held[0]({ ok: false, code: 'tab_watch_unanswered' }); a = await pa; }
+    else if (mode === 'm') { held[0]({ ok: false, code: 'tab_watch_unanswered' }); a = await pa; log.push('A-UNANSWERED'); held[1]({ ok: false, code: 'target_crashed', targetId: T(1), watching: false, activeCount: kernel.size, limit: 4 }); b = await pb; }
     else { held[0](); a = await pa; a.close(); await flush(); log.push('A-LEFT'); held[1](); b = await pb; }
     await flush();
     const drawsForB = kernel.has(T(1));
@@ -274,9 +282,12 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
   const LEASED_ANCH = ksrc3.split('\n').find((l) => l.startsWith('    if (!mayHold && !tabWatchLeased.has(k)) return;')) || '\u0000';
   if (!ksrc3.includes(LEASED_ANCH + '\n')) ok(false, 'the anchor of the control «a refusal sends no OFF» is not in the source (src/server/browser-keeper.js)');
   const Kleased = ksrc3.includes(LEASED_ANCH + '\n') ? M.load('src/server/browser-keeper.js', anchored(ksrc3, LEASED_ANCH + '\n', "    if (!mayHold) return; // (the control: a refusal sends no OFF, as at bc7dd84d8)\n"), 'tw-refused-no-off') : null;
-  const [ru, cRu, rl, cRl, rr, cRr] = await Promise.all([raceLeg(K, 'race-u', 'u'), raceLeg(Krace, 'c-race-u', 'u'), raceLeg(K, 'race-l', 'l'), Kconf ? raceLeg(Kconf, 'c-race-l', 'l') : Promise.resolve(null),
-    raceLeg(K, 'race-r', 'r'), Kleased ? raceLeg(Kleased, 'c-race-r', 'r') : Promise.resolve(null)]);
-  for (const x of [ru, cRu, rl, cRl, rr, cRr].filter(Boolean)) if (x.unmade) ok(false, `the race leg: ${x.unmade} — the leg cannot judge`, x.log);
+  // r5006 (2), the round's must: a share that MAY hold a lease (an ON with no reply in its bound) leaves while another share still
+  // counts the tab, and that other is then REFUSED — the tab is marked at the first leaving, so the last one sends the OFF
+  const Kmark = ksrc3.includes(COUNT_ANCH) ? M.load('src/server/browser-keeper.js', anchored(ksrc3, COUNT_ANCH, "    if (n > 0) { tabWatchCounts.set(k, n); return; } // (the control: no mark at a may-hold leaving, as at f0c44841b)\n"), 'tw-no-mark') : null;
+  const [ru, cRu, rl, cRl, rr, cRr, rm, cRm] = await Promise.all([raceLeg(K, 'race-u', 'u'), raceLeg(Krace, 'c-race-u', 'u'), raceLeg(K, 'race-l', 'l'), Kconf ? raceLeg(Kconf, 'c-race-l', 'l') : Promise.resolve(null),
+    raceLeg(K, 'race-r', 'r'), Kleased ? raceLeg(Kleased, 'c-race-r', 'r') : Promise.resolve(null), raceLeg(K, 'race-m', 'm'), Kmark ? raceLeg(Kmark, 'c-race-m', 'm') : Promise.resolve(null)]);
+  for (const x of [ru, cRu, rl, cRl, rr, cRr, rm, cRm].filter(Boolean)) if (x.unmade) ok(false, `the race leg: ${x.unmade} — the leg cannot judge`, x.log);
   ok(!ru.unmade && ru.b && ru.b.live === true && ru.a && ru.a.live === false && ru.a.code === 'tab_watch_unanswered' && ru.drawsForB === true && ru.leftOn === false,
     'r4779 (u): an unconfirmed ON in flight beside a confirmed one sends NO OFF while the confirmed hold counts the tab — the confirmed viewer still draws; the last leaving ends the lease', ru.log);
   ok(!cRu.unmade && cRu.drawsForB === false, 'CONTROL (the OFF whoever else holds the tab, as at 73d130109): the unconfirmed ON\'s OFF ends the confirmed viewer\'s lease — RED', cRu.log);
@@ -286,6 +297,9 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
   ok(!rr.unmade && rr.b && rr.b.live === false && rr.b.code === 'target_crashed' && rr.leftOn === false && rr.log.indexOf(`OFF ${A1}`) > rr.log.indexOf('A-LEFT'),
     'r4808 (r): the first viewer\'s ON confirmed, the second asks, the first leaves, the second is REFUSED (a code that holds nothing) — the last share\'s leaving sends the OFF all the same: no lease stays on with nobody watching', rr.log);
   if (cRr) ok(!cRr.unmade && cRr.leftOn === true, 'CONTROL (a refusal sends no OFF, as at bc7dd84d8): the first viewer\'s lease stays on with nobody watching until the socket ends — RED', cRr.log);
+  ok(!rm.unmade && rm.a && rm.a.code === 'tab_watch_unanswered' && rm.b && rm.b.code === 'target_crashed' && rm.leftOn === false && rm.log.indexOf(`OFF ${A1}`) > rm.log.indexOf('A-UNANSWERED'),
+    'r5006 (2), the round\'s must: an ON with no reply (it MAY hold a lease) leaves while the other share counts the tab, then the other is REFUSED — the tab was marked at the first leaving, so the last one sends the OFF: no lease stays on with nobody watching', rm.log);
+  if (cRm) ok(!cRm.unmade && cRm.leftOn === true, 'CONTROL (no mark at a may-hold leaving, as at f0c44841b): the possible lease stays on with nobody watching until the socket ends — RED', cRm.log);
 }
 
 // ═══ ③b the launch's rule, by behaviour: the keeper's own launchEngineOf over a stand-in engine registry ═══
