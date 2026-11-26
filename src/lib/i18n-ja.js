@@ -9722,6 +9722,7 @@ export default {
   "Who is using it (open files, working folders and command lines under it):": "使っているもの（その下で開いているファイル・作業フォルダー・コマンドライン）：",
   "- {hits} · {who} · {n} processes": "- {hits} · {who} · {n} 個のプロセス",
   "No process has a file open there.": "そこでファイルを開いているプロセスはありません。",
+  "Who has files open there could not be read.": "そこでファイルを開いているプロセスを読み取れませんでした。",
   "VibeSpace paused its own scans of it until it answers:": "応答が戻るまで、VibeSpace は自分によるスキャンを一時停止しました：",
   "- the session discovery sweep": "- セッション検出スキャン",
   "- the usage walk": "- 使用量の集計スキャン",

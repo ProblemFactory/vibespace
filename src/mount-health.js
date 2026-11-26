@@ -136,7 +136,8 @@ function canaryItem({ mountpoint, strikes, latencyMs, suspects = [], pausing = P
       const w = g.who || MP.whoOf(g);
       say(`- ${g.hits} · ${w.text} · ${g.n} process${g.n === 1 ? '' : 'es'}`, i18nKey('- {hits} · {who} · {n} processes'), { hits: g.hits, who: w.text, n: g.n });
     }
-  } else say('No process has a file open there.', i18nKey('No process has a file open there.'));
+  } else if (suspects === null) say('Who has files open there could not be read.', i18nKey('Who has files open there could not be read.'));   // B-323e's remainder: the table was not read — never «no process»
+  else say('No process has a file open there.', i18nKey('No process has a file open there.'));
   const kinds = PAUSE_KINDS.filter((k) => (Array.isArray(pausing) ? pausing : []).includes(k));
   if (kinds.length) {
     lines.push('');
@@ -179,7 +180,8 @@ function heldItem({ mountpoint, kind = 'storage', fn, path: p, ms, caller = null
       const w = g.who || MP.whoOf(g);
       say(`- ${g.hits} · ${w.text} · ${g.n} process${g.n === 1 ? '' : 'es'}`, i18nKey('- {hits} · {who} · {n} processes'), { hits: g.hits, who: w.text, n: g.n });
     }
-  } else say('No process has a file open there.', i18nKey('No process has a file open there.'));
+  } else if (suspects === null) say('Who has files open there could not be read.', i18nKey('Who has files open there could not be read.'));   // B-323e's remainder: the table was not read — never «no process»
+  else say('No process has a file open there.', i18nKey('No process has a file open there.'));
   lines.push('');
   const tail = HELD_TAIL[kind] || HELD_TAIL.storage;
   say(tail, i18nKey(tail));

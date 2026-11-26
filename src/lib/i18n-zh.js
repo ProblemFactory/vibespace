@@ -9723,6 +9723,7 @@ export default {
   "Who is using it (open files, working folders and command lines under it):": "谁在使用它（在它下面打开的文件、工作目录和命令行）：",
   "- {hits} · {who} · {n} processes": "- {hits} · {who} · {n} 个进程",
   "No process has a file open there.": "没有进程在那里打开文件。",
+  "Who has files open there could not be read.": "读不出谁在那里打开了文件。",
   "VibeSpace paused its own scans of it until it answers:": "在它恢复响应之前，VibeSpace 暂停了自己对它的扫描：",
   "- the session discovery sweep": "- 会话发现扫描",
   "- the usage walk": "- 用量统计遍历",
