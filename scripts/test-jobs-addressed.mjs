@@ -427,7 +427,7 @@ const CLASS = {
   '_exitAnswer#1': 'event', '_bootJudgeLate#1': 'event',
   // B-f276, the stamp unit (lane bl-proposals, 主开发 r5015): a run's process record that could not be read at the boot — HELD, said (the run
   // not judged: never a failure); a person's Stop of such a run — ended on purpose, said; a cron's fire skipped beside such a run — said once
-  '_stampAnswer#1': 'event', '_stopUnread#1': 'event', '_fireSkipUnread#1': 'event',
+  '_stampAnswer#1': 'event', '_stopUnread#1': 'event', '_fireSkipUnread#1': 'event', '_stampTornLift#1': 'event',
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -493,6 +493,7 @@ const DRIVERS = {
   '_stampAnswer#1': async () => { const j = svc('drv-stamp-held'), r = run0(j); j.state = 'up'; const un = stub(jm, { _ctlAnswer: () => ({ state: 'unreadable', code: 'EIO', why: 'the read failed', error: Object.assign(new Error('a placed refusal'), { code: 'EIO' }) }) }); try { jm._stampAnswer(j, 'boot'); } finally { un(); for (const e of (jm._stampHolds || new Map()).values()) e.hold.stop(); if (jm._stampHolds) jm._stampHolds.clear(); } return j; },   // the stamp unit
   '_stopUnread#1': async () => { const j = svc('drv-stop-unread'), r = run0(j); j.state = 'up'; const un = stub(jm, { _stampAnswer: () => ({ state: 'unknown', code: 'EIO' }), _stopDoubt: async () => { } }); try { jm.stop(j); } finally { un(); } return j; },   // the stamp unit: the way out
   '_fireSkipUnread#1': async () => { const c = mkJob(jm, { kind: 'cron', name: 'drv-fire-skip-unread', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'] } } } }), k = task('drv-fire-skip-child'); k.cronParent = c.id; k.state = 'up'; run0(k); jm._fireSkipUnread(c, k, { code: 'EIO' }); return c; },   // the stamp unit (c)
+  '_stampTornLift#1': async () => { const j = svc('drv-stamp-torn-lift'), r = run0(j); j.state = 'up'; jm._stampTornLift(j, r, '/made-up/pid.json.corrupt-1'); return j; },   // the stamp unit, r5291: a torn lift judges nothing, said
   '_exitAnswer#1': async () => { const j = svc('drv-exit-held'), r = run0(j); j.state = 'up'; const un = stub(jm, { _ctlAnswer: () => ({ state: 'unreadable', code: 'EIO', why: 'the read failed', error: Object.assign(new Error('a placed refusal'), { code: 'EIO' }) }) }); try { jm._exitAnswer(j, r, 'sweep'); } finally { un(); for (const e of (jm._exitHolds || new Map()).values()) e.hold.stop(); if (jm._exitHolds) jm._exitHolds.clear(); } return j; },   // B-f276 (s1126)
   '_bootJudgeLate#1': async () => { const j = svc('drv-boot-late-unverified'), r = run0(j); j.state = 'up'; jm._bootJudgeLate(j, r, { pid: 4244 }, null); return j; },   // B-f276 (s1126): a stamp with no boot id
   '_hubMainTaskEnd#1': async () => { const j = task('drv-boot-hub-task'), r = run0(j, { hubMain: true }); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },   // r1610 (as _bootNoExit#3's road)
