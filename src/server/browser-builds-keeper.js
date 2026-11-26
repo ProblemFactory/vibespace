@@ -18,6 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 function create(ctx, slot) {
+  const recDoors = { write: typeof ctx.writeRecord === 'function' ? ctx.writeRecord : ctx.writeJsonAtomic, synced: typeof ctx.writeRecordSynced === 'function' ? ctx.writeRecordSynced : null, forget: typeof ctx.forgetRecord === 'function' ? ctx.forgetRecord : null, of: typeof ctx.recordOf === 'function' ? ctx.recordOf : () => null };   // B-574d browser-stores 8/8
   const { bf, browsing, buildsFor, buildsHere, engineFactOf, engineRowsView, chromeBuildsResolve, commit, ensureLoaded, env, healing, hereTag, homeDir, humans, installDir, isEph, isLocalRec, isMediated, keptDirFor, keptStore, log, mediator, named, namedError, notify, now, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, usableExe, userTodos, whichOnPath, writeJsonAtomic } = ctx;
   const { INSTALL_TIMEOUT_MS, busyWords, installMarker, installState, mine: isMine, markInstall, otherOf, runStep, stalledWords } = slot;
   const inputsView = (...a) => ctx.inputsView(...a); // declared later in the keeper (read at call time)
@@ -80,7 +81,7 @@ function create(ctx, slot) {
   }
   /** The kept known-good list (re-judged on every read — a url edited on disk to another host is refused like a fetched one). */
   function knownGoodKept() {
-    let k = null; try { k = JSON.parse(fs.readFileSync(knownGoodFile(), 'utf8')); } catch { return null; }
+    let k = null; try { const m = recDoors.of(knownGoodFile()); k = JSON.parse(m != null ? m : fs.readFileSync(knownGoodFile(), 'utf8')); } catch { return null; }   // 8/8: this process's record from memory
     if (!k || !Array.isArray(k.versions)) return null;
     const versions = [], refused = Array.isArray(k.refused) ? k.refused.slice(0, 200) : [];
     for (const v of k.versions) { if (!v || !BB.VERSION_RE.test(String(v.version || ''))) continue; const u = BB.downloadUrlVerdict(v.url, { fileHost: CBR.fileHost }); if (u.ok) versions.push({ version: v.version, major: Number(String(v.version).split('.')[0]), revision: String(v.revision || ''), url: u.url }); else refused.push({ version: v.version, code: u.code, error: u.error }); }
@@ -100,7 +101,7 @@ function create(ctx, slot) {
       rec = { at: now(), lastModified: res.headers.get('last-modified') || null, timestamp: p.timestamp, versions: p.versions, refused: p.refused.slice(0, 200) };
     }
     fs.mkdirSync(path.dirname(knownGoodFile()), { recursive: true, mode: 0o700 });
-    writeJsonAtomic(knownGoodFile(), rec);
+    recDoors.write(knownGoodFile(), rec);   // 8/8: a record, on the store writer
     return rec;
   }
   /** A version's download url — from the lists a person's picker read (the channel list within the hour, the kept known-good
@@ -208,7 +209,10 @@ function create(ctx, slot) {
     const r = await execText(exe, ['--version'], { timeout: 30000, env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) });
     const s = BB.versionSays(r.out + r.err, version);
     if (!s.ok) throw namedError('build_verify_failed', `the downloaded chrome says ${s.says || (r.error ? 'nothing (' + r.error + ')' : 'nothing')}, not ${version}`);
-    writeJsonAtomic(path.join(top, BB.WITNESS_FILE), { version, url, bytes, etag, at: now(), cli: cli || null });
+    // 8/8: the witness ON DISK before its folder's rename (the asynchronous synced replace, awaited, off the loop) — a write that lands
+    // later would land in a folder already renamed
+    const witness = { version, url, bytes, etag, at: now(), cli: cli || null };
+    if (recDoors.synced) await recDoors.synced(path.join(top, BB.WITNESS_FILE), witness); else recDoors.write(path.join(top, BB.WITNESS_FILE), witness);
     fs.renameSync(top, plan.targetDir); // THE one rename (same filesystem): the build appears whole, its witness inside
     dropPartials(plan);
   }
@@ -216,7 +220,7 @@ function create(ctx, slot) {
     if (run !== cbState.run) return; // a run this keeper abandoned (shutdown) — the next keeper judges what it left
     const plan = BB.downloadPlan({ version: cbState.version, buildsRoot: buildsRoot() });
     if (err && plan.ok) dropPartials(plan);
-    try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
+    try { if (recDoors.forget) recDoors.forget(installMarker()); fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
     cbState.abort = null; cbState.code = err ? code || 'build_fetch_failed' : null;
     Object.assign(installState, { running: false, finishedAt: now(), exitCode: err ? 1 : 0, error: err ? `${installState.step || 'fetch'}: ${err}` : null, step: err ? installState.step || 'fetch' : 'done', pid: null });
     log[err ? 'warn' : 'log']?.(`[browser] Chrome ${cbState.version} download ${err ? `failed at ${installState.step} — ${err}` : `finished: ${plan.targetDir}`}`);
@@ -325,7 +329,7 @@ function create(ctx, slot) {
       else e = stalled ? `VibeSpace restarted during the download, and its ${stalledWords(`${m.step || 'unpack'} step`)}` : `VibeSpace restarted during the download (step ${m.step || 'fetch'}) — nothing was kept; download it again`;
     } catch (x) { e = String(x && x.message || x); }
     if (e && plan.ok) dropPartials(plan);
-    try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
+    try { if (recDoors.forget) recDoors.forget(installMarker()); fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
     cbState.code = e ? code || (stalled ? 'build_stalled' : 'build_fetch_failed') : null;
     Object.assign(installState, { running: false, finishedAt: now(), exitCode: e ? 1 : 0, error: e ? `${m.step || 'fetch'}: ${e}` : null, step: e ? (m.step || 'fetch') : 'done', pid: null });
     log[e ? 'warn' : 'log']?.(`[browser] Chrome ${m.version} download after a restart: ${e || 'finished from what it left'}`);

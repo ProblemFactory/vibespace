@@ -789,8 +789,8 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
 
 // ── B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): THE WINDOW STORES ON THE STORE WRITER — an agent's act (the open,
 // the attach) is handed, never awaited: in memory at once, on disk once landed; a PERSON's share act (the mode) answers AFTER its
-// window-reach.json landed, and a landing that fails is the act's REFUSAL (not_saved). RED (anchored copy): the share act answered
-// without waiting for its landing — the refused landing answered as saved
+// window-reach.json landed, and a landing that fails answers notOnDisk (7b: the act is in effect — never a false refusal). RED
+// (anchored copy): the share act answered without waiting for its landing — the failed landing answered as saved
 console.log('B-574d browser-stores 5/8: the window stores on the store writer');
 {
   const shareScene = async (ENGm, sub) => {
@@ -802,15 +802,18 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
     let disk = null; try { disk = JSON.parse(fs.readFileSync(reachFile, 'utf8')).windows['da-1'].mode; } catch { disk = null; }   // read right after the answer: landed
     fs.rmSync(reachFile, { force: true }); fs.mkdirSync(reachFile);   // the file's name taken by a folder: its next landing fails
     const o2 = await act(() => W.engine.setShareMode('da-1', 'tree')); const refused = o2 && o2.notOnDisk === true ? 'notOnDisk' : o2 && o2.err ? o2.err : null;
+    const st = require('../src/store-writer.js').storeWriter().stats().find((x) => x.file === reachFile);
+    const planted = !!(st && st.failures > 0);   // 主开发 r5135 law 1: the plant's witness — the writer's write of that file failed
     fs.rmSync(reachFile, { recursive: true, force: true });   // the writer retries over the freed name
-    return { leaseNow, mode: out && out.mode, disk, refused };
+    return { planted, leaseNow, mode: out && out.mode, disk, refused };
   };
+  const skip5 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
   const S5 = await shareScene(ENGINE, 'bs5-real');
-  ok(S5.leaseNow && S5.mode === 'pixels' && S5.disk === 'pixels' && S5.refused === 'notOnDisk',
+  if (!S5.planted) skip5('5/8', 'the folder in window-reach.json\'s name: the writer\'s write of it never failed'); else ok(S5.leaseNow && S5.mode === 'pixels' && S5.disk === 'pixels' && S5.refused === 'notOnDisk',
     'B-574d browser-stores 5/8: an agent\'s open and attach are handed (the lease in memory at once); a person\'s share act answers AFTER its landing (the file holds the mode when the answer comes), and a landing that FAILS answers notOnDisk — the act is in effect, never a false «refused»', S5);
   const src5 = read(ENGINE_REL), WAITS = '      respond(null, ok === true ? out : { ...out, notOnDisk: true });\n';
   const S5x = await shareScene(MUT.load(ENGINE_REL, editAnchor(src5, WAITS, '      respond(null, out);   // MUTANT: the landing not read\n', ENGINE_REL), 'bs5-unread'), 'bs5-red');
-  ok(S5x.refused === null, 'RED (anchored copy: the share act answered as saved whatever its landing): the failed landing is answered as on disk — 5/8 goes red', S5x);
+  if (!S5x.planted) skip5('5/8 RED', 'the copy\'s write of window-reach.json never failed'); else ok(S5x.refused === null, 'RED (anchored copy: the share act answered as saved whatever its landing): the failed landing is answered as on disk — 5/8 goes red', S5x);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

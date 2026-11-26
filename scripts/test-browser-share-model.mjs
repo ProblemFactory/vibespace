@@ -2336,7 +2336,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
       ok(noWitness !== ksrcI, '④j control setup: the legacy witness is where the control cuts');
       const c11 = await runR7(M.load('src/server/browser-keeper.js', noWitness, 'no-legacy-witness'), 'ctl11', ['S59']);
       ok(c11.S59a.err === 'profile_locked' && c11.S59a.left === 3 && c11.S59aEph.err === 'profile_locked' && c11.S59b.err === null, '④j CONTROL 11: a keeper without the legacy lock witness refuses userW\'s named AND ephemeral kept directories on the upgrade-is-the-roll path (the Update-first order still works by the file\'s writer) — S59a / S59a-eph catch it', { a: c11.S59a.err, e: c11.S59aEph.err, b: c11.S59b.err }); }
-    { const noLedger = editAnchor(ksrcI, "led.owed.push(JSON.stringify({ at: now(), boot: bootId,", "if (false) led.owed.push(JSON.stringify({ at: now(), boot: bootId, /* CONTROL: no ledger */", "src/server/browser-keeper.js");
+    { const noLedger = editAnchor(ksrcI, "L.owed.push(JSON.stringify({ at: now(), boot: bootId,", "if (false) L.owed.push(JSON.stringify({ at: now(), boot: bootId, /* CONTROL: no ledger */", "src/server/browser-keeper.js");
       ok(noLedger !== ksrcI, '④j control setup: the ledger write is where the control cuts');
       const c12 = await runR7(M.load('src/server/browser-keeper.js', noLedger, 'no-ledger'), 'ctl12', ['S60']);
       ok(c12.S60.journalLines === 1 && c12.S60.ledgerNamedAll === false, '④j CONTROL 12: a keeper without the ledger says the storm once and names three — the other 37 pruned paths are nowhere — S60 catches it', c12.S60); }
@@ -2572,7 +2572,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
       ok(always !== ksrc8, '④k control setup: the retire rule is where the control cuts');
       const c16 = await runR8(M.load('src/server/browser-keeper.js', always, 'retire-mints'), 'ctl16', ['S72']);
       ok(c16.S72.tokKeptAtRemove === false && c16.S72b.err === 'profile_locked', '④k CONTROL 16: a keeper whose retire remembers a refused record mints a fresh marker INTO the adopted backup, and the restore from it is refused as foreign (r7) — S72 / S72b catch it', { kept: c16.S72.tokKeptAtRemove, r: c16.S72b.err }); }
-    { const cut = 'if (!ledgerTailChecked) {'; const noTail = editAnchor(ksrc8, cut, 'if (false) { /* CONTROL: a torn tail never terminated */', "src/server/browser-keeper.js");
+    { const cut = 'if (!L.tailChecked) {'; const noTail = editAnchor(ksrc8, cut, 'if (false) { /* CONTROL: a torn tail never terminated */', "src/server/browser-keeper.js");
       ok(noTail !== ksrc8, '④k control setup: the tail check is where the control cuts');
       const c17 = await runR8(M.load('src/server/browser-keeper.js', noTail, 'no-tail-termination'), 'ctl17', ['S74']);
       ok(c17.S74a.glued === true && c17.S74a.terminated === false, '④k CONTROL 17: a keeper that never terminates a torn tail glues this boot\'s first line onto it (two records, one unparsable line — r7) — S74a catches it', c17.S74a); }

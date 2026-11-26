@@ -111,7 +111,10 @@ const DATA = path.join(ROOT, 'data');
 const plan = (v) => BB.downloadPlan({ version: v, buildsRoot: BROWSERS });
 const leftovers = (v) => { const p = plan(v); return [p.part, p.unpackDir, p.removingDir].filter((f) => fs.existsSync(f)); };
 const listed = (v) => BB.listBuilds({ homeDir: HOME }).builds.some((b) => b.version === v && b.usable);
-const marker = () => { try { return JSON.parse(fs.readFileSync(path.join(DATA, 'browser-tools', 'install-running.json'), 'utf8')); } catch { return null; } };
+// B-574d browser-stores 8/8: the keeper's records (the running marker, known-good) are the store writer's — a read after an act waits for
+// the file's landing (the writer's bounded flush of that one file)
+const landedFile = (f) => { try { const W = require('../src/store-writer.js').storeWriter(); if (W.pending(f)) W.flushSync([f]); } catch { /* read as it is */ } return f; };
+const marker = () => { try { return JSON.parse(fs.readFileSync(landedFile(path.join(DATA, 'browser-tools', 'install-running.json')), 'utf8')); } catch { return null; } };
 let kk = mkKeeper(DATA);
 const done = async (k = kk) => { await until(() => !k.chromeBuildFacts().install.running); return k.chromeBuildFacts().install; };
 
@@ -140,7 +143,7 @@ console.log('— ① the lists: no fetch at boot / for the facts; the channel li
   ok(hits.filter((h) => h.path === CBR.lists.lastKnownGood).length === 2, 'opened again: read again (fresh every time a person opens it)');
   const o = await kk.chromeBuildsAvailable({ lists: 'older' });
   const kgReads = () => hits.filter((h) => h.path === CBR.lists.knownGood);
-  ok((o.majors || []).map((m) => m.major).join() === '157,154,153,151,146,113' && o.majors.find((m) => m.major === 146).newest === '146.0.7680.165' && fs.existsSync(path.join(DATA, 'browser-tools', 'chrome-builds', 'known-good.json')) && kgReads().length === 1 && !kgReads()[0].ims,
+  ok((o.majors || []).map((m) => m.major).join() === '157,154,153,151,146,113' && o.majors.find((m) => m.major === 146).newest === '146.0.7680.165' && fs.existsSync(landedFile(path.join(DATA, 'browser-tools', 'chrome-builds', 'known-good.json'))) && kgReads().length === 1 && !kgReads()[0].ims,
     '"Older versions…": the known-good list read once, kept under data/browser-tools/chrome-builds/, one row per major (newest first, its newest version)', o.majors);
   const v146 = await kk.chromeBuildsAvailable({ major: 146 });
   const v151 = await kk.chromeBuildsAvailable({ major: 151 });

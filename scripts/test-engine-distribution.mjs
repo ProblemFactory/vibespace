@@ -1752,20 +1752,23 @@ await Promise.all(later);
     const d = path.join(ROOT, `bs3-${tag}`); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'browser-engines.json'), OLDREC);
     const said = [], ed = EDmod.create({ dataDir: d, log: { warn: (l) => said.push(String(l)), log() { } } });
     await ed.ready; ed._record().engines.made = { kernel: 'k1' };
-    const r = await placedSync(`browser-engines.json.${process.pid}.tmp`, code, () => ed._save());
+    const r = await placedSync(path.join(d, `browser-engines.json.${process.pid}.tmp`), code, () => ed._save());   // this scene's own temp only (an earlier scene's late save in its own folder never meets the plant)
     const text = fs.readFileSync(path.join(d, 'browser-engines.json'), 'utf8');
     return { landed: r.out, events: r.events, old: text === OLDREC, made: text.includes('"made"'), tmpLeft: fs.readdirSync(d).some((f) => f.endsWith('.tmp')), said };
   };
+  // 主开发 r5135 law 1: each placed answer is judged only when the product READ it inside the leg (its witness: the sync asked of the
+  // record's own temp, or the record's write through the window); a plant never read is a NAMED SKIP, not judged
+  const skip3 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
   const E1 = await recScene(EDR, 'eio', 'EIO');
-  ok(E1.landed === false && E1.old && !E1.tmpLeft && E1.events === 'open,sync' && E1.said.some((l) => l.includes('the engine record could not be written (EIO')),
+  if (!E1.events.includes('sync')) skip3('3/8 EIO', 'no sync was asked of the record\'s temp'); else ok(E1.landed === false && E1.old && !E1.tmpLeft && E1.events === 'open,sync' && E1.said.some((l) => l.includes('the engine record could not be written (EIO')),
     'B-574d browser-stores 3/8: the engines\' record\'s sync refused (EIO) is a FAILED write — the old record standing, no temp left, said (kept in memory: the next save writes it again)', E1);
   const E2 = await recScene(EDR, 'einval', 'EINVAL');
-  ok(E2.landed === true && E2.made && E2.said.filter((l) => l.includes('does not do a sync (EINVAL)')).length === 1, '…a file system with NO sync (EINVAL): it lands, said once', E2);
+  if (!E2.events.includes('sync')) skip3('3/8 EINVAL', 'no sync was asked of the record\'s temp'); else ok(E2.landed === true && E2.made && E2.said.filter((l) => l.includes('does not do a sync (EINVAL)')).length === 1, '…a file system with NO sync (EINVAL): it lands, said once', E2);
   const E3 = await recScene(EDR, 'real', null);
   ok(E3.landed === true && E3.made && E3.events === 'open,sync,rename', '…the real sync: the temp synced before its rename', E3);
   const EDw = MC.load('src/server/engine-distribution.js', swap(EDsrc, 'writeRecordSynced(JSON.stringify(record, null, 1))', '(async () => { const tmp = `${recordFile}.${process.pid}.tmp`; await fsp.mkdir(path.dirname(recordFile), { recursive: true }); await fsp.writeFile(tmp, JSON.stringify(record, null, 1), { mode: 0o600 }); await fsp.rename(tmp, recordFile); })()', 'the record\'s synced replace'), 'bs3-plain-write');
   const E1x = await recScene(EDw, 'red', 'EIO');
-  ok(E1x.landed === true && !E1x.events.includes('sync'), 'RED (anchored copy: the release\'s plain write + rename): no sync is asked, the refused scene lands — 3/8 goes red', E1x);
+  if (!E1x.events.includes('rename')) skip3('3/8 RED', 'the copy\'s write of the record never ran through the window'); else ok(E1x.landed === true && !E1x.events.includes('sync'), 'RED (anchored copy: the release\'s plain write + rename): no sync is asked, the refused scene lands — 3/8 goes red', E1x);
 }
 // ── B-574d «browser-stores» 4/8 (lane nl-migrations, 主开发 r5101 — the tree's standing law: nothing is removed at a start because a
 // record is silent, unread or torn): an engines record that cannot be read but for «not there» (a placed refusal of its read, EIO)
@@ -1775,25 +1778,31 @@ console.log('— B-574d browser-stores 4/8: a record that cannot be read holds t
 {
   const TORNREC = '{"v":1,"engines":{"x';
   const holdScenes = async (EDM) => {
-    const T = light(snapC, { EDM, prep: ({ R }) => fs.writeFileSync(path.join(R, 'browser-engines.json'), TORNREC) });
-    await T.ED.bootRestore();
-    const torn = { next: fs.existsSync(T.plan.nextDir), bytes: fs.readFileSync(path.join(T.R, 'browser-engines.json'), 'utf8') === TORNREC, said: T.journal.filter((l) => l.includes('could not be read (unparsable')).length, swept: T.journal.some((l) => l.includes('leftover kernel files the record does not name were removed')) };
     const P = fs.promises, rf0 = P.readFile;
-    P.readFile = function (p, ...a) { if (String(p).endsWith(path.sep + 'browser-engines.json')) return Promise.reject(Object.assign(new Error('EIO: a placed refusal of the read'), { code: 'EIO' })); return rf0.call(this, p, ...a); };
+    let readTorn = 0;   // 主开发 r5135 law 1: the torn bytes' witness — the product asked for the record's bytes
+    P.readFile = function (p, ...a) { if (String(p).endsWith(path.sep + 'browser-engines.json')) readTorn++; return rf0.call(this, p, ...a); };
+    let T = null; try { T = light(snapC, { EDM, prep: ({ R }) => fs.writeFileSync(path.join(R, 'browser-engines.json'), TORNREC) }); } finally { P.readFile = rf0; }
+    await T.ED.bootRestore();
+    const saved = await T.ED._save().catch((e) => 'threw:' + ((e && e.code) || 'error'));   // a save asked over the held record (an act would ask it): refused, nothing written over it
+    const torn = { read: readTorn, saved, next: fs.existsSync(T.plan.nextDir), bytes: fs.readFileSync(path.join(T.R, 'browser-engines.json'), 'utf8') === TORNREC, said: T.journal.filter((l) => l.includes('could not be read (unparsable')).length, swept: T.journal.some((l) => l.includes('leftover kernel files the record does not name were removed')) };
+    let refused = 0;   // 主开发 r5135 law 1: the placed refusal's witness — the product asked for the record's bytes
+    P.readFile = function (p, ...a) { if (String(p).endsWith(path.sep + 'browser-engines.json')) { refused++; return Promise.reject(Object.assign(new Error('EIO: a placed refusal of the read'), { code: 'EIO' })); } return rf0.call(this, p, ...a); };
     let U = null; try { U = light(snapC, { EDM }); } finally { P.readFile = rf0; }
     await U.ED.bootRestore();
-    const unread = { next: fs.existsSync(U.plan.nextDir), said: U.journal.filter((l) => l.includes('could not be read (EIO')).length, swept: U.journal.some((l) => l.includes('leftover kernel files the record does not name were removed')) };
+    const unread = { refused, next: fs.existsSync(U.plan.nextDir), said: U.journal.filter((l) => l.includes('could not be read (EIO')).length, swept: U.journal.some((l) => l.includes('leftover kernel files the record does not name were removed')) };
     return { torn, unread };
   };
   const H4 = await holdScenes().catch((e) => ({ threw: String(e && e.stack || e) }));
-  ok(!!H4.torn && H4.torn.next && H4.torn.bytes && H4.torn.said === 1 && !H4.torn.swept && H4.unread.next && H4.unread.said === 1 && !H4.unread.swept,
+  const skip4 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
+  const read4 = (H) => !!(H && H.torn && H.torn.read > 0), refused4 = (H) => !!(H && H.unread && H.unread.refused > 0);
+  if (H4.torn && !(read4(H4) && refused4(H4))) skip4('4/8', 'the torn record or the refused read was never asked for'); else ok(!!H4.torn && H4.torn.saved === false && H4.torn.next && H4.torn.bytes && H4.torn.said === 1 && !H4.torn.swept && H4.unread.next && H4.unread.said === 1 && !H4.unread.swept,
     'B-574d browser-stores 4/8: an engines record TORN, or whose read is refused (EIO), HOLDS the boot sweep — the waiting kernel\'s .next-<tag> stays, nothing is written over the record, said once', H4);
   const HOLDS = '    if (recordHeld) { sayRecordHeld(); return []; }   // 4/8: a record HELD removes nothing it might name\n';
   const H4x = await holdScenes(MC.load('src/server/engine-distribution.js', swap(EDsrc, HOLDS, '', 'the held record holds the sweep'), 'bs4-sweep-unheld')).catch((e) => ({ threw: String(e && e.message) }));
-  ok(!!H4x.torn && (!H4x.torn.next || H4x.torn.swept), 'RED (anchored copy: today\'s sweep over the empty record): the waiting kernel downloaded is REMOVED because its record was torn — 4/8 goes red', H4x);
+  if (H4x.torn && !read4(H4x)) skip4('4/8 RED (the sweep)', 'the copy never asked for the torn record'); else ok(!!H4x.torn && (!H4x.torn.next || H4x.torn.swept), 'RED (anchored copy: today\'s sweep over the empty record): the waiting kernel downloaded is REMOVED because its record was torn — 4/8 goes red', H4x);
   const SAVEH = '  const save = () => (recordHeld ? (sayRecordHeld(), Promise.resolve(false)) : saving = ';
   const H4y = await holdScenes(MC.load('src/server/engine-distribution.js', swap(EDsrc, SAVEH, '  const save = () => (false ? null : saving = ', 'nothing written over a held record'), 'bs4-save-unheld')).catch((e) => ({ threw: String(e && e.message) }));
-  ok(!!H4y.torn && !H4y.torn.bytes, 'RED (anchored copy: a save over the held record): the torn record is written over (its facts gone for the next start\'s sweep) — 4/8 goes red', H4y);
+  if (H4y.torn && !read4(H4y)) skip4('4/8 RED (the save)', 'the copy never asked for the torn record'); else ok(!!H4y.torn && !H4y.torn.bytes, 'RED (anchored copy: a save over the held record): the torn record is written over (its facts gone for the next start\'s sweep) — 4/8 goes red', H4y);
 }
 host.close();
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);

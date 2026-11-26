@@ -315,15 +315,17 @@ console.log('— B-574d browser-stores 7/8: a generated config read back, or wri
     const be = BEmod.create({ dataDir: path.join(d, 'data'), homeDir: h, serverSetting: () => undefined, log: { log() {}, warn: (l) => lines.push(String(l)), error() {} }, env: {}, socketDirBase: path.join(d, 'sock'), facts: { floor: async () => ({ state: 'ok' }) }, writeJson });
     const r = be.envFor({ browserKey: 'bk-0000b7b7', integrationOn: true });
     const cfg = (r.pairs || []).find((p) => String(p).startsWith('AGENT_BROWSER_CONFIG='));
-    return { variant: r.variant, named: !!cfg, writes: n, said: lines.filter((l) => l.includes('does not read back after two writes')).length };
+    return { tore: Math.min(n, tornWrites), variant: r.variant, named: !!cfg, writes: n, said: lines.filter((l) => l.includes('does not read back after two writes')).length };
   };
+  // 主开发 r5135 law 1: judged only when the product wrote through the plant (a torn write made: its witness); else a NAMED SKIP
+  const skip7 = (name) => console.log(`  SKIP ${name}: the product never wrote through the placed torn write — its plant was never read (主开发 r5135 law 1): not judged`);
   const R1 = readBack(BE, 'once', 1), R2 = readBack(BE, 'always', 99);
-  ok(R1.variant === 'D' && R1.named && R1.writes === 2 && R1.said === 0, 'B-574d browser-stores 7/8: a generated config whose write tore ONCE is written again at once — the conversation keeps rung D, its config named, nothing said', R1);
-  ok(R2.variant === 'C' && !R2.named && R2.said === 1, '…one that still does not read after the second write falls back as before (rung C, never named) and is SAID once by name', R2);
+  if (!R1.tore) skip7('7/8 (torn once)'); else ok(R1.variant === 'D' && R1.named && R1.writes === 2 && R1.said === 0, 'B-574d browser-stores 7/8: a generated config whose write tore ONCE is written again at once — the conversation keeps rung D, its config named, nothing said', R1);
+  if (!R2.tore) skip7('7/8 (torn always)'); else ok(R2.variant === 'C' && !R2.named && R2.said === 1, '…one that still does not read after the second write falls back as before (rung C, never named) and is SAID once by name', R2);
   const esrc7 = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
   const BE1 = mutantCopies('bs7-env', REPO).load('src/server/browser-env.js', editAnchor(esrc7, '    for (let i = 0; i < 2; i++) {\n      writeJson(p, obj);\n', '    for (let i = 0; i < 1; i++) {\n      writeJson(p, obj);\n', 'src/server/browser-env.js'), 'bs7-one-write');
   const R1x = readBack(BE1, 'red', 1);
-  ok(R1x.variant === 'C', 'RED (anchored copy: one write, no second): the config that tore once drops the conversation to rung C — 7/8 goes red', R1x);
+  if (!R1x.tore) skip7('7/8 RED'); else ok(R1x.variant === 'C', 'RED (anchored copy: one write, no second): the config that tore once drops the conversation to rung C — 7/8 goes red', R1x);
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''})`);

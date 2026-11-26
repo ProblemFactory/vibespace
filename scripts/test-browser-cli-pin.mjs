@@ -141,6 +141,7 @@ let k = mkKeeper(DATA, { FAKE_NPM_DELAY_MS: '600' });
   const e2 = (() => { try { k.installCli({ version: '0.39.2' }); return null; } catch (e) { return e; } })();
   const iv = k.installProgress();
   ok(e2 && e2.code === 'install_running' && iv.running === true, 'THE slot is ONE: a second CLI install is refused install_running while it runs', { e2: e2 && e2.code, iv: { running: iv.running, step: iv.step } });
+  if (typeof k._recordsLanded === 'function') k._recordsLanded();   // B-574d browser-stores 8/8: the marker on the store writer, on disk once it landed
   ok(fs.existsSync(path.join(TOOLS, 'install-running.json')), 'the running install is named in its marker (a restart re-attaches)');
   ok(await waitFor(async () => !(await k.cliFacts()).install.running, 10000), 'the install finishes');
   f = await k.cliFacts();

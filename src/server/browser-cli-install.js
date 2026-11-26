@@ -16,6 +16,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 function create(ctx, slot) {
+  const forgetRecord = typeof ctx.forgetRecord === 'function' ? ctx.forgetRecord : null, writeRec = typeof ctx.writeRecord === 'function' ? ctx.writeRecord : ctx.writeJsonAtomic;   // B-574d browser-stores 8/8: a removal after the writer forgets its pending write
   const { bf, bfPath, cliFolderOf, cliPin, env, installedCliOf, log, namedError, notify, now, runningClis, usableExe, whichOnPath, writeJsonAtomic } = ctx;
   const { INSTALL_TIMEOUT_MS, installMarker, installState, mine: isMine, markInstall, otherOf, stalledWords } = slot;
   const cliPrefix = (...a) => ctx.cliPrefix(...a); // declared later in the keeper (read at call time)
@@ -51,7 +52,7 @@ function create(ctx, slot) {
     const npm = whichOnPath('npm');
     const prefix = cliPrefix(v0.version);
     fs.mkdirSync(prefix, { recursive: true, mode: 0o700 });
-    try { fs.rmSync(cliWitnessOf(prefix), { force: true }); } catch { /* none */ } // verify r1 (F2): the folder is about to be rewritten — nothing resolves it until it is verified again
+    try { if (forgetRecord) forgetRecord(cliWitnessOf(prefix)); fs.rmSync(cliWitnessOf(prefix), { force: true }); } catch { /* none */ } // B-574d browser-stores 8/8: an owed witness write forgotten first (a late landing never brings it back); verify r1 (F2): the folder is about to be rewritten — nothing resolves it until it is verified again
     ctx.cliGen++; ctx.cliMemo = null;
     const e0 = {}; for (const [k2, v2] of Object.entries(env() || {})) if (v2 != null) e0[k2] = String(v2);
     if (!e0.PATH) e0.PATH = process.env.PATH || '';
@@ -108,12 +109,12 @@ function create(ctx, slot) {
           const out = await new Promise((resolve) => { try { require('child_process').execFile(i.path, ['--version'], { timeout: 15000, encoding: 'utf8', env: F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }) }, (er, so, se) => resolve(String(so || '') + String(se || ''))); } catch (x) { resolve(''); } });
           const got = B.parseVersion(out);
           if (!got || got.join('.') !== String(version)) e = `the installed program says ${got ? got.join('.') : 'nothing'}, not ${version}`;
-          else writeJsonAtomic(cliWitnessOf(i.prefix), { version: String(version), path: i.path, at: now(), says: got.join('.') }); // verify r1 (F2): THE witness — only now is the folder an install
+          else writeRec(cliWitnessOf(i.prefix), { version: String(version), path: i.path, at: now(), says: got.join('.') }); // verify r1 (F2): THE witness — only now is the folder an install
         }
       }
     } catch (x) { e = String(x && x.message || x); }
-    if (e) { try { fs.rmSync(cliWitnessOf(cliPrefix(version)), { force: true }); } catch { /* none */ } } // a failed install's folder is never resolved
-    try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
+    if (e) { try { if (forgetRecord) forgetRecord(cliWitnessOf(cliPrefix(version))); fs.rmSync(cliWitnessOf(cliPrefix(version)), { force: true }); } catch { /* none */ } } // a failed install's folder is never resolved
+    try { if (forgetRecord) forgetRecord(installMarker()); fs.rmSync(installMarker(), { force: true }); } catch { /* none */ }
     Object.assign(installState, { running: false, finishedAt: now(), exitCode: e ? 1 : 0, error: e ? `${installState.step || 'package'}: ${e}` : null, step: e ? installState.step : 'done', pid: null });
     ctx.cliGen++; ctx.cliMemo = null; try { cliPin(); } catch { /* said */ }
     cliFinishing = false;

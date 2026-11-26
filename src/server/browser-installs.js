@@ -30,7 +30,7 @@ const INSTALLERS = [
   require('./browser-builds-keeper.js'),
 ];
 
-function createSlot({ dataDir, installDir, installTimeoutMs = null, log = console, now = Date.now, writeJsonAtomic }) {
+function createSlot({ dataDir, installDir, installTimeoutMs = null, log = console, now = Date.now, writeJsonAtomic, writeRecord = null, forgetRecord = null }) {   // B-574d browser-stores 8/8: the marker through the keeper's record door (the store writer)
   const rows = new Map(); // row id → the row its installer registered
   const INSTALL_TIMEOUT_MS = Number.isFinite(installTimeoutMs) && installTimeoutMs > 0 ? installTimeoutMs : 15 * 60 * 1000;
   /** verify r1 (F8): THE slot's bound — every step of either install ends at INSTALL_TIMEOUT_MS: the browser CLI's detached
@@ -47,8 +47,9 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
   }
   const installState = { running: false, startedAt: null, finishedAt: null, exitCode: null, spec: null, pid: null, log: path.join(installDir, 'install.log'), error: null, step: null, refused: [] };
   const installMarker = () => path.join(dataDir, 'browser-tools', 'install-running.json');
+  const recordDoor = typeof writeRecord === 'function' ? writeRecord : writeJsonAtomic;   // 8/8: a record, on the store writer
   /** THE marker of a running install (both kinds): the step's pid + starttime, so a restart re-attaches (verify r1 F3). */
-  function markInstall(m) { try { fs.mkdirSync(path.dirname(installMarker()), { recursive: true, mode: 0o700 }); writeJsonAtomic(installMarker(), m); } catch (e) { log.warn?.(`[browser] the install marker was not written (${e && e.message}) — a restart now would not re-attach`); } }
+  function markInstall(m) { try { fs.mkdirSync(path.dirname(installMarker()), { recursive: true, mode: 0o700 }); recordDoor(installMarker(), m); } catch (e) { log.warn?.(`[browser] the install marker was not written (${e && e.message}) — a restart now would not re-attach`); } }
   /** ONE step of the install as a child, its output appended to the log; resolves `{ok, code, sig, error}`. The pid is
    *  on installState SYNCHRONOUSLY (the Promise executor runs now), so the caller answers it. */
   function runStep(step, cmd, argv, childEnv, mark = null) {
@@ -114,7 +115,7 @@ function createSlot({ dataDir, installDir, installTimeoutMs = null, log = consol
       retired = { kind, result: ended ? 'ended' : live ? 'let-go' : 'gone', pid: Number.isInteger(m.pid) ? m.pid : null, step: m.step ? String(m.step).slice(0, 40) : null };
       log.warn?.(`[browser] an install of a kind this version no longer runs (${kind}${retired.pid ? ', pid ' + retired.pid : ''}) was found at the restart — ${ended ? 'its step was stopped by identity' : live ? 'its pid could not be proven to be the step its marker names: let go, never signalled' : 'it had ended'}; what it left under ${installDir} stays where it is`);
     }
-    if (!row || (!Number.isInteger(m.pid) && !row.inProcess)) { try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ } return null; }
+    if (!row || (!Number.isInteger(m.pid) && !row.inProcess)) { try { if (forgetRecord) forgetRecord(installMarker()); fs.rmSync(installMarker(), { force: true }); } catch { /* none */ } return null; }
     if (row.beforeReattach) row.beforeReattach(m);
     Object.assign(installState, { running: true, kind: m.kind, spec: m.spec || null, startedAt: m.startedAt || now(), finishedAt: null, exitCode: null, pid: m.pid, error: null, step: m.step || 'package', refused: [] });
     const alive = () => Number.isInteger(m.pid) && F.pidAlive(m.pid) && (m.starttime == null || F.sameProcess(m.pid, m.starttime));

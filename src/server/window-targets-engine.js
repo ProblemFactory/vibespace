@@ -330,7 +330,6 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function save() {
     if (!leaseHold.writable('a write of the window leases')) return;   // HELD: never over a file that could not be read
     try {
-      fs.mkdirSync(dataDir, { recursive: true });
       const out = {};
       for (const [h, l] of leases) out[h] = { handle: h, sessionId: l.sessionId, browserKey: l.browserKey || null, since: l.since, origin: l.origin || ORIGIN };
       const agentEnds = {}; for (const [h, p] of openerLost) agentEnds[h] = { at: p.at, told: !!p.told, why: p.why || 'opener-ended' };
@@ -417,7 +416,6 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function saveReach() {
     if (!reachHold.writable('a write of the windows\' share modes')) return;   // HELD: never over a file that could not be read
     try {
-      fs.mkdirSync(dataDir, { recursive: true });
       const out = {};
       for (const [h, r] of reach) out[h] = r;
       writeWindowStore(reachFile, { v: 1, savedAt: now(), windows: out });

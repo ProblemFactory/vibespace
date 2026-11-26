@@ -130,6 +130,7 @@ for (const pl of placements) {
     const copy = copies[0] ? path.join(W.data, copies[0]) : null;
     ok(copies.length === 1 && readOwn(copy).equals(b0) && (fs.statSync(copy).mode & 0o777) === 0o600, `${pl.name}: the torn bytes are kept aside ONCE, byte for byte, mode 0600`, { copies });
     const dmg = codeOf(() => (typeof k.takeoversDamaged === 'function' ? k.takeoversDamaged() : null));
+    k._recordsLanded?.();   // B-574d browser-stores 8/8: the queue is the store writer's record — read after its landing
     let live = null; try { live = JSON.parse(readOwn(file, 'utf8')); } catch (e) { live = { unread: e.code }; }
     ok(!!dmg.value && dmg.value.copy === copies[0] && !!live && !!live.damaged && live.damaged.copy === copies[0], `${pl.name}: then it starts EMPTY with the DAMAGED mark — in the new file and in the queue's answer (the copy's name)`, { said: dmg.value || dmg, file: live && live.damaged });
     k.shutdown?.();
@@ -138,6 +139,7 @@ for (const pl of placements) {
     ok(!!d3.value && d3.value.copy === copies[0], `${pl.name}: a RESTART still says the queue was damaged, with the copy's name (the mark lives in the file)`, d3.value || d3);
     // r4130 (c): the mark has an END — the first request filed after the lift (the queue is live again; its save drops the mark)
     const fresh = codeOf(() => k3.requestTakeover({ browserKey: KEY_C, profileId: p1.id, sessionId: 'sess-c', conversationName: 'Bank reconcile', text: 'A new ask after the lift' }));
+    k3._recordsLanded?.();   // B-574d browser-stores 8/8: read after its landing
     let after = null; try { after = JSON.parse(readOwn(file, 'utf8')); } catch (e) { after = { unread: e.code }; }
     ok(!!fresh.value && fresh.value.ok === true && k3.takeoversDamaged() === null && !!after && !after.damaged && Array.isArray(after.requests) && after.requests.length === 1, `${pl.name}: the damaged mark ENDS at the first request filed after the lift — the queue's answer and the file no longer carry it (r4130 (c))`, { fresh: fresh.value ? fresh.value.ok : fresh, said: k3.takeoversDamaged(), file: after && after.damaged });
     k3.shutdown?.();

@@ -327,5 +327,157 @@ console.log('B-574d browser-stores 6/8: the lineage ledger on the store writer\'
   } else ok(false, 'RED control: the trim\'s owed lines are spelled once in the keeper');
 }
 
+// ── B-574d «browser-stores» 8/8 (lane nl-migrations; the chain's own read): THE LEDGER'S CURES — each by a PLACED fault with a WITNESS
+// that the product read it inside the leg (主开发 r5135, law 1: a plant never read is a NAMED SKIP, never a red and never a green), each
+// with its anchored RED: (a) a write that failed offers its lines again — and (b) a file not there with more than the ring's bound owed
+// is APPENDED, never rewritten (a rewrite of a missing file failed for good, every line owed); (c) two keepers over one data folder
+// lose none of each other's lines; (d) a trim never answered whose rename landed offers nothing again, one whose rename did not offers
+// its lines again; (e) a trim answered ERENAMEDNOSYNC is landed at once; (f) an append cut short by its thread's death offers only
+// the pieces not wholly in the file; (g) a trim answered EREWRITEMAIN (no writer thread) stops the trims, said once in its own words
+console.log('B-574d browser-stores 8/8: the lineage ledger\'s cures');
+{
+  const KS8 = read('src/server/browser-keeper.js');
+  const W8 = require('../src/store-writer.js').storeWriter();
+  const logOf8 = (said) => ({ log() { }, info() { }, error() { }, warn(m) { said.push(String(m)); } });
+  const skip8 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
+  const mk8 = (Kmod, D, H, said = []) => Kmod.create({ dataDir: D, homeDir: H, env: () => ({ PATH: '/usr/bin:/bin', HOME: H }), broadcast: () => { }, serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: logOf8(said), userTodos: fakeTodos(), now: () => Date.now(), taskInfo: () => null, hostKnown: () => false });
+  const rowsOf8 = (LF) => { let t = ''; try { t = fs.readFileSync(LF, 'utf8'); } catch { return { rows: [], whole: false }; } return { rows: t.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }), whole: t.endsWith('\n') }; };
+  const dirs8 = (tag) => { const S = path.join(SCR, `bs8-${tag}`), H = path.join(S, 'home'), D = path.join(S, 'data'); fs.mkdirSync(H, { recursive: true }); fs.mkdirSync(D, { recursive: true }); return { H, D, LF: path.join(D, 'browser-lineage-journal.ndjson') }; };
+  // (a) + (b): THE PLANT — a folder in the ledger's name before its first line; 1200 lines of ~1 KB owed (past the 1 MiB ring); the
+  // name freed; the writer's retry
+  const sceneA = async (Kmod, tag) => {
+    const { H, D, LF } = dirs8(`a-${tag}`); fs.mkdirSync(LF);
+    const said = [], k = mk8(Kmod, D, H, said), pad = 'z'.repeat(900);
+    for (let i = 0; i < 1200; i++) k._lineageLedger('bs8a', { n: i, pad });
+    const first = await k._ledgerDurable();
+    const st = W8.stats().find((x) => x.file === LF);
+    const witness = first === false && !!(st && st.failures > 0);   // the plant read: the writer's write of the folder's name failed
+    const told = said.some((m) => m.includes('the lineage ledger could not be written'));
+    fs.rmSync(LF, { recursive: true, force: true });
+    const landed = await k._ledgerDurable();
+    const R = rowsOf8(LF), ns = R.rows.filter((x) => x && x.kind === 'bs8a').map((x) => x.n);
+    try { k.shutdown(); } catch { }
+    return { witness, told, landed, kept: ns.length, all: ns.length === 1200 && ns.every((v, i) => v === i), torn: R.rows.filter((x) => x === null).length, whole: R.whole };
+  };
+  // the three scenes at once (three files, one writer): their retries' waits overlap
+  const MA = mutantCopies('bdisk-bs8a', REPO), KEEP = '  L.owed = pieces.concat(L.owed);\n  if (L.owed.length > LEDGER_OWED_MAX)', TRIM = 'Array.isArray(L.starts) && at > 0 && !L.noRewrite && total > LEDGER_MAX';
+  const [A, Ax, Ay] = await Promise.all([sceneA(K, 'real'),
+    sceneA(MA.load('src/server/browser-keeper.js', anchored(KS8, KEEP, '  L.owed = L.owed;   /* RED: the failed write\'s lines dropped */\n  if (L.owed.length > LEDGER_OWED_MAX)', 'the failed write offers its lines again'), 'bs8-lines-dropped'), 'red-drop'),
+    sceneA(MA.load('src/server/browser-keeper.js', anchored(KS8, TRIM, 'Array.isArray(L.starts) && !L.noRewrite && total > LEDGER_MAX /* RED: a file with no bytes rewritten */', 'a file with no bytes is appended'), 'bs8-missing-rewritten'), 'red-rewrite')]);
+  if (!A.witness) skip8('8/8 (a)+(b)', 'the folder in the ledger\'s name: the writer\'s write of it never failed');
+  else ok(A.told && A.landed === true && A.all && A.torn === 0 && A.whole, 'B-574d browser-stores 8/8 (a)+(b): 1200 lines owed while the ledger\'s name is a folder (its write refused, said) land once the name is free — every line once, in order, whole: a failed write offers its lines again, and a file not there past the ring\'s bound is appended, never rewritten', A);
+  { if (!Ax.witness) skip8('8/8 (a) RED', 'the copy\'s write of the folder never failed');
+    else ok(!Ax.all, 'RED (anchored copy: a failed write\'s lines dropped): the lines owed while the name was a folder never land — 8/8 (a) goes red', { kept: Ax.kept });
+    if (!Ay.witness) skip8('8/8 (b) RED', 'the copy\'s write of the folder never failed');
+    else ok(Ay.landed === false && !Ay.all, 'RED (anchored copy: a file with no bytes rewritten past the bound): the rewrite of a file not there fails again and again — no line lands — 8/8 (b) goes red', { landed: Ay.landed, kept: Ay.kept }); }
+  // (c) two keepers over one data folder: THE PLANT — two keepers of distinct boots (each one's own line landed first, the witness),
+  // then their lines interleaved in one turn
+  const sceneC = async (Kmod, tag) => {
+    const { H, D, LF } = dirs8(`c-${tag}`);
+    const k1 = mk8(Kmod, D, H); await new Promise((r) => setTimeout(r, 5)); const k2 = mk8(Kmod, D, H);
+    k1._lineageLedger('bs8c-own', { by: 1 }); await k1._ledgerDurable(); k2._lineageLedger('bs8c-own', { by: 2 }); await k2._ledgerDurable();
+    const own = rowsOf8(LF).rows.filter((x) => x && x.kind === 'bs8c-own'), witness = own.length === 2 && own[0].boot !== own[1].boot;
+    for (let i = 0; i < 40; i++) (i % 2 ? k2 : k1)._lineageLedger('bs8c', { n: i });
+    await k1._ledgerDurable(); await k2._ledgerDurable();
+    const ns = rowsOf8(LF).rows.filter((x) => x && x.kind === 'bs8c').map((x) => x.n).sort((a, b) => a - b);
+    try { k1.shutdown(); } catch { } try { k2.shutdown(); } catch { }
+    return { witness, kept: ns.length, all: ns.length === 40 && ns.every((v, i) => v === i) };
+  };
+  const C = await sceneC(K, 'real');
+  if (!C.witness) skip8('8/8 (c)', 'the two keepers\' own lines did not land under two boots');
+  else ok(C.all, 'B-574d browser-stores 8/8 (c): two keepers over one data folder (two boots) interleave 40 lines in one turn — every line of both lands: the ledger\'s state is the file\'s', C);
+  { const ST = 'const f = ledgerFile(), L = ledOf(f);', DT = 'produce: (o) => produceLedgerOf(f, o), onWritten: (ok, e) => ledgerWrittenOf(f, ok, e)';
+    const per = anchored(anchored(KS8, ST, 'const f = ledgerFile(), K8 = f + \'#\' + bootId, L = ledOf(K8);   /* RED: the ledger\'s state per keeper */', 'the ledger\'s state is the file\'s'), DT, 'produce: (o) => produceLedgerOf(K8, o), onWritten: (ok, e) => ledgerWrittenOf(K8, ok, e)', 'one producer for the file');
+    const Cx = await sceneC(mutantCopies('bdisk-bs8c', REPO).load('src/server/browser-keeper.js', per, 'bs8-per-keeper'), 'red');
+    if (!Cx.witness) skip8('8/8 (c) RED', 'the copy\'s two keepers did not land their own lines under two boots');
+    else ok(!Cx.all, 'RED (anchored copy: the ledger\'s state per keeper, as at 6/8): the keeper whose producer is not the file\'s last loses its lines — 8/8 (c) goes red', { kept: Cx.kept }); }
+  // (d) + (e): the ledger's own state, driven through its handle on a file past the ring's bound (its line starts known)
+  const big8 = (n, kind) => { const out = []; for (let i = 0; i < n; i++) out.push(JSON.stringify({ kind, n: i, pad: 'q'.repeat(900) }) + '\n'); return out; };
+  const sceneD = (Kmod, tag, { landedRename, answer = null }) => {
+    const G = Kmod._ledger; const S = path.join(SCR, `bs8-d-${tag}`); fs.mkdirSync(S, { recursive: true });
+    const LF = path.join(S, 'ledger.ndjson'), old = big8(1200, 'old'); fs.writeFileSync(LF, old.join(''));
+    const L = G.ledOf(LF); let off = 0; L.starts = old.map((p) => { const s0 = off; off += Buffer.byteLength(p); return s0; }); L.onDisk = off; L.tailChecked = true; L.recheck = false;
+    L.owed = big8(3, 'new');
+    const p1 = G.produceLedgerOf(LF, {}), w = L.writing;
+    const witness = !!w;   // a write was taken: the plant (its answer withheld, or the unsynced answer) applies to it
+    const isRewrite = !!(p1 && p1.rewrite && w && w.rewrite);   // judged: the trim's road taken past the bound
+    if (isRewrite && landedRename) { const buf = fs.readFileSync(LF); fs.writeFileSync(LF, Buffer.concat([buf.subarray(w.keep, w.at), Buffer.from(w.text)])); }   // the file the landed rename leaves
+    if (answer) G.ledgerWrittenOf(LF, false, Object.assign(new Error('the rename landed, its directory sync did not'), { code: answer }));
+    const settledAtOnce = L.owed.length === 0 && !L.unsure && L.onDisk === fs.statSync(LF).size;
+    const unanswered = !!L.writing;
+    L.owed.push(JSON.stringify({ kind: 'next', n: 0 }) + '\n');
+    const p2 = G.produceLedgerOf(LF, {}); const text2 = p2 ? String(p2.append || p2.then || '') : '';
+    G.ledgerWrittenOf(LF, true, null);
+    return { witness, isRewrite, unanswered, settledAtOnce, newAgain: (text2.match(/"kind":"new"/g) || []).length, next: text2.includes('"kind":"next"') };
+  };
+  const D1 = sceneD(K, 'landed', { landedRename: true }), D2 = sceneD(K, 'unlanded', { landedRename: false });
+  if (!(D1.witness && D1.unanswered && D2.witness && D2.unanswered)) skip8('8/8 (d)', 'no write was taken, or its answer was not withheld');
+  else ok(D1.isRewrite && D2.isRewrite && D1.newAgain === 0 && D1.next && D2.newAgain === 3 && D2.next, 'B-574d browser-stores 8/8 (d): a trim never answered (its thread stopped) — its rename landed (the file holds the trimmed bytes): nothing offered again; it did not (the file as before): its three lines offered again, once', { landed: D1, unlanded: D2 });
+  const E = sceneD(K, 'unsynced', { landedRename: true, answer: 'ERENAMEDNOSYNC' });
+  if (!E.witness) skip8('8/8 (e)', 'no write was taken for the unsynced answer');
+  else ok(E.isRewrite && E.settledAtOnce && E.newAgain === 0 && E.next, 'B-574d browser-stores 8/8 (e): a trim answered ERENAMEDNOSYNC (its rename landed, its directory\'s sync did not) is landed AT ONCE — the size known, nothing owed, its lines never offered again', E);
+  { const MD = mutantCopies('bdisk-bs8d', REPO);
+    const HOLD = '  if (t.size !== null && landed !== w.at && t.size === landed) return;   // the file holds them';
+    const Dx = sceneD(MD.load('src/server/browser-keeper.js', anchored(KS8, HOLD, '  /* RED: a write not known landed always offered again */', 'a landed rename offers nothing again'), 'bs8-always-again'), 'red-again', { landedRename: true });
+    if (!(Dx.witness && Dx.unanswered)) skip8('8/8 (d) RED', 'the copy took no write, or its answer was not withheld');
+    else ok(Dx.isRewrite && Dx.newAgain === 3, 'RED (anchored copy: an unanswered write always offered again): the landed trim\'s three lines written twice — 8/8 (d) goes red', Dx);
+    const NOSYNC = "  if (!ok && w.rewrite && e && e.code === 'ERENAMEDNOSYNC') ok = true;";
+    const Ex = sceneD(MD.load('src/server/browser-keeper.js', anchored(KS8, NOSYNC, '  /* RED: ERENAMEDNOSYNC a failed write */', 'a rewrite whose rename landed is landed'), 'bs8-nosync-failed'), 'red-nosync', { landedRename: true, answer: 'ERENAMEDNOSYNC' });
+    if (!Ex.witness) skip8('8/8 (e) RED', 'the copy took no write for the unsynced answer');
+    else ok(Ex.isRewrite && !Ex.settledAtOnce, 'RED (anchored copy: ERENAMEDNOSYNC read as a failed write): the landed trim left owed, its size unknown until the file is read again — 8/8 (e) goes red', Ex); }
+  // (f) an append CUT SHORT (its thread died inside it: nothing truncated it back): THE PLANT — the file holds the write's first two
+  // pieces whole and five bytes of the third, then the ETHREAD answer; only the pieces not wholly in the file are offered again, after
+  // a '\n' that terminates the torn tail
+  const sceneF = (Kmod, tag) => {
+    const G = Kmod._ledger, S = path.join(SCR, `bs8-f-${tag}`); fs.mkdirSync(S, { recursive: true });
+    const LF = path.join(S, 'ledger.ndjson'), base = JSON.stringify({ kind: 'base' }) + '\n'; fs.writeFileSync(LF, base);
+    const L = G.ledOf(LF); L.starts = [0]; L.onDisk = Buffer.byteLength(base); L.tailChecked = true; L.recheck = false;
+    L.owed = [0, 1, 2, 3].map((n) => JSON.stringify({ kind: 'cut', n }) + '\n');
+    const p1 = G.produceLedgerOf(LF, {}), w = L.writing;
+    const witness = !!(p1 && p1.append && w && !w.rewrite);   // an append was taken: the cut applies to it
+    if (witness) fs.appendFileSync(LF, Buffer.from(w.text).subarray(0, Buffer.byteLength(w.pieces[0]) + Buffer.byteLength(w.pieces[1]) + 5));
+    G.ledgerWrittenOf(LF, false, Object.assign(new Error('the thread stopped during the append'), { code: 'ETHREAD' }));
+    L.owed.push(JSON.stringify({ kind: 'next' }) + '\n');
+    const p2 = G.produceLedgerOf(LF, {}), t2 = p2 ? String(p2.append || '') : '';
+    G.ledgerWrittenOf(LF, true, null);
+    return { witness, terminated: t2.startsWith('\n'), ns: (t2.match(/"kind":"cut","n":\d/g) || []).map((x) => Number(x.slice(-1))), next: t2.includes('"kind":"next"') };
+  };
+  const F8 = sceneF(K, 'real');
+  if (!F8.witness) skip8('8/8 (f)', 'no append was taken for the cut');
+  else ok(F8.terminated && F8.ns.join() === '2,3' && F8.next, 'B-574d browser-stores 8/8 (f): an append cut short by its thread\'s death inside its third piece — only the pieces not wholly in the file are offered again (the third, the fourth), after a \'\\n\' that ends the torn tail: none written twice', F8);
+  { const CUTA = '  if (!w.rewrite && w.at !== null && t.size !== null && t.size > w.at && t.size < landed) {';
+    const Fx = sceneF(mutantCopies('bdisk-bs8f', REPO).load('src/server/browser-keeper.js', anchored(KS8, CUTA, '  if (false) {   /* RED: a cut-short append offered again whole */', 'a cut-short append offers only its unwritten pieces'), 'bs8-cut-whole'), 'red');
+    if (!Fx.witness) skip8('8/8 (f) RED', 'the copy took no append for the cut');
+    else ok(Fx.ns.join() === '0,1,2,3', 'RED (anchored copy: a cut-short append offered again whole): its first two pieces are written twice — 8/8 (f) goes red', Fx); }
+  // (g) a trim answered EREWRITEMAIN (the writer has no thread; a rewrite is never made on the main thread): THE PLANT — that answer
+  // to a trim; the lines are appended, no trim is tried again this process (also once the file's lines are indexed again), said ONCE
+  // in its own words — never the failure's line, which stays for a real failure
+  const sceneG = async (Kmod, tag) => {
+    const G = Kmod._ledger, S = path.join(SCR, `bs8-g-${tag}`); fs.mkdirSync(S, { recursive: true });
+    const LF = path.join(S, 'ledger.ndjson'), old = big8(1200, 'old'); fs.writeFileSync(LF, old.join(''));
+    const said = [], L = G.ledOf(LF); let off = 0; L.starts = old.map((p) => { const s0 = off; off += Buffer.byteLength(p); return s0; }); L.onDisk = off; L.tailChecked = true; L.recheck = false; L.log = logOf8(said);
+    L.owed = big8(3, 'new');
+    const p1 = G.produceLedgerOf(LF, {}), w = L.writing;
+    const witness = !!w, isRewrite = !!(p1 && p1.rewrite);
+    G.ledgerWrittenOf(LF, false, Object.assign(new Error('a rewrite is never written on the main thread'), { code: 'EREWRITEMAIN' }));
+    L.owed.push(JSON.stringify({ kind: 'more', n: 0 }) + '\n');
+    const p2 = G.produceLedgerOf(LF, {}); const t2 = p2 ? String(p2.append || p2.then || '') : '';
+    G.ledgerWrittenOf(LF, true, null);
+    for (let i = 0; i < 150 && !Array.isArray(L.starts); i++) await new Promise((r) => setTimeout(r, 20));   // the file's lines indexed again, off the loop (bounded: 3 s)
+    L.owed.push(JSON.stringify({ kind: 'more', n: 1 }) + '\n');
+    const p3 = G.produceLedgerOf(LF, {});
+    G.ledgerWrittenOf(LF, true, null);
+    return { witness, isRewrite, p2append: !!(p2 && p2.append && !p2.rewrite), newOnce: (t2.match(/"kind":"new"/g) || []).length, p3append: !!(p3 && p3.append && !p3.rewrite), indexed: Array.isArray(L.starts),
+      saidOwn: said.filter((m) => m.includes('cannot be trimmed while the store writer has no thread')).length, saidFailure: said.filter((m) => m.includes('could not be written')).length };
+  };
+  const G8 = await sceneG(K, 'real');
+  if (!G8.witness) skip8('8/8 (g)', 'no write was taken for the EREWRITEMAIN answer');
+  else ok(G8.isRewrite && G8.p2append && G8.newOnce === 3 && G8.indexed && G8.p3append && G8.saidOwn === 1 && G8.saidFailure === 0, 'B-574d browser-stores 8/8 (g): a trim answered EREWRITEMAIN (no writer thread) — its lines appended once, no trim tried again (also once the file is indexed again), said ONCE in its own words (the failure\'s line kept for a real failure)', G8);
+  { const MAIN = "  if (!ok && w.rewrite && e && e.code === 'EREWRITEMAIN') {";
+    const Gx = await sceneG(mutantCopies('bdisk-bs8g', REPO).load('src/server/browser-keeper.js', anchored(KS8, MAIN, "  if (false) {   /* RED: EREWRITEMAIN a failed write like any other */", 'a main-only trim stops the trims'), 'bs8-main-again'), 'red');
+    if (!Gx.witness) skip8('8/8 (g) RED', 'the copy took no write for the EREWRITEMAIN answer');
+    else ok(Gx.indexed && !Gx.p3append, 'RED (anchored copy: EREWRITEMAIN a failed write like any other): once the file is indexed again the next line is a trim again (and fails again) — 8/8 (g) goes red', Gx); }
+}
+
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
 process.exit(fail ? 1 : 0);
