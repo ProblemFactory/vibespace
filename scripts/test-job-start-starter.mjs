@@ -91,6 +91,10 @@ async function stampOf(jm, job, ms = 8000) {
   return st && jm._verifyAlive(st) ? st : null;
 }
 const NICE = String(spawnSync('sh', ['-c', 'command -v nice']).stdout || '').trim();
+/** the job's OWN command under its wrapper (the wrapper's children), by identity: what a red copy that kills the wrapper ALONE leaves
+ *  orphaned — its group's leader gone, the exit's group kill (by the wrapper's identity) refuses it. Recorded here, each is this suite's
+ *  to end at its exit one by one (the kit read a `sleep` of this suite alive after it: scene ②'s red, 11-26) */
+const childIdsOf = (pid) => { try { return fs.readFileSync(`/proc/${Number(pid)}/task/${Number(pid)}/children`, 'utf8').split(/\s+/).filter((c) => /^\d+$/.test(c)).map((c) => PI.identityOf(Number(c))).filter(Boolean); } catch { return []; } };
 
 const S = CS.createChildStarter(); CS.setChildStarter(S);
 await S.run(process.execPath, ['-e', '0'], { timeoutMs: 10000 });   // the starter's own start (one, made once) — before any window
@@ -130,6 +134,8 @@ console.log('② a job started through the starter outlives the starter and a hu
     const dd = folder('survive-' + tag), jm = engine(JM, dd);
     const { job } = await made(jm, { kind: 'task', name: 'outlive-' + tag, cmd: { argv: ['sleep', '30'] } });   // a task: a boot never replays it (nothing restarted beside the leg)
     const st = await stampOf(jm, job);
+    let kids = []; if (st) await until(() => (kids = childIdsOf(st.pid)).length > 0, 3000);
+    for (const k of kids) mine.push({ ...k, group: false });   // the job's command: ended by its identity at the exit, whoever ends its wrapper
     const sp = starter._proc(); starter.closePipe();
     const ended = await until(() => sp.exitCode !== null || sp.signalCode !== null, 5000);
     await sleep(100);
@@ -138,7 +144,7 @@ console.log('② a job started through the starter outlives the starter and a hu
     const j2 = engine(JM, dd), job2 = j2.jobs.get(job.id), st2 = job2 && j2._readStamp(job2);
     const adopted = !!job2 && job2.state === 'up' && !!st2 && j2._verifyAlive(st2) && Number(st2.pid) === Number(st && st.pid);
     j2.shutdown();
-    return { ended, endCode: sp.exitCode, endSignal: sp.signalCode, outlived, adopted };
+    return { ended, endCode: sp.exitCode, endSignal: sp.signalCode, outlived, adopted, kids: kids.length };
   };
   const good = await scene(CS.createChildStarter(), 'now');
   ok(good.ended && good.endCode === 0 && !good.endSignal && good.outlived && good.adopted, '② the starter\'s pipe closed: it ends by itself (code 0, no signal) — the job\'s wrapper runs on, and a second engine over the same folder (a hub restart) adopts it by its own stamp', good);
@@ -146,6 +152,7 @@ console.log('② a job started through the starter outlives the starter and a hu
   const heldScript = MJ.write('src/server/child-starter-proc.js', anchored(PSRC, HELD, "  held.set(id, c);   /* MUTANT: a detached child HELD */\n" + HELD, 'red-detach-held'), 'held');
   const red = await scene(CS.createChildStarter({ script: heldScript }), 'red');
   ok(red.ended && !red.outlived && !red.adopted, 'RED (a starter that holds its detached child): the starter\'s end kills the job\'s wrapper', red);
+  ok(good.kids >= 1 && red.kids >= 1, '② the job\'s own command under each wrapper is recorded by its identity before the starter ends — the red copy kills the wrapper alone, and its orphan is this suite\'s to end at its exit (the kit\'s leftovers read it alive after the suite, 11-26)', { good: good.kids, red: red.kids });
   CS.setChildStarter(S);
 }
 
