@@ -7,6 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - Settings → Claude has an entry label for chat conversations: off (the CLI's own label, the default), «vibespace», or a name you type.
 
+### Fixed
+- After a sudden power cut, VibeSpace no longer loses its record of an archive extraction cut short, or the warning that Claude could not save its work.
+
 ## 2.369.422 — 2026-11-27
 
 ### Fixed
