@@ -136,7 +136,7 @@ const OWN_DOOR = {
   // B-f276 (r4721, lane lg-vault-stages): two single values on the helper, with their own parse
   instance_id_unread: 'the telemetry instance id (src/telemetry.js): no route refuses with it — this life answers its own id while the file is held; the family\'s notice names the file by its plain name',
   link_token_unread: 'a paired machine\'s link token in the no-vault window (src/server/host-tokens.js): its refusal carries its own words (the machine named) wherever the link\'s error is said; the family\'s notice names the file by its shape',
-  jobs_lock_unread: 'B-f276 slice jobs-side-files (lane bl-proposals s1126): Background Work\'s lock held — no route refuses with this code; every jobs door answers the hold\'s own sentence (JobManager.lockHeldWords) where it said «jobs engine starting»; the family\'s notice names it by its plain name',
+  jobs_lock_unread: 'B-f276 slice jobs-side-files (lane bl-proposals s1126, r4994): Background Work\'s lock held — a job\'s token is answered with this code (JobManager.tokenHeldAnswer), and every jobs door answers the hold\'s own sentence (lockHeldWords) where it said «jobs engine starting» or «no such job»; the family\'s notice names it by its plain name',
 };
 function census(codes, table) {
   const red = [], held = [], generic = [];
