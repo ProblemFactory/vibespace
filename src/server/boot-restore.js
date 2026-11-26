@@ -283,10 +283,22 @@ const runChildP = (bin, args, ms) => require('./tls.js').runChild(bin, args, ms)
 // B-323e's remainder (lane nl-starts): THE RE-PROBE'S questions (the ladder below is a TIMER of the hub's — and the duplicate retire's
 // pgrep it reaches) ride the hub's starter (src/server/child-starter.js), never a fork of the hub: the same program, args, bound and
 // buffer, runChild's answer ({code, out, err}: the starter's «no answer» reads TIMEOUT — no answer, never a kill); the hub's PATH of the
-// moment rides the request (runChild's child inherited it). The boot's own questions (before the listen) keep runChild — a start's.
-const starterP = (bin, args, ms) => require('./tls.js').runViaStarter(bin, args, ms, { envAdd: { PATH: process.env.PATH || '' }, maxBuffer: 4 * 1024 * 1024 });
-// the restore's two liveness rungs, as children: fuser (an owner ⇒ alive), else pgrep -f (a command line naming the socket — never one of `own`, this server's own `dtach -a` attach clients) ⇒ true / false, or null = NO ANSWER (its bound ran out, or the tool is missing)
-const noAnswer = (r) => r.code === 'TIMEOUT' || r.code === 'ENOENT';
+// moment rides the request (runChild's child inherited it; none set ⇒ the starter's own). The boot's own questions (before the listen)
+// keep runChild — a start's. A question that got NO answer (a rung's: noAnswer, below; the fd scan's: no exit code — the starter's
+// silence, the bound, a start error) is SAID
+// once per (program, socket) — runChild's own rule for its bound (its reader's find: the duplicate retire's pgrep with no answer left a
+// husk running and nothing in the journal)
+const starterSaid = new Set();
+const starterP = (bin, args, ms) => require('./tls.js').runViaStarter(bin, args, ms, { ...(process.env.PATH != null ? { envAdd: { PATH: process.env.PATH } } : {}), maxBuffer: 4 * 1024 * 1024 }).then((r) => {
+  if (r && ((bin === 'fuser' || bin === 'pgrep') ? noAnswer(r) : typeof r.code !== 'number')) { const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin); if (!starterSaid.has(key)) { starterSaid.add(key); console.warn(`[child] ${key}: no answer through the hub's starter (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}) — no answer, never a kill`); } }
+  return r;
+});
+// the restore's two liveness rungs, as children: fuser (an owner ⇒ alive), else pgrep -f (a command line naming the socket — never one of `own`, this server's own `dtach -a` attach clients) ⇒ true / false, or null = NO ANSWER
+// AN ANSWER IS THE TOOL'S OWN EXIT 0 OR 1 (found / none — fuser's and pgrep's). Anything else is NO answer, never «dead» (B-323e's
+// remainder, its reader's find, lane nl-starts): its bound ran out, the tool is missing, its start failed (EAGAIN / EMFILE at a full
+// process or file table), a signal ended it, its output passed the buffer, or the tool's own fault (pgrep 2 / 3) — the release read
+// all but the first two as «nobody owns it» and a LIVE socket could be retired
+const noAnswer = (r) => !(r.code === 0 || r.code === 1);
 const ownedP = async (sp, rung2, ask = () => { }, own = new Set(), run = runChildP) => { ask('fuser'); const r = await run('fuser', [sp], 2000); if (r.code === 0) return r.out.trim().length > 0; if (!rung2) return noAnswer(r) ? null : false; ask('pgrep'); const g = await run('pgrep', ['-f', sp], 2000); return noAnswer(g) ? null : g.code === 0 && g.out.split('\n').some((x) => x.trim() && !own.has(Number(x))); };
 let probed = null, probing = null;
 function probeSockets() {

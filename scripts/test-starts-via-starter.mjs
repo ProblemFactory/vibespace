@@ -25,7 +25,8 @@
 //      on the starter and on its direct road (RED: SIGKILL at the bound leaves the child running); a stand-in parent, no sudo, no mount
 //   ⑫ (B-323e's remainder, lane nl-starts) the mount-health canary's scan of who presses a wedged mount (an episode, a held-loop item —
 //      the 10 s canary's timer): asked of the starter with its program, argv, bound and buffer, nothing started from the hub; a table it
-//      could not read (no reply, its bound, an exit, words that do not parse) is SAID «not read — <why>» (RED: the release's road)
+//      could not read (no reply, its bound, an exit, words that do not parse) is SAID «not read — <why>», and its item says «Who has files
+//      open there could not be read.», never «No process has a file open there.» (REDs: the release's road; a catch that keeps the empty table)
 // r1381 (6): every moved reader is also read with a starter that gives NO REPLY (what it then says), and the env + the bound each
 // site hands are pinned.
 //   ⑧ (主开发 r2030) a host with NO `which` program finds tmux the release's way (RED: the reader without the fallback); a NO-REPLY
@@ -948,7 +949,7 @@ WD.section('⑪b');
     `RED CONTROL (today's ending, SIGKILL at the bound, on both roads): the parent is gone and its child STILL RUNS — a root mount left behind (${JSON.stringify(without)})`, { roads });
 }
 
-say('⑫ B-323e\'S REMAINDER (lane nl-starts) — the mount-health canary\'s scan of who presses a wedged mount rides the starter; a table it could not read is said');
+say('⑫ B-323e\'S REMAINDER (lane nl-starts) — the mount-health canary\'s scan of who presses a wedged mount rides the starter; a table it could not read is said, in the journal and in the item');
 WD.section('⑫');
 {
   const nodeName = path.basename(process.execPath); WATCH.add(nodeName);   // for this section: a scan child started DIRECTLY is counted, never run
@@ -956,24 +957,38 @@ WD.section('⑫');
   try {
     const MHW_FILE = path.join(ROOT, 'src/server/mount-health-watch.js'), MHW_SRC = read('src/server/mount-health-watch.js');
     const MHW = require(MHW_FILE);
-    const mp = '/srv/vs-wedged-11';
+    const mp = '/srv/vs-wedged-11', UNREAD = 'Who has files open there could not be read.', NONE = 'No process has a file open there.';
     const table = [{ pid: 4242, ppid: 1, comm: 'rsync', argv: ['rsync', '-a', mp + '/a', '/backup'], cwd: mp + '/a', fdHits: 3 }];
-    const hold = async (mod) => { const lines = []; await mod.create({ file: mp + '/package.json', mountpoint: mp, getUserTodos: () => null, ownerIds: async () => ({}), log: { warn: (l) => lines.push(String(l)) }, mountinfo: () => '' })
-      .onHeld({ fn: 'statSync', path: mp + '/a', ms: 6000, caller: 'x.js:1', stack: '', mount: { root: mp, kind: 'fuse' } }); return lines; };
+    // a held-loop item (onHeld) — the For-you item recorded, the journal's lines kept
+    const hold = async (mod) => { const lines = [], items = []; const todos = { add: (key, o) => { items.push(o); return { id: 'i' + items.length }; }, get: () => null, setStatus: () => { } };
+      await mod.create({ file: mp + '/package.json', mountpoint: mp, getUserTodos: () => todos, ownerIds: async () => ({}), log: { warn: (l) => lines.push(String(l)) }, mountinfo: () => '' })
+        .onHeld({ fn: 'statSync', path: mp + '/a', ms: 6000, caller: 'x.js:1', stack: '', mount: { root: mp, kind: 'fuse' } });
+      return { lines, detail: items.length ? String(items[0].detail) : '', rows: items.length ? JSON.stringify(items[0].i18n) : '' }; };
     answer = (cmd, args, o) => (cmd === nodeName ? { started: true, code: 0, stdout: JSON.stringify(table) } : prev11(cmd, args, o));
     const A0 = asked.length, D0 = directOf(nodeName);
-    const lines = await hold(MHW);
+    const got = await hold(MHW);
     const q = asked.slice(A0).filter((a) => a.cmd === nodeName);
     ok(q.length === 1 && directOf(nodeName) === D0, `a held-loop item's scan of who presses the mount is ASKED of the starter (${q.length}) — nothing started from the hub's process (${directOf(nodeName) - D0})`, q.map((x) => x.args));
     ok(q.length === 1 && q[0].args.join(' ') === `${MHW_FILE} --suspects ${mp}` && q[0].o.timeoutMs === MHW.SCAN_TIMEOUT_MS && MHW.SCAN_TIMEOUT_MS === 15000 && q[0].o.maxBuffer === 64 * 1024 * 1024 && q[0].o.capture === true && JSON.stringify(q[0].o.envAdd) === '{}' && !q[0].o.wholeEnv,
       'THE PROGRAM, ARGV, BOUND AND BUFFER it hands: node <its own file> --suspects <mount>, 15 s, 64 MiB (as its execFile), the service env alone', q[0] && q[0].o);
-    ok(lines.some((l) => l.includes(`${mp} held the main loop 6 s (statSync ← x.js:1)`) && l.includes('1 process groups press it')) && !lines.some((l) => l.includes('not read')), 'its answer is the table: one process group presses the mount', lines);
+    ok(got.lines.some((l) => l.includes(`${mp} held the main loop 6 s (statSync ← x.js:1)`) && l.includes('1 process groups press it')) && !got.lines.some((l) => l.includes('not read')) && got.detail.includes('rsync') && !got.detail.includes(NONE) && !got.detail.includes(UNREAD),
+      'its answer is the table: one process group presses the mount, the item names it', got);
     for (const [a, word] of [[{ unknown: true }, 'the starter gave no answer'], [{ started: true, timedOut: true, code: null }, 'no answer in 15000 ms'], [{ started: true, code: 1, stdout: '' }, 'exit 1'],
       [{ started: false, code: null, error: 'ENOENT' }, 'not started (ENOENT)'], [{ started: true, overflow: true, code: null }, `the table passed ${64 * 1024 * 1024} bytes`], [{ started: true, code: 0, stdout: 'not a table' }, 'Unexpected token']]) {
       answer = (cmd, args, o) => (cmd === nodeName ? a : prev11(cmd, args, o));
-      const l2 = await hold(MHW);
-      ok(l2.some((l) => l.startsWith(`[mount-health] who presses ${mp}: not read — `) && l.includes(word)) && l2.some((l) => l.includes('0 process groups press it')), `a table not read is SAID, never an empty one in silence: «${word}»`, l2);
+      const g2 = await hold(MHW);
+      ok(g2.lines.some((l) => l.startsWith(`[mount-health] who presses ${mp}: not read — `) && l.includes(word)) && g2.lines.some((l) => l.includes('who presses it not read'))
+        && g2.detail.includes(UNREAD) && !g2.detail.includes(NONE) && g2.rows.includes(JSON.stringify(UNREAD)),
+        `a table not read is SAID — the journal «not read — ${word}», the item «${UNREAD}» (its words a key of the dictionaries), never «${NONE}»`, g2);
     }
+    const MH = require(path.join(ROOT, 'src/mount-health.js'));
+    ok(MH.canaryItem({ mountpoint: mp, strikes: 2, latencyMs: 5000, suspects: null }).detail.includes(UNREAD) && MH.canaryItem({ mountpoint: mp, strikes: 2, latencyMs: 5000, suspects: [] }).detail.includes(NONE)
+      && read('src/lib/i18n-zh.js').includes(`  ${JSON.stringify(UNREAD)}: `) && read('src/lib/i18n-ja.js').includes(`  ${JSON.stringify(UNREAD)}: `),
+      'the episode\'s item says the same (not read ≠ nobody), and both dictionaries carry the words');
+    const KEEPS = require(M.write('src/server/mount-health-watch.js', anchored(MHW_SRC, "catch (x) { suspects = null; log.warn?.(", "catch (x) { log.warn?.(", 'mh-unread-as-none'), 'mh-unread-as-none'));
+    answer = (cmd, args, o) => (cmd === nodeName ? { unknown: true } : prev11(cmd, args, o));
+    const r11 = await hold(KEEPS);
+    ok(r11.detail.includes(NONE) && !r11.detail.includes(UNREAD), `RED: a copy whose catch keeps the empty table — the item tells the person «${NONE}» for a table nobody read`, r11.detail);
     answer = (cmd, args, o) => (cmd === nodeName ? { started: true, code: 0, stdout: JSON.stringify(table) } : prev11(cmd, args, o));
     const OLD11 = require(M.write('src/server/mount-health-watch.js', anchored(MHW_SRC,
       "  return Promise.resolve().then(() => require('./child-starter').childStarter().run(process.execPath, [__filename, '--suspects', mountpoint], { timeoutMs: SCAN_TIMEOUT_MS, maxBuffer: SCAN_MAX_BUFFER, capture: true, envAdd: {} })).then((r) => {",

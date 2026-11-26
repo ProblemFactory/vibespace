@@ -58,7 +58,7 @@ function scanProc(mountpoint, { procDir = '/proc', perProc = FD_READS_PER_PROC, 
 
 /** B-323e's remainder (lane nl-starts): the scan child through the hub's starter (src/server/child-starter.js) — the same program,
  *  argv, bound and buffer as its old execFile, the service env. A table it could not read THROWS with its reason, and its caller says
- *  it («who presses <mp>: not read — <why>», the item then names no process) — never an empty table in silence. */
+ *  it («who presses <mp>: not read — <why>»; the item says «Who has files open there could not be read.») — never an empty table in silence. */
 function childScan(mountpoint) {
   return Promise.resolve().then(() => require('./child-starter').childStarter().run(process.execPath, [__filename, '--suspects', mountpoint], { timeoutMs: SCAN_TIMEOUT_MS, maxBuffer: SCAN_MAX_BUFFER, capture: true, envAdd: {} })).then((r) => {
     const why = !r ? 'no answer' : r.unknown ? 'the starter gave no answer' : r.timedOut ? `no answer in ${SCAN_TIMEOUT_MS} ms` : r.overflow ? `the table passed ${SCAN_MAX_BUFFER} bytes`
@@ -82,7 +82,7 @@ function create({ file, mountpoint = null, getUserTodos = () => null, ownerIds =
 
   async function open(episode) {
     let suspects = [];
-    try { const procs = await procTable(mp); suspects = MH.suspectsOf(procs, mp, await ownerIds(procs)); } catch (e) { log.warn?.(`[mount-health] who presses ${mp}: not read — ${e && e.message}`); }
+    try { const procs = await procTable(mp); suspects = MH.suspectsOf(procs, mp, await ownerIds(procs)); } catch (e) { suspects = null; log.warn?.(`[mount-health] who presses ${mp}: not read — ${e && e.message}`); }   // null: the item says it could not be read
     const it = MH.canaryItem({ mountpoint: mp, strikes: state.count, latencyMs: state.worstMs, suspects, pausing: MH.PAUSE_KINDS });
     if (!state.on || state.episode !== episode) return; // the episode ended while the table was read: nothing to say
     const todos = getUserTodos && getUserTodos();
@@ -90,7 +90,7 @@ function create({ file, mountpoint = null, getUserTodos = () => null, ownerIds =
       try { const r = todos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Storage', text: it.text, detail: it.detail, i18n: it.i18n }); itemId = (r && (r.id || (r.item && r.item.id))) || null; counts.filed++; }
       catch (e) { log.warn?.(`[mount-health] ${mp}: the For-you item was not filed — ${e && e.message}`); }
     }
-    log.warn?.(`[mount-health] ${mp} wedged (episode ${episode}, ${state.count} strikes): For-you item ${itemId ? 'filed' : 'NOT filed'}, ${suspects.length} process groups press it; the server's own scans pause on it`); // never the item's words (record-clear census)
+    log.warn?.(`[mount-health] ${mp} wedged (episode ${episode}, ${state.count} strikes): For-you item ${itemId ? 'filed' : 'NOT filed'}, ${suspects ? `${suspects.length} process groups press it` : 'who presses it not read'}; the server's own scans pause on it`); // never the item's words (record-clear census)
   }
   function close(wedgedMs) {
     const todos = getUserTodos && getUserTodos();
@@ -128,14 +128,14 @@ function create({ file, mountpoint = null, getUserTodos = () => null, ownerIds =
       if (open) { counts.heldRepeat++; log.warn?.(`[mount-health] ${root} held the main loop again (${Math.round(e.ms / 1000)} s, ${e.fn} ← ${e.caller || '?'}) — its For-you item is still open`); return prev; }
     }
     let suspects = [];
-    try { const procs = await procTable(root); suspects = MH.suspectsOf(procs, root, await ownerIds(procs)); } catch (x) { log.warn?.(`[mount-health] who presses ${root}: not read — ${x && x.message}`); }
+    try { const procs = await procTable(root); suspects = MH.suspectsOf(procs, root, await ownerIds(procs)); } catch (x) { suspects = null; log.warn?.(`[mount-health] who presses ${root}: not read — ${x && x.message}`); }   // null: the item says it could not be read
     const it = MH.heldItem({ mountpoint: root, kind: e.mount.kind, fn: e.fn, path: e.path, ms: e.ms, caller: e.caller, stack: e.stack, suspects });
     let id = null;
     if (todos) {
       try { const r = todos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Storage', text: it.text, detail: it.detail, i18n: it.i18n }); id = (r && (r.id || (r.item && r.item.id))) || null; if (id) { heldItems.set(root, id); counts.heldFiled++; } }
       catch (x) { log.warn?.(`[mount-health] ${root}: the hold's For-you item was not filed — ${x && x.message}`); }
     }
-    log.warn?.(`[mount-health] ${root} held the main loop ${Math.round(e.ms / 1000)} s (${e.fn} ← ${e.caller || '?'}): For-you item ${id ? 'filed' : 'NOT filed'}, ${suspects.length} process groups press it`);
+    log.warn?.(`[mount-health] ${root} held the main loop ${Math.round(e.ms / 1000)} s (${e.fn} ← ${e.caller || '?'}): For-you item ${id ? 'filed' : 'NOT filed'}, ${suspects ? `${suspects.length} process groups press it` : 'who presses it not read'}`);
     return id;
   }
   return { onProbe, onHeld, paused, counts, mountpoint: mp, settled: () => filing || Promise.resolve(), state: () => ({ ...(state || {}), itemId }) };
