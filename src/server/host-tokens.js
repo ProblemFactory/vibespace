@@ -145,6 +145,13 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   // machine's id (those are host-<hex> / dial-<device>)
   const IDENTITY_ENTRY = 'host:hub-identity';
   let mintFailSaid = false;   // B-574d (lane nl-paired): a first mint that could not be written, said once a run
+  /** B-574d (lane nl-paired, the early round's should): a linked name on disk too — its folder synced, BEST EFFORT (not every platform
+   *  opens or syncs a folder); the descriptor closed once through the tree's one close and forgotten in that statement */
+  function syncFolderOf(file) {
+    let d = null;
+    try { d = fs.openSync(path.dirname(file), 'r'); fs.fsyncSync(d); } catch (e) { void e; /* best effort: the key's bytes are already on disk */ }
+    if (d !== null) d = FC.closeWritten(d, "this hub key's folder", null);
+  }
   const identityFile = () => path.join(agentdDir, 'hub-identity.pem');
   const identityLocked = () => Object.assign(new Error('the vault is locked — this hub\'s own key opens after the owner unlocks the vault (no machine link until then)'), { code: 'vault_locked' });
   function readIdentity() {
@@ -170,7 +177,8 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
    *  once a run (its callers go on without a key). ONLY a file system that does no sync at all (src/fd-close.js SYNC_UNSUPPORTED) lands,
    *  said: the first mint through the door; the renew, which the secret family's replace refuses there, through the door too (the renew
    *  is the ONE way out of hub_identity_lost — it must land; there the retired key's bytes are not overwritten, as at the release).
-   *  KNOWN LIMIT: the first mint's NAME (its link) is not folder-synced — the door syncs no folder for any of its users. */
+   *  The first mint's NAME (its link) is synced too: its folder, best effort, as the secret family's replace syncs its own (the early
+   *  round's should, 主开发 r4797) — a folder that cannot be opened or synced is no failed write: the key's bytes are already on disk. */
   function writeIdentity(pem, { replace = false } = {}) {
     const st = stateOf();
     if (st === 'not_set_up') {
@@ -184,6 +192,7 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
       catch (e) { if (!mintFailSaid) { mintFailSaid = true; say(`this hub's own key could not be written (${(e && e.code) || 'error'}) — no machine can pin it until it is; it is tried again at the next link`); } throw e; }
       try { fs.linkSync(tmp, f); } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }
       try { fs.unlinkSync(tmp); } catch { }
+      syncFolderOf(f);
       return fs.readFileSync(f, 'utf8');
     }
     const v = SB.vaultForDir(dataDir);

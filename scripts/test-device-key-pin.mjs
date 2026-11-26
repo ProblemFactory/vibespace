@@ -686,7 +686,22 @@ console.log('— ⑦ D3 half b: THE HUB PROVES ITS KEY (主开发\'s ruling 2026
     const HTS = read('src/server/host-tokens.js');
     const XH = mutantCopies('hub-key-unsynced', REPO).load('src/server/host-tokens.js', anchored(HTS, "      if (replace) {\n        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n        return pem;\n      }\n      try { FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say }); }\n      catch (e) { if (!mintFailSaid) { mintFailSaid = true; say(`this hub's own key could not be written (${(e && e.code) || 'error'}) \u2014 no machine can pin it until it is; it is tried again at the next link`); } throw e; }\n", "      fs.writeFileSync(tmp, pem, { mode: 0o600 });   // MUTANT: the release's unsynced roads\n      if (replace) { fs.renameSync(tmp, f); return pem; }\n", 'hub-key-unsynced'), 'hub-key-unsynced');
     const x = keyScene(XH, 'red');
-    ok(x.first === 'landed' && x.firstN === 0 && x.firstKey && x.renew === 'landed' && x.renewN === 0 && !x.kept && !x.shredded, 'CONTROL (the release\'s unsynced roads, in a copy): no sync asked — the placed refusal is never met, the new key takes its name unsynced, the retired key\'s bytes stay in its inode — red', x);
+    ok(x.first === 'landed' && x.firstKey && x.renew === 'landed' && x.renewN === 0 && !x.kept && !x.shredded, 'CONTROL (the release\'s unsynced roads, in a copy): the key\'s temp is never synced — the placed refusal is not met there and the new key takes its name (only the folder\'s best-effort sync meets it), the retired key\'s bytes stay in its inode — red', x);
+    // the early round's should (主开发 r4797): the first mint's NAME is synced too — after the key's own sync, its FOLDER (best effort).
+    // RED: a copy without the folder's sync (the key's bytes synced, the link's name left to the file system's next commit).
+    const dirSyncScene = (H, tag) => {
+      const d = path.join(tmp, 'ht-dirsync-' + tag); fs.mkdirSync(d, { recursive: true });
+      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn() { } } });
+      const s0 = fs.fsyncSync, kinds = [];
+      fs.fsyncSync = function (fd, ...a) { let k = '?'; try { k = fs.fstatSync(fd).isDirectory() ? 'folder' : 'file'; } catch { k = '?'; } kinds.push(k); return s0.call(this, fd, ...a); };
+      try { h.identity(); } finally { fs.fsyncSync = s0; }
+      return kinds.join(',');
+    };
+    const ds = dirSyncScene(HT, 'real');
+    ok(ds === 'file,folder', `B-574d: a first mint syncs the key's bytes, then its FOLDER after the link (best effort) — the syncs in order: ${ds}`);
+    const XD = mutantCopies('hub-key-no-folder-sync', REPO).load('src/server/host-tokens.js', anchored(HTS, '      syncFolderOf(f);\n', '      /* MUTANT: the folder not synced */\n', 'hub-key-no-folder-sync'), 'hub-key-no-folder-sync');
+    const xd = dirSyncScene(XD, 'red');
+    ok(xd === 'file', `CONTROL (a copy without the folder's sync): only the key's bytes are synced, the link's name is not — red (${xd})`);
     const XN = mutantCopies('hub-key-renew-no-road', REPO).load('src/server/host-tokens.js', anchored(HTS, "        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n", "        replaceShredding(f, pem);   // MUTANT: no road on a file system with no sync\n", 'hub-key-renew-no-road'), 'hub-key-renew-no-road');
     const xn = noSyncScene(XN, 'red');
     ok(xn.renew === 'EINVAL' && !xn.renewed && xn.saidRenew === 0, 'CONTROL (the renew with no road for a file system with no sync, in a copy): the renew throws EINVAL and the key is never renewed — red', xn);
