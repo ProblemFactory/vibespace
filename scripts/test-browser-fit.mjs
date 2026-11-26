@@ -454,7 +454,11 @@ async function freshLeg(BSmod) {
   U.emit({ type: 'url', url: 'https://a.test/b' }); await sleep(60); U.frame('nav'); await sleep(FIT.FRESH_FRAME_MS + 300);
   r.afterFramed = calls.fresh.length;
   // a viewer's refresh: answered once per REFRESH_EVERY_MS
-  V.send({ type: 'refresh' }); V.send({ type: 'refresh' }); await sleep(300);
+  // r4665 (law 2): «ONE capture» is a never-read of the second refresh — read once the bridge HANDLED it: a ping sent after the two
+  // is answered in its turn (the bridge reads a viewer's messages in order), so its pong says both refreshes were acted on
+  const pongs0 = V.msgs.filter((m) => m.type === 'pong').length;
+  V.send({ type: 'refresh' }); V.send({ type: 'refresh' }); V.send({ type: 'ping' });
+  r.refreshesHandled = await until(() => V.msgs.filter((m) => m.type === 'pong').length > pongs0, 3000);
   r.afterRefresh = calls.fresh.length;
   await V.close(); await B.close(); await U.close();
   return r;
@@ -465,7 +469,7 @@ async function freshLeg(BSmod) {
   const f = await freshLeg(BS);
   ok(f.calls === 1 && f.fresh === 'navigation' && /^fresh1/.test(f.tag), `THE FRESH FRAME: a navigation no frame followed ⇒ after ${FIT.FRESH_FRAME_MS} ms the bridge asks the page for one and every viewer gets it (fresh:"${f.fresh}")`, JSON.stringify(f));
   ok(f.afterFramed === 1, 'a navigation the stream DID paint asks nothing');
-  ok(f.afterRefresh === 2, `a viewer's \`refresh\` is answered — twice in a row ⇒ ONE capture (at most one per ${FIT.REFRESH_EVERY_MS} ms)`, JSON.stringify(f));
+  ok(f.refreshesHandled && f.afterRefresh === 2, `a viewer's \`refresh\` is answered — twice in a row ⇒ ONE capture (at most one per ${FIT.REFRESH_EVERY_MS} ms)`, JSON.stringify(f));
 }
 
 // ═══ ⑤b BRIDGE CONTROLS (patched copies) ══════════════════════════════════
@@ -898,16 +902,19 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     const A = viewer(B.P); await A.ready();
     A.send({ type: 'fit', width: 700, height: 900, dpr: 1, visible: true });
     await until(() => A.lastFit() && A.lastFit().state === 'fitted', 3000); await sleep(200);
-    U.mirrorSet(800, 600, { agent: true }); await sleep(300); // the agent's own set: a raw `viewport` pair (an observation, untraced)
+    U.mirrorSet(800, 600, { agent: true }); // the agent's own set: a raw `viewport` pair (an observation, untraced)
+    // r4665 (law 2): «untraced» is a never-read — read once the TAP HAS the agent's pair (the bridge hands every upstream record to
+    // its taps as it arrives: a trace of it would be that hand-over), never after a fixed 300 ms
+    const agentPairTapped = await until(() => got.some((m) => m.type === 'result' && m.action === 'viewport' && m.data && m.data.width === 800), 3000);
     const traced = got.filter((m) => m.type === 'command' && T_.isTracedCommand(m));
     const entry = traced[0] ? T_.entryFor({ id: 'tr-000000000001', at: 1, command: traced[0], result: got.find((m) => m.type === 'result' && m.id === traced[0].id) || null, position: T_.positionOf({ kind: T_.classifyAction(traced[0].action), params: traced[0].params }) }) : null;
-    const out = { traced: traced.map((m) => [m.action, m.params]), ownRaw: got.filter((m) => m.action === 'viewport' && m.params && m.params.width === 700).length, viewerSaw: A.msgs.filter((m) => m.type === 'command' && (m.action === 'viewer-fit' || (m.action === 'viewport' && m.params && m.params.width === 700))).length, entry: entry && { kind: entry.kind, text: entry.text, ok: entry.ok, label: T_.timelineLabel(entry), pos: T_.positionText(entry.position) } };
+    const out = { agentPairTapped, traced: traced.map((m) => [m.action, m.params]), ownRaw: got.filter((m) => m.action === 'viewport' && m.params && m.params.width === 700).length, viewerSaw: A.msgs.filter((m) => m.type === 'command' && (m.action === 'viewer-fit' || (m.action === 'viewport' && m.params && m.params.width === 700))).length, entry: entry && { kind: entry.kind, text: entry.text, ok: entry.ok, label: T_.timelineLabel(entry), pos: T_.positionText(entry.position) } };
     try { tp && tp.untap && tp.untap(); } catch { }
     await A.close(); await B.close(); await U.close();
     return out;
   };
   const tr = await traceLeg(BS);
-  ok(tr.traced.length === 1 && tr.traced[0][0] === 'viewer-fit' && tr.traced[0][1].width === 700 && tr.traced[0][1].why === 'fit' && tr.ownRaw === 0 && tr.viewerSaw === 0 && tr.entry && tr.entry.kind === 'viewport' && tr.entry.ok === true && tr.entry.text === 'live view: set viewport 700 900 (fit)' && tr.entry.label === 'viewer-fit 700×900', `F6: the live view's resize is ONE traced row for the recorder ("${tr.entry && tr.entry.text}", kind ${tr.entry && tr.entry.kind}, label "${tr.entry && tr.entry.label}") — never our raw mirror, never a viewer's command; the agent's own \`viewport\` stays an untraced observation`, JSON.stringify(tr));
+  ok(tr.agentPairTapped && tr.traced.length === 1 && tr.traced[0][0] === 'viewer-fit' && tr.traced[0][1].width === 700 && tr.traced[0][1].why === 'fit' && tr.ownRaw === 0 && tr.viewerSaw === 0 && tr.entry && tr.entry.kind === 'viewport' && tr.entry.ok === true && tr.entry.text === 'live view: set viewport 700 900 (fit)' && tr.entry.label === 'viewer-fit 700×900', `F6: the live view's resize is ONE traced row for the recorder ("${tr.entry && tr.entry.text}", kind ${tr.entry && tr.entry.kind}, label "${tr.entry && tr.entry.label}") — never our raw mirror, never a viewer's command; the agent's own \`viewport\` stays an untraced observation`, JSON.stringify(tr));
   ok(T_.classifyAction('viewport') === null && T_.classifyAction('viewer-fit') === 'viewport' && T_.positionText(T_.positionOf({ kind: 'viewport', params: { device: 'iPhone 12', why: 'put-back' } })) === 'iPhone 12' && /set device iPhone 12 \(put-back\)/.test(T_.commandText('viewer-fit', { device: 'iPhone 12', why: 'put-back' })), 'the trace table: `viewer-fit` → kind viewport (a device put back names the device); the daemon\'s own `viewport` verb stays an observation');
   // (⑥ the trace view's words — MOVED to the fast scripts/test-browser-fit-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 

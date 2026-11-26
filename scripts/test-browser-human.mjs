@@ -336,7 +336,7 @@ const daemon = (by) => {
 if (a === '--version') { console.log('agent-browser 0.38.1'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: sess, socketDir: path.join(st, ns, 'run') } }); process.exit(0); }
 if (a === 'get' && b === 'cdp-url') { const s0 = read(); if (!(s0 && alive(s0.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-' + ns } }); process.exit(0); }
-if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } if (s && s.profile) { try { fs.unlinkSync(path.join(s.profile, 'SingletonLock.fake')); } catch { } } out({ success: true, data: { closed: 1 } }); process.exit(0); }
+if (a === 'close' && b === '--all') { log('closeall.log', { ns, sess }); const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } if (s && s.profile) { try { fs.unlinkSync(path.join(s.profile, 'SingletonLock.fake')); } catch { } } out({ success: true, data: { closed: 1 } }); process.exit(0); }
 log('cmds.log', { argv: raw, ns, sess, cdp, profile: prof });
 if (a === 'close') { out({ success: true, data: { closed: 1 } }); process.exit(0); }
 if (a === 'stream' && b === 'status') { const s = daemon('stream status'); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); } out({ success: true, data: { enabled: true, connected: true, port: 21000 + (sess.length * 7) % 900, screencasting: false } }); process.exit(0); }
@@ -363,6 +363,9 @@ const ownNewQ = (kk, pid, key, news) => {
   const facts = { mark, news, made, roots: l ? l.tabRoots : null };
   return { ok: /^[0-9a-f]{24}$/.test(mark) && news.length === 1 && news[0].replace(/^--pin-tab /, '') === `tab new about:blank#vs-own-${mark}` && !!made && JSON.stringify(l.tabRoots) === JSON.stringify([made]), facts };
 };
+// r4665: A BEGUN STOP's WITNESS — its first act, the CLI's close-all on the browser's own session: the stand-in writes it in its OWN log
+// (closeall.log, inside the close-all branch, before that branch ends — never the command log, which other legs count exactly)
+const closeAllsOf = (ns) => logOf('closeall.log').filter((x) => x.ns === ns || x.sess === ns).length;
 const quiet = { log() { }, warn() { }, error() { } };
 const settings = {};
 let clock = 1_900_000_000_000;
@@ -848,12 +851,12 @@ let work, solo, shop;
   k.humanTake({ key: HS, viewerId: 21 });
   k.humanRelease({ key: HS, viewerId: 21, cause: 'viewer-left' });
   ok(k.humanOf(solo.id).state === 'away', 'his window closes ⇒ AWAY (his tab kept)');
+  // r4596 / r4665: «has NOT idled out» is a NEVER claim — read only once a stop this tick began would have SHOWN its WITNESS (the
+  // close-all it makes first, closeAllsOf), counted from BEFORE the tick and waited for within the keeper's own stop grace (K.STOP_GRACE_MS,
+  // the product's bound for a begun stop: the window of a never-claim, NOT a settle); none came ⇒ no stop began (its red: the control below)
+  const ns11 = k.browserOf(solo.id).ns, c11 = closeAllsOf(ns11);
   clock += 11 * 3600e3; await k.tick();
-  // r4596 (should): «has NOT idled out» is a NEVER claim — read only once a stop this tick began would have SHOWN: its first act is the
-  // CLI's close-all on the browser's own session (the fake CLI logs it), waited for within the keeper's own stop grace (K.STOP_GRACE_MS,
-  // the product's bound for a begun stop: the window of a never-claim, NOT a settle); none came ⇒ no stop began
-  const ns11 = k.browserOf(solo.id).ns, closes11 = () => cmdsOf(ns11).filter((c) => /^close/.test(c)).length, c11 = closes11();
-  const stopShown11 = await until(() => closes11() > c11, K.STOP_GRACE_MS);
+  const stopShown11 = await until(() => closeAllsOf(ns11) > c11, K.STOP_GRACE_MS);
   ok(!stopShown11 && k.humanOf(solo.id) && k.browserOf(solo.id).state === 'ready', '11 h away: the person is still kept and the browser has NOT idled out (15 min idle — the person\'s holder row counts): no stop began within the keeper\'s own stop grace', { state: k.browserOf(solo.id).state, stopShown11 });
   const c1 = cmdsOf('vs-' + HS).length;
   clock += 3600e3 + 1000; await k.tick();
@@ -1190,7 +1193,18 @@ let work, solo, shop;
   await kh.browse(hp.id);
   const HH = HM.humanKeyFor(hp.id);
   kh.humanTake({ key: HH, viewerId: 42 }); kh.humanRelease({ key: HH, viewerId: 42 });
-  clock += 2 * 3600e3; await kx.tick(); await kh.tick();
+  // r4665: the keep leg's RED — a third twin of the same copy (it BEGINS a stop where the keep leg expects none): the keep leg's witness,
+  // counted from before the tick, FIRES — the leg goes red by the witness, not by the browser's state alone
+  const kw = mkKeeper(Kc, { dataDir: path.join(ROOT, 'data-xw') });
+  const wp = kw.createProfile({ label: 'XW' }, { owner: { kind: 'instance', id: null } });
+  await kw.browse(wp.id);
+  const HW = HM.humanKeyFor(wp.id);
+  kw.humanTake({ key: HW, viewerId: 43 }); kw.humanRelease({ key: HW, viewerId: 43 });
+  const nsW = kw.browserOf(wp.id).ns, cW = closeAllsOf(nsW);
+  clock += 2 * 3600e3; await kx.tick(); await kh.tick(); await kw.tick();
+  const wShown = await until(() => closeAllsOf(nsW) > cW, K.STOP_GRACE_MS);
+  ok(wShown, 'ITS RED (r4665): a copy that begins a stop where the keep leg expects none — the keep leg\'s witness (the close-all the stop makes first) FIRES within the keeper\'s own stop grace: the keep leg goes red by the witness', { wShown, state: kw.browserOf(wp.id).state });
+  await until(() => kw.browserOf(wp.id).state === 'stopped', 20000);
   // the wait is ON THE FACT the control judges: the idle stop landed (a generous bound; its expiry is said by THE ONE MARK)
   const stoppedX = await until(() => kx.browserOf(xp.id).state === 'stopped', 20000);
   const readX = stoppedX ? kx.browserOf(xp.id).state : markTimedOut(kx.browserOf(xp.id).state, 20000, 'CONTROL: the idle stop of the copy whose clock reads the leases only');

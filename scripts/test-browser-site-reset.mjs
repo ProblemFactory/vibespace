@@ -148,7 +148,11 @@ const chrome = await fakeChromes().listen();
 // r4456: A TAB THE HUB's DIALOGS WATCH HAS ATTACHED AND ENABLED (the fake sends its page events only to such a session): the wait is on that
 // fact, never a fixed 80 ms after the tab was added; its expiry is said by THE ONE MARK
 let worldAt = 0;   // r4596: when the CURRENT world began (swap() builds a new one; an older world's watch stays connected, never counted)
-const watchedTab = async (bpath, id, ms = 10000) => { const on = () => [...chrome.of(bpath).sessions.values()].some((s) => s.targetId === id && s.enabled && s.ws && (s.ws._at || 0) >= worldAt); const w = await until(on, ms); return w ? true : markTimedOut(false, ms, `the hub's watch enabling tab ${id}`); };
+// r4665: its EXPIRY IS A FAILING LINE at every site (twelve): three of them are followed by a judge that reads an ABSENCE of the tab
+// (S11 «nobody's after A's audit», the two-verbs tab «nobody's before B's ack», the NEGATIVE CONTROL's «nobody's with no ack») — a
+// tab the watch never had is absent from every scope, so those would go green for no reason; the other nine judges read the tab
+// the watch has and go red without it. `judge` is the suite's ok; ITS RED below hands its own to read the line
+const watchedTab = async (bpath, id, ms = 10000, judge = ok) => { const on = () => [...chrome.of(bpath).sessions.values()].some((s) => s.targetId === id && s.enabled && s.ws && (s.ws._at || 0) >= worldAt); const w = await until(on, ms); if (w) return true; markTimedOut(false, ms, `the hub's watch enabling tab ${id}`); judge(false, `SETUP (r4665): the hub's watch enables tab ${id} before the judge after it reads that tab — it did not in ${ms / 1000} s (a judge reading the tab's absence would be green over a tab the watch never had)`); return false; };
 servers.add(chrome.srv);
 
 // ═══ the scratch world: the REAL keeper, watch, runner, routes; three conversations ═══
@@ -625,6 +629,15 @@ try {
       const scC = W.dialogs.scopeFor({ profileId: shared.id, browserKey: sB._browserKey, sessionId: 'sess-b', ephemeral: false });
       ok(rb.code === 0 && !scC.has(`t-${nsOf}-${nC}`), 'CONTROL: a CLI that hands no ack over leaves the tab born under two verbs nobody\'s — the row above reddens on it', { scope: [...scC] });
       await j('POST', '/api/agent/browser/audit', { profile: shared.id, verb: 'open', ok: true }, as(sA));
+      // r4665: ITS RED — watchedTab's expiry is a FAILING line (the control above reads an absence): S13's Page.enable HELD past a
+      // short bound (the placed hold, never a clock) ⇒ the helper hands its judge a red; the same tab once the hold is let go ⇒ no red
+      { const seenX = []; let letGoX = null; chrome.holdEnable = { targetId: 'S13', p: new Promise((r) => { letGoX = r; }) };
+        chrome.addTab(SP, 'S13', 'https://app.bank.test/held');
+        const wX = await watchedTab(SP, 'S13', 600, (c, n) => seenX.push({ c: !!c, n }));
+        letGoX(); chrome.holdEnable = null;
+        const wX2 = await watchedTab(SP, 'S13', 10000, (c, n) => seenX.push({ c: !!c, n }));
+        chrome.removeTab(SP, 'S13');
+        ok(wX === false && seenX.length === 1 && seenX[0].c === false && /did not in 0\.6 s/.test(seenX[0].n) && wX2 === true, 'ITS RED (r4665): a tab whose enable the watch never got (S13\'s Page.enable held) — watchedTab\'s expiry is a FAILING line (its judge handed one red), and once the hold is let go the same wait is green with no line', { wX, wX2, seenX }); }
       // lane site-reset-windows: the FENCED path (this shared profile, the shipped CLI) — B's `tab new` is the KEEPER's: ONE tab in B's
       // OWN window over CDP (rung 2 of lane browser-windows on the fake window model), B's session bound to it, navigated; the binary's
       // `tab new` never runs. Born while A's verb is in flight, it is B's (its root + the route's bind of the keeper's ack), never A's
