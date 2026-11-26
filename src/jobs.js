@@ -29,6 +29,7 @@ const { list: harnessList } = require('./harnesses');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — this engine holds the door (clearJobs)
 const SR = require('./store-read.js'); // B-f276: THE STORE READ — a read that failed is no answer (never set aside, never «empty»)
+const LOCK_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // B-f276 (s1126): jobs.lock's shape ({pid, starttime, at})
 const HOLD = require('./store-read-hold.js');   // B-f276 family unit 2 commit 3: the kept copies' question (copiesOf)
 const NOTIFS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // job-notifications.json: {conversationId: [notice, …]}
 const asideOf = (file) => file + '.corrupt-' + now();   // the ONE set-aside name (the load's and the read again's — test-store-write-census ⑧ counts it once)
@@ -313,10 +314,12 @@ class JobManager {
   /** read the kept copies now (off the loop) — the vault-job door asks it when it files a card, so the person's press is judged by them */
   readCopies() { return this._copies().warm(); }   // (round wxzvih2as: read once if never read; round wjgchwl6a (4): a promise again, settled once the read in flight ends)
   _copies() { return this.__copies || (this.__copies = HOLD.copiesOf({ file: this.file, prefix: path.basename(asideOf(this.file)).replace(/\d+$/, ''), log: (m) => { try { this.d.log(m); } catch { } } })); }
-  init() {
+  init({ lockRead = null } = {}) {   // lockRead: the lock hold's lift (B-f276 s1126) — its answer, never a second read on the loop
     try {
       fs.mkdirSync(this.logsDir, { recursive: true });
-      if (!this._takeLock()) {
+      const lock = this._takeLock(lockRead);
+      if (lock && typeof lock === 'object') { this._holdForLock(lock); return; }   // B-f276 (s1126): HELD — nothing loaded, nothing written
+      if (!lock) {
         this.readOnly = true;
         this.d.log('[jobs] another engine holds the lock — READ-ONLY registry (no adopt/replay/cron)');
         this._load(); this._loadNotifs(); this.ready = true; return;
@@ -352,6 +355,7 @@ class JobManager {
     }
   }
   shutdown() { for (const t of this._urlTimers || []) clearTimeout(t); this._urlTimers = new Set(); /* B-74f5 r3: the URL checks end with the engine */ this._archiveDisarmed = true; /* B-0248 step 3: an ended engine's archive steps do nothing (the next one reads the files) */ if (this._notifsUnread && this.pendingNotifs.size) this.d.log(`[jobs] job-notifications.json is still held at the engine's end — ${[...this.pendingNotifs.values()].reduce((k, l) => k + l.length, 0)} notice(s) that arrived meanwhile are NOT written (the file is kept as it is)`);   // its read r1 (M2): said
+    if (this._lockHold) { this._lockHold.stop(); this._lockHold = null; } if (this._exitHolds) { for (const e of this._exitHolds.values()) e.hold.stop(); this._exitHolds.clear(); }   // B-f276 (s1126): the holds end with the engine
     if (this._keepOutOff) { this._keepOutOff(); this._keepOutOff = null; } this._unreadStopped = true; for (const w of ['store', 'archive']) { if (this._unreadT[w]) clearTimeout(this._unreadT[w]); this._unreadT[w] = null; } if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; } this._logsNoteAtExit(); try { if (this._dirty) this._save({ paced: true }); } catch { } this._unlockAfterStore(); this._logsStop(); }
   /** THE LOCK GOES AFTER THE STORE LANDS (lane lg-store-writes U4): the exit's store bytes are the writer's (its exit flush, after
    *  this) — the lock file is removed once jobs.json holds them, never before (an engine taking the lock in between would read
@@ -433,14 +437,39 @@ class JobManager {
     if (this._unlockWhenLanded) { this._unlockWhenLanded = false; this._unlockNow(); }   // armed only at the hub's exit (no other engine in this process)
   }
 
-  _takeLock() {
-    try {
-      const cur = JSON.parse(fs.readFileSync(this.lockFile, 'utf-8'));
-      if (cur.pid && readStarttime(cur.pid) === cur.starttime && cur.starttime) return cur.pid === process.pid; // live foreign engine
-    } catch { }
+  /** → true (taken: this engine owns the store) · false (a live engine of another process holds it: read-only) · the read's answer when
+   *  the lock could not be read or its bytes are torn — B-f276 (lane bl-proposals s1126), THE STORE READ: a read that FAILED is no «no
+   *  engine» (the release fell through to the write and TOOK a lock a live engine may hold: two engines on one jobs.json) — init HOLDS */
+  _takeLock(given = null) {
+    let read = given;
+    if (!read) { try { read = { text: fs.readFileSync(this.lockFile, 'utf-8') }; } catch (error) { read = { error }; } }
+    const lockA = SR.storeAnswer(read, { valid: LOCK_SHAPE });
+    if (lockA.state === 'unreadable' || lockA.state === 'corrupt') return lockA;
+    if (lockA.state === 'data') { const cur = lockA.value; if (cur.pid && readStarttime(cur.pid) === cur.starttime && cur.starttime) return cur.pid === process.pid; }   // live foreign engine
     writeJsonAtomic(this.lockFile, { pid: process.pid, starttime: readStarttime(process.pid), at: now() });
     return true;
   }
+  /** B-f276 (lane bl-proposals s1126): THE LOCK HELD — its read failed, or its bytes are torn. This engine neither takes it nor runs on a
+   *  guess: NOTHING is loaded, adopted, replayed or written (read-only meanwhile: a save writes nothing), and every door answers the hold
+   *  BY NAME (lockHeldWords). The lock is read again OFF the loop (src/store-read-hold.js: the law's ladder, one read in flight, the
+   *  family's ceiling; torn bytes kept beside it first, then «absent»); at its LIFT the engine starts exactly as a boot starts it, with
+   *  the lift's answer: taken, or read-only beside a live engine. A running job is a process of its own: it runs on meanwhile */
+  _holdForLock(a) {
+    this.readOnly = true;
+    const h = this._lockHold = HOLD.create({ file: this.lockFile, valid: LOCK_SHAPE, code: 'jobs_lock_unread', aside: (m) => this.lockFile + '.corrupt-' + m,
+      words: (x) => `Background Work's lock (jobs.lock in VibeSpace's data folder) could not be read (${x && x.code}) — another VibeSpace may hold it, so this one starts no job and changes no record until it reads; it is read again by itself every few minutes, and nothing is written over it`,
+      log: (l) => this.d.log(`[jobs] ${l}`),
+      onLift: (value) => {
+        if (this._lockHold !== h) return;
+        this._lockHold = null; h.stop();
+        if (this._unreadStopped) return;   // the engine ended meanwhile
+        this.readOnly = false;
+        this.init({ lockRead: value ? { text: JSON.stringify(value) } : { error: Object.assign(new Error('absent'), { code: 'ENOENT' }) } });
+      } });
+    h.start(a);
+  }
+  /** the lock's hold BY NAME — what a door answers while this engine waits for its lock (null: not held) */
+  lockHeldWords() { return this._lockHold ? this._lockHold.words() : null; }
   _load() {
     // B-f276: THE STORE READ (src/store-read.js) — data / missing / unreadable; only bytes that were READ and do not parse are corrupt.
     // The release set the LIVE jobs.json aside on ANY failed read (a storage hiccup: the records became skeletons, then gone)
@@ -541,7 +570,7 @@ class JobManager {
       for (const [, ks] of kids) if (ks.length >= 2) for (const k of ks) if (['done', 'interrupted', 'failed', 'missed'].includes(k.state) && Array.isArray(k.runs) && k.runs.length) want.push([path.join(this._ctlDir(k, last(k).startedAt), 'pid.json'), false]);
       for (const [f, tail] of want) {
         if (this._unreadStopped) break;
-        if (!tail) { try { m.set(f, await fs.promises.readFile(f, 'utf-8')); } catch { m.set(f, null); } continue; }
+        if (!tail) { try { m.set(f, await fs.promises.readFile(f, 'utf-8')); } catch (e) { m.set(f, e && e.code === 'ENOENT' ? null : { error: e }); } continue; }   // B-f276 (s1126): a failed read is no «absent»
         let fh = null;
         try { fh = await fs.promises.open(f, 'r'); const st = await fh.stat(), len = Math.min(st.size, 16384), buf = Buffer.alloc(len); if (len) await fh.read(buf, 0, len, st.size - len); m.set(f + '#last', len ? M.lastLineOf(buf.toString('utf-8'), 200) : ''); }
         catch { m.set(f + '#last', ''); } finally { if (fh) await fh.close().catch(() => { }); }
@@ -2077,11 +2106,19 @@ class JobManager {
       // line, so a later clear — which rewrites the spill LINE BY LINE — takes all of it
       const oneLine = (t) => String(t == null ? '' : t).replace(/\s*\r?\n\s*/g, ' ⏎ ');
       const block = `\n## drained ${new Date().toISOString()}\n` + items.map((n) => `- ${new Date(n.ts).toISOString()} ${n.jobId} ${oneLine(n.jobName)}${n.sub ? M.SUB_MARK : ''}: ${oneLine(n.text)}`).join('\n') + '\n';
-      let prev = '';
-      try { prev = fs.readFileSync(file, 'utf-8'); } catch { }
+      // B-f276 (lane bl-proposals s1126): THE STORE READ — only «the file is not there» is «no history». A read that FAILED keeps the
+      // history as it is: the new block is ADDED at its end (the release wrote the block OVER the file — every earlier drained
+      // notification gone), the trim waits for the next good read, said once an episode
+      let prev = '', read;
+      try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+      const histA = SR.storeAnswer(read, { parse: (t) => t });
+      const unreadSaid = this._spillUnreadSaid || (this._spillUnreadSaid = new Set()), unread = histA.state === 'unreadable';
+      if (histA.state === 'data') prev = histA.value;
       let out = prev + block;
-      if (out.length > 262144) out = out.slice(out.length - 262144); // keep the newest 256KB
-      fs.writeFileSync(file, out);
+      if (!unread && out.length > 262144) out = out.slice(out.length - 262144); // keep the newest 256KB
+      fs.writeFileSync(file, out, { flag: unread ? 'a' : 'w' });   // unread: ADDED at its end (`out` is the block alone), never written over
+      if (unread && !unreadSaid.has(file)) { unreadSaid.add(file); this.d.log(`[jobs] ${path.basename(file)} (the drained notifications' history) could not be read (${histA.code}) — the new block is added at its end, nothing is written over it; trimmed again once it reads`); }
+      else if (!unread) unreadSaid.delete(file);
       return file;
     } catch (e) { this.d.log('[jobs] notif spill failed:', e.message); return null; }
   }
@@ -3992,7 +4029,9 @@ class JobManager {
           continue;
         }
         const run = job.runs && job.runs[job.runs.length - 1];
-        const exit = this._readExit(job, run);
+        const exA = stamp && run ? this._exitAnswer(job, run, 'boot') : null;   // B-f276 (s1126): a wrapper that stamped and is gone — its record HELD judges nothing
+        if (exA && exA.state === 'held') continue;
+        const exit = exA ? exA.value : this._readExit(job, run);
         // round 4: its wrapper is gone — what is left in its scope is an ended run's (a service's KEPT processes excepted —
         // round 5, the ruling: its replay stops them first); round 5: a service's replay AWAITS this reap (_startAfter); round
         // 6: a reap past its read's bound is never dropped — it enqueues itself and every tick retries it (_reapScope)
@@ -4089,11 +4128,52 @@ class JobManager {
     else { job.state = 'interrupted'; this._touch(job, { what: 'interrupted (env-restart: the host/pod restarted)' }); this._notifyOwner(job, { what: 'interrupted (the machine restarted while it ran) — start it again if it still matters', wake: 'interrupted' }); }   // the manager design's piece 7: a task a restart interrupted is a RESULT to its owner (until now nobody was told)
   }
   /** a run's own record in its ctl dir — exit.json, and (lane jobs-memory-bound) bound.json / pressure.json the wrapper writes */
-  _ctlJson(job, run, name) {
-    if (!run) return null;
+  _ctlJson(job, run, name) { const a = this._ctlAnswer(job, run, name); return a.state === 'data' ? a.value : null; }   // its askers save nothing from a null; the roads that SAVE a run's end ask _exitAnswer
+  /** B-f276 (lane bl-proposals s1126): THE STORE READ of a run's own record → { state: 'data', value } | { state: 'missing' } |
+   *  { state: 'unreadable' | 'corrupt', code } — only ENOENT is «absent» (the release answered null for a read that failed and for torn
+   *  bytes alike: «no exit record», saved into the job's record) */
+  _ctlAnswer(job, run, name) {
+    if (!run) return { state: 'missing' };
     const f = path.join(this._ctlDir(job, run.startedAt), name);
-    if (this._ctlPre && this._ctlPre.has(f)) { try { return JSON.parse(this._ctlPre.get(f)); } catch { return null; } }   // B-f276 cure r2: read off the loop
-    try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; }
+    let read;
+    if (this._ctlPre && this._ctlPre.has(f)) { const v = this._ctlPre.get(f); read = v == null ? { error: Object.assign(new Error('absent'), { code: 'ENOENT' }) } : typeof v === 'object' ? { error: v.error } : { text: v }; }   // B-f276 cure r2: read off the loop
+    else { try { read = { text: fs.readFileSync(f, 'utf-8') }; } catch (error) { read = { error }; } }
+    const ctlA = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
+    return ctlA;
+  }
+  /** B-f276 (lane bl-proposals s1126): A GONE WRAPPER's RUN IS JUDGED FROM ITS EXIT RECORD — the two roads that SAVE that judgement (the
+   *  boot's adoption, the sweep's) ask it here. A record whose read FAILED, or torn bytes, is HELD — never «no exit record» (the release
+   *  judged the run ended with no code and saved it: the run's real end lost, a finished task run again): the run judges nothing, said
+   *  once in the journal and on its row, and its file is read again OFF the loop (src/store-read-hold.js: the law's ladder, one read in
+   *  flight, the family's ceiling; torn bytes kept beside it first, then «no record»). At the lift the sweep's next tick judges the run
+   *  ONCE, with what was read, on the road that met the hold (a record held at the boot: the boot's own judge — _bootJudgeLate).
+   *  → { state: 'data', value } | { state: 'missing', value: null } | { state: 'held' } (+ `road`, `setAside` once lifted) */
+  _exitAnswer(job, run, road) {
+    if (!run) return { state: 'missing', value: null };
+    const f = path.join(this._ctlDir(job, run.startedAt), 'exit.json'), holds = this._exitHolds || (this._exitHolds = new Map());
+    const h = holds.get(f);
+    if (h) { if (!h.lifted) return { state: 'held' }; holds.delete(f); h.hold.stop(); return h.lifted; }   // no read while held: the hold reads, off the loop
+    const a = this._ctlAnswer(job, run, 'exit.json');
+    if (a.state === 'data') return { state: 'data', value: a.value };
+    if (a.state === 'missing') return { state: 'missing', value: null };
+    const entry = { lifted: null, hold: null };
+    entry.hold = HOLD.create({ file: f, valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), code: 'exit_record_unread', aside: (m) => f + '.corrupt-' + m,
+      words: (x) => `the exit record of ${job.id}'s run could not be read (${x && x.code}) — the run is judged once it reads; nothing is decided from it meanwhile`,
+      log: (l) => this.d.log(`[jobs] ${job.id}: ${l}`),
+      onLift: (value, facts) => { entry.lifted = { state: value ? 'data' : 'missing', value: value || null, road, setAside: (facts && facts.setAside) || null }; } });
+    holds.set(f, entry);
+    entry.hold.start(a);
+    this._touch(job, { what: `its wrapper is gone and its exit record could not be read (${a.state === 'corrupt' ? 'torn bytes' : a.code}) — the run is judged once the record reads; nothing is decided from it meanwhile` });
+    return { state: 'held' };
+  }
+  /** B-f276 (lane bl-proposals s1126): a run the BOOT met with its exit record held is judged at the lift by the boot's own judge (the
+   *  boot's lines in _adoptAndReplay, after the record's read): its record's end, else a stamp of no boot unverified, else a wrapper that
+   *  died with its environment (the boot's judge) — never the sweep's «ended, no code» */
+  _bootJudgeLate(job, run, stamp, exit) {
+    if (exit) { this._finalizeRun(job, run, exit, 'boot'); return; }
+    if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); return; }
+    const sample = run && !run.endedAt ? this._ctlJson(job, run, 'pressure.json') : null;
+    this._bootNoExit(job, run, M.bootEndCause(sample, sample ? this._cgroupNow() : null));
   }
   /** THE LADDER's inputs (lane jobs-memory-bound): the owner's setting `jobs.memoryMb` (undefined while never set) and the
    *  cluster's default (the chart's env) — read live, per run */
@@ -4532,16 +4612,20 @@ class JobManager {
       }
       // B-2c5c unit 2: a run whose MAIN IS THIS HUB (proven at this boot) whose wrapper was killed has NOT ended — its main is this
       // process, which runs: never judged ended, never restarted beside itself (said once)
-      if (stamp && !this._verifyAlive(stamp) && !this._readExit(job, run) && this._hubIsMain(job, run)) {
+      const gone = !!stamp && !this._verifyAlive(stamp);   // B-f276 (s1126): asked ONCE a tick (the release asked it twice, below)
+      const exA = gone && run ? this._exitAnswer(job, run, 'sweep') : null;   // a gone wrapper's record — HELD judges nothing
+      if (exA && exA.state === 'held') continue;
+      if (gone && !(exA && exA.value) && this._hubIsMain(job, run)) {
         if (!run._wrapperGoneSaid) { run._wrapperGoneSaid = true; const what = 'its wrapper is gone, but its main process is this VibeSpace hub, which runs — the run is not ended (nothing restarted beside it)'; this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what }); }
         continue;
       }
-      if (stamp && !this._verifyAlive(stamp)) {
-        const exit = this._readExit(job, run) || { code: null, endedAt: now() };
+      if (gone) {
+        const exit = (exA && exA.value) || { code: null, endedAt: now() };
         // round 4: a wrapper gone, its scope not — never an ended run still running (a service's KEPT processes excepted —
         // round 5, the ruling). Round 6: the run is judged from its exit record NOW and its reap goes on beside it (bounded; one
         // that does not finish enqueues itself — _reapScope); a restart waits for it (_startAfter)
         if (!(exit.scopeEmpty === true || (exit.left && exit.left.kept) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { }); // measured empty: nothing to reap · B-2c5c unit 1: the hub's, never reaped
+        if (exA && exA.road === 'boot') { this._bootJudgeLate(job, run, stamp, exA.value); continue; }   // B-f276 (s1126): held at the boot — the boot's judge
         this._finalizeRun(job, run, exit, 'sweep');
         continue;
       }
@@ -5130,7 +5214,7 @@ class JobManager {
 
   // ── public API (callers pre-authorize via job-model predicates) ─────────
   create(spec, caller) {
-    if (this.readOnly || !this.ready) return { error: this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly' };
+    if (this.readOnly || !this.ready) return { error: this.lockHeldWords() || (this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly') };
     const vet = M.vetSpec(spec);
     if (!vet.ok) return { error: vet.error };
     // B-f276: while the records cannot be read nothing new is created (a record made now could not be written: it would end with this process)
@@ -5352,7 +5436,7 @@ class JobManager {
    *     on a grant that is then restored, and a grant being withdrawn wakes nothing (its words wait, as for any refused wake).
    *  → { ok, code?, why?, rows: [{ id, ok, changed, code?, error?, [GRANT_FIELD], wakeGrantBy }] } */
   async changeWakeGrants(changes, { by = null, timeoutMs = WAKE_GRANT_LAND_MS } = {}) {
-    if (this.readOnly || !this.ready) { const error = this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly'; return { ok: false, code: 'not_ready', error, rows: [] }; }   // as its sibling writers
+    if (this.readOnly || !this.ready) { const error = this.lockHeldWords() || (this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly'); return { ok: false, code: 'not_ready', error, rows: [] }; }   // as its sibling writers
     if (!by || (by.kind !== 'person' && by.kind !== 'key')) return { ok: false, code: 'wake_grant_person_only', error: DW.GRANT_REFUSAL, rows: [] };
     const G = DW.GRANT_FIELD, rows = [], acted = [], act = {};   // `act`: this act's own token — the marks it sets are its own
     // THE STORAGE BEHIND (the round's should): the jobs file's last landing did not come within its bound (or its write failed) —

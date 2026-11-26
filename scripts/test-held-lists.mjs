@@ -194,7 +194,10 @@ const CALLERS = { 'src/server/decision-engine.js': ['decision-memo.json', 'decis
   'src/server/session-stdout.js': { sites: 1, stores: ['cw-1-1700000000000.json'] },
   'src/server/host-tokens.js': { sites: 1, stores: ['host-dial-0a1b.token'] },   // B-f276 (r4721): a paired machine's link token in the no-vault window, a file a machine (a shape's example)
   'src/channel-store.js': { sites: 1, stores: ['people.json'] },   // bl-mail (line 698, 主开发 r3608): ONE create site (the people memo's hold), a store per channels account
-  'src/sync-store.js': { sites: 1, stores: ['drafts.json', 'settings-sync.json', 'uploads-sync.json', 'stage-sync.json'] } };   // lg-recovery (r3489): ONE create site (SyncStore._load), a store per file
+  'src/sync-store.js': { sites: 1, stores: ['drafts.json', 'settings-sync.json', 'uploads-sync.json', 'stage-sync.json'] },   // lg-recovery (r3489): ONE create site (SyncStore._load), a store per file
+  // B-f276 slice jobs-side-files (lane bl-proposals s1126): Background Work's lock (one), and a gone wrapper's exit record (ONE create site, a
+  // hold a run, each listed by its file's name)
+  'src/jobs.js': { sites: 2, stores: ['jobs.lock', 'exit.json'] } };
 // r3354: A FILE THAT ONLY ASKS the helper (its kept copies: copiesOf — no create site, inline or bound, and no destructured create) holds
 // no store through it: it needs no row and no plain name (hosts.js, jobs.js, machine-mounts.js ask it for their OLDER holds' copies, which
 // the notice bridges by their own doors). A file in the map is never let off this way (its rows would go dead unseen), and an asker that
@@ -243,7 +246,9 @@ ok(unnamed(shaped).some((x) => x.startsWith('frob-7.json (src/frobs.js)')), 'CON
 const shapedSites = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS + FROBS.split('\n')[1] + '\n']]), { ...CALLERS, 'src/frobs.js': { sites: 1, stores: ['cw-1-1700000000000.json'] } });
 const ASKER = "const HOLD = require('./store-read-hold.js');\nconst kept = HOLD.copiesOf(path.join(dir, 'frobs.json'));\n";
 const asks = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', ASKER]]));
-ok(!asks.has('src/frobs.js') && asks.askers.includes('src/frobs.js') && unnamed(asks).length === 0 && STORES.askers.length >= 1,
+// (the tree's askers may be none: src/jobs.js, its one, also HOLDS two stores through it since B-f276 s1126 — a caller like any other; the
+// planted asker proves the road)
+ok(!asks.has('src/frobs.js') && asks.askers.includes('src/frobs.js') && unnamed(asks).length === 0,
   `r3354: a file that only ASKS the helper (its kept copies) holds no store through it — no row, no plain name (the tree's askers: ${STORES.askers.join(', ')})`, { askers: STORES.askers, planted: asks.askers });
 const asksAndHolds = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', ASKER + "const h = HOLD.create({ file: path.join(dir, 'frobs.json'), code: 'frobs_unread' });\n"]]));
 ok(unnamed(asksAndHolds).some((x) => x.startsWith('src/frobs.js: a caller of the helper with no store')), 'CONTROL (r3354): the same asker that ALSO creates a hold is RED by name', unnamed(asksAndHolds));

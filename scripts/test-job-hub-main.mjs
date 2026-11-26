@@ -175,7 +175,7 @@ async function wrapperKilledScene(JM2, tag) {
   return out;
 }
 {
-  const SWEEP = "      if (stamp && !this._verifyAlive(stamp) && !this._readExit(job, run) && this._hubIsMain(job, run)) {";
+  const SWEEP = "      if (gone && !(exA && exA.value) && this._hubIsMain(job, run)) {";   // B-f276 (s1126): the sweep asks its wrapper's life once and its exit record's answer once
   const JX = MJ.load('src/jobs.js', anchored(JSRC, SWEEP, '      if (false) {   /* MUTANT: the sweep judges it as any run */', 'b2c5c-u2-sweep-cut'), 'b2c5c-u2-sweep-cut');
   const [real, red] = await Promise.all([wrapperKilledScene(require(path.join(ROOT, 'src/jobs.js')).JobManager, 'wk'), wrapperKilledScene(JX.JobManager, 'wk-mut')]);
   ok(!real.readOnly && real.latched === true && /its main process is this VibeSpace hub \(started as this job\)/.test(real.said),

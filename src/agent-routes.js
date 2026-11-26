@@ -1767,7 +1767,7 @@ function jobAuth(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
   const jm = getJobs && getJobs();
   if (!jm) { res.status(503).json({ error: 'jobs engine not available' }); return null; }
-  if (!jm.ready) { res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting — retry shortly' }); return null; }
+  if (!jm.ready) { res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || (jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting — retry shortly') }); return null; }   // B-f276 (s1126): the lock's hold by name
   if (jm._unread && jm._unread.store) { res.status(503).json({ error: jm.unreadWords(), code: 'records-unread' }); return null; }   // B-f276 cure r1: list / show / poll / stop say why, never «no such job»
   if (token && token.startsWith('jbt_')) {
     const job = jm.jobByToken(token);

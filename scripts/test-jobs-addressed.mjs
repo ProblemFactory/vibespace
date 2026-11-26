@@ -422,6 +422,9 @@ const CLASS = {
   '_budgetRefusal#1': 'event', '_budgetLadder#1': 'alarm', '_budgetLadder#2': 'event', '_fireCron#2': 'alarm',
   '_fireCron#3': 'event',   // round wh9e7xe8i: ONE alarm a stretch of skipped fires — the first; the later ones are events
   'vaultRevoked#1': 'alarm',   // B-a08e (lane vault-job-approval, decision ④): the person took back a job's use of a vault entry — the job STOPPED, said once
+  // B-f276 (lane bl-proposals s1126): a gone wrapper's exit record that could not be read (or is torn) — HELD, said on the row (the run not
+  // ended: never a failure); a run the boot met with its record held, judged at the lift by the boot's judge — its stamp of no boot unverified
+  '_exitAnswer#1': 'event', '_bootJudgeLate#1': 'event',
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -484,6 +487,8 @@ const DRIVERS = {
   '_bootNoExit#3': async () => { const j = task('drv-boot-env'), r = run0(j); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },
   '_parkForMemory#1': async () => { const j = svc('drv-park-memory'), r = run0(j, { endedAt: Date.now(), cause: 'oom-bound', memoryMb: 512 }); jm._parkForMemory(j, r); return j; },
   '_finalizeRun#1': async () => { const j = svc('drv-end-left'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 0, park: false }) }); jm._finalizeRun(j, r, { code: 0, endedAt: Date.now(), forced: 'its scope was killed after the grace' }, 'exit'); un(); return j; },
+  '_exitAnswer#1': async () => { const j = svc('drv-exit-held'), r = run0(j); j.state = 'up'; const un = stub(jm, { _ctlAnswer: () => ({ state: 'unreadable', code: 'EIO', why: 'the read failed', error: Object.assign(new Error('a placed refusal'), { code: 'EIO' }) }) }); try { jm._exitAnswer(j, r, 'sweep'); } finally { un(); for (const e of (jm._exitHolds || new Map()).values()) e.hold.stop(); if (jm._exitHolds) jm._exitHolds.clear(); } return j; },   // B-f276 (s1126)
+  '_bootJudgeLate#1': async () => { const j = svc('drv-boot-late-unverified'), r = run0(j); j.state = 'up'; jm._bootJudgeLate(j, r, { pid: 4244 }, null); return j; },   // B-f276 (s1126): a stamp with no boot id
   '_hubMainTaskEnd#1': async () => { const j = task('drv-boot-hub-task'), r = run0(j, { hubMain: true }); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },   // r1610 (as _bootNoExit#3's road)
   '_hubMainDown#1': async () => { const j = svc('drv-end-hub-main'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 0, park: false }) }); jm._finalizeRun(j, r, { code: 0, endedAt: Date.now(), hubMain: true }, 'exit'); un(); return j; },   // B-2c5c unit 2
   '_finalizeRun#2': async () => { const j = svc('drv-end-window'), r = run0(j); const un = stub(jm, { _inUpdateWindow: () => true }); jm._finalizeRun(j, r, { code: 9, endedAt: Date.now(), reason: 'update_window' }, 'exit'); un(); return j; },
