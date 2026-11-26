@@ -2914,7 +2914,7 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   const pressedAt = Date.now();   // B-91aa's remainder (r4591 (2)): the create's start is answered by the STARTER's answer — a failed start in today's words
   const r = a.jm.create(spec, a.caller);
   if (r.error) return res.status(400).json({ error: r.error });
-  { const sa = await a.jm.startAnswer(a.jm.jobs.get(r.job.id), pressedAt); if (sa && sa.error) return res.status(400).json({ error: sa.error }); }
+  { const sa = await a.jm.startAnswer(a.jm.jobs.get(r.job.id), pressedAt); if (sa && sa.error) return res.status(400).json({ error: sa.error }); const j1 = a.jm.jobs.get(r.job.id); if (j1) r.job = a.jm.snapshot(j1, { author: true }); }   // r4683 (b): the job as it is AFTER the starter answered
   // Tell the creating agent up front whether ITS conversation will hear back
   // (owner request 2.344.0): honest three-state — live message / stash-at-
   // resume / off, with the deciding layer named.

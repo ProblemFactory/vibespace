@@ -3425,8 +3425,8 @@ class JobManager {
   /** B-91aa's remainder (主开发 r4525 / r4591): A JOB'S START NO LONGER FORKS THE HUB'S MAIN PROCESS. Its wrapper is a DETACHED start of
    *  THE STARTER (its own session; no log — the wrapper writes its own; its env the wrapper's builder, the job's mark admitted by
    *  name). The job stays 'starting' until the starter answers. THE KILL LAW: the record a stop signals by stays the wrapper's OWN
-   *  stamp (pid.json: pid + its birth + the boot) — the answer's pid and birth are kept on the run as a CROSS-CHECK only (a stamp that
-   *  names another is not ours: never signalled). A start error, or no answer within its bound, is a FAILED START said — never a
+   *  stamp (pid.json: pid + its birth + the boot) — the answer's pid and birth are kept on the run FOR THE RECORD only (nothing signals
+   *  them; r4683's reading). A start error, or no answer within its bound, is a FAILED START said — never a
    *  guess; a wrapper that shows up after it is stopped by its own stamp (_lateStarts). A person's press waits for this answer
    *  (startAnswer). */
   _askStart(job, argv, specPath, trigger) {
@@ -3454,12 +3454,18 @@ class JobManager {
     if (st && this._verifyAlive(st)) {   // the pipe lost its answer, the wrapper did not: the start happened — its own stamp says so
       run.ask = 'stamped'; run._stamped = true;
       if (live) { job.proc = { pid: Number(st.pid) }; if (job.state === 'starting') job.state = 'up'; this._touch(job); }
+      else { run.startFailed = 'its job was removed while its start was answered'; this._lateLook(job, run); }   // r4683's reading: a wrapper no record holds is stopped by its stamp
       return { ok: true };
     }
-    const why = r && r.unknown ? `the starter gave no answer within ${boundWords(this.d.startAnswerMs || JOB_START_ANSWER_MS)} — its wrapper was not started` : `its wrapper could not be started (${(r && r.error) || 'no reason given'})`;
-    fs.promises.unlink(specPath).catch(() => { });   // a wrapper that starts after this finds no spec: it never runs the job (off the loop — no store's write; a late one that read it first is stopped by its stamp)
+    // r4683 (a): THE WORDS TRUE IN BOTH CASES — no starter at all (it could not be started: the request was never sent) is no wait and
+    // no start; a reply lost after its bound may hide a wrapper that DID start (stopped by its own stamp if it shows up)
+    const noStarter = !!(r && r.unknown && /^no starter$/.test(String(r.why || '')));
+    const why = !(r && r.unknown) ? `its wrapper could not be started (${(r && r.error) || 'no reason given'})`
+      : noStarter ? 'the starter could not be started — its wrapper was not started'
+        : `the starter gave no answer within ${boundWords(this.d.startAnswerMs || JOB_START_ANSWER_MS)}${r.why ? ` (${r.why})` : ''} — its wrapper may have started: if it shows up, it is stopped by its own stamp`;
+    this._dropSpec(specPath);
     run.ask = r && r.unknown ? 'unknown' : 'failed';
-    this._lateLook(job, run);
+    if (!noStarter) this._lateLook(job, run);   // nothing was asked of a starter that never started
     if (live && ['starting', 'up'].includes(job.state)) this._failedStart(job, run, trigger, why);
     return { error: `spawn failed: ${why}` };
   }
@@ -3483,13 +3489,21 @@ class JobManager {
     if (!run || !run.startedAt) return;
     (this._lateStarts || (this._lateStarts = new Map())).set(this._ctlDir(job, run.startedAt), { job, run, until: now() + (this.d.lateLookMs || LATE_LOOK_MS) });
   }
+  /** a start's spec removed — OFF the loop (no store's write): a wrapper that starts after this finds none and never runs the job; one that
+   *  read it first is stopped by its own stamp (the late look). ONE removal site: a failed answer's, and a boot's over a start never answered */
+  _dropSpec(specPath) { fs.promises.unlink(specPath).catch(() => { }); }
+  /** r4683 (c): the late look's read of a failed start's pid record — OFF the loop (it runs on the hub's tick for up to LATE_LOOK_MS a
+   *  failed start; data/ may sit on a network mount) */
+  async _lateStamp(l) { try { return JSON.parse(await fs.promises.readFile(path.join(this._ctlDir(l.job, l.run.startedAt), 'pid.json'), 'utf-8')); } catch { return null; } }
   /** the bounded look's fact: the run's pid record is ABSENT (ENOENT) — a read that fails any other way is no «never wrote» */
   _noPidFile(job, run) { try { fs.statSync(path.join(this._ctlDir(job, run.startedAt), 'pid.json')); return false; } catch (e) { return !!(e && e.code === 'ENOENT'); } }
-  _lateSweep() {
+  async _lateSweep() {
     if (!this._lateStarts || !this._lateStarts.size) return;
     for (const [ctl, l] of [...this._lateStarts]) {
-      const st = this._ctlJson(l.job, l.run, 'pid.json');
+      const st = await this._lateStamp(l);
+      if (!this._lateStarts.has(ctl)) continue;   // dropped while its read was out
       if (st && this._verifyAlive(st)) {
+        if (this._hubIsMain(l.job, l.run)) { this._lateStarts.delete(ctl); continue; }   // B-2c5c's main door, as _killGroup's: never a signal to a run whose main is this hub
         const hubInGroup = PI.pgidOf(process.pid) === Number(st.pid);
         const r = PI.signalIdentity(st, 'SIGTERM', { group: !hubInGroup, what: `job ${l.job.id}'s late wrapper` });
         const what = `its wrapper started after its start was failed (${l.run.startFailed || 'its start was not confirmed'}) — stopped by its own stamp${r && r.ok ? '' : ` (the signal was refused: ${(r && r.why) || '?'})`}`;
@@ -3983,6 +3997,10 @@ class JobManager {
         // B-2c5c unit 1: a run whose MAIN WAS THE HUB (exit.json `hubMain`) left the hub's own conversations and helpers in its scope —
         // never reaped (never this job's)
         if (!((exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept))) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { });   // r1263: the kept fact too (a killed wrapper wrote no exit record)
+        // r4683 (d): a start ASKED and never stamped (the hub ended between its ask and the answer) — its spec's removal is asked BEFORE the
+        // run is judged (off the loop), and the run is looked at late: a wrapper that read the spec before the removal landed is stopped by
+        // its own stamp; none starts from it after this boot's read
+        if (run && run.ask === 'asked' && !stamp && !this.readOnly) { this._dropSpec(path.join(this._ctlDir(job, run.startedAt), `spec.${run.startedAt}.json`)); run.startFailed = 'the hub restarted before its start was answered'; this._lateLook(job, run); }
         if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
         if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
         // no live process, no exit record ⇒ died with the environment
@@ -4485,7 +4503,7 @@ class JobManager {
     if (now() - this._lastArchiveSweep >= ARCHIVE_SWEEP_MS) {
       try { this.archiveSweep({ why: 'tick' }); } catch (e) { this.d.log('[jobs] archive sweep failed:', e.message); }
     }
-    try { this._lateSweep(); } catch (e) { this.d.log('[jobs] the late-start look failed:', e.message); }   // B-91aa's remainder
+    try { await this._lateSweep(); } catch (e) { this.d.log('[jobs] the late-start look failed:', e.message); }   // B-91aa's remainder
     for (const job of this.jobs.values()) {
       if (!['up', 'starting', 'awaiting-user'].includes(job.state)) continue;
       const run = job.runs && job.runs[job.runs.length - 1];

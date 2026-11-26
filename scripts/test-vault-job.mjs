@@ -202,7 +202,10 @@ async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir
   const release = () => fs.writeFileSync(path.join(root, 'out', 'release'), '1');
   const audit = () => { try { return fs.readFileSync(path.join(dd, 'vault-audit.jsonl'), 'utf8'); } catch { return ''; } };
   const uses = (id) => audit().split('\n').filter((l) => l.includes('"event":"vault-use"') && l.includes('"door":"service"') && (!id || l.includes(`Background job ${id}`))).map((l) => JSON.parse(l));
-  const walk = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p, out); else if (e.isFile()) out.push(fs.readFileSync(p, 'latin1')); } return out; };
+  const walk1 = (d, out = []) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk1(p, out); else if (e.isFile()) out.push(fs.readFileSync(p, 'latin1')); } return out; };
+  // B-91aa's remainder (its gate 4): a store's temp renamed away between the listing and its read (the engine's paced save) — the walk walks
+  // AGAIN (its whole check, unchanged), at most three times; any other error is the walk's own
+  const walk = (d) => { for (let i = 0; ; i++) { try { return walk1(d); } catch (e) { if (!(e && e.code === 'ENOENT') || i >= 2) throw e; } } };
   const end = () => { try { for (const t of jm._timers || []) clearInterval(t); jm.readOnly = true; jm.shutdown(); } catch { } try { todos.stop(); } catch { } };
   return { root, dd, vault: v, grants, todos, door, frames, journal, told, jm, built, create, until, untilMs, got, release, audit, uses, walk, end, put: (s) => v.agentPut('agent:conv-a/tok', s) };
 }
