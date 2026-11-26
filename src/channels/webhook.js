@@ -381,7 +381,11 @@ function create(record = {}, deps = {}) {
     if (c.delivery.mode === 'poll') {
       // B-574d: answered once the queue LANDED — the wait bounded by the send's own budget when it has one (an agent's waiting command)
       const onDisk = await queueAppend(st, convId, c.id, { replyId, inReplyTo, replyName: p.replyName, text }, t).landed(Number(budgetMs) > 0 ? { timeoutMs: Math.max(1, Math.floor(Number(budgetMs))) } : undefined);
-      return { ok: true, vendorMessageId: replyId, at: t, sentAs: 'user', lane: 'poll', ...(onDisk ? {} : { notOnDisk: true }) };
+      // r5041 (主开发, MUST 1): a reply NOT ON DISK in the send's budget is answered as the release answered its throw — not ok, the
+      // transport class, not retried, LOST: the person's card reads «unknown» (never «sent» over a line a restart would lose); the
+      // writer keeps the line and writes it when the storage comes back
+      if (!onDisk) return { ok: false, code: 'transport', retryable: false, detail: { lost: true, why: 'not-on-disk', message: 'the reply is queued but not on disk yet — it is written when the storage comes back; it is lost if VibeSpace restarts first' } };
+      return { ok: true, vendorMessageId: replyId, at: t, sentAs: 'user', lane: 'poll' };
     }
     if (c.delivery.mode !== 'reply-url') return { ok: false, code: 'send-not-available', retryable: false, detail: { why: 'delivery-none', reason: `${c.name} (${c.id}) takes no replies (its delivery is none)` } };
     // lane webhook-l3-cli-pair: a PEER (another VibeSpace) is called AS this side's caller on ITS path — the canonical payload,

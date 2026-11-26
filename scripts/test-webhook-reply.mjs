@@ -73,9 +73,10 @@ try {
   ok((await ad.reconcile()).unknown === true, 'reconcile ⇒ {unknown: true} (no caller-side lookup; a person re-sends)');
   // B-574d (lane nl-journals, 主开发 r4939): A POLL CALLER'S REPLY QUEUE THROUGH THE STORE WRITER — the append HANDS the queue file under its
   // row (0600), nothing written on the hub's loop; the poll hands out LANDED lines only (a cursor never moves past a line a dying hub could
-  // lose); the send is answered only once the queue LANDED (held here); a landing that fails answers ok with notOnDisk (the reply stays
-  // queued in the writer — no second copy). REDs (a copy): the release's append (written on the loop); a poll that hands out OWED lines
-  const queueScene = async (Mod, name) => {
+  // lose); the send is answered only once the queue LANDED (held here); a landing that fails — or misses the send's budget — is answered as
+  // the release answered its throw (主开发 r5041): NOT ok, the transport class, not retried, LOST, so the person's card reads «unknown»; the
+  // line stays queued in the writer (no second copy) and is written when the storage comes back. REDs (a copy): the release's append (written on the loop); a poll that hands out OWED lines
+  const queueScene = async (Mod, name, { lands = false } = {}) => {
     const qd = scratch('webhook-reply-' + name), sec = secrets;
     let release, owed = new Map(); const gate = new Promise((r) => { release = r; }), calls = [];
     const w = { dirty(file, o) { calls.push({ file, name: o.name, mode: o.mode, wakes: typeof o.onWritten === 'function' }); owed.set(file, o.produce()); }, owed: (f) => (owed.has(f) ? owed.get(f) : null), durable: async (f) => { const ok2 = await gate; if (ok2) owed.delete(f); return ok2; }, pending: () => false, forget() { } };
@@ -91,19 +92,30 @@ try {
       const p = qa.send('ci', { text: 'queued', idemKey: 'q-1', envelope: { to: al.caller.id } }).then((r) => { answered = true; return r; });
       await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
       before = { answered, poll: (Mod.pollAnswer(qs, 'ci', qs.caller('ci', al.caller.id), '', Date.now()) || { replies: [] }).replies.map((x) => x.text) };
-      release(false); sent = await p;
+      release(lands); sent = await p;
     } finally { Object.assign(fs, o); }
-    return { calls, loop: loop.join(' '), before, sent: { ok: sent && sent.ok, notOnDisk: sent && sent.notOnDisk } };
+    const d = (sent && sent.detail) || {};
+    return { calls, loop: loop.join(' '), before, owedAfter: owed.size, sent: { ok: sent && sent.ok, code: sent && sent.code, retryable: sent && sent.retryable, lost: d.lost === true, why: d.why || null, message: d.message || null, lane: sent && sent.lane, notOnDisk: sent && sent.notOnDisk } };
   };
   const qr = await queueScene(WH, 'real');
   ok(qr.calls.length === 1 && qr.calls[0].name === 'webhook-replies.write' && qr.calls[0].mode === 0o600 && qr.loop === '', 'B-574d the reply is HANDED to the store writer under its row (0600) — nothing written on the hub\'s loop', qr);
   ok(qr.before.answered === false && J(qr.before.poll) === J([]) && qr.calls[0].wakes === true, 'B-574d …the caller\'s poll hands out LANDED lines only (a reply still owed is not handed — its cursor can never pass a line a dying hub could lose), the long-poll is woken at the landing, and the send is NOT answered until it', qr.before);
-  ok(qr.sent.ok === true && qr.sent.notOnDisk === true, 'B-574d …a landing that fails answers ok with notOnDisk — the reply stays queued in the writer (no second copy, none lost while the hub lives)', qr.sent);
+  const notSent = (x) => x.sent.ok === false && x.sent.code === 'transport' && x.sent.retryable === false && x.sent.lost === true && x.sent.why === 'not-on-disk'
+    && /queued but not on disk yet/.test(x.sent.message || '') && /lost if VibeSpace restarts first/.test(x.sent.message || '') && x.owedAfter === 1;
+  ok(notSent(qr), 'B-574d (主开发 r5041) …a landing that FAILS is answered as the release answered its throw: NOT ok, the transport class, not retried, LOST (the person\'s card reads «unknown», never «sent») — its words: queued, not on disk yet, lost if VibeSpace restarts first; the line stays queued in the writer (no second copy)', qr.sent);
+  const ql = await queueScene(WH, 'landed', { lands: true });
+  ok(ql.sent.ok === true && ql.sent.lane === 'poll' && !ql.sent.notOnDisk && ql.before.answered === false, 'B-574d …a reply whose line LANDED is answered sent (the poll lane), only after the landing', { sent: ql.sent, before: ql.before });
   const WSRC = fs.readFileSync(new URL('../src/channels/webhook.js', import.meta.url), 'utf8');
   const MW = mutantCopies('webhook-reply-queue', new URL('..', import.meta.url).pathname);
   const owedPoll = MW.load('src/channels/webhook.js', anchored(WSRC, "  const items = queueRead(S, slug, c.id, t, { landed: true }).filter((x) => x.seq > since).slice(0, 50);", "  const items = queueRead(S, slug, c.id, t).filter((x) => x.seq > since).slice(0, 50);", 'a poll that hands out owed lines'), 'owed-poll');
   const r1 = await queueScene(owedPoll, 'red-owed-poll');
   ok(J(r1.before.poll) === J(['queued']), 'RED B-574d a poll that hands out OWED lines: the caller is handed a reply that has not landed — its cursor passes a line a dying hub could lose', r1.before);
+  const saysSent = MW.load('src/channels/webhook.js', anchored(WSRC, "      if (!onDisk) return { ok: false, code: 'transport', retryable: false, detail: { lost: true, why: 'not-on-disk', message: 'the reply is queued but not on disk yet — it is written when the storage comes back; it is lost if VibeSpace restarts first' } };\n", '', 'a copy that says sent'), 'says-sent');
+  const r3 = await queueScene(saysSent, 'red-says-sent');
+  ok(!notSent(r3) && r3.sent.ok === true, 'RED B-574d (r5041) a copy that says SENT: a reply not on disk is answered ok — the card would read «sent» over a line a restart loses', r3.sent);
+  const early = MW.load('src/channels/webhook.js', anchored(WSRC, 'const onDisk = await queueAppend(', 'const onDisk = !!queueAppend(', 'a send answered before its landing'), 'early');
+  const r4 = await queueScene(early, 'red-early');
+  ok(r4.before.answered === true, 'RED B-574d a copy that answers the send BEFORE its line landed: answered while the line is still owed', r4.before);
   const relApp = MW.load('src/channels/webhook.js', anchored(WSRC, "  W.dirty(f, { name: 'webhook-replies.write', mode: 0o600, produce: () => text, onWritten: (ok) => { if (ok) { try { S.bus.emit('reply', { slug, id }); } catch { /* a listener's */ } } } });", "  { const tmp = `${f}.tmp-${process.pid}`; fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, f); S.bus.emit('reply', { slug, id }); }", 'the release append'), 'release-append');
   const r2 = await queueScene(relApp, 'red-append');
   ok(/write/.test(r2.loop) && /rename/.test(r2.loop) && r2.calls.length === 0, 'RED B-574d the release\'s append: the queue written and renamed ON the hub\'s loop, nothing handed to the writer', { loop: r2.loop, calls: r2.calls.length });
