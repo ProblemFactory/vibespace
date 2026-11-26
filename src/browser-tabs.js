@@ -504,6 +504,8 @@ function handbackStayText(n, tIn) {
  *  path, no value. */
 function handBackAnswerWords(r, tIn) {
   const t = tOf(tIn);
+  // r5235 should: the conversation's OWN browser — the note still rides its next browser command (keeper.noteContinue): the softer words
+  if (r && r.code === 'stash_refused' && r.own === true) return { handedBack: true, warn: true, text: t('Handed back — your note could not be queued for the agent\'s next turn (VibeSpace could not write it); its next browser command is told instead') };
   if (r && (r.code === 'stash_refused' || (r.ok === true && r.stashed === false))) return { handedBack: true, warn: true, text: t('Handed back, but your note could not be queued for the agent\'s next turn (VibeSpace could not write it) — take the browser over again to hand it back anew') };
   // r5235: the refusal BEFORE any act (the conversation has no id yet: the takeover NOT ended) — never «handed back»; its own words
   if (r && r.code === 'no_conversation_id') return { handedBack: false, warn: false, text: t('Not handed back — this conversation has no id yet (its first reply has not come back): hand it back after the agent has answered once') };

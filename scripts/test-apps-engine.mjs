@@ -830,5 +830,48 @@ console.log('§14 lane app-system-env — THE REAL WIRING after listen: the mach
   ok(!u.r.error && u.appSystem && u.appSystem.enabled === false && u.appSystem.blocked === 'not-enabled' && u.sysRuns === 0 && u.bootAt < 0, 'the INVOCATION_ID rule on the same wiring: a process whose env names a systemd unit (INVOCATION_ID — a bare-metal host, an Actions runner) keeps the app system OFF with the flag set (blocked: not-enabled), no helper install ran', { r: u.r, lines: u.lines, sysRuns: u.sysRuns, appSystem: u.appSystem });
 }
 
+console.log('§15 主开发 r5164 (2) / r5176 (4): the agent\'s receipt of the person\'s decision not on disk — on the proposal\'s card (the person\'s own record), gone at the stash\'s lift or a turn\'s take; at a start the stash\'s own word decides');
+{
+  const MUT = mutantCopies('apps-engine-receipt', repo);
+  const eSrc = fs.readFileSync(path.join(repo, 'src/server/apps-engine.js'), 'utf8');
+  const tick = () => new Promise((r) => setImmediate(r));
+  const scene = async (Eng, mode, tag, { road = 'lift', restartOnDisk = null, restartHeld = false } = {}) => {
+    const d = path.join(dir, tag); fs.mkdirSync(d, { recursive: true });
+    const userTodos = new UserTodoManager({ dataDir: d, onChange: () => { }, expirySweepMs: 0 });
+    const lifts = [], evs = []; let onDisk = false, reached = 0, held = false;
+    // a stash stand-in with the REAL contract (held ⇒ taken; the lift tells its LIFT listeners; a take emits `drained`) — `reached` its WITNESS
+    const deliver = { ...fakeDeliver(), stashFor: () => { reached++; if (mode === 'throw') throw new Error('the stash could not be written to disk (msg-stash.json)'); return { stored: false, taken: true, why: 'taken, not on disk' }; },
+      onStashLift: (fn) => { lifts.push(fn); return () => { }; }, onStashLanded: () => () => { }, onStash: (fn) => { evs.push(fn); return () => { }; }, stashOnDisk: (c, r) => onDisk && c === S1.claudeSessionId && typeof r === 'string' && r.startsWith('ap-'), stashHeld: () => (held ? { code: 'EIO' } : null) };
+    const mk = () => Eng.create({ access: STUB.create({ log: quiet, delayMs: 5 }), userTodos, deliver, activeSessions: () => sessions, sessionStatusKey: (s) => keyOf(s), broadcast: () => { }, dataDir: d, log: quiet });
+    const eng = mk();
+    const p = await eng.propose({ request: { kind: 'apt', packages: ['hello'] }, by: agentBy(S1, 'w1') });
+    const todoId = eng.get(p.id).todoId;
+    const card = () => { const it = userTodos.get(todoId); return it && it.card ? (it.card.receipt || null) : 'no-card'; };
+    eng.reject(p.id);   // the person's decision: its receipt told to the agent at once
+    const after = card();
+    let restart = null;
+    if (restartOnDisk !== null) { onDisk = restartOnDisk; held = restartHeld; mk(); await tick(); await tick(); restart = card(); if (restartHeld) { held = false; for (const fn of lifts) fn(); await tick(); await tick(); restart = { atStart: restart, afterLift: card() }; } }   // a NEW process over the same store
+    else if (road === 'lift') { onDisk = true; for (const fn of lifts) fn(); await tick(); await tick(); }
+    else if (road === 'drained') { for (const fn of evs) fn('drained', S1.claudeSessionId, [{ ref: p.id }]); await tick(); await tick(); }
+    return { reached, after, cleared: card(), restart };
+  };
+  const h = await scene(E, 'held', 'rcpt-held'), hd = await scene(E, 'held', 'rcpt-drained', { road: 'drained' }), q = await scene(E, 'throw', 'rcpt-throw');
+  const rl = await scene(E, 'held', 'rcpt-restart-lost', { restartOnDisk: false }), ro = await scene(E, 'held', 'rcpt-restart-ondisk', { restartOnDisk: true }), rh = await scene(E, 'held', 'rcpt-restart-held', { restartOnDisk: false, restartHeld: true });
+  if (![h, hd, q, rl, ro, rh].every((x) => x.reached === 1)) console.log(`  SKIP §15: the receipt never reached the stash (${JSON.stringify({ h, hd, q, rl, ro, rh })})`);
+  else {
+    ok(h.after === 'not-on-disk' && h.cleared === null, '§15 a decision whose receipt is QUEUED IN MEMORY ONLY: the card says «not on disk yet» — and stops at the stash\'s LIFT (its own word: on disk)', h);
+    ok(hd.after === 'not-on-disk' && hd.cleared === null, '§15 …or once a turn TOOK it (drained)', hd);
+    ok(q.after === 'not-queued', '§15 …a receipt that could NOT be queued: the card says the agent was not told', q);
+    ok(rl.restart === 'not-queued' && ro.restart === null, '§15 …a mark read at a START: the stash\'s own word decides — not on disk ⇒ lost, «not told»; on disk (it landed, its clear not saved) ⇒ the mark goes', { rl, ro });
+    ok(rh.restart && rh.restart.atStart === 'not-on-disk' && rh.restart.afterLift === 'not-queued', '§15 …the list HELD at that start: the mark waits for the lift — a lift that does not find the receipt says it was lost', rh);
+  }
+  const hx = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, " p.receipt = 'not-on-disk'; owedReceipts.set(p.id, p.by.conversation); watchReceipts(); } }", ' } }', 'src/server/apps-engine.js'), 'rcpt-red'), 'held', 'rcpt-red');
+  if (hx.reached !== 1) console.log(`  SKIP §15 RED: the receipt never reached the stash (${JSON.stringify(hx)})`);
+  else ok(hx.after === null, '§15 RED CONTROL (the release: «queued in memory only» a log line): the card says nothing', hx);
+  const hdx = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, "if (ev === 'drained') due(ref, null);", "if (false) due(ref, null);", 'src/server/apps-engine.js'), 'rcpt-red-drained'), 'held', 'rcpt-red-drained', { road: 'drained' });
+  if (hdx.reached !== 1) console.log(`  SKIP §15 RED 2: the receipt never reached the stash (${JSON.stringify(hdx)})`);
+  else ok(hdx.after === 'not-on-disk' && hdx.cleared === 'not-on-disk', '§15 RED CONTROL 2 (a turn\'s take not read): the agent has the receipt, the card still says it is not on disk', hdx);
+}
+
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
 process.exit(fail ? 1 : 0);

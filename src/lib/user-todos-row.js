@@ -42,7 +42,7 @@ import { isSettingKey, SETTINGS_SCHEMA } from './settings-schema.js'; // lane se
 import { linkedHtml, segmentText, maskedLinkNote, maskedNoteOf } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { buttonsOf, buttonsNoteOf, endWordsOf } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
+import { buttonsOf, buttonsNoteOf, endWordsOf, receiptWords } from '../foryou-actions.js';   // lane queued-is-not-woke: a row's declared buttons
 import { decidedStamp, PERSON_DECIDES, closersOf, doorOf, isParkedAsk, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, runStripOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { fieldWhole } from '../inbox-origin.js'; // PURE: batch 47's cure — only the AGENT's own ask (isAsk: via 'ask', vibespace-ask) has whole words; B-76dc: fieldWhole = the ONE answer every surface asks
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
@@ -92,10 +92,19 @@ function heldDropTail(item, t) {
   const p = { k: Number(d.k) || 0, m: Number(d.of) || 0, d: Number(d.n) || 0, agent: String(d.agent || '') };
   return ' · ' + (d.why === 'not-covered' ? t('the rule no longer covers {k} of {m} conversations — {d} held messages dropped', p) : t('{k} of {m} conversations no longer wake {agent} — {d} held messages dropped', p));
 }
+/** 主开发 r5164 (2) / r5176 (4): THE AGENT'S RECEIPT OF A PERSON'S ANSWER — a producer that settled the record for a person (the vault's
+ *  paste answer, an app proposal's decision) marks it while the agent's receipt is not on disk yet (`not-on-disk`) or could not be
+ *  queued (`not-queued`); the mark leaves once it landed or a turn took it (src/user-todos.js noteReceipt). Said after the record's own
+ *  words; no path, no value. */
+export function resolvedByText(by, t, item = null) {
+  const base = resolvedByTextOf(by, t, item);
+  const tail = receiptWords(item && item.resolvedFact && item.resolvedFact.receipt, t);
+  return tail ? (base ? `${base} · ${tail}` : tail) : base;
+}
 /** Who resolved it, in words ('expired' = the store's sweep, 'reply' = the
  *  user's own inbox reply, design-user-inbox-reply D1.4). `item` = the
  *  resolved item, for a resolution worded with its fact ('resumed'). */
-export function resolvedByText(by, t, item = null) {
+function resolvedByTextOf(by, t, item = null) {
   // lane wake-approve-card: a decision only a person's click makes (a `decide: 'person'` row — a wake request, a reach request)
   // reads as the chat card's record does: «approved by you · 09:41» / «denied by you · 09:41» — the tray, the mini inbox and
   // the For-you window all word a resolved row here
@@ -665,6 +674,8 @@ export function appCardHtml(i, t, { lang = 'en', resolved = false, buttons = tru
   } else if (buttons && !resolved && v.state === 'proposed' && i.action.id) {
     html += `<div class="ut-exit-answer ut-app-answer"><button type="button" class="ut-act ut-action-app ut-app-install" data-answer="install">${escHtml(w.go)}</button><button type="button" class="ut-act ut-action-app ut-app-reject" data-answer="reject">${escHtml(w.later)}</button></div>`;
   }
+  // 主开发 r5176 (4): the agent's receipt of the person's decision not on disk yet / not queued — on the card, the person's own record
+  if (v.receipt === 'not-on-disk' || v.receipt === 'not-queued') html += line('ut-app-receipt', receiptWords(v.receipt, t));
   if (w.details.length) html += `<details class="ut-detail-exp ut-app-details"><summary>${escHtml(t('Details'))}</summary><div class="ut-app-detail">${w.details.map((d) => `<div class="ut-app-dline${d.mono ? ' ut-app-mono' : ''}">${escHtml(d.text)}</div>`).join('')}</div></details>`;
   return `<div class="ut-app-card" data-state="${escHtml(String(v.state || ''))}">${html}</div>`;
 }

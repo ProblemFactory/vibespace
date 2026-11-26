@@ -1486,6 +1486,67 @@ console.log('⑩c THE USER NAME REACHES THE ASKER ONLY WITH THE GRANT — every 
   ok(/The user did not let this conversation sign in with it/.test((STASH.slice(s0).find((e) => e.ref === a.json.requestId) || {}).text || '') && /The user allowed THIS conversation/.test(stYes[0] ? stYes[0].text : ''), 'law D: the other two outcomes keep their own sentences (not ticked · granted)');
 }
 
+console.log('㉑ 主开发 r5164 (2) / r5176 (4): THE AGENT\'S RECEIPT OF THE PERSON\'S ANSWER not on disk — said on the person\'s own record (the resolved For-you item), gone once the stash says it landed (its LIFT, a landing) or a turn took it');
+{
+  const W = makeWorld('receipt-mark');
+  const tick = () => new Promise((r) => setImmediate(r));
+  // a stash stand-in with the REAL contract: HELD ⇒ {stored:false, taken:true}; the lift tells its LIFT listeners (never the landing's);
+  // a later landing tells the landing listeners; a turn's take emits `drained` with the entries' refs
+  const run = async (DoorMod, mode, road = 'lift') => {
+    const lifts = [], lands = [], evs = []; let onDisk = false, reached = 0, asked = null;
+    const dl = { stashFor: (cid, env) => { reached++; asked = { cid, ref: env && env.ref }; if (mode === 'throw') throw new Error('the stash could not be written to disk (msg-stash.json) — the entry was not stored'); return mode === 'held' ? { stored: false, taken: true, why: 'taken, not on disk' } : { stored: true }; },
+      onStashLift: (fn) => { lifts.push(fn); return () => { }; }, onStashLanded: (fn) => { lands.push(fn); return () => { }; }, onStash: (fn) => { evs.push(fn); return () => { }; }, stashOnDisk: (c, r) => onDisk && !!asked && c === asked.cid && r === asked.ref, stashHeld: () => null };
+    const door = DoorMod.create({ vault: W.vault, userTodos: W.userTodos, deliver: dl, logins: W.logins, log: (m) => LOGS.push(String(m)) });
+    const rq = door.request({ caller: { conversationId: 'cid-rcpt-' + mode + road, scope: 'wr-' + mode + road, name: 'Receipt lane' }, words: 'the receipt login', purpose: 'p', kind: 'login', hosts: 'https://rcpt-' + mode + road + '.example.test' });
+    if (rq.ok) door.answer(rq.requestId, { answer: 'deny' });
+    const mark = () => { const it = W.userTodos.resolvedOf('secret-request').find((i) => i.action && i.action.requestId === rq.requestId); return it ? ((it.resolvedFact && it.resolvedFact.receipt) || null) : 'no-record'; };
+    const after = mark();
+    if (road === 'lift') { onDisk = true; for (const fn of lifts) fn(); }   // the lift's own write landed: the stash's word, at its lift
+    else if (road === 'drained') { for (const fn of evs) fn('drained', 'cid-rcpt-' + mode + road, [{ ref: rq.requestId }]); }   // a turn took it
+    await tick(); await tick();
+    return { reached, after, cleared: mark() };
+  };
+  const DOOR0 = require(path.join(REPO, 'src/server/vault-paste-door.js'));
+  const h = await run(DOOR0, 'held', 'lift'), hd = await run(DOOR0, 'held', 'drained'), q = await run(DOOR0, 'throw', 'lift'), st = await run(DOOR0, 'stored', 'lift');
+  if (!(h.reached === 1 && hd.reached === 1 && q.reached === 1 && st.reached === 1)) console.log(`  SKIP ㉑: the receipt never reached the stash (${JSON.stringify({ h, hd, q, st })})`);
+  else {
+    ok(h.after === 'not-on-disk' && h.cleared === null, '㉑ the receipt QUEUED IN MEMORY ONLY (the list held): the person\'s resolved record says «not on disk yet» — and stops saying it at the stash\'s LIFT (its own word: on disk)', h);
+    ok(hd.after === 'not-on-disk' && hd.cleared === null, '㉑ …or once a turn TOOK it (drained): the agent has it', hd);
+    ok(q.after === 'not-queued' && q.cleared === 'not-queued', '㉑ …a receipt that could NOT be queued: the record says the agent was not told (no landing takes that back)', q);
+    ok(st.after === null, '㉑ …a receipt on disk: the record says nothing more (the release\'s record)', st);
+  }
+  const DOORx = mutant('src/server/vault-paste-door.js', " owedReceipts.set(q.requestId, { conv: q.conv, todoId: q.todoId, who: q.who }); watchReceipts(); markReceipt(q.todoId, q.who, q.requestId, 'not-on-disk'); }", ' }');
+  const hx = await run(DOORx, 'held', 'lift');
+  if (hx.reached !== 1) console.log(`  SKIP ㉑ RED: the receipt never reached the stash (${JSON.stringify(hx)})`);
+  else ok(hx.after === null, '㉑ RED CONTROL (the release: «queued in memory only» a log line): the person\'s record says nothing', hx);
+  const DOORy = mutant('src/server/vault-paste-door.js', "    try { if (typeof deliver.onStashLift === 'function') deliver.onStashLift(onDiskNow); } catch { /* no lift word */ }\n", '');
+  const hy = await run(DOORy, 'held', 'lift');
+  if (hy.reached !== 1) console.log(`  SKIP ㉑ RED 2: the receipt never reached the stash (${JSON.stringify(hy)})`);
+  else ok(hy.after === 'not-on-disk' && hy.cleared === 'not-on-disk', '㉑ RED CONTROL 2 (the landing listened to, the LIFT not — the commit\'s first form): the mark stays for good after the lift', hy);
+  // ㉑b THE START: a mark of the LAST run read by a NEW door over the same For-you store — the stash's own word decides: on disk ⇒ the mark
+  // goes; not on disk, the list readable ⇒ lost, «not told»; the list HELD ⇒ its lift decides — and a lift that does not find it ⇒ lost
+  const nextRun = async (mode) => {
+    const { asked } = await (async () => { const o = { asked: null }; return o; })();
+    const lifts = []; let onDisk = mode === 'on-disk', held = mode === 'held', reads = 0;
+    const seed = await run(DOOR0, 'held', 'none');   // run 1: the receipt taken while held — its record says «not on disk yet»
+    const it = W.userTodos.resolvedOf('secret-request').filter((i) => i.resolvedFact && i.resolvedFact.receipt === 'not-on-disk').pop();
+    const dl = { stashFor: () => ({ stored: true }), onStashLift: (fn) => { lifts.push(fn); return () => { }; }, onStashLanded: () => () => { }, onStash: () => () => { },
+      stashOnDisk: (c, r) => { reads++; return onDisk && !!it && r === it.action.requestId; }, stashHeld: () => (held ? { code: 'EIO' } : null) };
+    DOOR0.create({ vault: W.vault, userTodos: W.userTodos, deliver: dl, logins: W.logins, log: (m) => LOGS.push(String(m)) });   // run 2's door
+    await tick(); await tick();
+    const mark = () => { const x = W.userTodos.get(it.id); return x && x.resolvedFact ? (x.resolvedFact.receipt || null) : null; };
+    const atStart = mark();
+    if (mode === 'held') { held = false; for (const fn of lifts) fn(); await tick(); await tick(); }   // the lift — the receipt is not in the list
+    return { seeded: seed.after, reads, atStart, afterLift: mark(), asked };
+  };
+  const s1 = await nextRun('on-disk'), s2 = await nextRun('lost'), s3 = await nextRun('held');
+  if (![s1, s2, s3].every((x) => x.seeded === 'not-on-disk' && x.reads >= 1)) console.log(`  SKIP ㉑b: run 1's mark or run 2's read of the stash never came (${JSON.stringify({ s1, s2, s3 })})`);
+  else {
+    ok(s1.atStart === null && s2.atStart === 'not-queued', '㉑b a mark of the LAST run at the start: the stash\'s own word — on disk ⇒ the mark goes; not on disk (the list readable) ⇒ lost, «the agent was not told»', { s1, s2 });
+    ok(s3.atStart === 'not-on-disk' && s3.afterLift === 'not-queued', '㉑b …the list HELD at the start: the mark waits for the lift — and a lift that does not find the receipt says it was lost', s3);
+  }
+}
+
 console.log('⑬ THE SURFACES THAT DRAW A LOGIN CARD — a census derived from the code (r3, law B)');
 {
   const LIB = path.join(REPO, 'src/lib');

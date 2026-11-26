@@ -65,7 +65,7 @@ import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse, endCodeOf, stripWithholds, tickDeadlines } from './user-todos-row.js';
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
-import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, newestFirst, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE, receiptWords } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** B-16a9: a view shorter than this (a chat window under ~480 px) draws its strip as the phone's one row (_dockShort) */
 const SHORT_VIEW_PX = 450;
@@ -786,11 +786,12 @@ export class NeedsCards {
       // lane wake-approve-card: a decision only a person's click makes says WHO and WHEN — «approved by you · 09:41» (the
       // tray row's words, decidedStamp); every other record keeps «approved · 2 min ago»
       const stamp = decidedStamp(e.item, { t });
-      const sig = `done\u0000${e.item.status}\u0000${e.item.resolvedBy || ''}\u0000${stamp ? stamp.text : ''}\u0000${words}`;   // r6: a grant's life (ended / revoked) redraws the line
+      const rw = receiptWords(e.item.resolvedFact && e.item.resolvedFact.receipt, t);   // r5176 (4): the agent's receipt, not on disk / not queued — said, and it redraws the line
+      const sig = `done\u0000${e.item.status}\u0000${e.item.resolvedBy || ''}\u0000${stamp ? stamp.text : ''}\u0000${words}\u0000${rw}`;   // r6: a grant's life (ended / revoked) redraws the line
       const verb = stamp ? stamp.verb : settledWords(e.item, t, kind);
       const ago = stamp ? stamp.time : agoText(e.item.resolvedAt || e.item.createdAt, t);
       const code = endCodeOf(e.item); // r8: an end this client cannot classify — «outcome unknown · <code>», never «done»
-      const line = `<span class="cn-line-mark" aria-hidden="true">${code ? '?' : e.item.status === 'dismissed' || (stamp && stamp.denied) ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb)}</span>${code ? ` · <code class="ut-end-code">${escHtml(code)}</code>` : ''}<span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;
+      const line = `<span class="cn-line-mark" aria-hidden="true">${code ? '?' : e.item.status === 'dismissed' || (stamp && stamp.denied) ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb + (rw ? ` · ${rw}` : ''))}</span>${code ? ` · <code class="ut-end-code">${escHtml(code)}</code>` : ''}<span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;
       // THE row's keep rule (round 3, #4 — an answer from another client wiped the lines being typed here): a box in use
       // stays — the quiet line above it, the row resolved AROUND it (patchRow keeps a box in use); it folds on leaving
       const rows = card.querySelector(':scope > .cn-rows');

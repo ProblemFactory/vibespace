@@ -3074,5 +3074,31 @@ console.log('㊴ A RECORD A CSS RULE HIDES WHOLE IS NO DRAWN RECORD (B-2adb — 
   const oneBase = oneOf(CVS.replace("        if (hiddenRecord(el)) return 'skip';", "        if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';")); // stale-pins: kept (a RED control that plants a twin line back on purpose)
   ok(oneBase.twins === 1 && !oneBase.reads, `CONTROL (the follow-up ②): a twin line put back in kindOf reds the census (${J(oneBase)})`);
 }
+console.log('㊵ 主开发 r5164 (2) / r5176 (4): the agent\'s receipt of a person\'s answer on the person\'s OWN record — the resolved row\'s words and the app card\'s line, en / zh / ja, no path');
+{
+  const { pathToFileURL } = await import('node:url');
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
+  const keys = []; const t = (x, p) => { keys.push(x); return p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x; };
+  const base = { id: 'ut-rc1', status: 'done', resolvedBy: 'denied', resolvedAt: Date.now(), action: { type: 'secret-request', requestId: 'sr-0000000000000001' } };
+  const plain = R.resolvedByText('denied', t, base);
+  keys.length = 0;
+  const d = R.resolvedByText('denied', t, { ...base, resolvedFact: { receipt: 'not-on-disk' } });
+  const q = R.resolvedByText('denied', t, { ...base, resolvedFact: { receipt: 'not-queued' } });
+  ok(!!plain && d.startsWith(plain + ' · ') && /receipt of your answer is not on disk yet/.test(d) && q.startsWith(plain + ' · ') && /the agent was not told/.test(q) && !/msg-stash|\.json|EIO/.test(d + q),
+    '㊵ the resolved row: its own words, then «the agent\'s receipt … is not on disk yet» (not-on-disk) or «the agent was not told» (not-queued); unmarked, the release\'s words alone', { plain, d, q });
+  const AC = req(path.join(ROOT, 'src/app-card.js'));
+  const view = AC.cardView({ id: 'ap-00000a', state: 'done', host: 'local', request: { kind: 'apt', packages: ['hello'] }, app: { name: 'Hello' }, by: { name: 'Agent' }, result: { rows: [] } });
+  const html = (rc) => R.appCardHtml({ id: 'ut-ap1', status: 'done', action: { type: 'app-install', id: 'ap-00000a' }, card: rc ? { ...view, receipt: rc } : view }, t, { resolved: true });
+  const h0 = html(null), h1 = html('not-on-disk'), h2 = html('not-queued');
+  ok(!/ut-app-receipt/.test(h0) && /ut-app-receipt[^>]*>[^<]*not on disk yet/.test(h1) && /ut-app-receipt[^>]*>[^<]*the agent was not told/.test(h2), '㊵ …the app card (the decision\'s record): a receipt line only when the card carries the mark', { h1: h1.slice(0, 300) });
+  const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+  const lit = (k) => JSON.stringify(k).replace(/\\u([0-9a-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+  const two = ['the agent\'s receipt of your answer is not on disk yet — if VibeSpace restarts before it is written, the agent will not hear it', 'the agent was not told — its receipt of your answer could not be queued'];
+  ok(two.every((k) => keys.includes(k)) && two.every((k) => zh.includes(lit(k) + ':') && ja.includes(lit(k) + ':')), '㊵ …both sentences have a zh and a ja row', two.filter((k) => !zh.includes(lit(k) + ':') || !ja.includes(lit(k) + ':')));
+  const CN = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8');
+  ok(CN.includes('const rw = receiptWords(e.item.resolvedFact && e.item.resolvedFact.receipt, t);') && CN.includes('\\u0000${words}\\u0000${rw}`') && CN.includes('${escHtml(verb + (rw ? ` · ${rw}` : \'\'))}'), '㊵ …the chat card\'s resolved line says the same words, and the mark redraws it (its key carries them)');
+}
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

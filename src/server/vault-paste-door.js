@@ -133,15 +133,65 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (indexed || !userTodos) return;
     if (userTodos.isHeldUnread?.()) return;   // B-44f3: For you held unread — its list is empty because it is unread: never frozen as the index (built from the FILE after the read)
     indexed = true;
+    // r5176 (4): a «not on disk yet» receipt mark read at a start — it did not land before the last stop (a landing clears it at once): lost,
+    // the record says the agent was not told
+    // the stash's own word decides: on disk (it landed; its clear was not saved) ⇒ the mark goes; the list HELD ⇒ its lift decides; else
+    // it did not land before the stop: lost, «not told»
+    startReceipts();
     try { for (const it of (userTodos.snapshot?.() || {}).open || []) { const q = recordOf(it); if (q) open.set(q.requestId, q); const w = wrecordOf(it); if (w) wopen.set(w.proposalId, w); } } catch (e) { log(`the paste requests could not be read back: ${e.message}`); }
   }
   const forget = (q) => { open.delete(q.requestId); settled.add(q.requestId); while (settled.size > SETTLED_MAX) settled.delete(settled.values().next().value); };
   /** The receipt at the asking conversation's next turn (the stash: free, never a wake). */
+  // 主开发 r5164 (2) / r5176 (4), a silence of the release: THE AGENT'S RECEIPT OF THE PERSON'S ANSWER «queued in memory only» was a log line.
+  // The person's own record says it now: the resolved For-you item carries `not-on-disk` (src/user-todos.js noteReceipt) until the receipt
+  // LANDED (the stash's own word, stashOnDisk, at a landing) or a turn took it (`drained`); `not-queued` when it could not be queued, or the
+  // stash's cap dropped it unread (`evicted`) — the agent was not told
+  const owedReceipts = new Map();   // requestId → { conv, todoId, who }
+  let receiptWatch = false, dueArmed = false;
+  const receiptsDue = new Map();
+  const markReceipt = (todoId, who, requestId, word) => { if (!userTodos || !todoId || typeof userTodos.noteReceipt !== 'function') return true; try { userTodos.noteReceipt(todoId, word); return true; } catch (e) { log(`${who}: the receipt mark of ${requestId} could not be written: ${e.message} — kept, written again at the stash's next word`); return false; } };
+  // the stash's words are read OFF their own turn (a drain is a prompt's road: nothing of ours rides it) and as one batch
+  const flushDue = () => { dueArmed = false; for (const [ref, word] of [...receiptsDue]) { receiptsDue.delete(ref); const o = owedReceipts.get(ref); if (o && markReceipt(o.todoId, o.who, ref, word)) owedReceipts.delete(ref); } };
+  const due = (ref, word) => { receiptsDue.set(ref, word); if (!dueArmed) { dueArmed = true; setImmediate(flushDue); } };
+  // at a lift or a landing: on disk ⇒ the mark goes; a mark of the LAST run (owed at a held start) the stash does not hold now ⇒ lost
+  const onDiskNow = () => { let held = false; try { held = typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { held = false; } for (const [ref, o] of owedReceipts) { let on = false; try { on = typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(o.conv, ref); } catch { on = false; } if (on) due(ref, null); else if (o.fromStart && !held) due(ref, 'not-queued'); } };
+  const watchReceipts = () => {
+    if (receiptWatch || !deliver) return;
+    receiptWatch = true;
+    // a receipt taken while the list is HELD lands at the LIFT (its listeners: onStashLift — the lift's own write tells no landing
+    // listener) or at a later landing after a spell of failing (onStashLanded): both ask the stash's own word, stashOnDisk
+    try { if (typeof deliver.onStashLift === 'function') deliver.onStashLift(onDiskNow); } catch { /* no lift word */ }
+    try { if (typeof deliver.onStashLanded === 'function') deliver.onStashLanded(onDiskNow); } catch { /* no landing word */ }
+    try { if (typeof deliver.onStash === 'function') deliver.onStash((ev, cid, entries) => { for (const e of entries || []) { const ref = e && e.ref ? String(e.ref) : ''; if (!owedReceipts.has(ref)) continue; if (ev === 'drained') due(ref, null); else if (ev === 'evicted') due(ref, 'not-queued'); } }); } catch { /* no events */ }
+  };
+  /** r5176 (4): the receipt marks of the last run, read ONCE a start — a tick after the door is made (the stash may be made after it)
+   *  and again at the index, whichever finds For you readable first. */
+  let receiptsStarted = false;
+  function startReceipts() {
+    if (receiptsStarted || !userTodos || userTodos.isHeldUnread?.()) return;
+    receiptsStarted = true;
+    try { for (const it of userTodos.resolvedOf?.(P.ACTION_TYPE) || []) startReceipt(it); } catch (e) { log(`the receipt marks of the last run could not be read again: ${e.message}`); }
+  }
+  setImmediate(() => { try { startReceipts(); } catch { /* the index runs it again */ } });
+  /** r5176 (4): one `not-on-disk` receipt mark read at a START. */
+  function startReceipt(it) {
+    if (!it || !it.resolvedFact || it.resolvedFact.receipt !== 'not-on-disk' || !it.action) return;
+    const ref = String(it.action.requestId || ''), conv = String(it.action.conv || '');
+    if (owedReceipts.has(ref)) return;   // this run's own mark (its receipt told by this door): its stash's words decide, not the start
+    let on = false, held = false;
+    try { on = !!deliver && typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(conv, ref); held = !on && !!deliver && typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { on = false; }
+    if (held) { owedReceipts.set(ref, { conv, todoId: it.id, who: String(it.sessionName || 'a conversation'), fromStart: true }); watchReceipts(); return; }
+    try { userTodos.noteReceipt?.(it.id, on ? null : 'not-queued'); } catch (e) { log(`the receipt mark of ${ref || it.id} could not be written at the start: ${e.message}`); return; }
+    if (!on) log(`the receipt of ${ref || it.id} did not land before the last stop — lost; its record says the agent was not told`);
+  }
   function tell(q, o) {
     if (!deliver || typeof deliver.stashFor !== 'function' || !q.conv) { log(`${q.who}: the receipt for ${q.requestId} has no road (no delivery stash)`); return false; }
     const text = P.receiptText({ ...o, requestId: q.requestId, words: q.words, purpose: q.purpose, target: q.target });
-    try { const st = deliver.stashFor(q.conv, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: q.requestId, text }); if (st && st.stored === false) log(`${q.who}: the receipt for ${q.requestId} is queued in memory only — ${st.why}`); return true; }
-    catch (e) { log(`${q.who}: the receipt for ${q.requestId} could not be queued: ${e.message}`); return false; }
+    try {
+      const st = deliver.stashFor(q.conv, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: q.requestId, text });
+      if (st && st.stored === false) { log(`${q.who}: the receipt for ${q.requestId} is queued in memory only — ${st.why}`); owedReceipts.set(q.requestId, { conv: q.conv, todoId: q.todoId, who: q.who }); watchReceipts(); markReceipt(q.todoId, q.who, q.requestId, 'not-on-disk'); }
+      return true;
+    } catch (e) { log(`${q.who}: the receipt for ${q.requestId} could not be queued: ${e.message}`); markReceipt(q.todoId, q.who, q.requestId, 'not-queued'); return false; }
   }
   /** Close the item by THIS door (its resolution word = the outcome), forget the request, tell the agent. */
   function settle(q, outcome, extra = {}) {

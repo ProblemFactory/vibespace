@@ -1390,6 +1390,22 @@ class UserTodoManager {
     this._save(); this._notify();
     return true;
   }
+  /** 主开发 r5164 (2) / r5176 (4): THE AGENT'S RECEIPT OF A PERSON'S ANSWER — a producer that settled an item for a person (the vault's paste
+   *  answer, an app proposal's decision) and then handed the agent its receipt marks the RESOLVED record: `'not-on-disk'` (queued in memory
+   *  only: a restart before it is written loses it), `'not-queued'` (the receipt could not be queued: the agent was not told), or `null` once
+   *  it landed or a turn took it — the record stops saying it. The decision itself is never touched. ONE save + ONE broadcast; → whether it
+   *  wrote. */
+  noteReceipt(id, word) {
+    this._refuseUnread('recording a receipt');
+    const it = this.get(id);
+    if (!it || it.status === 'open' || (word !== null && word !== 'not-on-disk' && word !== 'not-queued')) return false;
+    const f = it.resolvedFact && typeof it.resolvedFact === 'object' ? it.resolvedFact : {};
+    if ((f.receipt || null) === word) return false;
+    const next = { ...f }; if (word) next.receipt = word; else delete next.receipt;
+    it.resolvedFact = next;
+    this._save(); this._notify();
+    return true;
+  }
   /** r6: the RESOLVED items of one action type (copies) — a producer reconciling the facts of what it decided (the vault's
    *  grants at boot: the grant rows are memory, a restart ended them). */
   resolvedOf(type) { return this._state.items.filter((i) => i.status !== 'open' && i.action && i.action.type === type).map((i) => ({ ...i })); }

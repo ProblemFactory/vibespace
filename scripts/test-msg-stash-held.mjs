@@ -634,4 +634,33 @@ console.log('§13b 主开发 r5235 (MUST): the hand-back refused BEFORE any act 
   else ok(ex.handedBack === true, '§13b RED CONTROL (2e3d064a1: the early refusal answered stash_refused): the page would say «handed back» while the takeover is still on', ex);
 }
 
+console.log('§14 主开发 r5176 (4) on the REAL stash: a person\'s decision whose receipt is taken while the list is HELD — its card says «not on disk yet», and the stash\'s LIFT clears it');
+{
+  const E = require(path.join(REPO, 'src/server/apps-engine.js'));
+  const STUB = require(path.join(REPO, 'scripts/fixtures/apps-stub.cjs'));
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const ESRC = fs.readFileSync(path.join(REPO, 'src/server/apps-engine.js'), 'utf8');
+  const quiet = { log() { }, warn() { }, error() { } };
+  const S1 = { agentToken: 'vsst_s1', claudeSessionId: CC, name: 'Session One', backend: 'claude' }, sessions = new Map([['w1', S1]]), keyOf = (x) => `claude:${x.claudeSessionId}`;
+  const tick = () => new Promise((r) => setImmediate(r));
+  const realRun = async (Eng) => {
+    const { D, seen } = heldStart();   // the plant: the start's one read of msg-stash.json refused (EIO) ⇒ HELD; `seen` its WITNESS
+    const heldBefore = !!D.stashHeld();
+    const d = mk(); const userTodos = new UserTodoManager({ dataDir: d, onChange: () => { }, expirySweepMs: 0 });
+    const eng = Eng.create({ access: STUB.create({ log: quiet, delayMs: 5 }), userTodos, deliver: D, activeSessions: () => sessions, sessionStatusKey: keyOf, broadcast: () => { }, dataDir: d, log: quiet });
+    const p = await eng.propose({ request: { kind: 'apt', packages: ['hello'] }, by: { kind: 'agent', sessionId: 'w1', conversation: CC, name: S1.name, sessionKey: keyOf(S1) } });
+    const todoId = eng.get(p.id).todoId, card = () => { const it = userTodos.get(todoId); return it && it.card ? (it.card.receipt || null) : 'no-card'; };
+    eng.reject(p.id);
+    const after = card();
+    const lifted = await D.stashReadAgain(); await tick(); await tick();
+    return { seen, heldBefore, after, lifted, onDisk: D.stashOnDisk(CC, p.id), cleared: card() };
+  };
+  const r = await realRun(E);
+  if (!(r.seen === 1 && r.heldBefore)) console.log(`  SKIP §14: the placed read refusal never held the list (${JSON.stringify(r)})`);
+  else ok(r.after === 'not-on-disk' && r.lifted && r.onDisk && r.cleared === null, '§14 the REAL stash held: the decision\'s card says «not on disk yet»; at the LIFT the receipt lands (the stash\'s own word) and the card stops saying it', r);
+  const rx = await realRun(M.load('src/server/apps-engine.js', anchored(ESRC, "    try { if (typeof deliver.onStashLift === 'function') deliver.onStashLift(onDiskNow); } catch { /* no lift word */ }\n", '', 'the lift not listened to'), 'apps-no-lift'));
+  if (!(rx.seen === 1 && rx.heldBefore)) console.log(`  SKIP §14 RED: the placed read refusal never held the list (${JSON.stringify(rx)})`);
+  else ok(rx.after === 'not-on-disk' && rx.onDisk && rx.cleared === 'not-on-disk', '§14 RED CONTROL (the lift not listened to — the commit\'s first form): the receipt is on disk, the card still says it is not', rx);
+}
+
 report();

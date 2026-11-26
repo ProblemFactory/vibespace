@@ -149,7 +149,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     file, valid: APPS_SHAPE, code: 'apps_unread', aside: (mark) => file + '.corrupt-' + mark,
     words: (h) => `VibeSpace cannot read its app proposals right now (${h.code}); it reads them again by itself every few minutes. No app proposal is lost: nothing is written over them, and app proposals, their decisions and helpers wait until it reads`,
     log: (s) => log.warn?.('[apps] ' + s),
-    onLift: (v, facts) => { store = v ? { proposals: v.proposals, helpers: Array.isArray(v.helpers) ? v.helpers : [] } : { proposals: [], helpers: [] }; bump('local');
+    onLift: (v, facts) => { store = v ? { proposals: v.proposals, helpers: Array.isArray(v.helpers) ? v.helpers : [] } : { proposals: [], helpers: [] }; receiptsLostAtStart(); bump('local');
       if (facts && facts.setAside) tornKept = facts.setAside;   // r3232 (1): TORN bytes kept aside — the proposals they held may come back with that copy
       for (const h of [...owedListen]) { owedListen.delete(h); afterListen({ host: h }).catch((e) => log.warn?.(`[apps] the replay owed since the start failed at the lift: ${e && e.message}`)); } },   // r3193: the start's replay, now on the list as read
   }) : null;
@@ -181,10 +181,10 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   const notify = (p) => { const s = waiters.get(p.id); if (s) for (const fn of [...s]) { try { fn(p); } catch { /* gone */ } } };
   /** ONE state move: the fields, then (`tell`) the proposer's stashed outcome, then the store, the broadcast and the
    *  waiters — in that order, so a `wait` that reads a terminal state can take back the copy it just read. */
-  function setState(p, state, extra = {}, { tell = false } = {}) {
+  function setState(p, state, extra = {}, { tell = false, person = false } = {}) {
     Object.assign(p, extra, { state });
     if (TERMINAL.has(state)) { p.finishedAt = now(); if (state !== 'failed') unstageOf(p); } // a failed one keeps its file for a retry (the sweep takes it)
-    if (tell) tellProposer(p);
+    if (tell) tellProposer(p, { person });
     syncCard(p);
     save(); bump(p.host); notify(p);
   }
@@ -308,7 +308,29 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const f = c.from && c.from.kind === 'download' && K.fromOf(p.request.kind) === 'download' ? (c.from.host ? { host: c.from.host, ...(c.from.recipe ? { recipe: c.from.recipe } : {}) } : c.from.file ? { file: c.from.file } : null) : null;
     return { ...p, app: { name: c.app.name, labels: c.app.labels, ...(c.app.icon ? { icon: `/api/apps/proposals/${encodeURIComponent(p.id)}/icon` } : {}) }, ...(f ? { fetch: f } : {}), keeps: c.keeps };
   };
-  const cardViewOf = (p) => AC.cardView(cardInput(p));
+  // 主开发 r5176 (4): the agent's receipt of the person's decision, when it is not on disk yet / could not be queued, rides the card (the
+  // person's own record of the proposal) — beside the pure view, never inside it (src/app-card.js is shared with the machines' side)
+  const cardViewOf = (p) => { const v = AC.cardView(cardInput(p)); return p.receipt === 'not-on-disk' || p.receipt === 'not-queued' ? { ...v, receipt: p.receipt } : v; };
+  /** r5176 (4): a «not on disk yet» mark read at a start (or at the store's lift): the stash's OWN word decides, a tick later (the stash
+   *  may be made after this engine): on disk (it landed; its clear was not saved) ⇒ the mark goes; the list HELD ⇒ its lift decides;
+   *  else it did not land before the stop — lost: the card says the agent was not told. */
+  function receiptsLostAtStart() {
+    const marked = store.proposals.filter((p) => p && p.receipt === 'not-on-disk' && p.by && p.by.conversation);
+    if (!marked.length) return;
+    setImmediate(() => {
+      let lost = 0; const hosts = new Set();
+      for (const p of marked) {
+        let on = false, held = false;
+        try { on = !!deliver && typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(p.by.conversation, p.id); held = !on && !!deliver && typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { on = false; }
+        if (held) { owedReceipts.set(p.id, p.by.conversation); startOwed.add(p.id); watchReceipts(); continue; }
+        if (on) delete p.receipt; else { p.receipt = 'not-queued'; lost++; }
+        syncCard(p); hosts.add(p.host);
+      }
+      if (hosts.size) { save(); for (const h of hosts) bump(h); }
+      if (lost) log.warn?.(`[apps] ${lost} decision${lost === 1 ? '\'s' : 's\''} receipt to the agent did not land before the last stop — lost; ${lost === 1 ? 'its card says' : 'their cards say'} the agent was not told`);
+    });
+  }
+  receiptsLostAtStart();
 
   // ── an agent's PROPOSAL ──
   /** `by` = {kind:'agent', sessionId, conversation, name, sessionKey}. Plans first — a plan the machine refuses is never
@@ -418,7 +440,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     catch (e) {
       // design 009: a machine whose plan moved since the card was shown — nothing ran; the proposal TAKES the new plan, so
       // its card re-reads itself ("the plan changed — take another look") and the next click names the new one
-      if (p) { if (e && e.code === 'plan_changed') setState(p, 'proposed', e.plan && e.plan.ok && e.digest ? { summary: summaryOf(e.plan), digest: e.digest, planChanged: true } : {}); else setState(p, 'failed', { result: { code: e.code || 'install_failed', error: String(e.message || e).slice(0, 500), step: AC.stepOf(e && e.code) } }, { tell: true }); }
+      if (p) { if (e && e.code === 'plan_changed') setState(p, 'proposed', e.plan && e.plan.ok && e.digest ? { summary: summaryOf(e.plan), digest: e.digest, planChanged: true } : {}); else setState(p, 'failed', { result: { code: e.code || 'install_failed', error: String(e.message || e).slice(0, 500), step: AC.stepOf(e && e.code) } }, { tell: true, person: !!(by && by.kind === 'user') }); }
       throw e;
     } finally { if (rq.kind === 'replay') { replaying.delete(host || 'local'); bump(host); } }
     const pl = r.plan || {};
@@ -427,7 +449,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     try { rec = homeRec || await access.call(host, op, pl.forgets ? { ...params, keep: true } : params); } // design 019: a move keeps who asked and why
     catch (e) {
       const err = e && e.code === 'not_run' && r.reattached ? named('not_run', 'another install was running on that machine — it finished; press Install again') : e;
-      if (p) setState(p, err.code === 'not_run' ? 'proposed' : 'failed', { result: { code: err.code || 'record_failed', error: String(err.message || err).slice(0, 500), step: AC.stepOf(err.code, { recorded: true }) } }, { tell: err.code !== 'not_run' });
+      if (p) setState(p, err.code === 'not_run' ? 'proposed' : 'failed', { result: { code: err.code || 'record_failed', error: String(err.message || err).slice(0, 500), step: AC.stepOf(err.code, { recorded: true }) } }, { tell: err.code !== 'not_run', person: !!(by && by.kind === 'user') });
       throw err;
     }
     // design 019 M3: an install INTO the app system of exactly a host entry's packages IS its move — the host record goes now
@@ -436,7 +458,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const out = { done: true, host: host || 'local', kind: rq.kind, entryId: pl.entryId || null, label: labelOf(rq, pl), rows: (rec.rows || []).map((x) => ({ id: x.id, label: x.label })), reattached: !!r.reattached, run: rec.run || null, state: rec.state || null, ...(moved ? { moved } : {}) };
     if (p) {
       if (userTodos && p.todoId) { try { userTodos.setStatus(p.todoId, 'done', 'apps'); } catch { /* resolved already */ } }
-      setState(p, 'done', { result: { entryId: out.entryId, rows: out.rows } }, { tell: true });
+      setState(p, 'done', { result: { entryId: out.entryId, rows: out.rows } }, { tell: true, person: !!(by && by.kind === 'user') });
     }
     lastStatus.delete(host || 'local');
     bump(host);
@@ -513,11 +535,40 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   }
 
   /** The proposer hears the outcome on its NEXT turn (the stash — free), once. */
-  function tellProposer(p) {
+  // 主开发 r5164 (2) / r5176 (4), a silence of the release: the agent's receipt of the person's decision «queued in memory only» was a log line.
+  // The proposal's card (the person's own record) says it now — `receipt: 'not-on-disk'` until the receipt LANDED (the stash's own word at a
+  // landing) or a turn took it; `'not-queued'` when it could not be queued or the stash's cap dropped it unread (the agent was not told)
+  const owedReceipts = new Map();   // proposal id → conversation
+  let receiptWatch = false, dueArmed = false;
+  const receiptsDue = new Map(), startOwed = new Set();   // startOwed: the marks of the LAST run owed at a held start
+  // the stash's words are read OFF their own turn (a drain is a prompt's road: nothing of ours — the card, the store's write — rides
+  // it) and as ONE batch: one save for every card a word cleared
+  const flushDue = () => {
+    dueArmed = false; const hosts = new Set(); let n = 0;
+    for (const [id, word] of [...receiptsDue]) { receiptsDue.delete(id); startOwed.delete(id); if (!owedReceipts.delete(id)) continue; const p = get(id); if (!p) continue; if (word) p.receipt = word; else delete p.receipt; syncCard(p); hosts.add(p.host); n++; }
+    if (n) { save(); for (const h of hosts) bump(h); }
+  };
+  const due = (id, word) => { receiptsDue.set(id, word); if (!dueArmed) { dueArmed = true; setImmediate(flushDue); } };
+  // at a lift or a landing: on disk ⇒ the mark goes; a mark of the LAST run (owed at a held start) the stash does not hold now ⇒ lost
+  const onDiskNow = () => { let held = false; try { held = typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { held = false; } for (const [id, conv] of owedReceipts) { let on = false; try { on = typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(conv, id); } catch { on = false; } if (on) due(id, null); else if (startOwed.has(id) && !held) due(id, 'not-queued'); } };
+  const watchReceipts = () => {
+    if (receiptWatch || !deliver) return;
+    receiptWatch = true;
+    // a receipt taken while the list is HELD lands at the LIFT (onStashLift) or at a later landing (onStashLanded): the stash's own word
+    try { if (typeof deliver.onStashLift === 'function') deliver.onStashLift(onDiskNow); } catch { /* no lift word */ }
+    try { if (typeof deliver.onStashLanded === 'function') deliver.onStashLanded(onDiskNow); } catch { /* no landing word */ }
+    try { if (typeof deliver.onStash === 'function') deliver.onStash((ev, cid, entries) => { for (const e of entries || []) { const ref = e && e.ref ? String(e.ref) : ''; if (!owedReceipts.has(ref)) continue; if (ev === 'drained') due(ref, null); else if (ev === 'evicted') due(ref, 'not-queued'); } }); } catch { /* no events */ }
+  };
+  /** `person`: the state move is a PERSON's decision (their Not now, or the run their Install approved) — only then does the card say
+   *  the agent's receipt of «your answer» (an expiry, the agent's own withdraw, a restart's interruption: the release's log line) */
+  function tellProposer(p, { person = false } = {}) {
     if (!deliver || typeof deliver.stashFor !== 'function' || !p.by || !p.by.conversation) return;
     const text = outcomeText(p);
-    try { const st = deliver.stashFor(p.by.conversation, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: p.id, text }); if (st && st.stored === false) log.warn?.(`[apps] ${p.id}: the outcome is queued in memory only — ${st.why}`); }
-    catch (e) { log.warn?.(`[apps] ${p.id}: the outcome could not be queued for ${p.by.conversation}: ${e.message}`); }
+    try {
+      const st = deliver.stashFor(p.by.conversation, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: p.id, text });
+      if (st && st.stored === false) { log.warn?.(`[apps] ${p.id}: the outcome is queued in memory only — ${st.why}`); if (person) { p.receipt = 'not-on-disk'; owedReceipts.set(p.id, p.by.conversation); watchReceipts(); } }
+      else { delete p.receipt; owedReceipts.delete(p.id); }
+    } catch (e) { log.warn?.(`[apps] ${p.id}: the outcome could not be queued for ${p.by.conversation}: ${e.message}`); if (person) p.receipt = 'not-queued'; owedReceipts.delete(p.id); }
   }
   /** The agent-facing sentence of a proposal's state (English — the agent's contract; the CLI prints it too). */
   function outcomeText(p) {
@@ -540,7 +591,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const p = get(id);
     if (!p) throw named('not-found', `no proposal ${id}`);
     if (p.state !== 'proposed') throw named('proposal_state', `that proposal is ${p.state}`);
-    setState(p, 'rejected', { decidedAt: now(), decidedBy: by }, { tell: true });
+    setState(p, 'rejected', { decidedAt: now(), decidedBy: by }, { tell: true, person: by === 'user' });
     dismissCard(p.todoId);
     return view(p);
   }

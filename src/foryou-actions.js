@@ -626,6 +626,14 @@ function heldDropTail(item, t = fmt) {
   const p = { k: Number(d.k) || 0, m: Number(d.of) || 0, d: Number(d.n) || 0, agent: String(d.agent || '') };
   return ' · ' + (d.why === 'not-covered' ? t('the rule no longer covers {k} of {m} conversations — {d} held messages dropped', p) : t('{k} of {m} conversations no longer wake {agent} — {d} held messages dropped', p));
 }
+/** 主开发 r5164 (2) / r5176 (4): THE AGENT'S RECEIPT OF A PERSON'S ANSWER, when it is not on disk yet (`not-on-disk`) or could not be queued
+ *  (`not-queued`) — a resolved record's `resolvedFact.receipt` (src/user-todos.js noteReceipt) or an app card's `receipt`. '' for none.
+ *  The chat card's resolved line (src/lib/chat-needs-card.js), the tray row and the app card say these same words; no path, no value. */
+function receiptWords(word, t = fmt) {
+  if (word === 'not-on-disk') return t('the agent\'s receipt of your answer is not on disk yet — if VibeSpace restarts before it is written, the agent will not hear it');
+  if (word === 'not-queued') return t('the agent was not told — its receipt of your answer could not be queued');
+  return '';
+}
 /** The quiet record's VERB — how a resolved card reads in its line («approved · 2 min ago»). */
 function settledWords(item, t = fmt, kind = null) {
   const end = endOf(item);
@@ -1386,6 +1394,7 @@ const FORYOU_HEADS = Object.freeze({
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
 
 module.exports = {
+  receiptWords,   // r5176 (4)
   arrivalWords,
   PARKED_ASK_TYPES, isParkedAsk, FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, OPENS, opensOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf, doorOf, STORED_WORDS_LEGACY
 };
