@@ -49,10 +49,14 @@ const { loginHtml } = require('./login-page.js');   // the sign-in page, one for
 const SW = require('./signin-witness.js');   // B-dc3f (1): the data folder's own id inside it, the witness outside it (the plain form)
 // B-dc3f (3): the network home's refused witness write — its For-you notice's fixed key, source and words (en; zh / ja in the dictionaries)
 const i18nKey = (s) => s;   // extraction marker (scripts/i18n-extract.mjs)
-const WITNESS_INBOX_KEY = 'signin', WITNESS_ITEM = 'signin-witness-', WITNESS_SOURCE = i18nKey('Sign-in record'), WITNESS_CAUSES = Object.freeze(['refused', 'waiting']);
+const WITNESS_INBOX_KEY = 'signin', WITNESS_ITEM = 'signin-witness-', WITNESS_SOURCE = i18nKey('Sign-in record'), WITNESS_CAUSES = Object.freeze(['refused', 'waiting', 'machine']);
+/** r5327: a For-you item the PERSON closed (any of its verbs), not cleared */
+const byPerson = (i) => !!i && i.status !== 'open' && i.resolvedBy === 'user' && !i.clearedAt;
 const WITNESS_WORDS = Object.freeze({
   refused: Object.freeze({ text: i18nKey('The copy of the sign-in record on your network home folder could not be updated'), detail: i18nKey('People still sign in on this machine as before. The copy on the home folder is tried again at the next start or password change; check that the home folder is mounted and writable.') }),
   waiting: Object.freeze({ text: i18nKey('The copy of the sign-in record on your network home folder is waiting'), detail: i18nKey('Earlier requests to the home folder have not finished, so its copy is not updated yet. People still sign in on this machine as before; the copy is updated when the home folder answers. Check that the home folder is mounted.') }),
+  // r5327: THIS MACHINE's OWN ID unreadable — the copy cannot be named, so it is not kept; the home folder is not the place to look
+  machine: Object.freeze({ text: i18nKey('This machine\'s own id cannot be read, so the copy of the sign-in record on your network home folder is not kept'), detail: i18nKey('People still sign in on this machine as before. The copy on the home folder is named by this machine\'s own id; it is written when that id can be read again, at the next start or password change. Check that the account VibeSpace runs as can read the system\'s machine id.') }),
 });
 const SRH = require('./store-read-hold.js');   // 主开发 r3336: the id file under the store-read law — held while unread, read again off the loop
 /** B-dc3f (1), 主开发 r2780 (2) H1 + r2869: the network home's look — its bound, its re-ask (one look out at a time) and its read size */
@@ -172,20 +176,22 @@ class Auth {
     if (!w || this._noticed.has(cause) || !store) return;
     if (cause === 'waiting') this._waitingMaybe = true;   // filed now or owed to the read: the parked ask's run closes it either way
     if (this._heldInbox(store)) return this._owedAtRead(store, { [cause]: 'file' });
-    if (this._dismissedOf(store, cause)) { this._noticed.add(cause); return; }   // r5254 (2): the person dismissed it — not filed again until its cause lands
+    if (this._closedByPersonOf(store, cause)) { this._noticed.add(cause); return; }   // r5254 (2) / r5327: the person closed it (✕, ✓ or «Mark all read») — not filed again until its cause lands
     this._noticed.add(cause);
     try { store.add(WITNESS_INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'normal', by: 'system', sessionName: 'Sign-in record', itemKey: WITNESS_ITEM + cause, text: w.text, detail: w.detail, i18n: { text: { key: w.text }, detail: [{ key: w.detail }], source: { key: WITNESS_SOURCE } } }); }
     catch (e) { this._noticed.delete(cause); this._sayOnce('witness-notice', `[auth] the sign-in record's For-you notice was not filed — ${(e && e.message) || e}`); }
   }
-  /** r5254 (2): the person DISMISSED this cause's notice and it has not landed since (a landing marks it done): across restarts too */
-  _dismissedOf(store, cause) {
-    try { return typeof store.idsWhere === 'function' && (store.idsWhere((i) => i.sessionKey === WITNESS_INBOX_KEY && i.itemKey === WITNESS_ITEM + cause && i.status === 'dismissed' && i.resolvedBy === 'user') || []).length > 0; }
+  /** r5254 (2) / r5327: the PERSON CLOSED this cause's notice — ✕ Dismiss, ✓ Mark done or «Mark all read», each stamped by 'user'
+   *  (a notice is no pointer: never a hide) — and it has not landed since (a landing stamps it done by the system): across restarts too */
+  _closedByPersonOf(store, cause) {
+    try { return typeof store.idsWhere === 'function' && (store.idsWhere((i) => i.sessionKey === WITNESS_INBOX_KEY && i.itemKey === WITNESS_ITEM + cause && byPerson(i)) || []).length > 0; }
     catch { return false; }
   }
+
   /** r5254 (4): a write or removal of the home copy LANDED — «refused» closes; «waiting» too unless another write is still parked */
   _landedClose() { return this._closeWitnessNotices(this._netOwed && this._netOwed.size ? ['refused'] : WITNESS_CAUSES); }
   /** closes the notices of these causes (every cause by default; «waiting» alone: its parked ask asked) — the open ones, and one the
-   *  person dismissed (marked done: its cause ended, so a later refusal is said again) */
+   *  person closed (stamped done by the system: its cause ended, so a later refusal is said again) */
   _closeWitnessNotices(causes = WITNESS_CAUSES) {
     if (this._noticed) for (const c of causes) this._noticed.delete(c);
     if (causes.includes('waiting')) this._waitingMaybe = false;
@@ -193,7 +199,7 @@ class Auth {
     if (!store || typeof store.idsWhere !== 'function') return;
     if (this._heldInbox(store)) return this._owedAtRead(store, Object.fromEntries(causes.map((c) => [c, 'close'])));
     const keys = new Set(causes.map((c) => WITNESS_ITEM + c));
-    try { for (const x of store.idsWhere((i) => i.sessionKey === WITNESS_INBOX_KEY && keys.has(i.itemKey) && (i.status === 'open' || (i.status === 'dismissed' && i.resolvedBy === 'user'))) || []) store.setStatus(x, 'done', 'system'); }
+    try { for (const x of store.idsWhere((i) => i.sessionKey === WITNESS_INBOX_KEY && keys.has(i.itemKey) && !i.clearedAt && (i.status === 'open' || byPerson(i))) || []) store.setStatus(x, 'done', 'system'); }
     catch (e) { this._sayOnce('witness-notice-close', `[auth] the sign-in record's For-you notice was not closed — ${(e && e.message) || e}; it closes at the home copy's next landing`); }
   }
   /** For you held unread: each cause's word waits for the store's read — ONE wait, each cause's LAST word kept (a landing after a refusal
@@ -297,7 +303,7 @@ class Auth {
     if (!this._pool) { this._netStartNewOwed = true; return; }   // attachWitnessPool runs it
     this._netStartNewOwed = false;
     const root = SW.digestOf(f.root);
-    this._netQueue(() => this._netAsk('netRemove', { path: f.netHome, root }).then(() => { done(); this._landedClose(); }), (e) => { this._noticeWitness('refused'); this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netHome} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`); }, 'start-new');
+    this._netQueue(() => this._netAsk('netRemove', { path: f.netHome, root }).then(() => { done(); this._landedClose(); }), (e) => { this._noticeWitness(e && e.code === 'EMACHINEID' ? 'machine' : 'refused'); this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netHome} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`); }, 'start-new');
   }
   /** ONE ask of the witness worker, bounded (a pool that throws is a refusal, never a throw out of the start) */
   _netAsk(op, payload) { try { return Promise.resolve(this._pool.call(op, payload, { timeoutMs: this._netBound() })); } catch (e) { return Promise.reject(e); } }
@@ -429,14 +435,14 @@ class Auth {
     if (!f || !f.netHome || !this._pool || this._held || (this._net && !this._net.done) || !f.instance) return null;
     const set = !!(this._state && this._state.passwordHash), id = f.instance.id, home = f.netHome, root = SW.digestOf(f.root);
     const sayJ = (act, e) => this._sayOnce('net-witness', `[auth] the sign-in witness on the home folder ${home} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start${e && e.code === 'EWITNESSFOLDER' ? '; until that folder is mended, a data folder missing at a start is not caught by the home folder\'s copy' : ''}`);
-    const say = (act, e) => (this._noticeWitness('refused'), sayJ(act, e));
+    const say = (act, e) => (this._noticeWitness(e && e.code === 'EMACHINEID' ? 'machine' : 'refused'), sayJ(act, e));   // r5327: this machine's own id unread — its own words
     // this start's look answered already: never read twice; the START-NEW start reads none of the home (r2926): its copy is the act's to remove
     const madeUp = atStart && this._startNewUsed, seen = madeUp ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;
     return this._netQueue(async () => {
       if (this._held) return;   // 主开发 r4440 (c): a write queued before a put-back asks the hold again when it RUNS — a held start writes and removes nothing
       if (atStart) {   // H2: a start reads it first, and with no password keeps another folder's copy as it is
         const a = seen || SW.netAnswerOf(await this._netAsk('netRead', { path: home, root, maxBytes: NET_MAX_BYTES }).then((result) => ({ result }), (error) => ({ error })), { root: f.root, dataDir: f.dataDir });
-        if (!a.answered) return (a.machine ? sayJ : say)(set ? 'written' : 'removed', a.why);   // r5254 (1): this machine's own id unread — not the home's to mend: the journal alone (the hold's page names it)
+        if (!a.answered) return say(set ? 'written' : 'removed', a.machine ? Object.assign(new Error(a.why), { code: 'EMACHINEID' }) : a.why);   // r5254 (1) / r5327: this machine's own id unread — its own words, never the home's (a start with a password has no hold page)
         if (!set && a.found && SW.foreignAt([a.found], startId)) return this._sayOnce('foreign', `[auth] a sign-in witness names another data folder than ${this._dataDir} (${a.found.file}) — this start keeps it as it is`);
         if (!set && !a.found) return madeUp ? undefined : this._landedClose();   // B-dc3f (3): the home READ, no copy to remove — as it should be (the start-new start's «none» is no read: the removal's own end says)
       }

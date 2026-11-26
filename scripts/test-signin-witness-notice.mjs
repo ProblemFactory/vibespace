@@ -57,7 +57,7 @@ console.log('① B-dc3f (3) (lane lg-providers, package s1126-2): the network ho
   // a stand-in pool whose answers the leg switches (law 1: its calls are the witness that the product read the plant), and whose
   // stats() says how many ended asks still hold their threads (the waiting cause's road)
   const poolOf = () => { const s = { write: 'refuse', remove: 'ok', ending: 0, calls: [], read: null };
-    const p = standIn((op, pl) => { s.calls.push(op); return op === 'netRead' ? (s.read ? s.read : NONE(op, pl)) : (op === 'netWrite' && s.write === 'refuse') || (op === 'netRemove' && s.remove === 'refuse') ? { error: 'EIO: placed', code: 'EIO' } : 'ok'; });
+    const p = standIn((op, pl) => { s.calls.push(op); return op === 'netRead' ? (s.read ? s.read : NONE(op, pl)) : (op === 'netWrite' && s.write === 'machine') ? { error: 'this machine\'s own id could not be read (placed)', code: 'EMACHINEID' } : (op === 'netWrite' && s.write === 'refuse') || (op === 'netRemove' && s.remove === 'refuse') ? { error: 'EIO: placed', code: 'EIO' } : 'ok'; });
     return Object.assign(p, { s, stats: () => ({ ending: s.ending }), onWorkerEnded(fn) { s.ended = fn; } }); };
   const startWith = (it, pool, todos, A = Auth) => quiet(() => { const a = new A(it.data, { witness: cfgOf(it, { mountinfo: nfsOf(it), pool, ...quick }), todos: () => todos }); a.ensurePassword({}); return a; }).v;
   const wordsClean = (it, items, pw) => items.every((i) => { const all = [i.text, i.detail, JSON.stringify(i.i18n || {})].join(' ');
@@ -143,16 +143,25 @@ console.log('① B-dc3f (3) (lane lg-providers, package s1126-2): the network ho
     const a1 = startWith(it, pool, todos, A); await until(() => !a1.held); quiet(() => a1.setPassword('pw-notice-0016', { userSet: true })); await a1._netWrites;
     const p2 = poolOf(); p2.s.read = { result: { machineUnknown: { file: path.join(it.base, 'machine-id'), code: 'EACCES' } } };
     const a2 = startWith(it, p2, todos, A); await until(() => p2.s.calls.includes('netRead')); await a2._netWrites;
-    return { read: p2.s.calls.filter((c) => c === 'netRead').length, open: openOf(todos).map((i) => i.itemKey) };
+    const o = openOf(todos);
+    return { read: p2.s.calls.filter((c) => c === 'netRead').length, open: o.map((i) => i.itemKey), clean: o.length === 1 && wordsClean(it, o, 'pw-notice-0016') && !/mounted|writable/.test(o[0].text + ' ' + o[0].detail) };
   };
   const mu = await machineUnread();
-  ok(mu.read >= 1 && mu.open.length === 0, 'THIS MACHINE\'s OWN ID UNREAD at the start-time read (the stand-in answered «machine unknown»): no notice — the home folder is not the place to look (r5254 (1))', mu);
+  ok(mu.read >= 1 && mu.open.join() === 'signin-witness-machine' && mu.clean, 'THIS MACHINE\'s OWN ID UNREAD at the start-time read of a hub WITH a password (the stand-in answered «machine unknown»; no hold page there): ONE notice in its own words — no path, and no word sending the person to the home folder (r5327)', mu);
+  // …and a WRITE the worker refuses by this machine's id (EMACHINEID: a password set mid-run): the same cause, its own words
+  const machineWrite = async (A = Auth, tag = 'machine-write') => {
+    const it = install('dc3f-notice-' + tag), todos = inboxOf(it), pool = poolOf(), a = startWith(it, pool, todos, A);
+    await until(() => !a.held); pool.s.write = 'machine'; quiet(() => a.setPassword('pw-notice-0023', { userSet: true })); await a._netWrites;
+    return { writes: pool.s.calls.filter((c) => c === 'netWrite').length, open: openOf(todos).map((i) => i.itemKey) };
+  };
+  const mw = await machineWrite();
+  ok(mw.writes >= 1 && mw.open.join() === 'signin-witness-machine', 'A WRITE REFUSED BY THIS MACHINE\'s OWN ID (the stand-in answered EMACHINEID): the machine\'s own notice, never «refused» with the home folder\'s words (r5327)', mw);
   // r5254 (2): A NOTICE THE PERSON DISMISSED is not filed again at a restart while the home keeps refusing; once its cause LANDS (the
   // landing marks it done), a later refusal is said again
-  const restartDismissed = async (A = Auth, tag = 'restart-dismissed') => {
+  const restartDismissed = async (A = Auth, tag = 'restart-dismissed', close = (t, id) => t.setStatus(id, 'dismissed', 'user')) => {
     const it = install('dc3f-notice-' + tag), todos = inboxOf(it), pool = poolOf();
     const a1 = startWith(it, pool, todos, A); await until(() => !a1.held); quiet(() => a1.setPassword('pw-notice-0017', { userSet: true })); await a1._netWrites;
-    const first = openOf(todos); if (first[0]) todos.setStatus(first[0].id, 'dismissed', 'user');
+    const first = openOf(todos); if (first[0]) close(todos, first[0].id);
     const a2 = startWith(it, pool, todos, A); await until(() => !a2.held); quiet(() => a2.setPassword('pw-notice-0018', { userSet: true })); await a2._netWrites;   // the restart: refused again
     const afterRestart = openOf(todos).length, w2 = pool.s.calls.filter((c) => c === 'netWrite').length;
     pool.s.write = 'ok'; quiet(() => a2.setPassword('pw-notice-0019', { userSet: true })); await a2._netWrites;   // the cause lands
@@ -160,7 +169,10 @@ console.log('① B-dc3f (3) (lane lg-providers, package s1126-2): the network ho
     return { first: first.length, w2, afterRestart, again: openOf(todos).map((i) => i.itemKey) };
   };
   const rd = await restartDismissed();
-  ok(rd.first === 1 && rd.w2 >= 2 && rd.afterRestart === 0 && rd.again.join() === 'signin-witness-refused', 'A NOTICE THE PERSON DISMISSED (r5254 (2)): refused again after a restart (read by the stand-in) — not filed again; the cause landed, then refused once more — said again', rd);
+  ok(rd.first === 1 && rd.w2 >= 2 && rd.afterRestart === 0 && rd.again.join() === 'signin-witness-refused', 'A NOTICE THE PERSON DISMISSED (✕, r5254 (2)): refused again after a restart (read by the stand-in) — not filed again; the cause landed, then refused once more — said again', rd);
+  const DONE = (t, id) => t.setStatus(id, 'done', 'user'), ALL_READ = (t, id) => t.readNotices([id], true, 'user');
+  const rdDone = await restartDismissed(Auth, 'restart-done', DONE), rdRead = await restartDismissed(Auth, 'restart-all-read', ALL_READ);
+  ok([rdDone, rdRead].every((x) => x.first === 1 && x.w2 >= 2 && x.afterRestart === 0 && x.again.join() === 'signin-witness-refused'), 'A NOTICE THE PERSON CLOSED by ✓ Mark done or by «Mark all read» (r5327: each stamped done by the person): the same — not filed again after a restart, said again after its cause landed', { done: rdDone, allRead: rdRead });
   // r5254 (4): A LANDING WHILE ANOTHER WRITE IS STILL PARKED keeps «waiting» (closes «refused» only); the parked write asked and landed — closed
   const stillParked = async (A = Auth, tag = 'still-parked') => {
     const it = install('dc3f-notice-' + tag), todos = inboxOf(it), pool = poolOf(), a = startWith(it, pool, todos, A);
@@ -220,7 +232,7 @@ console.log('① B-dc3f (3) (lane lg-providers, package s1126-2): the network ho
   const nl = await noneLeft();
   ok(nl.before === 1 && nl.read >= 1 && nl.writes === 0 && nl.after === 0, 'a start with NO sign-in whose home read finds NO copy (the stand-in answered the read: none): the notice left from an earlier refusal closes — nothing written or removed', nl);
   // THE BASE (the REDS): the sayers alone — the journal line, no notice; the landing that closes nothing
-  const NO_REFUSED = authCut("this._noticeWitness('refused'), ", '', 'no-notice-refused');
+  const NO_REFUSED = authCut("this._noticeWitness(e && e.code === 'EMACHINEID' ? 'machine' : 'refused'), ", '', 'no-notice-refused');
   const red = await scene(NO_REFUSED, 'red-refused');
   ok(red.wrote1 >= 1 && red.first.length === 0, 'RED CONTROL: the base\'s sayer alone (the journal line) — the refused write (read by the product: the stand-in refused it) reaches nobody in For you', { wrote: red.wrote1 });
   const NO_CLOSE = authCut("      this._landedClose();   // B-dc3f (3): the home copy's write / removal LANDED — its notices close by themselves\n", '', 'no-close');
@@ -244,19 +256,28 @@ console.log('① B-dc3f (3) (lane lg-providers, package s1126-2): the network ho
   const NO_WAITING = authCut("        this._noticeWitness('waiting');\n", '', 'no-waiting');
   const red8 = await waitRefused(NO_WAITING, 'red-no-waiting');
   ok(red8.parked.length === 0 && red8.w0 === 0 && red8.asked === 1, 'RED CONTROL (the parked sayer alone): the write parked (the stand-in asked nothing until the stuck ask ended) and For you said nothing while it waited', red8);
-  const NO_ONCE = MUT.load('src/auth.js', anchored(anchored(AUTH_SRC, "    this._noticed.add(cause);\n", '', 'no-once'), "    if (this._dismissedOf(store, cause)) { this._noticed.add(cause); return; }", '', 'no-once-dismissed'), 'auth-no-once').Auth;
+  const NO_ONCE = MUT.load('src/auth.js', anchored(anchored(AUTH_SRC, "    this._noticed.add(cause);\n", '', 'no-once'), "    if (this._closedByPersonOf(store, cause)) { this._noticed.add(cause); return; }", '', 'no-once-dismissed'), 'auth-no-once').Auth;
   const red9 = await dismissed(NO_ONCE, 'red-dismissed');
   ok(red9.first === 1 && red9.writes >= 2 && red9.open === 1, 'RED CONTROL (no once-a-cause: neither the run\'s memory nor the person\'s dismissal): the second refusal (read by the stand-in) reopens the notice the person dismissed', red9);
-  const ANY_READ = authCut("        if (!a.answered) return (a.machine ? sayJ : say)(set ? 'written' : 'removed', a.why);", "        if (!a.answered) return say(set ? 'written' : 'removed', a.why);", 'machine-says-home');
+  const ANY_READ = authCut("        if (!a.answered) return say(set ? 'written' : 'removed', a.machine ? Object.assign(new Error(a.why), { code: 'EMACHINEID' }) : a.why);", "        if (!a.answered) return say(set ? 'written' : 'removed', a.why);", 'machine-says-home');
   const red10 = await machineUnread(ANY_READ, 'red-machine-unread');
   ok(red10.read >= 1 && red10.open.join() === 'signin-witness-refused', 'RED CONTROL (the first form\'s line: every unanswered read files «refused»): this machine\'s own id unread (the stand-in\'s answer read) — the notice sends the person to the home folder', red10);
-  const NO_DISMISS = authCut("    if (this._dismissedOf(store, cause)) { this._noticed.add(cause); return; }", '', 'no-dismissed-check');
+  const JOURNAL_ONLY = authCut("        if (!a.answered) return say(set ? 'written' : 'removed', a.machine ? Object.assign(new Error(a.why), { code: 'EMACHINEID' }) : a.why);", "        if (!a.answered) return (a.machine ? sayJ : say)(set ? 'written' : 'removed', a.why);", 'machine-journal-only');
+  const red14 = await machineUnread(JOURNAL_ONLY, 'red-machine-journal');
+  ok(red14.read >= 1 && red14.open.length === 0, 'RED CONTROL (the follow 628b397a9\'s line: the journal alone): this machine\'s own id unread at a hub with a password (the stand-in\'s answer read) — no hold page and no notice: the person is told nothing', red14);
+  const WRITE_HOME = authCut("this._noticeWitness(e && e.code === 'EMACHINEID' ? 'machine' : 'refused'), ", "this._noticeWitness('refused'), ", 'machine-write-says-home');
+  const red15 = await machineWrite(WRITE_HOME, 'red-machine-write');
+  ok(red15.writes >= 1 && red15.open.join() === 'signin-witness-refused', 'RED CONTROL (every refused write is «refused»): the write refused by this machine\'s id (EMACHINEID, read by the stand-in) sends the person to the home folder', red15);
+  const DISMISS_ONLY = authCut("i.itemKey === WITNESS_ITEM + cause && byPerson(i)) || []).length > 0;", "i.itemKey === WITNESS_ITEM + cause && i.status === 'dismissed' && i.resolvedBy === 'user') || []).length > 0;", 'dismiss-only');
+  const red16 = await restartDismissed(DISMISS_ONLY, 'red-restart-done', DONE), red17 = await restartDismissed(DISMISS_ONLY, 'red-restart-all-read', ALL_READ);
+  ok([red16, red17].every((x) => x.first === 1 && x.w2 >= 2 && x.afterRestart === 1), 'RED CONTROL (the follow 628b397a9\'s look: ✕ only): a notice closed by ✓ or by «Mark all read» is opened again by the refusal after the restart (read by the stand-in)', { done: red16, allRead: red17 });
+  const NO_DISMISS = authCut("    if (this._closedByPersonOf(store, cause)) { this._noticed.add(cause); return; }", '', 'no-dismissed-check');
   const red11 = await restartDismissed(NO_DISMISS, 'red-restart-dismissed');
   ok(red11.first === 1 && red11.w2 >= 2 && red11.afterRestart === 1, 'RED CONTROL (the first form: no look at the person\'s dismissal): the refusal after the restart (read by the stand-in) reopens the notice the person dismissed', red11);
   const ALL_CLOSE = authCut("this._closeWitnessNotices(this._netOwed && this._netOwed.size ? ['refused'] : WITNESS_CAUSES)", "this._closeWitnessNotices(WITNESS_CAUSES)", 'landing-closes-all');
   const red12 = await stillParked(ALL_CLOSE, 'red-still-parked');
   ok(red12.landed === 1 && red12.during.length === 0, 'RED CONTROL (the first form: a landing closes every cause): the later write landed (the stand-in took it) while one is still parked — «waiting» closed early', red12);
-  const NO_SN_REFUSED = authCut("(e) => { this._noticeWitness('refused'); this._sayOnce('start-new-net',", "(e) => { this._sayOnce('start-new-net',", 'no-start-new-refused');
+  const NO_SN_REFUSED = authCut("(e) => { this._noticeWitness(e && e.code === 'EMACHINEID' ? 'machine' : 'refused'); this._sayOnce('start-new-net',", "(e) => { this._sayOnce('start-new-net',", 'no-start-new-refused');
   const red13 = await startNew(NO_SN_REFUSED, 'red-start-new-refused');
   ok(red13.calls === 'netRemove' && red13.marker && red13.open.length === 0, 'RED CONTROL (the start-new removal\'s sayer alone): the removal refused (by the stand-in) and For you says nothing', red13);
   // (r5157) A PERSON's PAGE ONLY: the notice is filed under its own key («signin» — no conversation's, so no agent lists it as its own
