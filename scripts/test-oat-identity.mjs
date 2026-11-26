@@ -1743,25 +1743,32 @@ console.log('§7 the REAL producer (usage-pool-engine recordRateLimitEvent) — 
     // (b2) the slice's own read (F5, F6): a pass that RESTAMPS a window and THEN has its witness write refused — what it moved is archived (the
     // archive in a finally) and its rows ride the failure, handed on as changed (a verdict it wrote is applied). RED (anchored copy): the
     // archive written only when the loop finished
-    const rsScene = () => {
+    const rsScene = (appendCode = null) => {
       const w = world(), am9 = w.a, done = quiet();
       try {
         const C = am9.createSubscription({ name: 'Moved' }).id, W_C2 = slot(2, 20);
         w.writeCache(C, W_C); w.stamp(C, { sevenDay: W_C, producer: 'login', verifiedAt: Date.now() - 3600e3, verifiedBy: 'api-phase' });
         seedAnchors(w, C, W_C2);   // its API evidence moved: the repair restamps it
         const eng = mkWith(w, engMod);
-        const f = pass(eng, w, C, 'EIO');
+        // (主开发 r5013 (a)) the archive's append refused as well (placed for that one archive): the pass's OWN error and report must stand
+        const ap0 = fs.appendFileSync; if (appendCode) fs.appendFileSync = function (p, ...a) { if (String(p).endsWith('readings-foreign-usage-cache.ndjson')) throw Object.assign(new Error(`${appendCode}: a placed refusal of the append`), { code: appendCode, syscall: 'write' }); return ap0.call(this, p, ...a); };
+        let f; try { f = pass(eng, w, C, 'EIO'); } finally { fs.appendFileSync = ap0; }
         let arch = []; try { arch = fs.readFileSync(path.join(path.dirname(w.cd), 'archive', 'readings-foreign-usage-cache.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { }
-        return { err: !!(f.rep && f.rep.error), changed: !!(f.rep && f.rep.changed), rowRestamped: ((f.rep && f.rep.identities) || []).some((x) => x.key === C && x.sidecar === 'restamped'), stamped: (w.sidecar(C) || {}).sevenDay === W_C2, archived: arch.some((x) => x.key === C && x.action === 'restamped'), witness: f.witness };
+        return { errText: (f.rep && f.rep.error) || '', err: !!(f.rep && f.rep.error), changed: !!(f.rep && f.rep.changed), rowRestamped: ((f.rep && f.rep.identities) || []).some((x) => x.key === C && x.sidecar === 'restamped'), stamped: (w.sidecar(C) || {}).sevenDay === W_C2, archived: arch.some((x) => x.key === C && x.action === 'restamped'), witness: f.witness };
       } finally { done(); }
     };
     const RS = rsScene();
     ok(RS.err && RS.stamped && RS.archived && RS.changed && RS.rowRestamped && RS.witness === null,
       'B-574d (b2) a pass that RESTAMPED a window before its witness write was refused: the restamp is ARCHIVED (the old window kept), its row rides the failure and the pass is handed on as changed (the verdict applied), no witness on disk', RS);
-    const FIN = "  finally { _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived); }   // B-574d (F5): what was moved is archived even when a later write throws\n";
-    const rrFin = compileAs('src/reading-repair.js', anchored(RR_SRC, FIN, "  finally { }\n  _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived);   // MUTANT: archived only when the loop finished\n", 'the archive in a finally'));
+    const FIN = "    try { _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived); }\n    catch (ae) { if (!threw) throw ae; console.warn(`[usage-repair] the archive of what the failed pass moved could not be appended (${(ae && ae.code) || 'error'})`); }\n";
+    const rrFin = compileAs('src/reading-repair.js', anchored(RR_SRC, "  finally {   // B-574d (F5): what was moved is archived even when a later write throws; (主开发 r5013 (a)) the append's own failure never replaces the pass's error and report\n" + FIN + '  }\n', "  finally { }\n  _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived);   // MUTANT: archived only when the loop finished\n", 'the archive in a finally'));
     let RSM = null; try { entry.exports = rrFin; RSM = rsScene(); } finally { entry.exports = realRR; }
     ok(RSM.stamped && !RSM.archived, 'RED (anchored copy: the archive only when the loop finished): the restamped window\'s old value is lost — (b2) goes red', RSM);
+    const RA2 = rsScene('ENOSPC');
+    ok(RA2.err && RA2.errText.includes('EIO') && !RA2.errText.includes('ENOSPC') && RA2.changed && RA2.rowRestamped, 'B-574d (b2, 主开发 r5013 (a)) the archive\'s append refused TOO (ENOSPC): the pass\'s OWN error (the witness\'s EIO) and its report stand — the append\'s failure never replaces them', RA2);
+    const rrBare = compileAs('src/reading-repair.js', anchored(RR_SRC, FIN, "    _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived);   // MUTANT: the append unwrapped\n", 'the append wrapped'));
+    let RAM = null; try { entry.exports = rrBare; RAM = rsScene('ENOSPC'); } finally { entry.exports = realRR; }
+    ok(RAM.errText.includes('ENOSPC') && !RAM.changed, 'RED (anchored copy: the append unwrapped in the finally): its ENOSPC replaces the pass\'s own error and report — (b2)\'s r5013 (a) goes red', RAM);
   });
   // ── §9g THE LOW ROADS (verify r3 L-R1 / L-R2 / L-R3) ──
   await guard9(async () => {
