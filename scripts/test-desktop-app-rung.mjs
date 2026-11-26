@@ -797,19 +797,20 @@ console.log('B-574d browser-stores 5/8: the window stores on the store writer');
     const { W } = await engineChecks(ENGm, sub);
     const reachFile = W.engine.reachFile, leaseNow = !!W.engine.leaseOf('da-1');
     W.engine.storesLanded();
-    const out = await W.engine.shareAct(() => W.engine.setShareMode('da-1', 'pixels'));
+    const act = (fn) => new Promise((resolve) => W.engine.shareAct(fn, (err, o) => resolve(err ? { err: (err && err.code) || 'threw' } : o)));
+    const out = await act(() => W.engine.setShareMode('da-1', 'pixels'));
     let disk = null; try { disk = JSON.parse(fs.readFileSync(reachFile, 'utf8')).windows['da-1'].mode; } catch { disk = null; }   // read right after the answer: landed
     fs.rmSync(reachFile, { force: true }); fs.mkdirSync(reachFile);   // the file's name taken by a folder: its next landing fails
-    let refused = null; try { await W.engine.shareAct(() => W.engine.setShareMode('da-1', 'tree')); } catch (e) { refused = (e && e.code) || 'threw'; }
+    const o2 = await act(() => W.engine.setShareMode('da-1', 'tree')); const refused = o2 && o2.notOnDisk === true ? 'notOnDisk' : o2 && o2.err ? o2.err : null;
     fs.rmSync(reachFile, { recursive: true, force: true });   // the writer retries over the freed name
     return { leaseNow, mode: out && out.mode, disk, refused };
   };
   const S5 = await shareScene(ENGINE, 'bs5-real');
-  ok(S5.leaseNow && S5.mode === 'pixels' && S5.disk === 'pixels' && S5.refused === 'not_saved',
-    'B-574d browser-stores 5/8: an agent\'s open and attach are handed (the lease in memory at once); a person\'s share act answers AFTER its landing (the file holds the mode when the answer comes), and a landing that FAILS is the act\'s refusal (not_saved)', S5);
-  const src5 = read(ENGINE_REL), WAITS = "    if ((await landingOf(reachFile)) !== true) {";
-  const S5x = await shareScene(MUT.load(ENGINE_REL, editAnchor(src5, WAITS, '    if (false) {', ENGINE_REL), 'bs5-unwaited'), 'bs5-red');
-  ok(S5x.refused === null, 'RED (anchored copy: the share act answered without waiting for its landing): the refused landing is answered as saved — 5/8 goes red', S5x);
+  ok(S5.leaseNow && S5.mode === 'pixels' && S5.disk === 'pixels' && S5.refused === 'notOnDisk',
+    'B-574d browser-stores 5/8: an agent\'s open and attach are handed (the lease in memory at once); a person\'s share act answers AFTER its landing (the file holds the mode when the answer comes), and a landing that FAILS answers notOnDisk — the act is in effect, never a false «refused»', S5);
+  const src5 = read(ENGINE_REL), WAITS = '      respond(null, ok === true ? out : { ...out, notOnDisk: true });\n';
+  const S5x = await shareScene(MUT.load(ENGINE_REL, editAnchor(src5, WAITS, '      respond(null, out);   // MUTANT: the landing not read\n', ENGINE_REL), 'bs5-unread'), 'bs5-red');
+  ok(S5x.refused === null, 'RED (anchored copy: the share act answered as saved whatever its landing): the failed landing is answered as on disk — 5/8 goes red', S5x);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

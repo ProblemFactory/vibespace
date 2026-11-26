@@ -180,7 +180,7 @@ const MODE_PROBE_BUDGET = 400;
 // detach, open and end are handed, never awaited; a PERSON's share act answers after its landing (shareAct). file → {text, n, landing}
 const HANDED = new Map();
 const writerOf = () => require('../store-writer.js').storeWriter();
-function writeJsonAtomic(file, obj) {
+function writeWindowStore(file, obj) {   // (its read: named off the synchronous helper's name — it is the store writer's)
   const h = HANDED.get(file) || { text: '', n: 0, landing: Promise.resolve(true) };
   h.text = JSON.stringify(obj, null, 2); h.n++;
   HANDED.set(file, h);
@@ -190,7 +190,6 @@ function writeJsonAtomic(file, obj) {
   return h.landing;
 }
 const handedCount = (file) => (HANDED.get(file) || { n: 0 }).n;
-const landingOf = (file) => (HANDED.get(file) || { landing: Promise.resolve(true) }).landing;
 /** the window files' owed writes ON DISK now (a named, bounded wait of the writer — a suite's read of a file after an act) */
 function storesLandedNow(files) { try { const W = writerOf(); const owed = files.filter((f) => W.pending(f)); if (!owed.length) return true; const r = W.flushSync(owed); return !r.deferred && !r.left.some((x) => owed.includes(x.file)); } catch { return false; } }
 
@@ -335,7 +334,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const out = {};
       for (const [h, l] of leases) out[h] = { handle: h, sessionId: l.sessionId, browserKey: l.browserKey || null, since: l.since, origin: l.origin || ORIGIN };
       const agentEnds = {}; for (const [h, p] of openerLost) agentEnds[h] = { at: p.at, told: !!p.told, why: p.why || 'opener-ended' };
-      writeJsonAtomic(leaseFile, { v: 1, savedAt: now(), leases: out, ...(openerLost.size ? { agentEnds } : {}) });
+      writeWindowStore(leaseFile, { v: 1, savedAt: now(), leases: out, ...(openerLost.size ? { agentEnds } : {}) });
     } catch (e) { log.warn?.(`[window] ${LEASE_FILE} not written: ${e.message}`); }
   }
   function publish() { if (!broadcast || leaseHold.held()) return; try { broadcast({ type: 'window-leases-updated', leases: allViews() }); } catch (e) { log.warn?.(`[window] broadcast failed: ${e.message}`); } }
@@ -421,7 +420,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       fs.mkdirSync(dataDir, { recursive: true });
       const out = {};
       for (const [h, r] of reach) out[h] = r;
-      writeJsonAtomic(reachFile, { v: 1, savedAt: now(), windows: out });
+      writeWindowStore(reachFile, { v: 1, savedAt: now(), windows: out });
     } catch (e) { log.warn?.(`[window] ${REACH_FILE} not written: ${e.message}`); }
   }
   /** The last id of a Scale ▸ relaunch chain starting at `id` (null when nothing replaced it). */
@@ -637,14 +636,18 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
 
   /** B-574d «browser-stores» 5/8 (主开发 r5101): A PERSON'S SHARE ACT ANSWERS AFTER ITS LANDING — `fn` (a share verb: the mode, a grant,
-   *  a revoke, an except, «仅本组») runs; when it handed window-reach.json to the writer, that landing is waited for, and one that did
-   *  not land is the act's REFUSAL (not_saved, said). The share's rows themselves are the grants store's, on disk before it returns. */
-  async function shareAct(fn) {
+   *  a revoke, an except, «仅本组») runs, then `respond(err, out)` comes when the window-reach.json it handed LANDED — on the writer's
+   *  synchronous answer road (durable's `answer`: also while the hub stops, the exit's flush). Its read: the act is IN EFFECT before
+   *  that (the grants store's rows on disk, the mode live, the lease dropped by a revoke) — so a landing that failed is never a false
+   *  «refused, nothing changed»: the answer carries notOnDisk (the tree's words for it, as the jobs' and tasks' answers), said. */
+  function shareAct(fn, respond) {
     const n0 = handedCount(reachFile);
-    const out = fn();
-    if (handedCount(reachFile) === n0) return out;   // the act changed no window's mode: nothing to wait for
-    if ((await landingOf(reachFile)) !== true) { try { log.warn?.(`[window] ${REACH_FILE} could not be written — the person's share act is refused (not_saved)`); } catch { } throw namedError('not_saved', 'the window\'s share mode could not be saved (its file could not be written) — nothing changed on disk; try again'); }
-    return out;
+    let out; try { out = fn(); } catch (e) { return respond(e); }
+    if (handedCount(reachFile) === n0) return respond(null, out);   // the act changed no window's mode: nothing to wait for
+    writerOf().durable(reachFile, { answer: (ok) => {
+      if (ok !== true) { try { log.warn?.(`[window] ${REACH_FILE} is not on disk yet — the share act is in effect; the store writer keeps writing it`); } catch { } }
+      respond(null, ok === true ? out : { ...out, notOnDisk: true });
+    } });
   }
 
   // ── records ──

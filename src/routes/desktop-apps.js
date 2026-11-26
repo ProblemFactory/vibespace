@@ -1023,9 +1023,11 @@ function reachGate(req, res) {
   return engine;
 }
 // B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): a person's share act answers AFTER its window-reach.json landed — the
-// ONE await and its refusal (the engine's shareAct: a write that did not land is not_saved); an engine without it answers as before
-async function landedAnswer(res, engine, fn) {
-  try { res.json(typeof engine.shareAct === 'function' ? await engine.shareAct(fn) : fn()); } catch (e) { fail(res, e); }
+// ONE wait (the engine's shareAct, on the writer's answer road — also at the hub's stop): one that did not land answers notOnDisk
+// (in effect, not yet on disk; the writer keeps writing it); an engine without it answers as before
+function landedAnswer(res, engine, fn) {
+  if (typeof engine.shareAct !== 'function') { try { res.json(fn()); } catch (e) { fail(res, e); } return; }
+  engine.shareAct(fn, (err, out) => { try { require('../store-writer.js').identityAtExit(res); if (err) fail(res, err); else res.json(out); } catch { /* the answer could not go out */ } });
 }
 router.get('/api/desktop/apps/:id/reach', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;

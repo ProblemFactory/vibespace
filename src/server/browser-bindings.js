@@ -151,7 +151,14 @@ function handWrite(file, obj, log = console) {
   if (!DIRS_MADE.has(dir)) { fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE }); try { if ((fs.statSync(dir).mode & 0o777) !== DIR_MODE) fs.chmodSync(dir, DIR_MODE); } catch { } DIRS_MADE.add(dir); }
   const W = writerOf();
   W.dirty(file, { name: 'browser-bindings.write', rank: 0, mode: FILE_MODE, makeDir: true,
-    produce: () => { const H = HELD.get(file); if (H && H.hold.held()) throw Object.assign(new Error(`${FILE_NAME} is held (its read failed) — nothing is written over it until it reads`), { code: 'EHELD' }); const d = DOCS.get(file); return JSON.stringify(d ? d.doc : obj, null, 2); },
+    produce: () => {
+      const H = HELD.get(file); if (H && H.hold.held()) throw Object.assign(new Error(`${FILE_NAME} is held (its read failed) — nothing is written over it until it reads`), { code: 'EHELD' });
+      const d = DOCS.get(file), doc = d ? d.doc : obj, J = JUDGES.get(file);
+      // its read (2/8): a binding made before the start's records are read is NOT ON DISK until they judge it — never the next start's
+      // document (a kill before then: the conversation's own record gives its key back, rung 2)
+      if (J && J.state !== 'ok' && J.early.size) { const by = { ...doc.byConversation }; for (const sid of J.early) delete by[sid]; return JSON.stringify({ ...doc, byConversation: by }, null, 2); }
+      return JSON.stringify(doc, null, 2);
+    },
     onWritten: (ok, e) => { if (!ok) { try { log.warn?.(`[browser] could not write ${FILE_NAME}: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } catch { } } } });
   return W.durable(file);
 }
@@ -246,7 +253,7 @@ function judgeOf(file, opts) {
   JUDGES.set(file, J);
   const H = heldOf(file, opts), log = opts.log || console;
   J.done = listMetaFacts(H).then((r) => {
-    if (!r || !r.ok) { J.state = 'failed'; J.at = Date.now(); try { log.warn?.(`[browser] the conversations' records could not be read for this start's binding refusals (${(r && r.why) || 'failed'}) — the refusals judge ${FILE_NAME} alone meanwhile; read again within ${JUDGE_RETRY_MS / 1000} s`); } catch { } return false; }
+    if (!r || !r.ok) { J.state = 'failed'; J.at = Date.now(); retryJudge(file, opts); try { log.warn?.(`[browser] the conversations' records could not be read for this start's binding refusals (${(r && r.why) || 'failed'}) — the refusals judge ${FILE_NAME} alone meanwhile; read again within ${JUDGE_RETRY_MS / 1000} s`); } catch { } return false; }
     const firstAt = new Map();
     for (const row of r.rows) {
       if (!Array.isArray(row)) continue;
@@ -259,9 +266,12 @@ function judgeOf(file, opts) {
     J.state = 'ok';
     judgeEarly(file, J, log);
     return true;
-  }, () => { J.state = 'failed'; J.at = Date.now(); return false; });
+  }, () => { J.state = 'failed'; J.at = Date.now(); retryJudge(file, opts); return false; });
   return J;
 }
+/** its read (2/8): a listing that failed is read again by a timer (not only at the next new binding) — the bindings made meanwhile
+ *  wait for it, off the disk */
+function retryJudge(file, opts) { const t = setTimeout(() => { const J = JUDGES.get(file); if (J && J.state === 'failed') judgeOf(file, opts); }, JUDGE_RETRY_MS + 1000); if (t && t.unref) t.unref(); }
 /** the records' verdict on (sid, key): '' (none against it) | the conversation whose key it is (a share) | 'move:<key>' (sid's own) */
 function judgedAgainst(J, sid, key) {
   if (!J || J.state !== 'ok') return '';
@@ -273,10 +283,11 @@ function judgedAgainst(J, sid, key) {
 function judgeEarly(file, J, log) {
   const d = DOCS.get(file);
   if (!d || !J.early.size) { J.early.clear(); return; }
+  const hadEarly = J.early.size;
   const out = [];
   for (const sid of J.early) { const v = d.doc.byConversation[sid]; if (!v) continue; const why = judgedAgainst(J, sid, String(v.key)); if (why) { delete d.doc.byConversation[sid]; out.push([sid, String(v.key), why]); } }
   J.early.clear();
-  if (!out.length) return;
+  if (!out.length) { if (hadEarly) handWrite(file, d.doc, log).catch(() => { }); return; }   // judged and kept: now on disk
   const H = HELD.get(file); if (H) H.gen++;   // every instance's «already recorded» forgotten (r3717's road)
   for (const [sid, key, why] of out) { try { log.warn?.(`[browser] a binding made at this start before the conversations' records were read was taken back: conversation ${sid.slice(0, 8)} → ${key} — ${why.startsWith('move:') ? `its own record names ${why.slice(5)}` : `that key is conversation ${why.slice(0, 8)}'s by its record`} (a row that had not landed at the last stop); no holder is handed another holder's`); } catch { } }
   handWrite(file, d.doc, log).catch(() => { });
