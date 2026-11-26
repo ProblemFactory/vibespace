@@ -126,7 +126,9 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   let heldSaid = false;
   const hold = HOLD.create({ file, valid: isObj, code: 'device_upgrades_unread', aside: (m) => file + '.corrupt-' + m,
     words: (h) => `the record of the machines' agent updates could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and an update event waits for it`,
-    log: (l) => log(`[device-upgrade] ${l}`), onLift: (v) => { load(v); heldSaid = false; heldUntil = now(); replayOwed(); } });
+    // r4775: the lift BROADCASTS after the owed events — while held every row answered «held» (its «update failed» line off an open
+    // machines list); a lift that owes nothing would leave the list so until some later change
+    log: (l) => log(`[device-upgrade] ${l}`), onLift: (v) => { load(v); heldSaid = false; heldUntil = now(); replayOwed(); try { bcast(); } catch { } } });
   { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: isObj });
     if (hold.start(a) === 'data') load(a.value); }
@@ -256,7 +258,8 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     // from → to) — src/server/device-alerts.js (`upgrade-pushed`); a device's REFUSAL stays this module's own `refused` item
     // (int315: one item per refusal, never a second `upgrade-pushed` with `code: 'bad-signature'` beside it)
     if (!alerted) try { alerts?.file('upgrade-pushed', { hostKey: key, machine, from, to: t, by: 'system:device-upgrade' }); } catch (e) { log(`[device-upgrade] the pushed-update item was not filed: ${e.message}`); }
-    // B-f276 (r4718): the push's alert is device-alerts' own store (filed above, at once); only the deadline waits for THIS record
+    // B-f276 (r4718): the push's alert is device-alerts' own store (filed above, at once); only the deadline waits for THIS record —
+    // replayed at the lift, its deadline counts from the lift (as the sweep's silence does)
     if (heldNow('an update that began', () => begun(arguments[0], { alerted: true }))) return false;
     gone[key] = { ...(gone[key] || {}), machine: nameOf(machine), to: t, at: now(), pending: true };
     save();
