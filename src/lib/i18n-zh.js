@@ -4669,6 +4669,7 @@ export default {
   "the record of the login warnings already filed": "已提交的登录提醒记录",
   "the record of which agent holds which window": "哪个 agent 占用哪个窗口的记录",   // lg-recovery (B-f276 slice window-targets): the window engine's two stores
   "the share mode of each window": "每个窗口的共享模式",
+  "If an agent holds this window, it loses it as soon as the list of window holders can be read again": "如果有 agent 正占用这个窗口，等窗口占用记录能再次读出时它就会失去这个窗口",   // r4813: a narrowing share act while the leases are held
   "The record of which agent holds which window can’t be read right now — nothing was changed, and the agents’ window commands wait until it reads. VibeSpace reads it again by itself in a few minutes.": "暂时读不出哪个 agent 占用哪个窗口的记录 —— 什么都没有改动，agent 的窗口命令会等它读出后再执行。VibeSpace 会在几分钟内自己再读一次。",
   "The share mode of each window can’t be read right now — nothing was changed, and no agent reaches a window and no share changes until it reads. VibeSpace reads it again by itself in a few minutes.": "暂时读不出每个窗口的共享模式 —— 什么都没有改动，读出之前没有 agent 能使用窗口，共享也不会改动。VibeSpace 会在几分钟内自己再读一次。",
   "The record of the login warnings already filed could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A new login warning waits until it reads.": "已提交的登录提醒记录刚才没能读取——VibeSpace 会自己再读一次；没有丢失，也没有改动。新的登录提醒要等读出来之后再提交。",
