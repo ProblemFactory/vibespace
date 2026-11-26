@@ -35,6 +35,8 @@
  */
 const fs = require('fs');
 const path = require('path');
+const SR = require('../store-read.js');   // B-f276 (lane lg-remote-hardening, 主开发 r4718): device-upgrades.json under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and its hold: a failed read held, never read as a first run
 const XS = require('../exit-shell.js');
 
 const INBOX_KEY = 'machines'; // the panel's jump lands on Manage Agents → Machines (src/lib/user-todos-actions.js)
@@ -112,8 +114,40 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   const file = path.join(dataDir, 'device-upgrades.json');
   let ledger = {}; // hostKey → { machine, from, to, at, lost, itemId, text }
   let gone = {}; // hostKey → { machine, to, at (the upgrade began), pending, filedFor, itemId, text } (lane win-upgrade-pipe)
-  try { const j = JSON.parse(fs.readFileSync(file, 'utf-8')); if (j && j.devices && typeof j.devices === 'object') ledger = j.devices; if (j && j.gone && typeof j.gone === 'object') gone = j.gone; } catch { /* first run */ }
+  // B-f276 THE STORE-READ LAW (主开发 r4718, slice machine-watch-ledgers, lane lg-remote-hardening; login-expiry.json's form): the release
+  // read ANY failed read or torn bytes as a first run — the next upgrade event filed its For-you item again, lost the ids of the items it
+  // retracts (a stuck, refused or never-came-back item left open for good) and the deadlines it arms, and saved that over the file. Now
+  // through store-read's answer to the hold (src/store-read-hold.js, code `device_upgrades_unread`): HELD, every event that reads the
+  // ledger files, retracts, arms and drops NOTHING (said once a hold) and nothing is written over the file; LIFTED, the ledger as at a
+  // start (the next event of each device judges it); TORN, kept aside once, then empty (a re-filed item of the same words is the SAME
+  // item in For you: its add matches by its text)
+  const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  function load(j) { ledger = {}; gone = {}; if (j && isObj(j.devices)) ledger = j.devices; if (j && isObj(j.gone)) gone = j.gone; }
+  let heldSaid = false;
+  const hold = HOLD.create({ file, valid: isObj, code: 'device_upgrades_unread', aside: (m) => file + '.corrupt-' + m,
+    words: (h) => `the record of the machines' agent updates could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and an update event waits for it`,
+    log: (l) => log(`[device-upgrade] ${l}`), onLift: (v) => { load(v); heldSaid = false; heldUntil = now(); replayOwed(); } });
+  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: isObj });
+    if (hold.start(a) === 'data') load(a.value); }
+  /** HELD: an event over an unread ledger changes NOTHING now — said once a hold, nothing filed, retracted, armed or written — and is
+   *  OWED: replayed in its order at the lift (a device's hello comes once: a restart is exactly when every device re-dials, inside the
+   *  hold's first rung — dropped, a landed update's item would stay open and a re-dialed device be told «stopped answering»). At most
+   *  OWED_MAX events are owed; past it the rest are counted and said (each device's next hello says its state again). → true when held */
+  const owed = []; let owedDropped = 0; const OWED_MAX = 500;
+  const heldNow = (what, replay = null) => {
+    const h = hold.held(); if (!h) return false;
+    if (replay) { if (owed.length < OWED_MAX) owed.push(replay); else owedDropped++; }
+    if (!heldSaid) { heldSaid = true; log(`[device-upgrade] ${what} waits — the record of the machines' agent updates could not be read (${h.code || 'unread'}); nothing filed, retracted or written until it reads, then the events that came meanwhile are judged in their order`); }
+    return true;
+  };
+  function replayOwed() {
+    const q = owed.splice(0), lost = owedDropped; owedDropped = 0;
+    if (q.length || lost) log(`[device-upgrade] the record reads again — ${q.length} event(s) that came while it could not be read judged now${lost ? `; ${lost} more were not kept (over ${OWED_MAX}): each device's next hello says its state again` : ''}`);
+    for (const fn of q) { try { fn(); } catch (e) { log(`[device-upgrade] an owed event failed at the lift: ${e.message}`); } }
+  }
   const save = () => {
+    if (!hold.writable('a write of the machines\' agent updates record')) return;   // HELD: never over a file that could not be read
     try { const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, devices: ledger, gone }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }
     catch (e) { log(`[device-upgrade] ledger not written: ${e.message}`); }
   };
@@ -128,6 +162,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   function stuck({ hostKey, machine, from, to, platform = null, capabilities = null } = {}) {
     const f = verOf(from), t = verOf(to), key = String(hostKey || '').slice(0, 160);
     if (!key || !f || !t || f === t) return null;
+    if (heldNow('a stuck update', () => stuck(arguments[0]))) return { filed: false, held: true, row: null };
     const prev = ledger[key];
     const lost = lostOf({ platform, capabilities });
     if (prev && prev.to === t) { // the same (device, version): never a second item — refresh the row's facts only
@@ -149,6 +184,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     return { filed: !!rec.itemId, row: rowOf(key) };
   }
   function matched({ hostKey, version } = {}) {
+    if (heldNow('an update that landed', () => matched(arguments[0]))) return false;
     const key = String(hostKey || '').slice(0, 160), rec = ledger[key];
     if (!rec) return false;
     if (userTodos && userTodos.isHeldUnread?.()) return false;   // B-44f3: For you held unread — «gone» is unread there: keep the record (its retract would be refused — the item would stay open for good); the next report after the read resolves it
@@ -158,6 +194,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     return true;
   }
   function rowOf(hostKey) {
+    { const h = hold.held(); if (h) return { held: h.code || 'unread' }; }   // B-f276 (r4718): HELD — answered by name, never an empty ledger's «nothing»
     const r = ledger[String(hostKey || '')];
     return r ? { from: r.from, to: r.to, at: r.at, lost: r.lost || null, ...(r.refused ? { refused: r.refused } : {}), ...(r.unsigned ? { unsigned: true } : {}) } : null;
   }
@@ -166,6 +203,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   function refused({ hostKey, machine, from, to, code, keyId = null, by = null, floor = null } = {}) {
     const f = verOf(from), t = verOf(to), key = String(hostKey || '').slice(0, 160);
     if (!key || !f || !t || f === t) return null;
+    if (heldNow('a refused update', () => refused(arguments[0]))) return { filed: false, held: true, row: null };
     const prev = ledger[key];
     if (code === 'unsigned-local-build') {
       if (prev && prev.to === t && prev.unsigned) return { filed: false, row: rowOf(key) };
@@ -211,19 +249,22 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     return { filed };
   }
   /** The hub STARTED an upgrade of this device: arm its deadline (re-armed by every attempt). */
-  function begun({ hostKey, machine, from = null, to } = {}) {
+  function begun({ hostKey, machine, from = null, to } = {}, { alerted = false } = {}) {
     const key = String(hostKey || '').slice(0, 160), t = verOf(to);
     if (!key || !t) return false;
     // lane device-act-audit (design q-042 D10): a push of new code to a device is an URGENT For-you item, ONCE per (device,
     // from → to) — src/server/device-alerts.js (`upgrade-pushed`); a device's REFUSAL stays this module's own `refused` item
     // (int315: one item per refusal, never a second `upgrade-pushed` with `code: 'bad-signature'` beside it)
-    try { alerts?.file('upgrade-pushed', { hostKey: key, machine, from, to: t, by: 'system:device-upgrade' }); } catch (e) { log(`[device-upgrade] the pushed-update item was not filed: ${e.message}`); }
+    if (!alerted) try { alerts?.file('upgrade-pushed', { hostKey: key, machine, from, to: t, by: 'system:device-upgrade' }); } catch (e) { log(`[device-upgrade] the pushed-update item was not filed: ${e.message}`); }
+    // B-f276 (r4718): the push's alert is device-alerts' own store (filed above, at once); only the deadline waits for THIS record
+    if (heldNow('an update that began', () => begun(arguments[0], { alerted: true }))) return false;
     gone[key] = { ...(gone[key] || {}), machine: nameOf(machine), to: t, at: now(), pending: true };
     save();
     return true;
   }
   /** The device answered (any hello): no deadline left, and an open never-came-back item resolves itself. */
   function answered({ hostKey } = {}) {
+    if (heldNow('a device that answered', () => answered(arguments[0]))) return false;
     const key = String(hostKey || '').slice(0, 160), g = gone[key];
     if (!g) return false;
     const had = !!g.itemId;
@@ -241,6 +282,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     // (a 503) — its silence is the hub's, not the device's: nothing is judged (no «rerun its install command»), the next sweep after
     // the read judges it
     try { if (held()) { heldUntil = now(); return false; } } catch { }
+    if (heldNow('the never-came-back sweep')) { heldUntil = now(); return false; }   // B-f276 (r4718): its OWN record unread — nothing judged until it reads, the silence counted from then
     let changed = false;
     for (const g of Object.values(gone)) {
       // its read S2: the silence is counted from the hold's END — the first sweep after the read races the device's own re-dial
@@ -265,7 +307,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   if (tick && tick.unref) tick.unref();
   /** THE door (hosts.onAgentUpgrade): 'stuck' | 'matched' | 'begun' | 'answered' | 'refused' | 'trusted'. */
   function onAgentUpgrade(event, facts) { return event === 'stuck' ? stuck(facts) : event === 'matched' ? matched(facts) : event === 'begun' ? begun(facts) : event === 'answered' ? answered(facts) : event === 'refused' ? refused(facts) : event === 'trusted' ? trusted(facts) : null; }
-  return { stuck, matched, begun, answered, refused, trusted, sweep, rowOf, onAgentUpgrade, ledger: () => JSON.parse(JSON.stringify(ledger)), gone: () => JSON.parse(JSON.stringify(gone)), stop: () => { if (tick) clearInterval(tick); }, INBOX_KEY };
+  return { stuck, matched, begun, answered, refused, trusted, sweep, rowOf, onAgentUpgrade, ledger: () => JSON.parse(JSON.stringify(ledger)), gone: () => JSON.parse(JSON.stringify(gone)), held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), stop: () => { if (tick) clearInterval(tick); hold.stop(); }, INBOX_KEY };
 }
 
 module.exports = { create, itemOf, goneItemOf, refusedItemOf, trustedItemOf, REFUSAL_CODES, lostOf, INBOX_KEY, RESOLVED_BY, GONE_AFTER_MS };

@@ -181,6 +181,63 @@ console.log('— a REFUSED upgrade: one urgent item per (device, version, code);
   X.w.onAgentUpgrade('refused', f);
   ok(X.open().length === 0, 'CONTROL (r): a door without `refused` files nothing for a bad signature — REF-1 red');
 }
+console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-READ LAW — held when unreadable, kept aside once when torn, healed at the next good read —');
+{
+  const EIO = () => Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' });
+  // the unreadable file is a PLACED refusal of the read call (fs.readFileSync answers EIO for that one path, the next read only) —
+  // never a mode change or a mount; torn bytes are bytes written whole that do not parse
+  const placeReads = (file, n = 1) => { const f = path.resolve(file), realS = fs.readFileSync, seen = { n: 0 };
+    fs.readFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p) === f && seen.n < n) { seen.n++; throw EIO(); } return realS.call(this, p, ...a); };
+    return { seen, restore: () => { fs.readFileSync = realS; } }; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const MH = mutantCopies('dus-held', REPO);
+  const S = { hostKey: 'host-dial-HB1', machine: 'HB1', from: '2.369.199', to: '2.369.201', ...WIN };
+  /** life one: a stuck update filed and recorded, and a pending deadline (another device) — on disk */
+  const lifeOne = (Mod = DW) => { const a = world(Mod); a.w.stuck(S); a.w.begun({ hostKey: 'host-dial-HB2', machine: 'HB2', from: '2.369.199', to: '2.369.201' }); a.w.stop();
+    const file = path.join(a.dir, 'device-upgrades.json'); return { ...a, file, bytes: fs.readFileSync(file, 'utf8'), itemId: a.open()[0].id }; };
+  /** a held life: the same folder, its read refused once */
+  const heldLife = (Mod, a, lines = []) => { const pr = placeReads(a.file); let w = null; try { w = Mod.create({ userTodos: a.todos, dataDir: a.dir, log: (l) => lines.push(l), tickMs: 0 }); } finally { pr.restore(); } return { w, lines, seen: pr.seen.n }; };
+  const events = (w) => { const r1 = w.stuck({ ...S, to: '2.369.203' }); const m1 = w.matched({ hostKey: 'host-dial-HB1', version: '2.369.201' });   // a NEWER version gave up; the old one landed
+    w.begun({ hostKey: 'host-dial-HB3', machine: 'HB3', to: '2.369.201' }); w.answered({ hostKey: 'host-dial-HB2' }); w.sweep(); return { r1, m1 }; };
+  const alerted = [];
+  const heldLife2 = (Mod, L, lines = []) => { const pr = placeReads(L.file); let w = null; try { w = Mod.create({ userTodos: L.todos, dataDir: L.dir, log: (l) => lines.push(l), tickMs: 0, alerts: { file: (kind, f) => alerted.push([kind, f.hostKey]) } }); } finally { pr.restore(); } return { w, lines, seen: pr.seen.n }; };
+  const a = lifeOne();
+  const h = heldLife2(DW, a); const e = events(h.w);
+  ok(h.seen === 1 && !!h.w.held() && e.r1 && e.r1.held === true && e.m1 === false && a.open().length === 1 && a.open()[0].id === a.itemId && fs.readFileSync(a.file, 'utf8') === a.bytes
+    && h.lines.filter((l) => /waits — the record of the machines' agent updates could not be read \(EIO\)/.test(l)).length === 1 && JSON.stringify(h.w.rowOf('host-dial-HB1')) === JSON.stringify({ held: 'EIO' }),
+    'HELD (a placed EIO of the read): every update event changes NOTHING now — the item filed before stays the one open item, the bytes on disk byte for byte after every writer was asked, said once; the row reader answers «held» by name', { open: a.open().map((i) => i.text), row: h.w.rowOf('host-dial-HB1') });
+  ok(alerted.length === 1 && alerted[0][0] === 'upgrade-pushed' && alerted[0][1] === 'host-dial-HB3', 'HELD: a push that began files its URGENT alert AT ONCE (its own store, device-alerts) — only its deadline waits for this record', alerted);
+  ok(/could not be read/.test(h.w.heldWords() || ''), `HELD: its words name what waits («${h.w.heldWords()}»)`);
+  const lifted = await h.w.readAgain();
+  const g = h.w.gone();
+  ok(lifted === true && !h.w.held() && a.open().length === 0 && !g['host-dial-HB2'] && g['host-dial-HB3'] && g['host-dial-HB3'].pending === true && !h.w.ledger()['host-dial-HB1'] && alerted.length === 1
+    && h.lines.some((l) => /the record reads again — 4 event\(s\) that came while it could not be read judged now/.test(l)),
+    'LIFTED: the events that came while held are OWED and judged in their order — the newer give-up superseded the old item and the landed update resolved it (no item left open), the device that answered has no deadline left, the push that began has its deadline (its alert not filed twice)', { open: a.open().length, gone: Object.keys(g), lines: h.lines.filter((l) => /reads again/.test(l)) });
+  h.w.stop();
+  // RED: a copy that DROPS the owed events (the lift judges nothing that came meanwhile) — the landed update's item stays open for good
+  // and the re-dialed device keeps its deadline (it would be told «stopped answering»)
+  const OSRC = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
+  const Drop = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, 'heldSaid = false; heldUntil = now(); replayOwed(); } });', 'heldSaid = false; heldUntil = now(); } });', 'src/server/device-upgrade-watch.js'), 'owed-dropped');
+  const d = lifeOne(); const dh = heldLife2(Drop, d); events(dh.w); await dh.w.readAgain();
+  ok(d.open().length === 1 && dh.w.gone()['host-dial-HB2'] && dh.w.gone()['host-dial-HB2'].pending === true, 'RED: a copy that drops what came during the hold — the landed update\'s item stays open, the device that answered keeps its deadline', { open: d.open().length });
+  dh.w.stop();
+  // TORN: kept aside ONCE (byte for byte), the ledger then empty — the same stuck update re-filed is the SAME item in For you (its words)
+  const t0 = lifeOne(); const TORN = t0.bytes.slice(0, 30); fs.writeFileSync(t0.file, TORN);
+  const tw = DW.create({ userTodos: t0.todos, dataDir: t0.dir, log: () => { }, tickMs: 0 });
+  for (let i = 0; i < 200 && tw.held(); i++) await sleep(10);
+  const rt = tw.stuck(S);
+  const copies = fs.readdirSync(t0.dir).filter((n) => n.startsWith('device-upgrades.json.corrupt-'));
+  ok(!tw.held() && copies.length === 1 && fs.readFileSync(path.join(t0.dir, copies[0]), 'utf8') === TORN && t0.open().length === 1 && t0.open()[0].id === t0.itemId && rt && !rt.held,
+    'TORN: the bytes kept aside once beside the store, byte for byte; the ledger empty — the same stuck update re-filed is the SAME item in For you, never a second', { copies, open: t0.open().length });
+  tw.stop();
+  // RED: the tip's read (blind to the hold: a failed read taken as a first run) — the newer version files a SECOND item, the old one is
+  // never retracted, and the empty ledger is written over the file
+  const RSRC = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
+  const Rel = MH.load('src/server/device-upgrade-watch.js', editAnchor(RSRC, "    if (hold.start(a) === 'data') load(a.value); }\n", "    if (a.state === 'data') load(a.value); }\n", 'src/server/device-upgrade-watch.js'), 'tip-read');
+  const r = lifeOne(Rel); const rh = heldLife(Rel, r); rh.w.stuck({ ...S, to: '2.369.203' }); rh.w.stop();   // a NEWER version gave up, read over an empty ledger
+  ok(r.open().length === 2 && fs.readFileSync(r.file, 'utf8') !== r.bytes, 'RED: the tip\'s read (a failed read taken as a first run) — a SECOND item beside the old one, never retracted, and the ledger written over the file', r.open().map((i) => i.text));
+  for (const c of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1, label: 'mutant-copy (device-upgrades held): ' })) ok(c.pass, c.name, c.detail);
+}
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
