@@ -1680,6 +1680,43 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     const many = WL.create({ dataDir: scratch('helper-ask-writes-lost-many'), now: () => (t3 += 1000), log: () => { } });
     for (let i = 0; i < WL.MAX_PER_CONVERSATION + 3; i++) many.note(rec({ uuid: 'many-' + i, transcript_session_ids: ['c-many'], session_id: 'c-many' }));
     check('⑱f …the newest rows of one conversation are the ones kept', many.rowsFor('c-many').length === WL.MAX_PER_CONVERSATION && many.rowsFor('c-many').at(-1).uuid === 'many-' + (WL.MAX_PER_CONVERSATION + 2) && many.rowsFor('c-many')[0].uuid === 'many-3');
+    // B-574d (lane nl-journals): THE RECORD IS ON DISK BEFORE ITS NAME POINTS AT IT — the store's OWN write (writeAtomic, no `write`
+    // handed): every call on its temp, in order; a PLACED answer of the sync (an errno name), never a mount
+    const wlTraced = (file, fn, sync = null) => {
+      const tmp = file + '.tmp', o = { openSync: fs.openSync, fsyncSync: fs.fsyncSync, closeSync: fs.closeSync, renameSync: fs.renameSync }, calls = [];
+      let tfd = null, value, threw = null;
+      fs.openSync = function (p0, ...a) { const fd = o.openSync.call(this, p0, ...a); if (String(p0) === tmp) { tfd = fd; calls.push('open'); } return fd; };
+      fs.fsyncSync = function (fd, ...a) { if (fd === tfd) { calls.push('sync'); if (sync) throw Object.assign(new Error(`${sync}: a placed answer of the sync`), { code: sync }); } return o.fsyncSync.call(this, fd, ...a); };
+      fs.closeSync = function (fd, ...a) { if (fd === tfd) { calls.push('close'); tfd = null; } return o.closeSync.call(this, fd, ...a); };
+      fs.renameSync = function (a0, b0, ...a) { if (String(a0) === tmp) calls.push('rename'); return o.renameSync.call(this, a0, b0, ...a); };
+      try { value = fn(); } catch (err) { threw = err.code || err.message; } finally { Object.assign(fs, o); }
+      return { calls: calls.join(' '), value, threw };
+    };
+    const rowsOn = (d) => WL.create({ dataDir: d, log: () => { } }).rowsFor(CID).length;
+    const dirS = scratch('helper-ask-writes-lost-synced'), jS = []; fs.mkdirSync(dirS, { recursive: true });
+    const fS = path.join(dirS, 'writes-lost.json');
+    const sStore = WL.create({ dataDir: dirS, now: () => t0 + 7000, log: (...a) => jS.push(a.join(' ')), retryMs: 36e5 });
+    const sOk = wlTraced(fS, () => sStore.note(rec({ uuid: 'u-sync-1' })));
+    check('⑱f B-574d the record\'s own write: its temp written, SYNCED, closed, THEN renamed over the store — on disk before its name points at it', sOk.calls === 'open sync close rename' && !sOk.threw && rowsOn(dirS) === 1, sOk);
+    const sBefore = fs.readFileSync(fS, 'utf8');
+    const sBad = wlTraced(fS, () => sStore.note(rec({ uuid: 'u-sync-2' })), 'EIO');
+    check('⑱f B-574d a sync that FAILS (a placed EIO) is a failed write: no throw at the consumer, the old record stands, no temp left, the row held in memory, said once', sBad.calls === 'open sync close' && !sBad.threw && fs.readFileSync(fS, 'utf8') === sBefore && !fs.existsSync(fS + '.tmp') && sStore.rowsFor(CID).length === 2 && jS.filter((l) => /held in memory/.test(l)).length === 1, { sBad, jS });
+    const sRetry = wlTraced(fS, () => sStore.flush());
+    check('⑱f B-574d …its retry, the disk answering again, lands both rows — synced', sRetry.value === true && sRetry.calls === 'open sync close rename' && rowsOn(dirS) === 2, sRetry);
+    sStore.stop();
+    const dirN = scratch('helper-ask-writes-lost-nosync'), jN = []; fs.mkdirSync(dirN, { recursive: true });
+    const fN = path.join(dirN, 'writes-lost.json'), nStore = WL.create({ dataDir: dirN, now: () => t0 + 8000, log: (...a) => jN.push(a.join(' ')), retryMs: 36e5 });
+    const n1 = wlTraced(fN, () => nStore.note(rec({ uuid: 'u-ns-1' })), 'EINVAL'), n2 = wlTraced(fN, () => nStore.note(rec({ uuid: 'u-ns-2' })), 'EINVAL');
+    const nos = jN.filter((l) => /does not do a sync \(EINVAL\)/.test(l));
+    check('⑱f B-574d a file system that does no sync at all (a placed EINVAL) LANDS the record — said ONCE over two writes, no path in the words', n1.calls === 'open sync close rename' && n2.calls === n1.calls && rowsOn(dirN) === 2 && nos.length === 1 && !nos[0].includes(dirN), { n1, n2, jN });
+    nStore.stop();
+    const WL_AT = "  try { FC.renameSynced(tmp, file, text, { where: '[writes-lost] the kept warnings', say }); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }";
+    const WLrel = require(MXd.write('src/server/writes-lost.js', editAnchor(read('src/server/writes-lost.js'), WL_AT, '  try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }', 'src/server/writes-lost.js'), 'release-unsynced'));   // stale-pins: kept (the release's writeAtomic — this red control's own text)
+    const dirR = scratch('helper-ask-writes-lost-release'); fs.mkdirSync(dirR, { recursive: true });
+    const rStore = WLrel.create({ dataDir: dirR, now: () => t0 + 9000, log: () => { }, retryMs: 36e5 });
+    const rRun = wlTraced(path.join(dirR, 'writes-lost.json'), () => rStore.note(rec({ uuid: 'u-rel-1' })));
+    check('⑱f RED CONTROL B-574d: the release\'s write renames its temp over the store with NO sync — a power cut can leave the name over no bytes, read back as «no store»', !/sync/.test(rRun.calls) && /rename/.test(rRun.calls), rRun);
+    rStore.stop();
     // r3 M1 (round-2 acceptance): A ROW HELD AFTER A FAILED WRITE IS WRITTEN AT SHUTDOWN. The person frees the space and restarts the hub inside the 60-s retry
     const dirStop = scratch('helper-ask-writes-lost-stop'), jStop = []; fs.mkdirSync(dirStop, { recursive: true });
     let stopFull = true; const stopWrite = (file, text) => { if (stopFull) throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); fs.writeFileSync(file, text); };
