@@ -798,6 +798,52 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     ok(!!v && v.kind === 'maynot', 'CONTROL (the stop\'s flush not stamped stop:true, in a copy): a CLEAN stop is told «may not» — red', J(v)); }
   { const S = cut('mark-ignored', "  const st = stamp || null, m = mark && typeof mark === 'object' && 'base' in mark ? mark : null;", "  const st = stamp || null, m = null;"); const d = scratch(); await runOne(d, { owe: true, src: S }); const H = hub(d, S); still(() => H.R.readLayouts()); const v = await stopOf(H);
     ok(!!v && v.kind === 'maynot', 'CONTROL (the owed mark not read, in a copy): a KNOWN loss is told only «may not» — red', J(v)); }
+  // B-574d (lane nl-journals, 主开发 r4761 — the third shape): THE OWED MARK IS ON DISK BEFORE ITS NAME POINTS AT IT. Every call on its
+  // temp, in order, on the promises road (its own chain, off the loop); a PLACED answer of the temp's sync (an errno name), never a mount
+  const markTrace = async (dir, fn, { sync = null, close = null } = {}) => {
+    const tmp = tmpOf(dir, 'layouts.owed.json'), fin = path.join(dir, 'layouts.owed.json'), P0 = { open: fs.promises.open, rename: fs.promises.rename }, calls = [], warned = [], w0 = console.warn;
+    fs.promises.open = async function (p0, ...a) {
+      const fh = await P0.open.call(this, p0, ...a);
+      if (String(p0) !== tmp) return fh;
+      calls.push('open');
+      const s0 = fh.sync, c0 = fh.close;
+      fh.sync = async function () { calls.push('sync'); if (sync) throw Object.assign(new Error(`${sync}: a placed answer of the sync`), { code: sync }); return s0.call(this); };
+      fh.close = async function () { calls.push('close'); await c0.call(this); if (close) throw Object.assign(new Error(`${close}: a placed answer of the close`), { code: close }); };
+      return fh;
+    };
+    fs.promises.rename = async function (a0, b0, ...a) { if (String(a0) === tmp && String(b0) === fin) calls.push('rename'); return P0.rename.call(this, a0, b0, ...a); };
+    console.warn = (...a) => warned.push(a.join(' '));
+    try { const value = await fn(); return { value, calls: calls.join(' '), warned }; } finally { Object.assign(fs.promises, P0); console.warn = w0; }
+  };
+  const markOf = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'layouts.owed.json'), 'utf8')); } catch { return null; } };
+  /** a run with a write owed (runOne), its mark's chain SETTLED inside the placed window — the failed stop flush tries the mark again */
+  const owedRun = (d, o = {}) => async () => { const H0 = await runOne(d, { owe: true, ...o }); await settle(10); await H0.R.layoutsMarkSettled(); return H0; };
+  {
+    const d = scratch(), t = await markTrace(d, owedRun(d));
+    const m = markOf(d), H = hub(d); still(() => H.R.readLayouts()); const v = await stopOf(H);
+    ok(t.calls === 'open sync close rename' && !!m && typeof m.seq === 'number' && !fs.existsSync(tmpOf(d, 'layouts.owed.json')) && !!v && v.kind === 'known',
+      'B-574d THE OWED MARK: its temp opened, written, SYNCED, closed, THEN renamed — on its own chain off the loop; on disk before its name points at it, and the next start tells the KNOWN loss', { calls: t.calls, v: J(v) });
+  }
+  {
+    const d = scratch(), t = await markTrace(d, owedRun(d), { sync: 'EIO' });
+    const H = hub(d); still(() => H.R.readLayouts()); const v = await stopOf(H);
+    ok(/^open sync close/.test(t.calls) && !/rename/.test(t.calls) && markOf(d) === null && !fs.existsSync(tmpOf(d, 'layouts.owed.json')) && t.warned.some((l) => /the owed mark could not be written \(EIO\)/.test(l)) && !!v && v.kind === 'maynot',
+      'B-574d a sync of the mark that FAILS (a placed EIO) is a FAILED WRITE: no rename, no mark, no temp left, said by name — and the next start says «may not» (never a KNOWN loss read from a mark that never reached the disk)', { calls: t.calls, warned: t.warned, v: J(v) });
+  }
+  {
+    const d = scratch(), t = await markTrace(d, owedRun(d), { close: 'EIO' });
+    ok(/^open sync close/.test(t.calls) && !/rename/.test(t.calls) && markOf(d) === null && !fs.existsSync(tmpOf(d, 'layouts.owed.json')) && t.warned.some((l) => /the owed mark could not be written \(EIO\)/.test(l)),
+      'B-574d a CLOSE of the mark that fails after its write (a placed EIO — a deferred write error) is a FAILED WRITE too: no rename, no mark, no temp left, said by name', { calls: t.calls, warned: t.warned });
+  }
+  {
+    const d = scratch(), t = await markTrace(d, owedRun(d), { sync: 'EINVAL' });
+    const nos = t.warned.filter((l) => /the owed mark: its file system does not do a sync \(EINVAL\)/.test(l));
+    ok(t.calls === 'open sync close rename' && !!markOf(d) && nos.length === 1 && !nos[0].includes(d),
+      'B-574d a file system that does no sync at all (a placed EINVAL) LANDS the mark — said once, no path in the words', { calls: t.calls, warned: t.warned });
+  }
+  { const S = cut('mark-unsynced', "          try { await fh.sync(); } catch (e) { if (!FCM.SYNC_UNSUPPORTED.has(e && e.code)) throw e; if (!_markNoSyncSaid) { _markNoSyncSaid = true; console.warn(`[layouts] ${FCM.syncUnsupportedWords('the owed mark', e.code)}`); } }\n", '');
+    const d = scratch(), t = await markTrace(d, owedRun(d, { src: S }));
+    ok(!/sync/.test(t.calls) && /rename/.test(t.calls), 'CONTROL (the mark\'s sync taken out, in a copy): renamed over its name with NO sync of its temp — red', { calls: t.calls }); }
   { const S = cut('maynot-carried', "_startUnnoted : _stopFact && _stopFact.kind === 'known' ?", '_startUnnoted : _stopFact ?'); const d = scratch(); await runOne(d, { src: S }); const H2 = hub(d, S); still(() => H2.R.readLayouts()); await stopOf(H2); still(() => H2.R.flushLayouts({ stop: true })); const H3 = hub(d, S); still(() => H3.R.readLayouts()); const v = await stopOf(H3);
     ok(!!v, 'CONTROL («may not» carried in the bytes, in a copy): the start after a clean stop still tells a loss — red', J(v)); }
   { const S = cut('sum-unchecked', "  return { stamp: st, trusted: body !== null && typeof st.sum === 'string' && sumOf(body) === st.sum };", '  return { stamp: st, trusted: true };'); const d = scratch(); fs.writeFileSync(path.join(d, 'layouts.json'), relBytes); fs.writeFileSync(path.join(d, 'layouts.owed.json'), J({ run: 'r1', seq: 9, since: 1, base: { run: 'r1', seq: 3 }, code: 'EIO' })); const H = hub(d, S); still(() => H.R.readLayouts()); const v = await stopOf(H);

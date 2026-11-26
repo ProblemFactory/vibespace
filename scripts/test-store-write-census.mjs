@@ -2261,7 +2261,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
       const HOLD_WRITES = { layoutsHold: 1, bookmarksHold: 1, themesHold: 1, userStateHold: 2, settingsHold: 1 };
       const FS_WRITE = /^(write|append|rename|unlink|rm|copy|cp|truncate|symlink|link|mkdir|chmod|chown|utimes|open|createWriteStream)/;
-      const DIRECT_OK = { mkdirSync: [/^dir$/, /^HISTORY_DIR$/], writeFileSync: [/^tmp$/, /^CLAUDE_CREDS$/, /^CODEX_CREDS$/], renameSync: [/^tmp$/], 'promises.unlink': [/^path\.join\(HISTORY_DIR, /, /^OWED_MARK$/, /^markTmp$/], 'promises.writeFile': [/^markTmp$/], 'promises.rename': [/^markTmp$/] };
+      const DIRECT_OK = { mkdirSync: [/^dir$/, /^HISTORY_DIR$/], writeFileSync: [/^tmp$/, /^CLAUDE_CREDS$/, /^CODEX_CREDS$/], renameSync: [/^tmp$/], 'promises.unlink': [/^path\.join\(HISTORY_DIR, /, /^OWED_MARK$/, /^markTmp$/], 'promises.open': [/^markTmp$/], 'promises.rename': [/^markTmp$/] };   // B-574d (lane nl-journals): the owed mark's temp OPENED for its synced write (it was a writeFile — that allowance gone with its call)
       const chokeCensus = (src) => {
         const ast = ACH.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true });
         const text = (n) => src.slice(n.start, n.end);
