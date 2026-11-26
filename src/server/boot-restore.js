@@ -117,11 +117,27 @@ function turnRan(rec, session) {
 // lane end-obeys-verdict (majordomo piece 3): an END ON PURPOSE — a person's Terminate or an agent's admitted end — keeps the same
 // stopped record, reason `ended`, with who ended it (kind person | agent, the actor's id, a name) and when (stoppedAt)
 const STOP_ENDED = 'ended';
-/** tmp + rename (the atomic-persistence law): a crash mid-write leaves the old file or none, never a torn one. */
-function writeJsonAtomic(file, obj) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj));
-  fs.renameSync(tmp, file);
+const storeWriter = () => require('../store-writer.js').storeWriter();
+/** B-574d (lane bl-jobs, slice «session-and-job-records»): A KEPT COPY (`<sock>.json.stopped` — a restart's dead socket, an end on
+ *  purpose) reaches the disk through THE STORE WRITER: one job (no debounce; rank 0, nothing re-derives it), atomic and SYNCED on
+ *  the writer's thread — never a write on the hub's loop (the release wrote a boot's copies there, one per dead socket, unsynced,
+ *  and an end's unsynced). Forgotten once it lands with nothing newer owed. A failed write is SAID ONCE (`failed(code)`) and stays
+ *  the writer's (kept in memory, retried at its pace). → the writer */
+function keepCopy(file, kept, failed) {
+  const W = storeWriter();
+  let said = false;
+  W.dirty(file, { name: 'kept-copy.write', debounceMs: 0, rank: 0, produce: () => JSON.stringify(kept),
+    onWritten: (ok, err) => {
+      if (ok) { try { if (W.owed(file) === null) W.forget(file); } catch { } return; }   // landed: the writer keeps no entry for it
+      if (!said) { said = true; try { failed((err && (err.code || err.message)) || 'a failed write'); } catch { } }
+    } });
+  return W;
+}
+/** A KEPT COPY LEAVES THROUGH ITS WRITER FIRST (B-574d): a write of it still owed is dropped, one in flight is removed again once it
+ *  lands — a copy is never brought back after its removal; then its unlink, a refusal said by name */
+function unlinkKept(sockFile, file, done = null) {
+  try { storeWriter().forget(file); } catch { }
+  fs.unlink(file, (err) => { saidUnlinkFailure(sockFile, err); if (done) done(); });
 }
 
 function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
@@ -398,8 +414,14 @@ function retireDeadSocket(sockFile, socketPath) {
     if (!dm.orphanedAt && cid) {
       const stopped = path.join(META_DIR, sockFile + '.json.stopped');
       const kept = { ...dm, status: 'stopped', stoppedAt: deadTally.at || (deadTally.at = Date.now()), stopReason: STOP_DEAD_SOCKET }; // ONE instant per pass: its duplicates are ordered by createdAt
-      try { writeJsonAtomic(stopped, kept); } catch (e) { console.warn(`    ↳ ${sockFile}: its stopped copy could not be written (${e.message}) — the meta is left as it is, never deleted`); return; }
-      deleteSessionMeta(sockFile);
+      // B-574d: the copy is THE STORE WRITER's (never a write on the boot's loop — a machine's reboot retires every local
+      // conversation in one pass); the live meta goes through its ONE delete road only AFTER the copy LANDED: a copy that does not
+      // land leaves the meta as it is, never deleted (said once; the writer retries it)
+      let W = null;
+      try { W = keepCopy(stopped, kept, (why) => console.warn(`    ↳ ${sockFile}: its stopped copy is not written yet (${why}) — the meta is left as it is, never deleted, until the copy lands (the store writer retries it)`)); }
+      catch (e) { console.warn(`    ↳ ${sockFile}: its stopped copy could not be written (${e.message}) — the meta is left as it is, never deleted`); return; }
+      const landed = W.afterLanding(stopped, () => deleteSessionMeta(sockFile), { what: 'the live meta, removed once its stopped copy landed', timeoutMs: null });
+      settling.add(landed); landed.finally(() => settling.delete(landed));   // a test's wait (stoppedSettled) waits for the landing too
       const dropped = keepStopped(sockFile, kept, cid); // r2: a newer stop of the SAME conversation keeps one copy — the line says which went
       if (dropped === sockFile) { deadTally.superseded.push(sockFile); return; }
       if (dropped && deadTally.kept.includes(dropped)) { deadTally.kept.splice(deadTally.kept.indexOf(dropped), 1); deadTally.superseded.push(dropped); }
@@ -439,8 +461,8 @@ const endRank = (m) => (m && m.stopReason === STOP_ENDED ? 1 : 0);
 function keepStopped(sockFile, meta, id) {
   const k = keptKey(sockFile, meta, id), was = keptStopped.get(k);
   if (was && was.sockFile !== sockFile) {
-    if (endRank(was.meta) > endRank(meta) || (endRank(was.meta) === endRank(meta) && newerStop(was.meta, meta))) { fs.unlink(keptFile(sockFile), (err) => saidUnlinkFailure(sockFile, err)); return sockFile; }
-    fs.unlink(keptFile(was.sockFile), (err) => saidUnlinkFailure(was.sockFile, err));
+    if (endRank(was.meta) > endRank(meta) || (endRank(was.meta) === endRank(meta) && newerStop(was.meta, meta))) { unlinkKept(sockFile, keptFile(sockFile)); return sockFile; }
+    unlinkKept(was.sockFile, keptFile(was.sockFile));
     keptStopped.set(k, { sockFile, meta, id });
     return was.sockFile;
   }
@@ -480,18 +502,22 @@ let endedSettle = Promise.resolve();
  * lane end-obeys-verdict (majordomo piece 3) — TERMINATE SAYS WHO. An end on purpose keeps the stopped record a restart already
  * leaves (no new store): reason `ended`, `endedBy` {kind: 'person'|'agent', actorId, name}, and when. Called AFTER the kill took
  * the session out of the live map — a session-list read during the kill would otherwise consume the copy (stoppedSessions drops
- * a copy whose conversation is live). One async atomic write; a failed write keeps nothing and says so.
+ * a copy whose conversation is live). One write through THE STORE WRITER, awaited to its landing; a record that did not land
+ * keeps nothing and says so.
  */
-let endTmpSeq = 0;
 async function keepEnded(sockFile, meta, endedBy, endFacts = null) {
   const id = resumeIdOf(meta);
   if (!sockFile || !id) return null;
   const by = endedBy && typeof endedBy === 'object' ? { kind: endedBy.kind === 'agent' ? 'agent' : 'person', actorId: endedBy.actorId ? String(endedBy.actorId).slice(0, 200) : null, name: endedBy.name ? String(endedBy.name).slice(0, 120) : null, ...(endedBy.forced === true ? { forced: true } : {}), ...(endedBy.proposedBy && typeof endedBy.proposedBy === 'object' && endedBy.proposedBy.key ? { proposedBy: { key: String(endedBy.proposedBy.key).slice(0, 200), name: endedBy.proposedBy.name ? String(endedBy.proposedBy.name).slice(0, 120) : null } } : {}) } : { kind: 'person', actorId: null, name: null };   // proposedBy: lane login-request-card (the cure's law 12)
   const facts = endFacts && typeof endFacts === 'object' ? endFacts : { goalStated: false, queueRead: false, notStated: 'nothing was read before the end' };
   const kept = { ...meta, status: 'stopped', stoppedAt: Date.now(), stopReason: STOP_ENDED, endedBy: by, endFacts: facts };
-  const file = keptFile(sockFile), tmp = `${file}.${process.pid}.${++endTmpSeq}.tmp`;   // unique per write (two ends of one socket never share a temp)
-  try { await fs.promises.writeFile(tmp, JSON.stringify(kept)); await fs.promises.rename(tmp, file); }
-  catch (e) { fs.unlink(tmp, () => { }); console.warn(`[end] ${sockFile}: its ended record could not be written (${e.message}) — kept nothing`); return null; }
+  const file = keptFile(sockFile);
+  // B-574d (the family's ruling (b)): made ONCE at an END — a person's Terminate or an agent's admitted end, one conversation at a
+  // time: THE STORE WRITER, the record AWAITED to its DURABLE landing (synced on the writer's thread; the release's was unsynced). A
+  // record that did not land is said and dropped — kept nothing (a write of it still in flight is removed again once it lands)
+  let why = null, landed = false;
+  try { landed = (await keepCopy(file, kept, (w) => { why = w; }).durable(file)) === true; } catch (e) { why = e.message; }
+  if (!landed) { try { storeWriter().forget(file); } catch { } console.warn(`[end] ${sockFile}: its ended record could not be written (${why || 'not on disk within its bound'}) — kept nothing`); return null; }
   keepStopped(sockFile, kept, id);
   return kept;
 }
@@ -541,7 +567,7 @@ async function stoppedSessions() {
   for (const s of activeSessions.values()) { const id = pairedSession(s) ? null : addressableId(s); if (id) live.add(`${(s && s.backend) || 'claude'}:${id}`); } // a paired machine's session addresses no copy of this machine's
   const rows = [];
   for (const [k, e] of [...keptStopped]) {
-    if (live.has(k)) { keptStopped.delete(k); fs.unlink(keptFile(e.sockFile), (err) => saidUnlinkFailure(e.sockFile, err)); continue; } // resumed: the live session is the record now
+    if (live.has(k)) { keptStopped.delete(k); unlinkKept(e.sockFile, keptFile(e.sockFile)); continue; } // resumed: the live session is the record now
     const m = e.meta;
     rows.push({ backend: m.backend || 'claude', sessionId: e.id, backendSessionId: e.id, cwd: m.cwd || '', name: m.name || '', mode: m.mode || 'terminal', status: 'stopped',
       startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || (accountBoundOf(m.backend) ? 'subscription' : null), kept: e.sockFile,
@@ -569,7 +595,7 @@ async function consumeKeptOf(session, rec = null) {
   const k = `${session.backend || 'claude'}:${id}`, e = keptStopped.get(k);
   if (!e) return null;
   keptStopped.delete(k);
-  await new Promise((r) => fs.unlink(keptFile(e.sockFile), (err) => { saidUnlinkFailure(e.sockFile, err); r(); }));   // forgotten here; a refused unlink is said
+  await new Promise((r) => unlinkKept(e.sockFile, keptFile(e.sockFile), r));   // forgotten here; a refused unlink is said
   return e.sockFile;
 }
 // THE FACTS LINE (the boot trace's notes, ⚙ Diagnostics): what the dead sockets of a restore / a re-probe pass became —
@@ -607,7 +633,7 @@ function locateOrDrop(sockFile, file, meta, id) {
     if (found !== false) return found;
     const k = keptKey(sockFile, meta, id);
     if (keptStopped.get(k)?.sockFile === sockFile) keptStopped.delete(k);
-    await new Promise((r) => fs.unlink(file, (err) => { saidUnlinkFailure(sockFile, err); r(); }));
+    await new Promise((r) => unlinkKept(sockFile, file, r));
     console.log(`    ↳ ${sockFile}: no transcript — its stopped meta deleted`);
     return false;
   })();

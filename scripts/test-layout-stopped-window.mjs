@@ -489,11 +489,12 @@ await section('§3 A DEAD LOCAL SESSION IS A STOPPED SESSION — the real boot-r
     let syncLocates = -1, early = null;
     try {
       await api.probeSockets(); await api.restoreSessions();
-      syncLocates = mainLocates; early = fs.existsSync(path.join(META, noT + '.json.stopped'));
+      // B-574d: the copy is THE STORE WRITER's job — kept first means on disk OR owed to the writer at this instant, before any answer
+      syncLocates = mainLocates; { const cp = path.join(META, noT + '.json.stopped'); early = fs.existsSync(cp) || require(path.join(REPO, 'src/store-writer.js')).storeWriter().owed(cp) !== null; }
       await api.stoppedSettled?.(); // the kept metas' transcript answers (off the loop)
     } finally { console.log = REAL.log; console.warn = REAL.warn; CL.store.locate = locate0; }
     ok(syncLocates === 0 && mainLocates === 0, `§3 ③ the boot walks NO transcript store on its loop — 0 harness locates on the main thread (77dc65619: ${2} — one sync projects scan / rollout walk per dead socket; here ${mainLocates})`);
-    ok(deleted.includes(withT) && deleted.includes(noT) && !fs.readdirSync(META).some((f) => f.endsWith('.tmp')), '§3 ④ a kept meta\'s live .json goes through the ONE delete road (deleteSessionMeta — its tombstone stops a straggler writer resurrecting it), the stopped copy written tmp + rename (no .tmp left)', { deleted, files: fs.readdirSync(META) });
+    ok(deleted.includes(withT) && deleted.includes(noT) && !fs.readdirSync(META).some((f) => f.endsWith('.tmp')), '§3 ④ a kept meta\'s live .json goes through the ONE delete road (deleteSessionMeta — its tombstone stops a straggler writer resurrecting it), the stopped copy written by the store writer (no .tmp left)', { deleted, files: fs.readdirSync(META) });
     ok(early === true, '§3 ③ a conversation\'s meta is kept FIRST — the «no transcript» answer, not the boot\'s loop, deletes it', { early });
     const kept = path.join(META, withT + '.json.stopped');
     const k = fs.existsSync(kept) ? JSON.parse(fs.readFileSync(kept, 'utf8')) : null;
