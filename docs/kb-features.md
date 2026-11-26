@@ -4900,7 +4900,9 @@ THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coo
 - THE LIST BESIDE THE COLUMN (r4681 MUST, the full round of line 1062): the fixed #main-wrapper (the top band's cure) is its own stacking
   context, so the column's layer counts only inside it; on the outer display the conversations list (outside the wrapper, the phone's
   full-width overlay) covered every global door while it was open. The list now stops where the column begins (compact + a side column:
-  its width less the column's) — never a layer number on the wrapper. test-duo-layout ④b opens it and hits each button. The fixed wrapper
+  its width less the column's) — never a layer number on the wrapper — ON BOTH ANCHORS (r4817): «Sidebar on right» (sidebar.position,
+  stored on the hub for every device, so a desktop's choice reaches the phone) ends it where the column begins too, and closed it lies past
+  the screen. test-duo-layout ④b opens it on each anchor and hits each button. The fixed wrapper
   reaches EVERY iPhone's and iPad's home-screen copy (navigator.standalone), not the Duo alone.
 - THE WHITE BEFORE THE PAGE (about 3 s at a cold launch) comes before the page begins (the document's answer ends at 10 ms, the first paint
   at 18 ms). Nothing in the page reaches it. THE LAUNCH IMAGE (B-78db (B), 主开发 r4481 — the owner: can the launch's white be removed

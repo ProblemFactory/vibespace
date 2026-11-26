@@ -34,7 +34,8 @@
 //     only in their order, under the clock's room and above the bottom inset; the conversation's search and menu at the
 //     strip's «Conversation settings» door; a viewer's ✕ at its head; the never-overflow law at 951×360 (yields → ⚙'s rows);
 //     the outer's own head = the name's row; the outer display with the LIST OPEN — the list stops where the column begins, every
-//     button of the column the hit at its centre (r4681 MUST; RED: the rule cut by CSSOM). RED CONTROL: the release's stylesheet
+//     button of the column the hit at its centre (r4681 MUST; RED: the rule cut by CSSOM) — on BOTH anchors: «Sidebar on right» too,
+//     closed past the screen, open ending at the column (r4817 MUST; RED: its two rules cut). RED CONTROL: the release's stylesheet
 //     (the bar at right 0, 56 px) is red
 //   ④h THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the outer display held landscape, 678×445, insets left 84 · bottom 34):
 //     the bar IN the column at x 0 (84 wide, global things only, in order, from the top, above the bottom inset), the list
@@ -582,6 +583,24 @@ try {
     const lo = await evalJs(HITS);
     check(`④b outer, THE LIST OPEN: it stops where the column begins (0–${lo.right} of ${lo.w}); every one of the column's ${lo.hits.length} buttons is the hit at its centre`,
       lo.open && lo.left === 0 && lo.right === lo.w - 84 && lo.hits.length >= 6 && lo.hits.every((h) => h.hit), lo);
+    // r4817 MUST (the cure round of 40d3cded3): ON BOTH ANCHORS — «Sidebar on right» (sidebar.position, stored on the hub for every device;
+    // app.js writes it as body.sidebar-right) anchors the list at the right edge: closed it lies past the screen, open it ends where the
+    // column begins — every column button the hit at its centre, no band of the conversation at the left
+    const listClosed = `(() => { const s = document.querySelector('.sidebar'); return !!s && !s.classList.contains('open') && !s.getAnimations().length; })()`;
+    await evalJs(`(app.sidebar.toggle(false), document.body.classList.add('sidebar-right'), 1)`); await waitFor(listClosed, 5000);
+    const rc = await evalJs(HITS);
+    await evalJs(`(app.sidebar.toggle(true), 1)`); await waitFor(listSettled, 5000);
+    const ro = await evalJs(HITS);
+    check(`④b outer, «Sidebar on right»: closed, the list lies past the screen (${rc.left}–${rc.right}) and no button of the column is under it; open, it ends where the column begins (${ro.left}–${ro.right} of ${ro.w}) — every button the hit, no band at the left`,
+      !rc.open && rc.left >= rc.w && rc.hits.length >= 6 && rc.hits.every((h) => h.hit) && ro.open && ro.left === 0 && ro.right === ro.w - 84 && ro.hits.every((h) => h.hit), { rc, ro });
+    // RED CONTROL: 40d3cded3's sheet (the two rules of the right anchor cut by CSSOM) — the open list at the right edge, over the column
+    await evalJs(`(() => { let n = 0; for (const sh of document.styleSheets) { let rs; try { rs = sh.cssRules; } catch { continue; } for (let i = rs.length - 1; i >= 0; i--) if (['html[data-vc="compact"][data-sidecol] body.sidebar-right .sidebar', 'html[data-vc="compact"][data-sidecol] body.sidebar-right .sidebar.open'].includes(rs[i].selectorText)) { sh.deleteRule(i); n++; } } window.__cutRight = n; return n; })()`);
+    await waitFor(`(() => { const s = document.querySelector('.sidebar'); return !!s && Math.round(s.getBoundingClientRect().right) === innerWidth && !s.getAnimations().length; })()`, 5000);
+    const rr = await evalJs(HITS), cutR = await evalJs('window.__cutRight');
+    check(`④b RED CONTROL «Sidebar on right»: 40d3cded3's sheet (its ${cutR} right-anchor rule(s) cut) — the open list lies over the column (${rr.left}–${rr.right}), ${rr.hits.filter((h) => !h.hit).length} of ${rr.hits.length} buttons under it, a ${rr.left} px band at the left`,
+      cutR === 2 && rr.right === rr.w && rr.left === 84 && rr.hits.some((h) => !h.hit), { cutR, rr });
+    await evalJs(`(app.sidebar.toggle(false), document.body.classList.remove('sidebar-right'), 1)`); await waitFor(listClosed, 5000);
+    await evalJs(`(app.sidebar.toggle(true), 1)`); await waitFor(listSettled, 5000);   // the left anchor again, open, for its own RED below
     // RED CONTROL: the stylesheet before this cure — its one rule taken out of the page's sheets (CSSOM), the list open
     await evalJs(`(() => { let n = 0; for (const sh of document.styleSheets) { let rs; try { rs = sh.cssRules; } catch { continue; } for (let i = rs.length - 1; i >= 0; i--) if (rs[i].selectorText === 'html[data-vc="compact"][data-sidecol] .sidebar') { sh.deleteRule(i); n++; } } window.__cutRules = n; return n; })()`);
     await waitFor(`(() => { const s = document.querySelector('.sidebar'); return !!s && Math.round(s.getBoundingClientRect().right) === innerWidth && !s.getAnimations().length; })()`, 5000);
