@@ -8,7 +8,8 @@
   "run45670081619-heavy-5-of-7-node22.log",
   "run45670081619-heavy-6-of-7-node22.log",
   "run45670081619-heavy-7-of-7-node22.log",
-  "FIRST-MACHINE READING, not a hosted runner time (主开发 r4541 (3)): test-ci-remote-impact 5255 ms, the lane bl-tests-chrome's heavy read 34986ff30-20261125205330h-box on test machine 1 — the next hosted run replaces it"
+  "FIRST-MACHINE READING, not a hosted runner time (主开发 r4541 (3)): test-ci-remote-impact 5255 ms, the lane bl-tests-chrome's heavy read 34986ff30-20261125205330h-box on test machine 1 — the next hosted run replaces it",
+  "6f48d50e7-20261125155924h-box (test-fs-canary-holds only: the FIRST test machine's heavy read, lane artifacts-by-intent, B-7e49, 主开发 r4415 (a) — not a runner time; the next refresh replaces it)"
  ],
  "ms": {
   "test-account-reset-door-controls": 11601,
@@ -219,6 +220,7 @@
   "test-foryou-honest-chrome": 231005,
   "test-frame-host-viewers": 238795,
   "test-frp-plugin": 120986,
+  "test-fs-canary-holds": 10464,
   "test-gear-menu": 24915,
   "test-get-usage-parse": 50,
   "test-ghost-host-heal": 221910,
