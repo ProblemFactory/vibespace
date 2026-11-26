@@ -10,6 +10,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const FCM = require('../fd-close.js');   // B-574d (lane nl-journals): the owed mark's synced write — the codes and the words of a sync the file system does not do
 const { listCodexThreads } = require('../codex-session-store');
 const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollback point names the change that followed it (userW inc-mun7qjmw-iksh)
 const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window): one desktop restored alone takes its windows back from the others
@@ -245,6 +246,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _judgedResolve = null;
   const _stopJudgedP = new Promise((r) => { _judgedResolve = r; });
   let _markChain = Promise.resolve();
+  let _markNoSyncSaid = false;   // B-574d: a file system that does no sync — the mark lands, said once a hub
   const stopWord = () => (_stopFact ? { file: 'layouts.json', ..._stopFact } : null);
   /** the episode's mark, written OFF the loop (a temp, then the rename); a failure is the journal's line and is tried again at the next
    *  failed flush — a stop before it lands is told «may not» at the next start (r1318 (b)) */
@@ -255,7 +257,18 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (!live()) { m.trying = false; return; }   // the episode is over already
       const markTmp = `${OWED_MARK}.${process.pid}.tmp`;
       try {
-        await fs.promises.writeFile(markTmp, JSON.stringify({ run: m.run, seq: m.seq, since: m.since, base: m.base, code: m.code, ...(m.prior ? { prior: m.prior } : {}) }));
+        // B-574d (主开发 r4761, the third shape): THE MARK IS ON DISK BEFORE ITS NAME POINTS AT IT — its temp opened, written, SYNCED,
+        // closed, then renamed, each step on this chain (off the loop, as before). A sync or a close that fails is a FAILED WRITE (the
+        // catch below: the temp removed, said, tried again at the next failed flush); only a file system that does no sync at all lands
+        // it, said once a hub
+        const fh = await fs.promises.open(markTmp, 'w');
+        let failed = null;
+        try {
+          await fh.writeFile(JSON.stringify({ run: m.run, seq: m.seq, since: m.since, base: m.base, code: m.code, ...(m.prior ? { prior: m.prior } : {}) }));
+          try { await fh.sync(); } catch (e) { if (!FCM.SYNC_UNSUPPORTED.has(e && e.code)) throw e; if (!_markNoSyncSaid) { _markNoSyncSaid = true; console.warn(`[layouts] ${FCM.syncUnsupportedWords('the owed mark', e.code)}`); } }
+        } catch (e) { failed = e; }
+        try { await fh.close(); } catch (e) { if (!failed) failed = e; }
+        if (failed) throw failed;
         await fs.promises.rename(markTmp, OWED_MARK);
         m.written = true;
         if (!live()) await fs.promises.unlink(OWED_MARK).catch(() => {});   // over while it was written: the removal is the last word
