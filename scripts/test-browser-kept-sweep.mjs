@@ -1307,7 +1307,11 @@ console.log('B-574d browser-stores: the start\'s records judge the refusals');
     const said = [], b = BBmod.create({ dataDir: dir, log: { warn: (l) => said.push(String(l)), log() { } }, listMetas });
     const out = {};
     if (!early) { out.fresh = b.record(CZ, KZ); await b.judged(); out.yRecord = b.record(CY, KX); }   // the records read first, then Y offered X's key
-    else { out.yRecord = b.record(CY, KX); out.fRecord = b.record(CF, KF); out.yBefore = b.lookup(CY); release(); await b.judged(); }   // Y (and a fresh F) offered while they are read
+    else {   // Y (and a fresh F) offered while they are read
+      out.yRecord = b.record(CY, KX); out.fRecord = b.record(CF, KF); out.yBefore = b.lookup(CY);
+      b.landed(); try { out.diskEarly = JSON.parse(fs.readFileSync(path.join(dir, 'browser-env', 'bindings.json'), 'utf8')).byConversation[CY] ? 'on disk' : 'off disk'; } catch { out.diskEarly = 'unread'; }   // its read: not on disk until judged
+      release(); await b.judged();
+    }
     out.y = b.lookup(CY); out.f = b.lookup(CF); out.x = b.record(CX, KX); out.xNow = b.lookup(CX);
     out.said = said.filter((l) => l.includes('taken back') || l.includes('refused to bind')).length;
     b.landed();
@@ -1317,8 +1321,11 @@ console.log('B-574d browser-stores: the start\'s records judge the refusals');
   ok(J1.fresh === true && J1.yRecord === false && J1.y === '' && J1.x === true && J1.xNow === KX && J1.said >= 1,
     'B-574d browser-stores (2) a row not landed at the last stop: the start reads the conversations\' records, so Y offered X\'s key is REFUSED (a share), X\'s own record binds it — no holder handed another holder\'s', J1);
   const J2 = await killScene(BB0, 'judged-after', { early: true });
-  ok(J2.yRecord === true && J2.yBefore === KX && J2.y === '' && J2.f === KF && J2.xNow === KX && J2.said >= 1,
-    'B-574d browser-stores (2) …offered WHILE the records are read: written, then taken back when they answer (said) before any resume reads it; a fresh conversation\'s binding made meanwhile stays; X binds its own', J2);
+  ok(J2.yRecord === true && J2.yBefore === KX && J2.diskEarly === 'off disk' && J2.y === '' && J2.f === KF && J2.xNow === KX && J2.said >= 1,
+    'B-574d browser-stores (2) …offered WHILE the records are read: kept in memory but NOT on disk until they judge it (never the next start\'s document), taken back when they answer (said); a fresh conversation\'s binding made meanwhile stays; X binds its own', J2);
+  const OFFDISK = '      if (J && J.state !== \'ok\' && J.early.size) { const by = { ...doc.byConversation }; for (const sid of J.early) delete by[sid]; return JSON.stringify({ ...doc, byConversation: by }, null, 2); }\n';
+  const J2d = await killScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, OFFDISK, '', 'the early bindings off the disk'), 'bs2-early-landed'), 'red-ondisk', { early: true });
+  ok(J2d.diskEarly === 'on disk', 'RED (anchored copy: the early bindings written as made): Y\'s unjudged binding lands — a kill then makes it the next start\'s document — (2) goes red', J2d);
   const SHAREJ = '      if (against) return refuseShare(sid, against, String(key));\n';
   const J1x = await killScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, SHAREJ, '', 'the records judge a share'), 'bs2-no-share'), 'red-share');
   ok(J1x.y === KX, 'RED (anchored copy: the records\' share refusal cut): Y takes X\'s browser — (2) goes red', J1x);

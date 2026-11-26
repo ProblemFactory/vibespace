@@ -155,6 +155,9 @@ const SWEEP_GRACE_MS = 60 * 60 * 1000;
  *  module and this module must not require the keeper). test-browser-kept ③ pins the two agree. */
 const PROFILE_REGISTRY_FILE = 'browser-profiles.json';
 
+// B-574d «browser-stores» 7/8 (its read): the .cwd sidecars' bytes this PROCESS handed, by file — one for every instance (ws-create's
+// writes it at a spawn, the pin route's reads it)
+const CWD_MEMO = new Map();
 function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
   // B-50e7 (r3747 must 2): the settings HELD? (the hub's persistence router — the door the keeper has). Not given (src/ws-create.js's own
   // instance, whose ctx carries only the reader), the reader's own hold marker answers it: the held view carries Symbol.for('vibespace.settings-held')
@@ -335,16 +338,15 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     if (!unreadBackSaid.has(n)) { unreadBackSaid.add(n); try { log.warn?.(`[browser] the generated browser config ${n} does not read back after two writes — this conversation's browser falls back as before; its next start writes it again`); } catch { } }
     throw new Error('read-back was not an object (written twice)');
   }
-  const CWD_MEMO = new Map();   // key → the sidecar's bytes this process handed
   function writeCwdSidecar(key, obj) {
     const f = cwdPathFor(key), text = JSON.stringify(obj, null, 2);
-    CWD_MEMO.set(key, text);
+    CWD_MEMO.set(f, text);
     const W = require('../store-writer.js').storeWriter();
-    W.dirty(f, { name: 'browser-env-cwd.write', rank: 0, mode: 0o600, makeDir: true, produce: () => CWD_MEMO.get(key) || text });
+    W.dirty(f, { name: 'browser-env-cwd.write', rank: 0, mode: 0o600, makeDir: true, produce: () => CWD_MEMO.get(f) || text });
     W.durable(f).catch(() => { });
   }
   const readCwdSidecar = (key) => {
-    try { const m = CWD_MEMO.get(key); const r = JSON.parse(m != null ? m : fs.readFileSync(cwdPathFor(key), 'utf8')); return r && typeof r === 'object' ? { cwd: typeof r.cwd === 'string' ? r.cwd : null } : null; }
+    try { const m = CWD_MEMO.get(cwdPathFor(key)); const r = JSON.parse(m != null ? m : fs.readFileSync(cwdPathFor(key), 'utf8')); return r && typeof r === 'object' ? { cwd: typeof r.cwd === 'string' ? r.cwd : null } : null; }
     catch { return null; }
   };
 

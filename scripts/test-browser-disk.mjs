@@ -318,7 +318,7 @@ console.log('B-574d browser-stores 6/8: the lineage ledger on the store writer\'
     `B-574d browser-stores 6/8: 1500 lines of ~1 KB (past the 1 MiB ring many times) — the file stays bounded (${L6.size} bytes), every line whole, the kept ones the NEWEST (${L6.first}…${L6.last}) with no gap: no trim dropped a line newer than the ones it kept`);
   const OLD = (LF) => { const lines = []; for (let i = 0; i < 1300; i++) lines.push(JSON.stringify({ at: 1, boot: 'earlier', kind: 'old', n: i, pad: 'y'.repeat(900) })); fs.writeFileSync(LF, lines.join('\n') + '\n'); };
   const L6o = await ledScene(K, 'earlier', { pre: OLD });
-  ok(L6o.torn === 0 && L6o.whole && L6o.last === 1499 && L6o.oldsGapless && L6o.gapless, `…an earlier start's 1.3 MB file (its line starts read once, off the loop): trimmed on its own line boundaries — no torn line, the old lines kept (${L6o.olds}) gapless before the new ones`);
+  ok(L6o.torn === 0 && L6o.whole && L6o.last === 1499 && L6o.oldsGapless && L6o.gapless && L6o.olds < 1300 && L6o.size < (1 << 20) + 200 * 1024, `…an earlier start's 1.3 MB file (its line starts read once, off the loop): trimmed on its own line boundaries — no torn line, the old lines kept (${L6o.olds}) gapless before the new ones`);
   const KS6 = read('src/server/browser-keeper.js'), THEN = "then: text, as: 'browser-lineage-ledger.write' };";
   if (KS6.split(THEN).length === 2) {
     const M6 = mutantCopies('bdisk-bs6', REPO);
