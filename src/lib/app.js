@@ -695,7 +695,7 @@ class App {
     // active desktop first, then the other desktops in their order, windows in
     // their order within one (reconnect-queue.js; delays = view-visibility's
     // PURE reconnectSlot). A drop resets it — the next pass supersedes.
-    this._reconnectQueue = createReconnectQueue({ rankOf: (view) => this._reconnectRank(view) });
+    this._reconnectQueue = createReconnectQueue({ rankOf: (view) => this._reconnectRank(view), inFlight: () => this.ws?.attachesInFlight?.() ?? 0 });   // r4686: the page's cap of attaches in flight for a held window's retry
 
     // Re-attach all terminal sessions on reconnect (chat sessions handle their own)
     this.ws.onStateChange((connected) => {

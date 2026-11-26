@@ -28,8 +28,15 @@
 // microtask, and a new pass supersedes every older slot.
 import { reconnectSlot } from './view-visibility.js';
 
+// r4686: a HELD window's retry (`join`) is JITTERED and waits while the page has `cap` attaches in flight (its socket's own count)
+export const JOIN_CAP = 4, JOIN_JITTER_MS = 2000, JOIN_RETRY_MS = 750;
 export function createReconnectQueue({
   rankOf = () => [0],
+  inFlight = () => 0,
+  random = Math.random,
+  cap = JOIN_CAP,
+  jitterMs = JOIN_JITTER_MS,
+  retryMs = JOIN_RETRY_MS,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (h) => clearTimeout(h),
   defer = (fn) => queueMicrotask(fn),
@@ -78,13 +85,18 @@ export function createReconnectQueue({
   }
   function join(view) {
     if (!view || armed.has(view) || pending.includes(view)) return;   // already waiting: one slot a view
-    const index = armed.size, delayMs = slot({ suspended: true, index }), myGen = gen;
-    const timer = setTimer(() => {
-      if (myGen !== gen || !armed.has(view)) return;
-      armed.delete(view);
-      try { view._runQueuedReattach?.('slow'); } catch { }
-    }, delayMs);
-    armed.set(view, { timer, index, delayMs });
+    const index = armed.size, myGen = gen;
+    const arm = (delayMs) => {
+      const timer = setTimer(() => {
+        if (myGen !== gen || !armed.has(view)) return;
+        if (inFlight() >= cap) { arm(retryMs + Math.floor(random() * jitterMs)); return; }   // the page's cap: wait, jittered, never pile on
+        armed.delete(view);
+        try { view._runQueuedReattach?.('slow'); } catch { }
+      }, delayMs);
+      armed.set(view, { timer, index, delayMs });
+    };
+    const delayMs = slot({ suspended: true, index }) + Math.floor(random() * jitterMs);   // jittered: held windows never fire in one tick
+    arm(delayMs);
     try { view._trace?.('reconnect:joined', { slot: index, delay: delayMs }); } catch { }
   }
   /** Remove `view` if it is waiting; true ⇔ it was (the caller attaches now). */
