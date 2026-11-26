@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.420 — 2026-11-25
+## 2.369.420 — 2026-11-26
 
 ### Added
 - A conversation's status strip says when it runs on one of its pool's pay-as-you-go keys, with a button to move it back, or there while the pool asks.
