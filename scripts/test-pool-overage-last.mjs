@@ -158,8 +158,8 @@ const M = mutantCopies('pool-overage-last', REPO);
   if (bad.length) console.log('    ' + JSON.stringify(bad.slice(0, 3)));
   ck('r4696 M1: …an ordinary decision answers the release\'s «healthy», a proactive scan its «no-better»', got.filter((r) => r.hn.startsWith('a conversation')).every((r) => r.reason === 'healthy') && got.filter((r) => r.hn.startsWith('the pool default')).every((r) => r.reason === 'no-better'));
   const tipM1 = M.load('src/account-pool-auto.js', anchored(anchored(src,
-    "    if (curPayingOnly && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });\n", '', 'M1 red: the healthy answer'),
-    "    if (curPayingOnly) return none('no-better', ", "    if (false) return none('no-better', ", 'M1 red: the no-better answer'), 'm1-red');
+    "    if (curPayingTakes && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });\n", '', 'M1 red: the healthy answer'),
+    "    if (curPayingTakes) return none('no-better', ", "    if (false) return none('no-better', ", 'M1 red: the no-better answer'), 'm1-red');
   ck('r4696 M1 RED (8ab62425d): with the empty-pool answer missing, a paying member with nowhere to settle gets the pool\'s BLOCKED verdict', m1(tipM1).some((r) => BLOCKED.includes(r.reason)));
   // M2: on a pool that is NOT hot, a conversation IN A TURN with a COLD cache is never moved off a paying member mid-turn — owed at its stop
   const memB = [{ id: 'o', name: 'Paying' }, { id: 'r', name: 'Quota left' }];
@@ -209,7 +209,10 @@ const M = mutantCopies('pool-overage-last', REPO);
     const aQ = soft(P, memQ, cQ, PQ), aS = soft(P, memS, cS, { ...PAY, creditsIds: ['c'], warm: { warm: false, inTurn: false, agoSec: 400, ttlSec: 300 } });
     ck(`r4744 M2: a paying member in its soft band beside another live paying member is never blocked — it stays (${aQ.map((d) => d.reason).join(', ')})`, aQ.every((d) => !d.to && !BLOCKED.includes(d.reason)));
     ck(`r4744 M2: …beside a credits member that can settle it moves there at its stop (${aS.map((d) => `${d.to}/${d.reason}`).join(', ')})`, aS.every((d) => d.to === 'c' && d.reason === 'overage'));
-    const tipSoft = M.load('src/account-pool-auto.js', anchored(src, '  const curPayingOnly = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(dead)));', '  const curPayingOnly = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(soft)));', 'M2 red: paying only outside the soft band'), 'm2b-red');   // stale-pins: kept (the RED's text IS ebffe6f36's line)
+    const tipSoft = M.load('src/account-pool-auto.js', anchored(anchored(anchored(src,
+      '  const curPayingOnly = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(dead)));', '  const curPayingOnly = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(soft)));', 'M2 red: paying only outside the soft band'),   // stale-pins: kept (the RED's text IS ebffe6f36's line)
+      '  const curPayingTakes = curPaying && !(notMember || curLoginDead || curHeldWalled);', '  const curPayingTakes = curPaying && !(notMember || curLoginDead || curHeldWalled || (cur.known && curBr.some(soft)));', 'M2 red: …in the stays too'),
+      '    if (!hardDead && payingRanked.length) return none(', '    if (false) return none(', 'M2 red: no quiet stay beside paying members'), 'm2b-red');
     const rQ = soft(tipSoft, memQ, cQ, PQ), rS = soft(tipSoft, memS, cS, { ...PAY, creditsIds: ['c'], warm: { warm: false, inTurn: false, agoSec: 400, ttlSec: 300 } });
     ck(`r4744 M2 RED (ebffe6f36's guard): the pool is BLOCKED while two members serve (${rQ.map((d) => d.reason).join(', ')}), and the prepaid move never happens (${rS.map((d) => d.reason).join(', ')})`, rQ.some((d) => BLOCKED.includes(d.reason)) && rS.every((d) => d.to !== 'c')); }
   // THE HOP GUARD (r4714 3.): a LIVE paying member whose only other paying member is live too STAYS — no hop between two paying
@@ -221,7 +224,7 @@ const M = mutantCopies('pool-overage-last', REPO);
     ck(`r4714 HOP GUARD: a live paying member whose only other paying member is live (sooner, fuller) STAYS — ${st.length} shapes, none blocked (${[...new Set(st.map((d) => d.reason))].join(', ')})`, st.every((d) => !d.to && !BLOCKED.includes(d.reason)));
     ck('r4714 HOP GUARD: …unless it can no longer serve (under its hard bar): it moves onto the live paying member', hd({ o: fmM(0.99, 5 * D), p: fmM(0.1, 1 * D) }, shapes[0][1]).to === 'p');
     ck('r4714 HOP GUARD: …and never from a spent paying member onto another spent one', !hd({ o: fmM(0.99, 5 * D), p: fmM(0.99, 1 * D) }, shapes[0][1]).to);
-    const noGuard = M.load('src/account-pool-auto.js', anchored(src, '  const payingOk = payingRanked.length > 0 && !(curPaying && payingRanked[0].dead);', '  const payingOk = payingRanked.length > 0;', 'hop guard red'), 'hop-red');
+    const noGuard = M.load('src/account-pool-auto.js', anchored(src, '  const payingOk = payingRanked.length > 0 && !(curBilling && payingRanked[0].dead);', '  const payingOk = payingRanked.length > 0;', 'hop guard red'), 'hop-red');
     ck('r4714 HOP GUARD RED: without the guard a spent paying member hops onto another spent one', noGuard.decidePoolSwitch({ currentId: 'o', members: memH, readCache: viewM({ o: fmM(0.99, 5 * D), p: fmM(0.99, 1 * D) }), nowSec: NOW, explain: true, ...PAY2, ...shapes[0][1] }).to === 'p'); }
   // r4714's LEG (b): a HARD-DEAD paying current, a DEAD credits member with the EARLIER deadline, a LIVE paying member — the spent
   // credits tier is passed over and the paying tier asked; its TWIN: the credits member alive takes it
@@ -234,12 +237,11 @@ const M = mutantCopies('pool-overage-last', REPO);
     ck('r4714 (b): …with the setting ON the verdict NAMES the bar (toOverage) and no credits landing', on.to === 'p' && !!(on.toOverage && on.toOverage.id === 'p') && !on.toCredits);
     const twin = dl(P, { ...cL, c: fmM(0.4, 1 * D) });
     ck('r4714 (b) TWIN: the same pool with the credits member ALIVE moves onto the credits member (toCredits)', twin.to === 'c' && !!(twin.toCredits && twin.toCredits.id === 'c'));
-    const tipB = M.load('src/account-pool-auto.js', anchored(anchored(anchored(src,
+    const tipB = M.load('src/account-pool-auto.js', anchored(anchored(src,
       '      payingRanked.push({', '      creditsRanked.push({', '(b) red: the fold'),
-      '  creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || order(x, y));', '  creditsRanked.sort((x, y) => (((x.dead || x.paying) ? 1 : 0) - ((y.dead || y.paying) ? 1 : 0)) || order(x, y));', '(b) red: the sort'),   // stale-pins: kept (the RED's text IS 4f3305b49's line)
-      '!(curCredits && creditsRanked[0].dead);', '!((curCredits || curPaying) && creditsRanked[0].dead);', '(b) red: the guard'), 'b-red');   // stale-pins: kept (the RED's text IS 4f3305b49's line)
+      '  creditsRanked.sort((x, y) => ((x.dead ? 1 : 0) - (y.dead ? 1 : 0)) || order(x, y));', '  creditsRanked.sort((x, y) => (((x.dead || x.paying) ? 1 : 0) - ((y.dead || y.paying) ? 1 : 0)) || order(x, y));', '(b) red: the sort'), 'b-red');   // stale-pins: kept (the RED's text IS 4f3305b49's line)
     const rb = dl(tipB, cL);
-    ck(`r4714 (b) RED (4f3305b49: the fold, its sort, its guard): the conversation is BLOCKED on that pool (→ ${rb.to}, ${rb.reason})`, !rb.to && BLOCKED.includes(rb.reason)); }
+    ck(`r4714 (b) RED (4f3305b49: the fold and its sort): the conversation never reaches the live paying member (→ ${rb.to}, ${rb.reason})`, rb.to !== 'p'); }
   // M3 (now by the tiers, r4711): a credits member with prepaid quota before a paying member in each of the three walks
   { const mem3 = [{ id: 'a', name: 'Dead' }, { id: 'o', name: 'Paying' }, { id: 'c', name: 'Credits' }];
     const c3 = { a: fmM(0.99, 3 * D), o: fmM(0.3, 1 * D), c: fmM(0.4, 5 * D) };   // the paying member resets SOONER and holds more: today it wins both keys
@@ -262,6 +264,9 @@ const M = mutantCopies('pool-overage-last', REPO);
   // default's fallback stand in the SAME tier, in every pool. The tip's own rule in either walk (the tiers by a fixed order, a spent
   // tier never passed over) is its RED. And by the source: each walk takes its tier from poolTiers, and no walk keeps a rule of its own.
   { const srcA = fs.readFileSync(path.join(REPO, 'src/account-pool-auto.js'), 'utf8');
+    // its own readings (this block stands outside the r4696 block's helpers)
+    const fmM = (u7, resetIn) => ({ fiveHour: { utilization: 0, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + resetIn }, scopedWeekly: [] });
+    const viewM = (caches) => (id) => projectCacheForFamily(caches[id] ?? null, 'opus');
     const T = (credits, paying) => (id) => (credits.includes(id) ? 1 : paying.includes(id) ? 2 : 0);
     let seed = 29; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
     const walks = (mod, n = 300) => {
@@ -289,10 +294,10 @@ const M = mutantCopies('pool-overage-last', REPO);
     ck(`r4744 M1 THE WALKS AGREE: in ${w.told} seeded pools whose default moved, the decision's landing, the rank list's head and the default's fallback stand in the same tier (${w.agree})`, w.told > 100 && w.agree === w.told);
     if (w.agree !== w.told) console.log('    first disagreement: ' + JSON.stringify(w.first));
     seed = 29;
-    const ownRank = M.load('src/account-pool-auto.js', anchored(srcA, '  last.sort((x, y) => (keyOf(lastTier.get(x).tier) - keyOf(lastTier.get(y).tier)) || order(x, y));', '  last.sort((x, y) => (lastTier.get(x).tier - lastTier.get(y).tier) || order(x, y));', 'M1 red: the rank list by its own rule'), 'walks-red-rank');
+    const ownRank = M.load('src/account-pool-auto.js', anchored(srcA, '  last.sort((x, y) => (keyOf(lastTier.get(x)) - keyOf(lastTier.get(y))) || order(x, y));', '  last.sort((x, y) => (lastTier.get(x).tier - lastTier.get(y).tier) || order(x, y));', 'M1 red: the rank list by its own rule'), 'walks-red-rank');
     const wr = walks(ownRank);
     seed = 29;
-    const ownFallback = M.load('src/account-pool-auto.js', anchored(srcA, ' || (keyOf(x.tier) - keyOf(y.tier)) || ', ' || (x.tier - y.tier) || ', 'M1 red: the fallback by its own rule'), 'walks-red-fallback');   // stale-pins: kept (the RED's text IS ebffe6f36's sort)
+    const ownFallback = M.load('src/account-pool-auto.js', anchored(srcA, ' || (keyOf(x) - keyOf(y)) || ', ' || (x.tier - y.tier) || ', 'M1 red: the fallback by its own rule'), 'walks-red-fallback');   // stale-pins: kept (the RED's text IS ebffe6f36's sort)
     const wf = walks(ownFallback);
     ck(`r4744 M1 RED (ebffe6f36's rule in the rank list): the walks disagree (${wr.told - wr.agree} of ${wr.told})`, wr.agree < wr.told);
     ck(`r4744 M1 RED (ebffe6f36's rule in the fallback): the walks disagree (${wf.told - wf.agree} of ${wf.told})`, wf.agree < wf.told);
