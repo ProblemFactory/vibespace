@@ -723,6 +723,39 @@ app.post('/api/accounts/:poolId/pin', (req, res) => {
 // B-2083 unit A (主开发 r5167 / r5180): the pin road handed by its owner to the automation verb conversations.pin (pinRoad, below)
 require('./conversation-ops.js').provide({ pin: pinRoad({ engine, activeSessions, accounts, broadcastActiveSessions }) });
 
+// B-2083 unit B (lane lg-recovery, 主开发 r5166 / r5177): THE MEMBER ROW's ONE PRESS «Move every conversation of this pool here now».
+// GET …/pin-all?memberId= is the PLAN the press says first (nothing written: how many move now, at their next restart, wait and why,
+// were pinned to another member, stay); POST {memberId} pins every conversation of the pool to the member, ONE pin each through the
+// engine's ONE writer (setConversationPin — every law of the pin inside it); POST {memberId, clear: true} places every conversation
+// pinned to it automatically again. The plan's read and the press are a PERSON's: routes/vault.js personVerdict, the tree's one
+// verdict (an agent's, a job's and an automation's sign-in refused by name). Codes: not_pooled · not_member · human_only.
+const pinAllPerson = (req, res) => {
+  const who = require('../routes/vault.js').personVerdict(req);
+  if (who.ok) return true;
+  res.status(who.status || 403).json({ ok: false, code: who.code || 'human_only', error: who.error || 'a person\'s press only' });
+  return false;
+};
+app.get('/api/accounts/:poolId/pin-all', (req, res) => {
+  try {
+    if (!pinAllPerson(req, res)) return;
+    if (typeof engine.pinAllPlan !== 'function') return res.status(503).json({ ok: false, code: 'no_engine', error: 'pool engine unavailable' });
+    const r = engine.pinAllPlan(String(req.params.poolId || ''), String(req.query.memberId || ''));
+    if (!r || !r.ok) return res.status((r && r.status) || 400).json({ ok: false, code: (r && r.code) || 'refused', error: (r && r.error) || 'refused' });
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }
+});
+app.post('/api/accounts/:poolId/pin-all', (req, res) => {
+  try {
+    if (!pinAllPerson(req, res)) return;
+    if (typeof engine.pinAll !== 'function' || typeof engine.clearPinsTo !== 'function') return res.status(503).json({ ok: false, code: 'no_engine', error: 'pool engine unavailable' });
+    const poolId = String(req.params.poolId || ''), memberId = String(req.body?.memberId || '');
+    const r = req.body?.clear === true ? engine.clearPinsTo(poolId, memberId, { by: 'user' }) : engine.pinAll(poolId, memberId, { by: 'user' });
+    if (!r || !r.ok) return res.status((r && r.status) || 400).json({ ok: false, code: (r && r.code) || 'refused', error: (r && r.error) || 'refused' });
+    try { broadcastActiveSessions(); } catch { }
+    res.json(r);
+  } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }
+});
+
 // ── Long-lived token (oat01, B-211a) ──────────────────────────────────────
 // Minting one (claude setup-token, 1-year, no refresh) is the per-account
 // consent to run this subscription on remote machines — it ships as

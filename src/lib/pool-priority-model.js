@@ -68,7 +68,7 @@ export function movePriority(list, id, how) {
  *  default; `stateOf(id)` → memberState. Priority mode lists the ordered members
  *  first (#1…), then the unchecked ones. Every row: {id, name, sub, checked, place,
  *  state, isDefault, actions:[{act, key}]} — `actions` never carries a disabled one. */
-export function priorityRows({ members = [], checked = null, order = [], mode = 'automatic', current = null, stateOf = () => null } = {}) {
+export function priorityRows({ members = [], checked = null, order = [], mode = 'automatic', current = null, stateOf = () => null, pinnedHere = () => 0 } = {}) {
   const on = (id) => (checked == null ? true : checked.includes(id));
   const byId = new Map(members.map((m) => [m.id, m]));
   const ranked = mode === 'priority' ? (order || []).filter((id) => byId.has(id) && on(id)) : [];
@@ -82,6 +82,13 @@ export function priorityRows({ members = [], checked = null, order = [], mode = 
       if (place > 0) actions.push({ act: 'top', key: i18nKey('Move to top') }, { act: 'up', key: i18nKey('Move up') });
       if (place < ranked.length - 1) actions.push({ act: 'down', key: i18nKey('Move down') });
       if (place === 0) actions.push({ act: 'gather', key: i18nKey('Move every conversation here now') });
+    }
+    // B-2083 unit B (lane lg-recovery, 主开发 r5166 / r5177): THE ONE PRESS of a member of the pool, in the row's own action place (no
+    // new button): every conversation of the pool pinned here; «Back to automatic» only while a conversation is pinned here
+    if (on(id)) {
+      actions.push({ act: 'pin-all', key: i18nKey('Move every conversation of this pool here now') });
+      const n = Number(pinnedHere(id)) || 0;
+      if (n > 0) actions.push({ act: 'pin-clear', key: i18nKey('Back to automatic ({n} pinned here)'), params: { n } });
     }
     rows.push({ id, name: m.name || id, sub: m.email || '', checked: on(id), place: place >= 0 ? place + 1 : null, state: stateOf(id), isDefault: id === current, actions });
   }
@@ -204,6 +211,55 @@ export function gatherWords(r, t, { poolName = '', memberName = '', fmtTime = (m
   const restarts = Array.isArray(r.affected) ? r.affected.length : 0;
   if (restarts) parts.push(t(i18nKey('restarting {n} conversation(s)…'), { n: restarts }));
   return { type: undefined, text: parts.join(' — ') };
+}
+
+/** B-2083 unit B (lane lg-recovery, 主开发 r5166 / r5177): THE WORDS OF THE MEMBER ROW's ONE PRESS — plain words a person reads once,
+ *  never a verdict's code name. `why` = the pin verdict's own name, said as the person's words. */
+const pinWaitWhy = (why, t) => (why === 'pin-exhausted' ? t(i18nKey('out of quota'))
+  : why === 'pin-recovering' ? t(i18nKey('its quota is not back yet'))
+  : why === 'pin-login-dead' ? t(i18nKey('cannot sign in'))
+  : why === 'pin-lapsed' ? t(i18nKey('subscription inactive'))
+  : why === 'pin-member-excluded' ? t(i18nKey('it refused them a moment ago'))
+  : why === 'pin-model-not-served' ? t(i18nKey('it does not serve their model'))
+  : t(i18nKey('not usable in the pool right now')));
+const pinCountParts = (r, t) => {
+  const parts = [];
+  if (r.now > 0) parts.push(t(i18nKey('{n} move there now.'), { n: r.now }));
+  if (r.restart > 0) parts.push(t(i18nKey('{n} move at their next restart (this pool cannot switch a running conversation in place).'), { n: r.restart }));
+  for (const [why, n] of Object.entries(r.waits || {})) if (n > 0) parts.push(t(i18nKey('{n} wait until it can serve them: {why}.'), { n, why: pinWaitWhy(why, t) }));
+  if (r.elsewhere > 0) parts.push(t(i18nKey('{n} of them were pinned to another member — «Back to automatic» will not bring that pin back.'), { n: r.elsewhere }));
+  if (r.here > 0) parts.push(t(i18nKey('{n} already pinned here.'), { n: r.here }));
+  if (r.provider > 0) parts.push(t(i18nKey('{n} stay: they run on another provider — pin each of those by itself.'), { n: r.provider }));
+  if (r.remote > 0) parts.push(t(i18nKey('{n} stay: they run on another machine.'), { n: r.remote }));
+  return parts;
+};
+const pinWaitTotal = (r) => Object.values((r && r.waits) || {}).reduce((x, y) => x + (Number(y) || 0), 0);
+/** The confirm the press shows FIRST, from the hub's plan (GET …/pin-all): {ask:true, title, message, confirmText} — or {ask:false,
+ *  text} when no conversation would be pinned (nothing to confirm; the sentence says why) */
+export function pinAllConfirmWords(plan, t, { poolName = '', memberName = '' } = {}) {
+  const p = plan || {};
+  const pins = (Number(p.now) || 0) + (Number(p.restart) || 0) + pinWaitTotal(p);
+  const parts = pinCountParts(p, t);
+  if (!(pins > 0)) return { ask: false, text: [t(i18nKey('No conversation of “{pool}” to move to “{name}”.'), { pool: poolName, name: memberName }), ...parts].join(' ') };
+  return { ask: true, title: t(i18nKey('Pin every conversation of “{pool}” to “{name}”?'), { pool: poolName, name: memberName }), message: parts.join(' '), confirmText: t(i18nKey('Pin them here')) };
+}
+/** The answer of the press (POST …/pin-all), in the same plain counts → {text, type} */
+export function pinAllWords(r, t, { poolName = '', memberName = '' } = {}) {
+  if (!r || r.ok === false || r.error) return { type: 'error', text: (r && r.error) || t(i18nKey('Nothing was pinned — try again.')) };
+  const pinned = (Number(r.now) || 0) + (Number(r.restart) || 0) + pinWaitTotal(r);
+  const head = t(i18nKey('{n} conversation(s) of “{pool}” pinned to {name}.'), { n: pinned, pool: poolName, name: memberName });
+  const refused = Object.values(r.refused || {}).reduce((x, y) => x + (Number(y) || 0), 0);
+  const tail = refused > 0 ? [t(i18nKey('{n} could not be pinned — try again.'), { n: refused })] : [];
+  return { type: refused > 0 ? 'error' : undefined, text: [head, ...pinCountParts({ ...r, here: 0, provider: 0, remote: 0 }, t), ...tail].join(' ') };
+}
+/** The answer of «Back to automatic» (POST …/pin-all {clear:true}) → {text, type} */
+export function pinClearWords(r, t, { poolName = '', memberName = '' } = {}) {
+  if (!r || r.ok === false || r.error) return { type: 'error', text: (r && r.error) || t(i18nKey('Nothing was changed — try again.')) };
+  const n = Number(r.cleared) || 0;
+  const refused = Object.values(r.refused || {}).reduce((x, y) => x + (Number(y) || 0), 0);
+  const head = n > 0 ? t(i18nKey('{n} conversation(s) of “{pool}” are placed automatically again.'), { n, pool: poolName })
+    : t(i18nKey('No conversation of “{pool}” was pinned to {name}.'), { pool: poolName, name: memberName });
+  return { type: refused > 0 ? 'error' : undefined, text: refused > 0 ? `${head} ${t(i18nKey('{n} could not be changed — try again.'), { n: refused })}` : head };
 }
 
 /** THE BILLING SWITCHER'S POOL SUBMENU (2026-09-28, owner: "变成池的子菜单，直接选池本身就是自动切换，

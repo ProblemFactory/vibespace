@@ -2262,7 +2262,7 @@ console.log('㉓ B-2083 unit A — conversations.pin: the person\'s pin road for
   const ENGSRC = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8');
   const wi = ENGSRC.indexOf('function setConversationPin('), wbody = wi < 0 ? '' : ENGSRC.slice(wi, ENGSRC.indexOf('\n}\n', wi));
   const WCODES = ['no_session', 'not_pooled', 'remote_session', 'not_member', 'pin_not_saved'];
-  ok(wbody.length > 500 && WCODES.every((c) => wbody.includes(`code: '${c}'`)) && /function setConversationPin\(sid, memberId, \{ by = 'user', now = Date\.now\(\) \} = \{\}\)/.test(wbody), 'the stand-in\'s refusals are the ONE writer\'s own codes (read off setConversationPin: no_session · not_pooled · remote_session · not_member · pin_not_saved) and its signature (sid, memberId, {by})');
+  ok(wbody.length > 500 && WCODES.every((c) => wbody.includes(`code: '${c}'`)) && /function setConversationPin\(sid, memberId, \{ by = 'user', now = Date\.now\(\)(, quiet = false)? \} = \{\}\)/.test(wbody), 'the stand-in\'s refusals are the ONE writer\'s own codes (read off setConversationPin: no_session · not_pooled · remote_session · not_member · pin_not_saved) and its signature (sid, memberId, {by}) — its one optional `quiet` (B-2083 unit B: a press says ONE notice) is never passed by the automation road');
   const POOL = 'pool-p', MEMBERS = ['sub-free', 'sub-credits', 'sub-over', 'sub-unknown', 'sub-unread'];
   const sessions = new Map([
     ['sess-p-1', { name: 'coordinator', backend: 'claude', backendSessionId: 'coord-p', mode: 'chat' }],

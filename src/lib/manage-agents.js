@@ -50,7 +50,7 @@ import { wallWords, groupWalls, staleLaneAge, markT } from './account-wall-words
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict every bucket below is drawn by (windowDisplay — lane reset-unproven)
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
-import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords, fallbackPressToasts } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
+import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords, fallbackPressToasts, pinAllConfirmWords, pinAllWords, pinClearWords } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
 import { deviceLocale } from './i18n.js';
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
 import { dialRowState } from '../dial-facts.js'; // lane-pairing ③: THE one dial state (the machine row, this card, the pairing sheet)
@@ -1578,6 +1578,28 @@ export function installManageAgents(App, ctx = {}) {
     if (!r?.success) return;
     for (const sess of (r.affected || [])) this._poolColdRestart(sess, poolId);
   },
+  // B-2083 unit B (lane lg-recovery, 主开发 r5166 / r5177): THE MEMBER ROW's ONE PRESS «Move every conversation of this pool here now».
+  // It SAYS first — the hub's plan (GET …/pin-all, nothing written) in plain words: how many move now, at their next restart, wait and
+  // why, were pinned to another member, stay — in the one confirm; then the press pins each conversation through the hub's one writer
+  // (POST …/pin-all), and its answer is said in the same counts. A person's press (the hub refuses any other sign-in by name).
+  async _poolPinAll(poolId, memberId, memberName, poolName) {
+    const at = '/api/accounts/' + encodeURIComponent(poolId) + '/pin-all';
+    const plan = await fetchJson(at + '?memberId=' + encodeURIComponent(memberId));
+    if (!plan || plan.error || plan.ok === false) { showToast((plan && plan.error) || t('Nothing was pinned — try again.'), { type: 'error' }); return; }
+    const words = pinAllConfirmWords(plan, t, { poolName, memberName });
+    if (!words.ask) { showToast(words.text, { duration: 8000 }); return; }
+    const ok = await showConfirmDialog({ title: words.title, message: words.message, confirmText: words.confirmText });   // ONE options object (the approval census §1b)
+    if (!ok) return;
+    const r = await fetchJson(at, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId }) });
+    const said = pinAllWords(r, t, { poolName, memberName });
+    showToast(said.text, { type: said.type, duration: 8000 });
+  },
+  // …and ONE press back: every conversation of the pool pinned to this member is placed automatically again (pins elsewhere untouched)
+  async _poolPinClear(poolId, memberId, memberName, poolName) {
+    const r = await fetchJson('/api/accounts/' + encodeURIComponent(poolId) + '/pin-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId, clear: true }) });
+    const said = pinClearWords(r, t, { poolName, memberName });
+    showToast(said.text, { type: said.type, duration: 6000 });
+  },
   // ── Pool ⋯ menu: ONE block for every backend (2.369.18 — the codex roster
   // had no pool menu at all, and a copy of the claude block would be the
   // whitelist-drift twin class). Wording rides a.backend; the hot toggle
@@ -1733,7 +1755,9 @@ export function installManageAgents(App, ctx = {}) {
     const stateOf = (id) => { const x = subs.find((y) => y.id === id) || {}; return memberState({ serve: x.serve || null, loggedIn: signinUnread(x) ? true : !!x.loggedIn, loginState: x.loginState || null, usage: this._accountUsage?.[id] || null, nowSec: nowSec() }); };
     const fmtTime = (ms) => when(ms);
     const draw = () => {
-      const rows = priorityRows({ members: subs, checked: st.checked, order: st.order, mode: st.mode, current: fresh.current || null, stateOf });
+      // B-2083 unit B: how many live conversations of THIS pool are pinned to each member (the row's «Back to automatic» shows only then)
+      const pinnedHere = (id) => (this.sidebar?._webuiSessions || []).filter((x) => x && x.accountId === poolId && x.poolPin && x.poolPin.memberId === id).length;
+      const rows = priorityRows({ members: subs, checked: st.checked, order: st.order, mode: st.mode, current: fresh.current || null, stateOf, pinnedHere });
       body.innerHTML = `
       <div class="usage-note">${escHtml(codex ? t('The pool switches between these ChatGPT accounts. Not-signed-in accounts are skipped until they log in.') : t('The pool switches between these subscriptions. Not-signed-in accounts are skipped until they log in.'))}</div>
       <div class="pool-place-row" role="radiogroup" aria-label="${escHtml(t('Placement'))}">
@@ -1791,9 +1815,11 @@ export function installManageAgents(App, ctx = {}) {
         const row = rows.find((x) => x.id === b.dataset.id);
         const rect = b.getBoundingClientRect();
         showContextMenu(rect.left, rect.bottom + 4, row.actions.map((ac) => ({
-          label: t(ac.key),
+          label: t(ac.key, ac.params || {}),
           action: () => {
             if (ac.act === 'gather') { close(); this._poolGather(poolId, row.id, row.name, a?.name || '', effHot); return; }
+            if (ac.act === 'pin-all') { close(); this._poolPinAll(poolId, row.id, row.name, a?.name || ''); return; }   // B-2083 unit B
+            if (ac.act === 'pin-clear') { close(); this._poolPinClear(poolId, row.id, row.name, a?.name || ''); return; }
             st.order = movePriority(st.order, row.id, ac.act); draw();
           },
         })));

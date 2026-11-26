@@ -59,7 +59,7 @@ console.log('§2 the order: seed, moves, rows');
   const rows = M.priorityRows({ members, checked: ['m', 'u'], order: ['u', 'm'], mode: 'priority', current: 'u', stateOf });
   ok(rows.map((r) => r.id + ':' + (r.place || '-')).join(',') === 'u:1,m:2,f:-', 'rows: the order first (#1, #2), an unchecked member after without a place', rows.map((r) => r.id + ':' + r.place));
   ok(rows.every((r) => r.actions.every((a) => !('disabled' in a))), 'no action is ever DISABLED (a greyed control is refused by the house rules)');
-  ok(JSON.stringify(rows[0].actions.map((a) => a.act)) === '["down","gather"]' && JSON.stringify(rows[1].actions.map((a) => a.act)) === '["top","up"]' && rows[2].actions.length === 0, 'only what applies: #1 has no Move up/top (absent), the last no Move down', rows.map((r) => r.actions.map((a) => a.act)));
+  ok(JSON.stringify(rows[0].actions.map((a) => a.act)) === '["down","gather","pin-all"]' && JSON.stringify(rows[1].actions.map((a) => a.act)) === '["top","up","pin-all"]' && rows[2].actions.length === 0, 'only what applies: #1 has no Move up/top (absent), the last no Move down; a member of the pool has the one press (B-2083 unit B), one outside it none', rows.map((r) => r.actions.map((a) => a.act)));
   ok(rows[0].isDefault && rows[0].actions.some((a) => a.act === 'gather'), 'addendum 4: "Move every conversation here now" is on #1 EVEN WHEN #1 already is the default — never unreachable');
   ok(rows.find((r) => r.id === 'm').state.code === 'out' && rows.find((r) => r.id === 'm').checked, 'an exhausted member is a normal, checked row that SAYS it is out of quota');
   const w = M.rowWords(rows[0], tEn);
@@ -69,8 +69,34 @@ console.log('§2 the order: seed, moves, rows');
   const wj = M.rowWords(rows[0], tJa);
   ok(wj.state === '利用可' && wj.note === '新しい会話はここで始まります', 'row words (ja)', wj);
   const auto = M.priorityRows({ members, checked: null, order: ['u'], mode: 'automatic', current: 'u', stateOf });
-  ok(auto.every((r) => r.place === null && r.actions.length === 0) && auto.map((r) => r.id).join() === 'm,u,f', 'Automatic: no places, no order menu — the list order (turning Manual priority OFF clears the list)');
+  ok(auto.every((r) => r.place === null && JSON.stringify(r.actions.map((a) => a.act)) === '["pin-all"]') && auto.map((r) => r.id).join() === 'm,u,f', 'Automatic: no places, no order menu — the list order (turning Manual priority OFF clears the list); the row\'s action place holds only the one press (B-2083 unit B)');
   ok(M.placementWords('priority', tZh) === '分配方式：手动优先级' && M.placementWords('automatic', tEn) === 'Placement: Automatic', 'the placement caption');
+}
+
+console.log('B-2083 unit B — THE MEMBER ROW\'s ONE PRESS «Move every conversation of this pool here now»: its place, its clear, its plain words');
+{
+  const stateOf = () => ({ code: 'usable', key: 'usable', params: {} });
+  const pinned = { m: 3 };
+  const rows = M.priorityRows({ members, checked: null, order: [], mode: 'automatic', current: 'u', stateOf, pinnedHere: (id) => pinned[id] || 0 });
+  const m = rows.find((r) => r.id === 'm'), u = rows.find((r) => r.id === 'u');
+  ok(JSON.stringify(m.actions.map((a) => a.act)) === '["pin-all","pin-clear"]' && m.actions[1].params.n === 3 && JSON.stringify(u.actions.map((a) => a.act)) === '["pin-all"]',
+    '«Back to automatic» only on the row a conversation is pinned to, with how many', rows.map((r) => [r.id, r.actions.map((a) => a.act)]));
+  ok(tEn(m.actions[1].key, m.actions[1].params) === 'Back to automatic (3 pinned here)' && tZh(m.actions[1].key, m.actions[1].params) === '恢复自动（3 个固定在这里）' && tEn(m.actions[0].key) === 'Move every conversation of this pool here now' && tZh(m.actions[0].key) === '把这个池的所有对话立刻移到这里',
+    'the press and its clear in en and zh');
+  const plan = { ok: true, now: 2, restart: 1, waits: { 'pin-exhausted': 1, 'pin-login-dead': 1 }, here: 1, provider: 1, remote: 0, elsewhere: 2, refused: {} };
+  const c = M.pinAllConfirmWords(plan, tEn, { poolName: 'Team', memberName: 'UCI Max' });
+  ok(c.ask === true && c.title === 'Pin every conversation of “Team” to “UCI Max”?' && c.message.includes('2 move there now.') && c.message.includes('1 move at their next restart') && c.message.includes('1 wait until it can serve them: out of quota.') && c.message.includes('1 wait until it can serve them: cannot sign in.')
+    && c.message.includes('2 of them were pinned to another member') && c.message.includes('1 already pinned here.') && c.message.includes('1 stay: they run on another provider') && !/pin-|_unread|code/.test(c.message),
+    'THE CONFIRM SAYS FIRST, in plain words: now · at the next restart · waiting and why · pinned elsewhere (the clear will not bring it back) · here · stays — no verdict code name', c);
+  const cz = M.pinAllConfirmWords(plan, tZh, { poolName: 'Team', memberName: 'UCI Max' });
+  ok(cz.title === '把「Team」的所有对话固定到「UCI Max」？' && cz.message.includes('2 个现在就移过去。') && cz.message.includes('个等到它能服务时再移') && cz.message.includes('「恢复自动」不会恢复那个固定'), 'the confirm in zh (every part a dictionary row)', cz);
+  const none = M.pinAllConfirmWords({ ok: true, now: 0, restart: 0, waits: {}, here: 2, provider: 0, remote: 1, elsewhere: 0 }, tEn, { poolName: 'Team', memberName: 'UCI Max' });
+  ok(none.ask === false && /^No conversation of “Team” to move to “UCI Max”\. 2 already pinned here\. 1 stay: they run on another machine\.$/.test(none.text), 'nothing to pin: no confirm, the sentence says why', none);
+  const done = M.pinAllWords({ ok: true, now: 3, restart: 0, waits: { 'pin-recovering': 1 }, here: 0, provider: 0, remote: 0, elsewhere: 1, refused: { pin_not_saved: 1 } }, tEn, { poolName: 'Team', memberName: 'UCI Max' });
+  ok(done.type === 'error' && done.text.startsWith('4 conversation(s) of “Team” pinned to UCI Max.') && done.text.includes('1 wait until it can serve them: its quota is not back yet.') && done.text.includes('1 could not be pinned — try again.') && !/pin_not_saved/.test(done.text),
+    'the answer in the same plain counts; one that could not be pinned is said, never its code', done);
+  ok(M.pinClearWords({ ok: true, cleared: 3, refused: {} }, tEn, { poolName: 'Team', memberName: 'UCI Max' }).text === '3 conversation(s) of “Team” are placed automatically again.'
+    && M.pinClearWords({ ok: true, cleared: 0, refused: {} }, tZh, { poolName: 'Team', memberName: 'UCI Max' }).text === '「Team」没有固定在 UCI Max 上的对话。', 'the clear\'s answer (en, zh)');
 }
 
 console.log('§3 the chip / Session Properties note');

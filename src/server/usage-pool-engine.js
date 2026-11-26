@@ -8806,7 +8806,7 @@ function persistPoolPin(session, cleared = null) {   // r1070: `cleared` = a cle
  *  held) unless the pinned member cannot serve (then it waits, the pin kept); any other pool
  *  records it and it applies at the next restart/resume (never a restart by itself). Clearing
  *  moves nothing: automatic placement resumes from wherever the conversation is. */
-function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {}) {
+function setConversationPin(sid, memberId, { by = 'user', now = Date.now(), quiet = false } = {}) {   // quiet: B-2083 unit B's one press says ONE notice for every pin it made
   const s = sid ? activeSessions.get(sid) : null;
   if (!s) return { ok: false, status: 404, code: 'no_session', error: 'no live session with that id' };
   const poolId = s._accountId || null;
@@ -8834,7 +8834,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   if (!memberId) {
     out.reason = 'automatic';
     console.log(`[pool] pin ${poolId}/${sid}: cleared — placed automatically again (from ${current || '?'})`);
-    pinNotice(poolId, sid, s, 'unpinned');
+    if (!quiet) pinNotice(poolId, sid, s, 'unpinned');
     return out;
   }
   const hotNow = !!a.hot && caps.hotSwitch === 'verified' && !!caps.planC && own;
@@ -8843,7 +8843,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
     out.code = caps.hotSwitch !== 'verified' ? 'codex_cold' : !a.hot ? 'cold_pool' : 'no_own_link'; // no_own_link = a legacy follower of the pool default (its CLI reads the pool's own link)
     out.placed = current === memberId;
     console.log(`[pool] pin ${poolId}/${sid}: → ${memberId} (${out.placed ? 'already there' : 'applies at the next restart'} — ${out.code})`);
-    pinNotice(poolId, sid, s, out.placed ? 'pinned' : 'pinned-later', { member: memberId });
+    if (!quiet) pinNotice(poolId, sid, s, out.placed ? 'pinned' : 'pinned-later', { member: memberId });
     return out;
   }
   const members = switchCandidates(poolId);
@@ -8871,7 +8871,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
     if (out.reason === 'pin-model-not-served') out.code = 'model_not_served:' + (providerKey(memberProvider(memberId)) || '?');
   }
   console.log(`[pool] pin ${poolId}/${sid}: → ${memberId} (${out.placed ? `placed${current !== out.current ? `, from ${current || '?'}` : ', already there'}` : `waits — ${out.reason}`})`);
-  pinNotice(poolId, sid, s, out.placed ? 'pinned' : 'pinned-waiting', { member: memberId });
+  if (!quiet) pinNotice(poolId, sid, s, out.placed ? 'pinned' : 'pinned-waiting', { member: memberId });
   return out;
 }
 /** Can `memberId` serve THIS conversation (or, `session` null, the pool as a whole) right now —
@@ -8923,6 +8923,95 @@ function gatherPlan(poolId, memberId, now = Date.now()) {
     }
   } catch (e) { console.warn('[pool] gather plan failed:', e.message); }
   return out;
+}
+// ── B-2083 unit B (lane lg-recovery, 主开发 r5166 / r5177): THE MEMBER ROW's ONE PRESS «Move every conversation of this pool here
+// now». The owner's pain: one member reset early on the vendor's site and every conversation was wanted on it at once — three
+// presses each, for 44. ONE PIN PER CONVERSATION through the ONE writer (setConversationPin), so every law of the pin stands as it
+// is: a pin that can serve is honoured whatever it costs; one that cannot is kept and waits (no pin for the placing); a running
+// turn is never cut (the hot road re-points the link; a cold pool's pin applies at the conversation's next restart). It SAYS first
+// (pinAllPlan, nothing written), then acts (pinAll); ONE press clears every pin to this member (clearPinsTo). A conversation
+// pinned to ANOTHER member is re-pinned here, counted apart (the clear will not bring that older pin back); one on another provider
+// stays (a cross pin is a cold move with its own line: pinned one at a time); a remote one stays (a pool is this machine's).
+// Nothing else changes: not the pool's default, order or mode; nothing asks the vendor. Quiet per conversation, ONE notice a press.
+const PIN_ALL_KEYS = {
+  pinned: i18nKey('Pool "{pool}": {n} conversation(s) pinned to {member} by one press.'),
+  cleared: i18nKey('Pool "{pool}": {n} conversation(s) pinned to {member} are placed automatically again.'),
+};
+/** a conversation of the pool as the press sees it → {kind, why?, elsewhere} — kind: here · now · restart · waits · provider · remote */
+function pinAllRoadOf(poolId, a, sid, s, memberId, now) {
+  if (s.host) return { kind: 'remote', elsewhere: false };
+  const pin = poolPinOf(s, poolId);
+  if (pin && pin.memberId === memberId) return { kind: 'here', elsewhere: false };
+  const elsewhere = !!pin;
+  let onNow = null; try { onNow = sessionBillingMember(s, poolId).id || accounts.poolCurrentFor(poolId, sid); } catch { }
+  if (onNow && !sameProvider(poolProviderOf(a)(onNow), poolProviderOf(a)(memberId))) return { kind: 'provider', elsewhere: false };
+  const v = memberVerdictFor(poolId, memberId, s, sid, now);
+  if (!v.ok) return { kind: 'waits', why: v.why || 'pin-member-unknown', elsewhere };
+  const caps = capsOf(a.backend);
+  const hotNow = !!a.hot && caps.hotSwitch === 'verified' && !!caps.planC && hasOwnPoolLink(poolId, sid);
+  return { kind: hotNow || onNow === memberId ? 'now' : 'restart', elsewhere };
+}
+const pinAllTally = () => ({ now: 0, restart: 0, waits: {}, here: 0, provider: 0, remote: 0, elsewhere: 0, refused: {} });
+const pinAllRefusal = (poolId, memberId) => {
+  const a = accounts.get(poolId);
+  if (!a || a.type !== 'pooled') return { ok: false, status: 400, code: 'not_pooled', error: 'not a pooled account' };
+  if (typeof memberId !== 'string' || !(poolMembershipOf(poolId) || []).includes(memberId)) return { ok: false, status: 400, code: 'not_member', error: 'not a member of this pool: ' + String(memberId) };
+  return null;
+};
+/** THE PLAN the press says before it acts — per conversation, by the pin's own verdicts; NOTHING written */
+function pinAllPlan(poolId, memberId, now = Date.now()) {
+  const no = pinAllRefusal(poolId, memberId); if (no) return no;
+  const a = accounts.get(poolId);
+  const out = { ok: true, member: memberId, ...pinAllTally() };
+  for (const [sid, s] of activeSessions) {
+    if (!s || s._accountId !== poolId) continue;
+    const r = pinAllRoadOf(poolId, a, sid, s, memberId, now);
+    if (r.kind === 'waits') out.waits[r.why] = (out.waits[r.why] || 0) + 1; else out[r.kind]++;
+    if (r.elsewhere) out.elsewhere++;
+  }
+  return out;
+}
+/** THE PRESS: setConversationPin(sid, memberId) ONCE a conversation (quiet), then ONE notice; answers what was done, in the plan's counts */
+function pinAll(poolId, memberId, { by = 'user', now = Date.now() } = {}) {
+  const no = pinAllRefusal(poolId, memberId); if (no) return no;
+  const a = accounts.get(poolId);
+  const out = { ok: true, member: memberId, ...pinAllTally() };
+  let pinned = 0;
+  for (const [sid, s] of [...activeSessions]) {
+    if (!s || s._accountId !== poolId) continue;
+    const road = pinAllRoadOf(poolId, a, sid, s, memberId, now);
+    if (road.kind === 'here' || road.kind === 'provider' || road.kind === 'remote') { out[road.kind]++; continue; }
+    const r = setConversationPin(sid, memberId, { by, now, quiet: true });
+    if (!r || !r.ok) { const c = (r && r.code) || 'refused'; out.refused[c] = (out.refused[c] || 0) + 1; continue; }
+    pinned++;
+    if (road.elsewhere) out.elsewhere++;
+    if (r.placed) out.now++;
+    else if (r.reason === 'applies-at-restart') out.restart++;
+    else { const w = r.reason || 'pin-member-unknown'; out.waits[w] = (out.waits[w] || 0) + 1; }
+  }
+  if (pinned) {
+    const params = { pool: a.name || poolId, n: pinned, member: nameOf(memberId) };
+    serverNotice(`pool-pin-all-${poolId}-${memberId}-${now}`, `Pool "${params.pool}": ${pinned} conversation(s) pinned to ${params.member} by one press.`, { level: 1, i18n: { key: PIN_ALL_KEYS.pinned, params } });
+  }
+  return out;
+}
+/** ONE PRESS BACK: every conversation of the pool pinned to `memberId` is placed automatically again (the one writer, quiet) */
+function clearPinsTo(poolId, memberId, { by = 'user', now = Date.now() } = {}) {
+  const no = pinAllRefusal(poolId, memberId); if (no) return no;
+  const a = accounts.get(poolId);
+  let cleared = 0; const refused = {};
+  for (const [sid, s] of [...activeSessions]) {
+    if (!s || s._accountId !== poolId) continue;
+    const pin = poolPinOf(s, poolId);
+    if (!pin || pin.memberId !== memberId) continue;
+    const r = setConversationPin(sid, null, { by, now, quiet: true });
+    if (r && r.ok) cleared++; else { const c = (r && r.code) || 'refused'; refused[c] = (refused[c] || 0) + 1; }
+  }
+  if (cleared) {
+    const params = { pool: a.name || poolId, n: cleared, member: nameOf(memberId) };
+    serverNotice(`pool-pin-clear-${poolId}-${memberId}-${now}`, `Pool "${params.pool}": ${cleared} conversation(s) pinned to ${params.member} are placed automatically again.`, { level: 1, i18n: { key: PIN_ALL_KEYS.cleared, params } });
+  }
+  return { ok: true, member: memberId, cleared, refused };
 }
 // ── THE OWNER'S DECISION (2026-09-28, "全B"): A REMOVED MEMBER WITH NOBODY TO TAKE OVER STOPS AND WAITS ──
 // A conversation on a member the pool no longer lists, with no member able to take it over, is NOT kept running on
@@ -9820,6 +9909,7 @@ function maybeStopOnFallback(session, id, from, to) {
     placeUnplaced, fileUnplacedAsk, pushSealedOrders, // (lane pool-provider-latents, q-055 M2 / M1) an UNPLACED conversation's one decision + card; the device's orders
     setConversationPin, poolPinOf, // THE CONVERSATION'S PIN (2026-09-28): the ONE writer (behind POST /api/accounts/:poolId/pin) and the reader
     gatherPlan, // "Move every conversation here now", judged per conversation before anything moves (verify r1)
+    pinAllPlan, pinAll, clearPinsTo, // B-2083 unit B: the member row's one press (a pin per conversation through the one writer)
     memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, sweepNonMemberLinks, holdRemoved, _removedHoldOwed, // THE REMOVED-MEMBER WALL (2026-09-28): the one entry point, the default's decision (updatePool's chooser), the stale-link sweep every pool tick runs first
     memberServeLapsed, noteMemberServeFailure, // a LAPSED subscription (2026-10-08): the auto-cli loop's pacing + the probe's answer
     onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
