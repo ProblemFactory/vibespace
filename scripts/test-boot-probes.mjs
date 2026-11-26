@@ -12,6 +12,9 @@
 //     nothing is retired or killed — an undecided duplicate set included; the deferred re-probe (the fakes now answering)
 //     settles alive (the mark clears) / dead (the shared dead-socket retire) / the duplicate's loser (the shared duplicate
 //     retire, its SIGTERM by the pgrep answer) / still unanswered; after the fifth try it stays alive, said — never a kill.
+//   ③c THE RE-PROBE RIDES THE HUB'S STARTER (B-323e's remainder, lane nl-starts): its fuser / pgrep are asked of the starter and
+//     NONE starts from this process (counted at ChildProcess.prototype.spawn), with the same tally and Diagnostics line as the
+//     release's road. RED: a copy whose re-probe runner is the release's (runChild) starts all three from this process.
 //   ④ THE CENSUS: src/server/boot-restore.js holds no sync child (execFileSync / spawnSync / execSync) — a planted one is RED.
 // The fakes: `fuser` / `pgrep` read a mode file per (tool,) socket basename (hang = TERM ignored, never answers — the
 // D-state stand-in; alive; dead) and `cut` (the fd scan's last stage) hangs on demand. The legs that wait run side by
@@ -222,6 +225,34 @@ try {
     ok(tallies.length === 5 && tallies.every((t) => t.open.join() === g1.sock) && G.activeSessions.has(g1.id) && fs.existsSync(g1.sockPath) && fs.existsSync(g1.meta), `five passes, ${g1.sock} never answered: still adopted, socket + meta in place`, tallies);
     ok(G.notes.filter((l) => /^re-probe \d\/5: 0 alive, 0 dead \(retired\), 0 duplicate \(retired\), 1 still unanswered$/.test(l)).length === 5
       && G.notes.filter((l) => l === `re-probe gave up after 5 tries: ${g1.sock} kept alive — a non-answer is never a kill`).length === 1, `the Diagnostics lines: five passes, then once: ${G.notes.at(-1)}`, G.notes);
+  }
+
+  console.log('③c B-323e\'s remainder (lane nl-starts): THE RE-PROBE RIDES THE HUB\'S STARTER — its questions start nothing from this process, the same tally; RED the release\'s runner');
+  {
+    const CPm = require('child_process'), realCpSpawn = CPm.ChildProcess.prototype.spawn, direct = [];
+    CPm.ChildProcess.prototype.spawn = function (o) { direct.push(path.basename(String((o && o.file) || ''))); return realCpSpawn.call(this, o); };   // every async start of this process (spawn / execFile) passes here
+    const STARTER = require(path.join(REPO, 'src/server/child-starter.js')).childStarter();
+    const STARTER_LINE = "const starterP = (bin, args, ms) => require('./tls.js').runViaStarter(bin, args, ms, { envAdd: { PATH: process.env.PATH || '' }, maxBuffer: 4 * 1024 * 1024 });";
+    const OLDROAD = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, STARTER_LINE, 'const starterP = runChildP;', 'src/server/boot-restore.js'), 'reprobe-old-road'));
+    const onePass = async (BRm, tag, n) => {
+      const PATH0 = process.env.PATH, empty = path.join(ROOT, 'empty-' + tag); fs.mkdirSync(empty);
+      const X = instance(BRm, dataDir(tag)); const up = X.add(n), gone = X.add(n + 1);
+      process.env.PATH = empty;   // the boot's own questions find no tool: both sockets adopted probe-pending (as ③b)
+      try { await X.api.probeSockets(); await logged(async () => X.api.restoreSessions()); } finally { process.env.PATH = PATH0; }
+      mode(up.sock, 'alive'); mode(gone.sock, 'dead');
+      const d0 = direct.length, q0 = STARTER.stats().requests;
+      const r = await logged(async () => X.api.reprobePending());
+      return { tally: r.r, line: String(X.notes.filter((l) => String(l).startsWith('re-probe ')).at(-1) || ''), direct: direct.slice(d0).filter((b) => b === 'fuser' || b === 'pgrep' || b === 'sh').sort(), asked: STARTER.stats().requests - q0, up, gone };
+    };
+    try {
+      const mine = await onePass(BR, 'via-starter', 81), old = await onePass(OLDROAD, 'old-road', 91);
+      ok(mine.direct.length === 0 && mine.asked === 3, `the re-probe's three questions (fuser ×2, pgrep ×1) are asked of the starter (${mine.asked}) — NONE starts from the hub's process (${mine.direct.join(' ') || 'none'})`, mine.direct);
+      ok(mine.tally.alive.join() === mine.up.sock && mine.tally.dead.join() === mine.gone.sock && !mine.tally.open.length && fs.existsSync(mine.up.sockPath) && !fs.existsSync(mine.gone.sockPath),
+        `…with the release's answers: alive ${mine.tally.alive.join(' ')} · dead ${mine.tally.dead.join(' ')} (its socket retired)`, mine.tally);
+      ok(old.direct.join() === 'fuser,fuser,pgrep' && old.asked === 0 && old.tally.alive.join() === old.up.sock && old.tally.dead.join() === old.gone.sock,
+        `RED: a copy with the release's runner — the same tally, its three questions started from the hub's process (${old.direct.join(' ')})`, { direct: old.direct, asked: old.asked });
+      ok(mine.line !== '' && mine.line === old.line, `the Diagnostics line is the same on both roads: ${mine.line}`, { mine: mine.line, old: old.line });
+    } finally { CPm.ChildProcess.prototype.spawn = realCpSpawn; }
   }
 
   console.log('④ the census: no sync child in the boot restore');

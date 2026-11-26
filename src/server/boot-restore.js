@@ -280,9 +280,14 @@ const liveConvosOf = (ids, out) => { const held = out.split('\n'), live = new Se
 const sameIds = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 const dedupKey = (m) => `${m.backend || 'claude'}:${m.host || 'local'}:${m.claudeSessionId}`; // dedupWebuiSockets' own key
 const runChildP = (bin, args, ms) => require('./tls.js').runChild(bin, args, ms);
+// B-323e's remainder (lane nl-starts): THE RE-PROBE'S questions (the ladder below is a TIMER of the hub's — and the duplicate retire's
+// pgrep it reaches) ride the hub's starter (src/server/child-starter.js), never a fork of the hub: the same program, args, bound and
+// buffer, runChild's answer ({code, out, err}: the starter's «no answer» reads TIMEOUT — no answer, never a kill); the hub's PATH of the
+// moment rides the request (runChild's child inherited it). The boot's own questions (before the listen) keep runChild — a start's.
+const starterP = (bin, args, ms) => require('./tls.js').runViaStarter(bin, args, ms, { envAdd: { PATH: process.env.PATH || '' }, maxBuffer: 4 * 1024 * 1024 });
 // the restore's two liveness rungs, as children: fuser (an owner ⇒ alive), else pgrep -f (a command line naming the socket — never one of `own`, this server's own `dtach -a` attach clients) ⇒ true / false, or null = NO ANSWER (its bound ran out, or the tool is missing)
 const noAnswer = (r) => r.code === 'TIMEOUT' || r.code === 'ENOENT';
-const ownedP = async (sp, rung2, ask = () => { }, own = new Set()) => { ask('fuser'); const r = await runChildP('fuser', [sp], 2000); if (r.code === 0) return r.out.trim().length > 0; if (!rung2) return noAnswer(r) ? null : false; ask('pgrep'); const g = await runChildP('pgrep', ['-f', sp], 2000); return noAnswer(g) ? null : g.code === 0 && g.out.split('\n').some((x) => x.trim() && !own.has(Number(x))); };
+const ownedP = async (sp, rung2, ask = () => { }, own = new Set(), run = runChildP) => { ask('fuser'); const r = await run('fuser', [sp], 2000); if (r.code === 0) return r.out.trim().length > 0; if (!rung2) return noAnswer(r) ? null : false; ask('pgrep'); const g = await run('pgrep', ['-f', sp], 2000); return noAnswer(g) ? null : g.code === 0 && g.out.split('\n').some((x) => x.trim() && !own.has(Number(x))); };
 let probed = null, probing = null;
 function probeSockets() {
   if (probing) return probing;
@@ -580,9 +585,9 @@ function locateOrDrop(sockFile, file, meta, id) {
 }
 /** A stale duplicate of a conversation another socket owns: SIGTERM its dtach session (claude, if any, is the older/losing
  *  writer — the pids from a pgrep CHILD, never a sync ask) and clean socket + buffer + meta. */
-function retireDuplicate(sockFile, socketPath, id, claudeSessionId) {
+function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = runChildP) {   // run: the re-probe hands its starter's runner
   console.log(`  ⤫ Duplicate of ${claudeSessionId} — retiring stale ${sockFile}`);
-  runChildP('pgrep', ['-f', socketPath], 2000).then((r) => {
+  run('pgrep', ['-f', socketPath], 2000).then((r) => {
     for (const p of r.code === 0 ? r.out.split('\n') : []) {
       const pid = Number(p.trim());
       if (pid > 1 && pid !== process.pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }
@@ -595,7 +600,7 @@ function retireDuplicate(sockFile, socketPath, id, claudeSessionId) {
 
 // THE RE-PROBE (B-92a4): restoreSessions adopts a socket with no answer ALIVE — never retired, never dedup-killed, never
 // marked stopped on a non-answer; its card is an ordinary card. After listen, off the loop, the SAME questions are asked
-// again through runChild: 10 s, then 30 / 60 / 120 / 120 s (≤ 5 tries). alive ⇒ the mark clears; dead ⇒
+// again — through the hub's starter (starterP, B-323e's remainder): 10 s, then 30 / 60 / 120 / 120 s (≤ 5 tries). alive ⇒ the mark clears; dead ⇒
 // retireDeadSocket and the adopted session goes; a duplicate's conversation answered ⇒ the same dedup, its loser
 // retireDuplicate'd; no answer after the tries ⇒ it stays alive, said in ⚙ Diagnostics (the boot trace) — never a kill.
 const REPROBE_MS = [10000, 30000, 60000, 120000, 120000];
@@ -629,7 +634,7 @@ async function reprobePass() {
   for (const [sockFile, p] of [...pendingProbes]) { // 1. is the socket alive — four at a time, like the boot's probes
     if (activeSessions.get(p.id) !== p.session) { pendingProbes.delete(sockFile); continue; } // ended or replaced meanwhile (a Terminate): nothing left to settle
     if (p.q.has('alive')) asks.push(async () => {
-      const v = await ownedP(p.socketPath, true, () => { }, own);
+      const v = await ownedP(p.socketPath, true, () => { }, own, starterP);
       if (v === true) p.q.delete('alive');
       else if (v === false && activeSessions.get(p.id) === p.session) { retireDeadSocket(sockFile, p.socketPath); unadopt(p.id, p.session); pendingProbes.delete(sockFile); tally.dead.push(sockFile); }
     });
@@ -641,16 +646,16 @@ async function reprobePass() {
     if (rows.some((r) => r.p && r.p.q.has('alive'))) continue;
     let live = new Set(), known = true;
     const ids = dedupIdsOf(rows.filter((r) => !r.m.host));
-    if (ids.length) { const r = await runChildP('sh', ['-c', fdScanScript(ids)], 20000); if (r.code === 0) live = liveConvosOf(ids, r.out); else if (r.code === 'TIMEOUT') known = false; }
+    if (ids.length) { const r = await starterP('sh', ['-c', fdScanScript(ids)], 20000); if (r.code === 0) live = liveConvosOf(ids, r.out); else if (r.code === 'TIMEOUT') known = false; }
     const remote = new Map();
-    for (const r of rows) if (r.m.host) { const v = await ownedP(path.join(SOCKETS_DIR, r.sockFile), false); if (v == null) known = false; remote.set(r.sockFile, v); }
+    for (const r of rows) if (r.m.host) { const v = await ownedP(path.join(SOCKETS_DIR, r.sockFile), false, undefined, undefined, starterP); if (v == null) known = false; remote.set(r.sockFile, v); }
     if (!known) continue;
     pendingGroups.delete(key);
     const { retire } = dedupWebuiSockets(rows.map(({ sockFile, m }) => ({ sockFile, backend: m.backend || 'claude', host: m.host || 'local', claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0, claudeAlive: m.host ? !!remote.get(sockFile) : live.has(m.claudeSessionId) })));
     for (const r of rows) {
       if (!r.p) continue;
       r.p.q.delete('dedup');
-      if (retire.has(r.sockFile)) { retireDuplicate(r.sockFile, r.p.socketPath, r.p.id, r.m.claudeSessionId); unadopt(r.p.id, r.p.session); pendingProbes.delete(r.sockFile); tally.duplicate.push(r.sockFile); }
+      if (retire.has(r.sockFile)) { retireDuplicate(r.sockFile, r.p.socketPath, r.p.id, r.m.claudeSessionId, starterP); unadopt(r.p.id, r.p.session); pendingProbes.delete(r.sockFile); tally.duplicate.push(r.sockFile); }
     }
   }
   for (const [sockFile, p] of [...pendingProbes]) { if (p.q.size) tally.open.push(sockFile); else { pendingProbes.delete(sockFile); tally.alive.push(sockFile); } }

@@ -116,7 +116,7 @@ export const ROWS = Object.freeze([
   ['src/server/plugin-loader.js', "path.join(rec.dir, 'server.js')", 'long', 1, 'an enabled plugin\'s process'],
   ['src/server/session-stdout.js', 'DTACH_CMD', 'long', 2, 'a conversation\'s attach / heal (bridge-watch\'s tick, ≤3 per hour)'],
   ['src/server/stdout/claude-stream-json.js', "'git'", 'start', 1, 'a local claude chat\'s init with the worktree flag'],
-  ['src/server/tls.js', 'bin', 'timer', 1, 'runChild: the boot\'s liveness probes and their re-probe timer (≤5 per socket); the hourly pass rides the starter since B-323e'],
+  ['src/server/tls.js', 'bin', 'start', 1, 'runChild: the boot\'s liveness probes before the listen (and the boot\'s duplicate retire) — their re-probe ladder (a timer, ≤5 passes) rides the starter since B-323e\'s remainder (lane nl-starts), the hourly pass since B-323e'],
   ['src/server/window-targets-engine.js', 'bin', 'press', 1, 'an agent\'s screenshot of a desktop window'],
   ['src/session-store.js', 'cmd', 'timer', 1, '`ps` per lock on a hub WITHOUT /proc (the sweep); tmux list-panes rides the starter since B-323e'],
   ['src/ssh-key.js', 'cmd', 'press', 1, 'a machine added with a passphrase key'],
@@ -151,7 +151,7 @@ export const SYNC_ROWS = Object.freeze([
     'macOS only, with active usage polling on (opt-in): ≤1 per 5 min (the 90 s timer under the global login floor) + a ⟳ press, ≤3 s, ON THE MAIN LOOP'],
 ]);
 /** THE DEBT: the sum of every timer row's count — it only shrinks (lower it when a row is lowered) */
-export const TIMER_DEBT_SUM = 14;   // B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): the mount auto-reconnect's six (a CephFS connect's shim, mount and unmount, the rc socket's ask, the cache's witness, its old dir's removal) ride the starter — 20 → 14. B-323e's remainder (lane bl-chat-b, the coordinator's r2681 / r2689): the tailnet lookup, the copy's du, the agy poll and the CLI which ride the starter — 25 → 21; the person's login-shell look through the starter's session option — 21 → 20. 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
+export const TIMER_DEBT_SUM = 13;   // B-323e's remainder (lane nl-starts): the boot restore's re-probe ladder rides the starter — 14 → 13. B-323e's part 3 remainder (lane mask-value-shape, 主开发 r4379): the mount auto-reconnect's six (a CephFS connect's shim, mount and unmount, the rc socket's ask, the cache's witness, its old dir's removal) ride the starter — 20 → 14. B-323e's remainder (lane bl-chat-b, the coordinator's r2681 / r2689): the tailnet lookup, the copy's du, the agy poll and the CLI which ride the starter — 25 → 21; the person's login-shell look through the starter's session option — 21 → 20. 47 at the census; lines 70 (the System panel), 140 (the job-log sweep) and 141 (the mounts' probes and auto-reconnect) paid 18; lane bl-machines-b's Disconnect line (the pull mount's four) 4
 /** a guard is a PLATFORM FACT — the OS, or /proc — never a setting, a flag, an env word */
 export const PLATFORM_GUARD = /^(?:[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)(?:\|[^|]*(?:process\.platform\s*===?\s*'[a-z0-9]+'|\/proc\b|hasProc\(|_procfs)[^|]*)*$/;
 const NOT_PLATFORM = /setting|serverSetting|process\.env|\bflag\b|VS_[A-Z_]+|VIBESPACE_[A-Z_]+/i;
