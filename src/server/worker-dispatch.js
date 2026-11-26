@@ -238,7 +238,8 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
     catch (e) { v = { ok: false, why: 'authorizer-failed', detail: 'spend authorizer failed: ' + (e && e.message) }; }
     if (v && v.ok === false) {
       if (SA.isHeldWhy(v.why)) { giveBack({ attempted: false }); owe(key, { ...o, why: v.why }); log(`[dispatch] ${String(o.to).slice(0, 8)}: the owed compaction is held again (${v.why}) — asked once more when that hold lifts`); return; }
-      return end(`the spend ceiling refused the compaction (${v.detail || v.why})`);
+      // 主开发 r4859: a journal line names the verdict's CODE, never its detail (an hour or a day cap's detail begins with an account's name)
+      return end(`the spend ceiling refused the compaction (${v.why})`);
     }
     const sendUserInput = getSendUserInput();
     inFlight.add(o.to);

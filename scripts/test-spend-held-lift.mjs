@@ -732,7 +732,6 @@ const ALLOW = [   // [file, a substring unique to its line, audience, why]
   ['src/server/usage-pool-engine.js', 'error: hw.why ? `${hw.why}${hw.detail ?', 'person', 'the helper\'s error answered to the person\'s press'],
   ['src/server/usage-pool-engine.js', 'error: wr.why ? `${wr.why}${wr.detail ?', 'person', 'the reset credit\'s error answered to the person\'s press'],
   ['src/server/usage-pool-engine.js', '${wr.detail ? ` — ${String(wr.detail)', 'person', 'the wall card in the person\'s own window'],
-  ['src/server/worker-dispatch.js', 'the spend ceiling refused the compaction (${v.detail || v.why})', 'journal', 'the owed compaction\'s end, a log line (a cap: a held verdict never reaches it)'],
 ];
 // objects in an asking file whose `detail` is NO spend verdict's (each named with its why; a row nothing reads is stale, red)
 const NOT_VERDICT = [   // [file, the object read, why]
@@ -793,6 +792,14 @@ function census(files) {
   ];
   const caught = shapes.map(([n, rel, line]) => [n, plant(rel, line).length]);
   ok(!!caught.every(([, n]) => n === 1), `THE CENSUS's REACH (r4744): each of ${shapes.length} planted shapes is red — ${caught.map(([n, k]) => `${n} ${k}`).join(', ')}`, JSON.stringify(caught)); }
+console.log('§12c (主开发 r4859) the owed compaction\'s refused spend: its journal line names the verdict\'s CODE, never its detail (a cap\'s begins with an account\'s name)');
+const CAP_DETAIL = 'Made-up account has started 30 unattended turns this hour (cap 30)';
+const capAtLift = async (Mod) => { const W = await dispatchHeld(Mod); W.setRefuse('hour-cap'); W.setDetail(CAP_DETAIL); await liftD(W); const line = W.logs.find((l) => /the spend ceiling refused the compaction/.test(l)) || ''; const out = { line, typed: W.typed.length, wakes: W.wakes.length }; W.close(); return out; };
+{ const r = await capAtLift(WD);
+  ok(!!(r.line.includes('(hour-cap)') && !r.line.includes('Made-up account') && r.typed === 0 && r.wakes === 0), '(r4859) an owed compaction an hour cap refuses at the lift ends with a journal line naming the CODE (hour-cap), never the detail (no account\'s name); nothing typed, nobody woken', JSON.stringify(r)); }
+{ const RED = copyOf('src/server/worker-dispatch.js', 'refused the compaction (${v.why})`);', 'refused the compaction (${v.detail || v.why})`);', 'the refused-spend line saying the detail (c58d72871)');   // stale-pins: kept (the RED's text IS c58d72871's line)
+  ok(!!(!RED.err), 'RED CONTROL built: the refused-spend journal line saying the verdict\'s detail', RED.err);
+  if (!RED.err) { const r = await capAtLift(RED); ok(!!(r.line.includes('Made-up account')), 'RED (c58d72871): the journal line names the account (the cap detail\'s head)', JSON.stringify(r.line)); } }
 if (typeof process.getuid === 'function' && process.getuid() === 0) console.log('  ⊘ SKIP (b) r4696 should: the once-grant that stays spent — this process runs as root, and a folder\'s mode refuses no write of root\'s (the leg would read a correct product red)');
 else { const W = await autoWorld(ENG, HELD, 'once', (dir) => fs.chmodSync(dir, 0o500));   // the grant's release write FAILS (its folder refuses): release() answers 'kept'
   ok(!!(W.r.code === 'spend_refused' && !onceLeft(W) && !/grant is kept/.test(String(W.r.why)) && String(W.r.why).includes(HELD)), '(b) r4696 should: a once-grant that STAYS SPENT (its release could not be written) is never told «the grant is kept»', JSON.stringify({ why: W.r.why, grants: W.grants.map((g) => ({ mode: g.mode, spent: !!g.spentAt })) })); }
