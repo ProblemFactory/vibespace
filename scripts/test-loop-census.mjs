@@ -280,6 +280,24 @@ const CAP = {};
 const W = SFW.create({ rootDir: ROOT, armed: true, readMountinfo: () => '', fresh: true, beatMs: 50, holdMs: 400, noAnswerMs: 50, liveMs: 60000, censusEveryMs: 50, samplingOn: () => samplingOn,
   log: quiet, holdsOptions: { eluEveryMs: 50, eluBeforeMs: 500, captureMs: 1500, captureEveryMs: 20, autoCapture: false, captureOpts: CAP } }).start({ installHook: false });
 const sumOf = (t) => Object.values(t.ticks).reduce((s, n) => s + n, 0) + Object.values(t.families).reduce((s, n) => s + n, 0);
+// B-3dbd (r4729, lane bl-chat-b): THE TAKES WAIT ON THE CENSUS'S OWN FACTS. The watchdog thread ticks on a timer of its own that runs late
+// beside other suites, so a count of ticks is waited for by takes (summed, or one take after a growing pause), never by a fixed sleep; a
+// take may wait long for its answer (TAKE_MS — the product's 2 s TAKE_WAIT_MS is a hub's, not a loaded test machine's); a wait that ends
+// without its fact is a NAMED failed line, never a silent read of whatever was there
+const TAKE_MS = 20000, TRIES = 200, PACE = 50;
+const take = (w) => w.census(TAKE_MS);
+const noFact = (what, d) => ok(false, `the census never showed ${what} within its bound — a harness line, never the census's verdict`, d);
+/** takes until one answers `done` (each take starts the next hour) → that take, or null with its named line */
+const takeUntil = async (w, done, what) => { for (let i = 0; i < TRIES; i++) { const t = await take(w); if (t && done(t)) return t; await sleep(PACE); } noFact(what); return null; };
+/** takes summed until `done(sum)` → the sum {takes, paused, off, asks}, its named line when the bound ends first */
+const sumUntil = async (w, done, what) => {
+  const acc = { takes: 0, paused: 0, off: 0, asks: 0 };
+  for (let i = 0; i < TRIES && !done(acc); i++) { await sleep(PACE); const t = await take(w); if (!t) continue; acc.takes++; acc.paused += t.ticks.paused || 0; acc.off += (t.pausedBy && t.pausedBy.off) || 0; acc.asks += t.asks || 0; }
+  if (!done(acc)) noFact(what, acc);
+  return acc;
+};
+/** a condition of the main side, polled — its expiry a named line */
+const factWithin = async (fn, what, ms = TAKE_MS) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < ms) await sleep(20); if (!fn()) noFact(what); return fn(); };
 try {
   await sleep(400);   // the watchdog thread up
   ok(!!(await W.census()), 'census() answers the take of a running census');
@@ -309,17 +327,31 @@ try {
   const a3 = await W.census(), fa3 = LC.censusFold(a3);
   ok(a3 && a3.families.outside >= 3 && a3.deep >= 3 && a3.deep <= a3.families.outside && (a3.families.channels || 0) <= 1 && fa3.deep?.ticks === a3.deep,
     `(a3) the burn under 40 helper frames: ${a3 && a3.families.outside} ticks outside, ${a3 && a3.deep} of them deep — the sample's ${LC.FRAME_LIMIT} frames end before channels-burn.js`, a3);
-  // (b) the setting off: paused, nothing asked
-  samplingOn = false; await sleep(120); await W.census();   // the flag reaches the thread on a beat: an hour that starts after it is paused whole
-  await sleep(300);
-  const b = await W.census();
-  samplingOn = true; await sleep(150); await W.census();
-  ok(b && b.ticks.paused >= 3 && b.pausedBy.off >= 3 && b.asks === 0, `(b) the sampling setting off pauses the census as it stops a capture: ${b && b.ticks.paused} ticks paused (off), nothing asked`, b);
+  // (b) the setting off: paused, nothing asked. The flag reaches the thread on a beat: the take that first shows it paused ends the hour
+  // the flag arrived in; the hours after it are paused WHOLE — summed until three paused ticks (r4729: was 120 + 300 + 150 ms of sleeps)
+  samplingOn = false;
+  await takeUntil(W, (t) => ((t.pausedBy && t.pausedBy.off) || 0) >= 1, 'the setting off reaching its thread');
+  const b = await sumUntil(W, (acc) => acc.paused >= 3, 'three paused ticks after the setting went off');
+  samplingOn = true;
+  await takeUntil(W, (t) => sumOf(t) >= 1 && !((t.pausedBy && t.pausedBy.off) || 0), 'an hour wholly after the setting came back on');
+  ok(b && b.paused >= 3 && b.off >= 3 && b.asks === 0, `(b) the sampling setting off pauses the census as it stops a capture: ${b && b.paused} ticks paused (off) over ${b && b.takes} takes, nothing asked`, b);
+  // THE PLACEMENT (the family's law 1) of (b)'s old wait: a census that ticks on a slow rate the TEST sets (200 ms, a constant of its own,
+  // never load) — one fixed 300 ms window after the flag counts fewer than three paused ticks (the old leg's red, made at will); the
+  // takes summed on the fact reach three (this leg's wait, green)
+  {
+    const W2 = SFW.create({ rootDir: ROOT, armed: true, readMountinfo: () => '', fresh: true, beatMs: 50, holdMs: 400, noAnswerMs: 50, liveMs: 60000, censusEveryMs: 200, samplingOn: () => false, log: quiet }).start({ installHook: false });
+    try {
+      await takeUntil(W2, (t) => ((t.pausedBy && t.pausedBy.off) || 0) >= 1, 'the slow census\'s first paused tick');
+      await sleep(300); const old = await take(W2);
+      const now2 = await sumUntil(W2, (acc) => acc.paused >= 3, 'three paused ticks of the slow census');
+      ok(old && old.ticks.paused < 3 && now2.paused >= 3 && now2.asks === 0, `PLACED: a census ticking every 200 ms counts ${old && old.ticks.paused} paused ticks in the old fixed 300 ms (red at will); the takes summed on the fact count ${now2.paused} over ${now2.takes} takes`, { old: old && old.ticks, now2 });
+    } finally { W2.stop(); }
+  }
   // (c) a hold: a synchronous child (no JavaScript runs) past the 0.4 s bar — the census's ask in flight is TAKEN by the hold
   const h0 = W.holds().ring().length;
   cp.spawnSync('sleep', ['0.8']);
-  await sleep(300);
-  const c = await W.census(), held = W.holds().ring().slice(h0);
+  await factWithin(() => W.holds().ring().length > h0, 'the 0.8 s hold\'s own record in the ring');   // r4729: the hold's record itself (was a 300 ms sleep)
+  const c = await take(W), held = W.holds().ring().slice(h0);
   ok(c && held.length === 1 && held[0].samples >= 1 && c.ticks.held >= 1 && c.ticks.notSampled >= 1,
     `(c) a 0.8 s synchronous child: ${c && c.ticks.held} ticks held; the HOLD TOOK the census's ask in flight — its first sample «${held[0] && held[0].frame}» — and the census's waiting ticks are not sampled (${c && c.ticks.notSampled})`, { c, held });
   // (d0) B-518e — WHAT TURNED (d) RED IN A PACKED RUN, NAMED BY ELIMINATION AND PLACED: «7 asks — the capture took 2 samples»
@@ -352,9 +384,12 @@ try {
   const dSpan = d ? d.toM - d.fromM : null;
   ok(r.ok && d && d.asks === 0 && d.ticks.notSampled >= 3 && last && last.id === r.id && !last.stopped && dSpan < last.windowMs && last.samples >= 10,
     `(d) while a capture runs the census asks nothing: ${d && d.ticks.notSampled} busy ticks not sampled, ${d && d.asks} asks — the capture took ${last && last.samples} samples${last && last.stopped ? `, STOPPED «${last.stopped}»` : ''}; the take ${dSpan != null ? dSpan.toFixed(0) : '?'} ms of the capture's ${last && last.windowMs} ms window`, { r, d, last: last && { id: last.id, samples: last.samples, split: last.split, stopped: last.stopped, costMs: last.costMs, windowMs: last.windowMs } });
-  // (e) the take resets: the next hour starts where it ended, from zero
-  await sleep(250);
-  const e1 = await W.census(), e2 = await W.census();
+  // (e) the take resets: the next hour starts where it ended, from zero. A take holding three ticks is waited for by a growing pause
+  // before each take (r4729: was one 250 ms sleep, three ticks of a 50 ms timer that runs late under load), then the very next take
+  let e1 = null;
+  for (let i = 0, ms = 150; i < 12 && !(e1 && sumOf(e1) >= 3); i++, ms = Math.min(ms * 2, 3000)) { await sleep(ms); e1 = await take(W); }
+  if (!(e1 && sumOf(e1) >= 3)) noFact('a take of three ticks', e1);
+  const e2 = await take(W);
   ok(e1 && e2 && e2.fromM === e1.toM && sumOf(e1) >= 3 && sumOf(e2) <= 2 && e2.asks <= 1 && e2.halved === null,
     `(e) a take resets the counts: the next starts at its end (${e1 && sumOf(e1)} ticks, then ${e2 && sumOf(e2)})`, { e1, e2 });
 } finally { W.stop(); }
@@ -364,10 +399,13 @@ console.log('④ the doors');
 {
   const none = SFW.create({ rootDir: ROOT, readMountinfo: () => '', fresh: true, live: false, log: quiet }).start({ installHook: false });
   const off = SFW.create({ rootDir: ROOT, readMountinfo: () => '', fresh: true, beatMs: 50, holdMs: 400, censusEveryMs: 0, log: quiet }).start({ installHook: false });
-  await sleep(200);
-  const [n1, n2] = [await none.census(), await off.census()];
+  // r4729: THE NEVER CLAUSE read on the product's own answer — no thread answers null at once; the census-off thread ANSWERS «off» once it
+  // is up (its message waits in its port meanwhile): asked with a long wait, a null that came before that wait ran out is that answer, never
+  // the take's own timeout (was: a 200 ms sleep, then takes whose 2 s bound could meet the leg by itself)
+  const t0 = Date.now(), n1 = await none.census(TAKE_MS), n2 = await off.census(TAKE_MS), waited = Date.now() - t0;
   none.stop(); off.stop();
-  ok(n1 === null && n2 === null, 'census() answers null with no watchdog thread and with the census off (no take, never a guess)', { n1, n2 });
+  if (waited >= TAKE_MS) noFact('the census-off thread\'s own answer', { waited });
+  ok(n1 === null && n2 === null && waited < TAKE_MS, 'census() answers null with no watchdog thread and with the census off (no take, never a guess)', { n1, n2, waited });
   const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8');
   ok(/const q = takeCensusAsk\(\{ kind: 'hold', h \}\) \|\| ask\(\{ kind: 'hold', h \}\);/.test(WK) && /if \(!openHold\(now\)\) takeCensusAsk\(\{ kind: 'capture', c, pending: \[\] \}\);/.test(WK)
     && /if \(!openHold\(now\) && takeCensusAsk\(\{ kind: 'profile', pr, pq: \{ countedTo: now, counted: false \} \}\)\) return;/.test(WK)
