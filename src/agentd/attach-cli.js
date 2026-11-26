@@ -62,7 +62,8 @@ function askLinkToken() {
 }
 askLinkToken().then((r) => {
   // 7 = THE VAULT WAIT (data/bin/pty-wrapper.js never counts it toward its cap; the chat-wrapper retries every 30 s anyway)
-  if (!r.ok) { log(`no link token (${r.code}): ${r.why}`); process.exit(r.code === 'vault_locked' ? 7 : 5); }
+  // B-f276 (r4721's round): a link token HELD unread (the hub reads its file again by itself) waits as the locked vault does
+  if (!r.ok) { log(`no link token (${r.code}): ${r.why}`); process.exit(r.code === 'vault_locked' || r.code === 'link_token_unread' ? 7 : 5); }
   main(r.token, r.hubPub);
 });
 

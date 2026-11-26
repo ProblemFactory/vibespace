@@ -21,7 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
-const { replaceShredding } = require('../secret-file.js');
+const { replaceShredding, shredFile } = require('../secret-file.js');
 
 const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped (lane vault-locked-refusal-notice)
 const SR = require('../store-read.js');            // B-f276 (r4721): the store-read law — the legacy token file's read has three answers
@@ -53,16 +53,19 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
    *  B-f276 (r4721, lane lg-vault-stages): ITS READ UNDER THE STORE-READ LAW. Not there ⇒ the first pairing (minted, written 0600, as
    *  before). A read that FAILED, or torn bytes ⇒ HELD (src/store-read-hold.js): the link is refused BY NAME (`link_token_unread`, the
    *  machine named), nothing is written over the file, and it is read again off the loop; its token back ⇒ the next link reads it.
-   *  Torn bytes (not a token's shape) are kept aside ONCE (0600, beside the file) and a FRESH token is written over them off the loop:
-   *  the machine is paired again — the torn bytes were no token, said by name. The value is never in a log, an error, a held row or a
+   *  Torn bytes (not a token's shape) are kept aside ONCE (0600, beside the file) and a FRESH token is written over them off the loop
+   *  (refused by name until it is on disk; r4721's round): the machine is paired again —
+   *  the torn bytes were no token, said by name. Their copies are SHREDDED at an unpair and at the vault's open sweep. The value is never in a log, an error, a held row or a
    *  copy's name. (A token the machine already has is never minted over: that refused every hello until a person paired it again.) */
   const holds = new Map();   // hostId → its hold (from its first failed or torn read)
-  const fresh = new Map();   // hostId → a fresh token being written over torn bytes (the file's once the write lands)
+  const renewing = new Map();   // hostId → a fresh token being written over torn bytes: REFUSED until it is on disk (r4721's round: a
+                                // token handed out before then could be lost to a restart, and the machine paired again against it)
+  const COPY_RE = /^host-[\w.-]+\.token\.corrupt-\d+(?:-\d+)?$/;   // a torn token's copy beside it (the helper's set-aside name)
   const machineOf = (hostId) => { let n = null; try { n = nameOf(hostId); } catch { n = null; } return VB.actorName(n, 'a paired machine'); };
   function legacy(hostId) {
     ensureDir();
     const f = fileOf(hostId);
-    if (fresh.has(hostId)) return fresh.get(hostId);
+    if (renewing.has(hostId)) throw Object.assign(new Error(`the link to ${machineOf(hostId)}: its new link token is being written (its torn bytes kept aside) — it answers once it is on disk`), { code: 'link_token_unread', status: 503 });
     const h = holds.get(hostId);
     if (h && h.held()) throw h.refusal(`the link to ${machineOf(hostId)}`);
     let read;
@@ -86,12 +89,12 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   /** torn bytes kept aside (their copy named): a FRESH token, written over the torn file off the loop (0600) — the machine is paired again */
   function renew(hostId, f, copyName) {
     const tok = mint();
-    fresh.set(hostId, tok);
+    renewing.set(hostId, tok);
     log.warn?.(`[host-tokens] the link token of ${machineOf(hostId)} was torn — its bytes are kept aside as ${copyName}; a new one is written: pair the machine again`);
     try {   // THE STORE WRITER's thread writes it (whole, synced, then put in place) — never the hub's loop
-      require('../store-writer.js').storeWriter().dirty(f, { name: 'host-token.write', rank: 0, mode: 0o600, makeDir: true, produce: () => tok,
-        onWritten: (ok, e) => { if (ok) { if (fresh.get(hostId) === tok) fresh.delete(hostId); } else log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be written (${(e && e.code) || 'error'}) — this run keeps it, the writer tries again`); } });
-    } catch (e) { log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be handed to the store writer (${(e && e.code) || 'error'}) — this run keeps it`); }
+      require('../store-writer.js').storeWriter().dirty(f, { name: 'host-token.write', rank: 0, mode: 0o600, makeDir: true, produce: () => (renewing.get(hostId) === tok ? tok : null),   // unpaired meanwhile: nothing written
+        onWritten: (ok, e) => { if (renewing.get(hostId) !== tok) return; if (ok) renewing.delete(hostId); else log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be written (${(e && e.code) || 'error'}) — its link stays refused, the writer tries again`); } });
+    } catch (e) { renewing.delete(hostId); log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be handed to the store writer (${(e && e.code) || 'error'}) — its torn file is read again at the next link`); }
   }
   /** → 'not_set_up' | 'locked' | 'unlocked' — as THIS process sees the dir (no engine over a sealed dir = locked) */
   function stateOf() {
@@ -205,7 +208,8 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   function lockedWhy(hostId) { return stateOf() === 'locked' ? lockedError(hostId).message : null; }
   /** An unpaired machine: its file (if any) and its entry, gone. */
   function drop(hostId) {
-    const h = holds.get(hostId); if (h) { h.stop(); holds.delete(hostId); } fresh.delete(hostId);   // B-f276 (r4721): an unpaired machine's hold ends with it
+    const h = holds.get(hostId); if (h) { h.stop(); holds.delete(hostId); } renewing.delete(hostId);   // B-f276 (r4721): an unpaired machine's hold ends with it
+    shredCopies((n) => n.startsWith(`host-${hostId}.token.corrupt-`)).catch(() => 0);   // (r4721's round) and its torn token's copies, overwritten before the unlink
     try { fs.unlinkSync(fileOf(hostId)); } catch { }
     const v = SB.vaultForDir(dataDir);
     if (v && v.state() !== 'not_set_up') { const r = v.secretDrop(entryOf(hostId)); if (!r.ok) log.warn?.(`[vault] the link token of ${hostId} was not dropped (${r.code})`); }
@@ -225,7 +229,17 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
       if (r.ok && r.value) { r.value.fill(0); if (!fs.existsSync(path.join(agentdDir, n))) out.push(m[1]); }
     }
     if (out.length) log.log?.(`[vault] ${out.length} device link token file(s) sealed into the vault`);
+    shredCopies(() => true).catch(() => 0);   // B-f276 (r4721's round): a torn token's copy is no token beside the vault — overwritten, then unlinked
     return out;
+  }
+  /** the torn tokens' copies in data/agentd (the helper's `.corrupt-` names) that `which(name)` picks — SHREDDED off the loop (their bytes
+   *  overwritten before the unlink: secret material); said once as a count, never a name's value */
+  async function shredCopies(which) {   // the folder listed OFF the loop (nothing synchronous added on the hub's loop)
+    let names = [];
+    try { names = (await fs.promises.readdir(agentdDir)).filter((n) => COPY_RE.test(n) && which(n)); } catch { names = []; }
+    if (!names.length) return 0;
+    const r = await Promise.all(names.map((n) => shredFile(path.join(agentdDir, n)).catch(() => false)));
+    const n = r.filter(Boolean).length; if (n) log.log?.(`[vault] ${n} torn link token copie(s) shredded`); return n;
   }
   /** Every attach config an older build wrote carries the token: take it out (the attach child asks the hub now). → n. */
   function stripCopies() {

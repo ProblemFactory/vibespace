@@ -39,6 +39,7 @@ const STATUS = Object.freeze({
   wrong_password: 403, corrupt: 500, paced: 429, code_paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
   password_too_short: 400, password_too_long: 400, password_not_text: 400, same_as_sign_in: 400, same_password: 400, bad_hours: 400,
   human_only: 403, cross_site: 403, unauthorized: 401, vault_locked: 423, no_link: 404,
+  link_token_unread: 503,   // B-f276 (r4721's round, a should): a machine's link token HELD unread (the no-vault window) — a wait, its own words
   reveal_needs_password: 403, not_found: 404, unreadable: 500, // lane vault-contents-window
   'records-unread': 503, // B-f276 family unit 2 (round wgbjnr750): the Background Work records held — the job card's press refused by name
   not_revealable: 403, // int317: a machine's link token / a sealed file's key — never shown
@@ -484,10 +485,10 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     let hubPub = null; try { hubPub = typeof hubPubFor === 'function' ? hubPubFor() : null; } catch { hubPub = null; }
     try { const token = linkTokenFor(hostKey, { actor: s.name || s.webuiName || null }); waiting(false); return answerLink(200, { ok: true, token, ...(hubPub ? { hubPub } : {}) }); }
     catch (e) {
-      const code = e && e.code === 'vault_locked' ? 'vault_locked' : 'error';
+      const code = e && e.code === 'vault_locked' ? 'vault_locked' : e && e.code === 'link_token_unread' ? 'link_token_unread' : 'error';   // B-f276 (r4721's round): a held token answers its own wait, never a 500
       const again = code === 'vault_locked' && !!s._vaultWait;
       waiting(code === 'vault_locked');
-      return answerLink(code === 'vault_locked' ? STATUS.vault_locked : 500, { ok: false, code, error: (e && e.message) || WORDS.vault_locked }, { again });
+      return answerLink(code === 'error' ? 500 : STATUS[code], { ok: false, code, error: (e && e.message) || WORDS.vault_locked }, { again });
     }
   });
   if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste, jobAsks });

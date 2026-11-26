@@ -18,7 +18,11 @@
 //   K2 the refusal lifted, a read again ⇒ the file's token answers again, the file's bytes unchanged
 //   K3 torn bytes ⇒ kept aside once (the same bytes, 0600), a FRESH token written over them (0600, by the store writer), said by name
 //   K4 not there ⇒ minted and written 0600 (the first pairing, as the release)
-//   K5 the token is never said: no line, refusal or held row carries it, nor its first eight characters
+//   K5 the token is never said: no line, refusal or held row carries it (the machine's, the fresh ones, a prefix, a middle slice) —
+//      its control a copy whose renewal logs the token, caught by the same scan
+// THE ROUND's SHOULDS (r4721's round, 主开发 r4916): K3 hands out NO fresh token before it is on disk; K6 an unpaired machine's hold
+//   ends and its torn copies are shredded; K7 the link-token door answers a held token with its own wait (503 link_token_unread, the
+//   machine named, no token) and the token once it reads; I1b a batch forwarded while the id is held carries this life's id
 // Run: node scripts/test-minted-over-held.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -125,6 +129,7 @@ function tokWorld(tag, content) {
   return { hostId, file, make, mints: () => mints };
 }
 const told = [];   // every refusal's message (K5 scans them)
+const minted = [];   // the fresh tokens K3 and K4 made (K5 scans for them too)
 const errOf = (fn) => { try { fn(); return null; } catch (e) { told.push(String(e && e.message)); return e; } };
 {
   const w = tokWorld('held', TOK + '\n'), before = bytesOf(w.file);
@@ -153,23 +158,88 @@ const errOf = (fn) => { try { fn(); return null; } catch (e) { told.push(String(
   const w = tokWorld('torn', TORN);
   const k = w.make();
   const e = errOf(() => k.tokenFor(w.hostId));
-  await untilFact(() => w.mints() === 1 && !W().pending(w.file) && !String(bytesOf(w.file)).includes('not a token'), 'the torn token\'s copy made and a fresh one written');
+  // (the round's should) NO fresh token handed out before it is on disk: every ask until then is refused by name
+  let early = 0, got = null;
+  await untilFact(() => { let v = null; try { v = k.tokenFor(w.hostId); } catch { v = null; } if (v && String(bytesOf(w.file)) !== v) early++; if (v) got = v; return !!v; }, 'the fresh token answers once it is on disk');
   const copies = copiesOf(w.file), fresh = String(bytesOf(w.file));
-  let got = null; try { got = k.tokenFor(w.hostId); } catch (x) { got = x; }
+  minted.push(fresh);
   ok(!!e && e.code === 'link_token_unread' && copies.length === 1 && bytesOf(path.join(path.dirname(w.file), copies[0])).equals(TORN) && modeOf(path.join(path.dirname(w.file), copies[0])) === 0o600
-    && /^vsht_[0-9a-f]{32}$/.test(fresh) && got === fresh && modeOf(w.file) === 0o600 && said.some((l) => /Lab machine/.test(l) && /pair the machine again/.test(l)),
-    'K3 torn bytes ⇒ kept aside ONCE (the same bytes, 0600), a FRESH token written over them (0600, by the store writer), said by name: pair the machine again', { code: e && e.code, copies, mode: modeOf(w.file) });
+    && /^vsht_[0-9a-f]{32}$/.test(fresh) && got === fresh && early === 0 && modeOf(w.file) === 0o600 && said.some((l) => /Lab machine/.test(l) && /pair the machine again/.test(l)),
+    'K3 torn bytes ⇒ kept aside ONCE (the same bytes, 0600), a FRESH token written over them (0600, by the store writer), handed out only once it is on disk, said by name: pair the machine again', { code: e && e.code, copies, mode: modeOf(w.file), early });
 }
 {
   const w = tokWorld('none');
   const k = w.make(), tok = k.tokenFor(w.hostId);
+  minted.push(tok);
   ok(String(bytesOf(w.file)) === tok && modeOf(w.file) === 0o600 && w.mints() === 1, 'K4 not there ⇒ minted and written 0600 (the first pairing, as the release)', { mode: modeOf(w.file) });
 }
 {
   const rows = JSON.stringify(HOLD.holds()), lines = [...said, ...told].join('\n');
-  const leaks = [TOK, TOK.slice(0, 8)].filter((v) => lines.includes(v) || rows.includes(v));
-  const planted = [...said, `[host-tokens] a planted line ${TOK.slice(0, 8)}`].join('\n').includes(TOK.slice(0, 8));
-  ok(leaks.length === 0 && planted, `K5 the token is never said: ${said.length} lines, ${told.length} refusals and the held rows carry neither it nor its first eight characters (a planted line is caught: the scan's control)`, { leaks: leaks.length });
+  const secrets = [TOK, TOK.slice(0, 8), TOK.slice(8, 24), ...minted, ...minted.map((m) => m.slice(8, 24))];
+  const leaks = secrets.filter((v) => lines.includes(v) || rows.includes(v));
+  ok(minted.length === 2 && leaks.length === 0, `K5 the token is never said: ${said.length} lines, ${told.length} refusals and the held rows carry none of ${secrets.length} values (the machine's token, the two fresh ones, a prefix, middle slices)`, { leaks: leaks.length, minted: minted.length });
+  // its CONTROL: a copy whose renewal logs the fresh token — the same scan over its lines catches it
+  const LEAKY = MUT.load('src/server/host-tokens.js', anchored(K_SRC, 'a new one is written: pair the machine again`);', 'a new one is written: pair the machine again ${tok}`);', 'the renewal\'s line made to carry the token'), 'token-leaky');
+  const wl = tokWorld('leaky', Buffer.from('not a token\n')), kl = wl.make(LEAKY), at = said.length;
+  errOf(() => kl.tokenFor(wl.hostId));
+  await untilFact(() => !W().pending(wl.file) && /^vsht_/.test(String(bytesOf(wl.file))), 'the leaky copy\'s fresh token written');
+  const leaked = String(bytesOf(wl.file)), caught = said.slice(at).join('\n').includes(leaked);
+  ok(caught, 'K5 CONTROL: a copy whose renewal logs the fresh token — the scan finds it in that copy\'s lines (RED on the copy)', { caught });
+}
+
+// ═════ THE ROUND's SHOULDS: unpair, the link-token door, the batch while held ═════
+console.log('THE ROUND\'s SHOULDS (r4721\'s round)');
+{
+  // K6 (a) an unpaired machine's hold ends with it
+  const w = tokWorld('drop-held', TOK + '\n'), base = path.basename(w.file);
+  placed.add(w.file);
+  const k = w.make();
+  errOf(() => k.tokenFor(w.hostId));
+  const was = !!heldRow(base);
+  k.drop(w.hostId);
+  placed.delete(w.file);
+  ok(was && !heldRow(base) && !fs.existsSync(w.file), 'K6 a machine UNPAIRED while its token is held: its hold leaves the held list with it, its file gone', { was, row: !!heldRow(base) });
+  // K6 (b) its torn token's copies are SHREDDED with it (a torn token beside the data is no token anyone needs)
+  const wt = tokWorld('drop-torn', Buffer.from('not a token\n'));
+  const kt = wt.make();
+  errOf(() => kt.tokenFor(wt.hostId));
+  await untilFact(() => { try { return !!kt.tokenFor(wt.hostId); } catch { return false; } }, 'the torn world\'s fresh token on disk');
+  const before = copiesOf(wt.file).length;
+  kt.drop(wt.hostId);
+  await untilFact(() => copiesOf(wt.file).length === 0, 'the unpaired machine\'s torn copies shredded');
+  ok(before === 1 && copiesOf(wt.file).length === 0 && !fs.existsSync(wt.file), 'K6 a machine UNPAIRED after a torn renewal: its torn copy is shredded with its file', { before, after: copiesOf(wt.file).length });
+}
+{
+  // K7 the link-token door (src/routes/vault.js): a held token is its OWN wait — 503 link_token_unread, the machine named, no token
+  const w = tokWorld('door', TOK + '\n'), base = path.basename(w.file);
+  placed.add(w.file);
+  const k = w.make();
+  const handlers = {};
+  const reg = (m) => (p, ...hs) => { handlers[`${m} ${p}`] = hs[hs.length - 1]; };
+  const app = { get: reg('GET'), post: reg('POST'), delete: reg('DELETE'), put: reg('PUT'), patch: reg('PATCH'), use: () => {} };
+  const SESS = 'vsst_' + 'c'.repeat(40);
+  const sessions = new Map([['s1', { agentToken: SESS, _agentdSession: true, host: w.hostId, name: 'c1' }]]);
+  require(path.join(repo, 'src/routes/vault.js')).registerVaultRoutes(app, { vault: { state: () => 'not_set_up' }, activeSessions: sessions, linkTokenFor: (hk, who) => k.tokenFor(hk, who) });
+  const call = async () => { const res = { statusCode: 200, body: null, set() { }, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } }; await handlers['GET /api/agent/vault/link-token']({ params: {}, query: {}, headers: { authorization: 'Bearer ' + SESS }, body: {} }, res); return res; };
+  const r1 = await call();
+  placed.delete(w.file);
+  await HOLD.readAgainOf(base);
+  const r2 = await call();
+  ok(r1.statusCode === 503 && r1.body && r1.body.code === 'link_token_unread' && /Lab machine/.test(r1.body.error || '') && !JSON.stringify(r1.body).includes(TOK.slice(8, 24)) && r2.statusCode === 200 && r2.body && r2.body.token === TOK,
+    'K7 the link-token door while the token is held: 503 link_token_unread (a wait — the attach child waits as on a locked vault), the machine named, no token; once it reads: 200 with the token', { s1: r1.statusCode, c1: r1.body && r1.body.code, s2: r2.statusCode });
+}
+{
+  // I1b a batch forwarded while the id is held carries THIS LIFE's id (never the file's, never a new one over it)
+  const w = idWorld('forward', ID_OLD + '\n');
+  placed.add(w.file);
+  const bodies = [], realFetch = globalThis.fetch;
+  globalThis.fetch = (u, o) => { bodies.push(JSON.parse(o.body)); return Promise.resolve({ ok: true, status: 200 }); };
+  const t = new T.Telemetry({ dataDir: path.dirname(path.dirname(w.file)), version: 'test', getForwardUrl: () => 'http://127.0.0.1:9/collect' });
+  const mine = t._instanceId();
+  t._forward([{ kind: 'event', name: 'held-batch' }]);
+  globalThis.fetch = realFetch;
+  placed.delete(w.file);
+  ok(bodies.length === 1 && bodies[0].instance === mine && mine !== ID_OLD && String(bytesOf(w.file)).trim() === ID_OLD, 'I1b a batch forwarded while the id is held carries this life\'s own id; the file keeps its id', { n: bodies.length, same: bodies[0] && bodies[0].instance === mine });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
