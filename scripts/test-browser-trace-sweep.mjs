@@ -13,11 +13,18 @@
 //       rename — RED a rewrite that does not hold the appends;
 //   (e) a failed rewrite loses nothing (a PLACED refusal of the temp write, then of the rename): the old index stands whole, the
 //       held appends land in it in their order, no temp file is left, the next pass starts clean — RED a rewrite that drops them;
-//   (f) a torn or unreadable index: NO removal for that scope, the file byte for byte, one journal line with a count and a code and
-//       no path — RED the first pass's (its rewrite erases the torn line);
-//   (g) the hub's stop while a rewrite is in flight: it never renames, the held appends are written to the index that stands;
-//   (h) the hold is bounded: past SWEEP_HOLD_MAX held appends the rewrite gives up before its rename — every line lands, in order;
-//   (i) one sweep at a time; the route awaits it; the boot does not.
+//   (f) r4703: a TORN index line is kept byte for byte at the head of the new index and its scope is swept by its readable lines —
+//       RED the 162a38203 form (a torn line held its scope: never trimmed again) and the first pass's (its rewrite erases the line);
+//       an index or a session list whose read is REFUSED: NO removal for that scope, the file byte for byte, one journal line with
+//       a count and the codes and no path — RED a refused session-list read read as none;
+//   (g) the hub's stop while a rewrite is in flight: it never renames, the held appends are written to the index that stands —
+//       RED a stop that does not write them;
+//   (h) the hold is bounded: past SWEEP_HOLD_MAX held appends the rewrite gives up before its rename — every line lands, in order —
+//       RED a rewrite that renames past the bound;
+//   (i) one sweep at a time; the route awaits it (within its bound); the boot does not;
+//   (j) the settings' hold lifting while a sweep runs (r4547);
+//   (k) r4703, the hung-mount class: the FIRST read that does not answer (a PLACED hang) stops the pass — RED a pass that goes on;
+//   (l) r4703, the required: the Sweep press says what it did not sweep (a count, no path) and, past its bound, «still running».
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -36,7 +43,7 @@ const MB = 1048576, DAY = 86400000;
 const NOW = Date.parse('2026-11-25T12:00:00Z');
 const ROOT = scratch('browser-trace-sweep');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
-const P1 = 'bp-000000d1', P2 = 'bp-000000d2', PT = 'bp-000000d3', PE = 'bp-000000d4';
+const P1 = 'bp-000000d1', P2 = 'bp-000000d2', PT = 'bp-000000d3', PE = 'bp-000000d4', PM = 'bp-000000d5';
 const idOf = (scopeN, i) => 'tr-' + scopeN.toString(16).padStart(2, '0') + i.toString(16).padStart(10, '0');
 
 // ── a made-up trace on a scratch data folder: each scope's sessions of 50 actions (the last one open), 1 MB a picture (two a
@@ -76,7 +83,7 @@ const settings = { 'browser.traceBytesPerProfile': 64 };   // MB: the floor — 
 // line 924's rule (B-50e7, r4547): the settings' HOLD — the view the hub hands while its settings cannot be read (no browser.* row)
 const MARK = Symbol.for('vibespace.settings-held'), HELD = { kind: 'unreadable', code: 'EIO' };
 const heldNow = { on: false };
-const mkTrace = (Mod, W, { hold = null, said = null } = {}) => Mod.create({ dataDir: W.DATA, homeDir: path.join(ROOT, 'home'), keeper: keeperStub, bridge: bridgeStub, serverSetting: (k) => (k === MARK ? (heldNow.on ? HELD : undefined) : heldNow.on && /^browser\./.test(k) ? undefined : settings[k]), broadcast: () => { }, log: { log() { }, info() { }, warn: (m) => { if (said) said.push(String(m)); }, error() { } }, now: () => NOW, sweepEveryMs: 0, sweepHold: hold });
+const mkTrace = (Mod, W, { hold = null, said = null, readBound = null } = {}) => Mod.create({ ...(readBound ? { sweepReadBoundMs: readBound } : {}), dataDir: W.DATA, homeDir: path.join(ROOT, 'home'), keeper: keeperStub, bridge: bridgeStub, serverSetting: (k) => (k === MARK ? (heldNow.on ? HELD : undefined) : heldNow.on && /^browser\./.test(k) ? undefined : settings[k]), broadcast: () => { }, log: { log() { }, info() { }, warn: (m) => { if (said) said.push(String(m)); }, error() { } }, now: () => NOW, sweepEveryMs: 0, sweepHold: hold });
 const indexText = (W, pid) => fs.readFileSync(path.join(W.DATA, T.TRACE_DIR, pid, R.INDEX_FILE), 'utf8');
 const indexIds = (W, pid) => indexText(W, pid).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l).id; } catch { return '(torn)'; } });
 const dirFiles = (d) => { try { return fs.readdirSync(d).sort(); } catch { return []; } };
@@ -92,13 +99,37 @@ const relSrc = SRC.includes(NEW_START) && SRC.indexOf(NEW_END) > SRC.indexOf(NEW
 ok(!!relSrc && FIRST_PASS_SWEEP.includes('  function sweep() {\n') && FIRST_PASS_SWEEP.includes('T.traceSizePlan({ scopes: scopes().map(scopeForPlan), bytesPerScope: limit })'), 'the release\'s sweep (scripts/fixtures/b360d-first-pass-sweep.txt) is planted back in place of the new one');   // stale-pins: kept — the release's sweep, checked in its fixture on purpose
 const REL = relSrc ? M.load('src/server/browser-trace.js', relSrc, 'first-pass-sweep') : null;
 const edit = (text, pairs) => { let t = text; for (const [a, b] of pairs) { if (t.split(a).length !== 2) return null; t = t.replace(a, b); } return t; };
-const snapSrc = edit(SRC, [['    const planned = [];\n', '    const planned = []; const snapOf = new Map();\n'], ['      planned.push(await scopeForPlanSliced(sc, entries, markers, step));\n', '      snapOf.set(sc, entries.slice()); planned.push(await scopeForPlanSliced(sc, entries, markers, step));\n'], ['      await rewriteIndexAsync(sc, step);\n', '      indexes.set(sc, snapOf.get(sc)); await rewriteIndexAsync(sc, step);\n']]);
+const snapSrc = edit(SRC, [['    const planned = [];\n', '    const planned = []; const snapOf = new Map();\n'], ['      planned.push(await scopeForPlanSliced(sc, entries, mk.list, step));\n', '      snapOf.set(sc, entries.slice()); planned.push(await scopeForPlanSliced(sc, entries, mk.list, step));\n'], ['      await rewriteIndexAsync(sc, step);\n', '      indexes.set(sc, snapOf.get(sc)); await rewriteIndexAsync(sc, step);\n']]);
 const noHoldSrc = edit(SRC, [["    if (rw) { rw.held.push(JSON.stringify(entry) + '\\n');", "    if (false && rw) { rw.held.push(JSON.stringify(entry) + '\\n');"]]);
 const dropSrc = edit(SRC, [['      for (;;) {\n        if (rewriting.get(scope) !== rw) break;', '      for (;;) {\n        break; if (rewriting.get(scope) !== rw) break;']]);
 ok(!!snapSrc && !!noHoldSrc && !!dropSrc, 'the anchors of the three one-edit copies are in the source (a snapshot at the plan, the append hold cut, the held appends dropped)', { snap: !!snapSrc, noHold: !!noHoldSrc, drop: !!dropSrc });
 const SNAP = snapSrc ? M.load('src/server/browser-trace.js', snapSrc, 'snapshot-at-plan') : null;
 const NOHOLD = noHoldSrc ? M.load('src/server/browser-trace.js', noHoldSrc, 'no-append-hold') : null;
 const DROP = dropSrc ? M.load('src/server/browser-trace.js', dropSrc, 'held-dropped') : null;
+// r4703's copies: the 162a38203 form (a torn line HOLDS its scope — never trimmed again), the markers read as none, a pass that goes on
+// after a silent read, a stop that does not write the held appends, a rewrite that renames past its hold's bound
+const tornHoldSrc = edit(SRC, [['if (code) readState.set(scope, { torn: raw.length, code }); else readState.delete(scope); };', "if (code || raw.length) readState.set(scope, { torn: raw.length, code: code || 'torn' }); else readState.delete(scope); };"]]);
+const mkNoneSrc = edit(SRC, [['    if (r.code) return { hold: r.code };\n', '    // the markers read as none\n']]);
+const goOnSrc = edit(SRC, [["if (code === 'silent') { stopped = 'silent'; break; } continue; }", 'continue; }']]);
+const stopNoWriteSrc = edit(SRC, [["try { if (lines.length) fs.appendFileSync(rw.file, lines.join(''), { mode: FILE_MODE }); }", "try { if (false && lines.length) fs.appendFileSync(rw.file, lines.join(''), { mode: FILE_MODE }); }"]]);
+const holdNoThrowSrc = edit(SRC, [["      if (rw.over) throw Object.assign(new Error(`more than ${SWEEP_HOLD_MAX} appends held`), { code: 'hold_full' });\n", '      // the hold\'s bound not kept\n']]);
+ok(!!tornHoldSrc && !!mkNoneSrc && !!goOnSrc && !!stopNoWriteSrc && !!holdNoThrowSrc, 'the anchors of r4703\'s five one-edit copies are in the source', { tornHold: !!tornHoldSrc, mkNone: !!mkNoneSrc, goOn: !!goOnSrc, stopNoWrite: !!stopNoWriteSrc, holdNoThrow: !!holdNoThrowSrc });
+const TORNHOLD = tornHoldSrc ? M.load('src/server/browser-trace.js', tornHoldSrc, 'torn-holds') : null;
+const MKNONE = mkNoneSrc ? M.load('src/server/browser-trace.js', mkNoneSrc, 'markers-none') : null;
+const GOON = goOnSrc ? M.load('src/server/browser-trace.js', goOnSrc, 'silent-goes-on') : null;
+const STOPNOWRITE = stopNoWriteSrc ? M.load('src/server/browser-trace.js', stopNoWriteSrc, 'stop-no-write') : null;
+const HOLDNOTHROW = holdNoThrowSrc ? M.load('src/server/browser-trace.js', holdNoThrowSrc, 'hold-no-bound') : null;
+// the 162a38203 cache: a reading that FAILED stands for every pass after (the scope held until the hub restarts)
+const cachedSrc = edit(SRC, [['    if (was && !readState.has(scope)) return was;\n', '    if (was) return was;\n']]);
+ok(!!cachedSrc, 'the anchor of the cached-failed-reading copy is in the source');
+const CACHED = cachedSrc ? M.load('src/server/browser-trace.js', cachedSrc, 'failed-read-cached') : null;
+// the stop's two windows (r4703): the 162a38203 order (the held lines appended, THEN the temp file removed) and a stop that writes the
+// held lines but not the batch whose append is in flight
+const unlinkLastSrc = edit(SRC, [['try { fs.unlinkSync(rw.tmp); } catch { /* not written yet, or renamed already */ } const lines', 'const lines'], ['${e && e.code}`); } } /* r4522 (B-360d): at the hub', '${e && e.code}`); } try { fs.unlinkSync(rw.tmp); } catch { /* the 162a38203 order */ } } /* r4522 (B-360d): at the hub']]);
+const noFlushSrc = edit(SRC, [['const lines = rw.flushing.concat(rw.held);', 'const lines = rw.held.slice();']]);
+ok(!!unlinkLastSrc && !!noFlushSrc, 'the anchors of the two stop-window copies are in the source', { unlinkLast: !!unlinkLastSrc, noFlush: !!noFlushSrc });
+const UNLINKLAST = unlinkLastSrc ? M.load('src/server/browser-trace.js', unlinkLastSrc, 'stop-unlink-last') : null;
+const NOFLUSH = noFlushSrc ? M.load('src/server/browser-trace.js', noFlushSrc, 'stop-no-flushing') : null;
 
 console.log('— (a) the differential: the first pass\'s sweep and the new one over the same made-up traces, three sizes and the settings held');
 {
@@ -196,56 +227,127 @@ console.log('— (e) a failed rewrite loses nothing: a PLACED refusal of the tem
   ok(!!eD && !eD.heldInOrder, 'CONTROL (e): a rewrite that drops its held appends when it fails — the two actions are gone from the index — RED', eD);
 }
 
-console.log('— (f) a torn or unreadable index: NO removal for that scope, one journal line with a count and a code, no path');
+console.log('— (f) r4703: a TORN line is kept byte for byte and its scope swept; an index or a session list that cannot be READ: no removal for that scope, one journal line, no path');
 {
+  const TORN = '{"id":"tr-0000torn","torn';
   const tornRun = async (Mod, name) => {
-    const W = mkWorld(name, { scopes: [{ pid: PT, n: 300 }, { pid: PE, n: 300 }, { pid: P1, n: 300 }], torn: PT, recordings: false });
-    const beforeT = indexText(W, PT), beforeE = indexText(W, PE);
-    const refuseE = (() => { const orig = fs.promises.readFile; fs.promises.readFile = async function (...a) { if (String(a[0]).startsWith(path.join(W.DATA, T.TRACE_DIR, PE))) throw Object.assign(new Error('a placed refusal'), { code: 'EACCES' }); return orig.apply(fs.promises, a); }; return () => { fs.promises.readFile = orig; }; })();
+    const W = mkWorld(name, { scopes: [{ pid: PT, n: 100 }, { pid: PE, n: 100 }, { pid: PM, n: 100 }, { pid: P1, n: 100 }], torn: PT, recordings: false });
+    const beforeE = indexText(W, PE), beforeM = indexText(W, PM);
+    const ePrefix = path.join(W.DATA, T.TRACE_DIR, PE), mPath = path.join(W.DATA, T.TRACE_DIR, PM, BS.MARKERS_FILE);
+    const orig = fs.promises.readFile;   // PLACED refusals: PE's index read, PM's session-list (markers) read
+    fs.promises.readFile = async function (...a) { const f = String(a[0]); if (f.startsWith(ePrefix) || f === mPath) throw Object.assign(new Error('a placed refusal'), { code: 'EACCES' }); return orig.apply(fs.promises, a); };
     const said = [];
-    let r = null; try { r = await mkTrace(Mod, W, { said }).sweep(); } finally { refuseE(); }
+    const tr = mkTrace(Mod, W, { said });
+    let r = null; try { r = await tr.sweep(); } finally { fs.promises.readFile = orig; }
     const keys = new Set((r.plan.removeFrames || []).map((x) => x.key));
+    const tLines = indexText(W, PT).split('\n').filter(Boolean);
+    const jpg = (pid) => dirFiles(path.join(W.DATA, T.TRACE_DIR, pid)).filter((x) => x.endsWith('.jpg')).length;
     const line = said.find((x) => /not swept this pass/.test(x)) || '';
-    return { removedT: keys.has(PT), removedE: keys.has(PE), removedOther: keys.has(P1), tornKept: indexText(W, PT) === beforeT, unreadKept: indexText(W, PE) === beforeE, picturesT: dirFiles(path.join(W.DATA, T.TRACE_DIR, PT)).filter((x) => x.endsWith('.jpg')).length, line, pathInLine: line.includes(ROOT) };
+    const first = { removedT: keys.has(PT), removedE: keys.has(PE), removedM: keys.has(PM), removedOther: keys.has(P1), tornKept: tLines.filter((l) => l === TORN).length, tornAtHead: tLines[0] === TORN, picturesT: jpg(PT), picturesM: jpg(PM), unreadKept: indexText(W, PE) === beforeE, markersKept: indexText(W, PM) === beforeM, scopesHeld: r.scopesHeld, line, pathInLine: line.includes(ROOT) };
+    // the NEXT pass, the refusals lifted (the same trace — its cache as the first pass left it): both scopes are read again and swept
+    const r2 = await tr.sweep(), keys2 = new Set((r2.plan.removeFrames || []).map((x) => x.key));
+    return { ...first, next: { removedE: keys2.has(PE), removedM: keys2.has(PM), scopesHeld: r2.scopesHeld, tornKept: indexText(W, PT).split('\n').filter((l) => l === TORN).length } };
   };
-  const f = await tornRun(R, 'torn-new'), fR = REL ? await tornRun(REL, 'torn-rel') : null;
-  ok(!f.removedT && !f.removedE && f.removedOther && f.tornKept && f.unreadKept && f.picturesT === 600 && /2 scope\(s\) not swept this pass/.test(f.line) && /torn ×1/.test(f.line) && /EACCES ×1/.test(f.line) && !f.pathInLine,
-    '(f) a scope whose index has a TORN line and one whose read is REFUSED lose nothing (their files byte for byte, every picture kept); the other scope is swept; ONE journal line says it — a count and the codes, no path', f);
-  ok(!!fR && fR.removedT && !fR.tornKept, 'CONTROL (f): the first pass\'s sweep removes from the torn scope and its rewrite ERASES the torn line — RED', fR && { removedT: fR.removedT, tornKept: fR.tornKept });
+  const f = await tornRun(R, 'torn-new');
+  ok(f.removedT && f.tornKept === 1 && f.tornAtHead && f.picturesT < 200 && f.removedOther,
+    '(f) r4703 THE MUST: a scope with a TORN index line is SWEPT by its readable lines (bounded again) and its torn line is KEPT byte for byte, once, at the head of the new index', f);
+  ok(!f.removedE && f.unreadKept && !f.removedM && f.markersKept && f.picturesM === 200 && f.scopesHeld === 2 && /2 scope\(s\) not swept this pass/.test(f.line) && /EACCES ×2/.test(f.line) && !f.pathInLine,
+    '(f) a scope whose INDEX read is refused and one whose SESSION LIST read is refused lose nothing (their files byte for byte, every picture kept); ONE journal line says it — a count and the codes, no path; the answer counts them (scopesHeld)', f);
+  ok(f.next.removedE && f.next.removedM && f.next.scopesHeld === 0 && f.next.tornKept === 1,
+    '(f) THAT PASS only: the next pass (the refusals lifted) reads both scopes again and sweeps them; the torn line still stands once', f.next);
+  const fC = CACHED ? await tornRun(CACHED, 'torn-cached') : null;
+  ok(!!fC && !fC.next.removedE && fC.next.scopesHeld >= 1, 'CONTROL (the 162a38203 cache): a refused index read stands for every pass after — that profile is never swept again until the hub restarts — RED', fC && fC.next);
+  const fH = TORNHOLD ? await tornRun(TORNHOLD, 'torn-hold') : null, fR = REL ? await tornRun(REL, 'torn-rel') : null, fM = MKNONE ? await tornRun(MKNONE, 'torn-mknone') : null;
+  ok(!!fH && !fH.removedT && fH.picturesT === 200, 'CONTROL (r4703: the 162a38203 form — a torn line HOLDS its scope): that profile\'s trace is never trimmed again — RED', fH && { removedT: fH.removedT, picturesT: fH.picturesT });
+  ok(!!fR && fR.removedT && fR.tornKept === 0, 'CONTROL (the first pass\'s sweep): its rewrite ERASES the torn line — RED', fR && { removedT: fR.removedT, tornKept: fR.tornKept });
+  ok(!!fM && fM.removedM, 'CONTROL (r4703: a refused session-list read read as none): that scope is planned and swept as if it had no sessions — RED', fM && { removedM: fM.removedM });
 }
 
 console.log('— (g) the hub\'s stop while a rewrite is in flight; (h) the hold\'s bound; (i) one sweep at a time, the route awaits, the boot does not');
 {
   // (g): the stop lands between the temp write and the rename, with an append held — the rename never happens, the held line is
   // written to the index that stands, the temp file is removed
-  const W = mkWorld('stop', { scopes: [{ pid: P1, n: 700 }], recordings: false });
-  const before = indexText(W, P1), sid = idOf(9, 4); let tr = null;
-  const hold = async ({ where: w }) => { if (w === 'rewrite-written' && tr) { tr._appendIndex(P1, newEntry(P1, sid)); tr.shutdown(); } };
-  tr = mkTrace(R, W, { hold });
-  let threw = null; try { await tr.sweep(); } catch (e) { threw = e && e.code; }
-  const after = indexText(W, P1);
-  const g = { oldStands: after.startsWith(before), heldWritten: after.slice(before.length).includes(sid), tmp: tmpLeft(W, P1).length, threw };
+  const stopRun = async (Mod, name) => {
+    const W = mkWorld(name, { scopes: [{ pid: P1, n: 100 }], recordings: false });
+    const before = indexText(W, P1), sid = idOf(9, 4); let tr = null;
+    const hold = async ({ where: w }) => { if (w === 'rewrite-written' && tr) { tr._appendIndex(P1, newEntry(P1, sid)); tr.shutdown(); } };
+    tr = mkTrace(Mod, W, { hold });
+    let threw = null; try { await tr.sweep(); } catch (e) { threw = e && e.code; }
+    const after = indexText(W, P1);
+    return { oldStands: after.startsWith(before), heldWritten: after.slice(before.length).includes(sid), tmp: tmpLeft(W, P1).length, threw };
+  };
+  const g = await stopRun(R, 'stop'), gR = STOPNOWRITE ? await stopRun(STOPNOWRITE, 'stop-nowrite') : null;
   ok(g.oldStands && g.heldWritten && g.tmp === 0, '(g) the hub\'s STOP while a rewrite is in flight: the rename never happens (the index as it stood), the held append is written to it at the stop, no temp file is left', g);
+  ok(!!gR && gR.oldStands && !gR.heldWritten, 'CONTROL (g): a stop that does not write the held appends — the action is gone from the index — RED', gR);
+  // (g2) r4703, the stop's FIRST window: the rewrite's rename is in the thread pool when the stop comes — PLACED: the pool's rename lands
+  // right after the stop's first file call (the one interleave that loses at 162a38203: the held line appended to the old file, then
+  // the rename over it)
+  const renameRun = async (Mod, name) => {
+    const W = mkWorld(name, { scopes: [{ pid: P1, n: 100 }], recordings: false });
+    const file = path.join(W.DATA, T.TRACE_DIR, P1, R.INDEX_FILE), sid = idOf(9, 5);
+    let tr = null, armed = false, pending = null, landed = null;
+    const hold = async ({ where: w }) => { if (w === 'rewrite-written' && tr) { tr._appendIndex(P1, newEntry(P1, sid)); armed = true; } };
+    const o = { rename: fs.promises.rename, unlinkSync: fs.unlinkSync, appendFileSync: fs.appendFileSync };
+    const land = () => { if (!pending) return; const q = pending; pending = null; try { fs.renameSync(q.from, q.to); landed = { ok: true }; } catch (e) { landed = { code: e && e.code }; } };
+    fs.unlinkSync = function (...a) { try { return o.unlinkSync.apply(fs, a); } finally { land(); } };
+    fs.appendFileSync = function (...a) { try { return o.appendFileSync.apply(fs, a); } finally { land(); } };
+    fs.promises.rename = async function (from, to) {
+      if (!(armed && String(to) === file)) return o.rename.call(fs.promises, from, to);
+      armed = false; pending = { from: String(from), to: String(to) };   // the rename sent to the pool; the stop comes before it lands
+      tr.shutdown(); land();
+      if (landed.code) throw Object.assign(new Error('the rename failed'), { code: landed.code });
+    };
+    let threw = null;
+    try { tr = mkTrace(Mod, W, { hold }); try { await tr.sweep(); } catch (e) { threw = e && e.code; } } finally { fs.promises.rename = o.rename; fs.unlinkSync = o.unlinkSync; fs.appendFileSync = o.appendFileSync; }
+    return { heldInIndex: indexIds(W, P1).includes(sid), renamed: !!(landed && landed.ok), tmp: tmpLeft(W, P1).length, threw };
+  };
+  const g2 = await renameRun(R, 'stop-rename'), g2R = UNLINKLAST ? await renameRun(UNLINKLAST, 'stop-rename-old') : null;
+  ok(g2.heldInIndex && !g2.renamed && g2.tmp === 0, '(g2) r4703: the stop while the rename is in the thread pool: the temp file goes FIRST, so the rename fails and the old index stands WITH the held append; no temp file left', g2);
+  ok(!!g2R && !g2R.heldInIndex && g2R.renamed, 'CONTROL (g2): the 162a38203 order (the held lines appended, then the temp file removed) — the rename lands over them, the action is gone from the index — RED', g2R);
+  // (g3) r4703, the stop's SECOND window: the rename has landed and the held batch's append is in flight when the stop comes — PLACED:
+  // the stop runs inside that append, which never lands (the process exits)
+  const flushRun = async (Mod, name) => {
+    const W = mkWorld(name, { scopes: [{ pid: P1, n: 100 }], recordings: false });
+    const file = path.join(W.DATA, T.TRACE_DIR, P1, R.INDEX_FILE), before = indexText(W, P1), first = idOf(9, 6), later = idOf(9, 7);
+    let tr = null, armed = false;
+    const hold = async ({ where: w }) => { if (w === 'rewrite-written' && tr) { tr._appendIndex(P1, newEntry(P1, first)); armed = true; } };
+    const o = fs.promises.appendFile;
+    fs.promises.appendFile = async function (f, ...rest) {
+      if (!(armed && String(f) === file)) return o.call(fs.promises, f, ...rest);
+      armed = false; tr._appendIndex(P1, newEntry(P1, later)); tr.shutdown();   // an action meanwhile, then the stop; this append never lands
+    };
+    try { tr = mkTrace(Mod, W, { hold }); try { await tr.sweep(); } catch { /* the stop */ } } finally { fs.promises.appendFile = o; }
+    const ids = indexIds(W, P1);
+    return { renamed: !indexText(W, P1).startsWith(before), first: ids.indexOf(first), later: ids.indexOf(later) };
+  };
+  const g3 = await flushRun(R, 'stop-flush'), g3R = NOFLUSH ? await flushRun(NOFLUSH, 'stop-flush-old') : null;
+  ok(g3.renamed && g3.first >= 0 && g3.later > g3.first, '(g3) r4703: the stop while the held batch\'s append is in flight after the rename: the stop writes that batch again, then the later held lines — both in the index, in their order', g3);
+  ok(!!g3R && g3R.renamed && g3R.first === -1, 'CONTROL (g3): a stop that writes only the lines still held — the batch in flight is gone from the index — RED', g3R);
   // (h): more than SWEEP_HOLD_MAX appends held — the rewrite gives up before its rename, every held line lands in order
-  const W2 = mkWorld('hold-max', { scopes: [{ pid: P1, n: 700 }], recordings: false });
-  const before2 = indexText(W2, P1), many = Array.from({ length: R.SWEEP_HOLD_MAX + 1 }, (_, i) => 'tr-0a' + i.toString(16).padStart(10, '0'));
-  let tr2 = null;
-  const hold2 = async ({ where: w }) => { if (w === 'rewrite-written' && tr2 && !hold2.done) { hold2.done = true; for (const id of many) tr2._appendIndex(P1, newEntry(P1, id)); } };
-  tr2 = mkTrace(R, W2, { hold: hold2 });
-  await tr2.sweep();
-  const after2 = indexText(W2, P1), landed = after2.slice(before2.length).split('\n').filter(Boolean).map((l) => JSON.parse(l).id);
-  ok(typeof R.SWEEP_HOLD_MAX === 'number' && after2.startsWith(before2) && J(landed) === J(many) && tmpLeft(W2, P1).length === 0, `(h) past SWEEP_HOLD_MAX (${R.SWEEP_HOLD_MAX}) held appends the rewrite gives up BEFORE its rename: the old index stands and all ${many.length} held lines land in it, in order — none dropped`, { held: many.length, landed: landed.length, inOrder: J(landed) === J(many) });
+  const many = Array.from({ length: R.SWEEP_HOLD_MAX + 1 }, (_, i) => 'tr-0a' + i.toString(16).padStart(10, '0'));
+  const holdRun = async (Mod, name) => {
+    const W2 = mkWorld(name, { scopes: [{ pid: P1, n: 100 }], recordings: false });
+    const before2 = indexText(W2, P1); let tr2 = null; let done = false;
+    const hold2 = async ({ where: w }) => { if (w === 'rewrite-written' && tr2 && !done) { done = true; for (const id of many) tr2._appendIndex(P1, newEntry(P1, id)); } };
+    tr2 = mkTrace(Mod, W2, { hold: hold2 });
+    await tr2.sweep();
+    const after2 = indexText(W2, P1), landed = after2.startsWith(before2) ? after2.slice(before2.length).split('\n').filter(Boolean).map((l) => JSON.parse(l).id) : [];
+    return { oldStands: after2.startsWith(before2), landed: landed.length, inOrder: J(landed) === J(many), tmp: tmpLeft(W2, P1).length };
+  };
+  const h = await holdRun(R, 'hold-max'), hR = HOLDNOTHROW ? await holdRun(HOLDNOTHROW, 'hold-max-nothrow') : null;
+  ok(typeof R.SWEEP_HOLD_MAX === 'number' && h.oldStands && h.inOrder && h.tmp === 0, `(h) past SWEEP_HOLD_MAX (${R.SWEEP_HOLD_MAX}) held appends the rewrite gives up BEFORE its rename: the old index stands and all ${many.length} held lines land in it, in order — none dropped`, { held: many.length, landed: h.landed, inOrder: h.inOrder });
+  ok(!!hR && !hR.oldStands, 'CONTROL (h): a rewrite that renames past its hold\'s bound — the old index is replaced while its appends were held — RED', hR);
   // (i)
   const W3 = mkWorld('once', { scopes: [{ pid: P1, n: 120 }], recordings: false });
   const tr3 = mkTrace(R, W3), p1 = tr3.sweep(), p2 = tr3.sweep();
   await p1;
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8'), bsrc = SRC.slice(SRC.indexOf('  async function boot() {'), SRC.indexOf('  function shutdown()'));
-  ok(p1 === p2 && typeof R.SWEEP_SLICE === 'number' && R.SWEEP_SLICE > 0 && rsrc.includes("router.post('/api/browser/housekeeping/sweep', async (req, res) => {") && rsrc.includes('const r = await tr.sweep();') && bsrc.includes('sweep().catch(') && !/await sweep\(\)/.test(bsrc) && bsrc.includes('sweep: null'),
-    '(i) one sweep at a time (a second ask answers with the one running); the sweep-now route awaits it; the boot starts it and never waits for it (no step of the boot held)');
+  ok(p1 === p2 && typeof R.SWEEP_SLICE === 'number' && R.SWEEP_SLICE > 0 && rsrc.includes("router.post('/api/browser/housekeeping/sweep', async (req, res) => {") && rsrc.includes('const p = tr.sweep();') && rsrc.includes('const r = await Promise.race([p, bound]);') && bsrc.includes('sweep().catch(') && !/await sweep\(\)/.test(bsrc) && bsrc.includes('sweep: null'),
+    '(i) one sweep at a time (a second ask answers with the one running); the sweep-now route awaits it (within its bound); the boot starts it and never waits for it (no step of the boot held)');
 }
 console.log('— (j) the settings\' hold LIFTS while a sweep runs (r4547): the sweep in flight keeps the verdict it took at its start; the next one reads the bound');
 {
-  const W = mkWorld('lift', { scopes: [{ pid: P1, n: 700 }], recordings: false });
+  const W = mkWorld('lift', { scopes: [{ pid: P1, n: 100 }], recordings: false });
   const tr = mkTrace(R, W);
   heldNow.on = true;
   const p1 = tr.sweep();          // its verdict taken NOW: the bound unread (sweepNow's first line — const unread = boundUnread())
@@ -255,9 +357,48 @@ console.log('— (j) the settings\' hold LIFTS while a sweep runs (r4547): the s
   const kept1 = indexIds(W, P1).length, pics1 = dirFiles(path.join(W.DATA, T.TRACE_DIR, P1)).filter((x) => x.endsWith('.jpg')).length;
   const r2 = await tr.sweep();    // the next sweep (the hour's, or a press): the bound read again
   const liftSrc = SRC.slice(SRC.indexOf('  function settingsLifted() {'), SRC.indexOf('  async function boot() {'));
-  ok(p1 === p2 && r1.held === true && r1.removed === 0 && pics1 === 1400 && kept1 === 700 && !r2.held && r2.removed > 0 && !/\bsweep\(\)/.test(liftSrc) && SRC.includes('    const unread = boundUnread();\n'),
+  ok(p1 === p2 && r1.held === true && r1.removed === 0 && pics1 === 200 && kept1 === 100 && !r2.held && r2.removed > 0 && !/\bsweep\(\)/.test(liftSrc) && SRC.includes('    const unread = boundUnread();\n'),
     '(j) the hold LIFTS while a sweep runs: that sweep FINISHES on the verdict it took at its start (the bound unread: no frame removed, `held` said) — an ask meanwhile answers with it; the lift starts no sweep of its own; the NEXT sweep reads the bound and removes', { held1: r1.held, removed1: r1.removed, removed2: r2.removed, samePromise: p1 === p2 });
 }
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+console.log('— (k) r4703, the hung-mount class: the FIRST silent read stops the pass — no more of the mount\'s reads asked, nothing removed');
+{
+  const silentRun = async (Mod, name) => {
+    const W = mkWorld(name, { scopes: [{ pid: P1, n: 100 }, { pid: P2, n: 100 }], recordings: false });
+    const orig = fs.promises.readFile; let asked = 0, hung = 0;
+    // a PLACED hang: the first index read of the pass never answers (a hung mount); the read's bound, shortened for the suite, says it silent
+    fs.promises.readFile = function (...a) { const f = String(a[0]); if (f.startsWith(W.DATA) && f.endsWith(R.INDEX_FILE)) { asked += 1; if (!hung) { hung = 1; return new Promise(() => { }); } } return orig.apply(fs.promises, a); };
+    // the read's bound is an unref'd timer and the placed hang holds no handle: a ref'd interval keeps the process up while it runs
+    const said = []; let r = null; const keep = setInterval(() => { }, 1000);
+    try { r = await mkTrace(Mod, W, { said, readBound: 40 }).sweep(); } finally { fs.promises.readFile = orig; clearInterval(keep); }
+    const pics = [P1, P2].map((pid) => dirFiles(path.join(W.DATA, T.TRACE_DIR, pid)).filter((x) => x.endsWith('.jpg')).length);
+    return { asked, stopped: r.stopped || null, removed: r.removed, scopesHeld: r.scopesHeld, pics, said: said.some((x) => /STOPPED at a read that did not answer/.test(x)) };
+  };
+  const k = await silentRun(R, 'silent'), kR = GOON ? await silentRun(GOON, 'silent-goes-on') : null;
+  ok(k.asked === 1 && k.stopped === 'silent' && k.removed === 0 && k.scopesHeld === 1 && k.pics.every((n) => n === 200) && k.said,
+    '(k) the FIRST read that does not answer STOPS the pass: no other scope\'s read is asked of the hung mount (1 asked), nothing is removed, the journal says the pass stopped — the next pass asks again', k);
+  ok(!!kR && kR.asked === 2, 'CONTROL (k): a pass that goes on after a silent read asks the hung mount again (another thread parked there) — RED', kR && { asked: kR.asked });
+}
+
+console.log('— (l) r4703, the REQUIRED: a person\'s Sweep press says what it did NOT sweep — by count, never a path; past its bound, «still running» by name');
+{
+  const SW = await import('../src/lib/browser-session-words.js');
+  const n2 = SW.sweepNotDoneText({ scopesHeld: 2 }), run = SW.sweepNotDoneText({ running: { code: 'sweep_running', since: NOW } }), whole = SW.sweepNotDoneText({ scopesHeld: 0, removed: 3 });
+  const EN_NOT = '{n} profile(s) were not swept: their trace list could not be read', EN_RUN = 'The sweep is still running (started {at}) and finishes by itself';
+  const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const rows = [EN_NOT, EN_RUN].every((k) => zh.includes('  ' + JSON.stringify(k) + ': ') && ja.includes('  ' + JSON.stringify(k) + ': '));
+  ok(n2 === '2 profile(s) were not swept: their trace list could not be read' && /^The sweep is still running \(started .+\) and finishes by itself$/.test(run) && whole === '' && rows && !/[\/\\]/.test(n2),
+    '(l) the words (PURE, src/lib/browser-session-words.js sweepNotDoneText): the profiles not swept by COUNT, the sweep still running with its start; nothing when the sweep was whole; zh and ja rows', { n2, run, whole, rows });
+  const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8'), vsrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-trace-view.js'), 'utf8');
+  ok(rsrc.includes('res.json({ ok: true, scopesHeld: r.scopesHeld || 0,') && rsrc.includes("running: { code: 'sweep_running', since:") && vsrc.includes('const notDone = sweepNotDoneText(r || {});') && vsrc.includes("+ sweepHeldText(r.held) + (notDone ? ' ' + notDone : '')") && vsrc.includes("}) + (notDone ? ' ' + notDone : ''), { duration: notDone ? 8000 : 6000 });"),
+    '(l) the route answers the count (scopesHeld) and, past its bound, «sweep_running» with the sweep\'s start; the panel\'s toast says them after what was removed (or alone while it runs)');
+  // the trace's two facts the route reads: the running sweep's start (0 when none) and the press's bound
+  const W = mkWorld('press', { scopes: [{ pid: P1, n: 120 }], recordings: false });
+  let release = null; const gate = new Promise((res) => { release = res; });
+  const tr = mkTrace(R, W, { hold: async () => { await gate; } });
+  const p = tr.sweep(); await new Promise((res) => setImmediate(res));
+  const during = tr.sweepRunningSince(); release(); await p; const after = tr.sweepRunningSince();
+  ok(during === NOW && after === 0 && tr.sweepPressBound() === R.SWEEP_PRESS_BOUND_MS, '(l) while a sweep runs the trace answers its start; none after; the press\'s bound is the file\'s number (SWEEP_PRESS_BOUND_MS)', { during, after, bound: tr.sweepPressBound() });
+}
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 12 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

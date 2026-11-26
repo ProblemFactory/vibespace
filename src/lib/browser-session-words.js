@@ -83,6 +83,16 @@ export function sweepHeldText(held = {}) {
   if (held && held.kept) return t('VibeSpace’s settings cannot be read right now, so the kept browsers wait until they can be read');
   return t('VibeSpace’s settings cannot be read right now, so the frames wait until they can be read');
 }
+/** row B-360d (主开发 r4703): the panel's Sweep pressed — what it did NOT do, said plainly: still running past the press's bound (its
+ *  start), and how many profiles were not swept because their trace list could not be read (a count — never a path, an address, a title).
+ *  '' when the sweep was whole. */
+export function sweepNotDoneText(r = {}) {
+  const out = [];
+  if (r && r.running) out.push(t('The sweep is still running (started {at}) and finishes by itself', { at: when(Number(r.running.since) || Date.now()) }));
+  const n = Number(r && r.scopesHeld) || 0;
+  if (n > 0) out.push(t('{n} profile(s) were not swept: their trace list could not be read', { n }));
+  return out.join(' ');
+}
 /** A replay pane's empty state by NAME (src/browser-sessions.js replayEmpty). */
 export function emptyText(kind, { limit = 0 } = {}) {
   if (kind === 'no-sessions') return t('No browser sessions recorded for this conversation');

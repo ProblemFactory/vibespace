@@ -84,6 +84,8 @@ const SWEEP_EVERY_MS = 60 * 60 * 1000;
 const SWEEP_SLICE = 400;
 const SWEEP_READ_BOUND_MS = 20000;
 const SWEEP_HOLD_MAX = 2000;
+// r4703 (the round's hung-mount class): a person's Sweep press waits this long for the sweep, then answers «still running» by name
+const SWEEP_PRESS_BOUND_MS = 25000;
 const SIZE_CACHE_MS = 10 * 60 * 1000;
 /** VERIFY r1 L1: a `verb` does not re-arm a tap whose arming FAILED within this long (a new browser always arms). */
 const ARM_RETRY_MS = 30 * 1000;
@@ -104,6 +106,8 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   // r4522 (B-360d): a suite's PLACED hold — awaited (when given) at each slice's end ({where, scope}) and between a rewrite's temp
   // write and its rename ({where: 'rewrite-written'}); production passes none
   sweepHold = null,
+  // r4703: the bounds, a suite's to shorten (production keeps the file's numbers)
+  sweepReadBoundMs = SWEEP_READ_BOUND_MS, sweepPressBoundMs = SWEEP_PRESS_BOUND_MS,
   // 2026-09-27: every session marker, as it is written — the wiring puts the chat card into the live conversation
   onSession = null } = {}) {
   if (!dataDir) throw new Error('browser-trace: dataDir is required');
@@ -175,7 +179,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   // the appends held while a scope's rewrite runs; the stop that ends a sweep in hand
   let sweeping = null;
   let sweepStopped = false;
-  const readState = new Map();   // scope → { torn, code } — its index could not be read whole: no removal for it, never rewritten
+  const readState = new Map();   // scope → { torn, code } — its index could not be READ (a code, a silent read): no removal for it, never rewritten
+  const tornRaw = new Map();     // r4703 (the round's must): scope → its torn index lines, RAW — kept byte for byte at the head of every rewrite
+  let sweepingSince = 0;
   const rewriting = new Map();   // scope → { held: [lines], tmp, file, over } — the rewrite running now
   const turn = () => new Promise((r) => setImmediate(r));
   let unsubLease = null;
@@ -212,12 +218,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const out = [];
     // lane trace-fits: the index stays APPEND-ONLY — a coalesced fit is appended again under the run's id, and the later
     // line SUPERSEDES the earlier at load (the sweep's rewrite compacts the file; no tombstone, the id is the key)
-    const pos = new Map(); let torn = 0, code = null;
+    const pos = new Map(), raw = []; let torn = 0, code = null;
     try {
       const text = fs.readFileSync(path.join(scopeDir(scope), INDEX_FILE), 'utf8');
-      for (const line of text.split('\n')) torn += parseIndexLine(scope, line, out, pos);   // r4522: a torn line is COUNTED (the sweep never rewrites that scope)
+      for (const line of text.split('\n')) { const k = parseIndexLine(scope, line, out, pos); if (k) raw.push(line); torn += k; }   // r4703: a torn line is KEPT raw (every rewrite writes it back as it stands)
     } catch (e) { if (!(e && e.code === 'ENOENT')) code = (e && e.code) || 'EIO'; } // no index yet — or a read that failed: counted
-    noteRead(scope, torn, code);
+    noteRead(scope, raw, code);
     indexes.set(scope, out);
     return out;
   }
@@ -230,24 +236,29 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     byId.set(e.id, { scope, entry: e });
     return 0;
   }
-  const noteRead = (scope, torn, code) => { if (torn || code) readState.set(scope, { torn, code }); else readState.delete(scope); };
+  /** r4703 (the round's must): a TORN line no longer holds its scope — it is kept raw (tornRaw) and written back byte for byte at the head of
+   *  every rewrite, and the scope is swept by its readable lines (bounded again; nothing a later reader could use is lost). Only a read
+   *  that FAILED (a code) or stayed silent holds a scope — the store-read law. */
+  const noteRead = (scope, raw, code) => { if (raw.length) tornRaw.set(scope, raw); else tornRaw.delete(scope); if (code) readState.set(scope, { torn: raw.length, code }); else readState.delete(scope); };
   /** r4522: a file read off the loop, bounded: {text} | {text: null} (no file) | {text: null, code} (a failed read) | {silent: true}. */
   async function boundRead(file) {
     let to = null;
-    const bound = new Promise((res) => { to = setTimeout(() => res({ silent: true }), SWEEP_READ_BOUND_MS); if (to.unref) to.unref(); });
+    const bound = new Promise((res) => { to = setTimeout(() => res({ silent: true }), sweepReadBoundMs); if (to.unref) to.unref(); });
     try { return await Promise.race([fs.promises.readFile(file, 'utf8').then((text) => ({ text }), (e) => ({ text: null, code: e && e.code === 'ENOENT' ? null : ((e && e.code) || 'EIO') })), bound]); }
     finally { clearTimeout(to); }
   }
   /** r4522: a scope's FIRST index read for the sweep — async, parsed in slices into the SAME cache loadIndex fills (a road that read it
    *  meanwhile stands). null: no reading (the bound passed) — not cached, the next pass reads again. */
   async function loadIndexAsync(scope, step) {
-    if (indexes.has(scope)) return indexes.get(scope);
+    const was = indexes.get(scope);   // r4703: a standing reading that FAILED (a code) is asked again each pass — that pass held, never every pass after
+    if (was && !readState.has(scope)) return was;
+    const fresh = () => indexes.has(scope) && indexes.get(scope) !== was;   // a road that read it meanwhile stands
     const r = await boundRead(path.join(scopeDir(scope), INDEX_FILE));
-    if (indexes.has(scope)) return indexes.get(scope);
+    if (fresh()) return indexes.get(scope);
     if (r.silent) { readState.set(scope, { torn: 0, code: 'silent' }); return null; }
-    const out = [], pos = new Map(); let torn = 0;
-    if (r.text != null) { for (const line of r.text.split('\n')) { torn += parseIndexLine(scope, line, out, pos); await step('read', scope); if (indexes.has(scope)) return indexes.get(scope); } }
-    noteRead(scope, torn, r.code || null);
+    const out = [], pos = new Map(), raw = [];
+    if (r.text != null) { for (const line of r.text.split('\n')) { if (parseIndexLine(scope, line, out, pos)) raw.push(line); await step('read', scope); if (fresh()) return indexes.get(scope); } }
+    noteRead(scope, raw, r.code || null);
     indexes.set(scope, out);
     return out;
   }
@@ -277,7 +288,8 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     appendLine(scope, entry);
   }
   /** r4522: THE index rewrite (its ONE caller: the sweep). Atomic — a temp file, then the rename; off the loop, its lines built in
-   *  slices. It NEVER runs over an index it could not read whole (readState: a torn line, a failed read). While it runs, the scope's
+   *  slices. It NEVER runs over an index it could not READ (readState: a failed or silent read); a torn line is written back raw at its
+   *  head (tornRaw, r4703). While it runs, the scope's
    *  appends are held (appendLine) and written after the rename, in their order; a refused temp write or rename, a stop of the hub
    *  (shutdown) or more than SWEEP_HOLD_MAX held lines end it BEFORE the rename: the old index stands, the held lines are appended
    *  to it, the leftover temp file is removed. → true when the new index stands */
@@ -285,13 +297,14 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (readState.has(scope)) return false;
     const list = indexes.get(scope) || [];
     const file = path.join(scopeDir(scope), INDEX_FILE), tmp = file + '.tmp-' + crypto.randomBytes(4).toString('hex');
-    const rw = { held: [], tmp, file, over: false };
+    const rw = { held: [], tmp, file, over: false, flushing: [] };   // flushing: the batch whose append is in flight (r4703: the stop writes it again)
+    const torn = tornRaw.get(scope) || [];   // r4703: the scope's torn lines, raw, at the HEAD of the new index — never erased
     rewriting.set(scope, rw);
     let done = false;
     try {
-      const n0 = list.length, parts = [];
+      const n0 = list.length, parts = torn.slice();
       for (let k = 0; k < n0; k++) { parts.push(JSON.stringify(list[k])); await step('rewrite', scope); }
-      await fs.promises.writeFile(tmp, parts.join('\n') + (n0 ? '\n' : ''), { mode: FILE_MODE });
+      await fs.promises.writeFile(tmp, parts.join('\n') + (parts.length ? '\n' : ''), { mode: FILE_MODE });
       if (typeof sweepHold === 'function') await sweepHold({ where: 'rewrite-written', scope });
       if (sweepStopped) throw Object.assign(new Error('the hub is stopping'), { code: 'stopping' });
       if (rw.over) throw Object.assign(new Error(`more than ${SWEEP_HOLD_MAX} appends held`), { code: 'hold_full' });
@@ -305,7 +318,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       for (;;) {
         if (rewriting.get(scope) !== rw) break;   // the stop wrote them already (shutdown)
         const q = rw.held.splice(0); if (!q.length) break;
+        rw.flushing = q;
         try { await fs.promises.appendFile(file, q.join(''), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] index append failed (${scope}): ${q.length} held line(s) — ${e && e.code} (as an append that fails at the release)`); }
+        rw.flushing = [];
       }
       if (rewriting.get(scope) === rw) rewriting.delete(scope);
     }
@@ -859,6 +874,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
 
   // ── retention: BY SIZE ONLY (the owner, 2026-09-27) ──
 
+  /** r4703: the running sweep's start (0: none) and the press's bound — the sweep-now route answers «still running» past it, by name. */
+  const sweepRunningSince = () => (sweeping ? sweepingSince : 0);
+  const sweepPressBound = () => sweepPressBoundMs;
   /** r4522 (B-360d): the plan's input for one scope, its entries walked in SLICES (a plan row a step) — the same rows as scopeForPlan. */
   async function scopeForPlanSliced(sc, entries, markers, step) {
     const ss = BS.pairSessions({ markers, entries, now: now() });
@@ -869,25 +887,29 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     return { key: sc, sessions: [...byS.values(), ...(loose.entries.length ? [loose] : [])] };
   }
   let sweepHeldSaid = false;
-  /** r4522 (B-360d): the markers' first read for the sweep, async (the same cache loadMarkers fills). null: no reading. */
+  /** r4522 (B-360d): the markers' first read for the sweep, async (the same cache loadMarkers fills). → {list} | {hold: code} — r4703: a
+   *  markers read that FAILED or stayed silent is never read as none: the scope is held as for its index. */
   async function loadMarkersAsync(scope, step) {
-    if (markersBy.has(scope)) return markersBy.get(scope);
+    if (markersBy.has(scope)) return { list: markersBy.get(scope) };
     const r = await boundRead(path.join(scopeDir(scope), BS.MARKERS_FILE));
-    if (markersBy.has(scope)) return markersBy.get(scope);
-    if (r.silent) return null;
+    if (markersBy.has(scope)) return { list: markersBy.get(scope) };
+    if (r.silent) return { hold: 'silent' };
+    if (r.code) return { hold: r.code };
     const out = [];
-    if (r.text != null) for (const line of r.text.split('\n')) { if (line.trim()) { try { const m = JSON.parse(line); if (BS.isMarker(m)) out.push(m); } catch { /* a torn marker line is skipped (no marker is ever rewritten) */ } } await step('read', scope); if (markersBy.has(scope)) return markersBy.get(scope); }
+    if (r.text != null) for (const line of r.text.split('\n')) { if (line.trim()) { try { const m = JSON.parse(line); if (BS.isMarker(m)) out.push(m); } catch { /* a torn marker line is skipped (no marker is ever rewritten) */ } } await step('read', scope); if (markersBy.has(scope)) return { list: markersBy.get(scope) }; }
     markersBy.set(scope, out);
-    return out;
+    return { list: out };
   }
   /** THE SWEEP (row B-360d, r4522): one at a time — a second ask answers with the one running. Off the hub's loop: at most
    *  SWEEP_SLICE entries walked a turn, every file act async, one scope at a time. Its verdicts are the release's (T.traceSizePlan
    *  over the same rows; RR.recordingRetentionPlan); its order of removal too (the pictures, the entry, then the index). A scope
-   *  whose index could not be read whole (a torn line, a failed or silent read) loses NOTHING this pass: one journal line, a count
-   *  and a code, no path. → Promise of {at, removed, …, plan, recordings} */
+   *  whose index or session list could not be READ (a failed or silent read) loses NOTHING this pass: one journal line, a count
+   *  and a code, no path; the FIRST silent read stops the pass (r4703). A torn index line is kept raw, the scope swept by its readable
+   *  lines. → Promise of {at, removed, …, plan, recordings, scopesHeld, stopped?} */
   function sweep() {
     if (sweeping) return sweeping;
-    sweeping = (async () => { try { return await sweepNow(); } finally { sweeping = null; } })();
+    sweepingSince = now();
+    sweeping = (async () => { try { return await sweepNow(); } finally { sweeping = null; sweepingSince = 0; } })();
     return sweeping;
   }
   async function sweepNow() {
@@ -910,14 +932,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     // B-50e7's rule kept whole (主开发 r4547): the bound unread ⇒ no plan and no index read for the frames — the frames wait
     if (!unread) { try { names = (await fs.promises.readdir(traceRoot)).filter((n) => SCOPE_RE.test(n)); } catch { names = []; } }
     const planned = [];
+    let stopped = null;
     for (const sc of names) {
       const entries = await loadIndexAsync(sc, step);
-      const markers = entries ? await loadMarkersAsync(sc, step) : null;
-      const rs = readState.get(sc);
-      if (!entries || !markers || rs) { held.set(sc, rs ? (rs.code || 'torn') : 'silent'); continue; }
-      planned.push(await scopeForPlanSliced(sc, entries, markers, step));
+      const mk = entries ? await loadMarkersAsync(sc, step) : null;
+      const rs = readState.get(sc), code = rs ? rs.code : !entries ? 'silent' : mk && mk.hold ? mk.hold : null;
+      if (code) { held.set(sc, code); if (code === 'silent') { stopped = 'silent'; break; } continue; }   // r4703: the FIRST silent read stops the pass — the mount does not answer; no more of its reads are asked
+      planned.push(await scopeForPlanSliced(sc, entries, mk.list, step));
     }
-    const plan = unread ? { removeFrames: [], bytesRemoved: 0, kept: [] } : T.traceSizePlan({ scopes: planned, bytesPerScope: limit });
+    const plan = unread || stopped ? { removeFrames: [], bytesRemoved: 0, kept: [] } : T.traceSizePlan({ scopes: planned, bytesPerScope: limit });   // r4703: a pass stopped at a silent read removes nothing
     for (const sc of new Set(plan.removeFrames.map((r) => r.key))) {
       if (readState.has(sc)) { held.set(sc, readState.get(sc).code || 'torn'); continue; }   // read again torn while the plan walked: nothing of it removed
       const gone = new Map(plan.removeFrames.filter((r) => r.key === sc).map((r) => [r.id, r]));
@@ -938,15 +961,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     // recordings: their own bound, per profile (src/browser-recording-retention.js), over the files themselves
     const recRemoved = [];
     let recDirs = [];
-    try { recDirs = (await fs.promises.readdir(recRoot)).filter((n) => B.isProfileId(n)); } catch { recDirs = []; }
+    if (!stopped) { try { recDirs = (await fs.promises.readdir(recRoot)).filter((n) => B.isProfileId(n)); } catch { recDirs = []; } }
     for (const pid of recDirs) {
       const files = (await recordingsOfAsync(pid, step)).filter((f) => !f.live).map((f) => ({ id: f.file, at: f.mtime, bytes: f.bytes }));
       const rp = RR.recordingRetentionPlan({ groups: [{ key: pid, entries: files }], now: t });
       for (const r of rp.remove) { try { await fs.promises.unlink(path.join(recRoot, pid, r.id)); recRemoved.push({ profileId: pid, file: r.id, why: r.why, bytes: r.bytes }); } catch { /* */ } }
     }
-    if (held.size) { const codes = {}; for (const c of held.values()) codes[c] = (codes[c] || 0) + 1; log.warn?.(`[browser-trace] sweep: ${held.size} scope(s) not swept this pass — their action index could not be read whole (${Object.entries(codes).map(([c, n]) => `${c} ×${n}`).join(', ')}); nothing of theirs removed`); }
+    if (held.size) { const codes = {}; for (const c of held.values()) codes[c] = (codes[c] || 0) + 1; log.warn?.(`[browser-trace] sweep: ${held.size} scope(s) not swept this pass — their action index or session list could not be read (${Object.entries(codes).map(([c, n]) => `${c} ×${n}`).join(', ')}); nothing of theirs removed${stopped ? ' — the pass STOPPED at a read that did not answer (the data folder may be hung); the next pass asks again' : ''}`); }
     const framesRemoved = plan.removeFrames.length;
-    lastSweep = { at: t, removed: framesRemoved, framesRemoved, bytesRemoved: plan.bytesRemoved, limit, ...(unread ? { held: true } : {}), recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((n, r) => n + r.bytes, 0), kept: plan.kept, scopesHeld: held.size /* r4522 (B-360d): the scopes not swept this pass (a torn or unreadable index) — its own name: `held` is the settings' hold (B-50e7) */ };
+    lastSweep = { at: t, removed: framesRemoved, framesRemoved, bytesRemoved: plan.bytesRemoved, limit, ...(unread ? { held: true } : {}), recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((n, r) => n + r.bytes, 0), kept: plan.kept, scopesHeld: held.size /* r4522 (B-360d): the scopes not swept this pass (an index or a session list that could not be read) — its own name: `held` is the settings' hold (B-50e7) */, ...(stopped ? { stopped } : {}) };
     if (framesRemoved || recRemoved.length) log.log?.(`[browser-trace] sweep: the frames of ${framesRemoved} action(s) (${Math.round(plan.bytesRemoved / 1024)} KB) + ${recRemoved.length} recording(s) removed — ${[...plan.removeFrames, ...recRemoved].slice(0, 3).map((r) => r.why).join('; ')}${framesRemoved + recRemoved.length > 3 ? '; …' : ''} (every action list kept)`);
     bc({ type: 'browser-housekeeping-updated', sweep: lastSweep });
     return { ...lastSweep, plan, recordings: recRemoved };
@@ -1254,13 +1277,13 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (keeper && typeof keeper.addDigest === 'function') keeper.addDigest(digest);
     if (keeper && typeof keeper.setInFlightReader === 'function') keeper.setInFlightReader(inFlightFor); // the owner's ruling (2026-09-27)
   }
-  function shutdown() { sweepStopped = true; for (const [sc, rw] of [...rewriting]) { rewriting.delete(sc); try { if (rw.held.length) fs.appendFileSync(rw.file, rw.held.join(''), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] ${rw.held.length} held index line(s) not written at the stop (${sc}): ${e && e.code}`); } try { fs.unlinkSync(rw.tmp); } catch { /* not written yet */ } } /* r4522 (B-360d): at the hub's stop, a rewrite in flight never renames (sweepStopped) — its held appends are written NOW to the index that stands and its temp file removed */ fgHold.stop(); if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) { if (tp.human) unwatchKey(tp.key); else unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); } try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
+  function shutdown() { sweepStopped = true; for (const [sc, rw] of [...rewriting]) { rewriting.delete(sc); try { fs.unlinkSync(rw.tmp); } catch { /* not written yet, or renamed already */ } const lines = rw.flushing.concat(rw.held); try { if (lines.length) fs.appendFileSync(rw.file, lines.join(''), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] ${lines.length} held index line(s) not written at the stop (${sc}): ${e && e.code}`); } } /* r4522 (B-360d): at the hub's stop, a rewrite in flight never renames (sweepStopped) — its held appends are written NOW to the index that stands and its temp file removed. r4703 (the stop's two windows): the temp file goes FIRST — a rename still in the thread pool then fails and the old index stands, or it ran already and the lines land in the new one; a batch whose append is in flight is written again (a later line of an id supersedes the earlier) */ fgHold.stop(); if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) { if (tp.human) unwatchKey(tp.key); else unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); } try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
 
   return {
     enabled, traceHeld /* r3941 (3) */, settingsLifted /* r3941 (2) */, watch, unwatch, watchHuman, unwatchHuman, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
     maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown, inFlightFor,
-    traceRoot, recRoot, forgottenFile, abBase, _appendIndex: appendIndex /* r4522 (B-360d): the suite's seam — an action's own append road (appendIndex), asked while a sweep is held */, _forgottenHold: fgHold /* r3008: a suite asks its read again (the ladder's try, never a clock) */, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
+    traceRoot, recRoot, forgottenFile, abBase, sweepRunningSince, sweepPressBound /* r4703: the sweep-now route's «still running» */, _appendIndex: appendIndex /* r4522 (B-360d): the suite's seam — an action's own append road (appendIndex), asked while a sweep is held */, _forgottenHold: fgHold /* r3008: a suite asks its read again (the ladder's try, never a clock) */, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
   };
 }
 
-module.exports = { create, SWEEP_EVERY_MS, SWEEP_SLICE /* r4522 */, SWEEP_HOLD_MAX, INDEX_FILE, ARM_RETRY_MS };
+module.exports = { create, SWEEP_EVERY_MS, SWEEP_SLICE /* r4522 */, SWEEP_HOLD_MAX, SWEEP_PRESS_BOUND_MS /* r4703 */, INDEX_FILE, ARM_RETRY_MS };
