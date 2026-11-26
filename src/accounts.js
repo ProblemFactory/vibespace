@@ -589,6 +589,7 @@ class AccountManager {
     try { providerRows = this._providerRows ? this._providerRows() || [] : []; } catch { providerRows = []; }
     return {
       providerRows,   // lane lg-providers U5: BESIDE `accounts`, never in it (the hub's account readers see records only)
+      keptSignIns: this.keptSignIns(),   // B-e381 (r4680): the kept sign-in folders still owed a wipe (id, harness, since, pools — no name)
       ...this._providersLockOf(),   // (r3886 (B), r3908 (2)) providersUnread (the store's words while HELD) or providersDamaged ({copy}: lifted EMPTY over torn bytes) — from the SAME fact the hub's refusal reads
       ...Object.fromEntries(this._defaultIdFields().map((f) => [f, this._state[f] || null])), // defaultAccountId, defaultCodexAccountId, defaultAntigravityAccountId …
       accounts: this._rowsOf(this._state.accounts),
@@ -1873,20 +1874,30 @@ class AccountManager {
     // (B-e381's second unit, 主开发 r4613) EVERY harness that keeps a sign-in here (its creds row — never a harness's name) has pools
     // to heal: «this harness reports usage by its sign-in» (oauthUsage, the old gate) is not «this harness has pools». THE ORDER: the
     // links move BEFORE the member's folder is wiped; a heal that failed keeps the folder standing and the answer says so
-    let kept = null;
+    let kept = null, owedRow = null;
     if (this._acctType(a) === 'subscription' && this._keepsSignIn(this._acctBackend(a))) {
+      // B-e381 (主开发 r4680) law 1: the folder's wipe is OWED from the removal's first store write — the row rides the SAME write that takes
+      // the record off the file, so a crash anywhere after leaves no folder nobody knows of; it is dropped once the folder is gone
+      owedRow = { id, harness: this._acctBackend(a), since: Date.now(), pools: 0 };
+      this._keptRows().push(owedRow);
       // poolMembers below must not offer the removed account; 主开发 r4168 (MUST 1): a row that held a sign-in is OFF THE FILE before its
       // pools are healed and its folder wiped, as at the release (a kill after the wipe never brings it back with its sign-in and its pools);
       // the act still finishes (it has no undo) and a landing that fails is said at its end (r3977 (2))
       unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);
       const failed = this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });
-      if (failed.length) kept = { pools: failed.length, codes: [...new Set(failed.map((f) => f.code))] };
+      if (failed.length) { kept = { pools: failed.length, codes: [...new Set(failed.map((f) => f.code))] }; owedRow.pools = failed.length; }
     }
     // Isolated-login accounts own a creds dir — wipe it (best-effort).
     if (this._acctType(a) === 'pooled') { try { fs.unlinkSync(this._acctDir(this._acctBackend(a), id)); } catch { } try { fs.rmSync(this.poolLinksDir(id), { recursive: true, force: true }); } catch { } } // unlink ONLY — the target is a real account's dir; the links dir holds only symlinks (rm never follows)
     else if (this._acctType(a) === 'subscription') {
       if (kept) console.warn(`[pool] a removed member's sign-in folder is KEPT: ${kept.pools} pool(s) could not be moved off it (${kept.codes.join(', ')}) — its links still read it`);   // B-e381: names no account
       else { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
+      if (owedRow && !kept && !fs.existsSync(this._acctDir(this._acctBackend(a), id))) this._dropKept(id);   // B-e381 (r4680): wiped — nothing owed
+    }
+    // B-e381 (r4680): EVERY LATER REMOVAL (a person's act) retries each other owed wipe — never a timer, never a start
+    for (const r of [...(this._state.keptSignIns || [])]) if (r.id !== id) {   // (never makes the field: a list with no owed wipe stays as it was)
+      try { const o = this._retryKeptRow(r, opts); console.warn(`[pool] a kept sign-in folder (${r.harness}), retried at a removal: ${o.cleared ? 'cleared' : o.gone ? 'already gone — its row dropped' : o.live ? 'an account holds it again — nothing deleted, its row dropped' : o.kept.pools ? 'kept again: a pool still reads it' : 'kept again: it could not be deleted'}`); }   // names no account
+      catch (e) { console.warn(`[pool] a kept sign-in folder's wipe was not retried: ${(e && e.code) || 'error'}`); }
     }
     this._displayForget(a);   // B-360d: the folder's kept facts go with it
     // r3782: a row that held a sign-in is gone from the file before the call returns; r3977 (2): a landing that fails is said AFTER the act
@@ -1900,6 +1911,52 @@ class AccountManager {
   }
   /** B-e381: this harness keeps a sign-in here — its descriptor's creds row has a reader (an unknown harness keeps none) */
   _keepsSignIn(be) { try { const c = this._credsOf(be); return !!(c && typeof c.parseAuth === 'function'); } catch { return false; } }
+  /** B-e381 (主开发 r4680): the sign-in folders a removal KEPT (a pool it could not move off the member) — one row each, in the store's
+   *  own state: { id, harness, since, pools } (no name). Retried only on a person's act (retryKeptWipe, and every later removal). */
+  _keptRows() { return this._state.keptSignIns || (this._state.keptSignIns = []); }
+  _dropKept(id) { const rows = this._keptRows(), i = rows.findIndex((r) => r && r.id === id); if (i >= 0) rows.splice(i, 1); if (!rows.length) delete this._state.keptSignIns; }
+  keptSignIns() { return (this._state.keptSignIns || []).map((r) => ({ id: r.id, harness: r.harness, since: r.since, pools: r.pools })); }
+  /** the links that still read a folder named `id`: every pool's own link and every per-session link, read fresh (never a run's memo).
+   *  THE KEEP NEVER READS EMPTY: a link (or a pool's links folder) that cannot be read — anything but «no link here» / «not a link» —
+   *  COUNTS AS READING, so an unread keep deletes nothing */
+  _linksReading(id) {
+    const reads = (p) => { try { return path.basename(fs.readlinkSync(p)) === id; } catch (e) { return !(e && (e.code === 'ENOENT' || e.code === 'EINVAL' || e.code === 'ENOTDIR')); } };
+    let n = 0;
+    for (const pool of this._state.accounts.filter((x) => this._acctType(x) === 'pooled')) {
+      if (reads(this._poolLinkDir(pool))) n++;
+      let names = []; try { names = fs.readdirSync(this.poolLinksDir(pool.id)); } catch (e) { if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) n++; }
+      for (const k of names) if (reads(this.sessionPoolLinkPath(pool.id, k))) n++;
+    }
+    return n;
+  }
+  /** one owed wipe, tried: (law 4) that ONE folder, by the id and harness the row holds — a row whose folder is already gone is
+   *  dropped and said; links that still read it are moved first by the removal's own road (the heal); the folder goes only when NO
+   *  link reads it — else it is kept again and said again. → { cleared } | { gone } | { live } | { kept: { pools, codes } } */
+  _retryKeptRow(row, opts = {}) {
+    if (!row || typeof row.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(row.id) || !this._keepsSignIn(row.harness)) throw Object.assign(new Error('not a kept sign-in folder'), { code: 'not-kept' });
+    try {
+      // an account that holds this id again (a config import brought its record back) owns the folder: nothing is deleted, the row goes
+      if (this._state.accounts.some((x) => x && x.id === row.id)) { this._dropKept(row.id); return { live: true }; }
+      const dir = this._acctDir(row.harness, row.id);
+      if (!fs.existsSync(dir)) { try { this._healPoolsAfterRemoval(row.id, opts); } catch { } this._dropKept(row.id); return { gone: true }; }   // its links healed off the missing folder, as a removal's
+      const failed = this._healPoolsAfterRemoval(row.id, opts);   // the removal's own road
+      const reading = this._linksReading(row.id);
+      if (failed.length || reading) { row.pools = Math.max(failed.length, reading); row.tried = Date.now(); return { kept: { pools: row.pools, codes: [...new Set(failed.map((f) => f.code))] } }; }
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { row.tried = Date.now(); return { kept: { pools: 0, codes: [(e && e.code) || 'error'] } }; }
+      if (fs.existsSync(dir)) { row.tried = Date.now(); return { kept: { pools: 0, codes: ['still-there'] } }; }
+      this._dropKept(row.id);
+      return { cleared: true };
+    } finally { this._notify(); }   // the heal may have moved a pool's links, the row changed: every page told (a re-point notifies)
+  }
+  /** THE PERSON's DOOR (B-e381, 主开发 r4680): retry one owed wipe by its id — an unread store drops nothing (refused by name) */
+  retryKeptWipe(id, opts = {}) {
+    this._refuseWhileHeld('clearing a kept sign-in folder');
+    const row = (this._state.keptSignIns || []).find((r) => r && r.id === id);
+    if (!row) return { unknown: true };
+    const r = this._retryKeptRow(row, opts);   // it tells every page itself
+    this._save();
+    return r;
+  }
 
   /** Every pool that referenced a just-removed member: strip it from explicit
    *  member lists, re-point the default link if it targeted the removed
@@ -1920,6 +1977,10 @@ class AccountManager {
     const provWord = (removedProvider && (removedProvider.label || removedProvider.kind || removedProvider.id)) || 'its provider';
     const failed = [];
     for (const pool of this._state.accounts.filter((x) => this._acctType(x) === 'pooled')) {
+      // B-e381 (r4680, the round's should): a failure keeps the member's folder only for a pool that REFERENCED it (its list, its own link
+      // or a conversation's link named it) — an unrelated pool's error is said and keeps nothing; a reference that cannot be read counts
+      let refs = true;
+      try { refs = (Array.isArray(pool.members) && pool.members.includes(removedId)) || readTarget(this._poolLinkDir(pool)) === removedId || this.sessionPoolLinks(pool.id).some((l) => readTarget(l.path) === removedId); } catch { refs = true; }
       try {
         if (Array.isArray(pool.members) && pool.members.includes(removedId)) {
           const rest = pool.members.filter((m) => m !== removedId);
@@ -1961,7 +2022,7 @@ class AccountManager {
           // (q-055 M2) never the default of ANOTHER provider: the default when it is the deleted member's provider, else that
           // provider's first live member (the engine re-decides it within its provider next pass), else UNPLACED
           const target = chosen || (def && sameProv(def) ? def : null) || (aliveSame[0] ? aliveSame[0].id : null);
-          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch (e) { console.warn(`[pool] a conversation's link could not move to its member: that member's sign-in cannot be read here (${(e && e.code) || 'refused by its harness'}) — the link is dropped`); } }   // B-e381: the member's OWN harness folder; the reason said, no account named
+          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch (e) { console.warn(`[pool] a conversation's link could not move to its member: that member's sign-in cannot be read here (${(e && e.code) || (this.get(target) ? 'refused by its harness' : 'no record of that member')}) — the link is dropped`); } }   // B-e381: the member's OWN harness folder; the reason said, no account named
           if (signIn) {
             require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);
             this._noteSlot({ sessionId: l.sessKey, poolId: pool.id, from: removedId, to: target, why: 'member-removed' });
@@ -1974,7 +2035,7 @@ class AccountManager {
             }
           }
         }
-      } catch (e) { console.warn(`[pool] hygiene after removing ${removedId} failed for ${pool.id}:`, e.message); failed.push({ poolId: pool.id, code: (e && e.code) || 'error' }); }
+      } catch (e) { console.warn(`[pool] hygiene after removing ${removedId} failed for ${pool.id}:`, e.message); if (refs) failed.push({ poolId: pool.id, code: (e && e.code) || 'error' }); }
     }
     return failed;   // B-e381: the pools this removal could not move off the member (the caller keeps its folder)
   }

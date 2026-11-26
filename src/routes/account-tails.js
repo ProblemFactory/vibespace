@@ -43,6 +43,22 @@ function personOnlyDoor(req, res) {
   return false;
 }
 
+/** B-e381 (主开发 r4680): THE KEPT FOLDER's DOOR (POST /api/accounts/kept/:id/wipe) — a person on this page only (the tree's one person
+ *  verdict): any bearer (an agent's vsst_, a job's jbt_, an automation key's vsak_, or a token in the body or the query) answered 403
+ *  `human_only` naming them; another site `cross_site`. → true when a person on this page asks */
+const KEPT_DOOR_WORDS = Object.freeze({
+  human_only: 'only the person, on this VibeSpace page, clears a kept sign-in folder — an agent\'s, a job\'s or an automation\'s sign-in cannot',
+  cross_site: 'only the person, on this VibeSpace page, clears a kept sign-in folder — another site cannot',
+});
+function keptFolderDoor(req, res) {
+  const who = personVerdict(req);
+  if (who.ok) return true;
+  const code = who.code === 'human_only' ? 'human_only' : 'cross_site';
+  res.set('Cache-Control', 'no-store');
+  res.status(403).json({ ok: false, code, error: KEPT_DOOR_WORDS[code] });
+  return false;
+}
+
 /** THE KEY REVEAL (GET and POST /api/accounts/:id/key — src/server/account-usage-routes.js wires it): the store is the MASTER copy and
  *  the Console can't re-show it. lane vault-contents-window r2 (verify r1): a set-up vault shows it only through THIS page's reveal
  *  window — the Vault window's own door (people only, ONE value, paced, audited); Manage Agents' Show key… asks 验证是你 first.
@@ -116,4 +132,4 @@ function registerAccountTailRoutes(app, { accounts, providers = null }) {
   });
 }
 
-module.exports = { accountsAnswer, registerAccountTailRoutes, personOnlyDoor, CREDENTIAL_DOOR_WORDS, keepHostCliTail, forgetHostCliTail, revealKeyDoorOf };
+module.exports = { accountsAnswer, registerAccountTailRoutes, personOnlyDoor, CREDENTIAL_DOOR_WORDS, keptFolderDoor, KEPT_DOOR_WORDS, keepHostCliTail, forgetHostCliTail, revealKeyDoorOf };

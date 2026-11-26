@@ -424,6 +424,19 @@ app.patch('/api/accounts/:id', (req, res) => {
     res.json({ success: true, account });
   } catch (e) { failAcct(res, e); }
 });
+// B-e381 (主开发 r4680): THE PERSON's DOOR for a kept sign-in folder — a person on this page only (an agent's, a job's or an automation's
+// sign-in refused by name: personOnlyDoor); the removal's own road heals first, and the folder goes only when NO link reads it —
+// else it is kept again and said again; a row whose folder is already gone is dropped and said. Nothing runs it on a timer or a start.
+app.post('/api/accounts/kept/:id/wipe', (req, res) => {
+  if (!AT.keptFolderDoor(req, res)) return;   // a person on this page only — an agent's, a job's or an automation's sign-in refused by name
+  try {
+    const r = accounts.retryKeptWipe(req.params.id, {
+      chooseDefault: (poolId, from) => (typeof engine.decideDefaultTarget === 'function' ? engine.decideDefaultTarget(poolId, from) : null) || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(poolId, from) : null),
+      chooseLink: (poolId, from, sid) => (typeof engine.removalTargetFor === 'function' ? engine.removalTargetFor(poolId, from, sid) : null),
+    });
+    res.json({ success: true, ...r });
+  } catch (e) { failAcct(res, e); }
+});
 app.delete('/api/accounts/:id', (req, res) => {
   try {
     const _wasPool = accounts.get(req.params.id)?.type === 'pooled';

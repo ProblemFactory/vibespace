@@ -1632,7 +1632,7 @@ console.log('\nB-e381 a pool member is read by its own harness; a per-session li
     GATE + READ_NEW, "    if (!this.readSubCreds(memberId).loggedIn) throw new Error('pool member not logged in: ' + target.name);\n", "B-e381: the release's member read (the Claude reader)"),   // stale-pins: kept (the red copy: the release's own text, planted)
     "    require('./account-material.js').repointPoolSymlink(link, signIn.dir, signIn.bump);\n",
     "    require('./account-material.js').repointPoolSymlink(link, this.subDir(memberId), this.subCredsPath(memberId));\n", "B-e381: the release's link target (Claude's folder and file)"),   // stale-pins: kept (the red copy: the release's own text, planted)
-    "          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch (e) { console.warn(`[pool] a conversation's link could not move to its member: that member's sign-in cannot be read here (${(e && e.code) || 'refused by its harness'}) — the link is dropped`); } }   // B-e381: the member's OWN harness folder; the reason said, no account named\n          if (signIn) {\n            require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);\n",
+    "          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch (e) { console.warn(`[pool] a conversation's link could not move to its member: that member's sign-in cannot be read here (${(e && e.code) || (this.get(target) ? 'refused by its harness' : 'no record of that member')}) — the link is dropped`); } }   // B-e381: the member's OWN harness folder; the reason said, no account named\n          if (signIn) {\n            require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);\n",
     "          if (target) {\n            require('./account-material.js').repointPoolSymlink(l.path, this.subDir(target), this.subCredsPath(target));\n", "B-e381: the release's heal re-point (Claude's folder and file)");   // stale-pins: kept (the red copy: the release's own text, planted)
   const U1 = anchored(SRC, GATE, '', "B-e381: the first unit's writer (ace444d3b), no harness gate");
   const relF = copyPath('src/accounts.js', 'e381-release'); writeCopy(relF, REL);
@@ -1697,10 +1697,10 @@ console.log('\nB-e381 (2) a removal heals the pools of a member of any harness t
   const { anchored } = await import('./scratch.mjs');
   const SRC2 = read('src/accounts.js');
   const REL2 = [
-    ["    // (B-e381's second unit, 主开发 r4613) EVERY harness that keeps a sign-in here (its creds row — never a harness's name) has pools\n    // to heal: «this harness reports usage by its sign-in» (oauthUsage, the old gate) is not «this harness has pools». THE ORDER: the\n    // links move BEFORE the member's folder is wiped; a heal that failed keeps the folder standing and the answer says so\n    let kept = null;\n    if (this._acctType(a) === 'subscription' && this._keepsSignIn(this._acctBackend(a))) {\n      // poolMembers below must not offer the removed account; 主开发 r4168 (MUST 1): a row that held a sign-in is OFF THE FILE before its\n      // pools are healed and its folder wiped, as at the release (a kill after the wipe never brings it back with its sign-in and its pools);\n      // the act still finishes (it has no undo) and a landing that fails is said at its end (r3977 (2))\n      unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);\n      const failed = this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });\n      if (failed.length) kept = { pools: failed.length, codes: [...new Set(failed.map((f) => f.code))] };\n",
+    ["    // (B-e381's second unit, 主开发 r4613) EVERY harness that keeps a sign-in here (its creds row — never a harness's name) has pools\n    // to heal: «this harness reports usage by its sign-in» (oauthUsage, the old gate) is not «this harness has pools». THE ORDER: the\n    // links move BEFORE the member's folder is wiped; a heal that failed keeps the folder standing and the answer says so\n    let kept = null, owedRow = null;\n    if (this._acctType(a) === 'subscription' && this._keepsSignIn(this._acctBackend(a))) {\n      // B-e381 (主开发 r4680) law 1: the folder's wipe is OWED from the removal's first store write — the row rides the SAME write that takes\n      // the record off the file, so a crash anywhere after leaves no folder nobody knows of; it is dropped once the folder is gone\n      owedRow = { id, harness: this._acctBackend(a), since: Date.now(), pools: 0 };\n      this._keptRows().push(owedRow);\n      // poolMembers below must not offer the removed account; 主开发 r4168 (MUST 1): a row that held a sign-in is OFF THE FILE before its\n      // pools are healed and its folder wiped, as at the release (a kill after the wipe never brings it back with its sign-in and its pools);\n      // the act still finishes (it has no undo) and a landing that fails is said at its end (r3977 (2))\n      unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);\n      const failed = this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });\n      if (failed.length) { kept = { pools: failed.length, codes: [...new Set(failed.map((f) => f.code))] }; owedRow.pools = failed.length; }\n",
      "    if (capsOf(this._acctBackend(a)).oauthUsage && this._acctType(a) === 'subscription') {\n      // poolMembers below must not offer the removed account; 主开发 r4168 (MUST 1): a row that held a sign-in is OFF THE FILE before its\n      // pools are healed and its folder wiped, as at the release (a kill after the wipe never brings it back with its sign-in and its pools);\n      // the act still finishes (it has no undo) and a landing that fails is said at its end (r3977 (2))\n      unlanded0 = hadSignIn ? this._saveFinishing('the removal of the account') : (this._save(), null);\n      this._healPoolsAfterRemoval(id, { ...opts, removedProvider: goneProvider });\n", "B-e381 (2): the release's gate (oauthUsage) and its first save (r4168)"],   // stale-pins: kept (the red copy: the release's own text, planted)
-    ["      if (kept) console.warn(`[pool] a removed member's sign-in folder is KEPT: ${kept.pools} pool(s) could not be moved off it (${kept.codes.join(', ')}) — its links still read it`);   // B-e381: names no account\n      else { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }\n",
-     "      try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { }\n", "B-e381 (2): the release's wipe, whatever the heal did"],
+    ["      if (kept) console.warn(`[pool] a removed member's sign-in folder is KEPT: ${kept.pools} pool(s) could not be moved off it (${kept.codes.join(', ')}) — its links still read it`);   // B-e381: names no account\n      else { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }\n      if (owedRow && !kept && !fs.existsSync(this._acctDir(this._acctBackend(a), id))) this._dropKept(id);   // B-e381 (r4680): wiped — nothing owed\n    }\n    // B-e381 (r4680): EVERY LATER REMOVAL (a person's act) retries each other owed wipe — never a timer, never a start\n    for (const r of [...(this._state.keptSignIns || [])]) if (r.id !== id) {   // (never makes the field: a list with no owed wipe stays as it was)\n      try { const o = this._retryKeptRow(r, opts); console.warn(`[pool] a kept sign-in folder (${r.harness}), retried at a removal: ${o.cleared ? 'cleared' : o.gone ? 'already gone — its row dropped' : o.live ? 'an account holds it again — nothing deleted, its row dropped' : o.kept.pools ? 'kept again: a pool still reads it' : 'kept again: it could not be deleted'}`); }   // names no account\n      catch (e) { console.warn(`[pool] a kept sign-in folder's wipe was not retried: ${(e && e.code) || 'error'}`); }\n    }\n",
+     "      try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { }\n    }\n", "B-e381 (2): the release's wipe, whatever the heal did (no owed row, no retry of other rows)"],   // stale-pins: kept (the red copy: the release's own text, planted)
     ["    // B-e381 (formed with B-574d's r3977): a landing that fails is said at the end as before, and a kept folder rides it (keptFolder)\n    const owed = unlanded || unlanded0;\n    if (owed) { if (kept) owed.keptFolder = kept; throw owed; }\n    return kept ? { keptFolder: kept } : {};   // B-e381: the removal's answer — the folder kept when a pool could not be moved off it\n", "    if (unlanded || unlanded0) throw (unlanded || unlanded0);\n", "B-e381 (2): the release's said landing, silent on a kept folder"],   // stale-pins: kept (the red copy: the release's own text, planted)
     ["        if (readTarget(this._poolLinkDir(pool)) === removedId) {   // B-e381: the POOL's own link (its harness's folder), never Claude's path\n", "        if (readTarget(this.subDir(pool.id)) === removedId) {\n", "B-e381 (2): the release's default road (Claude's path)"],   // stale-pins: kept (the red copy: the release's own text, planted)
     ["            try { fs.unlinkSync(this._poolLinkDir(pool)); } catch { } // a dangling link reads as a phantom login path; absent = honestly signed-out (B-e381: the pool's own link)\n",
@@ -1775,6 +1775,164 @@ console.log('\nB-e381 (2) a removal heals the pools of a member of any harness t
   const v = vOf(AccountManager, 'v-tip'), vRel = vOf(Rel2AM, 'v-release');
   ok('B-e381 (2): the accounts answer\'s local verdict for a Codex pool reads its link through its own harness — usable, on this machine', !!v && v.usable === true && v.how === 'local-env' && v.reason === null, JSON.stringify(v));
   ok('B-e381 (2) RED — the release\'s verdict (the Claude reader) calls the signed-in Codex pool «pool-no-target»', !!vRel && vRel.usable === false && vRel.reason === 'pool-no-target', JSON.stringify(vRel));
+}
+
+// ── B-e381 (kept) (主开发 r4680): A KEPT SIGN-IN FOLDER's WAY OUT ──
+// A removal whose heal failed keeps the member's folder (B-e381 (2)); at the tip nothing remembered it and nothing ever wiped it later.
+// Now (law 1) the removal writes an owed row (keptSignIns: id, harness, since, pools — no name) in the SAME store write that takes the
+// record off the file; (law 4) the person's door (retryKeptWipe — POST /api/accounts/kept/:id/wipe) and every later removal retry it:
+// the removal's own heal first, then that ONE folder deleted only when no link reads it (read fresh), else kept again and said; a folder
+// already gone drops its row and says so; a held store drops nothing; a start does nothing. (law 2) The door refuses an agent's, a
+// job's and an automation's sign-in by name. RED: the tip's form (the formed chain's follow) planted in a copy — no row is written,
+// so nothing owes the folder, and there is no door.
+console.log('\nB-e381 (kept) a kept sign-in folder is owed in the removal\'s own write, and cleared only on a person\'s act');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const SRCK = read('src/accounts.js');
+  const PUSH = "      owedRow = { id, harness: this._acctBackend(a), since: Date.now(), pools: 0 };\n      this._keptRows().push(owedRow);\n";
+  const TIPK = [
+    [PUSH, '', "B-e381 (kept): the tip's form — no owed row is written"],
+    ["      if (failed.length) { kept = { pools: failed.length, codes: [...new Set(failed.map((f) => f.code))] }; owedRow.pools = failed.length; }\n",
+     "      if (failed.length) kept = { pools: failed.length, codes: [...new Set(failed.map((f) => f.code))] };\n", "B-e381 (kept): the tip's kept answer, no row to count"],   // stale-pins: kept (the red copy: the tip's own text, planted)
+    ['  retryKeptWipe(id, opts = {}) {\n', '  noDoorAtTheTip(id, opts = {}) {\n', "B-e381 (kept): the tip has no door"],
+  ].reduce((t, [from, to, why]) => anchored(t, from, to, why), SRCK);
+  const tipF = copyPath('src/accounts.js', 'e381-kept-tip'); writeCopy(tipF, TIPK);
+  const TipAM = waitEverySave(require(tipF).AccountManager);   // a copy's class is patched by its own call (its saves land before a read)
+  const tipPlant = !TIPK.includes(PUSH) && typeof TipAM.prototype.retryKeptWipe !== 'function' && typeof TipAM.prototype.noDoorAtTheTip === 'function';   // r5135 law 1: the plant's witness
+  const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+  const live = (p) => { try { fs.statSync(p); return true; } catch { return false; } };
+  const MAT = require(path.join(REPO, 'src/account-material.js'));
+  // the heal's re-point refused (placed: EACCES), as B-e381 (2)'s failRun — the one way a heal fails here
+  const refused = (fn) => { const real = MAT.repointPoolSymlink; MAT.repointPoolSymlink = () => { throw Object.assign(new Error('placed: the link could not be moved'), { code: 'EACCES' }); }; try { return fn(); } finally { MAT.repointPoolSymlink = real; } };
+  const world = (AM, tag, { extra = false } = {}) => {
+    const d = e381Tmp('vs-kept-e381-' + tag + '-');
+    const m = new AM({ dataDir: d });
+    const sub = (name) => { const a = m.createSubscription({ name }); fs.writeFileSync(path.join(m.subDir(a.id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-' + name, refreshToken: 'fake-rt', expiresAt: Date.now() + 3600e3, scopes: ['user:inference'] } })); return a.id; };
+    const A = sub('ClK0'), B = sub('ClK1'), C = extra ? sub('ClK2') : null;
+    const P = m.createPool({ name: 'ClKP', members: [A, B] }).id; m.setPoolTarget(P, A);
+    const file = path.join(d, 'accounts.json');
+    return { d, m, A, B, C, P, file, aDir: m.subDir(A), bDir: m.subDir(B), def: path.join(d, 'subs', P), onDisk: () => JSON.parse(fs.readFileSync(file, 'utf8')) };
+  };
+  const rowsOf = (j) => (j && Array.isArray(j.keptSignIns) ? j.keptSignIns : []);
+  // (law 1) the failed removal: every write that has the record OFF the file carries the owed row — the first one included
+  const failedRemoval = (AM, tag, opts) => {
+    const w = world(AM, tag, opts);
+    const writes = [], save0 = w.m._save;
+    w.m._save = function (...a) { const r = save0.apply(this, a); try { writes.push(JSON.parse(fs.readFileSync(w.file, 'utf8'))); } catch { writes.push(null); } return r; };
+    let ans = null; try { ans = refused(() => w.m.remove(w.A)); } finally { delete w.m._save; }
+    const off = writes.filter((j) => j && !j.accounts.some((x) => x.id === w.A));
+    return { ...w, ans, writes: writes.length, off: off.length, firstOffOwes: off.length > 0 && rowsOf(off[0]).some((r) => r.id === w.A && r.harness === 'claude'), everyOffOwes: off.length > 0 && off.every((j) => rowsOf(j).some((r) => r.id === w.A)) };
+  };
+  const k1 = failedRemoval(AccountManager, 'k1');
+  const disk1 = rowsOf(k1.onDisk()).find((r) => r.id === k1.A) || null;
+  ok('B-e381 (kept) LAW 1: the removal\'s FIRST write that takes the record off the file already carries the owed row (id, harness) — and so does every later one; the row on disk names no account', k1.firstOffOwes && k1.everyOffOwes && !!disk1 && disk1.pools === 1 && disk1.harness === 'claude' && !('name' in disk1) && !JSON.stringify(disk1).includes('ClK0') && JSON.stringify(k1.ans) === JSON.stringify({ keptFolder: { pools: 1, codes: ['EACCES'] } }), JSON.stringify({ writes: k1.writes, off: k1.off, first: k1.firstOffOwes, every: k1.everyOffOwes, disk1, ans: k1.ans }));
+  // a START does nothing: a restart reads the row, the folder stands, the pool still reads it — nothing runs at a start or on a timer
+  const m2 = new AccountManager({ dataDir: k1.d });
+  await new Promise((r) => setTimeout(r, 50));
+  const r2 = m2.keptSignIns();
+  ok('B-e381 (kept): the owed row SURVIVES a restart, and a start does nothing — the folder still stands, the pool still reads it, the row is the same', r2.length === 1 && r2[0].id === k1.A && r2[0].pools === 1 && exists(k1.aDir) && live(k1.def) && path.basename(fs.readlinkSync(k1.def)) === k1.A && (m2.list().keptSignIns || []).length === 1, JSON.stringify({ r2, aDir: exists(k1.aDir), def: live(k1.def) }));
+  // (law 4) THE DOOR, on the restarted store: kept again while the heal still fails; kept while a link still reads it whatever the heal
+  // says (the links are read fresh); cleared once no link reads it; then nothing is owed
+  const again = refused(() => m2.retryKeptWipe(k1.A));
+  ok('B-e381 (kept) the door: the heal fails again — the folder is KEPT AGAIN and said ({kept: {pools: 1, codes: [EACCES]}}), the row stays', JSON.stringify(again) === JSON.stringify({ kept: { pools: 1, codes: ['EACCES'] } }) && exists(k1.aDir) && m2.keptSignIns().length === 1, JSON.stringify(again));
+  m2._healPoolsAfterRemoval = () => [];   // a heal that SAYS it moved everything, while the pool's default still reads the folder
+  let fresh = null; try { fresh = m2.retryKeptWipe(k1.A); } finally { delete m2._healPoolsAfterRemoval; }
+  ok('B-e381 (kept) the door: a link that still reads the folder keeps it whatever the heal answered — the links are read fresh before any wipe', !!fresh && !!fresh.kept && fresh.kept.pools === 1 && exists(k1.aDir) && live(k1.def), JSON.stringify(fresh));
+  const cleared = m2.retryKeptWipe(k1.A);
+  const disk2 = JSON.parse(fs.readFileSync(k1.file, 'utf8'));
+  ok('B-e381 (kept) the door: the heal moves the pool to the member that stays, NO link reads the folder, and ONLY THEN that one folder is deleted — {cleared}, the row gone from the file; the other member\'s folder untouched', JSON.stringify(cleared) === JSON.stringify({ cleared: true }) && !exists(k1.aDir) && exists(k1.bDir) && live(k1.def) && path.basename(fs.readlinkSync(k1.def)) === k1.B && m2.keptSignIns().length === 0 && rowsOf(disk2).length === 0, JSON.stringify({ cleared, aDir: exists(k1.aDir), bDir: exists(k1.bDir), rows: rowsOf(disk2) }));
+  ok('B-e381 (kept) the door: asked again, nothing is owed under that id ({unknown}) — nothing deleted', JSON.stringify(m2.retryKeptWipe(k1.A)) === JSON.stringify({ unknown: true }) && exists(k1.bDir));
+  // a folder ALREADY GONE: the row is dropped and said; an account that holds the id again (a config import brought its record back —
+  // stood in by the store's own list) keeps its folder: nothing deleted, the row dropped
+  const k3 = failedRemoval(AccountManager, 'k3');
+  fs.rmSync(k3.aDir, { recursive: true, force: true });
+  const gone = k3.m.retryKeptWipe(k3.A);
+  ok('B-e381 (kept) the door: a folder already gone — the row is DROPPED and said ({gone}), the pool\'s link healed off the missing folder to the member that stays', JSON.stringify(gone) === JSON.stringify({ gone: true }) && k3.m.keptSignIns().length === 0 && rowsOf(k3.onDisk()).length === 0 && live(k3.def) && path.basename(fs.readlinkSync(k3.def)) === k3.B, JSON.stringify({ gone, def: live(k3.def) }));
+  const k4 = failedRemoval(AccountManager, 'k4');
+  k4.m._state.accounts.push({ id: k4.A, type: 'subscription', backend: 'claude', name: 'ClK0' });
+  const held4 = k4.m.retryKeptWipe(k4.A);
+  ok('B-e381 (kept) the door: an account holds that id again — NOTHING is deleted ({live}), the row dropped', JSON.stringify(held4) === JSON.stringify({ live: true }) && exists(k4.aDir) && k4.m.keptSignIns().length === 0, JSON.stringify(held4));
+  // EVERY LATER REMOVAL retries each owed wipe (a person's act): another account removed — the kept folder is cleared with it, said in
+  // a journal line that names no account
+  const k5 = failedRemoval(AccountManager, 'k5', { extra: true });
+  const lines = [], warn0 = console.warn;
+  console.warn = (...a) => { lines.push(a.join(' ')); };
+  try { k5.m.remove(k5.C); } finally { console.warn = warn0; }
+  const said = lines.filter((l) => /a kept sign-in folder \(claude\), retried at a removal: cleared/.test(l));
+  ok('B-e381 (kept): the NEXT removal retries the owed wipe — the pool moved to the member that stays, the kept folder deleted, the row gone; its journal line names no account', !exists(k5.aDir) && live(k5.def) && path.basename(fs.readlinkSync(k5.def)) === k5.B && k5.m.keptSignIns().length === 0 && rowsOf(k5.onDisk()).length === 0 && said.length === 1 && !said[0].includes(k5.A) && !said[0].includes('ClK'), JSON.stringify({ aDir: exists(k5.aDir), lines: lines.map((l) => l.slice(0, 120)) }));
+  // a HELD store (the accounts file could not be read at the start) drops nothing: the door is refused by name, the folder and the
+  // file's bytes stay
+  const k6 = failedRemoval(AccountManager, 'k6');
+  const before6 = fs.readFileSync(k6.file, 'utf8'), real6 = fs.readFileSync, f6 = path.resolve(k6.file);
+  let m6 = null;
+  fs.readFileSync = function (p, ...a) { if (path.resolve(String(p)) === f6) throw Object.assign(new Error('placed: EIO'), { code: 'EIO' }); return real6.call(this, p, ...a); };
+  try { m6 = new AccountManager({ dataDir: k6.d }); } finally { fs.readFileSync = real6; }
+  let heldErr = null; try { m6.retryKeptWipe(k6.A); } catch (e) { heldErr = e; }
+  ok('B-e381 (kept): a HELD accounts store drops nothing — the door is refused by name (accounts_unread), the folder stands, the file\'s bytes unchanged', !!m6.held() && !!heldErr && heldErr.code === 'accounts_unread' && exists(k6.aDir) && fs.readFileSync(k6.file, 'utf8') === before6, JSON.stringify({ held: !!m6.held(), code: heldErr && heldErr.code }));
+  // (law 2) THE DOOR's person check: an agent's, a job's and an automation's sign-in refused by name; another site refused; the person passes
+  const AT = require(path.join(REPO, 'src/routes/account-tails.js'));
+  const asked = (headers, body = {}) => { const out = {}; const res = { set() { return this; }, status(c) { out.code = c; return this; }, json(o) { out.body = o; return this; } }; out.passed = AT.keptFolderDoor({ headers, body, query: {}, socket: {} }, res); return out; };   // the page's verdict is its Sec-Fetch-Site (no host needed)
+  const page = { 'sec-fetch-site': 'same-origin' };
+  const agent = asked({ ...page, authorization: 'Bearer ' + ['vs', 'st_', 'k'.repeat(12)].join('') });
+  const job = asked(page, { token: ['jb', 't_', 'k'.repeat(12)].join('') });
+  const auto = asked({ ...page, authorization: 'Bearer ' + ['vs', 'ak_', 'k'.repeat(12)].join('') });
+  const site = asked({ 'sec-fetch-site': 'cross-site' }), person = asked(page);
+  const byName = (x) => x.passed === false && x.code === 403 && x.body && x.body.code === 'human_only' && /an agent's, a job's or an automation's sign-in cannot/.test(x.body.error || '');
+  const AURK = read('src/server/account-usage-routes.js');
+  ok('B-e381 (kept) LAW 2: the door refuses an agent\'s, a job\'s and an automation\'s sign-in BY NAME (403 human_only), another site (cross_site); a person on this page passes — and the wipe route asks it first', byName(agent) && byName(job) && byName(auto) && site.passed === false && site.code === 403 && site.body.code === 'cross_site' && person.passed === true && person.code === undefined && AURK.includes("app.post('/api/accounts/kept/:id/wipe', (req, res) => {\n  if (!AT.keptFolderDoor(req, res)) return;"), JSON.stringify({ agent, job, auto, site, person }));
+  // (law 3) THE PAGE: one line per owed row, drawn in each of the three rosters on this machine only; every answer worded in en, zh, ja
+  const MAK = read('src/lib/manage-agents.js'), ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), APPK = read('src/lib/app.js');
+  const carried = APPK.includes('keptSignIns: Array.isArray(d.keptSignIns) ? d.keptSignIns : []') && APPK.includes('keptSignIns: Array.isArray(msg.keptSignIns) ? msg.keptSignIns : []');   // the page's list keeps the rows (its read and the push)
+  const fnK = MAK.slice(MAK.indexOf('function keptFolderWords(r) {'), MAK.indexOf('\n}\n', MAK.indexOf('function keptFolderWords(r) {')));
+  const drawK = MAK.slice(MAK.indexOf('  _drawKeptFolders(left, accts, be, refresh) {'), MAK.indexOf('\n  },\n', MAK.indexOf('  _drawKeptFolders(left, accts, be, refresh) {')));
+  const keysK = [...(fnK + drawK).matchAll(/\bt\('([^']+)'/g)].map((x) => x[1]);
+  const untranslated = keysK.filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':'));
+  ok('B-e381 (kept) LAW 3: the line is drawn from the owed rows only (the page\'s list carries them, its read and the push), in the three rosters (local only), its button never greyed; its words and every answer (cleared, gone, held again, kept with why) in zh and ja', keysK.length >= 10 && untranslated.length === 0 && (MAK.match(/this\._drawKeptFolders\(left, accts, /g) || []).length === 3 && /accts\.keptSignIns/.test(drawK) && !/disabled/.test(drawK) && /needLine\(/.test(drawK) && carried, JSON.stringify({ keys: keysK.length, untranslated, carried }));
+  // THE MEETING's TWO FAULTS (the round's should): a heal that FAILS and a landing that FAILS together — the act finishes, its owed
+  // landing is thrown at the end, and it CARRIES the kept folder (the route's 503 hands it on); the owed row stands in memory, so the
+  // page's line is drawn (the toast's catch has only the landing's words). A sign-in row (a stand-in oatEnc) takes the synchronous road.
+  const twoFaults = (AM, tag) => {
+    const w = world(AM, tag);
+    w.m._state.accounts.find((x) => x.id === w.A).oatEnc = 'stand-in';   // a row that held a sign-in: its removal lands synchronously
+    const save0 = w.m._save;
+    w.m._save = function (o = {}) { if (o && o.now) throw Object.assign(new Error('accounts.json could not be written (placed: EIO) — the removal was not saved'), { code: 'not-durable', status: 503, signInSave: true }); return save0.call(this, o); };
+    let thrown = null; try { refused(() => w.m.remove(w.A)); } catch (e) { thrown = e; } finally { delete w.m._save; }
+    return { thrown: thrown && { code: thrown.code, landingOwed: !!thrown.landingOwed, keptFolder: thrown.keptFolder || null }, aKept: exists(w.aDir), owed: w.m.keptSignIns().map((r) => r.id === w.A && r.pools) };
+  };
+  const tf = twoFaults(AccountManager, 'two-faults');
+  const MEET = "    if (owed) { if (kept) owed.keptFolder = kept; throw owed; }\n";
+  const MEETX = anchored(SRCK, MEET, "    if (owed) throw owed;\n", "B-e381 (kept): the meeting without its kept folder");
+  const meetF = copyPath('src/accounts.js', 'e381-kept-meet'); writeCopy(meetF, MEETX);
+  const MeetAM = waitEverySave(require(meetF).AccountManager);
+  const meetPlant = !MEETX.includes('owed.keptFolder = kept');   // r5135 law 1: the plant's witness
+  ok('B-e381 (kept) THE MEETING: a heal that fails AND a landing that fails — the owed landing is thrown at the act\'s end CARRYING the kept folder ({pools: 1, codes: [EACCES]}), the folder stands, the row is owed in memory; the route hands it on its 503', !!tf.thrown && tf.thrown.code === 'not-durable' && tf.thrown.landingOwed && JSON.stringify(tf.thrown.keptFolder) === JSON.stringify({ pools: 1, codes: ['EACCES'] }) && tf.aKept && JSON.stringify(tf.owed) === '[1]' && AURK.includes('if (unlanded) return notDurable(res, unlanded, unlanded.keptFolder ? { keptFolder: unlanded.keptFolder } : {});'), JSON.stringify(tf));
+  if (!meetPlant) console.log('  ⊘ SKIP B-e381 (kept) THE MEETING RED — the plant was not in force in its copy');
+  else { const tfx = twoFaults(MeetAM, 'two-faults-red'); ok('B-e381 (kept) THE MEETING RED — the meeting without its clause (planted, witnessed): the same two faults throw the landing with NO kept folder — a later edit that drops it is red here', !!tfx.thrown && tfx.thrown.code === 'not-durable' && tfx.thrown.keptFolder === null && tfx.aKept, JSON.stringify(tfx)); }
+  // THE KEEP NEVER READS EMPTY: the pool's own link cannot be read (placed EIO at readlink) — the retry counts it as READING and keeps
+  // the folder; RED: the keep's first form, an unreadable link read as «no link», deletes the folder under it
+  const READS_CATCH = "catch (e) { return !(e && (e.code === 'ENOENT' || e.code === 'EINVAL' || e.code === 'ENOTDIR')); } };";
+  const READX = anchored(SRCK, READS_CATCH, 'catch (e) { return false; } };', "B-e381 (kept): an unreadable link read as no link");
+  const readF = copyPath('src/accounts.js', 'e381-kept-read'); writeCopy(readF, READX);
+  const ReadAM = waitEverySave(require(readF).AccountManager);
+  const readPlant = !READX.includes(READS_CATCH) && READX.includes('catch (e) { return false; } };');
+  const unread = (AM, tag) => {
+    const w = failedRemoval(AM, tag);
+    const real = fs.readlinkSync, at = path.resolve(w.def);
+    fs.readlinkSync = function (p, ...a) { if (path.resolve(String(p)) === at) throw Object.assign(new Error('placed: EIO'), { code: 'EIO' }); return real.call(this, p, ...a); };
+    let r = null; try { r = w.m.retryKeptWipe(w.A); } finally { fs.readlinkSync = real; }
+    return { r, aKept: exists(w.aDir), rows: w.m.keptSignIns().length };
+  };
+  const ur = unread(AccountManager, 'unread');
+  ok('B-e381 (kept) THE KEEP NEVER READS EMPTY: the pool\'s own link cannot be read (placed EIO) — it counts as READING, the folder is kept and said ({kept: {pools: 1}}), the row stays', !!ur.r && !!ur.r.kept && ur.r.kept.pools === 1 && ur.aKept && ur.rows === 1, JSON.stringify(ur));
+  if (!readPlant) console.log('  ⊘ SKIP B-e381 (kept) THE KEEP RED — the plant was not in force in its copy');
+  else { const urx = unread(ReadAM, 'unread-red'); ok('B-e381 (kept) THE KEEP RED — an unreadable link read as «no link» (planted, witnessed): the folder is DELETED while the pool\'s link may still name it', !!urx.r && urx.r.cleared === true && !urx.aKept, JSON.stringify(urx)); }
+  // RED — the tip's form: no row is written, so the folder is orphaned (nothing owes it, a restart knows nothing of it), and no door
+  if (!tipPlant) console.log('  ⊘ SKIP B-e381 (kept) RED — the tip\'s form was not in force in its copy (the plant\'s witness failed)');
+  else {
+    const t1 = failedRemoval(TipAM, 'tip');
+    const tm2 = new TipAM({ dataDir: t1.d });
+    ok('B-e381 (kept) RED — the tip\'s form (planted, witnessed): the folder is KEPT but nothing owes it — no row in the file or after a restart, no door to clear it: an orphan', t1.ans && t1.ans.keptFolder && exists(t1.aDir) && rowsOf(t1.onDisk()).length === 0 && tm2.keptSignIns().length === 0 && typeof tm2.retryKeptWipe !== 'function', JSON.stringify({ ans: t1.ans, aDir: exists(t1.aDir), rows: rowsOf(t1.onDisk()) }));
+  }
 }
 
 // ── R-tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

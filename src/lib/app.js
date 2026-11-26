@@ -407,7 +407,7 @@ class App {
       }
       if (msg.type === 'setting-holds' && Array.isArray(msg.holds)) this._setSettingHolds(msg.holds);   // lane setting-doors pick 2: a press, an «End now», a return
       if (msg.type === 'accounts-updated' && Array.isArray(msg.accounts)) {
-        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg), held: msg.held || null, answered: true };   // r3129 (2): the push's `held` — the lift ends the banner on every open page, and a page that never fetched during the hold learns it
+        this._accounts = { ...(this._accounts || {}), accounts: accountRowsOf(withTails(msg)), ...accountDefaultsOf(msg), keptSignIns: Array.isArray(msg.keptSignIns) ? msg.keptSignIns : [], held: msg.held || null, answered: true };   // r3129 (2): the push's `held` — the lift ends the banner on every open page, and a page that never fetched during the hold learns it
         // B-ba7d: the push carries no key tail — the person's last read is laid on, and asked again (coalesced: one ask in flight) — a
         // key added, a key replaced, a provider re-keyed: the next draw reads the new tail, never the old one. ONE ask a tails
         // generation: the push carries its word; the roster's refresh below takes this read (B-ee0a smalls)
@@ -2660,7 +2660,7 @@ class App {
   refreshAccounts() {
     return fetchJson('/api/accounts').then((d0) => askTails(d0 && d0.tailsGen).then((tl) => [d0, tl])).then(([d0, tl]) => {   // B-ee0a: the list's word decides whether the last read holds
       const d = withTails(d0, tl);   // B-ba7d: the list carries no key tail; the person's own read (POST /api/accounts/tails) lays it on
-      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, cliKey: d.cliKey || {}, held: d.held || null, answered: true };   // answered: the list was asked and said (B-8703 r4586: its door's «gone» waits for it) // every harness's default field (agent-meta); `held`: the B-f276 family (r2947)
+      if (d) this._accounts = { accounts: accountRowsOf(d), ...accountDefaultsOf(d), subscription: d.subscription || {}, keptSignIns: Array.isArray(d.keptSignIns) ? d.keptSignIns : [], cliKey: d.cliKey || {}, held: d.held || null, answered: true };   // answered: the list was asked and said (B-8703 r4586: its door's «gone» waits for it) // every harness's default field (agent-meta); `held`: the B-f276 family (r2947)
       if (d?.hostNames) this._hostNamesKnown = d.hostNames; // id→name for chips (2.244.1)
       return this._accounts;
     }).catch(() => this._accounts);

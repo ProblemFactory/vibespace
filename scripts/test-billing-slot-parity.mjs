@@ -199,7 +199,7 @@ export const ROWS = Object.freeze([
   ['cliTarget', 'src/routes/provider-models.js', 'cliDoor', 'routes', 1],
   ['demoteWalledAccount', 'src/server/usage-pool-engine.js', 'onWalledTurn', 'readings', 1],
   ['fallbackDefaultTarget', 'src/server/account-usage-routes.js', '(module)', 'routes', 1],
-  ['fallbackDefaultTarget', 'src/server/account-usage-routes.js', 'chooseDefault', 'pile', 1],
+  ['fallbackDefaultTarget', 'src/server/account-usage-routes.js', 'chooseDefault', 'pile', 2],   // B-e381 (r4680): + the kept folder's wipe door — the DELETE route's own chooser, for the same heal
   ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'memberRemoved', 'pool', 1],
   ['fallbackDefaultTarget', 'src/server/usage-pool-engine.js', 'poolChooserForModel', 'pile', 3],
   ['poolChooserForModel', 'src/server/usage-pool-engine.js', 'fallbackBackVerdict', 'pool', 1],   // B-d578 F3a: the new-conversation verdict of the first model (verdictOnly)

@@ -162,13 +162,13 @@ console.log('§4 the writer census');
   const sites = [];
   lines.forEach((l, i) => { if (/repointPoolSymlink\(/.test(l) && !/^\s*(const|let|var)\b.*require/.test(l)) sites.push({ line: i + 1, method: methodAt(i) }); });
   // a helper that does not notify itself is fine only when EVERY caller of it does (named, with its reason)
-  const VIA_CALLER = { _healPoolsAfterRemoval: 'remove' };
+  const VIA_CALLER = { _healPoolsAfterRemoval: ['remove', '_retryKeptRow'] };   // B-e381 (r4680): the kept folder's retry heals by the removal's own road and tells every page itself
   const notifies = (name) => /this\._notify(Links)?\(\)/.test(bodyOf(name));
   const judged = sites.map((s) => {
     if (notifies(s.method)) return { ...s, ok: true, by: s.method };
     const caller = VIA_CALLER[s.method];
     const callers = lines.map((l, i) => (new RegExp('this\\.' + s.method + '\\(').test(l) ? methodAt(i) : null)).filter(Boolean);
-    return { ...s, ok: !!caller && callers.length > 0 && callers.every((c) => c === caller) && notifies(caller), by: caller, callers };
+    return { ...s, ok: !!caller && callers.length > 0 && callers.every((c) => caller.includes(c)) && caller.every(notifies), by: caller && caller.join(' / '), callers };
   });
   ok(sites.length >= 4 && judged.every((s) => s.ok), `every re-point of a pool link in accounts.js notifies (${judged.map((s) => `${s.method}:${s.line}${s.by !== s.method ? ' via ' + s.by : ''}`).join(', ')})`, judged.filter((s) => !s.ok));
   ok(/this\._noteSlot\(\{ sessionId: sessKey, poolId, from, to: memberId, why \}\);\s*\n\s*this\._notifyLinks\(\);\s*\n\s*return link;/.test(bodyOf('ensureSessionPoolLink')), 'ensureSessionPoolLink: re-point → slot row → notify → return (the ONE per-session writer)');

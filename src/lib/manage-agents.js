@@ -133,6 +133,15 @@ const foldAnchor = (btn) => (btn.classList.contains(FOLDED) && btn.parentElement
 // Session dropdown inline the same comparator — keep them in step.
 // r4073 (2): the Remove road's «err» causes (src/hosts.js LOOK_ERR_WORDS), in the person's language — each a t() of its own words
 const LOOK_ERR_WHY = { unreadable: () => t('its hook file is there but could not be read'), dangling: () => t('its hook file is a link to nowhere (a volume not mounted yet?)'), 'folder-dangling': () => t('its folder is a link to nowhere (a volume not mounted yet?)'), unsearchable: () => t('its folder cannot be searched'), unknown: () => t('its hook file could not be looked at') };
+/** B-e381 (主开发 r4680): the answer of a kept folder's «Clear it», in plain words — cleared, gone, held by an account again, or kept
+ *  with why (a pool still reads it; or the folder could not be deleted, with the machine's code) */
+function keptFolderWords(r) {
+  if (r && r.cleared) return t('Cleared — the removed account’s sign-in folder is deleted');
+  if (r && r.gone) return t('That folder was already gone — the line is dropped');
+  if (r && r.live) return t('An account holds that folder again — nothing was deleted, the line is dropped');
+  if (r && r.kept) return r.kept.pools > 0 ? t('Kept — a pool still reads that folder and could not be moved to another signed-in account') : t('Kept — the folder could not be deleted ({code})', { code: (r.kept.codes || []).join(', ') });
+  return t('Nothing is owed for that folder any more');
+}
 const acctTypeRank = (x) => (x.pooled || x.type === 'pooled') ? 0 : (x.type === 'subscription' ? 1 : 2);
 /** a paired machine's CLI key «already imported»? Only when its tail is KNOWN and an account's tail matches it (B-ee0a: an unknown tail —
  *  a refused read, a hub restarted between the two asks — is never «imported»: the import is offered, and it is idempotent) */
@@ -2216,6 +2225,26 @@ export function installManageAgents(App, ctx = {}) {
     }
   },
 
+  /** B-e381 (主开发 r4680): ONE need line per sign-in folder a removal KEPT for this harness (a pool could not be moved off it) — drawn
+   *  only while its row is owed, on this machine's roster, under the list. Its button always acts (the person's door retries the wipe:
+   *  the removal's own heal first, the folder deleted only when no link reads it) and answers in plain words; never greyed. */
+  _drawKeptFolders(left, accts, be, refresh) {
+    const rows = ((accts && accts.keptSignIns) || []).filter((r) => r && r.harness === be && typeof r.id === 'string');
+    if (!rows.length) return;
+    const box = document.createElement('div'); box.className = 'acct-kept-lines';
+    for (const row of rows) {
+      const words = row.pools > 0 ? t('A removed account’s sign-in folder is kept here: a pool still reads it') : t('A removed account’s sign-in folder is kept here: it could not be deleted');
+      box.appendChild(needLine({ words, tone: 'need', cls: 'acct-kept-line', doors: [{ label: t('Clear it'), kind: 'primary', door: 'kept-folder-clear', run: async () => {
+        let r = null;
+        try { r = await api(`/api/accounts/kept/${encodeURIComponent(row.id)}/wipe`, { method: 'POST' }); }
+        catch (err) { showToast(t('Could not clear the folder — {reason}', { reason: err?.message || t('server unreachable') }), { type: 'error', duration: 8000 }); refresh(); return; }
+        showToast(keptFolderWords(r), r && r.kept ? { duration: 8000 } : {});
+        refresh();
+      } }] }));
+    }
+    const list = left.querySelector('.acct-list');
+    if (list) list.after(box); else left.prepend(box);
+  },
   async _renderCodexAccounts(ctx) {
     const { body, selectedHost, done, run, refresh, st } = ctx;
     let accts;
@@ -2321,6 +2350,7 @@ export function installManageAgents(App, ctx = {}) {
     left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
     markSoonRows(left.querySelector('.acct-list'));
+    if (!selectedHost) this._drawKeptFolders(left, accts, 'codex', refresh);   // B-e381 (r4680): a kept sign-in folder's line, only while one is owed
     const head = document.createElement('div'); head.className = 'acct-roster-head btn-bar';
     const title = document.createElement('b'); title.className = 'btn-bar-text'; title.textContent = t('ChatGPT / OpenAI accounts');
     const addBtn = document.createElement('button'); addBtn.className = 'agent-btn acct-add' + (codexAccts.length ? '' : ' primary'); addBtn.textContent = '+ ' + t('Add ChatGPT account…');
@@ -2488,6 +2518,7 @@ export function installManageAgents(App, ctx = {}) {
     }).join('');
     left.innerHTML = `<div class="acct-list">${globalRow}${lines}</div>
       <div class="agents-note">${escHtml(t('Each {cli} session can pick its {login} (New Session dialog / card ⚙). Each account is its own isolated login on this machine, switchable per session.', { cli: label, login }))}</div>`;
+    this._drawKeptFolders(left, accts, be, refresh);   // B-e381 (r4680): a kept sign-in folder's line, only while one is owed
     const head = document.createElement('div'); head.className = 'acct-roster-head btn-bar';
     const title = document.createElement('b'); title.className = 'btn-bar-text'; title.textContent = t('{login} accounts', { login });
     const addBtn = document.createElement('button'); addBtn.className = 'agent-btn acct-add' + (list.length ? '' : ' primary'); addBtn.textContent = '+ ' + t('Add {login} account…', { login });
@@ -3740,6 +3771,7 @@ export function installManageAgents(App, ctx = {}) {
     left.innerHTML = `<div class="acct-list">${globalRow}${keyLines}</div>
       <div class="agents-note">${note}</div>`;
     markSoonRows(left.querySelector('.acct-list'));
+    if (!selectedHost) this._drawKeptFolders(left, accts, 'claude', refresh);   // B-e381 (r4680): a kept sign-in folder's line, only while one is owed
     // (B-d578 F3b, r3316 (3)) the pool row's ONE press: a person's act (the route's personVerdict), its reply says QUEUED and how many
     for (const b of left.querySelectorAll('.pool-fb-back')) b.onclick = async (e) => {
       e.stopPropagation();
