@@ -13161,6 +13161,10 @@ export default {
   "Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.": "入力されるのはそのサイト自身（正確なアドレス、https）だけです — 別のサイトにも、それを埋め込んだフレームにも入力しません。",
   "Updated the login in the vault": "ボールトのログインを更新しました",
   "Saved the login to the vault": "ログインをボールトに保存しました",
+  "{who} says the stored password for {site} as {user} no longer signs in: {purpose}": "{who} によると、{site} の {user} の保存済みパスワードではもうサインインできません：{purpose}", // B-ab6c: an agent's ask for the new password of a login
+  "Type its new password below — it becomes the stored one, and the old one is kept as the previous one. VibeSpace never hands it to the agent.": "下に新しいパスワードを入力してください——それが保存済みのパスワードになり、古いものは以前のパスワードとして残ります。VibeSpace はそれをエージェントに渡しません。", // B-ab6c: an agent's ask for the new password of a login
+  "If it still works, press «It still works» — the agent is told so, and stops asking.": "まだ使える場合は「まだ使える」を押してください——エージェントにそう伝わり、尋ねるのをやめます。", // B-ab6c: an agent's ask for the new password of a login
+  "It still works": "まだ使える", // B-ab6c: an agent's ask for the new password of a login
   "The new password": "新しいパスワードを入力", // B-ab6c: a website login's Change password… and its previous one back
   "Type its new password — the current one is kept as the previous one": "新しいパスワードを入力します——現在のパスワードは以前のパスワードとして残ります", // B-ab6c: a website login's Change password… and its previous one back
   "The current password is kept as the previous one.": "現在のパスワードは以前のパスワードとして残ります。", // B-ab6c: a website login's Change password… and its previous one back

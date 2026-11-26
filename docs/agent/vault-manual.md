@@ -185,6 +185,21 @@ label gives a new id). If the user turned the setting off, the paste grants noth
 secret, and the user opens the entry in the Vault window. `vibespace-vault
 list` shows an entry you may use as yours «with no card for <hosts>».
 
+## A stored website login that no longer signs in — `request "<what>" --kind login --update <login>`
+
+When a site no longer accepts the password VibeSpace fills for a login you may use, ask the user for its new one — name the login
+by the reference you fill with:
+
+    vibespace-vault request "the shop's new password" --purpose "the shop says the password is wrong" --kind login --update web-login:https://shop.example.com#alice
+
+- **One card**, whose first line is YOUR claim and purpose («<this conversation> says the stored password for <site> as <user> no
+  longer signs in: <purpose>») — VibeSpace has not checked it. The form is the Vault window's own, the site and the user fixed.
+- **Its two answers.** The user types the new password (it replaces the stored one; the old one is kept as the previous one),
+  or presses «It still works» — then look for another reason the sign-in failed, and do not ask again.
+- **Only a login you may use.** Any other name — one you may not use, or none at all — answers ONE sentence: «no web login you may
+  use by that name». One open ask a login; after a refusal the same login is quiet for 10 minutes; a vault lock withdraws it.
+- **Your next turn** reads UPDATED (sign in again with `--vault <login>/password`) or REFUSED — never the password.
+
 ## A website login you do not have — `request "<what>" --kind login --host <site>`
 
 On a sign-in page, ask through the vault first and use a takeover last:

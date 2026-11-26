@@ -190,7 +190,7 @@ function slowLineOf(req, ms) {
   return `[vault] ${req.method} ${route} answered in ${Math.round(ms)} ms`;
 }
 
-function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, linkSignFor = null, hubPubFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null, jobAsks = null, jobSecrets = null,
+function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, linkSignFor = null, hubPubFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null, jobAsks = null, jobSecrets = null, loginMayUse = null,
   totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js */, proxyMove = null /* B-8b87: the keeper's moveProxyPassword(profileId) */, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
@@ -513,7 +513,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     }
   });
   if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste, jobAsks });
-  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take, who, jobSecrets });   // B-3fb5 (the read): + who — the agent entry's delete names who pressed; B-ef1b (the read): + jobSecrets — its door is the paste routes'
+  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take, who, jobSecrets, loginMayUse });   // B-3fb5 (the read): + who — the agent entry's delete names who pressed; B-ef1b (the read): + jobSecrets — its door is the paste routes'
 }
 
 /**
@@ -541,11 +541,11 @@ function pasteCallerIn(activeSessions, req) {
   }
   return null;
 }
-function registerPasteRoutes(app, { paste, activeSessions, person, take, who = () => null, jobSecrets = null }) {
+function registerPasteRoutes(app, { paste, activeSessions, person, take, who = () => null, jobSecrets = null, loginMayUse = null }) {   // loginMayUse: B-ab6c
   const pasteCallerOf = (req) => pasteCallerIn(activeSessions, req);
   const refusal = (res, r) => res.status(paste.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || paste.words(r.code), ...Object.fromEntries(['until', 'fields'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
   const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
-  app.post('/api/agent/vault/secret-request', (req, res) => {
+  app.post('/api/agent/vault/secret-request', async (req, res) => { try {   // B-ab6c: async — an update ask's grant read is awaited first
     res.set('Cache-Control', 'no-store');
     const b = bodyOf(req);
     const carried = Object.prototype.hasOwnProperty.call(b, 'value') || !!(req.query && Object.prototype.hasOwnProperty.call(req.query, 'value'));
@@ -554,11 +554,15 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take, who = (
     if (!caller) return refusal(res, { code: 'unauthorized' });
     if (carried) return refusal(res, { code: 'value_in_request', words: 'a paste request never carries a value — the user pastes it into the box in their tray' });
     let r;
-    try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name, hosts: b.hosts, note: typeof b.note === 'string' ? b.note : undefined }); }   // hosts: lane vault-use-grants (`--host`) · note: lane vault-entry-description (`--note`)
+    // B-ab6c: an UPDATE ask (`--update web-login:…`) names a login; whether THIS conversation may use it is read here, server-side
+    const update = typeof b.update === 'string' && b.update.trim() ? b.update.trim() : undefined;
+    let mayUse = null;
+    if (update) { try { mayUse = typeof loginMayUse === 'function' ? (await loginMayUse(caller, update)) === true : false; } catch { mayUse = false; } }
+    try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name, hosts: b.hosts, note: typeof b.note === 'string' ? b.note : undefined, update, mayUse }); }   // hosts: lane vault-use-grants (`--host`) · note: lane vault-entry-description (`--note`)
     catch (e) { return refusal(res, { code: 'unfiled' }); }
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
     return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
-  });
+  } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, code: 'unfiled', error: 'the request could not be filed' }); } });
   app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value, loginPassword, totpLink, totpSeed] = take(req, 'value', 'loginPassword', 'totpLink', 'totpSeed'); const b = req.body || {}; const tw = b.totp && typeof b.totp === 'object' && !Array.isArray(b.totp) ? b.totp : {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true, name: typeof b.name === 'string' ? b.name : undefined, note: typeof b.note === 'string' ? b.note : undefined, login: { username: b.username, password: loginPassword, totpName: b.totpName, allow: b.allow === true, ...(typeof b.useLogin === 'string' && b.useLogin ? { useLogin: b.useLogin } : {}), ...(b.expect === 'new' || b.expect === 'update' ? { expect: b.expect } : {}) }, totp: { uri: totpLink, seed: totpSeed, name: tw.name, digits: tw.digits, period: tw.period, algorithm: tw.algorithm, allow: b.allow === true } }); }));   // totp: lane totp-request-card — the link and the seed taken off the body (never logged, never echoed), the two-step dialog's own fields   // login: lane login-request-card — a website login's fields (the password off the body, as the add door's route takes it)   // name / note: lane vault-entry-description — the owner's words in the box win   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));

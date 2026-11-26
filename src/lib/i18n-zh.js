@@ -13162,6 +13162,10 @@ export default {
   "Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.": "只会填到这个网站本身（精确到地址、经 https）— 绝不填到别的网站，也不填到嵌入它的框架里。",
   "Updated the login in the vault": "已更新保险库里的登录",
   "Saved the login to the vault": "已把登录存入保险库",
+  "{who} says the stored password for {site} as {user} no longer signs in: {purpose}": "{who} 说 {site} 上 {user} 的已存密码已无法登录：{purpose}", // B-ab6c: an agent's ask for the new password of a login
+  "Type its new password below — it becomes the stored one, and the old one is kept as the previous one. VibeSpace never hands it to the agent.": "在下面输入它的新密码——它会成为已存的密码，旧密码保留为上一个密码。VibeSpace 从不把它交给智能体。", // B-ab6c: an agent's ask for the new password of a login
+  "If it still works, press «It still works» — the agent is told so, and stops asking.": "如果它仍然可用，请按「仍然可用」——智能体会收到告知，不再询问。", // B-ab6c: an agent's ask for the new password of a login
+  "It still works": "仍然可用", // B-ab6c: an agent's ask for the new password of a login
   "The new password": "新的密码", // B-ab6c: a website login's Change password… and its previous one back
   "Type its new password — the current one is kept as the previous one": "输入它的新密码——当前密码会保留为上一个密码", // B-ab6c: a website login's Change password… and its previous one back
   "The current password is kept as the previous one.": "当前密码会保留为上一个密码。", // B-ab6c: a website login's Change password… and its previous one back

@@ -69,6 +69,7 @@ const MORE_WORDS = Object.freeze({
   job_no_use: 'a Background Work job cannot ask the user for a secret — the conversation that owns the job asks',
   request_quiet: 'the user refused that a moment ago — do not ask again for 10 minutes; carry on without it',
   too_many_requests: `too many paste requests are waiting on the user (${P.LIMITS.openPerConversation} per conversation) — wait for their answers`,
+  login_not_yours: 'no web login you may use by that name',   // B-ab6c: ONE sentence for every name this conversation may not use — nothing is learned of it
   unfiled: 'the request could not be filed in the user\'s tray — nothing was asked',
   ask_unknown: 'that request is gone',
   ask_settled: 'that request was already answered',
@@ -120,7 +121,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   const settling = new Set();  // item ids this door resolves itself (its own onStatus is not a refusal)
   let indexed = false;
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
-  const placeOf = (t) => (t.kind === 'field' ? `field:${P.intoOf(t)}` : t.kind === P.LOGIN_KIND ? `login:${t.origin}` : t.kind === P.TOTP_KIND ? `totp:${String(t.label).toLowerCase()}` : `entry:${String(t.label).toLowerCase()}`);   // totp: lane totp-request-card (its name, else the agent's words)   // login: lane login-request-card (its ONE site)
+  const placeOf = (t) => (t.kind === 'field' ? `field:${P.intoOf(t)}` : t.kind === P.LOGIN_KIND ? (t.update ? `login-update:${t.update}` : `login:${t.origin}`) : t.kind === P.TOTP_KIND ? `totp:${String(t.label).toLowerCase()}` : `entry:${String(t.label).toLowerCase()}`);   // totp: lane totp-request-card (its name, else the agent's words)   // login: lane login-request-card (its ONE site)
   const recordOf = (it) => {
     const a = it && it.action;
     if (!a || a.type !== P.ACTION_TYPE || !P.REQUEST_ID_RE.test(String(a.requestId || ''))) return null;
@@ -211,11 +212,12 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
    * AN AGENT ASKS. `caller` = { conversationId (the stash's id), scope (the use law's conv), sessionKey, name, job? };
    * words / purpose / into / kind / name as the CLI sent them. → { ok: true, requestId, target, already? } | a refusal.
    */
-  function request({ caller = {}, words, purpose, into, kind, name, hosts, note } = {}) {
+  function request({ caller = {}, words, purpose, into, kind, name, hosts, note, update, mayUse = null } = {}) {   // B-ab6c: update + mayUse (the route's own grant read, never the body's)
     if (caller.job) return named('job_no_use');
     if (!caller.conversationId) return named('unauthorized');
-    const v = P.requestVerdict({ words, purpose, into, kind, name, hosts, note });   // note: lane vault-entry-description (`--note`)
+    const v = P.requestVerdict({ words, purpose, into, kind, name, hosts, note, update });   // note: lane vault-entry-description (`--note`)
     if (!v.ok) return v;
+    if (v.target.kind === P.LOGIN_KIND && v.target.update && mayUse !== true) return named('login_not_yours');   // B-ab6c: only a login THIS conversation may use
     if (!userTodos) return named('unfiled');
     if (userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('a paste request') };   // B-44f3: no card can be filed, and the open ones are unread — refused by name
     if (v.target.kind === P.LOGIN_KIND && !(logins && typeof logins.addOwn === 'function')) return named('login_no_door');   // lane login-request-card
@@ -243,7 +245,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
       it = userTodos.add(caller.sessionKey || 'vault', {
         origin: 'vault', kind: 'action', urgency: 'high', by: 'agent', sessionName: who,   // NO expiresAt: it waits for the owner (a restart keeps it)
         text: card.text, detail: card.detail, i18n: card.i18n,
-        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : v.target.kind === P.LOGIN_KIND ? P.LOGIN_KIND : v.target.kind === P.TOTP_KIND ? P.TOTP_KIND : '', conv, scope, ...(v.target.kind === 'entry' && v.target.hosts.length ? { hosts: v.target.hosts.join(' '), grant } : {}), ...(v.target.kind === P.LOGIN_KIND ? { hosts: v.target.origin, grant } : {}), ...(v.target.kind === P.TOTP_KIND ? { grant, ...(v.target.name ? { totpName: v.target.name } : {}) } : {}) },   // totp: lane totp-request-card (the proposed name, scalar)   // hosts + grant: lane vault-use-grants (scalars: the action's fields are)   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
+        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : v.target.kind === P.LOGIN_KIND ? P.LOGIN_KIND : v.target.kind === P.TOTP_KIND ? P.TOTP_KIND : '', conv, scope, ...(v.target.kind === 'entry' && v.target.hosts.length ? { hosts: v.target.hosts.join(' '), grant } : {}), ...(v.target.kind === P.LOGIN_KIND ? { hosts: v.target.origin, grant, ...(v.target.update ? { update: v.target.update } : {}) } : {}), ...(v.target.kind === P.TOTP_KIND ? { grant, ...(v.target.name ? { totpName: v.target.name } : {}) } : {}) },   // totp: lane totp-request-card (the proposed name, scalar)   // hosts + grant: lane vault-use-grants (scalars: the action's fields are)   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
       });
     } catch (e) { log(`${who}: the paste request could not be filed in For you: ${e.message}`); return named('unfiled'); }
     if (!it || !it.id) return named('unfiled');
@@ -252,7 +254,8 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     return { ok: true, requestId, target };
   }
   /** The target as an answer says it (no label of the owner's: the agent's own words and the registry's names). */
-  function publicTarget(t) { if (t.kind === P.LOGIN_KIND) return { login: t.origin }; if (t.kind === P.TOTP_KIND) return { totp: t.name || null }; /* lane totp-request-card: the proposed name only */ return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label, ...(t.note ? { note: t.note } : {}), ...(t.hosts && t.hosts.length ? { hosts: t.hosts } : {}) }; }
+  function publicTarget(t) { if (t.kind === P.LOGIN_KIND) return { login: t.origin, ...(t.update ? { update: t.update } : {}) };   // B-ab6c: the login the update names
+  if (t.kind === P.TOTP_KIND) return { totp: t.name || null }; /* lane totp-request-card: the proposed name only */ return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label, ...(t.note ? { note: t.note } : {}), ...(t.hosts && t.hosts.length ? { hosts: t.hosts } : {}) }; }
 
   /**
    * THE OWNER ANSWERS (the route: a person on this page; the value already taken off the request body).
@@ -268,7 +271,8 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     // THE BELT: the item still open, still this request's (the owner answers what the tray shows — the item IS the record)
     const it = userTodos && typeof userTodos.get === 'function' ? userTodos.get(q.todoId) : null;
     if (!it || it.status !== 'open' || !it.action || it.action.type !== P.ACTION_TYPE || it.action.requestId !== id) { forget(q); return named('ask_settled'); }
-    if (a === 'deny') { mark(); settle(q, 'refused', { why: 'denied' }); audit('vault-secret-refused', { by: String(by).slice(0, 40), conv: q.scope, requestId: id }); return { ok: true, outcome: 'refused' }; }
+    if (a === 'deny') { mark(); settle(q, 'refused', { why: q.target && q.target.update ? 'still_works' : 'denied' });   // B-ab6c: an update card's Deny IS «It still works» — its receipt says so
+    audit('vault-secret-refused', { by: String(by).slice(0, 40), conv: q.scope, requestId: id }); return { ok: true, outcome: 'refused' }; }
     if (a !== 'store') return named('bad_answer');
     if (q.target && q.target.kind === P.LOGIN_KIND) return answerLogin(q, id, login || {}, { by, mark });   // lane login-request-card
     if (q.target && q.target.kind === P.TOTP_KIND) return answerTotp(q, id, two || {}, { by, mark });   // lane totp-request-card
@@ -333,7 +337,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!v.ok) return v;
     if (v.totpName) { let names = []; try { names = vault.secretNames() || []; } catch { names = []; } if (!names.some((s) => s && s.name === `totp:${v.totpName}`)) return named('login_totp_unknown'); }
     let r = null;
-    try { r = logins.addOwn({ origin: q.target.origin, username: v.username, password: v.password, totpName: v.totpName, expect: l.expect === 'update' ? 'update' : 'new' }, { who: String(by).slice(0, 40) }); }   // B-ab6c: never a silent overwrite — the card says it first
+    try { r = logins.addOwn(q.target.update ? { origin: q.target.origin, username: q.target.user, password: v.password, totpName: v.totpName, expect: 'update' } : { origin: q.target.origin, username: v.username, password: v.password, totpName: v.totpName, expect: l.expect === 'update' ? 'update' : 'new' }, { who: String(by).slice(0, 40) }); }   // B-ab6c: an update ask saves over the login it named (site and user from the ASK), never a new one   // B-ab6c: never a silent overwrite — the card says it first
     catch (e) { log(`${q.requestId}: the website login could not be saved (${(e && e.code) || 'error'})`); return named('store_failed'); }
     if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c, ...(c === 'login_would_update' ? { site: r.site, user: r.user } : {}) }; }   // B-ab6c: the card's words name the login
     const entry = String(r.name), user = P.loginUserOf(entry);

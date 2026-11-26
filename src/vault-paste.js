@@ -123,6 +123,9 @@ const WORDS = Object.freeze({
   // lane login-request-card: A WEBSITE LOGIN (`--kind login --host <site>`) — the site by the add door's rule, refused BY NAME before any card
   login_site_required: 'name the site the login is typed on: --kind login --host https://<host>[:port]',
   login_one_site: 'a login is typed on ONE site: --host https://<host>[:port] — one address, no list',
+  login_update_name: 'name the login to update by the reference you fill with: --update web-login:https://<site>#<user>',   // B-ab6c
+  login_update_site: '--update names its own site — give no --host of another site',   // B-ab6c
+  login_update_kind: '--update is a website login\'s: give --kind login with it',   // B-ab6c
   login_bad_origin: 'a website address (https://host[:port])',
   login_words: 'a website login is named by its site and the user name the user types — no --name or --note',
   login_password_lines: 'a password holds no line break — a copied line\'s newline is not part of it; type or paste it again',
@@ -186,10 +189,11 @@ function lineOf(raw, max, what) {
 /** THE PLACE the value goes. `into` = `<row>.<field>` (a row id may hold `:` — the field is after the LAST dot); else a
  *  free entry of `kind` labelled `name` (no name: the words, cut to the label's bound). → { ok, target } | a refusal.
  *  target = { kind: 'field', row, field, rowLabel, fieldLabel } | { kind: 'entry', entryKind, label }. */
-function targetOf({ into = null, kind = null, name = null, words = '', hosts = null } = {}) {
+function targetOf({ into = null, kind = null, name = null, words = '', hosts = null, update = null } = {}) {   // update: B-ab6c
   const hasInto = into != null && String(into).trim() !== '', hasKind = kind != null && String(kind).trim() !== '';
   if (hasInto && hasKind) return refuse('bad_target');
-  if (hasKind && LOGIN_ALIASES[String(kind).trim().toLowerCase()]) return loginTargetOf({ name, hosts });   // lane login-request-card
+  if (update != null && String(update).trim() !== '' && !(hasKind && LOGIN_ALIASES[String(kind).trim().toLowerCase()])) return refuse('login_update_kind');   // B-ab6c: --update is a login's
+  if (hasKind && LOGIN_ALIASES[String(kind).trim().toLowerCase()]) return loginTargetOf({ name, hosts, update });   // lane login-request-card · B-ab6c: update
   if (hasKind && TOTP_ALIASES[String(kind).trim().toLowerCase()]) return totpTargetOf({ name, hosts, words });   // lane totp-request-card
   const hs = hostsOf(hosts);   // lane vault-use-grants
   if (hs === false) return refuse('bad_host');
@@ -220,8 +224,18 @@ function targetOf({ into = null, kind = null, name = null, words = '', hosts = n
  *  + host + port as the fill compares them, a non-ASCII host in its punycode form; BL.secureOrigin: https, or plain http on this
  *  machine's localhost only). A web-login is named by its site and the user the owner types (the registry's `words` is NONE) —
  *  a --name is refused by name. → { ok, target: { kind: 'login', origin } } | a refusal. */
-function loginTargetOf({ name = null, hosts = null } = {}) {
+function loginTargetOf({ name = null, hosts = null, update = null } = {}) {
   if (name != null && String(name).trim() !== '') return refuse('login_words');
+  // B-ab6c (the owner 2026-11-26): `--update web-login:<origin>#<user>` — an UPDATE of a login the agent names by the reference it
+  // fills with; the site and the user come from that name (a --host beside it must be the same site). Whether this conversation may
+  // use it is the DOOR's question (its grant rows), never this rule's.
+  if (update != null && String(update).trim() !== '') {
+    const nm = String(update).trim(), pn = BL.parseName(nm);
+    if (!pn) return refuse('login_update_name');
+    const hl = (Array.isArray(hosts) ? hosts : String(hosts == null ? '' : hosts).split(/[\s,]+/)).map((h) => String(h == null ? '' : h).trim()).filter(Boolean);
+    if (hl.length && (hl.length > 1 || BL.originOf(hl[0]) !== pn.origin)) return refuse('login_update_site');
+    return { ok: true, target: { kind: LOGIN_KIND, origin: pn.origin, user: pn.user, update: nm } };
+  }
   const list = (Array.isArray(hosts) ? hosts : String(hosts == null ? '' : hosts).split(/[\s,]+/)).map((h) => String(h == null ? '' : h).trim()).filter(Boolean);
   if (!list.length) return refuse('login_site_required');
   if (list.length > 1) return refuse('login_one_site');
@@ -245,12 +259,12 @@ function totpTargetOf({ name = null, hosts = null, words = '' } = {}) {
 }
 
 /** THE ASK as the agent sent it → { ok, words, purpose, target } | a refusal (its code + its words). */
-function requestVerdict({ words, purpose, into, kind, name, hosts, note } = {}) {
+function requestVerdict({ words, purpose, into, kind, name, hosts, note, update } = {}) {   // update: B-ab6c
   const w = lineOf(words, LIMITS.words, 'words');
   if (!w.ok) return w;
   const p = lineOf(purpose, LIMITS.purpose, 'purpose');
   if (!p.ok) return p;
-  const t = targetOf({ into, kind, name, words: w.text, hosts });
+  const t = targetOf({ into, kind, name, words: w.text, hosts, update });
   if (!t.ok) return t;
   // lane vault-entry-description: a NEW entry's description (`--note`), the words rule's — '' / absent = none given
   const hasNote = note != null && String(note).trim() !== '';
@@ -280,7 +294,7 @@ function wordsOfItem(it) {
 function targetOfAction(a, { label = '', words = '' } = {}) {
   if (!a || a.type !== ACTION_TYPE || !REQUEST_ID_RE.test(String(a.requestId || ''))) return null;
   if (a.kind === TOTP_KIND) { const tt = targetOf({ kind: TOTP_KIND, name: a.totpName || null, words }); return tt.ok ? tt.target : null; }   // lane totp-request-card
-  const t = a.into ? targetOf({ into: a.into }) : a.kind === LOGIN_KIND ? targetOf({ kind: LOGIN_KIND, hosts: a.hosts || '' }) : label ? targetOf({ kind: a.kind || 'secret', name: label, hosts: a.hosts || null }) : { ok: false };   // hosts: lane vault-use-grants (the action's space-joined scalar) — lane login-request-card: a login's ONE site, re-judged by today's rule
+  const t = a.into ? targetOf({ into: a.into }) : a.kind === LOGIN_KIND ? targetOf({ kind: LOGIN_KIND, hosts: a.hosts || '', update: a.update || null }) : label ? targetOf({ kind: a.kind || 'secret', name: label, hosts: a.hosts || null }) : { ok: false };   // hosts: lane vault-use-grants (the action's space-joined scalar) — lane login-request-card: a login's ONE site, re-judged by today's rule
   return t.ok ? t.target : null;
 }
 /** lane vault-entry-description: the request's target with the description its words carry (wordsOfItem's `note`). */
@@ -337,6 +351,7 @@ const LOGIN_HEAD = i18nKey('{who} asks you for a website login on {site} — it 
 const LOGIN_ONLY = i18nKey('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.');   // the add door's own line (src/lib/vault-login-row.js)
 function loginCardOf({ who, words, purpose, target, site = null }) {
   const s = site || target.origin;
+  if (target.update) return loginUpdateCardOf({ who, words, purpose, target, site: s });   // B-ab6c
   const lines = [
     { key: i18nKey('What: {words}'), params: { words } },
     { key: PURPOSE_LINE, params: { purpose } },
@@ -348,6 +363,23 @@ function loginCardOf({ who, words, purpose, target, site = null }) {
     text: `${who} asks you for a website login on ${s} — it is typed only on that site`,
     detail: lines.map(fill).join('\n'),
     i18n: { text: { key: LOGIN_HEAD, params: { who, site: s } }, detail: lines },
+  };
+}
+
+/** B-ab6c (主开发 r5023 (a)): THE UPDATE CARD — its first line is the CONVERSATION's CLAIM with its purpose in its own words (the hub has
+ *  not checked that the stored password stopped working); the lines below: what Save does, and that «It still works» is an answer. */
+const LOGIN_UPDATE_HEAD = i18nKey('{who} says the stored password for {site} as {user} no longer signs in: {purpose}');
+function loginUpdateCardOf({ who, words, purpose, target, site }) {
+  const lines = [
+    { key: i18nKey('What: {words}'), params: { words } },
+    { key: i18nKey('Type its new password below — it becomes the stored one, and the old one is kept as the previous one. VibeSpace never hands it to the agent.') },
+    { key: i18nKey('If it still works, press «It still works» — the agent is told so, and stops asking.') },
+  ];
+  const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : String(v); });
+  return {
+    text: `${who} says the stored password for ${site} as ${target.user} no longer signs in: ${purpose}`,
+    detail: lines.map(fill).join('\n'),
+    i18n: { text: { key: LOGIN_UPDATE_HEAD, params: { who, site, user: target.user, purpose } }, detail: lines },
   };
 }
 
@@ -438,6 +470,7 @@ function agentEntryWords({ label, note } = {}) {   // the name's bound is an inv
 const REFUSED_WHY = Object.freeze({
   edited: 'the user changed its name and description themselves meanwhile — read them in vibespace-vault list, and propose again only if it still needs a change',   // r2 (MINOR b)
   denied: 'the user pressed Refuse',
+  still_works: 'the user says the stored password still works — look for another reason the sign-in failed, and do not ask for a new one',   // B-ab6c
   dismissed: 'the user dismissed the request',
   done: 'the user marked it handled without pasting anything',
   cleared: 'the user cleared the request',
@@ -478,6 +511,10 @@ const LOGIN_USE = 'Sign in by opening {origin}, running vibespace-browser snapsh
  *  `asked` = the owner ticked the grant — r3, law D). */
 function loginReceiptText(head, o, piece) {
   const t = o.target || {}, l = o.login || {};
+  if (t.update) {   // B-ab6c: the update the agent asked for — the login it named (it may use it), never a value
+    const nm = piece(t.update, 400), rc0 = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
+    return `${head}: UPDATED — the user typed a new password for the website login ${nm}; the old one is kept as the previous one. VibeSpace never hands you the password. Sign in again: vibespace-browser fill <@ref> --vault ${nm}/password.${rc0}`;
+  }
   const origin = piece(t.origin, 300), user = l.allowed && l.user ? piece(l.user, 160) : '';
   const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
   const on = `${origin}${user ? ` (user ${user})` : ''}`;

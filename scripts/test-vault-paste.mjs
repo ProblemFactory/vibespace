@@ -92,6 +92,8 @@ const P = require(path.join(REPO, 'src/vault-paste.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const GS = require(path.join(REPO, 'src/server/grants-store.js'));   // lane login-request-card: the ONE grants store (in memory)
 const BLS = require(path.join(REPO, 'src/server/browser-logins.js'));   // lane login-request-card: THE web-login door (its writer)
+const BLR = require(path.join(REPO, 'src/browser-login.js'));   // B-ab6c: a stored login's record (current / previous)
+let MAY_USE = null;   // B-ab6c: the update leg's grant answer — the stand-in of the hub's own read (may-use facts + the logins' lister)
 const GM = require(path.join(REPO, 'src/grant-model.js'));
 const VUG = require(path.join(REPO, 'src/server/vault-use-grants.js'));   // B-3fb5: a vault-use grant row on an agent's entry goes with it
 let pass = 0, fail = 0;
@@ -138,6 +140,7 @@ const wiredDepsOf = (src) => {
 const WIRED_DEPS = wiredDepsOf(WIRING) || [];
 const WORLD_OWN = ['vault', 'activeSessions', 'getJobs', 'contents', 'run', 'paste', 'totp', 'logins', 'callerOf', 'jobSecrets'];
 const STAND_INS = {
+  loginMayUse: (caller, name) => Promise.resolve(!!(MAY_USE && MAY_USE(caller, name))),   // B-ab6c: no grant unless a leg says so
   who: (req) => Auth.signInHandle(req),   // the real one (src/auth.js — the cookie's handle)
   runOf: () => null, grantLive: () => true, subjects: () => ({ sessions: [], groups: [] }),   // no live run, every grant live, no subjects
   linkTokenFor: () => 'link-token-stand-in',   // a function, as the hub's (a road gated on it mounts); no world session has a link
@@ -1376,6 +1379,44 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
   // PURE: the site's words, the line rule
   ok(P.siteWords('https://shop.example.test', (h) => h) === 'https://shop.example.test' && P.siteWords('https://xn--bcher-kva.example.test', () => 'bücher.example.test') === 'https://xn--bcher-kva.example.test (https://bücher.example.test)', 'siteWords: an ASCII site as itself; a punycode one with its Unicode form beside it');
   ok(!P.loginAnswerOf({ username: 'u', password: 'a\rb' }).ok && !P.loginAnswerOf({ username: 'u', password: 'ab\u2028' }).ok && P.loginAnswerOf({ username: 'u', password: 'a b', totpName: '  ' }).totpName === null, 'loginAnswerOf: CR / U+2028 refused too; a blank two-step name is none');
+}
+
+console.log('⑩b2 B-ab6c — AN UPDATE of a stored login the conversation may use: the claim card, the update, «It still works», one answer for every other name');
+{
+  const SITE = 'https://upd.example.test', USER = 'alice', NAME = `web-login:${SITE}#${USER}`;
+  const OLD = ['old', 'login', crypto.randomBytes(6).toString('hex')].join('-'), NEW = ['new', 'login', crypto.randomBytes(6).toString('hex')].join('-');
+  SENTINELS.push(OLD, NEW);
+  W.logins.addOwn({ origin: SITE, username: USER, password: OLD, expect: 'new' }, { who: 'owner' });
+  MAY_USE = (caller, name) => name === NAME && !!caller && caller.conversationId === 'cid-asker-1';   // as the hub's grant read: THIS conversation may use THIS login
+  const notYours = await S.agent(W.OTHER_TOKEN, { words: 'w', purpose: 'p', kind: 'login', update: NAME });
+  const none = await S.agent(W.SESSION_TOKEN, { words: 'w', purpose: 'p', kind: 'login', update: `web-login:${SITE}#nobody` });
+  ok(notYours.status !== 200 && notYours.json.code === 'login_not_yours' && none.json.code === 'login_not_yours' && notYours.json.error === none.json.error && notYours.json.error === 'no web login you may use by that name',
+    'a login this conversation may NOT use, and one that does not exist: ONE answer, word for word the same — nothing is learned of it', { notYours: notYours.json, none: none.json });
+  const bad = await S.agent(W.SESSION_TOKEN, { words: 'w', purpose: 'p', kind: 'login', update: 'shop' });
+  const site2 = await S.agent(W.SESSION_TOKEN, { words: 'w', purpose: 'p', kind: 'login', update: NAME, hosts: 'https://other.example.test' });
+  const noKind = await S.agent(W.SESSION_TOKEN, { words: 'w', purpose: 'p', update: NAME });
+  ok(bad.json.code === 'login_update_name' && site2.json.code === 'login_update_site' && noKind.json.code === 'login_update_kind', 'no login reference, a --host of another site, an --update without --kind login: each refused by name before any card', [bad.json.code, site2.json.code, noKind.json.code]);
+  const a = await S.agent(W.SESSION_TOKEN, { words: 'the shop says the password is wrong', purpose: 'order the replacement parts', kind: 'login', update: NAME });
+  const it = openReqs(W).find((i) => i.action.requestId === a.json.requestId);
+  ok(a.status === 200 && a.json.target && a.json.target.update === NAME && !!it && it.action.update === NAME && it.action.kind === 'login' && it.action.hosts === SITE, 'filed: ONE item on the same road, naming the login it asks to update', it && it.action);
+  ok(!!it && it.text === `Lane asker says the stored password for ${SITE} as ${USER} no longer signs in: order the replacement parts` && it.i18n.text.key === '{who} says the stored password for {site} as {user} no longer signs in: {purpose}',
+    'its FIRST line is the conversation\'s CLAIM with its purpose (r5023 (a)) — never the hub saying the password stopped working', it && it.text);
+  const again = await S.agent(W.SESSION_TOKEN, { words: 'again', purpose: 'p', kind: 'login', update: NAME });
+  ok(again.json.already === 'open' && again.json.requestId === a.json.requestId, 'ONE open ask a login: the same ask again answers its id', again.json);
+  const st = await S.hit(`/api/vault/secret-requests/${a.json.requestId}/answer`, { body: { answer: 'store', username: 'someone-else', loginPassword: NEW } });
+  const rec = BLR.recordOf(W.vault.secretGet(NAME).value.toString('utf8'));
+  const other = W.vault.secretGet(`web-login:${SITE}#someone-else`);
+  ok(st.status === 200 && st.json.outcome === 'stored' && rec.current.password === NEW && !!rec.previous && rec.previous.password === OLD && !(other && other.ok && other.value),
+    'the person\'s save is an UPDATE of the login the ask named — the user from the ASK, never the body: the new password current, the old one previous', st.json);
+  const rc = stashOf('cid-asker-1').filter((e) => e.ref === a.json.requestId);
+  ok(rc.length === 1 && /UPDATED — the user typed a new password for the website login /.test(rc[0].text) && !rc[0].text.includes(NEW) && !rc[0].text.includes(OLD), 'the receipt at its next turn: UPDATED, the login it named — never a value', rc[0] && rc[0].text);
+  const b = await S.agent(W.SESSION_TOKEN, { words: 'w2', purpose: 'p2', kind: 'login', update: NAME });
+  await S.hit(`/api/vault/secret-requests/${b.json.requestId}/answer`, { body: { answer: 'deny' } });
+  const rcb = stashOf('cid-asker-1').filter((e) => e.ref === b.json.requestId);
+  ok(rcb.length === 1 && /the user says the stored password still works/.test(rcb[0].text), '«It still works» (the update card\'s Deny): the receipt tells the agent so — it stops asking', rcb[0] && rcb[0].text);
+  const quiet = await S.agent(W.SESSION_TOKEN, { words: 'w3', purpose: 'p3', kind: 'login', update: NAME });
+  ok(quiet.json.code === 'request_quiet', '…and the same login is quiet for 10 minutes after it', quiet.json);
+  MAY_USE = null;
 }
 
 console.log('⑩d A TWO-STEP CODE — one ask, one card with the two-step dialog\'s own fields, one totp entry (lane totp-request-card)');

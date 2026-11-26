@@ -64,7 +64,7 @@ const ENTRY_KEY = 'Where it goes: a new vault entry «{label}» ({kind})', NOTE_
  *  entry's name and description as the agent proposed them, above the field — the owner's to edit before saving (the owner's words win). */
 export function secretBoxEl(item) {
   if (isTotpAsk(item)) return totpBoxEl(item);   // lane totp-request-card
-  if (isLoginAsk(item)) return awayBoxEl(item) || loginBoxEl(item);   // lane login-request-card (r3: one answerable box — a moved card stands in its own window)
+  if (isLoginAsk(item)) return awayBoxEl(item) || (item.action && item.action.update ? loginUpdateBoxEl(item) : loginBoxEl(item));   // B-ab6c: an update ask's card   // lane login-request-card (r3: one answerable box — a moved card stands in its own window)
   const box = mk('div', 'ut-secret');
   box.dataset.req = String(item.action.requestId);
   box.dataset.target = item.action.into ? 'field' : 'entry';
@@ -145,6 +145,28 @@ const headParam = (item, name) => { const p = item && item.i18n && item.i18n.tex
  *  «Two-step code…» first moves THIS box — every field typed into it — into its own form window (unless it is in one already),
  *  then opens the 两步验证… dialog beside it; a surface that closes under a press in that dialog closes on nothing typed. The
  *  surfaces are a census (scripts/test-vault-paste.mjs ⑬), each with its Chrome leg (scripts/test-vault-paste-chrome.mjs ⑨). */
+/** B-ab6c (the owner 2026-11-26; 主开发 r5023): THE UPDATE CARD — an agent's claim that a stored login no longer signs in. The add door's
+ *  fields with the site AND the user name fixed (the ask's own: the login it named), ONE field «New password», the two-step code;
+ *  Save = «Change password» (an update: the old one kept as previous), the Deny = «It still works» (the agent is told so). No grant
+ *  tick: the conversation may use this login already (the door asked). It asks an unlocked vault, nothing more. */
+function loginUpdateBoxEl(item) {
+  const box = mk('div', 'ut-secret ut-secret-login ut-secret-login-update');
+  box.dataset.req = String(item.action.requestId);
+  box.dataset.target = 'login';
+  box.dataset.expect = 'update';
+  const name = String(item.action.update || ''), hash = name.lastIndexOf('#');
+  const site = headParam(item, 'site') || String(item.action.hosts || ''), user = headParam(item, 'user') || (hash > 0 ? name.slice(hash + 1) : '');
+  box.dataset.expectUser = user;
+  const f = loginFields({ site, fixed: true, user, fixedUser: true, change: true });
+  f.pw.classList.add('ut-secret-input');   // Enter in the password is Save (the tray's own key handler)
+  const kept = mk('div', 'ut-secret-note ut-login-kept', t('The current password is kept as the previous one.'));
+  const row = mk('div', 'ut-secret-row');
+  const save = btn(t('Change password'), 'ut-act ut-secret-save'), deny = btn(t('It still works'), 'ut-act ut-secret-deny');
+  row.append(save, deny);
+  box.append(f.fields[0], f.fields[1], f.fields[2], f.fields[3], f.otpList, kept, f.hint, row, stateEl());
+  applySecretBox(box);
+  return box;
+}
 function loginBoxEl(item) {
   const box = mk('div', 'ut-secret ut-secret-login');
   box.dataset.req = String(item.action.requestId);

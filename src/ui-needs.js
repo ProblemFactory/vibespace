@@ -98,6 +98,7 @@ const DIRECTIONS_TRUE = Object.freeze([
     "This app remembers its last share and launches with it — change ",
     "This key is passphrase-protected — enter its passphrase below.",
     "Type a folder, or pick one below",
+    "Type its new password below — it becomes the stored one, and the",
     "Type its user name and password below — they go straight into th",
     "VibeSpace could not read the sign-in link — here is the sign-in ",
     "click “List shared drives” (needs access above) or paste an id",

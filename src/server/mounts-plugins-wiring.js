@@ -210,7 +210,8 @@ if (typeof persistenceRouter.onSettingsLift === 'function') persistenceRouter.on
 settingHolds.start().catch((e) => console.log('[setting-holds] start failed:', e && e.message));
 require('../routes/setting-holds.js').registerSettingHoldRoutes(app, { holds: settingHolds });
 app.locals.settingHolds = settingHolds;   // the agent's ask route judges a lasting change against a live hold (law A)
-require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
+let loginMayUseFn = null;   // B-ab6c: set once «what it may use» is built below — an update ask names only a login its conversation may use
+require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste, loginMayUse: (caller, name) => (loginMayUseFn ? loginMayUseFn(caller, name) : Promise.resolve(false)),
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   proxyLogins: browserProxyLogins, proxyMove: (id) => { const k = require('./browser-keeper.js').keeper(); return k && typeof k.moveProxyPassword === 'function' ? k.moveProxyPassword(id) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }; },   // B-8b87
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
@@ -1903,6 +1904,15 @@ function createSessionMessages(session, sessionId) {
       log: (m) => console.log(m),
     });
     mayUse.mount(app, { personVerdict: require('../routes/vault.js').personVerdict });
+    // B-ab6c: may THIS conversation use that login? — the logins' own lister (the fill's grant rows) over its facts; unknown ⇒ no
+    loginMayUseFn = async (caller, name) => {
+      if (!caller || !caller.sessionKey || !browserLogins || typeof browserLogins.mayUseFor !== 'function') return false;
+      const fr = await mayUse.factsOf(caller.sessionKey, { webuiId: caller.scope || '' });
+      if (!fr || !fr.ok || !fr.facts) return false;
+      const f = fr.facts;
+      const doorFacts = { cid: f.cid, conversationKeys: f.conversationKeys, sessionKeys: f.sessionKeys, groupIds: f.groupIds, inheritedGroupIds: Array.isArray(f.inheritedGroupIds) ? f.inheritedGroupIds : [], groupsUnreadable: f.groupsUnreadable };
+      return browserLogins.mayUseFor(doorFacts).some((x) => x && x.ok === true && x.resource === String(name));
+    };
   } catch (e) { console.warn('[may-use] the route could not be mounted — ' + (e && e.message)); }
   return { resumeRoad, endProposals, resumeLine, deliveryWakeSeams, settingHolds, decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
     // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path

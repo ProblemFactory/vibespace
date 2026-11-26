@@ -177,6 +177,9 @@ PAGE VERBS (your own browser, or the attachment you name):
                                                   on a local named profile (or --vault <entry>/password --generate to change a
                                                   password; 24-char default — if a site rejects it, ask the owner via
                                                   vibespace-vault request --kind login --host <site> while on that profile)
+                                                  a STORED login the site no longer signs in with: ask the owner for its new
+                                                  password — vibespace-vault request "<what>" --purpose "<why>" --kind login
+                                                  --update web-login:<origin>#<user> (B-ab6c; the login you fill with)
   vibespace-browser permission <kind> allow|deny [origin] [lat,lon]   every page permission is DENIED ahead (no prompt
                                                   ever pends); flip one kind for one origin (your tab's by default)
   vibespace-browser stop                          stop the current tab loading (at once, even while it loops)
