@@ -326,6 +326,60 @@ console.log('— controls (patched copies) —');
   ok(F.macLive && F.macLive.live === null && !F.macLive.recipe.includes('grep -vxF'), 'CONTROL (f): a row that does not name the live install lists every install, the live one too ⇒ ROW-1b red', F.macLive);
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: 'mutant-copy (dial-health): ' })) ok(r.pass, r.name, r.detail);
 }
+console.log('— B-f276 (主开发 r4718): dial-health.json UNDER THE STORE-READ LAW — held when unreadable, kept aside once when torn, healed at the next good read —');
+{
+  const EIO = () => Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' });
+  // the unreadable file is a PLACED refusal of the read call (fs.readFileSync answers EIO for that one path, the next read only) —
+  // never a mode change or a mount; torn bytes are bytes written whole that do not parse
+  const placeReads = (file, n = 1) => { const f = path.resolve(file), realS = fs.readFileSync, seen = { n: 0 };
+    fs.readFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p) === f && seen.n < n) { seen.n++; throw EIO(); } return realS.call(this, p, ...a); };
+    return { seen, restore: () => { fs.readFileSync = realS; } }; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const MH = mutantCopies('dhl-held', REPO);
+  /** life one: a second dialer named — ONE item filed and recorded, on disk */
+  const lifeOne = (Mod = HW) => { const Wd = world(Mod); const a = Wd.mk(); a.observe(macHost(Wd), { connected: true }); a.stop();
+    const file = path.join(Wd.dir, 'dial-health.json'); return { Wd, file, bytes: fs.readFileSync(file, 'utf8'), itemId: Wd.open()[0].id }; };
+  const heldLife = (L) => { const pr = placeReads(L.file); let w = null; try { w = L.Wd.mk(); } finally { pr.restore(); } return { w, seen: pr.seen.n }; };
+  const passes = (L, w) => { L.Wd.tick(30e3); const v = w.observe(macHost(L.Wd), { connected: true });   // it still knocks
+    L.Wd.tick(15 * MIN); w.observe(macHost(L.Wd, { refAt: L.Wd.now() - 14 * MIN }), { connected: true }); return v; };   // a clear pass
+  const L1 = lifeOne();
+  const h = heldLife(L1); const v = passes(L1, h.w);
+  ok(h.seen === 1 && !!h.w.held() && v && v.kind === DH.SECOND && L1.Wd.open().length === 1 && L1.Wd.open()[0].id === L1.itemId && fs.readFileSync(L1.file, 'utf8') === L1.bytes
+    && L1.Wd.logs().filter((l) => /a pass skipped — the record of the extra dialing agents could not be read \(EIO\)/.test(l)).length === 1,
+    'HELD (a placed EIO of the read): a pass files, retracts and changes NOTHING (its verdict still answers the caller) — the item filed before stays, the bytes on disk byte for byte, said once', { open: L1.Wd.open().length, logs: L1.Wd.logs().slice(0, 3) });
+  ok(/could not be read/.test(h.w.heldWords() || ''), `HELD: its words name what waits («${h.w.heldWords()}»)`);
+  const lifted = await h.w.readAgain();
+  const rec = h.w._ledger()[`host-dial-Macbook|${DH.SECOND}`];
+  ok(lifted === true && !h.w.held() && !!rec && rec.itemId === L1.itemId, 'LIFTED at the next good read: the ledger back as it was — the episode\'s item id kept (its retract works again)', { lifted, rec: rec && rec.itemId });
+  h.w.stop();
+  // THE PASS's GUARD (the adversarial read: pinned only by its line before): a DISMISSED item is not reopened while the record is unread —
+  // over an empty ledger a pass would file again, and For you's add matches by words across statuses (it reopens a dismissed item)
+  const runDismissed = async (Mod) => { const L = lifeOne(Mod); L.Wd.todos.setStatus(L.itemId, 'dismissed', 'user'); const hd = heldLife(L); L.Wd.tick(30e3); hd.w.observe(macHost(L.Wd), { connected: true }); const st = L.Wd.todos.get(L.itemId).status; hd.w.stop(); return st; };
+  const keep = await runDismissed(HW);
+  const GSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-health-watch.js'), 'utf8');
+  const guardLine = "    { const hd = hold.held(); if (hd) { if (!heldSaid) { heldSaid = true; log(`[dial-health] a pass skipped — the record of the extra dialing agents could not be read (${hd.code || 'unread'}); nothing filed, retracted or written until it reads`); } return v; } }   // HELD: the verdict answers, the ledger is not touched\n";
+  const GP = GSRC.split(guardLine);
+  ok(GP.length === 2, 'the pass\'s guard is spelled once (the red copy removes exactly it)');
+  const reopened = await runDismissed(MH.load('src/server/dial-health-watch.js', GP.join(''), 'pass-unguarded'));
+  ok(keep === 'dismissed' && reopened !== 'dismissed', `HELD: an item the person DISMISSED stays dismissed through a pass over the unread record; RED: a copy without the pass's guard files over the empty ledger and the item comes back (${reopened})`, { keep, reopened });
+  // TORN: kept aside ONCE, byte for byte; the ledger empty — the same knocking re-files the SAME item in For you (its words)
+  const T1 = lifeOne(); const TORN = T1.bytes.slice(0, 30); fs.writeFileSync(T1.file, TORN);
+  const tw = T1.Wd.mk();
+  for (let i = 0; i < 200 && tw.held(); i++) await sleep(10);
+  T1.Wd.tick(30e3); tw.observe(macHost(T1.Wd), { connected: true });
+  const copies = fs.readdirSync(T1.Wd.dir).filter((n) => n.startsWith('dial-health.json.corrupt-'));
+  ok(!tw.held() && copies.length === 1 && fs.readFileSync(path.join(T1.Wd.dir, copies[0]), 'utf8') === TORN && T1.Wd.open().length === 1 && T1.Wd.open()[0].id === T1.itemId,
+    'TORN: the bytes kept aside once beside the store, byte for byte; the ledger empty — the same knocking re-files the SAME item, never a second', { copies, open: T1.Wd.open().length });
+  tw.stop();
+  // RED: the tip's read (blind to the hold) — the empty ledger is written over the file (the episode's start and item id gone)
+  const RSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-health-watch.js'), 'utf8');
+  const RelSrc = RSRC.split("    if (hold.start(a) === 'data') ledger = isObj(a.value.hosts) ? a.value.hosts : {}; }\n");
+  ok(RelSrc.length === 2, 'the hold\'s start line is spelled once (the red copy patches exactly it)');
+  const Rel = MH.load('src/server/dial-health-watch.js', RelSrc.join("    if (a.state === 'data') ledger = isObj(a.value.hosts) ? a.value.hosts : {}; }\n"), 'tip-read');
+  const R = lifeOne(Rel); const rh = heldLife(R); passes(R, rh.w); rh.w.stop();
+  ok(fs.readFileSync(R.file, 'utf8') !== R.bytes, 'RED: the tip\'s read (a failed read taken as a first run) — the ledger written over the file (the episode begun again)', JSON.parse(fs.readFileSync(R.file, 'utf8')));
+  for (const c of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1, label: 'mutant-copy (dial-health held): ' })) ok(c.pass, c.name, c.detail);
+}
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
