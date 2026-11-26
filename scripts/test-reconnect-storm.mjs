@@ -333,7 +333,9 @@ WS.prototype.emit = function (ev, data, ...a) { let attach = false; if (ev === '
   const wholeOff = scratch(`rstorm-${variant}-whole-off`); dirs.add(wholeOff);
   // 主开发 r4894: A LEFT-OVER FILE OF AN EARLIER RUN CANNOT DISARM THIS RUN's METER — one stands where the old form kept it (the fixed
   // name in the shared temp folder): planted here exclusively when none is there (removed at the end only then), and the meter
-  // must still arm in both storms (its red: the fixed name back)
+  // must still arm in both storms (its red: the fixed name back). Two runs of this form overlapping on one machine: the one that
+  // planted the file removes it at its end while the other still runs — harmless (the other read `there` at its own start, and the
+  // file is this suite's own, never a person's)
   const OLD_OFF = path.join(path.dirname(wholeLog), `rstorm-${variant}-whole-off`);
   let plantedOld = false; try { fs.writeFileSync(OLD_OFF, 'an earlier run\n', { flag: 'wx' }); plantedOld = true; } catch { }
   if (plantedOld) dirs.add(OLD_OFF);

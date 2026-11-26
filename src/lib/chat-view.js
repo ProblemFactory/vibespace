@@ -7168,7 +7168,7 @@ class ChatView {
     // Read-only windows (view-history, terminated, rescued) have nothing to
     // re-attach — a bare attach of a view-/dead id just errors (2.219.0 audit)
     if (this._readOnly) return;
-    if (this._attachHold) { try { this.app?._reconnectQueue?.cancel(this); } catch { } }   // B-a26e: a new cycle (a reconnect) asks now; the hold's line — and its 15-minute clock, which runs from the hold's start (r4708: a flapping hub never re-arms it) — stays until an attach lands
+    if (this._attachHold) { try { this.app?._reconnectQueue?.cancel(this); } catch { } this._attachHold.cycleAt = Date.now(); this._attachHoldWords(); }   // r5118: the NEW ask — an acknowledgement before it is the dropped socket's, never this ask's · B-a26e: a new cycle (a reconnect) asks now; the hold's line — and its 15-minute clock, which runs from the hold's start (r4708: a flapping hub never re-arms it) — stays until an attach lands
     // Keep input disabled until server confirms re-attach — prevents
     // sending messages before the WS is registered in session.clients
     if (keepDisabled && this._chatInput) this._chatInput.setDisconnected(true, this._attachHold ? 'attaching' : null);   // B-a26e: a new cycle while held keeps the hold's reason
@@ -7737,7 +7737,7 @@ class ChatView {
   _attachHoldWords(longDue = false) {
     const H = this._attachHold;
     if (!H || this._disposed || this._readOnly) return;
-    const ackAt = this._lastAttachAckAt || 0, ack = ackAt >= (H.askedAt || 0) ? ackAt : 0;   // only THIS hold's attach's acknowledgement: one stamped before its ask is an earlier attach's, long answered (its own heavy read, 11-26)
+    const ackAt = this._lastAttachAckAt || 0, ack = ackAt >= Math.max(H.askedAt || 0, H.cycleAt || 0) ? ackAt : 0;   // only THIS hold's attach's acknowledgement: one stamped before its ask is an earlier attach's, long answered (its own heavy read, 11-26)
     const now = Date.now(), life = Math.max(H.askedAt || 0, ack);
     const working = !!ack && now - ack < ATTACH_ACK_FRESH_MS, longLeft = ATTACH_HOLD_LONG_MS - (now - life);
     const long = longDue || longLeft <= 0;   // longDue: the long bound's own timer fired — no acknowledgement came since it was armed (each one re-arms it)
