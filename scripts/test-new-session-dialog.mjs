@@ -264,7 +264,10 @@ sock.on('message', (d) => {
 sock.on('close', (code) => { for (const [id, f] of pend) { pend.delete(id); f({ error: { message: `the DevTools link closed (code ${code}) — chrome exit ${chrome.exitCode}, signal ${chrome.signalCode}` } }); } });
 const cdp = (method, params = {}, bound = 30000) => new Promise((res, rej) => {
   const id = ++seq;
-  if (method === 'Page.navigate' || method === 'Page.reload') { nav.booting = true; nav.asked = nav.commits.length; } // the suite's own: its commit is waited on in waitApp
+  // the suite's own navigate / reload: its commit is waited on in waitApp. The method is matched by a PATTERN, never by its quoted
+  // name: test-architecture §47 reads every quoted navigate name, in text order, as a navigate that needs ONBOARDED_SOURCE first,
+  // and this wrapper navigates nothing — the suite's real navigates stay quoted calls after its pre-set (r4914)
+  if (/^Page\.(navigate|reload)$/.test(method)) { nav.booting = true; nav.asked = nav.commits.length; }
   const timer = setTimeout(() => { if (pend.delete(id)) rej(new Error(`DevTools ${method} had no answer in ${bound} ms (its own bound)`)); }, bound);
   pend.set(id, (m) => { clearTimeout(timer); if (m.error) rej(new Error(`${method}: ${m.error.message}` + (/navigated or closed|context was destroyed|Cannot find context/i.test(m.error.message) ? ` — the page's last navigation: ${lastNav()}` : ''))); else res(m.result); });
   if (sock.readyState !== 1) { pend.get(id)({ error: { message: `the DevTools link is closed — chrome exit ${chrome.exitCode}, signal ${chrome.signalCode}` } }); pend.delete(id); return; }
