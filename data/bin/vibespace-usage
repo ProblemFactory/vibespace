@@ -18,6 +18,13 @@
 // stream-json/chat mode has no statusLine, so those accounts show last-known.
 'use strict';
 const fs = require('fs');
+// B-bcb8 unit D (主开发 r5211 / r5214 / r5309): the ONE door of a record synced before its name, LOOKED UP ONLY WHEN A CHANGE IS
+// WRITTEN — never at a render that changes nothing (no stat, no load): the checkout's src/fd-close.js, else the copy beside this
+// tool at boot (src/server/agent-tool-generators.js); neither (a tool that rode a command alone, an older host): the same words inline
+let FC;   // undefined until the first change asks for it
+const doorOf = () => { if (FC === undefined) { FC = null; try { FC = require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/fd-close.js') : require('./fd-close.js'); } catch { try { FC = require('./fd-close.js'); } catch { FC = null; } } } return FC; };
+const renameSyncedInline = (tmp, final, bytes, { mode, where, say, sync = true } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } try { fs.renameSync(tmp, final); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; } }   // src/fd-close.js renameSynced, the same words inline (lane nl-journals' door spelling)
+const renameSynced = (...a) => { const d = doorOf(); return (d && d.renameSynced ? d.renameSynced : renameSyncedInline)(...a); };
 const path = require('path');
 const cp = require('child_process');
 
@@ -571,7 +578,7 @@ function keepTornAside(f, buf) {
   return null;
 }
 function readSlotState(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return null; } }
-function writeSlotState(f, st, fresh) {
+function writeSlotState(f, st, fresh, prev = null) {
   try {
     fs.mkdirSync(CACHE_DIR, { recursive: true });
     // Bound the directory ONCE per conversation (only when creating a new
@@ -584,8 +591,17 @@ function writeSlotState(f, st, fresh) {
         for (const e of byAge.slice(0, all.length - SLOT_STATE_MAX)) { try { fs.unlinkSync(path.join(CACHE_DIR, e.n)); } catch {} }
       }
     }
-    fs.writeFileSync(f + '.tmp', JSON.stringify(st));
-    fs.renameSync(f + '.tmp', f);
+    // B-bcb8 unit D (主开发 r5211 / r5214): WHAT IT HOLDS (its key, fingerprint, window: the guard's memory) takes its name only after
+    // ONE sync — when it changes (its fingerprint holds the used percentages, so a reading's every new percent is one). An observation that changes none of them only REFRESHES the file, unsynced as at the release: its
+    // TIME is a fact the prune above reads (the oldest by mtime go first), and a sync at every render is never asked (the statusline
+    // runs in every conversation; a data folder on a network file system pays each sync in full)
+    // «CHANGED» (主开发 r5314) reads the PERCENTS (from the stored fingerprint, which stays the release's) and the COUNTING windows
+    // (`win`, windowOf's): a not-started window answers a reset of now plus its length at every read (B-8b12), so a render where only
+    // such a reset moved is a refresh, never a change — the fingerprint itself, stored and handed to the lag shadow, is untouched
+    const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+    const percents = (fp) => String(fp == null ? '' : fp).split('|').map((p) => p.split('/')[0]).join('|');
+    if (!prev || prev.key !== st.key || percents(prev.fp) !== percents(st.fp) || !same(prev.win, st.win)) renameSynced(f + '.tmp', f, JSON.stringify(st), { where: "the statusline's slot state" });
+    else { fs.writeFileSync(f + '.tmp', JSON.stringify(st)); fs.renameSync(f + '.tmp', f); }   // the time's refresh
   } catch {}
 }
 
@@ -614,11 +630,11 @@ function writeUsage(p) {
           repointAgeMs: repointAgeMs(),
         });
         if (d.shadowed) {
-          writeSlotState(sf, { key: st.key, fp, win, at: Number(st.at) || Date.now() }, false);
+          writeSlotState(sf, { key: st.key, fp, win, at: Number(st.at) || Date.now() }, false, st);
           return; // these numbers are the PREVIOUS slot's — leave them there
         }
       }
-      writeSlotState(sf, { key, fp, win, at: Date.now() }, !st);
+      writeSlotState(sf, { key, fp, win, at: Date.now() }, !st, st);
     }
   }
   // ② THE WINDOW IDENTITY GUARD — the same rule the server applies to every

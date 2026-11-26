@@ -36,6 +36,11 @@
  * park and no ⚙ card, so nothing can ever reach it again.
  */
 const fs = require('fs');
+// B-bcb8 unit D (主开发 r5211 / r5214): the ONE door of a record synced before its name — the checkout's src/fd-close.js, else the
+// copy beside this tool at boot (src/server/agent-tool-generators.js); neither (a tool that rode a command alone, an older host): the
+// same words inline
+let FC = null; try { FC = require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/fd-close.js') : require('./fd-close.js'); } catch { try { FC = require('./fd-close.js'); } catch { FC = null; } }
+const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say, sync = true } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } try { fs.renameSync(tmp, final); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; } };   // B-bcb8 unit D: src/fd-close.js renameSynced, the same words inline (lane nl-journals' door spelling: a failed rename a failed write too)
 const os = require('os');
 const net = require('net');
 const path = require('path');
@@ -136,10 +141,10 @@ function deleteRecord() { try { fs.unlinkSync(RECORD); } catch { } }
 function writeRecord(r) {
   try {
     fs.mkdirSync(BASE, { recursive: true });
-    const tmp = RECORD + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(r));
-    fs.renameSync(tmp, RECORD);         // atomic, like every VibeSpace json write
-  } catch { }
+    // B-bcb8 unit D: the record is ON DISK before its name points at it (a torn one refuses the next start or stop until it is set
+    // aside): one sync of its temp; a failed write is SAID (stderr), never swallowed — the record from before stands
+    renameSynced(RECORD + '.tmp', RECORD, JSON.stringify(r), { where: "this machine's OpenCode serve record", say: (l) => console.error(l) });
+  } catch (e) { console.error(`the record of the OpenCode serve on this machine (~/.vibespace/opencode-serve.json) could not be written (${(e && (e.code || e.name)) || 'error'}) — the record from before stands`); }
 }
 async function healthy(port, timeoutMs = 2500) { try { const h = await req(port, 'GET', '/global/health', { timeoutMs }); return !!h && h.healthy !== false; } catch { return false; } }
 

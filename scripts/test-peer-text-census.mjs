@@ -954,6 +954,9 @@ const PRINTS = {
     'r.mountsHeld': `${V}:the mounts' hold words (src/mounts.js unreadWords: our sentence around the store's file name and its code)`,
     // lane lg-store-writes (B-15ac): the close helper's sentence (src/fd-close.js closeFailedWords — our words around the site's name and an errno)
     'closeSaid': `${V}:the close helper's one sentence (src/fd-close.js: our words around the site's name and an errno)`,
+    // B-bcb8 unit D (lane bl-scratch): the attachment's sync its file system does not do — the sync helper's one sentence (src/fd-close.js syncUnsupportedWords, or its same words inline)
+    'notDone': `${V}:the sync helper's one sentence (src/fd-close.js syncUnsupportedWords: our words around the site's name and an errno)`,
+    'FCL.syncUnsupportedWords': `${V}:the same sentence at the local's initializer (src/fd-close.js syncUnsupportedWords — the helper this CLI loads)`,
     // lane pod-oauth-callback: `connect <kind>` and `list`'s not-connected line — a vendor TYPE's label / kind and counts, our words
     'r.connectable': `${V}:the types no account of which holds a sign-in ({kind, label, accounts}) — the engine's connectOffers`,
     'notYet': `${V}:those types (r.connectable, each with a kind)`,

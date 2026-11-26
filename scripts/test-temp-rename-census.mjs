@@ -140,6 +140,7 @@ const FAMILIES = {
   aside: { verdict: 'named', classes: ['unsynced', 'move'], why: 'a file SET ASIDE, not new bytes put in place (a stale lock moved out of the way)' },
   move: { verdict: 'named', classes: ['move'], why: 'no bytes written before it in its scope: an existing file or folder moved (a rotation, an aside of a damaged copy, a folder swap, a symlink swap) — its bytes were written and closed long before' },
   sample: { verdict: 'named', classes: ['unsynced'], why: 'a READING of a live run, written again every 2 s while the job is over half its memory bound (data/bin/job-wrapper.js pressure.json; B-bcb8\'s first unit): read only to judge how a run that left no exit record ended (src/jobs.js _ctlJson reads a torn one as none) — after a power loss no sample is the environment\'s end, which the run\'s end then is' },
+  refresh: { verdict: 'named', classes: ['unsynced'], why: 'a record REWRITTEN UNCHANGED only to move its file\'s time, a time a reader takes as a fact (the statusline\'s slot-state prune: the oldest by mtime go first): what it holds is synced when it changes (B-bcb8 unit D); a sync at every observation is never asked (主开发 r5214: the statusline runs in every conversation, and a data folder on a network file system pays each sync in full) — a torn refresh empties it as at the release' },
   region: { verdict: 'owed', row: 'B-bcb8', classes: ['unsynced'], why: 'a file written by a command string the hub hands a child, or by a tool under data/bin, through its own temp + rename with no sync (judged in B-bcb8\'s first unit): after a power loss its name can point at an empty file, and each row says what that costs. Unit C of the row: the person\'s copies on another machine and the design file there (the command\'s own copy; the «person» family\'s cross-machine copy is the hub\'s local road), agy\'s conversation modes and the link beside its pictures' },
 };
 
@@ -341,13 +342,14 @@ const BIN_ROWS = [
   ["data/bin/job-wrapper.js", "unsynced", "sample", "pressure.json: the job's memory pressure, written again every sample while it is over half its bound", "startSampler"],
   ["data/bin/pty-wrapper.js", "move", "move", "the wrapper's log, rotated at 5 MB (appended, never written whole)", "log"],
   ["data/bin/vibespace-browser", "unsynced", "derived", "the sanctioned browser configuration, named by the digest of its bytes, written again whenever the file under that name differs", "composeConfig"],
-  ["data/bin/vibespace-channels", "unsynced", "region", "an attachment fetched (its declared size checked) into the attachment cache, or with --out to a path the agent names: that one is the person's file, empty after a power loss", "<module>"],
+  ["data/bin/vibespace-channels", "synced", "self-synced", "an attachment fetched (its declared size checked) into the attachment cache, or with --out to a path the agent names: its handle synced once before its close (B-bcb8 unit D), a failed sync a failed fetch — nothing kept", "<module>"],
   ["data/bin/vibespace-claude-subscription-login.mjs", "synced", "self-synced", "the isolated OAuth credential file of a subscription login: synced, a failed write said by name (credential-write), its temp removed", "atomicWritePrivate"],
-  ["data/bin/vibespace-design", "unsynced", "region", "a file of the person's design folder the design tool writes (design.json, a page): empty after a power loss", "writeInside"],
+  ["data/bin/vibespace-design", "synced", "self-synced", "a file of the person's design folder: its exclusive temp ('wx', never through a link) synced before its close and rename (B-bcb8 unit D), a failed sync a failed write, the file as it was", "writeInside"],
   ["data/bin/vibespace-hook-register.mjs", "synced", "self-synced", "a CLI's own settings file with VibeSpace's hooks (B-ddf3): synced, a failed sync a failed write said by name", "commitWrite", "commitCreate"],
-  ["data/bin/vibespace-opencode-op", "unsynced", "region", "the record of the OpenCode serve on a machine (~/.vibespace/opencode-serve.json): an empty one refuses the next start or stop, its words naming the way out (r3675)", "writeRecord"],
+  ["data/bin/vibespace-opencode-op", "synced", "self-synced", "the door's one-line fallback (src/fd-close.js renameSynced's words, in lane nl-journals' door spelling), taken when no copy of the helper is beside the tool: synced, a failed sync a failed write — the serve's record (~/.vibespace/opencode-serve.json) goes through the door (B-bcb8 unit D)", "<module>"],
   ["data/bin/vibespace-usage", "unsynced", "store", "the account's usage reading (data/usage-cache/<key>.json, its windows with what it carries forward: other producers' limits, spend, the tombstones): the same file src/usage-cache-write.js writes, rowed «store» — a torn one is held unread by the hub, the account's automatic turns wait and the person is told; one cure with its twin (on a paired machine the same tool writes that machine's own cache)", "writeUsage"],
-  ["data/bin/vibespace-usage", "unsynced", "region", "the statusline's slot state, the lag-shadow guard's memory of the account a conversation's slot pointed at: a torn one skips the guard once, and a reading of the slot before can be filed on the account it points at now", "writeSlotState"],
+  ["data/bin/vibespace-usage", "synced", "self-synced", "the door's one-line fallback (src/fd-close.js renameSynced's words, in lane nl-journals' door spelling), taken when no copy of the helper is beside the tool: synced, a failed sync a failed write — the slot state's CHANGES go through the door (B-bcb8 unit D)", "renameSyncedInline"],
+  ["data/bin/vibespace-usage", "unsynced", "refresh", "the statusline's slot state REFRESHED unchanged (its key, its percents and its counting windows as they were; a not-started window's sliding reset is no change): only its time moves, the prune's last-seen", "writeSlotState"],
   ["data/bin/vibespace-usage", "unsynced", "derived", "the model ids the statusline has seen (at most 50, for the model menu): a torn list starts again, each id learned again when it is used", "learnModel"],
   ["data/bin/vibespace-usage-scan", "unsynced", "derived", "the usage scan's cursor on a machine, written after its events are flushed: a torn one reads as none, and the next harvest sends from the start again, which the hub's dedup by event id absorbs", "<module>"],
 ];
@@ -380,7 +382,7 @@ const SHELL_ROWS = [
 ];
 // THE REGIONS' OWED SITES: an EQUALITY like OWED_MAX and kept beside it (a src/ cure lowers OWED_MAX, a region's cure this one);
 // a rise above the kept baseline is red by name unless REGION_RISES names it with its row
-const REGION_OWED_MAX = 25;
+const REGION_OWED_MAX = 21;   // B-bcb8 unit D, group one (lane bl-scratch, 主开发 r5214): 25 → 21 — the channels, design and OpenCode tools' writes and the statusline's slot state are synced (the slot state when what it holds changes)
 const REGION_OWED_BASELINE = 25;   // kept at the regions' judging (B-bcb8's first unit)
 const REGION_RISES = [];           // [n, row, why] — a named rise of the regions' owed count (none)
 

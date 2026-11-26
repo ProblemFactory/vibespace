@@ -597,6 +597,14 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
         for (let off = 0; off < value.length;) off += (await fh.write(value, off, value.length - off)).bytesWritten;
       }
       if (got !== declared) throw new Error(`the answer ended at ${got} of its declared ${declared} bytes — nothing kept`);
+      // B-bcb8 unit D (主开发 r5211 / r5214): the bytes are ON DISK before the name points at them — the handle synced ONCE before its
+      // close. A sync that fails is a failed fetch (into the catch: the part removed, nothing kept); only a sync the file system does not
+      // do at all lands, said once (src/fd-close.js's codes and words, through the helper this CLI already loads)
+      try { await fh.sync(); } catch (e) {
+        if (!((FCL && FCL.SYNC_UNSUPPORTED) || new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'])).has(e && e.code)) throw new Error(`the attachment could not be put on disk (${(e && e.code) || 'error'}) — nothing kept`);
+        const notDone = FCL && FCL.syncUnsupportedWords ? FCL.syncUnsupportedWords('the attachment being saved', e.code) : `the attachment being saved: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`;
+        console.error(`vibespace-channels: ${notDone}`);
+      }
       { const saving = fh; fh = null; await saving.close(); }   // B-15ac follow: forgotten BEFORE the awaited close — the catch never closes it a second time (a failed close throws into it and is said there)
       const dest = out || agentAttachmentPath({ root: cacheRoot, adapterId: conv.slice(0, i), convId: conv.slice(i + 1), msg: msgId, attId, mime: info.mime, head });
       fs.renameSync(part, dest);   // a rename REPLACES a planted symlink at the target, it never writes through it

@@ -16,6 +16,12 @@ CC.cliStart({ tool: 'vibespace-design', flags: ['--timeout', '--call-timeout'] }
 'use strict';
 const fs = require('fs');
 const path = require('path');
+// B-bcb8 unit D (主开发 r5211 / r5214): the ONE door of a record synced before its name — the checkout's src/fd-close.js, else the
+// copy beside this tool at boot (src/server/agent-tool-generators.js); neither (a tool that rode a command alone, an older host): the
+// same words inline
+let FC = null; try { FC = require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/fd-close.js') : require('./fd-close.js'); } catch { try { FC = require('./fd-close.js'); } catch { FC = null; } }
+const NOT_SYNCED = (FC && FC.SYNC_UNSUPPORTED) || new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);   // a sync the file system does not do at all
+const notSyncedWords = (where, code) => (FC && FC.syncUnsupportedWords ? FC.syncUnsupportedWords(where, code) : `${where}: its file system does not do a sync (${code}) — its new bytes took their name unsynced`);
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
 
@@ -93,7 +99,18 @@ function writeInside(dir, name, text) {
   try { st = fs.lstatSync(fp); } catch { }
   if (st && !st.isFile()) die(`refusing to write ${fp}: it is a link or not a regular file`);
   const tmp = path.join(dir, `.${name}.tmp-${process.pid}`);
-  fs.writeFileSync(tmp, text, { flag: 'wx' });
+  // B-bcb8 unit D (主开发 r5211 / r5214): the person's file is ON DISK before its name points at it. Its temp is made EXCLUSIVELY
+  // ('wx': never through a link planted at the temp's name — the door's renameSynced opens with 'w'), its descriptor synced ONCE before
+  // the close and the rename. A failed write, sync or close is a failed write: the temp removed, the file as it was, the error thrown as
+  // the release's write threw it; only a sync the file system does not do at all lands, said once (src/fd-close.js's codes and words)
+  const fd = fs.openSync(tmp, 'wx', 0o666);
+  let failed = null;
+  try {
+    fs.writeFileSync(fd, text);
+    try { fs.fsyncSync(fd); } catch (e) { if (!NOT_SYNCED.has(e && e.code)) throw e; console.error(notSyncedWords(`the design file ${name}`, e.code)); }
+  } catch (e) { failed = e; }
+  try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }
+  if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; }
   fs.renameSync(tmp, fp);
   return fp;
 }
