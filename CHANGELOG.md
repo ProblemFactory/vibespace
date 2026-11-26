@@ -22,6 +22,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A notice about a folder that stopped answering now says when it could not read who uses the folder, instead of saying that no process has a file open there.
 - After a restart, when the check of which of two windows of one conversation is still running fails, VibeSpace keeps both open instead of closing the older one.
 - Removing an account from a Codex pool now moves the pool to a member that is signed in, instead of leaving it on the removed account.
+- In For you, sign-in notices are grouped under «Accounts and sign-ins», and a long-lived token's identity notice no longer offers a reply it cannot take.
 
 ## 2.369.421 — 2026-11-26
 
