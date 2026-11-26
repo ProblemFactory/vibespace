@@ -127,6 +127,7 @@ function realpathChild(p, { ms = 6000, onExit = null, onHeld = null } = {}) {   
 const RCLONE_PIN = 'v1.69.3'; // ≥1.66 brings `rclone nfsmount` (macOS without macFUSE); 2.369.12
 
 const STORE_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // machine-mounts.json: {mounts: [...]}
+const legacyKey = (r) => String((r && (r.id || r.mountpoint)) || '');   // r4985: a legacy record's key in the lift's judged list
 
 class MachineMounts {
   /** @param deps { hosts, mountTokens, publicUrl:()=>string|null, localPort:()=>number|null, rcloneBin:()=>string, broadcast, log } */
@@ -210,7 +211,10 @@ class MachineMounts {
       if (la.state === 'missing') return null; // nothing to do
       if (la.state === 'unreadable') { this._legacyHeld(file, map, la); return -2; }   // HELD (said by the helper: held and read again)
       if (la.state !== 'data') { this.log(`legacy store unreadable — kept in place (fix or remove it, then delete machine-mounts.json to re-migrate): ${file}: ${(la.error && la.error.message) || la.why}`); return -1; }
-      return this._ingestLegacy(file, la.value, map).length;
+      // its gate (test-hosts-held-census's lookup control): a record whose LOOKUP throws (the machines answering by a throw) is no crash
+      // of the start — the store stays in place under its name and OWED (-3: read, its records not judged now); the next start tries again
+      try { return this._ingestLegacy(file, la.value, map, { judged: this._judgedOf(file) }).length; }
+      catch (e) { this.log(`${path.basename(file)}: its records could not be judged now (${(e && (e.code || e.message)) || e}) — kept in place, owed to the next start`); return -3; }
     };
     const nPush = ingest(hmF, (m) => ({ ...m, dir: 'push' }));
     const nPull = ingest(dvF, (m) => ({
@@ -222,6 +226,7 @@ class MachineMounts {
       remotePath: m.remotePath, mountpoint: m.mountpoint, createdAt: m.createdAt,
     }));
     if (nPush === -2 || nPull === -2) this._state.legacyOwed = true;   // OWED (r4985): the next start ingests it again (the mark _loadAnswer reads)
+    if (nPush === -3 || nPull === -3) this._state.legacyOwed = true;   // a lookup that threw: owed too (its gate)
     if (nPush === null && nPull === null) return;
     try {
       const t = this._file + '.tmp';
@@ -231,6 +236,8 @@ class MachineMounts {
     } catch (e) { this.log('migration save FAILED — legacy stores kept, will re-run next boot: ' + e.message); return; }
     try { if (nPush >= 0 && fs.existsSync(hmF)) fs.renameSync(hmF, hmF + '.migrated'); } catch { }
     try { if (nPull >= 0 && fs.existsSync(dvF)) fs.renameSync(dvF, dvF + '.migrated'); } catch { }
+    // its read (MUST 2): a store ingested wholly at a start leaves no judged list behind (the file is renamed above)
+    if (this._state.legacyHandled) { for (const [f, n] of [[hmF, nPush], [dvF, nPull]]) if (n !== null && n >= 0) delete this._state.legacyHandled[path.basename(f)]; if (!Object.keys(this._state.legacyHandled).length) delete this._state.legacyHandled; }
     const migrated = (nPush > 0 ? nPush : 0) + (nPull > 0 ? nPull : 0);
     if (migrated) this.log(`migrated ${migrated} legacy mount record(s) into machine-mounts.json`);
   }
@@ -238,12 +245,16 @@ class MachineMounts {
   /** one legacy store's records into the list (`st` its whole value) → the records ADDED. r4039 (f): a record the list already holds (the
    *  SAME record: its id, mount point and birth — an owed ingest after a lift) is skipped in silence; one whose id or mount point a
    *  DIFFERENT record of the list holds (a person's newer mount, made while the store was held) is PASSED OVER — the live one wins — and
-   *  said by its store and count, once a run (主开发 r4985 (b)): never dropped in silence */
-  _ingestLegacy(file, st, map) {
+   *  said by its store and count, once a run (主开发 r4985 (b)): never dropped in silence. Its read: a PUSH mount point is a path on ITS
+   *  machine — it meets only a push record of the same machine (a PULL mount point is a folder of this hub: any pull record there);
+   *  `judged` — the records a lift already judged (added, passed over or the same): skipped in silence, so the person's acts since stand
+   *  (a mount removed after the lift stays removed) */
+  _ingestLegacy(file, st, map, { judged = null } = {}) {
     const same = (r, m) => m.id === r.id && (m.mountpoint || null) === (r.mountpoint || null) && (m.createdAt || null) === (r.createdAt || null);
     const added = [], passed = [];
     for (const r of (Array.isArray(st && st.mounts) ? st.mounts : []).map(map)) {
-      const meets = this._state.mounts.filter((m) => m.id === r.id || (r.mountpoint && m.mountpoint === r.mountpoint));
+      if (judged && judged.has(legacyKey(r))) continue;
+      const meets = this._state.mounts.filter((m) => m.id === r.id || (r.mountpoint && m.mountpoint === r.mountpoint && (r.dir === 'pull' ? m.dir === 'pull' : m.dir !== 'pull' && m.hostId === r.hostId)));
       if (!meets.length) added.push(r);
       else if (!meets.every((m) => same(r, m))) passed.push(r);
     }
@@ -251,6 +262,8 @@ class MachineMounts {
     if (passed.length) this.log(`${path.basename(file)}: ${passed.length} legacy mount record(s) passed over — a mount the list already holds has the same id or mount point (that newer one is kept): ${passed.map((r) => r.mountpoint || r.id).join(', ')}`);
     return added;
   }
+  /** the records of `file` a lift already judged (its read, MUST 2) — a Set of their keys, or null */
+  _judgedOf(file) { const j = this._state.legacyHandled && this._state.legacyHandled[path.basename(file)]; return Array.isArray(j) ? new Set(j) : null; }
   /** HELD (主开发 r4985): a legacy store whose read FAILED — the family helper's hold over it, read again off the loop on its ladder. Its
    *  journal line says it is held and read again (never the advice to delete a store); the family's notice names it while it holds */
   _legacyHeld(file, map, a) {
@@ -269,14 +282,18 @@ class MachineMounts {
    *  if linked; the file keeps its name and the mark stays — the next start ingests it again (the same records: no second copy) and
    *  renames it after its verified save (主开发 r4985 (c): nothing of a legacy store renamed or removed while any part of it is unread) */
   _legacyLifted(file, map, value, { setAside = null } = {}) {
-    if (!value) { this.log(setAside ? `legacy store unreadable — kept in place (fix or remove it, then delete machine-mounts.json to re-migrate): ${file}: torn bytes (a copy kept aside as ${path.basename(setAside)})` : `${path.basename(file)} is gone — nothing of it to ingest`); return; }
+    // its read (SHOULD 3): torn at a read again, the list already keeps the store OWED — fixing the file is enough; never «delete the list»
+    if (!value) { this.log(setAside ? `legacy store unreadable — kept in place under its own name (fix it or remove it: the next start reads it again, the list keeps it owed): ${file}: torn bytes (a copy kept aside as ${path.basename(setAside)})` : `${path.basename(file)} is gone — nothing of it to ingest`); return; }
     const added = this._ingestLegacy(file, value, map);
+    // its read (MUST 2): what this lift JUDGED is saved with the mark — the next start skips it (a mount the person removes since stays removed)
+    this._state.legacyHandled = { ...(this._state.legacyHandled || {}), [path.basename(file)]: (Array.isArray(value.mounts) ? value.mounts : []).map(map).map(legacyKey) };
     this._state.legacyOwed = true;
     this._save();
     this.log(`${path.basename(file)} read again: ${added.length} legacy mount record(s) listed now — the file keeps its name until a start saves the list`);
     if (!added.length) return;
     this._notify();
-    for (const hostId of new Set(added.map((r) => r.hostId))) { try { if (this._online(hostId)) this.onMachineLinked(hostId); } catch { } }
+    // its read (SHOULD 1): ONLY the records it added are healed — a person's live mounts on that machine are never torn down for it
+    for (const hostId of new Set(added.map((r) => r.hostId))) { try { if (this._online(hostId)) this.onMachineLinked(hostId, new Set(added.map((r) => r.id))); } catch { } }
   }
 
   /** remainder of B-f276 (bl-jobs, the store-read law over machine-mounts.json — every mount of a paired machine, each push
@@ -1097,14 +1114,14 @@ class MachineMounts {
    *  Mac report) and re-own push tunnel ports (the fresh daemon has no
    *  listeners; the machine-side rclone still points at the recorded port).
    *  Fire-and-forget. */
-  onMachineLinked(hostId) {
+  onMachineLinked(hostId, only = null) {   // `only`: the record ids to heal (the legacy lift's), else every record of the machine
     if (!hostId) return;
     // B-844b r4 (read 3 #1b): a link is a re-rank — a held record of this machine may take its folder over from a holder that is down
-    if (this._held.size) { this._recheckPairs().catch(() => { }).then(() => this._healLinked(hostId)); return; }
-    this._healLinked(hostId);
+    if (this._held.size) { this._recheckPairs().catch(() => { }).then(() => this._healLinked(hostId, only)); return; }
+    this._healLinked(hostId, only);
   }
-  _healLinked(hostId) {
-    for (const rec of this._state.mounts.filter((m) => m.hostId === hostId)) {
+  _healLinked(hostId, only = null) {
+    for (const rec of this._state.mounts.filter((m) => m.hostId === hostId && (!only || only.has(m.id)))) {
       if (rec.dir === 'pull') {
         if (this._held.has(rec.id)) continue;   // B-844b (read 2): a held record is not healed (said once, by its row)
         const stale = this._live.get(rec.id);
