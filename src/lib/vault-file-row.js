@@ -4,8 +4,9 @@
 // 添加 › 文件… (pick or drop ONE file; its size is checked BEFORE it is read; then POST /api/vault/files). Every word a person
 // reads goes through t(); every text lands by textContent. Nothing here keeps a byte past the press that read it.
 import { t } from './i18n.js';
-import { createModalShell, fetchJson, showToast } from './utils.js';
-import { revealValue, revealWords } from './vault-reveal.js';
+import { createModalShell, fetchJson, showToast, showConfirmDialog } from './utils.js';
+import { revealValue, revealWords, revealLeftMs, revealHeaders, askRevealPassword, noteRevealLeft, forgetReveal } from './vault-reveal.js';
+import { stampAt } from './page-time.js';   // lane ui-language: the ONE formatter of a time a person reads
 import { wordsRefusalWords } from './vault-paste-box.js';   // the name / description rule's refusals in their own words
 import { FILE_MAX, RUN_FILE_BYTES_MAX } from '../vault-file.js';   // THE cap (the owner's D1, 2026-11-03) — the page refuses a bigger file before reading a byte of it
 
@@ -61,6 +62,39 @@ export function fileExtras(row) {
     doors.push(rp);
   }
   return { box, chips, doors };
+}
+
+/** U1c (主开发 r4774 B): the window's ONE line for the sealed files the record does not name — the gentler road FIRST (the right
+ *  record put back opens them), then the owner's door. Nothing is greyed; no For-you item (nothing waits on it). */
+export function keptLineWords(n) {
+  return n === 1
+    ? t('1 sealed file is kept that the vault\'s record does not name — for example after the record was put back from an older copy. Put the right vault record back to open it, or remove it.')
+    : t('{n} sealed files are kept that the vault\'s record does not name — for example after the record was put back from an older copy. Put the right vault record back to open them, or remove them.', { n });
+}
+/** «Remove them…» (U1c): 验证是你 first (the second password), then a confirm that lists their sizes and dates only and says once
+ *  that it cannot be undone; the hub removes them, each asked again at its own turn. → true when the hub removed them */
+export async function removeKeptFiles(kept, opts = {}) {
+  const refresh = typeof opts.refresh === 'function' ? opts.refresh : () => {};
+  const n = (kept && kept.count) || 0;
+  if (!n) return false;
+  if (!revealLeftMs() && !(await askRevealPassword())) return false;
+  const items = ((kept && kept.files) || []).map((f) => t('{size} · sealed {when}', { size: sizeWords(f.size), when: stampAt(f.at, { words: true }) }));
+  const ok = await showConfirmDialog({
+    title: n === 1 ? t('Remove the sealed file the record does not name?') : t('Remove the {n} sealed files the record does not name?', { n }),
+    message: n === 1 ? t('Removing it cannot be undone.') : t('Removing them cannot be undone.'),
+    items, confirmText: t('Remove'), danger: true,
+  });
+  if (!ok) return false;
+  const r = await fetchJson('/api/vault/files/kept/remove', { method: 'POST', headers: { ...revealHeaders(), 'Content-Type': 'application/json' }, body: '{}' });
+  if (r && r.ok) {
+    noteRevealLeft(r.leftMs);
+    showToast(r.left > 0 ? t('{removed} removed — {left} could not be removed and are still kept', { removed: r.removed || 0, left: r.left }) : t('Removed the sealed files the record did not name'), r.left > 0 ? { type: 'error' } : undefined);
+    refresh();
+    return r.left === 0;
+  }
+  if (r && r.code === 'reveal_needs_password') forgetReveal();
+  showToast(r && r.code ? revealWords(r) : t('Could not remove them — the hub did not answer'), { type: 'error' });
+  return false;
 }
 
 /** base64 → bytes (the browser's own decoder). */

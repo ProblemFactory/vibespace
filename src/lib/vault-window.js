@@ -42,7 +42,7 @@ import { wideHeaderDoors, loginHeld, showLoginGrantPicker, showAnySiteDialog, sh
 const LOGIN_DOORS = Object.freeze({ held: loginHeld, grant: showLoginGrantPicker, anySite: showAnySiteDialog, anyAccount: showAnyAccountDialog });   // handed to each login row (it imports no dialog — the paste box's bundle stays as it is)
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
 import { totpNote } from './vault-totp-row.js';   // r3275 (4): the two-step grants list's ONE note (its own line: test-vault-kinds-census cuts the line above by its text)
-import { fileExtras, showFileAddDialog } from './vault-file-row.js'; // lane lg-vault-file (B-0830): a FILE's row — its name, size, kind, the passphrase it needs + Download; 文件…
+import { fileExtras, showFileAddDialog, keptLineWords, removeKeptFiles } from './vault-file-row.js'; // lane lg-vault-file (B-0830): a FILE's row — its name, size, kind, the passphrase it needs + Download; 文件…
 import { addOrderOf, familyOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY (lane vault-entry-description: familyOf — which kinds carry a name and a description) — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
 import { buttonsOf } from '../foryou-actions.js'; // B-ef1b: a band item's DECLARED buttons (the registry's words; runAction runs them)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
@@ -545,6 +545,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     // silently shorter list
     { const heldParts = (d.stores || []).flatMap((s) => (Array.isArray(s.held) ? s.held : [])).map((h) => h.label).filter(Boolean);
       if (heldParts.length) want.unshift(emptyEl(t("Some stored values cannot be listed right now: {what}. Nothing is lost — their file could not be read, and VibeSpace reads it again by itself.", { what: [...new Set(heldParts)].join(', ') }), 'held-parts')); }
+    // U1c (主开发 r4774 B): the sealed files the record does not name — ONE line with its door on the line, at the top
+    if (d.kept && d.kept.count > 0) want.unshift(keptEl(d.kept));
     if (!v.rows.length && filtered) want.push(st.q ? noMatchEl(v) : emptyEl(t('No stored value matches these filters'), 'empty-match'));
     else if (!v.rows.length && st.purpose === 'all') want.push(emptyEl(t('Nothing stored here'), 'empty-all'));
     reconcile(list, want);
@@ -565,6 +567,21 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     return noMatch.el;
   }
   const empties = new Map();
+  // U1c: the kept files' line — ONE element for the window's life (keyed reconciliation: never rebuilt under a press)
+  let keptBox = null;
+  function keptEl(kept) {
+    if (!keptBox) {
+      keptBox = vwEl('div', 'vw-empty vw-kept'); keptBox.dataset.key = 'kept-files';
+      const b = vwEl('button', 'vw-btn vw-kept-remove'); b.type = 'button';
+      b.onclick = async () => { if (keptBox._busy) return; keptBox._busy = true; try { await removeKeptFiles(keptBox._kept, { refresh: () => refresh() }); } finally { keptBox._busy = false; } };   // nothing greyed (test-vault-inventory): a second press while one runs is ignored
+      keptBox.append(vwEl('span', 'vw-kept-text'), b);
+    }
+    keptBox._kept = kept;
+    const [txt, b] = keptBox.children, words = keptLineWords(kept.count), door = kept.count === 1 ? t('Remove it…') : t('Remove them…');
+    if (txt.textContent !== words) txt.textContent = words;
+    if (b.textContent !== door) b.textContent = door;
+    return keptBox;
+  }
   function emptyEl(text, key) { let e = empties.get(key); if (!e) { e = vwEl('div', 'vw-empty'); e.dataset.key = key; empties.set(key, e); } if (e.textContent !== text) e.textContent = text; return e; }
   /** Keyed reconciliation: `want` in order, by MOVING nodes (an element already in place is never touched; nothing is rebuilt). */
   function reconcile(box, want) {
@@ -763,7 +780,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     // the rail between the two drew the purpose with no row and a 铸造… with no choices (test-automation-keys-chrome ⑨b, 2/3)
     const auto = r.state === 'unlocked' ? await (autoEarly || loadAutomation()) : null;
     if (st.closed) return;
-    st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [], ...(r.unreadable ? { unreadable: true } : {}) };   // r3230's reader table (r3002 (b)): the record held
+    st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [], ...(r.unreadable ? { unreadable: true } : {}), ...(r.kept && r.kept.count > 0 ? { kept: r.kept } : {}) };   // U1c: the sealed files the record does not name   // r3230's reader table (r3002 (b)): the record held
     st.auto = auto;
     st.totp = r.state === 'unlocked' && st.data.rows.some(isTotp) ? await loadTotp() : null;   // design q-047 L1: the codes' grants + the picker's subjects (never a value)
     st.logins = r.state === 'unlocked' && st.data.rows.some(isLogin) ? await loadLogins() : null;   // lane browser-login: the logins' grants + the picker's subjects (never a password)

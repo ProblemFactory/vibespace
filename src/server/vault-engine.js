@@ -266,7 +266,18 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (r && r.owed > 0) say(`[vault] ${r.owed} sealed file(s) in ${VF.FILE_DIR} that the record names as dropped could not be shredded (files_drop_owed) — the next start takes them`);
     return r;
   };
-  if (record) track(sweepAtStart().catch(() => null));
+  // U1c (主开发 r4774 B): THE KEPT FILES as the start's sweep left them — listed off the loop after the sweep (each size and
+  // date; the ids stay in this process) and again after the owner's removal; every open window re-reads its line
+  let keptNow = [];
+  const refreshKept = async () => {
+    let l = null;
+    try { l = await files.keptList(fileLive, { dropped: fileDropped }); } catch { l = null; }
+    if (!Array.isArray(l)) return;   // the folder could not be listed: the line keeps what it said (never a wrong count)
+    const was = keptNow.length;
+    keptNow = l;
+    if (l.length || was) contentsChanged();
+  };
+  if (record) track(sweepAtStart().catch(() => null).then(() => refreshKept()));
   const shredLater = (id) => { track(files.shred(id).then((g) => { if ((g === true || g === 'absent') && droppedOf(record).includes(String(id))) confirmedGone.add(String(id)); }, () => false)); };   // r5114: only a LISTED id is remembered (a put's own failed file is never on the list)   // a failed shred of a DROPPED file: the next start's sweep takes it (the record names it dropped); of a put's own unrecorded file: it is kept and said
   /** → a promise that resolves once the boot sweep and every shred in flight have ended. */
   const filesSettled = async () => { while (pendingFiles.size) await Promise.all([...pendingFiles]); };
@@ -614,6 +625,27 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     if (!r.ok) { shredLater(id); return r; }
     return { ok: true, name, file: VF.publicFactsOf(file) };
     } finally { filesInFlight.delete(id); }
+  }
+  /** U1c: the kept files as a window draws them — their count, each one's size and date; never an id, never a byte. */
+  const keptFacts = () => ({ count: keptNow.length, files: keptNow.map((f) => ({ size: f.size, at: f.at })) });
+  /** U1c (主开发 r4774 B): THE OWNER's REMOVAL of the kept files — unlocked, the record read; each file asked again at its OWN
+   *  turn (named by no entry of the record in force, held by no put, not dropped, the vault still unlocked: a lock in the middle
+   *  stops the walk), then shredded; ONE audit line with the counts. Never automatic, never on a timer; its ONE caller is the
+   *  contents door (a person inside the window 验证是你 opened). → { ok, removed, left } | { ok: false, code } */
+  async function keptRemove({ who = null, ip = null } = {}) {
+    if (state() !== 'unlocked') return { ok: false, code: lockedCode() };
+    if (!record || recordBad) return { ok: false, code: badCode() };
+    const keep = (id) => state() !== 'unlocked' || !record || !!recordBad || fileLive(id);
+    let removed = 0, stayed = 0;
+    for (const f of keptNow.slice()) {
+      let g = false;
+      try { g = await files.shredKept(f.id, keep, fileDropped); } catch { g = false; }
+      if (g === 'gone') removed++; else stayed++;
+    }
+    await refreshKept();
+    audit('vault-files-kept-removed', { who, ip, removed, stayed });
+    contentsChanged();
+    return { ok: true, removed, left: keptNow.length };
   }
   /** THE ONE ROAD to a file entry's BYTES: unlocked only — its file key unwrapped, the `.vfile` opened (its GCM tag under the
    *  entry's own key and the box's size prove the bytes — no digest is kept), read OFF the main loop. → a promise of { ok, bytes: Buffer (the caller's copy to zero), file } |
@@ -1080,7 +1112,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
      *  card = { actor, by, key, entry, door, outcome, n, since, at } (names and codes; never a value). */
     onFailing(fn) { if (typeof fn === 'function') failingHooks.push(fn); },
     secretGet, secretPut, secretDrop, secretAdopt, secretNames, agentMint, agentPut,   // lane vault-mint-put
-    fileOf, filePut, fileOpen, agentFilePut, filesSettled,   // lane lg-vault-file (B-0830): a FILE entry — its facts, its put, its ONE opening road (filePut / fileOpen / agentFilePut answer promises: the bytes never touch the main loop) · the sweep's and the shreds' end
+    fileOf, filePut, fileOpen, agentFilePut, filesSettled, keptFacts, keptRemove,   // lane lg-vault-file (B-0830): a FILE entry — its facts, its put, its ONE opening road (filePut / fileOpen / agentFilePut answer promises: the bytes never touch the main loop) · the sweep's and the shreds' end
     batchRecordWrite, loginRevFloor,   // lane vault-login: single-write batchRecordWrite (afterCommit) + monotonic floor across web-login drop/re-add
     editEntryWords,   // lane vault-entry-description: THE writer of an entry's name and description after its creation
     macOf,   // lane vault-run-door: a mark under a DEK-derived key (the run door's store) — null unless unlocked

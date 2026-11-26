@@ -478,6 +478,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     agentFilePut: 'purpose-door', fileOf: 'receipt', filePut: 'hub-only', fileOpen: 'hub-only', filesSettled: 'hub-only',   // the cure: the sweep's and the shreds' end (the hub's close, the suites) — no route names it   // lane lg-vault-file: an agent's put --file (name + reference + the file's facts, never a byte) · a file's public facts · the owner's / a request's file write · THE one road to a file's bytes (a run's injection, the owner's download)
     blocked: 'refusal',
     setup: 'owner-only', unlock: 'owner-only', change: 'owner-only', confirm: 'owner-only', setIdleLock: 'owner-only', touch: 'owner-only',
+    keptFacts: 'owner-only', keptRemove: 'owner-only',   // lane lg-vault-file U1c: the kept files' line facts (sizes, dates — never an id) and their removal — the person's contents door only
     keyFor: 'hub-only', secretGet: 'hub-only', secretPut: 'hub-only', secretDrop: 'hub-only', secretAdopt: 'hub-only', resumeSeal: 'hub-only', audit: 'hub-only', idleTick: 'hub-only', close: 'hub-only',
     onUnlock: 'hub-only', onOpen: 'hub-only', onLock: 'hub-only', onBlocked: 'hub-only', onFailing: 'hub-only',
     macOf: 'hub-only',

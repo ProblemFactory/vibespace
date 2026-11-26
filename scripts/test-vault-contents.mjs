@@ -351,15 +351,16 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
   const JDIR = scratch('vault-contents-row'); fs.mkdirSync(JDIR, { recursive: true });
   const STUBS = {
     './i18n.js': 'export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);',
-    './utils.js': 'const P = () => globalThis.__vfr; export const createModalShell = (o) => (P() && P().shell ? P().shell(o) : { dialog: null, body: null, close() {}, raised: true }); export const fetchJson = async (u, o) => (P() && P().fetch ? P().fetch(u, o) : { ok: false }); export const showToast = (m, o) => P().toast(String(m), o);',
-    './vault-reveal.js': 'const P = () => globalThis.__vfr; export const revealValue = (id) => P().reveal(id); export const revealWords = () => "refused";',
+    './utils.js': 'const P = () => globalThis.__vfr; export const createModalShell = (o) => (P() && P().shell ? P().shell(o) : { dialog: null, body: null, close() {}, raised: true }); export const fetchJson = async (u, o) => (P() && P().fetch ? P().fetch(u, o) : { ok: false }); export const showToast = (m, o) => P().toast(String(m), o); export const showConfirmDialog = async (o) => (P() && P().confirm ? P().confirm(o) : false);',
+    './vault-reveal.js': 'const P = () => globalThis.__vfr; export const revealValue = (id) => P().reveal(id); export const revealWords = () => "refused"; export const revealLeftMs = () => (P() && P().leftMs ? P().leftMs() : 0); export const revealHeaders = () => (P() && P().headers ? P().headers() : {}); export const askRevealPassword = async () => (P() && P().askPw ? P().askPw() : false); export const noteRevealLeft = () => {}; export const forgetReveal = () => {};',
+    './page-time.js': 'export const stampAt = (ms) => "at " + ms;',
     './vault-paste-box.js': 'export const wordsRefusalWords = () => "";',
   };
   const SRC = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8');
   let nb = 0;
   const rowOf = async (src) => {   // the module bundled from TEXT (its imports stubbed; ../vault-file.js the real one), with its two inner functions exported for the legs only
     const out = await esbuild.build({ stdin: { contents: src + '\nexport { downloadFile, filePickEl, showFileReplaceDialog };\n', resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'vault-file-row.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
-      plugins: [{ name: 'vfr', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|vault-reveal|vault-paste-box)\.js$/ }, (a) => ({ path: a.path, namespace: 'vfr' })); b.onLoad({ filter: /.*/, namespace: 'vfr' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+      plugins: [{ name: 'vfr', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|vault-reveal|vault-paste-box|page-time)\.js$/ }, (a) => ({ path: a.path, namespace: 'vfr' })); b.onLoad({ filter: /.*/, namespace: 'vfr' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
     const f = path.join(JDIR, `row-${++nb}.cjs`); fs.writeFileSync(f, out.outputFiles[0].text); return require(f);
   };
   const cut = (src, from, to, what) => { if (src.split(from).length !== 2) throw new Error(`the anchor of the control «${what}» is not in the source once`); return src.replace(from, to); };
@@ -440,6 +441,22 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
       "  if (raised) return null;\n  dialog.innerHTML = name;\n  const err = mk('div', 'vault-secret-error'); err.setAttribute('role', 'status');\n  const runNote = mk('div', 'vault-file-run-note'); runNote.setAttribute('role', 'status'); runNote.hidden = true;\n  const sayFit", 'the replace dialog writing the name as HTML')));
     ok(rlHtml.html.includes(MARK), 'red control: «the replace dialog writes the name as HTML» is RED', rlHtml.html);
     ok(/h3\.textContent = title;/.test(fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8')), 'the shell draws a dialog\'s title as TEXT (utils buildShell: h3.textContent = title) — the name the replace dialog hands it is never HTML');
+    // U1c (主开发 r4774 B): «Remove them…» — 验证是你 FIRST when the page has no window, then a confirm that lists sizes and dates
+    // ONLY and says once that it cannot be undone, then ONE POST with the page's window; nothing is sent when either is refused
+    {
+      const kept = { count: 2, files: [{ size: 30, at: 1700000000000 }, { size: 2048, at: 1700000100000 }] };
+      const seen = { askPw: 0, confirm: null, posts: [], refreshed: 0 };
+      globalThis.__vfr = { toast: (m) => toasts.push(m), leftMs: () => 0, askPw: async () => { seen.askPw++; return false; }, confirm: async (o) => { seen.confirm = o; return true; }, headers: () => ({ 'X-Vault-Page': 'pg' }), fetch: async (u, o) => { seen.posts.push({ u, o }); return { ok: true, removed: 2, left: 0, leftMs: 1000 }; } };
+      const r0 = await REAL.removeKeptFiles(kept, { refresh: () => seen.refreshed++ });
+      ok(r0 === false && seen.askPw === 1 && seen.confirm === null && seen.posts.length === 0, 'U1c: «Remove them…» asks 验证是你 FIRST when the page has no window — refused, nothing confirmed, nothing sent', seen);
+      globalThis.__vfr.askPw = async () => { seen.askPw++; return true; };
+      const r1 = await REAL.removeKeptFiles(kept, { refresh: () => seen.refreshed++ });
+      const items = (seen.confirm && seen.confirm.items) || [];
+      ok(r1 === true && items.length === 2 && items.every((x) => /bytes|KB/.test(x) && /at 17/.test(x)) && /cannot be undone/.test((seen.confirm && seen.confirm.message) || '') && seen.posts.length === 1 && seen.posts[0].u === '/api/vault/files/kept/remove' && seen.posts[0].o.headers['X-Vault-Page'] === 'pg' && seen.refreshed === 1,
+        'U1c: then a confirm that lists each file\'s size and date ONLY and says once that removal cannot be undone; ONE POST with the page\'s window; the window refreshed', { items, message: seen.confirm && seen.confirm.message, posts: seen.posts.map((p) => p.u) });
+      ok(REAL.keptLineWords(2).startsWith('2 sealed files are kept') && /Put the right vault record back to open them, or remove them\.$/.test(REAL.keptLineWords(2)) && /open it, or remove it\.$/.test(REAL.keptLineWords(1)),
+        'U1c: the line names the gentler road FIRST — «Put the right vault record back to open them, or remove them»', REAL.keptLineWords(2));
+    }
   } finally {
     for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }
     URL.createObjectURL = keepURL.create; URL.revokeObjectURL = keepURL.revoke;
@@ -448,6 +465,27 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
   const FRS = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8'), VWS = fs.readFileSync(path.join(REPO, 'src/lib/vault-window.js'), 'utf8');
   ok(FRS.includes("asks for the second password unless this page verified it in the last 5 minutes") && /if \(!row\.file\) meta\.push\(kindWord\(row\.kind\)\);/.test(VWS),
     '(a) the Download door says it asks for the second password unless this page verified it in the last 5 minutes; (e) a file row\'s kind is said once, on its file line');
+}
+
+console.log('㉓ THE KEPT FILES\' DOOR (lane lg-vault-file, B-0830 U1c, 主开发 r4774 B): the list says them — a count, sizes, dates, never an id; the removal only inside the window');
+{
+  const d = path.join(ROOT, 'file-kept'); fs.mkdirSync(d, { recursive: true });
+  const mk = () => VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, register: false });
+  const v0 = mk(); await v0.setup(PW); await v0.filesSettled(); v0.close();
+  fs.mkdirSync(path.join(d, 'vault-files'), { recursive: true });
+  const planted = path.join(d, 'vault-files', '00000000c1.vfile'); fs.writeFileSync(planted, Buffer.alloc(40, 3));   // a sealed file the record does not name
+  const v = mk(); await v.unlock(PW); await v.filesSettled();
+  const VCm = require(path.join(REPO, 'src/server/vault-contents.js'));
+  const c = VCm.create({ vault: v, sources: { secrets: () => VCm.secretSource({ vault: v }) } });
+  const l = c.list();
+  ok(l.kept && l.kept.count === 1 && l.kept.files.length === 1 && l.kept.files[0].size === 40 && l.kept.files[0].at > 0 && !JSON.stringify(l).includes('00000000c1'),
+    'the contents list carries the kept files\' line — the count, the size, the date; never the id', l.kept);
+  const no = await c.removeKept('owner', null);
+  ok(!no.ok && no.code === 'reveal_needs_password' && fs.existsSync(planted), 'the removal WITHOUT the window (验证是你) ⇒ reveal_needs_password — the file stays', no);
+  const w = await c.startReveal('owner', PW);
+  const yes = await c.removeKept('owner', w.page);
+  ok(yes.ok && yes.removed === 1 && yes.left === 0 && !fs.existsSync(planted) && !('kept' in c.list()), 'inside the window ⇒ the hub removes it and the line goes (the list carries no kept facts)', yes);
+  v.close();
 }
 
 console.warn = warn0;

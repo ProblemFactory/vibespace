@@ -1218,19 +1218,24 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         const planted = path.join(dm, 'vault-files', '0000000001.vfile'); fs.writeFileSync(planted, 'a kept file at the counter'); const keep = fs.readFileSync(planted);
         const keepReaddir = fspm.readdir, keepLstat = fspm.lstat; let listing = 0, look = 0;
         fspm.readdir = async function (p, ...a) { if (String(p).endsWith(`${path.sep}vault-files`) && !listing) { listing++; throw Object.assign(new Error('EIO: placed'), { code: 'EIO' }); } return keepReaddir.call(this, p, ...a); };
-        fspm.lstat = async function (p, ...a) { const s = String(p), hit = failWhat === 'look' ? s.endsWith(`${path.sep}0000000001.vfile`) : s.endsWith(`${path.sep}vault-files`); if (hit && !look) { look++; throw Object.assign(new Error('EIO: placed'), { code: 'EIO' }); } return keepLstat.call(this, p, ...a); };
+        const lookPlant = async function (p, ...a) { const s = String(p), hit = failWhat === 'look' ? s.endsWith(`${path.sep}0000000001.vfile`) : s.endsWith(`${path.sep}vault-files`); if (hit && !look) { look++; throw Object.assign(new Error('EIO: placed'), { code: 'EIO' }); } return keepLstat.call(this, p, ...a); };
         if (store) VFSm.create = store;
         let r = null;
         try {
           const k2 = mkE(E, dm); await k2.unlock(PW); await k2.filesSettled();   // the start's listing failed: the disk's top is unknown
+          fspm.lstat = lookPlant;   // armed AFTER the start: U1c's kept list looks at each kept file there — the WRITE's look (or the folder's check) is the one it fails
           r = await k2.filePut('keyfile:0b6b7b8b9b', bin, { filename: 'b.bin', prov: 'uploaded' });
           await k2.filesSettled(); k2.close();   // the queue drained
         } finally { fspm.readdir = keepReaddir; fspm.lstat = keepLstat; VFSm.create = realC; }
         return { listing, look, code: r && r.code, untouched: fs.existsSync(planted) && fs.readFileSync(planted).equals(keep) };
       };
       const ml = await mustLeg(VE, 'look'), mf = await mustLeg(VE, 'folder');
-      ok(ml.listing === 1 && ml.look === 1 && ml.code === 'file_not_stored' && ml.untouched && mf.listing === 1 && mf.look === 1 && mf.untouched,
-        'THE MUST (r5114): a file AT the counter, the start\'s listing failed — the write\'s look failing once REFUSES (file_not_stored) and the folder\'s check failing once refuses too: the planted file\'s bytes untouched after the put and after the queue drained', { ml, mf });
+      ok(ml.listing === 1 && ml.look === 1 && ml.code === 'file_not_stored' && ml.untouched && mf.listing === 1 && mf.look === 1 && mf.code === 'file_not_stored' && mf.untouched,
+        'THE MUST (r5114): a file AT the counter, the start\'s listing failed — the write\'s look failing once REFUSES (file_not_stored) and the folder\'s check failing once refuses too, said in the same family (file_not_stored, r5308): the planted file\'s bytes untouched after the put and after the queue drained', { ml, mf });
+      const oldDir = MO.load('src/server/vault-files.js', anchored(SFo, "    try { await ensureDir(); } catch (e) { if (e && e.code === 'file_store_unsafe') throw e; throw err('file_look_failed', `the folder of the sealed files could not be looked at (${(e && e.code) || 'error'}) — nothing was written`); }",
+        '    await ensureDir();', 'test-vault-engine the folder check said by its errno'), 'olddir');
+      const mdr = await mustLeg(VE, 'folder', oldDir.create);
+      ok(mdr.look === 1 && mdr.code !== 'file_not_stored' && mdr.untouched, `red control: «the folder's check said by its errno» tells the person ${mdr.code}, a code of another family (r5308)`, mdr);
       const oldLook = MO.load('src/server/vault-files.js', anchored(SFo, "    let there = true;\n    try { await fsp.lstat(file); } catch (e) { if (!(e && e.code === 'ENOENT')) throw err('file_look_failed', `the place of a sealed file could not be looked at (${(e && e.code) || 'error'}) — nothing was written`); there = false; }\n    if (there) throw err('file_id_taken', 'a sealed file of that id is already kept');",
         "    if (await fsp.lstat(file).then(() => true, () => false)) throw err('file_id_taken', 'a sealed file of that id is already kept');", 'test-vault-engine the look reading any failure as absent'), 'oldlook');
       const mlr = await mustLeg(VE, 'look', oldLook.create);
@@ -1280,6 +1285,8 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         await k2.filePut('keyfile:0a7a8a9a0a', bin, { filename: 'g.bin', prov: 'uploaded' }); const id = k2.fileOf('keyfile:0a7a8a9a0a').id; k2.close();
         return { id };
       };
+      const bk0 = await brokenLeg(VE);
+      ok(bk0.id === '000000000d', `a BROKEN counter with a file met on disk at 000000000c mints one past it (${bk0.id}) — the red control below runs this same scene (主开发 r5308)`, bk0);
       const bk = await brokenLeg(noTop);
       ok(bk.id !== '000000000d', `red control: «the disk's top cut» mints below a file the start met (${bk.id}) — the step past it is all that is left`, bk);
       {
@@ -1290,6 +1297,48 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         const before = (recOf(dp).filesDropped || []).includes('0000000005');
         await k2.filePut('keyfile:0b7b8b9b0b', bin, { filename: 'h.bin', prov: 'uploaded' }); await k2.filesSettled(); k2.close();   // the next record write
         ok(before && !(recOf(dp).filesDropped || []).includes('0000000005'), 'a listed id whose file a start finds NOT THERE by its name leaves the list at the next record write', recOf(dp).filesDropped);
+      }
+      // U1c (主开发 r4774 B): THE KEPT FILES' DOOR — what a start keeps (r4625) is said as a count, sizes and dates (never an id);
+      // the owner's removal shreds exactly those, each asked again at its own turn; a locked vault refuses by name; a lock in the
+      // middle stops the walk (its red: a removal that does not ask again)
+      {
+        const plant = (d, id, n) => fs.writeFileSync(path.join(d, 'vault-files', `${id}.vfile`), Buffer.alloc(n, 7));
+        const vfile = (d, id) => fs.existsSync(path.join(d, 'vault-files', `${id}.vfile`));
+        const keptScene = async (name, ids, sizes) => {
+          const d = path.join(ROOT, `file-kept-${name}-${Math.random().toString(16).slice(2, 8)}`); fs.mkdirSync(d, { recursive: true });
+          const k = mkE(VE, d); await k.setup(PW, {});
+          await k.filePut('keyfile:0c7c8c9c0c', bin, { filename: 'named.bin', prov: 'uploaded' }); await k.filesSettled(); k.close();   // 0000000000, NAMED
+          ids.forEach((id, n) => plant(d, id, sizes[n]));
+          return d;
+        };
+        const auditOf = (d) => { try { return fs.readFileSync(path.join(d, 'vault-audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+        const d1 = await keptScene('list', ['00000000a1', '00000000a2'], [30, 50]);
+        const k1 = mkE(VE, d1); await k1.filesSettled();   // LOCKED: the start's sweep keeps and lists them all the same
+        const f1 = k1.keptFacts();
+        ok(f1.count === 2 && f1.files.map((f) => f.size).sort((a, b) => a - b).join() === '30,50' && f1.files.every((f) => Object.keys(f).sort().join() === 'at,size' && f.at > 0),
+          'U1c: a start KEEPS the two sealed files the record does not name and says them as a count, each a size and a date — never an id; the named file is not among them', JSON.stringify(f1));
+        const r1 = await k1.keptRemove({ who: 'test' });
+        ok(r1.ok === false && /vault_locked$/.test(String(r1.code)) && vfile(d1, '00000000a1') && vfile(d1, '00000000a2'), 'U1c: a LOCKED vault refuses the removal by name (the engine\'s own locked code, key-unreadable:vault_locked) — both files stay', JSON.stringify(r1));
+        await k1.unlock(PW);
+        const r2 = await k1.keptRemove({ who: 'test', ip: '127.0.0.1' });
+        const au = auditOf(d1).filter((l) => l.event === 'vault-files-kept-removed');
+        ok(r2.ok && r2.removed === 2 && r2.left === 0 && !vfile(d1, '00000000a1') && !vfile(d1, '00000000a2') && vfile(d1, '0000000000') && k1.keptFacts().count === 0 && au.length === 1 && au[0].removed === 2,
+          'U1c: unlocked, the owner\'s removal shreds EXACTLY the two kept files — the named file stays, the line\'s count is 0, ONE audit line with the count', JSON.stringify({ r2, au, facts: k1.keptFacts() }));
+        k1.close();
+        const lockLeg = async (E) => {
+          const d = await keptScene('lock', ['00000000b1', '00000000b2', '00000000b3'], [20, 20, 20]);
+          let eng = null, seen = 0;
+          VFSm.create = (o) => { const st = realC(o); return { ...st, shredKept: async (...a) => { const g = await st.shredKept(...a); if (++seen === 1 && eng) eng.lock('test'); return g; } }; };
+          let r = null;
+          try { eng = mkE(E, d); await eng.unlock(PW); await eng.filesSettled(); r = await eng.keptRemove({ who: 'test' }); await eng.filesSettled(); eng.close(); }
+          finally { VFSm.create = realC; }
+          return { r, seen, left: ['00000000b1', '00000000b2', '00000000b3'].filter((id) => vfile(d, id)).length };
+        };
+        const lk = await lockLeg(VE);
+        ok(lk.r && lk.r.ok && lk.r.removed === 1 && lk.left === 2, 'U1c: a LOCK in the middle of the removal stops the walk — the first file shredded, the two after it stay (each asked again at its own turn)', JSON.stringify(lk));
+        const noReask = MO.load('src/server/vault-engine.js', anchored(ESo, "    const keep = (id) => state() !== 'unlocked' || !record || !!recordBad || fileLive(id);", '    const keep = (id) => fileLive(id);', 'test-vault-engine the removal that does not ask again'), 'noreask');
+        const lkr = await lockLeg(noReask);
+        ok(lkr.left === 0, 'red control: «a removal that does not ask again» goes on past the lock and shreds all three', JSON.stringify(lkr));
       }
     }
   }
@@ -1449,7 +1498,7 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
       ok(em && em.stored, 'MUTANT «the state asked, not the epoch»: the patch hits once and the leg goes RED — the put that was in flight across the lock landed', em);
       const one = await oneLeg(realCreate);
       ok(one === 1, `round 3: ONE sealed-file operation at a time — 8 writes and 8 reads at once never open two files of data/vault-files together (most ${one})`, one);
-      const mQ = patch('src/server/vault-files.js', SF3, 'write: one(write), read: one(read), shred: one(shred), has: one(has), sweep };', 'write, read, shred, has, sweep };', 'noqueue');   // stale-pins: kept (the replacement IS the round-2 store, unqueued)
+      const mQ = patch('src/server/vault-files.js', SF3, 'write: one(write), read: one(read), shred: one(shred), has: one(has), sweep, keptList, shredKept: one(shredKept) };', 'write, read, shred, has, sweep, keptList, shredKept };', 'noqueue');   // stale-pins: kept (the replacement IS the round-2 store, unqueued)
       const qm = mQ ? await oneLeg(mQ.create) : null;
       ok(qm != null && qm > 1, `MUTANT «the store's operations unqueued»: the patch hits once and the leg goes RED — ${qm} opens in flight together`, qm);
       // ROUND 4 (the third read: one HUNG operation held the queue for ever — every put unanswered, its bytes and its key in memory):

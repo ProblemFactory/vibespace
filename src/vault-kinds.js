@@ -151,7 +151,8 @@ const FAMILIES = Object.freeze([
       use: { route: 'POST /api/agent/vault/run' }, delete: { method: 'DELETE', path: '/api/vault/files/' }, cli: { bin: 'vibespace-vault', verbs: ['run'] },
       route: ['POST /api/vault/files', 'POST /api/vault/files/:id/replace', 'DELETE /api/vault/files/:id', 'POST /api/vault/reveal'], words: WORDS(['request']), doc: '**Files in the vault' },
     // r5043 (f): the KEPT-FILE door (unit U1c: a sealed file the vault's record does NOT name) is no surface of this kind — a kept file
-    // is no entry (no row, no id the window lists); its one line and its «Remove them…» live in the Vault window's head, a unit of its own
+    // is no entry (no row, no id the window lists); its one line and its «Remove them…» stand at the top of the Vault window's list
+    // (U1c: POST /api/vault/files/kept/remove, inside the page's 验证是你 window — not a route of this kind)
     deferred: { request: { lane: 'lg-vault-file', backlog: 'B-0830', why: 'unit U2: an agent asks the owner for a file (request --file)' } } }),
   fam({ id: 'sealed-file-key', label: 'A sealed file\'s key', category: 'other', stores: ['secrets'], entryRe: /^file:/, sample: 'file:census',
     surfaces: { request: NONE('VibeSpace makes it when it seals the file'), list: true, row: 'base', add: NONE('VibeSpace makes it when it seals the file'), reveal: false, use: SYSTEM('VibeSpace opens the file with it'),

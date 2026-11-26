@@ -73,7 +73,9 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     const inv = VI.inventoryOf(listed, { uses });
     if (typeof runFacts === 'function') inv.rows = inv.rows.map((r) => { let run = null; try { run = runFacts(r); } catch { run = null; } return run ? { ...r, run } : r; });   // lane vault-run-door: the row's switch
     if (typeof jobFacts === 'function') inv.rows = inv.rows.map((r) => { let jobs = null; try { jobs = jobFacts(r); } catch { jobs = null; } return Array.isArray(jobs) && jobs.length ? { ...r, jobs } : r; });   // lane vault-job-approval: its jobs' chips (each with its ✕)
-    return { ok: true, state, ...inv };
+    // U1c (主开发 r4774 B): the sealed files the record does not name — their count, sizes and dates (never an id): the window's one line
+    const kept = typeof vault.keptFacts === 'function' ? vault.keptFacts() : null;
+    return { ok: true, state, ...inv, ...(kept && kept.count > 0 ? { kept } : {}) };
   }
 
   /** 「验证是你」: the second password again ⇒ a 5-minute window for THIS page (its secret is in the answer, once). */
@@ -152,6 +154,16 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
     return { ok: true, leftMs: v.leftMs };
   }
 
+  /** U1c (主开发 r4774 B): THE OWNER's REMOVAL of the sealed files the record does not name — inside this page's window (the
+   *  second password: 验证是你), paced as a reveal; the engine asks each file again at its own turn and writes the audit line. */
+  async function removeKept(who, page, { ip = null } = {}) {
+    if (typeof vault.keptRemove !== 'function') return { ok: false, code: 'not_found' };
+    const v = door(who, page, ip);
+    if (!v.ok) return v;
+    const r = await vault.keptRemove({ who: whoOf(who), ip });
+    return r && r.ok ? { ...r, leftMs: v.leftMs } : r;
+  }
+
   /** 「隐藏全部」 / the window closed: this page's window ends now. */
   function endReveal(who, page) {
     const p = pageOf(page);
@@ -162,7 +174,7 @@ function create({ vault, sources = {}, now = () => Date.now(), mono = () => perf
   // use; this forgets it at once — the census over the engine's onLock subscribers counts this one)
   if (typeof vault.onLock === 'function') vault.onLock(() => { windows.clear(); });
 
-  return { list, windowFacts, startReveal, reveal, revealRecord, endReveal, _windows: windows };
+  return { list, windowFacts, startReveal, reveal, revealRecord, removeKept, endReveal, _windows: windows };
 }
 
 /** «Hub secrets» (int317): the engine's OWN secret entries as a source — `vaultRows` = their names and dates

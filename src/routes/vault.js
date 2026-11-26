@@ -269,6 +269,9 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     app.post('/api/vault/reveal-session', person((req) => { const [pw] = take(req, 'password'); return contents.startReveal(whoOf(req), pw, { ip: ipOf(req) }); }));
     app.post('/api/vault/reveal', person((req) => { const [page] = take(req, 'page'); return contents.reveal(whoOf(req), page, req.body && req.body.id, { ip: ipOf(req) }); }));
     app.post('/api/vault/reveal-end', person((req) => { const [page] = take(req, 'page'); return contents.endReveal(whoOf(req), page); }));
+    // U1c (lane lg-vault-file, B-0830, 主开发 r4774 B): the OWNER's removal of the sealed files the record does not name — inside
+    // this page's window (验证是你), a person only; never automatic, never an agent (human_only like every contents door)
+    app.post('/api/vault/files/kept/remove', person((req) => contents.removeKept(whoOf(req), pageHeader(req), { ip: ipOf(req) })));   // the page's window rides X-Vault-Page (revealHeaders)
   }
   // ── TWO-STEP CODES (design q-047 L1, lane vault-totp — src/server/vault-totp.js over PURE src/totp.js). PEOPLE: the list
   //    (names + grants), 添加 (an otpauth:// link or the seed — taken off the body; `preview` = the code it makes, nothing

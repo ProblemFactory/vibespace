@@ -63,7 +63,8 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
    *  any failure. The order is the crash proof: the temp file written and synced, renamed, the folder synced. */
   async function write(id, key, bytes) {
     const file = fileOf(id);
-    await ensureDir();
+    // 主开发 r5308 (should): the folder's own check failing (mkdir / lstat) is the look's family — said as file_not_stored, never an errno code
+    try { await ensureDir(); } catch (e) { if (e && e.code === 'file_store_unsafe') throw e; throw err('file_look_failed', `the folder of the sealed files could not be looked at (${(e && e.code) || 'error'}) — nothing was written`); }
     // 主开发 r4625 (the MUST): a sealed file the record says nothing of is KEPT — an id whose file is already on disk is never written over
     // 主开发 r5114 (THE MUST): the placement is EXCLUSIVE — only «not there» (ENOENT) is absent; any other answer of the look REFUSES (a
     // kept file at the counter is never written over by the rename below; the store's one queue puts no writer between the look and it)
@@ -78,7 +79,7 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
     const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
     const fh = await fsp.open(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
     try { await fh.writeFile(out); try { await fh.sync(); } catch { /* best effort */ } } catch (e) { await fh.close().catch(said('a failed temp file could not be closed')); await fsp.unlink(tmp).catch(() => {}); throw e; }
-    await fh.close();
+    try { await fh.close(); } catch (e) { await fsp.unlink(tmp).catch(() => {}); throw e; }   // 主开发 r5308 (should): a close that throws leaves no temp behind
     try { await fsp.rename(tmp, file); } catch (e) { await fsp.unlink(tmp).catch(() => {}); throw e; }
     try { const d = await fsp.open(DIR, 'r'); try { await d.sync(); } finally { await d.close(); } } catch (e) { said('the folder sync (best effort) failed')(e); }
     return crypto.createHash('sha256').update(bytes).digest('hex');
@@ -173,6 +174,34 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
     if (m && (isLive(m[1]) || !isDropped(m[1]))) return false;
     return shredPath(path.join(DIR, name));
   }
+  /** THE KEPT FILES (U1c, 主开发 r4774 B): the sealed files no entry names and no list drops — the ones the start's sweep KEEPS
+   *  (r4625) — each with its id (the hub's own, never on the wire), its size and its date. One listing, then one look per file,
+   *  each its own queued turn. → (a promise of) [{ id, size, at }] ([] when the folder is not there), or null when the folder
+   *  could not be listed (the line then says nothing rather than a wrong count) */
+  async function keptList(live, { dropped = () => false } = {}) {
+    const isLive = typeof live === 'function' ? live : (id) => !!(live && live.has(id));
+    const isDropped = typeof dropped === 'function' ? dropped : (id) => !!(dropped && dropped.has(id));
+    let names;
+    try { names = await listQ(); } catch (e) { return e && e.code === 'ENOENT' ? [] : null; }
+    const out = [];
+    for (const name of names) {
+      const m = VFILE_RE.exec(name);
+      if (!m || isLive(m[1]) || isDropped(m[1])) continue;
+      let st = null;
+      try { st = await lookQ(name); } catch { st = null; }   // gone meanwhile, or not answering: not listed (the next listing says it)
+      if (st && st.isFile()) out.push({ id: m[1], size: st.size, at: Math.round(st.mtimeMs) });
+    }
+    return out;
+  }
+  /** ONE kept file removed by the OWNER's act (U1c): asked again at its OWN turn — `keep(id)` true (the record in force names it
+   *  now, a put holds it, the vault locked meanwhile) or the list now dropping it ⇒ left as it is — then shredded.
+   *  → 'gone' | 'kept' | false (the shred failed: it stays, and stays counted) */
+  async function shredKept(id, keep, isDropped = () => false) {
+    if (!VF.ID_RE.test(String(id))) return false;
+    if (keep(id) || isDropped(id)) return 'kept';
+    const g = await shredPath(fileOf(id));
+    return g === true || g === 'absent' ? 'gone' : false;
+  }
   // ONE AT A TIME (round 3): each public operation waits for the one before it; the sweep's own shreds run inside its turn.
   // BOUNDED (round 4): past opMs it is answered files_stuck and the store refuses everything until that operation settles
   let tail = Promise.resolve(), stuck = null;
@@ -192,8 +221,8 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
     tail = p.then(() => {}, () => {});
     return p;
   };
-  const listQ = one(() => fsp.readdir(DIR)), sweepOneQ = one(sweepOne);
-  return { dir: DIR, mintId, mintKey, write: one(write), read: one(read), shred: one(shred), has: one(has), sweep };
+  const listQ = one(() => fsp.readdir(DIR)), sweepOneQ = one(sweepOne), lookQ = one((name) => fsp.lstat(path.join(DIR, name)));
+  return { dir: DIR, mintId, mintKey, write: one(write), read: one(read), shred: one(shred), has: one(has), sweep, keptList, shredKept: one(shredKept) };
 }
 
 module.exports = { create, MAGIC };
