@@ -192,6 +192,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   const armFailSaid = new Map();
   // 2026-09-27 BROWSER SESSIONS: scope → markers (loaded lazily from sessions.ndjson, appended in memory), and the OPEN
   // session per (browser key, scope) — loaded from disk once (a start with no end) before the first event decides anything
+  const markersFailed = new Map();   // r4739 (the smaller shape): scope → the code its session list's read FAILED with — held until the next start
   const markersBy = new Map();
   const openSessions = new Map();
   let openLoaded = false;
@@ -240,24 +241,33 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
    *  every rewrite, and the scope is swept by its readable lines (bounded again; nothing a later reader could use is lost). Only a read
    *  that FAILED (a code) or stayed silent holds a scope — the store-read law. */
   const noteRead = (scope, raw, code) => { if (raw.length) tornRaw.set(scope, raw); else tornRaw.delete(scope); if (code) readState.set(scope, { torn: raw.length, code }); else readState.delete(scope); };
-  /** r4522: a file read off the loop, bounded: {text} | {text: null} (no file) | {text: null, code} (a failed read) | {silent: true}. */
+  /** r4522: a file read off the loop, bounded: {text} | {text: null} (no file) | {text: null, code} (a failed read) | {silent: true}.
+   *  r4739 (the hung-mount class): a read that went SILENT stays in the thread pool until it settles — that file is never asked again
+   *  meanwhile (it answers silent at once, its scope held): at most ONE outstanding read of a silent file; when it settles, a pass may ask. */
+  const outstanding = new Map();   // file → its silent read, not settled yet
   async function boundRead(file) {
+    if (outstanding.has(file)) return { silent: true, outstanding: true };
     let to = null;
+    const read = fs.promises.readFile(file, 'utf8').then((text) => ({ text }), (e) => ({ text: null, code: e && e.code === 'ENOENT' ? null : ((e && e.code) || 'EIO') }));
     const bound = new Promise((res) => { to = setTimeout(() => res({ silent: true }), sweepReadBoundMs); if (to.unref) to.unref(); });
-    try { return await Promise.race([fs.promises.readFile(file, 'utf8').then((text) => ({ text }), (e) => ({ text: null, code: e && e.code === 'ENOENT' ? null : ((e && e.code) || 'EIO') })), bound]); }
-    finally { clearTimeout(to); }
+    try {
+      const r = await Promise.race([read, bound]);
+      if (r.silent) { outstanding.set(file, read); read.then(() => { if (outstanding.get(file) === read) outstanding.delete(file); }); }
+      return r;
+    } finally { clearTimeout(to); }
   }
   /** r4522: a scope's FIRST index read for the sweep — async, parsed in slices into the SAME cache loadIndex fills (a road that read it
-   *  meanwhile stands). null: no reading (the bound passed) — not cached, the next pass reads again. */
+   *  meanwhile stands: an append or a replace reads the index itself first, so it is in that reading). null: no reading (the bound
+   *  passed) — not cached, a later pass may read again (one outstanding read a file). r4739 (the smaller shape): a reading that FAILED
+   *  (a code) is cached like any other and STANDS UNTIL THE NEXT START — its scope held every pass, never read again inside a running hub
+   *  (a re-read could replace a list an append or a replace changed meanwhile). */
   async function loadIndexAsync(scope, step) {
-    const was = indexes.get(scope);   // r4703: a standing reading that FAILED (a code) is asked again each pass — that pass held, never every pass after
-    if (was && !readState.has(scope)) return was;
-    const fresh = () => indexes.has(scope) && indexes.get(scope) !== was;   // a road that read it meanwhile stands
+    if (indexes.has(scope)) return indexes.get(scope);
     const r = await boundRead(path.join(scopeDir(scope), INDEX_FILE));
-    if (fresh()) return indexes.get(scope);
+    if (indexes.has(scope)) return indexes.get(scope);
     if (r.silent) { readState.set(scope, { torn: 0, code: 'silent' }); return null; }
     const out = [], pos = new Map(), raw = [];
-    if (r.text != null) { for (const line of r.text.split('\n')) { if (parseIndexLine(scope, line, out, pos)) raw.push(line); await step('read', scope); if (fresh()) return indexes.get(scope); } }
+    if (r.text != null) { for (const line of r.text.split('\n')) { if (parseIndexLine(scope, line, out, pos)) raw.push(line); await step('read', scope); if (indexes.has(scope)) return indexes.get(scope); } }
     noteRead(scope, raw, r.code || null);
     indexes.set(scope, out);
     return out;
@@ -334,7 +344,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     try {
       const text = fs.readFileSync(path.join(scopeDir(scope), BS.MARKERS_FILE), 'utf8');
       for (const line of text.split('\n')) { if (!line.trim()) continue; try { const m = JSON.parse(line); if (BS.isMarker(m)) out.push(m); } catch { /* a torn line is skipped */ } }
-    } catch { /* no markers yet */ }
+    } catch (e) { if (e && e.code !== 'ENOENT') markersFailed.set(scope, (e && e.code) || 'EIO'); /* ENOENT: no markers yet — r4739: a FAILED read holds the scope's sweep until the next start (never read as none) */ }
     markersBy.set(scope, out);
     return out;
   }
@@ -888,13 +898,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   }
   let sweepHeldSaid = false;
   /** r4522 (B-360d): the markers' first read for the sweep, async (the same cache loadMarkers fills). → {list} | {hold: code} — r4703: a
-   *  markers read that FAILED or stayed silent is never read as none: the scope is held as for its index. */
+   *  markers read that FAILED or stayed silent is never read as none: the scope is held as for its index; r4739: a FAILED one (either
+   *  road) until the next start. */
   async function loadMarkersAsync(scope, step) {
+    if (markersFailed.has(scope)) return { hold: markersFailed.get(scope) };
     if (markersBy.has(scope)) return { list: markersBy.get(scope) };
     const r = await boundRead(path.join(scopeDir(scope), BS.MARKERS_FILE));
     if (markersBy.has(scope)) return { list: markersBy.get(scope) };
     if (r.silent) return { hold: 'silent' };
-    if (r.code) return { hold: r.code };
+    if (r.code) { markersFailed.set(scope, r.code); return { hold: r.code }; }
     const out = [];
     if (r.text != null) for (const line of r.text.split('\n')) { if (line.trim()) { try { const m = JSON.parse(line); if (BS.isMarker(m)) out.push(m); } catch { /* a torn marker line is skipped (no marker is ever rewritten) */ } } await step('read', scope); if (markersBy.has(scope)) return { list: markersBy.get(scope) }; }
     markersBy.set(scope, out);
@@ -935,7 +947,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     let stopped = null;
     for (const sc of names) {
       const entries = await loadIndexAsync(sc, step);
-      const mk = entries ? await loadMarkersAsync(sc, step) : null;
+      const mk = entries && !readState.has(sc) ? await loadMarkersAsync(sc, step) : null;   // r4739: an index that could not be read — its session list is not asked
       const rs = readState.get(sc), code = rs ? rs.code : !entries ? 'silent' : mk && mk.hold ? mk.hold : null;
       if (code) { held.set(sc, code); if (code === 'silent') { stopped = 'silent'; break; } continue; }   // r4703: the FIRST silent read stops the pass — the mount does not answer; no more of its reads are asked
       planned.push(await scopeForPlanSliced(sc, entries, mk.list, step));
@@ -967,7 +979,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       const rp = RR.recordingRetentionPlan({ groups: [{ key: pid, entries: files }], now: t });
       for (const r of rp.remove) { try { await fs.promises.unlink(path.join(recRoot, pid, r.id)); recRemoved.push({ profileId: pid, file: r.id, why: r.why, bytes: r.bytes }); } catch { /* */ } }
     }
-    if (held.size) { const codes = {}; for (const c of held.values()) codes[c] = (codes[c] || 0) + 1; log.warn?.(`[browser-trace] sweep: ${held.size} scope(s) not swept this pass — their action index or session list could not be read (${Object.entries(codes).map(([c, n]) => `${c} ×${n}`).join(', ')}); nothing of theirs removed${stopped ? ' — the pass STOPPED at a read that did not answer (the data folder may be hung); the next pass asks again' : ''}`); }
+    if (held.size) { const codes = {}; for (const c of held.values()) codes[c] = (codes[c] || 0) + 1; log.warn?.(`[browser-trace] sweep: ${held.size} scope(s) not swept this pass — their action index or session list could not be read (${Object.entries(codes).map(([c, n]) => `${c} ×${n}`).join(', ')}); nothing of theirs removed${Object.keys(codes).some((c) => c !== 'silent') ? ' — a read that FAILED is asked again only at the next start' : ''}${stopped ? ' — the pass STOPPED at a read that did not answer (the data folder may be hung); a later pass asks again once that read has settled' : ''}`); }
     const framesRemoved = plan.removeFrames.length;
     lastSweep = { at: t, removed: framesRemoved, framesRemoved, bytesRemoved: plan.bytesRemoved, limit, ...(unread ? { held: true } : {}), recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((n, r) => n + r.bytes, 0), kept: plan.kept, scopesHeld: held.size /* r4522 (B-360d): the scopes not swept this pass (an index or a session list that could not be read) — its own name: `held` is the settings' hold (B-50e7) */, ...(stopped ? { stopped } : {}) };
     if (framesRemoved || recRemoved.length) log.log?.(`[browser-trace] sweep: the frames of ${framesRemoved} action(s) (${Math.round(plan.bytesRemoved / 1024)} KB) + ${recRemoved.length} recording(s) removed — ${[...plan.removeFrames, ...recRemoved].slice(0, 3).map((r) => r.why).join('; ')}${framesRemoved + recRemoved.length > 3 ? '; …' : ''} (every action list kept)`);
@@ -1282,7 +1294,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   return {
     enabled, traceHeld /* r3941 (3) */, settingsLifted /* r3941 (2) */, watch, unwatch, watchHuman, unwatchHuman, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
     maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown, inFlightFor,
-    traceRoot, recRoot, forgottenFile, abBase, sweepRunningSince, sweepPressBound /* r4703: the sweep-now route's «still running» */, _appendIndex: appendIndex /* r4522 (B-360d): the suite's seam — an action's own append road (appendIndex), asked while a sweep is held */, _forgottenHold: fgHold /* r3008: a suite asks its read again (the ladder's try, never a clock) */, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
+    traceRoot, recRoot, forgottenFile, abBase, sweepRunningSince, sweepPressBound /* r4703: the sweep-now route's «still running» */, _replaceIndex: replaceIndex /* r4739: the suite's seam for a replace */, _appendIndex: appendIndex /* r4522 (B-360d): the suite's seam — an action's own append road (appendIndex), asked while a sweep is held */, _forgottenHold: fgHold /* r3008: a suite asks its read again (the ladder's try, never a clock) */, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
   };
 }
 
