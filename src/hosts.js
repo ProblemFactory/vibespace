@@ -2433,11 +2433,29 @@ class HostManager {
       fs.writeFileSync(path.join(stage, 'token'), String(hostToken), { mode: 0o600 });
       if (rel.signed) fs.writeFileSync(path.join(stage, 'agentd.manifest.json'), JSON.stringify(rel.manifest));
       // B-323e (lane bl-keys-misc, 主开发 r1351): the tar is ASYNC — it was a SYNCHRONOUS start (up to 15 s held) redone on every connect
-      // while an install keeps failing (connects come from polls); its bytes cannot cross the starter's line pipe: a direct start, a
-      // TIMER debt row of the start census (scripts/start-triggers.mjs)
-      const tar = await new Promise((resolve, reject) => execFile('tar', ['-c', '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])], { env: serviceEnv(process.env), timeout: 15000, maxBuffer: 32 * 1024 * 1024, encoding: 'buffer' }, (e, out) => (e ? reject(e) : resolve(out))));   // r1381 (1): the service env, never the hub's whole one
+      // while an install keeps failing (connects come from polls). B-323e's remainder (lane nl-starts): it rides the hub's STARTER — its
+      // bytes cannot cross the starter's line pipe, so the archive is written into its own stage folder (`-f`, the same members) and read
+      // back here, off the loop: the same bound (15 s), the same cap (32 MiB), the service env (r1381 (1)). THE ARCHIVE HOLDS THE HOST'S
+      // TOKEN (主开发 r4910): it is born inside the stage mkdtemp made (0700 — no other user reaches it there) and is made 0600 before it is
+      // read back; its SIZE is asked first — past the bound it is refused by name and never read into memory; the stage (the token, the
+      // archive) is removed on every road (a failed tar, a failed read-back, a failed or finished ssh — the catch below; a hub that ends
+      // between leaves it to the OS's own temp cleaning: nothing of ours sweeps vs-agentd-stage-, src/temp-sweepers.js). Every failure
+      // fails the install BY NAME — a tar with no reply or that failed in execFile's words («Command failed: tar …» + what it said, the
+      // starter's silence as itself), a read-back that failed or an empty archive as theirs — never «nothing to install»
+      const tarFile = path.join(stage, 'bundle.tar'), tarArgs = ['-c', '-f', tarFile, '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])];
+      const tr = await require('./server/child-starter').childStarter().run('tar', tarArgs, { timeoutMs: 15000, capture: true, maxBuffer: 64 * 1024, envAdd: {} });
+      if (!tr || tr.unknown || tr.timedOut || tr.overflow || tr.started === false || tr.code !== 0) {
+        const said = !tr || tr.unknown ? 'the starter gave no answer' : tr.timedOut ? 'no answer in 15000 ms' : tr.started === false ? `spawn tar ${tr.error || 'failed'}` : tr.overflow ? 'its output passed 64 KiB' : (String(tr.stderr || '').trim() || (tr.code == null ? `ended by ${tr.signal || 'a signal'}` : `exit ${tr.code}`));
+        throw Object.assign(new Error(`Command failed: tar ${tarArgs.join(' ')}\n${said}`), { code: tr && tr.started === false ? tr.error : tr ? tr.code : null });
+      }
+      let size = 0;
+      try { await fs.promises.chmod(tarFile, 0o600); size = (await fs.promises.stat(tarFile)).size; } catch (e) { throw new Error(`the agent bundle's tar could not be read back: ${(e && e.code) || (e && e.message) || e}`); }
+      if (size > 32 * 1024 * 1024) throw new RangeError(`the agent bundle's tar is ${size} bytes — past its 32 MiB bound`);   // refused unread
+      if (!size) throw new Error("the agent bundle's tar is empty");
+      let tar;
+      try { tar = await fs.promises.readFile(tarFile); } catch (e) { throw new Error(`the agent bundle's tar could not be read back: ${(e && e.code) || (e && e.message) || e}`); }
       const remote = installAgentdScript(ver, rel.signed);
-      return new Promise((resolve, reject) => {
+      return await new Promise((resolve, reject) => {   // awaited: a rejection inside reaches the catch below too (the stage removed — idempotent)
         const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remote],
           { env: this.sshEnv(), timeout: 30000 }, (err, stdout, stderr) => {
             try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}
