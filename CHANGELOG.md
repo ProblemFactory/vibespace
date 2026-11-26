@@ -16,6 +16,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace cannot read that you removed its hooks from your CLIs, it no longer puts them back; Install and Remove say so when they cannot save your choice.
 - The model menu no longer loses the models it learned when their list could not be read for a moment.
 - If VibeSpace cannot read an older mounts list while upgrading it, it keeps it and reads it again; those mounts are no longer lost.
+- A notice about a folder that stopped answering now says when it could not read who uses the folder, instead of saying that no process has a file open there.
 
 ## 2.369.421 — 2026-11-26
 
