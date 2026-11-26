@@ -388,7 +388,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     const r = jm.create(spec, USER);
     if (r.error) return res.status(400).json({ error: r.error, ...(r.code ? { code: r.code } : {}), ...(r.budget ? { budget: r.budget } : {}) });   // B-b14a: a create past the memory budget is named in the reader's language
     const reply = () => jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, job: r.job, renamed: r.renamed, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });   // lane lg-store-writes U4: the answer waits for the store, never the loop
-    jm.startAnswer(jm.jobs.get(r.job.id), pressedAt).then((sa) => (sa && sa.error ? res.status(400).json({ error: sa.error }) : reply()));
+    jm.startAnswer(jm.jobs.get(r.job.id), pressedAt).then((sa) => { if (sa && sa.error) return res.status(400).json({ error: sa.error }); const j1 = jm.jobs.get(r.job.id); if (j1) r.job = jm.snapshot(j1, { author: true }); reply(); });   // r4683 (b): the job as it is AFTER the starter answered
   });
   app.get('/api/jobs/:id', (req, res) => {
     const job = jm.jobs.get(req.params.id);

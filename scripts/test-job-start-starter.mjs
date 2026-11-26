@@ -10,9 +10,9 @@
 //      engine over the same folder adopts it by its stamp); RED a starter that holds its detached child ⇒ the wrapper dies with it
 //   ③ THE KILL LAW: a stop signals the job's own pid BY ITS STAMP — never the pid an answer named (placed: a decoy of ours under that
 //      pid); RED a stop that signals the answered pid ⇒ the decoy dies
-//   ④ A START THE STARTER CANNOT DO IS A FAILED START, SAID — never a guess, never a silent «starting»: a placed start error and a
-//      placed silence each fail the run in today's words («spawn failed: …» to the presser), the spec file gone; RED the failure's
-//      road cut ⇒ the job stays «starting»
+//   ④ A START THE STARTER CANNOT DO IS A FAILED START, SAID — never a guess, never a silent «starting»: a placed start error, a placed
+//      silence («may have started», looked at late) and no starter at all («was not started», no wait) each fail the run in words true
+//      to the case («spawn failed: …» to the presser), the spec file gone; RED the failure's road cut ⇒ the job stays «starting»
 //   ⑤ A LATE WRAPPER (its stamp appears after its start was failed — placed) is STOPPED BY ITS OWN STAMP, said; RED the late look cut
 //   ⑥ THE BOUNDED LOOK (r4591 (3)): a wrapper that wrote NO pid record within the look's bound (placed: a wrapper that exits at once)
 //      is a FAILED START, said; RED the release's gap (the look cut) ⇒ the run stays «up» with no process
@@ -20,6 +20,8 @@
 //      hourly line's vault-direct-starts); a job without values counts nothing there
 //   ⑧ THE MARK: the wrapper the starter started carries VIBESPACE_JOB_ID=<its id> in its own env, and no secret of the hub's env;
 //      RED a starter without the job's mark ⇒ the mark gone (the hub's walks would never find the job's processes)
+//   ⑨ A BOOT OVER A START NEVER ANSWERED (r4683 (d)): the next hub's boot removes that run's spec before it judges the run (off the
+//      loop) and looks at it late; RED the boot's step cut ⇒ the spec stays readable, nothing looks
 // FAST, in-process: the real engine, the real wrapper over scratch data folders, the real starter (small node children); every
 // process is this suite's own child, ended at exit by identity.
 import './scratch.mjs';
@@ -177,9 +179,10 @@ const failScene = async (Mod, tag, answer) => {
   CS.setChildStarter(fakeStarter(answer));
   const jm = engine(Mod, folder('fail-' + tag));
   const { job, a } = await made(jm, { kind: 'task', name: 'fail-' + tag, cmd: { argv: ['sleep', '30'] } });
-  await sleep(20);
   const run = lastRun(job), ctl = jm._ctlDir(job, run.startedAt);
-  let specs = []; try { specs = fs.readdirSync(ctl).filter((f) => /^spec\./.test(f)); } catch { }
+  const specsNow = () => { try { return fs.readdirSync(ctl).filter((f) => /^spec\./.test(f)); } catch { return []; } };
+  await until(() => !specsNow().length, 3000);   // its removal is OFF the loop: the wait is on the fact
+  const specs = specsNow();
   CS.setChildStarter(S);
   return { jm, job, run, a, state: job.state, cause: run.cause, specs, said: LOGS.filter((l) => l.includes(job.id) && /not started \(manual\)/.test(l)) };
 };
@@ -189,8 +192,13 @@ const failScene = async (Mod, tag, answer) => {
     '④ a placed start error: the presser answered «spawn failed: its wrapper could not be started (ENOENT)», the job failed, its run ended (start_failed), said once, its spec file gone', { a: err.a, state: err.state, cause: err.cause, specs: err.specs, said: err.said });
   err.jm.shutdown();
   const unk = await failScene(JM, 'unknown', { unknown: true });
-  ok(unk.a && /^spawn failed: the starter gave no answer within 15 s — its wrapper was not started$/.test(unk.a.error || '') && unk.state === 'failed' && !unk.specs.length && unk.said.length === 1,
-    '④ a placed silence (the starter\'s «unknown»): a failed start in the same words — never a guess, never a silent «starting»; the spec file gone (a wrapper that starts after finds none)', { a: unk.a, state: unk.state, specs: unk.specs });
+  ok(unk.a && /^spawn failed: the starter gave no answer within 15 s — its wrapper may have started: if it shows up, it is stopped by its own stamp$/.test(unk.a.error || '') && unk.state === 'failed' && !unk.specs.length && unk.said.length === 1 && unk.jm._lateStarts && unk.jm._lateStarts.size === 1,
+    '④ a placed silence (a reply lost after its bound): a failed start whose words say the TRUTH — its wrapper may have started, and if it shows up it is stopped by its own stamp (looked at late); the spec file gone (a wrapper that starts after finds none)', { a: unk.a, state: unk.state, specs: unk.specs });
+  // r4683 (a): NO STARTER AT ALL (it could not be started — the request was never sent): no wait was had and nothing started — said so
+  const nos = await failScene(JM, 'no-starter', { unknown: true, why: 'no starter' });
+  ok(nos.a && nos.a.error === 'spawn failed: the starter could not be started — its wrapper was not started' && nos.state === 'failed' && !nos.specs.length && !(nos.jm._lateStarts && nos.jm._lateStarts.size),
+    '④ no starter at all: «the starter could not be started — its wrapper was not started» (no 15 s wait was had; nothing to look at late)', { a: nos.a, state: nos.state });
+  nos.jm.shutdown();
   // ⑤ A LATE WRAPPER of that failed start: its own stamp appears in its own run folder (placed: a process of ours, its identity written as
   // the wrapper writes it) — the next sweep stops it BY THAT STAMP, said; RED the late look cut
   console.log('⑤ a wrapper that shows up after its start was failed is stopped by its own stamp');
@@ -201,12 +209,12 @@ const failScene = async (Mod, tag, answer) => {
     fs.writeFileSync(path.join(jm._ctlDir(job, run.startedAt), 'pid.json'), JSON.stringify({ ...id, startedAt: Date.now() }));
     await jm._sweep();
     const stopped = await until(() => PI.aliveIdentity(id) !== true, boundMs);   // the sweep's signal is sent in its own pass: a short bound on the red copy
-    return { stopped, said: LOGS.filter((l) => l.includes(job.id) && /stopped by its own stamp/.test(l)).length };
+    return { stopped, said: LOGS.filter((l) => l.includes(job.id) && /its wrapper started after its start was failed/.test(l)).length };   // the late look's OWN sentence (a lost reply's failure words name the stamp too)
   };
   const lt = await lateScene(unk.jm, unk.job, unk.run);
   ok(lt.stopped && lt.said === 1, '⑤ the late wrapper is stopped by its own stamp, said once', lt);
   unk.jm.shutdown();
-  const LATE = "    try { this._lateSweep(); } catch (e) { this.d.log('[jobs] the late-start look failed:', e.message); }   // B-91aa's remainder\n";
+  const LATE = "    try { await this._lateSweep(); } catch (e) { this.d.log('[jobs] the late-start look failed:', e.message); }   // B-91aa's remainder\n";
   const NoLate = MJ.load('src/jobs.js', anchored(JSRC, LATE, '', 'red-no-late-look'), 'no-late');
   const unk2 = await failScene(NoLate, 'unknown-red', { unknown: true });
   const lt2 = await lateScene(unk2.jm, unk2.job, unk2.run, 400);
@@ -281,6 +289,31 @@ console.log('⑧ the wrapper the starter started carries the job\'s mark, and no
   const red = await scene(S8, 'red');
   try { S8.closePipe(); } catch { }
   ok(red.stamped && !red.mark, 'RED (a starter without the job\'s mark): the wrapper\'s env lacks VIBESPACE_JOB_ID — the hub\'s walks would never find the job\'s processes', red);
+}
+
+// ════════ ⑨ A BOOT OVER A START NEVER ANSWERED (r4683 (d)) ════════
+console.log('⑨ a hub that ended between a start\'s ask and its answer: the next boot removes its spec before it judges the run, and looks late');
+{
+  const scene = async (Mod, tag) => {
+    CS.setChildStarter({ run: () => new Promise(() => { }), stats: () => ({}), noteDirect() { } });   // PLACED: an ask the hub never hears answered
+    const dd = folder('boot-ask-' + tag), j1 = engine(JM, dd);
+    const { r } = await (async () => { const r0 = j1.create({ kind: 'task', name: 'boot-ask-' + tag, cmd: { argv: ['sleep', '30'] }, owner: OWNER }, CALLER); return { r: r0 }; })();
+    const job = j1.jobs.get(r.job.id), run = lastRun(job), ctl = j1._ctlDir(job, run.startedAt), spec = path.join(ctl, `spec.${run.startedAt}.json`);
+    const asked = run.ask === 'asked' && fs.existsSync(spec);
+    j1.shutdown(); await until(() => !fs.existsSync(j1.lockFile), 5000);
+    CS.setChildStarter(S);
+    const j2 = engine(Mod, dd);
+    const gone = await until(() => !fs.existsSync(spec), tag === 'red' ? 500 : 3000);
+    const looked = !!(j2._lateStarts && j2._lateStarts.has(ctl));
+    j2.shutdown();
+    return { asked, gone, looked };
+  };
+  const good = await scene(JM, 'now');
+  ok(good.asked && good.gone && good.looked, '⑨ the next boot removes the spec of a start asked and never stamped BEFORE it judges the run (off the loop), and looks at that run late — no wrapper starts from it after the boot\'s read', good);
+  const BOOT = "        if (run && run.ask === 'asked' && !stamp && !this.readOnly) {";
+  const NoBoot = MJ.load('src/jobs.js', anchored(JSRC, BOOT, "        if (false) {", 'red-boot-keeps-spec'), 'boot-keeps-spec');
+  const red = await scene(NoBoot, 'red');
+  ok(red.asked && !red.gone && !red.looked, 'RED (the boot\'s step cut): the spec stays readable after the boot and nothing looks late at that run', red);
 }
 
 for (const jm of engines) { try { jm.shutdown(); } catch { } }
