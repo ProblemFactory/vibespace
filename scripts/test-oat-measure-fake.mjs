@@ -431,6 +431,9 @@ else {
   const ex = runEntry('entry-extra', 'extra');
   ok('a fake that sends one header more with the name ⇒ PASS, the header RECORDED by name «elsewhere» (read by the coordinator, never judged here)',
     !!ex.on && ex.on.verdict === 'PASS' && ex.r.status === 0 && ex.on.entry.elsewhere.some((x) => /header only with the name: x-fake-entry$/.test(x)), ex.on && ex.on.note);
+  const lost = runEntry('rewrite-launcher', 'lost');
+  ok('a pair that never reads (the launcher changed during entry-off: entry-on never starts) exits 5 «did not run» — NO exit 0 without a reading',
+    lost.r.status === 5 && /ENTRY: the entry pair did not run/.test(lost.r.stderr) && !!lost.R && !lost.on && lost.R.void === 'launcher-changed', `exit ${lost.r.status}: ${String(lost.r.stderr).slice(-300)}`);
   const ord = measure(['--claude', wrap('entry'), '--variant', 'entry-on,entry-off', '--out', path.join(tmp, 'entry-rec-order.json')]);
   let RO = null; try { RO = JSON.parse(fs.readFileSync(path.join(tmp, 'entry-rec-order.json'), 'utf8')); } catch { }
   ok('the pair runs off first whatever the order asked (entry-on is read against entry-off)', ord.status === 0 && !!RO && JSON.stringify(RO.results.map((x) => x.variant)) === '["entry-off","entry-on"]' && RO.results[1].entry.verdict === 'PASS', `exit ${ord.status}: ${RO && JSON.stringify(RO.results.map((x) => x.variant))}`);

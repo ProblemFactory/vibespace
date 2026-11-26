@@ -27,6 +27,9 @@ const VENDOR_NAMES = Object.freeze(['cli', 'mcp', 'sdk-cli', 'sdk-ts', 'sdk-py',
   'local-agent', 'local_agent', 'claude-desktop', 'claude-desktop-3p', 'claude-in-teams', 'claude_in_slack', 'claude-in-slack', 'ssh-remote',
   'claude-coworker', 'claude-coworker-terminal', 'claude-security']);
 const RESERVED = Object.freeze(['local_projects']);
+/** The resolved account kind of a third-party provider's conversation (src/server/provider-spawn.js answers { kind: 'provider' }):
+ *  its requests go to that provider's own address, not the vendor's — the owner's ask is the vendor's service (主开发 r4672 (1)). */
+const PROVIDER_KIND = 'provider';
 const NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 /** The refusal codes, in the order nameVerdict asks. */
 const REFUSALS = Object.freeze(['entry_name_empty', 'entry_name_shape', 'entry_name_cli', 'entry_name_sdk', 'entry_name_vendor', 'entry_name_remote', 'entry_name_reserved']);
@@ -57,12 +60,15 @@ function entryLabelOf(value) {
   return r.ok ? { on: true, name: r.name, typed: true } : { on: false, refused: r.code, typed: true };
 }
 
-/** The name a start passes (CLAUDE_CODE_ENTRYPOINT's value), or null: a CHAT start with the setting on and a name the rule takes.
- *  A terminal start never — its own label (cli) is the true one. */
-function entryNameFor({ mode = null, value = null } = {}) {
+/** The name a start passes (CLAUDE_CODE_ENTRYPOINT's value), or null: a CHAT start with the setting on and a name the rule takes,
+ *  on an account that is not a third-party provider's. A terminal start never — its own label (cli) is the true one; a start that
+ *  names no mode never; a provider's conversation never (its requests are not the vendor's: the account's kind, a fact of the
+ *  resolved account, never a guess from an address). */
+function entryNameFor({ mode = null, value = null, accountKind = null } = {}) {
   if (mode !== 'chat') return null;
+  if (accountKind === PROVIDER_KIND) return null;
   const l = entryLabelOf(value);
   return l.on ? l.name : null;
 }
 
-module.exports = { ENTRY_VAR, OFF, OURS, CHOICES, VENDOR_NAMES, RESERVED, NAME_RE, REFUSALS, nameVerdict, entryLabelOf, entryNameFor };
+module.exports = { ENTRY_VAR, OFF, OURS, CHOICES, VENDOR_NAMES, RESERVED, PROVIDER_KIND, NAME_RE, REFUSALS, nameVerdict, entryLabelOf, entryNameFor };

@@ -1179,6 +1179,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // the fact (true / false / null = cannot be read; undefined = not read: the start carries no settings file of the person's)
             keyHelperNamed,
             ownSettings,   // B-e7c0: the person's file to merge (this machine only), else null
+            // 主开发 r4672 (1): the RESOLVED account's kind, a fact — a third-party provider's conversation ('provider') never carries the
+            // entry label (src/claude-entry-label.js entryNameFor): its requests go to that provider's own address, not the vendor's
+            accountKind: (spawnAccount && spawnAccount.kind) || null,
           });
           // Resume: the harness's persisted fork chain (store.forkChain → store.forkChainEnv; codex's forked_from).
           // MODEL CONTINUITY (2.369.32) and EFFORT CONTINUITY (B-21e4 item 4)

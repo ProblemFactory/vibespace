@@ -900,9 +900,6 @@ class SettingsUI {
     fetchJson('/api/browser/display').then((r) => { if (line.isConnected || line.parentNode) line.textContent = machineDisplayText(r); });
   }
 
-  /** lane engine-plugin: the FACT beside the default-engine PREFERENCE — where the value in effect comes from (a cluster preset
-   *  says so: «由集群预设») and each engine plugin's kernel on this computer (GET /api/browser/engines, asked when the row draws).
-   *  Lane engine-spi-egress: the SAME answer draws the row's options (engineOptions — no engine id named in the schema). */
   /** 主开发 r4483: the entry label's fact line — the verdict of the STORED value (off, the name the next chat start reports, or a
    *  refused typed name with its reason), drawn again after every change of the row's select or typed field. */
   _renderEntryLabelFact(info, row, path) {
@@ -913,6 +910,9 @@ class SettingsUI {
     info.appendChild(line);
     if (row) row.addEventListener('change', () => setTimeout(paint, 0));
   }
+  /** lane engine-plugin: the FACT beside the default-engine PREFERENCE — where the value in effect comes from (a cluster preset
+   *  says so: «由集群预设») and each engine plugin's kernel on this computer (GET /api/browser/engines, asked when the row draws).
+   *  Lane engine-spi-egress: the SAME answer draws the row's options (engineOptions — no engine id named in the schema). */
   _renderEngineFact(info, row = null, path = '') {
     const line = document.createElement('div');
     line.className = 'settings-row-fact settings-engine-fact';

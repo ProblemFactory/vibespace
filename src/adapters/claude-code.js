@@ -382,7 +382,9 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // vendor's rule refuses (src/claude-entry-label.js) pass NOTHING: the CLI's own label stands. A TERMINAL start never carries
     // it — the CLI's interactive start, whose own label (cli) is the true one. This env rides every road with the rest of it
     // (ws-create's spawn pairs: the local dtach line, the ssh ladder's quoted parts, the device agent's pipe session).
-    { const en = ENTRY.entryNameFor({ mode, value: S.entryLabel }); if (en) env[ENTRY.ENTRY_VAR] = en; }
+    // 主开发 r4672 (1): a third-party PROVIDER's conversation never carries it (ws-create hands the resolved account's kind); and the
+    // mode is the caller's own word — a caller that names none (this method's `mode` defaults to chat) carries no name.
+    { const en = ENTRY.entryNameFor({ mode: options.mode, value: S.entryLabel, accountKind: options.accountKind }); if (en) env[ENTRY.ENTRY_VAR] = en; }
     // Per-session apiKeyHelper neutralization (2.236.0, userN's "can't
     // switch to my subscription" on a keyHelper machine): a configured
     // apiKeyHelper in the merged settings UNCONDITIONALLY overrides claude.ai
