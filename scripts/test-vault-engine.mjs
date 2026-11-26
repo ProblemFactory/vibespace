@@ -685,7 +685,8 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     door.answerRequest(rg.askId, { answer: '8h', reauthed: true });
     auto.grant(key.key.id, ['session:conv-2'], { mode: 'once', by: 'user' });
     const live = { view: contents._windows.size === 1 && rs.ok, run: alive(pid) && door.running() === 1, asks: !!(c2 && rq.ok && reqId && c3), grants: door._grants.size === 1 && auto.list().keys[0].grants.some((g) => g.mode === 'once' && !g.spentAt) };
-    return { dir, v, contents, door, auto, userTodos, open, pid, running, held, call, rq, reqId, live, tick: (ms) => { clock += ms; }, killArmed: () => armed.includes(KILL_MS) };
+    const mark = armed.length;   // the timers armed BEFORE the lock: only what the lock arms is read (the review: never the world's whole life)
+    return { dir, v, contents, door, auto, userTodos, open, pid, running, held, call, rq, reqId, live, tick: (ms) => { clock += ms; }, killArmed: () => armed.slice(mark).includes(KILL_MS) };
   }
   /** What the lock ENDED — each of the four, judged from the outside. */
   async function ended(w) {

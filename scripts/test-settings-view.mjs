@@ -11,8 +11,9 @@
 //      and every fact false (a loop, not a sample); the tier census printed
 //   §5 wiring pins (the UI consumes the model; the facts' sources; the light adapters route; the harness `cli`)
 //   §8 THE STORE'S NOTIFIER WALKS A SNAPSHOT (lane guards-door): a listener that unsubscribes itself and subscribes a
-//      fresh one while it runs (a row that redraws) is called ONCE — the real SettingsManager in a child under a 4 s
-//      deadline; CONTROL: a copy walking the live Set never returns (killed at the deadline ⇒ RED)
+//      fresh one while it runs (a row that redraws) is called ONCE — the real SettingsManager in a child that ends by itself
+//      (its re-subscriptions capped by the leg), its bound's expiry a named harness line; CONTROL: a copy walking the live Set
+//      re-enters the listener up to that cap in one notify ⇒ RED (B-3dbd, r4729: was a 4 s kill)
 //   §6 patched copies of settings-view.js, one per rule, each turns its own judge red (scripts/mutant-copy.mjs)
 //   §7 (B-df40 part 3) the per-VENDOR rows derived from src/channel-settings.js: advanced, `when: {channel}`,
 //      hidden without that vendor's account, the "Per vendor" block + its chip with one; a patched schema copy
@@ -276,14 +277,15 @@ console.log('§8 the store\'s notifier walks a snapshot of its listeners');
     if (s._saveTimer) clearTimeout(s._saveTimer);
     console.log(JSON.stringify({ calls, listeners: s._listeners['channels.guardAttachmentsReview'].size }));`.replace('%URL%', url)], { encoding: 'utf8', timeout });
   const verdict = (r) => { let o = null; try { o = JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch {} return { green: r.status === 0 && !!o && o.calls === 101 && o.listeners === 2, o, signal: r.signal, expired: r.signal === 'SIGTERM', err: String(r.stderr || '').slice(0, 300) }; };
-  const said = (v, who) => { if (v.expired) ok(false, `the ${who} child never answered within its bound — a harness line, never the store's verdict`, JSON.stringify(v)); };
+  const namedOf = (v, who) => (v.expired ? `the ${who} child never answered within its bound — a harness line, never the store's verdict` : null);
+  const said = (v, who) => { const l = namedOf(v, who); if (l) ok(false, l, JSON.stringify(v)); };
   const real = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href)); said(real, 'real store\'s');
   ok(real.green, 'a listener that re-subscribes while it runs is called ONCE (the other listener once too), the store returns, 2 listeners stay', JSON.stringify(real));
   // THE PLACEMENT (the family's law 1): the old leg's verdict leaned on the child beating its deadline — a start HELD past a deadline
   // shorter than the hold (a stall the leg owns, never load) reads a GREEN store RED by that deadline; the bound of this leg reads it green
   const HOLD = 400, held = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href, { holdMs: HOLD, timeout: HOLD / 2 }));
   const heldNow = verdict(drive(pathToFileURL(path.join(REPO, 'src/lib/settings.js')).href, { holdMs: HOLD }));
-  ok(held.expired && !held.green && heldNow.green, `PLACED: a child whose start is held ${HOLD} ms past a ${HOLD / 2} ms deadline is killed (the old leg's red, made at will) — under this leg's bound the same held child answers green`, JSON.stringify({ held, heldNow }));
+  ok(held.expired && !held.green && /never answered within its bound — a harness line/.test(namedOf(held, 'held') || '') && heldNow.green, `PLACED: a child whose start is held ${HOLD} ms past a ${HOLD / 2} ms deadline is killed (the old leg's red, made at will) and this leg says that expiry as its NAMED harness line, never the store's verdict — under this leg's bound the same held child answers green`, JSON.stringify({ held, heldNow }));
   const SNAP = 'for (const cb of [...listeners]) {';
   const ssrc = read('src/lib/settings.js');
   ok(ssrc.split(SNAP).length === 2, 'the notifier walks a snapshot, spelled once where the control reverts it');
