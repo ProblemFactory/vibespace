@@ -134,7 +134,9 @@ function keepCopy(file, kept, failed) {
   return W;
 }
 /** A KEPT COPY LEAVES THROUGH ITS WRITER FIRST (B-574d): a write of it still owed is dropped, one in flight is removed again once it
- *  lands — a copy is never brought back after its removal; then its unlink, a refusal said by name */
+ *  lands — a copy is never brought back after its removal; then its unlink, a refusal said by name. The forget also RUNS every step
+ *  waiting on that file's landing (retireDeadSocket's: the dead socket and the live meta go now — the copy that stands for the
+ *  conversation is another one, or none is needed) */
 function unlinkKept(sockFile, file, done = null) {
   try { storeWriter().forget(file); } catch { }
   fs.unlink(file, (err) => { saidUnlinkFailure(sockFile, err); if (done) done(); });
@@ -381,7 +383,11 @@ function probeFacts(o) {
  *  stopped row, the window's history, the resume-all offer — with the name, cwd and account it kept). */
 function retireDeadSocket(sockFile, socketPath) {
   console.log(`  ✗ Dead socket: ${sockFile} — cleaning up`);
-  try { fs.unlinkSync(socketPath); } catch {}
+  // B-574d (主开发 r5005): THE DEAD SOCKET LEAVES WITH ITS RECORD. On the kept-copy road it goes only once the stopped copy LANDED,
+  // in the same step as the live meta: a hub killed before that landing leaves the dead socket, and the next start retires it
+  // again (the boot walks sockets — a meta with no socket and no copy would be retired by nothing). Every other road: at once
+  const dropSocket = (p) => { try { fs.unlinkSync(p); } catch {} };   // its path as its parameter: each road that calls it is a counted site (test-store-write-census)
+  let socketRides = false;
   // B-1525 (2.219.0): a REMOTE session's meta holds the ONLY local record
   // of its keeper sid / dial device — the remote half (keeper daemon,
   // device pipe session) survives a pod-level death, and deleting the
@@ -415,12 +421,14 @@ function retireDeadSocket(sockFile, socketPath) {
       const stopped = path.join(META_DIR, sockFile + '.json.stopped');
       const kept = { ...dm, status: 'stopped', stoppedAt: deadTally.at || (deadTally.at = Date.now()), stopReason: STOP_DEAD_SOCKET }; // ONE instant per pass: its duplicates are ordered by createdAt
       // B-574d: the copy is THE STORE WRITER's (never a write on the boot's loop — a machine's reboot retires every local
-      // conversation in one pass); the live meta goes through its ONE delete road only AFTER the copy LANDED: a copy that does not
-      // land leaves the meta as it is, never deleted (said once; the writer retries it)
+      // conversation in one pass); the dead socket and the live meta (its ONE delete road) go only AFTER the copy LANDED — or when
+      // its owner removes the copy (a forget runs every step that waits on that file's landing: a superseded or consumed copy).
+      // A copy that does not land leaves the socket and the meta as they are, never deleted (said once; the writer retries it)
       let W = null;
       try { W = keepCopy(stopped, kept, (why) => console.warn(`    ↳ ${sockFile}: its stopped copy is not written yet (${why}) — the meta is left as it is, never deleted, until the copy lands (the store writer retries it)`)); }
       catch (e) { console.warn(`    ↳ ${sockFile}: its stopped copy could not be written (${e.message}) — the meta is left as it is, never deleted`); return; }
-      const landed = W.afterLanding(stopped, () => deleteSessionMeta(sockFile), { what: 'the live meta, removed once its stopped copy landed', timeoutMs: null });
+      const landed = W.afterLanding(stopped, () => { dropSocket(socketPath); deleteSessionMeta(sockFile); }, { what: 'the dead socket and the live meta, removed once its stopped copy landed', timeoutMs: null });
+      socketRides = true;   // the dead socket leaves in that step, never before it
       settling.add(landed); landed.finally(() => settling.delete(landed));   // a test's wait (stoppedSettled) waits for the landing too
       const dropped = keepStopped(sockFile, kept, cid); // r2: a newer stop of the SAME conversation keeps one copy — the line says which went
       if (dropped === sockFile) { deadTally.superseded.push(sockFile); return; }
@@ -430,7 +438,7 @@ function retireDeadSocket(sockFile, socketPath) {
       settleStopped(sockFile, stopped, dm, cid);
       return;
     }
-  } catch { }
+  } catch { } finally { if (!socketRides) dropSocket(socketPath); }   // every road but the kept copy's: the dead socket goes at once, as before
   deadTally.deleted.push(sockFile);
   deleteSessionMeta(sockFile);
 }

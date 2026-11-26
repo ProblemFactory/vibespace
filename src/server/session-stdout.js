@@ -417,7 +417,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
       try {
         const tomb = { ...(wrapperMeta && typeof wrapperMeta === 'object' ? wrapperMeta : (settle.torn ? { metaUnreadable: true } : { metaMissing: true })),
           exitedAt: Date.now(), socketFate: facts.socketFate, wrapperFate: facts.wrapperFate, settleMs: settle.waitedMs };
-        keepTomb(path.join(tombDir, `${id}.meta.json`), JSON.stringify(tomb), id);   // B-574d: THE STORE WRITER (below) — never a write on the loop at a mass stop
+        keepTomb(path.join(tombDir, `${id}.meta.json`), JSON.stringify(tomb), id);   // B-574d: the tomb's META is THE STORE WRITER's (below); the .tail above and the sweep below stay on the loop
       } catch (e) { console.warn(`[session] exit tomb meta for ${id} not written: ${e.message}`); }
       // opportunistic sweep: tombs (.tail AND .meta.json) older than 7 days
       try {
@@ -494,8 +494,9 @@ function knownOnDisk(dir, fp) {
 const storeWriter = () => require('../store-writer.js').storeWriter();
 /** B-574d (lane bl-jobs, slice «session-and-job-records»; the family's ruling (b)): THE EXIT TOMB's record is made ONCE at a
  *  conversation's END — by every real teardown (a person's close or kill, an agent's end, a crash); at worst a MASS STOP, N tombs in
- *  one turn of the loop. By that rate it takes THE STORE WRITER: one job each (no debounce), atomic and SYNCED on the writer's thread,
- *  forgotten once it lands — never a write on the hub's loop (the release wrote it there, unsynced). Nothing reads it right after:
+ *  one turn of the loop. By that rate its META takes THE STORE WRITER: one job each (no debounce), atomic and SYNCED on the writer's
+ *  thread, forgotten once it lands — the release wrote it on the hub's loop, unsynced. WHAT IS LEFT on the loop at each teardown
+ *  (not this unit's sites): the `.tail`'s read and write, and the 7-day sweep's listing of the tombs folder. Nothing reads the meta right after:
  *  the forensics read it later by name, the 7-day sweep by its age. A write that fails is SAID ONCE for its conversation and stays
  *  the writer's (kept in memory, retried at the writer's pace, as every store's) until it lands */
 function keepTomb(tombPath, text, id) {
