@@ -347,12 +347,9 @@
   "stops": "the person's «done»: it says not on disk"
  },
  {
-  "key": "jobs · src/jobs.js · JobManager._stopUnread · _save()",
-  "verdict": "waits",
-  "why": "B-f276, the stamp unit: a person's Stop of a live run whose process record cannot be read ends it on purpose inside stop() — its answer is stop()'s own, through persisted() (notOnDisk said when it did not land).",
-  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' || act === 'answer' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // the moved2 cure 2: a removal / an answer not landed finishes by itself at the landing (said by its code)   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID",
-  "branch": "(saved ? {} : { notOnDisk: true",
-  "stops": "the person's «done»: it says not on disk"
+  "key": "jobs · src/jobs.js · JobManager._stopUnread > endIt · _save()",
+  "verdict": "none",
+  "why": "forward precedes; boot re-judges it"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.start · _save()",

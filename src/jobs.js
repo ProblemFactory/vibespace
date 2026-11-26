@@ -2496,15 +2496,26 @@ class JobManager {
   }
   /** the stamp unit (r5015 (b)): A PERSON'S STOP of a live run whose process record is unknown — the run ends by their word (the stop's
    *  own end: «interrupted», what it held released), its hold ends, and the doubt's stop (round 8: its scope from bound.json, the
-   *  processes carrying its mark — never a number of the unread record) stops what can be named; a Start then goes on */
+   *  processes carrying its mark — never a number of the unread record) stops what can be named; a Start then goes on (one pressed
+   *  while the forward runs is remembered, as during a stop's grace). r5238 law 6: the forward FIRST, the run's end recorded after it */
   _stopUnread(job, run, sa) {
     const code = sa.code;
-    this._dropStampHold(job, run);
     const what = `stopped by its owner while its process record could not be read (${code}) — nothing was signalled from that record; what carries the job's mark is stopped`;
-    this._finalizeRun(job, run, { code: null, endedAt: now() }, 'stop');
-    this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
-    this._save();
-    this._stopDoubt(job, run).catch((e) => this.d.log(`[jobs] ${job.id}: the stop of what its run left failed:`, e && e.message));
+    const stops = this._unreadStops || (this._unreadStops = new WeakSet());
+    if (stops.has(run)) return { ok: true, hadProc: false, already: 'already stopping' };   // pressed again while its forward runs: nothing twice
+    stops.add(run);
+    this._dropStampHold(job, run);
+    // r5238 LAW 6 — THE FORWARD FIRST: the doubt's stop (its scope, the processes carrying the job's mark) signals, THEN the run's end
+    // is recorded, said and saved, once; a job removed meanwhile (rm --stop) or an ended engine records nothing more
+    let done = false;
+    const endIt = () => {
+      if (done) return; done = true; stops.delete(run);
+      if (this._unreadStopped || this.readOnly || this.jobs.get(job.id) !== job || run.endedAt) return;
+      this._finalizeRun(job, run, { code: null, endedAt: now() }, 'stop');
+      this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
+      this._save();
+    };
+    this._stopDoubt(job, run, { afterForward: endIt }).then(endIt, (e) => { this.d.log(`[jobs] ${job.id}: the stop of what its run left failed:`, e && e.message); endIt(); });
     return { ok: true, hadProc: false, words: what };
   }
   /** the stamp unit (c): a cron's fire SKIPPED because its run's process record could not be read — said ONCE a run, with the way out */
@@ -2801,7 +2812,7 @@ class JobManager {
   /** a run's SIGTERM — a stop's, a timeout's, an until-marker's — and (round 7) the STOP'S INTENT before it, beside the run's
    *  pid.json: the engine signals the wrapper's GROUP, so the wrapper may handle its child's end before its own signal handler
    *  runs — the intent tells it a stop is in flight all the same (a service's leftovers are stopped with it, not kept) */
-  _termRun(job, run) {
+  _termRun(job, run, sa = null) {   // sa: the Stop's own answer of the record (r5238 law 6: read once on that road)
     // B-2c5c, round wwa7r2uc1 (THE MAIN DOOR): the job's main IS this hub — no intent, no signal: refused by name (a stop asked before
     // its stamp existed is no longer asked: the job is not said stopping)
     if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, job._timedOut ? 'its time limit' : job._untilHit ? 'its until-marker' : 'the stop'); delete job._stopRequested; return false; }
@@ -2815,7 +2826,7 @@ class JobManager {
       // member walk: procfs, the tree's own cost, bounded — the stop's signal stays in this same tick
       // B-2c5c r1 (M3): a hub in the job's PROCESS GROUP — the engine signals the wrapper alone (_killGroup), so the intent says so
       // (`alone`, `hub`): the wrapper then signals the job's processes itself, once (else it took the group as having heard the stop)
-      const st = this._readStamp(job), live = !!(st && this._verifyAlive(st)), hubInGroup = live && PI.pgidOf(process.pid) === Number(st.pid);
+      const st = sa && sa.state === 'data' ? sa.stamp : sa && sa.state === 'missing' ? null : this._readStamp(job), live = !!(st && this._verifyAlive(st)), hubInGroup = live && PI.pgidOf(process.pid) === Number(st.pid);
       const ctl = this._ctlDir(job, run.startedAt), alone = !!this._ctlJson(job, run, 'stopping.json') || hubInGroup;
       const tree = live ? PI.treeOf([Number(st.pid)], { since: Number(st.starttime) || 0 }) : Object.assign([], { cut: false, keptOut: [] });
       const all = tree.filter((m) => m.pgid !== Number(st && st.pid)), rows = all.slice(0, 256).map((m) => [m.pid, m.starttime, m.pgid, m.comm]);
@@ -3123,9 +3134,10 @@ class JobManager {
   /** round 8: A PERSON'S STOP ENDS A DOUBT — what of the previous run can be named is stopped: its scope (killed), the processes
    *  carrying the job's mark (its wrapper among them: it then drains its own group) — SIGTERM, the grace, then by force; the
    *  doubt is over only when the mark's scan finished (a cut one proves nothing), and said */
-  async _stopDoubt(job, run) {
+  async _stopDoubt(job, run, { afterForward = null } = {}) {   // afterForward: what the Stop's road owes, made AFTER its forward and its grace (r5238 law 6)
     const l = run.left;
     if (l && l.kept && l.cut && !l.cleared && !l.gone) { // round 9: what it kept — the stop's own clear walked /proc once just now
+      if (afterForward) afterForward();   // nothing to signal here
       run.doubtOver = { by: 'stop', at: now() }; this._dirty = true;
       const what = `stopped by its owner — what its last run left was not proven gone (${l.cut.why}); it may start again`;
       this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
@@ -3147,6 +3159,7 @@ class JobManager {
     run.doubtOver = { by: 'stop', at: now() }; this._dirty = true;
     const what = `stopped by its owner — the previous run was not proven gone: ${did}${scan.cut ? `; could not check ${scan.total - scan.scanned} of ${scan.total} processes` : ''}${ww.unread ? `; its mark could not be read in ${ww.unread}` : ''}${ww.stillEnding ? `; ${ww.stillEnding}` : ''}${marked.ended ? `; ${require('./server/marked-walk.js').endedWords(marked.ended)}` : ''}; it may start again`;   // B-d8f4 (9): an ended walk said
     this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
+    if (afterForward) afterForward();   // r5238 law 6: the forward made (its scope, its marked processes, their grace) — now the road's records
   }
   /** what a service's next start waits for (round 6): processes its last run KEPT and not yet stopped; a reap of its scope in
    *  flight or deferred; a scope its wrapper did not measure empty (no exit.json `scopeEmpty` — a wrapper that died); round 8:
@@ -5383,7 +5396,9 @@ class JobManager {
     const run = job.runs && job.runs[job.runs.length - 1];
     // B-f276, the stamp unit (主开发 r5015 (b)/(d)): its run NOT ended and its PROCESS RECORD UNKNOWN — a person's Stop is the WAY OUT:
     // the run is ended ON PURPOSE (nothing is signalled from that record), then the doubt's own stop (round 8) stops what can be named
-    { const sa = this._runLive(job, run) ? this._stampAnswer(job) : null; if (sa && sa.state === 'unknown') return this._stopUnread(job, run, sa); }
+    // r5238 LAW 6: this is the unit's ONE read of the record on a Stop's road — the signal below takes its answer (no second read before it)
+    const sa = this._runLive(job, run) ? this._stampAnswer(job) : null;
+    if (sa && sa.state === 'unknown') return this._stopUnread(job, run, sa);
     // round 10: A STOP STEP IS IDEMPOTENT — pressed again while its SIGTERM's grace runs, it delivers nothing and says so (round 9
     // and before signalled the whole group again on every press: a cleanup cut off by its second SIGTERM, code 143)
     if (!force && job._termAt && this._runLive(job, run)) {
@@ -5391,7 +5406,7 @@ class JobManager {
       return { ok: true, hadProc: true, already: `already stopping (${Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000))} s left)` };
     }
     const scope = run && !run.endedAt ? this._runScope(job, run) : null; // round 4: the cgroup rung's group is its scope
-    const hadProc = force && scope ? this._escalate(job, scope, undefined, run) : force ? this._killGroup(job, 'SIGKILL') : this._termRun(job, run); // round 7: its intent first
+    const hadProc = force && scope ? this._escalate(job, scope, undefined, run) : force ? this._killGroup(job, 'SIGKILL') : this._termRun(job, run, sa); // round 7: its intent first
     if (force) job._stopForce = true; else if (hadProc) job._termAt = now(); // round 5: the stop's own clock (the sweep keeps it)
     // the kill step, a grace on — the scope's too when its wrapper is gone (the sweep reaps such a scope first); round 6: bound
     // to THIS run — it never reaches a run started again inside the grace
@@ -5413,7 +5428,7 @@ class JobManager {
     // B-cac2 (fb-f4a0c70a84): a START while a STOP's grace runs is no «already running» (the service then ended down and a second
     // start was needed) — it is REMEMBERED and done when the stop ends (_finalizeRun), said with the grace left
     const run0 = job.runs && job.runs[job.runs.length - 1];
-    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {
+    if ((job._termAt || job._stopForce || (this._unreadStops && this._unreadStops.has(run0))) && this._runLive(job, run0)) {   // the stamp unit: a way-out Stop's forward too
       job._startAfterStop = true;
       this.d.log(`[jobs] ${job.id}: a start asked while its stop runs — it starts when the stop ends`);
       const left = job._termAt ? Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000)) : null;   // a forced / not-yet-reached stop has no grace clock
