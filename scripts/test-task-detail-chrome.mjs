@@ -64,7 +64,7 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'data/bin', 'scripts', 'docs']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(path.join(wt, f))} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });   // its own copies of the tree under test (the build's gates read scripts/ + docs/)
+execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });   // its own copies of the tree under test (the bundles' own steps run from its scripts/)
 // a store from BEFORE the Context table: the boot's one migration turns its old fields into rows (through the live store)
 const T0 = Date.now() - 3600e3;
 fs.writeFileSync(path.join(wt, 'data', 'task-groups.json'), JSON.stringify({ version: 1, tasks: {

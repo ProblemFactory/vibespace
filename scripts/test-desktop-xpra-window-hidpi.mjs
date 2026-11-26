@@ -23,7 +23,7 @@ import { freePorts, scratch, scratchHome, gtkRow } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const { bin, bootedCopy, CALC6, check, crashed, ctlServers, D, dropPage, ensureActive, fakeHome, finish, identity7, launchOn, mkPage, openPage, page,
-  PORT, readyOn, rebaseline, repo, revealBars, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, trustedClickAt, until, VNC_ENV, worktrees,
+  PORT, readyOn, repo, revealBars, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, trustedClickAt, until, VNC_ENV, worktrees,
   wt, XDOTOOL, xenvFor, xq, XTERM } = await bootXpraWindow('test-desktop-xpra-window-hidpi');
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
@@ -229,7 +229,7 @@ try {
     let allOnce = true;
     for (const [f, from, to] of patches) { const src = fs.readFileSync(path.join(wtc, f), 'utf8'); if (src.split(from).length !== 2) allOnce = false; fs.writeFileSync(path.join(wtc, f), src.replace(from, to)); }
     check('CONTROL: each pre-fix lever is spelled exactly once in the tree (the control patches exactly those)', allOnce);
-    rebaseline(wtc); execSync('npm run build:bundles', { cwd: wtc, stdio: 'ignore' });
+    execSync('npm run build:bundles', { cwd: wtc, stdio: 'ignore' });
     const [PORTH] = await freePorts(1);
     const homeH = scratchHome('deskxpra-hidpictl-home', fs);
     const sh = spawnCopy('the pre-fix copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTH), HOME: homeH }); ctlServers.push(sh);

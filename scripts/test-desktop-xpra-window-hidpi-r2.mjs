@@ -17,7 +17,7 @@ import { freePorts, scratch, scratchHome } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const { allDigits7, bootedCopy, CALC6, check, crashed, ctlServers, dropPage, ensureActive, finish, identity7, launchOn, mkPage, openPage, page, PORT,
-  R2, readyOn, rebaseline, repo, sizeWinOn, sleep, spawnCopy, srvEnv, target, until, VNC_ENV, worktrees, wt, XDOTOOL, xenvFor, xq, XTERM } = await bootXpraWindow('test-desktop-xpra-window-hidpi-r2');
+  R2, readyOn, repo, sizeWinOn, sleep, spawnCopy, srvEnv, target, until, VNC_ENV, worktrees, wt, XDOTOOL, xenvFor, xq, XTERM } = await bootXpraWindow('test-desktop-xpra-window-hidpi-r2');
 let p1 = await page(target);
 try {
   await openPage(p1, `http://127.0.0.1:${PORT}`);
@@ -160,7 +160,7 @@ try {
     let once = true;
     for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtr, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtr, f), src.replace(from, to)); }
     check('CONTROL (r1): each of the nine r2 levers is spelled exactly once in the tree (the control pulls back exactly those)', once);
-    rebaseline(wtr); execSync('npm run build:bundles', { cwd: wtr, stdio: 'ignore' });
+    execSync('npm run build:bundles', { cwd: wtr, stdio: 'ignore' });
     const [PORTR] = await freePorts(1);
     const homeR = scratchHome('deskxpra-r2ctl-home', fs);
     const sr = spawnCopy('the r1 copy', wtr, { ...srvEnv, ...VNC_ENV, PORT: String(PORTR), HOME: homeR }); ctlServers.push(sr);

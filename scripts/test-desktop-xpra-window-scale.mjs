@@ -35,7 +35,7 @@ import { freePorts, scratch, scratchHome, gtkRow } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const require = createRequire(import.meta.url);
-const { bin, bootedCopy, check, copyLeft, crashed, ctlServers, dropPage, endCopy, ensureActive, finish, launchOn, mkPage, openPage, page, PORT, readyOn, rebaseline,
+const { bin, bootedCopy, check, copyLeft, crashed, ctlServers, dropPage, endCopy, ensureActive, finish, launchOn, mkPage, openPage, page, PORT, readyOn,
   repo, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, trustedClickAt, until, worktrees, wt, xenvFor, xq } = await bootXpraWindow('test-desktop-xpra-window-scale');
 let p1 = await page(target);
 try {
@@ -545,7 +545,7 @@ try {
     let once = true;
     for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtd, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtd, f), src.replace(from, to)); }
     check('§15/§16 CONTROL: each lane-D lever is spelled exactly once (the copy patches exactly those)', once);
-    rebaseline(wtd); execSync('npm run build:bundles', { cwd: wtd, stdio: 'ignore' });
+    execSync('npm run build:bundles', { cwd: wtd, stdio: 'ignore' });
     const [PORTD] = await freePorts(1);
     const homeD = scratchHome('deskxpra-dctl-home', fs);
     const sd = spawnCopy('the pre-lane-D copy', wtd, { ...srvEnv, PORT: String(PORTD), HOME: homeD }); ctlServers.push(sd);

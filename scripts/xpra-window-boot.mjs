@@ -130,11 +130,7 @@ export async function bootXpraWindow(part) {
   for (const f of ['src', 'public', 'server.js']) { execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`); }
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
   fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
-  execSync('npm run build', { cwd: wt, stdio: 'ignore' });
-  // dc-ratchet (2.369.213): a CONTROL copy below is a MUTANT tree, not a commit — before its build, its §78 ratchet baselines are
-  // re-derived from the copy itself (a lever pulled back can remove or restore a member-id branch or an export; test-architecture
-  // is chained in npm run build, and §78 is red on any rise or fall against the committed baseline)
-  const rebaseline = (dir) => { for (const c of ['id-branch', 'dead-code']) { fs.rmSync(path.join(dir, 'scripts', 'fixtures', `${c}-baseline.json`), { force: true }); execSync(`node scripts/${c}-census.mjs --write-initial`, { cwd: dir, stdio: 'ignore' }); } };
+  execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });   // B-c27e: the bundles alone — the four checks run once, in the tier's own build (ci.mjs runBuild)
 
   // §5's agent lease needs a LIVE agent session: a fake claude (prints the init frame, then sleeps) under the real ws create
   const FAKE_BIN = path.join(fakeHome, 'fake-bin');
@@ -458,7 +454,7 @@ export async function bootXpraWindow(part) {
   return { agentTokens, allDigits7, appsOf, bin, BOOT_DEADLINE_MS, bootedCopy, bootServer, CALC6, CDP_PORT, cdpTargets, check, chordC7, CHROME,
   chrome, COPY_RING_LINES, copyBack7, copyLeft, crashed, ctlServers, D, endCopy, devHomes, devProcs, DIGITS7, dropPage, ensureActive, FAKE_BIN, FAKE_CLAUDE, fakeHome,
   finish, fixtureLitter, HIT7, HOSTNAME, hostResolves, identity7, KEY_DEADLINE_MS, keyOf, keySeen7, LAST7, launchOn, markerSweep, measurePane, mkPage,
-  newPage, openPage, page, PORT, R2, REACH_DEADLINE_MS, reach7, readyOn, REAL_PROJECTS, realBefore, rebaseline, recordedApps, recordedPids, repo,
+  newPage, openPage, page, PORT, R2, REACH_DEADLINE_MS, reach7, readyOn, REAL_PROJECTS, realBefore, recordedApps, recordedPids, repo,
   revealBars, ringTail, RUNTIME, SEAT, SETTLE_DEADLINE_MS, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, TITLE_DEADLINE_MS,
   trustedClickAt, typedFile, until, VNC_ENV, WebSocket, WIN, worktrees, wt, XAGREE_DEADLINE_MS, XAUTH, XCLIP, xclipKids, XDOTOOL, xenvFor, XPRA,
   xpraVersion, xq, XTERM, CDP_CALL_MS, FETCH_CALL_MS };

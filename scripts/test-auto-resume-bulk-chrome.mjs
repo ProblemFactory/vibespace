@@ -71,7 +71,7 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const T0 = Date.now();   // (主开发 r1292: where this suite's time goes — its own build first, then each section, printed)
 execSync('npm run build:bundles', { cwd: wt, stdio: 'ignore' });
-console.log(`  (the worktree's own npm run build — i18n check, the bundles, the agentd release, its test scripts: ${Date.now() - T0} ms)`);
+console.log(`  (the worktree's own npm run build:bundles — i18n check, the bundles, the agentd release: ${Date.now() - T0} ms)`);
 const tPlus = () => `(t+${Math.round((Date.now() - T0) / 1000)} s)`;
 
 // THE FAKE CLAUDE — the real CLI's words at a wall / an overload (2.1.308 shapes), every prompt it got logged per conversation
