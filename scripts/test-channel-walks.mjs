@@ -416,9 +416,18 @@ console.log('⑧ every writer of a row\'s lastAt or kind writes it through entry
     ['src/server/channels-engine.js', 'x.firstAt = x.firstAt || t; x.lastAt = t;'],   // a counter's own window
   ];
   const BROAD = /\b[A-Za-z_$][\w$]*\.(lastAt|kind)\s*=(?!=)/, EN = /\ben\.(lastAt|kind)\s*=(?!=)/;
+  // 主开发 r4700: THE OTHER FORMS of a write of the two fields, anywhere in src/: a compound write (`||=`, `&&=`, `??=`, `+=` …),
+  // a bracket write (`<name>['lastAt'] = …`), and Object.assign(<row>, { … lastAt / kind … }) on its line (any target in the channel
+  // files, `en` elsewhere). A write no line can show (a whole row replaced, a field written off update()) is THE STORE's DRIFT
+  // SWEEP's — its BACKSTOP: src/channel-store.js sweep() re-serializes the cached chunks every interval tick and fires every key of
+  // a chunk whose bytes drifted (that touch refreshes the key's slot), and a row born outside entry() touches the whole map (the
+  // slots built again).
+  const COMPOUND = /\b[A-Za-z_$][\w$]*\.(lastAt|kind)\s*(?:\|\||&&|\?\?|[+\-*/%])=(?!=)/, BRACKET = /\[\s*['"`](lastAt|kind)['"`]\s*\]\s*(?:\|\||&&|\?\?|[+\-*/%])?=(?!=)/;
+  const ASSIGN_ANY = /Object\.assign\(.*\b(lastAt|kind)\b\s*[:,}]/, ASSIGN_EN = /Object\.assign\(\s*en\b.*\b(lastAt|kind)\b\s*[:,}]/;
+  const writes = (f, l) => (CHANNEL_FILES.includes(f) ? BROAD : EN).test(l) || COMPOUND.test(l) || BRACKET.test(l) || (CHANNEL_FILES.includes(f) ? ASSIGN_ANY : ASSIGN_EN).test(l);
   const census = (textOf, srcFiles) => {
     const found = [];
-    for (const f of srcFiles) { const L = String(textOf(f) || '').split('\n'); L.forEach((l, i) => { if ((CHANNEL_FILES.includes(f) ? BROAD : EN).test(l) && !/^\s*(\/\/|\*)/.test(l)) found.push({ f, i, l, L }); }); }
+    for (const f of srcFiles) { const L = String(textOf(f) || '').split('\n'); L.forEach((l, i) => { if (writes(f, l) && !/^\s*(\/\/|\*)/.test(l)) found.push({ f, i, l, L }); }); }
     const claimed = new Set(), unlisted = [], roadless = [], gone = [];
     for (const [f, anchor, n = 1] of [...INDEX_ROW, ...NOT_A_ROW]) {
       const hits = found.filter((x) => x.f === f && x.l.includes(anchor));
@@ -436,12 +445,15 @@ console.log('⑧ every writer of a row\'s lastAt or kind writes it through entry
   const texts = new Map();   // each file read once for the census and both controls
   const read = (f) => { if (!texts.has(f)) { let t = null; try { t = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { t = null; } texts.set(f, t); } return texts.get(f); };
   const c0 = census(read, SRC);
-  ok(c0.unlisted.length === 0 && c0.roadless.length === 0 && c0.gone.length === 0 && c0.found === INDEX_ROW.reduce((n, r) => n + (r[2] || 1), 0) + NOT_A_ROW.length, `⑧ ${c0.found} writers of a lastAt or a kind found in src/ (${SRC.length} files): ten write an index row through entry() inside its update, ${NOT_A_ROW.length} another object — none unlisted`, c0);
+  ok(c0.unlisted.length === 0 && c0.roadless.length === 0 && c0.gone.length === 0 && c0.found === INDEX_ROW.reduce((n, r) => n + (r[2] || 1), 0) + NOT_A_ROW.length, `⑧ ${c0.found} writers of a lastAt or a kind found in src/ (${SRC.length} files; plain, compound, bracket and Object.assign forms — none of the last three today): ten write an index row through entry() inside its update, ${NOT_A_ROW.length} another object — none unlisted; anything no line can show is the drift sweep's (its backstop)`, c0);
   // CONTROLS: a new writer beside them (a planted line in a text copy, never the tree); one that reaches its row by live()
   const ENGF = 'src/server/channels-engine.js', ENGT = read(ENGF);
   const planted = anchored(ENGT, '    en.vendorId = c.vendorId; en.kind = c.kind;\n', '    en.vendorId = c.vendorId; en.kind = c.kind;\n    en.lastAt = Date.now();   // PLANTED: a writer beside the census\n', 'a new writer');
   const c1 = census((f) => (f === ENGF ? planted : read(f)), SRC);
   ok(c1.unlisted.length === 1, 'CONTROL: a new writer of lastAt planted beside the listed ones is found unlisted ⇒ the census leg goes RED', c1.unlisted);
+  const forms = anchored(ENGT, '    en.vendorId = c.vendorId; en.kind = c.kind;\n', "    en.vendorId = c.vendorId; en.kind = c.kind;\n    en.lastAt ||= 1;   /* PLANTED: compound */\n    en['kind'] = 'dm';   /* PLANTED: bracket */\n    Object.assign(en, { lastAt: 1 });   /* PLANTED: assign */\n", 'the other forms');
+  const c3 = census((f) => (f === ENGF ? forms : read(f)), SRC);
+  ok(c3.unlisted.length === 3 && ['||=', "['kind']", 'Object.assign'].every((x) => c3.unlisted.some((u) => u.includes(x))), 'CONTROL: a compound, a bracket and an Object.assign write planted beside them are each found unlisted ⇒ RED', c3.unlisted);
   const roadless = anchored(ENGT, '    const en = store.index.entry(rec.id, c.id);\n', '    const en = store.index.live()[`${rec.id}/${c.id}`];   // PLANTED: the row reached by live(), never touched\n', 'a writer off the touch');
   const c2 = census((f) => (f === ENGF ? roadless : read(f)), SRC);
   ok(c2.roadless.length >= 1, 'CONTROL: a listed writer whose row is reached by live() instead of entry() is named roadless ⇒ RED', c2.roadless);
