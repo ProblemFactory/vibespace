@@ -159,6 +159,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - The pin «a history window says view-close when it goes» allowed at most 1200 characters between dispose()'s start and the view hold's send: 1159 at the train's tip, 1281 once line 995's two commits stand on the first pass's strip press commit — red at the pick's dry tip, the product right. It now takes dispose()'s body WHOLE by its structure (from its head to the line that closes at its own indent) and asserts the send inside it; a RED control: a dispose without the send.
 - Its follow (line 1037's): the helper's positions are named for what they are (headAt, closeAt) and compared to -1 — test-ci-gate's wall-clock census had read «b < 0» as a literal time bound under 1000 ms (two items, both zones).
 
+### lg-rewind B-437e files tier — line 995's two shoulds (主开发 r4512)
+- A put-back's try (a patch with no state) never makes a line of its own: noteLine refuses it for a press with no line (the root of the stateless STORED line the page's early return drops at an attach — it would never be drawn and says nothing true of a copy). Leg + RED.
+- The fork stand-in of test-rewind-kept carries only the production shape: before the CLI's first id-bearing line its parent's id in both id fields and _forkRequested; after it the parent in forkedFrom, its own id, _forkRequested off (no _forkSourceId, a field no live session has).
+- kb: a put-back reads only the fences of the conversation it names; «not running» is the hub's own lifecycle (a detached session whose dtach socket lives still runs).
+
 ## 2.369.419 — 2026-11-25
 
 ### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)
