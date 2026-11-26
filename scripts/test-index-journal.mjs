@@ -508,7 +508,7 @@ async function heldLandLeg(mod, tag, waitMs = 200) {
 {
   const r = await landLeg(CS, 'land');
   ok(r.during === false && r.after === true, `⑮ (1) a born row while its journal line's write is held before its sync: landed ${r.during}; after the sync: landed ${r.after}`, r);
-  const MK = M.load('src/channel-store.js', anchored(SRC, "    for (const [k, f] of fps) if (f !== null && unlanded.has(k) && !bornSeq.has(k)) bornSeq.set(k, seq);", "    for (const [k, f] of fps) if (f !== null) unlanded.delete(k);", 'landed at the line\'s making'), 'land-at-making');
+  const MK = M.load('src/channel-store.js', anchored(SRC, "    for (const [k, f] of fps) if (f !== null && isUnlanded(k) && !bornSeq.has(k)) bornSeq.set(k, seq);", "    for (const [k, f] of fps) if (f !== null) unlanded.delete(k);", 'landed at the line\'s making'), 'land-at-making');
   const rk = await landLeg(MK, 'land-red1');
   ok(rk.during === true, `⑮ (1) RED CONTROL: a row said landed at its line's MAKING — landed while the line was not on disk (${rk.during}) — the leg above would go red`, rk);
   const MW = M.load('src/channel-store.js', anchored(SRC, "    for (const [k, sq] of bornSeq) if (sq <= w.upTo) { unlanded.delete(k); bornSeq.delete(k); }", "    void 0;", 'landed only by a whole write'), 'land-only-whole');
@@ -516,7 +516,7 @@ async function heldLandLeg(mod, tag, waitMs = 200) {
   ok(rw.after === false, `⑮ (1) RED CONTROL: a row that lands only by a whole write (B-526c's set put beside the journal by text alone) — still unlanded after its line synced (${rw.after}) — the leg above would go red`, rw);
   const h = await heldLandLeg(CS, 'land-held');
   ok(h.landed === false && h.afBytes === 0, `⑮ (3) the family HELD: a row born outside an update is never said landed (${h.landed}); no journal byte written (${h.afBytes})`, h);
-  const MH = M.load('src/channel-store.js', anchored(anchored(anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'actOf deaf'), "    if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }", "    void 0;", 'produceActs deaf'), "      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),", "      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),", 'landed deaf'), "if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; }", "if (closed || !o.size) return;", 'the outside road deaf'), 'land-held-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
+  const MH = M.load('src/channel-store.js', anchored(anchored(anchored(anchored(SRC, "    if (ixLoad.blocked) return 'whole';\n    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all || ixLoad.missing) return 'whole';", 'actOf deaf'), "    if (ixLoad.blocked) { sayHeldOnce(); return (LATER); }", "    void 0;", 'produceActs deaf'), "      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !isUnlanded(key),", "      landed: (key) => hasOwn(ix.conversations, key) && !isUnlanded(key),", 'landed deaf'), "if (closed || !o.size) return; if (ixLoad.blocked) { sayHeldOnce(); return; }", "if (closed || !o.size) return;", 'the outside road deaf'), 'land-held-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
   const rh = await heldLandLeg(MH, 'land-held-red', 2500);
   ok(rh.landed === true || rh.afBytes > 0, `⑮ (3) RED CONTROL: a journal deaf to the hold — a line written beside the held index (${rh.afBytes} bytes) and the row said landed (${rh.landed}) — the leg above would go red`, rh);
 }
@@ -765,12 +765,12 @@ async function heldAccessorLeg(mod, tag) {
 {
   const p1 = await producedLeg(CS, 'produced');
   ok(p1.afterOld === false && p1.afterNew === true, `⑰ (1) a row purged after a whole write was produced and born again before it landed: that landing (the OLD row) leaves it unlanded (${p1.afterOld}); its new line on disk lands it (${p1.afterNew})`, p1);
-  const PM = M.load('src/channel-store.js', anchored(SRC, 'unlanded.add(key); bornSeq.delete(key); if (producedUnlanded) producedUnlanded.delete(key);', 'unlanded.add(key); bornSeq.delete(key);', 'the produced set kept at a birth'), 'produced-kept');
+  const PM = M.load('src/channel-store.js', anchored(SRC, 'unlanded.set(key, ++bornGen); bornSeq.delete(key);', 'unlanded.set(key, unlanded.has(key) ? unlanded.get(key) : ++bornGen); bornSeq.delete(key);', 'the produced set kept at a birth (B-360d found holder 1: a birth that keeps its old generation)'), 'produced-kept');
   const p1r = await producedLeg(PM, 'produced-red');
   ok(p1r.afterOld === true, `⑰ (1) RED CONTROL: the produced set kept at a birth — the old row's landing said the new one landed (${p1r.afterOld}) — the leg above would go red`, p1r);
   const r2 = await rebornLeg(CS, 'reborn');
   ok(r2.afterOld === false && r2.afterNew === true, `⑰ (2) purged and born again with its old line in flight: the old line's sync leaves it unlanded (${r2.afterOld}); the NEW line's lands it (${r2.afterNew})`, r2);
-  const RM = M.load('src/channel-store.js', anchored(SRC, 'unlanded.add(key); bornSeq.delete(key); if (producedUnlanded)', 'unlanded.add(key); if (producedUnlanded)', 'the map\'s reset removed'), 'reborn-kept');
+  const RM = M.load('src/channel-store.js', anchored(SRC, 'unlanded.set(key, ++bornGen); bornSeq.delete(key);', 'unlanded.set(key, ++bornGen);', 'the map\'s reset removed'), 'reborn-kept');
   const r2r = await rebornLeg(RM, 'reborn-red');
   ok(r2r.afterOld === true, `⑰ (2) RED CONTROL: the map's reset removed — the OLD line's sync said the reborn row landed (${r2r.afterOld}) — the leg above would go red`, r2r);
   const b = await bootLeg('boot');
@@ -781,7 +781,7 @@ async function heldAccessorLeg(mod, tag) {
   ok(od.rising && od.seqs.length === 3 && od.next === od.seqs[od.seqs.length - 1] + 1, `⑰ (2) THE ORDER across a fold and a compaction: the journal's lines ${JSON.stringify(od.seqs)} all past the index's actsSeq ${od.held}, strictly rising; after a reopen the next is ${od.next}`, od);
   const h = await heldAccessorLeg(CS, 'held-accessor');
   ok(h.before === true && h.held && h.during === false, `⑰ (3) THE HOLD's own guard: a row replayed before the index appeared (landed: ${h.before}) is not said landed once the family is held (${h.during})`, h);
-  const HA = M.load('src/channel-store.js', anchored(SRC, '      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !unlanded.has(key),', '      landed: (key) => hasOwn(ix.conversations, key) && !unlanded.has(key),', 'the accessor deaf to the hold'), 'held-accessor-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
+  const HA = M.load('src/channel-store.js', anchored(SRC, '      landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !isUnlanded(key),', '      landed: (key) => hasOwn(ix.conversations, key) && !isUnlanded(key),', 'the accessor deaf to the hold'), 'held-accessor-deaf');   // stale-pins: kept (the train's own landed() before the hold, a red control's text)
   const hr = await heldAccessorLeg(HA, 'held-accessor-red');
   ok(hr.during === true, `⑰ (3) RED CONTROL: the accessor deaf to the hold — the replayed row said landed while the family is held (${hr.during}) — the leg above would go red`, hr);
 }
