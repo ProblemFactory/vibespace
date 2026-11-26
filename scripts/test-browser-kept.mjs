@@ -1278,6 +1278,17 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
   const mk14 = (Kmod, dataDir, readTargetsFn = readT, wrapRuntime = (r) => r) => { const kk = Kmod.create({ dataDir, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: wrapRuntime(F.createBrowserRuntime({ env: rtE })), facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readTargetsFn }); keepers.push(kk); return kk; };
   const sleep14 = (ms) => new Promise((r) => setTimeout(r, ms));
   const killDaemon = async (kk, id) => { const rec = kk._reg().browsers[id]; try { process.kill(rec.pid, 'SIGKILL'); } catch { } for (let i = 0; i < 30; i++) { try { process.kill(rec.pid, 0); await sleep14(50); } catch { break; } } };
+  // r4839 (the second hosted proof of .420, line 962's road — B-0e4a): a lease's NEW tab is born at its OWN marked blank. EXACTLY one
+  // new-tab command, `tab new about:blank#vs-own-<its 24-hex mark>`, and the tab it made is the lease's ONLY root, at that address
+  const ownNew14b = (kk, pid, key, after, ns) => {
+    const l = B.findLease(kk._reg().leases, pid, key);
+    const mark = String((l && l.ownMark) || '');
+    const at = `about:blank#vs-own-${mark}`;
+    const news = after.filter((x) => /(^| )tab new( |$)/.test(x));
+    const made = fakeTabs(ns).find((t) => t.url === at);
+    const facts = { mark, news, made: made ? made.targetId : null, roots: l ? l.tabRoots : null };
+    return { ok: /^[0-9a-f]{24}$/.test(mark) && news.length === 1 && news[0].replace(/^--pin-tab /, '') === `tab new ${at}` && !!made && JSON.stringify(l.tabRoots) === JSON.stringify([made.targetId]), facts };
+  };
   let kp = mk14(K, D14);
   try {
     const p = kp.createProfile({ label: 'Roll' });
@@ -1305,7 +1316,27 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
     const t3 = fakeTabs(ns)[0].targetId;
     const b2 = await kp.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' });
     const after2 = cmds(ns).slice(n1).map((c) => c.argv.join(' '));
-    ok(a4.rebound && a4.rebound.how === 'switched' && a4.rebound.targetId === t3 && b2.rebound && b2.rebound.how === 'new' && b2.rebound.why === 'life' && /new tab was opened/.test(b2.rebound.text) && fakeTabs(ns).length === 2 && after2.includes(`tab ${t3}`) && after2.includes('tab new') && B.findLease(kp._reg().leases, p.id, KEY_B).tabRoots.join() === fakeTabs(ns)[1].targetId, '⑭b two leases on one replaced browser: the first takes the only page, the second (that page is the first\'s root now) gets a NEW tab of its own — never another holder\'s', { a4: a4.rebound, b2: b2.rebound, after2 });
+    const own2 = ownNew14b(kp, p.id, KEY_B, after2, ns);
+    ok(a4.rebound && a4.rebound.how === 'switched' && a4.rebound.targetId === t3 && b2.rebound && b2.rebound.how === 'new' && b2.rebound.why === 'life' && /new tab was opened/.test(b2.rebound.text) && fakeTabs(ns).length === 2 && after2.includes(`tab ${t3}`) && own2.ok && B.findLease(kp._reg().leases, p.id, KEY_B).tabRoots.join() === fakeTabs(ns)[1].targetId, '⑭b two leases on one replaced browser: the first takes the only page, the second (that page is the first\'s root now) gets a NEW tab of its own — never another holder\'s — born at ITS OWN marked blank: one new-tab command, the made tab its only root (r4839)', { a4: a4.rebound, b2: b2.rebound, after2, own: own2.facts });
+    // r4839's RED: a keeper copy that opens the BARE `tab new` (the release's text before line 962) — the leg's own judge goes red
+    {
+      const ksrcB = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+      const bare = anchored(ksrcB, "[...pin, 'tab', 'new', ...(birth ? [birth] : [])], o)", "[...pin, 'tab', 'new'], o) /* CONTROL: the bare tab new, as at the release */", '⑭b the rebind\'s new tab');
+      const DB = path.join(ROOT, 'k14-bare'); fs.mkdirSync(DB, { recursive: true });
+      const kb = mk14(M14.load('src/server/browser-keeper.js', bare, 'bare-tab-new'), DB);
+      const pb = kb.createProfile({ label: 'Bare' }); const nsb = 'vs-' + pb.id;
+      try {
+        await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
+        await kb.attach({ profileId: pb.id, browserKey: KEY_B, sessionId: 'sess-b' });
+        await killDaemon(kb, pb.id);
+        const m0 = cmds(nsb).length;
+        await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
+        const bb = await kb.attach({ profileId: pb.id, browserKey: KEY_B, sessionId: 'sess-b' });
+        const afterB = cmds(nsb).slice(m0).map((c) => c.argv.join(' '));
+        const ownB = ownNew14b(kb, pb.id, KEY_B, afterB, nsb);
+        ok(bb.rebound && bb.rebound.how === 'new' && !ownB.ok && ownB.facts.news.length === 1 && ownB.facts.news[0].replace(/^--pin-tab /, '') === 'tab new', '⑭b CONTROL (r4839: the bare `tab new`, the release\'s text): the second lease\'s new tab is not born at its own mark — the leg\'s judge goes red', { rebound: bb.rebound, afterB, own: ownB.facts });
+      } finally { try { await kb.stop(pb.id, { why: 'user' }); } catch { /* none */ } kb.shutdown(); }
+    }
     // verify r1 (F3): the same two leases, their first commands AT ONCE (two agents resumed together) — reproduced: both read
     // the page list before either bound, both picked the one page, both rooted it (one tab for two conversations). The
     // rebind is serialized per profile now: the second reads the list after the first's bind landed.

@@ -348,6 +348,19 @@ const PATH_ENV = `${BIN}:${path.dirname(process.execPath)}:/usr/bin:/bin`;
 const env = { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB, XDG_RUNTIME_DIR: XDG };
 const logOf = (n) => { try { return fs.readFileSync(path.join(AB, n), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const cmdsOf = (sess) => logOf('cmds.log').filter((c) => c.sess === sess).map((c) => c.argv.join(' '));
+// r4839 (the second hosted proof of .420, line 962's road — B-0e4a): a conversation's NEW tab is born at its OWN marked blank. EXACTLY
+// one new-tab command, `tab new about:blank#vs-own-<its 24-hex mark>`, and the tab it made — the fake's own answer, read from the
+// fake's state, never the keeper's — is the lease's ONLY root
+const NEW_TAB_RE = /(^| )tab new( |$)/;
+const ownNewQ = (kk, pid, key, news) => {
+  const l = B.findLease(kk._reg().leases, pid, key);
+  const mark = String((l && l.ownMark) || '');
+  const ent = logOf('cmds.log').filter((c) => c.sess === 'vs-' + key && NEW_TAB_RE.test(c.argv.join(' '))).pop();
+  let n = 0; try { n = ent ? Number(JSON.parse(fs.readFileSync(path.join(AB, `${ent.ns}__${ent.sess}.json`), 'utf8')).tabs) || 0 : 0; } catch { n = 0; }
+  const made = n ? ('ab' + String(n).padStart(4, '0')).padEnd(32, 'c').toUpperCase() : null;
+  const facts = { mark, news, made, roots: l ? l.tabRoots : null };
+  return { ok: /^[0-9a-f]{24}$/.test(mark) && news.length === 1 && news[0].replace(/^--pin-tab /, '') === `tab new about:blank#vs-own-${mark}` && !!made && JSON.stringify(l.tabRoots) === JSON.stringify([made]), facts };
+};
 const quiet = { log() { }, warn() { }, error() { } };
 const settings = {};
 let clock = 1_900_000_000_000;
@@ -791,9 +804,28 @@ let work, solo, shop;
   const markedQ = k._reg().tabClosed[`${work.id}|${KA}`];
   const tq = cmdsOf('vs-' + KA).length;
   const rq = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://x.example'] }, as(sA));
-  const boundQ = cmdsOf('vs-' + KA).slice(tq).filter((c) => /tab new$/.test(c));
-  ok(Number.isFinite(markedQ) && rq.status === 200 && boundQ.length === 1 && k._reg().tabClosed[`${work.id}|${KA}`] === undefined, 'the conversation\'s next command after the Quit: the browser starts again and binds it a NEW tab first (the mark the stop set), then drops the mark (the owner, 5: "they reopen with `tab new` on their next command")', { markedQ, rq: rq.json, boundQ });
+  const boundQ = cmdsOf('vs-' + KA).slice(tq).filter((c) => NEW_TAB_RE.test(c));
+  const ownQ = ownNewQ(k, work.id, KA, boundQ);
+  ok(Number.isFinite(markedQ) && rq.status === 200 && ownQ.ok && k._reg().tabClosed[`${work.id}|${KA}`] === undefined, 'the conversation\'s next command after the Quit: the browser starts again and binds it a NEW tab first (the mark the stop set), born at ITS OWN marked blank, one new-tab command, the made tab its only root (r4839), then drops the mark (the owner, 5: "they reopen with `tab new` on their next command")', { own: ownQ.facts, markedQ, rq: rq.json, boundQ });
   ok(spyCount() === 0 && !sessionCards.some((c) => c.m.holder === 'user' || HM.isHumanKey(c.m.browserKey)) && sessionCards.length > 0 && sessionCards.every((c) => c.key === KA) && sessionCards.some((c) => c.m.phase === 'end' && c.m.reason === 'stopped'), '…and nothing of HIS reached any chat: a Quit is a Stop — the one card is the conversation\'s own session ending `stopped` (its lease session), a stop with no takeover delivers nothing', { spy: Object.fromEntries(Object.entries(spy).map(([a, b]) => [a, b.length])), cards: sessionCards.map((c) => c.key + ':' + c.m.phase + ':' + (c.m.reason || '')) });
+  // r4839's RED: a keeper copy that opens the BARE `tab new` (the release's text before line 962) — the leg's judge goes red. The
+  // Quit's own road through the keeper: a conversation's lease, the browser stopped for everyone (the stop marks every lease
+  // `closed`), its next attach binds its new tab. Its own registry and profile; a page list read EMPTY (nothing to switch to)
+  {
+    const qsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const Kq = M.load('src/server/browser-keeper.js', editAnchor(qsrc, "[...pin, 'tab', 'new', ...(birth ? [birth] : [])], o)", "[...pin, 'tab', 'new'], o) /* CONTROL: the bare tab new, as at the release */", "src/server/browser-keeper.js"), 'bare-tab-new');
+    const kq = mkKeeper(Kq, { dataDir: path.join(ROOT, 'data-q'), readTargets: async () => ({ ok: true, targets: [] }) });
+    const qp = kq.createProfile({ label: 'Q' }, { owner: { kind: 'instance', id: null } });
+    try {
+      await kq.attach({ profileId: qp.id, browserKey: KA, sessionId: 'sess-a' });
+      await kq.stop(qp.id, { why: 'user' });
+      const q0 = cmdsOf('vs-' + KA).length;
+      const qa = await kq.attach({ profileId: qp.id, browserKey: KA, sessionId: 'sess-a' });
+      const newQc = cmdsOf('vs-' + KA).slice(q0).filter((c) => NEW_TAB_RE.test(c));
+      const ownQc = ownNewQ(kq, qp.id, KA, newQc);
+      ok(newQc.length === 1 && newQc[0].replace(/^--pin-tab /, '') === 'tab new' && !ownQc.ok, 'CONTROL (r4839: the bare `tab new`, the release\'s text): the conversation\'s next command after the Quit opens a tab NOT at its own mark — the leg\'s judge goes red', { newQc, own: ownQc.facts, rebound: qa && qa.rebound });
+    } finally { try { await kq.stop(qp.id, { why: 'user' }); } catch { /* none */ } try { kq.shutdown(); } catch { /* none */ } }
+  }
 }
 {
   // Close on a profile nobody else uses: his tabs close under HIS session, the browser stays, the idle clock starts now
