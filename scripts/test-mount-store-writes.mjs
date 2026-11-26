@@ -8,7 +8,8 @@
 // FAST, in-process: each store's REAL code over a scratch data folder; the faults are PLACED (a refused sync of the store's own temp;
 // a stand-in writer thread that refuses a write) — never a mount, never a child, nothing fetched.
 //   W  three stores on THE STORE WRITER (mounts.json, machine-mounts.json, port-forwards.json), a real writer on a stand-in thread:
-//      W1 a person's act (a storage added, a pull mount removed, a machine unpaired) is ON DISK when its call returns (flushSync).
+//      W1 a person's act (a storage added, a pull mount removed, a forward removed, a MACHINE REMOVED — r5036) is ON DISK when its call
+//         returns (flushSync).
 //         RED: the act's save without `now` — not on disk at its return (owed to the writer's next turn)
 //      W2 mounts.json: a person's act whose landing FAILS throws not-durable with law F's one sentence, the old file stands, the writer
 //         said it, and the change lands once the storage answers; a save no person pressed under the same refusal throws NOTHING (a
@@ -19,6 +20,9 @@
 //      W5 a person's DISCONNECT is done first (detached) and its record lands after; a landing that fails answers what is true —
 //         detached, notOnDisk (the route's answer, the page says it) — and the record lands once the storage answers. RED: the
 //         cure's own first shape (the landing asked before the detach, thrown)
+//      W6 r5036, a machine's REMOVAL: ONE synchronous landing a removal (one flush, one write of the file), NONE for a machine with
+//         no forward while nothing is owed (an owed write is landed by a person's act, as every Ports press); EVERY call of the store's
+//         unpair in src/ and server.js: the two person roads pass now, the lift's passes none
 //   R  THE RATE LEGS — each event repeated N times over a recording writer writes zero or one time. RED each: its gate taken out
 //      R1 port-forwards.json: N dial-ins of a machine with no forward and of one whose forward is live
 //      R2 port-forwards.json: N heal sweeps of a forward that starts while its republish fails (each sweep one 5-min retry)
@@ -135,6 +139,8 @@ try {
       edits: [["    this._save({ now, why: 'a mount removed' }); this._notify();", "    this._save({ why: 'a mount removed' }); this._notify();"]] },
     { base: 'port-forwards.json', rel: PF, world: (M) => portsWorld(M, RW, [fwd(1), fwd(2)]), act: (w) => w.pf.unforward('pf-made1', { now: true }), landed: (doc) => !!doc && !doc.includes('"pf-made1"'),   // the Ports route's call (server.js passes now)
       edits: [["    this._state.forwards = this._state.forwards.filter((r) => r.id !== id);\n    this._persist({ now });", "    this._state.forwards = this._state.forwards.filter((r) => r.id !== id);\n    this._persist();"]] },   // stale-pins: kept — the release-shaped text, compiled back in as the red control
+    { base: 'port-forwards.json (a machine removed)', rel: PF, world: (M) => portsWorld(M, RW, [fwd(1), fwd(2)]), act: (w) => w.pf.onMachineUnpaired('host-made1', { now: true }), landed: (doc) => !!doc && !doc.includes('"pf-made1"') && doc.includes('"pf-made2"'),   // r5036: removeHost / unpairDialDevice pass now
+      edits: [["    this._persist({ now });   // r5036: a machine's REMOVAL by a person lands at once (its callers pass now); the unpair at a lift rides the writer", "    this._persist();"]] },   // the RED: the writer's road (the slice's first shape)
   ];
   for (const R of W_ACTS) {
     const scene = async (M) => { const w = R.world(M); let threw = null; try { await R.act(w); } catch (e) { threw = (e && e.message) || String(e); } const atReturn = R.landed(bytes(w.file)); const lands = await landed(w.file); return { atReturn, threw, later: lands && R.landed(bytes(w.file)), mode: (modeOf(w.file) || 0).toString(8) }; };
@@ -224,6 +230,31 @@ try {
     let red = null, why = null;
     try { red = await scene(copyOf(MO, [["      this._save();   // B-574d (r4827): the Disconnect's record rides the writer — the act is DONE first; a person's press lands it after its detach (unmount)", "      this._save({ now: true, why: 'a Disconnect' });"], ["    road = road.then((ok) => { if (this._save({ now: true, why: 'a Disconnect', quiet: true }) === false) (this._unmountNotOnDisk = this._unmountNotOnDisk || new Set()).add(id); return ok; });\n", ""]], 'w5-landing-first')); } catch (e) { why = e.message; }   // stale-pins: kept — the release-shaped text, compiled back in as the red control
     ok(!!red && (red.threw === 'not-durable' || !red.detached), 'W5 RED CONTROL (the landing asked before the detach, as at dd2e53e79): the press throws «not on disk» while the mount was never detached', red || why);
+  }
+  console.log('W6 r5036: a machine\'s REMOVAL by a person — one synchronous landing a removal, none for a machine with no forward (nothing owed)');
+  {
+    const w = portsWorld(require(path.join(REPO, PF)), RW, [fwd(1), fwd(2), fwd(3, { hostId: 'host-made1' })]);
+    const writesOf = () => ((RW.stats().find((r) => r.file === w.file) || {}).writes || 0);
+    let flushes = 0; const f0 = RW.flushSync; RW.flushSync = function (...a) { flushes++; return f0.apply(this, a); };
+    let one = null, none = null;
+    try {
+      w.pf.onMachineUnpaired('host-made1', { now: true });
+      const doc = bytes(w.file) || '';
+      one = { flushes, writes: writesOf(), gone: !doc.includes('"pf-made1"') && !doc.includes('"pf-made3"'), kept: doc.includes('"pf-made2"') };
+      flushes = 0; const w0 = writesOf();
+      w.pf.onMachineUnpaired('host-made9', { now: true });   // a machine with no forward: nothing changed, nothing owed
+      none = { flushes, writes: writesOf() - w0 };
+    } finally { RW.flushSync = f0; }
+    ok(one.flushes === 1 && one.writes === 1 && one.gone && one.kept, 'W6 a machine removed by a person: ONE synchronous landing (one flush, one write of the file) and its two forwards gone from the file when the call returns', one);
+    ok(none.flushes === 0 && none.writes === 0, 'W6 a machine removed that has no forward, nothing owed: no landing asked, nothing written', none);
+    // EVERY call of the store's unpair: the port-forward manager is handed around as `portForwards` (server.js, its routes); its own
+    // lift calls `this.onMachineUnpaired` — a new road of either shape is counted here and must name its side
+    const calls = [], walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (r.endsWith('.js')) srcOf(r).split('\n').forEach((l, i) => { if (/\bportForwards\??\.onMachineUnpaired\(/.test(l)) calls.push([r, l.trim()]); }); } };
+    walk('src'); srcOf('server.js').split('\n').forEach((l) => { if (/\bportForwards\??\.onMachineUnpaired\(/.test(l)) calls.push(['server.js', l.trim()]); });
+    const own = srcOf(PF).split('\n').filter((l) => /\bthis\.onMachineUnpaired\(/.test(l)).map((l) => l.trim());
+    ok(calls.length === 2 && calls.every(([, l]) => l.includes(', { now: true })')) && calls.some(([f]) => f === 'src/server/exit-routes.js') && calls.some(([f]) => f === 'src/server/dial-pairing.js')
+      && own.length === 1 && own[0].includes('try { this.onMachineUnpaired(h); }'),
+      `W6 every call of the store's unpair names its side: the two person roads (removeHost, unpairDialDevice) pass now, the lift's passes none (${calls.length} calls, ${own.length} of its own)`, { calls, own });
   }
 } finally { /* the real writer stops at the end */ }
 

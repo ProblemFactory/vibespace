@@ -257,10 +257,11 @@ class PortForwardManager {
    *  write; ONE road for the file, so a later state always lands last. NO WRITE WHEN NOTHING CHANGED (r4796 (b)): the bytes the writer
    *  was last handed are never asked again — a dial-in of a machine with nothing to change, the heal sweep's retry that changed
    *  nothing, a service's restart that publishes the same address write NOTHING. THE CALLER NAMES THE SIDE (r4827): ONLY a person's own
-   *  act from the Ports routes (server.js passes `now`) lands before it answers — the writer's own synchronous road (flushSync); every
-   *  caller no person pressed (the jobs engine's forward and publish at a service's start or restart, its recheck, reprobe, the heal
-   *  sweep, a dial-in, a probe's answer, an unpair's road, the boot's replay) rides the writer off the loop, and an unchanged state
-   *  asks nothing even while a write is owed (no landing waited for, whatever the storage). A failed landing
+   *  act — from the Ports routes (server.js passes `now`) and, r5036, a machine's REMOVAL (removeHost, unpairDialDevice pass `now`) —
+   *  lands before it answers, the writer's own synchronous road (flushSync: with `now` a write still owed is landed too, an unchanged
+   *  state included); every caller no person pressed (the jobs engine's forward and publish at a service's start or restart, its
+   *  recheck, reprobe, the heal sweep, a dial-in, a probe's answer, the unpair at a LIFT, the boot's replay) rides the writer off the
+   *  loop, and for them an unchanged state asks nothing even while a write is owed (no landing waited for, whatever the storage). A failed landing
    *  is the writer's own line (said at its first failure and every tenth) and stays owed; nothing is thrown (as before: said, never
    *  thrown). r3009: held ⇒ nothing written over the file */
   _persist({ now = false } = {}) {
@@ -271,7 +272,7 @@ class PortForwardManager {
       W.dirty(this.file, { name: 'port-forwards.write', produce: () => {
         const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
       } });
-      if (now) W.flushSync([this.file], { waitedBy: 'port-forwards.json: a forward changed by a person or a service' });
+      if (now) W.flushSync([this.file], { waitedBy: 'port-forwards.json: a forward changed by a person (a Ports press, a machine removed) or a service' });
     } catch (e) { this.log('port-forward persist: ' + e.message); }
   }
   /** r3009: the words the Ports panel reads while port-forwards.json is held (null when it reads) */
@@ -905,8 +906,12 @@ class PortForwardManager {
     if (changed) { this._persist(); this._emit(); }
   }
 
-  /** A machine was unpaired/removed — drop its forwards. */
-  onMachineUnpaired(hostId) {
+  /** A machine was unpaired/removed — drop its forwards. r5036 (主开发): a machine's REMOVAL is a PERSON's act — its two callers (removeHost in
+   *  src/server/exit-routes.js, unpairDialDevice in src/server/dial-pairing.js) pass `now`, so port-forwards.json holds the truth when the
+   *  route replies (a hub killed right after never comes back with that machine's forwards) — as every Ports press, a landing that
+   *  fails or meets the flush's bound is the writer's own line and stays owed. While the list is HELD (unread) the removal waits for the
+   *  lift, and the unpair at a LIFT names no side — no press there: the writer's crash window, the family's accepted cost */
+  onMachineUnpaired(hostId, { now = false } = {}) {
     if (this._hold.held()) { (this._unpairedHeld = this._unpairedHeld || new Set()).add(hostId); return; }   // r3174: held — its forwards go at the lift
     for (const rec of this._state.forwards.filter((r) => r.hostId === hostId)) {
       // unpublish FIRST — dropping the record without frpUnpublish left the
@@ -920,7 +925,7 @@ class PortForwardManager {
       this._pubGen.delete(rec.id); this._relayUnanswered.delete(rec.id);   // r3327
     }
     this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);
-    this._persist();   // B-574d (r4827): an unpair's own road (no Ports press) rides the writer
+    this._persist({ now });   // r5036: a machine's REMOVAL by a person lands at once (its callers pass now); the unpair at a lift rides the writer
     this._emit();
   }
 }

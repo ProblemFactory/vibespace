@@ -386,7 +386,7 @@ async function removeHost(h) {
   // port-forwards are pure local plumbing (unlike mounts, which keep their
   // preserve-as-orphan semantics for ssh) — with the host record gone their
   // records become invisible, undeletable orphans (review finding)
-  else { try { portForwards.onMachineUnpaired(h.id); } catch { } }
+  else { try { portForwards.onMachineUnpaired(h.id, { now: true }); } catch { } }   // r5036: a person's removal lands at once (port-forwards.json held: at its lift, on the writer)
   try { require('../routes/account-tails.js').forgetHostCliTail(h.id); } catch { }   // B-ee0a's take: its CLI key's kept tail leaves with it
   try { exitProxy.onMachineUnpaired(h.id); } catch { }
   hosts.remove(h.id);

@@ -406,7 +406,8 @@ try {
     let fwdErr = null; try { await ph.forward('__local__', 5502, { label: 'a new forward' }); } catch (e) { fwdErr = e; }
     await ph.restore().catch(() => {});
     // r5029: «write NOTHING» is read after the product could have written — the store writer asked to land what it owes for the file first
-    const owedAfter = !!ph._writer().pending(sfile); ph._writer().flushSync([sfile]);
+    const owedAfter = !!ph._writer().pending(sfile);   // read BEFORE the flush: what the product owed then
+    ph._writer().flushSync([sfile]);
     const after = fs.readFileSync(sfile, 'utf8');
     const listed = typeof ph.heldWords === 'function' ? ph.heldWords() : null;
     check('r3009: port-forwards.json read FAILED (a placed EIO) — the person\'s next Forward and the boot replay write NOTHING over it: the file\'s content survives', after === before && !owedAfter, after.slice(0, 240));
@@ -436,7 +437,8 @@ try {
       pu.onMachineUnpaired('h1');
       // r5029 (B-574d: this store's writes ride the STORE WRITER since slice «mounts-and-forwards»): «nothing written then» is read AFTER
       // the product could have written — the writer asked to land every write it owes for the file (none is owed while held), then the read
-      const PW = pu._writer(), owedHeld = !!PW.pending(ufile); PW.flushSync([ufile]);
+      const PW = pu._writer(), owedHeld = !!PW.pending(ufile);   // read BEFORE the flush: what the product owed while held
+      PW.flushSync([ufile]);
       const heldFile = fs.readFileSync(ufile, 'utf8');
       const PMu = PMmod.create({ getPortForwards: () => pu, requestAuthed: () => false });
       const anon = await new Promise((resolve) => { const res = { status(c) { this.c = c; return this; }, json(b) { resolve({ c: this.c, b }); }, redirect(c, u) { resolve({ c, u }); } }; PMu.handler({ originalUrl: '/svc/x/', url: '/svc/x/', headers: {} }, res); });
@@ -444,6 +446,8 @@ try {
       // r5029: the lift's own write is the writer's: the file is read when the WRITER says it landed (its own fact, durable() — never a
       // sleep; nothing owed answers at once, so a write never asked reads the old file)
       const landed = await PW.durable(ufile, { timeoutMs: 15000 });
+      // afterIds (memory) naming only the local forward is what proves the lift had run before durable() was asked — an early «true»
+      // (nothing owed yet) cannot pass the leg: onDisk would still name the unpaired machine's forward
       const afterIds = pu.list().map((r) => r.id).sort().join(','), onDisk = JSON.parse(fs.readFileSync(ufile, 'utf8')).forwards.map((r) => r.id).sort().join(',');
       clearInterval(pu._watch);
       fs.rmSync(udir, { recursive: true, force: true });
@@ -460,9 +464,28 @@ try {
     check('RED CONTROL r3228: the unpair\'s held line cut (in a copy) — the unpaired machine\'s forward comes back at the lift', u1.afterIds.includes('pf-h1-7001'), JSON.stringify(u1));
     // r5029: RED CONTROL — the lift's write never asked (the unpair road's _persist cut, in a copy): the list drops the machine, the landing
     // answers at once (nothing owed) and the file still names its forward — the on-disk clause, read after the landing, can see a lost write
-    const UNPAIR_WRITE = "    this._persist();   // B-574d (r4827): an unpair's own road (no Ports press) rides the writer\n";
+    const UNPAIR_WRITE = "    this._persist({ now });   // r5036: a machine's REMOVAL by a person lands at once (its callers pass now); the unpair at a lift rides the writer\n";
     const u3 = await unpairScene(MU.load('src/port-forward.js', anchU(PFS, UNPAIR_WRITE, '', 'unpair-write-cut'), 'unpair-write-cut').PortForwardManager, PM0, 'unpair-write-cut');
     check('RED CONTROL r5029: the unpair\'s write cut (in a copy) — listed without the machine, but read after the landing the file still holds its forward', u3.landed === true && u3.afterIds === 'pf-__local__-7002' && u3.onDisk.includes('pf-h1-7001'), JSON.stringify(u3));
+    // r5116 (N3): A PERSON's ACT ON THE PORTS `now` ROAD (server.js passes it: a protocol change, a forward's removal, …) IS ON DISK WHEN
+    // ITS CALL RETURNS — the file read at once after the call (its save runs before the call's first await), no flush, no wait. RED
+    // CONTROL (a copy): the `now` road's flushSync cut — the write is only owed then (the writer lands it on a later turn of the loop)
+    const nowScene = async (PFM, tag) => {
+      const ndir = fs.mkdtempSync(path.join(path.dirname(dataDir), 'pf-now-')), nfile = path.join(ndir, 'port-forwards.json');
+      fs.writeFileSync(nfile, JSON.stringify({ forwards: [{ id: 'pf-__local__-7003', hostId: '__local__', remotePort: 7003, label: 'local' }] }, null, 2));
+      const pn = new PFM({ hosts, dataDir: ndir, broadcast: () => {}, log: () => {} });
+      const p = pn.setProtoOverride('pf-__local__-7003', 'https', { now: true });
+      const atReturn = (JSON.parse(fs.readFileSync(nfile, 'utf8')).forwards[0] || {}).protoOverride || null;
+      await p; const landed = await pn._writer().durable(nfile, { timeoutMs: 15000 });
+      const later = (JSON.parse(fs.readFileSync(nfile, 'utf8')).forwards[0] || {}).protoOverride || null;
+      clearInterval(pn._watch); if (pn._hold && pn._hold.stop) pn._hold.stop();
+      fs.rmSync(ndir, { recursive: true, force: true });
+      return { tag, atReturn, landed, later };
+    };
+    const NOW_FLUSH = "      if (now) W.flushSync([this.file], { waitedBy: 'port-forwards.json: a forward changed by a person (a Ports press, a machine removed) or a service' });\n";
+    const n0 = await nowScene(PortForwardManager, 'now'), n1 = await nowScene(MU.load('src/port-forward.js', anchU(PFS, NOW_FLUSH, '', 'now-flush-cut'), 'now-flush-cut').PortForwardManager, 'now-flush-cut');
+    check('r5116: a person\'s act on the Ports now road (a protocol change) is ON DISK when its call returns — read at once, no flush, no wait', n0.atReturn === 'https' && n0.landed === true && n0.later === 'https', JSON.stringify(n0));
+    check('RED CONTROL r5116: the now road\'s flushSync cut (in a copy) — the change is NOT on disk at the return (only owed), it lands later', n1.atReturn === null && n1.landed === true && n1.later === 'https', JSON.stringify(n1));
     const u2 = await unpairScene(PortForwardManager, MU.load('src/server/path-mounts.js', anchU(PMS, PLAIN, "res.status(503).json({ error: heldW, code: 'ports_unread' })", 'plain-503-cut'), 'plain-503-cut'), 'plain-503-cut');
     check('RED CONTROL r3228: the plain 503 cut (in a copy) — the hold\'s words (the file\'s name) reach a caller who is not signed in', u2.anon.c === 503 && /port-forwards|could not be read/.test(JSON.stringify(u2.anon.b || {})), JSON.stringify(u2.anon));
   }
