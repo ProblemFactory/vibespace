@@ -134,6 +134,7 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const FC = require('../fd-close.js');   // B-574d browser-stores: the rename door's words (a file system with no sync) and its set
 const crypto = require('crypto');
 const zlib = require('zlib');
 const { Writable } = require('stream');
@@ -176,7 +177,26 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   let record = { v: 1, engines: {} };
   const ready = (async () => { try { const j = JSON.parse(await fsp.readFile(recordFile, 'utf8')); if (j && typeof j === 'object' && j.engines && typeof j.engines === 'object') record = { v: 1, engines: j.engines }; } catch { /* none yet */ } })();
   let saving = Promise.resolve();
-  const save = () => (saving = saving.then(async () => { const tmp = `${recordFile}.${process.pid}.tmp`; await fsp.mkdir(path.dirname(recordFile), { recursive: true }); await fsp.writeFile(tmp, JSON.stringify(record, null, 1), { mode: 0o600 }); await fsp.rename(tmp, recordFile); }).catch((e) => log.warn?.(`[browser] the engine record could not be written (${e && e.message})`)));
+  // B-574d «browser-stores» 3/8 (lane nl-migrations, 主开发 r5101): the record takes its name only after ONE sync of its temp — the
+  // asynchronous synced replace (off the loop as before, serialized as before): the temp written, its FileHandle synced, its close
+  // judged, then renamed; a write, sync or close that fails is a failed write — the temp removed, the old record standing, said (the
+  // record stays in memory and the next save writes it again, as before); only a file system with no sync lets the bytes take their
+  // name, said once. save() resolves true when the record landed, false when it did not
+  let noSyncSaid = false;
+  const writeRecordSynced = async (text) => {
+    const tmp = `${recordFile}.${process.pid}.tmp`;
+    await fsp.mkdir(path.dirname(recordFile), { recursive: true });
+    const fh = await fsp.open(tmp, 'w', 0o600);
+    let failed = null;
+    try {
+      await fh.writeFile(text);
+      try { await fh.sync(); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; if (!noSyncSaid) { noSyncSaid = true; try { log.warn?.(FC.syncUnsupportedWords('[browser] the engine record', e.code)); } catch { } } }
+    } catch (e) { failed = e; }
+    try { await fh.close(); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there
+    if (failed) { await fsp.unlink(tmp).catch(() => { }); throw failed; }
+    await fsp.rename(tmp, recordFile);
+  };
+  const save = () => (saving = saving.then(() => writeRecordSynced(JSON.stringify(record, null, 1)).then(() => true)).catch((e) => { log.warn?.(`[browser] the engine record could not be written (${e && e.message}) — kept in memory, written again at the next save`); return false; }));
   const recOf = (id) => (record.engines[id] = record.engines[id] || {});
   const running = new Map();   // id → the download in flight {step, bytes, total, startedAt, by, abort}
   const measuring = new Map();
@@ -1466,7 +1486,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     return out;
   };
 
-  return { installKernel, plannedKernel, measure, kernelFact, bootFleet, bootRestore, fleetView, ready, recordFile, _record: () => record,
+  return { installKernel, plannedKernel, measure, kernelFact, bootFleet, bootRestore, fleetView, ready, recordFile, _record: () => record, _save: () => save(),   // _save: a suite's write of the record (B-574d browser-stores)
     syncFleet, fleetChanged, follow, landNext, kernelDue, holdPlace, fleetSettled, beforeStart, bootLine, // lane fleet-plugin-catalog (r2: holdPlace — a start's hold on the place; r3: beforeStart — a start's ONE ask)
     _inUse: (id) => inUse(String(id || ''), planOf(String(id || ''))) }; // a suite's read of the in-use check (round 2, N4)
 }
