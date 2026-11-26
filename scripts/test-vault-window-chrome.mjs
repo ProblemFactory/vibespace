@@ -21,6 +21,10 @@
 //   ⑥b Manage Agents' Show key… (r2): a fresh page ⇒ 验证是你 first — in the click's own task, before any key request (lane
 //      takeover-surface-census) — then the key on ONE request; a second Show key… inside the window asks nothing
 //   ⑦ a phone viewport: the rows fit, 「显示」 is reachable (on top, ≥ 36 px)
+//   ⑦f (lane lg-vault-file, B-0830, 主开发 r5316): a FILE row's «Replace file…» and its «Cancel» PRESSED AS A PERSON presses (CDP
+//      mouse events at the control's centre once the page says it is the topmost element there — never a script's click()):
+//      the form gone and no form left in the taskbar, at 1280 and at 768; RED CONTROL: the same reading over a Cancel planted to
+//      do nothing sees the form standing; the file entry removed after (⑧ on read the rows they always had)
 //   ⑧ the words in Chinese: 「验证是你」, 「显示」; no value or password in the server log; the audit has the reveals
 //   THE HEADER (lane vault-one-door — the old ⚙ System ▸ Vault… dialog is the window's header now): ⓪ not set up ⇒ only
 //   设置第二密码…, which sets it from the header; unlocked ⇒ 立即锁定 + 修改第二密码… (opens the change dialog) + the idle row
@@ -55,7 +59,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, realClicker } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -590,6 +594,49 @@ check('… and back: every row, the modal closed', !!(await until(`document.quer
   await evalJs(`JSON.stringify({ rows: document.querySelectorAll('.vw-list .vw-row').length, modal: !!document.getElementById('vault-filter-dialog'), kinds: [...document.querySelectorAll('.vw-list .vw-row')].map((r) => r.dataset.purpose || r.dataset.store || '?') })`));   // a red says what the list holds (主开发 r5543)
 await shot('vw-6-phone.png');
 await cdp('Emulation.clearDeviceMetricsOverride');
+
+console.log('⑦f a FILE row: «Replace file…» and its «Cancel» pressed as a person presses (lane lg-vault-file, 主开发 r5316)');
+/** A PERSON's press through the ONE door (scratch.mjs realClicker, §108): measured scrolled into view, held still, pressed
+ *  only where the element under the pointer IS the control — never a script's click(); a miss says why (lastMiss). */
+const RC = realClicker({ evalJs, cdp });
+const pressAsPerson = async (sel) => { const pressed = await RC(sel); return { pressed, miss: pressed ? null : (RC.lastMiss && RC.lastMiss.why) || 'not pressed' }; };
+/** the Replace form in the page, and the taskbar's forms (the window manager's form windows — a sheet has none) */
+const replaceState = () => evalJs(`({ form: !!document.getElementById('vault-file-replace'), forms: [...app.wm.windows.values()].filter((w) => w.type === 'form').length })`);
+const FILE_TEXT = ['# build server', 'server = build.example.test', 'port = 8443', 'retries = 3', ''].join('\n');
+const fput = await api('POST', '/api/vault/files', { label: 'Build server settings', note: 'How the build server is reached', filename: 'build.conf', size: Buffer.byteLength(FILE_TEXT), bytes: Buffer.from(FILE_TEXT).toString('base64') });
+const fentry = (fput && fput.json && fput.json.entry) || '';
+check('a FILE entry stored through the owner\'s door (POST /api/vault/files)', fput && fput.status === 200 && /^keyfile:[0-9a-f]+$/.test(fentry), fput);
+const FROW = `.vw-row[data-id^="secrets:${fentry}#"]`, FREPLACE = `${FROW} .vw-file-replace`, FCANCEL = '#vault-file-replace .dialog-footer .btn-cancel';   // the FOOTER's Cancel: the picker's «Choose a file…» carries btn-cancel too, and comes first
+for (const sz of [{ w: 1280, h: 800 }, { w: 768, h: 1024 }]) {
+  await cdp('Emulation.setDeviceMetricsOverride', { width: sz.w, height: sz.h, deviceScaleFactor: 1, mobile: false });
+  await cdp('Page.navigate', { url: URL });
+  await until(`!!(window.app && app.wm)`, { timeout: 30000 });
+  await splashGone();
+  await openWindow();
+  const hasRow = !!(await until(visible(FROW), { timeout: 10000 }));
+  const p1 = await pressAsPerson(FREPLACE);
+  const opened = !!(await until(visible(FCANCEL), { timeout: 8000 }));
+  const s0 = await replaceState();
+  const named = await evalJs(`document.querySelector(${JSON.stringify(FCANCEL)})?.textContent || ''`);   // the press's own witness: the control IS Cancel
+  const p2 = await pressAsPerson(FCANCEL);
+  const gone = !!(await until(`!document.getElementById('vault-file-replace') && [...app.wm.windows.values()].every((w) => w.type !== 'form')`, { timeout: 5000 }));
+  const s1 = await replaceState();
+  check(`${sz.w}×${sz.h}: «Replace file…» pressed as a person opens its form, and its «Cancel» pressed as a person CLOSES it — the form gone, no form left in the taskbar`, hasRow && p1.pressed && opened && s0.form && named === 'Cancel' && p2.pressed && gone && !s1.form && s1.forms === 0, { hasRow, p1, named, p2, s0, s1 });
+  if (sz.w === 1280) {
+    // RED CONTROL: the same press and the same reading over a Cancel PLANTED to do nothing (its witness: the button's handler is the plant)
+    const p3 = await pressAsPerson(FREPLACE);
+    const again = !!(await until(visible(FCANCEL), { timeout: 8000 }));
+    const planted = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(FCANCEL)}); if (!b) return false; b.onclick = function plantedNoClose() {}; return b.onclick.name === 'plantedNoClose'; })()`);
+    const p4 = await pressAsPerson(FCANCEL);
+    await sleep(1500);
+    const s2 = await replaceState();
+    check('red control: «a Cancel that leaves the form standing» (planted on the button, its handler read back) — the same press and reading see the form and its taskbar entry', p3.pressed && again && planted && p4.pressed && s2.form && s2.forms >= 1, { p3, planted, p4, s2 });
+    await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'form') app.wm.closeWindow(w.id); document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
+  }
+}
+await cdp('Emulation.clearDeviceMetricsOverride');
+const fdrop = await api('DELETE', `/api/vault/files/${fentry.slice('keyfile:'.length)}`);
+check('… the file entry removed again (⑧ on read the rows they always had)', fdrop && fdrop.status === 200 && fdrop.json && fdrop.json.ok === true, fdrop);
 
 console.log('⑧ the words in Chinese; the log; the audit');
 await evalJs(`localStorage.setItem('vibespace.lang', 'zh')`);
