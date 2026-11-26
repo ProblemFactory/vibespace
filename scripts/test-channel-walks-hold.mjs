@@ -15,6 +15,8 @@
 //   PRINTED, never judged (the found holders, named in the line — not this unit's): the index's write after a burst over every
 //   row; the per-account map rebuilt WHOLE in one turn (keysOf after a void); a rule whose row applies to the asker (its account
 //   judged per row); the store's own search over a logged account (its wanted set over the ids it is handed)
+//   THE CLOCK IS THE BOX's (主开发 r4850, the tree's form of scripts/test-boot-resume-shape.mjs): on the hosted runner every leg that
+//   judges a time prints its reading and is a named skip; what is not a clock is judged everywhere (below, at HOSTED)
 // Run: node scripts/test-channel-walks-hold.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +28,24 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
-const { ok, report } = checker();
+// THE CLOCK IS THE BOX's (主开发 r4850; the form of scripts/test-boot-resume-shape.mjs, 主开发 r965 / r2955): the bound is read on the
+// box and the test machines. On the hosted runner (its own mark: GITHUB_ACTIONS=true — never a guess from speed) every leg still
+// runs; a leg that judges a TIME (the bound legs, and the red controls that must read over the bound) prints its reading and says
+// by name that it is not judged there — a SKIP line (counted as a skip, never a green); everything that is not a clock (the sliced
+// build's structure, the kept flags, the errors, the census) is judged everywhere. The closing line there names how many legs were
+// printed, not judged. The box's run is the law's proof.
+const HOSTED = process.env.GITHUB_ACTIONS === 'true';
+const CLOCKS = { n: 0 };
+const { ok, report } = checker({ log: (l) => console.log(HOSTED && /^\n(?:ALL PASS|\d+ FAILED)/.test(l) ? `${l} · ${CLOCKS.n} leg(s) that judge a clock printed, not judged on the hosted runner (each said above)` : l) });
+const LAW_WHY = 'the clock law is judged on the box only (主开发 r4850); its reading is printed';
+const RED_WHY = 'a red control\'s clock is judged on the box only, as its law (主开发 r4850); its plant is judged by its structure checks';
+/** a leg that judges a TIME: a leg on the box and the test machines; on the hosted runner its words (its reading in them) and the skip */
+function clock(cond, words, why, detail) {
+  if (!HOSTED) return ok(cond, words, detail);
+  CLOCKS.n++;
+  console.log(`  ⊘ SKIP: ${words} — NOT JUDGED on the hosted runner (GITHUB_ACTIONS=true): ${why}`);
+  return cond;
+}
 const ROOT = scratch('channel-walks-hold');
 const T = Date.parse('2026-11-25T12:00:00Z');
 const BOUND_MS = 50;   // 主开发 r4325: under 50 ms a turn at the stand-in's size
@@ -122,7 +141,8 @@ console.log('① the per-account map after a whole-map touch: built in slices, s
   console.log(`  · PRINTED: while the map is void the road answers by the release's walk (slow and right, 主开发 r4325): ${first.turn} ms, «${first.out}»`);
   const h = await holdOf(() => ix.keysReady());
   const st1 = ix.keysStats();
-  ok(!st0.kept && stA.warming && !stA.kept && st1.kept && h.turn <= BOUND_MS, `① the first road after the touch started the SLICED build (never the whole map in its turn); to its landing the loop's longest turn ${h.turn} ms (histogram ${h.hist} ms) of ${h.total} ms — ≤ ${BOUND_MS} ms`, { st0, stA, st1, h: { turn: h.turn, total: h.total } });
+  ok(!st0.kept && stA.warming && !stA.kept && st1.kept && first.err === null && h.err === null, `① the first road after the touch started the SLICED build (never the whole map in its turn): void before it, warming and not kept after the road's turn, kept at the build's landing — no error`, { st0, stA, st1, errs: [first.err, h.err].filter(Boolean) });
+  clock(h.turn <= BOUND_MS, `① …to its landing the loop's longest turn ${h.turn} ms (histogram ${h.hist} ms) of ${h.total} ms — ≤ ${BOUND_MS} ms`, LAW_WHY, { h: { turn: h.turn, total: h.total } });
   // PRINTED: the same map rebuilt WHOLE in one turn (a keysOf after a void — B-dfa4's own road, found holder 2)
   await ix.update((x) => { delete x.conversations[`${A[0]}/c${String(SIZES[0] - 2).padStart(6, '0')}`]; });
   await ix.durable();
@@ -153,16 +173,18 @@ console.log('① the per-account map after a whole-map touch: built in slices, s
 // ═══ ② THE ROADS ══════════════════════════════════════════════════════════════════════════════════════════════════════════
 console.log(`② every road for every asker, three runs each: the median longest turn ≤ ${BOUND_MS} ms`);
 const RELI = REL.create(ectx);
-const table = {};
+const table = {}, roadErrs = [];
 for (const [an, mk] of Object.entries(ASKERS)) {
   for (const [rn, f] of Object.entries(ROADS)) {
     const runs = [];
     for (let i = 0; i < 3; i++) runs.push(await holdOf(() => f(eng, mk())));
     const med = median(runs.map((r) => r.turn));
     table[`${rn} · ${an}`] = runs.map((r) => r.turn);
-    ok(med <= BOUND_MS && runs.every((r) => r.err === null), `② ${rn} — ${an}: longest turn ${runs.map((r) => r.turn).join(' / ')} ms (median ${med}; histogram ${runs.map((r) => r.hist).join(' / ')}; whole ask ${runs.map((r) => r.total).join(' / ')} ms)`, runs.map((r) => r.err).filter(Boolean));
+    for (const r of runs) if (r.err !== null) roadErrs.push(`${rn} — ${an}: ${r.err}`);
+    clock(med <= BOUND_MS, `② ${rn} — ${an}: longest turn ${runs.map((r) => r.turn).join(' / ')} ms (median ${med}; histogram ${runs.map((r) => r.hist).join(' / ')}; whole ask ${runs.map((r) => r.total).join(' / ')} ms)`, LAW_WHY);
   }
 }
+ok(roadErrs.length === 0, `② every road answered every asker on every run, no error (${Object.keys(ASKERS).length * Object.keys(ROADS).length} asks × 3 runs)`, roadErrs);
 // RED: the release's walk for the asker no row names
 {
   const rel = [];
@@ -171,7 +193,9 @@ for (const [an, mk] of Object.entries(ASKERS)) {
     const runs = [];
     for (let i = 0; i < 3; i++) runs.push(await holdOf(() => ROADS[rn](RELI, ASKERS['no row names it']())));
     rel.push(`${rn} ${runs.map((r) => r.turn).join(' / ')} ms`);
-    ok(median(runs.map((r) => r.turn)) > BOUND_MS, `RED: the release's walk (its text in a copy, the same engine) — ${rn} for the asker no row names: ${runs.map((r) => r.turn).join(' / ')} ms, over the bound (the meter sees the walk by conversation)`);
+    ok(runs.every((r) => r.err === null && !!r.out && r.out.ok === true), `RED's plant: the release's walk in its copy (three anchored edits, each throws unless its line is there once; the copy in the census below) answered ${rn} for the asker no row names on every run — no error`, runs.map((r) => r.err).filter(Boolean));
+    // AN ABSOLUTE TIME (r4841 (b)): machine 1 reads the list at 64–73 ms (the directory's 74–89) — a machine about 1.4 times faster reads it under the bound: red falsely
+    clock(median(runs.map((r) => r.turn)) > BOUND_MS, `RED: the release's walk (its text in a copy, the same engine) — ${rn} for the asker no row names: ${runs.map((r) => r.turn).join(' / ')} ms, over the bound (the meter sees the walk by conversation)`, RED_WHY);
   }
 }
 
