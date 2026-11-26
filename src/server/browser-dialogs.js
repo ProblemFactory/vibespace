@@ -3791,7 +3791,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   // ── A BROWSER COMMAND's OUTPUT OFF THE LOOP (row B-360d, lane mask-value-shape, 主开发 r4523) ──
   // The CLI (data/bin/vibespace-browser) posts a verb's whole output to the audit route when the profile holds scrub values; each half
-  // (`out`, `err`) is up to 16 MiB. A half past THE ON-LOOP FIGURE (the frames' own, 64 KiB) is ONE «text» job on the profile's scrub
+  // (`out`, `err`) is up to 4 MiB (SCRUB_FIG.textMax; an older CLI copy posts up to 16 MiB — refused by name). A half past THE ON-LOOP FIGURE (the frames' own, 64 KiB) is ONE «text» job on the profile's scrub
   // worker, in the same queue as its frames (so the halves and the commands come back in the order asked), with THE SAME compiled
   // scrubber and values; a half of 64 KiB or less stays on the loop, as a frame does. NEVER RAW, NEVER A FALLBACK TO THE LOOP: a lost
   // worker, a silence past its bound, the floor between starts, the ceiling, or the text budget's overrun REFUSES the whole output
