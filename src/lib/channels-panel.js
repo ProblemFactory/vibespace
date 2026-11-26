@@ -116,6 +116,7 @@ function purgeLeftLine(p) {
     busy = (async () => {
       const r = await fetchJson(`/api/channels/purge-left/${encodeURIComponent(p.id)}/retry`, { method: 'POST' });
       if (!r || r.error) showToast(routeErrorText(r), { type: 'error' });
+      else if (r.done && r.journalOwed) showToast(t('Removed "{name}" — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write', { name: removedName(p) }), { type: 'warn', duration: 9000 });   // B-360d (r4642 (1)): its poll stamps not off the disk yet — the first removal's own words
       else if (r.done) showToast(t('The rest of the removed account {name} was removed from disk', { name: removedName(p) }));
       else showToast(t('{left} of the removed account {name} could still not be removed — it stays listed', { name: removedName(p), left: purgeLeftText(r.purgeLeft) }), { type: 'warn', duration: 9000 });
     })().catch(() => { }).finally(() => { busy = null; });

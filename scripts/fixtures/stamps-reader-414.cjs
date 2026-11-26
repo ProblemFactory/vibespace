@@ -1,7 +1,7 @@
 'use strict';
 // THE FROZEN READER (B-360d, the coordinator's r1319 «a rollback to the release reads what you leave»): the poll stamps' LOAD of
 // 2.369.414 (a117cebb8, src/channel-store.js — the side file's validator, its map fill and the journal's replay, copied
-// VERBATIM in their order; only the scaffolding around them is new). test-channel-store-writer-laws (m6) reads the files the
+// VERBATIM in their order; only the scaffolding around them is new). test-channel-stamps-write (m6) reads the files the
 // compaction leaves through it — a store rolled back to that release reads every stamp. A FIXTURE, not `git show`: a hosted
 // run's checkout is shallow, and the rollback leg must run there too. Never edit the copied lines; a later release that
 // changes its reader adds its own frozen copy beside this one.

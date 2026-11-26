@@ -1307,12 +1307,17 @@ function create(engineCtx) {
     if (!onDisk) throw httpErr(409, 'records-unwritten', 'the accounts\' file (adapters.json) holds a change that is not on disk yet — nothing was removed; try again in a moment');
     const r = await store.purgeAccount(id);
     if (r && r.refused) throw httpErr(409, r.refused, r.error);
+    // B-360d (r4642 (1)): the press waits for the poll stamps' landing as the first press does — one that could not land is said,
+    // and answered journalOwed (the person's words for it), never a silent «done»
+    let stampsClean = true;
+    try { if (r && r.stamps) stampsClean = (await r.stamps) !== false; } catch { stampsClean = false; }
+    if (!stampsClean) log.warn(`[channels] ${id}: tried again — but its poll times are not off the disk yet (the side file's write failed, or its family is held): they leave at the next write that lands`);
     const left = Array.isArray(r && r.left) ? r.left : [];
     if (left.length) log.warn(`[channels] ${id}: tried again — part of its local copy could still NOT be removed (${left.map((x) => `${x.folder}: ${x.code}`).join('; ')}) — it stays listed`);
     else log.log(`[channels] ${id}: tried again — the rest of its local copy was removed`);
     try { store.audit({ kind: 'account', op: left.length ? 'purge-again-left' : 'purge-again', id, ...(left.length ? { left: left.map((x) => x.folder) } : {}), at: now() }); } catch {}
     notify([]);
-    return { ok: true, id, done: !left.length, ...(left.length ? { purgeLeft: left.map((x) => x.what) } : {}), ...(r.markUnwritten ? { markUnwritten: true } : {}) };
+    return { ok: true, id, done: !left.length, ...(left.length ? { purgeLeft: left.map((x) => x.what) } : {}), ...(stampsClean ? {} : { journalOwed: true }), ...(r.markUnwritten ? { markUnwritten: true } : {}) };
   }
   /** DUPLICATE an account (r4 §8.1 #2, D4): a NEW record of the same type
    *  carrying EXACTLY `DUPLICATE_FIELDS` (the custom secret re-sealed), named

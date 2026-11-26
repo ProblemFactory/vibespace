@@ -44,12 +44,22 @@ const AFTER_PACE_MS = DEB * 12;      // past a debounce and a gap: a write the s
 //          count rise by one). CONTROL: one slice for every key — red.
 //     (m4) A CLOSE MID-COMPACTION writes the whole side file in its own turn (the journal folded). CONTROL: the close drops
 //          the compaction being made and writes nothing — red.
+//     (m3b) THE SLICE WINDOW (主开发 r4642 must 1) — a compaction of two slices HELD between them by the leg (the store's own
+//          next-slice callback taken from setImmediate, run only when the leg lets it go: a placed hold, never a clock); in that
+//          gap a key of the slice made is set again, a key of the slice to come is set, a key of the made slice is deleted; the
+//          landing waited on as a fact; a store made again (the first never closed — no whole write hides a loss) reads the newest
+//          of all three and nothing of the deleted one. CONTROLS: the made mark moved to the last slice; the «set since» note
+//          dropped from a set — red.
+//     (m3c) A ROW BORN AGAIN UNDER A KEY THAT LEFT (r4642 (3)) is a change of that key for the window: the compaction's write
+//          held in flight on the stand-in thread, the row leaves and is born again during it; a store made again gives the new
+//          row no stamp. CONTROL: the release's line (its removal journaled, the key not marked set since the bytes) — red.
 //     (m5) A JOURNAL LINE THAT CANNOT BE WRITTEN asks the compaction at once (the side file carries the change). CONTROL:
 //          the failed append asks nothing — red.
 //     (m6) ROLLBACK — 2.369.414's own reader (scripts/fixtures/stamps-reader-414.cjs, its lines copied verbatim) reads every
 //          newest stamp from what the compaction leaves: mid-life (the side file + the journal past it) and after a close.
 //          CONTROL: a side file in a shape the release cannot read (v 2) — red.
-//     (m7)–(m9), the rounds' laws (a write never schedules the next one, the purge, the retry): test-channel-stamps-rounds.
+//     (m7)–(m9), the rounds' laws (a write never schedules the next one, the purge, the retry): test-channel-stamps-rounds;
+//     (m8b)–(m8e), a purge's ONE door (r4642): test-channel-stamps-purge.
 console.log('(m) B-360d: quiet is free — the side file is the journal\'s compaction, made in slices; a rollback reads it');
 {
   const CS_FILE = path.join(REPO, 'src/channel-store.js');
@@ -61,11 +71,6 @@ console.log('(m) B-360d: quiet is free — the side file is the journal\'s compa
     for (const c of cuts) { if (src.split(c[0]).length !== 2) throw new Error(`(m) a CONTROL's anchor is not in src/channel-store.js once: ${c[0].slice(0, 90)}`); src = src.replace(c[0], c[1]); }
     const m = new Module(CS_FILE, null); m.filename = CS_FILE; m.paths = Module._nodeModulePaths(path.dirname(CS_FILE)); m._compile(src, CS_FILE); return m.exports;
   };
-  // round wkovlam1t's MUST, the tip that was sent back: the one-slice compaction re-dirtied the writer from its own produce, and
-  // produce began a compaction whenever the writer asked
-  const HALF_A = ['    if (!b.inProduce) W().dirty(stampsFile', '    if (true) W().dirty(stampsFile'], HALF_B = ['    if (!stampsCompactOwed) return null;', '    if (false) return null;'];
-  const NOPURGEOWE = ['    owe(stampsFile, stampsAsk());\n    return W().durable(stampsFile);', '    return W().durable(stampsFile);'];
-  const NORETRY = ['    if (!ok) { stampsDirty = true; stampsCompactOwed = true;', '    if (!ok) { stampsDirty = true;'];
   const BOUND0 = ['  function stampsBoundBytes() { return stampsSideBytes < 0 ? 0 :', '  function stampsBoundBytes() { return 0; return stampsSideBytes < 0 ? 0 :'];
   const ONESLICE = ['end = Math.min(b.keys.length, b.i + stampsSlice);', 'end = b.keys.length;'];
   const CLOSEDROP = ['      if (stampsBuild) { stampsBuild = null; stampsDirty = true; }', '      if (stampsBuild) { stampsBuild = null; }'];
@@ -170,6 +175,87 @@ console.log('(m) B-360d: quiet is free — the side file is the journal\'s compa
   ok(cl.mid && cl.wrong === 0 && cl.keys === N && cl.journal === 0, `(m4) A CLOSE MID-COMPACTION (one slice a turn, ${N} keys): the close wrote the whole side file in its own turn — ${cl.keys} keys, ${cl.wrong} not the newest, the journal folded (${cl.journal} B)`, cl);
   const clc = await closeRun('close-c', CLOSEDROP);
   ok(clc.mid && clc.wrong > 0, `(m4) CONTROL: the close drops the compaction being made and writes nothing — ${clc.wrong} key(s) not the newest in the side file — red`, clc);
+
+  // (m3b) THE SLICE WINDOW (主开发 r4642 must 1) — a placed hold between two slices of one compaction
+  const LASTMARK = [['    stampsMadeNow();\n    stampsBuild = { keys: [...stampMap.keys()], i: 0, lines: [], ready: null, inProduce: true };', '    stampsBuild = { keys: [...stampMap.keys()], i: 0, lines: [], ready: null, inProduce: true };'], ['    b.ready = sideTextOf(b.lines); b.lines = null;', '    stampsMadeNow(); b.ready = sideTextOf(b.lines); b.lines = null;']];
+  const NOSINCE = ['    stampsDirty = true; stampSeq++; stampsSince.add(k);', '    stampsDirty = true; stampSeq++;'];
+  const IMM = globalThis.setImmediate;
+  const HOLD_BOUND_MS = 10000;   // a fact not seen within it is a HARNESS line (the leg below then judges red), never a pass
+  const windowRun = async (tag, cut) => {
+    const dir = await seedDir(tag);
+    const { w, st } = open(loadCut(cut), dir, { stampsBound: { min: 1024, max: 1024 }, stampsSlice: 500 });
+    const A = keyOf(10), B = keyOf(700), D = keyOf(20);   // slice 1 = keys 0–499 (the side file's order), slice 2 = keys 500–999
+    let held = null, r = null;
+    // THE HOLD: the store's next slice is the one setImmediate whose callback runs stampsBuildSlice — taken, not run, until let go
+    globalThis.setImmediate = (fn, ...a) => {
+      if (!held && typeof fn === 'function' && String(fn).includes('stampsBuildSlice')) { held = fn; return { ref() { return this; }, unref() { return this; }, hasRef: () => false }; }
+      return IMM(fn, ...a);
+    };
+    try {
+      for (let n = 0; logBytes(st) < 1024; n++) st.stamps.set(keyOf(900 + (n % 100)), { lastPollAt: T + n });   // past the bound: the compaction owed
+      const end = performance.now() + HOLD_BOUND_MS;
+      while (!held && performance.now() < end) await sleep(TICK_MS);
+      if (!held) console.error(`  HARNESS (m3b ${tag}): no second slice was held within ${HOLD_BOUND_MS} ms — the compaction never began`);
+      const gap = { slices: st.stamps.stats().slices, compactions: st.stamps.stats().compactions };
+      st.stamps.set(A, { lastPollAt: T + 9e6 + 1 });   // a key of the slice already made, set again
+      st.stamps.set(B, { lastPollAt: T + 9e6 + 2 });   // a key of the slice to come
+      st.stamps.set(D, { lastPollAt: 0 });             // a key of the made slice, deleted (its only stamp removed)
+      globalThis.setImmediate = IMM;
+      if (held) IMM(held);   // let it go: the second slice, then the bytes to the writer
+      const end2 = performance.now() + HOLD_BOUND_MS;
+      while (st.stamps.stats().compactions < 1 && performance.now() < end2) await sleep(TICK_MS);
+      if (st.stamps.stats().compactions < 1) console.error(`  HARNESS (m3b ${tag}): the compaction did not land within ${HOLD_BOUND_MS} ms`);
+      await settle(w, st);
+      const w2 = SW.create({ log: quiet, workerPath: STAND, pace: PACED });
+      const reborn = CS.createChannelStore({ dir, log: quiet, writer: w2 });   // what a kill leaves (the first store never closed)
+      r = { held: !!held, gap, landed: st.stamps.stats().compactions, a: (reborn.stamps.get(A) || {}).lastPollAt || null, b: (reborn.stamps.get(B) || {}).lastPollAt || null, d: (reborn.stamps.get(D) || {}).lastPollAt || null };   // stamps.get answers {} for a key with none
+      w2.stop();
+    } finally { globalThis.setImmediate = IMM; }
+    w.stop();
+    return r;
+  };
+  const wn = await windowRun('window', null);
+  ok(wn.held && wn.gap.slices === 1 && wn.gap.compactions === 0 && wn.landed === 1 && wn.a === T + 9e6 + 1 && wn.b === T + 9e6 + 2 && wn.d === null,
+    `(m3b) THE SLICE WINDOW: a compaction of 2 slices held after its first (${wn.gap.slices} made, ${wn.gap.compactions} landed); in the gap a made key set again, a key to come set, a made key deleted; landed (${wn.landed}) — a store made again reads the newest of both (${wn.a === T + 9e6 + 1}, ${wn.b === T + 9e6 + 2}) and nothing of the deleted one (${wn.d})`, wn);
+  const wnm = await windowRun('window-cm', LASTMARK);
+  ok(wnm.held && (wnm.a !== T + 9e6 + 1 || wnm.d !== null), `(m3b) CONTROL: the made mark moved to the last slice — the reborn store reads the made key's older stamp (${wnm.a}) or the deleted one back (${wnm.d}) — red`, wnm);
+  const wns = await windowRun('window-cs', NOSINCE);
+  ok(wns.held && (wns.a !== T + 9e6 + 1 || wns.d !== null), `(m3b) CONTROL: the «set since» note dropped from a set — the reborn store reads the made key's older stamp (${wns.a}) or the deleted one back (${wns.d}) — red`, wns);
+
+  // (m3c) A ROW BORN AGAIN UNDER A KEY THAT LEFT (r4642 (3))
+  const NOREBORN = ['      if (stampMap.delete(key)) { stampsDirty = true; stampSeq++; stampsSince.add(key); journal(key); }', '      if (stampMap.delete(key)) { stampsDirty = true; journal(key); }'];   // stale-pins: kept (the RED control restores the release's line)
+  const HOLD_MS = 400;   // the stand-in thread holds the side file's (or the index's) write this long; the leg's changes inside it take a few ms
+  const flying = (w, f) => !!(w.stats().find((s) => s.file === f) || {}).inflight;   // the writer's own fact: that file's write on its thread now
+  const rebornRun = async (tag, cut) => {
+    const dir = await seedDir(tag);
+    const { w, st } = open(loadCut(cut), dir, { stampsBound: { min: 1024, max: 1024 } });
+    const K = keyOf(5), old = T - 3600e3 + 5;
+    let r = null;
+    SAND.hold('poll-stamps.json', HOLD_MS);
+    try {
+      for (let n = 0; logBytes(st) < 1024; n++) st.stamps.set(keyOf(600 + (n % 300)), { lastPollAt: T + n });   // past the bound: its bytes carry K's stamp
+      const end = performance.now() + HOLD_BOUND_MS;
+      while (!flying(w, st.stamps.file) && performance.now() < end) await sleep(TICK_MS);
+      const inFlight0 = flying(w, st.stamps.file);
+      if (!inFlight0) console.error(`  HARNESS (m3c ${tag}): the side file's write was never seen on the thread within ${HOLD_BOUND_MS} ms`);
+      await st.index.update((ix) => { delete ix.conversations[K]; });   // the row leaves …
+      await st.index.update(() => { st.index.entry('acct', 't5', { create: true }); });   // … and is born again under its key
+      const inFlight1 = flying(w, st.stamps.file);   // the scene held: both inside the write's flight
+      const end2 = performance.now() + HOLD_BOUND_MS;
+      while (st.stamps.stats().compactions < 1 && performance.now() < end2) await sleep(TICK_MS);
+      await settle(w, st);
+      const w2 = SW.create({ log: quiet, workerPath: STAND, pace: PACED });
+      const reborn = CS.createChannelStore({ dir, log: quiet, writer: w2 });   // the first never closed
+      r = { inFlight0, inFlight1, landed: st.stamps.stats().compactions, k: (reborn.stamps.get(K) || {}).lastPollAt || null, old };   // stamps.get answers {} for a key with none
+      w2.stop();
+    } finally { SAND.unhold('poll-stamps.json'); }
+    w.stop();
+    return r;
+  };
+  const rbn = await rebornRun('reborn', null);
+  ok(rbn.inFlight0 && rbn.inFlight1 && rbn.landed === 1 && rbn.k === null, `(m3c) A ROW BORN AGAIN UNDER A KEY THAT LEFT, during the compaction's flight (${rbn.inFlight0}, ${rbn.inFlight1}): landed (${rbn.landed}) — a store made again gives the new row no stamp (${rbn.k})`, rbn);
+  const rbnc = await rebornRun('reborn-c', NOREBORN);
+  ok(rbnc.inFlight1 && rbnc.k === rbnc.old, `(m3c) CONTROL: the release's line — the new row carries the old row's poll time after a restart (${rbnc.k}) — red`, rbnc);
 
   // (m5) a journal line that cannot be written
   const failRun = async (tag, cut) => {
