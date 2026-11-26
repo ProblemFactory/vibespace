@@ -823,6 +823,169 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
   const WANT_ORDER = ['k2', 'k3', 'odd1', 'k5', 'k4', 'chat%201', 'k1', 'norow'].map((c) => `${c}.ndjson`);
   ok(opened.join() === WANT_ORDER.join(), 'the logs opened newest first by their OWN rows: the tie by name (k2 before k3), the odd row by its own time, the escaped id read back to its row, the log with no row last', opened.join());
   ok(st.searchStats().fallback - fb0 === 2, 'two ids that escape to ONE name take the release\'s pass for that search, COUNTED: once in each of its two scenes, in no other', JSON.stringify(st.searchStats()));
+  // ── HOLDER 3's FOLLOW (主开发 r4684's round, its shoulds; lane bl-loop-b) ──────────────────────────────────────────────────────
+  const quiet = { log() {}, warn() {} };
+  const CJK8 = String.fromCharCode(0x4e2d, 0x6587, 0x5bf9, 0x8bdd, 0x6d4b, 0x8bd5, 0x540d, 0x5b57);   // 8 characters of 2 readings each: 256 > SEG_IDS_MAX ⇒ the fallback
+  // (1) THE LEG «nothing new on the loop» GETS ITS RED: a copy with ONE synchronous call planted in logFilesOf
+  {
+    const AT = '    searchStats.searches++;\n';
+    const ps = require(MUTE.write(STORE, anchored(SRC(STORE), AT, AT + '    fs.existsSync(path.join(msgsDir, safeSeg(adapterId)));   // PLANTED: one synchronous call on the loop\n', 'b360d-h3-planted-sync'), 'planted-sync')).createChannelStore({ dir, log: quiet });
+    const a = await reads(ps, SCENES[0][1])(), b = await reads(rs, SCENES[0][1])();
+    ps.close();
+    ok(a.syncs.join() !== b.syncs.join() && a.syncs.some((x) => /^existsSync /.test(x)), `RED (the leg «nothing new on the loop»): ONE synchronous call planted in logFilesOf is seen — ${a.syncs.length} store-framed call(s) where the release's copy makes ${b.syncs.length}`, JSON.stringify({ planted: a.syncs, release: b.syncs }));
+  }
+  // (2) THE UNSAFE IDS (the round's shoulds at :2342 and :2357): an id in the CALLER's list that safeSeg refuses rejects the whole search
+  //     in the release's own words; a damaged ROW whose id safeSeg refuses is passed over on every road, where the release refused
+  {
+    const BAD = ['', '.', '..', 'a/b', 'a\\b', 'a\u0000b', null];
+    const said = async (x, list) => { try { await x.search('pa', 'note', { limit: 5, convIds: ['k1', ...list] }); return 'answered'; } catch (e) { return 'refused: ' + e.message; } };
+    const rows = [];
+    for (const b of BAD) rows.push([JSON.stringify(b), await said(st, [b]), await said(rs, [b])]);
+    ok(rows.every(([, c, r]) => c === r && /^refused: channel-store: unsafe id segment /.test(c)), `an unsafe id in the CALLER's list (${BAD.length}: '', '.', '..', a slash, a backslash, a NUL, null) refuses the whole search in the release's own words, byte for byte`, JSON.stringify(rows));
+    const us = require(MUTE.write(STORE, anchored(SRC(STORE), 'for (const c of convIds) { safeSeg(c); want.add(String(c));', 'for (const c of convIds) { want.add(String(c));', 'b360d-h3-no-list-refusal'), 'no-list-refusal')).createChannelStore({ dir, log: quiet });
+    const ur = await said(us, ['..']);
+    us.close();
+    ok(ur === 'answered', 'RED: a copy without the list\'s refusal (the tip before this follow) answers a search whose list holds «..» — the leg above would go red', ur);
+    const dirD = path.join(ROOT, 'h3-damaged');
+    fs.rmSync(dirD, { recursive: true, force: true }); fs.mkdirSync(dirD, { recursive: true });
+    const sd = createChannelStore({ dir: dirD, log: quiet });
+    await sd.index.update(() => {
+      for (const c of ['d1', 'd2']) { const e = sd.index.entry('pd', c); e.lastAt = T0 + 1000; e.title = c; }
+      const bad = sd.index.entry('pd', 'dx'); bad.id = 'a/b'; bad.lastAt = T0 + 3000;   // a damaged row: its id is not its key's tail, and safeSeg refuses it
+      const odd = sd.index.entry('zz', 'oddx'); odd.adapterId = 'pd'; odd.id = '..'; odd.lastAt = T0 + 4000;   // a damaged ODD row (its key is not its account's)
+      const f = sd.index.entry('pf', CJK8); f.lastAt = T0 + 1000;
+      const fb = sd.index.entry('pf', 'fx'); fb.id = 'a\\b'; fb.lastAt = T0 + 2000;   // a damaged row on the account the fallback reads
+    });
+    for (const [A, c] of [['pd', 'd1'], ['pd', 'd2'], ['pf', CJK8], ['pf', 'f1']]) sd.appendRecords(A, c, [rec(A, c, ++j)]);
+    await sd.index.durable();
+    const rd = REL.createChannelStore({ dir: dirD, log: quiet });
+    const ans = async (x, A) => { try { const r = await x.search(A, 'note', { limit: 100 }); return r.results.map((h) => h.convId).join(); } catch (e) { return 'refused: ' + e.message; } };
+    const fb0d = sd.searchStats().fallback;
+    const got = { main: await ans(sd, 'pd'), fallback: await ans(sd, 'pf') };
+    got.fallbacks = sd.searchStats().fallback - fb0d;
+    got.relMain = await ans(rd, 'pd'); got.relFallback = await ans(rd, 'pf');
+    ok(got.main.split(',').sort().join() === 'd1,d2' && got.fallback.split(',').sort().join() === [CJK8, 'f1'].sort().join() && got.fallbacks === 1 && /^refused: channel-store: unsafe id segment /.test(got.relMain) && /^refused: channel-store: unsafe id segment /.test(got.relFallback), 'a damaged ROW whose id safeSeg refuses is passed over on EVERY road — the main road with its odd rows (pd: d1, d2) and the fallback (pf, counted once) answer; the release\'s pass refused the account\'s whole search (a named difference, damaged rows only)', JSON.stringify(got));
+    const ts = require(MUTE.write(STORE, anchored(SRC(STORE), 'const segName = (id) => { try { return `${safeSeg(id)}.ndjson`; } catch { return null; } };', 'const segName = (id) => `${safeSeg(id)}.ndjson`;', 'b360d-h3-rows-throw'), 'rows-throw')).createChannelStore({ dir: dirD, log: quiet });
+    const tg = { main: await ans(ts, 'pd'), fallback: await ans(ts, 'pf') };
+    ts.close(); sd.close(); rd.close();
+    ok(/^refused/.test(tg.main) && /^refused/.test(tg.fallback), 'RED: a copy whose row roads throw on such an id (the fallback and the odd rows before this follow) refuses both searches — the leg above would go red', JSON.stringify(tg));
+  }
+  // (3) A GENERATED STORE against the release copy (the round's should: many accounts, equal times, keys removed and born again, ids with
+  //     several readings, a fallback past SEG_IDS_MAX and one by two ids escaping to one name, an account of more than LOG_STEP files).
+  //     Seeded; two phases over ONE live store — the second after a whole-map removal (the per-account map built again) and births, re-
+  //     births and touches row by row (the map kept up row by row), with an odd row born after the map was built; a fresh release copy
+  //     reads the same disk at each phase. Every scene: the answer and the files opened, in order. RED: a copy without the odd rows' pass
+  {
+    let seed = 0x360d0003;
+    const rnd = () => { seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };   // mulberry32
+    const int = (n) => Math.floor(rnd() * n);
+    const dirG = path.join(ROOT, 'h3-gen');
+    fs.rmSync(dirG, { recursive: true, force: true }); fs.mkdirSync(dirG, { recursive: true });
+    const sg = createChannelStore({ dir: dirG, log: quiet });
+    const SIZES = { ga: 2100, gb: 40, gc: 30, gd: 8 };   // ga: past LOG_STEP (the loop given back between its files); gc / gd: the fallback's two causes
+    const plan = {};
+    for (const [A, n] of Object.entries(SIZES)) {
+      const list = plan[A] = [];
+      for (let i = 0; i < n; i++) { const r = rnd(); const id = r < 0.12 ? `n ${i}` : r < 0.18 ? `u${String.fromCharCode(0xe0 + int(16))}${i}` : `c${i}`; list.push({ id, row: rnd() > 0.05, log: rnd() > 0.04 }); }   // «n 5» and «uà5»: names with several readings
+    }
+    plan.gc.push({ id: CJK8, row: true, log: true });   // more than SEG_IDS_MAX readings
+    plan.gd.push({ id: eAcute, row: true, log: true }, { id: tri, row: true, log: true });   // two ids escape to ONE name
+    const GE = ['a=b', 'oc_3f2a', 'x y z', '50%', String.fromCharCode(0xe9), String.fromCharCode(0x4e2d), String.fromCharCode(0x4e2d, 0x6587), 'a' + String.fromCharCode(0xd83d, 0xde00), 'q.r@s:t+u-v', '%41', 'A%'];
+    plan.ge = GE.map((id, i) => ({ id, row: i % 5 !== 4, log: true }));   // ids as a vendor might send them (the census below): «=», a space, «%», non-ASCII, a surrogate pair
+    const WORDS = ['note', 'alpha', 'beta', 'gamma', ''];
+    const odd = [];
+    await sg.index.update(() => {
+      for (const [A, list] of Object.entries(plan)) for (const c of list) if (c.row) { const e = sg.index.entry(A, c.id); e.lastAt = T0 + int(6) * 1000; e.title = WORDS[int(WORDS.length)]; }   // six times only: ties everywhere
+      for (let k = 0; k < 6; k++) { const A = k % 2 ? 'gb' : 'ga'; const id = `odd${k}`; const e = sg.index.entry('zz', id); e.adapterId = A; e.lastAt = T0 + (9 + k) * 1000; e.title = 'odd'; odd.push([A, id]); }   // rows whose key is not their account's: the NEWEST, so their order shows under a cap
+    });
+    for (const [A, list] of Object.entries(plan)) for (const c of list) if (c.log) sg.appendRecords(A, c.id, [rec(A, c.id, ++j)]);
+    for (const [A, id] of odd) sg.appendRecords(A, id, [rec(A, id, ++j)]);
+    await sg.index.durable();
+    const one = fs.statSync(sg.logPath('ga', plan.ga.find((c) => c.log).id)).size;
+    const scenesOf = (A) => {
+      const ids = plan[A].map((c) => c.id), other = plan[A === 'ga' ? 'gb' : 'ga'][0].id;
+      const list = [...ids.filter(() => rnd() < 0.3).slice(0, 40), 'nope-1', other, ...(A === 'ga' || A === 'gb' ? [odd[A === 'ga' ? 0 : 1][1]] : [])];
+      const cap = one * (A === 'ga' ? 60 : 8 + int(8)) + 1, asked = ids[int(ids.length)];   // every draw made HERE, once: the cure and the release copy are asked the same
+      return [
+        [`${A}: no list, a byte cap`, (x) => x.search(A, 'note', { limit: 100, maxBytes: cap })],
+        [`${A}: a visible list of ${list.length}`, (x) => x.search(A, 'note', { limit: 100, convIds: list, maxBytes: cap })],
+        [`${A}: the existence call`, (x) => x.search(A, 'note', { limit: 1, convIds: [asked] })],
+        [`${A}: a match predicate`, (x) => x.search(A, 'note', { limit: 100, maxBytes: cap, match: (r) => /note \d*[02468] /.test(r.text) })],
+      ];
+    };
+    const run = async (label, x, rel, scenes, out) => {
+      for (const [what, fn] of scenes) {
+        const f0 = x.searchStats ? x.searchStats().fallback : 0;
+        const a = await reads(x, fn)(), b = await reads(rel, fn)();
+        out.n++; if (x.searchStats && x.searchStats().fallback > f0) out.fallback++;
+        if (a.r !== b.r || a.seen.join() !== b.seen.join()) out.diffs.push({ label, what, cure: a.r.slice(0, 120), release: b.r.slice(0, 120), opened: [a.seen.length, b.seen.length] });
+      }
+    };
+    const out = { n: 0, fallback: 0, diffs: [] };
+    const S1 = ['ga', 'gb', 'gc', 'gd', 'ge'].flatMap(scenesOf);
+    const r1 = REL.createChannelStore({ dir: dirG, log: quiet });
+    await run('phase 1', sg, r1, S1, out);
+    r1.close();
+    const gone = Object.entries(plan).flatMap(([A, list]) => list.filter((c) => c.row && rnd() < 0.15).map((c) => [A, c.id]));
+    await sg.index.update((v) => { for (const [A, id] of gone) delete v.conversations[`${A}/${id}`]; });   // a whole-map removal: the per-account map is dropped
+    await sg.search('gb', 'note', { limit: 1 });   // …and built again by the next search
+    await sg.index.update(() => {
+      for (const [A, id] of gone) if (rnd() < 0.6) { const e = sg.index.entry(A, id); e.lastAt = T0 + int(6) * 1000; e.title = 'reborn'; }   // born again, row by row
+      for (const A of ['ga', 'gb']) for (const c of plan[A]) if (c.row && rnd() < 0.05) { const e = sg.index.entry(A, c.id); e.lastAt = T0 + int(6) * 1000; }   // touched
+      const e = sg.index.entry('zz', 'odd-late'); e.adapterId = 'gb'; e.lastAt = T0 + 20000; e.title = 'odd';   // an odd row born after the map was built
+    });
+    sg.appendRecords('gb', 'odd-late', [rec('gb', 'odd-late', ++j)]);
+    await sg.index.durable();
+    const S2 = ['ga', 'gb', 'gc', 'gd', 'ge'].flatMap(scenesOf);
+    const r2 = REL.createChannelStore({ dir: dirG, log: quiet });
+    await run('phase 2', sg, r2, S2, out);
+    const nGa = fs.readdirSync(path.dirname(sg.logPath('ga', 'c0'))).length;
+    ok(out.diffs.length === 0 && out.n === 40 && out.fallback > 0 && out.fallback < out.n && nGa > 2000 && gone.length > 0, `A GENERATED STORE (seeded; 5 accounts, six times for all rows, ${gone.length} rows removed and some born again, odd rows, an odd row born after the map was built, ids of several readings, the fallback's two causes): in ${out.n} scenes over two phases the answer and the files opened are the release copy's, byte for byte and in order — ${out.fallback} on the fallback, ${out.n - out.fallback} on the main road; account ga holds ${nGa} logs (past LOG_STEP)`, JSON.stringify(out.diffs).slice(0, 700));
+    const bs = require(MUTE.write(STORE, anchored(SRC(STORE), 'for (const k of oddKeys.keys())', 'for (const k of [])', 'b360d-h3-no-odd-rows'), 'no-odd-rows')).createChannelStore({ dir: dirG, log: quiet });
+    const outB = { n: 0, fallback: 0, diffs: [] };
+    await run('the red', bs, r2, S2, outB);
+    bs.close(); r2.close(); sg.close();
+    ok(outB.diffs.length > 0, `RED: a copy without the odd rows' pass differs from the release copy in ${outB.diffs.length} of ${outB.n} generated scenes — the leg above would go red`, JSON.stringify(outB.diffs.map((d) => d.what)));
+  }
+  // (4) THE ADAPTER-ID CENSUS (the round's should: hold 1's claim backed in code): every kind the tree registers — the vendor list's
+  //     manifests, the engine's seeded modules (agents, webhook: its SEEDED line pinned), the fake's kinds — has ONE row here naming the
+  //     line that makes or holds its conversation ids, and that line stands ONCE in its file. A kind whose own code holds its ids to a
+  //     class says the class, and every code unit of it (0..0xFFFF) is inside safeSeg's safe set; a kind taken as the vendor sends it
+  //     says so — the read-back is exact for ANY id (account «ge» above: «=», a space, «%», non-ASCII, a surrogate pair), only its cost
+  //     differs (its readings, or the counted fallback)
+  {
+    const FAKE_ROW = { file: 'src/channels/fake.js', lines: ["{ id: `${kind}-ops`, title: 'Ops room'", 'const id = `${kind}-${d.id}`;'], held: 'a-z0-9-' };
+    const ID_ROWS = {
+      slack: { file: 'src/channels/slack.js', lines: ['const ID_RE = /^[A-Z0-9][A-Z0-9_]{1,40}$/;', "typeof c.id === 'string' && ID_RE.test(c.id)"], held: 'A-Z0-9_' },
+      webhook: { file: 'src/webhook-auth.js', lines: ['const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;'], held: 'a-z0-9-' },
+      'fake-poll': FAKE_ROW, 'fake-push': FAKE_ROW, 'fake-scan': FAKE_ROW,
+      lark: { file: 'src/channels/lark.js', lines: ['id: String(c.chat_id), vendorId: String(c.chat_id),'], held: null, as: 'the vendor\'s chat_id (oc_ and hex by its format; a search hit may carry «=», src/channel-feed.js)' },
+      gmail: { file: 'src/channels/gmail.js', lines: ['const items = (d.threads || []).filter((t) => t && t.id);'], held: null, as: 'the vendor\'s thread id' },
+      agents: { file: 'src/channels/agents.js', lines: ['id: s.cid, vendorId: s.cid, title: s.name || s.cid'], held: null, as: 'a backend\'s own session id' },
+    };
+    const SAFE = /^[A-Za-z0-9._@:+-]$/;
+    const census = (kinds, rows) => {
+      const bad = [];
+      for (const k of kinds) if (!rows[k]) bad.push(`${k}: no row`);
+      for (const k of Object.keys(rows)) if (!kinds.includes(k)) bad.push(`${k}: a row for no kind`);
+      for (const [k, r] of Object.entries(rows)) {
+        const text = SRC(r.file);
+        for (const l of r.lines) { const n = text.split(l).length - 1; if (n !== 1) bad.push(`${k}: «${l.slice(0, 50)}» stands ${n}× in ${r.file}`); }
+        if (r.held) { const cls = new RegExp(`^[${r.held}]$`); for (let u = 0; u <= 0xffff; u++) { const ch = String.fromCharCode(u); if (cls.test(ch) && !SAFE.test(ch)) { bad.push(`${k}: U+${u.toString(16)} is in its class and outside the safe set`); break; } } }
+      }
+      return bad;
+    };
+    const kinds = [...require(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.map((m) => m.kind), 'agents', 'webhook', ...fake.FAKE_KINDS];
+    const seededOnce = SRC('src/server/channels-engine.js').split('const SEEDED = [agents, webhook].filter((m) => m.seed === true);').length - 1 === 1;
+    const fakeIds = [...fake.FAKE_KINDS, ...fake.FAKE_DMS.map((d) => d.id)].every((x) => /^[a-z0-9-]+$/.test(String(x)));
+    const heldIn = ['slack', 'webhook'].every((k) => ID_ROWS[k].lines[0].includes(`[${ID_ROWS[k].held}]`));
+    const bad = census(kinds, ID_ROWS);
+    const held = Object.keys(ID_ROWS).filter((k) => ID_ROWS[k].held), asSent = Object.keys(ID_ROWS).filter((k) => !ID_ROWS[k].held);
+    ok(!bad.length && seededOnce && fakeIds && heldIn, `THE ADAPTER-ID CENSUS: ${kinds.length} kinds, each with its id line standing once in its file — held to a class inside the safe set by their own code: ${held.join(', ')}; taken as the vendor sends them: ${asSent.map((k) => `${k} (${ID_ROWS[k].as})`).join(', ')} — the read-back is exact for any id (account «ge» above)`, JSON.stringify({ bad, seededOnce, fakeIds, heldIn }));
+    const redA = census([...kinds, 'teams'], ID_ROWS);
+    const redB = census(kinds, { ...ID_ROWS, slack: { ...ID_ROWS.slack, lines: ['const ID_RE = /^[A-Z0-9][A-Z0-9_ ]{1,40}$/;'], held: 'A-Z0-9_ ' } });
+    ok(redA.some((x) => /^teams: no row/.test(x)) && redB.some((x) => /stands 0×/.test(x)) && redB.some((x) => /outside the safe set/.test(x)), 'RED: a kind with no row, a line that no longer stands, and a class reaching outside the safe set are each named — the census above would go red', JSON.stringify({ redA, redB }));
+  }
   st.close(); rs.close();
 }
 
