@@ -1290,4 +1290,41 @@ console.log('B-574d browser-stores: the bindings, one document on the store writ
   ok(D1x.seen.a !== KA || D1x.disk !== [CA, CB].sort().join(','), 'RED (anchored copy: the release\'s read of the FILE at every call, the writes landing later): a record in the next statement is not seen, or the second record\'s rewrite drops the first — (1) goes red', D1x);
 }
 
+// ── B-574d «browser-stores» commit 2 (主开发 r5101): THE KEPT LAW AT A START — a row that had not landed at a kill is not in the file
+// the next start reads; the conversations' OWN records still name it. The refusals judge them too (read once a start, off the loop);
+// a binding made while they are read is judged when they answer. No holder is handed another holder's. REDs (anchored copies): the
+// records' share refusal cut; the early judging cut
+console.log('B-574d browser-stores: the start\'s records judge the refusals');
+{
+  const KX = 'bk-0000c33c', KZ = 'bk-0000d44d', KF = 'bk-0000e55e';
+  const CX = 'c0ffee22-aaaa-4bbb-8ccc-00000000000a', CY = 'c0ffee22-aaaa-4bbb-8ccc-00000000000b', CZ = 'c0ffee22-aaaa-4bbb-8ccc-00000000000c', CF = 'c0ffee22-aaaa-4bbb-8ccc-00000000000d';
+  // the kill: X's row never landed (the file has none), X's own session record names its key
+  const killScene = async (BBmod, tag, { early = false } = {}) => {
+    const dir = path.join(ROOT, `bs2-${tag}`); fs.mkdirSync(path.join(dir, 'browser-env'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'browser-env', 'bindings.json'), JSON.stringify({ v: 1, byConversation: {} }));
+    let release = null; const gate = early ? new Promise((r) => { release = r; }) : null;
+    const listMetas = async () => { if (gate) await gate; return { ok: true, rows: [[KX, CX, '', '', CX, 1000]] }; };
+    const said = [], b = BBmod.create({ dataDir: dir, log: { warn: (l) => said.push(String(l)), log() { } }, listMetas });
+    const out = {};
+    if (!early) { out.fresh = b.record(CZ, KZ); await b.judged(); out.yRecord = b.record(CY, KX); }   // the records read first, then Y offered X's key
+    else { out.yRecord = b.record(CY, KX); out.fRecord = b.record(CF, KF); out.yBefore = b.lookup(CY); release(); await b.judged(); }   // Y (and a fresh F) offered while they are read
+    out.y = b.lookup(CY); out.f = b.lookup(CF); out.x = b.record(CX, KX); out.xNow = b.lookup(CX);
+    out.said = said.filter((l) => l.includes('taken back') || l.includes('refused to bind')).length;
+    b.landed();
+    return out;
+  };
+  const J1 = await killScene(BB0, 'judged-first');
+  ok(J1.fresh === true && J1.yRecord === false && J1.y === '' && J1.x === true && J1.xNow === KX && J1.said >= 1,
+    'B-574d browser-stores (2) a row not landed at the last stop: the start reads the conversations\' records, so Y offered X\'s key is REFUSED (a share), X\'s own record binds it — no holder handed another holder\'s', J1);
+  const J2 = await killScene(BB0, 'judged-after', { early: true });
+  ok(J2.yRecord === true && J2.yBefore === KX && J2.y === '' && J2.f === KF && J2.xNow === KX && J2.said >= 1,
+    'B-574d browser-stores (2) …offered WHILE the records are read: written, then taken back when they answer (said) before any resume reads it; a fresh conversation\'s binding made meanwhile stays; X binds its own', J2);
+  const SHAREJ = '      if (against) return refuseShare(sid, against, String(key));\n';
+  const J1x = await killScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, SHAREJ, '', 'the records judge a share'), 'bs2-no-share'), 'red-share');
+  ok(J1x.y === KX, 'RED (anchored copy: the records\' share refusal cut): Y takes X\'s browser — (2) goes red', J1x);
+  const EARLYJ = '    judgeEarly(file, J, log);\n';
+  const J2x = await killScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, EARLYJ, '', 'the early bindings judged'), 'bs2-no-early'), 'red-early', { early: true });
+  ok(J2x.y === KX, 'RED (anchored copy: the bindings made while the records are read never judged): Y keeps X\'s browser — (2)\'s early road goes red', J2x);
+}
+
 report();
