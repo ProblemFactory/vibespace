@@ -9,7 +9,8 @@
 //     scratch root (DeviceManager.installLocal + connect), handed to the tree's own browser-access through a stand-in registry;
 //   · ONE Chrome, the suite's own (headless, CHROME_QUIET + CHROME_STORE), on the "machine": the forward names its port;
 //   · the real driver through the tree's fence (src/browser-facts.js binaryResolver), its sessions under the suite's OWN label
-//     (AGENT_BROWSER_NAMESPACE = a name of this suite with its run's mark — they never meet another conversation's sessions);
+//     (AGENT_BROWSER_NAMESPACE = a name of this suite with its run's mark — they never meet another conversation's sessions),
+//     their sockets in a SHORT folder of the suite's own (AGENT_BROWSER_SOCKET_DIR = a second stamped scratch root, r4773);
 //     no operating-system namespace of any kind (no unshare, no netns, no user or mount namespace).
 // THE LEGS:
 //   ① each trial binds on BOTH roads through the forward while the other session churns `tab new` + `tab close`:
@@ -19,7 +20,7 @@
 //   ② THE FORWARD's FAULTS behind the proxy (r1846 (c)): the machine DROPS while SA is bound ⇒ SA's next command answers a refusal
 //      within a bound, never a hang; the machine RE-DIALS ⇒ SA reaches its tab again through the SAME grant url; the forward's url
 //      CHANGES ⇒ the grant REPOINTED reaches the browser through the new url — CONTROL: a grant left on the closed url refuses by name.
-// ONLY WHAT IT STARTED: every folder under this run's stamped scratch root; Chrome, the page and the mediator on free ports; the
+// ONLY WHAT IT STARTED: every folder under this run's stamped scratch roots (the suite's and its socket folder); Chrome, the page and the mediator on free ports; the
 // device agent's daemon(s) ended by endDaemonsAndWait on its own root, every other process of this root by pid + start time, at the
 // end and at exit. Without the real agent-browser or a Chrome it SKIPS BY NAME («SKIP: …», never a green). Zero vendor calls.
 import './scratch.mjs';
@@ -45,11 +46,19 @@ const T0 = Date.now(), left = () => CAP_MS - (Date.now() - T0);
 
 const ROOT = scratch('pairedscope');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true, mode: 0o700 });
+// r4773 (the candidate's box row 953, the first real-driver read): the driver's socket is <root>/namespaces/<label>/run/<session>.sock
+// and its root was each world's runtime folder (<world>/xdg/agent-browser) — 118 / 114 bytes against the driver's 103 («Session name
+// 'vs-SA' is too long … set AGENT_BROWSER_SOCKET_DIR to a shorter path»). The sockets go to a SHORT folder of the suite's own instead:
+// a second stamped scratch root (/tmp/vs-pss-<pid>, a folder a world), ended at exit like the first; the label stays the suite's own
+// with its run's mark
+const SOCKETS = scratch('pss');
+fs.rmSync(SOCKETS, { recursive: true, force: true }); fs.mkdirSync(SOCKETS, { recursive: true, mode: 0o700 });
 const AGENTD_ROOT = path.join(ROOT, 'agentd');
 process.env.VIBESPACE_AGENTD_ROOT = AGENTD_ROOT;
 process.env.VIBESPACE_NODE_MODULES = path.join(new URL('..', import.meta.url).pathname, 'node_modules');
 const NS = `vs-pairedscope-${process.pid}-${T0}`;   // the suite's OWN session label, with its run's mark (r2043)
 const under = (v, d) => { const s = String(v == null ? '' : v); return s === d || s.startsWith(d + '/'); };
+const ours = (v) => under(v, ROOT) || under(v, SOCKETS);   // this run's two stamped roots
 const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_')
   && !['DISPLAY', 'WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY', 'TMPDIR', 'XDG_RUNTIME_DIR'].includes(k)));
 const skipWhole = (why) => { console.log(`\nSKIP: ${why} — no leg ran on this machine`); process.exit(0); };
@@ -64,9 +73,9 @@ function endMine() {
     if (skip.has(pid)) continue;
     const s1 = statOf(pid); if (!s1 || s1.st == null || MY_START == null || s1.st < MY_START) continue;
     let rooted = false;
-    try { rooted = under(fs.readlinkSync(`/proc/${pid}/cwd`), ROOT); } catch { /* not ours to read */ }
-    if (!rooted) try { rooted = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split(/[\0\s]+/).some((t) => under(t, ROOT) || t.split('=').slice(1).some((v) => under(v, ROOT))); } catch { /* gone */ }
-    if (!rooted) try { const env = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0'); rooted = ['HOME', 'XDG_RUNTIME_DIR', 'TMPDIR', 'VIBESPACE_AGENTD_ROOT'].some((k) => under((env.find((kv) => kv.startsWith(k + '=')) || '').slice(k.length + 1), ROOT)); } catch { /* gone */ }
+    try { rooted = ours(fs.readlinkSync(`/proc/${pid}/cwd`)); } catch { /* not ours to read */ }
+    if (!rooted) try { rooted = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split(/[\0\s]+/).some((t) => ours(t) || t.split('=').slice(1).some((v) => ours(v))); } catch { /* gone */ }
+    if (!rooted) try { const env = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0'); rooted = ['HOME', 'XDG_RUNTIME_DIR', 'TMPDIR', 'VIBESPACE_AGENTD_ROOT', 'AGENT_BROWSER_SOCKET_DIR'].some((k) => ours((env.find((kv) => kv.startsWith(k + '=')) || '').slice(k.length + 1))); } catch { /* gone */ }
     if (!rooted) continue;
     const s2 = statOf(pid); if (!s2 || s2.st !== s1.st) continue;
     try { process.kill(pid, 'SIGKILL'); hit.push(`${pid}:${s1.st}`); } catch { /* gone */ }
@@ -135,17 +144,22 @@ const road = M.leaseRoadVerdict({ proxy: true, paired: true, agent: true });
 ok(road.mode === M.SCOPE_MODE && road.paired === true && !!gSA.url && gSA.url !== gSB.url, 'the road a paired machine\'s agent lease takes is the SCOPE road (the tree\'s verdict), and the mediator hands SA and SB a grant each over the forward', { road, sa: !!gSA.url });
 
 // ── the sessions: per road one label of the suite's own (two holders of one shared profile), each session its own world ──
-const world = (name, cdpUrl, { debug = false } = {}) => { const d = path.join(ROOT, name); const w = { name, cdpUrl, debug, home: path.join(d, 'home'), tmp: path.join(d, 'tmp'), xdg: path.join(d, 'xdg'), cwd: path.join(d, 'cwd') }; for (const x of [w.home, w.tmp, w.xdg, w.cwd]) fs.mkdirSync(x, { recursive: true, mode: 0o700 }); return w; };
+const world = (name, cdpUrl, { debug = false } = {}) => { const d = path.join(ROOT, name); const w = { name, cdpUrl, debug, home: path.join(d, 'home'), tmp: path.join(d, 'tmp'), xdg: path.join(d, 'xdg'), cwd: path.join(d, 'cwd'), sock: path.join(SOCKETS, name) }; for (const x of [w.home, w.tmp, w.xdg, w.cwd, w.sock]) fs.mkdirSync(x, { recursive: true, mode: 0o700 }); return w; };   // r4773: each world its OWN short socket folder (its files apart, as its runtime folder kept them)
 const SA = world('SA', gSA.url, { debug: true }), SB = world('SB', gSB.url), A = world('A', FWD_URL, { debug: true }), Bw = world('B', FWD_URL);
+const labelOf = (w) => `${NS}-${w.name === 'A' || w.name === 'B' ? 'bare' : 'scoped'}`, sessionOf = (w) => `vs-${w.name}`;
+// the socket path each session will have (the driver's shape, counted in bytes as the kernel's sun_path is) — over 103 is said
+// here by name, before any driver is asked
+const SOCKET_MAX = 103, sockBytes = (w) => Buffer.byteLength(`${w.sock}/namespaces/${labelOf(w)}/run/${sessionOf(w)}.sock`, 'utf8');
+ok([SA, SB, A, Bw].every((w) => sockBytes(w) <= SOCKET_MAX), `the four sessions' sockets in the suite's own short folders (${SOCKETS}/<world>) stay within the driver's ${SOCKET_MAX} bytes`, Object.fromEntries([SA, SB, A, Bw].map((w) => [w.name, sockBytes(w)])));
 const drive = (w, args, timeout) => new Promise((resolve) => {
   const t0 = Date.now();
   execFile(REAL_AB, ['--cdp', w.cdpUrl, ...args], { encoding: 'utf8', timeout, killSignal: 'SIGKILL', cwd: w.cwd, maxBuffer: 8 * 1024 * 1024,
-    env: { ...BASE_ENV, HOME: w.home, TMPDIR: w.tmp, XDG_RUNTIME_DIR: w.xdg, AGENT_BROWSER_NAMESPACE: `${NS}-${w.name === 'A' || w.name === 'B' ? 'bare' : 'scoped'}`, AGENT_BROWSER_SESSION: `vs-${w.name}`, AGENT_BROWSER_JSON: '1', ...(w.debug ? { AGENT_BROWSER_DEBUG: '1' } : {}) } },
+    env: { ...BASE_ENV, HOME: w.home, TMPDIR: w.tmp, XDG_RUNTIME_DIR: w.xdg, AGENT_BROWSER_SOCKET_DIR: w.sock, AGENT_BROWSER_NAMESPACE: labelOf(w), AGENT_BROWSER_SESSION: sessionOf(w), AGENT_BROWSER_JSON: '1', ...(w.debug ? { AGENT_BROWSER_DEBUG: '1' } : {}) } },
     (err, stdout, stderr) => resolve({ ms: Date.now() - t0, code: err ? (err.killed ? 'timeout' : (err.code || 1)) : 0, out: String(stdout || '').slice(-262144), err: String(stderr || '').slice(-4000) }));
 });
 const answerOf = (r) => { try { return JSON.parse(String(r.out || '').trim().split('\n').filter(Boolean).pop()); } catch { return null; } };
 const wordOf = (r) => { const j = answerOf(r); return String((j && j.error) || r.err.split('\n').filter(Boolean).pop() || '').slice(0, 240); };
-const filesOf = (w) => { const out = []; const walk = (d, depth) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory() && depth < 4) walk(p, depth + 1); else if (e.isFile() && /log|debug|daemon/i.test(e.name)) out.push(p); } }; for (const r of [w.home, w.tmp, w.xdg, w.cwd]) walk(r, 0); return out; };
+const filesOf = (w) => { const out = []; const walk = (d, depth) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory() && depth < 4) walk(p, depth + 1); else if (e.isFile() && /log|debug|daemon/i.test(e.name)) out.push(p); } }; for (const r of [w.home, w.tmp, w.xdg, w.cwd, w.sock]) walk(r, 0); return out; };
 const PREPARE_FAIL = 'failed to prepare new page session';
 const prepareFailsOf = (w) => filesOf(w).reduce((n, f) => { let s = ''; try { s = fs.readFileSync(f, 'utf8'); } catch { return n; } return n + s.split('\n').filter((l) => l.includes(PREPARE_FAIL)).length; }, 0);
 const brief = (r) => { if (!r) return null; return { ms: r.ms, code: r.code, ...(r.code !== 0 ? { answer: wordOf(r) } : {}) }; };
