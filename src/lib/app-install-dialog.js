@@ -512,7 +512,7 @@ export function openAgentHelp(app, m, { request: carried = '' } = {}) {
       onCreateResult: async (okd, msg) => {
         if (!okd || !msg || !msg.sessionId) return;
         const h = await fetchJson('/api/apps/helpers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: m.hostId, sessionId: msg.sessionId, request }) });
-        if (!h || h.error) showToast(t('The helper started, but it could not be marked as a helper: {why}', { why: (h && h.error) || t('server unreachable') }), { type: 'error' });
+        if (!h || h.error) showToast(t('The helper started, but it could not be marked as a helper: {why}', { why: h && h.code === 'write_failed' ? t('it could not be saved on the server — try again in a minute') : (h && h.error) || t('server unreachable') }), { type: 'error' });   // B-574d: a write that failed, by name
       } });
   };
   ready.then((s) => { if (s) setTimeout(() => input.focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)

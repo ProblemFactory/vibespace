@@ -6,16 +6,18 @@
 //   S  three registries written on a person's or an agent's act take a SYNCED replace through src/fd-close.js renameSynced (synchronous
 //      by ruling: a rare write on an act, never a cadence) — app-proposals.json (apps-engine addHelper), plugin-registry.json
 //      (plugin-loader setEnabled), feedback.json (feedback-store report):
-//      S1 a sync that FAILS (EIO placed at the fsync of the store's own temp) is a failed write that reaches the caller (its words or
-//         its answer): the old file stands byte for byte and no temp is left. RED: the release's writeJsonAtomic (an anchored copy)
-//         asks no sync and the new bytes take the name — the fault this cures
+//      S1 a sync — or a close — that FAILS (EIO placed at the fsync, or the close, of the store's own temp) is a failed write that
+//         reaches the caller: a person's own Disable of a plugin and a helper's start REFUSE by name (write_failed, 主开发 r4765)
+//         with nothing changed; feedback.json's report answers write_failed. The old file stands byte for byte, no temp is left.
+//         RED: the release's writeJsonAtomic (an anchored copy) asks no sync and the new bytes take the name — the fault this cures
 //      S2 a file system with no sync (EINVAL placed) lands the write and says it ONCE a run (two acts, one line)
 //   W  three registries written at a cadence go through THE STORE WRITER (src/store-writer.js) — designs.json (design-engine: every
 //      open, Rename, Remove, ask), doc-owners.json (doc-engine's owner memo: every lookup that sees an owner or a holder move) and
 //      feedback-outbox.json (feedback-forward: every send attempt that backs off — 主开发 r4730):
 //      W1 the act marks its file with the writer under its store-timing name; the bytes are made at the write and are the release's
-//         bytes for the same acts; nothing of the store is written on the main loop. RED: the release's save (an anchored copy)
-//         writes its own temp and renames it on the loop, and marks nothing
+//         bytes for the same acts; the module itself writes nothing of the store on the main loop (its own fs calls — the writer
+//         here is a stand-in that records). RED: the release's save (an anchored copy) writes its own temp and renames it on the
+//         loop, and marks nothing
 //      W2 over a REAL writer on a stand-in thread: the write lands; a write the storage refuses is the writer's own line, the file
 //         keeps its last landed bytes, and the store stays owed and lands once the storage answers again
 //   O  the outbox's two landed writes (r4730: «nothing may be sent twice or lost»):
@@ -24,6 +26,8 @@
 //         start sends that report again with the SAME origin key — the minted key landed before the first request named it — and
 //         the maintainers' hub (its real receive) keeps ONE record. RED: the key paced — the next start mints another key and the
 //         hub keeps the report twice
+//      O3 a hub that comes back drains its queue: every send's removal goes to the writer — NO sync of the outbox on the hub's loop
+//         (the stall class). RED: the synced-replace shape (b7f0a39fa: the outbox through renameSynced) syncs once a send on the loop
 // Run: node scripts/test-registry-writes.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -41,15 +45,18 @@ const quiet = { log() { }, info() { }, warn() { }, error() { } };
 const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
 const srcOf = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const bytes = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+let worldN = 0;   // every scene its own folder (a scratch NAME answers the same path in one run)
 const temps = (dir, base) => fs.readdirSync(dir).filter((n) => n.startsWith(base + '.') && n.includes('tmp'));
 
-/** THE PLACED SYNC: the fsync of a descriptor opened on the store's OWN temp (`<file>.…tmp…`) answers `code` (null: lets it through);
+/** THE PLACED SYNC (or CLOSE): the fsync of a descriptor opened on the store's OWN temp (`<file>.…tmp…`) answers `code` (null: lets
+ *  it through) — or, `at: 'close'`, its close does (the descriptor closed first: a deferred write error arriving at the close);
  *  every such sync asked is counted */
-function placeSync(file, code) {
-  const o = fs.openSync, s = fs.fsyncSync, fds = new Set(), asked = [];
+function placeSync(file, code, { at = 'sync' } = {}) {
+  const o = fs.openSync, s = fs.fsyncSync, c = fs.closeSync, fds = new Set(), asked = [];
   fs.openSync = function (p, ...a) { const fd = o.call(this, p, ...a); if (typeof p === 'string' && p.startsWith(file + '.') && p.includes('tmp')) fds.add(fd); return fd; };
-  fs.fsyncSync = function (fd, ...a) { if (fds.has(fd)) { asked.push(fd); if (code) throw Object.assign(new Error(`a placed ${code} at the sync`), { code }); } return s.call(this, fd, ...a); };
-  return { asked, restore: () => { fs.openSync = o; fs.fsyncSync = s; } };
+  fs.fsyncSync = function (fd, ...a) { if (fds.has(fd)) { asked.push(fd); if (code && at === 'sync') throw Object.assign(new Error(`a placed ${code} at the sync`), { code }); } return s.call(this, fd, ...a); };
+  fs.closeSync = function (fd, ...a) { const r = c.call(this, fd, ...a); if (fds.has(fd) && code && at === 'close') { fds.delete(fd); throw Object.assign(new Error(`a placed ${code} at the close`), { code }); } return r; };
+  return { asked, restore: () => { fs.openSync = o; fs.fsyncSync = s; fs.closeSync = c; } };
 }
 /** console.warn (the four modules' «no sync» sink) captured around fn */
 function warnsOf(fn) { const w0 = console.warn, out = []; console.warn = (...a) => out.push(a.join(' ')); try { return { r: fn(), out }; } finally { console.warn = w0; } }
@@ -58,56 +65,63 @@ function warnsOf(fn) { const w0 = console.warn, out = []; console.warn = (...a) 
 const PLUG = (id) => JSON.parse(fs.readFileSync(path.join(REPO, `scripts/fixtures/${id}/vibespace-plugin.json`), 'utf8'));
 const REGS = [
   { rel: 'src/server/apps-engine.js', base: 'app-proposals.json', tag: '[apps]',
-    world: (M) => { const d = scratchDir('regw-apps'), lines = []; const e = M.create({ access: {}, dataDir: d, log: { ...quiet, warn: (...a) => lines.push(a.join(' ')) } }); return { d, file: path.join(d, 'app-proposals.json'), e, lines }; },
+    world: (M) => { const d = scratchDir('regw-apps-' + (++worldN)), lines = []; const e = M.create({ access: {}, dataDir: d, log: { ...quiet, warn: (...a) => lines.push(a.join(' ')) } }); return { d, file: path.join(d, 'app-proposals.json'), e, lines }; },
     act: (w, n) => w.e.addHelper({ host: 'local', sessionId: `helper-madeup-${n}`, request: 'install a made-up app' }),
     mark: (w, n) => `helper-madeup-${n}`,
-    failed: (w, r) => w.lines.some((l) => /app-proposals\.json not written: .*EIO/.test(l)),
+    failed: (w, r, threw) => !!threw && threw.code === 'write_failed' && w.lines.some((l) => /app-proposals\.json not written: .*EIO/.test(l)),   // a helper's start refused by name (B-574d, r4765)
+    putBack: true,
     tip: "function writeJsonAtomic(file, obj) { require('../fd-close.js').renameSynced(`${file}.${process.pid}.tmp`, file, JSON.stringify(obj, null, 2), { where: 'app-proposals.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[apps] ${w}`); } } }); }",
     rel0: 'function writeJsonAtomic(file, obj) { const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(obj, null, 2)); fs.renameSync(tmp, file); }' },   // stale-pins: kept — the release's text: the red control's replacement, never an anchor
   { rel: 'src/server/plugin-loader.js', base: 'plugin-registry.json', tag: '[plugins]',
     world: (M) => {
-      const root = scratchDir('regw-plugins'), lines = [], ids = [];
+      const root = scratchDir('regw-plugins-' + (++worldN)), lines = [], ids = [];
       for (const fx of ['engine-plugin-egress', 'engine-plugin-user']) { const man = PLUG(fx), d = path.join(root, 'data', 'plugins', man.id); fs.mkdirSync(d, { recursive: true }); fs.copyFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/server.js'), path.join(d, 'server.js')); fs.writeFileSync(path.join(d, 'vibespace-plugin.json'), JSON.stringify(man)); ids.push(man.id); }
       const e = M.create({ rootDir: root, app: null, autoStart: false, hostVersion: '2.369.356', log: { ...quiet, warn: (...a) => lines.push(a.join(' ')) } });
       return { d: path.join(root, 'data'), file: path.join(root, 'data', 'plugin-registry.json'), e, lines, ids };
     },
     act: (w, n) => w.e.setEnabled(w.ids[n % 2], false),   // switched off (never started): acts 1 and 2 each add a registry row
     mark: (w, n) => w.ids[n % 2],
-    failed: (w, r) => w.lines.some((l) => /registry write failed: .*EIO/.test(l)),
+    failed: (w, r, threw) => !!threw && threw.status === 500 && !!threw.payload && threw.payload.code === 'write_failed' && w.lines.some((l) => /registry write failed: .*EIO/.test(l)),   // the person's own Disable refused by name (B-574d, r4765)
+    putBack: true,
     tip: "  require('../fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'plugin-registry.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[plugins] ${w}`); } } });",
     rel0: "  const tmp = file + '.tmp';\n  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));\n  fs.renameSync(tmp, file);" },   // stale-pins: kept — the release's text: the red control's replacement, never an anchor
   { rel: 'src/server/feedback-store.js', base: 'feedback.json', tag: '[feedback]',
-    world: (M) => { const d = scratchDir('regw-feedback'); return { d, file: path.join(d, 'feedback.json'), e: M.create({ dataDir: d, log: () => { } }), lines: [] }; },
+    world: (M) => { const d = scratchDir('regw-feedback-' + (++worldN)); return { d, file: path.join(d, 'feedback.json'), e: M.create({ dataDir: d, log: () => { } }), lines: [] }; },
     act: (w, n) => w.e.report({ text: `a made-up report ${n}`, about: 'vibespace-task' }, { session: { id: `sess-madeup-${n}`, name: `Made-up ${n}` } }),
     mark: (w, n) => `a made-up report ${n}`,
-    failed: (w, r) => !!r && r.ok === false && r.code === 'write_failed',
+    failed: (w, r, threw) => !threw && !!r && r.ok === false && r.code === 'write_failed',
     tip: "  require('../fd-close.js').renameSynced(`${file}.tmp-${process.pid}`, file, JSON.stringify(obj), { where: 'feedback.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[feedback] ${w}`); } } });",
     rel0: '  const tmp = `${file}.tmp-${process.pid}`;\n  fs.writeFileSync(tmp, JSON.stringify(obj));\n  fs.renameSync(tmp, file);' },   // stale-pins: kept — the release's text: the red control's replacement, never an anchor
 ];
 
 /** one store's scene under a placed sync code: a first act lands (the old file), the second meets the placed sync */
-function scene(R, M, code) {
+function scene(R, M, code, at = 'sync') {
   const w = R.world(M);
   R.act(w, 1);
   const old = bytes(w.file);
-  const p = placeSync(w.file, code);
+  const p = placeSync(w.file, code, { at });
   let r, threw = null, said = [];
   try { const x = warnsOf(() => { try { return R.act(w, 2); } catch (e) { threw = e; return null; } }); r = x.r; said = x.out; } finally { p.restore(); }
-  return { w, r, threw, old, now: bytes(w.file), asked: p.asked.length, temps: temps(w.d, R.base), said };
+  const now = bytes(w.file), tmp = temps(w.d, R.base);
+  // a press that refused must have changed NOTHING: the next write (nothing placed) carries no trace of it
+  let putBack = null; if (R.putBack) { try { R.act(w, 3); } catch { } putBack = !(bytes(w.file) || '').includes(R.mark(w, 2)); }
+  return { w, r, threw, old, now, asked: p.asked.length, temps: tmp, said, putBack };
 }
 
 console.log('S1 a sync that FAILS is a failed write that reaches the caller; the old file stands (four registries, each through its real act)');
 for (const R of REGS) {
   const M = require(path.join(REPO, R.rel));
-  const t = scene(R, M, 'EIO');
-  const facts = { asked: t.asked, threw: t.threw && t.threw.message, oldKept: t.now === t.old, temps: t.temps, failedSaid: R.failed(t.w, t.r), lines: t.w.lines.slice(-2) };
-  console.log(`    ${R.base}: ${JSON.stringify(facts)}`);
-  ok(!!t.old && !t.old.includes(R.mark(t.w, 2)) && t.asked === 1 && !t.threw && t.now === t.old && t.temps.length === 0 && R.failed(t.w, t.r),
-    `S1 ${R.base} (${R.rel}): one sync of its own temp asked; the placed EIO fails the write to its caller (its own words / answer), the OLD file stands byte for byte, no temp left`, facts);
+  for (const at of ['sync', 'close']) {
+    const t = scene(R, M, 'EIO', at);
+    const facts = { at, asked: t.asked, threw: t.threw && (t.threw.code || (t.threw.payload && t.threw.payload.code)), oldKept: t.now === t.old, temps: t.temps, failedSaid: R.failed(t.w, t.r, t.threw), putBack: t.putBack, lines: t.w.lines.slice(-2) };
+    console.log(`    ${R.base}: ${JSON.stringify(facts)}`);
+    ok(!!t.old && !t.old.includes(R.mark(t.w, 2)) && t.asked === 1 && t.now === t.old && t.temps.length === 0 && R.failed(t.w, t.r, t.threw) && (!R.putBack || t.putBack === true),
+      `S1 ${R.base} (${R.rel}): one sync of its own temp asked; an EIO placed at the ${at.toUpperCase()} fails the write to its caller — ${R.putBack ? 'the press REFUSED by name (write_failed) and nothing changed (the next write carries no trace of it)' : 'its answer write_failed'} —, the OLD file stands byte for byte, no temp left`, facts);
+  }
   // RED: the release's writeJsonAtomic — its own unsynced temp + rename
   let red = null, why = null;
   try { red = scene(R, asModule(R.rel, anchored(srcOf(R.rel), R.tip, R.rel0, `s1-${R.base}-release`)), 'EIO'); } catch (e) { why = e.message; }
-  const rf = red && { asked: red.asked, newTookName: !!red.now && red.now.includes(R.mark(red.w, 2)), failedSaid: R.failed(red.w, red.r) };
+  const rf = red && { asked: red.asked, newTookName: !!red.now && red.now.includes(R.mark(red.w, 2)), failedSaid: R.failed(red.w, red.r, red.threw) };
   console.log(`    RED copy ${R.base}: ${JSON.stringify(rf || why)}`);
   ok(!!red && red.asked === 0 && rf.newTookName && !rf.failedSaid,
     `S1 RED CONTROL ${R.base}: the release's writeJsonAtomic asks no sync — under the same placed EIO the NEW bytes take the name and the caller hears nothing`, rf || why);
@@ -216,7 +230,7 @@ console.log('W2 over a REAL writer on a stand-in thread: lands; a refused write 
       const line = said.find((l) => l.includes(`${R.name} not written`) && l.includes('EIO'));
       const facts = { landed: a, refused: b, keptLast: kept === first, owedAfter: owed, landedLater: c, changed: last !== first, line };
       console.log(`    ${R.base}: ${JSON.stringify(facts)}`);
-      ok(a === true && !!first && b === false && kept === first && !!line && c === true && last !== first,
+      ok(a === true && !!first && b === false && kept === first && owed === true && !!line && c === true && last !== first,
         `W2 ${R.base}: its write lands through the writer's thread; a write the storage refuses (EIO) is the writer's own line («${R.name} not written»), the file keeps its last landed bytes, and the store stays owed and lands once the storage answers`, facts);
     }
   } finally { try { W.stop(); } catch { } }
@@ -289,6 +303,35 @@ console.log('O2 a crash between a send and its removal\'s landing: the next star
     'O2 the minted origin key is ON DISK when the first request names it; the restart after the crash sends the report again under that SAME key and the hub answers it as the record it already made (duplicate) — ONE record', tip);
   ok(!!red && red.seen.length === 2 && red.seen[0].keyOnDisk === null && red.seen[1].key !== red.seen[0].key && red.records === 2,
     'O2 RED CONTROL: the key written paced — the request names a key not on disk, the restart mints ANOTHER and the hub keeps the report twice', red || why);
+}
+
+
+console.log('O3 a queue drained after the hub comes back: no sync of the outbox on the hub\'s loop (every removal is the writer\'s)');
+{
+  const scene3 = async (M, tag) => {
+    const STAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs')).make(scratchDir('regw-o3-stand-' + tag));
+    const d = scratchDir('regw-o3-' + tag), f = path.join(d, 'feedback-outbox.json');
+    const q = [31, 32, 33, 34, 35].map((n) => { const row = fbRow(n); return { id: row.id, body: FFM.wireBody(row, { instance: 'made-up', version: '0' }), tries: 0, firstAt: n }; });
+    fs.writeFileSync(f, KEYED('fk_' + 'C'.repeat(43), q));
+    const W = SW.create({ log: quiet, workerPath: STAND.path });
+    const ok200 = async () => ({ status: 200, headers: { get: () => null }, json: async () => ({ ok: true }) });
+    const o = outbox(M, d, W, { fetch: ok200 });
+    const p = placeSync(f, null);   // counts every sync of the outbox's own temp asked ON THIS THREAD (the writer's thread is another)
+    let out = null;
+    try { out = await o.pump(); } finally { p.restore(); o.stop(); W.stop(); }
+    return { sent: out && out.sent, loopSyncs: p.asked.length };
+  };
+  const tip = await scene3(FFW, 'tip');
+  let red = null, why = null;
+  try {
+    let code = srcOf(FF_REL);
+    code = anchored(code, /  function save\(\{ land = false \} = \{\}\) \{[\s\S]*?\n  \}\n/, "  const save = () => { if (!hold.writable('the feedback outbox')) return false; try { writeJsonAtomic(file, state); return true; } catch (e) { log('[feedback] data/feedback-outbox.json not written:', e.message); return false; } };\n", 'o3-synced-save');   // stale-pins: kept — the b7f0a39fa shape: the red control's replacement, never an anchor
+    code = anchored(code, '/** deps: dataDir;', "function writeJsonAtomic(file, obj) {\n  require('../fd-close.js').renameSynced(`${file}.tmp-${process.pid}`, file, JSON.stringify(obj), { mode: 0o600, where: 'feedback-outbox.json' });\n}\n\n/** deps: dataDir;", 'o3-synced-door');   // stale-pins: kept — the b7f0a39fa shape: the red control's replacement, never an anchor
+    red = await scene3(asModule(FF_REL, code), 'red');
+  } catch (e) { why = e.message; }
+  console.log(`    facts: ${JSON.stringify({ tip, red: red || why })}`);
+  ok(tip.sent === 5 && tip.loopSyncs === 0, 'O3 five queued reports drained: NO sync of the outbox on the hub\'s loop — each send\'s removal is the writer\'s, off the loop', tip);
+  ok(!!red && red.sent === 5 && red.loopSyncs >= 5, 'O3 RED CONTROL: the synced-replace shape (the outbox through renameSynced, b7f0a39fa) syncs on the hub\'s loop once a send — a day\'s queue is a burst of syncs on the data folder', red || why);
 }
 
 report();

@@ -4027,6 +4027,7 @@ export default {
   "Disable": "無効にする",
   "Enable": "有効にする",
   "Plugin disabled": "プラグインを無効にしました",
+  "The plugin list could not be saved on the server — nothing changed. Try again in a minute.": "サーバー上のプラグイン一覧を保存できませんでした——何も変わっていません。1分ほどしてからもう一度お試しください。",   // B-574d: a write that failed
   "Plugin enabled": "プラグインを有効にしました",
   "OpenCode": "OpenCode",
   "Build": "ビルド",
@@ -8426,6 +8427,7 @@ export default {
   "App install helper": "アプリインストールヘルパー",
   "Install app · {request}": "アプリを入れる · {request}",
   "The helper started, but it could not be marked as a helper: {why}": "ヘルパーは開始しましたが、ヘルパーとして記録できませんでした: {why}",
+  "it could not be saved on the server — try again in a minute": "サーバーに保存できませんでした——1分ほどしてからもう一度お試しください",   // B-574d: a write that failed
   "restoring…": "復元中…",
   "could not be put back": "元に戻せませんでした",
   "not installed here (yet)": "ここには（まだ）インストールされていません",

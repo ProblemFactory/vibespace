@@ -167,7 +167,8 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
   { let read; try { read = { text: fs.readFileSync(registryFile, 'utf-8') }; } catch (error) { read = { error }; } const a0 = SR.storeAnswer(read, { valid: REGISTRY_SHAPE }); if (hold.start(a0) === 'data') registry = normalize(a0.value); }
   /** a writer's guard: refused BY NAME (503 plugin_registry_unread) while the registry is held — before any side effect */
   const heldRefuse = (what) => { const f = hold.held(); if (f) throw httpErr(503, `${what}: ${hold.words()}`, { code: HELD_CODE, held: { file: f.file, code: f.code, since: f.since } }); };
-  const saveRegistry = () => { if (!hold.writable('a plugin registry write')) return; try { fs.mkdirSync(path.dirname(registryFile), { recursive: true }); writeJsonAtomic(registryFile, registry); } catch (e) { log.warn?.('[plugins] registry write failed:', e.message); } };
+  // → true when written; false when held (nothing asked) or when the write FAILED (said; B-574d: a person's own press refuses on it)
+  const saveRegistry = () => { if (!hold.writable('a plugin registry write')) return false; try { fs.mkdirSync(path.dirname(registryFile), { recursive: true }); writeJsonAtomic(registryFile, registry); return true; } catch (e) { log.warn?.('[plugins] registry write failed:', e.message); return false; } };
   /** the hold LIFTED: the registry read (null: «not there» twice, or torn bytes kept aside — empty); what the start skipped runs now */
   // B-f276 (主开发 r3305 (c)): who waits for the lift (the fleet run of engine-distribution) — told ONCE after the reload, then forgotten
   const liftWaiters = new Set();
@@ -411,6 +412,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   function setEnabled(id, on, { trusted = false } = {}) {
     heldRefuse(on ? (trusted ? 'enabling (and trusting) a plugin' : 'enabling a plugin') : 'switching a plugin off');   // r3305 (b): no consent asked or recorded over it
     const rec = plugins.get(id);
+    const was = { enabled: Object.prototype.hasOwnProperty.call(registry.enabled, id) ? [registry.enabled[id]] : null, trust: Object.prototype.hasOwnProperty.call(registry.trust, id) ? [registry.trust[id]] : null };   // B-574d: put back if the write fails
     if (!rec) throw httpErr(404, `unknown plugin "${id}"`);
     if (on && !rec.manifest) throw httpErr(400, `plugin "${id}" is invalid: ${rec.errors.join('; ')}`);
     if (on && needsConsent(rec.manifest)) {
@@ -422,7 +424,12 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
           { consentRequired: true, capabilities: capabilitySummary(rec.manifest), capabilitiesHash: hash, changed: !!had });
       }
     }
-    registry.enabled[id] = !!on; saveRegistry();
+    registry.enabled[id] = !!on;
+    if (!saveRegistry()) {   // B-574d (主开发 r4765): a person's own Enable / Disable whose write FAILED is refused BY NAME — nothing changed (memory put back), the switch drawn again as it was
+      if (was.enabled) registry.enabled[id] = was.enabled[0]; else delete registry.enabled[id];
+      if (was.trust) registry.trust[id] = was.trust[0]; else delete registry.trust[id];
+      throw httpErr(500, `the plugin list could not be saved on the server — "${id}" was not ${on ? 'enabled' : 'switched off'}; try again in a minute`, { code: 'write_failed' });
+    }
     rec.enabled = !!on && !!rec.manifest;
     rec.notice = null;
     if (rec.enabled) { rec.crashes = []; if (rec.state === 'parked') rec.state = 'stopped'; startChild(rec); }

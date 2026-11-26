@@ -364,7 +364,7 @@ export function installPluginsUI(App) {
     const enablePlugin = async (p, { trusted = false } = {}) => {
       const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: true, trusted }) });
       if (rr?.consentRequired && !trusted) { const okc = await this._pluginConsentDialog(p, rr.capabilities); if (okc) return enablePlugin(p, { trusted: true }); return; }
-      if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); render(); return; }   // r3634: the switch drawn again as it is (a refused press changes nothing)
+      if (rr?.error) { showToast(heldWordsOf(rr) || (rr.code === 'write_failed' ? t('The plugin list could not be saved on the server — nothing changed. Try again in a minute.') : rr.error), { type: 'error' }); render(); return; }   // r3634: the switch drawn again as it is (a refused press changes nothing); B-574d: a write that failed, by name
       showToast(trusted ? t('Plugin enabled (trusted)') : t('Plugin enabled'));
       this.pluginClient?.refresh?.();
       render();
@@ -426,7 +426,7 @@ export function installPluginsUI(App) {
             return enablePlugin(p);
           }
           const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: false }) });
-          if (rr?.error) { showToast(heldWordsOf(rr) || rr.error, { type: 'error' }); if (p.held) { cb.checked = false; cb.indeterminate = true; } else cb.checked = true; return; }   // r3634: put back as it was
+          if (rr?.error) { showToast(heldWordsOf(rr) || (rr.code === 'write_failed' ? t('The plugin list could not be saved on the server — nothing changed. Try again in a minute.') : rr.error), { type: 'error' }); if (p.held) { cb.checked = false; cb.indeterminate = true; } else cb.checked = true; return; }   // r3634: put back as it was; B-574d: a write that failed, by name
           showToast(t('Plugin disabled'));
           this.pluginClient?.refresh?.();
           render();

@@ -4027,6 +4027,7 @@ export default {
   "Disable": "禁用",
   "Enable": "启用",
   "Plugin disabled": "插件已禁用",
+  "The plugin list could not be saved on the server — nothing changed. Try again in a minute.": "服务器上的插件列表没能保存——什么都没有改变。请过一分钟再试。",   // B-574d: a write that failed
   "Plugin enabled": "插件已启用",
   "OpenCode": "OpenCode",
   "Build": "构建",
@@ -8427,6 +8428,7 @@ export default {
   "App install helper": "应用安装助手",
   "Install app · {request}": "装应用 · {request}",
   "The helper started, but it could not be marked as a helper: {why}": "助手已启动，但无法把它标记为助手：{why}",
+  "it could not be saved on the server — try again in a minute": "服务器上没能保存——请过一分钟再试",   // B-574d: a write that failed
   "restoring…": "正在恢复…",
   "could not be put back": "无法恢复",
   "not installed here (yet)": "（还）没装在这里",

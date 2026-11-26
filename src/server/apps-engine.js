@@ -171,7 +171,7 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     if (!file || !hold.writable('an app proposal change')) return;   // held: nothing written over it
     const t = now();
     store.proposals = store.proposals.filter((p) => !TERMINAL.has(p.state) || t - (p.finishedAt || p.createdAt || t) < KEEP_MS).slice(-MAX_PROPOSALS);
-    try { writeJsonAtomic(file, store); } catch (e) { log.warn?.(`[apps] ${STORE_FILE} not written: ${e.message}`); }
+    try { writeJsonAtomic(file, store); return true; } catch (e) { log.warn?.(`[apps] ${STORE_FILE} not written: ${e.message}`); return false; }   // B-574d: → false when the write FAILED (a person's own press refuses on it)
   };
   const bump = (host) => { try { broadcast({ type: 'apps-updated', host: host || 'local' }); } catch { /* no clients */ } };
   /** lane apps-launcher-witness: where an install landed, in the agent's words — this hub by its own name, a paired machine by its label. */
@@ -701,8 +701,10 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   function addHelper({ host = 'local', sessionId, request = '' }) {
     if (isHeld()) throw hold.refusal('starting a helper');
     if (!/^[A-Za-z0-9._-]{1,80}$/.test(String(sessionId || ''))) throw named('bad-request', 'bad session id');
+    const before = store.helpers;
     store.helpers = store.helpers.filter((x) => x.sessionId !== sessionId).concat({ host, sessionId, request: String(request).slice(0, 500), at: now() }).slice(-50);
-    save(); bump(host);
+    if (file && save() === false) { store.helpers = before; throw named('write_failed', 'the helper could not be recorded on the server — try again in a minute'); }   // B-574d (主开发 r4765): a helper's start whose write FAILED is refused by name; nothing changed
+    bump(host);
     return store.helpers.find((x) => x.sessionId === sessionId);
   }
   function dropHelper(sessionId) { if (isHeld()) return; const n = store.helpers.length; store.helpers = store.helpers.filter((x) => x.sessionId !== sessionId); if (store.helpers.length !== n) { save(); bump('local'); } }
