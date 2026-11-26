@@ -750,19 +750,91 @@ console.log('\n§5 the detached child\'s git environment');
     const now = halves(PKG.scripts), planted = halves({ ...PKG.scripts, build: PKG.scripts.build + ' && esbuild src/x-entry.js --bundle --outfile=public/x.js' });
     ok(now.length === 0, `(1) THE TWO HALVES: build ≡ build:bundles then the four checks and nothing else; every writer stands in build:bundles (${String(PKG.scripts['build:bundles'] || '').split(' && ').length} steps)${now.length ? ' — ' + now.join(' · ') : ''}`);
     ok(planted.length === 1 && /four checks alone/.test(planted[0]), `(1) CONTROL: a writer added to build alone is red by name (${planted.length})`);
-    // (2) THE CENSUS: a suite that runs the WHOLE build script (`npm run build`, the chain with its checks) with a cwd of its own is red by
-    // name — a worktree or scratch asks build:bundles. NEEDS_CHECKS would name a suite that truly needs the checks there, with its reason:
-    // none today. (A planted text — a string in a suite — whose call has no `cwd:` of its own is no call of this census.)
+    // and each other red branch (the take round's should on line 1011): a check put inside build:bundles; build:bundles without a writer it must hold
+    const inside = halves({ ...PKG.scripts, 'build:bundles': PKG.scripts['build:bundles'] + ' && node scripts/test-zz-planted.mjs' });
+    const lacking = halves({ ...PKG.scripts, 'build:bundles': String(PKG.scripts['build:bundles'] || '').split(' && ').filter((x) => x !== 'npm run build:agentd').join(' && ') });
+    ok(inside.some((x) => /a check stands inside build:bundles/.test(x)) && lacking.some((x) => /lacks a writer/.test(x)),
+      `(1) CONTROL: a check put inside build:bundles is red (${inside.length}), and build:bundles without the device bundle is red (${lacking.length})`);
+    // (2) THE CENSUS: a suite — or a module a suite imports, at any depth (B-c27e follow, 主开发 r5141: scripts/xpra-window-boot.mjs built
+    // whole for seven heavy suites, unseen by a census of the suites alone) — that runs the WHOLE build script (`npm run build`, the chain
+    // with its checks) with a cwd of its own is red by name: a worktree or scratch asks build:bundles. The cwd is read to the call's own
+    // closing parenthesis (options on the next line too); REPO and repo alone are the tree's own root (ROOT is a scratch root in suites);
+    // a shell form (a cd into a folder that is not the tree's own root, then the whole build) is a whole build too. NEEDS_CHECKS would name a suite that truly needs the
+    // checks there, with its reason: none today. (A planted text — a string — whose call has no `cwd:` of its own is no call of this census.)
     const NEEDS_CHECKS = {};
-    const BUILD_CALL = /(?:execSync|execFileSync|spawnSync|spawn|execFile|exec)\(\s*(?:(['"`])npm run build\1|['"]npm['"]\s*,\s*\[\s*['"]run['"]\s*,\s*['"]build['"]\s*\])([^\n]*)/g;
+    const BUILD_HEAD = /(?:execSync|execFileSync|spawnSync|spawn|execFile|exec)\(\s*(?:(['"`])npm run build\1|['"]npm['"]\s*,\s*\[\s*['"]run['"]\s*,\s*['"]build['"]\s*\])/g;
+    const SHELL_BUILD = /\bcd ([^'"`;&]{1,80})&& npm run build(?![:\w])/g;
     const BUNDLES_CALL = /(?:execSync|execFileSync|spawnSync|spawn|execFile|exec)\(\s*(?:(['"`])npm run build:bundles\1|['"]npm['"]\s*,\s*\[\s*['"]run['"]\s*,\s*['"]build:bundles['"]\s*\])/g;
-    const whole = (name, src) => [...src.matchAll(BUILD_CALL)].filter((m) => { const c = /\bcwd:\s*([A-Za-z_$][\w$.]*)/.exec(m[2] || ''); return !!c && !/^(REPO|repo|ROOT)$/.test(c[1]); }).map(() => name);
+    // A COMMENT LINE says nothing of a call. The rest of a call is read to its OWN closing parenthesis (quotes and nesting kept, at most
+    // 4000 characters): a later statement's cwd is never its own, and a `;` inside a string or a long options object hides nothing.
+    const code = (src) => src.split('\n').map((l) => (/^\s*(?:\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n');
+    const restOfCall = (src, at) => {
+      let depth = 0, q = null;
+      for (let i = at; i < Math.min(src.length, at + 4000); i++) {
+        const ch = src[i];
+        if (q) { if (ch === '\\') i++; else if (ch === q) q = null; continue; }
+        if (ch === "'" || ch === '"' || ch === '`') q = ch;
+        else if ('([{'.includes(ch)) depth++;
+        else if (')]}'.includes(ch)) { if (depth === 0) return src.slice(at, i); depth--; }
+      }
+      return src.slice(at, at + 4000);
+    };
+    const ROOTS = /^(?:REPO|repo)$/, ROOT_CD = /^"?\$\{(?:REPO|repo)\}"?$/;
+    const whole = (name, src) => {
+      const t = code(src);
+      return [...[...t.matchAll(BUILD_HEAD)].filter((m) => { const c = /\bcwd:\s*([A-Za-z_$][\w$.]*)/.exec(restOfCall(t, m.index + m[0].length)); return !!c && !ROOTS.test(c[1]); }),
+        ...[...t.matchAll(SHELL_BUILD)].filter((m) => !ROOT_CD.test(m[1].trim()))].map(() => name);
+    };
+    // the suites and every scripts/ module they import BY A LITERAL PATH, at any depth — a static or a bare import at a line's start,
+    // import(), require() (a computed specifier cannot be followed); a comment line is not read; a path outside scripts/ is not read
+    const IMPORT_SPEC = /^\s*import\b[^;]*?\bfrom\s*['"](\.{1,2}\/[^'"]+)['"]|^\s*import\s*['"](\.{1,2}\/[^'"]+)['"]|\bimport\s*\(\s*['"](\.{1,2}\/[^'"]+)['"]|\brequire\s*\(\s*['"](\.{1,2}\/[^'"]+)['"]/gm;
+    const reach = (tests, readRel) => {
+      const seen = new Map(), todo = [];
+      for (const f of tests) { seen.set(f, readRel(f) || ''); todo.push(f); }
+      while (todo.length) {
+        const f = todo.pop();
+        for (const m of code(seen.get(f)).matchAll(IMPORT_SPEC)) {
+          const g = path.posix.normalize(path.posix.join(path.posix.dirname(f), m[1] || m[2] || m[3] || m[4]));
+          if (g.startsWith('..') || seen.has(g)) continue;
+          const t = readRel(g);
+          if (t !== null) { seen.set(g, t); todo.push(g); }
+        }
+      }
+      return seen;
+    };
+    const nameOf = (f) => (/^test-[^/]*\.mjs$/.test(f) ? f.slice(0, -4) : `scripts/${f}`);
+    const readScripts = (rel) => { try { return fs.readFileSync(path.join(REPO, 'scripts', rel), 'utf-8'); } catch { return null; } };
     const files = fs.readdirSync(path.join(REPO, 'scripts')).filter((n) => /^test-.*\.mjs$/.test(n));
+    const read = reach(files, readScripts), mods = [...read.keys()].filter((f) => !files.includes(f));
     let calls = 0; const red = [];
-    for (const f of files) { const src = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf-8'), n = f.slice(0, -4); calls += (src.match(BUNDLES_CALL) || []).length; for (const w of whole(n, src)) if (!NEEDS_CHECKS[w]) red.push(w); }
-    ok(red.length === 0 && calls >= 40, `(2) THE CENSUS: ${files.length} suites read — ${calls} build:bundles calls in a worktree of their own, ${red.length} building the whole chain there${red.length ? ': ' + [...new Set(red)].join(', ') : ''}; needing the checks there: ${Object.keys(NEEDS_CHECKS).length}`);
+    for (const [f, src] of read) { calls += (src.match(BUNDLES_CALL) || []).length; for (const w of whole(nameOf(f), src)) if (!NEEDS_CHECKS[w]) red.push(w); }
+    ok(red.length === 0 && calls >= 40 && mods.includes('xpra-window-boot.mjs'), `(2) THE CENSUS: ${files.length} suites and the ${mods.length} scripts/ modules they import read — ${calls} build:bundles calls in a worktree of their own, ${red.length} building the whole chain there${red.length ? ': ' + [...new Set(red)].join(', ') : ''}; needing the checks there: ${Object.keys(NEEDS_CHECKS).length}`);
     const PLANT = "const wt = 'x';\nexecSync('npm run " + "build', { cwd: wt, stdio: 'ignore' });\n";
     ok(whole('test-zz-planted', PLANT).length === 1, '(2) CONTROL: a planted suite that runs the whole build in its worktree is red by name');
+    // the follow's controls (r5141): a module a suite imports (two deep) is read and named; the options on the next line; ROOT is no root;
+    // the shell form; and the tree's own root stays clean
+    const B = "execSync('npm run " + "build'";
+    const TREE = { 'test-zz-planted.mjs': "import { boot } from './zz-boot.mjs';\n", 'zz-boot.mjs': "import { cut } from './lib/zz-deep.mjs';\n", 'lib/zz-deep.mjs': PLANT };
+    const viaHelper = [...reach(['test-zz-planted.mjs'], (r) => (r in TREE ? TREE[r] : null))].flatMap(([f, src]) => whole(nameOf(f), src));
+    const shapes = { nextLine: `${B},\n    { cwd: wt, stdio: 'ignore' });`, root: `${B}, { cwd: ROOT, stdio: 'ignore' });`, shell: "execSync(`cd ${wt} " + "&& npm run " + "build`, { stdio: 'ignore' });" };
+    const own = whole('test-zz-planted', `${B}, { cwd: REPO, stdio: 'ignore' });`);
+    ok(JSON.stringify(viaHelper) === JSON.stringify(['scripts/lib/zz-deep.mjs']) && Object.values(shapes).every((t) => whole('x', t).length === 1) && own.length === 0,
+      `(2) CONTROL: a module two imports deep that builds whole in a worktree is named (${viaHelper.join(', ') || 'none'}); options on the next line, a cwd ROOT and the shell form are each red; the tree's own root is not`);
+    // the follow's read round: a `;` inside a string and a long options object hide no cwd; a later statement's cwd is not the call's; a
+    // comment and a cd into the tree's own root are no whole build; a bare import and a require are followed, an import in a comment is not
+    const more = {
+      semicolon: `${B}, { env: { PS4: '+; ' }, cwd: wt, stdio: 'ignore' })`,
+      long: `${B}, { env: { NOTE: '${'x'.repeat(400)}' }, cwd: wt, stdio: 'ignore' })`,
+    };
+    const clean = {
+      laterStatement: `${B}, { stdio: 'ignore' })\nexecSync(next, { cwd: wt })`,
+      comment: '  // by hand: cd /tmp/vs-zz ' + '&& npm run ' + 'build',
+      rootCd: "execSync(`cd ${REPO} " + "&& npm run " + "build`, { stdio: 'ignore' });",
+    };
+    const TREE2 = { 'test-zz-planted.mjs': "import './zz-side.mjs';\nconst h = require('./zz-req.cjs');\n// import { x } from './zz-commented.mjs';\n", 'zz-side.mjs': '', 'zz-req.cjs': PLANT, 'zz-commented.mjs': PLANT };
+    const viaForms = [...reach(['test-zz-planted.mjs'], (r) => (r in TREE2 ? TREE2[r] : null))].flatMap(([f, src]) => whole(nameOf(f), src));
+    ok(Object.values(more).every((t) => whole('x', t).length === 1) && Object.values(clean).every((t) => whole('x', t).length === 0) && JSON.stringify(viaForms) === JSON.stringify(['scripts/zz-req.cjs']),
+      `(2) CONTROL: a ; in a string and a long options object hide no cwd; a later statement's cwd, a comment and a cd into the tree's own root are clean; a bare import and a require are followed, a commented import is not (${viaForms.join(', ') || 'none'})`);
     // (3) EACH TIER RUNS THE FOUR CHECKS ONCE, BY NAME: ci.mjs runBuild spawns the whole `npm run build`; the fast gate and the heavy gate
     // each call it once on their tree (the hosted jobs run those gates)
     const CI = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');

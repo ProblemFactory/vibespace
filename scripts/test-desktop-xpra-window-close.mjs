@@ -27,7 +27,7 @@ import { freePorts, scratch, scratchHome } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const { agentTokens, bin, bootedCopy, CDP_PORT, check, crashed, ctlServers, D, dropPage, ensureActive, FAKE_CLAUDE, fakeHome, finish, launchOn, mkPage, openPage, page, PORT,
-  R2, reach7, readyOn, rebaseline, repo, revealBars, SEAT, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, trustedClickAt, until, VNC_ENV,
+  R2, reach7, readyOn, repo, revealBars, SEAT, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, trustedClickAt, until, VNC_ENV,
   WebSocket, WIN, worktrees, wt, XTERM } = await bootXpraWindow('test-desktop-xpra-window-close');
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
@@ -290,7 +290,7 @@ try {
       const closeLine = '    if (!v.close) return false;';
       check('CONTROL: the window\'s close decision is spelled exactly once (the control pulls exactly it back)', winSrc.split(closeLine).length === 2);
       fs.writeFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), editAnchor(winSrc, closeLine, '    return false; // pre-A2 CONTROL: the window never closes itself', "src/lib/desktop-app-window.js"));
-      rebaseline(wtc); execSync('npm run build:bundles', { cwd: wtc, stdio: 'ignore' });
+      execSync('npm run build:bundles', { cwd: wtc, stdio: 'ignore' });
       const [PORTA] = await freePorts(1);
       const homeA = scratchHome('deskxpra-a2ctl-home', fs);
       const sa = spawnCopy('the pre-A2 copy', wtc, { ...srvEnv, ...VNC_ENV, PORT: String(PORTA), HOME: homeA }); ctlServers.push(sa);

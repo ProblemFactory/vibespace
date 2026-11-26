@@ -23,7 +23,7 @@ import { freePorts, scratch, scratchHome, gtkRow } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const require = createRequire(import.meta.url);
-const { bin, bootedCopy, check, copyLeft, crashed, ctlServers, endCopy, ensureActive, finish, launchOn, mkPage, openPage, page, PORT, readyOn, rebaseline,
+const { bin, bootedCopy, check, copyLeft, crashed, ctlServers, endCopy, ensureActive, finish, launchOn, mkPage, openPage, page, PORT, readyOn,
   repo, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, until, worktrees, wt } = await bootXpraWindow('test-desktop-relaunch-stall');
 let p1 = await page(target);
 try {
@@ -137,7 +137,7 @@ try {
     const wf = path.join(wts, 'src/lib/desktop-app-window.js'); const src9 = fs.readFileSync(wf, 'utf8');
     check('B-92aa stall: the relaunch fit\'s call is spelled exactly once (the copy holds exactly it)', src9.split(FROM).length === 2);
     fs.writeFileSync(wf, src9.replace(FROM, TO));
-    rebaseline(wts); execSync('npm run build:bundles', { cwd: wts, stdio: 'ignore' });
+    execSync('npm run build:bundles', { cwd: wts, stdio: 'ignore' });
     const [PORTS] = await freePorts(1);
     const homeS = scratchHome('deskxpra-stall-home', fs);
     const ss = spawnCopy('the stalled-fit copy', wts, { ...srvEnv, PORT: String(PORTS), HOME: homeS }); ctlServers.push(ss);
