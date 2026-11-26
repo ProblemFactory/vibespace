@@ -241,6 +241,29 @@ try {
   await new DeviceManager({ dataDir: hb, bundlePath: hubBundle, version: '1.1.1', log: () => {} })._upgrade(fm);
   const proofFile = path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'upgrade-proof');
   ok(fm.line && /^[0-9a-f]{64}$/.test(fm.line.localProof) && !('sig' in fm.line) && fs.readFileSync(proofFile, 'utf8') === fm.line.localProof && (fs.statSync(proofFile).mode & 0o777) === 0o600, 'its OWN machine\'s daemon gets an unsigned build with the local proof (the same 32 random bytes in <root>/state/upgrade-proof, 0600)');
+  // B-574d (lane nl-paired, 主开发 r4752): THE PROOF'S BYTES ARE ON DISK BEFORE ITS NAME (src/fd-close.js renameSynced) — its reader is
+  // another process (the daemon's landingVerdict). A sync REFUSED (placed: fs.fsyncSync throws EIO) is a FAILED WRITE: _writeLocalProof
+  // throws, the proof on disk stands byte for byte, no temp is left; a file system with no sync at all (EINVAL) lands, said once.
+  // RED: a copy with the release's unsynced write + rename — the placed refusal is never met and the new proof takes its name.
+  {
+    const before = fs.readFileSync(proofFile);
+    const placedSync = (code, fn) => { const s0 = fs.fsyncSync; let n = 0; fs.fsyncSync = function () { n++; throw Object.assign(new Error(`${code}: a placed sync refusal`), { code }); }; try { return { r: fn(), n }; } catch (e) { return { threw: (e && e.code) || String(e), n }; } finally { fs.fsyncSync = s0; } };
+    const proofScene = (DM, code) => {
+      fs.writeFileSync(proofFile, 'OLD', { mode: 0o600 });
+      const said = [];
+      const out = placedSync(code, () => new DM({ dataDir: hb, bundlePath: hubBundle, version: '1.1.1', log: (l) => said.push(String(l)) })._writeLocalProof());
+      const left = fs.readdirSync(path.dirname(proofFile)).filter((f) => f.startsWith('upgrade-proof.') && f.endsWith('.tmp')).length;
+      return { ...out, now: fs.readFileSync(proofFile, 'utf8'), left, said: said.filter((l) => /^\[agentd\] the local upgrade proof: its file system does not do a sync \(EINVAL\)/.test(l)).length };
+    };
+    const e = proofScene(DeviceManager, 'EIO'), u = proofScene(DeviceManager, 'EINVAL');
+    ok(e.threw === 'EIO' && e.n === 1 && e.now === 'OLD' && e.left === 0 && /^[0-9a-f]{64}$/.test(u.r || '') && u.now === u.r && u.n === 1 && u.said === 1 && u.left === 0,
+      'B-574d: the local upgrade proof is SYNCED before its name — a refused sync (EIO, placed) is a failed write (thrown to the upgrade, the old proof stands, no temp left); a file system with no sync (EINVAL) lands, said once in the journal', { e, u });
+    const CSRC = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
+    const XDM = mutantCopies('sig-proof-unsynced', REPO).load('src/agentd/client.js', anchored(CSRC, "    FC.renameSynced(tmp, file, proof, { mode: 0o600, where: 'the local upgrade proof', say: (l) => this._log(`[agentd] ${l}`) });\n", "    fs.writeFileSync(tmp, proof, { mode: 0o600 }); fs.renameSync(tmp, file);   // MUTANT: the release's unsynced write\n", 'proof-unsynced'), 'proof-unsynced').DeviceManager;
+    const x = proofScene(XDM, 'EIO');
+    ok(!x.threw && x.n === 0 && x.now !== 'OLD' && /^[0-9a-f]{64}$/.test(x.now), 'CONTROL (the release\'s unsynced proof, in a copy): no sync asked — the placed refusal is never met and the new proof takes its name unsynced — red', x);
+    fs.writeFileSync(proofFile, before, { mode: 0o600 });
+  }
   fs.writeFileSync(hubManifest, JSON.stringify(SIG.sign(K1.privateKeyPem, fs.readFileSync(hubBundle), '9.9.9', C)));
   const fm2 = { onControl: () => { }, data: () => { }, control: (m) => { if (m.op === 'upgrade') { fm2.line = m; setTimeout(() => fm2.onControl({ op: 'upgrade-done' }), 5); } } };
   await new DeviceManager({ dataDir: hb, bundlePath: hubBundle, version: '1.1.1', log: () => {} })._upgrade(fm2);

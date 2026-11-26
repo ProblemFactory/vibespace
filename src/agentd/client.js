@@ -18,6 +18,7 @@ const { Mux, PROTO_VERSION } = require('./mux.js');
 const { daemonEnv, serviceEnv, SSH_ENV_KEEP } = require('../agent-env.js');
 const DA = require('../device-acts.js'); // lane device-act-audit: the op layers + `by` + THE audit line (PURE)
 const AC = require('./answer-caps.js'); // lane lg-remote-hardening (B-7f0b D8): the line's bound and each op's answer cap, one PURE table
+const FC = require('../fd-close.js');   // B-574d (lane nl-paired): the synced replace — the local upgrade proof's bytes on disk before its name
 // B-c632 cure (batch 71's reader): the act's WHOLE argv — the summary is cut at SUMMARY_MAX, so two long commands alike in their
 // first 240 characters were one subject; a hash of the whole argv (cmd + args, or the shell line, + cwd) tells them apart
 const argvIdOf = (p) => (p && (p.cmd != null || p.shell != null) ? crypto.createHash('sha256').update(JSON.stringify([p.shell == null ? null : String(p.shell), p.cmd == null ? null : String(p.cmd), Array.isArray(p.args) ? p.args.map(String) : null, p.cwd == null ? null : String(p.cwd)])).digest('hex').slice(0, 16) : '');
@@ -314,14 +315,19 @@ class DeviceManager {
     try { this._onUpgradeRefused?.(from, to, { code: e.code, keyId: e.keyId || null, floor: e.floor || null, sha256: this._releaseState().sha256 || null, by: BY_UPGRADE }); } catch { }
   }
   /** The local proof (design q-042 D2): 32 random bytes written into the daemon's OWN state dir right before every upgrade
-   *  of THIS machine's daemon — whoever writes that dir is this machine's user already; the daemon deletes it on any read. */
+   *  of THIS machine's daemon — whoever writes that dir is this machine's user already; the daemon deletes it on any read.
+   *  B-574d (lane nl-paired): ITS BYTES ARE ON DISK BEFORE ITS NAME — the tree's one synced replace (src/fd-close.js renameSynced:
+   *  written, synced once, closed, renamed). Its reader is ANOTHER process (the daemon's landingVerdict, at the upgrade this call
+   *  precedes), so the write is synchronous, never queued; a rare write (one per upgrade of the hub's own daemon). Before, a power
+   *  loss after the rename could leave the name on an empty proof (that upgrade refused as «unsigned»). A sync or close that FAILS
+   *  is a failed write: thrown to upgrade() (the attempt fails and says so), the temp removed; only a file system with no sync at
+   *  all lands, said in the journal (at most once an upgrade). */
   _writeLocalProof() {
     const proof = crypto.randomBytes(32).toString('hex');
     const file = path.join(this._state, 'upgrade-proof'), tmp = file + '.' + process.pid + '.tmp';
     fs.mkdirSync(this._state, { recursive: true, mode: 0o700 });
     try { fs.unlinkSync(tmp); } catch { }
-    fs.writeFileSync(tmp, proof, { mode: 0o600 });
-    fs.renameSync(tmp, file);
+    FC.renameSynced(tmp, file, proof, { mode: 0o600, where: 'the local upgrade proof', say: (l) => this._log(`[agentd] ${l}`) });
     return proof;
   }
 
