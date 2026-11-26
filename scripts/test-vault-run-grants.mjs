@@ -229,7 +229,10 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
       const qc = wc.door.request({ caller: c8, entry: M1, purpose: 'after the corrupt file' });
       wc.door.answerRequest(qc.askId, { answer: '8h', reauthed: true, person: true });
       for (const h of heldC.filter((x) => x.ms > 3600e3)) h.fn();
-      for (let k = 0; k < 1000 && fileNow() === null; k++) await sleep(10);   // the next end handed to the writer (after the set-aside's rename) and landed — what both roads come to
+      // B-54a9 (the split's follow): the end is ASKED onto disk (SW.durable: the shared writer writes a dirty store now, as an act), never
+      // waited out at the writer's pace (its 500 ms floor: two of these waits were a second of this suite). The fact is the same —
+      // the file landed with the end — and the bound is generous: 1000 tries
+      for (let k = 0; k < 1000 && fileNow() === null; k++) { await SW.durable(f); if (fileNow() === null) await sleep(10); }   // the next end handed to the writer (after the set-aside's rename) and landed — what both roads come to
       await SW.durable(f);
       const a = asideOf();
       return { asides: a.length, keptBytes: a.length === 1 && fs.readFileSync(path.join(wc.dataDir, a[0]), 'utf8') === bytes, fileNow: fileNow() };
