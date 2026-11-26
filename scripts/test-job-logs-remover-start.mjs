@@ -184,18 +184,21 @@ try {
       if (kind === 'cut') fs.writeFileSync(f + '.tmp', '{"removed": 8');
       if (kind === 'big') fs.writeFileSync(f, JSON.stringify({ removed: 7, entries: 21, jobDirs: 0, pad: 'x'.repeat(5000) }));
       if (kind === 'odd') fs.writeFileSync(f, JSON.stringify({ removed: -1, entries: 'many' }));
+      if (kind === 'torn') fs.writeFileSync(f, '{"removed": 9, "entr');   // B-574d ruling (c): the count's name over a half record — a power loss with no sync
+      if (kind === 'empty') fs.writeFileSync(f, '');   // …or over an empty file
       if (kind === 'fifo') await S0.run('mkfifo', [f], { timeoutMs: 5000 });
       snapIn[kind] = { f, at: snapOf(f), tmp: snapOf(f + '.tmp') };   // r3357: what the read finds (the stand-in's last act before its exit)
       setTimeout(() => o.onLateExit(), 30);
       return { started: true, timedOut: true, overflow: false, code: null, signal: 'SIGKILL', stdout: '', stderr: '' };
     };
     const countRead = async (k, workerPath = WORKER) => { kind = k; const R = LS.createRemover({ logsDir: L4, timeoutMs: 2000, wedgedMs: 3000, workerPath, runImpl: hybrid }); return Promise.race([R.sweep({ keep: KEEP0, cutoff: 1, max: 1, orphanDir: D4 }), sleep(6000).then(() => ({ hung: true }))]); };
-    const got = {}, left = {}; for (const k of ['good', 'missing', 'cut', 'big', 'odd', 'fifo']) { got[k] = await countRead(k); left[k] = asLeft(k); }
+    const got = {}, left = {}; for (const k of ['good', 'missing', 'cut', 'big', 'odd', 'fifo', 'torn', 'empty']) { got[k] = await countRead(k); left[k] = asLeft(k); }
     ok(got.good.partial && got.good.partial.removed === 7 && got.good.partial.entries === 21 && got.good.partial.jobDirs === 1 && LS.COUNT_NAME.test(got.good.countFile || ''), 'a whole count file: its count answers the cut pass', got.good);
     const unk = (a, re) => !!a && !a.hung && !a.partial && re.test(a.partialUnknown || '');
     ok(unk(got.missing, /^missing$/) && unk(got.cut, /cut while it was written/) && unk(got.big, /over its bound \(4096 bytes\)/) && unk(got.odd, /not a count/) && unk(got.fifo, /not a file/), 'a count file missing, cut while written, over its bound, not a count, or a FIFO (never waited on) — each answers «unknown», never «nothing removed»', got);
     // r3357: THE READ'S BEHAVIOUR — every kind's file stands after the read as the read found it (the same bytes, inode, mtime), a
     // cut write's .tmp too, and a missing file stays missing: the read writes, renames, removes and makes nothing
+    ok(unk(got.torn, /^not a count$/) && unk(got.empty, /^not a count$/), 'B-574d ruling (c) — THE COUNT ASKS NO SYNC (written in the remover child, never on the hub\'s loop): its name over a HALF record or an EMPTY file (a power loss after an unsynced rename) answers «unknown» (not a count), never «nothing removed»; the run folders it counted are gone either way', { torn: got.torn, empty: got.empty });
     const changed = Object.keys(got).filter((k) => changedBy(k, left[k]));
     ok(changed.length === 0 && !!(snapIn.good && snapIn.good.at && snapIn.good.at.b) && !!(snapIn.cut && snapIn.cut.tmp && !snapIn.cut.at) && !!(snapIn.missing && !snapIn.missing.at && !snapIn.missing.tmp), `the count read LEAVES THE FILE AS IT FOUND IT: the count file's bytes, inode and mtime equal before and after the read, a cut write's .tmp too, a missing file still missing (${Object.keys(got).length} kinds; changed: ${changed.join(', ') || 'none'})`, { changed, snapIn, left });
     const COF = '  let o = null; try { o = JSON.parse(rd.text); } catch { }';
