@@ -267,15 +267,17 @@ try {
   // and every later call fails the same way at once. Bookkeeping first: Chrome may end before the link opens.
   const tChrome = Date.now();
   let chromeErr = '', chromeExit = null, gone = null, goneSoon = null, lastMethod = null;
+  let chromeBrowser = null; // the browser's own name + version (/json/version), said in the gone line: which Chrome it was (r5064)
   const pend = new Map(); // id → { resolve, reject, method, timer }
-  const chromeLast = () => chromeErr.split('\n').map((l) => l.trim()).filter(Boolean).slice(-6).join(' ⏎ ').slice(-450);
+  // its last lines: a FATAL / failed-check line first and WHOLE (machine 1's 158 read cut its head off at the old tail cut)
+  const chromeLast = () => { const ls = chromeErr.split('\n').map((l) => l.trim()).filter(Boolean); const fatal = ls.filter((l) => /FATAL|Check failed/.test(l)).slice(-2); return [...fatal, ...ls.filter((l) => !fatal.includes(l)).slice(-2)].map((l) => l.slice(0, 150)).join(' ⏎ '); };
   const goneErr = (method) => Object.assign(new Error(`DevTools ${method}: ${gone}`), { browserGone: true });
   const markGone = (why) => {
     if (gone || cleaned) return;
     const settle = () => {
       goneSoon = null;
       if (gone || cleaned) return;
-      gone = `the browser is gone (${why}) — chrome ${chromeExit ? `exited code=${chromeExit.code} signal=${chromeExit.signal} at +${chromeExit.at} ms` : 'had not exited 2 s after its link closed'}; the last DevTools method sent: ${lastMethod || 'none'}; its last lines: ${chromeLast() || '(none written)'}`;
+      gone = `the browser is gone (${why}) — chrome (${chromeBrowser || 'its version not read'}) ${chromeExit ? `exited code=${chromeExit.code} signal=${chromeExit.signal} at +${chromeExit.at} ms` : 'had not exited 2 s after its link closed'}; the last DevTools method sent: ${lastMethod || 'none'}; its last lines: ${chromeLast() || '(none written)'}`;
       console.log('  [design-window] ' + gone);
       for (const [id, p] of pend) { pend.delete(id); clearTimeout(p.timer); p.reject(goneErr(p.method)); }
     };
@@ -286,6 +288,7 @@ try {
   chrome.on('exit', (code, signal) => { chromeExit = { code, signal, at: Date.now() - tChrome }; markGone('chrome exited'); });
   const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { return null; } }, 30000, 250);
   if (!ok(!!target, 'headless chrome exposed a page target', gone || chromeLast())) throw new Error('no chrome');
+  try { chromeBrowser = (await (await fetch(`http://127.0.0.1:${CDP}/json/version`, { signal: AbortSignal.timeout(5000) })).json()).Browser || null; } catch { } // a miss leaves «its version not read»
   cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
   await new Promise((r, e) => { cdp.on('open', r); cdp.on('error', e); });
   cdp.on('close', (code) => markGone(`the DevTools link closed, code ${code}`));
@@ -737,14 +740,17 @@ try {
     evidence.printAll = { paw, ctx: !!pactx };
     const paf = printFault(paw);
     ok(!paf && paw.left === 0, paf ? `print-all's print() call is judged: ${paf}` : `print() was CALLED in the print-all frame once BOTH artboard frames had loaded (left ${paw.left}) — the witness in place from the frame's start, the browser's own print() never reached; headless Chrome shows no print dialog`, { paw, ctx: !!pactx });
-    // Chrome's own PDF of that document (a fresh tab, the print call muted): one page per artboard, at its size
+    // Chrome's own PDF of that document (a fresh tab, the print call muted): one page per artboard, at its size.
+    // The tab OPENS AT the document (a data: URL, a browser-initiated navigation), never an about:blank tab written by
+    // Page.setDocumentContent: on machine 1's Chrome 158 that write ABORTED THE BROWSER, both tries (SIGABRT, «FATAL:
+    // content/browser/site_instance_impl.cc:1720] Check failed: has_site_.» — 主开发 r4954; the hosted runner's 157 hung at
+    // the same step; the hub box's older Chromium does not abort). WHY is a READING, not proven: an about:blank tab has no
+    // site yet when the written document's sandboxed frames ask for one; the proof is the run (this form green on 158).
     const pdfOf = async (html) => {
-      const { targetId } = await call('Target.createTarget', { url: 'about:blank' });
+      const { targetId } = await call('Target.createTarget', { url: 'data:text/html;base64,' + Buffer.from(html.replace('print()', 'void 0'), 'utf8').toString('base64') });
       try {
         const { sessionId: ps } = await call('Target.attachToTarget', { targetId, flatten: true });
         await send('Page.enable', {}, ps);
-        const tree = await send('Page.getFrameTree', {}, ps);
-        await send('Page.setDocumentContent', { frameId: tree.result.frameTree.frame.id, html: html.replace('print()', 'void 0') }, ps);
         const loaded = await until(async () => { const r = await send('Runtime.evaluate', { expression: 'typeof left === "number" && left <= 0', returnByValue: true }, ps); return !!(r.result && r.result.result && r.result.result.value === true); }, 15000, 200);
         await sleep(400);
         const r = await send('Page.printToPDF', { preferCSSPageSize: true, printBackground: true }, ps);
