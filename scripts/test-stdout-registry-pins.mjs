@@ -8,6 +8,7 @@
 // Run: node scripts/test-stdout-registry-pins.mjs
 import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
+import { anchored } from './scratch.mjs';   // the planted control's edit (fails by name if its anchor moves)
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -183,6 +184,25 @@ console.log('— unknown-records: notification / api_error / vcs / code_change r
   ok('the fixture\'s own api_error rows exist and are TRANSCRIPT rows (never on stdout — the census of 35 live buffers saw zero); the consumer is forward-compat for the stream twin, the transcript path is NOT consumed (a days-old 401 must not evict today\'s member)', fixtureRows.length >= 1 && fixtureRows.every((r) => 'parentUuid' in r || 'retryAttempt' in r) && !/api_error/.test(fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8')) && !/noteApiErrorAuth/.test(fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8')), fixtureRows.map((r) => [r.error?.status, r.retryAttempt]));
 
   ok('the parse and the device feed call the SAME four named functions (source pin: claudeSideEffects names each; the parse calls each through brainRef)', ['noteHarnessNotification', 'noteApiErrorAuth', 'noteVcsState', 'notePublishedChange'].every((fn) => new RegExp("subtype === '[a-z_]+'\\) " + fn + "\\(session, sid, msg\\);").test(read('src/server/session-brain.js')) && new RegExp('brainRef\\?\\.' + fn + '\\?\\.\\(session, id, msg\\)').test(read('src/server/stdout/claude-stream-json.js'))));
+}
+
+
+console.log('— the file road\'s seam (主开发 r4741): three numbers on the session, never on the wire');
+{
+  // CONDITION 2: three numbers only — the seam's ONE maker (fileRoadOf) builds {judged, started, settled} of zeros, and nothing else
+  // in the module assigns the field (a list, a per-file map or a second maker would be a new write, red here)
+  const csj = read('src/server/stdout/claude-stream-json.js');
+  const makers = csj.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l) && /_fileRoad\s*=(?!=)/.test(l));
+  ok('the seam has ONE maker, of three integers (judged, started, settled), and no other line of the module assigns session._fileRoad',
+    makers.length === 1 && /session\._fileRoad \|\| \(session\._fileRoad = \{ judged: 0, started: 0, settled: 0 \}\)/.test(makers[0]), makers);
+  // CONDITION 1 (the sessions list's own builder): server.js activeSessionsPayload builds each row field by field — no spread of the
+  // session, the seam never among the fields it names; the heavy scripts/test-stdout-registry.mjs judges the broadcasts and the stored meta it writes
+  const bodyOf = (src, head) => { const i = src.indexOf(head); if (i < 0) return null; let d = 0; for (let k = src.indexOf('{', i); k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}' && --d === 0) return src.slice(i, k + 1); } return null; };
+  const judgeList = (src) => { const b = bodyOf(src, 'function activeSessionsPayload() {'); return !!b && !/\.\.\.\s*s\b(?!\.)/.test(b) && !/_fileRoad/.test(b); };   // each row names its fields (the road's other underscore fields it shows are picked by name; this one is never picked)
+  const srv = read('server.js');
+  ok('the sessions list (server.js activeSessionsPayload) names its fields one by one: no spread of a session, and _fileRoad is not among them', judgeList(srv));
+  const planted = anchored(srv, 'function activeSessionsPayload() {', 'function activeSessionsPayload() { const zz = (s) => ({ ...s });', 'pins-list-spread');
+  ok('CONTROL: a list builder that SPREADS the session is red (the planted copy)', !judgeList(planted));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

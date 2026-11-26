@@ -18,7 +18,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { trackedFiles } from './tracked-files.mjs';   // B-1561: the census lists data/bin via git, never a working-tree readdir
+import { trackedFiles } from './tracked-files.mjs';
+import { anchored } from './scratch.mjs';   // the planted wrong roads (r4741): an anchor that moved fails by name
+import { mutantCopies } from './mutant-copy.mjs';   // B-1561: the census lists data/bin via git, never a working-tree readdir
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -1298,7 +1300,7 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
   fs.writeFileSync(path.join(filesDir, 'chart.png'), Buffer.from('89504e470d0a1a0a', 'hex'));
   fs.writeFileSync(path.join(filesDir, 'notes.md'), '# hi');
   const pages = require(path.join(REPO, 'src/server/published-pages.js')).create({ dataDir: pagesDir });
-  const so2 = require(path.join(REPO, 'src/server/session-stdout.js')).create({
+  const so2Opts = {   // the consumer's world — kept: the planted wrong roads of (e) and (f) run in the same one
     rootDir: tmp, BUFFERS_DIR, META_DIR, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmp, 'nonexistent'),
     CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result']), _seenStreamTypes: new Set(), activeSessions, engine,
     checkClaudeGoalStatus() { }, broadcastToSession: (s, id, m) => calls.broadcasts.push({ id, ...m }), broadcastActiveSessions: () => { calls.active++; },
@@ -1306,14 +1308,21 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null,
     getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }),
     getDeliver: () => ({ stashFor() { } }), getPages: () => pages,
-  });
+  };
+  const so2 = require(path.join(REPO, 'src/server/session-stdout.js')).create(so2Opts);
+  // THE FILE ROAD's SEAM (主开发 r4661 / r4741): session._fileRoad = {judged, started, settled}, moved synchronously by the road —
+  // a decision NOT to publish is judged in the same turn (judged moved, started not); a publish's end is waited on by its settled count
+  const roadOf = (s) => ({ ...(s._fileRoad || { judged: 0, started: 0, settled: 0 }) });
+  const SETTLE_MS = 10000;   // the harness expiry, named: a publish of two small local files settles in milliseconds
+  const settledTo = async (s, n) => { const t0 = Date.now(); while (Date.now() - t0 < SETTLE_MS) { if ((s._fileRoad || {}).settled >= n) return true; await new Promise((r) => setTimeout(r, 10)); } return false; };
   const s4 = mkSession('claude', 'w-userfile'); s4.cwd = filesDir;
   const p4 = fakePty();
   so2.setupSessionPty(s4, 'w-userfile', p4);
   p4.data(J({ type: 'assistant', session_id: 'sid-uf', uuid: 'u-uf', message: { id: 'msg_uf', model: 'claude-fable-5', role: 'assistant', content: [
     { type: 'tool_use', id: 'toolu_uf1', name: 'SendUserFile', input: { files: ['chart.png', 'notes.md', 'missing.bin'], caption: 'the run', status: 'proactive' } },
   ] } }));
-  await new Promise((r) => setTimeout(r, 250)); // the publish is async by design (never block the event loop)
+  // the publish is async by design (never block the event loop): waited on ITS OWN END — the road's settled count
+  ok(`harness: the publish of toolu_uf1 settled (the road's settled count reached its started one within ${SETTLE_MS} ms)`, await settledTo(s4, roadOf(s4).started) && roadOf(s4).started === 1, JSON.stringify(roadOf(s4)));
   const pubMsg = calls.broadcasts.filter((b) => b.id === 'w-userfile' && b.type === 'user-file-published').slice(-1)[0];
   ok("a live SendUserFile record publishes through published-pages and broadcasts the rows, keyed by the card's OWN toolCallId", !!pubMsg && pubMsg.toolCallId === 'toolu_uf1' && pubMsg.files.length === 3, JSON.stringify(pubMsg && pubMsg.files));
   const okRows = (pubMsg?.files || []).filter((f) => f.link);
@@ -1439,30 +1448,93 @@ console.log('— agent→user channel (SendUserMessage / SendUserFile)');
     // (the renderer's hand-off wiring pin — MOVED to the fast scripts/test-stdout-registry-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 
+  // A PLANTED WRONG ROAD (r4741): the stream module as a copy (with the index and the consumer that load it — a closed world of
+  // copies), driven in the same world as so2; `edit` plants the fault by an anchored edit of the road's own lines
+  const wrongRoad = (tag, edit) => {
+    const W = mutantCopies('stdout-road-' + tag, REPO);
+    const src = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+    const p1 = W.write('src/server/stdout/claude-stream-json.js', edit(src('src/server/stdout/claude-stream-json.js')), tag + '-road');
+    const p2 = W.write('src/server/stdout/index.js', anchored(src('src/server/stdout/index.js'), "require('./claude-stream-json.js')", `require(${JSON.stringify(p1)})`, tag + '-index'), tag + '-index');
+    return W.load('src/server/session-stdout.js', anchored(src('src/server/session-stdout.js'), "require('./stdout/index.js')", `require(${JSON.stringify(p2)})`, tag + '-consumer'), tag + '-consumer').create(so2Opts);
+  };
+  /** A PLACED HOLD on the publish's stat of `file` (the order proof): every stat of it waits until released */
+  const holdStat = (file) => { const st0 = fs.promises.stat; let open; const gate = new Promise((r) => { open = r; }); fs.promises.stat = async function (p, ...a) { if (String(p) === file) await gate; return st0.call(this, p, ...a); }; return () => { fs.promises.stat = st0; open(); }; };
+
   // (e) NEGATIVE CONTROL: an unrelated tool in the SAME shape publishes
-  // nothing and is not a user message.
+  // nothing and is not a user message — judged IN THE SAME TURN on the road's own counts (r4741): the road looked at the record
+  // (judged moved) and decided no publish (started did not) — no wait, no clock.
   const before = calls.broadcasts.length;
   const pagesBefore = pages.list({}).length; // "nothing NEW was published" — never a magic total
-  p4.data(J({ type: 'assistant', session_id: 'sid-uf', uuid: 'u-uf2', message: { id: 'msg_uf2', model: 'claude-fable-5', role: 'assistant', content: [
-    { type: 'tool_use', id: 'toolu_bash1', name: 'Bash', input: { command: 'cat chart.png', files: ['chart.png'], status: 'proactive' } },
-  ] } }));
-  await new Promise((r) => setTimeout(r, 200));
-  ok('NEGATIVE CONTROL: an unrelated tool carrying the SAME field names is never treated as a user message — nothing published, nothing broadcast',
-    !calls.broadcasts.slice(before).some((b) => b.type === 'user-file-published')
+  const BASH = (uuid, id) => J({ type: 'assistant', session_id: 'sid-uf', uuid, message: { id: 'msg_' + uuid, model: 'claude-fable-5', role: 'assistant', content: [
+    { type: 'tool_use', id, name: 'Bash', input: { command: 'cat chart.png', files: ['chart.png'], status: 'proactive' } },
+  ] } });
+  const e0 = roadOf(s4);
+  p4.data(BASH('u-uf2', 'toolu_bash1'));
+  const e1 = roadOf(s4);
+  ok('NEGATIVE CONTROL: an unrelated tool carrying the SAME field names is never treated as a user message — the road judged it (judged +1) and started NO publish (started +0) in the same turn; nothing published, nothing broadcast',
+    e1.judged === e0.judged + 1 && e1.started === e0.started
+    && !calls.broadcasts.slice(before).some((b) => b.type === 'user-file-published')
     && userChannelKind('Bash') === null && userChannelRecord({ toolName: 'Bash', input: { files: ['chart.png'], status: 'proactive' }, output: null }) === null
-    && pages.list({}).length === pagesBefore, JSON.stringify(pages.list({}).map((p) => p.name)));
+    && pages.list({}).length === pagesBefore, JSON.stringify({ e0, e1, pages: pages.list({}).map((p) => p.name) }));
+  {
+    // RED: the planted wrong road — every tool's files go to the publish (the filter dropped, a Bash call handed on as a file call).
+    // Its publish's stat is HELD: started moves at once, settled stays behind (the order proof), so the control is red in the
+    // same turn — while a fixed wait (the leg's old 200 ms) would have seen no broadcast yet and read green.
+    const soW = wrongRoad('e-files', (s) => anchored(s, "              if (b?.type !== 'tool_use' || userChannelKind(b.name) !== 'file') continue;\n              publishUserFiles(session, id, b, { broadcastToSession });",
+      "              if (b?.type !== 'tool_use') continue;\n              publishUserFiles(session, id, { ...b, name: 'SendUserFile' }, { broadcastToSession });   // MUTANT: the wrong road", 'e-wrong-road'));
+    const sW = mkSession('claude', 'w-userfile-wrong'); sW.cwd = filesDir;
+    const pW = fakePty(); soW.setupSessionPty(sW, 'w-userfile-wrong', pW);
+    const release = holdStat(path.join(filesDir, 'chart.png'));
+    let w0, w1, w2, broadcastWhileHeld;
+    try {
+      w0 = roadOf(sW);
+      pW.data(BASH('u-ufw', 'toolu_bashw'));
+      w1 = roadOf(sW);
+      await new Promise((r) => setTimeout(r, 200));   // the leg's OLD wait, kept only to show what it saw: no broadcast while the stat is held
+      broadcastWhileHeld = calls.broadcasts.some((b) => b.id === 'w-userfile-wrong' && b.type === 'user-file-published');
+      w2 = roadOf(sW);
+    } finally { release(); }
+    const settledW = await settledTo(sW, 1);
+    ok('RED CONTROL (the planted wrong road, its stat HELD): the control\'s own judgment reads it in the same turn — started +1 at once, settled still 0 while held (the order: started before settled), the old 200 ms wait saw no broadcast',
+      w1.judged === w0.judged + 1 && w1.started === w0.started + 1 && w2.settled === 0 && !broadcastWhileHeld && settledW, JSON.stringify({ w0, w1, w2, broadcastWhileHeld, settledW }));
+  }
 
   // (f) the REMOTE rule: a session whose files live on another machine
-  // publishes nothing here (we cannot read them, and a guess would be worse).
+  // publishes nothing here (we cannot read them, and a guess would be worse) — judged in the same turn on the road's counts.
   const pagesBeforeRemote = pages.list({}).length;
   const s5 = mkSession('claude', 'w-userfile-remote'); s5.cwd = filesDir; s5.host = 'h1';
   const p5 = fakePty(); so2.setupSessionPty(s5, 'w-userfile-remote', p5);
-  p5.data(J({ type: 'assistant', session_id: 'sid-uf3', uuid: 'u-uf3', message: { id: 'msg_uf3', model: 'claude-fable-5', role: 'assistant', content: [
-    { type: 'tool_use', id: 'toolu_uf3', name: 'SendUserFile', input: { files: ['chart.png'], status: 'normal' } },
-  ] } }));
-  await new Promise((r) => setTimeout(r, 200));
-  ok('a REMOTE session publishes nothing (its files are on another machine — an honest absence, not a guessed link)',
-    !calls.broadcasts.some((b) => b.id === 'w-userfile-remote' && b.type === 'user-file-published') && pages.list({}).length === pagesBeforeRemote);
+  const REMOTE = (uuid, id) => J({ type: 'assistant', session_id: 'sid-uf3', uuid, message: { id: 'msg_' + uuid, model: 'claude-fable-5', role: 'assistant', content: [
+    { type: 'tool_use', id, name: 'SendUserFile', input: { files: ['chart.png'], status: 'normal' } },
+  ] } });
+  const f0 = roadOf(s5);
+  p5.data(REMOTE('u-uf3', 'toolu_uf3'));
+  const f1 = roadOf(s5);
+  ok('a REMOTE session publishes nothing (its files are on another machine — an honest absence, not a guessed link): judged +1, started +0, in the same turn',
+    f1.judged === f0.judged + 1 && f1.started === f0.started
+    && !calls.broadcasts.some((b) => b.id === 'w-userfile-remote' && b.type === 'user-file-published') && pages.list({}).length === pagesBeforeRemote, JSON.stringify({ f0, f1 }));
+  {
+    // RED: the planted wrong road — the host check dropped: the remote session's call is started at once (its stat held)
+    const soR = wrongRoad('f-host', (s) => anchored(s, "msg.message?.content) && !session.host) {", "msg.message?.content)) {   // MUTANT: no host check", 'f-no-host'));
+    const sR = mkSession('claude', 'w-userfile-remote-wrong'); sR.cwd = filesDir; sR.host = 'h1';
+    const pR = fakePty(); soR.setupSessionPty(sR, 'w-userfile-remote-wrong', pR);
+    const release = holdStat(path.join(filesDir, 'chart.png'));
+    let r0, r1;
+    try { r0 = roadOf(sR); pR.data(REMOTE('u-ufr', 'toolu_ufr')); r1 = roadOf(sR); } finally { release(); }
+    const settledR = await settledTo(sR, 1);
+    ok('RED CONTROL (the host check dropped, the stat HELD): the remote call is started at once (started +1, settled 0 while held) — the remote leg\'s judgment reads it in the same turn',
+      r1.judged === r0.judged + 1 && r1.started === r0.started + 1 && r1.settled === 0 && settledR, JSON.stringify({ r0, r1, settledR }));
+  }
+  // THE SEAM NEVER TRAVELS (r4741, condition 1): the real outputs of this run — every broadcast the consumer sent
+  // (broadcastToSession) and the session meta it wrote (session-stdout's meta writer, read back by meta()) — carry no field of it,
+  // while the sessions it counted hold three numbers each (condition 2). The sessions list's own builder (server.js
+  // activeSessionsPayload) is pinned by its syntax in the fast scripts/test-stdout-registry-pins.mjs.
+  {
+    const wire = JSON.stringify(calls.broadcasts) + JSON.stringify([s4, s5].map((s) => meta(s)));
+    const three = [s4, s5].every((s) => s._fileRoad && Object.keys(s._fileRoad).sort().join(',') === 'judged,settled,started' && Object.values(s._fileRoad).every((v) => Number.isInteger(v)));
+    ok('the file road\'s seam never reaches the wire or the stored meta (this run\'s broadcasts and session meta name no _fileRoad), and it is three integers on each session it counted',
+      !/fileRoad/.test(wire) && three, JSON.stringify({ s4: s4._fileRoad, s5: s5._fileRoad }));
+  }
 
   // (g) the WORKTREE PATH the CLI itself announced (owner ruling 9) — the init
   // frame's own `cwd`, a typed record, recorded ONLY for a session that asked.
