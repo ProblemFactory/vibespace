@@ -52,12 +52,20 @@ await hub.ready();
 const WebSocket = require('ws');
 let target = null;
 target = await waitPageTarget(CDP_PORT, { polls: 40, everyMs: 250, child: chrome }); // B-fcae: the one waiter (a miss always waits)
+// a browser that exposed no page target is ONE named red with what the waiter last saw — never a crash on a null (主开发 r4861:
+// the second hosted proof's Node 24 try died on `target.webSocketDebuggerUrl` while the runner's Chrome was stalled)
+if (!target) { check('headless chrome exposed a page target on its DevTools port', false, `the waiter gave up after 40 asks 250 ms apart — it last saw: ${waitPageTarget.lastSeen} (chrome exit ${chrome.exitCode}, signal ${chrome.signalCode})`); console.log(`${failed} FAILED`); process.exit(1); }
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();
 ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+// every DevTools call has a bound of its own and fails BY NAME; the link's close fails every waiting call at once (r4861)
+ws.on('close', (code) => { for (const [id, f] of pend) { pend.delete(id); f({ error: { message: `the DevTools link closed (code ${code}) — chrome exit ${chrome.exitCode}, signal ${chrome.signalCode}` } }); } });
 const cdp = (method, params = {}) => new Promise((res, rej) => {
-  const id = ++seq; pend.set(id, (m) => m.error ? rej(new Error(m.error.message)) : res(m.result));
+  const id = ++seq;
+  const timer = setTimeout(() => { if (pend.delete(id)) rej(new Error(`DevTools ${method} had no answer in 30000 ms (its own bound)`)); }, 30000);
+  pend.set(id, (m) => { clearTimeout(timer); if (m.error) rej(new Error(`${method}: ${m.error.message}`)); else res(m.result); });
+  if (ws.readyState !== 1) { pend.get(id)({ error: { message: `the DevTools link is closed — chrome exit ${chrome.exitCode}, signal ${chrome.signalCode}` } }); pend.delete(id); return; }
   ws.send(JSON.stringify({ id, method, params }));
 });
 const evalJs = async (expr) => {
