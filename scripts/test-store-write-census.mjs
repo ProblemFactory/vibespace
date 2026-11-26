@@ -1995,7 +1995,7 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
 // ── ⑫ THE WRITER'S forget IS THE FILE OWNER'S REMOVAL, NEVER A DROP (主开发 r286) ──────────────────────────────────────────────
 // A step riding a write runs ONLY once that write LANDED, or when the file's OWNER removes the file (forget, then its unlink — its
 // riding steps are told «landed»: the record they waited for is the removal). A suite's crash stand-in that used forget as a drop
-// ran half a removal (r284); the census names the product's callers of the writer's forget — THREE today (B-0248 step 3 (c): + a Task Group's removal, its archive months): the conversation's stdout
+// ran half a removal (r284); the census names the product's callers of the writer's forget — THREE files then (B-0248 step 3 (c): + a Task Group's removal, its archive months; B-574d: + boot-restore's kept copies and the exit tomb, named below): the conversation's stdout
 // file unlinked next (src/server/session-stdout.js) and the usage cursors' settle (src/usage-history.js, a drop pinned safe below) —
 // and a third caller is red by name. WHAT IT CANNOT SEE (a mistake-guard over the product's text, not a proof): a writer handle that
 // reaches forget under a spelling it does not bind — a parameter (`(W) => W.forget(…)`), a deps object (`this.d.writer.forget(…)`),
@@ -2037,12 +2037,22 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
   // landing (pinned below: its forget would run such a step as «landed» over bytes never written)
   // …and a Task Group's removal (src/task-groups.js _archiveDrop, B-0248 step 3 (c)): its archive months' owed appends dropped, an append
   // on its way let land first, then the group's folder removed (the owner's removal; nothing rides an archive month's landing)
-  const FORGET_CALLERS = { 'src/server/session-stdout.js': 1, 'src/task-groups.js': 1, 'src/usage-history.js': 1 };
+  // …and B-574d's records made ONCE at an end (lane bl-jobs, slice «session-and-job-records»): the writer's entry of a record whose ONE
+  // write LANDED with nothing newer owed is released (session-stdout keepTomb, boot-restore keepCopy — nothing rides it then: a step
+  // riding that version ran at the landing, before onWritten); a kept copy's removal by its owner (boot-restore unlinkKept: forget,
+  // then its unlink); an end's record that did not land, told «kept nothing» to the person (boot-restore keepEnded: a write of it in
+  // flight is removed again once it lands) — none is a drop of a write someone waits on
+  const FORGET_CALLERS = { 'src/server/boot-restore.js': 3, 'src/server/session-stdout.js': 2, 'src/task-groups.js': 1, 'src/usage-history.js': 1 };
   const fc = forgetCensus(files);
   ok(JSON.stringify(fc) === JSON.stringify(FORGET_CALLERS), `⑫ the census: the product calls the writer's forget ONLY where a file's owner removes the file (${Object.entries(fc).map(([f, n]) => `${f} ${n}`).join(', ') || 'none'}) — never as a drop`, fc);
   const UH = files.get('src/usage-history.js') || '';
   const durables = (UH.match(/\.durable\(this\.cursorsFile\)/g) || []).length, caughtOnly = (UH.match(/\.durable\(this\.cursorsFile\)\.catch\(\(\) => \{ \}\)/g) || []).length;
   ok(!/afterLanding\(|\bride\(|whenDurable\(/.test(UH) && durables === caughtOnly, '⑫ …the usage cursors\' drop (settleCursors) is safe by construction: NOTHING rides _cursors.json\'s landing — no step, no wait whose answer is read (its one durable() is only caught) — a step there would run as «landed» over bytes the drop never wrote', { durables, caughtOnly });
+  const SSF = files.get('src/server/session-stdout.js') || '', BRF = files.get('src/server/boot-restore.js') || '';
+  ok(SSF.includes('if (ok) { try { if (W.owed(tombPath) === null) W.forget(tombPath); } catch { } return; }') && BRF.includes('if (ok) { try { if (W.owed(file) === null) W.forget(file); } catch { } return; }')
+    && /function unlinkKept\(sockFile, file, done = null\) \{\n  try \{ storeWriter\(\)\.forget\(file\); \} catch \{ \}\n  fs\.unlink\(file, /.test(BRF)
+    && BRF.includes("if (!landed) { try { storeWriter().forget(file); } catch { } console.warn(`[end] ${sockFile}: its ended record could not be written"),
+    '⑫ …B-574d\'s five calls are each of a lawful kind: a record\'s entry released only once its write LANDED with nothing newer owed (keepTomb, keepCopy), a kept copy\'s removal by its owner (unlinkKept: forget, then its unlink), an end\'s record told «kept nothing» (keepEnded)');
   const planted = new Map(files); planted.set('src/server/browser-keeper.js', files.get('src/server/browser-keeper.js') + '\nfunction zzDrop() { const W = writerOf(); W.forget(storeKey); }\n');
   const pc = forgetCensus(planted);
   ok(pc['src/server/browser-keeper.js'] === 1 && JSON.stringify(pc) !== JSON.stringify(FORGET_CALLERS), 'CONTROL (planted in a copy\'s text): a SECOND caller of the writer\'s forget — a drop of the registry\'s owed write — is red by name', pc);
