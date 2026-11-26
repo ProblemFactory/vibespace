@@ -321,7 +321,7 @@ const {
   quotaVerdictFor, sessionModelFor, sweepUsageAnchors, usageCacheKeyFor, resetCreditOffer, resetCreditPreview, consumeResetCreditFor, claimColdRestarts, refreshCodexForPerson, settleResetCreditByRead, catchUpResetCreditFromBuffer, // the stored reset credits the auto-resume arm card offers (design-reset-credits §5) + the manual use's preview/POST (p2) + verify r1: the session path's read before a press over an unsettled attempt
   usageIdentityAccountIds, usageIdentityGroups, usageIdentityGroupsCached, cacheFactsOf, flushRequestStamps, // cacheFactsOf + flushRequestStamps: each live conversation's prompt-cache facts for the session list (lane cache-warmth-tiles)
   writeUsageCacheForKey, clearSealedOrders, pushSealedOrders,
-  estOverlayCache, predictCalib,
+  estOverlayCache, predictCalib, heldWordsLifted,
 } = require('./src/server/usage-pool-engine.js').create({
   app, rootDir: __dirname, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN,
   broadcastToSession, getAutoResume: () => { try { return autoResume; } catch { return null; } }, getQuotaProbe: () => { try { return usage.refreshViaCliPanel; } catch { return null; } }, // both lazy: created further down (TDZ otherwise); otelIngest = B-b3cd org verification
@@ -615,6 +615,8 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     const landing = harnessConfig.onSettingsWrite(next, prev); try { plugins.onSettingsWrite(next, prev); } catch { } return (landing || toggled) ? Promise.all([toggled, landing]) : null; // B-ddf3 u2 line 1 (b): the switch's registration and the rows' landing ride back to the settings write's answer (src/server/landing-answer.js notLanded reads both) // lane plugin-settings-p0: a plugin row that re-applies (frp relay fields, Tailscale mode) moved ⇒ that plugin re-applies (before the plugin wiring exists nothing can have changed)
   } });
 app.use(persistenceRouter);
+// B-5279 (主开发 r4942 (2)): a conversation's «the settings could not be read» word goes when the settings read again
+if (typeof persistenceRouter.onSettingsLift === 'function') persistenceRouter.onSettingsLift(() => { try { heldWordsLifted(); } catch (e) { console.warn('[wall] the held words could not be cleared at the lift:', e && e.message); } });
 // ── Agent-hook boot registration (deferred from the hook-machinery block so
 // the Integration master switch is readable) — a toggle flipped just before a
 // restart, or an imported config bundle carrying it, converges here.

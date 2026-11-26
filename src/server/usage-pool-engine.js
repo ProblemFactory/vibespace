@@ -4098,14 +4098,28 @@ function scheduleWallProbe(session, scope, model, attempt, { once = false } = {}
  *  in its OWN view (auto-resume's status, the chip where the wall's words stand: statusFor `readsOff`), to the PERSON only: nothing
  *  is typed to the agent and no turn starts. The fact lives on the session beside its stop and is dropped when the session runs
  *  again (clearStoppedBy); a later wall says it again. */
+const readsOffWhy = (code) => (code === 'refresh-held' ? 'the settings could not be read, so no usage read is started' : 'usage reads are off in Settings');
 function readsOffStop(session, scope, code) {
   const id = session && session._webuiId;
   if (!id || session._readsOffWall) return;
   // a continue already armed (a reset the wall itself named) waits for a time: nothing to tell
   try { const ids = getAutoResume()?.armedIds?.(); if (Array.isArray(ids) && ids.includes(id)) return; } catch { }
   session._readsOffWall = { at: Date.now(), scope: scope || null, code: code || null };
-  console.log(`[wall] ${id}: usage reads are off in Settings (${code || 'off'}) and no reset time is known — this conversation continues when a person resumes it (said once, in its view)`);
+  console.log(`[wall] ${id}: ${readsOffWhy(code)} (${code || 'off'}) and no reset time is known — this conversation continues when a person resumes it (said once, in its view)`);
   try { getAutoResume()?.refreshStatus?.(id); } catch { }
+}
+/** B-5279 (主开发 r4942 (2)): THE SETTINGS READ AGAIN — a conversation told «the settings could not be read» (refresh-held) is told
+ *  so no more: its word goes and its status is said again (the wall's own words stand; nothing is armed, nothing is started — a
+ *  person resumes it). An Off word stays: Off still stands. server.js hooks it at the lift (persistenceRouter.onSettingsLift). */
+function heldWordsLifted() {
+  const cleared = [];
+  for (const [, s] of activeSessions) {
+    if (!s || !s._readsOffWall || s._readsOffWall.code !== 'refresh-held') continue;
+    s._readsOffWall = null; cleared.push(s._webuiId);
+    try { getAutoResume()?.refreshStatus?.(s._webuiId); } catch { }
+  }
+  if (cleared.length) console.log(`[wall] the settings read again — ${cleared.length} conversation${cleared.length === 1 ? ' is' : 's are'} no longer told the settings could not be read`);
+  return cleared;
 }
 /** The pre-fire gate (auto-resume beforeFire): probe fresh quota, re-check
  *  the verdict — false vetoes the spend and re-arms to the new blockedUntil. */
@@ -4937,7 +4951,7 @@ function probeDuringResetHold(key, p) {
   try {
     const s = activeSessions.get(p.sid) || null;
     // B-5279: a read the door refused by the row lifts the hold AT ONCE — no ten-minute wait for a reading that cannot come
-    Promise.resolve(probeQuotaForKey(key, { session: s, fresh: true })).then((r) => { if (r && r.refused && _resetCreditPending.get(key) === p) releaseResetHold(key, `usage reads are off in Settings (${r.refused}) — no post-reset reading can come; the next evaluation decides on the cache as it stands`, { force: false }); }).catch(() => { }); // a re-ask after silence is written even while an older read waits
+    Promise.resolve(probeQuotaForKey(key, { session: s, fresh: true })).then((r) => { if (r && r.refused && _resetCreditPending.get(key) === p) releaseResetHold(key, `${readsOffWhy(r.refused)} (${r.refused}) — no post-reset reading can come; the next evaluation decides on the cache as it stands`, { force: false }); }).catch(() => { }); // a re-ask after silence is written even while an older read waits
   } catch { }
 }
 function onResetHoldTimer(key, p) {
@@ -9814,7 +9828,7 @@ function maybeStopOnFallback(session, id, from, to) {
     repairIdentityAnchors, // B-855a c2: the STANDING identity repair (boot + POST /api/usage/repair-identity)
     oatIdentity, oatIdentityAttach, oatRebind, oatAnswer, tokenSpentBy, tokenGenOf, readingRoad, oatRoadOf, // lane oat-identity-postcheck: the long-lived token's identity post-check (the account routes wire its store hook + the re-bind door + the owner's answer); tokenGenOf = WHICH token a reading was produced with (lane oat-identity-fix)
     sessionBillingMember, wallKeyFor, rejectionSlotFor, readingSlotFor, memberLoginState, accountCredentialState, healthyPoolMembers, switchCandidates, poolReadLogin, slotTransitions, nearArmVeto, armCauseFor, fireIdentityFor, demoteWalledAccount, wallCount, sessionWalledMembers,
-    _scheduleWallProbe: scheduleWallProbe, _holdForResetReading: holdForResetReading,   // B-5279: the wall ladder and the reset-credit hold, driven by test-usage-reads-off
+    heldWordsLifted, _scheduleWallProbe: scheduleWallProbe, _holdForResetReading: holdForResetReading,   // B-5279: the wall ladder and the reset-credit hold, driven by test-usage-reads-off
     _wallRing, _sessionWalls, _sessionWallLanes, noteSessionWall, WALL_RING_MS, SESSION_WALL_MS, // wall-ground-truth + token-slot + session-wall seams (test-auto-resume §11, test-auto-resume-loop)
     _poolAutoLast, _poolSwitchAt, _poolEvalAt, _poolGateHeld, _poolKickTrail, poolKickRerun, _poolDecisions, _basisOf, // the gates (10s) + dwell belt (180s) are WALL-CLOCK: a suite winds them back instead of sleeping through them; the held count and the trailing re-run (B-37f9) are what a leg reads
     sessionModelFor, sweepUsageAnchors, usageAnchors, usageCacheKeyFor,

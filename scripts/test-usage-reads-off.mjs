@@ -18,6 +18,10 @@
 //      the chip and its door; the strip's row; the door census's row.
 //   ③b WHILE THE SETTINGS ARE HELD (主开发 r4932 M2): the held view (its marker + the strict «manual») — every road, a direct press and
 //      the person's ⟳ route: refused BY NAME (refresh-held), 0 starts, nothing booked; the ladder's word names THAT reason.
+//   ③c THE REAL SETTINGS ROUTER (主开发 r4942): src/routes/persistence.js over a torn settings.json, read as server.js reads it — a
+//      road and a press refused (refresh-held), 0 starts; the reset claim's answer promises no read; the settings mended, the
+//      hold's own ladder lifts them and the conversation's held word goes (an Off word stays). Its red: the door reading the held
+//      view's value starts the program through the real router.
 //   ⑤ RED CONTROLS (scripts/mutant-copy.mjs, anchored edits): the door without the fence starts the program under Off on every
 //      road; a refusal booked as a failure makes ②'s booking leg red; the recorder without the door's codes books the account's
 //      failed-probe note (r4932 M1); the door reading the held view's value starts the program while held (M2).
@@ -63,7 +67,7 @@ const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id
  *  CLAUDE_CMD, the read wired as the engine's probe (counted asks); `row` = the usage-refresh row's value; `cache` = the member's
  *  reading; `usage` = a usage-routes module (a red control's copy); `probe` = another probe in place of the read */
 const SETTINGS_HELD = Symbol.for('vibespace.settings-held');
-function world({ row, cache = 'unknown-reset', usage = UR, probe = null, held = false } = {}) {
+function world({ row, cache = 'unknown-reset', usage = UR, probe = null, held = false, setting = null } = {}) {
   const dir = path.join(ROOT, 'w' + (++seq)); fs.mkdirSync(dir, { recursive: true });
   const dataDir = path.join(dir, 'data');
   const am = new AccountManager({ dataDir });
@@ -82,7 +86,7 @@ function world({ row, cache = 'unknown-reset', usage = UR, probe = null, held = 
   const store = row === undefined ? {} : { [ROW]: row };
   // the HELD view as src/routes/persistence.js hands it: its marker answers, the row reads the strict side (src/settings-held-strict.js)
   const strict = require(path.join(REPO, 'src/settings-held-strict.js'));
-  const serverSetting = (k) => (held ? (k === SETTINGS_HELD ? { code: 'settings-unreadable' } : (k === ROW ? strict.STRICT_WHILE_HELD[ROW].strict : store[k])) : store[k]);
+  const serverSetting = setting || ((k) => (held ? (k === SETTINGS_HELD ? { code: 'settings-unreadable' } : (k === ROW ? strict.STRICT_WHILE_HELD[ROW].strict : store[k])) : store[k]));
   const sessions = new Map(), arms = [], statusAsks = [], asks = [], serveFails = [];
   const routes = {};
   const app = { get() { }, post(p, ...h) { routes[p] = h[h.length - 1]; }, put() { }, delete() { }, use() { }, locals: {} };
@@ -117,7 +121,8 @@ function world({ row, cache = 'unknown-reset', usage = UR, probe = null, held = 
   };
   const probeLog = path.join(dataDir, 'usage-probe-log.ndjson');
   const press = (key) => new Promise((resolve) => { const res = { code: 200, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); return this; } }; Promise.resolve(routes['/api/usage/refresh']({ headers: {}, body: { account: key } }, res)).catch((e) => resolve({ code: 'threw', body: String(e && e.message) })); });
-  return { dir, dataDir, am, eng, u, M, P, sessions, arms, statusAsks, asks, serveFails, starts: prog.starts, mkSession, probeLog, press, setRow: (v) => { if (v === undefined) delete store[ROW]; else store[ROW] = v; } };
+  const claim = (key) => new Promise((resolve) => { const res = { code: 200, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); return this; } }; const t = setTimeout(() => resolve({ code: 'no answer in 4 s' }), 4000); t.unref?.(); try { routes['/api/accounts/:id/reset-claim']({ headers: {}, params: { id: key }, body: { lanes: 'all' } }, res); } catch (e) { resolve({ code: 'threw', body: String(e && e.message) }); } });
+  return { dir, dataDir, am, eng, u, M, P, sessions, arms, statusAsks, asks, serveFails, starts: prog.starts, mkSession, probeLog, press, claim, setRow: (v) => { if (v === undefined) delete store[ROW]; else store[ROW] = v; } };
 }
 const stopTimers = (w) => { for (const s of w.sessions.values()) { try { clearTimeout(s._wallProbeTimer); } catch { } s._wallProbeTimer = null; } const p = w.eng._resetCreditPending; if (p && typeof p.forEach === 'function') { p.forEach((x) => { try { clearTimeout(x.timer); } catch { } }); p.clear?.(); } };
 
@@ -137,8 +142,8 @@ console.log('— ① THE DOOR (spawnPanelProbe): off refuses by name, before the
   }
   const heldR = await run((k) => (k === SETTINGS_HELD ? { code: 'settings-unreadable' } : (k === ROW ? 'manual' : undefined)));
   ok(!!heldR.err && heldR.err.code === 'refresh-held' && /settings could not be read/.test(heldR.err.message) && prog.starts() === n, 'WHILE THE SETTINGS ARE HELD the door refuses BY NAME (refresh-held) — even though the held view reads «manual» (r4932 M2)', { code: heldR.err && heldR.err.code, starts: prog.starts() });
-  ok(UR.panelDoorRefusal((k) => (k === ROW ? 'off' : undefined)).code === UR.PANEL_OFF && UR.panelDoorRefusal(() => 'manual') === null && UR.panelDoorRefusal(null).code === UR.PANEL_NO_READER
-    && require(path.join(REPO, 'src/harnesses/claude-quota.js')).readsRow === ROW, 'panelDoorRefusal reads the Claude descriptor\'s own row (quota.readsRow), its two codes exported');
+  ok(UR.panelDoorRefusal((k) => (k === ROW ? 'off' : undefined)).code === UR.PANEL_OFF && UR.panelDoorRefusal((k) => (k === ROW ? 'manual' : undefined)) === null && UR.panelDoorRefusal(null).code === UR.PANEL_NO_READER && UR.PANEL_HELD === 'refresh-held'
+    && require(path.join(REPO, 'src/harnesses/claude-quota.js')).readsRow === ROW, 'panelDoorRefusal reads the Claude descriptor\'s own row (quota.readsRow), its three codes exported');
   const O = require(path.join(REPO, 'src/server/oat-mint.js'));
   const pp = O.panelProbeVia((o, done) => UR.spawnPanelProbe(prog.bin, { ...o, setting: (k) => (k === ROW ? 'off' : undefined) }, done), UR.parseCliUsageText);
   const before = prog.starts(), pr = await pp({ root: null, env: { PATH: process.env.PATH } });
@@ -157,10 +162,10 @@ const nothingBooked = (b, code = 'refresh-off') => b.serveFails === 0 && b.probe
     const b = bookingsOf(w, w.M);
     ok(r === false && w.starts() === 0, 'refreshViaCliPanel under Off answers false and starts NOTHING');
     ok(nothingBooked(b), `NOTHING BOOKED — of the release's bookings on a failed read (${BOOKINGS.join('; ')}) none is made: the read is NOT PROBED with the door's code`, b);
-    ok(typeof w.u.refreshViaCliPanel.refusal === 'function' && w.u.refreshViaCliPanel.refusal().code === 'refresh-off', 'the read lets its callers ask the DOOR for its refusal (refreshViaCliPanel.refusal) — never a second rule');
+    ok(typeof w.u.refreshViaCliPanel.refusal === 'function' && (w.u.refreshViaCliPanel.refusal(w.M) || {}).code === 'refresh-off', 'the read lets its callers ask the refusal IT met for that account (refreshViaCliPanel.refusal(key)) — never a second rule');
     w.setRow('manual');
     const q2 = quiet(); const r2 = await w.u.refreshViaCliPanel(w.M); q2.done();
-    ok(w.starts() === 1 && w.u.refreshViaCliPanel.refusal() === null, 'the same world with the row back on manual: the read starts the program once (the read itself is unchanged)', { r2, starts: w.starts() });
+    ok(w.starts() === 1 && w.u.refreshViaCliPanel.refusal(w.M) === null, 'the same world with the row back on manual: the read starts the program once (the read itself is unchanged)', { r2, starts: w.starts() });
     stopTimers(w);
   }
 }
@@ -258,6 +263,50 @@ for (const [what, drive, settled] of ROADS) {
   ok(strict.strict === 'manual' && /a person's press included/.test(strict.why) && !/still reads/.test(strict.why), 'the held view\'s sentence for the row says what is now true (no read, a person\'s press included) — its strict value unchanged', strict);
 }
 
+console.log('— ③c THE REAL SETTINGS ROUTER (src/routes/persistence.js over a torn settings.json, read as server.js reads it)');
+const PERSIST = path.join(REPO, 'src/routes/persistence.js');
+/** a fresh persistence router over a data dir whose settings.json is TORN (a stored Off nobody can read); its reader is server.js's
+ *  serverSetting, word for word; `onLift` = the router's lift hooks (as server.js registers the engine's) */
+function realRouter(tag) {
+  const D = path.join(ROOT, 'router-' + tag); fs.mkdirSync(D, { recursive: true });
+  const file = path.join(D, 'settings.json');
+  fs.writeFileSync(file, '{"accounts.onDemandQuotaRefresh": "off", "ui.th');
+  delete require.cache[PERSIST];
+  const Pmod = require(PERSIST);
+  const q = quiet();
+  try { Pmod.setup({ dataDir: D, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => null, getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } }); } finally { q.done(); }
+  const R = Pmod.router, readSettings = R.readSettings, onLift = R.onSettingsLift;
+  function serverSetting(key) { try { return readSettings ? readSettings()[key] : undefined; } catch { return undefined; } }   // server.js's, word for word
+  return { file, serverSetting, onLift, held: () => !!serverSetting(SETTINGS_HELD) };
+}
+{
+  const RR = realRouter('a');
+  const q0 = quiet(); const heldAtStart = RR.held(); q0.done();
+  ok(heldAtStart && RR.serverSetting(ROW) === 'manual', 'the real router HOLDS the torn settings: its view carries the hold\'s marker and reads the row on its strict side («manual» — no stored Off can be read)', { held: heldAtStart, row: RR.serverSetting(ROW) });
+  const w = world({ setting: RR.serverSetting });
+  if (w) {
+    RR.onLift(() => w.eng.heldWordsLifted());   // the engine's hook, as server.js registers it at the lift
+    const s = w.mkSession('s-real'), s2 = w.mkSession('s-real-off');
+    const q = quiet(); let pr = null, cl = null;
+    try { w.eng._scheduleWallProbe(s, w.P, null, 0); await until(() => w.asks.length >= 1 && !!s._readsOffWall, 'the ladder (real router) to settle'); pr = await w.press(w.M); cl = await w.claim(w.M); } finally { q.done(); }
+    ok(w.asks.length >= 1 && w.starts() === 0 && !!s._readsOffWall && s._readsOffWall.code === 'refresh-held', 'real router, held — the ladder ASKS the read, the door refuses BY NAME (refresh-held), 0 starts, the conversation told the true reason', { asks: w.asks.length, starts: w.starts(), word: s._readsOffWall });
+    ok(!!pr && pr.code === 503 && pr.body && pr.body.code === 'refresh-held' && w.starts() === 0, 'real router, held — the person\'s ⟳ press is refused by the door\'s code before its token ladder, 0 starts', pr);
+    ok(!!cl && cl.code === 200 && cl.body && cl.body.ok === true && cl.body.refresh === false, 'real router, held — the reset claim stands (a person\'s word, kept) and its answer promises NO read (refresh false: the page presses no ⟳ that would be refused)', cl);
+    ok(nothingBooked(bookingsOf(w, w.M), 'refresh-held'), 'real router, held — nothing booked against the account', bookingsOf(w, w.M));
+    // the settings MENDED: the hold's own ladder reads them again (its first silent rung, ~1 s), the lift's hooks run
+    s2._readsOffWall = { at: Date.now(), scope: null, code: 'refresh-off' };
+    const said = w.statusAsks.filter((x) => x === 's-real').length;
+    fs.writeFileSync(RR.file, JSON.stringify({ [ROW]: 'off' }));
+    const q2 = quiet(); let lifted = false; try { lifted = await until(() => !RR.held(), 'the hold\'s own ladder to read the mended settings', 16000); } finally { q2.done(); }
+    ok(lifted && RR.serverSetting(ROW) === 'off', 'the settings mended: the real router reads them again by its own ladder (the stored Off now reads)', { lifted, row: RR.serverSetting(ROW) });
+    ok(s._readsOffWall === null && w.statusAsks.filter((x) => x === 's-real').length === said + 1, 'THE HELD WORD GOES WHEN THE SETTINGS READ AGAIN — cleared at the lift, the conversation\'s status said again (r4942 (2))', { word: s._readsOffWall, said: w.statusAsks.filter((x) => x === 's-real').length - said });
+    ok(!!s2._readsOffWall && s2._readsOffWall.code === 'refresh-off' && w.starts() === 0, '…an Off word stays (Off still stands), and the lift starts nothing', { off: s2._readsOffWall, starts: w.starts() });
+    stopTimers(w);
+  }
+  const wm = world({ row: 'manual' }), wo = world({ row: 'off' });
+  if (wm && wo) { const q = quiet(); const cm = await wm.claim(wm.M), co = await wo.claim(wo.M); q.done(); ok(cm.code === 200 && cm.body.refresh === true && co.code === 200 && co.body.refresh === false && wm.starts() === 0 && wo.starts() === 0, 'the reset claim\'s flag otherwise as ever: manual promises the read (true), Off does not (false); the claim itself starts nothing', { manual: cm, off: co }); stopTimers(wm); stopTimers(wo); }
+}
+
 console.log('— ④ THE WIRING');
 {
   const AU = read('src/server/account-usage-routes.js'), AR = read('src/server/auto-resume.js'), CSB = read('src/lib/chat-status-bar.js'), ST = read('src/lib/strip-table.js'), UN = read('src/ui-needs.js');
@@ -269,6 +318,10 @@ console.log('— ④ THE WIRING');
   const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
   const keys = ['Usage reads are off', 'Usage reads are off, so this conversation continues when you resume it — press to open the setting.', 'Settings could not be read', 'The settings could not be read, so usage is not read and this conversation continues when you resume it — press to open Settings.'];
   ok(keys.every((k) => ZH.includes('  ' + JSON.stringify(k) + ': ') && JA.includes('  ' + JSON.stringify(k) + ': ')), 'zh and ja hold the four sentences (off, held)');
+  const SJ = read('server.js'), US2 = read('src/usage-routes.js');
+  ok(SJ.includes("if (typeof persistenceRouter.onSettingsLift === 'function') persistenceRouter.onSettingsLift(() => { try { heldWordsLifted(); }") && /estOverlayCache, predictCalib, heldWordsLifted,\n\} = require\('\.\/src\/server\/usage-pool-engine\.js'\)\.create\(/.test(SJ),
+    'server.js hooks the engine\'s heldWordsLifted on the settings\' lift (③c drives that hook through the real router)');
+  ok(US2.includes("refresh: odMode !== 'off' && !panelDoorRefusal(serverSetting) };"), 'the reset claim\'s answer asks the door before it promises a read');
   const S = read('src/lib/settings-schema.js');
   ok(/\{ value: 'off', label: t\('Off \(never contact Anthropic\)'\) \}/.test(S), 'the row\'s meaning and its words in Settings stay as they are (no default, meaning or sentence changes)');
 }
@@ -317,6 +370,13 @@ console.log('— ⑤ RED CONTROLS');
     stopTimers(wh);
   }
   ok(started.length === ROADS.length, `RED: the door reading the held view's «manual» starts the program while held on EVERY road (${started.length}/${ROADS.length}) — ③b's legs go red (M2)`, started);
+  const RR = realRouter('red'), wr = world({ setting: RR.serverSetting, usage: R4 });
+  if (wr) {
+    const s = wr.mkSession('s-real-red');
+    const q = quiet(); try { wr.eng._scheduleWallProbe(s, wr.P, null, 0); await until(() => wr.starts() >= 1, 'the ladder to start (the real-router control)', 4000); } finally { q.done(); }
+    ok(wr.starts() >= 1 && RR.held(), 'RED: through the REAL router, the door reading the held view\'s value (no held check) starts the program while the settings are held — ③c\'s 0-starts leg goes red', { starts: wr.starts(), held: RR.held() });
+    stopTimers(wr);
+  }
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

@@ -1809,7 +1809,8 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
   // A PERSON'S ACT IS ON DISK BEFORE ITS ANSWER (K2): the claims store's next write through the store writer. Not on disk
   // (law F — store-writer.js: a failed act is SAID): 503 `not-durable` with the store writer's own sentence, the claim beside
   // it (applied: in memory, the pool reads it) — the page says both (account-wall-words claimAnsweredWords)
-  const body = { ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off' };
+  // B-5279 (主开发 r4942 (3)): `refresh` promises the page a read — false while the door refuses (Off, or the settings held)
+  const body = { ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off' && !panelDoorRefusal(serverSetting) };
   const notDurable = () => res.status(503).json({ ...body, code: 'not-durable', error: NOT_DURABLE_WORDS });
   resetClaims.persisted().then((durable) => {
   console.log(`[reset-claim] ${keyName(key)}: a person says ${r.lanes.join(', ')} ${r.lanes.length === 1 ? 'was' : 'were'} reset on the vendor's site — reset, unconfirmed until ${r.lanes.length === 1 ? 'its' : 'their'} next reading${wall ? ` (and it stays unplaceable: ${unplaceableText(wall)})` : ''}`);
