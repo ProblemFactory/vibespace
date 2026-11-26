@@ -376,7 +376,7 @@ function noteHandWord(type, f) {
     for (const id of Array.isArray(f.landedIds) ? f.landedIds : []) ends.push([String(id), 'landed']);
   }
   for (const [id, st] of ends) { const r = HR.get(id); if (r && RANK[st] > rankOf(r)) { r.state = st; r.settledAt = Date.now(); r.via = f.via || r.via; changed = true; } }
-  if (changed) writeRecords();
+  if (changed) { if (handedAfterStop) handedDue = true; else writeRecords(); }   // r5172: on a Stop's road, owed to the batch's end
 }
 // THE TAIL IS READ IN A CHILD OF ITS OWN (unit 2's gate): a home that does not answer holds an fs call in this process's thread pool for
 // good, and a process exit waits for that pool — so a read here, however bounded, would hold the wrapper's exit. The child streams the
@@ -565,11 +565,16 @@ function persistNow() {
 // the CLI goes out INSIDE it, as before — then the file is written ONCE if a line in it changes what the conversation is, and only
 // then are its lines said upward, in their order. On disk before said; never N full rewrites before a Stop reaches the CLI, nor one
 // between an interrupted result and the follow-up's init that is interrupted in the same tick.
-let batchDepth = 0, batchOut = [], durableDue = false;
+// r5172 (主开发; test-claude-steer-chrome §A ③'s hosted red): THE STOP REACHES THE CLI FIRST. While a Stop's drop runs (handedAfterStop),
+// the handed records' synced write is owed (handedDue) and made at the batch's end — after the interrupt went to the CLI and before any
+// line of the batch is said, so «on disk before it is said» and «the name only after one sync» both stand; a person's Stop no longer
+// waits for a disk's sync (placed: the Stop's fsync held, the tool's result carried the handed frame to the model before the Stop)
+let batchDepth = 0, batchOut = [], durableDue = false, handedAfterStop = false, handedDue = false;
 function say(line) { if (batchDepth) batchOut.push(line); else { if (JOURNAL) JOURNAL.flush(); try { process.stdout.write(line + '\n'); } catch {} } }   // B-cd4b: on disk (the journal's append) before it is said
 function beginBatch() { batchDepth++; }
 function endBatch() {
   if (--batchDepth > 0) return;
+  if (handedDue) { handedDue = false; writeRecords(); }   // r5172: the Stop's owed handed records, after its interrupt, before a line is said
   if (durableDue) { durableDue = false; trimBuffer(); persistNow(); }
   if (JOURNAL) JOURNAL.flush();   // B-cd4b: the input's said lines in the file (ONE append) before any of them is said
   const out = batchOut; batchOut = [];
@@ -997,7 +1002,8 @@ function holdSecondStop(line) {
   // the window is open and the CLI's turn already ended (its interrupted result came): what is left is the follow-up
   if (!stopping || turnBusy) return false;
   const prior = stopping.heldInterrupt;
-  dropHeldForStop();
+  handedAfterStop = true;   // r5172: the second Stop's road the same — its records' synced write is owed to the batch's end
+  try { dropHeldForStop(); } finally { handedAfterStop = false; }
   stopping.heldInterrupt = line;
   // EVERY REQUEST GETS ITS RESPONSE (r6): a Stop folded into the newer one is answered here — the CLI answers the one delivered
   if (prior) { let rid = null; try { rid = JSON.parse(prior).request_id; } catch { } if (rid) record('control_response', { response: { subtype: 'success', request_id: rid }, webui_note: 'folded into the one interrupt on the follow-up init' }); }
@@ -1822,7 +1828,15 @@ try {
         // Stop: what is held is dropped (and put back) BEFORE the interrupt reaches the CLI — then the interrupt goes
         // through as it always did (the server's 2 s SIGINT fallback is unchanged); a handed frame stays with the turn
         if (parsed.type === 'control_request' && parsed.request && parsed.request.subtype === 'interrupt' && holdSecondStop(line)) continue;
-        if (parsed.type === 'control_request' && parsed.request && parsed.request.subtype === 'interrupt') dropHeldForStop();
+        // r5172: what makes «nothing held runs after it» is MEMORY (the held frames spliced out, the window opened) and stays before the
+        // interrupt; the interrupt goes to the CLI NEXT; the handed records' synced write is owed to the batch's end (endBatch)
+        if (parsed.type === 'control_request' && parsed.request && parsed.request.subtype === 'interrupt') {
+          handedAfterStop = true;
+          try { dropHeldForStop(); } finally { handedAfterStop = false; }
+          sendChild(line);
+          if (!batchDepth && handedDue) { handedDue = false; writeRecords(); }   // (outside a batch: written at once, after the interrupt)
+          continue;
+        }
         // Handle goal commands from WebUI
         if (parsed.type === 'set-goal') {
           // Forward to the CLI's NATIVE /goal (dispatched as a command in

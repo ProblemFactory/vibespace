@@ -26,7 +26,7 @@
 // THE REAL WRAPPER over the stand-in (the hand-over, the witness, Stop's follow-up interrupt, the RED legs on the 6428c67e
 // wrapper) is §0 of scripts/test-claude-steer-chrome.mjs — the fast tier's 910 s sum had 0.77 s left; §8 here is the one fast
 // exception (B-28b1: ten runs at once, 0.6 s on the test machine).
-import './scratch.mjs';
+import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -599,6 +599,87 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
     && (w.match(/namesSaid = /g) || []).length === 1 && (w.match(/if \(msg\.type === 'system' && msg\.subtype === 'init'\) noteInitNames\(msg\);/g) || []).length === 1
     && w.includes("    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg);") && /function startChild\(\) \{\n  reconnectTimer = null;\n  if \(!OFFSET_MODE\) initNamesSeen = false;/.test(w),
     'the wiring: every init feeds the witness; the follow-up branch (inside the Stop window, before the owed-turn branch) calls noteFollowUpNames(msg), the ONE writer of namesSaid');
+});
+// ── §8b THE STOP REACHES THE CLI FIRST (主开发 r5172; test-claude-steer-chrome §A ③'s hosted red, rows B-1217 / B-28b1) ──
+// The release's wrapper wrote the handed records (renamed after an fsync) INSIDE the Stop's drop, BEFORE the interrupt went on to
+// the CLI: every Stop waited for a disk's sync. PLACED: the wrapper's first fsync after the Stop is HELD by a preload until THIS RUN
+// releases it (never a clock) — its mark names the file it held: the WITNESS that the hold was in force (r5135 law 1). The run
+// releases on the first of two facts: the CLI READ the interrupt (the stand-in's own capture of its stdin), or the tool's turn went
+// on without it and its result CARRIED the handed frame to the model (the stand-in's record) — the B-28b1 law's red.
+console.log('§8b the Stop reaches the CLI before the handed records\' sync: the REAL chat-wrapper over the stand-in CLI, that sync HELD');
+await guard('§8b', async () => {
+  const { spawn } = await import('node:child_process');
+  const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (fn, ms) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(5); } return !!fn(); };
+  const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
+  const own = [];
+  process.on('exit', () => { for (const d of own) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });   // this run's folders
+  const holdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-hold-'));
+  process.on('exit', () => { try { fs.rmSync(holdDir, { recursive: true, force: true }); } catch { } });   // the hold's folder is the run's own
+  const HOLD = path.join(holdDir, 'hold-sync.cjs');
+  fs.writeFileSync(HOLD, [
+    "'use strict';",
+    "const fs = require('fs'), E = process.env, ARM = E.SYNC_HOLD_ARM || '', MARK = E.SYNC_HOLD_MARK || '', REL = E.SYNC_HOLD_RELEASE || '';",
+    "const paths = new Map(), open = fs.openSync;",
+    "fs.openSync = function (p, ...a) { const fd = open.call(fs, p, ...a); try { paths.set(fd, String(p)); } catch (e) { } return fd; };",
+    "const realSync = fs.fsyncSync; let done = false;",
+    "fs.fsyncSync = function (fd) {",
+    "  if (!done && ARM && fs.existsSync(ARM) && /[\\\\/]handed[\\\\/]/.test(paths.get(fd) || '')) {   // only the handed records' sync: a meta timer's passes",
+    "    done = true;",
+    "    try { fs.writeFileSync(MARK, JSON.stringify({ file: paths.get(fd) || null })); } catch (e) { }",
+    "    const sab = new Int32Array(new SharedArrayBuffer(4)), end = Date.now() + 30000;   // the run releases it; 30 s only names a run that never did",
+    "    while (!fs.existsSync(REL) && Date.now() < end) Atomics.wait(sab, 0, 0, 10);",
+    "  }",
+    "  return realSync.call(fs, fd);",
+    "};",
+  ].join('\n') + '\n');
+  const scene = async (wrapperPath, tag) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-' + tag + '-')); own.push(dir);
+    const dlv = path.join(dir, 'delivered.jsonl'), cap = path.join(dir, 'cli-stdin.jsonl'), arm = path.join(dir, 'arm'), mark = path.join(dir, 'held'), rel = path.join(dir, 'release');
+    const w = spawn(process.execPath, ['-r', HOLD, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN],
+      { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STUB_CAPTURE: cap, STAND_IN_LONG_MS: '1500', VIBESPACE_SKIP_AGENT_HOOKS: '1', SYNC_HOLD_ARM: arm, SYNC_HOLD_MARK: mark, SYNC_HOLD_RELEASE: rel } });
+    const recs = []; let lb = '';
+    w.stdout.setEncoding('utf8');
+    w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
+    const out = { missed: null };
+    const step = async (name, fn, ms = 30000) => { if (out.missed) return false; const got = await until(fn, ms); if (!got) out.missed = name; return got; };
+    const interruptIn = () => fs.existsSync(cap) && fs.readFileSync(cap, 'utf8').split('\n').some((l) => /"subtype":"interrupt"/.test(l));
+    try {
+      await step('the wrapper wrote its session file', () => fs.existsSync(path.join(dir, 's.json')));
+      w.stdin.write(ad.formatChatInput('TOOL-A LONG- run a slow command', 'm-a').stdinPayload + '\n');
+      await step('the tool_use record', () => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
+      w.stdin.write(ad.formatChatInput('MARK-B handed while the tool runs', 'm-b', { steer: true }).stdinPayload + '\n');
+      await step('the handover (handed)', () => recs.some((r) => r.type === 'input_handover' && r.state === 'handed'));
+      const d0 = lines(dlv).length, n0 = recs.length;
+      fs.writeFileSync(arm, 'armed');   // the hold takes the FIRST fsync from here on: the Stop's own write
+      w.stdin.write(ad.formatInterrupt() + '\n');
+      if (await step('the hold reached (the wrapper inside the Stop\'s sync)', () => fs.existsSync(mark), 15000)) {
+        try { out.heldFile = JSON.parse(fs.readFileSync(mark, 'utf8')).file; } catch { out.heldFile = null; }
+        const carried = () => lines(dlv).slice(d0).some((x) => x.how === 'tool_result' || x.how === 'request');
+        if (!(await until(() => interruptIn() || carried(), 10000))) out.missed = out.missed || 'neither the CLI\'s read of the interrupt nor a carried frame within 10 s of the hold';
+        out.interruptWhileHeld = interruptIn(); out.carriedWhileHeld = carried();
+        fs.writeFileSync(rel, 'go');
+      }
+      await step('the CLI\'s answer to the interrupt, said', () => recs.slice(n0).some((r) => r.type === 'control_response'), 15000);
+      await step('the handed records on disk after the release', () => fs.existsSync(path.join(dir, 'handed')) && fs.readdirSync(path.join(dir, 'handed')).some((f) => f.endsWith('.json')), 15000);
+      out.carried = lines(dlv).slice(d0).filter((x) => x.how === 'tool_result' || x.how === 'request').map((x) => x.how + ':' + String(x.text || '').slice(0, 12));
+    } finally { try { w.kill('SIGKILL'); } catch { } }   // the wrapper this run started (its stand-in child ends with its stdin)
+    return out;
+  };
+  // RED CONTROL: the release's order, in a copy — the drop and its synced write before the interrupt goes on
+  const cwSrc = read('data/bin/chat-wrapper.js');
+  const FIRST = "          handedAfterStop = true;\n          try { dropHeldForStop(); } finally { handedAfterStop = false; }\n          sendChild(line);\n";
+  ok(cwSrc.split(FIRST).length === 2, '§8b ANCHOR: the Stop\'s branch — the drop in memory, then the interrupt to the CLI — spelled once (a missing anchor builds no control: RED by name)');
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-ctl-')); own.push(d);
+  fs.mkdirSync(path.join(d, 'data', 'bin'), { recursive: true });
+  fs.symlinkSync(path.join(REPO, 'src'), path.join(d, 'src'));
+  fs.writeFileSync(path.join(d, 'data', 'bin', 'chat-wrapper.js'), anchored(cwSrc, FIRST, "          dropHeldForStop();\n          if (handedDue) { handedDue = false; writeRecords(); }\n          sendChild(line);\n", 'the Stop\'s branch'));
+  const cur = await scene(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip');
+  const red = await scene(path.join(d, 'data', 'bin', 'chat-wrapper.js'), 'release-order');
+  ok(!cur.missed && /[\\/]handed[\\/]/.test(String(cur.heldFile || '')), '§8b WITNESS: the hold was in force on the Stop\'s own write — the handed records\' sync, the file it held named', cur);
+  ok(!cur.missed && cur.interruptWhileHeld === true && cur.carriedWhileHeld === false && cur.carried.length === 0, '§8b THE STOP REACHES THE CLI FIRST: with the handed records\' sync held, the CLI read the interrupt — and no tool result or request carried the handed frame to the model', cur);
+  ok(!red.missed && /[\\/]handed[\\/]/.test(String(red.heldFile || '')) && red.interruptWhileHeld === false && red.carriedWhileHeld === true, '§8b RED CONTROL (the release\'s order, in a copy): with the same sync held the interrupt does NOT reach the CLI, and the tool\'s result carries the handed frame to the model before the Stop — the hosted red, placed', red);
 });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
