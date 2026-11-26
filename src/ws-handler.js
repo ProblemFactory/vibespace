@@ -1588,7 +1588,7 @@ function registerWsHandler(wss, ctx) {
           // alive and processing, so it WAITS instead of declaring death.
           // r4686: THE ATTACH's OWN ID (the page's `attachId`), echoed on its ack and its answer; the newest one this socket asked for a
           // session is kept, so an older attach still in its waits steps aside and never re-registers the socket over the newer one
-          const attachId = data.attachId != null ? data.attachId : null;
+          const attachId = Number.isSafeInteger(data.attachId) ? data.attachId : null;   // a malformed id acts as an old page's (none), never a mixed-type comparison
           if (attachId != null) { const M = ws.__attachLatest || (ws.__attachLatest = new Map()), was = M.get(data.sessionId); if (was == null || attachId > was) M.set(data.sessionId, attachId); }   // the NEWEST (the page's ids rise), never the last to arrive
           try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, ...(attachId != null ? { attachId } : {}) })); } catch {} try { require('./server/local-index.js').note('attach', data.sessionId); } catch {} // lane human-cli: the person's index notes the attach
           if (attachId != null && ws.__attachLatest && ws.__attachLatest.get(data.sessionId) > attachId) break;   // r4708 (its delta read): an attach KNOWN older at its arrival (one queued while its socket was closing, flushed after the reconnect's own) does nothing at all — no join, no warm, no read

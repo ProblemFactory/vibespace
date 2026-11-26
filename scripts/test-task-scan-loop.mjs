@@ -140,8 +140,8 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
     const MCW = mutantCopies('a2-attach', REPO);
     const plantW = (tag, edits) => { let t = wshSrc; for (const [x, y] of edits) { if (t.split(x).length !== 2) throw new Error(`④b (${tag}): its anchor is not ONE site: ${x.slice(0, 70)}`); t = t.replace(x, () => y); } return MCW.load('src/ws-handler.js', t, tag); };
     const realWts = H.store.warmTaskState;
-    let during = null, gateWarm = null;   // gateWarm (B-a26e): the NEXT warm waits on this promise (the step-aside leg holds an attach in its waits)
-    H.store.warmTaskState = (...x) => { if (during) during(); if (gateWarm) { const g = gateWarm; gateWarm = null; return g.then(() => realWts(...x)); } return realWts(...x); };
+    let during = null, gateWarm = null, warmCalls = 0;   // gateWarm (B-a26e): the NEXT warm waits on this promise (the step-aside leg holds an attach in its waits); warmCalls counts them
+    H.store.warmTaskState = (...x) => { warmCalls++; if (during) during(); if (gateWarm) { const g = gateWarm; gateWarm = null; return g.then(() => realWts(...x)); } return realWts(...x); };
     const buf = path.join(os.homedir(), 'buf'); fs.mkdirSync(buf, { recursive: true });
     const scene = async (WSH, n, BC = SB, opt = {}) => {
       const { broadcastToSession } = BC.createSessionBroadcast({ event() { }, log: { warn() { } } });
@@ -220,7 +220,16 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         sessions.set(sidA, mkS());
         const within = (pr, ms) => Promise.race([pr.then(() => true, () => true), new Promise((r) => setTimeout(() => r(false), ms))]);
         const answersOf = () => frames.filter((f) => f.type === 'attached' && f.sessionId === sidA).map((f) => f.attachId);
+        const w0 = warmCalls;
         const acksOf = () => frames.filter((f) => f.type === 'attach-ack' && f.sessionId === sidA && !('progress' in f)).map((f) => f.attachId);   // the synchronous ack (its re-acks carry `progress`)
+        if (first === 'two') {   // a SECOND socket (another tab or device) with its own, lower id: answered — the newest is kept per socket
+          const h2 = {}, frames2 = [];
+          const sock2 = { readyState: 1, bufferedAmount: 0, send: (x) => frames2.push(JSON.parse(x)), on: (ev, fn) => { h2[ev] = fn; }, ping() { }, terminate() { }, close() { } };
+          wss.clients.add(sock2); on.connection(sock2);
+          const dX = await within(Promise.resolve(h.message(JSON.stringify({ type: 'attach', sessionId: sidA, attachId: 5 }))), 8000);
+          const dY = await within(Promise.resolve(h2.message(JSON.stringify({ type: 'attach', sessionId: sidA, attachId: 1 }))), 8000);
+          return { first, answers: answersOf(), answers2: frames2.filter((f) => f.type === 'attached' && f.sessionId === sidA).map((f) => f.attachId), expired: !dX || !dY };
+        }
         if (first === 'post') {
           const pHeld = Promise.resolve(h.message(JSON.stringify({ type: 'attach', sessionId: sidA, attachId: 1 })));   // the older: its pre-join waits run after this tick (the warm is called in a microtask)…
           const s2 = mkS(); sessions.set(sidA, s2);   // …so the conversation's session REPLACED here is what they meet
@@ -240,7 +249,7 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         const thenDone = await within(pThen, 8000);   // the harness's bound (r4340 law 1): the other attach's handler settles
         open(); gateWarm = null;
         const heldDone = await within(pHeld, 8000);   // …then the held one's, its gate opened
-        return { first, thenDone, heldDone, answers: answersOf(), acks: acksOf(), expired: !thenDone || !heldDone };
+        return { first, thenDone, heldDone, answers: answersOf(), acks: acksOf(), warms: warmCalls - w0, expired: !thenDone || !heldDone };
       };
       const stepOk = (r) => !r.expired && JSON.stringify(r.answers) === '[2]' && JSON.stringify([...r.acks].sort()) === '[1,2]';
       const so = await idsScene(require(path.join(REPO, 'src/ws-handler.js')), 7, 'older'), sn = await idsScene(require(path.join(REPO, 'src/ws-handler.js')), 8, 'newer');
@@ -254,6 +263,12 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const STEP2 = STEP.filter((l) => l.includes('AGAIN after the waits above'));
       const xp = await idsScene(plantW('no-second-step-aside', STEP2.map((l) => [l + '\n', ''])), 13, 'post');
       ok(STEP2.length === 1 && xp.reached === true && !stepOk(xp) && xp.answers.includes(1), `RED CONTROL (the SECOND step-aside alone taken out, the one before the answer): the older attach held after its join is answered too (${JSON.stringify(xp.answers)}) — the leg reaches it`, xp);
+      ok(sn.warms === 1 && so.warms === 2, `B-a26e (r4857): an attach the hub knows is older at its ARRIVAL does nothing at all — no warm (newer first: ${sn.warms} warm, the newer's; older first: ${so.warms})`, { sn, so });
+      const STEP_ARR = STEP.filter((l) => l.includes('KNOWN older at its arrival'));
+      const xa = await idsScene(plantW('no-arrival-step-aside', STEP_ARR.map((l) => [l + '\n', ''])), 14, 'newer');
+      ok(STEP_ARR.length === 1 && xa.warms === 2 && JSON.stringify(xa.answers) === '[2]', `RED CONTROL (the ARRIVAL step-aside alone taken out): the older attach does its waits before it steps aside (${xa.warms} warms; answers ${JSON.stringify(xa.answers)}, caught later) — the leg above can go red`, xa);
+      const s2 = await idsScene(require(path.join(REPO, 'src/ws-handler.js')), 15, 'two');
+      ok(!s2.expired && JSON.stringify(s2.answers) === '[5]' && JSON.stringify(s2.answers2) === '[1]', `B-a26e (r4857): two sockets of one conversation keep their own ids — a lower id on the second socket is answered (${JSON.stringify(s2.answers)} / ${JSON.stringify(s2.answers2)})`, s2);
       const xl = await idsScene(lastWins, 11, 'newer');
       ok(!stepOk(xl) && xl.answers.includes(1), `RED CONTROL (the hub keeps the LAST id to arrive — 4c2a64f15's form): newer first, the older attach is answered (${JSON.stringify(xl.answers)}) — the leg can go red`, xl);
     } finally { H.store.warmTaskState = realWts; }

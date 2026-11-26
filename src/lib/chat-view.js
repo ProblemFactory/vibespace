@@ -7218,7 +7218,7 @@ class ChatView {
     let waits = 0;
     const checkOrRetry = () => {
       if (gen !== this._reattachGen) { this.ws.offGlobal(handler); return; } // superseded by a newer reconnect cycle (which armed its own handler)
-      if (this._readOnly || this._disconnected) { this.ws.offGlobal(handler); return; } // resolved / offline (next reconnect restarts the ladder)
+      if (this._readOnly || this._disconnected || this._disposed) { this.ws.offGlobal(handler); return; } // resolved / offline (next reconnect restarts the ladder) / closed (r4857: its ladder stops)
       if ((this._lastAttachedAt || 0) >= reattachAt) { this.ws.offGlobal(handler); return; } // attached — done (r4708: unhooked here too — an answer of another road may have landed first)
       const acked = (this._lastAttachAckAt || 0) >= reattachAt;
       // A FRESH ack (the server re-acks every 10s while this session waits
@@ -7238,7 +7238,7 @@ class ChatView {
       // exited, the sign-in wall: each reaches _setReadOnly or the view's replacement, and both clear the hold first); the
       // view-only rescue is never a timeout's (it stays the explicit not-found's road).
       this._hideTyping();
-      this._holdAttach?.(attachFrame, gen, () => this.ws.offGlobal(handler));   // the hold owns the handler's off-switch (adversarial read: it outlived a closed window)
+      this._holdAttach?.(attachFrame, gen, () => this.ws.offGlobal(handler), reattachAt);   // the hold owns the handler's off-switch (adversarial read: it outlived a closed window)
     };
     setTimeout(checkOrRetry, 20000);
 
@@ -7345,6 +7345,7 @@ class ChatView {
       this._reattachCatchUp();
     };
     this.ws.onGlobal(handler);
+    this._cycleOff = () => this.ws.offGlobal(handler);   // 主开发 r4857: a closed view's live cycle is unhooked by dispose at once (never at its ladder's end, ~2 minutes later)
     // Safety: re-enable INPUT after 30s even if attached never arrives. The
     // handler itself must stay armed for the whole retry-ladder window — an
     // 'attached' landing between 30s and the ~2min deadline used to be
@@ -7700,9 +7701,10 @@ class ChatView {
    *  attach's own answer — it sends no attach of its own (r4686: an acked attach is always answered or its socket closes; a re-send
    *  would be a whole duplicate for the hub that is already slow). A retry comes only after a reconnect (the hub lost the ask with
    *  the socket): in the reconnect queue's pass, its slot jittered, under the page's cap of attaches in flight. 15 minutes after the
-   *  hold began (a new cycle does not restart that clock, r4708) the bar's words say a Reload asks again (words only). Ended by its attach landing (`_clearAttachHold` in the cycle's handler), by
+   *  ask that began it (`askedAt`, the cycle whose ladder ended: 主开发 r4857 — a hub that acked and went quiet, or kept acking for
+   *  15 minutes, is not made to wait 15 more) the bar's words say a Reload asks again (words only); a new cycle does not restart it (r4708). Ended by its attach landing (`_clearAttachHold` in the cycle's handler), by
    *  the server's explicit words (`_setReadOnly`), or by dispose; a late answer of an attach it gave up on is dropped by its id. */
-  _holdAttach(frame, gen, off = null) {
+  _holdAttach(frame, gen, off = null, askedAt = 0) {
     if (this._disposed || this._readOnly) { try { off?.(); } catch { } return; }
     const H = this._attachHold || (this._attachHold = { line: null, timer: 0, off: null });
     H.frame = frame; H.gen = gen;
@@ -7726,7 +7728,7 @@ class ChatView {
       if (this._attachHold !== H || this._disposed || this._readOnly) return;
       if (H.note) H.note.textContent = t('Still attaching — the hub has not answered for 15 minutes. Reloading the tab asks again; your message waits here.');
       try { this._trace?.('attach:holdLong', {}); } catch { }
-    }, ATTACH_HOLD_LONG_MS);
+    }, Math.max(0, ATTACH_HOLD_LONG_MS - (askedAt ? Date.now() - askedAt : 0)));   // from the unanswered ask (r4857)
   }
 
   _clearAttachHold() {
@@ -8928,6 +8930,7 @@ class ChatView {
     // B-360d (A) r1374: a HISTORY window (its id `view-…`) tells the server it is gone, so its tail's hold ends with it
     try { const vid = this._viewHoldId || (String(this.sessionId || '').startsWith('view-') ? this.sessionId : null); if (vid) this.ws?.send?.({ type: 'view-close', sessionId: vid }); } catch { }
     try { this._clearAttachHold(); } catch { }   // B-a26e: a closed view's attach hold ends (its timer, its queue slot, its line)
+    try { this._cycleOff?.(); } catch { } this._cycleOff = null;   // 主开发 r4857: …and its live cycle's handler, at once
     LIVE_CHAT_VIEWS.delete(this);
     // The keybinding is signal-bound to the WINDOW, but a view can be replaced
     // while its window lives on — an orphaned binding would keep answering the
