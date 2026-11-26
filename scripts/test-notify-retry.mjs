@@ -40,6 +40,13 @@ function editAnchor(text, from, to, file, mode = 'one') {
 }
 const skip = (n) => { skipped++; console.log('  - SKIP ' + n); };   // B-7f97 cure: a skip is NEVER a pass — named, and counted apart in the summary
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// B-3dbd (r4868/r4965, lane bl-chat-b): THE SHORT SETTLES (sleep 0 to 30 ms after a notify, a broadcast, a turn end or an advance) STAY:
+// each follows a call whose async work the product hands back no promise of (_notifyOwner, the rig's broadcast, a turn end the leg holds
+// by its own release). On the two roads read to the post — a turn end (attemptRetry writes the in-flight stamp synchronously, then
+// deliverToConversation reaches postToPeer with no await before it; the hand-over's turn-end listener awaits only an ARMED hand-over)
+// and a notify (_notifyOwner → _deliverTo → the same ladder) — the post is asked within microtasks, so the settle only yields turns.
+// The waits (e3)'s verdicts read are on their facts (factWithin; a whole turn into the hold), each expiry a named line
+const factWithin = async (fn, what, ms = 20000) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < ms) await sleep(5); const v = fn(); if (!v) ok(false, `the leg waited ${ms} ms for ${what} — it never came (a harness line, never the leg's verdict)`); return v; };
 /** block THIS loop synchronously — the shape of a busy server (load 100+ on the owner's box) */
 const stall = (ms) => { const sab = new SharedArrayBuffer(4); Atomics.wait(new Int32Array(sab), 0, 0, ms); };
 
@@ -360,24 +367,74 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   ok((await settled) === 1 && R3.posts.length === 1 && R3.deliver.retryCount(R3.cid) === 0 && !JSON.parse(fs.readFileSync(path.join(R3.dir, 'msg-retry.json'), 'utf-8'))[R3.cid], '(e) …settleRetries resolves after it landed and its removal is on disk (a graceful stop never leaves an in-flight stamp)');
   // (e3) THE EXIT'S DEADLINE COVERS THE POST'S OWN BOUND (verify r2, reproduced: the primitive answers a never-reading inbox
   // at 6 006 ms = timer + write grace, the exit waited 5 s — a post started a second before SIGTERM was left stamped, and
-  // the next boot handed a LANDED frame to the stash). Here the shape at a tenth of the scale: a 1.2 s post, a 0.6 s wait
-  // is "unsettled", the exit's own default waits it out and clears the stamp on disk
+  // the next boot handed a LANDED frame to the stash). Here the shape by a held post (r4965): a post the leg holds, a short
+  // deadline reads "unsettled" while it is held, and the exit's own default waits for it (released once that wait began) and
+  // clears the stamp on disk
   const ES = require(path.join(REPO, 'src/server/exit-settle.js'));
   ok(PM.POST_BOUND_MS === 5000 + 1000 + 150 && ES.SETTLE_MS > PM.POST_BOUND_MS && ES.SETTLE_MS < 30 * 1000, '(e3) the exit settle\'s default covers the primitive\'s bound (timer + write grace + flush grace) and stays far under systemd\'s stop timeout', JSON.stringify({ bound: PM.POST_BOUND_MS, settle: ES.SETTLE_MS }));
   ok(/settleInFlight\(\{ stashView, deliver, n, m \}\)/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8')), '(e3) server.js takes the exit settle\'s default (no shorter deadline of its own)');
   const R4 = rig('settle-bound');
   await NOTIFY(R4);
-  R4.setAnswer(() => new Promise((res) => setTimeout(() => res({ ok: true, phase: 'written' }), 1200)));
+  // r4965: THE POST IS HELD BY THE LEG — its answer comes only when the leg releases it (a placed hold), never after a 1.2 s timer of the
+  // test's own. A deadline shorter than the post reads «unsettled» for as long as the post is held, so the short deadline is 50 ms (was
+  // 600 ms of a 1.2 s post); the release comes at once after the exit's own settle began — that settle must outlast the post: a whole
+  // turn into the hold it is still waiting (an exit that leaves the retry posts out of its wait is done by then — every microtask has
+  // run — its RED control below), and it ends once the post landed. The product's own bound the exit covers (PM.POST_BOUND_MS) is judged
+  // by the static leg above, unchanged.
+  let releasePost = null;
+  // the deliver's own deadline timers are unref'd (a hub's loop keeps them): while the post is held nothing else keeps this loop up, so the
+  // scene keeps it with an interval of its own (cleared once the post landed) — the old 1.2 s timer did it by the way
+  const keepUp = setInterval(() => { }, 1000);
+  R4.setAnswer(() => new Promise((res) => { releasePost = () => res({ ok: true, phase: 'written' }); }));
   R4.session._isStreaming = false;
   const p4 = R4.deliver.noteTurnEnd(R4.session);
-  await sleep(5);
+  const stampOf = () => { try { const e = JSON.parse(fs.readFileSync(path.join(R4.dir, 'msg-retry.json'), 'utf-8'))[R4.cid]; return !!(e && e[0] && e[0].inflight); } catch { return false; } };
+  await factWithin(() => !!releasePost && stampOf(), 'the held post asked for and its in-flight stamp on disk');   // (was a 5 ms settle)
   R4.deliver.closeRetries();
-  const short = await R4.deliver.settleRetries(600);
+  const short = await R4.deliver.settleRetries(50);
   ok(short === -1 && JSON.parse(fs.readFileSync(path.join(R4.dir, 'msg-retry.json'), 'utf-8'))[R4.cid][0].inflight, '(e3) a deadline shorter than the post reads unsettled while the stamp is still on disk (the pre-fix exit)');
   const warned = [];
-  await ES.settleInFlight({ stashView: null, deliver: R4.deliver, n: 0, m: 1, log: { log: () => { }, warn: (l) => warned.push(l) } });
+  let exitDone = false;
+  const exitSettle = ES.settleInFlight({ stashView: null, deliver: R4.deliver, n: 0, m: 1, log: { log: () => { }, warn: (l) => warned.push(l) } }).then(() => { exitDone = true; });
+  await new Promise((r) => setImmediate(r));   // a whole turn into the hold: every microtask has run — an exit that does not wait is done by now
+  const waitedHeld = !exitDone;                // read BEFORE the release (after it, the turn end's own promise waits for the post anyway)
+  if (releasePost) releasePost();
+  await exitSettle;
+  const atExit = { posts: R4.posts.length, stamp: !!JSON.parse(fs.readFileSync(path.join(R4.dir, 'msg-retry.json'), 'utf-8'))[R4.cid] };   // the exit's wait alone
   await p4;
-  ok(R4.posts.length === 1 && !warned.length && !JSON.parse(fs.readFileSync(path.join(R4.dir, 'msg-retry.json'), 'utf-8'))[R4.cid] && R4.deliver.retryCount(R4.cid) === 0, '(e3) …the exit\'s own wait outlasts the post: landed, no warning, the stamp gone from disk', JSON.stringify({ posts: R4.posts.length, warned }));
+  clearInterval(keepUp);
+  ok(waitedHeld && atExit.posts === 1 && !atExit.stamp && !warned.length && R4.deliver.retryCount(R4.cid) === 0, '(e3) …the exit\'s own wait outlasts the post: still waiting a turn into the hold, and once it ends the post landed, no warning, the stamp gone from disk', JSON.stringify({ waitedHeld, atExit, warned }));
+  // (e3)'s RED control (B-3dbd, lane bl-chat-b): a copy of the exit settle that leaves the retry posts out of its wait (anchored); the
+  // same held scene finds it done a turn into the hold with the post still unanswered — the verdict above reads it. Judged on its
+  // WITNESS (r5135 law 1): the copy's exit ran inside the hold with the plant in force — its own text carries the mark, and it never
+  // asked the deliver's settleRetries (counted on the deliver it was handed); a plant not in force is a NAMED SKIP, never a red
+  {
+    const ESRC = fs.readFileSync(path.join(REPO, 'src/server/exit-settle.js'), 'utf-8');
+    const WAIT_A = "deliver && typeof deliver.settleRetries === 'function' ? deliver.settleRetries(maxMs) : Promise.resolve(0)";
+    const ESX = mutantCopies('ntr-exit-nowait', REPO).load('src/server/exit-settle.js', anchored(ESRC, WAIT_A, "Promise.resolve(0) /* MUTANT: the retry posts left out of the exit's wait */", 'the exit waits for the retry posts'), 'exit-no-wait');
+    const R5 = rig('settle-bound-red');
+    await NOTIFY(R5);
+    let release5 = null;
+    const keep5 = setInterval(() => { }, 1000);   // the held post leaves no ref'd timer (as above)
+    R5.setAnswer(() => new Promise((res) => { release5 = () => res({ ok: true, phase: 'written' }); }));
+    R5.session._isStreaming = false;
+    const p5 = R5.deliver.noteTurnEnd(R5.session);
+    await factWithin(() => !!release5, 'the control\'s held post asked for');
+    R5.deliver.closeRetries();
+    let asked5 = 0;
+    const settle5 = R5.deliver.settleRetries;
+    R5.deliver.settleRetries = (...a) => { asked5++; return settle5(...a); };   // the witness: does the exit under test ask it?
+    let done5 = false;
+    const exit5 = ESX.settleInFlight({ stashView: null, deliver: R5.deliver, n: 0, m: 1, log: { log: () => { }, warn: () => { } } }).then(() => { done5 = true; });
+    await new Promise((r) => setImmediate(r));
+    const red = { doneHeld: done5, posts: R5.posts.length, asked: asked5, marked: /MUTANT: the retry posts left out of the exit's wait/.test(String(ESX.settleInFlight)) };
+    if (release5) release5();
+    await exit5; await p5;
+    clearInterval(keep5);
+    R5.deliver.settleRetries = settle5;
+    if (!(red.marked && red.asked === 0)) skip(`CONTROL (e3): the plant was not in force inside the hold (the copy's mark ${red.marked ? 'present' : 'absent'}, settleRetries asked ${red.asked} time(s)) — nothing judged`);
+    else ok(red.doneHeld === true && red.posts === 0, 'CONTROL (e3): an exit settle that leaves the retry posts out of its wait (its mark in force, settleRetries never asked) is done a turn into the hold, the post still unanswered — the leg above reads it (red)', JSON.stringify(red));
+  }
   R3.setAnswer(async () => ({ ok: false, reason: 'timeout', phase: 'connect', transient: true }));
   const rAfter = await R3.deliver.deliverToConversation(R3.cid, 'after close', { kind: 'notification', spendReason: 'job-notification', retry: { producer: 'test', meta: { jobId: 'jb-3' } } });
   R3.setAnswer(async () => ({ ok: true, phase: 'written' }));
