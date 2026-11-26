@@ -90,6 +90,7 @@ const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMES
 let cfgProf = null; try { const c = JSON.parse(fs.readFileSync(process.env.AGENT_BROWSER_CONFIG, 'utf8')); if (c && typeof c.profile === 'string') cfgProf = c.profile; } catch { }
 const prof = process.env.AGENT_BROWSER_PROFILE || cfgProf, cdp = process.env.AGENT_BROWSER_CDP || null;
 const f = path.join(st, ns + '__' + sess + '.json');
+const writeState = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // the fake's state by a temp file of its own process and a rename: no verb's read meets a torn file when two of its processes run at once (lane bl-loop-b, 主开发 r5152)
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
@@ -100,11 +101,11 @@ const view = process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || '';
 const failDirs = (() => { try { return fs.readFileSync(path.join(st, 'fail-dirs'), 'utf8').split('\\n').filter(Boolean); } catch { return []; } })();
 const daemon = (by) => {
   let s = read(); if (s && alive(s.pid)) return s;
-  if (cdp) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, cdp, view }; fs.writeFileSync(f, JSON.stringify(s)); log('connects.log', { ns, sess, cdp, by, pid: c.pid }); return s; }
+  if (cdp) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, cdp, view }; writeState(s); log('connects.log', { ns, sess, cdp, by, pid: c.pid }); return s; }
   if (prof && failDirs.includes(prof)) { log('failed.log', { ns, sess, by, prof }); return { refused: 'Chrome exited early (exit code: 1) — fake: this profile cannot start' }; }
   const lock = prof ? path.join(prof, 'SingletonLock.fake') : null;
   if (lock) { let h = null; try { h = Number(fs.readFileSync(lock, 'utf8')); } catch { } if (h && alive(h)) { log('refused.log', { ns, sess, by, prof }); return { refused: 'Chrome exited early (exit code: 21) ... Failed to create ' + prof + '/SingletonLock: File exists (17)' }; } }
-  const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: prof, view }; fs.writeFileSync(f, JSON.stringify(s));
+  const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: prof, view }; writeState(s);
   if (lock) fs.writeFileSync(lock, String(c.pid));
   log('launches.log', { ns, sess, by, profile: prof, pid: c.pid });
   return s;

@@ -96,6 +96,7 @@ const fs = require('fs'), path = require('path'), os = require('os'), { spawn } 
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default'; const sess = process.env.AGENT_BROWSER_SESSION || ns;
 const prof = process.env.AGENT_BROWSER_PROFILE || null;
 const f = path.join(st, ns + '__' + sess + '.json');
+const writeState = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // the fake's state by a temp file of its own process and a rename: no verb's read meets a torn file when two of its processes run at once (lane bl-loop-b, 主开发 r5152)
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
@@ -134,7 +135,7 @@ const daemon = (by) => {
   c.unref();
   for (let i = 0; i < 200 && !lockOf(dir); i++) pause(15);   // the real binary returns once its Chrome is up
   let chrome = chromeNow();
-  s = { pid: c.pid, dir, chrome }; fs.writeFileSync(f, JSON.stringify(s));
+  s = { pid: c.pid, dir, chrome }; writeState(s);
   log('launches.log', { ns, sess, by, dir, pid: c.pid, chrome, idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || null, config: process.env.AGENT_BROWSER_CONFIG || null });
   return s;
 };

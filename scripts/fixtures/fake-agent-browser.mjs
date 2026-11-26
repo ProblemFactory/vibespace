@@ -15,6 +15,7 @@ export function writeFakeAgentBrowser(binDir, stateDir) {
 const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
 const f = path.join(st, ns + '.json');
+const writeState = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // the fake's state by a temp file of its own process and a rename: no verb's read meets a torn file when two of its processes run at once (lane bl-loop-b, 主开发 r5152)
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
@@ -42,7 +43,7 @@ if (a === '--version') {
   console.log('agent-browser ' + MYV); process.exit(0);
 }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? (s.version || '0.38.1') : null } }); process.exit(0); }
-{ const s = read(); if (s && alive(s.pid) && s.version && s.version !== MYV) { process.stderr.write('⚠ Daemon version mismatch detected, restarting...\\n'); try { process.kill(s.pid, 'SIGKILL'); } catch { } const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); fs.appendFileSync(path.join(st, 'restarts.log'), JSON.stringify({ ns, from: s.version, to: MYV, oldPid: s.pid, pid: c.pid }) + '\\n'); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, pid: c.pid, version: MYV, restart: true }) + '\\n'); fs.writeFileSync(f, JSON.stringify({ ...s, pid: c.pid, version: MYV })); } }
+{ const s = read(); if (s && alive(s.pid) && s.version && s.version !== MYV) { process.stderr.write('⚠ Daemon version mismatch detected, restarting...\\n'); try { process.kill(s.pid, 'SIGKILL'); } catch { } const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); fs.appendFileSync(path.join(st, 'restarts.log'), JSON.stringify({ ns, from: s.version, to: MYV, oldPid: s.pid, pid: c.pid }) + '\\n'); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, pid: c.pid, version: MYV, restart: true }) + '\\n'); writeState({ ...s, pid: c.pid, version: MYV }); } }
 const tabNew = a === 'tab' && b === 'new';
 if (a === 'open' || tabNew) {
   const url = tabNew ? argv[2] : b;
@@ -51,10 +52,10 @@ if (a === 'open' || tabNew) {
     if (fs.existsSync(path.join(st, prefix.exe ? 'fail-cloak' : 'fail-plain'))) { process.stderr.write('fake: the browser did not start\\n'); process.exit(1); }
     const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref();
     s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, ...prefix, session: process.env.AGENT_BROWSER_SESSION || null, config: cfgOf(), version: MYV, tz: process.env.TZ || null };   // B-9584 U2b: the zone its browser would get
-    fs.writeFileSync(f, JSON.stringify(s));
+    writeState(s);
     fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n');
   }
-  const n = (Number((read() || {}).opens) || 0) + 1; const cur = read() || s; cur.opens = n; fs.writeFileSync(f, JSON.stringify(cur));
+  const n = (Number((read() || {}).opens) || 0) + 1; const cur = read() || s; cur.opens = n; writeState(cur);
   const targetId = 't-' + ns + '-' + n;
   fs.appendFileSync(path.join(st, 'opens.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, url, targetId, pinTab: prefix.pinTab, verb: tabNew ? 'tab new' : 'open' }) + '\\n');
   // the page's title: a suite names it per url in <state>/titles.json (lane browser-propose: the sign-in hint reads url + title)

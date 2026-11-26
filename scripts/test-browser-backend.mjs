@@ -85,6 +85,7 @@ exec '${process.execPath}' '${FAKE_JS}' "$@"
 fs.writeFileSync(FAKE_JS, `const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
 const f = path.join(st, ns + '.json');
+const writeState = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // the fake's state by a temp file of its own process and a rename: no verb's read meets a torn file when two of its processes run at once (lane bl-loop-b, 主开发 r5152)
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
@@ -121,10 +122,10 @@ if (a === 'open' || tabNew) {
     if (fs.existsSync(path.join(st, process.env.BROWSERBASE_API_KEY ? 'fail-fixture' : 'fail-plain'))) { process.stderr.write('fake: segmentation fault on start\\n'); process.exit(1); } // the rebuilt dialog: a launch that fails for no licence reason
     const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref();
     s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || null, ...prefix, vendor, session: process.env.AGENT_BROWSER_SESSION || null };
-    fs.writeFileSync(f, JSON.stringify(s));
+    writeState(s);
     fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n');
   }
-  const n = (Number((read() || {}).opens) || 0) + 1; const cur = read() || s; cur.opens = n; fs.writeFileSync(f, JSON.stringify(cur));
+  const n = (Number((read() || {}).opens) || 0) + 1; const cur = read() || s; cur.opens = n; writeState(cur);
   const targetId = 't-' + ns + '-' + n;
   fs.appendFileSync(path.join(st, 'opens.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, url, targetId, pinTab: prefix.pinTab, verb: tabNew ? 'tab new' : 'open' }) + '\\n');
   out({ success: true, data: { url, targetId } }); process.exit(0);
