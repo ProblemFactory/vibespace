@@ -1389,6 +1389,9 @@ export class ChatStatusBar {
     // squeezed beside the chips: on the two rows it is a ROW OF ITS OWN, the strip's first (chat.css wraps it whole); on the one row
     // it stands in its place and never gives way (the other marks do)
     if (!one) { const iFb = ordered.findIndex((c) => c.key === 'fallback'); if (iFb >= 0) { const [fb] = ordered.splice(iFb, 1); ordered.unshift(fb, mark('row-break-fallback', 'chat-status-rowbreak')); } }
+    // B-5279 (主开发 r4942's pictures: at 390 px the mark was cut to its icon and «…», both reasons alike): THE READS-OFF LINE — why this
+    // conversation waits for a person — is read whole like the fallback line: on the two rows a ROW OF ITS OWN, the strip's first
+    if (!one) { const iRo = ordered.findIndex((c) => c.key === 'readsoff'); if (iRo >= 0) { const [ro] = ordered.splice(iRo, 1); ordered.unshift(ro, mark('row-break-readsoff', 'chat-status-rowbreak')); } }
     else if (one && w > 0) {   // the ONE row (the artboard at 960): a hairline between the classes — before row 2, before «⚙ 对话设置»
       const iSet = ordered.findIndex((c) => c.key === 'settings');
       if (iSet > 0) ordered.splice(iSet, 0, mark('class-line-iii', 'chat-status-classline'));

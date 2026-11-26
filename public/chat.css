@@ -201,6 +201,12 @@
 .chat-status-bar.chat-status-two-rows > .chat-status-fallback.chat-status-fallback[data-chip] { flex: 1 1 100%; }
 .chat-status-bar > .chat-status-fallback.chat-status-fallback[data-chip] > span.chat-status-fb-words { white-space: normal; overflow: visible; text-overflow: clip; min-width: 0; flex: 0 1 auto; }
 .chat-status-bar > .chat-status-fallback.chat-status-fallback[data-chip] > button.chat-status-fb-press { white-space: normal; text-align: left; flex: 0 1 auto; max-width: 100%; }
+/* B-5279 (主开发 r4942's pictures): THE READS-OFF LINE says why this conversation waits for a person — read whole at every width like
+   the fallback line: on the ONE row it keeps its own width (the other marks cut inside themselves); on the TWO rows it is a row of its
+   own (chat-status-bar.js _arranged), its words wrapping rather than cut */
+.chat-status-bar > .chat-status-readsoff.chat-status-readsoff[data-chip] { flex: 0 0 auto; max-width: 100%; overflow: visible; }
+.chat-status-bar.chat-status-two-rows > .chat-status-readsoff.chat-status-readsoff[data-chip] { flex: 1 1 100%; justify-content: flex-start; }
+.chat-status-bar > .chat-status-readsoff.chat-status-readsoff[data-chip] > span.chat-status-words { white-space: normal; overflow: visible; text-overflow: clip; min-width: 0; flex: 0 1 auto; }
 /* a dim chip on the strip takes no extra margin (.chat-status-dim's 1 px is for dim words inside a line — on the strip it read as
    a 9 px gap; below the short forms' push to the row's end, which outranks it) */
 .chat-status-bar > .chat-status-dim[data-chip] { margin-left: 0; }

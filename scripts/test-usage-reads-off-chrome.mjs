@@ -9,11 +9,13 @@
 // en / zh × 1200 px (a desk's chat window) / 390 px (a phone: mobile emulation):
 //   ① THE MARK: drawn on the stopped conversation's strip in the language's words for its reason, the long sentence its title, its
 //      whole face the door (data-reads-off-door on the chip and on its words)
-//   ② WHOLE: the mark inside the bar, the bar inside the picture's frame, nothing behind «⋯»
+//   ② WHOLE: the mark inside the bar, the bar inside the picture's frame, nothing behind «⋯», and its WORDS SHOWN WHOLE (never cut to
+//      «…» — the first pictures at 390 px showed the icon and «…», both reasons alike); on the two rows the mark is a row of its own
 //   ③ THE PRESS (a real press through THE still door, scratch.mjs stillPresser: the mark stood still, the press landed on it): Off ⇒ the Settings window opens on the row's own search, the row
 //      (accounts.onDemandQuotaRefresh) drawn with its stored value, Off; held ⇒ the Settings window says the settings cannot be
 //      read (the page's own held words, no row drawn: the hub's copy could not be read, nothing is offered to change)
-//   RED CONTROL: the bar built without its door (the click's door line taken out, anchored) ⇒ a press opens nothing — ③ red.
+//   RED CONTROLS: the bar built without its door (the click's door line taken out, anchored) ⇒ a press opens nothing — ③ red;
+//   the bar without the mark's own row (its _arranged line taken out) ⇒ at 390 px its words are cut — ② red.
 // PICTURES: USAGE_READS_OFF_PNG_DIR (default: the scratch dir) readsoff-<off|held>-<lang>-<width>.png (the strip) and
 // …-pressed.png (the strip and what opened below it); each is ALSO printed into the suite's output as base64 lines
 // («PICTURE <name> <i>/<n> <chunk>»), so they come back wherever the whole output is kept (the test machine's heavy part).
@@ -102,7 +104,10 @@ window.mark = () => {
     door: !!chip && chip.getAttribute('data-reads-off-door') === '1', innerDoor: !!chip && !!chip.querySelector('[data-reads-off-door]'),
     inBar: !!r && r.left >= br.left - 0.5 && r.right <= br.right + 0.5 && r.top >= br.top - 0.5 && r.bottom <= br.bottom + 0.5,
     barInHost: br.left >= hr.left - 0.5 && br.right <= hr.right + 0.5, more: !!bar.querySelector('.chat-status-more'), folded: !!(chip && chip.closest('.chat-status-folded')),
-    mid: r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null, bar: { x: br.left, y: br.top, w: br.width, h: br.height }, barRows: Math.round(br.height) };
+    mid: r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null, bar: { x: br.left, y: br.top, w: br.width, h: br.height }, barRows: Math.round(br.height),
+    wordsWhole: (() => { const w = chip ? chip.querySelector('.chat-status-words') : null; return !!w && w.scrollWidth <= w.clientWidth + 1 && w.getBoundingClientRect().right <= r.right + 0.5; })(),
+    twoRows: bar.classList.contains('chat-status-two-rows'),
+    ownRow: !!r && [...bar.children].filter((c) => c !== chip && c.getAttribute('data-chip') && !c.classList.contains('chat-status-rowbreak') && !c.classList.contains('chat-status-classline') && c.getBoundingClientRect().width > 0).every((c) => { const q = c.getBoundingClientRect(); return q.top >= r.bottom - 0.5 || q.bottom <= r.top + 0.5; }) };
 };
 window.opened = () => {
   const win = document.getElementById('win'), wr = win.getBoundingClientRect();
@@ -122,6 +127,9 @@ await build('page');
 // THE RED COPY: the bar without its door — the click's door line taken out (anchored: the line exists once, or this throws)
 const noDoor = { name: 'no-door', setup(b) { b.onLoad({ filter: /chat-status-bar\.js$/ }, () => ({ contents: anchored(BAR_SRC, DOOR_LINE, '    const roDoor = null;   // RED CONTROL: the bar without its door\n', 'the bar without its door'), loader: 'js', resolveDir: path.dirname(BAR) })); } };
 await build('nodoor', [noDoor]);
+const OWN_ROW_LINE = "    if (!one) { const iRo = ordered.findIndex((c) => c.key === 'readsoff'); if (iRo >= 0) { const [ro] = ordered.splice(iRo, 1); ordered.unshift(ro, mark('row-break-readsoff', 'chat-status-rowbreak')); } }\n";
+const noOwnRow = { name: 'no-own-row', setup(b) { b.onLoad({ filter: /chat-status-bar\.js$/ }, () => ({ contents: anchored(BAR_SRC, OWN_ROW_LINE, '', 'the bar without the mark\'s own row'), loader: 'js', resolveDir: path.dirname(BAR) })); } };
+await build('noownrow', [noOwnRow]);
 
 // ── the page servers: one per reason (its GET /api/settings = that hub's router), the bundles, the real stylesheets ──
 const express = require(path.join(REPO, 'node_modules/express'));
@@ -131,12 +139,12 @@ async function pageServer(reason) {
   const web = express();
   web.get('/s0.css', (req, res) => res.type('css').send(CSS0));
   web.get('/s1.css', (req, res) => res.type('css').send(CSS1));
-  web.get('/:b.js', (req, res) => (/^(page|nodoor)$/.test(req.params.b) ? res.type('js').send(fs.readFileSync(path.join(ROOT, req.params.b + '.js'))) : res.status(404).end()));
+  web.get('/:b.js', (req, res) => (/^(page|nodoor|noownrow)$/.test(req.params.b) ? res.type('js').send(fs.readFileSync(path.join(ROOT, req.params.b + '.js'))) : res.status(404).end()));
   web.get('/api/settings', GET_SETTINGS[reason]);
   web.all(/^\/api\//, (req, res) => res.json({}));   // every other read of the page: nothing known (hides nothing)
   web.get('/', (req, res) => {
     const lang = req.query.lang === 'zh' ? 'zh' : 'en', phone = req.query.phone === '1', w = Number(req.query.w) || 1200, pad = phone ? 0 : 12;
-    const winW = Number(req.query.ww) || 760, winH = Number(req.query.wh) || 600, bundle = req.query.b === 'nodoor' ? 'nodoor' : 'page';
+    const winW = Number(req.query.ww) || 760, winH = Number(req.query.wh) || 600, bundle = ['nodoor', 'noownrow'].includes(req.query.b) ? req.query.b : 'page';
     res.type('html').send(`<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <script>try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}</script>
 <link rel="stylesheet" href="/s0.css"><link rel="stylesheet" href="/s1.css">
@@ -206,7 +214,7 @@ try {
         const m = await ev('window.mark()');
         ok(!!m && m.chip && m.shown && m.words === want[0] && m.title === want[1] && m.door && m.innerDoor && (lang === 'en' || want[0] !== WORDS[R.code][0]),
           `① ${at}: the mark is drawn in the language's words for its reason («${m && m.words}»), the long sentence its title, its whole face the door`, { m, want });
-        ok(!!m && m.inBar && m.barInHost && !m.more && !m.folded, `② ${at}: the mark inside the bar, the bar inside the frame, nothing behind «⋯»`, m);
+        ok(!!m && m.inBar && m.barInHost && !m.more && !m.folded && m.wordsWhole && (!m.twoRows || m.ownRow), `② ${at}: the mark inside the bar, the bar inside the frame, nothing behind «⋯», its words shown WHOLE${m && m.twoRows ? ' on a row of its own' : ''}`, m);
         const file = `readsoff-${R.tag}-${lang}-${S.w}`;
         ok(await shot(file + '.png', await frameOf('#host')), `${at}: the strip pictured whole (${file}.png)`);
         if (!m || !m.mid) continue;
@@ -233,6 +241,11 @@ try {
     const o = await ev('window.opened()');
     ok(landed && !!m && m.chip && !o.open && !o.row, 'RED CONTROL: the bar built without its door (the click\'s door line taken out) — a press that LANDED on the same mark opens nothing, so ③ goes red', { m: m && m.words, landed, o });
   } else ok(false, 'the red control\'s page booted');
+  // RED CONTROL — the bar without the mark's own row (its _arranged line taken out): at 390 px its words are cut again
+  if (await open('refresh-off', 'en', SIZES[1], 'noownrow')) {
+    const m = await ev('window.mark()');
+    ok(!!m && m.chip && m.twoRows && (!m.wordsWhole || !m.ownRow), 'RED CONTROL: the bar without the mark\'s own row (its _arranged line taken out) — at 390 px the words are cut or share a row, so ② goes red', m);
+  } else ok(false, 'the own-row red control\'s page booted');
   ok(pageErrors.length === 0, `no page error on the way (${pageErrors.length})`, pageErrors.slice(0, 3));
   console.log(`  pictures: ${PNG_DIR} (${pictures.length} PNGs)`);
 } finally { try { cdp.close(); } catch { } await done(); }
