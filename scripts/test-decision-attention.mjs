@@ -22,6 +22,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { createFakeJudge, createDecisionEngine, createWaits, createFactsWorld } from './lib/attention-facts-world.mjs';   // B-0f37 (主开发 r5208): this suite's harness, shared once
 
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,28 +50,10 @@ const ROOT = scratch('decision-attention');
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 let clock = Date.now();
 const now = () => clock;
-
-// ── the fake provider (OpenAI dialect): a record whose own part says URGENT needs you (0.86) ──
-const got = [];
-let inflight = 0, maxIn = 0;
-let holdAt = 0, holdP = null, heldNow = false;   // r2988: the call numbered `holdAt` is HELD on `holdP` (a promise) — its flight a state, never a 40 ms window
-let holdAll = null, heldCount = 0;   // r5012: while `holdAll` stands EVERY call waits on it (section ⑩'s window, placed — never load); heldCount = the calls sitting there
-const recordPart = (input) => String(input).split('———').pop();
-// the judge's request body is a ONE-SHOT stream (lane judge-one-shot-body) — a fake reads it like the wire does
-const bodyText = (init) => (typeof init.body === 'string' ? init.body : new Response(init.body).text());
-async function fakeFetch(url, opts) {
-  inflight++; maxIn = Math.max(maxIn, inflight);
-  const raw = await bodyText(opts), body = JSON.parse(raw);
-  got.push({ url, body, raw, auth: opts.headers.authorization });
-  if (holdP && got.length === holdAt) { heldNow = true; try { await holdP; } finally { heldNow = false; } }   // r4310: the hold's own fact
-  if (holdAll) { heldCount++; try { await holdAll; } finally { heldCount--; } }   // r5012: the whole window held
-  await sleep(40);
-  inflight--;
-  const hot = /URGENT/.test(recordPart(body.input));
-  const P = { needs_now: hot ? 0.86 : 0.22, asks_me: hot ? 0.9 : 0.1, deadline_money: hot ? 0.75 : 0.05, money: /Lunch|Contract/.test(recordPart(body.input)) ? 0.9 : 0.1 };   // money: the draft's leg (the two "needs" examples)
-  const answers = body.questions.map((q) => ({ type: 'predicate', name: q.name, probability: P[q.name] !== undefined ? P[q.name] : 0.3 }));
-  return { status: 200, ok: true, json: async () => ({ answers, usage: { input_tokens: Math.ceil(raw.length / 4) } }) };
-}
+// ── the fake provider (OpenAI dialect): a record whose own part says URGENT needs you (0.86) — scripts/lib/attention-facts-world.mjs
+// (B-0f37, 主开发 r5208: shared once with scripts/test-attention-facts.mjs); `J` holds its state: the calls, the holds
+const J = createFakeJudge({ sleep });
+const got = J.got, recordPart = J.recordPart, fakeFetch = J.fetch;
 
 // ── the world: six conversations of one account, the newest message from Ada inside the hour ──
 const TITLES = ['Invoice URGENT', 'Handed one', 'Lunch plans', 'Handed two URGENT', 'Contract URGENT', 'Newsletter'];
@@ -94,11 +77,7 @@ function worldModule(W) {
 const world = () => new Map(TITLES.map((title, i) => [`c${i}`, { id: `c${i}`, title, recs: [0, 1].map((k) => ({ vendorId: `c${i}-m${k}`, at: clock - (i + 2) * 60e3 + k * 1000, author: { id: 'u1', name: 'Ada', isSelf: false, isBot: false }, text: k ? `${title}: can you look at this today?` : 'earlier line' })) }]));
 const settings = { 'decision.attentionBlock': 'Invoices and contracts matter to me.' };
 let plug = { enabled: true, config: { attention: true } };
-function decisionEngine(dataDir) {
-  const d = DE.create({ dataDir, integrations: { resolveIntegration: () => ({ values: { provider: 'openai', apiKey: 'sk-dummy-SECRET-123456', model: '' }, source: 'user' }) }, fetchImpl: fakeFetch, now, log: quiet });
-  d.attachPlugin({ peek: () => plug, settings: () => plug.config || {} }); // lane plugin-settings-p0: the engine reads the settings rows
-  return d;
-}
+const decisionEngine = createDecisionEngine({ REPO, fetch: fakeFetch, now, quiet, plug: () => plug });   // the shared harness (B-0f37)
 async function engines(name, W, engineMod = ENG, fresh = true) {
   const dataDir = path.join(ROOT, name);
   if (fresh) {
@@ -116,24 +95,8 @@ async function engines(name, W, engineMod = ENG, fresh = true) {
   }
   return { eng, events, dataDir, decision };
 }
-// r4310 (主开发; one UTC sighting in a whole gate at load 30+, green alone): «3 of 7 rows judged» — the old idle() polled 200 × 20 ms,
-// a 4 s GUESS, and returned QUIETLY at its end. Under IO load each judgment's two durable journal writes (its reservation before the
-// call, its journal line after) made the drain outlast the guess, and the next leg read the half-done drain as the product's answer.
-// A WAIT IS ON THE FACT — the product's own idle() (nothing queued, flying or due) — with a GENEROUS bound whose expiry FAILS BY A
-// NAMED HARNESS LINE; every wait of this suite goes through `until`
-const SETTLE_MS = 120000;
-async function until(fact, what, { boundMs = SETTLE_MS, say = ok } = {}) {
-  const t0 = Date.now();
-  while (!fact()) {
-    if (Date.now() - t0 >= boundMs) { say(false, `HARNESS (r4310): ${typeof what === 'function' ? what() : what} — not within ${Math.round(boundMs / 1000)} s (the wait's bound, never the product's answer)`); return false; }
-    await sleep(20);
-  }
-  return true;
-}
-/** 主开发 r5135 law 1: a CONTROL is judged on the FACT that its plant was in force — `inForce` is the witness that the product read
- *  the plant inside the window; a plant never read is a NAMED SKIP (counted by the gate), never a red and never a green */
-const redIf = (inForce, witness, cond, words, detail) => { if (inForce) return ok(cond, words, detail); console.log(`  ⊘ SKIP: ${words} — NOT JUDGED: its plant was not read in the window (${witness}; 主开发 r5135 law 1)`); return true; };
-const idle = (eng, opts = {}) => until(() => eng.attention.idle(), () => { const s = eng.attention.status(); return `the attention queue settles (still ${s.queued} queued, ${s.inFlight} in flight)`; }, opts);
+// THE WAIT ON THE FACT (r4310: the product's own idle(), a generous bound whose expiry fails by a NAMED HARNESS line) — the shared harness
+const { until, idle } = createWaits({ ok, sleep });
 const rowOf = (d, id) => (d.conversations || []).find((c) => c.key === `im/${id}`);
 const tagOf = (d, id) => { const r = rowOf(d, id); return r ? FO.statusTag(r, clock) : undefined; };
 const factNamed = (bodies) => bodies.filter((g) => ['Handed one', 'Handed two'].some((t) => String(g.body.input).includes(t)));
@@ -142,7 +105,7 @@ console.log('① the scan: the first read never waits; 4 untagged rows ⇒ 4 cal
 const W = world();
 const A = await engines('main', W);
 A.events.length = 0;
-let openLast = null; holdAt = got.length + 4; holdP = new Promise((r) => { openLast = r; });   // r2988: the LAST row's call held
+let openLast = null; J.holdAt = got.length + 4; J.holdP = new Promise((r) => { openLast = r; });   // r2988: the LAST row's call held
 const t0 = Date.now();
 const d0 = A.eng.digest();
 const firstMs = Date.now() - t0;
@@ -151,15 +114,15 @@ ok(FACT.every((id) => (tagOf(d0, id) || {}).code === 'assigned'), 'FIXTURE: the 
 // r2988 (one UTC sighting in a whole gate, green alone): the poll in 1 ms sleeps had to land inside the last call's 40 ms flight, and
 // a loaded run's timers overshot it. The call is HELD now: the wait is on its state (bounded), and the reads' effect is read from
 // the queue's own size, at once
-await until(() => got.length === 4 && inflight > 0, 'the LAST row\'s call is in flight, HELD');   // r4310: on the fact, a named expiry
-const midFlight = got.length === 4 && inflight > 0;
+await until(() => got.length === 4 && J.inflight > 0, 'the LAST row\'s call is in flight, HELD');   // r4310: on the fact, a named expiry
+const midFlight = got.length === 4 && J.inflight > 0;
 A.eng.digest(); A.eng.digest();   // reads while the LAST row's call is in flight (dequeued, no verdict yet)
 const queuedAfter = A.eng.attention.status().queued;
-holdP = null; openLast();
+J.holdP = null; openLast();
 ok(await idle(A.eng), 'the queue drains');
 ok(midFlight && queuedAfter === 0 && got.length === 4, `two reads while a row's call is in flight queue it NOT again — one call per row (${got.length} calls, ${queuedAfter} queued by the reads; the heavy leg's reload caught the double call)`);
 ok(got.length === 4 && got.every((g) => g.body.questions.length === 8 && (String(g.body.input).match(/\[record\]/g) || []).length === 1 && /\/v1\/decisions$/.test(g.url)), 'exactly 4 calls — ONE record each, every one of the 8 rubric questions (needs_now + 7 clauses) in that call', got.map((g) => [g.body.questions.length, (String(g.body.input).match(/\[record\]/g) || []).length]));
-ok(maxIn === 3, `the queue keeps ≤ 3 calls in flight (measured ${maxIn})`);
+ok(J.maxIn === 3, `the queue keeps ≤ 3 calls in flight (measured ${J.maxIn})`);
 ok(got.every((g) => /^\n\n\[record\]\nfacts: addressed: no mention of the reader; kind: a group; 0 messages since the reader last read, \d+ min ago\ntitle: /.test(recordPart(g.body.input))) && A.eng.attention.status().scans === 1, 'lane decision-attention-facts: each record opens with its facts line (the backlog of a first walk is read by construction: 0 since the read line); the scan\'s facts built ONCE for the 4 rows', recordPart(got[0].body.input).slice(0, 200));
 ok(got.every((g) => String(g.body.input).includes('Invoices and contracts matter to me.') && String(g.body.input).includes('Rubric v2') && !g.raw.includes('SECRET') && g.auth === 'Bearer sk-dummy-SECRET-123456'), 'each input carries the rubric v2 and the person\'s block as written; the key rides the header only, never the body');
 
@@ -169,10 +132,10 @@ console.log('①b r4310 THE WAIT IS ON THE FACT: a drain that outlasts any guess
   const n0 = got.length;
   // the scan's FIRST call HELD (its number counted from here, whatever this late world's scan holds): while it is held the drain
   // cannot be idle — the drain outlasts any guess; the wait below is on the hold's OWN fact (the fake vendor sits on it)
-  let open1 = null; holdAt = n0 + 1; holdP = new Promise((r) => { open1 = r; });
+  let open1 = null; J.holdAt = n0 + 1; J.holdP = new Promise((r) => { open1 = r; });
   S.eng.digest();
   const w = idle(S.eng, { say: () => { } });
-  await until(() => heldNow, 'the held call sits on its hold');
+  await until(() => J.heldNow, 'the held call sits on its hold');
   const at = () => new Promise((r) => setImmediate(() => r('pending')));
   const whileHeld = await Promise.race([w.then(() => 'settled'), at()]);
   // the OLD shape, run while the call is held: a fixed count of polls that returns QUIETLY at its end (its count cut to one — the
@@ -182,9 +145,9 @@ console.log('①b r4310 THE WAIT IS ON THE FACT: a drain that outlasts any guess
   // THE BOUND's EXPIRY is NAMED: a second wait with a short bound, the call still held — it fails by its harness line
   const said = [];
   const expired = await idle(S.eng, { boundMs: 200, say: (c, n) => said.push({ c, n }) });
-  holdP = null; open1();
+  J.holdP = null; open1();
   const settled = await w;
-  ok(whileHeld === 'pending' && settled === true && got.length > n0 && !heldNow && S.eng.attention.idle(), '①b the wait on the fact holds while a call is HELD (the drain outlasts any guess) and ends when the drain does: the hold released, the queue idle', { whileHeld, settled, calls: got.length - n0 });
+  ok(whileHeld === 'pending' && settled === true && got.length > n0 && !J.heldNow && S.eng.attention.idle(), '①b the wait on the fact holds while a call is HELD (the drain outlasts any guess) and ends when the drain does: the hold released, the queue idle', { whileHeld, settled, calls: got.length - n0 });
   ok(oldEnded === false && busyAtOldEnd, '①b RED CONTROL (the old shape: a fixed count of polls, quiet at its end): with the call HELD it ENDS while the drain is still busy — the next leg would read a half-done drain', { oldEnded, busyAtOldEnd });
   ok(expired === false && said.length === 1 && said[0].c === false && /^HARNESS \(r4310\): the attention queue settles \(still \d+ queued, \d+ in flight\) — not within 0 s/.test(said[0].n), '①b the wait\'s own bound, when it expires, FAILS BY ITS NAMED HARNESS LINE (never a quiet return)', said);
   got.splice(n0);   // the block's own calls given back: every later leg reads the calls it always read
@@ -304,14 +267,14 @@ const attMut3 = MUT.write('src/server/channels-attention.js', editAnchor(attSrc,
 const engMut3 = MUT.load('src/server/channels-engine.js', editAnchor(engSrc, "require('./channels-attention.js')", `require(${JSON.stringify(attMut3)})`, "src/server/channels-engine.js"), 'mut-flying');
 {
   const C3 = await engines('control-flying', world(), engMut3);
-  let open3 = null; holdAt = got.length + 4; holdP = new Promise((r) => { open3 = r; });
+  let open3 = null; J.holdAt = got.length + 4; J.holdP = new Promise((r) => { open3 = r; });
   const g0 = got.length;
   C3.eng.digest();
-  await until(() => got.length === g0 + 4 && inflight > 0, 'the last row\'s call is in flight, HELD (the guard removed)');   // r4310
-  const held3 = got.length === g0 + 4 && inflight > 0;
+  await until(() => got.length === g0 + 4 && J.inflight > 0, 'the last row\'s call is in flight, HELD (the guard removed)');   // r4310
+  const held3 = got.length === g0 + 4 && J.inflight > 0;
   C3.eng.digest(); C3.eng.digest();
   const queued3 = C3.eng.attention.status().queued;
-  holdP = null; open3();
+  J.holdP = null; open3();
   await idle(C3.eng);
   ok(held3 && queued3 >= 1, `RED CONTROL (r2988: the in-flight guard removed, in a copy): with the last row's call HELD, two reads queue it AGAIN (${queued3} queued) — ①'s leg would read it`, { held3, queued3 });
 }
@@ -320,44 +283,9 @@ for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4 })) ok(x.p
 console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention-facts): @ / reply / DM / unread since the read line / one mail in 2 inboxes / an automated sender / mail trimmed — never a name');
 {
   // the world: a chat account (the owner = me1) + TWO mail accounts (caps.glyph 'mail') that both got the same notice 19 min apart
-  const T0 = clock;
-  const person = (id, name) => ({ id, name, isSelf: false, isBot: false });
-  const ME = { id: 'me1', name: 'Owner Person', isSelf: true, isBot: false };
-  const CHAT = new Map([
-    ['ops', { kind: 'group', title: 'Ops room', recs: Array.from({ length: 30 }, (_, i) => ({ vendorId: `ops-${i}`, at: T0 - (40 - i) * 60e3, author: person(i % 2 ? 'u2' : 'u3', i % 2 ? 'userR Q' : 'Kato Y'), text: `ops line ${i}: the quota for next week` })) }],
-    ['launch', { kind: 'group', title: 'Launch', recs: [{ vendorId: 'l-0', at: T0 - 9 * 60e3, author: person('u4', 'Will R'), text: 'this one should be @Owner Person', mentions: [{ kind: 'person', id: 'me1', name: 'Owner Person' }] }] }],
-    ['review', { kind: 'group', title: 'Review', recs: [{ vendorId: 'r-0', at: T0 - 20 * 60e3, author: ME, text: 'I pushed the fix' }, { vendorId: 'r-1', at: T0 - 8 * 60e3, author: person('u5', 'Ada K'), text: 'looks good, merging', replyTo: 'r-0' }] }],
-    ['dm', { kind: 'dm', title: 'Ada K', recs: [{ vendorId: 'd-0', at: T0 - 7 * 60e3, author: person('u5', 'Ada K'), text: 'lunch at noon?' }] }],
-  ]);
-  const NOTICE = ['A new setting for OAuth clients.', '', 'You are receiving this because you administer the suite.', '', ...Array.from({ length: 12 }, (_, i) => `Paragraph ${i}: the setting applies to agent clients; review them before the rollout.`), '', '© 2026 Example LLC, 1600 Example Parkway', 'You have received this mandatory update. Unsubscribe never applies.'].join('\n');
-  const WS = person('workspace-noreply@example.com', 'The Workspace Team');
-  const MAIL = {
-    mail1: new Map([['n1', { kind: 'thread', title: '[Action Required] Mark AI agent OAuth clients', recs: [{ vendorId: 'n1-0', at: T0 - 30 * 60e3, author: WS, text: NOTICE, facts: [{ k: 'automated', v: 'notification' }] }] }],
-      ['q1', { kind: 'thread', title: 'Re: licensing', recs: [{ vendorId: 'q1-0', at: T0 - 6 * 60e3, author: person('ann@example.com', 'Ann L'), text: 'Signed copy by Friday.\n\n-- \nAnn L | Partnerships\n\nOn Mon, Oct 12, 2026 at 9:14 AM Dana <\ndana@example.com> wrote:\n> Can you confirm the licensing terms?\n> QUOTED-TAIL' }] }]]),
-    mail2: new Map([['n2', { kind: 'thread', title: 'Re: [Action Required] Mark AI agent OAuth clients', recs: [{ vendorId: 'n2-0', at: T0 - 11 * 60e3, author: WS, text: NOTICE }] }]]),
-  };
-  const mod = (kind, glyph) => ({
-    kind,
-    caps: { ...fake.fakePoll.caps, receive: 'poll', attachments: 'fetch', olderHistory: 'page', budget: { unit: 'request', default: 100000, settingKey: null, metered: true }, ...(glyph ? { glyph, facts: ['automated'] } : {}) },
-    create(record) {
-      const Wd = kind === 'chatx' ? CHAT : MAIL[record.id];
-      const rec = (id, m) => REC.makeRecord({ adapterId: record.id, convId: id, vendorId: m.vendorId, at: m.at, author: m.author, text: m.text, attachments: [], threadKey: id, raw: {}, ...(m.mentions ? { mentions: m.mentions } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}), ...(m.facts ? { facts: m.facts } : {}) });
-      return {
-        selfId: () => (kind === 'chatx' ? 'me1' : null),
-        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
-        async listConversations() { return { conversations: [...Wd.entries()].map(([id, x]) => REC.makeConversation({ id, title: x.title, kind: x.kind, lastAt: x.recs[x.recs.length - 1].at })), cursor: null, complete: true }; },
-        async convCaps() { return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
-        async history(id) { const x = Wd.get(id); return { records: x.recs.map((m) => rec(id, m)), anchor: x.recs[x.recs.length - 1].vendorId, reachedAnchor: true, complete: true }; },
-        async older() { return { records: [], exhausted: true }; },
-      };
-    },
-  });
-  const acct = (id, kind, label) => ({ id, kind, label, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: true, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null });
-  const registry = CH.createChannelRegistry();
-  registry.register(mod('chatx', null));
-  registry.register(mod('mailx', 'mail'));
-  // the at-you / replied / direct facts claim those rows on the first screen: off here, so the judge sees them (preset "judge only")
-  for (const r of ['at-you', 'replied', 'direct']) settings[`channels.attention.rule.${r}`] = false;
+  // the world: a chat account (the owner = me1) + TWO mail accounts (caps.glyph 'mail') that both got the same notice 19 min apart —
+  // its fixtures, tables and factsWorld are the shared harness's (scripts/lib/attention-facts-world.mjs, B-0f37 r5208)
+  const { CHAT, TITLES10, factsOf, factsTable, exactOnce, asksOf, asksExact, missingLine, factsWorld } = createFactsWorld({ REPO, ROOT, T0: clock, J, now, quiet, settings, setPlug: (p) => { plug = p; }, decisionEngine, until, idle });
   // r5012 (主开发) — THE COUNT IS EXACT, OVER EACH WORLD's WHOLE LIFE (the thing counted is the paid judge's calls, and the judge's
   // ASKS: a memo answer is an ask too — a row asked twice with unchanged facts costs no call, so the asks are counted beside the calls).
   // Each world is fresh (its own data folder and decision engine), so every call after n0, taken BEFORE its first pass, is its own.
@@ -368,53 +296,11 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
   //     leg's digest — nothing is queued before it, so every row is judged in ONE scan over the whole index (the facts lines read)
   //   · THE EARLY WORLD (the sighting's road, every run): the vendor holds every call while `holdAll` stands; the leg waits on the
   //     FACT that the chat pass's four rows are queued and its first calls sit on the hold; the hold opens after the leg's digest.
-  //     Its scan began before the mail passes landed: B-0f37 (lane bl-loop-a, 主开发 r5024 / r5035, the find of this section) — the
-  //     rows the mail passes queued meanwhile are judged with the facts of THEIR OWN moment (the engine's duplicate-inbox map kept
-  //     current by the index's touch hook, built once at the first row's need), so its facts lines ARE read: the two notices carry
-  //     «the same message reached 2 of the reader's inboxes»; REDS: the map kept from its first build (the release's scan facts:
-  //     the notices without it) and a map walked again at every touch (built more than once). Its COUNT is read, and the release's
-  //     count base, red.
+  //     Its scan began before the mail passes landed; its late rows' facts lines are read by scripts/test-attention-facts.mjs (B-0f37's
+  //     cure: each row judged with the facts of its own moment); its COUNT is read here, and the release's count base, red.
   // WHICH ROW MAY BE ASKED TWICE, AND WHY: only Ops room — the mark moves its read line, so its facts truly change between two asks.
   // In both worlds it is asked ONCE, after the mark (the content world asks nothing before it; the early world holds the three chat
   // rows ahead of it, and the drain asks a row as it is now): each world's exact count is 7 asks, 7 calls, each row once.
-  const TITLES10 = ['Ops room', 'Launch', 'Review', 'Ada K', 'Re: licensing', '[Action Required] Mark AI agent OAuth clients', 'Re: [Action Required] Mark AI agent OAuth clients'];
-  const factsOf = (g) => { const m = /\[record\]\nfacts: ([^\n]*)\n/.exec(String(g && g.body.input)); return m ? m[1] : null; };
-  /** the world's calls by row: each title's calls, the rows never judged (by name), each row's facts from its LAST call (as it is now) */
-  const factsTable = (calls) => {
-    const per = Object.fromEntries(TITLES10.map((t) => [t, calls.filter((g) => recordPart(g.body.input).includes(`title: ${t}\n`))]));
-    const missing = TITLES10.filter((t) => !per[t].length);
-    const last = (t) => (per[t].length ? per[t][per[t].length - 1] : null);
-    return { per, missing, last, F: Object.fromEntries(TITLES10.map((t) => [t, factsOf(last(t)) || ''])), counts: Object.fromEntries(TITLES10.map((t) => [t, per[t].length])) };
-  };
-  const exactOnce = (T, calls) => calls.length === TITLES10.length && TITLES10.every((t) => T.counts[t] === 1);
-  const asksOf = (eng) => { const st = eng.attention.status(); return { calls: st.calls, memo: st.memo, refused: st.refused }; };
-  const asksExact = (a) => a.calls === TITLES10.length && a.memo === 0 && a.refused === 0;
-  const missingLine = (T) => (T.missing.length ? T.missing.map((t) => `the row «${t}» was never judged`).join('; ') : 'none missing');
-  const factsWorld = async (EM, tag, { early = false, walk = null, hold = null } = {}) => {   // walk/hold: B-0f37 follow's placed map walks
-    const dataDir = path.join(ROOT, tag);
-    fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
-    fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acct('chat', 'chatx', 'Team chat'), acct('mail1', 'mailx', 'Work mail'), acct('mail2', 'mailx', 'Old mail')] }));
-    const decision = decisionEngine(dataDir);
-    const eng = EM.create({ dataDir, registry, env: {}, now, broadcast: () => { }, serverSetting: (k) => settings[k], liveSessions: () => [], deliver: null, log: quiet, decisionEngine: decision, ...(walk ? { walk } : {}) });
-    if (hold) hold.eng = eng;
-    const n0 = got.length;
-    let openAll = null, placed = false, nBase = n0;
-    if (early) holdAll = new Promise((r) => { openAll = r; });
-    else plug = { enabled: true, config: { attention: false } };   // the content world: nothing queued before the leg's digest
-    try {
-      await eng.pass('chat', { force: true });
-      if (early) placed = await until(() => { const st = eng.attention.status(); return heldCount > 0 && heldCount === st.inFlight && st.inFlight + st.queued === 4; },
-        () => { const st = eng.attention.status(); return `${tag}: the chat pass's own four rows queued, its first calls sitting on the hold (${heldCount} held, ${st.inFlight} in flight, ${st.queued} queued)`; });
-      for (const a of ['mail1', 'mail2']) await eng.pass(a, { force: true });
-      await eng.markRead('chat', 'ops', CHAT.get('ops').recs[9].at);   // the owner read up to line 9 ⇒ 20 unread
-      if (!early) { placed = got.length === n0 && eng.attention.status().queued === 0 && eng.attention.status().inFlight === 0; plug = { enabled: true, config: { attention: true } }; }
-      nBase = got.length;   // ← where the release took its count base: after the passes and the mark
-      eng.digest();
-    } finally { if (early) { holdAll = null; openAll(); } plug = { enabled: true, config: { attention: true } }; }
-    await idle(eng);
-    const mine = got.slice(n0);
-    return { eng, dataDir, placed, mine, afterBase: got.length - nBase, asks: asksOf(eng), T: factsTable(mine) };
-  };
   const W = await factsWorld(ENG, 'facts');
   const eng = W.eng, dataDir = W.dataDir, mine = W.mine, T = W.T, F = T.F;
   const judged7 = exactOnce(T, mine) && asksExact(W.asks) && T.missing.length === 0;
@@ -425,25 +311,6 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
     const E = await factsWorld(ENG, 'facts-early', { early: true });
     ok(E.placed && exactOnce(E.T, E.mine) && asksExact(E.asks), `THE COUNT, EXACT over the EARLY world (the sighting's road, placed): ${TITLES10.length} asks, ${TITLES10.length} calls, each row once — the chat pass's three rows judged on the drain's own kick (held), Ops room behind them, asked once after the mark (${E.mine.length} calls; asks ${JSON.stringify(E.asks)})`, E.T.counts);
     ok(E.afterBase < TITLES10.length, `RED (the release's count base, after the passes and the mark, in the early world): it counts ${E.afterBase} of the world's ${E.mine.length} calls — the held chat calls are outside it, EVERY run`, { afterBase: E.afterBase, all: E.mine.length });
-    // B-0f37: THE LATE ROWS — queued by the mail passes while the scan was HELD — judged with the facts of their own moment
-    const late = (W) => { const n = TITLES10.filter((t) => /Action Required/.test(t)).map((t) => W.T.last(t)).filter(Boolean); return { n, two: n.length === 2 && n.every((g) => (factsOf(g) || '').includes('kind: an email thread') && (factsOf(g) || '').includes('the same message reached 2 of the reader\'s inboxes')), lines: n.map((g) => factsOf(g)) }; };
-    const EL = late(E), est = E.eng.attentionFacts.stats();
-    ok(E.placed && EL.two && (factsOf(E.T.last('Re: licensing')) || '').includes('kind: an email thread'), `B-0f37 THE LATE ROWS of the early world: the two notices the mail passes queued while the scan was held are judged WITH «the same message reached 2 of the reader's inboxes», as email threads (${EL.lines.join(' | ')})`, EL.lines);
-    ok(est.builds === 1 && est.walks === 1 && est.kept && est.applied > 0 && E.eng.attention.status().scans === 1, `B-0f37: the duplicate-inbox map built ONCE (at the first row's need, before the mail passes) and kept current by ${est.applied} row touch(es), never walked again; the scan took its facts once (scans ${E.eng.attention.status().scans})`, est);
-    const MB = mutantCopies('decision-attention-b0f37', REPO);
-    const ESRC0 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-    const HOOK = "      if (job) apply(job.m, k);\n      if (served) apply(served, k);\n";
-    const WHOLE = "      if (key === null || key === undefined) { if (job) job.again = true; if (served) stale = true; return; }\n";
-    ok(ESRC0.split(HOOK).length === 2 && ESRC0.split(WHOLE).length === 2, 'control setup: the map\'s touch hook (a row\'s work, a whole touch) is present once');
-    // RED: the release's kept facts — the map kept from its first build, never touched (the scan's first moment)
-    const Kept = await factsWorld(MB.load('src/server/channels-engine.js', editAnchor(ESRC0, HOOK, "      /* RED: the map kept from its first build — the release's scan facts */\n", 'src/server/channels-engine.js'), 'kept-facts'), 'facts-kept', { early: true });
-    const KL = late(Kept), ks = Kept.eng.attentionFacts.stats();
-    redIf(ks.builds === 1 && ks.rows < est.rows, `the copy's map was built once and never took the late rows: ${ks.rows} rows against the cure's ${est.rows}`, Kept.placed && KL.n.length === 2 && !KL.two && KL.lines.every((l) => !(l || '').includes('reached 2')), `RED (the release's kept facts: the map from the scan's first moment, in a copy): the late notices are judged WITHOUT «the same message reached 2 of the reader's inboxes» (${KL.lines.join(' | ')})`, KL.lines);
-    // RED: a map walked again at EVERY touch (the rebuild the cure must not be — on a hub of mostly mail rows, a walk of them all per poll)
-    const Every = await factsWorld(MB.load('src/server/channels-engine.js', editAnchor(ESRC0, WHOLE, "      { if (job) job.again = true; if (served) stale = true; if (key === null || key === undefined) return; }   /* RED: every touch walks it again */\n", 'src/server/channels-engine.js'), 'every-touch'), 'facts-every', { early: true });
-    const evs = Every.eng.attentionFacts.stats();
-    redIf(evs.applied > 0, `a row's touch reached the copy's hook while its map stood: applied ${evs.applied}`, Every.placed && late(Every).two && evs.builds > 1, `RED (a copy that walks the map again at every touch): the facts are right but it is BUILT ${evs.builds} times in this world — the leg above (once) is red on it`, evs);
-    for (const x of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 2, label: 'B-0f37 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   }
   const notices = TITLES10.filter((t) => /Action Required/.test(t)).map((t) => T.last(t)).filter(Boolean);
   ok(/^addressed: no mention of the reader; kind: a group; .*20 messages since the reader last read, 3\d min ago$/.test(F['Ops room']), '"Ops room": no mention, a group, 20 messages since the read line (markRead at line 9)', F['Ops room'] || missingLine(T));
@@ -462,84 +329,6 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
   if (judged7) ok(leaked.length === 0, 'CENSUS: no facts line names a person, an account, an id, an address or a title (16 needles over 7 lines)', leaked);
   else NOT_READ('no facts line names a person, an account, an id, an address or a title');
   ok(eng.attention.status().scans === 1, `the scan's facts (the duplicate-inbox map over the live index) were built ONCE for the 7 rows (${eng.attention.status().scans})`);
-  // B-0f37: the content world's map — built once at the first row's need; a ROW's touch is one row's work (no build); a WHOLE-map
-  // touch walks it again once, at the next row's need
-  {
-    const s0 = eng.attentionFacts.stats();
-    await eng.store.index.update(() => { Object.assign(eng.store.index.entry('mail1', 'q1'), { unread: 3 }); });
-    await eng.attentionFacts.ready();
-    const s1 = eng.attentionFacts.stats();
-    await eng.store.index.update((x) => { void Object.keys(x.conversations).length; });   // the update reaches ix.conversations: a whole-map touch
-    const kept2 = eng.attentionFacts.stats().kept;
-    await eng.attentionFacts.ready();
-    const s2 = eng.attentionFacts.stats();
-    ok(s0.builds === 1 && s0.kept && s1.builds === 1 && s1.applied === s0.applied + 1 && !kept2 && s2.builds === 2 && s2.kept, `B-0f37: the content world's map was built once; a row's touch is ONE row's work (builds ${s1.builds}, applied ${s0.applied} → ${s1.applied}); a whole-map touch makes it stale and the next need walks it again ONCE (builds ${s2.builds})`, { s0, s1, s2 });
-  }
-  // B-0f37 follow (主开发 r5106 (1)): THE JUDGE SWITCHED OFF DROPS THE MAP — a read while it is off (its note) leaves no map and no
-  // work at a touch; switched on, the next need builds it again
-  {
-    const d0 = eng.attentionFacts.stats();
-    plug = { enabled: true, config: { attention: false } };
-    eng.digest();
-    const d1 = eng.attentionFacts.stats();
-    await eng.store.index.update(() => { Object.assign(eng.store.index.entry('mail1', 'q1'), { unread: 4 }); });
-    const d2 = eng.attentionFacts.stats();
-    plug = { enabled: true, config: { attention: true } };
-    const back = await eng.attentionFacts.ready();
-    const d3 = eng.attentionFacts.stats();
-    ok(d0.kept && !d1.kept && d1.rows === 0 && d1.dropped === d0.dropped + 1 && d2.applied === d1.applied && back === 'whole' && d3.builds === d1.builds + 1 && d3.kept && d3.rows > 0, `B-0f37 follow: the judge switched OFF drops the map at its next read (kept ${d1.kept}, rows ${d1.rows}); a touch then does no work (applied ${d1.applied} → ${d2.applied}); switched on, the next need builds it again (builds ${d1.builds} → ${d3.builds}, ${d3.rows} rows)`, { d0, d1, d2, d3, back });
-  }
-  {
-    const MF = mutantCopies('decision-attention-b0f37-follow', REPO);
-    const ESRC1 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-    const notices = (W, T2) => TITLES10.filter((t) => /Action Required/.test(t)).map((t) => (T2 || W.T).last(t)).filter(Boolean).map((g) => factsOf(g) || '');
-    // (2) A HALF MAP IS NEVER SERVED AS CURRENT: the engine's walk seam — one row a slice, a WHOLE-map touch placed between two
-    // slices of every walk of the map while the seam stands (never load): each walk is cut, the ladder's bound is met
-    const halfWorld = async (EM, tag) => {
-      const hold = { eng: null, seam: true };
-      const onSlice = async (i, what) => { if (hold.seam && what === 'attention-inbox' && hold.eng) await hold.eng.store.index.update((x) => { void Object.keys(x.conversations).length; }); };
-      const W = await factsWorld(EM, tag, { walk: { sliceMs: 0, onSlice }, hold });
-      const during = { calls: W.mine.length, st: W.eng.attentionFacts.stats(), half: W.eng.attention.status().factsHalf };
-      hold.seam = false;
-      const n1 = got.length;
-      W.eng.digest();
-      await idle(W.eng);
-      const after = got.slice(n1);
-      return { W, during, after, T2: factsTable(after), st2: W.eng.attentionFacts.stats() };
-    };
-    const H = await halfWorld(ENG, 'facts-half');
-    ok(H.W.placed && H.during.calls === 0 && H.during.half >= TITLES10.length && H.during.st.landedAsItStood >= 1 && !H.during.st.kept, `B-0f37 follow (r5106 (2)): with a whole-map touch in EVERY walk the map is never served as current — it lands STALE past the bound (${H.during.st.landedAsItStood} time(s), ${H.during.st.walks} walks), and the ${H.during.half} rows that waited on it are NOT judged now (0 calls, no paid call)`, H.during);
-    ok(exactOnce(H.T2, H.after) && notices(H.W, H.T2).length === 2 && notices(H.W, H.T2).every((l) => l.includes('the same message reached 2 of the reader\'s inboxes')) && H.st2.kept, `B-0f37 follow: the seam lifted, the next read judges each row ONCE with a whole map — the notices WITH the fact (${notices(H.W, H.T2).join(' | ')})`, { st2: H.st2, n: H.after.length });
-    const LAND = "        if (job === j) { served = j.m; stale = !full; job = null; }\n        if (full) { failedAt = null; failSaid = false; }\n        return full ? 'whole' : 'half';\n";
-    const VIEW = "      const mail = attnMailIds().has(en.adapterId);\n";
-    const BACK = "      if (failedAt !== null && now() - failedAt < ATTN_BACKOFF_MS) return Promise.resolve('none');\n";
-    ok([LAND, VIEW, BACK].every((x) => ESRC1.split(x).length === 2), 'control setup: the map\'s landing, the view\'s mail and the back-off are present once each');
-    const HR = await halfWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, LAND, "        if (job === j) { served = j.m; stale = false; job = null; }\n        if (full) { failedAt = null; failSaid = false; }\n        return 'whole';   /* RED: df8fcedfb's landing — the half map served as current */\n", 'src/server/channels-engine.js'), 'half-current'), 'facts-half-red');
-    const hrn = notices(HR.W);
-    redIf(HR.during.st.landedAsItStood >= 1, `the seam's whole touches cut the copy's walks to the ladder's bound: ${HR.during.st.landedAsItStood} landing(s) as it stood, ${HR.during.st.walks} walks`, HR.during.calls > 0 && hrn.length >= 1 && hrn.some((l) => !l.includes('reached 2')), `RED (df8fcedfb's landing, in a copy): the half map is served as current — ${HR.during.calls} rows judged while the seam stood, a notice WITHOUT the fact (${hrn.join(' | ')})`, HR.during);
-    // (3) A FAILED BUILD: a throw placed in the map's walk (the same seam) — no map is served; each row is judged with its mail read
-    // from the ACCOUNTS and no inbox count; said once; tried again only after the back-off (the suite's clock moved past it)
-    const failWorld = async (EM, tag) => {
-      const hold = { eng: null, seam: true };
-      const onSlice = async (i, what) => { if (hold.seam && what === 'attention-inbox') throw new Error('a placed throw of the map build'); };
-      const W = await factsWorld(EM, tag, { walk: { sliceMs: 0, onSlice }, hold });
-      const st = W.eng.attentionFacts.stats();
-      hold.seam = false;
-      const c0 = clock; clock += 31e3;   // past ATTN_BACKOFF_MS (30 s)
-      let back; try { back = await W.eng.attentionFacts.ready(); } finally { clock = c0; }
-      return { W, st, back, st2: W.eng.attentionFacts.stats() };
-    };
-    const F = await failWorld(ENG, 'facts-fail');
-    const fn = notices(F.W);
-    ok(F.W.placed && exactOnce(F.W.T, F.W.mine) && F.st.failed === 1 && F.st.builds === 1 && fn.length === 2 && fn.every((l) => l.includes('kind: an email thread') && !l.includes('reached 2')), `B-0f37 follow (r5106 (3)): a FAILED build serves no map — the ${F.W.mine.length} rows are judged once each, the notices AS EMAIL THREADS (mail read from the accounts) with no inbox count, and the build is tried ONCE in the back-off (failed ${F.st.failed}, builds ${F.st.builds})`, { st: F.st, fn });
-    ok(F.back === 'whole' && F.st2.builds === 2 && F.st2.kept && F.st2.failed === 1, `B-0f37 follow: past the back-off the next need builds it again, whole (builds ${F.st2.builds})`, F.st2);
-    const FR = await failWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, VIEW, "      const mail = !!attnInbox.whole() && attnInbox.whole().mailIds.has(en.adapterId);   /* RED: df8fcedfb's view — mail read from the map */\n", 'src/server/channels-engine.js'), 'mail-from-map'), 'facts-fail-red');
-    const frn = notices(FR.W);
-    redIf(FR.st.failed >= 1, `the placed throw failed the copy's build: failed ${FR.st.failed}`, frn.length === 2 && frn.every((l) => !l.includes('kind: an email thread')), `RED (df8fcedfb's view, in a copy): on a failed build the mail rows are described to the paid judge as NOT mail (${frn.join(' | ')})`, frn);
-    const FB = await failWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, BACK, "      /* RED: no back-off — every judged row walks the map again */\n", 'src/server/channels-engine.js'), 'no-backoff'), 'facts-fail-nobackoff');
-    redIf(FB.st.failed >= 1, `the placed throw failed the copy's build: failed ${FB.st.failed}`, FB.st.builds > 1, `RED (no back-off, in a copy): every judged row starts another walk of the failed map (builds ${FB.st.builds}) — the leg above (once) is red on it`, FB.st);
-    for (const x of copiesCensus(MF.files, MF.dir, REPO, { minCopies: 3, label: 'B-0f37 follow ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
-  }
   ok(mine.length > 0 && mine.every((g) => g.body.questions.length === 8 && String(g.body.input).includes('Rubric v2 — ') && !String(g.body.input).includes(M.RUBRIC.clauses[0].instructions)), 'with the person\'s block: 8 questions; the [rubric] part is one line — no question\'s instructions ride twice');
   const journal = fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.use === 'attention' && r.outcome === 'ok');
   ok(journal.length === 7 && journal.every((r) => r.p === 0.22 && r.rubric === 2), 'each journal line carries p (needs_now, 2 decimals) and rubric 2 — the next quality check needs no memo join', journal.map((r) => r.p));
