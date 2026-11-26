@@ -893,7 +893,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     // PAID OVERAGE (D3c) is no SCRAP any more (B-87fd (1)): it stands in its own tier above, after the credits members (r4711)
     // RESERVE FLOOR (D2). Only a MEASURED weekly reading may bar a member:
     // an unknown one is ignorance, and ignorance is never a claim.
-    if (floor > 0 && wk != null && wk < floor) { reserveBlocked.push({ id: m.id, name: m.name, remaining: wk }); nearRanked.push({ ...row, barredWhy: 'reserve-floor' }); continue; }
+    // r4903 (主开发's ruling, by the owner's word): QUOTA HELD IN RESERVE IS USED BEFORE DOLLARS — leaving a paying member, and placing a
+    // new conversation while the default pays, pass no floor (the settle bar and «never in a turn» still bind a MOVE); elsewhere as it is
+    if (floor > 0 && wk != null && wk < floor && !curPayingTakes) { reserveBlocked.push({ id: m.id, name: m.name, remaining: wk }); nearRanked.push({ ...row, barredWhy: 'reserve-floor' }); continue; }
     ranked.push(row);
   }
   // THE ROSTER (R2): a member the pool LISTS that the candidate list lacks — no credential the pooled CLI can read (a
@@ -1010,6 +1012,15 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const toPrepaid = (r) => ((warm && warm.inTurn)
     ? none('warm-soft-defer', { agoSec: warm.agoSec, ttlSec: warm.ttlSec, wouldTo: r.id, wouldToName: r.name, band: 'soft', fromRemaining: cur.known ? cur.remaining : null, softBucket: null, paying: true, ...bucketDetail(curBr) })
     : { to: r.id, toName: r.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: r.remaining, reason: 'overage', band: 'soft', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(r.id) < priority.length ? prioRank(r.id) + 1 : null } : {}) });
+  // r4903 M2 (主开发's ruling): A NEW CONVERSATION HAS NOTHING TO LOSE — the settle bar is a bar for moving a RUNNING conversation (a
+  // cache and a turn to lose). A new one is never placed on a paying default while an ordinary or a credits member can serve now,
+  // whichever band: the ordinary members first (one that settles, else the most headroom read, as the hard band picks), then a usage-
+  // credits member that holds quota
+  if (placing && curPayingTakes && !hardDead) {
+    const known = ranked.filter((r) => r.known);
+    const pick = ranked.find((r) => r.settleOk) || (known.length ? known.reduce((x, y) => (y.eff > x.eff ? y : x)) : ranked[0]) || creditsRanked.find((r) => !r.dead) || null;
+    if (pick) return { to: pick.id, toName: pick.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: pick.remaining, reason: 'overage', band: 'soft', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(pick.id) < priority.length ? prioRank(pick.id) + 1 : null } : {}) };
+  }
   if (!pool.length) {
     if (prepaid) return toPrepaid(prepaid);
     // B-87fd (1): a member billing paid overage with NOWHERE to go stays — the release's own answer for it (it read healthy there):
@@ -1084,7 +1095,8 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   const notBetterDetail = () => (!usingScraps && !usingCredits && !usingPaying && ranked.length ? { notBetter: ranked.map((r) => ({ id: r.id, name: r.name, remaining: r.known ? Math.round(r.remaining) : null })) } : {});
   const scrapsInfo = (pick) => {
     if (usingCredits) return { toCredits: { id: pick.id, name: pick.name, dead: !!pick.dead } };
-    if (usingPaying) return overage && overage.has(pick.id) ? { toOverage: { id: pick.id, name: pick.name } } : {};   // B-87fd (1): the bar NAMED only with the setting on
+    // B-87fd (1): the bar NAMED only with the setting on; the landing MARKED always (r4903 M3: a paying landing is no alternative to a prepaid reset credit)
+    if (usingPaying) return { ...(overage && overage.has(pick.id) ? { toOverage: { id: pick.id, name: pick.name } } : {}), toPaying: { id: pick.id, name: pick.name } };
     if (!usingScraps) return {};
     if (pick.barredWhy === 'overage') return { toOverage: { id: pick.id, name: pick.name } };
     if (pick.barredWhy === 'reserve-floor') return { toReserve: { id: pick.id, name: pick.name, remaining: pick.weeklyRemaining ?? null } };

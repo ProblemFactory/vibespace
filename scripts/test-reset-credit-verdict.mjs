@@ -177,7 +177,7 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
     && /identity: \(av && av\.identity\) \|\| null/.test(eng) && /spendGuard\.release\(\{ hold: t\.hold \}\)/.test(eng));
   ok('ASK files ONE For-you action item with an i18n structure and a reset-credit action payload',
     /if \(mode === 'ask'\) \{[\s\S]{0,300}if \(session\._resetCreditAsked === eventKey\) return 'skipped';\s*\n\s*session\._resetCreditAsked = eventKey;[\s\S]{0,900}todos\.add\(sessionKey, \{[\s\S]{0,600}kind: 'action'[\s\S]{0,300}i18n: \{ text: \{ key: i18nKey\('Use a stored reset credit on \{account\}\?'\)[\s\S]{0,200}action: \{ type: 'reset-credit', sessionId: session\._webuiId/.test(eng));
-  ok('the pool alternative never counts a pay-per-use (usage credits) member', /return !!\(d && d\.to && !d\.toCredits\);/.test(eng));
+  ok('the pool alternative never counts a pay-per-use (usage credits) member, nor a member billing paid overage (B-87fd (1), 主开发 r4903)', /return !!\(d && d\.to && !d\.toCredits && !d\.toPaying\);/.test(eng));
   ok('the pool DEFAULT keeps the proactive warm hold but computes NO inTurn (the soft hold is dropped, §8 ③)',
     /const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);\s*\n\s*if \(!w\.warm\) continue;/.test(eng) // lane cache-warmth-tiles: the facts' ONE producer
     && !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
