@@ -405,11 +405,31 @@ console.log('④ RED CONTROL');
     ok(!!err && A.status === 500 && A.body.code === 'prices_not_saved' && /EIO/.test(A.body.error) && !A.body.error.includes(d) && !A.body.error.includes('/') && B.status === 400 && B.body.code === (rateErr && rateErr.code),
       '⑥ B-574d (r5013 (b)): a prices save the DISK refused answers as the server\'s failure (500, prices_not_saved) and its words carry no path of the server; a refused rate stays the client\'s (400, its code)', { A, B: B.status });
     const file8 = path.join(REPO, 'src/usage-history.js'), m8 = new Module(file8, null); m8.filename = file8; m8.paths = Module._nodeModulePaths(path.dirname(file8));
-    m8._compile(anchored(USRC, 'module.exports.pricesSaveAnswer = (e) => (e && e.syscall\n', 'module.exports.pricesSaveAnswer = (e) => (false   // MUTANT: the release\'s answer — every refusal the client\'s, the message whole\n', 'the disk\'s refusal the server\'s'), file8);
+    m8._compile(anchored(USRC, 'module.exports.pricesSaveAnswer = (e) => (e && (e.syscall || e.code === \'ESHORT\')   // r5068: the door\'s short write is the disk\'s too\n', 'module.exports.pricesSaveAnswer = (e) => (false   // MUTANT: the release\'s answer — every refusal the client\'s, the message whole\n', 'the disk\'s refusal the server\'s'), file8);
     const R5 = m8.exports.pricesSaveAnswer(err);
     ok(R5.status === 400 && String(R5.body.error).includes(d), 'RED CONTROL (anchored copy: the release\'s answer — every refusal the client\'s): a disk\'s refusal answers 400 with the server\'s path in its words — ⑥\'s answer goes red', R5.status);
     stopOf(uh);
   }
+    // (主开发 r5068) the round's small edge: a SHORT write at the door (src/fd-close.js renameSynced: code ESHORT, no system call name) is
+    // the disk's refusal too — 500 (prices_not_saved), never the client's 400; pricing.json byte-identical, no temp. RED (anchored copy):
+    // follow 2's condition (the system call name alone)
+    {
+      const d9 = dirOf('save-short'), f9 = plant(d9), uh9 = make(d9), before9 = RAW.call(fs, f9, 'utf8');
+      const o9 = fs.openSync, w9 = fs.writeSync, c9 = fs.closeSync, fds9 = new Set(); let serr = null;
+      fs.openSync = function (p, ...a) { const fd = o9.call(fs, p, ...a); if (String(p).endsWith(path.sep + 'pricing.json.tmp')) fds9.add(fd); return fd; };
+      fs.writeSync = function (fd, ...a) { if (fds9.has(fd)) return 0; return w9.call(fs, fd, ...a); };   // the storage takes nothing: a short write
+      fs.closeSync = function (fd) { fds9.delete(fd); return c9.call(fs, fd); };   // a number is forgotten at its close
+      try { uh9.setPricing({ accounts: { 'made-up-key-9': { discount: 0.7 } } }); } catch (e) { serr = e; } finally { fs.openSync = o9; fs.writeSync = w9; fs.closeSync = c9; }
+      const S9 = UH.pricesSaveAnswer(serr);
+      ok(!!serr && serr.code === 'ESHORT' && !serr.syscall && S9.status === 500 && S9.body.code === 'prices_not_saved' && S9.body.error === 'the disk refused the write (ESHORT); nothing changed' && RAW.call(fs, f9, 'utf8') === before9 && !fs.existsSync(f9 + '.tmp'),
+        '⑥ B-574d follow 3 (r5068): a prices save written SHORT (ESHORT, no system call name) answers as the disk\'s refusal — 500 prices_not_saved, words the toast adds nothing to repeat; pricing.json byte-identical, no temp', { code: serr && serr.code, S9 });
+      const SHORTHEAD = "module.exports.pricesSaveAnswer = (e) => (e && (e.syscall || e.code === 'ESHORT')   // r5068: the door's short write is the disk's too\n";
+      const file9 = path.join(REPO, 'src/usage-history.js'), m9 = new Module(file9, null); m9.filename = file9; m9.paths = Module._nodeModulePaths(path.dirname(file9));
+      m9._compile(anchored(USRC, SHORTHEAD, "module.exports.pricesSaveAnswer = (e) => (e && e.syscall   // MUTANT: follow 2's condition — a short write carries no system call name\n", 'the short write the disk\'s'), file9);
+      const R9 = m9.exports.pricesSaveAnswer(serr);
+      ok(R9.status === 400, 'RED CONTROL (anchored copy: follow 2\'s condition, the system call name alone): the short write answers 400, the client\'s — ⑥\'s short write goes red', R9.status);
+      stopOf(uh9);
+    }
 }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
 process.exit(fail ? 1 : 0);

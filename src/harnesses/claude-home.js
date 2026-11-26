@@ -15,7 +15,12 @@ const projectsDirOf = (home) => path.join(home, '.claude', 'projects');
 
 /** Is /home/<old> gone (a renamed user's old home)? — the default for a caller that hands none; migrateHomeRename hands its ONE
  *  injectable homeGone to both sources of an old user (B-8033 cure), so a test never depends on the paths of its machine. */
-const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);
+const homeGoneOnDisk = (old) => absentOnDisk(`/home/${old}`);
+/** B-574d follow 3 (主开发 r5068, R6): «not there» is the ONLY absent — a look refused for any other cause is not «absent» (the old home
+ *  not gone, a name in the new folder not free): nothing acts on a look that failed; it waits for a start that can see. */
+function absentOnDisk(p) { return lookOf(p) === 'absent'; }
+/** …ONE stat: 'present', 'absent' (ENOENT only) or the refusal's code (follow 3's second read: every refused look is named and owed). */
+function lookOf(p) { try { fs.statSync(p); return 'present'; } catch (e) { return e && e.code === 'ENOENT' ? 'absent' : ((e && e.code) || 'error'); } }
 /** B-8033 cure 2 (主开发's law): THE PERSON'S OWN FOLDERS ARE NEVER MOVED. A folder name is claude's encoding of a working folder
  *  (every character but a letter or a digit becomes '-' — src/harnesses/helper-transcripts.js projDirOf), so a name alone never
  *  says whose a folder is (`-home-vibe-alice-notes`: /home/vibe/alice-notes or /home/vibe-alice/notes or /home/vibe.alice/notes).
@@ -55,7 +60,10 @@ function firstCwdOf(file, budget = { left: READ_BUDGET }) {
       rest = text.slice(text.lastIndexOf('\n') + 1);
     }
     return cwdOfLine(rest + dec.end());
-  } catch { return READ_ERR; } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
+  } catch (e) {   // follow 3's second read: a transcript NOT THERE (a dangling link) is no evidence — every other failure is a look owed, its code kept
+    if (e && e.code === 'ENOENT') return null;
+    budget.err = (e && e.code) || 'error'; return READ_ERR;
+  } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
 }
 /** Whose is this `-home-<old>…` folder? Every transcript in it is asked, within the folder's READ_BUDGET: 'old' = each one that
  *  names a working folder names a /home/<old>(/…) one whose encoding IS the folder's name (an old project still in place — once
@@ -66,14 +74,14 @@ function firstCwdOf(file, budget = { left: READ_BUDGET }) {
  *  Two working folders can encode to ONE name (/home/vibe/alice-notes and /home/vibe-alice/notes both → -home-vibe-alice-notes):
  *  the folder moves only when EVERY transcript that names a working folder says «old project in place»; a transcript that names
  *  none cannot veto — it is no evidence either way. */
-function ownerByCwd(dir, old) {
+function ownerByCwd(dir, old, why = null) {   // why: the failed look's file and code, for its line (follow 3)
   let names = [];
-  try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort(); } catch { return 'error'; }
+  try { names = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort(); } catch (e) { if (why) why.code = (e && e.code) || 'error'; return 'error'; }
   reads.folders++;
   const seen = new Set(), budget = { left: READ_BUDGET };
   for (const f of names) {
     const cwd = firstCwdOf(path.join(dir, f), budget);
-    if (cwd === READ_ERR) return 'error';
+    if (cwd === READ_ERR) { if (why) { why.code = budget.err || 'error'; why.file = f; } return 'error'; }
     if (cwd === OVER) return null;
     if (cwd == null) continue;
     const underOld = cwd === `/home/${old}` || cwd.startsWith(`/home/${old}/`);
@@ -83,14 +91,17 @@ function ownerByCwd(dir, old) {
 }
 /** B-8033 cure 3: ONE verdict per candidate folder per boot — the move and the count of what is left read THIS map, never a
  *  transcript twice. A link (the symlinked-home deploy) is no candidate: lstat first, nothing is ever read through it. */
+const whyOf = (m) => m.why || (m.why = new Map());   // the verdicts not taken, by folder: { name, code } (said by the caller)
 function ownersOf(home, old) {
   const projectsDir = projectsDirOf(home), out = new Map();
-  let names = []; try { names = fs.readdirSync(projectsDir); } catch { return out; }
+  let names = []; try { names = fs.readdirSync(projectsDir); } catch (e) { if (!(e && e.code === 'ENOENT')) out.unlisted = (e && e.code) || 'error'; return out; }   // R6: a listing refused is no «none»
   for (const d of names) {
     if (!oldFolderOf(d, old)) continue;
-    let st = null; try { st = fs.lstatSync(path.join(projectsDir, d)); } catch { continue; }
+    let st = null; try { st = fs.lstatSync(path.join(projectsDir, d)); } catch (e) { if (!(e && e.code === 'ENOENT')) { out.set(d, 'error'); whyOf(out).set(d, { name: d, code: (e && e.code) || 'error' }); } continue; }   // R6: refused ⇒ a failed move, tried again
     if (!st.isDirectory()) continue;
-    out.set(d, ownerByCwd(path.join(projectsDir, d), old));
+    const why = {}, v = ownerByCwd(path.join(projectsDir, d), old, why);
+    out.set(d, v);
+    if (v === 'error') whyOf(out).set(d, { name: why.file ? `${d}/${why.file}` : d, code: why.code || 'error' });
   }
   return out;
 }
@@ -100,9 +111,10 @@ const ctxOwners = (ctx, home, old) => (ctx && ctx.owners) || (ctx ? (ctx.owners 
 const oldFolderOf = (d, old) => d === `-home-${old}` || d.startsWith(`-home-${old}-`);
 const newNameOf = (d, old, P) => (d === `-home-${old}` ? P : P + '-' + d.slice(`-home-${old}-`.length));
 /** Old usernames left behind: -home-<old>-… projdirs whose /home/<old> is gone. */
-function staleUsers(home, user, { homeGone = homeGoneOnDisk } = {}) {
+function staleUsers(home, user, { homeGone = homeGoneOnDisk, say = null } = {}) {
   let dirs = [];
-  try { dirs = fs.readdirSync(projectsDirOf(home)); } catch { return []; }
+  try { dirs = fs.readdirSync(projectsDirOf(home)); }
+  catch (e) { if (say && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.claude/projects could not be listed (${(e && e.code) || 'error'}) — its old users wait for a start that can list it`); return []; }   // R6
   const oldUsers = new Set();
   for (const d of dirs) {
     const m = /^-home-([a-z][a-z0-9]*)(?:-|$)/.exec(d);   // B-8033 cure 2: the old user's bare home folder names it too
@@ -117,7 +129,10 @@ function moveUser(home, old, user, ctx = null) {
   const projectsDir = projectsDirOf(home);
   let moved = 0;
   const P = ownPrefixOf(user), owners = ctxOwners(ctx, home, old);
-  for (const d of fs.readdirSync(projectsDir)) {
+  // follow 3 (its read): «not there» is nothing to move, and a refused listing moves nothing (ownersOf marked it: the count of what is
+  // left says failed) — never a throw that ends the whole start's other old users and their owed rewrites
+  let names = []; try { names = fs.readdirSync(projectsDir); } catch { return 0; }
+  for (const d of names) {
     if (owners.get(d) !== 'old') continue;   // B-8033 cure 2/3: only an old project still in place moves (this boot's one verdict) — the person's own, an undecided one and an unreadable one stay
     const nd = newNameOf(d, old, P);
     const src = path.join(projectsDir, d), dst = path.join(projectsDir, nd);
@@ -125,7 +140,7 @@ function moveUser(home, old, user, ctx = null) {
       if (!fs.existsSync(dst)) { fs.renameSync(src, dst); moved++; }
       else {
         for (const f of fs.readdirSync(src)) {
-          if (!fs.existsSync(path.join(dst, f))) fs.renameSync(path.join(src, f), path.join(dst, f));
+          if (absentOnDisk(path.join(dst, f))) fs.renameSync(path.join(src, f), path.join(dst, f));   // R6: a refused look is no free name (a rename would replace a transcript)
         }
         try { fs.rmdirSync(src); } catch { }
         moved++;
@@ -141,23 +156,29 @@ function moveUser(home, old, user, ctx = null) {
  *  symlinked-home deploy's links (relinkLegacy) are no leftovers. */
 function leftAfterMove(home, old, user, ctx = null) {
   const projectsDir = projectsDirOf(home);
-  let failed = 0, sameName = 0, undecided = 0, names = [];
-  try { names = fs.readdirSync(projectsDir); } catch { return { failed, sameName, undecided, judged: 0 }; }
+  let failed = 0, sameName = 0, undecided = 0, unread = 0, names = [];   // unread: the refused looks (a verdict not taken — owed, never «gave up»)
+  const refused = [], cannot = (name, code) => { failed++; unread++; refused.push({ name, code }); };   // each refused look by its name and code
   const P = ownPrefixOf(user), owners = ctxOwners(ctx, home, old);
+  const judged = [...owners.values()].filter((v) => v === 'old').length;
+  if (owners.unlisted) { cannot('~/.claude/projects', owners.unlisted); return { failed, sameName, undecided, judged, unread, refused }; }   // R6: the verdicts' listing was refused — not whole (tried again); said once
+  // R6: a listing refused after the move ran is NOT «nothing left» — failed (tried again), this start's verdict kept (its rewrite runs now)
+  try { names = fs.readdirSync(projectsDir); } catch (e) { if (!(e && e.code === 'ENOENT')) cannot('~/.claude/projects', (e && e.code) || 'error'); return { failed, sameName, undecided, judged, unread, refused }; }
   for (const d of names) {
     if (!owners.has(d)) continue;   // B-8033 cure 3: not a candidate of this boot's first pass (a destination, a link) — never read
     const who = owners.get(d);   // own ⇒ never moved; undecided ⇒ stays, said; unreadable ⇒ failed (tried again)
-    if (who === 'error') { failed++; continue; }
+    if (who === 'error') { const w = owners.why && owners.why.get(d); cannot(w ? w.name : d, w ? w.code : 'error'); continue; }
     if (who === null) { undecided++; continue; }
     if (who !== 'old') continue;
-    const src = path.join(projectsDir, d), dst = path.join(projectsDir, newNameOf(d, old, P));
-    let st = null; try { st = fs.lstatSync(src); } catch { continue; }
+    const nd = newNameOf(d, old, P), src = path.join(projectsDir, d), dst = path.join(projectsDir, nd);
+    let st = null; try { st = fs.lstatSync(src); } catch (e) { if (!(e && e.code === 'ENOENT')) cannot(d, (e && e.code) || 'error'); continue; }   // R6: gone = moved; refused = not known moved
     if (!st.isDirectory()) continue;
-    let files = []; try { files = fs.readdirSync(src); } catch { failed++; continue; }
-    let dstDir = false; try { dstDir = fs.statSync(dst).isDirectory(); } catch { dstDir = false; }
-    if (!dstDir || files.some((f) => !fs.existsSync(path.join(dst, f)))) failed++; else sameName++;
+    let files = []; try { files = fs.readdirSync(src); } catch (e) { cannot(d, (e && e.code) || 'error'); continue; }
+    let dstSt = null; try { dstSt = fs.statSync(dst); } catch (e) { if (!(e && e.code === 'ENOENT')) { cannot(nd, (e && e.code) || 'error'); continue; } }
+    if (!dstSt || !dstSt.isDirectory()) { failed++; continue; }
+    const looks = files.map((f) => [f, lookOf(path.join(dst, f))]), bad = looks.find(([, l]) => l !== 'present' && l !== 'absent');
+    if (bad) cannot(`${nd}/${bad[0]}`, bad[1]); else if (looks.some(([, l]) => l === 'absent')) failed++; else sameName++;
   }
-  return { failed, sameName, undecided, judged: [...owners.values()].filter((v) => v === 'old').length };
+  return { failed, sameName, undecided, judged, unread, refused };
 }
 
 /** The symlinked-home deploy (2.236.1): rename each -home-<old>-* dir to the

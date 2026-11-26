@@ -3507,13 +3507,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(S.hk2.calls.length === 1 && S.c.length === 1 && S.c[0].home === true && S.c[0].data === false && S.projC === '-home-userN-left' && mountOf(S.dC) === '/home/olduser/proj' && fs.existsSync(path.join(S.home2, '.vibespace', NAME)),
       'an install migrated before the split (a data/ marker only, a projdir left behind): the move runs — a merge — and writes the HOME marker; no second rewrite', { calls: S.hk2.calls, c: S.c, proj: S.projC });
     const SRC = fs.readFileSync(path.join(REPO_ROOT, HRS), 'utf8');
-    const ONE = 'const homeDone = fs.existsSync(hm), dmState = dataMarkerState(dm), dataDone = dmState.done;';   // B-574d follow: the data marker read for its state
-    const MARKED = 'const oldUsers = new Set([...hrs.flatMap((hr) => hr.staleUsers(home, user, { homeGone })), ...markedOldUsers(home, user, homeGone)]);';
+    const ONE = 'const hmState = homeMarkerState(hm), homeDone = hmState.exists, dmState = dataMarkerState(dm), dataDone = dmState.done;';   // B-574d follow: the data marker read for its state; follow 3: the HOME marker's too
+    const MARKED = 'const oldUsers = new Set([...hrs.flatMap((hr) => hr.staleUsers(home, user, { homeGone: gone, say })), ...markedOldUsers(home, user, gone, say)]);';
     ok(SRC.split(ONE).length === 2 && SRC.split(MARKED).length === 2, 'ANCHOR: the two markers read once, the old users from the hooks AND the markers — each spelled once');
     const MH = mutantCopies('home-rename', REPO_ROOT);
-    const M1 = await scenes(MH.load(HRS, SRC.replace(ONE, 'const dmState = dataMarkerState(dm), dataDone = dmState.done, homeDone = dataDone;'), 'one-marker'), 'm1');
+    const M1 = await scenes(MH.load(HRS, SRC.replace(ONE, 'const hmState = homeMarkerState(hm), dmState = dataMarkerState(dm), dataDone = dmState.done, homeDone = dataDone;'), 'one-marker'), 'm1');
     ok(M1.hk.calls.length === 2, 'MUTANT RED: one marker in data/ for both halves (the release\'s) ⇒ the second install moves the HOME\'s projdirs again', M1.hk.calls);
-    const M2 = await scenes(MH.load(HRS, SRC.replace(MARKED, 'const oldUsers = new Set(hrs.flatMap((hr) => hr.staleUsers(home, user, { homeGone })));'), 'no-markers'), 'm2');
+    const M2 = await scenes(MH.load(HRS, SRC.replace(MARKED, 'const oldUsers = new Set(hrs.flatMap((hr) => hr.staleUsers(home, user, { homeGone: gone, say })));'), 'no-markers'), 'm2');
     ok(!M2.b.length && mountOf(M2.dB) === '/home/olduser/proj', 'MUTANT RED: old users from the projdirs alone ⇒ the second install finds none — its stores keep /home/<old>', { b: M2.b, mountB: mountOf(M2.dB) });
     // B-8033 cure (1): THE HOME MARKER SAYS THE MOVE IS WHOLE — a project folder whose rename failed withholds it (tried again
     // at the next start); one left behind by same-name transcripts is SAID with its count and needs no retry. (2) an old user a
@@ -3540,11 +3540,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       '…the next start moves it and writes the marker; a folder left behind by same-name transcripts is SAID with its count (never overwritten), no retry', { r2: CS.r2, said2: CS.said2, projs: CS.projs });
     ok(!CS.rBack.length && CS.mountBack === '/home/olduser/proj', 'B-8033 cure (2): an old user a marker names whose /home/<old> EXISTS again is taken by neither source — a fresh data/ keeps its paths', { rBack: CS.rBack, mount: CS.mountBack });
     const WHOLE = '        if (!whole && !gaveUp) {';
-    const GONE2 = '.filter((o) => OLD_RE.test(o) && o !== user && homeGone(o));';
+    const GONE2 = '.filter((o) => o && OLD_RE.test(o) && o !== user && homeGone(o));';   // B-574d follow 3: the tries name old users too
     ok(SRC.split(WHOLE).length === 2 && SRC.split(GONE2).length === 2, 'ANCHOR: the whole-move gate and the marker source\'s gone-home check, each spelled once');
     const MC1 = await cureScenes(MH.load(HRS, SRC.replace("          if (typeof hr.leftAfterMove === 'function') {", "          if (false && typeof hr.leftAfterMove === 'function') {"), 'marker-regardless'), 'm3');
     ok(MC1.marker1 === true, 'MUTANT RED: the marker written however the move went (the release\'s) ⇒ the failed folder is marked done, never tried again', MC1.r1);
-    const MC2 = await cureScenes(MH.load(HRS, SRC.replace(GONE2, '.filter((o) => OLD_RE.test(o) && o !== user);'), 'marker-unchecked'), 'm4');
+    const MC2 = await cureScenes(MH.load(HRS, SRC.replace(GONE2, '.filter((o) => o && OLD_RE.test(o) && o !== user);'), 'marker-unchecked'), 'm4');
     ok(MC2.rBack.length === 1 && MC2.mountBack === '/home/userN/proj', 'MUTANT RED: a marker\'s old user unchecked ⇒ a fresh data/ rewrites /home/<old> paths though that home exists again', MC2.rBack);
     // B-8033 cure r2 (the cure's own read): a NEW name that STARTS with the old one (olduser → olduser-x). The new user's own
     // -home-olduser-x-… folders are never moved — the release renamed them once (-x-x-), the cure's whole-gate at every start
@@ -3682,9 +3682,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return { m1, p1, said, mount1, m2: fs.existsSync(path.join(home, '.vibespace', NAME)), p2: projOf(home), mount2: mountOf(d1) };
     };
     const US = await unreadScene(CH, 'real');
-    ok(!US.m1 && US.p1 === '-home-olduser-r' && US.said.some((l) => /could not be moved — no marker; tried again at the next start/.test(l)) && US.mount1 === '/home/olduser/proj' && US.m2 && US.p2 === '-home-userN-r' && US.mount2 === '/home/userN/proj',
-      'B-8033 cure 3: a transcript that cannot be read ⇒ a FAILED move — not marked, said, the stores NOT decided yet; once it reads, the next start moves the folder, marks, and rewrites the stores', US);
-    const RE = "    if (cwd === READ_ERR) return 'error';";
+    ok(!US.m1 && US.p1 === '-home-olduser-r' && US.said.some((l) => l.includes('could not be made — -home-olduser-r/z.jsonl (EISDIR: a folder has its name: move the folder) — no marker, nothing judged from them; tried again at every start')) && US.mount1 === '/home/olduser/proj' && US.m2 && US.p2 === '-home-userN-r' && US.mount2 === '/home/userN/proj',
+      'B-8033 cure 3: a transcript that cannot be read ⇒ a FAILED move — not marked, said (B-574d follow 3: as a look that failed — owed, tried at every start, no try spent), the stores NOT decided yet; once it reads, the next start moves the folder, marks, and rewrites the stores', US);
+    const RE = "    if (cwd === READ_ERR) { if (why) { why.code = budget.err || 'error'; why.file = f; } return 'error'; }";
     ok(CHSRC.split(RE).length === 2, 'ANCHOR: the unreadable verdict, spelled once');
     const UM = await unreadScene(MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, RE, '    if (cwd === READ_ERR) return null;', "src/harnesses/claude-home.js"), 'unread-undecided'), 'm12');
     ok(UM.m1 === true, 'MUTANT RED: an unreadable transcript taken as «undecided» ⇒ the move is marked whole at once — one NFS hiccup strands the old project for good', UM);
@@ -3724,9 +3724,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     fs.writeFileSync(path.join(LP, '-home-userN-a', 's1.jsonl'), '{}\n');
     const LA = CH.leftAfterMove(lh, 'olduser', 'userN');
     ok(LA.failed === 1 && LA.sameName === 0, 'B-8033 cure r2: the new folder lacks s2.jsonl the old one holds ⇒ failed (no marker, tried again)', LA);
-    const FSOME = '    if (!dstDir || files.some((f) => !fs.existsSync(path.join(dst, f)))) failed++; else sameName++;';
+    const FSOME = "    if (bad) cannot(`${nd}/${bad[0]}`, bad[1]); else if (looks.some(([, l]) => l === 'absent')) failed++; else sameName++;";
     ok(CHSRC.split(FSOME).length === 2, 'ANCHOR: leftAfterMove\'s missing-transcript test, spelled once');
-    const MLA = MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, FSOME, '    if (!dstDir) failed++; else sameName++;', "src/harnesses/claude-home.js"), 'left-names-unread').leftAfterMove(lh, 'olduser', 'userN');
+    const MLA = MH.load('src/harnesses/claude-home.js', editAnchor(CHSRC, FSOME, '    sameName++;   // MUTANT: the transcripts not compared', "src/harnesses/claude-home.js"), 'left-names-unread').leftAfterMove(lh, 'olduser', 'userN');
     ok(MLA.sameName === 1 && MLA.failed === 0, 'MUTANT RED: the transcripts not compared ⇒ the move is called whole, s2.jsonl stranded under the old name for good', MLA);
     const SJ = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
     ok(/require\('\.\/src\/server\/home-rename\.js'\)\.migrateHomeRename\(\{ dataDir: path\.join\(__dirname, 'data'\), metaDir: META_DIR \}\);/.test(SJ) && !/function migrateHomeRename/.test(SJ),
@@ -4431,7 +4431,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const ONLY = "    if (only && !only.has(key) && !(only.has('session-meta/') && key.startsWith('session-meta/'))) continue;   // a listing owed: every meta\n";
     const [, RM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, ONLY, '', 'the retry\'s owed stores only'), 'retry-all'), 'e4-red', ['EIO', null], { between: { 2: NEWP } });
     ok(!RM2.mounts.includes('/home/olduser/paired'), 'B-574d follow RED (anchored copy: the retry tries every store): the path recorded after the first start is rewritten — (e4) goes red', RM2.mounts);
-    const OWEDSRC = '    for (const o of owedOldUsers(dataDir, user, homeGone)) oldUsers.add(o);   // B-574d follow: an owed rewrite names its old user too\n';
+    const OWEDSRC = '    for (const o of owedOldUsers(dataDir, user, gone, say)) oldUsers.add(o);   // B-574d follow: an owed rewrite names its old user too\n';
     const [, SM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, OWEDSRC, '', 'the owed marker as a source'), 'owed-unnamed'), 'e5-red', ['EIO', null], { between: { 2: NOHM } });
     ok(SM2.out.length === 0 && SM2.layouts === LAY0 && !doneOf(SM2.mark), 'B-574d follow RED (anchored copy: the owed marker names no old user): with the HOME marker lost the owed store is never tried — (e5) goes red', { out: SM2.out, layouts: SM2.layouts });
     // RED (anchored copies): the tip 93829d26a's line (the marker written whatever failed); the verdict NOT carried (the R2 road); no bound
@@ -4440,9 +4440,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const [EM1, EM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, MARK, E_OLD, 'the owed marker'), 'marker-regardless'), 'e-red', ['EIO', null]);   // stale-pins: kept — the RED copy puts the tip 93829d26a's marker back on purpose
     ok(doneOf(EM1.mark) && EM2.out.length === 0 && EM2.layouts === LAY0,
       'B-574d follow RED (anchored copy: the tip 93829d26a\'s marker — done whatever failed): marked done at the first start, layouts.json keeps /home/olduser for good (the next start runs nothing)', { first: EM1.mark, second: [EM2.out, EM2.layouts] });
-    const CARRY = '        const judgedOld = Math.max(!homeDone ? judged : judgedOf(hm), prior ? prior.judgedOld : 0);\n';
-    const [, GM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, CARRY, '        const judgedOld = !homeDone ? judged : judgedOf(hm);   // MUTANT: the verdict not carried\n', 'the carried verdict'), 'verdict-dropped'), 'g-red', ['EIO', null], { move: 'partial' });
-    ok(GM2.layouts === LAY0 && !doneOf(GM2.mark), 'B-574d follow RED (anchored copy: the earlier start\'s verdict not carried): on a move that is not whole the owed store is never cured (layouts.json keeps /home/olduser)', { mark: GM2.mark, layouts: GM2.layouts });
+    const CARRY = '        const judgedOld = Math.max(!homeDone ? judgedAll : hmState.judged, prior ? prior.judgedOld : 0);\n';
+    const [, GM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, CARRY, '        const judgedOld = !homeDone ? judged : hmState.judged;   // MUTANT: the verdict carried by neither the owed marker nor the tries (follow 3)\n', 'the carried verdict'), 'verdict-dropped'), 'g-red', ['EIO', null], { move: 'partial' });
+    ok(GM2.layouts === LAY0 && !doneOf(GM2.mark), 'B-574d follow RED (anchored copy: the earlier start\'s verdict not carried — by the owed marker nor, since follow 3, by the tries record): on a move that is not whole the owed store is never cured (layouts.json keeps /home/olduser)', { mark: GM2.mark, layouts: GM2.layouts });
     // (i)–(v) 主开发 r4981 and its own read: a LISTING or a STAT that fails for any cause but «not there» is OWED for that start, never read as
     // absent — on a retry the metas are listed only when one is owed, and a failed listing owes exactly those; a data marker that CANNOT BE
     // READ is not done and is never written over (the data half waits for a start that can read it), one whose bytes DO NOT PARSE runs the
@@ -4545,12 +4545,319 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(NM2.warned.length === 0 && NM2.out.length === 0, 'B-574d follow 2 RED (anchored copy: an unreadable marker names nobody): with the HOME marker lost the start says nothing at all — (v)\'s «said once» goes red', { second: NM2.warned });
     // RED: each home-rename helper back to the bare write + rename
     const REW = "      renameSynced(f + '.tmp', f, fixed, { where: `[migrate] ${path.basename(f)}`, say: (l) => log.warn(l) });";
-    const HSYNC = "    try { await fh.sync(); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { log.warn(syncUnsupportedWords('[migrate] home rename: the tries', e.code)); } catch { /* a sink that throws says nothing more */ } }\n";
+    const HSYNC = "    try { await fh.sync(); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { log.warn(syncUnsupportedWords(`[migrate] home rename: ${what}`, e.code)); } catch { /* a sink that throws says nothing more */ } }\n";
     const HCLOSE = '  try { await fh.close(); } catch (e) { if (!failed) failed = e; }';
     const HB = M574.load('src/server/home-rename.js', anchored(anchored(anchored(HRT, REW, "      const tmp = f + '.tmp'; fs.writeFileSync(tmp, fixed); fs.renameSync(tmp, f);   // MUTANT: the bare temp + rename", 'the rewrite\'s synced replace'), HSYNC, '', 'the tries\' sync'), HCLOSE, '  try { await fh.close(); } catch (e) { void e; }   // MUTANT: a failed close swallowed', 'the tries\' judged close'), 'bare-home');
     const rc = await hrScene(HB, 'c-red', 'mounts.json.tmp', 'EIO'), rd = await hrScene(HB, 'd-red', NAME + '.tries.tmp', 'EIO', { failedMove: true, tries0: TRIES0 }), rd4 = await hrScene(HB, 'd-close-red', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0, closeCode: 'EIO' });
     ok(rc.out[0].rewrote === 1 && !rc.events.includes('sync') && rd.tries && JSON.parse(rd.tries).tries === 2 && !rd.events.includes('sync') && rd4.tries && JSON.parse(rd4.tries).tries === 2,
       'B-574d RED (anchored copy: the rewrite back to the bare temp + rename, the tries without their sync and with their close swallowed): no sync is asked, the EIO scenes land — (c) and (d) go red on it', { c: [rc.out, rc.events], d: [rd.tries, rd.events], close: [rd4.tries, rd4.events] });
+    {   // its own block: its names never meet the legs' above
+    const CH = require('../src/harnesses/claude-home.js');
+    // (viii)–(xiii) B-574d follow 3 (主开发 r5068): (R5) THE HOME MARKER IS WRITTEN BY THE SYNCED REPLACE, and a HOME marker that cannot be
+    // read or does not parse is HELD — never read as «judged none» (a second install over this HOME would write «kept»); (R6) on the HOME
+    // side «not there» is the only absent — the old home's stat, the listings, the claude hook's looks. Each by a placed refusal (that one
+    // path; a stat refused to existsSync too), each with its RED (anchored copies: follow 2's lines)
+    const HMT = '.vibespace' + path.sep + NAME + '.tmp', hmOf = (x) => { const f = path.join(x.root, 'home', 'userN', '.vibespace', NAME); return { mark: fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null, tmpLeft: fs.existsSync(f + '.tmp') }; };
+    const k1 = await hrScene(HR, 'viii-eio', HMT, 'EIO'), k1h = hmOf(k1);
+    ok(k1.events === 'open,sync' && k1h.mark === null && !k1h.tmpLeft && k1.warned.some((l) => l.includes('the projdirs marker could not be written (EIO')),
+      'B-574d follow 3 (viii) THE HOME MARKER BY THE SYNCED REPLACE: its temp\'s sync refused (EIO) ⇒ no marker (another install over this HOME moves again: a merge), no temp left, said', { events: k1.events, home: k1h, warned: k1.warned });
+    const k2 = await hrScene(HR, 'viii-einval', HMT, 'EINVAL'), k2h = hmOf(k2), nk2 = noSyncLines(k2.warned, 'EINVAL');
+    ok(!!k2h.mark && JSON.parse(k2h.mark).judgedOld === 1 && nk2.length === 1 && nk2[0].startsWith('[migrate] home rename: the HOME marker: ') && !nk2[0].includes(k2.root),
+      'B-574d follow 3 (viii) a file system with NO sync (EINVAL): the HOME marker lands (its verdict, judged 1), ONE line says so by its name, no path', { home: k2h, said: nk2 });
+    const k3 = await hrScene(HR, 'viii-real', HMT, null), k3h = hmOf(k3);
+    ok(k3.events === 'open,sync,rename' && !!k3h.mark && JSON.parse(k3h.mark).judgedOld === 1 && !k3h.tmpLeft, 'B-574d follow 3 (viii) the real sync: the HOME marker\'s temp synced before its rename, no temp left', { events: k3.events, home: k3h });
+    const HMW = ".then(() => replaceSyncedAsync(`${hm}.tmp`, hm, mark, log, 'the HOME marker'))   // R5: through the synced replace\n";
+    const kR = await hrScene(M574.load('src/server/home-rename.js', anchored(HRT, HMW, ".then(() => fs.promises.writeFile(hm, mark))   // MUTANT: follow 2's plain write\n", 'the HOME marker\'s synced replace'), 'home-plain-write'), 'viii-red', HMT, 'EIO'), kRh = hmOf(kR);   // stale-pins: kept — the RED copy puts follow 2's plain write back on purpose
+    ok(kRh.mark !== null && !kR.events.includes('sync'), 'B-574d follow 3 RED (anchored copy: follow 2\'s plain write of the HOME marker): no sync is asked, the marker lands over the refusal — (viii) goes red', { events: kR.events, home: kRh });
+    // the HOME marker READ: a second install over this HOME (a data/ of its own, no data marker), the folders long moved — only the HOME
+    // marker names the old user and holds the verdict (judged 1)
+    const HM1 = JSON.stringify({ at: 1, moved: 1, judgedOld: 1 }), HMR = path.sep + '.vibespace' + path.sep + NAME, TORNH = '{"at":1,"mov';
+    const kScene = async (Mod, tag, steps) => {
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), d = path.join(root, 'data'), meta = path.join(d, 'session-meta'), hm = path.join(home, '.vibespace', NAME);
+      fs.mkdirSync(meta, { recursive: true }); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0); fs.writeFileSync(path.join(d, 'layouts.json'), LAY0); fs.writeFileSync(path.join(meta, 'cw-1.json'), META0);
+      const hk = { staleUsers: () => [], moveUser: () => 0, leftAfterMove: () => ({ failed: 0, judged: 0 }) };
+      const out = [];
+      for (const st of steps) {
+        if (typeof st.home === 'string') fs.writeFileSync(hm, st.home);
+        if (typeof st.dm === 'string') fs.writeFileSync(path.join(d, NAME), st.dm);   // a data marker placed by hand (xix)
+        const warned = [], undo = st.refuse ? refusing(...st.refuse) : null;
+        let r = null;
+        try { r = Mod.migrateHomeRename({ dataDir: d, metaDir: meta, home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, ...(st.diskGone ? {} : { homeGone: () => true }), throwaway: () => false }); await r.written; }
+        finally { if (undo) undo(); }
+        out.push({ out: r, warned, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d), home: fs.existsSync(hm) ? fs.readFileSync(hm, 'utf8') : null });
+      }
+      return out;
+    };
+    const [P0] = await kScene(HR, 'ix-control', [{ home: HM1 }]);
+    ok(P0.layouts.includes('/home/userN/proj') && doneOf(P0.mark) && !P0.mark.kept && P0.warned.length === 0, 'B-574d follow 3 (ix) control: a READABLE HOME marker carries its verdict to a second install — layouts.json cured, marked done (never «kept»)', { mark: P0.mark, warned: P0.warned });
+    const [P1, P2] = await kScene(HR, 'ix-real', [{ home: HM1, refuse: ['readFileSync', HMR, 'EIO'] }, {}]);
+    ok(P1.layouts === LAY0 && P1.mark === null && P1.home === HM1 && P1.warned.length === 1 && P1.warned[0].includes('the HOME marker of /home/olduser could not be read (EIO: tried again at the next start) — not taken as judged')
+      && P2.layouts.includes('/home/userN/proj') && doneOf(P2.mark) && !P2.mark.kept && P2.warned.length === 0 && P2.home === HM1,
+      'B-574d follow 3 (ix) the HOME marker\'s READ refused (EIO): HELD — never «judged none»: no data marker (no «kept»), nothing rewritten, the HOME marker never written over, said ONCE; the next start that can read it cures layouts.json on its verdict and marks done', { first: [P1.mark, P1.warned], second: [P2.mark, P2.warned] });
+    const [Q1, Q2] = await kScene(HR, 'x-real', [{ home: TORNH }, { home: HM1 }]);
+    ok(Q1.layouts === LAY0 && Q1.mark === null && Q1.home === TORNH && Q1.warned.length === 1 && Q1.warned[0].includes('could not be read (unparsable: its bytes do not parse: restore it from a backup — never move it aside')
+      && Q2.layouts.includes('/home/userN/proj') && doneOf(Q2.mark) && !Q2.mark.kept,
+      'B-574d follow 3 (x) a TORN HOME marker (bytes that do not parse): HELD the same — no «kept», nothing rewritten, never written over, said once with the one safe hand (restore it — never move it aside: the move would be judged again over folders already moved); restored, the next start cures and marks done', { first: [Q1.mark, Q1.warned], second: Q2.mark });
+    const HELD = '      const unread = dmUnread || (!!hmState.unreadable && !ownVerdict);\n';
+    const HMut = M574.load('src/server/home-rename.js', anchored(HRT, HELD, "      const unread = dmUnread;   // MUTANT: follow 2's road — a held HOME marker read as judged none\n", 'a held HOME marker holds the data half'), 'home-held-none');
+    const [PR1] = await kScene(HMut, 'ix-red', [{ home: HM1, refuse: ['readFileSync', HMR, 'EIO'] }]), [QR1] = await kScene(HMut, 'x-red', [{ home: TORNH }]);
+    ok(!!PR1.mark && PR1.mark.kept === true && PR1.layouts === LAY0 && !!QR1.mark && QR1.mark.kept === true, 'B-574d follow 3 RED (anchored copy: a held HOME marker read as judged none): a false «kept» is written and layouts.json keeps /home/olduser for good — (ix) and (x) go red', { unreadable: PR1.mark, torn: QR1.mark });
+    // (xi) R6: the OLD HOME's own stat (the default look, no homeGone handed): refused (EACCES) ⇒ NOT gone — nothing acted on, said once;
+    // «not there» (ENOENT) ⇒ gone, the rewrite runs
+    const [G1] = await kScene(HR, 'xi-eacces', [{ home: HM1, diskGone: true, refuse: ['statSync', '/home/olduser', 'EACCES'] }]), [G2] = await kScene(HR, 'xi-enoent', [{ home: HM1, diskGone: true, refuse: ['statSync', '/home/olduser', 'ENOENT'] }]);
+    ok(G1.layouts === LAY0 && G1.mark === null && G1.warned.length === 1 && G1.warned[0].includes('/home/olduser could not be looked at (EACCES) — not taken as gone') && G2.layouts.includes('/home/userN/proj') && doneOf(G2.mark) && G2.warned.length === 0,
+      'B-574d follow 3 (xi) the old home\'s stat refused (EACCES): NOT gone — nothing rewritten, no marker, said once; «not there» (ENOENT) is gone: cured, marked done', { refused: [G1.mark, G1.warned], absent: G2.mark });
+    const GONEF = "function homeGoneOnDisk(old, say = null) {\n  try { fs.statSync(`/home/${old}`); return false; }\n  catch (e) { if (e && e.code === 'ENOENT') return true; if (say) say(`[migrate] home rename: /home/${old} could not be looked at (${(e && e.code) || 'error'}) — not taken as gone; its old user waits for a start that can see it`); return false; }\n}\n";
+    const GMut = M574.load('src/server/home-rename.js', anchored(HRT, GONEF, "const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);\n", 'the old home asked by its stat'), 'home-gone-exists');   // stale-pins: kept — the RED copy puts follow 2's existsSync back on purpose
+    const [GR1] = await kScene(GMut, 'xi-red', [{ home: HM1, diskGone: true, refuse: ['statSync', '/home/olduser', 'EACCES'] }]);
+    ok(GR1.layouts.includes('/home/userN/proj') && GR1.warned.length === 0, 'B-574d follow 3 RED (anchored copy: follow 2\'s existsSync of the old home): a refused stat reads as GONE — the rewrite acts on an old home that may be there, said nowhere — (xi) goes red', { mark: GR1.mark });
+    // (xii) R6: the HOME side's listings — ~/.vibespace (the HOME markers) and data/ (the owed markers): refused ⇒ said (their old users
+    // wait for a start that can list); «not there» says nothing
+    const [L1] = await kScene(HR, 'xii-vs', [{ home: HM1, refuse: ['readdirSync', path.sep + '.vibespace', 'EACCES'] }]), [L2] = await kScene(HR, 'xii-data', [{ refuse: ['readdirSync', path.sep + 'data', 'EACCES'] }]), [L3] = await kScene(HR, 'xii-none', [{ home: HM1, refuse: ['readdirSync', path.sep + '.vibespace', 'ENOENT'] }]);
+    ok(L1.layouts === LAY0 && L1.mark === null && L1.warned.length === 1 && L1.warned[0].includes('~/.vibespace could not be listed (EACCES: its permissions refuse the hub') && L2.warned.length === 1 && L2.warned[0].includes('data/ could not be listed (EACCES') && L3.warned.length === 0,
+      'B-574d follow 3 (xii) the HOME markers\' listing (~/.vibespace) and the owed markers\' (data/) refused (EACCES): each SAID, nothing acted on; a ~/.vibespace not there says nothing', { vs: L1.warned, data: L2.warned, none: L3.warned });
+    const LV = "catch (e) { if (say && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.vibespace could not be listed", LD = "catch (e) { if (say && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: data/ could not be listed";
+    const LMut = M574.load('src/server/home-rename.js', anchored(anchored(HRT, LV, "catch (e) { if (false && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.vibespace could not be listed", 'the HOME markers\' listing said'), LD, "catch (e) { if (false && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: data/ could not be listed", 'the owed markers\' listing said'), 'listings-silent');
+    const [LR1] = await kScene(LMut, 'xii-red1', [{ home: HM1, refuse: ['readdirSync', path.sep + '.vibespace', 'EACCES'] }]), [LR2] = await kScene(LMut, 'xii-red2', [{ refuse: ['readdirSync', path.sep + 'data', 'EACCES'] }]);
+    ok(LR1.warned.length === 0 && LR2.warned.length === 0, 'B-574d follow 3 RED (anchored copy: follow 2\'s silent catches): a refused listing reads as «no marker» and says nothing — (xii) goes red', { vs: LR1.warned, data: LR2.warned });
+    // (xiii) R6 in the claude hook (src/harnesses/claude-home.js): its looks on the HOME side — a refusal is never «absent»
+    const CHT = fs.readFileSync(path.join(REPO_ROOT, 'src/harnesses/claude-home.js'), 'utf8');
+    const chWorld = (tag) => { const h = path.join(base, tag, 'home', 'userN'), P = path.join(h, '.claude', 'projects'); fs.mkdirSync(path.join(P, '-home-olduser-a'), { recursive: true }); fs.writeFileSync(path.join(P, '-home-olduser-a', 's1.jsonl'), JSON.stringify({ cwd: '/home/olduser/a' }) + '\n'); return { h, P }; };
+    const chScenes = (C, tag) => {
+      const r = {};
+      { const { h } = chWorld(tag + '-gone'); let u = refusing('statSync', '/home/olduser', 'EACCES'); try { r.refused = C.staleUsers(h, 'userN'); } finally { u(); } u = refusing('statSync', '/home/olduser', 'ENOENT'); try { r.gone = C.staleUsers(h, 'userN'); } finally { u(); } }
+      { const { h } = chWorld(tag + '-list'); r.listSaid = []; r.noneSaid = []; let u = refusing('readdirSync', path.sep + 'projects', 'EIO'); try { r.listed = C.staleUsers(h, 'userN', { homeGone: () => true, say: (l) => r.listSaid.push(l) }); } finally { u(); }
+        u = refusing('readdirSync', path.sep + 'projects', 'ENOENT'); try { C.staleUsers(h, 'userN', { homeGone: () => true, say: (l) => r.noneSaid.push(l) }); } finally { u(); } }
+      { const { h } = chWorld(tag + '-cand'); const u = refusing('lstatSync', path.sep + '-home-olduser-a', 'EIO'); try { r.cand = C.leftAfterMove(h, 'olduser', 'userN'); } finally { u(); } }
+      { const { h } = chWorld(tag + '-after'); const ctx = {}; r.moved = C.moveUser(h, 'olduser', 'userN', ctx); const u = refusing('readdirSync', path.sep + 'projects', 'EIO'); try { r.after = C.leftAfterMove(h, 'olduser', 'userN', ctx); } finally { u(); } }
+      { const { h } = chWorld(tag + '-src'); const ctx = { owners: C.ownersOf(h, 'olduser') }; const u = refusing('lstatSync', path.sep + '-home-olduser-a', 'EIO'); try { r.src = C.leftAfterMove(h, 'olduser', 'userN', ctx); } finally { u(); } }
+      { const { h, P } = chWorld(tag + '-merge'); fs.mkdirSync(path.join(P, '-home-userN-a')); fs.writeFileSync(path.join(P, '-home-userN-a', 's1.jsonl'), 'NEW\n');
+        const u = refusing('statSync', path.sep + '-home-userN-a' + path.sep + 's1.jsonl', 'EIO'); try { C.moveUser(h, 'olduser', 'userN', {}); } finally { u(); }
+        r.newKept = fs.readFileSync(path.join(P, '-home-userN-a', 's1.jsonl'), 'utf8') === 'NEW\n'; r.oldKept = fs.existsSync(path.join(P, '-home-olduser-a', 's1.jsonl')); }
+      return r;
+    };
+    const CR = chScenes(CH, 'xiii-real');
+    ok(CR.refused.length === 0 && CR.gone.join() === 'olduser', 'B-574d follow 3 (xiii) the hook\'s own look at the old home: a refused stat (EACCES) names NO old user (not gone); «not there» names it', { refused: CR.refused, gone: CR.gone });
+    ok(CR.listed.length === 0 && CR.listSaid.length === 1 && CR.listSaid[0].includes('~/.claude/projects could not be listed (EIO)') && CR.noneSaid.length === 0, 'B-574d follow 3 (xiii) the projects listing refused (EIO): said, its old users wait; not there: nothing said', { said: CR.listSaid, none: CR.noneSaid });
+    ok(CR.cand.failed === 1 && CR.cand.unread === 1, 'B-574d follow 3 (xiii) a candidate folder\'s lstat refused while its verdicts are taken: a FAILED move (no marker, tried again) — never «no candidate», never «whole»', CR.cand);
+    ok(CR.moved === 1 && CR.after.failed === 1 && CR.after.judged === 1 && CR.after.unread === 1, 'B-574d follow 3 (xiii) the listing refused AFTER the move ran: not whole (tried again) and THIS start\'s verdict kept (judged 1: its rewrite runs now) — never «nothing left, judged none» (a «kept» for good)', { moved: CR.moved, after: CR.after });
+    ok(CR.src.failed === 1 && CR.src.unread === 1, 'B-574d follow 3 (xiii) an old folder\'s own lstat refused in the count of what is left: not known moved — failed (tried again)', CR.src);
+    ok(CR.newKept && CR.oldKept, 'B-574d follow 3 (xiii) a merge whose look at a name in the new folder is refused (EIO): the old transcript is NOT renamed over the new folder\'s own (merge, never overwrite) — it stays where it is', { newKept: CR.newKept, oldKept: CR.oldKept });
+    const CHM = M574.load('src/harnesses/claude-home.js', anchored(anchored(anchored(anchored(anchored(anchored(CHT,
+      'const homeGoneOnDisk = (old) => absentOnDisk(`/home/${old}`);\n', 'const homeGoneOnDisk = (old) => !fs.existsSync(`/home/${old}`);\n', 'the hook\'s old home by its stat'),   // stale-pins: kept — follow 2's lines in the RED copy on purpose
+      "catch (e) { if (say && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.claude/projects could not be listed", "catch (e) { if (false && !(e && e.code === 'ENOENT')) say(`[migrate] home rename: ~/.claude/projects could not be listed", 'the projects listing said'),
+      "catch (e) { if (!(e && e.code === 'ENOENT')) { out.set(d, 'error'); whyOf(out).set(d, { name: d, code: (e && e.code) || 'error' }); } continue; }", 'catch { continue; }', 'a candidate\'s refused lstat'),
+      "catch (e) { if (!(e && e.code === 'ENOENT')) cannot('~/.claude/projects', (e && e.code) || 'error'); return { failed, sameName, undecided, judged, unread, refused }; }", 'catch { return { failed, sameName, undecided, judged: 0 }; }', 'the listing after the move'),   // stale-pins: kept — follow 2's line in the RED copy
+      "catch (e) { if (!(e && e.code === 'ENOENT')) cannot(d, (e && e.code) || 'error'); continue; }   // R6: gone = moved", 'catch { continue; }   // R6: gone = moved', 'an old folder\'s refused lstat'),
+      'if (absentOnDisk(path.join(dst, f))) fs.renameSync', 'if (!fs.existsSync(path.join(dst, f))) fs.renameSync', 'a name in the new folder by its stat'), 'ch-r6-old');   // stale-pins: kept — follow 2's line in the RED copy
+    const CM = chScenes(CHM, 'xiii-red');
+    ok(CM.refused.join() === 'olduser' && CM.listSaid.length === 0 && CM.cand.failed === 0 && CM.after.failed === 0 && CM.after.judged === 0 && CM.src.failed === 0 && !CM.newKept,
+      'B-574d follow 3 RED (anchored copy: follow 2\'s hook — every refusal «absent»): the refused old home is gone, the refused listing silent, the refused looks «whole, judged none», and the merge REPLACES the new folder\'s transcript — every (xiii) leg goes red', { refused: CM.refused, said: CM.listSaid, cand: CM.cand, after: CM.after, src: CM.src, newKept: CM.newKept });
+    // (xiv)–(xvi) follow 3's own read: (xiv) a move not whole because a LOOK was refused never «gives up» — its verdict is not taken, so it
+    // is never marked and the data half never writes «kept» (the claude hook end to end: a candidate folder's lstat refused at every start);
+    // (xv) the HOME marker is read ONCE a start (a second read refused was «judged none»); (xvi) a projects folder not there while an
+    // OWED rewrite waits: nothing to move, the owed store cured (the hook's listing threw and ended the whole start)
+    const HOURN = 3600e3;
+    const xScene = async (Mod, CHmod, tag, starts) => {
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), d = path.join(root, 'data'), meta = path.join(d, 'session-meta'), hm = path.join(home, '.vibespace', NAME);
+      fs.mkdirSync(meta, { recursive: true }); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0); fs.writeFileSync(path.join(d, 'layouts.json'), LAY0); fs.writeFileSync(path.join(meta, 'cw-1.json'), META0);
+      const P = path.join(home, '.claude', 'projects'); fs.mkdirSync(path.join(P, '-home-olduser-a'), { recursive: true }); fs.writeFileSync(path.join(P, '-home-olduser-a', 's1.jsonl'), JSON.stringify({ cwd: '/home/olduser/a' }) + '\n');
+      const out = []; let t = 1795000000000;
+      for (const st of starts) {
+        t += HOURN;
+        if (st.pre) st.pre({ d, home, P, hm });
+        const warned = [], undo = st.refuse ? refusing(...st.refuse) : null;
+        let r = null;
+        try { r = Mod.migrateHomeRename({ dataDir: d, metaDir: meta, home, hooks: [CHmod], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, homeGone: () => true, throwaway: () => false, now: () => t }); await r.written; }
+        finally { if (undo) undo(); }
+        out.push({ out: r, warned, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d), home: fs.existsSync(hm) ? fs.readFileSync(hm, 'utf8') : null, moved: fs.existsSync(path.join(P, '-home-userN-a')) });
+      }
+      return out;
+    };
+    const LREF = { refuse: ['lstatSync', path.sep + '-home-olduser-a', 'EIO'] };
+    const X = await xScene(HR, CH, 'xiv-real', [LREF, LREF, LREF, LREF, {}]);
+    ok(X.slice(0, 4).every((x) => x.home === null && x.mark === null && x.layouts === LAY0 && !x.moved && x.warned.some((l) => l.includes('look(s) for the move of /home/olduser could not be made — -home-olduser-a (EIO: tried again at the next start) — no marker, nothing judged from them; tried again at every start')))
+      && X[4].moved && !!X[4].home && JSON.parse(X[4].home).judgedOld === 1 && X[4].layouts.includes('/home/userN/proj') && doneOf(X[4].mark) && !X[4].mark.kept,
+      'B-574d follow 3 (xiv) a candidate folder\'s look refused at FOUR starts (past the three tries): never «gave up» — no HOME marker, no data marker (never «kept»), nothing rewritten, said each start; the start that can look judges it old, moves it, marks the move (judged 1), cures the stores, marks done', { marks: X.map((x) => [x.home, x.mark]), said: X.map((x) => x.warned.length) });
+    const GIVE = '        const gaveUp = !whole && !lookRefused && tries >= MOVE_TRIES;\n';
+    const COUNTED = '          counted = !lookRefused && (!n0 || now() - at0 >= TRY_GAP_MS);   // follow 3: a REFUSED look is owed, never a try spent\n';
+    const XMT = anchored(anchored(HRT, COUNTED, "          counted = !n0 || now() - at0 >= TRY_GAP_MS;   // MUTANT: follow 3's first form — a refused look spends a try\n", 'a refused look spends no try'),   // stale-pins: kept — follow 3's first form in the RED copy
+      GIVE, "        const gaveUp = !whole && tries >= MOVE_TRIES;   // MUTANT: …and gives up\n", 'a refused look never gives up');   // stale-pins: kept — follow 3's first form in the RED copy
+    const XM = await xScene(M574.load('src/server/home-rename.js', XMT, 'gives-up-on-refusal'), CH, 'xiv-red', [LREF, LREF, LREF, LREF, {}]);
+    ok(XM.slice(2).some((x) => !!x.mark && x.mark.kept === true) && XM[4].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: a refused look counts a try and gives up): the third start marks the move with «judged none» and the data half writes «kept» — the stores keep /home/olduser for good, the healed start does nothing — (xiv) goes red', { marks: XM.map((x) => x.mark) });
+    const CHT2 = fs.readFileSync(path.join(REPO_ROOT, 'src/harnesses/claude-home.js'), 'utf8');
+    const XC = await xScene(HR, M574.load('src/harnesses/claude-home.js', anchored(CHT2, "    if (who === 'error') { const w = owners.why && owners.why.get(d); cannot(w ? w.name : d, w ? w.code : 'error'); continue; }\n", "    if (who === 'error') { failed++; continue; }   // MUTANT: a verdict not taken counted as a failed move only\n", 'a verdict not taken is a refused look'), 'ch-error-counted'), 'xiv-red2', [LREF, LREF, LREF, LREF, {}]);
+    ok(XC.slice(2).some((x) => !!x.mark && x.mark.kept === true) && XC[4].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the hook counts a verdict not taken as a failed move only): the move gives up, «kept» for good — (xiv) goes red on the hook\'s side too', { marks: XC.map((x) => x.mark) });
+    // (xv) the HOME marker read once a start: its SECOND read refused (a network HOME's EIO) is never asked — cured on the first read's verdict
+    const secondRead = () => { const real = fs.readFileSync; let n = 0; fs.readFileSync = function (p, ...a) { if (String(p).endsWith(HMR) && ++n === 2) throw Object.assign(new Error('EIO: a placed refusal of the second read'), { code: 'EIO' }); return real.call(this, p, ...a); }; return () => { fs.readFileSync = real; }; };
+    const oneRead = async (Mod, tag) => {   // the refusal placed around the start alone: the leg's own reads after it are the real ones
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), d = path.join(root, 'data'), meta = path.join(d, 'session-meta'), hm = path.join(home, '.vibespace', NAME);
+      fs.mkdirSync(meta, { recursive: true }); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0); fs.writeFileSync(path.join(d, 'layouts.json'), LAY0); fs.writeFileSync(path.join(meta, 'cw-1.json'), META0); fs.writeFileSync(hm, HM1);
+      const hk = { staleUsers: () => [], moveUser: () => 0, leftAfterMove: () => ({ failed: 0, judged: 0 }) }, warned = [], undo = secondRead();
+      try { const r = Mod.migrateHomeRename({ dataDir: d, metaDir: meta, home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, homeGone: () => true, throwaway: () => false }); await r.written; } finally { undo(); }
+      return { warned, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d) };
+    };
+    const O1 = await oneRead(HR, 'xv-real');
+    ok(O1.layouts.includes('/home/userN/proj') && doneOf(O1.mark) && !O1.mark.kept && O1.warned.length === 0, 'B-574d follow 3 (xv) the HOME marker read ONCE a start: a second read that would be refused is never made — cured on its verdict, marked done (never «kept»)', { mark: O1.mark, warned: O1.warned });
+    const ONCE = '        const judgedOld = Math.max(!homeDone ? judgedAll : hmState.judged, prior ? prior.judgedOld : 0);\n';
+    const OM = await oneRead(M574.load('src/server/home-rename.js', anchored(HRT, ONCE, "        const judgedOld = Math.max(!homeDone ? judgedAll : homeMarkerState(hm).judged, prior ? prior.judgedOld : 0);   // MUTANT: follow 3's first form — read again\n", 'the HOME marker read once'), 'home-read-twice'), 'xv-red');
+    ok(!!OM.mark && OM.mark.kept === true && OM.layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the data half reads the HOME marker a second time): the refused second read is «judged none» — «kept» for good — (xv) goes red', { mark: OM.mark });
+    // (xvi) an OWED rewrite (its HOME marker never landed), ~/.claude/projects not there: the hook moves nothing, the start goes on — the
+    // owed store cured on the carried verdict, the HOME marker written with it
+    const OWEDM = JSON.stringify({ at: 1, owed: ['layouts.json'], judgedOld: 1 });
+    const owedPre = ({ d, P }) => { fs.rmSync(path.dirname(P), { recursive: true, force: true }); fs.writeFileSync(path.join(d, NAME), OWEDM); };
+    const [V1] = await xScene(HR, CH, 'xvi-real', [{ pre: owedPre }]);
+    ok(V1.layouts.includes('/home/userN/proj') && doneOf(V1.mark) && !V1.mark.kept && !!V1.home && JSON.parse(V1.home).judgedOld === 1, 'B-574d follow 3 (xvi) an owed rewrite whose projects folder is not there: nothing to move, the start goes on — layouts.json cured on the carried verdict, marked done, the HOME marker written with that verdict (judged 1)', { mark: V1.mark, home: V1.home, warned: V1.warned });
+    const MLIST = "  let names = []; try { names = fs.readdirSync(projectsDir); } catch { return 0; }\n  for (const d of names) {\n    if (owners.get(d) !== 'old') continue;";
+    const [VM1] = await xScene(HR, M574.load('src/harnesses/claude-home.js', anchored(CHT2, MLIST, "  for (const d of fs.readdirSync(projectsDir)) {   // MUTANT: the release's unguarded listing\n    if (owners.get(d) !== 'old') continue;", 'the move\'s listing'), 'ch-move-throws'), 'xvi-red', [{ pre: owedPre }]);   // stale-pins: kept — the release's listing in the RED copy on purpose
+    ok(VM1.layouts === LAY0 && !doneOf(VM1.mark) && VM1.warned.some((l) => l.includes('home-rename check failed')), 'B-574d follow 3 RED (anchored copy: the hook\'s unguarded listing): the start throws and ends — the owed store is never cured, at any start — (xvi) goes red', { mark: VM1.mark, warned: VM1.warned });
+    // (xvii)–(xxii) follow 3's second read: (xvii) the tries record CARRIES the verdict a start took to the start that marks the move, and
+    // NAMES its old user (a listing refused after the move ran: the next start finds nothing to name it by — the HOME marker then never
+    // written, a second install over this HOME never rewriting); (xviii) a HOME marker that could not be written leaves the verdict in
+    // the tries; (xix) a held HOME marker never holds an owed rewrite that carries its own verdict; (xx) a dangling transcript is «not
+    // there»; (xxi) a tries record that cannot be read is HELD, said by name, never written over; (xxii) each guard of «a refused look
+    // never gives up» red alone
+    const fScene = async (Mod, tag, legs, { pre = null } = {}) => {
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), hm = path.join(home, '.vibespace', NAME), tf = hm + '.tries';
+      const mk = (d) => { const meta = path.join(d, 'session-meta'); fs.mkdirSync(meta, { recursive: true }); fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0); fs.writeFileSync(path.join(d, 'layouts.json'), LAY0); fs.writeFileSync(path.join(meta, 'cw-1.json'), META0); return d; };
+      const d1 = mk(path.join(root, 'data')), d2 = mk(path.join(root, 'data-second')); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      if (pre) pre({ d: d1, home, hm, tf });
+      let k = 0, t = 1795000000000; const out = [];
+      const hk = { staleUsers: () => (legs[k - 1].named ? ['olduser'] : []), moveUser: () => legs[k - 1].moved || 0, leftAfterMove: () => legs[k - 1].left };
+      for (const leg of legs) {
+        k++; t += HOURN;
+        const d = leg.second ? d2 : d1, warned = [];
+        const r = Mod.migrateHomeRename({ dataDir: d, metaDir: path.join(d, 'session-meta'), home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, homeGone: () => true, throwaway: () => false, now: () => t });
+        await r.written;
+        const text = (f) => { try { return fs.statSync(f).isDirectory() ? 'DIR' : fs.readFileSync(f, 'utf8'); } catch { return null; } };
+        out.push({ warned, home: text(hm), tries: text(tf), mark: markOf(d), layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8') });
+      }
+      return out;
+    };
+    const REF1 = { failed: 1, unread: 1, judged: 1, refused: [{ name: '~/.claude/projects', code: 'EIO' }] };
+    const CARRYL = [{ named: true, moved: 1, left: REF1 }, { named: false, left: { failed: 0, judged: 0 } }, { named: false, second: true, left: { failed: 0, judged: 0 } }];
+    const C3 = await fScene(HR, 'xvii-real', CARRYL);
+    ok(C3[0].home === null && !!C3[0].tries && JSON.parse(C3[0].tries).judgedOld === 1 && doneOf(C3[0].mark) && C3[0].layouts.includes('/home/userN/proj') && C3[0].warned.some((l) => l.includes('~/.claude/projects (EIO: tried again at the next start)'))
+      && !!C3[1].home && JSON.parse(C3[1].home).judgedOld === 1 && C3[1].tries === null
+      && C3[2].layouts.includes('/home/userN/proj') && doneOf(C3[2].mark) && !C3[2].mark.kept,
+      'B-574d follow 3 (xvii) the listing refused AFTER the move ran (judged 1): no HOME marker, the verdict in the tries record (said by name); the next start — nothing left to name the old user but the tries — marks the move WITH that verdict and removes the tries; a second install over this HOME then rewrites its stores (never «kept»)', { marks: C3.map((x) => [x.home, x.tries, x.mark]) });
+    const NAMEBY = 'n.endsWith(triesTail) ? n.slice(head.length, n.length - triesTail.length) : null';
+    const C3a = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, NAMEBY, 'null /* MUTANT: the tries name nobody */', 'the tries name their old user'), 'tries-name-nobody'), 'xvii-red1', CARRYL);
+    ok(C3a[1].home === null && C3a[2].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the tries name nobody): the move is never marked and the second install never rewrites — (xvii) goes red', { marks: C3a.map((x) => [x.home, x.mark]) });
+    const CARRYV = '        judgedAll = Math.max(judged, prevJudged);\n';
+    const C3b = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, CARRYV, '        judgedAll = judged;   // MUTANT: the verdict not carried by the tries\n', 'the tries carry the verdict'), 'tries-verdict-dropped'), 'xvii-red2', CARRYL);
+    ok(!!C3b[1].home && JSON.parse(C3b[1].home).judgedOld === 0 && C3b[2].mark && C3b[2].mark.kept === true, 'B-574d follow 3 RED (anchored copy: the verdict not carried): the start that marks writes «judged none» and the second install writes «kept» — (xvii) goes red', { marks: C3b.map((x) => [x.home, x.mark]) });
+    // (xviii) the HOME marker's write refused (its sync, EIO): the tries record keeps this start's verdict for the next start
+    ok(!!k1.tries && JSON.parse(k1.tries).judgedOld === 1, 'B-574d follow 3 (xviii) a HOME marker that could not be written leaves THIS start\'s verdict in the tries record (judged 1), for the next start to mark with', { tries: k1.tries });
+    const FALLB = '              return replaceSyncedAsync(`${tf}.tmp`, tf, triesRecord(), log)   // the verdict kept for the next start (a full disk may refuse it too: said)\n'
+      + "                .catch((e2) => log.warn(`[migrate] home rename: the tries could not be written either (${e2.message}) — this start's verdict is NOT kept: the next start judges the move again`));\n";
+    const k1R = await hrScene(M574.load('src/server/home-rename.js', anchored(HRT, FALLB, '              return null;   // MUTANT: the verdict dropped with the marker\n', 'the verdict kept in the tries'), 'verdict-dropped-with-marker'), 'xviii-red', HMT, 'EIO');
+    ok(k1R.tries === null, 'B-574d follow 3 RED (anchored copy: nothing kept when the HOME marker cannot be written): no record of the verdict — (xviii) goes red', { tries: k1R.tries });
+    // (xix) a TORN HOME marker and an OWED data marker with its own verdict (judged 1): the owed store is retried on it — cured, done
+    const OWN1 = JSON.stringify({ at: 1, owed: ['layouts.json'], judgedOld: 1 });
+    const [Y1] = await kScene(HR, 'xix-real', [{ home: TORNH, dm: OWN1 }]);
+    ok(Y1.layouts.includes('/home/userN/proj') && doneOf(Y1.mark) && !Y1.mark.kept && Y1.home === TORNH && Y1.warned.some((l) => l.includes('— not taken as judged; the owed rewrite runs on its own verdict')),
+      'B-574d follow 3 (xix) a held HOME marker beside an OWED rewrite that carries its own verdict: the owed store retried on it — cured, marked done (never «kept»), the HOME marker never written over, said', { mark: Y1.mark, warned: Y1.warned });
+    const [YR1] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, HELD, "      const unread = dmUnread || !!hmState.unreadable;   // MUTANT: follow 3's first form — a held HOME marker holds an owed rewrite too\n", 'an owed verdict runs past a held HOME marker'), 'owed-held-too'), 'xix-red', [{ home: TORNH, dm: OWN1 }]);
+    ok(YR1.layouts === LAY0 && !doneOf(YR1.mark), 'B-574d follow 3 RED (anchored copy: a held HOME marker holds the owed rewrite too): layouts.json never retried, for good — (xix) goes red', { mark: YR1.mark });
+    // (xx) a transcript NOT THERE (a dangling link) is no evidence: the folder is judged by its other transcripts
+    const { h: hx, P: Px } = chWorld('xx-real'); fs.symlinkSync(path.join(Px, 'gone-target.jsonl'), path.join(Px, '-home-olduser-a', 'z.jsonl'));
+    ok(CH.ownersOf(hx, 'olduser').get('-home-olduser-a') === 'old', 'B-574d follow 3 (xx) a dangling transcript link (ENOENT) is «not there» — the folder judged old by its other transcript, never «a look refused»', { v: CH.ownersOf(hx, 'olduser').get('-home-olduser-a') });
+    const CHM2 = M574.load('src/harnesses/claude-home.js', anchored(CHT2, "    if (e && e.code === 'ENOENT') return null;\n", '', 'a transcript not there is no evidence'), 'dangling-refused');
+    ok(CHM2.ownersOf(hx, 'olduser').get('-home-olduser-a') === 'error', 'B-574d follow 3 RED (anchored copy: a dangling transcript read as a refused look): the folder is never judged — (xx) goes red', { v: CHM2.ownersOf(hx, 'olduser').get('-home-olduser-a') });
+    // (xxi) a FOLDER in the tries record's name (EISDIR): HELD — never written over, the move never gives up, said by name with what a
+    // person can do (follow 3's first form read it as «no tries» and wrote over it at every start)
+    const RENF = { named: true, moved: 0, left: { failed: 1, judged: 1 } };
+    const Z = await fScene(HR, 'xxi-real', [RENF, RENF, RENF, RENF], { pre: ({ tf }) => fs.mkdirSync(tf) });
+    ok(Z.every((x) => x.home === null && x.tries === 'DIR' && x.warned.some((l) => l.includes(NAME + '.tries (EISDIR: a folder has its name: move the folder)')) && !x.warned.some((l) => l.includes('the tries could not be written'))),
+      'B-574d follow 3 (xxi) a folder in the tries record\'s name: HELD at every start — never written over, never «gave up», said by name with what a person can do', { said: Z.map((x) => x.warned) });
+    const HELDT = "if (e && e.code && e.code !== 'ENOENT') triesHeld = e.code; }";
+    const ZR = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, HELDT, 'void e; /* MUTANT: an unreadable tries record read as none */ }', 'a tries record that cannot be read is held'), 'tries-read-none'), 'xxi-red', [RENF, RENF], { pre: ({ tf }) => fs.mkdirSync(tf) });
+    ok(ZR.some((x) => x.warned.some((l) => l.includes('the tries could not be written'))), 'B-574d follow 3 RED (anchored copy: an unreadable tries record read as «no tries»): every start tries to write over it — (xxi) goes red', { said: ZR.map((x) => x.warned) });
+    // (xxii) each guard of «a refused look never gives up», red ALONE: (a) refused looks spend no try — four refused starts, then a start
+    // whose move truly fails counts its FIRST try (never gives up at once); (b) a refused look over a tries record already at its bound
+    // never gives up (with «judged none»: «kept» for good)
+    const REFJ = { named: true, moved: 0, left: { failed: 1, unread: 1, judged: 1, refused: [{ name: '-home-olduser-a', code: 'EIO' }] } };
+    const GA = [REFJ, REFJ, REFJ, REFJ, RENF];
+    const G5 = await fScene(HR, 'xxii-a-real', GA);
+    ok(G5[4].home === null && G5[4].warned.some((l) => l.includes('could not be moved — no marker; tried again at the next start (1 of 3)')), 'B-574d follow 3 (xxii a) four refused starts spend no try: the first start whose move truly fails counts try 1 of 3 — not marked', { said: G5[4].warned, tries: G5[4].tries });
+    const G5R = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, COUNTED, "          counted = !n0 || now() - at0 >= TRY_GAP_MS;   // MUTANT: a refused look spends a try (the give-up guard kept)\n", 'a refused look spends no try'), 'refused-spends-try'), 'xxii-a-red', GA);   // stale-pins: kept — follow 3's first form in the RED copy
+    ok(G5R[4].home !== null, 'B-574d follow 3 RED (anchored copy: refused looks spend tries, the give-up guard alone kept): the first true failure gives up AT ONCE and marks the move — (xxii a) goes red', { home: G5R[4].home });
+    const BOUND = ({ tf }) => fs.writeFileSync(tf, JSON.stringify({ tries: 3, at: 0, judgedOld: 0 }));
+    const REF0 = { named: true, moved: 0, left: { failed: 1, unread: 1, judged: 0, refused: [{ name: '-home-olduser-a', code: 'EIO' }] } };
+    const [GB] = await fScene(HR, 'xxii-b-real', [REF0], { pre: BOUND });
+    ok(GB.home === null && GB.mark === null && GB.layouts === LAY0, 'B-574d follow 3 (xxii b) a refused look over a tries record at its bound (3): never «gave up» — no HOME marker, no «kept»', { home: GB.home, mark: GB.mark });
+    const [GBR] = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, GIVE, "        const gaveUp = !whole && tries >= MOVE_TRIES;   // MUTANT: a refused look gives up (the try guard kept)\n", 'a refused look never gives up'), 'refused-gives-up'), 'xxii-b-red', [REF0], { pre: BOUND });   // stale-pins: kept — follow 3's first form in the RED copy
+    ok(!!GBR.mark && GBR.mark.kept === true, 'B-574d follow 3 RED (anchored copy: the give-up guard cut, the try guard kept): the move gives up with «judged none» and the data half writes «kept» — (xxii b) goes red', { mark: GBR.mark });
+    // (xxiii)–(xxv) follow 3's third read: a hook that MOVES for real (its folder in place until its one move; a later start judges none)
+    // — (xxiii) nothing moves while the tries record is held (a move that ran then lost its verdict); (xxiv) a whole move beside a data
+    // marker that cannot be read keeps its verdict and its old user in the tries while the HOME marker waits; (xxv) a TORN tries record
+    // is held (never «no tries»: its verdict may be in it)
+    const sScene = async (Mod, tag, starts, { pre = null } = {}) => {
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), hm = path.join(home, '.vibespace', NAME), tf = hm + '.tries';
+      const mk = (d) => { const meta = path.join(d, 'session-meta'); fs.mkdirSync(meta, { recursive: true }); fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0); fs.writeFileSync(path.join(d, 'layouts.json'), LAY0); fs.writeFileSync(path.join(meta, 'cw-1.json'), META0); return d; };
+      const d1 = mk(path.join(root, 'data')), d2 = mk(path.join(root, 'data-second')); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      if (pre) pre({ d: d1, home, hm, tf });
+      let inPlace = true, movedNow = false, calls = 0, t = 1795000000000; const out = [];
+      const hk = { staleUsers: () => (inPlace ? ['olduser'] : []), moveUser: () => { calls++; movedNow = inPlace; inPlace = false; return movedNow ? 1 : 0; }, leftAfterMove: () => ({ failed: 0, judged: movedNow ? 1 : 0 }) };
+      for (const st of starts) {
+        movedNow = false; t += HOURN;
+        if (st.before) st.before({ d: d1, home, hm, tf });
+        const d = st.second ? d2 : d1, warned = [];
+        const r = Mod.migrateHomeRename({ dataDir: d, metaDir: path.join(d, 'session-meta'), home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, homeGone: () => true, throwaway: () => false, now: () => t });
+        await r.written;
+        const text = (f) => { try { return fs.statSync(f).isDirectory() ? 'DIR' : fs.readFileSync(f, 'utf8'); } catch { return null; } };
+        out.push({ calls, warned, home: text(hm), tries: text(tf), mark: markOf(d), layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8') });
+      }
+      return out;
+    };
+    const TDIR = ({ tf }) => fs.mkdirSync(tf), TGONE = ({ tf }) => fs.rmSync(tf, { recursive: true, force: true });
+    const HSTARTS = [{}, { before: TGONE }, { second: true }];
+    const A = await sScene(HR, 'xxiii-real', HSTARTS, { pre: TDIR });
+    ok(A[0].calls === 0 && A[0].home === null && A[0].tries === 'DIR' && !!A[1].home && JSON.parse(A[1].home).judgedOld === 1 && A[2].layouts.includes('/home/userN/proj') && doneOf(A[2].mark) && !A[2].mark.kept,
+      'B-574d follow 3 (xxiii) a folder in the tries record\'s name: NOTHING MOVES while it is held (no hook asked); the folder moved aside, the next start moves and marks with its real verdict (judged 1); a second install rewrites (never «kept»)', { calls: A.map((x) => x.calls), home: A[1].home });
+    const MOVEG = '        if (!triesHeld) for (const hr of hrs) {\n';
+    const AR = await sScene(M574.load('src/server/home-rename.js', anchored(HRT, MOVEG, '        for (const hr of hrs) {   // MUTANT: the move runs while the tries record is held\n', 'no move while the tries are held'), 'moves-while-held'), 'xxiii-red', HSTARTS, { pre: TDIR });
+    ok(AR[0].calls === 1 && AR[1].home === null && AR[2].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: the move runs while the tries record is held): its verdict is kept nowhere — no later start names the old user, the second install never rewrites — (xxiii) goes red', { home: AR.map((x) => x.home), second: AR[2].layouts });
+    const DMDIR = ({ d }) => fs.mkdirSync(path.join(d, NAME)), DMGONE = ({ d }) => fs.rmSync(path.join(d, NAME), { recursive: true, force: true });
+    const B4 = await sScene(HR, 'xxiv-real', [{}, { before: DMGONE }], { pre: DMDIR });
+    ok(B4[0].calls === 1 && B4[0].home === null && !!B4[0].tries && JSON.parse(B4[0].tries).judgedOld === 1 && B4[0].layouts === LAY0 && !!B4[1].home && JSON.parse(B4[1].home).judgedOld === 1 && B4[1].layouts.includes('/home/userN/proj') && doneOf(B4[1].mark),
+      'B-574d follow 3 (xxiv) a WHOLE move beside a data marker that cannot be read (a folder in its name): the HOME marker waits and the tries keep its verdict (judged 1) and its old user; the marker made readable, the next start — the folders moved, no hook naming the old user — marks with that verdict and cures the stores', { tries: B4[0].tries, home: B4[1].home, mark: B4[1].mark });
+    const WAITT = "            if (!prev || judgedAll > prevJudged || counted) writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => replaceSyncedAsync(`${tf}.tmp`, tf, triesRecord(), log))   // only when it changed\n"
+      + "              .catch((e) => log.warn(`[migrate] home rename: the tries could not be written (${e.message}) — this start's verdict is NOT kept: the next start judges the move again`)));\n";
+    const B4R = await sScene(M574.load('src/server/home-rename.js', anchored(HRT, WAITT, '            void 0;   // MUTANT: nothing kept while the HOME marker waits\n', 'the tries kept while the HOME marker waits'), 'waits-keeps-nothing'), 'xxiv-red', [{}, { before: DMGONE }], { pre: DMDIR });
+    ok(B4R[1].home === null && B4R[1].layouts === LAY0, 'B-574d follow 3 RED (anchored copy: nothing kept while the HOME marker waits): no later start names the old user — the stores keep /home/olduser for good — (xxiv) goes red', { home: B4R[1].home });
+    const TORNT = '{"judgedOld":1,"tries":1,"at":0';   // the verdict first, as the product writes it
+    const TTL = [{ named: false, left: { failed: 0, judged: 0 } }, { named: false, second: true, left: { failed: 0, judged: 0 } }];
+    const TT = await fScene(HR, 'xxv-real', TTL, { pre: ({ tf }) => fs.writeFileSync(tf, TORNT) });
+    ok(TT[0].home === null && TT[0].mark === null && TT[0].tries === TORNT && TT[0].warned.some((l) => l.includes(NAME + '.tries (unparsable: its bytes do not parse: restore it from a backup — never move it aside')) && TT[1].mark === null && TT[1].layouts === LAY0,
+      'B-574d follow 3 (xxv) a TORN tries record (its verdict may be in it): HELD — nothing moves, no HOME marker with «judged none», no «kept» in either install, never written over, said with the one safe hand', { first: [TT[0].home, TT[0].mark, TT[0].warned], second: TT[1].mark });
+    const TTR = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, "if (triesText.startsWith('{\"j')) triesHeld = 'unparsable'; else ", 'if (false) triesHeld = \'unparsable\'; else ', 'a torn tries record is held'), 'torn-tries-none'), 'xxv-red', TTL, { pre: ({ tf }) => fs.writeFileSync(tf, TORNT) });
+    ok(!!TTR[0].mark && TTR[0].mark.kept === true, 'B-574d follow 3 RED (anchored copy: a torn tries record read as «no tries»): the move is marked with «judged none» and «kept» is written — (xxv) goes red', { mark: TTR[0].mark });
+    // (xxvi)–(xxvii) its fourth read: (xxvi) a TORN tries record that never carried a verdict (the release's {tries, at}, a zero-length
+    // tear) is only a lost count — read as none, said, the move goes on (holding it would have had no way out); (xxvii) the verdict's last
+    // copy failing is SAID — the HOME marker refused and the tries after it, and the tries while the HOME marker waits
+    const LEGACYT = '{"tries":1,"at"';
+    const LG = await fScene(HR, 'xxvi-real', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }], { pre: ({ tf }) => fs.writeFileSync(tf, LEGACYT) });
+    ok(!!LG[0].home && JSON.parse(LG[0].home).judgedOld === 1 && LG[0].tries === null && LG[0].warned.some((l) => l.includes('does not parse and carries no verdict (a count only) — read as none')),
+      'B-574d follow 3 (xxvi) a torn tries record of the release (a count only): read as none and said — the move goes on and is marked with its verdict (judged 1), the record gone', { home: LG[0].home, warned: LG[0].warned });
+    const TORNRULE = "if (triesText.startsWith('{\"j')) triesHeld = 'unparsable'; else ";
+    const LGR = await fScene(M574.load('src/server/home-rename.js', anchored(HRT, TORNRULE, "if (true) triesHeld = 'unparsable'; else ", 'only a record that carried a verdict is held torn'), 'torn-count-held'), 'xxvi-red', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }], { pre: ({ tf }) => fs.writeFileSync(tf, LEGACYT) });
+    ok(LGR[0].home === null, 'B-574d follow 3 RED (anchored copy: every torn tries record held): the release\'s count holds the move for ever (no backup exists to restore) — (xxvi) goes red', { home: LGR[0].home });
+    const vsTmpRefused = async (fn) => { const P = fs.promises, o0 = P.open; P.open = async function (p, ...a) { const s = String(p); if (s.includes(path.sep + '.vibespace' + path.sep) && s.endsWith('.tmp')) throw Object.assign(new Error('EIO: a placed refusal of the open'), { code: 'EIO' }); return o0.call(this, p, ...a); }; try { return await fn(); } finally { P.open = o0; } };
+    const SA = await vsTmpRefused(() => fScene(HR, 'xxvii-a', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }]));
+    const SB = await vsTmpRefused(() => sScene(HR, 'xxvii-b', [{}], { pre: DMDIR }));
+    ok(SA[0].warned.some((l) => l.includes('the tries could not be written either (EIO')) && SB[0].warned.some((l) => l.includes('the tries could not be written (EIO: a placed refusal of the open) — this start\'s verdict is NOT kept')),
+      'B-574d follow 3 (xxvii) the verdict\'s last copy failing is SAID: the HOME marker refused and the tries after it («either»), and the tries while the HOME marker waits («NOT kept»)', { a: SA[0].warned, b: SB[0].warned });
+    const SILA = "                .catch((e2) => log.warn(`[migrate] home rename: the tries could not be written either (${e2.message}) — this start's verdict is NOT kept: the next start judges the move again`));\n";
+    const SILB = "              .catch((e) => log.warn(`[migrate] home rename: the tries could not be written (${e.message}) — this start's verdict is NOT kept: the next start judges the move again`)));\n";
+    const SAR = await vsTmpRefused(() => fScene(M574.load('src/server/home-rename.js', anchored(HRT, SILA, '                .catch(() => { });   // MUTANT: the last copy\'s failure silent\n', 'the fallback\'s failure said'), 'fallback-silent'), 'xxvii-a-red', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }]));
+    const SBR = await vsTmpRefused(() => sScene(M574.load('src/server/home-rename.js', anchored(HRT, SILB, '              .catch(() => { }));   // MUTANT: the waiting tries\' failure silent\n', 'the waiting tries\' failure said'), 'waiting-silent'), 'xxvii-b-red', [{}], { pre: DMDIR }));
+    ok(!SAR[0].warned.some((l) => l.includes('could not be written either')) && !SBR[0].warned.some((l) => l.includes('— this start\'s verdict is NOT kept')), 'B-574d follow 3 RED (anchored copies: each failure silent): nothing says the verdict was lost — (xxvii) goes red', { a: SAR[0].warned, b: SBR[0].warned });
+    }
   } catch (e) { ok(false, `B-574d: the synced replace's legs could not run on this tree (${(e && e.stack) || e})`); }
   finally { fs.rmSync(base, { recursive: true, force: true }); }
 }

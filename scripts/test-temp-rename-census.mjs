@@ -268,7 +268,7 @@ const ROWS = [
   ["src/server/grants-migration.js", "unsynced", "not-production", "the hosts.json reshape with no live HostManager handed (a suite); the hub hands one: hosts.reshapeStore, on the store writer", "migrate"],
   ["src/server/grants-store.js", "unsynced", "ruled-sync", "a grant's land: all or nothing, on disk before the person's reply (主开发 r3455)", "writeJsonAtomic"],
   ["src/server/grants-store.js", "move", "move", "", "create > audit"],
-  ["src/server/home-rename.js", "synced", "self-synced", "B-574d (lane nl-migrations): the HOME move's tries beside its marker — the temp written, synced (a sync or close that fails fails the write; a file system with no sync is said), then renamed, off the boot's synchronous road; the recorded-path rewrite goes through src/fd-close.js renameSynced (no rename here)", "replaceSyncedAsync"],
+  ["src/server/home-rename.js", "synced", "self-synced", "B-574d (lane nl-migrations): the HOME move's tries beside its marker, and (follow 3, 主开发 r5068) the HOME marker itself — the temp written, synced (a sync or close that fails fails the write; a file system with no sync is said), then renamed, off the boot's synchronous road; the recorded-path rewrite goes through src/fd-close.js renameSynced (no rename here)", "replaceSyncedAsync"],
   ["src/server/host-tokens.js", "unsynced", "store", "", "create > writeIdentity"],
   ["src/server/instance-url.js", "unsynced", "store", "", "writeJsonAtomic"],
   ["src/server/integration-store.js", "move", "move", "", "create > load"],

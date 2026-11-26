@@ -1524,7 +1524,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   } catch (e) { threw = true; if (e && typeof e === 'object') e.report = report; throw e; }   // B-574d (F6): the pass's report so far rides the error (what landed)
   finally {   // B-574d (F5): what was moved is archived even when a later write throws; (主开发 r5013 (a)) the append's own failure never replaces the pass's error and report
     try { _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived); }
-    catch (ae) { if (!threw) throw ae; console.warn(`[usage-repair] the archive of what the failed pass moved could not be appended (${(ae && ae.code) || 'error'})`); }
+    catch (ae) { if (!threw) { if (ae && typeof ae === 'object') ae.report = report; throw ae; } console.warn(`[usage-repair] the archive of what the failed pass moved could not be appended (${(ae && ae.code) || 'error'})`); }
   }
   report.ms = Date.now() - t0;
   return report;
