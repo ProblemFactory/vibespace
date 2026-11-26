@@ -3163,7 +3163,7 @@ await (async () => {
         ['function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) {\n', 'function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) { _proving = _provingPools.get(poolId) || _provingPools.set(poolId, new Map()).get(poolId); /* PATCHED */\n']]);
       const tpRed = ePer ? await twoPools(ePer) : null;
       ck('r3 MINOR 2 RED: with a hold map PER POOL the second pool sends its spawn onto the SAME guess (UCI, UCI)', !!tpRed && tpRed[0] === 'uci' && tpRed[1] === 'uci', JSON.stringify(tpRed));
-      const eOwn = ectl('ownfile', [['readReading: poolReadReading(),', "readReading: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } }, /* PATCHED: the member's own file only */"]]);
+      const eOwn = ectl('ownfile', [['proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(),', "proving: forDefault ? null : provingInFlight(), readReading: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } }, /* PATCHED: the member's own file only */"]]);
       const gwRed = eOwn ? await groupWorld(eOwn) : null;
       ck('r3 4a RED: a proving decision handed the member\'s OWN FILE only (no identity group) places a spawn on UCI to confirm a reset its identity already read', !!gwRed && gwRed.proving === true, JSON.stringify(gwRed));
       for (const r of ccE(MPE.files, MPE.dir, path.resolve('.'), { minCopies: 3, label: 'proving engine: ' })) ck(r.name, r.pass);

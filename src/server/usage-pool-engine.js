@@ -1010,10 +1010,11 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // the pin can serve (the owner's choice, explicit — no warm or settle bar at a spawn); a pin
     // that cannot serve starts it where the automatic rules would (the pin kept on the session).
     // THE START's ONE ENTRY asks it too (B-87fd (1), 主开发 r5067): on a PAYING default those automatic rules carry the start's mark
-    // (the placing law; a guess fail closed) — a pin that cannot serve is no pin for the placing
+    // (the placing law; a guess fail closed) — a pin that cannot serve is no pin for the placing. It hands the bare reading as the entry
+    // does (r5108's small): a held mark reaches the decision through readCache too today, so no decision moves; the two calls cannot part
     if (pin) {
       const pm = healthyPoolMembers(poolId);
-      const dp = require('../account-pool-auto.js').decideStart({ family: fam, hinted, baseReadCache: base, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm), payingIds: overageInUseIds(pm) });
+      const dp = require('../account-pool-auto.js').decideStart({ family: fam, hinted, baseReadCache: base, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), readReading: poolReadReading(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm), payingIds: overageInUseIds(pm) });
       // (q-053 P0b) a pin of ANOTHER provider is never where a spawn starts: its model is the request's, the pin's provider
       // would serve it under another id — it applies through the conversation's cold switch (the pin kept), so the spawn
       // is placed by the automatic rules below
