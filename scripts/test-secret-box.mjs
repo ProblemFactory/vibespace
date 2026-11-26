@@ -81,7 +81,7 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
 // when it can answer (a tarball export cannot — SKIP with the reason, never
 // a false green).
 {
-  let shipped = null, why = null;
+  let shipped = null, why = null, pinRead = false;   // r5259: was the PINNED base read (a full clone), whatever it held?
   try {
     // HEAD may already carry the fix; the PARENT of a commit that touched
     // mounts.js is where the inline cipher last lived. Walk back until the
@@ -90,10 +90,14 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
     // at 699b7d9eb — the newest commit of src/mounts.js that still carries the inline `_key()` (2026-09-03)
     for (const ref of ['HEAD', '699b7d9eb']) {
       let s; try { s = execFileSync('git', ['show', `${ref}:src/mounts.js`], { cwd: REPO, env: gitEnvFrom(process.env), encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 }); } catch (e) { why = e.message; break; }
+      if (ref === '699b7d9eb') pinRead = true;
       if (/_key\(\) \{\n    try \{ return Buffer\.from\(fs\.readFileSync\(this\._keyFile/.test(s)) { shipped = s; break; }
     }
   } catch (e) { why = e.message; }
-  if (!shipped) console.log(`  … SKIP git cross-check of the embedded pre-fix bytes (${why || 'the pinned 699b7d9eb is in this checkout but carries no inline cipher'})`);
+  // r5259 (the round's MUST): the named SKIP only when the pin could not be READ (a shallow clone, a tarball); a pin READ that no longer
+  // shows the fault is a RED by name, as the family's other two re-pinned controls (test-principal-picker, test-codex-p2-wrapper) make it
+  if (!shipped && pinRead) ok(false, 'CONTROL lost its fault: the pinned 699b7d9eb is in this checkout but carries no inline cipher (its `_key()` reading the key file) — the git cross-check of the embedded pre-fix bytes cannot judge');
+  else if (!shipped) console.log(`  … SKIP git cross-check of the embedded pre-fix bytes (${why || 'git could not be asked'})`);
   else {
     const pick = (name) => { const m = shipped.match(new RegExp(`  ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}`)); return m ? m[0] : ''; };
     const norm = (s) => s.replace(/^\s+/gm, '').replace(/\s+$/gm, '');
