@@ -62,7 +62,7 @@ parentPort.on('message', (m) => {
   if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
   Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
   const ix = m.ev === 'write' && /index\\.json$/.test(m.file), dirOf = path.dirname(m.file);
-  if (ix) { const t1 = Date.now(); while (fs.existsSync(path.join(dirOf, 'stallix')) && Date.now() - t1 < ${BOUND_MS}) Atomics.wait(Z, 0, 0, 5); }
+  if (ix) { const t1 = Date.now(); while (fs.existsSync(path.join(dirOf, 'stallix')) && Date.now() - t1 < ${BOUND_MS}) Atomics.wait(Z, 0, 0, 5); if (fs.existsSync(path.join(dirOf, 'stallix-then'))) { try { fs.renameSync(path.join(dirOf, 'stallix-then'), path.join(dirOf, 'stallix')); } catch { } } }   // a CHAINED hold: «stallix-then» holds the NEXT index write
   if (ix && fs.existsSync(path.join(dirOf, 'failix'))) err = { code: 'EIO', message: 'the storage refused (a placed refusal)' };
   else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
   else { try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; try { fs.unlinkSync(m.tmp); } catch { } } }
@@ -228,6 +228,52 @@ async function failedLeg(mod, tag) {
   ok(rr.after === true, 'RED: a landing that moves the mark on a FAILED write says the rows it never wrote landed — the leg above would go red', rr);
 }
 
+// r4885 (the full round's should): a SECOND landing while the sweep runs starts the sweep again at its end — the entries that landing
+// covered which the running sweep had already passed are dropped without waiting for a third landing. THE PLACEMENT, every window by a
+// hold: a fill past BURST_ROWS (one whole write, no journal line) whose write is HELD in flight; 100 of its rows removed and born again
+// in ONE update that reaches the whole map (their keys keep their place in the generations' map, their generations newer than the
+// write's); the first write lets go and the second is held at once (the stand's chained hold); the sweep's FIRST slice runs and its
+// SECOND is held (the sweep's own step, matched by its text, nothing else of the loop); then the second write lands; then the slice
+// goes. A placement that did not meet is a HARNESS line alone.
+const SWEEP_STEP_TEXT = 'sweepIt.next()';
+function holdSweepFromSecondSlice() {
+  const real = global.setImmediate, held = []; let seen = 0;
+  global.setImmediate = function (fn, ...a) { if (typeof fn === 'function' && String(fn).includes(SWEEP_STEP_TEXT) && ++seen >= 2) { held.push(() => real(fn, ...a)); return { ref() { return this; }, unref() { return this; }, hasRef() { return false; } }; } return real(fn, ...a); };
+  return { held, release() { global.setImmediate = real; for (const f of held.splice(0)) f(); } };
+}
+async function sweepAgainLeg(mod, tag) {
+  const dir = tmp(tag), o = open(mod, dir, { stand: true }), N = 4200, AGAIN = 100;   // N: past BURST_ROWS (4096) and twice past the sweep's slice
+  let H = null;
+  try {
+    await o.st.index.fold().catch(() => false);   // the empty index on disk first: the next write is the fill's
+    await fill(o.st, 0, N, 8);
+    fs.writeFileSync(path.join(dir, 'stallix'), '1'); fs.writeFileSync(path.join(dir, 'stallix-then'), '1');
+    const w1 = o.st.index.fold().then((v) => v !== false, () => false);
+    await waitFor(() => ixStat(o.w).inflight);
+    await o.st.index.update((x) => { for (let i = 0; i < AGAIN; i++) delete x.conversations[`acct/c${i}`]; for (let i = 0; i < AGAIN; i++) o.st.index.entry('acct', `c${i}`).title = 'again'; });
+    H = holdSweepFromSecondSlice();
+    fs.unlinkSync(path.join(dir, 'stallix'));   // the first write lets go; the stand moves «stallix-then» into its place: the second is held
+    await waitFor(() => H.held.length > 0);
+    const mid = { ...o.st.index.landedStats(), held: H.held.length, secondHeld: fs.existsSync(path.join(dir, 'stallix')) && !fs.existsSync(path.join(dir, 'stallix-then')) };
+    fs.unlinkSync(path.join(dir, 'stallix'));   // the second write lets go: it lands DURING the running sweep
+    const l1 = await w1, l2 = await o.st.index.fold().then((v) => v !== false, () => false);
+    const before = o.st.index.landedStats();
+    H.release(); H = null;
+    await waitFor(() => !o.st.index.landedStats().sweeping);
+    return { N, AGAIN, l1, l2, mid, before, end: o.st.index.landedStats() };
+  } finally { if (H) H.release(); for (const f of ['stallix', 'stallix-then']) { try { fs.unlinkSync(path.join(dir, f)); } catch { } } shut(o); }
+}
+{
+  const MA = M.load('src/channel-store.js', anchored(SRC, 'if (r.done) { sweepIt = null; if (sweepAgain) { sweepAgain = false; sweepLanded(); } return; }', 'if (r.done) { sweepIt = null; return; }', 'a sweep that does not start again'), 'sweep-not-again');
+  const r = await sweepAgainLeg(CS, 'sweep-again'), rr = await sweepAgainLeg(MA, 'sweep-again-red');   // ONE AFTER THE OTHER: the slice hold is the process's
+  const placedOf = (x) => x.l1 && x.l2 && x.mid.sweeping && x.mid.held === 1 && x.mid.secondHeld && x.mid.entries === x.N - 2000 + x.AGAIN && x.before.sweeping;
+  const placed = placedOf(r) && placedOf(rr);
+  if (!placed) ok(false, `HARNESS (the sweep-again placement): the holds did not all meet — the first slice kept the ${r.AGAIN} newer entries (${r.mid.entries} = ${r.N - 2000 + r.AGAIN}?), the second slice held (${r.mid.held}), the second write held then landed during the sweep (${r.mid.secondHeld}, ${r.l2}) — nothing below is judged`, JSON.stringify({ r, rr }));
+  else {
+    ok(r.end.entries === 0 && r.end.owed === 0 && r.end.sweeps === r.mid.sweeps + 1, `a SECOND landing during a running sweep starts the sweep again at its end: the ${r.AGAIN} rows born again while the first write flew (newer than its mark, kept by the slice that passed them) are dropped without a third landing (${r.end.entries} kept, ${r.end.sweeps} sweeps)`, JSON.stringify(r));
+    ok(rr.end.entries === rr.AGAIN && rr.end.owed === 0, `RED: a sweep that does not start again keeps the ${rr.end.entries} entries the second landing covered (none owed) until a third landing — the leg above would go red`, JSON.stringify(rr));
+  }
+}
 // ═══ ⑤ PIECE FOUR: ONE SNAPSHOT OF THE MAP FOR THE SIZE TEST AND THE BUILD ═══
 sectionTime();
 console.log('⑤ one snapshot of the map for the size test and the sliced build');

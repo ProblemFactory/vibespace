@@ -683,14 +683,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const landedStats = { sweeps: 0, dropped: 0 };
   let sweepIt = null;   // the sweep's live iterator over `unlanded` (a Map's own: entries deleted or added meanwhile are safe)
   const UNLANDED_SWEEP_STEP = 2000;
+  let sweepAgain = false;   // a landing came while the sweep ran
   function sweepLanded() {
-    if (sweepIt || closed) return;
+    if (closed) return;
+    if (sweepIt) { sweepAgain = true; return; }   // r4885: a landing while the sweep runs — it starts again at its end (the slice already past held entries this landing covered)
     sweepIt = unlanded.entries(); landedStats.sweeps++;
     const step = () => {
       if (closed) { sweepIt = null; return; }
       for (let n = 0; n < UNLANDED_SWEEP_STEP; n++) {
         const r = sweepIt.next();
-        if (r.done) { sweepIt = null; return; }
+        if (r.done) { sweepIt = null; if (sweepAgain) { sweepAgain = false; sweepLanded(); } return; }
         const [k, g] = r.value;
         if (g <= landedGen) { unlanded.delete(k); bornSeq.delete(k); landedStats.dropped++; }
       }
@@ -3647,6 +3649,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       // B-526c × B-360d unit 1 (主开发 r1765): a row has LANDED exactly when its own change is on disk by the road that carries it —
       // its journal line synced, or the whole write that carried it landed; while the family is HELD nothing is said landed
       landed: (key) => !ixLoad.blocked && hasOwn(ix.conversations, key) && !isUnlanded(key),
+      // landedStats(): the GATES' read only — its «owed» walks every kept entry once (a suite's count, never a road of the product)
       landedStats: () => ({ ...landedStats, entries: unlanded.size, owed: [...unlanded.values()].filter((g) => g > landedGen).length, sweeping: !!sweepIt }),   // B-360d found holder 1: the generations' counts (the gates')
       // B-360d unit 1 (law 11): `journalDurable()` — the journal as it stands written (a compaction owed: landed), for a purge
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, journalStats: () => ({ journalBytes, owedBytes, lines: actLines.length, actSeq, appendedSeq, compactOwed, wholeOwed, indexOwed: dirty }), journalDurable: () => { if (closed) return Promise.resolve(true); if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked)); askActs(); return W().durable(actsFile); },   // r1542's law: held — refused by name
