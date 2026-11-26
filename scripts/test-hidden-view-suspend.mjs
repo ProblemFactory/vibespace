@@ -13,10 +13,11 @@
 // tab / minimized / desktop compose; suspended while any holds, the settle +
 // pinned re-tail runs when the last clears) and WindowManager.syncHiddenViews
 // derives the three from the classes it owns at every site that changes them.
-import './scratch.mjs';
+import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -262,6 +263,15 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     held._disconnected = true;
     reconnectOf(held); drain(); advance(10000);
     ok('B-a26e: a held window\'s slot whose socket is down meanwhile asks nothing (the belt in _runQueuedReattach)', attachesOf(held).length === 2, sent);
+    // r4708's belt, its own leg (主开发 r4857's round): the socket CLOSING (its onclose not run yet) — the slot asks nothing and is not
+    // counted (the reconnect's pass asks on the next socket); CONTROL: the same held window on an OPEN socket asks once
+    const closing = mk('closing'); closing._attachHold = { frame: null, line: null, timer: 0 }; closing.ws = { ...fakeWs, ws: { readyState: 2 } };
+    const inF0 = q.inFlight;
+    reconnectOf(closing); drain(); advance(10000);
+    ok('B-a26e (r4708): a held retry whose socket is CLOSING asks nothing and is not counted', attachesOf(closing).length === 0 && q.inFlight === inF0, { sent: attachesOf(closing), inF0, now: q.inFlight });
+    closing.ws = { ...fakeWs, ws: { readyState: 1 } };
+    reconnectOf(closing); drain(); advance(10000);
+    ok('B-a26e CONTROL: the same held window on an OPEN socket asks once — the leg above can go red', attachesOf(closing).length === 1, attachesOf(closing));
   }
   {
     // B-a26e (主开发 r4686): THE STORM — a hundred held windows in ONE reconnect's pass. Their retries are JITTERED (never one tick) and
@@ -303,6 +313,11 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     // hold's START — a new cycle 10 minutes in (its ladder's end calls _holdAttach again) does not restart them (RED in the
     // re-arm form: at 25 minutes); a new hold after its end says the first words; (b) a held retry is counted until ITS OWN answer
     // lands through the real cycle handler (`landed`); (c) a cycle whose view another road attached unhooks its handler at its check
+    // (d) THE HOLD NEVER OUTLIVES ITS WINDOW (主开发 r4857, the full round's MUST): its RED CONTROL is the tip's dispose with its
+    // hold-clear line cut — a copy of chat-view (its imports the real modules), loaded before the clock is swapped
+    const DISPOSE_CLEAR = '    try { this._clearAttachHold(); } catch { }   // B-a26e: a closed view\'s attach hold ends (its timer, its queue slot, its line)\n';
+    let CVx = null, mutantErr = null;
+    try { ({ ChatView: CVx } = await import(mutantCopies('hold-dispose', REPO).write('src/lib/chat-view.js', anchored(read('src/lib/chat-view.js'), DISPOSE_CLEAR, '', 'dispose-no-hold-clear'), 'dispose-no-hold-clear', { esm: true }))); } catch (e) { mutantErr = String((e && e.message) || e).slice(0, 300); }
     const clock = { now: 1.8e12, timers: [] };
     const real = { st: globalThis.setTimeout, ct: globalThis.clearTimeout, now: Date.now, doc: globalThis.document };
     const tick = (ms) => { const end = clock.now + ms; for (;;) { let nx = null; for (const h of clock.timers) if (h.live && h.due <= end && (!nx || h.due < nx.due)) nx = h; if (!nx) break; nx.live = false; clock.now = nx.due; try { nx.fn(); } catch { } } clock.now = end; };
@@ -324,6 +339,12 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
       v._holdAttach({ type: 'attach', sessionId: 'sid-long' }, 3, null);
       R.again = v._attachHold?.note?.textContent;
       v._clearAttachHold();
+      // (a2) r4857: the words run from the ASK that began the hold — one asked 10 minutes before its ladder ended says Reload 5 minutes on
+      const v3 = stubs(mkView(), 'sid-asked');
+      v3._holdAttach({ type: 'attach', sessionId: 'sid-asked' }, 1, null, Date.now() - 10 * 60000);
+      tick(5 * 60000 - 1000); R.asked1 = v3._attachHold?.note?.textContent;
+      tick(2000); R.asked2 = v3._attachHold?.note?.textContent;
+      v3._clearAttachHold();
       const handlers = [], sent = [], deferred = [];
       const fws = { send(m) { sent.push(m); }, onGlobal(h) { handlers.push(h); }, offGlobal(h) { const i = handlers.indexOf(h); if (i >= 0) handlers.splice(i, 1); } };
       const q = createReconnectQueue({ setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h), defer: (fn) => deferred.push(fn), rankOf: () => [0, 0], random: () => 0, now: () => Date.now() });
@@ -342,11 +363,37 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
       w2._lastAttachedAt = Date.now() + 1;   // another road's answer landed first (the permanent handler stamped it)
       tick(20001);   // the cycle's first check
       R.n2 = handlers.length;
+      // (d) a view HELD by a real cycle (never answered), its reconnect retry gone out (counted), then CLOSED
+      const holdThenDispose = (CV) => {
+        clock.timers.length = 0;   // a clean clock: only this view's timers from here
+        const hs = [], out = [], deferredD = [];
+        const fwsD = { send(m) { out.push(m); }, onGlobal(h) { hs.push(h); }, offGlobal(h) { const i = hs.indexOf(h); if (i >= 0) hs.splice(i, 1); } };
+        const qD = createReconnectQueue({ setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h), defer: (fn) => deferredD.push(fn), rankOf: () => [0, 0], random: () => 0, now: () => Date.now() });
+        const v = stubs(mkView(), 'sid-close', { ws: fwsD, app: { _reconnectQueue: qD }, _settingsListeners: [], _clearPendingSteers() { }, _stopCollabTick() { } });
+        Object.setPrototypeOf(v, CV.prototype);
+        v._reattach(true);
+        tick(20000 + 5 * 25000 + 1);   // its ladder ends un-acked: the HOLD (the handler it owns, its 15-minute timer)
+        const H = v._attachHold, held = !!H;
+        v._reconnectAttach(); while (deferredD.length) deferredD.shift()();
+        tick(4000);   // the reconnect pass's slot fires: a new cycle, counted in flight
+        const before = { handlers: hs.length, inFlight: qD.inFlight, sent: out.length };
+        try { CV.prototype.dispose.call(v); } catch { }   // the person closes the window (the fake lacks DOM teardown bits past the hold's clear)
+        const atClose = { handlers: hs.length, has: qD.has(v), inFlight: qD.inFlight, hold: v._attachHold ?? null, holdTimerLive: !!(H && H.timer && H.timer.live) };
+        const sent0 = out.length;
+        tick(20 * 60000);   // twenty minutes on
+        return { held, before, atClose, after: { handlers: hs.length, sent: out.length - sent0, liveTimers: clock.timers.filter((h) => h.live).length } };
+      };
+      R.d = holdThenDispose(ChatView);
+      if (CVx) R.dx = holdThenDispose(CVx);
     } catch (e) { R.threw = String((e && e.stack) || e).slice(0, 400); } finally { globalThis.setTimeout = real.st; globalThis.clearTimeout = real.ct; Date.now = real.now; if (real.doc === undefined) delete globalThis.document; else globalThis.document = real.doc; }
     ok(`B-a26e (r4708): the 15-minute words run from the hold's START — a new cycle 10 minutes in does not restart them (at 15 minutes: «${R.at15}»)`, /^Still attaching — waiting for the hub to answer/.test(R.first || '') && /has not answered for 15 minutes/.test(R.at15 || ''), R);
     ok('B-a26e: a NEW hold after the last one ended says the first words again', /^Still attaching — waiting for the hub to answer/.test(R.again || ''), R.again);
     ok(`B-a26e (r4708): a held retry counts as in flight until ITS OWN answer lands through the real cycle handler (${R.inFlightSent} → ${R.inFlightLanded}); the hold ends`, R.frame === true && R.inFlightSent === 1 && R.handlersSent === 1 && R.inFlightLanded === 0 && R.heldAfter === false, R);
     ok(`B-a26e (r4708): a cycle whose view another road attached unhooks its handler at its check (${R.n1} → ${R.n2})`, R.n0 === 0 && R.n1 === 1 && R.n2 === 0, R);
+    ok('B-a26e (r4857): the 15-minute words run from the ASK that began the hold (asked 10 minutes before: Reload 5 minutes on, not 15)', /^Still attaching — waiting for the hub to answer/.test(R.asked1 || '') && /has not answered for 15 minutes/.test(R.asked2 || ''), { asked1: R.asked1, asked2: R.asked2 });
+    const dOk = (d) => !!d && d.held === true && d.before.handlers === 2 && d.before.inFlight === 1 && d.atClose.handlers === 0 && d.atClose.has === false && d.atClose.inFlight === 0 && d.atClose.hold === null && d.atClose.holdTimerLive === false && d.after.handlers === 0 && d.after.sent === 0;
+    ok(`B-a26e (r4857, THE MUST): THE HOLD NEVER OUTLIVES ITS WINDOW — a view held by a real cycle, its retry counted (${R.d?.before?.handlers} handlers, ${R.d?.before?.inFlight} in flight), closed: at once no handler on the link (${R.d?.atClose?.handlers}), no slot or count, no hold, no live 15-minute timer; nothing sent in the twenty minutes after`, dOk(R.d), R.d || R.threw);
+    ok(`B-a26e RED CONTROL (r4857): the tip's dispose with its hold-clear line cut leaves the hold behind (${R.dx?.atClose?.handlers} handler(s), hold ${R.dx?.atClose?.hold ? 'up' : 'gone'}, its timer ${R.dx?.atClose?.holdTimerLive ? 'live' : 'cleared'}, ${R.dx?.atClose?.inFlight} counted) — the leg can go red`, mutantErr === null && !!R.dx && R.dx.held === true && !dOk(R.dx) && R.dx.atClose.handlers >= 1 && R.dx.atClose.hold !== null && R.dx.atClose.holdTimerLive === true, mutantErr || R.dx);
   }
   {
     // un-hide mid-queue ⇒ attach NOW, slot cancelled; dispose ⇒ dequeued; a second drop ⇒ superseded

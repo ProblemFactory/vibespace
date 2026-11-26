@@ -11,7 +11,7 @@
 // name leaves the file — past the hub's own acknowledgement, which goes through unless a leg asks the page to drop it for speed;
 // `exited` and every other frame go through, as a hub sends them to a pending client. The same preload counts every attach AT
 // THE HUB's DOOR (what the slow hub must work through). THE LADDER's CLOCK is shortened in the page
-// (its 20 s / 25 s rungs and the hold's 60 s ask run at 1/100) — the same code, a short clock.
+// (its 20 s / 25 s rungs, the release's 30 s safety and the 15-minute words run at 1/100) — the same code, a short clock.
 //   ① THE HOLD: past the whole ladder the window is NOT read-only, shows the hold's ONE bar (never a line added to the chat), its
 //      composer is held with the text typed before the drop still in it, and it TAKES TYPING while held; a press of Send while
 //      held sends nothing and says the hold's own words (主开发 r4529 (a)); it sends NO attach of its own while held, counted at
@@ -138,7 +138,7 @@ const SPY = `(() => { window.__creates = []; window.__attachesOut = []; window._
     window.__answers = []; app.ws.onGlobal((m) => { if (m && (m.type === 'created' || m.type === 'error') && m.reqId) window.__answers.push({ type: m.type, code: m.code || null, reqId: m.reqId, sessionId: m.sessionId || null }); }); }, 20);
   // THE SHORT CLOCK: the ladder's rungs (20 s, 25 s), the release's safety (30 s), the 60 s delay (the hold's ask until r4686) and the
   // 15-minute words (900 s) at 1/100 — only those delays; 'safety' scales the 30 s safety alone (⑤: the free window stays open while the leg sends)
-  const st = window.setTimeout.bind(window); window.__shortClock = false; window.setTimeout = (fn, ms, ...a) => st(fn, (window.__shortClock === true && (ms === 20000 || ms === 25000 || ms === 30000 || ms === 60000 || ms === 900000)) || (window.__shortClock === 'safety' && ms === 30000) ? ms / 100 : ms, ...a); })();`;
+  const st = window.setTimeout.bind(window); window.__shortClock = false; window.setTimeout = (fn, ms, ...a) => st(fn, (window.__shortClock === true && (ms === 20000 || ms === 25000 || ms === 30000 || ms === 60000 || (ms > 600000 && ms <= 900000))) || (window.__shortClock === 'safety' && ms === 30000) ? ms / 100 : ms, ...a); })();`;
 
 const BLIND_HOLD = `(() => { const CV = Object.getPrototypeOf([...app.sessions.values()].find((v) => v && v._reattach)); CV._holdAttach = function () { this._renderers.appendSystem('the release: did not answer the re-attach'); this._setReadOnly(); }; return 1; })()`;
 
@@ -204,6 +204,8 @@ try {
   const typed = 'a draft typed before the drop';
   const f1 = Sa && await holdOn(P, Sa, typed);
   const t1 = await P.ev('Date.now()');
+  const asksDrop = await asksOf(P, Sa, 0);   // from the drop (holdOn empties the list there) to the hold
+  check(`① from the drop to the hold the window sent ONE attach (${asksDrop}) — the ladder re-sends nothing, even un-acked (r4686; the release re-sent every rung)`, asksDrop === 1, asksDrop);
   check(`① past the whole ladder the window is NOT read-only: it holds — its one line «${f1?.line}»`, !!f1 && !f1.readOnly && f1.hold && f1.line === 'Still attaching — waiting for the hub to answer. Your message waits here and can be sent once it is back.' && !f1.rescued, f1);
   check('① …its composer is held (sending blocked) with the text typed before the drop still in it, NOT greyed (a live press answered in words: the owner\'s rule), and no read-only sentence was said', !!f1 && f1.held && !f1.greyed && f1.text === typed && !f1.sentence, f1);
   // IT TAKES TYPING WHILE HELD (主开发 r4529 (a)): the composer's own road for a link that is down keeps the box editable
@@ -323,7 +325,7 @@ try {
   const tg = Date.now(), heard0 = (await heardOf(P, Sg)).length;
   await P.ev(`(${VIEW(Sg)}._runQueuedReattach('unhide'), true)`);   // a NEWER attach on the same socket (the window shown again)
   const door7 = await waitFor('⑦ the newer attach at the hub\'s door', async () => { const d = doorOf(Sg, tg); return d.length >= 1 ? d : null; }, 15000, 100);
-  await sleep(500);   // the hub works the newer attach through; its answer is held behind the older one's
+  // (no wait here, r4857: the preload keeps one socket's answers in order — the older answer reaches the page first whether or not the newer one is built yet)
   await release(P, Sg);
   const heard7 = await waitFor('⑦ both answers heard', async () => { const h = (await heardOf(P, Sg)).slice(heard0); return h.length >= 2 ? h : null; }, 20000, 100);
   const lateA = heard7 && heard7[0], newB = heard7 && heard7[1];
