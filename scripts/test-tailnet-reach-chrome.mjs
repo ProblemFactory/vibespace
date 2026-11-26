@@ -96,6 +96,11 @@ function makeSampler({ roots: rs, outside: into, ssBin = 'ss', everyMs = 250 } =
 }
 const LOOP = monitorEventLoopDelay({ resolution: 10 }); LOOP.enable();   // the loop's longest turn while the sampler runs (ms at ⑤)
 const SAMPLER = makeSampler({ roots, outside });
+// r4704: EVERY final sample the suite judges on goes through this ONE door: a final whose socket listing failed is a FAILING LINE by
+// name, never a silent «none seen» (③ before the driver's close, ⑤ before its verdict, the positive control's two). the judgement is turned
+// off for the placed red control alone, and ⑥ reads this file's own text so that a third place cannot take a final sample around the door.
+const finalVerdict = (read, where) => ({ pass: read === true, name: `the final sample ${where} READ its socket listing (a failed listing is never «none seen»)` });
+const finalSample = async (where, s = SAMPLER, { judge = true } = {}) => { const read = await s.final(); if (judge) { const v = finalVerdict(read, where); ok(v.name, v.pass, { where, read, failed: s.stats().failed }); } return read; };
 sampler = SAMPLER.interval;
 
 // ── the minted tailnet ──
@@ -301,7 +306,7 @@ console.log('③ THE DRIVER\'S ROAD — the real agent-browser launches Chrome w
     const s1 = socksSeen.length;
     const o2 = await run(['open', `http://public.example:${PUB_PORT}/`]);
     const t2 = await run(['get', 'text', 'body']);
-    await SAMPLER.final();   // B-8695: the driver's Chrome sampled after its last act, before its close (never skipped)
+    await finalSample("of the driver's Chrome, after its last act and before its close");   // B-8695 / r4704: never skipped, and its listing must READ
     await run(['close', '--all']);
     // the daemon this leg started: only a process whose cmdline names THIS leg's socket dir (never a pid by pattern alone)
     for (const d of await daemons()) { try { process.kill(d, 'SIGKILL'); } catch { } }
@@ -374,7 +379,7 @@ console.log('④ LAW 2\'s page in the in-page browser (/proxy) AFTER the ordinar
 
 console.log('⑤ nothing left loopback');
 {
-  await SAMPLER.final();   // B-8695: the last sample, after the browsers' last act, is never skipped
+  await finalSample("after the browsers' last act");   // B-8695 / r4704: never skipped, and its listing must READ
   SAMPLER.stop(); LOOP.disable();   // r4685: the figures below are exactly «while it ran»; ⑥ runs on a quiet loop
   const st = SAMPLER.stats(), srt = st.ms.slice().sort((x, y) => x - y), q = (f) => srt.length ? srt[Math.min(srt.length - 1, Math.floor(f * srt.length))] : 0;
   console.log(`  · the sampler (B-8695): ${st.n} samples, ${st.skipped} skipped while one ran; per sample median ${q(0.5)} ms, p95 ${q(0.95)} ms, the longest five ${srt.slice(-5).reverse().join(' / ')} ms; ${st.read} listings read, ${st.failed} failed (each counted); the largest tree it walked ${st.maxTree} processes (${st.maxKids} beyond the roots); the loop's longest turn while it ran ${Math.round(LOOP.max / 1e6)} ms`);
@@ -415,13 +420,22 @@ console.log('⑥ CONTROL: the sampler with its sample HELD (a stand-in `ss` that
   // one whose roots do not must not (red when the walk or the parse misses it)
   const kid = spawn(process.execPath, ['-e', "const d = require('dgram').createSocket('udp4'); d.connect(9, '192.0.2.1', (e) => { process.stdout.write(e ? 'no route\\n' : 'held\\n'); }); setTimeout(() => process.exit(0), 20000);"], { stdio: ['ignore', 'pipe', 'ignore'] });
   const other = spawn('sleep', ['20'], { stdio: 'ignore' });
+  kids.add(kid); kids.add(other);   // the suite's own cleanup ends them on any road out
   const said = await new Promise((r) => { let b = ''; kid.stdout.on('data', (d) => { b += d; if (/held|no route/.test(b)) r(b.trim()); }); setTimeout(() => r(b.trim() || 'silent'), 5000); });
   const seen = [], unseen = [];
   const withKid = makeSampler({ roots: new Set([kid.pid]), outside: seen }), withoutKid = makeSampler({ roots: new Set([other.pid]), outside: unseen });
   withKid.stop(); withoutKid.stop();
-  const readWith = await withKid.final(), readWithout = await withoutKid.final();
+  const readWith = await finalSample('of the positive control (its roots hold the child)', withKid), readWithout = await finalSample('of the negative control (its roots do not hold the child)', withoutKid);
   try { process.kill(kid.pid, 'SIGKILL'); } catch { } try { process.kill(other.pid, 'SIGKILL'); } catch { }
   ok(`POSITIVE CONTROL: a child of the suite holding a socket connected to 192.0.2.1 (a documentation address; no packet sent) is SEEN outside the loopback by the sampler whose roots hold it (${said})`, said === 'held' && readWith === true && seen.some((x) => x.includes('192.0.2.1')), { said, readWith, seen: seen.slice(0, 3) });
   ok('…and NOT by a sampler whose roots do not hold that child (the walk decides what is the suite\'s)', readWithout === true && !unseen.some((x) => x.includes('192.0.2.1')), { readWithout, unseen: unseen.slice(0, 3) });
+  // r4704 RED: a final sample whose listing FAILS (a stand-in `ss` that exits 1: placed, never load) is a failing line by the same verdict
+  const failSs = path.join(dir, 'ss-fails'); fs.writeFileSync(failSs, '#!/bin/sh\nexit 1\n', { mode: 0o700 });
+  const failing = makeSampler({ roots: new Set([process.pid]), outside: [], ssBin: failSs }); failing.stop();
+  const failRead = await finalSample('placed to fail', failing, { judge: false }), fv = finalVerdict(failRead, 'placed to fail');
+  ok(`RED CONTROL: a final sample whose socket listing FAILED (a stand-in ss that exits 1) is a failing line by the same verdict — «${fv.name}» reads ${fv.pass ? 'green' : 'red'}`, fv.pass === false && failing.stats().failed >= 1, { failRead, failed: failing.stats().failed });
+  // r4704: ONE door — the file's own text takes a final sample only inside finalSample, and only the placed control skips its judgement
+  const ownText = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8'), finalsTaken = ownText.split('.fin' + 'al()').length - 1, unjudged = ownText.split('judge: ' + 'false').length - 1;
+  ok(`every final sample goes through finalSample: the file's one call that takes a final sample is the door's (${finalsTaken}), and the judgement is turned off once, in the placed red (${unjudged})`, finalsTaken === 1 && unjudged === 1, { finalsTaken, unjudged });
 }
 done();
