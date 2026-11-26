@@ -33,6 +33,7 @@
 const fs = require('fs');
 const path = require('path');
 const { redactSecrets } = require('./secret-shapes.js'); // PURE (the device bundle carries it already)
+const DFILE = require('./agentd/durable-file.js'); // B-574d (lane bl-machines-b): THE device's one door — the ledger is a RECORD (the device bundles this module)
 
 const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs)
 const FAILED_INBOX_KEY = 'migrations';
@@ -107,11 +108,13 @@ function readLedger(ledgerPath) {
   if (!ledger.applied || typeof ledger.applied !== 'object' || Array.isArray(ledger.applied)) return { unread: 'it holds no list of what ran', torn: true };
   return ledger;
 }
+/** B-574d (lane bl-machines-b, 主开发 r4806): the ledger is a RECORD — after a power cut a torn ledger holds EVERY migration at every
+ *  start until a person restores it (readLedger above) — so it takes its name only after ONE sync of its temp, through THE
+ *  device's one door (src/agentd/durable-file.js: a refused sync is said once and the ledger still lands). */
 function writeLedger(ledgerPath, ledger, warn) {
   try {
     fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
-    fs.writeFileSync(ledgerPath + '.tmp', JSON.stringify(ledger, null, 2));
-    fs.renameSync(ledgerPath + '.tmp', ledgerPath);
+    DFILE.writeDurable({ file: ledgerPath, tmp: ledgerPath + '.tmp', data: JSON.stringify(ledger, null, 2), log: (l) => warn(`[migrate] ${l}`), what: 'the migrations\' ledger' });
   } catch (e) { warn(`[migrate] ledger write failed: ${e.message}`); }
 }
 function noteReport(ledger, id, report) {

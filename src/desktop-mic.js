@@ -27,6 +27,7 @@
  */
 const crypto = require('crypto');
 const MM = require('./mic-model.js');
+const DFILE = require('./agentd/durable-file.js'); // B-574d (lane bl-machines-b): THE device's one door — the kept default microphone is a RECORD
 const SP = require('./stream-plan.js');
 
 const named = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}) });
@@ -62,7 +63,9 @@ function createMic({ platform = process.platform, spawn, execFile, env, lookupEn
     catch (e) { resolve({ err: e, stdout: '', stderr: '' }); }
   });
   const readJson = async (f) => { try { const o = JSON.parse(await P.readFile(f, 'utf8')); return o && typeof o === 'object' ? o : null; } catch { return null; } };
-  const writeJson = async (f, o) => { await P.mkdir(vsDir, { recursive: true }); await P.writeFile(f + '.tmp', JSON.stringify(o)); await P.rename(f + '.tmp', f); };
+  // B-574d (lane bl-machines-b, 主开发 r4806): mic-default.json keeps the person's OWN default microphone for the restore — a RECORD:
+  // it takes its name only after ONE sync, through THE device's one door with this module's own fs (a refused sync said once, landed)
+  const writeJson = async (f, o) => { await P.mkdir(vsDir, { recursive: true }); DFILE.writeDurable({ fs, file: f, tmp: f + '.tmp', data: JSON.stringify(o), log: (l) => log(`[mic] ${l}`), what: 'the default microphone kept for the restore' }); };
   const isFile = async (f) => { try { return (await P.stat(f)).isFile(); } catch { return false; } };
   const sha = (t) => crypto.createHash('sha256').update(t).digest('hex');
   const firstErr = (r) => ((r.stdout + '\n' + r.stderr).split(/\r?\n/).map((l) => l.trim()).filter((l) => /error/i.test(l))[0] || (r.err && (r.err.code || r.err.message)) || 'no output').toString().slice(0, 300);

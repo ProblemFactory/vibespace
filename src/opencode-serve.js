@@ -114,6 +114,7 @@ const { spawn, execFile } = require('child_process');
 const cliIdentity = require('./cli-identity');   // THE process-identity ladder (residual (c)): one definition for every caller that signals
 const PI = require('./proc-identity');            // the record's BIRTH (B-5ee1): signalServe → signalIdentity
 const HOLD = require('./store-read-hold.js');     // r3334 (lane bl-chat-b): data/opencode-serve.json under the store-read law (its hold, read again, the torn bytes' copy)
+const DFILE = require('./agentd/durable-file.js'); // B-574d (lane bl-machines-b): THE device's one door — the serve's record takes its name only after ONE sync
 const SR = require('./store-read.js');            // …the ONE read's answer (data / missing / unreadable / torn)
 const { nameFromText } = require('./discovery-facts');
 const { AcpSessionMessages } = require('./acp-message-manager');
@@ -209,11 +210,12 @@ function pidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
-function writeJsonAtomic(file, value) {
-  const tmp = `${file}.${process.pid}.tmp`;
+/** B-574d (lane bl-machines-b, 主开发 r4806): the serve's record (its port, pid and birth) is a RECORD — torn, it is held unread and
+ *  the running serve can be neither adopted nor stopped by it — so it takes its name only after ONE sync, through THE device's
+ *  one door (this module rides the device bundle); a refused sync is said once (`say`) and the record still lands. */
+function writeJsonAtomic(file, value, say = null) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
-  fs.renameSync(tmp, file);
+  DFILE.writeDurable({ file, tmp: `${file}.${process.pid}.tmp`, data: JSON.stringify(value, null, 2), log: say, what: 'the OpenCode serve\'s record' });
 }
 const isoOf = (ms) => new Date(Number.isFinite(ms) && ms > 0 ? ms : Date.now()).toISOString();
 const isConnErr = (e) => e && (e.code === 'network' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET');
@@ -974,7 +976,7 @@ function createServeLocator({
     else if (b) torn.size = b.length;   // r3675: too large to keep — the decision is by its size
     else { torn.decided = false; torn.undecidable = true; }   // r3675: its copy could not be read — the decision cannot be tied to the bytes: said (remove the record by hand)
   }
-  function writeRecord(r) { try { writeJsonAtomic(recordPath, r); } catch (e) { log?.warn?.(`[opencode-serve] record write failed: ${e.message}`); } }
+  function writeRecord(r) { try { writeJsonAtomic(recordPath, r, (l) => log?.warn?.(`[opencode-serve] ${l}`)); } catch (e) { log?.warn?.(`[opencode-serve] record write failed: ${e.message}`); } }
   /** THE SERVE SIGNAL (B-5ee1) — every signal to a serve pid this process holds no handle for (a runaway park of an
    *  adopted serve, the replace rung, settle's stop, stop({killRecorded})): the record's BIRTH (`start` + `bootId`,
    *  written beside the pid at the spawn tick, carried by adopt) must still name it — PI.signalIdentity, a refusal
