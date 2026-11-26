@@ -393,11 +393,23 @@ function modelsOwed(file) { if (_modelsAppeared) return null; try { const w = mo
 // (r5110) A LIST READ MISSING IS WRITTEN EXCLUSIVELY (the store writer's door, B-f276 1b): a file that appeared since — the statusline
 // hook's — is kept as it is, never written over; the writer answers onWritten(false, EEXIST) and the ids this write carried are
 // forgotten here, so their next sighting reads the file that appeared and merges into it (a read that answered DATA writes as before)
+// (r5157) THE EXCLUSIVE MARK IS STICKY from a «missing» read until the first landing or its refusal: a second sighting inside that wait
+// reads the hub's OWN owed list as «data» — it never turns the door off, so the first write still never lands over a list the hook
+// wrote meanwhile. A refusal whose file is later removed: the next «missing» read clears the writer's «appeared» first, then writes
+// exclusively again (before, the writer dropped every later write while «appeared» stood)
+let _modelsExclusive = false;
 function writeModels(list, { exclusive = false } = {}) {
   _modelsList = list;
-  const refused = (ok, err) => { if (!ok && err && err.code === 'EEXIST') { _modelsAppeared = true; for (const m of _modelsList || []) if (m && m.id) _modelsSeenRam.delete(m.id); } };
-  if (!exclusive) _modelsAppeared = false;   // this write took the file in (its read answered data): the writer's owed bytes are ours again
-  try { modelsWriter().dirty(modelsFile(), { name: 'models.write', exclusive, onWritten: refused, produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }
+  let w, file; try { w = modelsWriter(); file = modelsFile(); } catch { return false; }   // no writer: nothing written (the id is asked again)
+  if (exclusive && _modelsAppeared) { try { w.dirty(file, { exclusive: false }); _modelsAppeared = false; } catch { /* «appeared» stands: the writer drops this write */ } }   // the file that appeared is gone: the writer's «appeared» cleared
+  if (exclusive) _modelsExclusive = true;
+  const excl = _modelsExclusive;
+  const answered = (ok, err) => {
+    if (ok) { _modelsExclusive = false; return; }   // landed: the file is the hub's own now
+    if (err && err.code === 'EEXIST') { _modelsExclusive = false; _modelsAppeared = true; for (const m of _modelsList || []) if (m && m.id) _modelsSeenRam.delete(m.id); }
+  };
+  if (!excl) _modelsAppeared = false;   // this write took the file in (its read answered data): the writer's owed bytes are ours again
+  try { w.dirty(file, { name: 'models.write', exclusive: excl, onWritten: answered, produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }
 }
 function modelsHoldOf() {
   if (_modelsHold) return _modelsHold;

@@ -33,6 +33,7 @@ const STORES = Object.freeze({
   'reset-claims.write': row('write', 'usage-reset-claims', 'src/usage-reset-claim.js', ['save']),   // through the store writer (lane account-reset-door K2)
   'usage-cache.write': row('write', 'usage-cache.json', 'src/usage-routes.js', ['writeUsageCache']),   // through the store writer (B-360d part 3 U2)
   'door-reads.write': row('write', 'usage-cache/.door-reads-<account>', 'src/door-reads.js', ['bumpDoorRead']),   // through the store writer, awaited before the read (lane usage-predict, law A3)
+  'models.write': row('write', 'usage-cache/__models__', 'src/server/cli-env.js', ['writeModels']),   // through the store writer (lane lg-providers, B-f276 s1126: the hub's learned models list — exclusive after a «missing» read, its mark sticky to the first landing)
   'session-status.read': row('read', 'session-status', 'src/session-status.js'),
   'user-todos.write': row('write', 'user-todos', 'src/user-todos.js', ['_handToWriter']),   // through the store writer (B-0248, lane bl-loop-b, r3320)
   'user-todos.read': row('read', 'user-todos', 'src/user-todos.js'),
