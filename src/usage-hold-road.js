@@ -8,6 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 const LD = require('./usage-ledger-dedup.js'); // a shard's sampled shape + the streaming dedup
+const FC = require('./fd-close.js');   // B-574d (r5072 / r5075): the tree's one door — its asynchronous twin for the hold's set file
+let holdNoSyncSaid = false;   // «its file system does not do a sync»: said ONCE a run
 const { timedSync, WARM_SLICE_BYTES, REMEDY_STATES, ackOf, LIVE } = require('./usage-history.js').holdRoadScope;
 // F1 THE LEDGER LAW (a re-emission costs zero bytes): the ingest's own rid index per shard — the `h:` rids it holds, read
 // once (streaming; inline while the unread part is ≤ INGEST_IX_INLINE_BYTES, else a step per turn while the batch waits),
@@ -815,7 +817,7 @@ class UsageHoldRoad {
       const text = dropLines('gone', [...h.gone]) + (s.below ? JSON.stringify({ below: s.below }) + '\n' : '') + (s.retired ? JSON.stringify({ retired: h.gen }) + '\n' : '') + (s.checked ? JSON.stringify({ checked: h.gone.size }) + '\n' : '');
       try {
         if (!text) { if (!(await this._heldUnlink(df))) throw Object.assign(new Error('unlink'), { code: 'unlink' }); h.goneBytes = 0; }
-        else { await this._holdIO('compaction', df, fs.promises.writeFile(df + '.tmp', text)); await this._holdIO('compaction', df, fs.promises.rename(df + '.tmp', df)); h.goneBytes = Buffer.byteLength(text); }
+        else { await this._replaceSynced(df, text); h.goneBytes = Buffer.byteLength(text); }   // B-574d: synced before its name
         h.goneTorn = false; h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes); did = 'rewritten';
       } catch (e) { await this._heldUnlink(df + '.tmp'); a.rewrite = String((e && e.code) || e).slice(0, 40); }
     }
@@ -1204,6 +1206,17 @@ class UsageHoldRoad {
     if (line && line.below) h.below = Math.max(h.below, line.below);
     return true;
   }
+  /** B-574d «usage-readings» (主开发 r5072 / r5075 (C), lane lg-group-parents): A SET FILE REPLACED, SYNCED — off the loop, through the
+   *  tree's one door (src/fd-close.js renameSyncedAsync, its asynchronous twin) with every step on the road's own queue (`_holdIO`:
+   *  said while it waits): its temp opened, written, synced ONCE and closed, THEN renamed over the set.
+   *  A write, sync or close that FAILS is a failed write — thrown to the caller, whose own catch removes the temp: the old set stands
+   *  (after a power cut the set is the old whole one or the new whole one, never empty or torn). Only a file system with no sync at
+   *  all (src/fd-close.js SYNC_UNSUPPORTED) lands, said once a run. Not the store writer: the road orders its own appends and
+   *  compactions of the same file (a write landed later would rename a compaction over appends it never saw). */
+  async _replaceSynced(f, text) {
+    await FC.renameSyncedAsync(f + '.tmp', f, text, { where: 'the hold\'s set file', step: (p) => this._holdIO('compaction', f, p),   // the tree's one door, its asynchronous twin, through the road's own queue
+      say: (w) => { if (!holdNoSyncSaid) { holdNoSyncSaid = true; console.warn(`[usage] ${w}`); } } });   // «no sync at all»: said once a run
+  }
   /** r6: the set file rewritten as the set (tmp + rename) once its lines pass 4× it — an error leaves the old one (valid).
    *  r7: `below` rides it; 4× from growth alone rewrites it at 64 KiB, 256 KiB, 1 MiB, … (≈ 1.33× its final size in all).
    *  r8: on the async road (r7 wrote the whole set — uncapped — on the main thread). */
@@ -1211,7 +1224,7 @@ class UsageHoldRoad {
     const f = this._dropFile(h.key, h.gen), text = dropLines('gone', [...h.gone]) + (h.below ? JSON.stringify({ below: h.below }) + '\n' : '');
     try {
       if (!text) { if (await this._heldUnlink(f)) h.goneBytes = 0; }
-      else { await this._holdIO('compaction', f, fs.promises.writeFile(f + '.tmp', text)); await this._holdIO('compaction', f, fs.promises.rename(f + '.tmp', f)); h.goneBytes = Buffer.byteLength(text); }
+      else { await this._replaceSynced(f, text); h.goneBytes = Buffer.byteLength(text); }   // B-574d: synced before its name
       h.goneTorn = false;
     } catch { await this._heldUnlink(f + '.tmp'); }
     h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes);

@@ -77,4 +77,23 @@ function renameSynced(tmp, final, bytes, { mode, where, say, sync = true } = {})
   try { fs.renameSync(tmp, final); } catch (e) { try { fs.unlinkSync(tmp); } catch { /* gone already */ } throw e; }
 }
 
-module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, syncUnsupportedWords, SYNC_UNSUPPORTED, syncUnsupportedLands };
+/** B-574d «usage-readings» (主开发 r5075 (C)): THE SAME DOOR, ASYNCHRONOUS — for a road that already writes OFF the loop through the
+ *  promises API and orders its own steps (the usage hold road's set file, src/usage-hold-road.js): `bytes` written to `tmp` (its
+ *  mode) through a FileHandle, synced ONCE, closed, then renamed to `final` — EVERY call handed to `step(promise)` (the caller's own
+ *  queue: its bound, its slow word). THE SAME LAW as renameSynced: a write, sync or close that FAILS is a failed write — the temp
+ *  removed, the error thrown, the OLD file stands; a rename that fails removes the temp too and throws; ONLY a sync the file system
+ *  does not do at all (SYNC_UNSUPPORTED) is SAID (the site's name, the code — no path) and the file lands. → Promise(undefined) */
+async function renameSyncedAsync(tmp, final, bytes, { mode, where, say, sync = true, step = (p) => p } = {}) {
+  const fsp = fs.promises, b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes));
+  const fh = await step(fsp.open(tmp, 'w', mode === undefined ? 0o666 : mode));
+  let failed = null;
+  try {
+    await step(fh.writeFile(b));
+    if (sync) { try { await step(fh.sync()); } catch (e) { if (!syncUnsupportedLands(e, where, say)) throw e; /* THE one cadence (主开发 r4675): said through the once-door, once a site */ } }
+  } catch (e) { failed = e; }
+  try { await step(fh.close()); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there — a failed write
+  if (failed) { try { await fsp.unlink(tmp); } catch { /* gone already */ } throw failed; }
+  try { await step(fsp.rename(tmp, final)); } catch (e) { try { await fsp.unlink(tmp); } catch { /* gone already */ } throw e; }
+}
+
+module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, renameSyncedAsync, syncUnsupportedWords, SYNC_UNSUPPORTED, syncUnsupportedLands };
