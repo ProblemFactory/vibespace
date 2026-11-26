@@ -414,7 +414,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (isLocalHost(host)) { const r = await machine.list(witness); return hasRemote() ? { ...r, apps: listApps() } : r; }
     const r = await acc().call(host, 'list', { settings: settingsForOp(), ...witness });
     ingestHost(host, r.apps, { www: r.availability && r.availability.xpra ? r.availability.xpra.www || null : null });
-    return { apps: listApps(), registry: r.registry, availability: r.availability && { ...r.availability, caps: M.capsOf(r.availability, backends) }, cap: r.cap, idleTimeoutMin: r.idleTimeoutMin, host: { hostId: host, label: labelOf(host) } };
+    return { apps: listApps(), registry: r.registry, ...(r.cut && Number(r.cut.registry) > 0 ? { catalogCut: Number(r.cut.registry) } : {}) /* B-5278 (r4443): the catalog the machine cut to its reply's size — said in the launcher */, availability: r.availability && { ...r.availability, caps: M.capsOf(r.availability, backends) }, cap: r.cap, idleTimeoutMin: r.idleTimeoutMin, host: { hostId: host, label: labelOf(host) } };
   }
 
   // ── the machine's acts (device #0 in-process — zero hops; a paired machine through the desktop-serve op) ──

@@ -279,7 +279,13 @@ export function cardMenuRowLabel(m) {
   return m.kind === 'adopt' ? t('Add to VibeSpace…') : m.kind === 'remove' ? t('Remove…') : m.kind === 'forget' ? t('Forget') : t('Show command');
 }
 /** The command a recipe / a variant runs, as ONE line read back to the same words (never hidden, never re-quoted twice). */
-export function recipeLine(rec) { return rec && rec.exec ? joinWords([rec.exec, ...(Array.isArray(rec.args) ? rec.args : [])]) : ''; }
+export function recipeLine(rec) {
+  if (!rec || !rec.exec) return '';
+  // B-5278 (主开发 r4443): a paired machine cut this live record's command line to fit its reply (argsCut) — said, never its bare
+  // program as if that were the whole command (the machine keeps the whole record; nothing on the hub starts from this copy)
+  if (rec.argsCut === true) return t('{exec} — command line not shown', { exec: String(rec.exec) });
+  return joinWords([rec.exec, ...(Array.isArray(rec.args) ? rec.args : [])]);
+}
 /** rel254 verify F3: what a row / a variant RUNS, as a person reads it — `env K=V …` before, `(in <cwd>)` after, every
  *  invisible character shown (src/argv-words.js commandLine). A variant without its own env inherits the row's (the default's). */
 export function runLine(row, variant = null) {
@@ -1241,6 +1247,8 @@ export async function showLaunchDialog(app, opts = {}) {
     const scales = !dead && !!data?.availability?.caps?.scales; // lane D: only a rung that scales apps offers a default scale (the row's cell)
     // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
     if (!seenOnly) { regEl.innerHTML = ''; browsersEl.innerHTML = ''; }
+    // B-5278 (主开发 r4443): the machine cut its catalog to fit one answer — the person is told the list is short, never a short list in silence
+    if (!seenOnly && data && Number(data.catalogCut) > 0) { const cutEl = document.createElement('p'); cutEl.className = 'agents-note desktop-launch-cut'; cutEl.textContent = t('{n} applications of this machine are not listed here — its list is longer than one answer from it carries.', { n: Number(data.catalogCut) }); regEl.appendChild(cutEl); }
     const seenOld = new Map(seenOnly ? [...seenEl.children].map((w) => [w.dataset.seenKey, w]) : []), seenWant = [];
     if (host === 'local' && data && data.hostName) noteLocalHostName(data.hostName);
     // §7.9 FILE MODE: the document's own LibreOffice row only (its module opens it — the PURE verdict's rule)
