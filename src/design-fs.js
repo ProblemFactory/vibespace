@@ -16,7 +16,12 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const FC = require('./fd-close.js');   // B-ddf3 unit 3 (r4634): a sync the file system does not do lands, said once (syncUnsupportedLands)
+// B-ddf3 unit 3's cure (lane bl-vault, 主开发 r4675): THE DEVICE's OWN reading of «no sync here». The device agent bundles this file, and
+// the hub's helper (src/fd-close.js) never becomes a device input: the same four codes and the same words as its SYNC_UNSUPPORTED and
+// syncUnsupportedWords, letter for letter (test-person-file-sync ⓓ pins them equal); said ONCE (this file's one site) for the process's life
+const NO_SYNC = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
+const noSyncWords = (where, code) => `${where}: its file system does not do a sync (${code}) — its new bytes took their name unsynced`;
+let noSyncSaid = false;
 const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const M = require('./design-model.js');
 const DT = require('./design-tokens.js');
@@ -120,7 +125,7 @@ async function writeUser(dir, text) {
   try {
     fh = await fsp.open(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o644);
     await fh.writeFile(String(text));
-    try { await fh.sync(); } catch (se) { if (!FC.syncUnsupportedLands(se, 'a design file', (l) => console.warn(`[design] ${l}`))) throw se; }   // B-ddf3 (lane bl-vault, r4361): on disk before its name points at it — a failed sync is a failed write, said below (write_failed); r4634: a file system that does not do a sync lands, said once
+    try { await fh.sync(); } catch (se) { if (!(se && NO_SYNC.has(se.code))) throw se; if (!noSyncSaid) { noSyncSaid = true; try { console.warn(`[design] ${noSyncWords('a design file', se.code)}`); } catch { } } }   // B-ddf3 (lane bl-vault, r4361): on disk before its name points at it — a failed sync is a failed write, said below (write_failed); r4634: a file system that does not do a sync lands, said once
     await fh.close(); fh = null;
     await fsp.rename(tmp, file);
     let mtime = null;

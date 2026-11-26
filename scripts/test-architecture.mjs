@@ -8095,11 +8095,15 @@ await section(async () => {
   // B-82b8 (主开发 r654): the harness settings' WORDS (a person's — shown only by the hub's Settings window) never ride the device bundle;
   // the table of machine facts does (the descriptors read its keys, types, defaults and apply road)
   ok(in107.some((k) => /src\/harness-settings\.js$/.test(k)) && !in107.some((k) => /src\/harness-settings-words\.js$/.test(k)), `§107 B-82b8: the device bundle carries src/harness-settings.js (the machine facts) but NOT src/harness-settings-words.js (a person's words) — the bundle is ${size107} bytes`, in107.filter((k) => /harness-settings/.test(k)));
-  // B-ddf3 unit 3's cure (lane bl-vault, 主开发 r4635): src/design-fs.js asks src/fd-close.js (the one no-sync door: node's fs only), so
-  // the device bundle CARRIES it — a named input of the cut. Read from this build's own input list: who asks it, its bytes in the output
-  const fc107 = in107.find((k) => /(^|\/)src\/fd-close\.js$/.test(k)), fcBy107 = in107.filter((k) => (r107.metafile.inputs[k].imports || []).some((i) => /(^|\/)src\/fd-close\.js$/.test(i.path)));
-  const fcOut107 = Object.values(r107.metafile.outputs || {}).map((o) => (o.inputs && fc107 && o.inputs[fc107] ? o.inputs[fc107].bytesInOutput : 0)).reduce((a, b) => a + b, 0);
-  ok(!!fc107 && fcBy107.some((k) => /src\/design-fs\.js$/.test(k)), `§107 B-ddf3: the device bundle carries src/fd-close.js, asked by ${fcBy107.join(', ') || 'nothing'} (${fcOut107} bytes of esbuild's output before the strip) — the bundle is ${size107} bytes, ${in107.length} inputs`, fcBy107);
+  // B-ddf3 unit 3's cure (lane bl-vault, 主开发 r4675): THE HUB's CLOSE HELPER NEVER BECOMES A DEVICE INPUT. src/design-fs.js (a device
+  // input) keeps its OWN reading of «no sync here»; src/fd-close.js stays the hub's (its changes never re-cut the signed agent). Read from
+  // this build's own input list. RED CONTROL: the same build with design-fs asking the helper carries it
+  const fc107 = in107.find((k) => /(^|\/)src\/fd-close\.js$/.test(k));
+  const dfsSrc107 = read('src/design-fs.js') || '', DFS_STRICT107 = "'use strict';\n";
+  const fcCtl107 = dfsSrc107.split(DFS_STRICT107).length === 2 ? await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent',
+    plugins: [{ name: 'design-fs-asks-the-helper', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]design-fs\.js$/ }, () => ({ contents: dfsSrc107.replace(DFS_STRICT107, DFS_STRICT107 + "require('./fd-close.js');\n"), loader: 'js' })); } }] }) : null;
+  const fcCtlIn107 = fcCtl107 ? Object.keys(fcCtl107.metafile.inputs) : [];
+  ok(!fc107 && fcCtlIn107.some((k) => /(^|\/)src\/fd-close\.js$/.test(k)), `§107 B-ddf3: the device bundle does NOT carry the hub's close helper src/fd-close.js (design-fs keeps its own «no sync» reading) — the bundle is ${size107} bytes, ${in107.length} inputs; CONTROL: design-fs asking it carries it (${fcCtlIn107.length} inputs)`, fc107 || null);
   // 主开发 r2660 (B): THE HUB'S FILE POOL NEVER RIDES THE DEVICE BUNDLE. src/safe-fs.js (about 23 KB as shipped) reached it through the
   // lazy requires of three files the device carries (the codex adapter, the transcript service, the agy backfill), each asked only when
   // its worker script exists, so no pool was ever built on a machine. They ask src/hub-pool.js now, whose require is a computed path the

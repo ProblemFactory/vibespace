@@ -39,7 +39,8 @@ function syncUnsupportedWords(where, code) { return `${where}: its file system d
 
 /** B-ddf3 unit 3 (lane bl-vault, 主开发 r4634): A PERSON's FILE ON A FOLDER WHOSE FILE SYSTEM DOES NOT DO A SYNC STILL LANDS. THE one
  *  reading of a sync's error at a site that writes a person's file: a code of SYNC_UNSUPPORTED → true (the file takes its name), its
- *  words SAID ONCE A SITE (`where`, for this process's life: the site's name and the code, no path) in the site's own sink; EVERY OTHER
+ *  words SAID ONCE A SITE (`where`, for the life of a process or of a worker thread — each pool worker has its own: the site's name and
+ *  the code, no path) in the site's own sink; THE one cadence of these words in this file (r4675); EVERY OTHER
  *  error → false (a failed write — the caller's, said by name). The open and the write keep their own try: only the sync's answer comes here */
 const syncUnsupportedSaid = new Set();
 function syncUnsupportedLands(e, where, say) {
@@ -63,7 +64,7 @@ function renameSynced(tmp, final, bytes, { mode, where, say, sync = true } = {})
   let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null;
   try {
     for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; }
-    if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { if (typeof say === 'function') say(syncUnsupportedWords(where, e.code)); } catch { /* a sink that throws says nothing more */ } } }   // r4563: `sync: false` — a caller's named choice (a buffer)
+    if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!syncUnsupportedLands(e, where, say)) throw e; /* THE one cadence (主开发 r4675): said through the once-door, once a site */ } }   // r4563: `sync: false` — a caller's named choice (a buffer)
   } catch (e) { failed = e; }
   try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there — a failed write
   fd = null;

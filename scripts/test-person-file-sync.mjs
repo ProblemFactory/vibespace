@@ -46,7 +46,7 @@ let seq = 0;   // each run's own folder
 // THE RECORDER: the real fs calls run; each one this law is about is written down in order. `fail(kind, p)` PLACES an answer at a
 // call: false = none; true = a failed call (EIO); a string = a failed call with THAT code (EINVAL: a file system that does not do a
 // sync); a function = a placed HOLD (run and awaited inside the call, then the call goes on). Kinds: sync and close (a handle of
-// fs.promises.open), fsyncSync and closeSync (a number fs.openSync gave)
+// fs.promises.open), fsyncSync and closeSync (a number fs.openSync gave), rename (fs.promises.rename: a HOLD only)
 async function recorded(fn, fail = () => false) {
   const log = [], P = fs.promises, keep = { open: P.open, rename: P.rename, renameSync: fs.renameSync, fsyncSync: fs.fsyncSync, closeSync: fs.closeSync, linkSync: fs.linkSync, openSync: fs.openSync, writeFileSync: fs.writeFileSync };
   const fdPath = new Map(), base = (p) => path.basename(String(p));
@@ -61,7 +61,7 @@ async function recorded(fn, fail = () => false) {
   fs.fsyncSync = (fd) => { const p = fdPath.get(fd) || '?', f = fail('fsyncSync', p); if (f && typeof f !== 'function') throw refused('fsyncSync', p, f); log.push(`fsyncSync ${base(p)}`); return keep.fsyncSync(fd); };
   fs.closeSync = (fd) => { if (!fdPath.has(fd)) return keep.closeSync(fd); const p = fdPath.get(fd), f = fail('closeSync', p); fdPath.delete(fd); if (f && typeof f !== 'function') { keep.closeSync(fd); throw refused('closeSync', p, f); } return keep.closeSync(fd); };
   fs.renameSync = (a, b) => { log.push(`rename ${base(a)}`); return keep.renameSync(a, b); };
-  P.rename = async (a, b) => { log.push(`rename ${base(a)}`); return keep.rename.call(P, a, b); };
+  P.rename = async (a, b) => { const f = fail('rename', a); if (typeof f === 'function') await f(); log.push(`rename ${base(a)}`); return keep.rename.call(P, a, b); };
   fs.writeFileSync = (p, ...a) => { log.push(`writeFileSync ${base(p)}`); return keep.writeFileSync(p, ...a); };
   fs.linkSync = (a, b) => { log.push(`link ${base(a)}`); return keep.linkSync(a, b); };
   try { const r = await fn(); return { log, r }; } catch (e) { return { log, err: e }; } finally { Object.assign(P, { open: keep.open, rename: keep.rename }); Object.assign(fs, { renameSync: keep.renameSync, fsyncSync: keep.fsyncSync, closeSync: keep.closeSync, linkSync: keep.linkSync, openSync: keep.openSync, writeFileSync: keep.writeFileSync }); }
@@ -201,12 +201,12 @@ const SITE = {
   cht: { where: 'a copy between machines', tag: 'files', then: 'fault = se;' },
   sfw: { where: 'a copy across devices', tag: 'safe-fs', then: 'fault = se;' },
   dav: { where: 'a WebDAV upload', tag: 'webdav', then: 'fault = se;' },
-  dfs: { where: 'a design file', tag: 'design', then: 'throw se;' },
+  dfs: { where: 'a design file', tag: 'design', then: 'throw se;', own: "if (!(se && NO_SYNC.has(se.code))) throw se; if (!noSyncSaid) { noSyncSaid = true; try { console.warn(`[design] ${noSyncWords('a design file', se.code)}`); } catch { } } }", ownTo: 'throw se; }' },   // the DEVICE's own reading (r4675): never the hub's helper
   tg: { where: 'a Task Group export', tag: 'task-groups', then: 'fault = se;' },
   pp: { where: 'a published page', tag: 'pages', then: 'fault = se;' },
 };
-const doorCall = (s) => "if (!FC.syncUnsupportedLands(se, '" + s.where + "', (l) => console.warn(`[" + s.tag + "] ${l}`))) " + s.then;
-const noDoor = (text, s) => anchored(text, doorCall(s), s.then, `the 31dca7dd2 form at ${s.where}: no sync at all is a refused file`);
+const doorCall = (s) => "if (!FC.syncUnsupportedLands(se, '" + s.where + "', (l) => console.warn(`[" + s.tag + "] ${l}`))) " + s.then;   // stale-pins: kept (the five HUB sites' door call; design-fs keeps its OWN reading since r4675 — its red is SITE.dfs.own)
+const noDoor = (text, s) => s.own ? anchored(text, s.own, s.ownTo, `the 31dca7dd2 form at ${s.where}: no sync at all is a refused file`) : anchored(text, doorCall(s), s.then, `the 31dca7dd2 form at ${s.where}: no sync at all is a refused file`);
 // «said once a site»: the FIRST no-sync answer at a site says its words once (the site's name and the code, no path); a later one, nothing
 function saidOnce(s, code, before, what) {
   const now = saidOf(s.where);
@@ -233,6 +233,26 @@ console.log('ⓓ the door (src/fd-close.js): SYNC_UNSUPPORTED and its words as l
   const fails = ['EIO', 'ENOSPC', 'EDQUOT', 'EROFS', 'EMADEUP'].map((c) => FCM.syncUnsupportedLands(e(c), 'a second made-up site', hear)).concat([FCM.syncUnsupportedLands(new Error('no code'), 'a third', hear), FCM.syncUnsupportedLands(null, 'a fourth', hear)]);
   ok(fails.every((x) => x === false) && heard.length === 1, 'EIO, ENOSPC, EDQUOT, EROFS, an unknown code, no code: a FAILED WRITE (false), nothing said', fails);
   ok(FCM.syncUnsupportedLands(e('EINVAL'), 'a fifth', () => { throw new Error('a sink that throws'); }) === true, 'a sink that throws: the file still lands, nothing more');
+  // THE DEVICE's OWN READING (主开发 r4675): src/design-fs.js rides the device bundle and never asks the hub's helper; its four codes and its
+  // words are the helper's LETTER FOR LETTER (test-architecture §107: the bundle does not carry src/fd-close.js)
+  const DFST = fs.readFileSync(path.join(REPO, 'src/design-fs.js'), 'utf8');
+  const codesOf = (text, name) => ((text.match(new RegExp(`const ${name} = new Set\\((\\[[^\\]]*\\])\\);`)) || [])[1] || null);
+  const wordsOf = (text, re) => ((text.match(re) || [])[1] || null);
+  const FC_WORDS = /function syncUnsupportedWords\(where, code\) \{ return (`[^`]*`); \}/, DFS_WORDS = /const noSyncWords = \(where, code\) => (`[^`]*`);/;
+  const samePin = (dfs) => !!codesOf(FCT, 'SYNC_UNSUPPORTED') && codesOf(dfs, 'NO_SYNC') === codesOf(FCT, 'SYNC_UNSUPPORTED') && !!wordsOf(FCT, FC_WORDS) && wordsOf(dfs, DFS_WORDS) === wordsOf(FCT, FC_WORDS);
+  ok(samePin(DFST) && !/require\([^)]*fd-close/.test(DFST), 'the design file\'s OWN reading (a device input): the helper\'s four codes and its words, letter for letter — and it never asks src/fd-close.js', { codes: codesOf(DFST, 'NO_SYNC'), words: wordsOf(DFST, DFS_WORDS) });
+  ok(!samePin(DFST.replace("'ENOSYS']);", "'ENOSIS']);")) && !samePin(DFST.replace('took their name unsynced`;', 'took its name unsynced`;')) && DFST.includes("'ENOSYS']);") && DFST.includes('took their name unsynced`;'), 'CONTROL: one code a letter apart, or the words a word apart — red');
+  // ONE CADENCE (主开发 r4675): in the helper only syncUnsupportedLands reads the set or says the words — once a site for the life of a
+  // process or of a worker thread; line 1017's rename door, once united here, says through it (its own say at every write is red)
+  const cadenceOne = (text) => { const i = text.indexOf('function syncUnsupportedLands('), j = i < 0 ? -1 : text.indexOf('\n}\n', i); if (i < 0 || j < 0) return false; const rest = text.slice(0, i) + text.slice(j); return !/SYNC_UNSUPPORTED\.has\(/.test(rest) && (rest.match(/\bsyncUnsupportedWords\(/g) || []).length === 1; };
+  const L1017_SYNC = "    if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { if (typeof say === 'function') say(syncUnsupportedWords(where, e.code)); } catch { /* a sink that throws says nothing more */ } } }   // r4563: `sync: false` — a caller's named choice (a buffer)";   // line 1017's own rename door's sync line, as it stands on its tip (d4e8e2535): its own say at every write
+  ok(cadenceOne(FCT) && !cadenceOne(FCT + '\nfunction renameSyncedAsWritten(fd, where, say, sync) {\n' + L1017_SYNC + '\n}\n'), 'ONE cadence: only syncUnsupportedLands reads the set and says the words — CONTROL: line 1017\'s rename door as written on its tip (its own say at every write) is red');
+  if (typeof FCM.renameSynced === 'function') {   // the united file (line 1017 and this line both in): its rename door says ONCE a site
+    const heardR = [], dirR = path.join(ROOT, `united-${++seq}`); fs.mkdirSync(dirR, { recursive: true });
+    const k0 = fs.fsyncSync; fs.fsyncSync = () => { throw Object.assign(new Error('EINVAL: a placed no-sync'), { code: 'EINVAL' }); };
+    try { for (const n of ['a', 'b']) FCM.renameSynced(path.join(dirR, `${n}.tmp`), path.join(dirR, `${n}.json`), '{}', { where: 'a united made-up record', say: (l) => heardR.push(l) }); } finally { fs.fsyncSync = k0; }
+    ok(heardR.length === 1 && fs.existsSync(path.join(dirR, 'a.json')) && fs.existsSync(path.join(dirR, 'b.json')), 'the united rename door: both records LAND on a folder with no sync, its words said ONCE a site', heardR);
+  } else console.log('  · line 1017\'s rename door is not in this tree: the cadence census above judges it once both are in');
 }
 
 // ③ a file copied from another machine into the person's folder (src/routes/files.js crossHostTransfer, the file case)
@@ -310,7 +330,7 @@ const SFW_LIVE = MC.write(SFW_REL, withOps(SFW), 'sfw-live');   // the worker wi
   ok(!!s.err && s.err.code === 'EEXIST' && !!s.old && s.old.equals(OLD) && !s.files && tmpLeft(s.dir, /vs-partial/).length === 0, 'over a destination that already STANDS: the staged copy is refused (EEXIST) before any byte — the standing file byte for byte as it was', s.err ? s.err.code : 'NO ERROR');
   const n0 = saidOf(S.where).length, ns = await sfwRun(SFW_LIVE, 'copy', (k) => k === 'fsyncSync' ? 'EINVAL' : false);
   ok(!ns.err && !!ns.files && ns.files.every(Boolean) && ns.log.includes('rename dest-tree.vs-partial'), 'a file system that does NOT DO A SYNC (EINVAL at every file): the copy LANDS whole', ns.err ? ns.err.message : ns.log.join(' → '));
-  saidOnce(S, 'EINVAL', n0, 'its no-sync answer (once for the whole tree)');
+  saidOnce(S, 'EINVAL', n0, 'its no-sync answer (once for the whole tree; once a site in each pool WORKER: each has its own — here the worker\'s ops run in-process)');
   const nm = await sfwRun(SFW_LIVE, 'move', (k) => k === 'fsyncSync' ? 'ENOSYS' : false, { exdev: true });
   ok(!nm.err && !!nm.files && nm.files.every(Boolean) && !nm.srcLeft && saidOf(S.where).length === 1, '…a cross-device move on it (ENOSYS) lands, its source goes after the rename, and nothing more is said', nm.err ? nm.err.message : saidOf(S.where));
   const nd = await sfwRun(MC.write(SFW_REL, withOps(noDoor(SFW, S)), 'sfw-nodoor'), 'copy', (k) => k === 'fsyncSync' ? 'EINVAL' : false);
@@ -445,7 +465,7 @@ async function tgRun(modPath, fail, { stand = null, twice = false } = {}) {
   }
   const two = await tgRun(path.join(REPO, TG_REL), undefined, { twice: true });
   ok(!two.err && two.r === two.file && !!two.second && two.second.r === two.file && two.now === two.text && tmpLeft(path.join(two.dir, 'out'), /\.tmp$/).length === 0, 'TWO EXPORTS TO ONE PATH AT ONCE (the first held at its sync while the second runs whole): EACH answered rightly, the file one whole export, no temp left', `${two.err ? two.err.message : 'ok'} · ${two.second && (two.second.e ? two.second.e.message : 'ok')}`);
-  const shared = anchored(anchored(TG, "    const tmp = `${absPath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;", "    const tmp = absPath + '.tmp';", 'the 31dca7dd2 form: one temp for every export to a path'), "fs.promises.open(tmp, 'wx')", "fs.promises.open(tmp, 'w')", 'the 31dca7dd2 form: its open');
+  const shared = anchored(anchored(TG, "    const tmp = `${absPath}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;", "    const tmp = absPath + '.tmp';", 'the 31dca7dd2 form: one temp for every export to a path'), "fs.promises.open(tmp, 'wx')", "fs.promises.open(tmp, 'w')", 'the 31dca7dd2 form: its open');   // stale-pins: kept (the release form WRITTEN BACK by this red copy — a replacement, never an anchor)
   const tw = await tgRun(MC.write(TG_REL, shared, 'export-shared'), undefined, { twice: true });
   ok(!!tw.err && /ENOENT/.test(tw.err.message), 'RED (the 31dca7dd2 form, one temp a path): the first export is answered WRONGLY (its rename finds no temp: ENOENT) for a file that was written', tw.err ? tw.err.message : 'NO ERROR');
   const n0 = saidOf(S.where).length, ns = await tgRun(path.join(REPO, TG_REL), at('sync', 'ENOTSUP'));
@@ -506,6 +526,22 @@ const pageText = (r) => { const p = r.list[0]; try { return fs.readFileSync(path
   const noRead = anchored(PP, / else \{\n {6}\/\/ r4634 MUST 1[\s\S]*?\n {6}\}\n {4}\}/, '', 'the 31dca7dd2 form: no second read of the list by the source');
   const two = await personRun(MC.write(PP_REL, noRead, 'pages-noread'));
   ok(two.rows.length === 2 && two.files.length === 2, 'RED (the 31dca7dd2 form, no read again by the source): TWO pages for one source, served from two files', `${two.rows.length} row(s) · ${two.files.join(', ')}`);
+  // …and that row TAKEN DOWN during the adoption's own rename (r4675's should; a HOLD at the rename): said, no row, no file left
+  const adoptDown = async (modPath) => {
+    const dir = path.join(ROOT, `pages-adopt-${++seq}`); fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'report.html'); fs.writeFileSync(file, '<!doctype html><title>the person\'s own</title>');
+    const pages = require(modPath).create({ dataDir: dir });
+    let person = null, removed = null;
+    const out = await recorded(() => pages.publishContent({ html: AGENT, name: 'made-up', srcKey: 'local:' + file, sessionId: 's-made-up' }),
+      (k, p) => k === 'sync' && /\.html\.tmp$/.test(String(p)) && !person ? async () => { person = pages.publish({ srcPath: file, name: 'the person\'s' }); }
+        : k === 'rename' && person && person.page && !removed && /\.html$/.test(String(p)) && !String(p).includes(person.page.id) ? async () => { removed = pages.remove(person.page.id); } : false);
+    return { ...out, dir, person, removed, list: pages.list({}), files: snaps(dir) };
+  };
+  const ad = await adoptDown(path.join(REPO, PP_REL));
+  ok(!!ad.removed && !!ad.r && /taken down while it was being published — not published/.test(String(ad.r.error)) && ad.list.length === 0 && ad.files.length === 0, 'the adopted row TAKEN DOWN during the adoption\'s rename: said by name, no row, no file of it left', `${JSON.stringify(ad.r)} · ${ad.files.join(', ')}`);
+  const noAdoptDown = anchored(PP, "        if (!store.pages.some((p) => p.id === appeared.id)) { await fs.promises.unlink(into).catch(() => { }); return { error: 'the page was taken down while it was being published — not published' }; }   // taken down during the rename (r4675's should)\n", '', 'no read after the adoption\'s rename');
+  const ad2 = await adoptDown(MC.write(PP_REL, noAdoptDown, 'pages-noadoptdown'));
+  ok(!!ad2.r && !!ad2.r.page && ad2.list.length === 0 && ad2.files.length === 1, 'RED (no read after the adoption\'s rename): answered WITH a page whose row is gone, its file left behind', `${JSON.stringify(ad2.r && (ad2.r.page ? 'a page' : ad2.r.error))} · ${ad2.files.join(', ')}`);
   // ONE ORDER A SOURCE: a second re-publish arriving while the first is held at its sync waits for it (the publishing map)
   // the hold starts the second; if it BEGAN AT ONCE (no order: its first act, the list's hold read, ran inside the call) the hold waits for it
   // to end, so its write meets the first's on the same temp (placed, no clock); in order it waits behind the first, never for it
