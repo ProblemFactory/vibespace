@@ -577,11 +577,14 @@ export function installSidebarRail(Sidebar) {
       const note = hist.querySelector('.sys-hist-note');
       const pts = d?.points || [];
       this._destroyRailSysCharts();
+      // B-f276 (lane nl-paired, 主开发 r4991 (d)): a HELD history is said in the chart's own place, beside the points it has (no tray
+      // item, no toast, no greyed control) — the hub's history route answers `held` while its file could not be read
+      const heldNote = d?.held ? `<div class="empty-hint empty-hint-inline">${escHtml(tr('The CPU and memory history could not be read just now — VibeSpace reads it again by itself; nothing in it was lost or changed. The charts show what was measured since this start.'))}</div>` : '';
       if (pts.length < 2) {
-        if (note) note.innerHTML = `<div class="empty-hint empty-hint-inline">${escHtml(tr('Collecting samples — history appears after a few minutes.'))}</div>`;
+        if (note) note.innerHTML = heldNote || `<div class="empty-hint empty-hint-inline">${escHtml(tr('Collecting samples — history appears after a few minutes.'))}</div>`;
         return;
       }
-      if (note) note.innerHTML = '';
+      if (note) note.innerHTML = heldNote;
       const cs = getComputedStyle(document.documentElement);
       const col = (v, fb) => (cs.getPropertyValue(v) || fb).trim() || fb;
       const tint = (c3) => /^#[0-9a-f]{6}$/i.test(c3) ? c3 + '20' : 'transparent';

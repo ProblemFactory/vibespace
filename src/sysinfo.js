@@ -10,6 +10,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const SR = require('./store-read.js');   // PURE (B-f276, r4991): the store-read law's answer — already in the device bundle's closure (no new input); the HOLD is the hub's, handed in
 const { execFile } = require('child_process');
 
 // THE HUB HANDS ITS STARTER (B-360d, lane bl-keys-misc — the coordinator's r1020: GET /api/sysinfo held the hub's loop 62 ms in ONE
@@ -357,14 +358,56 @@ function sampleCpuCores() {
 const _hist = { fine: [], coarse: [], loadedFrom: null }; // fine: 45s×24h, coarse: 15min×7d
 const FINE_MAX = Math.ceil(24 * 3600 / 45), COARSE_MAX = Math.ceil(7 * 24 * 4);
 let _histDirty = false, _histFile = null, _lastCoarseAt = 0;
-function loadHistory(dataDir) {
-  _histFile = path.join(dataDir, 'sysinfo-history.json');
-  try {
-    const d = JSON.parse(fs.readFileSync(_histFile, 'utf8'));
-    if (Array.isArray(d.fine)) _hist.fine = d.fine.slice(-FINE_MAX);
-    if (Array.isArray(d.coarse)) _hist.coarse = d.coarse.slice(-COARSE_MAX);
-  } catch { }
+// B-f276 THE STORE-READ LAW (lane nl-paired, slice «resource-history», 主开发 r4991): the release read ANY failed read or torn bytes
+// as EMPTY rings — the System panel's 24 h and 7 d charts restarted empty and the next 5-minute persist wrote that over the file (the
+// history gone for good, said nowhere). Now the one read at the start answers through the store-read law to a HOLD that THE HUB'S
+// START HANDS IN (startWatch's `hold`, server.js — as the writer is: this module is in the device agent's bundle and requires
+// nothing of the hub's; the law's answer is the PURE src/store-read.js, already in that bundle; the device never calls startWatch nor loadHistory: its `sysinfo` op asks read() alone).
+//   HELD (a read that failed): the samples are still taken in memory (the charts show them) and persistHistory writes NOTHING over
+//     the file (the hold's own check, said once a hold); the hold reads it again off the loop (store-read's ladder).
+//   LIFTED: the file's rings come back MERGED UNDER the samples taken meanwhile (mergeRing: by time, each ring's cap kept, a sample
+//     present in both — its `t` — kept ONCE, the one in memory), and the next persist writes both.
+//   TORN (bytes that are no history): kept aside ONCE, byte for byte, as `sysinfo-history.json.corrupt-<ms>` (the hold's exclusive
+//     create: a second torn read of the SAME bytes makes no second copy; other bytes take a name of their own, never one over the
+//     first; the hub removes none — at a start or on a timer), then empty: the samples since this start are written as usual.
+//   NO HOLD HANDED IN (a suite, a caller of tomorrow): a failed read or torn bytes still never let a persist write over the file in
+//     that run — ONE owed flag, said once; never a silent fall back to the release's read.
+const HIST_SHAPE = (d) => !!d && typeof d === 'object' && !Array.isArray(d) && (d.fine === undefined || Array.isArray(d.fine)) && (d.coarse === undefined || Array.isArray(d.coarse));
+const pointsOf = (r) => (Array.isArray(r) ? r.filter((x) => x && Number.isFinite(x.t)) : []);   // a point with no time is no point (at a start as at a lift)
+const takeRings = (d) => { if (Array.isArray(d.fine)) _hist.fine = pointsOf(d.fine).slice(-FINE_MAX); if (Array.isArray(d.coarse)) _hist.coarse = pointsOf(d.coarse).slice(-COARSE_MAX); };
+/** the file's ring UNDER the samples taken meanwhile: by time, a sample present in both (its `t`) kept once (the one in memory), the cap kept */
+function mergeRing(fromFile, mine, cap) {
+  const at = new Set(mine.map((x) => x && x.t));
+  const older = pointsOf(fromFile).filter((x) => !at.has(x.t));
+  return [...older, ...mine].sort((a, b) => a.t - b.t).slice(-cap);
 }
+function liftRings(d) {
+  if (d && HIST_SHAPE(d)) { _hist.fine = mergeRing(d.fine, _hist.fine, FINE_MAX); _hist.coarse = mergeRing(d.coarse, _hist.coarse, COARSE_MAX); }
+  _histDirty = true;   // the first write after the lift holds both (torn: the samples since this start)
+}
+let _histHold = null, _histUnread = null;
+function loadHistory(dataDir, { hold = null, log = (l) => console.warn(`[sysinfo] ${l}`) } = {}) {
+  _histFile = path.join(dataDir, 'sysinfo-history.json');
+  if (_histHold) { try { _histHold.stop(); } catch { } _histHold = null; }
+  _histUnread = null;
+  let read; try { read = { text: fs.readFileSync(_histFile, 'utf8') }; } catch (error) { read = { error }; }
+  const a = SR.storeAnswer(read, { valid: HIST_SHAPE });
+  if (hold && typeof hold.create === 'function') {
+    _histHold = hold.create({ file: _histFile, valid: HIST_SHAPE, code: 'sysinfo_history_unread', aside: (m) => _histFile + '.corrupt-' + m,
+      words: (h) => `the CPU and memory history could not be read (${(h && h.code) || 'unreadable'}) — VibeSpace reads it again by itself; nothing is written over it, and the charts show what was measured since this start`,
+      log, onLift: (v) => liftRings(v) });
+    if (_histHold.start(a) === 'data') takeRings(a.value);
+    return;
+  }
+  if (a.state === 'missing') return;   // a first run
+  if (a.state === 'data') { takeRings(a.value); return; }
+  _histUnread = String(a.code || 'unreadable').slice(0, 40);
+  log(`the CPU and memory history could not be read (${_histUnread}) — nothing is written over it in this run (no hold was handed in to read it again)`);
+}
+/** the route's answer (the panel's chart says it in its own place): { code, since } while the history is HELD, else null */
+function historyHeld() { const h = _histHold && _histHold.held(); return h ? { code: 'sysinfo_history_unread', since: h.since || null } : null; }
+/** the hold's read again now (the family's door — a suite's, a person's «read again») → true when it lifted */
+const historyReadAgain = () => (_histHold ? _histHold.again() : Promise.resolve(false));
 // B-0248 step 2 unit 5 (lane bl-loop-b, 主开发 r4147): the history's temp, write and rename are THE STORE WRITER's, on its thread. The release
 // wrote them ON THE LOOP every 5 minutes (about 100 KB, both rings), and on slow storage a rename holds the loop its whole delay (the page
 // bl-loop-b/b0248-page.md, row 9). The bytes are made AT the write (the rings as they are then). At the hub's stop server.js asks it once
@@ -374,6 +417,9 @@ function loadHistory(dataDir) {
 let _histWriter = null;
 function persistHistory(writer = _histWriter) {
   if (!_histFile || !_histDirty || !writer) return;
+  // r4991: a history that could not be read is never written over — HELD (the hold's own check, said once a hold), or, with no hold
+  // handed in, the run's owed flag; the rings stay owed in memory
+  if (_histUnread || (_histHold && !_histHold.writable('a write of the CPU and memory history'))) return;
   // the rings are no longer owed only once the writer TOOK them (unit 5's follow, r4231): a hand-over that throws leaves them owed
   try { writer.dirty(_histFile, { name: 'sysinfo-history.write', produce: () => JSON.stringify({ fine: _hist.fine, coarse: _hist.coarse }) }); _histDirty = false; } catch { }
 }
@@ -434,7 +480,7 @@ async function cmdlineHead(pid, { max = CMDLINE_HEAD, procDir = '/proc' } = {}) 
 // triggerVerdict) — {level, medianMs, at} of the last 3-min window, null before the window is full or without the watch
 let _lagNow = null;
 const loopLagNow = () => _lagNow;
-function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null, writer = null } = {}) {
+function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null, writer = null, hold = null } = {}) {
   _histWriter = writer;   // B-0248 unit 5: the hub's store writer (persistHistory, above)
   let lastLevel = 0, lastAlertAt = 0;
   // ── Event-loop lag watch (2.235.0, userL "卡了2h但CPU不高" incident): the
@@ -466,7 +512,7 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null, w
     broadcast?.({ type: 'sysinfo-alert', kind: 'evloop', level, lagMs: med });
   }, 500);
   lagT.unref?.();
-  if (dataDir) loadHistory(dataDir);
+  if (dataDir) loadHistory(dataDir, { hold });   // r4991: the hub hands the hold in, as the writer
   sampleCpuCores(); // prime the delta baseline
   const persistT = setInterval(persistHistory, 5 * 60 * 1000);
   persistT.unref?.();
@@ -491,7 +537,7 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null, w
     } catch { }
   }, intervalMs);
   t.unref?.();
-  return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
+  return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); if (_histHold) { try { _histHold.stop(); } catch { } } };
 }
 
-module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, loadHistory, recordSample, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram, sampleProcCpu, statTicks, SAMPLE_SLICE, SAMPLE_BOUND_MS };
+module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, historyHeld, historyReadAgain, persistHistory, loadHistory, recordSample, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram, sampleProcCpu, statTicks, SAMPLE_SLICE, SAMPLE_BOUND_MS };

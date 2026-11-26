@@ -9,6 +9,7 @@
 // (3) the ssh-script fallback's parse still yields the same field names. (4c) B-460d's remainder: a paired machine's
 // conversation starts below its machine's agent — this real agent, the started process's niceness read from /proc.
 import { endDaemonsAndWait, DAEMON_ROOT_ENV, DAEMON_ARGV, DAEMON_COMM } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -367,14 +368,16 @@ console.log(JSON.stringify({ procs: (r.procs || []).length, ok: (r.procs || []).
   ok(got.procs > 0 && got.ok, `a ps table BIGGER than the pre-fix 4 MiB buffer still yields processes (${got.procs} rows)`);
   // NEGATIVE CONTROL: the same fake `ps` against a copy of sysinfo.js with the
   // pre-fix buffer spliced back in must produce the empty list this fixes.
-  const patched = path.join(bin, 'sysinfo-prefix.js');
   const src = fs.readFileSync(path.join(REPO, 'src/sysinfo.js'), 'utf-8');
   const before = editAnchor(src, /const PS_MAX_BUFFER = [^;]+;/, 'const PS_MAX_BUFFER = 4 * 1024 * 1024;', "src/sysinfo.js");
   ok(before !== src, 'NEGATIVE CONTROL patch applied (the buffer constant is where the fix lives)');
-  fs.writeFileSync(patched, before);
+  // THE COPY THROUGH scripts/mutant-copy.mjs (B-f276 slice resource-history, lane nl-paired): its require bound to the real
+  // file's place, so the module's relative requires resolve (./store-read.js since that slice) — a copy written bare into the
+  // temp folder failed to load, and the probe read «-1 rows»
+  const patched = mutantCopies('sysinfo-op-prefix', REPO).write('src/sysinfo.js', before, 'prefix-buffer');
   fs.writeFileSync(probe, fs.readFileSync(probe, 'utf-8').replace(JSON.stringify(REPO + '/src/sysinfo.js'), JSON.stringify(patched)));
   const ctl = run(withFake);
-  ok(ctl.procs === 0, `NEGATIVE CONTROL: with the pre-fix 4 MiB buffer the SAME table yields an EMPTY list (${ctl.procs} rows) — silently, which is what this fixes`);
+  ok(ctl.procs === 0, `NEGATIVE CONTROL: with the pre-fix 4 MiB buffer the SAME table yields an EMPTY list (${ctl.procs} rows${ctl.procs < 0 ? ` — the copy did not run: ${String(ctl.raw || '').trim().split('\n').slice(-3).join(' | ').slice(0, 300)}` : ''}) — silently, which is what this fixes`);
   try { fs.rmSync(bin, { recursive: true, force: true }); } catch {}
 }
 
