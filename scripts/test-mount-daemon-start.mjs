@@ -22,7 +22,7 @@
 //     today's («rclone exited before mounting»), never «died», nothing watched; a starter that never ran asked nothing (its words)
 //  ⑧ (its follow, r1782) a person's Disconnect while the start waits on its starter's answer: nothing wanted again, the daemon ended by
 //     the identity its starter answered — RED the generation not read again; ⑧b its answer lost; ⑧s it mounted meanwhile; ⑧c a Connect
-//     after that Disconnect; ⑧d a pid given away; ⑧e the last word a Disconnect; ⑧n no /proc; ⑧n2 a stranger in the window — each RED; ⑨ the old road's detached start after two starter faults (its own
+//     after that Disconnect; ⑧d a pid given away; ⑧e the last word a Disconnect; ⑧n no /proc; ⑧n2 a stranger in the window (answered once its ps row reads its true age; PLACED: its row read within a tick of its birth, the etime wrapped — both copies hold, r5094) — each RED; ⑨ the old road's detached start after two starter faults (its own
 //     session, its log, alive after the starter is let go) — RED its branch cut
 // Run: node scripts/test-mount-daemon-start.mjs
 import './scratch.mjs';
@@ -238,7 +238,11 @@ try {
   // mount point waits for it — RED the lost answer not read there. ⑧s it MOUNTED before it was ended: the dead endpoint is released
   // (an internal unmount, the person's word unchanged) — RED that release cut. ⑧c a Connect AFTER that Disconnect (it joins the
   // connect in flight) is the person's last word: a connect anew — RED the join read as before
-  const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false, stranger = false } = {}) => {
+  // r5094 (the r3209 retally's unit A): ps's elapsed time of a process born within a clock tick of the read WRAPS (the probe read it
+  // «441077234-00:18:40» — its start a tick past ps's clock); the product's age gate then rightly holds a row it cannot place
+  const WRAPPED_ETIME = '441077234-00:18:40';
+  const etimeOf = (pid) => { try { return CP.execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 3000 }).trim(); } catch { return null; } };
+  const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false, stranger = false, wrapPs = false } = {}) => {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R), mp = mm.pathOf(R); let release; const gate = new Promise((r) => { release = r; });
     const started = [], after = []; let released = false, mountedNow = false, strangerKid = null;
@@ -249,9 +253,17 @@ try {
     mm._startingT = { ...mm._startingT, quickMs: 50 };   // a fresh connect's quick look (⑧c), short
     const W = { stats: () => S.stats(), run: (cmd, args, o) => {
       if (released) after.push(path.basename(String(cmd)));
-      const p = S.run(cmd, args, o); if (!(o && o.detach)) return p;
+      const p = S.run(cmd, args, o);
+      if (wrapPs && strangerKid && path.basename(String(cmd)) === 'ps' && (args || []).includes(String(strangerKid.pid))) return p.then((x) => (x && x.code === 0 ? { ...x, stdout: String(x.stdout || '').replace(/^(\s*\S+\s+)\S+/, '$1' + WRAPPED_ETIME) } : x));   // PLACED (unit A): the stranger's row as the box gives it within a tick of its birth
+      if (!(o && o.detach)) return p;
       return p.then(async (r) => { if (r && r.pid) ownDaemon(r.pid, r.starttime); started.push(r); if (started.length === 1) { await gate; if (lost) return { unknown: true, why: 'its reply lost' };
-        if (stranger) { strangerKid = CP.spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((x) => strangerKid.once('spawn', x)); return { ...r, pid: strangerKid.pid, starttime: null }; } }   // the answered pid a STRANGER's, started inside the window
+        if (stranger) { strangerKid = CP.spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((x) => strangerKid.once('spawn', x));
+          // r5094 (unit A — 6 reds at the current file, every one at a lower load than the median): the stranger is ANSWERED only once
+          // its own ps row reads its TRUE age — answered at its birth, ps's etime wrapped and the product's age gate held it on BOTH
+          // copies, so the control could not tell the program check's work from the age gate's. Waited on as its fact; its expiry said
+          const trueAge = await until(() => { const e = etimeOf(strangerKid.pid); return !!e && !/^\d+-/.test(e); }, 10000);
+          if (!trueAge) console.log(`    (the stranger's ps row never read its true age in 10 s — its last etime ${etimeOf(strangerKid.pid)}: the scene did not form, and a red below is that)`);
+          return { ...r, pid: strangerKid.pid, starttime: null }; } }   // the answered pid a STRANGER's, started inside the window
         return r; });
     } };
     CS.setChildStarter(W);
@@ -315,6 +327,13 @@ try {
   const dnSR = await discDuring(NOPROG, 'disc-np-stranger-red', { noProc: true, stranger: true });
   ok(dnS.r === false && dnS.strangerAlive === true && dnS.lostMark && dnSR.strangerAlive === false,
     `⑧n2 with NO /proc a pid freed and taken by a STRANGER inside the window (a fresh start, another program) is never signalled (it lives: ${dnS.strangerAlive}); the next start waits (${dnS.lostMark}) — RED the program not read: the stranger killed (${!dnSR.strangerAlive})`, { dnS, dnSR });
+  // PLACED ⑧n2 (r5094, unit A — the find made red at will): the stranger's ps row served as the box gives it within a tick of its birth
+  // (its etime WRAPPED): the age gate holds it on BOTH copies — the mutant that reads no program too — so the old control could not tell
+  // them apart (the reds' road); the scene above answers the stranger only once its row reads its true age
+  const dnSw = await discDuring(MOUNTS, 'disc-np-stranger-wrap', { noProc: true, stranger: true, wrapPs: true });
+  const dnSRw = await discDuring(NOPROG, 'disc-np-stranger-wrap-red', { noProc: true, stranger: true, wrapPs: true });
+  ok(dnSw.strangerAlive === true && dnSRw.strangerAlive === true && dnSRw.lostMark,
+    `PLACED ⑧n2: a stranger read within a tick of its birth (ps's etime wrapped to ${WRAPPED_ETIME}) — the age gate holds it on both copies (the mutant too: alive ${dnSRw.strangerAlive}, held ${dnSRw.lostMark}): the old control could not tell them apart — RED with nothing wrong in the product`, { dnSw, dnSRw });
   // ⑧d its read (MUST 2): ended by the ANSWERED identity alone — the person's Unmount ended it first (its walk's mark) and the kernel gave
   // its pid away (a stranger, this suite's own sleeper): never signalled — RED the record, else the identity read NOW (the stranger killed)
   const stranger = CP.spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((r) => stranger.once('spawn', r));
