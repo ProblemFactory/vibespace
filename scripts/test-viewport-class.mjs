@@ -389,6 +389,11 @@ console.log('⑤e the simulator\'s faults (主开发 r4463): the launch wears th
   ok(LG.CLEAR === 'vs_ground=; path=/; max-age=0; SameSite=Lax' && ['hsl(0, 0%, 10%)', 'oklch(0.2 0 0)', 'color-mix(in srgb, red, blue)', 'black', ''].every((v) => LG.groundCookie(v) === LG.CLEAR) && LG.groundCookie(' #fafafa') === LG.cookieFor('#fafafa'),
     '⑤e a theme whose ground is no plain colour (an hsl(), oklch(), color-mix(), a name) writes the CLEARING cookie — the next launch falls back to today\'s dark, never the previous theme\'s ground');
   ok(LG.cookieFor('hsl(0, 0%, 10%)') === null, '⑤e RED CONTROL: effa5382a\'s road (write only a colour) wrote NOTHING for such a ground — the previous theme\'s ground stayed in the cookie');
+  // r4681 required 1: the ground is written under the release's own guard (r3634: a fallback no person chose is shown, never stored)
+  const guardOk = (t) => /apply\(name, \{ store = true \} = \{\}\) \{[\s\S]*?\n    if \(store\) try \{ document\.cookie = groundCookie\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); \}/.test(t);
+  const guardWas = TH.replace('    if (store) try { document.cookie = groundCookie(', '    try { document.cookie = groundCookie(');   // stale-pins: kept — the CONTROL plants the unguarded write back
+  ok(guardOk(TH), '⑤e the ground is written only when the theme is STORED (apply(name, { store }) — a dark fallback for a plugin theme waiting for its plugin writes nothing)');
+  ok(guardWas !== TH && !guardOk(guardWas), '⑤e RED CONTROL: the write outside the guard (aad260742 formed on the train) is caught');
   // r4681 required 2: THE WORDS ON A LIGHT GROUND — the loading screen's text and track follow the ground; the splash draws its stuck-start
   // line and its Reload button in ON_LIGHT there (src/lib/boot-splash.js)
   const lightOut = LG.withGround(IDX, '#f0f0f5'), darkOut = LG.withGround(IDX, '#1e1f29');

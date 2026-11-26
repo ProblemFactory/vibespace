@@ -92,7 +92,9 @@ class ThemeManager {
     // B-78db (主开发 r4463 fault 2): the NEXT launch wears THIS theme's ground from its first paint — the index route writes it from one cookie
     // (src/launch-ground.js: a hex or rgb() only); a custom or plugin theme's ground too, read as the page now computes it
     // r4681 required 3: a ground that is no plain colour CLEARS the cookie (the next launch: today's dark, never the previous theme's)
-    try { document.cookie = groundCookie(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); } catch { /* no document (a suite) */ }
+    // r4681 required 1 (the release's own r3634 rule): a fallback no person chose (store: false — a plugin theme waiting for its plugin)
+    // is shown, never remembered — it writes no ground, or the next launch would be dark under the person's light theme
+    if (store) try { document.cookie = groundCookie(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); } catch { /* no document (a suite) */ }
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('theme-colors-changed'));
   }
 
