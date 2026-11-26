@@ -3,6 +3,8 @@
 // measures the accessibility tree on EXACTLY the shape the paging suite pages
 // (a second copy would be a twin that drifts). NOT a test-*.mjs on purpose: the
 // tier census would demand a tier. The essay below is the §1c one, verbatim.
+// scripts/test-chat-first-hold.mjs (test-chat-paging's §4h, moved to a suite of its own, 2026-11-25) pages the same
+// shape through the same call.
 //
 // THE HUGE COMPACT-MODE SESSION (inc-mubvu3a4-x8sb, 2026-09-21): a synthetic
 // transcript with the SHAPE of the owner's 976 MB / 266,270-line conversation,

@@ -1,5 +1,5 @@
 // THE PER-GESTURE RULES of chat paging (inc-mubvu3a4-x8sb, 2026-09-21), shared by
-// the gate suite (scripts/test-chat-paging.mjs §1c) and the by-hand driver
+// the gate suites (scripts/test-chat-paging.mjs §1c; scripts/test-chat-first-hold.mjs, its §4h moved there) and the by-hand driver
 // (scripts/dbg-huge-paging.mjs repro), so the table both print is ONE table.
 //
 // A gesture row is { name, dir: 'up'|'down'|'btn', wheelPx (signed, the sum of

@@ -501,7 +501,9 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
   // armed by the helper once, so the suite carries no signal line of its own.
   const onHelper = (t) => /import\s*\{[^}]*\bstartHub\b[^}]*\}\s*from\s*'\.\/hub-boot\.mjs'/.test(t) && /\bstartHub\(/.test(t);
   const helperHome = (t) => onHelper(t) && /\bstartHub\(\{[^;]*?\benv\s*:\s*\{[^;]*?\bHOME\s*:/s.test(t);
-  const writesTranscript = (t) => /['"`]\.claude['"`]\s*,\s*['"`]projects['"`]/.test(t) && /writeFileSync|writeSync|openSync/.test(t);
+  // …or through THE SHARED GENERATOR (scripts/huge-transcript-fixture.mjs writeHugeTranscript: its stream write lives in the module, so
+  // the suite's own text names only the call — test-chat-first-hold, test-chat-paging's §4h moved, 2026-11-25, writes nothing else)
+  const writesTranscript = (t) => /['"`]\.claude['"`]\s*,\s*['"`]projects['"`]/.test(t) && /writeFileSync|writeSync|openSync|\bwriteHugeTranscript\(/.test(t);
   const namesHome = (t) => {
     if (helperHome(t)) return true;   // the boot helper's start: the HOME in startHub's env (the helper refuses any other)
     // the HOME must be in the env of a server.js spawn, not merely mentioned (the literal, or a constant naming it)
@@ -544,6 +546,10 @@ console.log('\nTHE RULE\n    ' + G.SWEEP_RULE + '\n');
     ok(namesHome(good), 'CONTROL (b): adding HOME to that same spawn env is the whole fix');
     const viaHelper = "import { mintRoot, startHub } from './hub-boot.mjs';\nfs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nfor (const f of ['src', 'server.js']) cp(f);\nconst hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), HOME: fakeHome } });";
     ok(namesHome(viaHelper) && !namesHome(viaHelper.replace(', HOME: fakeHome', '')), 'CONTROL (b): a suite on the boot helper names its HOME in startHub\'s env — without it, it IS caught');
+    // a transcript written through the shared generator is a write too; the same lines with no write are not
+    const viaGenerator = "const PROJ = path.join(fakeHome, '.claude', 'projects', d);\nawait writeHugeTranscript({ file: path.join(PROJ, 'x.jsonl'), sid, cwd });";
+    ok(writesTranscript(viaGenerator) && !writesTranscript(viaGenerator.replace('writeHugeTranscript(', 'readHugeTranscript(')),
+      'CONTROL (b): a transcript written through the shared generator (writeHugeTranscript) is a write — the same lines calling no writer are not');
     // the constant shape (the follow-up): the census follows the constant into the spawn — and a constant that only names the
     // file (a source read, test-ledger-boot-load's SERVER_SOURCE) is not a spawn
     const viaConst = "fs.writeFileSync(path.join(h, '.claude', 'projects', d, 'x.jsonl'), '');\nconst SRV = path.join(wt, 'server.js');\nconst srv = spawn(process.execPath, [SRV], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });";
