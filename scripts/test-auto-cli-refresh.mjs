@@ -814,15 +814,20 @@ parentPort.on('message', (m) => {
     // (never a look on a cadence). An error of the FILE SYSTEM (it may heal): the wait starts again, said once a wait. TORN bytes (they
     // never heal): kept aside ONCE, the loop goes on with its memory. The state: MERGED (every stamp the later, every count the larger,
     // every bucket kept). Every fault PLACED: the read's answer through fs.promises (EIO, once), or torn bytes really on disk.
-    const placeAgain = (eio = 0, { hang = false, during = null } = {}) => { const real = fs.promises.readFile; let n = 0, all = 0, hung = 0;
-      fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && p.endsWith(STATE_TAIL)) { all++; if (hang) { hung++; return new Promise(() => { }); } if (n < eio) { n++; return Promise.reject(Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' })); } if (during) during(); } return real.call(this, p, ...a); };
+    const placeAgain = (eio = 0, { hang = false, during = null, late = null } = {}) => { const real = fs.promises.readFile; let n = 0, all = 0, hung = 0, lateDone = false;
+      fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && p.endsWith(STATE_TAIL)) { all++; if (during) during(); if (hang) { hung++; return new Promise(() => { }); }
+        if (late && !lateDone) { lateDone = true; return new Promise((r) => setTimeout(() => r(late.text), late.ms)); }   // r5061 (2): the FIRST read answers late (its own ref'd timer)
+        if (n < eio) { n++; return Promise.reject(Object.assign(new Error('EIO: i/o error, read (placed)'), { code: 'EIO' })); } } return real.call(this, p, ...a); };
       return { reads: () => all, hung: () => hung, restore: () => { fs.promises.readFile = real; } }; };
     const loopCut = (name, from, to) => { const f = path.join(scratch, name + '.js'); fs.writeFileSync(f, anchored(loopTxt, from, to, name)); return f; };
     const NO_REREAD = loopCut('loop-no-reread', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) { await readAgain(now); now = clock(); } }', 'else if (now - st.unknownAt >= UNKNOWN_WAIT_MS) st.unknownAt = null; }');   // the release: the wait ends with no read (stale-pins: kept — the release's wait end, planted back as the RED)
-    const NO_RETRY = loopCut('loop-no-retry', "    st.unknownAt = now;\n    warn(`[auto-cli] pacing state still unreadable", "    st.unknownAt = null;\n    warn(`[auto-cli] pacing state still unreadable");   // an error of the file system ends the wait
+    const NO_RETRY = loopCut('loop-no-retry', '    st.unknownAt = clock();   // r5061 (3)', '    st.unknownAt = null;   // r5061 (3)');   // an error of the file system ends the wait
     const TORN_WAITS = loopCut('loop-torn-waits', "    if (a.state === 'corrupt') {", "    if (false) {");   // torn bytes taken for an error that may heal
     // 主开发 r5030: the read again with no bound (a hung folder holds the tick), and the tick's clock not read again after it
-    const NO_READ_BOUND = loopCut('loop-no-read-bound', "    const read = await Promise.race([fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error })), bound]);", "    const read = await fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error }));");
+    const NO_READ_BOUND = loopCut('loop-no-read-bound', '      read = await Promise.race([mine, bound]);', '      read = await mine;');
+    // 主开发 r5061: today's lines (a read started at every wait's end, none kept out), and the wait counted from the clock before the read
+    const TODAY_READS = loopCut('loop-today-reads', "      const mine = readOut = fs.promises.readFile(statePath, 'utf-8')", "      const mine = fs.promises.readFile(statePath, 'utf-8')");
+    const NO_GIVEUP_CLOCK = loopCut('loop-no-giveup-clock', '    st.unknownAt = clock();   // r5061 (3)', '    st.unknownAt = now;   // r5061 (3)');
     const NO_RECLOCK = loopCut('loop-no-reclock', '{ await readAgain(now); now = clock(); } }', '{ await readAgain(now); } }');
     const saidN = (w, re) => w.logs.filter((l) => re.test(l)).length;
     const STILL = /pacing state still unreadable/, MERGED = /pacing state read again at the end of its unknown wait — merged/, TORNED = /pacing state's bytes are torn/;
@@ -881,13 +886,15 @@ parentPort.on('message', (m) => {
       const x = FILE_WINS.mergeState(M({ attempts: { a: 200 }, fails: { b: 4 } }), M({ attempts: { a: 150 }, fails: { b: 2 } }));
       ok(x.attempts.get('a') === 150 && x.fails.get('b') === 2, `§ban-safety r4771 (d) RED CONTROL (the file's values taken whole): an older stamp and a smaller count replace this process's own (a ${x.attempts.get('a')}, b ${x.fails.get('b')})`);
     }
+    // the run awaited under a REF'D HARNESS timer of the suite's own (a hung read and the loop's unref'd bound hold no process open — leg
+    // (3)'s lesson): once the placed read has begun, the tick has graceMs to return, or the HARNESS line names it
+    const heldRun = async (w, minutes, began, graceMs, maxLooks = 4000) => { let h = null, iv = null, looks = 0;
+        const cut = new Promise((r) => { iv = setInterval(() => { looks++; if (began() || looks > maxLooks) { clearInterval(iv); iv = null; h = setTimeout(() => r(`HARNESS: the tick did not return ${graceMs} ms after its read began (${began() ? 'the read began' : 'the read never began'}) — the read's bound never ended it`), graceMs); } }, 5); });
+        try { return await Promise.race([w.run(minutes).then(() => null, (e) => `the run threw: ${(e && e.message) || e}`), cut]); } finally { if (iv) clearInterval(iv); clearTimeout(h); } };
     { // (e) 主开发 r5030 (a): A READ THAT NEVER ANSWERS at the wait's end (a hung folder, placed): past its bound it is unreadable — the wait
       //     starts again, said once, the tick returns. The run is awaited under a REF'D HARNESS timer of the suite's own (the hung read and the
       //     loop's unref'd bound hold no process open — leg (3)'s lesson): once the placed read has begun, the tick has graceMs to return, or the
       //     HARNESS line names it; RED: the bound cut — the tick held for ever
-      const heldRun = async (w, minutes, began, graceMs, maxLooks = 4000) => { let h = null, iv = null, looks = 0;
-        const cut = new Promise((r) => { iv = setInterval(() => { looks++; if (began() || looks > maxLooks) { clearInterval(iv); iv = null; h = setTimeout(() => r(`HARNESS: the tick did not return ${graceMs} ms after its read began (${began() ? 'the read began' : 'the read never began'}) — the read's bound never ended it`), graceMs); } }, 5); });
-        try { return await Promise.race([w.run(minutes).then(() => null, (e) => `the run threw: ${(e && e.message) || e}`), cut]); } finally { if (iv) clearInterval(iv); clearTimeout(h); } };
       const hungRead = async (loopFile, graceMs) => { const pa = placeAgain(0, { hang: true });
         try { const { w, file } = placed('eio', { stateFile: STATE, loopFile, readAgainMs: 50 }); const harness = await heldRun(w, WAIT_MIN + 1, () => pa.hung() > 0, graceMs);
           return { w, file, harness, hung: pa.hung() }; } finally { pa.restore(); } };
@@ -909,6 +916,37 @@ parentPort.on('message', (m) => {
       const f0 = await slowRead(REAL_LOOP), f1 = await slowRead(NO_RECLOCK);
       ok(f0.asks.length >= 1 && f0.stamps.every((s, i) => s === f0.at[i]), `§ban-safety r5030 (c): a read of three minutes at the wait's end — the ${f0.asks.length} ask(s) of that tick (${f0.asks.join(', ')}) are stamped with the clock AFTER the read (the minute they start)`, f0);
       ok(f1.asks.length >= 1 && f1.stamps.every((s, i) => s === f1.at[i] - 3 * 60e3), `§ban-safety r5030 (c) RED CONTROL (the clock not read again): that tick's stamps are three minutes older than its asks`, f1);
+    }
+    { // (g) 主开发 r5061 (2)+(3): a LATE ANSWER (placed: the first read answers 200 ms after its 50 ms bound, with a state holding an OLDER
+      //     stamp) — NOTHING merged, the unknown mark still set, the wait restarted from the clock read AFTER the read gave up (the world's
+      //     clock moved two minutes while it read, placed); the late bytes land at last and go to nobody; the next wait's end reads anew.
+      //     RED (3): the wait counted from the clock before the read; RED (2): the read with no bound — the late answer merged
+      const OLDER = { v: 1, attempts: { 'sub-bad': T0 - 60 * 60e3 }, fails: { 'sub-bad': 6 }, projReads: {} };
+      const lateRead = async (loopFile, second) => { let w = null; const pa = placeAgain(0, { late: { ms: 200, text: JSON.stringify(OLDER) }, during: () => w.bump(2 * 60e3) });
+        try { w = placed('eio', { stateFile: STATE, loopFile, readAgainMs: 50 }).w; await w.run(WAIT_MIN + 1);
+          const at = { unknownAt: w.mem().unknownAt, fails: w.mem().fails.get('sub-bad') ?? null, attempts: w.mem().attempts.size, calls: w.calls.length, said: saidN(w, STILL) };
+          await new Promise((r) => setTimeout(r, 400));   // the late answer lands (its own placed timer)
+          const after = { unknownAt: w.mem().unknownAt, fails: w.mem().fails.get('sub-bad') ?? null, attempts: w.mem().attempts.size };
+          if (second) await w.run(WAIT_MIN);   // to the next wait's end (counted from the give-up) — a read anew, the real file
+          return { at, after, reads: pa.reads(), merged: saidN(w, MERGED) }; } finally { pa.restore(); } };
+      const GIVEUP = T0 + (WAIT_MIN + 2) * 60e3;
+      const g0 = await lateRead(REAL_LOOP, true);
+      ok(g0.at.unknownAt === GIVEUP && g0.at.fails === null && g0.at.attempts === 0 && g0.at.calls === 0 && g0.at.said === 1
+        && g0.after.unknownAt === GIVEUP && g0.after.fails === null && g0.after.attempts === 0 && g0.reads === 2 && g0.merged === 1,
+        `§ban-safety r5061 (2)(3): a LATE answer (200 ms past its bound, an older stamp) — nothing merged (no stamp, no count), the unknown mark still set, said once (${g0.at.said}); the wait restarted from the clock AFTER the read gave up (min ${(g0.at.unknownAt - T0) / 60e3}); the late bytes landed and went to nobody; the next wait's end read anew (${g0.reads} reads, merged ${g0.merged})`, g0);
+      const g1 = await lateRead(NO_GIVEUP_CLOCK, false);
+      ok(g1.at.unknownAt === T0 + WAIT_MIN * 60e3, `§ban-safety r5061 (3) RED CONTROL (the wait counted from the clock before the read): it restarts two minutes early (min ${(g1.at.unknownAt - T0) / 60e3})`, g1);
+      const g2 = await lateRead(NO_READ_BOUND, false);
+      ok(g2.at.unknownAt === null && g2.at.fails >= 6, `§ban-safety r5061 (2) RED CONTROL (the read with no bound): the late answer is MERGED — its older count taken (${g2.at.fails}: the file's 6, then that tick's own asks), the mark gone`, g2);
+    }
+    { // (h) 主开发 r5061 (1): three wait's ends over a read that NEVER answers start ONE read — the one still out is taken as unreadable again,
+      //     said once a wait, nothing asked; RED: today's lines (a read started at every wait's end) — three reads, three pool threads
+      const threeWaits = async (loopFile) => { const pa = placeAgain(0, { hang: true });
+        try { const { w } = placed('eio', { stateFile: STATE, loopFile, readAgainMs: 50 }); const harness = await heldRun(w, 3 * WAIT_MIN + 3, () => false, 15000, 6000);
+          return { harness, started: pa.hung(), said: saidN(w, STILL), calls: w.calls.length }; } finally { pa.restore(); } };
+      const h0 = await threeWaits(REAL_LOOP), h1 = await threeWaits(TODAY_READS);
+      ok(!h0.harness && h0.started === 1 && h0.said === 3 && h0.calls === 0, `§ban-safety r5061 (1): three wait's ends over a read that never answers — ONE read started (${h0.started}), unreadable said once a wait (${h0.said}), no call (${h0.calls})`, h0);
+      ok(!h1.harness && h1.started === 3 && h1.said === 3, `§ban-safety r5061 (1) RED CONTROL (today's lines): a read started at every wait's end — ${h1.started} reads held at once`, h1);
     }
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts

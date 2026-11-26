@@ -227,15 +227,27 @@ function createAutoCliLoop(d) {
   // heal) → the wait starts again, said once a wait; TORN BYTES (read whole, not the state: they never heal) → kept aside ONCE under
   // the hold's dated name (src/store-hold.js setAside's), and the loop goes on with its memory, as the release did — never an
   // automatic read paused for ever on a file nobody can mend. The wait ends only here: while it runs nothing is picked or written.
+  // 主开发 r5061 (1): AT MOST ONE READ OF THE STATE FILE IS EVER OUT — the read that has not answered is KEPT here; while it is out no new
+  // read is started (a data folder that stays hung pins ONE thread of the hub's file pool, never one more each wait's end)
+  let readOut = null;
   async function readAgain(now) {
     if (!d.dataDir) { st.unknownAt = null; return; }
     const statePath = path.join(d.dataDir, STATE_FILE);   // its own name: the sync-fs census reads a path by its name across the file
-    // r5030 (a): BOUNDED — a read with no answer past readAgainMs is an error of the file system (ETIMEDOUT): the wait starts again, said once;
-    // the read left in flight holds one thread of the pool until the folder answers (at most one a wait, 320 min apart)
-    let timer = null;
-    const bound = new Promise((resolve) => { timer = setTimeout(() => resolve({ error: Object.assign(new Error(`no answer in ${Math.round(readAgainMs / 1000)} s`), { code: 'ETIMEDOUT' }) }), readAgainMs); if (timer.unref) timer.unref(); });
-    const read = await Promise.race([fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error })), bound]);
-    clearTimeout(timer);
+    // r5030 (a): BOUNDED — a read with no answer past readAgainMs is an error of the file system (ETIMEDOUT): the wait starts again, said once.
+    // r5061 (1): the read that missed its bound stays OUT; at the next wait's end, while it is still out, none is started and the tick takes
+    // it as unreadable again (the same words, said once a wait); when it answers at last its bytes go to nobody (the race settled already),
+    // and the next wait's end may read anew
+    const timedOut = () => ({ error: Object.assign(new Error(`no answer in ${Math.round(readAgainMs / 1000)} s`), { code: 'ETIMEDOUT' }) });
+    let read;
+    if (readOut) read = timedOut();
+    else {
+      const mine = readOut = fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+      mine.then(() => { if (readOut === mine) readOut = null; });
+      let timer = null;
+      const bound = new Promise((resolve) => { timer = setTimeout(() => resolve(timedOut()), readAgainMs); if (timer.unref) timer.unref(); });
+      read = await Promise.race([mine, bound]);
+      clearTimeout(timer);
+    }
     const a = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
     if (a.state === 'data') { mergeState(st, fieldsOf(a.value, now, warn)); st.unknownAt = null; warn('[auto-cli] pacing state read again at the end of its unknown wait — merged into memory (every stamp the later, every count the larger, every bucket kept)'); return; }
     if (a.state === 'missing') { st.unknownAt = null; return; }
@@ -250,7 +262,7 @@ function createAutoCliLoop(d) {
         : `[auto-cli] pacing state's bytes are torn (${a.code}) and could not be kept aside (${why}) — the loop goes on with its memory; its next save writes over them`);
       return;
     }
-    st.unknownAt = now;
+    st.unknownAt = clock();   // r5061 (3): the wait counted from the clock read AFTER the read gave up (never up to its bound early)
     warn(`[auto-cli] pacing state still unreadable (${a.code}) — the longest backoff starts again (${Math.round(UNKNOWN_WAIT_MS / 60e3)} min) before any /usage read`);
   }
   let ticking = false;
