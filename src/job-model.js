@@ -629,19 +629,25 @@ function leftWords(l) {
  *  stopped what it kept), else a kill we made */
 function runEndWords(run) { return run && run.left ? leftWords(run.left) : (run && typeof run.forced === 'string' && run.forced) || ''; }
 /** B-2c5c (4c), 主开发 r4564 M1: THE BOUND IN FORCE for a job — its LAST RUN's own bound record (the wrapper's, adopted: {mb, by, why}),
- *  else what the tree's one bound function gives that job (memoryMbOf over the engine's context: the ladder and the instance's cap,
- *  its rung not known). Never the raw figure a job asked. → { mb, by: 'cgroup' | 'rlimit-data' | 'none' | null, why } */
+ *  else the figure that run recorded at its spawn (r4673), else what the tree's one bound function gives that job (memoryMbOf over
+ *  the engine's context: the ladder and the instance's cap, its rung not known). Never the raw figure a job asked. → { mb, by: 'cgroup' | 'rlimit-data' | 'none' | null, why } */
 function boundInForceOf(job, ctx = {}) {
   const runs = job && Array.isArray(job.runs) ? job.runs : [];
   const run = runs.length ? runs[runs.length - 1] : null;
   if (run && run.memoryBound && typeof run.memoryBound === 'object') { const b = boundRecord(run.memoryBound); return { mb: b.mb, by: b.by, why: b.why }; }
-  const m = memoryMbOf(job, ctx || {});
+  // r4673 (lens two's should): a run whose wrapper's record is not adopted yet holds the figure recorded AT ITS SPAWN (the ladder and
+  // the instance's cap then, src/jobs.js) — never today's context over a run already bounded
+  if (run && finiteMb(run.memoryMb) !== null) return { mb: finiteMb(run.memoryMb), by: null, why: '' };
+  const own = job && job.kind === 'cron' && job.action && job.action.task ? job.action.task : job;   // r4673: a cron's figure is its task's (the view's own read)
+  const m = memoryMbOf(own, ctx || {});
   return { mb: finiteMb(m && m.mb) || 0, by: null, why: '' };
 }
 /** B-2c5c (4c), 主开发 r4564 M2: what passing that bound does, TRUE TO ITS RUNG — 'whole' (a scope stopped whole: the cgroup rung with
  *  OOMPolicy=stop, which the wrapper names in the record's why), 'process' (a scope with no such policy: the kernel's OOM kill takes ONE
  *  process), 'own' (RLIMIT_DATA: each process its own limit), 'none' (unbounded), 'unknown' (no run record: the soft sentence) */
 function boundRungOf(b) {
+  // r4673: THE RUNG LAW's twin is the card's (src/lib/jobs-layout.js hubBoundNote, ESM, imports nothing) — test-hub-handed-drop ③'s
+  // parity leg feeds both the same records
   if (!b) return 'unknown';
   if (b.by === 'none' || b.mb === 0) return 'none';   // 0 = the owner set no bound: unbounded, on any rung
   if (!(finiteMb(b.mb) > 0)) return 'unknown';
@@ -652,8 +658,11 @@ function boundRungOf(b) {
 /** B-2c5c (4c), 主开发 r4380 / r4564: the boot's ONE journal line when this VibeSpace was started INSIDE a background job (its handed id).
  *  `seen` = what the engine knows of it: { label (its labelOf — the ONE accessor of a job's name, test-architecture §93), mb, by, why
  *  (boundInForceOf) }; null = a job this VibeSpace does not hold now (another VibeSpace's, or one it archived). Every clause is true to
- *  what the record names: the size the bound IN FORCE; the consequence its RUNG's; the start again its HOLDER's (a job this engine holds
- *  is a hub-main run, never started again by itself — B-2c5c unit 2; another holder may) */
+ *  what the record names: the size the bound IN FORCE; the consequence its RUNG's; the start again its RUNG's AND its holder's (r4673):
+ *  only where the scope is stopped WHOLE (a launcher in the job stopped with it) and the run's main WAS this hub (`mainIsHub`: the
+ *  engine's one hub-main fact, proven at the boot's adopt — such a run is never started again by itself, B-2c5c unit 2) does VibeSpace
+ *  stay down; where ONE process ends (an older scope, its own data limit, a rung not read, a job not held) a launcher in the job
+ *  (./run.sh's loop) may start VibeSpace again, inside the same scope or under the same inherited limit */
 function startedInJobLine(id, seen = null) {
   const held = !!seen;
   const label = held && seen.label ? String(seen.label).replace(/[\r\n\t]+/g, ' ').slice(0, 80) : '';
@@ -665,7 +674,8 @@ function startedInJobLine(id, seen = null) {
       : rung === 'own' ? `${bound} is each of its processes' own limit (RLIMIT_DATA) — a process that passes it fails its own allocation, VibeSpace's too, which can end it`
         : rung === 'none' ? 'it runs under no memory bound of its own'
           : `${bound} can end VibeSpace and the conversations it started`;
-  const again = rung === 'none' ? '' : held ? '; VibeSpace does not start again by itself' : "; only that job's own VibeSpace may start it again";
+  const again = rung === 'none' ? '' : rung !== 'whole' ? "; if the job's own command starts VibeSpace again (a launcher such as ./run.sh), it comes back under the same bound"
+    : held && seen.mainIsHub === true ? '; VibeSpace does not start again by itself' : '';   // 'whole' is a held job's (a job not held has no record: 'unknown')
   return `[jobs] this VibeSpace was started INSIDE the background job ${who}: ${what}${again}. Start VibeSpace as its service (the Background Work manual: «VibeSpace itself is never a job»)`;
 }
 /** the NAMED end the journal says (the card words the same through its own t()) */
