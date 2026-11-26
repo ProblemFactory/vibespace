@@ -1896,7 +1896,7 @@ class AccountManager {
       // (r5260) ONE RULE FOR BOTH WIPES: the removal's own wipe also asks the links' fresh read — a link that still names the folder,
       // or one that cannot be read, keeps it (owed, said), as the retry's does
       if (owedRow && !kept) { const reading = this._linksReading(id); if (reading) { kept = { pools: reading, codes: [] }; owedRow.pools = reading; } }
-      if (kept) console.warn(`[pool] a removed member's sign-in folder is KEPT: ${kept.pools} pool(s) could not be moved off it (${kept.codes.join(', ')}) — its links still read it`);   // B-e381: names no account
+      if (kept) console.warn(`[pool] a removed member's sign-in folder is KEPT: ${kept.pools} pool(s) could not be moved off it (${kept.codes.join(', ') || 'a link still names it or cannot be read'}) — its links still read it`);   // B-e381: names no account
       else { try { fs.rmSync(this._acctDir(this._acctBackend(a), id), { recursive: true, force: true }); } catch { } }
       if (owedRow && !kept && this._folderState(this._acctDir(this._acctBackend(a), id)).gone) this._dropKept(id);   // B-e381 (r4680): wiped — nothing owed («gone» only on no such file)
     }
@@ -1937,6 +1937,14 @@ class AccountManager {
     for (const k of names) if (reads(this.sessionPoolLinkPath(pool.id, k))) n++;
     return n;
   }
+  /** (r5296) the provider a kept row's CODE names, with its label (an unplaced mark says the provider's words, never its raw code):
+   *  the harness's own subscription provider, or the provider a member here serves under that code; else the code alone */
+  _providerOfCode(code, harness) {
+    if (!code) return null;
+    try { const fp = this.firstPartyProviderOf(harness); if (this._providerKeyOf(fp) === code) return fp; } catch { }
+    for (const x of this._state.accounts) { try { const p = this.memberProviderOf(x.id); if (this._providerKeyOf(p) === code) return p; } catch { } }
+    return { id: code };
+  }
   /** (r5260) a folder's state, read without following a link: «gone» ONLY on no such file; any other failure is «unread» (kept, said) */
   _folderState(dir) { try { fs.lstatSync(dir); return { there: true }; } catch (e) { return e && e.code === 'ENOENT' ? { gone: true } : { unread: (e && e.code) || 'error' }; } }
   /** one owed wipe, tried: (law 4) that ONE folder, by the id and harness the row holds — a row whose folder is already gone is
@@ -1947,7 +1955,7 @@ class AccountManager {
     try {
       // an account that holds this id again (a config import brought its record back) owns the folder: nothing is deleted, the row goes
       if (this._state.accounts.some((x) => x && x.id === row.id)) { this._dropKept(row.id); return { live: true }; }
-      const dir = this._acctDir(row.harness, row.id), heal = { ...opts, removedProvider: row.provider ? { id: row.provider } : null };   // (r5260) the provider it served
+      const dir = this._acctDir(row.harness, row.id), heal = { ...opts, removedProvider: this._providerOfCode(row.provider, row.harness) };   // (r5260 / r5296) the provider it served, with its label
       const at = this._folderState(dir);
       if (at.unread) { row.tried = Date.now(); return { kept: { pools: row.pools || 0, codes: [at.unread] } }; }   // (r5260) a folder that cannot be read is kept and said — never dropped as gone
       if (at.gone) { try { this._healPoolsAfterRemoval(row.id, heal); } catch { } this._dropKept(row.id); return { gone: true }; }   // its links healed off the missing folder, as a removal's

@@ -50,6 +50,9 @@ const KEPT_DOOR_WORDS = Object.freeze({
   human_only: 'only the person, on this VibeSpace page, clears a kept sign-in folder — an agent\'s, a job\'s or an automation\'s sign-in cannot',
   cross_site: 'only the person, on this VibeSpace page, clears a kept sign-in folder — another site cannot',
 });
+/** B-e381 (主开发 r5296): a removal retries the OTHER owed sign-in folders only for a PERSON on this page (the tree's one person
+ *  verdict, as the kept folder's own door asks) — a script's removal (no browser, or any bearer) stays the release's bare removal */
+function keptRetryAsked(req) { try { return personVerdict(req).ok === true; } catch { return false; } }
 function keptFolderDoor(req, res) {
   const who = personVerdict(req);
   if (who.ok) return true;
@@ -132,4 +135,4 @@ function registerAccountTailRoutes(app, { accounts, providers = null }) {
   });
 }
 
-module.exports = { accountsAnswer, registerAccountTailRoutes, personOnlyDoor, CREDENTIAL_DOOR_WORDS, keptFolderDoor, KEPT_DOOR_WORDS, keepHostCliTail, forgetHostCliTail, revealKeyDoorOf };
+module.exports = { accountsAnswer, registerAccountTailRoutes, personOnlyDoor, CREDENTIAL_DOOR_WORDS, keptFolderDoor, keptRetryAsked, KEPT_DOOR_WORDS, keepHostCliTail, forgetHostCliTail, revealKeyDoorOf };

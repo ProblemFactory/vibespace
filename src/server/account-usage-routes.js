@@ -446,7 +446,7 @@ app.delete('/api/accounts/:id', (req, res) => {
     try { removed = accounts.remove(req.params.id, {
       chooseDefault: (poolId, from) => (typeof engine.decideDefaultTarget === 'function' ? engine.decideDefaultTarget(poolId, from) : null) || (typeof engine.fallbackDefaultTarget === 'function' ? engine.fallbackDefaultTarget(poolId, from) : null),
       chooseLink: (poolId, from, sid) => (typeof engine.removalTargetFor === 'function' ? engine.removalTargetFor(poolId, from, sid) : null),
-      retryKept: true,   // B-e381 (r5260): a PERSON's removal retries the other owed sign-in folders — this route alone asks it
+      retryKept: AT.keptRetryAsked(req),   // B-e381 (r5260 / r5296): a PERSON's removal retries the other owed sign-in folders — this route alone asks it, and only for a person (a script's removal stays bare)
     }); } catch (e) { if (e && e.code === 'not-durable' && e.landingOwed) unlanded = e; else throw e; } // throws for unknown ids → only real (shape-safe) ids continue
     try { modelsDoor.forget(req.params.id); } catch { } // the models its CLI reported go with it (lane agy-models-report, E2)
     // (lane pool-provider-latents, q-055 M2) a conversation the deletion left UNPLACED (nobody of its provider left) is decided
