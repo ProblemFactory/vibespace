@@ -1223,7 +1223,9 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   // shows whole, N the live-session set alone (4ad07d751's `alive`)
   {
     const DSRC5 = read('src/lib/desktop-manager.js'), LSRC5 = read('src/lib/session-lifecycle.js'), WSRC5 = read('src/ws-handler.js');
-    const dm5 = (find, repl, tag) => { ok(DSRC5.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC5, find, repl, "src/lib/desktop-manager.js", 'join'), tag, { esm: true })).href).then((m) => m.DesktopManager); };
+    // B-0d3e (card-door-in-chat, r5285): a call whose patched line stands more than once SAYS its count — a row beside it names a lost or
+    // a third copy (the join mode alone passes while one copy stands); every copy is still patched
+    const dm5 = (find, repl, tag, count = null) => { ok(DSRC5.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); if (count !== null) ok(DSRC5.split(find).length - 1 === count, `mutant ${tag}: its patched line stands ${count} times in desktop-manager.js, every copy patched (a lost or a third copy is named here)`); return import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC5, find, repl, "src/lib/desktop-manager.js", 'join'), tag, { esm: true })).href).then((m) => m.DesktopManager); };
     const DMo = await dm5('    if (!census.shows.size) return out;', '    return out;', 'r5-o-attempt'); // copiesOf answers nothing (r9: its one census)
     const fO = await r5Legs({ DM: DMo, install: install0, quiet: true, legs: ['O1', 'O3a', 'O5'] });
     ok(fO.some((n) => /r5 O1: A COPY THIS PAGE CANNOT BUILD IS A GHOST/.test(n)) && fO.some((n) => /r5 O3 \(merge at 0 ms\)/.test(n)) && fO.some((n) => /r5 O5: AN OPEN OF A WINDOW THAT STANDS/.test(n)), `mutant r5-O-build-attempt-until-save (4ad07d751's ghostsOf: only _kept / _carried): A's group taken apart by B's re-send (q1), the merge refused (q3), v-t's group still pending at the open (qR2) — RED (${fO.length}: ${fO.map((n) => n.slice(0, 22)).join(' | ')})`);
@@ -1237,7 +1239,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const installW = await loadLifecycle(editAnchor(LSRC5, lf, '        if (!replay && this.desktopManager?.keepInFront?.(winId)) return true;', "src/lib/session-lifecycle.js"));
     const fW5 = await r5Legs({ DM: DMw, install: installW, quiet: true, legs: ['O6'] });
     ok(fW5.some((n) => /r5 O6: …a reveal never waits for a group/.test(n)), `mutant r5-O-reveal-waits-for-group (4ad07d751's revealWhenFormed for a window that stands): the open of win-v-s reveals nothing while its group waits 8 s for a member (qR) — RED (${fW5.length})`);
-    const DMa = await dm5('    this._relisted(desktopId, state);\n', '', 'r5-o-ask-again');
+    const DMa = await dm5('    this._relisted(desktopId, state);\n', '', 'r5-o-ask-again', 2);
     const fA5 = await r5Legs({ DM: DMa, quiet: true, legs: ['O1'] });
     ok(fA5.some((n) => /r5 O1: …A's next act lands at once — acked, NO refusal/.test(n)), `mutant r5-O-ask-again (a copy the hub let go asked for again at the next save): A's next act is refused 'shrink-without-close' first — RED (${fA5.length})`);
     const DMp = await dm5('    lm.takeChains(d, rec, take, { keep });', '    lm.takeChains(d, rec, [...touch]);', 'r5-p-discard');

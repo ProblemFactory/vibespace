@@ -309,13 +309,17 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
   for (const [k, mk] of Object.entries(shapes)) { const v = stepsOf(mk, 16384, 4); ok(v.ok, `linear on ${k} by the count: ${stepsLine(v)} at ×4 input`, v); }
   // R7 / R8 (inbox-verify F1, 2026-10-13 — the LLM plugin's judge read a record's token query values and its key material verbatim)
   const R7A = ['https://hooks.example.com/cb?to', 'ken=tok_9f8e7d6c5b4a&sig=ab12'].join(''), R7B = 'see https://x.io/a?access_token=AT-99zz&api_key=K-77yy&x=1#key=frag-55';
-  const qa = SS.redactSecrets(R7A).text, qb = SS.redactSecrets(R7B).text;
-  ok(qa === ['https://hooks.example.com/cb?to', 'ken=«redacted»&sig=«redacted»'].join('') && !/AT-99zz|K-77yy|frag-55/.test(qb) && qb.includes('&x=1') && SS.redactSecrets(qb).text === qb, 'R7: a URL query value named by a secret word goes, its name and the plain parameters stay (idempotent)', [qa, qb]);
-  ok(SS.redactSecrets('https://x.io/a?redirect=/home&page=2&code=abc').redacted === 0, "R7 NEGATIVE: a plain parameter (and `code`, R2's exception) stays");
+  // the R7 / R8 rows over ONE module — the real one here; the RED CONTROL below reads the SAME rows over its cut copy (s1126-3)
   const RUNS = { hex: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08', b64: 'QWxhZGRpbjpvcGVuIHNlc2FtZQQWxhZGRpbjpvcGVuIHNlc2FtZQ==', b64url: 'Zk3_xQ9-Lm2PwR7tYb4NcV8sHj6KdF1gA0eU5iO' };
-  for (const [k, v] of Object.entries(RUNS)) { const on = SS.redactSecrets(`x ${v} y`, { runs: true }).text, off = SS.redactSecrets(`x ${v} y`).text; ok(on === 'x «redacted» y' && off.includes(v) && SS.redactSecrets(on, { runs: true }).text === on, `R8 (${k}): key material with no name goes when asked ({ runs: true } — the judge's input), stays in a stored head (a sha is diagnosis)`, [on, off]); }
   const KEEP = ['/var/tmp/vibespace-lanes/wt-decision-input-scrub/src/decision-model.js', 'phone-arrangement-verify-r1-NO-GO-2026Oct12', 'AIWorkspaceVibespaceDecisionModelScrubLane', 'sha 9e2852896 short', 'a'.repeat(40)];
-  ok(KEEP.every((t) => SS.redactSecrets(t, { runs: true }).redacted === 0), 'R8 NEGATIVE: a path, a slug, an identifier with no digit, a short sha, one repeated letter stay');
+  const r78Rows = (S) => {
+    const qa = S.redactSecrets(R7A).text, qb = S.redactSecrets(R7B).text;
+    const rows = [[qa === ['https://hooks.example.com/cb?to', 'ken=«redacted»&sig=«redacted»'].join('') && !/AT-99zz|K-77yy|frag-55/.test(qb) && qb.includes('&x=1') && S.redactSecrets(qb).text === qb, 'R7: a URL query value named by a secret word goes, its name and the plain parameters stay (idempotent)', [qa, qb]], [S.redactSecrets('https://x.io/a?redirect=/home&page=2&code=abc').redacted === 0, "R7 NEGATIVE: a plain parameter (and `code`, R2's exception) stays"]];
+    for (const [k, v] of Object.entries(RUNS)) { const on = S.redactSecrets(`x ${v} y`, { runs: true }).text, off = S.redactSecrets(`x ${v} y`).text; rows.push([on === 'x «redacted» y' && off.includes(v) && S.redactSecrets(on, { runs: true }).text === on, `R8 (${k}): key material with no name goes when asked ({ runs: true } — the judge's input), stays in a stored head (a sha is diagnosis)`, [on, off]]); }
+    rows.push([KEEP.every((t) => S.redactSecrets(t, { runs: true }).redacted === 0), 'R8 NEGATIVE: a path, a slug, an identifier with no digit, a short sha, one repeated letter stay']);
+    return rows;
+  };
+  for (const [c, n, d] of r78Rows(SS)) ok(c, n, d);
   const r7Steps = {};
   // lane mask-value-shape r3 (A): a holder's value holding a long run of closers before its last character (r2's `[closers]+$` backtracked:
   // 137 ms at 16 384 dots + `x`, 1.9 s at 60 000), one ending in them, and a
@@ -356,14 +360,22 @@ await section('§2b PURE secret-shapes: what a stored head never keeps (verify r
     const NO_STOP = "const NAME_QUERY_VALUE_RE = /«(?!redacted»)[^»\\r\\n]{1,65536}»|(?:«redacted»|[^&#;\\s\"'<>]){1,65536}/y;";   // stale-pins: kept (r2280's red control: the guillemet branch without its « stop)
     const fG = mutantCopies('exr-name-guil', REPO).write('src/secret-shapes.js', anchored(ssG, G, NO_STOP, 'r2280: the guillemet branch without its « stop'), 'guil-no-stop'), v = SS_NAME(NAME_STORMS.guillemetPublic, 1024, 4, fG);
     ok(G.includes('[^«»') && !v.err && !v.ok, `r2280 RED CONTROL: the name road's guillemet branch without its « stop reads quadratic by the count — ${stepsLine(v)} at ×4 input (the guillemetPublic leg goes red)`, v); }
-  { const ssN = fs.readFileSync(SS_FILE, 'utf8'), cutN = ssN.replace('  const core = coreOf(run);', "  const core = run.replace(/[)\"'`\\]}>,;:!?.]+$/, '');");
+  { const CORE = '  const core = coreOf(run);', ssN = fs.readFileSync(SS_FILE, 'utf8'), cutN = editAnchor(ssN, CORE, "  const core = run.replace(/[)\"'`\\]}>,;:!?.]+$/, '');", 'src/secret-shapes.js', 'first');   // B-0d3e (s1126-3): by name; it stands twice and the first is patched, as it always was
+    ok(ssN.split(CORE).length - 1 === 2 && cutN.split(CORE).length - 1 === 1, 'r9 RED CONTROL setup: «const core = coreOf(run);» stands TWICE in secret-shapes.js and the copy patches the first, by count (a lost or a third copy is a red row here)');
     const fN9 = mutantCopies('exr-name9', REPO).write('src/secret-shapes.js', cutN, 'coretrim'), v = SS_NAME(NAME_STORMS.closers, 1024, 4, fN9);
     ok(cutN !== ssN && !v.err && !v.ok, `r9 RED CONTROL: the run row's core trimmed by a \`[…]+$\` regex reads quadratic by the count — ${stepsLine(v)} at ×4 input (the closers leg goes red)`, v); }
-  // RED CONTROL: the table without R7 / R8 (a patched copy) keeps the query value and the run — the legs above can fail
+  // RED CONTROL (s1126-3, 主开发 r4967): the table without R7 / R8 — its two statements cut BY NAME (editAnchor, each once), never a line
+  // filter: the filter's third alternative (R7's old «text = text.replace(URL_QUERY_RE»: R7 is one walk now, redactQuery) matched NO line.
+  // The SAME rows are read over the copy: exactly the R7 row and the three R8 rows go red, their two negatives stay
   const src78 = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
-  const cut78 = src78.split('\n').filter((l) => !/text = text\.replace\(URL_QUERY_RE|text = redactQuery\(text|if \(runs\) text = text\.replace\(RUN_RE/.test(l)).join('\n');   // lane mask-value-shape r3: R7 is one walk (redactQuery)
+  const R7CUT = '    text = redactQuery(text, (head) => { n++; if (say) say(head); });', R8CUT = "    if (runs) text = text.replace(RUN_RE, (m) => { if (!keyMaterial(m)) return m; n++; if (say) say('a key-material run'); return REDACTED; });";
+  const cut78 = editAnchor(editAnchor(src78, R7CUT, '', 'src/secret-shapes.js'), R8CUT, '', 'src/secret-shapes.js');
   const SS78 = mutantCopies('exr78', REPO).load('src/secret-shapes.js', cut78, 'nor78');
-  ok(cut78 !== src78 && SS78.redactSecrets(R7A).text.includes('tok_9f8e7d6c5b4a') && SS78.redactSecrets(`x ${RUNS.hex} y`, { runs: true }).text.includes(RUNS.hex), 'RED CONTROL: secret-shapes without R7 / R8 keeps the query value and the key material');
+  const lines78 = src78.split('\n'), cutLines78 = cut78.split('\n'), changed78 = lines78.filter((l, i) => l !== cutLines78[i]).length;
+  const red78 = r78Rows(SS78).filter(([c]) => !c).map(([, n]) => n), want78 = r78Rows(SS).filter(([, n]) => !/NEGATIVE/.test(n)).map(([, n]) => n);
+  ok(src78.split(R7CUT).length === 2 && src78.split(R8CUT).length === 2 && lines78.length === cutLines78.length && changed78 === 2 && want78.length === 4 && JSON.stringify(red78) === JSON.stringify(want78)
+    && SS78.redactSecrets(R7A).text.includes('tok_9f8e7d6c5b4a') && SS78.redactSecrets(`x ${RUNS.hex} y`, { runs: true }).text.includes(RUNS.hex),   // the old control's own reads, kept: the query value and the key material stay
+    `RED CONTROL: secret-shapes without R7 / R8 (its two statements cut, once each, by name: exactly ${changed78} lines changed) — over the copy exactly these rows read RED: ${red78.join(' · ')}`, { changed78, red78 });
   // the wiring: the stored head carries the redaction (through outputHeads), the URL rule still first
   const h = E.outputHeads({ stdout: 'GITHUB_TOKEN=gh' + 'p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\nhttps://u:pw@x.example/a?token=s3cr3t\n', stderr: '-----BEGIN EC PRIVATE KEY-----\nMHQCAQEEIBRz\n-----END EC PRIVATE KEY-----\n' });
   ok(!/ABCDEFGHIJKLMNOPQRSTUVWXYZ|pw@|s3cr3t|MHQCAQEEIBRz/.test(h.stdout + h.stderr) && /GITHUB_TOKEN=«redacted»/.test(h.stdout) && /BEGIN EC PRIVATE KEY-----\n«redacted»\n-----END/.test(h.stderr), 'outputHeads: the stored heads redact the shapes (pre-fix: all nine verbatim on the audit line, the broadcast, the card, the history, the CLI)', h);
