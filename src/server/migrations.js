@@ -13,6 +13,18 @@ const { runMigrations, failedLine } = require('../migration-runner.js'); // fail
 const MR = require('../migration-reads.js'); // MG1 (r2929): a migration whose input could not be READ has not run — its strict readers (only «not there» is nothing to do)
 const { RETIRED_2026_10, stripRetiredSettings } = require('../retired-settings.js'); // PURE: the one retired-key list (the schema re-exports it); 2026-10-settings-rows-retired strips the keys it shipped with
 const { redactSecrets } = require('../secret-shapes.js'); // PURE: the one secret-shape rule (2026-10-job-secrets-retired shows no name it flags)
+const { renameSynced } = require('../fd-close.js'); // B-574d (lane nl-migrations): the tree's one synced replace (replaceSynced below)
+/** B-574d, the slice «hub-migrations» (lane nl-migrations): EVERY store, record or archive this registry rewrote by its own temp +
+ *  rename takes its name only after ONE sync of its temp (not yet: the runner's ledger, src/migration-runner.js, and a helper
+ *  module's own writer such as src/fixture-ledger-purge.js — other slices of B-574d) — src/fd-close.js renameSynced (written whole, synced, its close judged, renamed), synchronous as the
+ *  bare temp + rename it replaces, so no reader's timing moves. A sync or a close that FAILS is a failed write: thrown, the temp
+ *  removed, the old file standing — the migration is NOT recorded and runs again at the next start, never «applied» over bytes that
+ *  may not be on disk (after a power cut such a store came back empty or torn, and was then held as damaged). Only a file system
+ *  that does no sync at all lets the bytes take their name, said once in the journal (the file's name and the code, no path).
+ *  `mode` as writeFileSync's (undefined: 0o666 under the umask). */
+function replaceSynced(tmp, file, text, mode) {
+  renameSynced(tmp, file, text, { mode, where: `[migrate] ${path.basename(file)}`, say: (line) => console.warn(line) });
+}
 
 /** THE ACCOUNTS LIST UNREAD (主开发 r3044 (3)): an account-store migration over a list it could not read has NOT run — it throws,
  *  is not recorded, and the runner tries it again at the next start (only «not there» is nothing to do). Asked through the
@@ -188,8 +200,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const v = doc['chat.collapseKinds'];
         if (!Array.isArray(v) || v.includes('agent')) return;
         v.push('agent');
-        fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
-        fs.renameSync(f + '.tmp', f);
+        replaceSynced(f + '.tmp', f, JSON.stringify(doc, null, 2));
       },
     },
     {
@@ -204,8 +215,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         const v = doc['chat.collapseKinds'];
         if (!Array.isArray(v) || v.includes('note')) return;
         v.push('note');
-        fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
-        fs.renameSync(f + '.tmp', f);
+        replaceSynced(f + '.tmp', f, JSON.stringify(doc, null, 2));
       },
     },
     {
@@ -442,8 +452,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           if (r.migrated.length) {
             let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
             const tmp = `${file}.${process.pid}.tmp`;
-            fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
-            fs.renameSync(tmp, file);
+            replaceSynced(tmp, file, JSON.stringify(disk, null, 2), mode);
           }
         }
         const rep = { file: path.basename(file), via, migrated: r.migrated, kept: r.kept.length };
@@ -471,8 +480,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           if (r.migrated.length) {
             let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
             const tmp = `${file}.${process.pid}.tmp`;
-            fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
-            fs.renameSync(tmp, file);
+            replaceSynced(tmp, file, JSON.stringify(disk, null, 2), mode);
           }
         }
         const rep = { file: path.basename(file), via, migrated: r.migrated, kept: r.kept };
@@ -754,10 +762,8 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         fs.mkdirSync(archiveDir, { recursive: true });
         const out = path.join(archiveDir, 'task-plans-legacy.json');
         const prev = MR.readJson(out, 'archive/' + path.basename(out)) || {};   // MG1: an earlier archive unread is never written over with this run's alone
-        fs.writeFileSync(out + '.tmp', JSON.stringify({ ...prev, ...archived }, null, 2));
-        fs.renameSync(out + '.tmp', out);
-        fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
-        fs.renameSync(f + '.tmp', f);
+        replaceSynced(out + '.tmp', out, JSON.stringify({ ...prev, ...archived }, null, 2));
+        replaceSynced(f + '.tmp', f, JSON.stringify(doc, null, 2));
       },
     },
     {
@@ -871,13 +877,11 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
           const prev = MR.readJson(out, 'archive/' + path.basename(out)) || {};   // MG1: an earlier archive unread is never written over with this run's alone
           const merged = { ...prev };
           for (const [id, keys] of Object.entries(gone)) merged[id] = [...new Set([...(Array.isArray(prev[id]) ? prev[id] : []), ...keys])];
-          fs.writeFileSync(out + '.tmp', JSON.stringify(merged, null, 2));
-          fs.renameSync(out + '.tmp', out);
+          replaceSynced(out + '.tmp', out, JSON.stringify(merged, null, 2));
           if (tm && typeof tm.unbindKeys === 'function') tm.unbindKeys(archived);
           else {
             for (const [id, keys] of Object.entries(gone)) doc.tasks[id].sessions = require('../task-membership.js').membersWithout(doc.tasks[id].sessions, keys, { exact: true }).keep;
-            fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
-            fs.renameSync(f + '.tmp', f);
+            replaceSynced(f + '.tmp', f, JSON.stringify(doc, null, 2));
           }
         }
         const rep = { archived: archived.length, groups: Object.keys(gone).length, keys: n, via: tm && typeof tm.unbindKeys === 'function' ? 'store' : 'file' };
@@ -1224,7 +1228,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       t.ctx = m.rows;
       rep.groups++; rep.rows += m.rows.length; rep.folders += m.folders; rep.notes += m.notes; rep.merged += m.merged; rep.nonRecursive += m.nonRecursive;
     }
-    if (rep.groups) { fs.writeFileSync(file + '.tmp', JSON.stringify(doc, null, 2)); fs.renameSync(file + '.tmp', file); }
+    if (rep.groups) replaceSynced(file + '.tmp', file, JSON.stringify(doc, null, 2));
     return rep;
   }
 
@@ -1281,8 +1285,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     if (!n.changed) return rep;   // nothing dropped ⇒ never written (test-migrations pins it by inode + mtime)
     let mode = 0o644; try { mode = fs.statSync(file).mode & 0o777; } catch { }
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(n.doc, null, 2), { mode });
-    try { fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
+    try { replaceSynced(tmp, file, JSON.stringify(n.doc, null, 2), mode); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }   // a failed rename leaves no temp either
     rep.store = 'rewritten';
     return rep;
   }
@@ -1335,7 +1338,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       if (!doc || typeof doc !== 'object' || Array.isArray(doc)) throw new Error(`${what} is not ${what === 'data/settings.json' ? 'a settings document' : 'an object'} (${JSON.stringify(doc).slice(0, 40)}) — not migrated; retried at the next boot`);
       return { missing: false, doc, text };
     };
-    const writeAtomic = (file, text, mode) => { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, text, { mode }); fs.renameSync(tmp, file); };
+    const writeAtomic = (file, text, mode) => { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); replaceSynced(`${file}.${process.pid}.tmp`, file, text, mode); };
     const modeOf = (file, d) => { try { return fs.statSync(file).mode & 0o777; } catch { return d; } };
     // round 2 (主开发's law B): a crash between two writes, made on purpose by the suites' harness — an env-gated throw right AFTER
     // the named write (never in production: the variable is the suites' own), so every torn shape a real crash leaves is driven
@@ -1557,8 +1560,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     if (!Object.keys(stripped).length) return { settings: 'untouched', stripped };
     let mode = 0o644; try { mode = fs.statSync(file).mode & 0o777; } catch { }
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(kept, null, 2), { mode });
-    fs.renameSync(tmp, file);
+    replaceSynced(tmp, file, JSON.stringify(kept, null, 2), mode);
     return { settings: 'rewritten', stripped };
   }
 
@@ -1619,8 +1621,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       const arch = path.join(archiveDir, `hosts-allow-exit-${now}.json`);
       const snap = {};
       for (const h of recs) if (h && h.id) snap[h.id] = h.allowExit === true;
-      fs.writeFileSync(arch + '.tmp', JSON.stringify(snap, null, 2));
-      fs.renameSync(arch + '.tmp', arch);
+      replaceSynced(arch + '.tmp', arch, JSON.stringify(snap, null, 2));
       for (const h of recs) {
         if (!h || typeof h !== 'object') continue;
         const m = E.migrateExitAccess(h, { now });
@@ -1636,8 +1637,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     if (!rep.archive) return { ...rep, via: 'file' };
     let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
-    fs.renameSync(tmp, file);
+    replaceSynced(tmp, file, JSON.stringify(disk, null, 2), mode);
     return { ...rep, via: 'file' };
   }
 
@@ -1671,8 +1671,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     if (!hadMap && !rewritten) return { file: path.basename(file), via: 'file', parks: 0, rewritten: 0 };
     let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
-    fs.renameSync(tmp, file);
+    replaceSynced(tmp, file, JSON.stringify(disk, null, 2), mode);
     return { file: path.basename(file), via: 'file', parks: parksOnDisk, rewritten };
   }
 
@@ -1695,8 +1694,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     if (!stamped) return { file: path.basename(file), via: 'file', records, stamped: 0 };
     let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
-    fs.renameSync(tmp, file);
+    replaceSynced(tmp, file, JSON.stringify(disk, null, 2), mode);
     return { file: path.basename(file), via: 'file', records, stamped };
   }
 

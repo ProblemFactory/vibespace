@@ -18,8 +18,25 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { renameSynced, SYNC_UNSUPPORTED, syncUnsupportedWords } = require('../fd-close.js');   // B-574d (lane nl-migrations): the one synced replace and its law
 
 const markerName = (old, user) => `.home-migrated-${old}-to-${user}`;
+/** B-574d (lane nl-migrations): the tries' ASYNC synced replace — the HOME move's writes stay OFF the boot's synchronous road (B-8033
+ *  cure 3), under the one law of src/fd-close.js renameSynced: the temp written, ONE sync of it, its close judged, then renamed. A
+ *  sync or a close that FAILS is a failed write: the temp removed, the old tries file standing, rejected into the caller's «could not
+ *  be written — tried again at the next start»; only a file system that does no sync at all (SYNC_UNSUPPORTED) lets the bytes take
+ *  their name, said once in the door's words (a sink that throws says nothing more). */
+async function replaceSyncedAsync(tmp, final, text, log) {
+  const fh = await fs.promises.open(tmp, 'w');
+  let failed = null;
+  try {
+    await fh.writeFile(text);
+    try { await fh.sync(); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { log.warn(syncUnsupportedWords('[migrate] home rename: the tries', e.code)); } catch { /* a sink that throws says nothing more */ } }
+  } catch (e) { failed = e; }
+  try { await fh.close(); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there
+  if (failed) { await fs.promises.unlink(tmp).catch(() => { }); throw failed; }   // the temp goes; the old tries stand
+  await fs.promises.rename(tmp, final);
+}
 const OLD_RE = /^[a-z][a-z0-9]*$/;   // an old user as claude-home's staleUsers reads it (-home-<old>-…)
 // B-8033 cure 2: the starts a folder that cannot move is tried, then the move is marked (said once). A try counts once per
 // TRY_GAP_MS — a restart loop during a short outage spends one, never all three
@@ -64,7 +81,7 @@ function rewriteStores(dataDir, metaDir, old, user, log) {
       if (!raw.includes(`/home/${old}`)) continue;
       const fixed = JSON.stringify(walk(JSON.parse(raw)));
       fs.writeFileSync(f + '.pre-home-migrate', raw); // one-shot backup beside it
-      const tmp = f + '.tmp'; fs.writeFileSync(tmp, fixed); fs.renameSync(tmp, f);
+      renameSynced(f + '.tmp', f, fixed, { where: `[migrate] ${path.basename(f)}`, say: (l) => log.warn(l) });   // B-574d: synced before it takes the name; a failed sync is this store's failed rewrite (said below, not counted)
       rewrote++;
     } catch (e) { log.warn(`[migrate] ${path.basename(f)}: ${e.message}`); }
   }
@@ -120,7 +137,7 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
         const gaveUp = !whole && tries >= MOVE_TRIES;
         if (!whole && !gaveUp) {
           log.warn(`[migrate] home rename: a project folder of /home/${old} could not be moved — no marker; tried again at the next start (${tries} of ${MOVE_TRIES})`);
-          if (counted) writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => fs.promises.writeFile(`${tf}.tmp`, JSON.stringify({ tries, at: now() }))).then(() => fs.promises.rename(`${tf}.tmp`, tf))   // cure 3: by temp and rename
+          if (counted) writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => replaceSyncedAsync(`${tf}.tmp`, tf, JSON.stringify({ tries, at: now() }), log))   // cure 3: by temp and rename
             .catch((e) => log.warn(`[migrate] home rename: the tries could not be written (${e.message}) — tried again at the next start`)));
         } else {
           if (gaveUp) log.warn(`[migrate] home rename: a project folder of /home/${old} could not be moved in ${MOVE_TRIES} starts — it stays under the old name; marked, not tried again`);

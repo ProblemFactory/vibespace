@@ -4163,6 +4163,128 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(sb['ut-holds'] && sb['ut-holds'].status === 'done', 'r3288 (2b) RED without the test (today): the expiry closes the setting-holds notice too — older than a day, no expiry of its own', sb['ut-holds'] && sb['ut-holds'].status);
   }
 }
+// ── B-574d, the slice «hub-migrations» (lane nl-migrations, 主开发 r4750): A STORE A MIGRATION REWRITES TAKES ITS NAME ONLY AFTER ONE
+// SYNC OF ITS TEMP — src/server/migrations.js replaceSynced (the tree's one synced replace, src/fd-close.js renameSynced) and
+// src/server/home-rename.js (the recorded-path rewrite through the same door; the HOME tries through their own async synced replace).
+// The sync's answer is PLACED (fs.fsyncSync / a FileHandle's sync() answer a code for the ONE temp named; every other sync is the real
+// one) — never a mount. A sync that FAILS is a failed write: the migration NOT recorded (it runs again at the next start), the store
+// byte-identical, no temp left; a file system with no sync at all lands, said ONCE (the file's name and the code, no path); the real
+// sync comes before the rename. RED (anchored copies): each helper back to the bare temp + rename.
+{
+  console.log('B-574d the migrations\' synced replace');
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-mig574-'));
+  try {
+    const M574 = mutantCopies('migrations-574d', REPO_ROOT);
+    const MIG = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8');
+    const HRT = fs.readFileSync(path.join(REPO_ROOT, 'src/server/home-rename.js'), 'utf8');
+    const home0 = path.join(base, 'home-empty'); fs.mkdirSync(home0, { recursive: true });
+    // the placed answer: a sync of a temp whose path ends in `tail` answers `code` (null: the real sync); the events of THAT temp
+    // (open, sync, rename) in their order; console's lines kept (said), the suite's own ✓ lines untouched (no ok() inside)
+    const placed = async (tail, code, fn, closeCode = null) => {
+      const P = fs.promises, open0 = fs.openSync, sync0 = fs.fsyncSync, rename0 = fs.renameSync, popen0 = P.open, prename0 = P.rename;
+      const probe = await P.open(path.join(REPO_ROOT, 'package.json'), 'r'), FHP = Object.getPrototypeOf(probe); await probe.close();
+      const fsync0 = FHP.sync, fds = new Set(), handles = new WeakSet(), events = [], said = [], warn0 = console.warn, log0 = console.log;
+      const answer = () => { events.push('sync'); if (code) throw Object.assign(new Error(`${code}: a placed answer of the sync`), { code }); };
+      fs.openSync = function (p, ...a) { const fd = open0.call(this, p, ...a); if (String(p).endsWith(tail)) { fds.add(fd); events.push('open'); } return fd; };
+      fs.fsyncSync = function (fd) { if (fds.has(fd)) answer(); return sync0.call(this, fd); };
+      fs.renameSync = function (a, b) { if (String(a).endsWith(tail)) events.push('rename'); return rename0.call(this, a, b); };
+      // a FileHandle's close() is its OWN field (not the prototype's): the close's placed answer goes on the handle the temp opened —
+      // closed for real first, so nothing leaks
+      P.open = async function (p, ...a) { const h = await popen0.call(this, p, ...a); if (String(p).endsWith(tail)) { handles.add(h); events.push('open');
+        if (closeCode) { const c0 = h.close; h.close = async () => { await c0.call(h); events.push('close'); throw Object.assign(new Error(`${closeCode}: a placed answer of the close`), { code: closeCode }); }; } }
+        return h; };
+      P.rename = async function (a, b) { if (String(a).endsWith(tail)) events.push('rename'); return prename0.call(this, a, b); };
+      FHP.sync = async function () { if (handles.has(this)) answer(); return fsync0.call(this); };
+      console.warn = (...a) => { said.push(a.map(String).join(' ')); }; console.log = () => { };
+      try { return { out: await fn(), events, said }; }
+      finally { fs.openSync = open0; fs.fsyncSync = sync0; fs.renameSync = rename0; P.open = popen0; P.rename = prename0; FHP.sync = fsync0; console.warn = warn0; console.log = log0; }
+    };
+    const noSyncLines = (said, code) => said.filter((l) => l.includes(`does not do a sync (${code})`));
+    const ledgerOf = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf8')).applied || {}; } catch { return {}; } };
+    // (a) a migration's own temp (`<store>.tmp`): settings.json, 2026-08-collapse-kinds-agent-default
+    const ID_A = '2026-08-collapse-kinds-agent-default', SET0 = JSON.stringify({ 'chat.collapseKinds': ['tool'] }, null, 2);
+    const sceneA = async (mod, tag, code) => {
+      const root = path.join(base, tag), d = path.join(root, 'data'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'settings.json'), SET0);
+      const r = await placed('settings.json.tmp', code, () => mod.create({ rootDir: root, homeDir: home0, serverNotice: () => { } }).runLocalMigrations({ only: [ID_A] }).find((x) => x.id === ID_A));
+      const text = fs.readFileSync(path.join(d, 'settings.json'), 'utf8');
+      return { status: r.out && r.out.status, events: r.events.join(), said: r.said, text, agent: (() => { try { return JSON.parse(text)['chat.collapseKinds'].includes('agent'); } catch { return false; } })(), tmpLeft: fs.existsSync(path.join(d, 'settings.json.tmp')), recorded: !!ledgerOf(d)[ID_A], d };
+    };
+    const a1 = await sceneA({ create }, 'a-eio', 'EIO');
+    ok(a1.status === 'failed' && !a1.recorded && a1.text === SET0 && !a1.tmpLeft && a1.events === 'open,sync',
+      'B-574d (a) a migration whose temp\'s SYNC FAILS (EIO) is a failed write: NOT recorded (it runs again at the next start), settings.json byte-identical, no temp left', { status: a1.status, recorded: a1.recorded, tmpLeft: a1.tmpLeft, events: a1.events });
+    const a1r = await placed('settings.json.tmp', null, () => create({ rootDir: path.join(base, 'a-eio'), homeDir: home0, serverNotice: () => { } }).runLocalMigrations({ only: [ID_A] }).find((x) => x.id === ID_A));
+    const a1t = fs.readFileSync(path.join(a1.d, 'settings.json'), 'utf8');
+    ok(a1r.out && a1r.out.status === 'ran' && !!ledgerOf(a1.d)[ID_A] && JSON.parse(a1t)['chat.collapseKinds'].includes('agent') && a1r.events.join() === 'open,sync,rename',
+      'B-574d (a) …and the NEXT start (the sync answering) runs it again over the store as it was: migrated, synced before its name, recorded', { status: a1r.out && a1r.out.status, events: a1r.events.join() });
+    const a2 = await sceneA({ create }, 'a-einval', 'EINVAL'), n2 = noSyncLines(a2.said, 'EINVAL');
+    ok(a2.status === 'ran' && a2.recorded && a2.agent && n2.length === 1 && n2[0].startsWith('[migrate] settings.json: ') && !n2[0].includes(a2.d),
+      'B-574d (a) a file system with NO sync (EINVAL): the store takes its name and the migration is recorded; ONE journal line says so — the file\'s name, no path', { status: a2.status, said: n2 });
+    const a3 = await sceneA({ create }, 'a-real', null);
+    ok(a3.status === 'ran' && a3.recorded && a3.agent && a3.events === 'open,sync,rename' && !noSyncLines(a3.said, 'EINVAL').length,
+      'B-574d (a) the real sync: the temp written, SYNCED, then renamed over settings.json — in that order — and recorded', { status: a3.status, events: a3.events });
+    // (b) a helper's own temp (`<store>.<pid>.tmp`, the file's mode kept): desktop-apps.json on the FILE road (no keeper handed in)
+    const ID_B = '2026-09-desktop-apps-host-key', DA0 = JSON.stringify({ apps: { a1: { name: 'one' } } }, null, 2);
+    const sceneB = async (mod, tag, code) => {
+      const root = path.join(base, tag), d = path.join(root, 'data'), f = path.join(d, 'desktop-apps.json'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(f, DA0, { mode: 0o600 }); fs.chmodSync(f, 0o600);
+      const r = await placed(`desktop-apps.json.${process.pid}.tmp`, code, () => mod.create({ rootDir: root, homeDir: home0, serverNotice: () => { } }).runLocalMigrations({ only: [ID_B] }).find((x) => x.id === ID_B));
+      const text = fs.readFileSync(f, 'utf8');
+      return { status: r.out && r.out.status, events: r.events.join(), text, stamped: text.includes('"hostId": "local"'), mode: fs.statSync(f).mode & 0o777, tmpLeft: fs.readdirSync(d).some((n) => n.endsWith('.tmp')), recorded: !!ledgerOf(d)[ID_B] };
+    };
+    const b1 = await sceneB({ create }, 'b-eio', 'EIO'), b3 = await sceneB({ create }, 'b-real', null);
+    ok(b1.status === 'failed' && !b1.recorded && b1.text === DA0 && b1.mode === 0o600 && !b1.tmpLeft && b1.events === 'open,sync',
+      'B-574d (b) the file road\'s pid temp: a sync that FAILS (EIO) leaves desktop-apps.json byte-identical, its mode kept, no temp, the migration NOT recorded', { status: b1.status, recorded: b1.recorded, mode: b1.mode.toString(8), tmpLeft: b1.tmpLeft, events: b1.events });
+    ok(b3.status === 'ran' && b3.recorded && b3.stamped && b3.mode === 0o600 && b3.events === 'open,sync,rename',
+      'B-574d (b) the real sync on the file road: stamped, the mode kept (0600), synced before the rename', { status: b3.status, mode: b3.mode.toString(8), events: b3.events });
+    // RED: the helper back to the bare temp + rename (the release's road) — the EIO scenes read «applied»
+    const HELP = "  renameSynced(tmp, file, text, { mode, where: `[migrate] ${path.basename(file)}`, say: (line) => console.warn(line) });\n";
+    const bare = M574.load('src/server/migrations.js', anchored(MIG, HELP, "  fs.writeFileSync(tmp, text, mode === undefined ? undefined : { mode }); fs.renameSync(tmp, file);   // MUTANT: the bare temp + rename\n", 'the migrations\' synced replace'), 'bare-replace');
+    const ra = await sceneA(bare, 'a-red', 'EIO'), rb = await sceneB(bare, 'b-red', 'EIO');
+    ok(ra.status === 'ran' && ra.recorded && rb.status === 'ran' && rb.recorded && !ra.events.includes('sync') && !rb.events.includes('sync'),
+      'B-574d RED (anchored copy: replaceSynced back to the bare temp + rename): no sync is asked, the EIO scenes read «applied» — (a) and (b) go red on it', { a: [ra.status, ra.events], b: [rb.status, rb.events] });
+    // (c) + (d) the home rename (through migrateHomeRename, the boot's own call): the recorded-path rewrite and the HOME tries
+    const MOUNTS0 = JSON.stringify({ m: [{ path: '/home/olduser/proj' }] }), NAME = '.home-migrated-olduser-to-userN';
+    const hrScene = async (Mod, tag, tail, code, { failedMove = false, tries0 = null, closeCode = null } = {}) => {
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), d = path.join(root, 'data');
+      fs.mkdirSync(path.join(d, 'session-meta'), { recursive: true }); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0);
+      const tf = path.join(home, '.vibespace', NAME + '.tries'); if (tries0) fs.writeFileSync(tf, tries0);
+      const hk = { staleUsers: () => ['olduser'], moveUser: () => 1, leftAfterMove: () => ({ failed: failedMove ? 1 : 0, judged: 1 }) };
+      const warned = [];
+      const r = await placed(path.sep + tail, code, async () => { const o = Mod.migrateHomeRename({ dataDir: d, metaDir: path.join(d, 'session-meta'), home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, homeGone: () => true, throwaway: () => false }); await o.written; return o; }, closeCode);
+      return { out: r.out, events: r.events.join(), warned, root, mounts: fs.readFileSync(path.join(d, 'mounts.json'), 'utf8'), tmpLeft: fs.existsSync(path.join(d, 'mounts.json.tmp')), tries: fs.existsSync(tf) ? fs.readFileSync(tf, 'utf8') : null, triesTmpLeft: fs.existsSync(tf + '.tmp') };
+    };
+    const HR = require('../src/server/home-rename.js');
+    const c1 = await hrScene(HR, 'c-eio', 'mounts.json.tmp', 'EIO');
+    ok(c1.out.length === 1 && c1.out[0].rewrote === 0 && c1.mounts === MOUNTS0 && !c1.tmpLeft && c1.events === 'open,sync' && c1.warned.some((l) => l.startsWith('[migrate] mounts.json: EIO')),
+      'B-574d (c) the recorded-path rewrite: a sync that FAILS (EIO) is that store\'s failed rewrite — mounts.json byte-identical, no temp, said, not counted as rewritten', { out: c1.out, events: c1.events, warned: c1.warned });
+    const c2 = await hrScene(HR, 'c-einval', 'mounts.json.tmp', 'EINVAL'), nc2 = noSyncLines(c2.warned, 'EINVAL');
+    ok(c2.out[0].rewrote === 1 && c2.mounts.includes('/home/userN/proj') && nc2.length === 1 && nc2[0].startsWith('[migrate] mounts.json: ') && !nc2[0].includes(c2.root),
+      'B-574d (c) a file system with NO sync (EINVAL): mounts.json rewritten, ONE line says so (the file\'s name, no path)', { out: c2.out, said: nc2 });
+    const c3 = await hrScene(HR, 'c-real', 'mounts.json.tmp', null);
+    ok(c3.out[0].rewrote === 1 && c3.mounts.includes('/home/userN/proj') && c3.events === 'open,sync,rename', 'B-574d (c) the real sync: mounts.json\'s temp synced before its rename', { events: c3.events });
+    const TRIES0 = JSON.stringify({ tries: 1, at: 0 });   // one try spent long ago: this start counts the second
+    const d1 = await hrScene(HR, 'd-eio', NAME + '.tries.tmp', 'EIO', { failedMove: true, tries0: TRIES0 });
+    ok(d1.tries === TRIES0 && !d1.triesTmpLeft && d1.events === 'open,sync' && d1.warned.some((l) => l.includes('the tries could not be written (EIO')),
+      'B-574d (d) the HOME tries (async, off the boot\'s synchronous road): a sync that FAILS (EIO) is a failed write — the old tries file stands, no temp left, said («tried again at the next start»)', { tries: d1.tries, tmpLeft: d1.triesTmpLeft, events: d1.events, warned: d1.warned });
+    const d4 = await hrScene(HR, 'd-close', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0, closeCode: 'EIO' });
+    ok(d4.tries === TRIES0 && !d4.triesTmpLeft && d4.events === 'open,sync,close' && d4.warned.some((l) => l.includes('the tries could not be written (EIO')),
+      'B-574d (d) a CLOSE that fails after the write (a deferred write error, EIO) is a failed write too: the old tries stand, no temp left, said', { tries: d4.tries, tmpLeft: d4.triesTmpLeft, events: d4.events, warned: d4.warned });
+    const d2 = await hrScene(HR, 'd-einval', NAME + '.tries.tmp', 'EINVAL', { failedMove: true, tries0: TRIES0 }), nd2 = noSyncLines(d2.warned, 'EINVAL');
+    ok(d2.tries && JSON.parse(d2.tries).tries === 2 && nd2.length === 1 && !nd2[0].includes(d2.root),
+      'B-574d (d) a file system with NO sync (EINVAL): the tries take their name (2), ONE line says so, no path', { tries: d2.tries, said: nd2 });
+    const d3 = await hrScene(HR, 'd-real', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0 });
+    ok(d3.tries && JSON.parse(d3.tries).tries === 2 && d3.events === 'open,sync,rename', 'B-574d (d) the real sync: the tries\' temp synced before its rename', { tries: d3.tries, events: d3.events });
+    // RED: each home-rename helper back to the bare write + rename
+    const REW = "      renameSynced(f + '.tmp', f, fixed, { where: `[migrate] ${path.basename(f)}`, say: (l) => log.warn(l) });";
+    const HSYNC = "    try { await fh.sync(); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { log.warn(syncUnsupportedWords('[migrate] home rename: the tries', e.code)); } catch { /* a sink that throws says nothing more */ } }\n";
+    const HCLOSE = '  try { await fh.close(); } catch (e) { if (!failed) failed = e; }';
+    const HB = M574.load('src/server/home-rename.js', anchored(anchored(anchored(HRT, REW, "      const tmp = f + '.tmp'; fs.writeFileSync(tmp, fixed); fs.renameSync(tmp, f);   // MUTANT: the bare temp + rename", 'the rewrite\'s synced replace'), HSYNC, '', 'the tries\' sync'), HCLOSE, '  try { await fh.close(); } catch (e) { void e; }   // MUTANT: a failed close swallowed', 'the tries\' judged close'), 'bare-home');
+    const rc = await hrScene(HB, 'c-red', 'mounts.json.tmp', 'EIO'), rd = await hrScene(HB, 'd-red', NAME + '.tries.tmp', 'EIO', { failedMove: true, tries0: TRIES0 }), rd4 = await hrScene(HB, 'd-close-red', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0, closeCode: 'EIO' });
+    ok(rc.out[0].rewrote === 1 && !rc.events.includes('sync') && rd.tries && JSON.parse(rd.tries).tries === 2 && !rd.events.includes('sync') && rd4.tries && JSON.parse(rd4.tries).tries === 2,
+      'B-574d RED (anchored copy: the rewrite back to the bare temp + rename, the tries without their sync and with their close swallowed): no sync is asked, the EIO scenes land — (c) and (d) go red on it', { c: [rc.out, rc.events], d: [rd.tries, rd.events], close: [rd4.tries, rd4.events] });
+  } catch (e) { ok(false, `B-574d: the synced replace's legs could not run on this tree (${(e && e.stack) || e})`); }
+  finally { fs.rmSync(base, { recursive: true, force: true }); }
+}
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
 /** B-a09e: a STEPPED migration's ledger row — polled on the scratch folder's own migrations.json (bounded: 10 s) until the runner
