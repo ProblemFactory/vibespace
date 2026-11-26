@@ -2230,12 +2230,23 @@ function heldPoolMemberFor(session, poolId = null) {
  *  unreadable ledger read at first resolution used to pin the process unknown
  *  for its whole life; the ledger is re-asked (a stat, cached rows) and the
  *  journal speaks once (`_heldPoolOrigin` 'unknown' is only that marker). */
+const LEDGER_HELD_WORDS = 'the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again';   // B-f276: its one sentence (r5188)
+const _heldMemberLedgerSaid = new Set();   // B-f276 r5188: the conversations told «which login it holds is not read» in this hold
 function poolMemberOfSessionFor(session, poolId = null) {
   try {
     if (!session) return null;
     const pid = poolId || session._accountId;
     if (!pid || pid !== session._accountId) return null;
     const r = accounts.poolMemberOfSession(pid, session);
+    // B-f276 (主开发 r5188, the round's small): the LEDGER HELD is its own cause with its own end — never «no spawn stamp … until it
+    // restarts» (the row may be there, unread). Said once a conversation a hold; the marker below is not set, so the true answer is
+    // said once the ledger reads again
+    const sidH = session._webuiId || '?';
+    if (r && r.origin === 'unknown' && r.why === 'ledger-held') {
+      if (!_heldMemberLedgerSaid.has(sidH)) { _heldMemberLedgerSaid.add(sidH); if (_heldMemberLedgerSaid.size > 2000) _heldMemberLedgerSaid.delete(_heldMemberLedgerSaid.values().next().value); console.log(`[pool] ${sidH}: which login this process holds is not read — ${LEDGER_HELD_WORDS}; no credit is spent through it and its readings are filed nowhere until then`); }
+      return r;
+    }
+    if (_heldMemberLedgerSaid.size) _heldMemberLedgerSaid.delete(sidH);   // the hold is over for it: a next hold is said again
     if (r && r.origin === 'unknown' && !session._heldPoolOrigin) { session._heldPoolOrigin = 'unknown'; console.log(`[pool] ${session._webuiId}: no spawn stamp and no slot-transition row that names its start — which login this process holds is unknown; no credit is spent through it until it restarts`); }
     if (r && r.origin === 'ledger' && session._heldPoolMember !== r.id) {
       session._heldPoolMember = r.id; session._heldPoolOrigin = 'ledger';
@@ -3276,6 +3287,12 @@ function clearStoppedBy(session, why = 'ran again') {
 }
 /** A turn STARTED running (the harness said so) — the stop is over. */
 function noteTurnRunning(session) { try { clearStoppedBy(session, 'a turn started'); } catch { } }
+/** B-f276 (主开发 r5188 (1)): A TURN's START ENDS THE TURN BEFORE's HELD MARK. The turn's end clears it too — but a turn that ends
+ *  with no result record (the wrapper died) never reaches noteTurnEnd, and its mark silenced the NEXT turn's real wall (no account
+ *  marked, no switch asked, its end no demotion). Called at the turn's own start, never a backlog's: claude's init (session-brain,
+ *  either feed, once a turn), codex's task_started, an ACP prompt_start. Never noteTurnRunning: a claude turn's first output says
+ *  that, and it comes AFTER the rejection whose mark it would clear. */
+function noteTurnStart(session) { if (session && session._turnLedgerHeld) session._turnLedgerHeld = null; }
 /** A TYPED error on the turn's main thread (claude: the assistant record's `error`; codex: task_failed's
  *  codexErrorInfo, `final` — its task_failed IS the turn's end). The turn's LAST one is what its end reads; a later
  *  record without one clears it (a retried error the turn got past is not why it stopped). */
@@ -3566,16 +3583,18 @@ function wallAttributionFor(session, poolId, b, pinnedKey) {
   });
 }
 
+/** B-f276 (主开发 r5188 (2)): is the conversation's account a POOL — the one gate the slot ledger's answers apply behind (no pool ⇒
+ *  no ledger and no re-point): the rejection's target and the banner's «the ledger is held now» ask it alike */
+function pooledConversation(session) {
+  try { const poolId = session && session._accountId; const a = poolId && accounts.get(poolId); return !!(a && a.type === 'pooled'); } catch { return false; }
+}
 /** THE PER-RECORD half: where does THIS rejected `rate_limit_event` go, right
  *  now? Returns the key to write on, or null when the record is archived
  *  instead. A session with no pool has no ledger and no re-point, so the rule
  *  degrades to "the pin" by construction and this costs one sidecar read. */
 function wallRecordTarget(session, key, ev) {
   const poolId = session && session._accountId;
-  try {
-    const a = poolId && accounts.get(poolId);
-    if (!a || a.type !== 'pooled') return key;   // no pool ⇒ no ledger and no re-point: the rule has nothing to add
-  } catch { return key; }
+  if (!pooledConversation(session)) return key;   // no pool ⇒ no ledger and no re-point: the rule has nothing to add
   const b = {
     kind: ev.kind,
     scopedName: ev.kind === 'scoped' ? String(ev.scopedName || '').toLowerCase() : null,
@@ -4046,10 +4065,10 @@ async function refreshCodexForPerson({ key = null, sessionId = null, timeoutMs =
   // B-87fd: a conversation whose held member cannot be named is refused BY ITS OWN NAME, before any read — its reading would be filed
   // nowhere (a key's carrier never picks it: pickLiveProbeSession)
   const hu = {};
-  if (s && heldPoolUnknown(s, hu)) return { ok: false, code: 'holder_unknown', key: null, name: null, sessionId: s._webuiId, error: hu.why === 'ledger-held' ? 'the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again — no reading is asked' : 'this conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' };
+  if (s && heldPoolUnknown(s, hu)) return { ok: false, code: 'holder_unknown', key: null, name: null, sessionId: s._webuiId, error: hu.why === 'ledger-held' ? `${LEDGER_HELD_WORDS} — no reading is asked` : 'this conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' };
   // B-87fd follow (round wg6jz85ye): no carrier, but a running conversation of the member's pool was SKIPPED because its held member
   // cannot be named — the press says THAT, never «no session is running» while one visibly runs
-  if (!s && key) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) return { ok: false, code: 'holder_unknown', key: String(key), name: nameOf(key), sessionId: null, error: 'the running Codex conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' }; }
+  if (!s && key) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) { const hw = {}; try { heldPoolUnknown(u, hw); } catch { } return { ok: false, code: 'holder_unknown', key: String(key), name: nameOf(key), sessionId: null, error: hw.why === 'ledger-held' ? `${LEDGER_HELD_WORDS} — no reading is asked` : 'the running Codex conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' }; } }   // r5188: the ledger held is said as the first branch says it
   if (!s) return { ok: false, code: 'no_live_session', key: key || null, name: key ? nameOf(key) : null, error: key ? `no running Codex chat session holds ${nameOf(key)}'s login (the read rides that session's own app-server)` : 'no running Codex chat session (the read rides its own app-server)' };
   const r = await liveRead(s, timeoutMs);
   const k = (r && r.key) || liveQuotaKeyFor(s);
@@ -6427,7 +6446,13 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
   // the helper's reading names its identity (lane reset-path: no session — the key IS the login it ran on)
   // B-87fd: filed nowhere — a READING only: the limit banner is a REFUSAL (the wall's own road, as a claude rejection keeps rejectionSlotFor)
   const huw = {};
-  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session, huw)) { saidUnknownHolderReading(session, 'codex:' + source, huw.why); return { key: null, snap, archived: true, why: 'holder-unknown' }; }
+  const unknownHolder = !forKey && !!session && heldPoolUnknown(session, huw);
+  if (unknownHolder && source !== 'limit-banner') { saidUnknownHolderReading(session, 'codex:' + source, huw.why); return { key: null, snap, archived: true, why: 'holder-unknown' }; }
+  // B-f276 (主开发 r5188 (3)): …and the REFUSAL of a conversation whose held member is unknown BECAUSE THE SLOT LEDGER IS HELD is filed
+  // nowhere too. A codex process never stamps a request-out instant (turn-state's writers are claude's), so readingSlotFor never asks
+  // the ledger for it: the release's road filed this wall on the LINK — a guess the hold forbids (r5109 M1: under a hold no road marks
+  // an account). The wall road says it and sets the turn's mark; a holder unknown for its own cause keeps B-87fd's road
+  if (unknownHolder && huw.why === 'ledger-held') return { key: null, snap, archived: true, why: 'ledger-held' };
   // 主开发 r3197 (the round's MUST): THE SECOND ROAD OF THE READINGS — a conversation that names an account while the list is UNREAD files
   // NOTHING here either (its key would fall to liveQuotaKeyFor: the pool's own id), on every source, said once a conversation
   if (!forKey && session && session._accountId) { const lh = accountsHeld(); if (lh) { sayHeldOnce('reading:' + (session._webuiId || '?'), lh, `[usage] codex:${source}: ${session._webuiId || '?'}'s readings are not filed — the accounts list could not be read (${lh.code || 'unread'})`); return { key: null, snap, archived: true, why: 'accounts-held' }; } }
@@ -6627,6 +6652,15 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
         // not a reading at all. Calling either one 'codex-rate-limits' would
         // claim a producer that did not produce it.
         const w2 = writeSnap(snap, 'limit-banner');
+        // B-f276 (主开发 r5188 (3)): the wall's reading ARCHIVED because the slot ledger is held — whose login met it cannot be read:
+        // the TURN's mark is set (as the claude rejection's), and the road asks no switch, walks no credit rung and rings no account;
+        // only the conversation's own wall signal stays, and the turn ends on it (its end is the held verdict: noteTurnEnd)
+        if (w2 && w2.why === 'ledger-held') {
+          try { session._turnLedgerHeld = session._turnLedgerHeld || { at: Date.now() }; } catch { }
+          console.log(`[wall] ${session._webuiId}: a codex usage-limit wall is marked on no account — ${LEDGER_HELD_WORDS} — no switch is asked and no credit is spent on it`);
+          try { noteWallSignal(session, { resetsAtMs: resets > nowSec ? resets * 1000 : 0, bucket: 'sevenDay', key: liveQuotaKeyFor(session), lane: arSignal.laneOf(snap) }); noteTurnEnd(session); } catch { }
+          return;
+        }
         // a WALL on an account whose reset credit is pending says the reset did
         // not hold (r4): the hold ends here, and the ladder below decides on it
         try { const e = w2 && w2.key ? resetHoldEntry(w2.key) : null; if (e) releaseResetHold(e[0], 'a new wall on it after the reset', { force: false }); } catch { }
@@ -6684,8 +6718,10 @@ function markLimitBannerNow(session, text) {
     // the same destination by asking the same proof (wallAttributionFor).
     let key = pinKey;
     // B-f276 (主开发 r5109 M1): UNDER A HOLD NO ROAD MARKS AN ACCOUNT — the turn's held mark (its held rejection) or the ledger held
-    // now: the banner writes no cache and asks no switch; only the conversation's own wall signal stays (no ring mark)
-    if (session._turnLedgerHeld || ledgerHeldNow()) {
+    // now: the banner writes no cache and asks no switch; only the conversation's own wall signal stays (no ring mark). r5188 (2): the
+    // ledger held now is asked of a POOLED conversation only (pooledConversation, the record's own gate) — a login of its own reads no
+    // ledger, and its banner marks that login whatever the ledger's state
+    if (session._turnLedgerHeld || (pooledConversation(session) && ledgerHeldNow())) {
       try { session._turnLedgerHeld = session._turnLedgerHeld || { at: Date.now() }; } catch { }
       const hl = hit.kind === 'scoped' ? String(hit.name || '').toLowerCase() : BUCKET_LABEL[hit.kind] || hit.kind;
       console.log(`[wall] ${session._webuiId}: a ${hl} banner is marked on no account — the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again`);
@@ -9798,7 +9834,7 @@ function maybeStopOnFallback(session, id, from, to) {
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
     noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
-    noteStoppedBy, clearStoppedBy, noteTurnRunning, noteTurnError, sessionWallVerdict, // lane auto-resume-bulk: WHY a session stopped — the fact's writer/clearer, the turn-start + typed-error hooks the stdout consumers call, and the pool's live answer the bulk resume skips by
+    noteStoppedBy, clearStoppedBy, noteTurnRunning, noteTurnStart, noteTurnError, sessionWallVerdict, // lane auto-resume-bulk: WHY a session stopped — the fact's writer/clearer, the turn-start + typed-error hooks the stdout consumers call, and the pool's live answer the bulk resume skips by
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)
  quotaVerdictFor, probeUsageViaSession, recordRateLimitEvent, recordCodexQuotaSignal, resolveUsageKey,

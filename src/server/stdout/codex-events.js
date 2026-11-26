@@ -15,7 +15,7 @@ const { codexErrorEnum } = require('../../harnesses/codex-quota.js'); // lane au
 const protocol = 'codex-events';
 
 function create({ engine, deliverRef, permissionRulesRef }) {
-  const { noteTurnEnd, recordCodexQuotaSignal, catchUpResetCreditFromBuffer, noteTurnRunning, noteTurnError, recordIsLate } = engine;
+  const { noteTurnEnd, recordCodexQuotaSignal, catchUpResetCreditFromBuffer, noteTurnRunning, noteTurnStart, noteTurnError, recordIsLate } = engine;
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
     // THE WORD A RESTART LOSES (lane reset-path verify r10): before this bridge's first live byte, the keyed reset-credit
     // records the wrapper wrote to its own buffer file while no server was attached (a press that straddled the restart:
@@ -185,6 +185,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
               const evType = payload.type;
               if (evType === 'task_started' && payload.turn_id) {
                 session._isStreaming = true; newLabel = 'thinking...'; try { if (!recordIsLate?.(session, msg)) noteTurnRunning?.(session); } catch { } // lane auto-resume-bulk: a turn that starts ends the stop — never a backlog's (a replay after a restart)
+                try { if (!recordIsLate?.(session, msg)) noteTurnStart?.(session); } catch { }   // B-f276 (主开发 r5188 (1)): the turn's start ends the turn before's held mark (a turn the wrapper's death ended has no task_complete) — never a backlog's
                 // lane queued-is-not-woke (law 1): the turn's start (said as «running since»), the edge a queued frame waits for
                 session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
                 session._turnOpenSaidAt = Date.parse(msg.timestamp) || null;   // lane queued-is-not-woke laws 2 + 3 (Shape B): the opening AS THE RECORD STATES IT (src/server/wait-watch.js «its turn opened at»); none ⇒ «it is in a turn»

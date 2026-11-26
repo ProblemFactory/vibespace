@@ -23,6 +23,10 @@ const { noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = r
 // (claudeSideEffects: the records the parse has not seen). Both feeds carry the same ordered stream, so taking each record at
 // its first appearance keeps the order. The state lives on the SESSION (`_turnOpen`); an attach makes the opener UNKNOWN
 // until a turn starts in its sight (as-if-must (1)): a gap can never leave the previous turn's «you» standing.
+// B-f276 (主开发 r5188 (1)): THE TURN's START, told to the pool engine ONCE a turn (its init, from whichever feed brings it first —
+// never a backlog's, never one already taken): the engine ends the turn before's held mark there (a turn the wrapper's death ended
+// reached no result). Set by create from its engine; none (a harness without it) tells nothing.
+let turnStartHook = null;
 const TURN_SEEN_MAX = 600;   // the reader's should: the same bound as sbSeenFirst's SB_SEEN_MAX (a feed lagging past it is caught by the order rule below)
 function turnStateOf(session) {
   return session._turnOpen || (session._turnOpen = { live: null, cmd: null, first: null, waitCmd: null, persons: new Set(), launched: new Map(), bgLive: [], cmdRecs: new Map(), seen: new Set(), feedAt: {}, resultAt: 0, opened: new Set(), firstFromDevice: false, belt: null, belted: new Map() });
@@ -140,6 +144,7 @@ function takeTurnRecord(session, msg, feed) {
   if (msg.type === 'system' && msg.subtype === 'init' && key) { if (st.opened.has(key)) return; st.opened.add(key); if (st.opened.size > 2000) st.opened.delete(st.opened.values().next().value); }
   if (msg.type === 'system' && msg.subtype === 'init') {
     st.live = true; session._turnLive = true;   // B-02a3: the turn the CLI is running, by its own records (either feed)
+    if (!msg.parent_tool_use_id && !msg.isSidechain) { try { turnStartHook?.(session); } catch { } }   // B-f276 r5188 (1): the main thread's turn starts here
     const cmd = st.cmd;
     st.cmd = null; st.first = null; st.waitCmd = null;
     const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
@@ -180,7 +185,8 @@ function create({ engine, applyTaskToolUpdate, updateSessionTodos, getUsageHisto
   const { kickPoolEval, markLimitBanner, maybeStopOnFallback,
     recordRateLimitEvent, resolveUsageKey, usageEstimator,
     noteServedModel, noteModelFallback, rerouteAnnouncedBy, notePoolAuthFailure,
-    noteStreamRecord, recordIsLate, noteModelRequest, noteCompacted } = engine; // + the late-record rule (lane-hot-switch) — called through `?.`: the dark-parity harness passes neither
+    noteStreamRecord, recordIsLate, noteModelRequest, noteCompacted, noteTurnStart } = engine; // + the late-record rule (lane-hot-switch) — called through `?.`: the dark-parity harness passes neither
+  turnStartHook = typeof noteTurnStart === 'function' ? noteTurnStart : null;   // B-f276 r5188 (1): the turn's start (takeTurnRecord's init)
   const usageHistory = mk(getUsageHistory);
   const metaStore = mk(getSessionMetaStore);
   const sessionStatus = mk(getSessionStatus);

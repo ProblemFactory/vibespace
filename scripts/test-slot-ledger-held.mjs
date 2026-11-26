@@ -14,8 +14,16 @@
 //      the ledger's sentence.
 //   ④ THE LIFT: once the ledger reads whole again (its own ladder, off the loop) nothing is attributed late — the numbers filed
 //      nowhere stay nowhere — and the lift starts NO ask by itself; the first ask after it is an ordinary one.
-//   ⑤ THE CALLERS (a static census, 主开发 r4993 (a)): every call of the three doors in src/ sits in a function that answers the held
-//      refusal by its one helper (isLedgerHeld); a caller that does not is red BY NAME. RED: a copy with one handler removed.
+//   ⑤ THE CALLERS (a static census, 主开发 r4993 (a)): every call of the three doors in src/ and server.js (r5188) sits in a function
+//      that answers the held refusal by its one helper (isLedgerHeld); a caller that does not is red BY NAME. RED: a copy with one
+//      handler removed, and a door planted into a copy of server.js's text.
+// THE REQUIRED FOLLOW (主开发 r5188), each red at 5b42f5226:
+//   ⑥ THE TURN's START ends the turn before's held mark (claude's init through the brain's one opener; codex task_started; ACP
+//      prompt_start — never a backlog's): a turn the wrapper's death ended (no result record) no longer silences the next turn's wall.
+//   ⑦ the banner asks «the ledger is held now» of a POOLED conversation only: a login of its own is marked by its banner.
+//   ⑧ THE CODEX WALL ROAD: an unstamped codex process whose held member is unknown because the ledger is held — its refusal is filed
+//      nowhere (it never stamps a request-out instant, so the release filed it on the link), the turn's mark is set, no switch is
+//      asked, no account is rung; and the round's two small lines name the ledger (the held member's line, the press's second branch).
 // Run: node scripts/test-slot-ledger-held.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -106,7 +114,7 @@ const world = () => {
   { const rows = am.slotTransitions.all(); const last = rows[rows.length - 1]; if (last) s._readingShadowEndedAt = last.at; }   // its spawn's lag shadow ended (a reading came): the ordinary state, so an ask follows its own rule
   const caches = () => Object.fromEntries([A, B].map((id) => [id, origRFS(path.join(cacheDir, id + '.json'), 'utf8')]));
   const getUsageAsks = () => written.filter((w) => w.includes('get_usage')).length;
-  return { am, eng, s, A, B, P, R5, R7, caches, getUsageAsks, written };
+  return { am, eng, s, A, B, P, R5, R7, caches, getUsageAsks, written, sessions, cacheDir };
 };
 const quietLog = () => { const said = [], o = { log: console.log, warn: console.warn }; console.log = (...a) => said.push(a.join(' ')); console.warn = (...a) => said.push(a.join(' ')); return { said, done: () => { console.log = o.log; console.warn = o.warn; } }; };
 {
@@ -200,7 +208,9 @@ console.log('⑤ the callers: every call of the three doors answers the held ref
   };
   // r5109: every file of src/ that can reach the ledger's doors (it names the ledger's module or an instance of it), not a list of four
   const walk = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walk(r, out); else if (/\.js$/.test(e.name)) out.push(r); } return out; };
-  const FILES = walk('src').filter((f) => f !== 'src/slot-transitions.js' && /slot-transitions\.js|SlotTransitions|slotTransitions|\btransitions\s*\.\s*(all|slotAt|transitionsFor)\s*\(/.test(read(f)));
+  const reaches = (src) => /slot-transitions\.js|SlotTransitions|slotTransitions|\btransitions\s*\.\s*(all|slotAt|transitionsFor)\s*\(/.test(src);
+  const WALKED = [...walk('src'), 'server.js'];   // r5188: the hub's own wiring too (server.js builds the stores it hands out)
+  const FILES = WALKED.filter((f) => f !== 'src/slot-transitions.js' && reaches(read(f)));
   const texts = Object.fromEntries(FILES.map((f) => [f, read(f)]));
   const rows = census(texts);
   const bad = rows.filter((r) => !r.listed || !r.handled);
@@ -209,6 +219,188 @@ console.log('⑤ the callers: every call of the three doors answers the held ref
   const cut = { ...texts, 'src/server/usage-pool-engine.js': h < 0 ? E : E.slice(0, h) + 'isLedgerHeldGone(' + E.slice(h + 'isLedgerHeld('.length) };   // requestSlotFor's own handler removed
   const redBad = census(cut).filter((r) => !r.listed || !r.handled);
   ok(redBad.length >= 1, `⑤ RED: a copy whose first handler is removed is named by the census: ${redBad.map((r) => `${r.file} ${r.fn}`).join('; ')}`, redBad);
+  const planted = read('server.js') + '\nfunction plantedDoor() {\n  return slotTransitions.all();\n}\n';   // a door called in server.js with no handler (its own function, on its own lines)
+  const srvBad = reaches(planted) ? census({ 'server.js': planted }).filter((r) => r.file === 'server.js' && (!r.listed || !r.handled)) : [];
+  ok(WALKED.includes('server.js') && srvBad.length >= 1, `⑤ r5188: the walk reads server.js too (${WALKED.length} files walked) — a door planted into a copy of its text is named: ${srvBad.map((r) => `${r.file} ${r.fn}`).join('; ') || 'none'}`, srvBad);
+}
+
+console.log('⑥ r5188 (1): THE TURN\'s START ends the turn before\'s held mark — a turn the wrapper\'s death ended (no result record) silences no REAL wall of the next');
+{
+  const w = world();
+  const BR = require(path.join(REPO, 'src/server/session-brain.js'));
+  BR.create({ engine: { noteTurnStart: w.eng.noteTurnStart }, applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => null });   // the ONE turn opener of both feeds, told the engine's turn start as server.js tells it
+  let initN = 0;
+  const init = (extra = {}) => BR.noteTurnOpener(w.s, { type: 'system', subtype: 'init', uuid: `init-${++initN}-${Date.now()}`, session_id: w.s.claudeSessionId, ...extra }, 'parse');
+  const rejected = () => w.eng.recordRateLimitEvent(w.s, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resets_at: w.R5, resetsAt: w.R5 } });
+  const q = quietLog();
+  const events = []; const origEvent = global.__vsEvent; global.__vsEvent = (name, v) => { events.push(String(name)); try { origEvent && origEvent(name, v); } catch { } };
+  let threw = null, planted = false, keptOnSub = false, lifted = false, opened = false, cleared = false, t2From = 0;
+  try {
+    init();   // turn 1 opens
+    await sleep(3); w.s._lastRequestOutAt = Date.now(); await sleep(3);   // its request went out (on B)
+    refuse = ledgerOnly; w.eng.slotTransitions._cache = null;
+    rejected();   // its wall while the ledger cannot be read: the turn's held mark is set
+    planted = !!w.s._turnLedgerHeld;   // WITNESS: the product read the placed refusal (its own mark is there)
+    init({ parent_tool_use_id: 'toolu-sub' });   // a sub-agent's init inside that turn is no turn's start of the conversation
+    keptOnSub = !!w.s._turnLedgerHeld;
+    // …and the wrapper DIES: no result record, so noteTurnEnd never runs. The ledger reads again on its own ladder
+    refuse = null;
+    lifted = await until(() => { try { return Array.isArray(w.eng.slotTransitions.all()); } catch { return false; } });
+    t2From = q.said.length;
+    init();   // turn 2 opens (the next process's first turn)
+    opened = w.s._turnLive === true;
+    cleared = !w.s._turnLedgerHeld;
+    await sleep(3); w.s._lastRequestOutAt = Date.now(); await sleep(3);
+    rejected();   // turn 2's REAL wall, the ledger readable: its rejection, its banner, its end
+    w.eng.markLimitBanner(w.s, "You've reached your 5-hour limit");
+    w.eng.noteTurnEnd(w.s, { type: 'result', result: "You've reached your 5-hour limit" });
+  } catch (e) { threw = e; }
+  q.done(); global.__vsEvent = origEvent; refuse = null;
+  const t2 = q.said.slice(t2From);
+  const t2Ledger = t2.filter((l) => l.includes('slot-transitions.jsonl'));
+  const judged = events.some((e) => e === 'wall-demote' || e === 'wall-demote-held' || e === 'wall-refuted');
+  ok(!threw, `⑥ no throw reaches the caller (${threw ? threw.message : 'none'})`);
+  if (!(planted && lifted && opened)) console.log(`  ⊘ SKIP ⑥ the turn's start — the plant was not read (the held mark set by turn 1's wall: ${planted}; the ledger read again: ${lifted}; turn 2's init taken by the opener: ${opened})`);
+  else {
+    ok(keptOnSub, '⑥ control: a SUB-AGENT\'s init inside the held turn leaves its mark (only the main thread\'s init starts a turn)');
+    ok(cleared, '⑥ turn 2\'s START (its init, taken once by the brain\'s one opener) ends turn 1\'s held mark — turn 1 ended with no result record');
+    ok(judged && !t2Ledger.length, `⑥ turn 2's REAL wall is judged on its member at its end (${events.filter((e) => /^wall-/.test(e)).join(', ') || 'no wall event'}), and nothing of turn 2 says the ledger is held (${JSON.stringify(t2Ledger.slice(0, 2))}) — RED at 5b42f5226: the carried mark silenced it`, { events, t2Ledger });
+  }
+  // THE OTHER TWO TURN STARTS: codex's task_started and an ACP prompt_start (the real consumers, the real engine) — a live one ends
+  // the mark; a backlog's (a record an hour old, the attach's replay) never does
+  const engOf = () => engMod.create({ app: { get() { }, post() { }, put() { }, delete() { }, patch() { }, use() { }, locals: {} }, rootDir: dir('cons'), USAGE_CACHE_DIR: path.join(dir('cons'), 'usage-cache'), activeSessions: new Map(), wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => null, getHosts: () => null, getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null, getSessionMetaStore: () => ({ readSessionMeta: () => ({}), writeSessionMeta() { }, patchSessionMeta: () => Promise.resolve(true) }) });
+  const consumerRun = (rel, backend, rec) => {
+    const eng = engOf();
+    const sx = { backend, mode: 'chat', _webuiId: 'w-' + backend, sockName: 'sock-' + backend, backendSessionId: 'th-' + backend, buffer: '', _turnLedgerHeld: { at: Date.now() - 3600e3 } };
+    let feed = null; const pty = { onData: (cb) => { feed = cb; }, onExit() { }, write() { } };
+    require(path.join(REPO, rel)).create({ engine: eng, noteHarnessModels() { }, deliverRef: null, permissionRulesRef: null }).attach(sx, sx._webuiId, pty, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta() { }, updateSessionTodos() { } });
+    const line = (o) => feed && feed(JSON.stringify(o) + '\n');
+    line(rec(new Date(Date.now() - 3600e3).toISOString(), 't-old'));   // the attach's replayed backlog: an hour old
+    const keptLate = !!sx._turnLedgerHeld;
+    line(rec(new Date().toISOString(), 't-new'));
+    return { keptLate, clearedLive: !sx._turnLedgerHeld };
+  };
+  const qc = quietLog();
+  let cx = null, ac = null, cthrew = null;
+  try {
+    cx = consumerRun('src/server/stdout/codex-events.js', 'codex', (ts, turn) => ({ type: 'event_msg', timestamp: ts, payload: { type: 'task_started', turn_id: turn } }));
+    ac = consumerRun('src/server/stdout/acp-events.js', 'antigravity', (ts) => ({ ts, type: 'acp', kind: 'prompt_start' }));
+  } catch (e) { cthrew = e; }
+  qc.done();
+  ok(!cthrew && !!cx && cx.keptLate && cx.clearedLive, `⑥ codex: a LIVE task_started ends the held mark, a backlog's (an hour old) leaves it — the real codex-events consumer (${cthrew ? cthrew.message : JSON.stringify(cx)})`, cx);
+  ok(!cthrew && !!ac && ac.keptLate && ac.clearedLive, `⑥ ACP: a LIVE prompt_start ends the held mark, a backlog's (by its own stamp) leaves it — the real acp-events consumer (${cthrew ? cthrew.message : JSON.stringify(ac)})`, ac);
+}
+
+console.log('⑦ r5188 (2): the banner asks «the ledger is held now» of a POOLED conversation only — a login of its own is marked by its banner');
+{
+  const w = world();
+  const C = w.am.createSubscription({ name: 'Member C' }).id;
+  fs.writeFileSync(path.join(w.am.subDir(C), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + C, refreshToken: 'r', expiresAt: Date.now() + 36e5, subscriptionType: 'max' } }), { mode: 0o600 });
+  fs.writeFileSync(path.join(w.cacheDir, C + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'cli-usage', fiveHour: { utilization: 0.1, resetsAt: w.R5 }, sevenDay: { utilization: 0.3, resetsAt: w.R7 } }));
+  const own = { backend: 'claude', mode: 'chat', host: null, _webuiId: 'w-own', claudeSessionId: 'c-own', _accountId: C, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), name: 'own', pty: { write() { } } };
+  w.sessions.set(own._webuiId, own);
+  const cacheC = () => origRFS(path.join(w.cacheDir, C + '.json'), 'utf8');
+  const beforeC = cacheC(), before = w.caches();
+  refuse = ledgerOnly; w.eng.slotTransitions._cache = null;
+  try { w.eng.slotTransitions.all(); } catch { }   // the ledger is HELD now (a read refused)
+  const heldNow = !!(w.eng.slotTransitions.held && w.eng.slotTransitions.held());   // WITNESS: the hold the banner asks about is there
+  const q = quietLog();
+  let threw = null;
+  try {
+    w.eng.markLimitBanner(own, "You've reached your 5-hour limit");   // the conversation on a login of its own
+    w.eng.markLimitBanner(w.s, "You've reached your 5-hour limit");   // control: the POOLED conversation, the same hold
+  } catch (e) { threw = e; }
+  q.done(); refuse = null;
+  const afterC = cacheC(), after = w.caches();
+  let fiveC = null; try { fiveC = JSON.parse(afterC).fiveHour || null; } catch { fiveC = null; }
+  ok(!threw, `⑦ no throw reaches the caller (${threw ? threw.message : 'none'})`);
+  if (!heldNow) console.log('  ⊘ SKIP ⑦ the banner under a hold — the plant was not read (the ledger did not answer held)');
+  else {
+    ok(afterC !== beforeC && !!fiveC && Number(fiveC.utilization) === 1 && !own._turnLedgerHeld, `⑦ a NON-POOLED conversation's banner while the ledger is held marks ITS login (Member C's 5-hour window: ${JSON.stringify(fiveC)}) and sets no held mark — RED at 5b42f5226: it lost the mark`, { fiveC, mark: own._turnLedgerHeld || null });
+    ok(after[w.A] === before[w.A] && after[w.B] === before[w.B] && !!w.s._turnLedgerHeld, '⑦ control: the POOLED conversation\'s banner under the same hold marks no account (its turn\'s held mark set)', { changed: [w.A, w.B].filter((id) => after[id] !== before[id]) });
+  }
+}
+
+console.log('⑧ r5188 (3): the CODEX wall road under a hold — its refusal filed nowhere, the turn\'s mark set, no switch asked, no account rung; the smalls\' two lines');
+{
+  const cxWorld = () => {
+    const root = dir('cx'), dataDir = path.join(root, 'data');
+    const prevHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = path.join(root, 'shared-codex');
+    let am = null, A = null, B = null, P = null;
+    try {
+      am = new AccountManager({ dataDir });
+      // two DISTINCT identities (an id_token each, the real auth.json shape), as test-codex-pool's world builds them
+      const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const sub = (name) => {
+        const { id } = am.createCodexSubscription({ name });
+        const tag = name.replace(/\W+/g, '');
+        const idTok = `${b64u({ alg: 'none', typ: 'JWT' })}.${b64u({ email: tag.toLowerCase() + '@example.com', 'https://api.openai.com/auth': { chatgpt_plan_type: 'plus', chatgpt_account_id: 'acct-' + tag } })}.sig`;
+        fs.writeFileSync(path.join(am.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-' + tag, id_token: idTok } }));
+        return id;
+      };
+      A = sub('Cx Alpha'); B = sub('Cx Beta');
+      am.createPool({ name: 'CxPool', backend: 'codex' });
+      P = am.list().accounts.find((a) => a.type === 'pooled' && a.backend === 'codex').id;
+      am.setPoolTarget(P, A); am.updatePool(P, { auto: true });
+    } finally { if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome; }
+    const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+    const nowS = Math.floor(Date.now() / 1000);
+    const cache = (u) => ({ fetchedAt: Date.now() - 60e3, source: 'codex-rate-limits', limitId: 'codex', fiveHour: { utilization: u, usedPercent: u * 100, windowMinutes: 300, resetsAt: nowS + 3600 }, sevenDay: { utilization: u, usedPercent: u * 100, windowMinutes: 10080, resetsAt: nowS + 3 * 86400 } });
+    for (const id of [A, B]) fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify(cache(0.3)));   // equal: no pass moves anything
+    const sessions = new Map();
+    const eng = engMod.create({
+      app: { get() { }, post() { }, put() { }, delete() { }, patch() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
+      wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { },
+      serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
+      recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null,
+    });
+    const caches = () => Object.fromEntries([A, B].map((id) => [id, origRFS(path.join(cacheDir, id + '.json'), 'utf8')]));
+    return { am, eng, A, B, P, sessions, caches, nowS };
+  };
+  const w = cxWorld();
+  // THE PLANT FIRST: the ledger cannot be read before the conversation exists, so nothing names its held member before the hold —
+  // an UNSTAMPED process (no spawn stamp: the pool default row before its start would name Cx Alpha), as a process older than the stamp
+  refuse = ledgerOnly; w.eng.slotTransitions._cache = null;
+  try { w.eng.slotTransitions.all(); } catch { }
+  await sleep(3);
+  const wrote = [];
+  const s = { backend: 'codex', mode: 'chat', host: null, _webuiId: 'cx-held', backendSessionId: 'thread-held', _accountId: w.P, name: 'cx', createdAt: Date.now(), _isStreaming: true, _turnState: 'running', pty: { write(x) { wrote.push(String(x)); } } };
+  let pm = null; try { pm = w.am.poolMemberOfSession(w.P, s); } catch { pm = null; }
+  const readPlant = !!(pm && pm.origin === 'unknown' && pm.why === 'ledger-held');   // WITNESS: the product's own answer read the placed refusal
+  w.sessions.set(s._webuiId, s);
+  const passes = () => ((w.eng._poolDecisions && w.eng._poolDecisions.get(w.P)) || {}).pool || 0;
+  const ring = (id) => (w.eng._wallRing.get(id) || []).length;
+  const q = quietLog();
+  const events = []; const origEvent = global.__vsEvent; global.__vsEvent = (name, v) => { events.push(String(name)); try { origEvent && origEvent(name, v); } catch { } };
+  let threw = null, k = 0, used = 0, press = null, fromWall = 0;
+  const before = w.caches(), ringBefore = [ring(w.A), ring(w.B)];
+  try {
+    const p0 = passes(); w.eng.maybePoolAutoSwitch(s); k = passes() - p0;   // WITNESS of the counter: what ONE ask of the pool counts here
+    fromWall = q.said.length;
+    const p1 = passes();
+    w.eng.recordCodexQuotaSignal(s, { type: 'task_failed', codexErrorInfo: 'usage_limit_reached', resetsAt: w.nowS + 7200 });   // the codex wall (its task_failed IS the turn's end)
+    used = passes() - p1;
+    press = await w.eng.refreshCodexForPerson({ key: w.A });   // a person's ⟳ on the member the held conversation's pool lists
+  } catch (e) { threw = e; }
+  q.done(); global.__vsEvent = origEvent; refuse = null;
+  const after = w.caches(), ringAfter = [ring(w.A), ring(w.B)];
+  let cur = null; try { cur = w.am.poolCurrent(w.P); } catch { cur = null; }
+  const named = q.said.slice(fromWall).filter((l) => /^\[(wall|usage|reset-credit|codex-quota)\]/.test(l) && (l.includes(w.A) || l.includes(w.B) || /Cx (Alpha|Beta)/.test(l)));   // the wall road's own lines
+  const wallSaid = q.said.filter((l) => /a codex usage-limit wall is marked on no account — the slot ledger \(slot-transitions\.jsonl\)/.test(l));
+  const wrongCause = q.said.filter((l) => /no spawn stamp|started before the pool stamped/.test(l));
+  const ledgerCause = q.said.filter((l) => /which login this process holds is not read — the slot ledger \(slot-transitions\.jsonl\)/.test(l));
+  ok(!threw, `⑧ no throw reaches the caller (${threw ? threw.message : 'none'})`);
+  if (!readPlant) console.log(`  ⊘ SKIP ⑧ the codex wall under a hold — the plant was not read (the conversation's held member answered ${JSON.stringify(pm)})`);
+  else {
+    ok(after[w.A] === before[w.A] && after[w.B] === before[w.B], '⑧ the codex wall\'s refusal is filed NOWHERE while its held member is unknown because the ledger is held — neither member\'s numbers moved (RED at 5b42f5226: written on the link, Cx Alpha)', { changed: [w.A, w.B].filter((id) => after[id] !== before[id]) });
+    ok(ringAfter[0] === ringBefore[0] && ringAfter[1] === ringBefore[1], `⑧ no account is RUNG (ring ${JSON.stringify(ringBefore)} → ${JSON.stringify(ringAfter)}) — RED at 5b42f5226: the link's member`, { ringBefore, ringAfter });
+    if (k < 1) console.log(`  ⊘ SKIP ⑧ no switch asked — the pool's pass counter counted nothing for one ask here (${k})`);
+    else ok(used === k && cur === w.A, `⑧ no switch is asked: the pool's default stays Cx Alpha (${cur === w.A ? 'Cx Alpha' : cur === w.B ? 'Cx Beta' : cur}) and the road's pool passes (${used}) are the turn end's one (${k} an ask) — RED at 5b42f5226: the wall filed on the link read Cx Alpha spent, and the escape ladder's ask moved the default to Cx Beta (its 10 s gate then held the turn end's pass)`, { used, k, cur });
+    ok(wallSaid.length === 1 && !named.length, `⑧ it is SAID once, naming the ledger and no account: ${JSON.stringify(wallSaid.slice(0, 1))}; lines naming an account: ${JSON.stringify(named.slice(0, 2))}`, { wallSaid, named });
+    ok(!wrongCause.length && ledgerCause.length === 1, `⑧ the round's small: «which login this process holds» names the LEDGER as its cause (once), never «no spawn stamp … until it restarts»: ${JSON.stringify((wrongCause.length ? wrongCause : ledgerCause).slice(0, 1))}`, { wrongCause, ledgerCause });
+    ok(!!press && press.code === 'holder_unknown' && /slot-transitions\.jsonl/.test(String(press.error)) && !wrote.some((x) => /codex-read-limits/.test(x)), `⑧ the round's small: a person's ⟳ on a member whose running conversation is held is refused naming the LEDGER (the press's second branch), and nothing is read: «${press && String(press.error).slice(0, 140)}»`, press);
+  }
 }
 
 report();
