@@ -52,7 +52,7 @@ const UNCUT = Object.freeze(['exits', 'windows']);
  *  exit-reach session / group / everyone, window-reach session / self-open / group / everyone, the model conversation /
  *  group / everyone). */
 const VIA = Object.freeze({ conversation: 'self', own: 'self', session: 'self', self: 'self', 'self-open': 'self', task: 'group', group: 'group', all: 'everyone', everyone: 'everyone' });
-const LISTED_REFUSALS = Object.freeze(['excepted', 'groups_unreadable', 'unknown_shape', 'vault_locked', 'not_open', 'vault_use_marks_unread', 'marks_undecided', 'automation_unread']);   // the automation store's next touch: + the keys could not be read (its own row)   // r3205 (2): + an undecided vault-use row (listed as unknown)   // r3104 (a): + the vault-use marks held (listed as unknown, never dropped)
+const LISTED_REFUSALS = Object.freeze(['excepted', 'groups_unreadable', 'unknown_shape', 'vault_locked', 'not_open', 'vault_use_marks_unread', 'marks_undecided', 'automation_unread', 'window_reach_unread']);   // the automation store's next touch: + the keys could not be read (its own row)   // r3205 (2): + an undecided vault-use row (listed as unknown)   // r3104 (a): + the vault-use marks held (listed as unknown, never dropped)
 const RANK = Object.freeze({ self: 0, group: 1, everyone: 2 });
 const str = (v) => (v === undefined || v === null ? '' : String(v));
 
