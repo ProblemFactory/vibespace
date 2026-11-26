@@ -945,7 +945,7 @@ function readRawReading(id) {
 }
 /** B-87fd (1) (THE OWNER's WORD, 主开发 r4668): THE FACT — the members billing paid overage NOW, read from the RAW reading only (the
  *  producer's stated overage, never an estimate: P7), handed to every decision ALWAYS (`payingIds`): such a member is never preferred
- *  over a member with quota left — it ranks with the credits members, the last resort. → Set | null */
+ *  over a member with quota left — its own last tier, after the credits members (r4711). → Set | null */
 function overageInUseIds(members) {
   try {
     const out = new Set();
@@ -9084,7 +9084,7 @@ function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid)
   }
   if (d.reason === 'warm-soft-defer') {
     const b = d.softBucket || {};
-    if (d.paying) { console.log(`[pool] defer ${sid}: its member is billing paid overage, but it is mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`); return; }   // B-87fd (1)
+    if (d.paying) { console.log(`[pool] defer ${sid}: its member is billing paid overage, but it is mid-turn — moves at its stop (to ${d.wouldToName || d.wouldTo})${scope}`); return; }   // B-87fd (1)
     console.log(`[pool] defer ${sid}: soft-exhausted (${b.label || '?'} ${b.remaining ?? '?'}% < hot ${b.hot ?? '?'}%) but mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`);
     return;
   }
@@ -9429,6 +9429,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
           ? ` — but ${toName}'s own login ${typeof ds.toLoginNear.msLeft === 'number' && ds.toLoginNear.msLeft > 0 ? `expires in ${loginAgeText(ds.toLoginNear.msLeft)}` : 'expires imminently'}; re-login it in Manage Agents now`
           : ds.toCredits
           ? ` — the last resort: ${toName} bills pay-per-use past its quota (usage credits)`
+          : ds.toOverage   // B-87fd (1) r4711 (c): the setting promises the bar is NAMED — landed on the paying tier, it says so
+          ? ` — the last resort: ${toName} is billing paid overage`
           : '';
         if (ds.toCredits) noteCreditsParking(poolId, ds.to, poolCreditsNotice({ toCredits: ds.toCredits, toRemaining: ds.toRemaining }, { poolName: a.name, memberName: toName }), now);
         if (ds.reason === 'not-a-member' && !ds.pinExhausted) removedMemberNotice(poolId, sid, s2, curFor, ds.to, !a.hot); // the removed-member words, whoever sees the removal first
@@ -9591,6 +9593,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       ? ` — but ${d.toName}'s own login ${typeof d.toLoginNear.msLeft === 'number' && d.toLoginNear.msLeft > 0 ? `expires in ${loginAgeText(d.toLoginNear.msLeft)}` : 'expires imminently'}; re-login it in Manage Agents now`
       : d.toCredits
       ? ` — the last resort: ${d.toName} bills pay-per-use past its quota (usage credits)`
+      : d.toOverage   // B-87fd (1) r4711 (c): the setting promises the bar is NAMED — landed on the paying tier, it says so
+      ? ` — the last resort: ${d.toName} is billing paid overage`
       : '';
     if (d.toCredits) noteCreditsParking(poolId, d.to, poolCreditsNotice({ toCredits: d.toCredits, toRemaining: d.toRemaining }, { poolName: a.name, memberName: d.toName || d.to }), now);
     serverNotice(`pool-auto-${poolId}-${now}`, d.reason === 'edf'
@@ -9600,7 +9604,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       : d.reason === 'not-a-member'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} was removed from the pool${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : d.reason === 'overage'   // B-87fd (1): the member billing paid overage is left for one with quota
-      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} is billing paid overage, and ${d.toName} has quota left${hot ? '' : ' (restarting its conversations)'}`
+      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} is billing paid overage, and ${d.toName} has quota left${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : d.reason === 'subscription-lapsed'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s subscription is inactive; it rejoins by itself once it answers again${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : d.reason === 'login-expired'
