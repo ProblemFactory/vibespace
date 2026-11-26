@@ -23,6 +23,8 @@ const crypto = require('crypto');
 const BL = require('../browser-login.js');
 const GM = require('../grant-model.js');
 const { writeJsonAtomic } = require('../channel-store.js');
+const SR = require('../store-read.js');   // B-f276 (lane hub-loop-stalls, r4719): browser-login-reminders.json under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and its hold: a ledger that could not be read is HELD, never «nobody reminded yet»
 
 const CARDS_MAX = 4;
 const CARD_MS = 10 * 60e3;
@@ -195,18 +197,31 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     }
     return `mem:${rk}`;
   };
-  function loadRemindedDigests() {
-    if (!remindFile) return;
-    let raw;
-    try { raw = fs.readFileSync(remindFile, 'utf8'); } catch { return; }
-    let parsed;
-    try { parsed = JSON.parse(raw); } catch { return; }
+  // B-f276 (lane hub-loop-stalls, r4719) — THE STORE-READ LAW. The release read a failed read or torn bytes as «nobody reminded yet»:
+  // every pending sign-in was reminded AGAIN in For you, and the next pass wrote the ledger over with only the new marks. Now through
+  // store-read's answer to the hold (code `pending_reminders_unread`). HELD: the pass reminds nothing (said once a hold) and writes
+  // nothing; LIFTED: the marks loaded, then the pass runs (a reminder the hold delayed goes now). TORN: kept aside once, then empty
+  // (the hold's own law)
+  const isLedger = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  const addDigests = (parsed) => {
     for (const d of (parsed && Array.isArray(parsed.reminded)) ? parsed.reminded : []) {
       if (typeof d === 'string' && /^[0-9a-f]{32}$/.test(d)) remindedDigests.add(d);
     }
+  };
+  let remindHeldSaid = false;
+  const remindHold = remindFile ? HOLD.create({ file: remindFile, valid: isLedger, code: 'pending_reminders_unread', aside: (m) => remindFile + '.corrupt-' + m,
+    words: (h) => `the record of the sign-in reminders already filed could not be read (${h && h.code}) — VibeSpace reads it again by itself; nothing is written over it, and a reminder waits until it reads`,
+    log: (l) => say(`[browser-login] ${l}`),
+    onLift: (v) => { addDigests(v); remindHeldSaid = false; try { maybeRemindPending(); } catch (e) { say(`[browser-login] the reminder pass at the lift failed — ${e && e.message}`); } } }) : null;
+  function loadRemindedDigests() {
+    if (!remindFile) return;
+    let read; try { read = { text: fs.readFileSync(remindFile, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: isLedger });   // the sign-in reminders' ledger: THE ANCHOR (test-data-store-census)
+    if (remindHold.start(a) === 'data') addDigests(a.value);
   }
   function saveRemindedDigests() {
     if (!remindFile || typeof vault.macOf !== 'function') return;
+    if (!remindHold.writable('a write of the sign-in reminders record')) return;   // HELD: never over a file that could not be read
     while (remindedDigests.size > REMINDERS_MAX) remindedDigests.delete(remindedDigests.keys().next().value);
     try {
       fs.mkdirSync(path.dirname(remindFile), { recursive: true });
@@ -298,6 +313,10 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
   /** Remind ONCE after 7 days (`BL.PENDING_REMIND_MS`) for any unconfirmed `pending` login, recorded outside `vault.json` (0 vault writes). */
   function maybeRemindPending(profileId = null) {
     if (vstate() !== 'unlocked') return 0;
+    // B-f276: HELD — nothing reminded and nothing written; the pending cards are still REGISTERED (below), so a Confirm, a Discard
+    // or a fill later resolves the card an earlier run filed (the adversarial read's should: an early return left it open for good)
+    const held = !!(remindHold && remindHold.held());
+    if (held && !remindHeldSaid) { remindHeldSaid = true; say(`[browser-login] the pending sign-in reminders wait — ${remindHold.words()}`); }
     const t = now();
     let reminded = 0;
     let dirty = false;
@@ -312,6 +331,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       const o = open(e.name);
       if (!o.ok || !o.rec || !o.rec.pending) continue;
       const pc = registerPendingMeta(e.name, o.rec, profileId);
+      if (held) continue;
       const digest = pendingRemindDigest(e.name, o.rec);
       if (!digest || !BL.shouldRemindPending(o.rec, t, { alreadyReminded: remindedDigests.has(digest) })) continue;
       let filed = false;

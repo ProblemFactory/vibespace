@@ -175,6 +175,8 @@ const CALLERS = { 'src/server/decision-engine.js': ['decision-memo.json', 'decis
   'src/channels/webhook.js': ['callers.json', 'pair-pending.json'], 'src/server/vault-totp.js': ['vault-grants.json'], 'src/usage-reset-claim.js': ['usage-reset-claims.json'],
   'src/server/vault-run-door.js': ['vault-grant-ends.json'],   // r3377: lg-vault-env's grant ends
   'src/server/agent-listener.js': ['agent-door.json'],   // r3333 unit 1: the agent door's record (its port)
+  // B-f276 (lane hub-loop-stalls, r4719): four said-once records
+  'src/server/hook-root-watch.js': ['hook-root-notice.json'], 'src/server/tls.js': ['state.json'], 'src/server/browser-logins.js': ['browser-login-reminders.json'], 'src/server/cli-registration.js': ['cli-registration.json'],
   // 主开发 r3336 (lane lg-text-legs-3): the data folder's own id file, held by the sign-in's start
   'src/auth.js': { sites: 1, stores: ['instance.json'] },   // (it names the file through SW.INSTANCE_FILE)
   'src/port-forward.js': ['port-forwards.json'], 'src/server/instance-url.js': ['instance-url.json'],   // bl-machines-a (lines 702 + 646 + 749, moved onto 2.369.419): the Ports list and the publish setting

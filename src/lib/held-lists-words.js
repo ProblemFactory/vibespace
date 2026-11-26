@@ -28,6 +28,11 @@ const NAMES = Object.freeze({
   'cli-unmeasured-notice.json': i18nKey('the record of the unmeasured Claude Code notice'),
   'maintenance.json': i18nKey('the maintenance banner'),
   'cli-model-catalog.json': i18nKey('the Claude Code model catalog'),
+  // B-f276 (lane hub-loop-stalls, r4719): four said-once records
+  'hook-root-notice.json': i18nKey('the record of the agent hooks notice already said'),
+  'state.json': i18nKey('the HTTPS record'),   // data/tls/state.json (src/server/tls.js): the only store held under this base name
+  'browser-login-reminders.json': i18nKey('the record of the sign-in reminders already filed'),
+  'cli-registration.json': i18nKey('the record of the Claude Code builds already said'),
   'published-pages.json': i18nKey('the list of published pages'),
   'setting-holds.json': i18nKey('the raised spending ceilings'),
   'vault-use-marks.json': i18nKey('who may use your stored values'),

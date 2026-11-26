@@ -22,6 +22,8 @@ const fs = require('fs');
 const path = require('path');
 const serverRoot = require('../server-root.js');
 const { writeJsonAtomic } = require('../channel-store.js'); // the ONE atomic data/*.json writer
+const SR = require('../store-read.js');   // B-f276 (lane hub-loop-stalls, r4719): hook-root-notice.json under the store-read law…
+const HOLD = require('../store-read-hold.js');   // …and its hold: a memo that could not be read is HELD, never «not said yet»
 const i18nKey = (s) => s; // the extraction marker (scripts/i18n-extract.mjs): the client words the toast with t(key, params)
 const UNKNOWN_KEY = i18nKey('VibeSpace could not tell which folder it runs from ({error}) — the agent hooks are not registered; it reads again with backoff (30 s to 30 min) and registers them as soon as it can.');
 const REGISTERED_KEY = i18nKey('VibeSpace registered the agent hooks at {time} after an earlier read error ({error}) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction.');
@@ -30,6 +32,30 @@ const MEMO_FILE = 'hook-root-notice.json';
 function create({ dataDir, ensureAgentHooks, rootRecovery, ownerWriteRefusal, factsNow = null, integrationEnabled = () => true, serverNotice, setTimer = setTimeout, now = Date.now, log = console.warn } = {}) {
   const memoFile = path.join(dataDir, MEMO_FILE);
   const st = { timer: null, attempt: 0, said: false, delays: [] };
+  // B-f276 (lane hub-loop-stalls, r4719) — THE STORE-READ LAW. The release read the memo at EVERY judgement and took a failed read or
+  // torn bytes as «no notice said»: the toast was posted again at each turn of the backoff while the file could not be read, and the
+  // memo written over. Now the memo is read ONCE (at the first judgement, where the release read it — never at the start: nothing
+  // synchronous is added) through store-read's answer to the hold (code `hook_notice_unread`), then kept in memory. HELD: the notice
+  // is said ONCE a hold (that memory only) and nothing is written over the file; LIFTED: a notice said meanwhile is the memo (written
+  // once then), else the memo read decides. TORN: kept aside once, then empty (the hold's own law)
+  const isMemo = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  let memoRead = false, stored = null, heldMemo = null;
+  const hold = HOLD.create({ file: memoFile, valid: isMemo, code: 'hook_notice_unread', aside: (m) => memoFile + '.corrupt-' + m,
+    words: (h) => `the record of the hooks notice already said could not be read (${h && h.code}) — VibeSpace reads it again by itself; nothing is written over it`,
+    log: (l) => log(`[integration] ${l}`),
+    // LIFTED: a notice said while held is the newer memo — written once now (the write its post skipped); else the memo read decides
+    onLift: (v) => { if (heldMemo) { stored = heldMemo; writeMemo(heldMemo); } else stored = isMemo(v) ? v : null; heldMemo = null; } });
+  function writeMemo(m) { try { writeJsonAtomic(memoFile, m); } catch (e) { log('[integration] hook-root notice memo not written:', e && e.message); } }   // the ONE write of the memo
+  function memoNow() {
+    if (!memoRead) {
+      memoRead = true;
+      let read; try { read = { text: fs.readFileSync(memoFile, 'utf-8') }; } catch (error) { read = { error }; }
+      const a = SR.storeAnswer(read, { valid: isMemo });   // the hooks notice's memo: THE ANCHOR (test-data-store-census)
+      if (hold.start(a) === 'data') stored = a.value;
+    }
+    return hold.held() ? heldMemo : stored;
+  }
+  const remember = (m) => { if (hold.held()) heldMemo = m; else stored = m; };
   function arm() {
     if (st.timer) return null;
     const delay = serverRoot.nextRejudgeDelay(st.attempt++);
@@ -41,20 +67,21 @@ function create({ dataDir, ensureAgentHooks, rootRecovery, ownerWriteRefusal, fa
     return delay;
   }
   function unknown(refused) {
-    let memo = null; try { memo = JSON.parse(fs.readFileSync(memoFile, 'utf-8')); } catch { memo = null; }
+    const memo = memoNow();
     const due = serverRoot.unknownNoticeDue(memo, refused.why || refused.line);
     let posted = false;
     if (due.post) {
       const error = String(refused.why || '').replace(/^the server root could not be judged: /, '');
       const seen = serverNotice('hook-root-unknown', `${refused.line} — read again with backoff (30 s to 30 min); hooks register then.`, { level: 2, i18n: { key: UNKNOWN_KEY, params: { error } } });
       posted = Number(seen) > 0;
-      if (posted) { try { writeJsonAtomic(memoFile, due.memo); } catch (e) { log('[integration] hook-root notice memo not written:', e && e.message); } }
+      if (posted) { remember(due.memo); if (hold.writable('a write of the hooks notice record')) writeMemo(due.memo); }
     }
     arm();
     return { posted };
   }
   function recovered() {
     st.attempt = 0;
+    stored = null; heldMemo = null;   // the memo's own end (a recovery), never a failed read
     try { if (fs.existsSync(memoFile)) fs.rmSync(memoFile, { force: true }); } catch { }
     const rec = typeof rootRecovery === 'function' ? rootRecovery() : null;
     if (rec && rec.registeredAfterError && !st.said) {
@@ -86,7 +113,7 @@ function create({ dataDir, ensureAgentHooks, rootRecovery, ownerWriteRefusal, fa
     if (rec && rec.registeredAfterError && !info.stale && !scriptMissing) { recovered(); return true; }
     return false;
   }
-  return { sync, arm, unknown, recovered, probeMayRun, saidRecoveryInstead, memoFile, _state: st };
+  return { sync, arm, unknown, recovered, probeMayRun, saidRecoveryInstead, memoFile, held: () => hold.held(), stop: () => hold.stop(), _state: st };
 }
 
 module.exports = { create, UNKNOWN_KEY, REGISTERED_KEY, MEMO_FILE };
