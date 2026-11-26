@@ -138,7 +138,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement, bindDoor } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, chipFoldText, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFit } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
-import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep, takeoverStays, handbackStayText } from '../browser-tabs.js';
+import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep, takeoverStays, handbackStayText, handBackAnswerWords } from '../browser-tabs.js';
 /** B-e674 follow (r694 (3)): a handback's own words, then what stays with the conversation (one sentence after the other). */
 const withStays = (text, stays) => (stays ? t('{first}. {second}', { first: text, second: stays }) : text);
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
@@ -2767,9 +2767,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (st.closed) return;
     // verify r2: the previous hand-back still waits for the agent's next turn — this view folds its button like a hand-back of its own
     if (r && r.code === 'already_handed_back') { st.resumedHere = false; st.handedBack = true; renderMode(); showToast(t('Already handed back — the agent reads it with its next turn'), { duration: 5000 }); return; }
-    if (!r || r.error) { renderMode(); showToast(t('Could not hand the browser back: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error', duration: 7000 }); return; }
+    // 主开发 r5164 (2): the answer read whole (src/browser-tabs.js handBackAnswerWords) — a stash_refused DID hand the browser back (the
+    // takeover ended, the card shown): said as a hand-back with its warning, never «could not hand back: <the stash's file>»
+    const w = handBackAnswerWords(r, t);
+    if (!w.handedBack) { renderMode(); showToast(t('Could not hand the browser back: {why}', { why: String((r && r.error) || t('server unreachable')) }), { type: 'error', duration: 7000 }); return; }
     st.resumedHere = false; st.handedBack = true;
-    showToast(t('Handed back — the agent reads your note and the tabs with its next turn (nothing is sent now)'), { duration: 5000 });
+    showToast(w.text, w.warn ? { type: 'warn', duration: 9000 } : { duration: 5000 });
     renderMode();
   };
   winInfo.titleSpan?.addEventListener?.('click', (e) => { const r = row(); if (r && app.showBrowserProfilePicker) app.showBrowserProfilePicker(r, { x: e.clientX, y: e.clientY }); }, { signal: winInfo._listenerCtl?.signal });

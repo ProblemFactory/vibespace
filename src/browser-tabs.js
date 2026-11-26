@@ -496,6 +496,18 @@ function handbackStayText(n, tIn) {
   if (!k) return '';
   return k === 1 ? t('1 tab opened in your takeover stays with this conversation — its agent can read it now') : t('{n} tabs opened in your takeover stay with this conversation — its agent can read them now', { n: k });
 }
+/** 主开发 r5164 (2), a silence of the release: THE HAND-BACK'S ANSWER READ WHOLE. The route answers the person's Continue: ok (the note
+ *  queued; `durable` false = in memory only, not on disk yet), or `stash_refused` — the takeover ENDED and the card was shown, only the note
+ *  could not be queued (its error text names the stash's file: never shown). The page said «handed back» for every ok, and «could not
+ *  hand the browser back: <the error>» for a stash_refused that did hand it back. → { handedBack, text, warn } (text '' when not handed
+ *  back: the page's own refusal words stand). No path, no value. */
+function handBackAnswerWords(r, tIn) {
+  const t = tOf(tIn);
+  if (r && (r.code === 'stash_refused' || (r.ok === true && r.stashed === false))) return { handedBack: true, warn: true, text: t('Handed back, but your note could not be queued for the agent\'s next turn (VibeSpace could not write it) — take the browser over again to hand it back anew') };
+  if (!r || r.error || r.ok === false) return { handedBack: false, warn: false, text: '' };
+  if (r.durable === false) return { handedBack: true, warn: true, text: t('Handed back — your note is not on disk yet: if VibeSpace restarts before the agent\'s next turn, the agent will not read it') };
+  return { handedBack: true, warn: false, text: t('Handed back — the agent reads your note and the tabs with its next turn (nothing is sent now)') };
+}
 /** A FOREIGN front this view does NOT list (the bridge sends its state alone — no id, no name, no title): one general line. */
 function frontNoteText(tIn) {
   const t = tOf(tIn);
@@ -725,5 +737,5 @@ module.exports = {
   FRONT_READS_MAX, FRONT_STATES, frontVerdict, frontText, // B-e674 unit 1: the front of this view's window, said
   FRONT_READ_MS, frontNoteText, // B-e674 unit 2: one front read's bound; the unlisted foreign front's general line
   madeText, // B-e674 unit 2: the birth stamp in words
-  takeoverStays, handbackStayText, // B-e674 follow (r694 (3)): the handback says what stays
+  takeoverStays, handbackStayText, handBackAnswerWords, // B-e674 follow (r694 (3)): the handback says what stays
 };
