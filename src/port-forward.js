@@ -272,7 +272,7 @@ class PortForwardManager {
       W.dirty(this.file, { name: 'port-forwards.write', produce: () => {
         const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
       } });
-      if (now && now.deadline != null) { W.flushSync([this.file], { waitedBy: 'port-forwards.json: a machine removed (its bound shared, r5156)', deadline: now.deadline }); return; }
+      if (now && now.bound) { const b = now.bound, dl = b.deadline != null ? b.deadline : (b.deadline = W.flushDeadline()); W.flushSync([this.file], { waitedBy: 'port-forwards.json: a machine removed (its bound shared, r5156)', deadline: dl }); return; }   // r5225: taken from THIS store's writer at its landing when still empty
       if (now) W.flushSync([this.file], { waitedBy: 'port-forwards.json: a forward changed by a person (a Ports press, a machine removed) or a service' });
     } catch (e) { this.log('port-forward persist: ' + e.message); }
   }
@@ -912,8 +912,10 @@ class PortForwardManager {
    *  route replies (a hub killed right after never comes back with that machine's forwards) — as every Ports press, a landing that
    *  fails or meets the flush's bound is the writer's own line and stays owed. While the list is HELD (unread) the removal waits for the
    *  lift, and the unpair at a LIFT names no side — no press there: the writer's crash window, the family's accepted cost */
-  onMachineUnpaired(hostId, { now = false, deadline = null } = {}) {
-    if (now && deadline != null) now = { deadline };   // r5156 (S1): the removal's ONE bound, shared with machine-mounts.json's landing
+  onMachineUnpaired(hostId, { now = false, bound = null } = {}) {
+    // r5156 / r5225: the removal's ONE bound rides `now` into _persist as { bound } — so its two lines test-port-forward's red controls
+    // anchor (the unpair's save, the now road's flush) stay as they are; started by the removal's FIRST landing, reused by the second
+    if (now && bound) now = { bound };
     if (this._hold.held()) { (this._unpairedHeld = this._unpairedHeld || new Set()).add(hostId); return; }   // r3174: held — its forwards go at the lift
     for (const rec of this._state.forwards.filter((r) => r.hostId === hostId)) {
       // unpublish FIRST — dropping the record without frpUnpublish left the

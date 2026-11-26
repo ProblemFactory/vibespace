@@ -358,7 +358,7 @@ class MachineMounts {
   _refuseIfUnread(what) {
     if (this._unread) throw Object.assign(new Error(`${what}: ${this.unreadWords()}`), { code: 'mounts-unread', status: 503 });
   }
-  _save({ now = false, why = 'a mount change', deadline = null } = {}) {
+  _save({ now = false, why = 'a mount change', bound = null } = {}) {
     if (!this._hold.writable('a machine-mounts.json write')) return;   // (said once a hold, by the helper)
     // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): machine-mounts.json goes through THE STORE WRITER (src/store-writer.js:
     // its thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the
@@ -375,7 +375,10 @@ class MachineMounts {
       W.dirty(this._file, { name: 'machine-mounts.write', mode: 0o600, produce: () => {
         const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
       } });
-      if (now) W.flushSync([this._file], { waitedBy: `machine-mounts.json: ${why}`, ...(deadline != null ? { deadline } : {}) });   // r5156: a shared bound when its caller hands one
+      // r5225: a removal's ONE bound starts at its FIRST landing (taken here, from THIS store's own writer, when the bound is still
+      // empty) and is reused by the second — never before an awaited teardown, which waits off the loop and holds nothing
+      const dl = now && bound ? (bound.deadline != null ? bound.deadline : (bound.deadline = W.flushDeadline())) : null;
+      if (now) W.flushSync([this._file], { waitedBy: `machine-mounts.json: ${why}`, ...(dl != null ? { deadline: dl } : {}) });
     } catch (e) { this.log(`machine-mounts.json: its write could not be asked (${(e && e.code) || (e && e.message) || 'an error'})`); }
   }
   _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
@@ -1507,15 +1510,15 @@ class MachineMounts {
   /** A machine was removed — its mount records go (each unmount rides the writer). r5156 (主开发): a machine's REMOVAL is a PERSON's act —
    *  its one caller (unpairDialDevice, src/server/dial-pairing.js — reached only through removeHost) passes `now`: once its records are
    *  gone, ONE synchronous landing puts machine-mounts.json on disk (a hub killed right after never comes back with that machine's
-   *  mounts), as port-forwards.json since r5036. `deadline` (the writer's flushDeadline): the removal's ONE bound, shared with
-   *  port-forwards.json's landing. A landing that fails or meets the bound is the writer's own line and stays owed (earlier writes of
+   *  mounts), as port-forwards.json since r5036. `bound` ({} from the caller): the removal's ONE bound, STARTED by its first landing
+   *  (r5225: after this awaited teardown, never before it) and shared with port-forwards.json's. A landing that fails or meets the bound is the writer's own line and stays owed (earlier writes of
    *  its records may land on the writer's own turns while a push's remote unmount is awaited: one LANDING asked, not one write) */
-  async onMachineUnpaired(hostId, { now = false, deadline = null } = {}) {
+  async onMachineUnpaired(hostId, { now = false, bound = null } = {}) {
     if (!hostId) return;
     for (const rec of [...this._state.mounts.filter((m) => m.hostId === hostId)]) {
       try { await this.unmount(rec.id); } catch { }
     }
-    if (now) this._save({ now: true, why: 'a machine removed', deadline });   // r5156: ONE landing for all its records (a person's removal), its bound shared
+    if (now) this._save({ now: true, why: 'a machine removed', bound });   // r5156: ONE landing for all its records (a person's removal), its bound shared
     // B-f276 family unit 2 (r3081): a PERSON removed this machine — its reverse-mount tokens with no record here (minted before a torn
     // lift: unknown to the sweep) are revoked now, by their owner (the un-pairing asked revokeHeldFor first: the token store reads)
     if (this._state.tornAt) {
