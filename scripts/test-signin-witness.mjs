@@ -223,7 +223,7 @@ console.log('⑦ a throwaway hub (law 4): judged by THE ONE TEST (src/server/thr
   const u = start(it, { throwaway: 'unsaid' }).v;
   ok(!u.held && SW.startFactsSync({ dataDir: it.data, home: it.home, uid: UID, env: {}, mountinfo: '', varTmp: path.join(it.base, 'vartmp'), xdgRuntimeDir: '' }).place.dir === null, 'UNSAID is throwaway: a caller that hands no answer touches none of the person\'s place');
   const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
-  ok(/const signinWitness = require\('\.\/src\/server\/hub-port\.js'\)\.piped\(\) \? null : \{ env: process\.env, throwaway: throwawayRoot \? 'throwaway' : false \};/.test(srv) && /PipedAuth : Auth\)\(path\.join\(__dirname, 'data'\), \{ clerk: clerkAuth, witness: signinWitness \}\)/.test(srv) && /const throwawayRoot = require\('\.\/src\/server\/throwaway-root\.js'\)\.throwaway\(__dirname\);/.test(srv), 'server.js hands the PLAIN form\'s Auth THE ONE TEST\'s answer for its own root (decided at the boot\'s first act); the piped form\'s hub gets none (主开发 r2341)');
+  ok(/const signinWitness = require\('\.\/src\/server\/hub-port\.js'\)\.piped\(\) \? null : \{ env: process\.env, throwaway: throwawayRoot \? 'throwaway' : false \};/.test(srv) && /PipedAuth : Auth\)\(path\.join\(__dirname, 'data'\), \{ clerk: clerkAuth, witness: signinWitness, todos: \(\) => userTodos \}\)/.test(srv) && /const throwawayRoot = require\('\.\/src\/server\/throwaway-root\.js'\)\.throwaway\(__dirname\);/.test(srv), 'server.js hands the PLAIN form\'s Auth THE ONE TEST\'s answer for its own root (decided at the boot\'s first act); the piped form\'s hub gets none (主开发 r2341)');
 }
 
 console.log('⑧ the declaration (opt-in): VIBESPACE_SIGNIN=required');
@@ -586,7 +586,7 @@ console.log('⑯ H1 (主开发 r2780 (2), r2869, r2901, r3030): a network home k
   const l2b = start(L2b.it, { mountinfo: L2b.mi, ...quick }, Auth, 'env-pw-0010').v, pl2b = homeCopy(L2b); l2b.attachWitnessPool(pl2b); await l2b._netWrites;
   const ops2b = pl2b.calls.map((c) => c.op).join(',');
   ok(!l2b.held && l2b.verifyPassword('env-pw-0010') && ops2b === 'netRemove,netWrite' && !fs.existsSync(m2b), `…with the boot's own sign-in and the pool late: the old copy removed, then THAT sign-in's copy written, nothing read (${ops2b})`);
-  const RL = authCut('    const seen = atStart && this._startNewUsed ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;\n', '    const seen = atStart && this._net && this._net.done ? this._net.answer : null;\n', 'late-start-new-reads');
+  const RL = authCut('    const madeUp = atStart && this._startNewUsed, seen = madeUp ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;\n', '    const madeUp = false, seen = atStart && this._net && this._net.done ? this._net.answer : null;\n', 'late-start-new-reads');
   const L2r = await netIt('h1-late-start-new-red'); fs.writeFileSync(path.join(L2r.it.data, SW.START_NEW), '');
   const l2r = start(L2r.it, { mountinfo: L2r.mi, ...quick }, RL).v, pl2r = homeCopy(L2r); l2r.attachWitnessPool(pl2r); await l2r._netWrites;
   ok(pl2r.calls.some((c) => c.op === 'netRead'), `RED CONTROL: the start-time write's read kept at a start-new start — the pool handed late reads the home (${pl2r.calls.map((c) => c.op).join(',')})`);

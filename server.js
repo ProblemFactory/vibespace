@@ -115,7 +115,7 @@ const { Auth } = require('./src/auth');
 const { ClerkAuth } = require('./src/clerk-auth');
 const clerkAuth = new ClerkAuth();
 const signinWitness = require('./src/server/hub-port.js').piped() ? null : { env: process.env, throwaway: throwawayRoot ? 'throwaway' : false };   // B-dc3f (1): the PLAIN form's witness (主开发 r2341) — the piped form's hub opens no file
-const auth = new (require('./src/server/hub-port.js').piped() ? require('./src/server/piped-auth.js').PipedAuth : Auth)(path.join(__dirname, 'data'), { clerk: clerkAuth, witness: signinWitness });   // B3b-1: piped ⇒ the interface holds the sign-in table, this hub opens no file
+const auth = new (require('./src/server/hub-port.js').piped() ? require('./src/server/piped-auth.js').PipedAuth : Auth)(path.join(__dirname, 'data'), { clerk: clerkAuth, witness: signinWitness, todos: () => userTodos });   // B3b-1: piped ⇒ the interface holds the sign-in table, this hub opens no file
 {
   const { generated } = auth.ensurePassword({ generateIfMissing: process.env.VIBESPACE_GENERATE_PASSWORD === '1' });
   if (generated) {

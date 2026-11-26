@@ -5674,6 +5674,11 @@ export default {
   "scopes {list}": "スコープ {list}",
   "This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.": "このアカウントのトークンはこのクライアントで発行されました。クライアントを切り替えるとサインインし直しになります — 保存すると「再認可」が開きます。",
   "Sign-in": "サインイン",
+  "Sign-in record": "サインイン記録",   // B-dc3f (3): the network home's witness notice (src/auth.js) — its For-you head
+  "The copy of the sign-in record on your network home folder could not be updated": "ネットワークのホームフォルダにあるサインイン記録のコピーを更新できませんでした",   // B-dc3f (3): the network home's witness notice (src/auth.js)
+  "People still sign in on this machine as before. The copy on the home folder is tried again at the next start or password change; check that the home folder is mounted and writable.": "このマシンでのサインインはこれまでどおりです。ホームフォルダのコピーは次回の起動時またはパスワード変更時に再試行されます。ホームフォルダがマウントされ、書き込み可能か確認してください。",   // B-dc3f (3): the network home's witness notice (src/auth.js)
+  "The copy of the sign-in record on your network home folder is waiting": "ネットワークのホームフォルダにあるサインイン記録のコピーは待機中です",   // B-dc3f (3): the network home's witness notice (src/auth.js)
+  "Earlier requests to the home folder have not finished, so its copy is not updated yet. People still sign in on this machine as before; the copy is updated when the home folder answers. Check that the home folder is mounted.": "ホームフォルダへの以前の要求がまだ終わっていないため、コピーはまだ更新されていません。このマシンでのサインインはこれまでどおりです。ホームフォルダが応答するとコピーが更新されます。ホームフォルダがマウントされているか確認してください。",   // B-dc3f (3): the network home's witness notice (src/auth.js)
   // lane ui-controls-and-bugs pick 2 — the billing menu says what it is
   "This session’s billing account": "このセッションの課金アカウント",
   "it connects to the vendor’s servers (measured)": "ベンダーのサーバーに接続します（実測）",

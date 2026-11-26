@@ -1380,6 +1380,7 @@ const FORYOU_HEADS = Object.freeze({
   'File watches': i18nKey('File watches'), // lane bl-loop-b (the 2026-11-19 hotfix): the machine's limit of file watches reached (src/watch-door.js)
   'Agent messages': i18nKey('Agent messages'),   // B-e3fe follow-up: the unreadable record of waiting messages
   'Background Work': i18nKey('Background Work'),   // B-2566's remainder: the «results wait for a machine» item (src/server/jobs-wiring.js noticeMachineAway)
+  'Sign-in record': i18nKey('Sign-in record'),   // B-dc3f (3): the sign-in record's copy on the network home folder refused or waiting (src/auth.js _noticeWitness)
 });
 /** The words of a filed head, in the reader's language (an unknown head = itself). */
 function headWordOf(name, t) { return typeof name === 'string' && Object.prototype.hasOwnProperty.call(FORYOU_HEADS, name) ? t(FORYOU_HEADS[name]) : name; }
