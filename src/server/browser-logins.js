@@ -904,7 +904,10 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
       ? BL.ownerUpdatedRecord({ ...baseEx, username: str(username).trim(), ...(notes ? { notes } : {}) }, password, { ...(totpName ? { totpName } : {}), now: now() })
       : BL.newRecord({ origin: o, username, password, totpName, notes, source: 'owner', now: now(), rev: nextFloorRev(n), entryGen: BL.mintEntryGen(randomBytes) });
     const prevPendingItemId = ex.rec && ex.rec.pending ? ex.rec.pending.itemId : null;
-    const w = writeEntry(n, rec, { actor: null, owner: null });
+    // B-ab6c's round (主开发 r5200): an UPDATE of a login that is here changes its VALUE and nothing of WHOSE it is — its owner, its
+    // actor and its grants stand (writeEntry keeps the entry's meta), so a conversation that saved it itself still fills it after the
+    // person typed the new password it asked for; a NEW login is the person's own (no owner)
+    const w = ex.rec ? writeEntry(n, rec) : writeEntry(n, rec, { actor: null, owner: null });
     if (!w.ok) return w;
     resolvePendingItemsForName(n, prevPendingItemId);
     try { vault.audit?.('vault-web-login-saved', { why: n, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
@@ -922,7 +925,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     if (rev !== undefined && rev !== null && Number(rev) !== o.rec.rev) return named('card_changed', 'that login changed after it was shown — nothing was swapped; read it again');
     const rec = BL.previousSwappedRecord(o.rec, { now: now() });
     if (!rec) return named('login_no_previous', 'this login keeps no previous password');
-    const w = writeEntry(name, rec, { actor: null, owner: null });
+    const w = writeEntry(name, rec);   // r5200: the swap changes the value only — whose the login is (owner, actor, grants) stands
     if (!w.ok) return w;
     try { vault.audit?.('vault-web-login-previous-used', { why: name, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name, rev: rec.rev };

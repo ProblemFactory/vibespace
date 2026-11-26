@@ -188,7 +188,7 @@ list` shows an entry you may use as yours «with no card for <hosts>».
 ## A stored website login that no longer signs in — `request "<what>" --kind login --update <login>`
 
 When a site no longer accepts the password VibeSpace fills for a login you may use, ask the user for its new one — name the login
-by the reference you fill with:
+by the reference you fill with (`web-login:<origin>#<user>`, or the `<site>#<user>` of your `--vault`: the same login):
 
     vibespace-vault request "the shop's new password" --purpose "the shop says the password is wrong" --kind login --update web-login:https://shop.example.com#alice
 
@@ -197,7 +197,9 @@ by the reference you fill with:
 - **Its two answers.** The user types the new password (it replaces the stored one; the old one is kept as the previous one),
   or presses «It still works» — then look for another reason the sign-in failed, and do not ask again.
 - **Only a login you may use.** Any other name — one you may not use, or none at all — answers ONE sentence: «no web login you may
-  use by that name». One open ask a login; after a refusal the same login is quiet for 10 minutes; a vault lock withdraws it.
+  use by that name». One open ask a login: when another conversation already asked for it, `login_update_open` — try the login
+  again after the user answers. After a refusal the same login is quiet for 10 minutes; a vault lock withdraws it.
+- **It stays yours.** The new password changes the login's value only: a login you saved yourself is still yours to fill.
 - **Your next turn** reads UPDATED (sign in again with `--vault <login>/password`) or REFUSED — never the password.
 
 ## A website login you do not have — `request "<what>" --kind login --host <site>`

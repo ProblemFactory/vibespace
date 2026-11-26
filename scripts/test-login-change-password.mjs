@@ -9,6 +9,8 @@
 //   ② «Use the previous password»: the person's swap (current ⇄ previous, rev+1), pressed again it is undone; a login with none is
 //     refused by name (login_no_previous); a row shown before a change is refused (card_changed); one audit line, never a value
 //   ③ the routes and the card carry `expect`; the swap's route is a person's (the press verdict)
+//   ④ (主开发 r5200, the round's must) WHOSE a login is stands: a login a conversation saved itself (its OWNER: it fills with no grant
+//     row) stays its own through Change password… / the update card, the swap and the Add door's update; a new one is nobody's
 // REDs: copies of the door with each new line planted back to the release's (scripts/mutant-copy.mjs, anchored: a gone anchor fails
 // by name). The REAL vault engine over a scratch data folder, the REAL grants store in memory, a stand-in of For you. No vendor call.
 // Run: node scripts/test-login-change-password.mjs
@@ -120,6 +122,35 @@ console.log('— REDs: the release\'s lines planted back in copies');
   W3.logins.addOwn({ origin: SITE, username: USER, password: P2, expect: 'update' }, { who: 'owner' });
   W3.logins.usePrevious(NAME, { who: 'owner' });
   ok(W3.rec().current.password === P2, 'RED (a swap that keeps the current one): «Use the previous password» changes nothing a person typed wrong');
+}
+
+console.log('— ④ WHOSE a login is stands through an update and a swap (主开发 r5200)');
+const ownVia = (Wx, name = NAME, conv = 'conv-own') => { const r = Wx.logins.mayUseFor({ conversationKeys: [conv] }).find((x) => x.resource === name); return r && r.ok ? r.via : null; };
+const ownRoad = async (Lmod) => {
+  const W = await world(Lmod); const P1 = pw('One'), P2 = pw('Two');
+  const s0 = W.logins.addAgent({ origin: SITE, username: USER, password: P1 }, { owner: 'conv-own', actor: 'conv-own' });   // the agent's OWN save (owner = its conversation)
+  const o0 = ownVia(W);
+  const u = W.logins.addOwn({ origin: SITE, username: USER, password: P2, expect: 'update' }, { who: 'owner' });   // Change password… / the update card
+  const o1 = ownVia(W);
+  const sw = W.logins.usePrevious(NAME, { rev: W.rec().rev, who: 'owner' });
+  const o2 = ownVia(W);
+  const plain = W.logins.addOwn({ origin: SITE, username: USER, password: P2 }, { who: 'owner' });   // the Add door's road (no expect) over it
+  const o3 = ownVia(W);
+  return { W, s0, u, sw, plain, o0, o1, o2, o3, P1 };
+};
+{
+  const r = await ownRoad(Lm);
+  ok(r.s0.ok && r.o0 === 'own' && r.u.ok && r.o1 === 'own' && r.sw.ok && r.o2 === 'own' && r.plain.ok && r.o3 === 'own',
+    'a login a conversation SAVED ITSELF stays its own — it fills as its OWNER, with no grant row — through the update, «Use the previous password» and the Add door\'s update', { o0: r.o0, o1: r.o1, o2: r.o2, o3: r.o3 });
+  const BOB = BL.entryName('https://other.example.test', 'bob');
+  const fresh = r.W.logins.addOwn({ origin: 'https://other.example.test', username: 'bob', password: r.P1, expect: 'new' }, { who: 'owner' });
+  ok(!!fresh.ok && ownVia(r.W, BOB) === null, '…and a NEW login a person adds is nobody\'s to fill until it is granted (no owner)');
+  const UPD_LINE = '    const w = ex.rec ? writeEntry(n, rec) : writeEntry(n, rec, { actor: null, owner: null });';
+  const rU = await ownRoad(require(M.write(LG_REL, anchored(LGSRC, UPD_LINE, '    const w = writeEntry(n, rec, { actor: null, owner: null });', 'an update that clears the owner'), 'update-clears-owner')));   // stale-pins: kept — the RED control plants the release's line back
+  ok(rU.o0 === 'own' && rU.o1 === null, 'RED (today\'s line before the round: the update hands the writer an EMPTY owner): after the person typed the password it asked for, the conversation may no longer fill its own login', { o0: rU.o0, o1: rU.o1 });
+  const SWAP_W = '    const w = writeEntry(name, rec);   // r5200: the swap changes the value only';
+  const rS = await ownRoad(require(M.write(LG_REL, anchored(LGSRC, SWAP_W, '    const w = writeEntry(name, rec, { actor: null, owner: null });   //', 'a swap that clears the owner'), 'swap-clears-owner')));
+  ok(rS.o1 === 'own' && rS.o2 === null, 'RED (a swap that clears the owner): «Use the previous password» takes the login away from the conversation that saved it', { o1: rS.o1, o2: rS.o2 });
 }
 
 console.log('— ③ the routes and the card carry what the form means');

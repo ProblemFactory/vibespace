@@ -272,6 +272,9 @@ console.log('④ the agent side has no unlock');
     'the link-token door answers a session token (vsst_) of a session on a paired machine only, and never unlocks / sets up / changes');
   const personDoors = [...routes.matchAll(/app\.post\('(\/api\/vault\/[^']+)', person\(/g)].map((m) => m[1]);
   ok(['setup', 'unlock', 'change', 'lock', 'idle', 'active'].every((d) => personDoors.includes('/api/vault/' + d)), `every person door is wrapped in person() (human_only + same-origin): ${personDoors.join(', ')}`);
+  // B-ab6c's round (主开发 r5200 should 4): a website login's PERSON doors (each noStoreL(person(…))) — its change's write and its swap among them
+  const loginPersonDoors = [...routes.matchAll(/app\.(?:post|delete)\('(\/api\/vault\/web-logins[^']*)', noStoreL\(person\(/g)].map((m) => m[1]);
+  ok(['/api/vault/web-logins', '/api/vault/web-logins/use-previous'].every((d) => loginPersonDoors.includes(d)), `a website login's write (Add, Change password…) and its swap («Use the previous password») are person doors: ${loginPersonDoors.join(', ')}`);
 }
 
 console.log('⑤ MUTANTS — each RED');

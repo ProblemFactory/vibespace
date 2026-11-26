@@ -557,7 +557,8 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take, who = (
     // B-ab6c: an UPDATE ask (`--update web-login:…`) names a login; whether THIS conversation may use it is read here, server-side
     const update = typeof b.update === 'string' && b.update.trim() ? b.update.trim() : undefined;
     let mayUse = null;
-    if (update) { try { mayUse = typeof loginMayUse === 'function' ? (await loginMayUse(caller, update)) === true : false; } catch { mayUse = false; } }
+    const updateName = update ? PW.loginUpdateNameOf(update) : null;   // r5200: the login by the fill's own parse — another spelling of it is the same login
+    if (updateName) { try { mayUse = typeof loginMayUse === 'function' ? (await loginMayUse(caller, updateName)) === true : false; } catch { mayUse = false; } }
     try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name, hosts: b.hosts, note: typeof b.note === 'string' ? b.note : undefined, update, mayUse }); }   // hosts: lane vault-use-grants (`--host`) · note: lane vault-entry-description (`--note`)
     catch (e) { return refusal(res, { code: 'unfiled' }); }
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });

@@ -137,7 +137,7 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
  *  labelled `fields` in order, the add door's `hint`, the two-step field's list (`otpList` — placed under the field's row;
  *  `otpPick` its handle), `values()` (the body the add door posts) and `field()`. `addCode` = the caller's «Two-step code…»
  *  door, which the list offers when the vault holds no code. */
-export function loginFields({ site = '', fixed = false, addCode = null, user: userName = '', fixedUser = false, change = false, totpName = '' } = {}) {   // B-ab6c: `fixedUser` + `change` — Change password… and the update card
+export function loginFields({ site = '', fixed = false, addCode = null, user: userName = '', fixedUser = false, change = false } = {}) {   // B-ab6c: `fixedUser` + `change` — Change password… and the update card
   const field = (label, control) => { const l = el('label', 'vault-secret-field'); l.append(el('span', 'vault-secret-label', label), control); return l; };
   const input = (cls, type, ph) => { const i = el('input', `vault-pw ${cls}`); i.type = type; i.autocomplete = 'off'; i.spellcheck = false; i.placeholder = ph; return i; };
   const s = input('vault-login-site', 'text', t('The site — e.g. https://example.com'));
@@ -152,7 +152,6 @@ export function loginFields({ site = '', fixed = false, addCode = null, user: us
   // headed, a row per code BY NAME (the vault's own names — no record is unsealed to decorate a row: the owner's word,
   // 2026-11-17 20:36Z) — never the browser's native list, which every platform draws as its own
   // suggestion (src/lib/vault-otp-field.js)
-  if (totpName) otp.value = String(totpName);   // B-ab6c: the two-step code bound now, shown and changeable
   const otpPick = otpField(otp, { addCode });
   const hint = el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.'));
   const values = () => ({ origin: s.value.trim(), username: user.value.trim(), loginPassword: pw.value, ...(otp.value.trim() ? { totpName: otp.value.trim() } : {}) });
@@ -212,7 +211,8 @@ export function showLoginAddDialog({ refresh = () => {} } = {}) {
 }
 
 /** B-ab6c (the owner 2026-11-26: «现在修改已存网站密码的方式非常蠢»): Change password… — the row's own door. The add door's fields with
- *  the site AND the user name fixed and shown, ONE field for the new password, the two-step code as bound now (changeable); the save
+ *  the site AND the user name fixed and shown, ONE field for the new password, the two-step code as bound now in WORDS (r5200: no
+ *  field a person could empty and believe unbound — the row's own «Change…» / «Bind…» door changes it); the save
  *  is an UPDATE (expect 'update': the old password kept as previous, the grants and the binding untouched; a login gone meanwhile is
  *  refused, never created). It asks what the add door asks — an unlocked vault — and nothing more. */
 export function showLoginChangeDialog(entry, { refresh = () => {} } = {}) {
@@ -222,7 +222,9 @@ export function showLoginChangeDialog(entry, { refresh = () => {} } = {}) {
     dialogClass: 'vault-login-add-dialog vault-login-change-dialog', escapeToClose: true,
     unsaved: { isDirty: () => !!(f && f.pw.value), save: () => saveNow(), discard: () => { if (f) f.pw.value = ''; } }, kind: 'form' });
   if (raised) return null;
-  f = loginFields({ site, fixed: true, user, fixedUser: true, change: true, totpName: (entry && entry.totpName) || '', addCode: () => showTotpAddDialog({ refresh: (r) => { if (r && typeof r.name === 'string' && r.name) { f.otpPick.added(r.name); try { refresh(); } catch { } } } }) });
+  f = loginFields({ site, fixed: true, user, fixedUser: true, change: true });
+  const bound = String((entry && entry.totpName) || '');
+  const otpWords = el('div', 'vw-ak-hint vault-login-change-totp', bound ? t('Two-step code: {name}', { name: bound }) : t('Two-step code: none'));   // r5200: words, never a field
   const kept = el('div', 'vw-ak-hint vault-login-change-kept', t('The current password is kept as the previous one.'));
   const pend = entry && (entry.pending === 'change' || entry.pending === 'register') ? el('div', 'vw-desc-pending vault-login-change-pending', t('A generated password waits for your confirmation — saving this drops it.')) : null;
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
@@ -231,7 +233,7 @@ export function showLoginChangeDialog(entry, { refresh = () => {} } = {}) {
   const save = el('button', 'btn-create', t('Change password'));
   cancel.type = save.type = 'button';
   foot.append(cancel, save);
-  body.append(...f.fields, f.otpList, kept, ...(pend ? [pend] : []), err);
+  body.append(f.fields[0], f.fields[1], f.fields[2], otpWords, kept, ...(pend ? [pend] : []), err);
   dialog.append(foot);
   cancel.onclick = () => { f.pw.value = ''; close(); };
   save.onclick = saveNow = async () => {

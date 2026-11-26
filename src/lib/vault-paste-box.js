@@ -163,7 +163,7 @@ function loginUpdateBoxEl(item) {
   const row = mk('div', 'ut-secret-row');
   const save = btn(t('Change password'), 'ut-act ut-secret-save'), deny = btn(t('It still works'), 'ut-act ut-secret-deny');
   row.append(save, deny);
-  box.append(f.fields[0], f.fields[1], f.fields[2], f.fields[3], f.otpList, kept, f.hint, row, stateEl());
+  box.append(f.fields[0], f.fields[1], f.fields[2], kept, f.hint, row, stateEl());   // r5200: the new password only — the two-step binding is the row's own door (no field here to empty)
   applySecretBox(box);
   return box;
 }

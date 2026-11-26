@@ -70,6 +70,7 @@ const MORE_WORDS = Object.freeze({
   request_quiet: 'the user refused that a moment ago — do not ask again for 10 minutes; carry on without it',
   too_many_requests: `too many paste requests are waiting on the user (${P.LIMITS.openPerConversation} per conversation) — wait for their answers`,
   login_not_yours: 'no web login you may use by that name',   // B-ab6c: ONE sentence for every name this conversation may not use — nothing is learned of it
+  login_update_open: 'the user is already asked for the new password of that login — try it again after they answer',   // r5200 should 3: ONE open update ask a login, across conversations
   unfiled: 'the request could not be filed in the user\'s tray — nothing was asked',
   ask_unknown: 'that request is gone',
   ask_settled: 'that request was already answered',
@@ -89,7 +90,7 @@ const MORE_WORDS = Object.freeze({
   totp_no_door: 'this server keeps no two-step codes — nothing was asked',
 });
 const STATUS = Object.freeze({
-  unauthorized: 401, job_no_use: 403, 'todos-unread': 503, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409,
+  unauthorized: 401, job_no_use: 403, 'todos-unread': 503, request_quiet: 429, too_many_requests: 429, unfiled: 503, ask_unknown: 404, ask_settled: 409, login_update_open: 409,
   bad_answer: 400, vault_use_marks_unread: 503, vault_grants_unread: 503, vault_locked: 423, vault_not_set_up: 409, invalid_value: 400, store_failed: 500, value_required: 400, value_too_long: 400, entry_unknown_id: 404,
   entry_unknown: 404, words_not_here: 400, words_same: 409, words_pending: 409,   // lane vault-entry-description
   totp_no_door: 409, totp_bad_name: 400, totp_words: 400, totp_host: 400, exists: 409, bad_uri: 400, hotp_unsupported: 400, bad_seed: 400, seed_too_short: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400, name_required: 400, bad_way: 400,   // lane totp-request-card (the two-step add door's own codes)
@@ -232,6 +233,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     index();
     const conv = String(caller.conversationId), place = placeOf(v.target), target = publicTarget(v.target);
     for (const q of open.values()) if (q.conv === conv && q.place === place) return { ok: true, already: 'open', requestId: q.requestId, target };
+    if (v.target.kind === P.LOGIN_KIND && v.target.update) for (const q of open.values()) if (q.place === place) return named('login_update_open');   // r5200 should 3: ONE card a login — another conversation's open update ask of it stands for this one
     const qu = quiet.get(`${conv}\n${place}`);
     if (qu && qu > now()) return named('request_quiet', { until: new Date(qu).toISOString() });
     if ([...open.values()].filter((q) => q.conv === conv).length >= P.LIMITS.openPerConversation || open.size >= P.LIMITS.openHubWide) return named('too_many_requests');

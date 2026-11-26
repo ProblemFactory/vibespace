@@ -1419,6 +1419,44 @@ console.log('⑩b2 B-ab6c — AN UPDATE of a stored login the conversation may u
   MAY_USE = null;
 }
 
+console.log('⑩b3 B-ab6c\'s round (主开发 r5200) — WHOSE a login is stands through an update and a swap; the fill\'s spelling; one card a login; the person doors refuse a bearer');
+{
+  const SITE = 'https://own.example.test', USER = 'agentuser', NAME = `web-login:${SITE}#${USER}`;
+  const P1 = ['own', 'first', crypto.randomBytes(6).toString('hex')].join('-'), P2 = ['own', 'second', crypto.randomBytes(6).toString('hex')].join('-');
+  SENTINELS.push(P1, P2);
+  const recNow = () => BLR.recordOf(W.vault.secretGet(NAME).value.toString('utf8'));
+  // the hub's own lister over a conversation's facts (the wiring's loginMayUse composition, its facts by conversation id)
+  MAY_USE = (caller, name) => !!caller && W.logins.mayUseFor({ conversationKeys: [String(caller.conversationId)] }).some((x) => x && x.ok === true && x.resource === name);
+  const ownOf = (cid) => { const r = W.logins.mayUseFor({ conversationKeys: [cid] }).find((x) => x.resource === NAME); return r && r.ok ? r.via : null; };
+  const saved = W.logins.addAgent({ origin: SITE, username: USER, password: P1 }, { owner: 'cid-asker-1', actor: 'Lane asker' });   // the agent's OWN save (the fill's road: owner = its conversation)
+  const own0 = ownOf('cid-asker-1');
+  const a = await S.agent(W.SESSION_TOKEN, { words: 'the site says the password is wrong', purpose: 'renew the order', kind: 'login', update: NAME });
+  const st = await S.hit(`/api/vault/secret-requests/${a.json.requestId}/answer`, { body: { answer: 'store', loginPassword: P2 } });
+  const own1 = ownOf('cid-asker-1');
+  const sw = await S.hit('/api/vault/web-logins/use-previous', { body: { name: NAME, rev: recNow().rev } });
+  const own2 = ownOf('cid-asker-1');
+  ok(saved.ok && own0 === 'own' && a.status === 200 && st.json.outcome === 'stored' && own1 === 'own' && sw.status === 200 && sw.json.ok === true && own2 === 'own' && recNow().current.password === P1,
+    'THE MUST (r5200): a login an agent SAVED ITSELF stays its own through the person\'s update (the card it asked for: no grant tick, none needed) and through «Use the previous password» — it may fill it as its OWNER at each step', { saved, own0, st: st.json, own1, sw: sw.json, own2 });
+  // should 2: the name read by the fill's own parse — the spelling the agent fills with names the same login
+  const c = await S.agent(W.SESSION_TOKEN, { words: 'still refused', purpose: 'renew the order', kind: 'login', update: `own.example.test#${USER}` });
+  ok(c.status === 200 && c.json.target && c.json.target.update === NAME, 'another spelling of the login (the <site>#<user> it fills with) is the same login: filed for its canonical name, never «none you may use»', c.json);
+  // should 3: ONE card a login across conversations
+  const gr = W.logins.grant(NAME, 'this-account', 'session:cid-other-2', { by: 'user' });
+  const d = await S.agent(W.OTHER_TOKEN, { words: 'refused here too', purpose: 'p', kind: 'login', update: NAME });
+  const cards = openReqs(W).filter((i) => i.action.update === NAME);
+  ok(gr && gr.ok !== false && ownOf('cid-other-2') !== null && d.status === 409 && d.json.code === 'login_update_open' && /already asked for the new password of that login/.test(d.json.error) && cards.length === 1,
+    'two conversations that may use one login raise ONE card: the second ask is answered login_update_open, nothing filed', { d: d.json, cards: cards.length, other: ownOf('cid-other-2') });
+  await S.hit(`/api/vault/secret-requests/${c.json.requestId}/answer`, { body: { answer: 'deny' } });
+  // should 4: the person doors of a login refuse an agent's sign-in — the change's write and the swap (the bearer beside the page's own
+  // cookie, as ② sends it: without the cookie the auth layer refuses 401 before the person verdict is asked)
+  const before = recNow();
+  const bw = await S.hit('/api/vault/web-logins', { headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN }, body: { origin: SITE, username: USER, loginPassword: P2, expect: 'update' } });
+  const bs = await S.hit('/api/vault/web-logins/use-previous', { headers: { ...S.PAGE, authorization: 'Bearer ' + W.SESSION_TOKEN }, body: { name: NAME, rev: before.rev } });
+  ok(bw.status === 403 && bw.json.code === 'human_only' && bs.status === 403 && bs.json.code === 'human_only' && recNow().rev === before.rev && recNow().current.password === before.current.password,
+    'an agent\'s sign-in (its vsst_ bearer) at Change password…\'s write and at «Use the previous password» ⇒ 403 human_only, the login as it was', { bw: bw.json, bs: bs.json });
+  MAY_USE = null;
+}
+
 console.log('⑩d A TWO-STEP CODE — one ask, one card with the two-step dialog\'s own fields, one totp entry (lane totp-request-card)');
 {
   const TT = require(path.join(REPO, 'src/totp.js'));

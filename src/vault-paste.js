@@ -220,6 +220,18 @@ function targetOf({ into = null, kind = null, name = null, words = '', hosts = n
   return { ok: true, target: { kind: 'entry', entryKind: k, label: l.text, hosts: hs || [] } };
 }
 
+/** B-ab6c's round (主开发 r5200 should 2): the login an `--update` names, read by THE FILL's own parse (BL.parseVaultFillSpec — the
+ *  store's entryName at its end), so every spelling the agent fills with (web-login:<origin>#<user>, <site>#<user>, with or
+ *  without its /field) names the same login: its canonical entry name, or null. The may-use read and the card both take this name. */
+function loginUpdateNameOf(raw) {
+  const nm = String(raw == null ? '' : raw).trim();
+  if (!nm) return null;
+  for (const spec of [nm, `${nm}/password`]) {
+    const ps = BL.parseVaultFillSpec(spec);
+    if (ps && ps.ok && !ps.isNew && ps.name && BL.parseName(ps.name)) return ps.name;
+  }
+  return null;
+}
 /** lane login-request-card: A WEBSITE LOGIN's target — the ONE site it is typed on, by THE add door's rule (BL.originOf: scheme
  *  + host + port as the fill compares them, a non-ASCII host in its punycode form; BL.secureOrigin: https, or plain http on this
  *  machine's localhost only). A web-login is named by its site and the user the owner types (the registry's `words` is NONE) —
@@ -230,7 +242,7 @@ function loginTargetOf({ name = null, hosts = null, update = null } = {}) {
   // fills with; the site and the user come from that name (a --host beside it must be the same site). Whether this conversation may
   // use it is the DOOR's question (its grant rows), never this rule's.
   if (update != null && String(update).trim() !== '') {
-    const nm = String(update).trim(), pn = BL.parseName(nm);
+    const nm = loginUpdateNameOf(update), pn = nm ? BL.parseName(nm) : null;
     if (!pn) return refuse('login_update_name');
     const hl = (Array.isArray(hosts) ? hosts : String(hosts == null ? '' : hosts).split(/[\s,]+/)).map((h) => String(h == null ? '' : h).trim()).filter(Boolean);
     if (hl.length && (hl.length > 1 || BL.originOf(hl[0]) !== pn.origin)) return refuse('login_update_site');
@@ -590,6 +602,6 @@ module.exports = {
   ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
   WORDS_TYPE, PROPOSAL_ID_RE, wordsOf, withNote, wordsCardOf, proposalOfItem, wordsReceiptText, agentEntryWords, pendingWords, sharedNoteOf, privateNoteOf,   // lane vault-entry-description
-  LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf, loginOriginOf,   // lane login-request-card
+  LOGIN_KIND, LOGIN_USE, siteWords, loginAnswerOf, loginUserOf, loginOriginOf, loginUpdateNameOf,   // lane login-request-card · B-ab6c
   TOTP_KIND, TOTP_USE,   // lane totp-request-card
 };
