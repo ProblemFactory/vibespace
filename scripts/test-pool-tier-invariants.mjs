@@ -282,12 +282,12 @@ const heldOnly = (mod) => {
   const nP = heldOnly(P), nH = heldOnly(holds);
   ck(`the starts on a held paying member: green at this tree (${nP} failing checks)`, nP === 0);
   ck(`RED: the no-data hold standing on a start too turns them red (${nH} failing checks)`, nH > 0); }
-// THE PIN (r4986): the engine's chooser asks decideStart exactly as this leg does — the start's family, its hint, the default's staleness,
+// THE PIN (r4986; r5067: the pin road too): the engine's chooser asks decideStart exactly as this leg does — the start's family, its hint, the default's staleness,
 // the bare reading, hot: true, no `placing` of its own, and no decision of its own beside it
 { const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
   const i = eng.indexOf('\nfunction poolChooserForModel('), j = eng.indexOf('\nfunction ', i + 10), body = i < 0 ? '' : eng.slice(i, j < 0 ? undefined : j);
   const call = (body.match(/const chooseNow = \(\) => decideStart\(\{[^\n]*\}\);/) || [''])[0];
-  ck('THE PIN: the chooser\'s decision is decideStart\'s, called as this leg calls it (family, hint, stale default, bare reading, hot: true, no placing of its own), no decidePoolSwitch beside it', typeof P.decideStart === 'function' && /decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(call) && /hot: true/.test(call) && !/placing:/.test(call) && !/decidePoolSwitch\(/.test(body)); }
+  ck('THE PIN: the chooser\'s decision is decideStart\'s, called as this leg calls it (family, hint, stale default, bare reading, hot: true, no placing of its own), and the pin road asks it too (r5067): no decidePoolSwitch or decidePinnedPlacement of the chooser\'s own', typeof P.decideStart === 'function' && /decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(call) && /hot: true/.test(call) && !/placing:/.test(call) && !/decidePoolSwitch\(/.test(body) && !/decidePinnedPlacement\(/.test(body) && /decideStart\(\{ family: fam, hinted, baseReadCache: base, pin, currentId: cur,/.test(body)); }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 4 : 3, label: 'tier-invariants: ' })) ck(r.name, r.pass);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

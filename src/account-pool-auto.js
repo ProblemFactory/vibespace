@@ -547,7 +547,7 @@ function poolTiers({ creditsIds = null, payingIds = null, overageIds = null } = 
 }
 
 /**
- * decideStart({family, hinted, defaultStale, baseReadCache, ...decidePoolSwitch's own args}) — THE START's ONE ENTRY (B-87fd item (1),
+ * decideStart({family, hinted, defaultStale, baseReadCache, pin, ...decidePoolSwitch's own args}) — THE START's ONE ENTRY (B-87fd item (1),
  * 主开发 r4986: A RESUME IS A START). The engine's chooser (src/server/usage-pool-engine.js poolChooserForModel) asks it for EVERY start it
  * makes — a new conversation, a resume by hand, each conversation of a resume-all — and test-pool-tier-invariants drives this same entry
  * for every kind of start. With nobody paying on the default it is the release's own call: a start with no model family (and a
@@ -555,10 +555,15 @@ function poolTiers({ creditsIds = null, payingIds = null, overageIds = null } = 
  * hinted one is a guess: no spare-lane placing on it). On a PAYING default the placing law binds every start (`starting`): a cold spawn
  * has no turn to cut, so the settle bar (a bar for MOVES) gives it no reason to bill. A guessed or unknown family is judged FAIL
  * CLOSED: on the unprojected reading (`baseReadCache`, every bucket the guess could mean), no proving spawn on a guess; when no member
- * can serve that way, the default stands. → the decision, or null (the default).
+ * can serve that way, the default stands. THE PIN ROAD (主开发 r5067): a start that carries a `pin` is the pinned placement's (explicit:
+ * a spawn has no warm or settle bar) — a pin that CAN serve is honoured as before, whatever it costs (the person's own choice); a pin
+ * that cannot serve is no pin for the placing: on a paying default the pinned placement's automatic rules carry the start's mark
+ * (`starting`, a guess judged fail closed on the bare reading) and keep `pinned` (never a spare lane); where the default does not pay,
+ * they are the release's own. → the decision, or null (the default).
  */
-function decideStart({ family = null, hinted = false, defaultStale = false, baseReadCache = null, ...args } = {}) {
+function decideStart({ family = null, hinted = false, defaultStale = false, baseReadCache = null, pin = null, ...args } = {}) {
   const pays = poolTiers({ creditsIds: args.creditsIds, payingIds: args.payingIds, overageIds: args.overageIds }).tierOf(args.currentId) === TIER_PAYING;
+  if (pin) return decidePinnedPlacement({ ...args, pin, explicit: true, ...(pays ? { starting: true, ...(!family || hinted ? { autoReadCache: baseReadCache || args.readCache } : {}) } : {}) });
   if (!family && !defaultStale && !pays) return null;
   if (pays && (!family || hinted)) return decidePoolSwitch({ ...args, readCache: baseReadCache || args.readCache, proving: null, placing: false, starting: true });
   return decidePoolSwitch({ ...args, placing: !hinted, starting: pays });
