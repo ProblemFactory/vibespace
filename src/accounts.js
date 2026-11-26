@@ -1961,7 +1961,7 @@ class AccountManager {
           // (q-055 M2) never the default of ANOTHER provider: the default when it is the deleted member's provider, else that
           // provider's first live member (the engine re-decides it within its provider next pass), else UNPLACED
           const target = chosen || (def && sameProv(def) ? def : null) || (aliveSame[0] ? aliveSame[0].id : null);
-          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch { } }   // B-e381: the member's OWN harness folder
+          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch (e) { console.warn(`[pool] a conversation's link could not move to its member: that member's sign-in cannot be read here (${(e && e.code) || 'refused by its harness'}) — the link is dropped`); } }   // B-e381: the member's OWN harness folder; the reason said, no account named
           if (signIn) {
             require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);
             this._noteSlot({ sessionId: l.sessKey, poolId: pool.id, from: removedId, to: target, why: 'member-removed' });

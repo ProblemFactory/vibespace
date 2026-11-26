@@ -1611,6 +1611,11 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
 
 fs.rmSync(dataDir, { recursive: true, force: true });
 
+// B-e381's scenes make their stand-in homes through e381Tmp: each folder is removed when the process exits (its stores may
+// still settle until then — never a folder taken from under a store mid-run)
+const e381Dirs = [];
+const e381Tmp = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); e381Dirs.push(d); return d; };
+process.on('exit', () => { for (const d of e381Dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
 // ── B-e381 (主开发 r4531 / r4614): A POOL's MEMBER IS JUDGED BY ITS OWN HARNESS ──
 // The per-session link's writers read a member by ITS harness's creds row (its reader, its folder, its sign-in file: _memberSignIn).
 // The per-session writer then decides by the POOL's harness: a member of another harness is refused by name, and a per-session link is
@@ -1627,7 +1632,7 @@ console.log('\nB-e381 a pool member is read by its own harness; a per-session li
     GATE + READ_NEW, "    if (!this.readSubCreds(memberId).loggedIn) throw new Error('pool member not logged in: ' + target.name);\n", "B-e381: the release's member read (the Claude reader)"),   // stale-pins: kept (the red copy: the release's own text, planted)
     "    require('./account-material.js').repointPoolSymlink(link, signIn.dir, signIn.bump);\n",
     "    require('./account-material.js').repointPoolSymlink(link, this.subDir(memberId), this.subCredsPath(memberId));\n", "B-e381: the release's link target (Claude's folder and file)"),   // stale-pins: kept (the red copy: the release's own text, planted)
-    "          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch { } }   // B-e381: the member's OWN harness folder\n          if (signIn) {\n            require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);\n",
+    "          let signIn = null; if (target) { try { signIn = this._memberSignIn(this.get(target)); } catch (e) { console.warn(`[pool] a conversation's link could not move to its member: that member's sign-in cannot be read here (${(e && e.code) || 'refused by its harness'}) — the link is dropped`); } }   // B-e381: the member's OWN harness folder; the reason said, no account named\n          if (signIn) {\n            require('./account-material.js').repointPoolSymlink(l.path, signIn.dir, signIn.bump);\n",
     "          if (target) {\n            require('./account-material.js').repointPoolSymlink(l.path, this.subDir(target), this.subCredsPath(target));\n", "B-e381: the release's heal re-point (Claude's folder and file)");   // stale-pins: kept (the red copy: the release's own text, planted)
   const U1 = anchored(SRC, GATE, '', "B-e381: the first unit's writer (ace444d3b), no harness gate");
   const relF = copyPath('src/accounts.js', 'e381-release'); writeCopy(relF, REL);
@@ -1635,7 +1640,7 @@ console.log('\nB-e381 a pool member is read by its own harness; a per-session li
   const RelAM = require(relF).AccountManager, U1AM = require(u1F).AccountManager;
   // A STORE with a Codex pool (two signed-in members, one signed out), a Claude pool, and one Codex subscription for the Claude pool
   const scene = (AM, tag) => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxpool-e381-' + tag + '-'));
+    const d = e381Tmp('vs-cxpool-e381-' + tag + '-');
     const m = new AM({ dataDir: d });
     const cx = (name, signedIn) => { const { id } = m.createCodexSubscription({ name }); if (signedIn) fs.writeFileSync(path.join(m.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-' + name } })); return id; };
     const cl = (name) => { const a = m.createSubscription({ name }); fs.writeFileSync(path.join(m.subDir(a.id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-' + name, refreshToken: 'fake-rt', expiresAt: Date.now() + 3600e3, scopes: ['user:inference'] } })); return a.id; };
@@ -1663,7 +1668,7 @@ console.log('\nB-e381 a pool member is read by its own harness; a per-session li
   // (5) A CLAUDE POOL IS UNCHANGED, BYTE FOR BYTE: the same scene through today's module and through the release's writers in a copy —
   // the link's target, the sign-in file beside it, the refusal's words, the heal's target (each id written as its role)
   const claudeRun = (AM, tag) => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-clpool-e381-' + tag + '-'));
+    const d = e381Tmp('vs-clpool-e381-' + tag + '-');
     const m = new AM({ dataDir: d });
     const sub = (name, signedIn) => { const a = m.createSubscription({ name }); if (signedIn) fs.writeFileSync(path.join(m.subDir(a.id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-' + name, refreshToken: 'fake-rt', expiresAt: Date.now() + 3600e3, scopes: ['user:inference'] } })); return a.id; };
     const A = sub('ClA', true), B = sub('ClB', true), O = sub('ClOut', false);
@@ -1708,7 +1713,7 @@ console.log('\nB-e381 (2) a removal heals the pools of a member of any harness t
   const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
   const live = (p) => { try { fs.statSync(p); return true; } catch { return false; } };   // a link that reads something
   const cxPool = (AM, tag, { members = 2 } = {}) => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxrm-e381-' + tag + '-'));
+    const d = e381Tmp('vs-cxrm-e381-' + tag + '-');
     const m = new AM({ dataDir: d });
     const sub = (name) => { const { id } = m.createCodexSubscription({ name }); fs.writeFileSync(path.join(m.codexSubDir(id), 'auth.json'), JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'tok-' + name } })); return id; };
     const ids = Array.from({ length: members }, (_, k) => sub('CxR' + k));
@@ -1736,7 +1741,7 @@ console.log('\nB-e381 (2) a removal heals the pools of a member of any harness t
   // (ORDER) a heal that FAILS keeps the member's folder standing and the answer says so: the re-point refused (placed: EACCES) —
   // a CLAUDE pool, through today's module and through the release's removal
   const failRun = (AM, tag) => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-clrm-e381-' + tag + '-'));
+    const d = e381Tmp('vs-clrm-e381-' + tag + '-');
     const m = new AM({ dataDir: d });
     const sub = (name) => { const a = m.createSubscription({ name }); fs.writeFileSync(path.join(m.subDir(a.id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-' + name, refreshToken: 'fake-rt', expiresAt: Date.now() + 3600e3, scopes: ['user:inference'] } })); return a.id; };
     const A = sub('ClF0'), B = sub('ClF1');
@@ -1751,7 +1756,7 @@ console.log('\nB-e381 (2) a removal heals the pools of a member of any harness t
   ok('B-e381 (2) RED — the release wipes the folder whatever the heal did, and answers nothing: the pool\'s link is left dead in silence', !flRel.aKept && !flRel.defLive && flRel.ans === 'null', JSON.stringify(flRel));
   // a CLAUDE removal is UNCHANGED, byte for byte: the default, a conversation's link and the wipe, through today's module and the release's removal
   const clRm = async (AM, tag) => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-clrm2-e381-' + tag + '-'));
+    const d = e381Tmp('vs-clrm2-e381-' + tag + '-');
     const m = new AM({ dataDir: d });
     const sub = (name) => { const a = m.createSubscription({ name }); fs.writeFileSync(path.join(m.subDir(a.id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'fake-' + name, refreshToken: 'fake-rt', expiresAt: Date.now() + 3600e3, scopes: ['user:inference'] } })); return a.id; };
     const A = sub('ClR0'), B = sub('ClR1');
