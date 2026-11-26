@@ -229,6 +229,59 @@ function rebuildBindings(file, H, copy) {
   return r0.busy;
 }
 
+// B-574d «browser-stores» commit 2 (主开发 r5101): THE KEPT LAW AT A START — a row that had not LANDED at a kill (the hub killed between a
+// record and its landing) is not in the file the next start reads, while the conversations' OWN records (their session metas: a key
+// and the conversation it was decided for — the resume's rung 2) still name it. The refusals (a move, a share, a fork's record of
+// another's name) judge those records too: read ONCE a start, off the loop (the rebuild's own child, bounded), at the first new
+// binding of the start. A binding made while they are still read is judged when they answer — one that hands a conversation another
+// conversation's browser (or moves one off its own) is taken out of the document and said, before any resume reads it. No holder is
+// handed another holder's. file → { state: 'reading' | 'ok' | 'failed', byKey: key → sid, bySid: sid → key, early: Set(sid), at, done }
+const JUDGES = new Map();
+const JUDGE_RETRY_MS = 60 * 1000;
+const EARLY_MAX = 4096;
+function judgeOf(file, opts) {
+  let J = JUDGES.get(file);
+  if (J && (J.state !== 'failed' || Date.now() - J.at < JUDGE_RETRY_MS)) return J;
+  J = { state: 'reading', byKey: new Map(), bySid: new Map(), early: J ? J.early : new Set(), at: Date.now(), done: null };
+  JUDGES.set(file, J);
+  const H = heldOf(file, opts), log = opts.log || console;
+  J.done = listMetaFacts(H).then((r) => {
+    if (!r || !r.ok) { J.state = 'failed'; J.at = Date.now(); try { log.warn?.(`[browser] the conversations' records could not be read for this start's binding refusals (${(r && r.why) || 'failed'}) — the refusals judge ${FILE_NAME} alone meanwhile; read again within ${JUDGE_RETRY_MS / 1000} s`); } catch { } return false; }
+    const firstAt = new Map();
+    for (const row of r.rows) {
+      if (!Array.isArray(row)) continue;
+      const meta = { browserKey: row[0], claudeSessionId: row[1] || undefined, backendSessionId: row[2] || undefined, forkSourceId: row[3] || undefined, browserKeyFor: row[4] || undefined };
+      const key = String(meta.browserKey || ''), sid = bindableIdOf(meta), t = Number(row[5]) || 0;
+      if (!sid || !KEY_RE.test(key)) continue;
+      if (!J.byKey.has(key) || t < firstAt.get(key)) { J.byKey.set(key, sid); firstAt.set(key, t); }   // the FIRST holder keeps a key (the rebuild's rule)
+      if (!J.bySid.has(sid)) J.bySid.set(sid, key);
+    }
+    J.state = 'ok';
+    judgeEarly(file, J, log);
+    return true;
+  }, () => { J.state = 'failed'; J.at = Date.now(); return false; });
+  return J;
+}
+/** the records' verdict on (sid, key): '' (none against it) | the conversation whose key it is (a share) | 'move:<key>' (sid's own) */
+function judgedAgainst(J, sid, key) {
+  if (!J || J.state !== 'ok') return '';
+  const holder = J.byKey.get(key); if (holder && holder !== sid) return holder;
+  const own = J.bySid.get(sid); if (own && own !== key) return 'move:' + own;
+  return '';
+}
+/** the bindings made while the records were read, judged now: one against them is taken out (said), its conversation offered again */
+function judgeEarly(file, J, log) {
+  const d = DOCS.get(file);
+  if (!d || !J.early.size) { J.early.clear(); return; }
+  const out = [];
+  for (const sid of J.early) { const v = d.doc.byConversation[sid]; if (!v) continue; const why = judgedAgainst(J, sid, String(v.key)); if (why) { delete d.doc.byConversation[sid]; out.push([sid, String(v.key), why]); } }
+  J.early.clear();
+  if (!out.length) return;
+  const H = HELD.get(file); if (H) H.gen++;   // every instance's «already recorded» forgotten (r3717's road)
+  for (const [sid, key, why] of out) { try { log.warn?.(`[browser] a binding made at this start before the conversations' records were read was taken back: conversation ${sid.slice(0, 8)} → ${key} — ${why.startsWith('move:') ? `its own record names ${why.slice(5)}` : `that key is conversation ${why.slice(0, 8)}'s by its record`} (a row that had not landed at the last stop); no holder is handed another holder's`); } catch { } }
+  handWrite(file, d.doc, log).catch(() => { });
+}
+
 /** The one rule for "which id is this conversation filed under" — shared in
  *  spirit with `reading-repair._sessionKeyMap` (claude first, then the
  *  backend's own id), spelled here so a meta record can be asked directly. */
@@ -398,6 +451,11 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
       if (cur && KEY_RE.test(String(cur.key || '')) && cur.key !== key) return refuseMove(sid, cur, key);
       const holder = holderOf(all.byConversation, String(key));
       if (holder && holder !== sid) return refuseShare(sid, holder, String(key));
+      // browser-stores commit 2: THE START'S RECORDS judge it too (a row not landed at the last stop); made while they are read: judged when they answer
+      const J = judgeOf(file, opts), against = judgedAgainst(J, sid, String(key));
+      if (against.startsWith('move:')) return refuseMove(sid, { key: against.slice(5) }, key);
+      if (against) return refuseShare(sid, against, String(key));
+      if (J.state !== 'ok' && J.early.size < EARLY_MAX) J.early.add(sid);
       all.byConversation[sid] = { key: String(key), at };
       all.byConversation = prune(all.byConversation);
       writeAll(all);
@@ -462,6 +520,7 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
       if (cur && cur.key === key) { out.already++; continue; }
       if (cur && KEY_RE.test(String(cur.key || ''))) { out.movedOn++; continue; }
       if (holderOf(all.byConversation, key)) { out.taken++; continue; }
+      { const J = judgeOf(file, opts), against = judgedAgainst(J, sid, key); if (against.startsWith('move:')) { out.movedOn++; continue; } if (against) { out.taken++; continue; } if (J.state !== 'ok' && J.early.size < EARLY_MAX) J.early.add(sid); }   // browser-stores commit 2
       all.byConversation[sid] = { key, at: Math.round(Number(at)) || Date.now() }; out.made++;   // r3961 (4): stamped NOW (the folder's first time is old: the bound would evict it at once)
     }
     if (!out.made) return out;
@@ -491,12 +550,12 @@ function create({ dataDir, log = console, listMetas = null, execFileImpl = null 
   function implicitForks() { return announced.size; }
 
   return { record, lookup, conversationOf, conversationsByKey, keys, boundKeys, state, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS,
-    restoreFromNotes, heldFacts, recoveredFacts, landed: () => landedNow(file), _hold: () => (HELD.get(file) || {}).hold || null, _rebuild: () => { const H = HELD.get(file); return H ? rebuildBindings(file, H, null) : Promise.resolve(false); } };   // r3585
+    restoreFromNotes, heldFacts, recoveredFacts, landed: () => landedNow(file), judged: () => { const J = JUDGES.get(file); return J && J.done ? J.done : Promise.resolve(null); }, _hold: () => (HELD.get(file) || {}).hold || null, _rebuild: () => { const H = HELD.get(file); return H ? rebuildBindings(file, H, null) : Promise.resolve(false); } };   // r3585
 }
 
 /** the file's owed write ON DISK now (a named, bounded wait of the store writer — a suite's read of the file, a caller that must) →
  *  true: on disk (or nothing owed); false: not landed */
 function landedNow(file) { try { const W = writerOf(); if (!W.pending(file)) return true; const r = W.flushSync([file]); return !r.deferred && !r.left.some((x) => x.file === file); } catch { return false; } }
 /** a NEW PROCESS's view of `file` (suites: the next start after a kill) — the document forgotten, read again at its next call */
-function _forgetDocument(file) { DOCS.delete(file); }
+function _forgetDocument(file) { DOCS.delete(file); JUDGES.delete(file); }   // …and the start's records read again
 module.exports = { create, onLift, landedNow, _forgetDocument, BINDINGS_SHAPE, conversationIdOf, bindableIdOf, keyDecidedFor, FILE_NAME, DIR_REL, MAX_BINDINGS, REFUSAL_METRIC, SHARE_METRIC, IMPLICIT_FORK_METRIC };
