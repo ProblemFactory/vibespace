@@ -805,7 +805,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let stampsHanded = false;   // r4676: bytes handed to the writer that have no answer yet (landed or failed) — a thread lost in flight never answers
   // (r4892: a stale true — after a blocked family's turn, a stopped writer, a parked job a sync flush left — acts only with the compaction
   // OWED and nothing dirty: a make whose answer never came, where making the bytes again is the right act; every owe sets dirty too)
-  let stampsSideBytes = (() => { try { return fs.statSync(stampsFile).size; } catch { return -1; } })();   // -1: no side file (its first write once the journal holds a line)
+  let stampsSideBytes = (() => { try { return fs.statSync(stampsFile).size; } catch (e) { return e && e.code === 'ENOENT' ? -1 : 0; } })();   // -1: no side file (its first write once the journal holds a line); r5016 (2): only «not there» is absent — a stat that failed otherwise is a file that may hold names
   const stampStats = { writes: 0, healed: 0, lostAtLoad: 0, compactions: 0, slices: 0 };
   let journalFd = null, journalTorn = false, journalSaidAt = 0, journalWas = false;   // journalWas: a journal there at the start (or opened since)
   const journalStats = { replayed: 0, torn: 0, lines: 0, bytes: 0, folds: 0 };
@@ -3584,7 +3584,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (removing.has(id) || purging.has(id)) continue;
       if (!recordsRead()) continue;   // r3021 (6): the accounts' records not read — the id is left off until they read (it may be a live account's)
       if (recordOf(id)) { if (!ending.has(id) && adaptersOnDisk()) endMark(id, 'an account with this id has a record'); continue; }   // r3131 (2): only once its record is on disk
-      out.push({ id, at: Number(e && e.at) || null, left: e && Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null, name: markName(e && e.name), ...(psLoad.blocked || ixLoad.blocked ? { stampsHeld: true } : {}) });   // r4995: the fetch times' family held — no ask can be made this life
+      out.push({ id, at: Number(e && e.at) || null, left: e && Array.isArray(e.left) ? e.left.filter((k) => typeof k === 'string') : null, name: markName(e && e.name), ...(psLoad.blocked || ixLoad.blocked ? { stampsHeld: psLoad.blocked ? 'poll-stamps' : 'index' } : {}) });   // r4995: the fetch times' family held — no ask can be made this life
     }
     if (dropped) pendingWrite().catch((x) => warn(`[channels] purge-pending.json not written (${(x && x.code) || (x && x.message) || x}) — its bad ids are dropped in memory`));
     return out;
@@ -3722,7 +3722,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       try { await pendingWrite(); } catch (e) { markUnwritten = (e && e.code) || 'error'; }
     }
     if (markUnwritten) warn(`[channels] ${adapterId}: purge-pending.json not written (${markUnwritten}) — ${left.length ? 'what is left of it is not noted on disk' : 'its finished purge is not noted on disk'}`);
-    return { logs: r.logs.state === 'removed', files: r.files.state === 'removed', own: r.own.state === 'removed', states: r, left, done: !left.length, stamps: stampsGone, ...((purgedStamps || stampsOnDisk) && (psLoad.blocked || ixLoad.blocked) ? { stampsHeld: true } : {}), ...(markUnwritten ? { markUnwritten } : {}) };
+    return { logs: r.logs.state === 'removed', files: r.files.state === 'removed', own: r.own.state === 'removed', states: r, left, done: !left.length, stamps: stampsGone, ...((purgedStamps || stampsOnDisk) && (psLoad.blocked || ixLoad.blocked) ? { stampsHeld: psLoad.blocked ? 'poll-stamps' : 'index' } : {}), ...(markUnwritten ? { markUnwritten } : {}) };
   }
 
   acctWarmStart();   // B-dfa4 cut 3: a big index's per-account keys, in slices from the load (keysOf finishes them if it asks first)

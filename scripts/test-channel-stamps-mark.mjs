@@ -24,6 +24,7 @@
 //          nothing asked on the file, no row listed. CONTROL: the guard cut (an anchored edit) — the live account's stamps dropped.
 //   (m10g) r4995 M2 + the small one: the fetch times' OWN file unread at the start (placed): nothing asked on it; the row says the held
 //          family's sentence (stampsHeld) and the press answers it, never «erased at the next write». CONTROL: the guard cut — red.
+//   (m10i) r5016: the twin of (m10e) for the MARK file's own hold lifting during the run; CONTROL the same — red.
 //   (m10h) the page's words pinned: the stamps-only, the held and the mixed rows; purgeLeftText names the kind.
 //   The mark's law «nothing removes an account's data at a start or on a timer» (test-channel-store-forget) has
 //   the ONE named exception (r4666 (2)): the poll times an entry notes owed («stamps») leave at a start, by its names only.
@@ -185,11 +186,11 @@ console.log('(m10) B-360d: the removal\'s row for its poll times — noted, ende
 
   // (m10e) r4995 M1: a note from disk, the records' hold lifted during the run, Try again ends the row
   const NOASKRECORD = ['    if (notedNow && (purgedStamps || stampsOnDisk)) stampsMarked.set(adapterId, Math.max(stampsMarked.get(adapterId) || 0, stampsAskOf));\n', ''];
-  const liftRun = async (tag, cut) => {
+  const liftRun = async (tag, cut, refuse = isAdapters) => {
     const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
     await seed(dir); noteFile(dir);
     fs.writeFileSync(path.join(dir, 'adapters.json'), JSON.stringify({ v: 1, adapters: [] }));   // the records are THERE (no record for 'gone'): unread only at this start — a file not there would stay held (a start judges absence)
-    const { w, st } = openRefused(loadCut(cut), dir, isAdapters, { heldRetry: { firstMs: DEB, maxMs: DEB * 2 } });
+    const { w, st } = openRefused(loadCut(cut), dir, refuse, { heldRetry: { firstMs: DEB, maxMs: DEB * 2 } });
     const listedHeld = !!listed(st);
     const lifted = await until(() => !!listed(st));   // the records' hold reads again on its own ladder: the row is listed
     const again = await st.purgeAccount('gone');
@@ -204,6 +205,13 @@ console.log('(m10) B-360d: the removal\'s row for its poll times — noted, ende
   ok(!le.listedHeld && le.lifted && le.answer === true && le.ended && !le.inSide, `(m10e) M1: the records unread at the start (no row then: ${le.listedHeld}), their hold lifted (the row listed: ${le.lifted}); «Try again» answered ${le.answer} and its landing ENDED the row (${le.ended}) — no name on disk`, le);
   const lec = await liftRun('lift-c', NOASKRECORD);
   ok(lec.lifted && lec.answer === true && !lec.ended && !!lec.listedAfter, `(m10e) CONTROL: the tip's purge, its ask not recorded for a note from disk — the erasure landed and the row STANDS (${JSON.stringify(lec.listedAfter && lec.listedAfter.left)}) — red`, lec);
+
+  // (m10i) r5016: the twin of (m10e) — the MARK file's own hold lifting during the run
+  const isMark = (f) => path.basename(f) === 'purge-pending.json';
+  const lm = await liftRun('liftmark', null, isMark);
+  ok(!lm.listedHeld && lm.lifted && lm.answer === true && lm.ended && !lm.inSide, `(m10i) THE MARK unread at the start (no row then: ${lm.listedHeld}), its hold lifted (the row listed: ${lm.lifted}); «Try again» answered ${lm.answer} and its landing ENDED the row (${lm.ended})`, lm);
+  const lmc = await liftRun('liftmark-c', NOASKRECORD, isMark);
+  ok(lmc.lifted && lmc.answer === true && !lmc.ended && !!lmc.listedAfter, `(m10i) CONTROL: the purge that does not record its ask for a note from disk — the row STANDS — red`, lmc);
 
   // (m10f) r4995 M2: the records unread at the start — a LIVE account under a noted id loses nothing
   const NORECORDSGUARD = ['    if (noted.length && !recordsReadNow) warn(', '    if (false) warn('];   // the ONE guard of the records read, cut
@@ -246,9 +254,13 @@ console.log('(m10) B-360d: the removal\'s row for its poll times — noted, ende
     const ZH = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
     const K1 = "The removed account {name}: its conversations' fetch times are not erased from disk yet — Try again asks for it now";
     const K2 = "The removed account {name}: its conversations' fetch times are not erased from disk yet — their file could not be read at this start; they are erased after the next start that reads it";
-    const pin = (p, d) => p.includes(`t("${K1}"`) && p.includes(`t("${K2}"`) && p.includes("owesStamps && Array.isArray(folders) && !folders.length ? stampsWords : owesStamps ? foldersWords + ' ' + stampsWords : foldersWords") && p.includes('else if (r.done && r.stampsHeld) showToast(') && /stamps: tr\("its conversations' fetch times"\)/.test(d) && [ZH, JA].every((x) => x.includes(JSON.stringify(K1) + ':') && x.includes(JSON.stringify(K2) + ':'));
-    ok(pin(PANEL, DLG), '(m10h) the page: the stamps-only row, the held row and the mixed row (the folders\' sentence names the folders only, the fetch times\' sentence beside it); the press\'s held answer; purgeLeftText names the kind; zh and ja carry both sentences');
+    const K3 = "The removed account {name}: its conversations' fetch times are not erased from disk yet — the conversation list could not be read at this start; they are erased after the next start that reads it";
+    const MIX = ["Its conversations' fetch times are not erased from disk yet either — Try again asks for it now", "Its conversations' fetch times are not erased from disk yet either — their file could not be read at this start; they are erased after the next start that reads it", "Its conversations' fetch times are not erased from disk yet either — the conversation list could not be read at this start; they are erased after the next start that reads it"];
+    const AUTH = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
+    const pin = (p, d, a = AUTH) => [K1, K2, K3].every((k) => p.includes(`t("${k}"`)) && MIX.every((k) => p.includes(`t("${k}")`)) && p.includes("owesStamps && Array.isArray(folders) && !folders.length ? stampsWords : owesStamps ? foldersWords + ' ' + stampsAlso : foldersWords") && p.includes('else if (r.done && r.stampsHeld) showToast(') && /stamps: tr\("its conversations' fetch times"\)/.test(d) && d.includes('if (r && r.stampsHeld) { showToast(') && a.includes('if (purged && purged.purged && purged.stampsHeld) return { ok: true, removed: true, id: rec.id, stampsHeld: purged.stampsHeld,') && [ZH, JA].every((x) => [K1, K2, K3, ...MIX].every((k) => x.includes(JSON.stringify(k) + ':')));
+    ok(pin(PANEL, DLG), '(m10h) the page: the stamps-only row, the two held rows naming the file that is held (the fetch times\' own, the conversation list), the mixed row naming the account once; the press\'s and the FIRST removal\'s held answers (r5016 (1)); purgeLeftText names the kind; zh and ja carry every sentence');
     ok(!pin(PANEL.replace('else if (r.done && r.stampsHeld) showToast(', 'else if (false) showToast('), DLG), '(m10h) CONTROL: the press without the held family\'s sentence — the pin above would go red');
+    ok(!pin(PANEL, DLG, AUTH.replace('if (purged && purged.purged && purged.stampsHeld) return', 'if (false) return')), '(m10h) CONTROL: the first removal without its held answer (it would say «erased at the next write») — the pin above would go red');
   }
 
   // (m10d) r4699: an account added AGAIN under the id between the purge and the start keeps its new stamps
