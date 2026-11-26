@@ -1732,6 +1732,41 @@ ctl.push(leg('M41', async () => { // M41 — the r7 card: kernelFact with no unr
 }));
 await Promise.all(ctl);
 await Promise.all(later);
+// ── B-574d «browser-stores» 3/8 (lane nl-migrations, 主开发 r5101): THE ENGINES' RECORD TAKES ITS NAME ONLY AFTER ONE SYNC — the
+// asynchronous synced replace (off the loop, serialized): a sync that fails is a failed write (the old record standing, no temp left,
+// said; the record kept in memory); a file system with no sync lands, said once; the real sync before the rename. RED (anchored
+// copy): the release's plain write + rename — no sync asked, the refused scene lands
+{
+  const EDR = require('../src/server/engine-distribution.js');
+  const OLDREC = JSON.stringify({ v: 1, engines: { old: { kernel: 'k0' } } }, null, 1);
+  const placedSync = async (tail, code, fn) => {
+    const P = fs.promises, open0 = P.open, rename0 = P.rename;
+    const probe = await P.open(path.join(REPO, 'package.json'), 'r'), FHP = Object.getPrototypeOf(probe); await probe.close();
+    const sync0 = FHP.sync, handles = new WeakSet(), events = [];
+    P.open = async function (p, ...a) { const h = await open0.call(this, p, ...a); if (String(p).endsWith(tail)) { handles.add(h); events.push('open'); } return h; };
+    FHP.sync = async function () { if (handles.has(this)) { events.push('sync'); if (code) throw Object.assign(new Error(`${code}: a placed answer of the sync`), { code }); } return sync0.call(this); };
+    P.rename = async function (a, b) { if (String(a).endsWith(tail)) events.push('rename'); return rename0.call(this, a, b); };
+    try { return { out: await fn(), events: events.join() }; } finally { P.open = open0; FHP.sync = sync0; P.rename = rename0; }
+  };
+  const recScene = async (EDmod, tag, code) => {
+    const d = path.join(ROOT, `bs3-${tag}`); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'browser-engines.json'), OLDREC);
+    const said = [], ed = EDmod.create({ dataDir: d, log: { warn: (l) => said.push(String(l)), log() { } } });
+    await ed.ready; ed._record().engines.made = { kernel: 'k1' };
+    const r = await placedSync(`browser-engines.json.${process.pid}.tmp`, code, () => ed._save());
+    const text = fs.readFileSync(path.join(d, 'browser-engines.json'), 'utf8');
+    return { landed: r.out, events: r.events, old: text === OLDREC, made: text.includes('"made"'), tmpLeft: fs.readdirSync(d).some((f) => f.endsWith('.tmp')), said };
+  };
+  const E1 = await recScene(EDR, 'eio', 'EIO');
+  ok(E1.landed === false && E1.old && !E1.tmpLeft && E1.events === 'open,sync' && E1.said.some((l) => l.includes('the engine record could not be written (EIO')),
+    'B-574d browser-stores 3/8: the engines\' record\'s sync refused (EIO) is a FAILED write — the old record standing, no temp left, said (kept in memory: the next save writes it again)', E1);
+  const E2 = await recScene(EDR, 'einval', 'EINVAL');
+  ok(E2.landed === true && E2.made && E2.said.filter((l) => l.includes('does not do a sync (EINVAL)')).length === 1, '…a file system with NO sync (EINVAL): it lands, said once', E2);
+  const E3 = await recScene(EDR, 'real', null);
+  ok(E3.landed === true && E3.made && E3.events === 'open,sync,rename', '…the real sync: the temp synced before its rename', E3);
+  const EDw = MC.load('src/server/engine-distribution.js', swap(EDsrc, 'writeRecordSynced(JSON.stringify(record, null, 1))', '(async () => { const tmp = `${recordFile}.${process.pid}.tmp`; await fsp.mkdir(path.dirname(recordFile), { recursive: true }); await fsp.writeFile(tmp, JSON.stringify(record, null, 1), { mode: 0o600 }); await fsp.rename(tmp, recordFile); })()', 'the record\'s synced replace'), 'bs3-plain-write');
+  const E1x = await recScene(EDw, 'red', 'EIO');
+  ok(E1x.landed === true && !E1x.events.includes('sync'), 'RED (anchored copy: the release\'s plain write + rename): no sync is asked, the refused scene lands — 3/8 goes red', E1x);
+}
 host.close();
 console.log(fail ? `\n${fail} FAILED, ${pass} passed` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
