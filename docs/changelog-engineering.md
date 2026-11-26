@@ -155,6 +155,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - Smalls: a line that arrives keeps the strip's scroll place; the kb says the record may pass 32 lines while copies stand; the message's time checked in milliseconds; r1383's word on the twins fold in src/rewind-files.js's comment (it fails closed, so it stands).
 - Legs + REDs: test-rewind-kept (a session's end keeps the record; the forget and a late press; the key across a resume + RED keyed by the session; a failed machine look; the kept copy that cannot be read); test-rewind-files-page (the words; a told patch keeps the drawn line; the scroll place; the view's end + RED the notice left pinned; the ws wiring keyed by the conversation); test-rewind-files-door (the time in ms).
 
+### lg-rewind — test-cache-bounds reads the view's dispose by its own bounds (主开发 r4571, tests only)
+- The pin «a history window says view-close when it goes» allowed at most 1200 characters between dispose()'s start and the view hold's send: 1159 at the train's tip, 1281 once line 995's two commits stand on the first pass's strip press commit — red at the pick's dry tip, the product right. It now takes dispose()'s body WHOLE by its structure (from its head to the line that closes at its own indent) and asserts the send inside it; a RED control: a dispose without the send.
+
 ## 2.369.419 — 2026-11-25
 
 ### bl-machines-b — B-323e: the Disconnect line's follow (line 469, formed again on the release 2.369.418, 主开发 r3584)
