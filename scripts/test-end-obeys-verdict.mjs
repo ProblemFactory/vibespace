@@ -355,8 +355,8 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
   const fresh = mk(BR, M4);
   const c0 = await fresh.consumeKeptOf({ backend: 'claude', claudeSessionId: 'e2e00000-0000-4000-8000-0000000000ed' }, RAN);
   await new Promise((r) => setTimeout(r, 30));
-  ok(c0 === 'cw-15-1794880000015' && !fs.existsSync(path.join(M4, 'cw-15-1794880000015.json.stopped')) && src.includes('`${file}.${process.pid}.${++endTmpSeq}.tmp`'),
-    'the consume waits for the store\'s first load (an earlier boot\'s record is consumed, its file gone); the temp file\'s name is unique per write', { c0 });
+  ok(c0 === 'cw-15-1794880000015' && !fs.existsSync(path.join(M4, 'cw-15-1794880000015.json.stopped')) && src.includes("W.dirty(file, { name: 'kept-copy.write', debounceMs: 0, rank: 0,") && src.includes('landed = (await keepCopy(file, kept, (w) => { why = w; }).durable(file)) === true;'),
+    'the consume waits for the store\'s first load (an earlier boot\'s record is consumed, its file gone); the record goes through the store writer, awaited to its landing (B-574d: its temps are the writer\'s own, unique per write)', { c0 });
   const cwp = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
   ok(cwp.includes("      if (listed.complete !== true && meta.queueReadAt !== undefined) { delete meta.queueReadAt; scheduleMeta(); }   // THE ONE END RECORD: a PARTIAL read is no read") && cwp.indexOf('delete meta.queueReadAt') < cwp.indexOf('publishQueue(items, { fresh: listed.complete === true });'),
     '主开发 15:31Z must 3 — the codex wrapper: a PARTIAL list read drops the read mark before the queue is published, so «read» always means a complete read');

@@ -474,7 +474,7 @@ const DELETION_CALLS = Object.freeze({
   'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 18,   /* r4828 (lane nl-journals): + the extraction journal's temp removed on a failed write */
   'src/routes/persistence.js': 6, 'src/routes/window-targets.js': 1, 'src/safe-fs-worker.js': 9, 'src/search-index-worker.js': 1,
   'src/secret-box.js': 1, 'src/secret-file.js': 4, 'src/server/agent-listener.js': 1, 'src/server/agent-tool-generators.js': 2,
-  'src/server/apps-ops-door.js': 2, 'src/server/automation-engine.js': 1, 'src/server/boot-restore.js': 14, 'src/server/browser-attach-launch.js': 1,
+  'src/server/apps-ops-door.js': 2, 'src/server/automation-engine.js': 1, 'src/server/boot-restore.js': 9, 'src/server/browser-attach-launch.js': 1,
   'src/server/browser-builds-keeper.js': 8, 'src/server/browser-cli-install.js': 3, 'src/server/browser-clone-run.js': 2, 'src/server/browser-display-config.js': 2,
   'src/server/browser-env.js': 1, 'src/server/browser-installs.js': 1, 'src/server/browser-keeper.js': 5, 'src/server/browser-kept.js': 7,
   // r3786 (card-door-in-chat): browser-kept.js +1 — adopted() takes the note out of a folder a profile adopted (no keep list: the registry rules
