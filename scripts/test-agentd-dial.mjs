@@ -426,7 +426,7 @@ async function neverConverging({ tag, bundleSrc, ms }) {
   check('C3: the log says "dial-out ended — self-upgrade re-exec" (never "dial-out failed — closed-before-hello")', /dial-out ended — self-upgrade re-exec/.test(r.log) && !/dial-out failed — closed-before-hello/.test(r.log), dialLines(r.log));
   // CONTROL: the same run over a bundle whose upgrade never raises the flag — the pre-fix shape must come back
   // (closed-before-hello recorded, the next dial-in carrying attempt ≥ 1), else the three pins above prove nothing.
-  const mutant = bsrc.replace('upgradeLanded = true;\n', '');
+  const mutant = editAnchor(bsrc, 'upgradeLanded = true;\n', '', "the device bundle built from src/agentd/agentd.js");
   check('(C3 control: the mutant bundle drops the flag set)', mutant !== bsrc);
   const m = await neverConverging({ tag: 'c-ctl', bundleSrc: mutant, ms: 5000 });
   check(`C3 CONTROL: without the flag the old process records closed-before-hello and the re-exec'd daemon dials in with attempt ≥ 1 (${m.upgrades} upgrades)`, m.upgrades >= 1 && m.status.history.some((e) => e.code === 'closed-before-hello') && /dial-out failed — closed-before-hello/.test(m.log) && !!m.acc && m.acc.attempt >= 1, JSON.stringify({ upgrades: m.upgrades, acc: m.acc, lines: dialLines(m.log) }));

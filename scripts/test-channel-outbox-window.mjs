@@ -94,8 +94,8 @@ ok(obxSrc.split(MOUNT).length === 2 && obxSrc.split(PASS).length === 2 && NOSHRI
 const VIEW = path.join(wt, 'src/lib/channel-api-card-view.js'), viewSrc = fs.readFileSync(VIEW, 'utf-8');
 const RUNS = '    const runs = S.folded ? [] : runsOf(S.items, (r) => C.rowModel(r, { now }).runKey);\n';
 ok(viewSrc.split(RUNS).length === 2, 'the control has its line to cut: the API rows are drawn as runs once');
-fs.writeFileSync(OBX, obxSrc.replace(MOUNT, '  const apiSec = apiOutboxSection(app);\n  root.insertBefore(apiSec.el, list);\n').replace(PASS, '    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, onAll });\n'));
-fs.writeFileSync(VIEW, viewSrc.replace(RUNS, '    const runs = S.items.map((r) => ({ key: r.id, items: [r] }));\n'));
+fs.writeFileSync(OBX, editAnchor(editAnchor(obxSrc, MOUNT, '  const apiSec = apiOutboxSection(app);\n  root.insertBefore(apiSec.el, list);\n', "src/lib/channel-outbox.js"), PASS, '    const r = outboxNodes(app, list, ob, { view, open, onToggle, onReview, onAll });\n', "src/lib/channel-outbox.js"));
+fs.writeFileSync(VIEW, editAnchor(viewSrc, RUNS, '    const runs = S.items.map((r) => ({ key: r.id, items: [r] }));\n', "src/lib/channel-api-card-view.js"));
 build('public/bundle-control.js');
 fs.writeFileSync(OBX, obxSrc);
 fs.writeFileSync(VIEW, viewSrc);
