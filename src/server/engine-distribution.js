@@ -175,7 +175,18 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   const I = () => { try { return typeof integrations === 'function' ? integrations() : integrations; } catch { return null; } };
   const recordFile = path.join(String(dataDir || '.'), RECORD_FILE);
   let record = { v: 1, engines: {} };
-  const ready = (async () => { try { const j = JSON.parse(await fsp.readFile(recordFile, 'utf8')); if (j && typeof j === 'object' && j.engines && typeof j.engines === 'object') record = { v: 1, engines: j.engines }; } catch { /* none yet */ } })();
+  // B-574d «browser-stores» 4/8 (lane nl-migrations, 主开发 r5101 — a standing law of the tree: NOTHING IS REMOVED AT A START BECAUSE A
+  // RECORD IS SILENT, UNREAD OR TORN): a record that cannot be read but for «not there», or whose bytes do not parse (or are not the
+  // record's shape), is HELD — the boot sweep removes no folder the record might name (a waiting kernel downloaded, its only copy), and
+  // nothing is written over it (an empty record landed would let the next start's sweep remove it all the same); said once; it is read
+  // again at the next start. «Not there» is a fresh record
+  let recordHeld = null, recordHeldSaid = false;
+  const ready = (async () => {
+    let text; try { text = await fsp.readFile(recordFile, 'utf8'); } catch (e) { if (!(e && e.code === 'ENOENT')) recordHeld = (e && e.code) || 'error'; return; }   // none yet: a fresh record
+    try { const j = JSON.parse(text); if (j && typeof j === 'object' && j.engines && typeof j.engines === 'object') { record = { v: 1, engines: j.engines }; return; } } catch { /* torn */ }
+    recordHeld = 'unparsable';
+  })();
+  const sayRecordHeld = () => { if (recordHeldSaid) return; recordHeldSaid = true; try { log.warn?.(`[browser] the engine record ${RECORD_FILE} could not be read (${recordHeld}${recordHeld === 'unparsable' ? ': its bytes do not parse — restore it, or move it aside to start a fresh record' : recordHeld === 'EACCES' || recordHeld === 'EPERM' ? ': let the hub\'s user read it' : ''}) — no kernel folder is removed for it and nothing is written over it until it reads (at the next start)`); } catch { } };
   let saving = Promise.resolve();
   // B-574d «browser-stores» 3/8 (lane nl-migrations, 主开发 r5101): the record takes its name only after ONE sync of its temp — the
   // asynchronous synced replace (off the loop as before, serialized as before): the temp written, its FileHandle synced, its close
@@ -196,7 +207,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     if (failed) { await fsp.unlink(tmp).catch(() => { }); throw failed; }
     await fsp.rename(tmp, recordFile);
   };
-  const save = () => (saving = saving.then(() => writeRecordSynced(JSON.stringify(record, null, 1)).then(() => true)).catch((e) => { log.warn?.(`[browser] the engine record could not be written (${e && e.message}) — kept in memory, written again at the next save`); return false; }));
+  const save = () => (recordHeld ? (sayRecordHeld(), Promise.resolve(false)) : saving = saving.then(() => writeRecordSynced(JSON.stringify(record, null, 1)).then(() => true)).catch((e) => { log.warn?.(`[browser] the engine record could not be written (${e && e.message}) — kept in memory, written again at the next save`); return false; }));
   const recOf = (id) => (record.engines[id] = record.engines[id] || {});
   const running = new Map();   // id → the download in flight {step, bytes, total, startedAt, by, abort}
   const measuring = new Map();
@@ -1027,6 +1038,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
    *  `.next-<tag>`) is removed as before r7. → the names removed. */
   async function sweepLeftovers(sid, plan) {
     if (running.has(sid)) return [];
+    if (recordHeld) { sayRecordHeld(); return []; }   // 4/8: a record HELD removes nothing it might name
     return withNext(sid, async () => {
       if (running.has(sid)) return [];
       const h = await healAside(sid, plan); // r6 (n3): the waiting kernel a stop left aside is put back (or the record stops naming it) FIRST
