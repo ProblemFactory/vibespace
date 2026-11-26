@@ -4718,6 +4718,7 @@ export default {
   "the record of the Claude Code builds already said": "已提示过的 Claude Code 版本的记录",
   "the maintenance banner": "维护横幅",
   "the Claude Code model catalog": "Claude Code 模型目录",
+  "the list of models learned from conversations": "从对话中学到的模型列表",
   "the list of published pages": "已发布页面的列表",
   "the raised spending ceilings": "被调高的支出上限",
   "who may use your stored values": "谁可以使用你存储的值",

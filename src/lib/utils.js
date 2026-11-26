@@ -2052,7 +2052,7 @@ const HELD_CODE_RE = /(?:^|[_-])(?:unread|unreadable)$/i;   // THE STATED PATTER
 // a proxy login, a browser's tabs, a bare «unreadable» …) — so the generic sentence reaches ONLY the codes the census classed a LIST HOLD
 // without a row of their own (scripts/test-held-words.mjs: every code of the tree with that ending, whatever its status, has a class);
 // every other code — a new one included, until somebody judged it — keeps its own words through the step
-const HELD_GENERIC = new Set(['hosts-unread', 'mounts-unread', 'store_unread', 'plugins_unread', 'storage_unread', 'tokens_unread', 'TASK_GROUPS_UNREAD', 'todos-unread', 'records-unread', 'ledger_unreadable']);
+const HELD_GENERIC = new Set(['models_unread', 'hosts-unread', 'mounts-unread', 'store_unread', 'plugins_unread', 'storage_unread', 'tokens_unread', 'TASK_GROUPS_UNREAD', 'todos-unread', 'records-unread', 'ledger_unreadable']);
 export function heldGenericWords() { return t('VibeSpace cannot read one of its saved lists right now — nothing was changed. Try again in a few minutes.'); }
 /** a held code → its row's sentence, else the generic one when the census classed it a list hold (HELD_GENERIC); any other code → null (its own words stand) */
 export function familyHeldWords(code) { const c = String(code || ''); return Object.prototype.hasOwnProperty.call(HELD_WORDS, c) ? HELD_WORDS[c]() : HELD_GENERIC.has(c) ? heldGenericWords() : null; }

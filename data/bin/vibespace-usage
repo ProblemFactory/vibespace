@@ -772,19 +772,38 @@ function writeUsage(p) {
 // shared cache so the model dropdown learns full IDs WITHOUT a /v1/models API
 // call. (Claude Code has no on-disk model cache, and stream-json doesn't emit
 // the model list, so this is the only zero-call way to grow the list.)
+/** torn bytes of the models list beside it, ONCE per content (the hub's names: `__models__.json.corrupt-<ms>`) → kept or not */
+function keepModelsAside(f, buf) {
+  const dir = path.dirname(f), head = path.basename(f) + '.corrupt-';
+  let names = []; try { names = fs.readdirSync(dir).filter((n) => n.startsWith(head)); } catch { names = []; }
+  for (const n of names) { try { if (fs.readFileSync(path.join(dir, n)).equals(buf)) return true; } catch { /* not this one */ } }
+  for (let k = 0; k < 5; k++) {
+    try { fs.writeFileSync(path.join(dir, head + Date.now() + (k ? '-' + k : '')), buf, { flag: 'wx', mode: 0o600 }); return true; } catch (e) { if (!e || e.code !== 'EEXIST') return false; }
+  }
+  return false;
+}
 function learnModel(p) {
   const m = p && p.model;
   const id = m && (m.id || (typeof m === 'string' ? m : null));
   if (!id || typeof id !== 'string' || !/^claude-/.test(id)) return; // only full ids
   const label = (m.display_name || id);
   const f = path.join(CACHE_DIR, '__models__.json');
-  let list = [];
-  try { list = JSON.parse(fs.readFileSync(f, 'utf-8')); if (!Array.isArray(list)) list = []; } catch {}
+  // (B-f276, lane lg-providers s1126) the list's read HELD as the hub's (src/server/cli-env.js noteModelSeen): a list that parses
+  // merges, no file starts it; a read that FAILS writes nothing (this hook runs again at the next status line); bytes that do not
+  // parse are kept aside beside the file first (once per content, the hub's names) and only then does a fresh list replace them
+  let list = [], buf = null;
+  try { buf = fs.readFileSync(f); } catch (e) { if (!e || e.code !== 'ENOENT') return; }
+  if (buf && !buf.length) return;   // zero bytes: a writer mid-write — no answer; the next status line reads again
+  if (buf) {
+    let parsed; try { parsed = JSON.parse(buf.toString('utf-8')); } catch { parsed = undefined; }
+    if (Array.isArray(parsed)) list = parsed;
+    else if (!keepModelsAside(f, buf)) return;   // torn, and no copy beside it: nothing written over the only copy
+  }
   if (list.some((x) => x && x.id === id)) return; // already known
   list.push({ id, label });
   if (list.length > 50) list = list.slice(-50);
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
-  const tmp = f + '.tmp';
+  const tmp = f + '.' + process.pid + '.tmp';   // a temp name of this process's own (hooks run side by side)
   fs.writeFileSync(tmp, JSON.stringify(list));
   fs.renameSync(tmp, f);
 }

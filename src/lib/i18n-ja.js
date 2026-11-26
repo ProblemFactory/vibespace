@@ -4717,6 +4717,7 @@ export default {
   "the record of the Claude Code builds already said": "通知済みの Claude Code ビルドの記録",
   "the maintenance banner": "メンテナンスのバナー",
   "the Claude Code model catalog": "Claude Code のモデル一覧",
+  "the list of models learned from conversations": "会話から学習したモデルの一覧",
   "the list of published pages": "公開ページの一覧",
   "the raised spending ceilings": "引き上げた支出上限",
   "who may use your stored values": "保存した値を使える人",

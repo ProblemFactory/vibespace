@@ -34,6 +34,7 @@ const NAMES = Object.freeze({
   'state.json': i18nKey('the HTTPS record'),   // data/tls/state.json (src/server/tls.js): the only store held under this base name
   'browser-login-reminders.json': i18nKey('the record of the sign-in reminders already filed'),
   'cli-registration.json': i18nKey('the record of the Claude Code builds already said'),
+  '__models__.json': i18nKey('the list of models learned from conversations'),   // B-f276 s1126: usage-cache/__models__.json (src/server/cli-env.js)
   'published-pages.json': i18nKey('the list of published pages'),
   'setting-holds.json': i18nKey('the raised spending ceilings'),
   'vault-use-marks.json': i18nKey('who may use your stored values'),

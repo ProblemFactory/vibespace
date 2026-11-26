@@ -663,11 +663,15 @@ class UsageHistory {
   // guard above would preserve it forever. reading-repair names those sids in
   // .attrib-emptied.json; for them `_acctAt` falls through to the session-meta
   // account, which is the un-refuted fallback the archive was meant to expose.
+  // (B-f276, lane lg-providers s1126) read through the store-read law: missing ⇒ an empty list (nothing emptied yet); a read that FAILS
+  // or bytes that do not parse ⇒ null, HELD — the re-bake does not run on it (an empty set would bake those conversations onto the
+  // refuted account for good, its marker then written)
   _emptiedAttribSids() {
-    try {
-      const raw = JSON.parse(fs.readFileSync(path.join(this.dir, '.attrib-emptied.json'), 'utf-8'));
-      return new Set(Array.isArray(raw) ? raw : []);
-    } catch { return new Set(); }
+    let read; try { read = { text: fs.readFileSync(path.join(this.dir, '.attrib-emptied.json'), 'utf-8') }; } catch (e) { read = { error: e }; }
+    const a = SR.storeAnswer(read, { valid: Array.isArray });
+    if (a.state === 'data') return new Set(a.value);
+    if (a.state === 'missing') return new Set();
+    return null;
   }
   /** THE ACCOUNTS LIST UNREAD (主开发 r3060 Q1): the resolver server.js hands this history answers `{ held: true }` while the list
    *  could not be read — its one channel to the list's fact. Nothing is BAKED while it does: a baked row's kind is for good. */
@@ -677,8 +681,15 @@ class UsageHistory {
     try { if (fs.existsSync(marker)) return; } catch {}
     if (this._rebakeRefused) return;   // B-574d (the slice's own read, F7): a rebake whose write failed waits for the next start — said once
     if (this._accountsListHeld()) return;   // r3060 Q1: never re-baked against an unread list (its marker NOT written: it runs at a later start)
-    const attrib = this._attribMap();
+    if (this._emptiedHeldUntil && Date.now() < this._emptiedHeldUntil) return;   // HELD: asked again only on the ladder (no read a scan)
     const emptied = this._emptiedAttribSids();
+    if (!emptied) {   // HELD (B-f276, s1126): nothing re-baked and the marker NOT written — it runs once the list reads
+      this._emptiedHeldUntil = Date.now() + SR.retryDelay(++this._emptiedTries || (this._emptiedTries = 1));
+      if (!this._emptiedHeldSaid) { this._emptiedHeldSaid = true; console.warn('[usage-history] re-bake not run: the list of emptied conversations (usage-history/.attrib-emptied.json) could not be read or does not parse — nothing re-baked; it is read again by itself and the re-bake runs once it reads. Restore the file from a copy if its bytes are torn: moved away, it would read as «nothing emptied» and those conversations\' spend would stay on the refuted account'); }
+      return;
+    }
+    this._emptiedHeldUntil = 0; this._emptiedTries = 0;
+    const attrib = this._attribMap();
     const meta = this._metaMap();
     let shards = [];
     try { shards = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)); } catch {}
