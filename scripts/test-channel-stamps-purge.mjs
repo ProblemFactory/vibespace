@@ -18,6 +18,10 @@
 //         on the stand-in thread, the purge's compaction asked behind it, an index.json APPEARS meanwhile (its exclusive create
 //         meets it, the index family held) — the side file's turn writes nothing. CONTROL: the writer's settle alone as the
 //         answer (the tip's) — true with nothing written — red.
+//   (m8f) (r4676; r4666: the compaction STAYS owed) THE WRITER's THREAD LOST IN FLIGHT with the purge's compaction: its requeue
+//         asks the store again with no answer for the handed bytes — they are made again and land on the restarted thread; the
+//         side file holds none of the names and the purge answers true. CONTROL: the release's line — produce answers «equal to
+//         the disk» (nothing set since), the compaction no longer owed: the names stay and the purge answers false — red.
 //   (m8e) (r4646 (2)) THE COST: for an account with NO stamps the purge's compaction is one write more than the tip's — its
 //         bytes and its time on the writer's thread printed over the largest stand-in these suites build (1000 stamped keys);
 //         ONE write a removal, never one a row.
@@ -184,6 +188,42 @@ console.log('(m8b–m8e) B-360d: a purge\'s ONE door — «done» only once a co
   const hdc = await heldRun('held-c', NOLANDDOOR);
   ok(hdc.askedInFlight && hdc.appeared && hdc.stamps === true, `(m8d) CONTROL: the writer's settle alone as the answer — the purge answers ${hdc.stamps} with nothing written — red`, hdc);
 
+
+  // (m8f) r4676: the writer's thread lost in flight — the handed bytes are made again
+  const NOREMAKE = ['    if (!stampsDirty && !(stampsCompactOwed && stampsHanded)) { stampsCompactOwed = false; return null; }', '    if (!stampsDirty) { stampsCompactOwed = false; return null; }'];   // stale-pins: kept (the RED control restores the release's line)
+  const lostRun = async (tag, cut) => {
+    const dir = path.join(ROOT, `m-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const said = [];
+    const log = { log() { }, info() { }, warn: (m) => said.push(String(m)), error: (m) => said.push(String(m)) };
+    { // a first life writes both accounts' rows and stamps and closes: the side file is THERE at the next start (a hub's case — a store
+      // that read it missing writes own-only for its life, and the stand-in thread hands back no own numbers to a restarted one)
+      const w0 = SW.create({ log: quiet, workerPath: STAND, pace: PACED });
+      const s0 = CS.createChannelStore({ dir, log: quiet, writer: w0, stampsDebounceMs: DEB });
+      await s0.index.update(() => { for (let i = 0; i < 30; i++) { s0.index.entry('gone', `g${i}`, { create: true }); s0.index.entry('keep', `k${i}`, { create: true }); } });
+      for (let i = 0; i < 30; i++) { s0.stamps.set(`gone/g${i}`, { lastPollAt: T + i }); s0.stamps.set(`keep/k${i}`, { lastPollAt: T + i }); }
+      s0.close(); w0.stop();
+    }
+    const w = SW.create({ log, workerPath: STAND, pace: PACED });
+    const st = loadCut(cut).createChannelStore({ dir, log: quiet, writer: w, stampsDebounceMs: DEB });   // the side file read at the start
+    SAND.die('poll-stamps.json');   // PLACED: the thread exits as the side file's next write reaches it (once)
+    let r = null;
+    try {
+      const pr = await st.purgeAccount('gone');
+      const answer = await Promise.race([pr.stamps, sleep(BOUND_MS).then(() => 'timeout')]);
+      const end = performance.now() + BOUND_MS;
+      while (w.pending(st.stamps.file) && performance.now() < end) await sleep(DEB);
+      const lost = said.some((m) => /stopped \(it exited/.test(m));
+      if (!lost) console.error(`  HARNESS (m8f ${tag}): the writer never said its thread stopped — the placed loss did not happen`);
+      const sw = statOf(w, st.stamps.file), ss = st.stamps.stats();
+      r = { lost, answer, ...onDiskOf(st), writes: sw.writes, failures: sw.failures, why: w.whyNotDurable(st.stamps.file), compactions: ss.compactions, said: said.filter((m) => /store-write/.test(m)).map((m) => m.slice(0, 160)) };
+    } finally { try { fs.unlinkSync(path.join(ROOT, 'stand', 'die-poll-stamps.json')); } catch { } }
+    w.stop();
+    return r;
+  };
+  const ls = await lostRun('lost', null);
+  ok(ls.lost && ls.answer === true && !ls.inSide && !ls.inJournal && ls.keepOnDisk, `(m8f) THE WRITER's THREAD LOST IN FLIGHT with the purge's compaction (${ls.lost}): the handed bytes made again and landed on the restarted thread — no byte of the names in the side file (${ls.inSide}) or the journal (${ls.inJournal}), the other account kept; the purge answered ${ls.answer}`, ls);
+  const lsc = await lostRun('lost-c', NOREMAKE);
+  ok(lsc.lost && lsc.inSide && lsc.answer === false, `(m8f) CONTROL: the release's line — the requeued ask answered «equal to the disk», the compaction no longer owed: the names stay in the side file (${lsc.inSide}) and the purge answers ${lsc.answer} — red`, lsc);
 
   // (m8e) THE COST (主开发 r4646 (2)) — one write a removal, never one a row
   const costRun = async () => {

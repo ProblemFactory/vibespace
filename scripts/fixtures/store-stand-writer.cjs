@@ -2,7 +2,8 @@
 // A STAND-IN STORE-WRITER THREAD for in-process suites (channel-store-off-loop: test-channel-store-loop-free and
 // test-channel-store-writer-laws). It runs the REAL writeJob (src/store-writer-worker.js) after the milliseconds named in
 // `<ctl>/hold-<basename>` (if that file exists); `<ctl>/fail-<basename>` = that file's write fails (EIO, the storage
-// refusing). `make(ctl)` writes the worker script into `ctl` and returns its path with the switches:
+// refusing); `<ctl>/die-<basename>` = the thread EXITS as that file's write reaches it (once: the switch is removed — the writer's
+// thread lost in flight; the writer restarts it). `make(ctl)` writes the worker script into `ctl` and returns its path with the switches:
 //   const S = make(dir); SW.create({ workerPath: S.path, ... }); S.hold('adapters.json', 600); S.unhold(...); S.failOn(..., true)
 const fs = require('fs');
 const path = require('path');
@@ -18,7 +19,8 @@ const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuff
 parentPort.on('message', (m) => {
   if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
   Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
-  const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b);
+  const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b), die = path.join(CTL, 'die-' + b);
+  if (m.ev === 'write' && fs.existsSync(die)) { try { fs.unlinkSync(die); } catch { } process.exit(7); }
   if (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0);
   if (fs.existsSync(path.join(CTL, 'fail-' + b))) err = { code: 'EIO', message: 'the storage failed' };
   else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
@@ -33,6 +35,7 @@ parentPort.on('message', (m) => {
     path: file,
     hold: (base, ms) => fs.writeFileSync(path.join(ctl, 'hold-' + base), String(ms)),
     unhold: (base) => { try { fs.unlinkSync(path.join(ctl, 'hold-' + base)); } catch { } },
+    die: (base) => fs.writeFileSync(path.join(ctl, 'die-' + base), '1'),
     failOn: (base, on) => { const f = path.join(ctl, 'fail-' + base); if (on) fs.writeFileSync(f, '1'); else try { fs.unlinkSync(f); } catch { } },
   };
 }
