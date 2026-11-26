@@ -11068,6 +11068,7 @@ export default {
   "The key grants are read once, when VibeSpace starts: mend that list by hand, then restart VibeSpace — the restart is what reads them again.": "密钥授权只在 VibeSpace 启动时读取一次：请手工修好那份列表，然后重启 VibeSpace——重启才会重新读取它们。",   // the automation store's next touch (login-request-card)
   "The saved list is damaged; it needs mending by hand, then a restart.": "保存的列表已损坏，需要手工修好，然后重启。",   // the automation store's next touch (login-request-card)
   "unknown — the automation keys could not be read (nothing is lost)": "未知——自动化密钥读不出来（没有丢失任何内容）",   // the automation store's next touch (login-request-card)
+  "unknown — the windows’ share modes could not be read (nothing is lost)": "未知——各窗口的共享模式读不出来（没有丢失任何内容）",   // lg-recovery (B-f276 slice window-targets): «what it may use» while the share modes are held
   "Parameter": "参数", // lane vault-contents-window
   "Passkeys": "通行密钥", // lane vault-contents-window
   "Recently used": "最近使用", // lane vault-contents-window

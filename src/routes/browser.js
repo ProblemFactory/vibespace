@@ -193,7 +193,7 @@ function consumeVaultFillTicket(req, f) {
 let windowEngine = null;
 function setWindowEngine(e) { windowEngine = e || null; }
 /** lane e2a: a status for the desktop-app door's refusals (the PURE verdict's codes + the launch's). */
-const DESKTOP_APP_STATUS = Object.freeze({ desktop_app_cap: 409, bad_mode: 400, desktop_app_lacks: 400, not_yet: 400, backend_conflict: 400, desktop_app_only: 400, provider_unknown: 400, provider_local_only: 400, 'bad-url': 400, 'bad-request': 400, not_live: 409, cap: 409, 'browser-absent': 409, 'no-backend': 409, 'backend-not-wired': 409, no_window_engine: 503 });
+const DESKTOP_APP_STATUS = Object.freeze({ window_leases_unread: 503, window_reach_unread: 503 /* B-f276 slice window-targets: a held window store, by name */, desktop_app_cap: 409, bad_mode: 400, desktop_app_lacks: 400, not_yet: 400, backend_conflict: 400, desktop_app_only: 400, provider_unknown: 400, provider_local_only: 400, 'bad-url': 400, 'bad-request': 400, not_live: 409, cap: 409, 'browser-absent': 409, 'no-backend': 409, 'backend-not-wired': 409, no_window_engine: 503 });
 
 const LOCAL = new Set(['', 'local']);
 function hostOf(req) { const h = (req.method === 'GET' ? req.query.host : req.body?.host); return h == null ? '' : String(h); }

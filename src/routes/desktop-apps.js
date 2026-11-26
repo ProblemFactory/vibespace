@@ -290,6 +290,9 @@ router.post('/api/desktop/apps', async (req, res) => {
     if (!v.ok) return fail(res, { code: v.code, message: v.why });
     if (host !== 'local' && v.share && v.share.principals.length) return fail(res, { code: 'share_local_only', message: 'a window on another machine cannot be shared with an agent — agents address this machine\'s windows only' });
   }
+  // B-f276 slice window-targets (the cure round): a share that rides the launch needs the windows' share modes — held, the launch is
+  // refused by name BEFORE anything starts (never an app left running unshared behind a refusal)
+  if (share != null && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.storesReadable === 'function') { try { ctx.windowEngine.storesReadable({ reach: true }); } catch (e) { return fail(res, e); } }
   try {
     const lb = fill ? { ...bodyOf(req), appId: fill } : bodyOf(req);
     const launchedBy = launchedByOfReq(req); // lane app-launch-singleton: the record says who started it

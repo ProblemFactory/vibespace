@@ -54,6 +54,9 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
     if (liveForkPending(s)) throw namedError('fork_pending', `${s.name || sessionId} is a fork that has not announced its own conversation id yet — ask again in a moment`);   // verify r6: its OWN code — `no_conversation`'s client words ("say something to it first") were the wrong advice for a fork
     if (!deliver || typeof deliver.stashFor !== 'function') throw namedError('bad-request', 'the delivery ladder is not wired on this instance');
     const name = s.name || s.webuiName || String(sessionId);
+    // B-f276 slice window-targets (the cure round): a request that ends another agent's hold reads the leases first — held, it is
+    // refused by name before the grant (never a grant made and the hold's end silently skipped)
+    if (endHold && typeof engine.storesReadable === 'function') engine.storesReadable({ leases: true });
     // 1. the grant (the request exposes the window to the asked agent)
     const g = engine.grantReach(view.handle, { kind: 'session', id: String(sessionId), name }, { by: 'request' });
     // 2. another agent's hold ends when the user asked for it

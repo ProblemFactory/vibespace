@@ -6,7 +6,9 @@
 // is a PLACED refusal of the read call (fs.readFileSync answers EIO for that one path, its next read only) — never a mount, never a mode
 // change; torn bytes are bytes written whole that do not parse; the read again is the family's own (src/store-read-hold.js
 // readAgainOf), never a clock. Each RED is a copy of the engine with ONE anchored edit: the release's read (a failure read as «nothing
-// stored»), the reconcile blind to a hold, the stream's gate that throws. No vendor call, no process, nothing else.
+// stored»), the reconcile blind to a hold, the stream's gate that throws; and (the cure round, 主开发 r4783 + the adversarial read) each
+// INNER guard with an outer one gone (the save, the broadcast, the kill path), «what it may use» named, and the routes DRIVEN over
+// loopback (the relaunch, Resume here, a launch with a share). No vendor call, no process, nothing else.
 import { scratch, anchored } from './scratch.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +21,8 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ok, report } = checker();
 const ENGINE_REL = 'src/server/window-targets-engine.js';
 const ENGINE = require(path.join(REPO, ENGINE_REL));
+const MU = require(path.join(REPO, 'src/may-use-model.js'));
+const ROUTES_REL = 'src/routes/desktop-apps.js';
 const HOLD = require(path.join(REPO, 'src/store-read-hold.js'));
 const SRC = fs.readFileSync(path.join(REPO, ENGINE_REL), 'utf8');
 const M = mutantCopies('window-stores-held', REPO);
@@ -45,19 +49,21 @@ let dirN = 0;
 const mk = () => { const d = path.join(scratch('window-stores-held'), 'd' + (++dirN)); fs.mkdirSync(d, { recursive: true }); return d; };
 const READ0 = fs.readFileSync;   // the suite's OWN reads (a file's bytes, judged) — never counted as the engine's, never refused
 const bytesOf = (dir, f) => { try { return READ0.call(fs, path.join(dir, f), 'utf8'); } catch { return null; } };
-const S1 = 'aaaaaaaa-1111-4000-8000-000000000071';
+const S1 = 'aaaaaaaa-1111-4000-8000-000000000071', S2 = 'bbbbbbbb-2222-4000-8000-000000000072';
 const mkRec = (id, extra = {}) => ({ id, label: `App ${id}`, exec: 'x', state: 'ready', display: ':77', pids: { app: 4242, x: null, server: null, wm: null }, starts: {}, backend: 'vnc-display', startedAt: 1, ...extra });
 /** one LIFE: an engine over `dir` (the module `Mod` — the real one, or a RED copy), the session `w-A`, three windows */
 function life(Mod, dir) {
-  const sessions = new Map([['w-A', { agentToken: 'vsst_A', claudeSessionId: S1, backendSessionId: S1, backend: 'claude', name: 'agent A', mode: 'chat' }]]);
+  const sessions = new Map([['w-A', { agentToken: 'vsst_A', claudeSessionId: S1, backendSessionId: S1, backend: 'claude', name: 'agent A', mode: 'chat' }],
+    ['w-B', { agentToken: 'vsst_B', claudeSessionId: S2, backendSessionId: S2, backend: 'claude', name: 'agent B', mode: 'chat' }]]);
   const records = new Map([['da-one', mkRec('da-one')], ['da-two', mkRec('da-two')], ['da-three', mkRec('da-three')]]);
-  const sent = [], logs = [], launched = [], stopped = [];
+  const sent = [], logs = [], launched = [], stopped = [], relaunched = [], elected = [];
   const keeper = { listApps: () => [...records.values()], get: (id) => records.get(id) || null, sessionPids: (rec) => Object.values(rec.pids).filter(Boolean), x11EnvFor: () => null,
     launch: async () => { launched.push(1); const rec = mkRec('da-opened'); records.set(rec.id, rec); return rec; }, stop: async (id) => { stopped.push(id); return { ok: true }; },
+    relaunch: async (id) => { relaunched.push(id); return { id: id + '-r' }; }, takeoverViewer: (id, viewerId) => { elected.push(id); return { ok: true, viewers: [viewerId] }; },
     registry: () => [{ id: 'gedit', label: 'gedit', exec: 'gedit', args: [], available: true, reason: null }] };
   const engine = Mod.create({ keeper, dataDir: dir, env: () => ({}), activeSessions: sessions, bins: { xdotool: null, gdbus: null }, procExe: () => null,
     log: { warn: (l) => logs.push(String(l)), log() {} }, broadcast: (m) => sent.push(m) });
-  return { engine, sessions, records, sent, logs, launched, stopped, facts: engine.factsForToken('vsst_A') };
+  return { engine, keeper, sessions, records, sent, logs, launched, stopped, relaunched, elected, facts: engine.factsForToken('vsst_A') };
 }
 /** a call's answer: its value, or its refusal's { code, status, message } */
 const tryOf = (fn) => { try { return { v: fn() }; } catch (e) { return { code: e && e.code, status: e && e.status, message: String((e && e.message) || e) }; } };
@@ -85,12 +91,21 @@ const heldRows = (file) => HOLD.holds().filter((r) => r.file === file && r.held)
 const grantRows = (w, h) => { try { return require(path.join(REPO, 'src/server/grants-store.js')).forDir(w.dir).rowsFor('window', h).length; } catch { return -1; } };
 
 // THE RED COPIES — each ONE anchored edit of the engine's text
-const LEASE_READ = "      const a = SR.storeAnswer(read, { valid: isObj }); if (leaseHold.start(a) === 'data') applyLeases(a.value);";
-const REACH_READ = "      const a = SR.storeAnswer(read, { valid: isObj }); if (reachHold.start(a) === 'data') applyReach(a.value);";
+// (the RELEASE copies: the placed refusal is undone right after their boot — the release reads ONCE at its start, so the attach that
+// follows meets the memory the failed read left, never a second read)
+const LEASE_READ = "      const a = SR.storeAnswer(read, { valid: leasesShape }); if (leaseHold.start(a) === 'data') applyLeases(a.value);";
+const REACH_READ = "      const a = SR.storeAnswer(read, { valid: reachShape }); if (reachHold.start(a) === 'data') applyReach(a.value);";
 const RELEASE_LEASES = () => M.load(ENGINE_REL, anchored(SRC, LEASE_READ, "      try { if (read.error) throw read.error; applyLeases(JSON.parse(read.text)); } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.('[window] window-leases.json unreadable — starting with no leases'); }", 'the-release-lease-read'), 'release-leases');
 const RELEASE_REACH = () => M.load(ENGINE_REL, anchored(SRC, REACH_READ, "      try { if (read.error) throw read.error; applyReach(JSON.parse(read.text)); } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.('[window] window-reach.json unreadable — every window starts in auto mode'); }", 'the-release-reach-read'), 'release-reach');
 const PRUNE_BLIND = () => M.load(ENGINE_REL, anchored(SRC, '    for (const h of reachUnread ? [] : shareHandles()) {', '    for (const h of shareHandles()) {', 'prune-blind-to-the-hold'), 'prune-blind');   // stale-pins: kept — the red's own text (the release's loop)
 const ENDS_BLIND = () => M.load(ENGINE_REL, anchored(SRC, '    if (leaseHold.held()) return [];', '', 'ends-blind-to-the-hold'), 'ends-blind');
+const ENDS = ['    if (leaseHold.held()) return [];', ''], KILL = ['  function dropSession(sessionId) { if (leasesHeld()) return 0; let n = 0;', '  function dropSession(sessionId) { let n = 0;'];
+const SAVE = ["    if (!leaseHold.writable('a write of the window leases')) return;", ''], PUB = ['  function publish() { if (!broadcast || leaseHold.held()) return;', '  function publish() { if (!broadcast) return;'];   // stale-pins: kept — the red's own text (the release's form)
+const SAVE_R = ["    if (!reachHold.writable('a write of the windows\\' share modes')) return;", ''], PRUNE = ['    for (const h of reachUnread ? [] : shareHandles()) {', '    for (const h of shareHandles()) {'];   // stale-pins: kept — the red's own text (the release's loop)
+const copyOf = (tag, ...edits) => M.load(ENGINE_REL, edits.reduce((t, [a, b], i) => anchored(t, a, b, `${tag}-${i}`), SRC), tag);
+const SAVE_BLIND = () => copyOf('save-blind', ENDS, SAVE), PUBLISH_BLIND = () => copyOf('publish-blind', ENDS, PUB), KILL_BLIND = () => copyOf('kill-blind', ENDS, KILL);
+const SAVE_R_BLIND = () => copyOf('save-reach-blind', PRUNE, SAVE_R);
+const MAYUSE_THROWS = () => M.load(ENGINE_REL, anchored(SRC, "    if (reachHeld()) return [{ door: 'window', resource: '*', name: '', ok: false, code: REACH_UNREAD }];", '', 'may-use-unnamed'), 'may-use-unnamed');
 const GATE_THROWS = () => M.load(ENGINE_REL, anchored(SRC, '    if (leasesHeld()) return { relay: true, code: null, why: null };', '    load();', 'gate-throws-while-held'), 'gate-throws');
 
 console.log('§0 an ABSENT file is a first run: no hold, the verbs act, both files written');
@@ -104,27 +119,31 @@ console.log('§1 window-leases.json UNREADABLE: HELD — readers and writers ref
   const dir = mk(); const f = firstLife(dir);
   const w = heldLife(ENGINE, dir, LEASES); w.dir = dir;
   w.records.set('da-ab', mkRec('da-ab', { origin: 'agent-browser', by: { sessionId: 'w-gone' } }));   // an agent's desktop browser whose conversation ended
+  w.records.set('da-ab2', mkRec('da-ab2', { origin: 'agent-browser', by: { sessionId: 'w-B' } }));   // …and one whose conversation (w-B) is live: the kill path's
   ok(w.pr.seen.refused === 1 && Array.isArray(w.boot && w.boot.held) && w.boot.held.join() === LEASES && w.boot.dropped === 0 && heldRows(LEASES).length === 1,
     'HELD at the boot: said in its answer (held: window-leases.json), nothing dropped; the family lists the hold', w.boot);
   const syncAtBoot = w.pr.seen.sync;
   const readers = { leases: tryOf(() => w.engine.leases()), leaseOf: tryOf(() => w.engine.leaseOf('da-one')), desktop: tryOf(() => w.engine.desktopLeases()), list: await tryAsync(() => w.engine.list(w.facts)), summary: tryOf(() => w.engine.inputSummaryFor('w-A')) };
   ok(Object.values(readers).every((r) => named(r, 'window_leases_unread')), 'READERS: the lease list, one lease, the desktop leases, `list` and the session summary answer window_leases_unread BY NAME (503, the hold\'s words)', readers);
   const writers = { attach: tryOf(() => w.engine.attach('da-two', w.facts)), detach: tryOf(() => w.engine.detach('da-one', w.facts)), takeover: tryOf(() => w.engine.takeover({ handle: 'da-one', viewerId: 'v1' })),
-    endHold: tryOf(() => w.engine.endHold('da-one', 'the person ended it')), share: tryOf(() => w.engine.setShareMode('da-two', 'tree')), open: await tryAsync(() => w.engine.open({ appId: 'gedit' }, w.facts)) };
-  ok(Object.values(writers).every((r) => named(r, 'window_leases_unread')) && w.launched.length === 0, 'WRITERS: attach, detach, a person\'s takeover, the person\'s end of a hold, a share change and an open are refused BY NAME before any act (nothing launched)', { writers, launched: w.launched.length });
-  const rec = w.engine.reconcile({ graceMs: 0 }); const ds = w.engine.dropSession('w-A'); w.engine.tick();
-  ok(rec.leasesHeld === true && rec.dropped.length === 0 && rec.ended.length === 0 && ds === 0 && w.stopped.length === 0, 'BACKGROUND: the reconcile (and the tick) drop, stamp and end nothing by the held file — the agent browser whose conversation ended is not stopped; the kill path drops nothing', { rec, ds, stopped: w.stopped });
+    endHold: tryOf(() => w.engine.endHold('da-one', 'the person ended it')), open: await tryAsync(() => w.engine.open({ appId: 'gedit' }, w.facts)) };
+  ok(Object.values(writers).every((r) => named(r, 'window_leases_unread')) && w.launched.length === 0, 'WRITERS: attach, detach, a person\'s takeover, the person\'s end of a hold and an open are refused BY NAME before any act (nothing launched)', { writers, launched: w.launched.length });
+  const rec = w.engine.reconcile({ graceMs: 0 }); const ds = w.engine.dropSession('w-B'); w.engine.tick(); await sleep(0);   // (a stop rides a microtask: read after it)
+  ok(rec.leasesHeld === true && rec.ended.length === 0 && ds === 0 && w.stopped.length === 0, 'BACKGROUND: the reconcile and the tick end nothing by the held file (the agent browser whose conversation ended is not stopped), and the kill path of a live opener (w-B) ends nothing — its browser is not stopped', { rec, ds, stopped: w.stopped });
   const gate = { policy: tryOf(() => w.engine.inputPolicy('da-one', 'v1')), input: tryOf(() => w.engine.leaseInput('da-one')), hint: tryOf(() => w.engine.agentBrowserFor('da-one', 'bk')) };
   ok(!!(gate.policy.v && gate.policy.v.relay === true && gate.input.v === null && gate.hint.v === null), 'THE STREAM\'S GATE: inputPolicy relays, leaseInput and the browser verbs\' hint answer «no lease» — never a throw (no agent verb runs while held, none injects)', gate);
   ok(w.sent.filter((m) => m.type === 'window-leases-updated').length === 0, 'NO LIST broadcast while held (an empty list reads as every lease lost)', w.sent.map((m) => m.type));
   ok(bytesOf(dir, LEASES) === f.leases && bytesOf(dir, REACH) === f.reach, 'NOT WRITTEN OVER: window-leases.json byte for byte after every writer was asked (and the share modes untouched)');
   ok(w.pr.seen.sync === syncAtBoot, `NOTHING SYNCHRONOUS ADDED: no store read again on the loop while held (${w.pr.seen.sync - syncAtBoot} after the boot's one)`);
   ok(w.logs.filter((l) => /window-leases\.json could not be read \(EIO\)/.test(l)).length === 1, 'the journal says the hold ONCE', w.logs);
+  const gr = tryOf(() => w.engine.grantReach('da-three', { kind: 'session', id: 'w-A', name: 'agent A' })), rv0 = tryOf(() => w.engine.reachOf('da-one'));
+  ok(!!(gr.v && gr.v.lease === null && rv0.v && rv0.v.lease === null && rv0.v.mode === 'pixels' && (JSON.parse(bytesOf(dir, REACH)).windows || {})['da-three'] && bytesOf(dir, LEASES) === f.leases),
+    'A SHARE ACT NEEDS THE SHARE MODES ONLY (the cure round): while the leases are held the person shares da-three (written) and a window\'s share answers lease: null — the lease file untouched', { gr: gr.code || 'acted', rv0: rv0.v ? { lease: rv0.v.lease, mode: rv0.v.mode } : rv0 });
   const syncBeforeHeal = w.pr.seen.sync;
   const lifted = await HOLD.readAgainOf(LEASES);
   const after = { lease: tryOf(() => w.engine.leaseOf('da-one')), sent: w.sent.filter((m) => m.type === 'window-leases-updated') };
-  ok(!!(lifted === true && heldRows(LEASES).length === 0 && after.lease.v && after.lease.v.sessionId === 'w-A' && after.sent.length === 1 && after.sent[0].leases.some((l) => l.handle === 'da-one') && w.pr.seen.sync === syncBeforeHeal),
-    'HEALED at the next good read (off the loop — no synchronous read): da-one\'s lease back as it was, ONE list broadcast with it', { lifted, after, sync: w.pr.seen.sync - syncBeforeHeal });
+  ok(!!(lifted === true && heldRows(LEASES).length === 0 && after.lease.v && after.lease.v.sessionId === 'w-A' && after.sent.length >= 1 && after.sent.every((m) => m.leases.some((l) => l.handle === 'da-one')) && w.pr.seen.sync === syncBeforeHeal),
+    'HEALED at the next good read (off the loop — no synchronous read): da-one\'s lease back as it was; every list broadcast at the lift (its own, the lift\'s reconcile) carries it', { lifted, after, sync: w.pr.seen.sync - syncBeforeHeal });
   const att = tryOf(() => w.engine.attach('da-two', w.facts));
   const disk = JSON.parse(bytesOf(dir, LEASES) || '{}').leases || {};
   ok(!!(att.v && att.v.handle === 'da-two' && disk['da-one'] && disk['da-two']), 'after the heal a verb acts and the file keeps what it held (da-one AND da-two)', Object.keys(disk));
@@ -137,10 +156,29 @@ console.log('§1 window-leases.json UNREADABLE: HELD — readers and writers ref
   r.engine.shutdown();
   // RED: the lease half blind to the hold — the agent browser stopped on an empty memory
   const e = heldLife(ENDS_BLIND(), (() => { const d3 = mk(); firstLife(d3); return d3; })(), LEASES); e.pr.restore();
+  const eDir = path.dirname(e.engine.leaseFile), eBytes = bytesOf(eDir, LEASES);
   e.records.set('da-ab', mkRec('da-ab', { origin: 'agent-browser', by: { sessionId: 'w-gone' } }));
   e.engine.reconcile({ graceMs: 0 }); await sleep(0);
   ok(e.stopped.includes('da-ab'), 'RED: the reconcile blind to the hold — the agent browser is stopped on an empty memory (its pending end is the held file\'s)', e.stopped);
+  ok(bytesOf(eDir, LEASES) === eBytes && e.sent.filter((m) => m.type === 'window-leases-updated').length === 0 && !e.logs.some((l) => /broadcast failed/.test(l)),
+    'THE INNER GUARDS ON THEIR OWN: in that copy two commits are reached while held — the save writes nothing over the file, the broadcast sends nothing and says no failure', e.logs);
   e.engine.shutdown();
+  // RED: the save without its guard (the ends' guard gone too, so a commit is reached) — the empty memory written over the file
+  const sv = heldLife(SAVE_BLIND(), (() => { const d = mk(); firstLife(d); return d; })(), LEASES); sv.pr.restore();
+  sv.records.set('da-ab', mkRec('da-ab', { origin: 'agent-browser', by: { sessionId: 'w-gone' } })); sv.engine.reconcile({ graceMs: 0 }); await sleep(0);
+  const svDisk = JSON.parse(bytesOf(path.dirname(sv.engine.leaseFile), LEASES) || '{}');
+  ok(!!svDisk.leases && !svDisk.leases['da-one'], 'RED: the save without its guard — the empty memory written over window-leases.json: da-one\'s lease gone', Object.keys(svDisk.leases || {}));
+  sv.engine.shutdown();
+  // RED: the broadcast without its guard — it asks the held leases at each commit (its list refuses by name, so nothing leaves; the journal says a failure each time)
+  const pb = heldLife(PUBLISH_BLIND(), (() => { const d = mk(); firstLife(d); return d; })(), LEASES); pb.pr.restore();
+  pb.records.set('da-ab', mkRec('da-ab', { origin: 'agent-browser', by: { sessionId: 'w-gone' } })); pb.engine.reconcile({ graceMs: 0 }); await sleep(0);
+  ok(pb.logs.filter((l) => /broadcast failed/.test(l)).length >= 1, 'RED: the broadcast without its guard — a failed broadcast said in the journal at every commit while held', pb.logs);
+  pb.engine.shutdown();
+  // RED: the kill path blind to the hold (its guard and the ends' guard gone) — a live opener's browser stopped on an empty memory
+  const kb = heldLife(KILL_BLIND(), (() => { const d = mk(); firstLife(d); return d; })(), LEASES); kb.pr.restore();
+  kb.records.set('da-ab2', mkRec('da-ab2', { origin: 'agent-browser', by: { sessionId: 'w-B' } })); kb.engine.dropSession('w-B'); await sleep(0);
+  ok(kb.stopped.includes('da-ab2'), 'RED: the kill path blind to the hold — the browser of the conversation that ended is stopped on an empty memory', kb.stopped);
+  kb.engine.shutdown();
   // RED: the gate that throws while held (the bridge catches it and warns at EVERY input message)
   const g = heldLife(GATE_THROWS(), (() => { const d4 = mk(); firstLife(d4); return d4; })(), LEASES); g.pr.restore();
   const gp = tryOf(() => g.engine.inputPolicy('da-one', 'v1'));
@@ -170,8 +208,10 @@ console.log('§3 window-reach.json UNREADABLE: HELD — no agent reaches a windo
   const w = heldLife(ENGINE, dir, REACH); w.dir = dir;
   ok(w.pr.seen.refused === 1 && Array.isArray(w.boot && w.boot.held) && w.boot.held.join() === REACH && heldRows(REACH).length === 1, 'HELD at the boot: said in its answer (held: window-reach.json)', w.boot);
   const syncAtBoot = w.pr.seen.sync;
-  const readers = { reachOf: tryOf(() => w.engine.reachOf('da-one')), views: tryOf(() => w.engine.reachViews()), list: await tryAsync(() => w.engine.list(w.facts)), mayUse: tryOf(() => w.engine.mayUseFor({ conversationKeys: [`claude:${S1}`] })) };
-  ok(Object.values(readers).every((r) => named(r, 'window_reach_unread')), 'READERS: a window\'s share, the share list, `list` and «what it may use» answer window_reach_unread BY NAME (503, the hold\'s words)', readers);
+  const readers = { reachOf: tryOf(() => w.engine.reachOf('da-one')), views: tryOf(() => w.engine.reachViews()), list: await tryAsync(() => w.engine.list(w.facts)) };
+  ok(Object.values(readers).every((r) => named(r, 'window_reach_unread')), 'READERS: a window\'s share, the share list and `list` answer window_reach_unread BY NAME (503, the hold\'s words)', readers);
+  const mu = tryOf(() => w.engine.mayUseFor({ conversationKeys: [`claude:${S1}`] })), muRow = mu.v && mu.v.length === 1 ? MU.rowOf(mu.v[0]) : null;
+  ok(!!(muRow && muRow.state === 'unknown' && muRow.code === 'window_reach_unread' && mu.v[0].resource === '*'), '«WHAT IT MAY USE» NAMES IT: one window row with the held code, which the model lists as unknown BY THAT CODE (never folded into unknown_shape)', mu);
   const grantsBefore = grantRows(w, 'da-three');
   const writers = { attach: tryOf(() => w.engine.attach('da-two', w.facts)), mode: tryOf(() => w.engine.setShareMode('da-one', 'tree')), grant: tryOf(() => w.engine.grantReach('da-three', { kind: 'session', id: 'w-A', name: 'agent A' })),
     revoke: tryOf(() => w.engine.revokeReach('da-two', { kind: 'session', id: 'w-A', name: 'agent A' })), open: await tryAsync(() => w.engine.open({ appId: 'gedit' }, w.facts)) };
@@ -186,7 +226,7 @@ console.log('§3 window-reach.json UNREADABLE: HELD — no agent reaches a windo
   ok(w.pr.seen.sync === syncAtBoot, `NOTHING SYNCHRONOUS ADDED: no store read again on the loop while held (${w.pr.seen.sync - syncAtBoot} after the boot's)`);
   const lifted = await HOLD.readAgainOf(REACH);
   const v = tryOf(() => w.engine.reachOf('da-one'));
-  ok(!!(lifted === true && v.v && v.v.mode === 'pixels' && w.sent.filter((m) => m.type === 'window-reach-updated').length === 1), 'HEALED at the next good read: da-one\'s «pixels» back, ONE share list broadcast', { lifted, v: v.v && v.v.mode });
+  ok(!!(lifted === true && v.v && v.v.mode === 'pixels' && w.sent.filter((m) => m.type === 'window-reach-updated').length >= 1 && w.sent.filter((m) => m.type === 'window-reach-updated').every((m) => m.reach.some((x) => x.handle === 'da-one'))), 'HEALED at the next good read: da-one\'s «pixels» back; every share list broadcast at the lift carries it', { lifted, v: v.v && v.v.mode });
   w.pr.restore(); w.engine.shutdown();
   // RED: the release's read — the failure read as «every window in auto»: a mode change writes the file over (da-one's «pixels» gone)
   const r = heldLife(RELEASE_REACH(), (() => { const d2 = mk(); firstLife(d2); return d2; })(), REACH); r.pr.restore();
@@ -196,10 +236,24 @@ console.log('§3 window-reach.json UNREADABLE: HELD — no agent reaches a windo
   r.engine.shutdown();
   // RED: the prune blind to the hold — a gone window's share row removed on an empty memory
   const p = heldLife(PRUNE_BLIND(), (() => { const d3 = mk(); firstLife(d3); return d3; })(), REACH); p.pr.restore(); p.dir = path.dirname(p.engine.reachFile);
+  const pBytes = bytesOf(p.dir, REACH);
   p.records.delete('da-two');
   const pr = p.engine.reconcile({ graceMs: 0 });
   ok(pr.pruned >= 1 && grantRows(p, 'da-two') === 0, 'RED: the reconcile blind to the hold — the gone window\'s share row removed', { pr, rows: grantRows(p, 'da-two') });
+  ok(!!pBytes && bytesOf(p.dir, REACH) === pBytes && JSON.parse(pBytes).windows['da-one'].mode === 'pixels' && p.sent.filter((m) => m.type === 'window-reach-updated').length === 0,
+    'THE INNER GUARDS ON THEIR OWN: in that copy a share commit is reached while held — the save writes nothing over window-reach.json («pixels» kept), nothing is broadcast');
   p.engine.shutdown();
+  // RED: the share save without its guard (the prune's guard gone too) — the empty memory written over the file
+  const sr = heldLife(SAVE_R_BLIND(), (() => { const d = mk(); firstLife(d); return d; })(), REACH); sr.pr.restore();
+  sr.records.delete('da-two'); sr.engine.reconcile({ graceMs: 0 });
+  const srDisk = JSON.parse(bytesOf(path.dirname(sr.engine.reachFile), REACH) || '{}');
+  ok(!!srDisk.windows && !srDisk.windows['da-one'], 'RED: the share save without its guard — the empty memory written over window-reach.json: da-one\'s «pixels» gone', srDisk);
+  sr.engine.shutdown();
+  // RED: «what it may use» without its named row — it throws, and the may-use door folds a throw into unknown_shape
+  const mt = heldLife(MAYUSE_THROWS(), (() => { const d = mk(); firstLife(d); return d; })(), REACH); mt.pr.restore();
+  const mu2 = tryOf(() => mt.engine.mayUseFor({ conversationKeys: [`claude:${S1}`] }));
+  ok(mu2.code === 'window_reach_unread' && mu2.v === undefined, 'RED: «what it may use» without its named row throws (the door would list it as unknown_shape)', mu2);
+  mt.engine.shutdown();
 }
 
 console.log('§4 window-reach.json TORN: kept aside once, then every window in auto; the share acts');
@@ -224,6 +278,46 @@ console.log('§5 the routes answer both codes 503 by name; the relaunch never re
   ok(wr.includes('window_leases_unread: 503, window_reach_unread: 503,'), 'PRODUCTION: the window routes\' STATUS maps both codes to 503');
   ok(da.includes("code === 'window_leases_unread' || code === 'window_reach_unread' ? 503") && da.includes("catch (e) { if (e && e.code === 'window_leases_unread') return fail(res, e); lease = null; }"), 'PRODUCTION: the desktop-app routes answer both 503; the relaunch refuses by name while the leases are held');
   ok(ENGINE.LEASE_FILE === LEASES, 'PRODUCTION: the engine\'s lease file is the census\'s name');
+  ok(fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8').includes('window_leases_unread: 503, window_reach_unread: 503'), 'PRODUCTION: `vibespace-browser new --backend desktop-app` answers both codes 503 (its status table)');
+}
+
+console.log('§6 THE ROUTES, DRIVEN over loopback (the cure round): the relaunch refused by name while the leases are held, Resume here acts with lease null, a launch with a share refused BEFORE anything starts while the share modes are held');
+{
+  const express = require(path.join(REPO, 'node_modules/express'));
+  const http = require('node:http');
+  const RT_SRC = fs.readFileSync(path.join(REPO, ROUTES_REL), 'utf8');
+  /** the desktop-app routes (the real file, or a RED copy) over loopback, wired to one life's keeper and engine → { go(path, body), close() } */
+  async function serve(R, w) {
+    R.setup({ keeper: w.keeper, windowEngine: w.engine });
+    const app = express(); app.use(express.json()); app.use(R.router);
+    const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const go = async (p, body) => { const r = await fetch(base + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); let j = null; try { j = await r.json(); } catch { j = null; } return { status: r.status, body: j }; };
+    return { go, close: () => new Promise((r) => srv.close(() => r())) };
+  }
+  const drive = async (R, w, p, body) => { const s1 = await serve(R, w); try { return await s1.go(p, body); } finally { await s1.close(); } };
+  const RT = require(path.join(REPO, ROUTES_REL));
+  const L = heldLife(ENGINE, (() => { const d = mk(); firstLife(d); return d; })(), LEASES); L.pr.restore();
+  const rel = await drive(RT, L, '/api/desktop/apps/da-one/relaunch', {});
+  const res = await drive(RT, L, '/api/desktop/apps/da-one/viewers/takeover', { viewerId: 'v1' });
+  ok(!!(rel.status === 503 && rel.body && rel.body.code === 'window_leases_unread' && L.relaunched.length === 0), 'THE RELAUNCH while the leases are held: 503 window_leases_unread by name, nothing relaunched (unknown is never «no agent holds it»)', rel);
+  ok(!!(res.status === 200 && res.body && res.body.ok === true && res.body.lease === null && L.elected.length === 1), 'RESUME HERE while the leases are held: the person\'s own election acts and answers lease: null (no agent verb runs while held)', res);
+  // RED copies of the route file, ONE anchored edit each
+  const RREL = M.load(ROUTES_REL, anchored(RT_SRC, "catch (e) { if (e && e.code === 'window_leases_unread') return fail(res, e); lease = null; }", 'catch { lease = null; }', 'relaunch-reads-held-as-none'), 'relaunch-none');   // stale-pins: kept — the red's own text (the release's form)
+  const rel2 = await drive(RREL, L, '/api/desktop/apps/da-one/relaunch', {});
+  ok(rel2.status === 200 && L.relaunched.length === 1, 'RED: the relaunch that reads a held lease table as «no agent holds it» — the window relaunched', rel2);
+  const RTKO = M.load(ROUTES_REL, anchored(RT_SRC, 'lease: leaseView || (engine ? leaseAfterAct(engine, id) : null) });', 'lease: leaseView || (engine ? engine.leaseOf(id) : null) });', 'takeover-asks-the-held-lease'), 'takeover-held');   // stale-pins: kept — the red's own text (the release's form)
+  const res2 = await drive(RTKO, L, '/api/desktop/apps/da-one/viewers/takeover', { viewerId: 'v2' });
+  ok(!!(res2.status === 503 && L.elected.length === 2), 'RED: Resume here that asks the held lease after its act — the person is elected, then told 503 (an act done behind a refusal)', res2);
+  L.engine.shutdown();
+  const SHARE = { appId: 'gedit', share: { principals: [{ kind: 'session', id: 'w-A', name: 'agent A' }], mode: 'auto' } };
+  const Rh = heldLife(ENGINE, (() => { const d = mk(); firstLife(d); return d; })(), REACH); Rh.pr.restore();
+  const la = await drive(RT, Rh, '/api/desktop/apps', SHARE);
+  ok(!!(la.status === 503 && la.body && la.body.code === 'window_reach_unread' && Rh.launched.length === 0), 'A LAUNCH WITH A SHARE while the share modes are held: 503 window_reach_unread BEFORE anything starts (nothing launched)', la);
+  const RLA = M.load(ROUTES_REL, anchored(RT_SRC, "  if (share != null && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.storesReadable === 'function') { try { ctx.windowEngine.storesReadable({ reach: true }); } catch (e) { return fail(res, e); } }\n", '', 'launch-before-the-share'), 'launch-first');
+  const la2 = await drive(RLA, Rh, '/api/desktop/apps', SHARE);
+  ok(!!(Rh.launched.length === 1 && la2.body && la2.body.reachError && la2.body.reachError.code === 'window_reach_unread'), 'RED: the launch before the share\'s question — the app starts, then its share is refused (an app running unshared behind a refusal)', la2);
+  Rh.engine.shutdown();
 }
 
 report();
