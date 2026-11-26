@@ -706,10 +706,23 @@ async function fourthRoad(Mod = DWO) {
 { const RED = copyOf('src/server/conversation-deliver.js', "attempt: { at, reason: agentSpendWords(v), phase: 'spend',", "attempt: { at, reason: `spend gate held: ${v.detail || v.why}`, phase: 'spend',", 'the parked attempt saying the gate\'s detail (3f60456cd)');
   ok(!!(!RED.err), 'RED CONTROL built: the parked first try\'s attempt saying the gate\'s detail', RED.err);
   if (!RED.err) { const W = await deliverHeldRoad(RED); ok(!!(LEAK.test(String(W.attempt.reason))), 'RED (3f60456cd): the parked first try\'s attempt reason tells a job\'s Delivery log another process\'s id and host', JSON.stringify(W.attempt.reason)); } }
-// THE CENSUS: in every src file that asks the gate, a read of a spend verdict's detail is the door's own or a NAMED allowlist row (a
-// person's page or the journal) — a new road beside the door is red
-const GATE_ASK = /\bauthorizeSpend\s*\(|\bspendGuard\.authorize\s*\(|\bguard\.authorize\s*\(/;
-const DETAIL_READ = /\b(?:v|g|av|hw|wr|verdict)\.detail\b|\brefused\.detail\b/;
+// THE CENSUS: in every source file that asks the gate, a read of a spend verdict's detail is the door's own or a NAMED allowlist row
+// (a person's page or the journal) — a new road beside the door is red. ITS REACH (主开发 r4744, line 1053's follow): it walks src/
+// AND the root's .js (server.js asks the gate itself), any `.authorize(` asks, and in an asking file it reads EVERY `detail` read — on
+// any name, through an optional chain (`?.detail`), by brackets (`['detail']`), or destructured (`const { detail } = x`). A read is
+// green only on a NAMED verdict line (ALLOW) or on an object NAMED as no verdict at all (NOT_VERDICT, each with its why): a read on a
+// new name is red until it is one or the other. (A whole verdict handed out by a spread or a json(v) is not read here.)
+const GATE_ASK = /\bauthorizeSpend\s*\(|\.authorize\s*\(/;
+const OBJ = '(?:[\\w$]+|\\))(?:\\??\\.[\\w$]+|\\[[^\\]]*\\])*';
+const READS = [new RegExp(`(${OBJ})\\??\\.detail\\b`, 'g'), new RegExp(`(${OBJ})\\[\\s*['"\`]detail['"\`]\\s*\\]`, 'g')];
+const DESTRUCT = /\b(?:const|let|var)\s*\{([^}]*)\}\s*=\s*([^;,)]+)/g;
+const readsOf = (l) => {
+  if (!l.includes('detail')) return [];   // most lines name no detail at all: no pattern is asked of them
+  const objs = [];
+  for (const re of READS) for (const m of l.matchAll(re)) objs.push(m[1]);
+  for (const m of l.matchAll(DESTRUCT)) if (/\bdetail\b/.test(m[1])) { const h = new RegExp(`^${OBJ}`).exec(m[2].trim()); objs.push(h ? h[0] : m[2].trim()); }
+  return objs;
+};
 const DOOR_FILES = new Set(['src/spend-words.js', 'src/spend-authorizer.js', 'src/server/spend-guard.js']);
 const ALLOW = [   // [file, a substring unique to its line, audience, why]
   ['src/server/auto-resume.js', 'detail: (v && v.detail) || null', 'person', 'the bulk resume page a person reads (routes/bulk-resume)'],
@@ -721,23 +734,67 @@ const ALLOW = [   // [file, a substring unique to its line, audience, why]
   ['src/server/usage-pool-engine.js', '${wr.detail ? ` — ${String(wr.detail)', 'person', 'the wall card in the person\'s own window'],
   ['src/server/worker-dispatch.js', 'the spend ceiling refused the compaction (${v.detail || v.why})', 'journal', 'the owed compaction\'s end, a log line (a cap: a held verdict never reaches it)'],
 ];
-const srcFiles = () => { const out = new Map(); const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) out.set(rel, fs.readFileSync(path.join(REPO, rel), 'utf8')); } }; walk('src'); return out; };
+// objects in an asking file whose `detail` is NO spend verdict's (each named with its why; a row nothing reads is stale, red)
+const NOT_VERDICT = [   // [file, the object read, why]
+  ['src/agent-routes.js', 'b', 'a backlog item answered to its own agent (taskItemAnswer)'],
+  ['src/agent-routes.js', 'p', 'a progress entry answered to its own agent (taskEntryAnswer)'],
+  ['src/agent-routes.js', 'req.body', 'a task verb\'s own request body'],
+  ['src/agent-routes.js', 'kept', 'the progress entry a task verb kept'],
+  ['src/agent-routes.js', 'BACKLOG_CAPS', 'the backlog\'s size caps'],
+  ['src/agent-routes.js', 'backlog[r]', 'the backlog row a verb edits'],
+  ['src/agent-routes.js', 'acted', 'the backlog row a verb acted on'],
+  ['src/server/usage-pool-engine.js', 'w', 'a held notice\'s own words (heldNoticeWords)'],
+  ['src/server/usage-pool-engine.js', 'out', 'a reading attribution\'s own answer, written'],
+  ['src/server/usage-pool-engine.js', 'x', 'a For-you item being redrawn'],
+];
+const srcFiles = () => {
+  const out = new Map();
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) out.set(rel, fs.readFileSync(path.join(REPO, rel), 'utf8')); } };
+  walk('src');
+  for (const e of fs.readdirSync(REPO, { withFileTypes: true })) if (e.isFile() && e.name.endsWith('.js')) out.set(e.name, fs.readFileSync(path.join(REPO, e.name), 'utf8'));   // the root: server.js asks the gate itself
+  return out;
+};
+// a file's «does it ask the gate» is read ONCE from the tree's own text; a plant's copy (another string) is asked again
+let BASE = null, BASE_ASK = null;
+const asks = (rel, text) => (BASE && BASE.get(rel) === text ? BASE_ASK.has(rel) : GATE_ASK.test(text));
 function census(files) {
-  const found = [], used = new Map(ALLOW.map((a, i) => [i, 0]));
+  const found = [], used = new Map(ALLOW.map((a, i) => [i, 0])), plain = new Map(NOT_VERDICT.map((a, i) => [i, 0]));
   for (const [rel, text] of files) {
-    if (DOOR_FILES.has(rel) || !GATE_ASK.test(text)) continue;
-    text.split('\n').forEach((l, i) => { if (!DETAIL_READ.test(l)) return; const k = ALLOW.findIndex(([f, sub]) => f === rel && l.includes(sub)); if (k < 0) found.push(`${rel}:${i + 1}`); else used.set(k, used.get(k) + 1); });
+    if (DOOR_FILES.has(rel) || !asks(rel, text)) continue;
+    text.split('\n').forEach((l, i) => {
+      const objs = readsOf(l);
+      if (!objs.length) return;
+      const k = ALLOW.findIndex(([f, sub]) => f === rel && l.includes(sub));
+      if (k >= 0) { used.set(k, used.get(k) + 1); return; }
+      for (const o of objs) { const q = NOT_VERDICT.findIndex(([f, obj]) => f === rel && obj === o); if (q < 0) found.push(`${rel}:${i + 1} (${o})`); else plain.set(q, plain.get(q) + 1); }
+    });
   }
-  return { found, stale: [...used].filter(([, n]) => n !== 1).map(([k]) => ALLOW[k][0] + ' «' + ALLOW[k][1] + '»') };
+  return { found, stale: [...[...used].filter(([, n]) => n !== 1).map(([k]) => ALLOW[k][0] + ' «' + ALLOW[k][1] + '»'), ...[...plain].filter(([, n]) => n < 1).map(([k]) => NOT_VERDICT[k][0] + ' «' + NOT_VERDICT[k][1] + '» read nowhere')] };
 }
 { const files = srcFiles();
+  BASE = files; BASE_ASK = new Set([...files].filter(([, t]) => GATE_ASK.test(t)).map(([r]) => r));
   const c = census(files);
-  ok(!!(c.found.length === 0 && c.stale.length === 0 && [...files.keys()].filter((f) => !DOOR_FILES.has(f) && GATE_ASK.test(files.get(f))).length >= 8), `THE CENSUS: in the ${[...files.keys()].filter((f) => !DOOR_FILES.has(f) && GATE_ASK.test(files.get(f))).length} src files that ask the gate, every read of a verdict\'s detail is the door\'s or one of the ${ALLOW.length} named rows (person ${ALLOW.filter((a) => a[2] === 'person').length}, journal ${ALLOW.filter((a) => a[2] === 'journal').length}), each row matched once`, JSON.stringify(c));
+  const askers = [...BASE_ASK].filter((f) => !DOOR_FILES.has(f));
+  ok(!!(c.found.length === 0 && c.stale.length === 0 && askers.length >= 9 && askers.includes('server.js')), `THE CENSUS: in the ${askers.length} source files that ask the gate (server.js among them), every read of a detail field is on one of the ${ALLOW.length} named verdict lines (person ${ALLOW.filter((a) => a[2] === 'person').length}, journal ${ALLOW.filter((a) => a[2] === 'journal').length}), each matched once, or on one of the ${NOT_VERDICT.length} objects named as no verdict`, JSON.stringify({ ...c, askers }));
   const planted = new Map(files); planted.set('src/server/worker-dispatch.js', files.get('src/server/worker-dispatch.js') + '\nconst leak = (v) => ({ why: v.detail });\n');
   ok(!!(census(planted).found.length === 1), 'THE CENSUS RED: a road beside the door — a planted read of a verdict\'s detail in a copy of one file\'s text — is red', JSON.stringify(census(planted).found));
   const newFile = new Map(files); newFile.set('src/server/made-up-road.js', "const v = authorizeSpend({ reason: 'peer-message' });\nanswer({ reason: v.detail });\n");
-  ok(!!(census(newFile).found.length === 1 && census(newFile).found[0].startsWith('src/server/made-up-road.js')), 'THE CENSUS RED: a NEW file that asks the gate and reads the detail is red', JSON.stringify(census(newFile).found)); }
-{ const W = await autoWorld(ENG, HELD, 'once', (dir) => fs.chmodSync(dir, 0o500));   // the grant's release write FAILS (its folder refuses): release() answers 'kept'
+  ok(!!(census(newFile).found.length === 1 && census(newFile).found[0].startsWith('src/server/made-up-road.js')), 'THE CENSUS RED: a NEW file that asks the gate and reads the detail is red', JSON.stringify(census(newFile).found));
+  // ITS REACH (r4744): each shape the census once missed is red when planted — another name, an optional chain, brackets, a
+  // destructured detail, an asker no `spendGuard.` names, and a read in the root's server.js
+  const plant = (rel, line) => { const m = new Map(files); m.set(rel, (files.get(rel) || '') + '\n' + line + '\n'); return census(m).found; };
+  const shapes = [
+    ['another name', 'src/server/worker-dispatch.js', 'const res = authorizeSpend(q); say(res.detail);'],
+    ['an optional chain', 'src/server/worker-dispatch.js', 'say(v?.detail);'],
+    ['brackets', 'src/server/worker-dispatch.js', "say(v['detail']);"],
+    ['a destructured detail', 'src/server/worker-dispatch.js', 'const { why, detail } = v;'],
+    ['an asker by another handle', 'src/server/made-up-asker.js', 'const sg = getSpendGuard(); const a = sg.authorize(q); say(a.detail);'],
+    ['the root server.js', 'server.js', 'app.get(\'/x\', (req, res) => res.json({ error: verdictOf(req).detail }));'],
+  ];
+  const caught = shapes.map(([n, rel, line]) => [n, plant(rel, line).length]);
+  ok(!!caught.every(([, n]) => n === 1), `THE CENSUS's REACH (r4744): each of ${shapes.length} planted shapes is red — ${caught.map(([n, k]) => `${n} ${k}`).join(', ')}`, JSON.stringify(caught)); }
+if (typeof process.getuid === 'function' && process.getuid() === 0) console.log('  ⊘ SKIP (b) r4696 should: the once-grant that stays spent — this process runs as root, and a folder\'s mode refuses no write of root\'s (the leg would read a correct product red)');
+else { const W = await autoWorld(ENG, HELD, 'once', (dir) => fs.chmodSync(dir, 0o500));   // the grant's release write FAILS (its folder refuses): release() answers 'kept'
   ok(!!(W.r.code === 'spend_refused' && !onceLeft(W) && !/grant is kept/.test(String(W.r.why)) && String(W.r.why).includes(HELD)), '(b) r4696 should: a once-grant that STAYS SPENT (its release could not be written) is never told «the grant is kept»', JSON.stringify({ why: W.r.why, grants: W.grants.map((g) => ({ mode: g.mode, spent: !!g.spentAt })) })); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
