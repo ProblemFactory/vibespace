@@ -265,6 +265,10 @@ function create({ engine, deliverRef, permissionRulesRef }) {
               try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.payload.kind || null, fromName: msg.payload.fromName || null, text: String(msg.payload.text) }); } // kind = the wrapper's echo of the frame's PATH (S3 verify F3; an older wrapper echoes none ⇒ unknown, never guessed from the name)
               catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
             }
+            // 主开发 r5164 (2), a silence of the release: on every road of a hand-back (the ladder's own stash, a hand-over's restore, the
+            // re-stash) the entry is the ONLY copy of the frame the wrapper handed back — a stash whose file is not current (a held list, a
+            // failed write: its own health) is said by name in the journal (r5176: the journal only)
+            try { const h = cid ? deliverRef?.stashHealth?.() : null; if (h && h.durable === false) console.warn(`[deliver] ${id}: the frame the wrapper handed back (${String(msg.payload.text).length} chars, for ${cid}) is not on disk — ${h.held ? 'the list of messages waiting for conversations could not be read: lost if VibeSpace restarts before it reads again, unless that conversation\'s next turn takes it first' : `the stash could not be written (${h.error || 'its write is owed'}): lost if VibeSpace restarts before it is written, unless that conversation's next turn takes it first`}`); } catch { /* the health is a report */ }
           }
           // A notification that could NOT be steered fell back to the queue
           // (the turn ended between the check and the RPC, or it was a
