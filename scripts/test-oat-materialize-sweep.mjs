@@ -17,8 +17,9 @@
 // broadcast, the collector's pauses), how many gaps passed the leg's bound and what those held, and the Node version
 // THE BROADCAST TURN's LAW IS NOT PINNED YET (r4585): F13 prints the turn that held the sweep's roster build against 3 × the
 // control's broadcast turn and judges nothing of it, because its control does not do the sweep's own file work, so that figure
-// moved about two and a half times from run to run (2.53 of its bound alone on machine 1). The leg that pins it, a control that
-// does the sweep's file work in a scratch store, is owed to row B-ed9e.
+// moved about two and a half times from run to run (2.53 of its bound alone on machine 1). Row B-ed9e built its control (a
+// scratch store's own sweep in a window of its own, the pair on each build's own span); the pair stays printed until three alone
+// readings on machine 1 and three box rows read it at half its bound or less.
 import './scratch.mjs';   // FIRST (B-ba47): a suite that reads a home or loads a module that does takes the re-home before any of its code (§113 THE ROW: a NEW one takes the import)
 import fs from 'node:fs';
 import os from 'node:os';
@@ -97,7 +98,12 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
     return { ms: +g.ms.toFixed(2), turn: g.turn, rows: starts.filter((k) => k === g.turn).length, broadcast: lists.some(inside), gcMs: +gcMs.toFixed(2) };
   };
   const longestOf = (gaps) => gaps.reduce((p, g) => (g.ms > p.ms ? g : p), { ms: 0, end: 0, turn: -1 });
-  const f13 = async (M, N = 200, o = {}) => {
+  // B-ed9e (the coordinator's r4870 GO): `scratch` adds THE SCRATCH CONTROL — a second store over its own scratch folder, its 200
+  // stand-in rows (the token and the logins built at run time, never a literal), whose own sweep runs in a window of its own after
+  // the control: the same archive, write and fsync on fs.promises and the same keeper re-read off the loop, in this process. The
+  // measured store's roster builds there are made one turn after a scratch act started (its file work in flight), over the same
+  // 200 written rows. `place` holds ONE roster build 40 ms (the second of that phase) — the placed red, its witness kept
+  const f13 = async (M, N = 200, o = {}, { scratch = false, place = null } = {}) => {
     const am13 = mk(M, o); await nv(am13, '2.1.296');
     const ids = [];
     for (let i = 0; i < N; i++) { const m = am13.createSubscription({ name: 'C' + i }).id; put(am13, m, login(NOW, { dead: true })); ids.push(m); }
@@ -108,6 +114,9 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
     // unsettled they fell inside the timed sweep window and never inside the control's. They are settled HERE, before either window;
     // the saves each window still holds are counted and printed with the stall figure (the law's number does not move)
     await am13.displaySettled();
+    let amS = null;   // B-ed9e: the scratch control's store, made AFTER the control's window (its heap and its landings never in the judged windows)
+    let phase = 'before', actsOpen = 0, scratchOpen = 0;
+    const spans = [], placed = { n: 0, done: false, phase: null };   // B-ed9e: each roster build's own span, its phase, and the file work in flight
     let saves = 0;
     am13._save = function (...a) { saves++; return Object.getPrototypeOf(this)._save.apply(this, a); };
     const subs = path.join(am13.dataDir, 'subs') + path.sep;
@@ -118,31 +127,55 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
     // every change — reads the rows synchronously; it is outside the sweep's acts, and inside both stall figures)
     let inList = 0, builds = 0, buildMs = 0;
     const lists = [], gcs = [];   // r4340's prints: each roster broadcast's span, each pause of the collector
-    am13.list = function (...a) { inList++; const from = performance.now(); try { return Object.getPrototypeOf(this).list.apply(this, a); } finally { const end = performance.now(); inList--; builds++; buildMs += end - from; lists.push([from, end]); } };
+    am13.list = function (...a) {
+      inList++; const from = performance.now(), open = phase === 'scratch' ? scratchOpen : actsOpen;
+      if (place && phase === place && !placed.done && ++placed.n === 2) { while (performance.now() - from < 40) { } placed.done = true; placed.phase = phase; }   // THE PLACED HOLD, read inside its phase (the witness)
+      try { return Object.getPrototypeOf(this).list.apply(this, a); } finally { const end = performance.now(); inList--; builds++; buildMs += end - from; lists.push([from, end]); spans.push({ phase, ms: end - from, open }); }
+    };
     for (const k of SYNC) { keep[k] = fs[k]; fs[k] = function (p, ...r) { if (!inList && String(p).startsWith(subs)) syncHits.push(k); return keep[k].call(this, p, ...r); }; }
     const gcObs = new PerformanceObserver((l) => { for (const e of l.getEntries()) gcs.push([e.startTime, e.startTime + e.duration]); });
     gcObs.observe({ entryTypes: ['gc'] });
     const meter = loopMeter(() => builds, () => buildMs), starts = [];
-    am13.syncOatFile = function (...a) { starts.push(meter.turn()); return Object.getPrototypeOf(this).syncOatFile.apply(this, a); };
+    am13.syncOatFile = function (...a) { starts.push(meter.turn()); const pr = Object.getPrototypeOf(this).syncOatFile.apply(this, a); actsOpen++; pr.then(() => actsOpen--, () => actsOpen--); return pr; };
+    let scratchFirst = null, scratchGone = null;
     let first, steady, run, ctl, savesSweep = 0, savesCtl = 0;
     try {
-      const t0 = performance.now();
+      const t0 = performance.now(); phase = 'sweep';
       first = await am13.syncOatFiles(); steady = await am13.syncOatFiles(); run = meter.stop(); savesSweep = saves;
       const took = performance.now() - t0;
       // the CONTROL: as long as the sweeps, their one broadcast each, not one act — over the rows they wrote
+      phase = 'control';
       const c = loopMeter(() => builds, () => buildMs);
       for (let k = 0; k < 2; k++) { const until = performance.now() + took / 2; do await new Promise((res) => setImmediate(res)); while (performance.now() < until); am13._notify(); }
       ctl = c.stop(); savesCtl = saves - savesSweep;
+      if (scratch) {   // B-ed9e: THE SCRATCH CONTROL — its store made here, after the judged windows; then its window: its own sweep in flight, the measured store's builds one turn after each 8th of its acts starts
+        phase = 'scratch-setup'; amS = mk(M, o); await nv(amS, '2.1.296');
+        const sids = [];
+        for (let i = 0; i < N; i++) { const m = amS.createSubscription({ name: 'S' + i }).id; put(amS, m, login(NOW, { dead: true })); sids.push(m); }
+        for (const m of sids) { const a = amS.get(m); a.oatEnc = amS._enc(OAT); a.oatMintedAt = Date.now(); a.oatShape = SHAPE; }
+        amS._save(); await amS.displaySettled();
+        phase = 'scratch'; let k = 0; const every = Math.max(1, Math.floor(N / 8));
+        amS.syncOatFile = function (...a) { const pr = Object.getPrototypeOf(this).syncOatFile.apply(this, a); scratchOpen++; pr.then(() => scratchOpen--, () => scratchOpen--); if (++k % every === 0) setImmediate(() => am13._notify()); return pr; };
+        scratchFirst = await amS.syncOatFiles(); await amS.oatFileSettled(); delete amS.syncOatFile;
+        await new Promise((res) => setImmediate(res));   // the last scheduled build lands inside the window
+      }
+      phase = 'after';
       await new Promise((res) => setTimeout(res, 20));   // a pause's entry reaches the observer a turn or two after it (the prints only)
       for (const e of (typeof gcObs.takeRecords === 'function' ? gcObs.takeRecords() : [])) gcs.push([e.startTime, e.startTime + e.duration]);
-    } finally { gcObs.disconnect(); if (!run) meter.stop(); delete am13.syncOatFile; delete am13.list; delete am13._save; for (const k of SYNC) fs[k] = keep[k]; }
+    } finally {
+      gcObs.disconnect(); if (!run) meter.stop(); delete am13.syncOatFile; delete am13.list; delete am13._save; for (const k of SYNC) fs[k] = keep[k];
+      if (amS) { try { fs.rmSync(path.dirname(amS.dataDir), { recursive: true, force: true }); } catch { } scratchGone = !fs.existsSync(path.dirname(amS.dataDir)); }   // the scratch control's folders: removed here, read by its leg
+    }
+    const top = (ph) => spans.filter((x) => x.phase === ph).reduce((m, x) => Math.max(m, x.ms), 0);
+    const pair = amS ? { sweep: +top('sweep').toFixed(2), ctl: +top('scratch').toFixed(2), nSweep: spans.filter((x) => x.phase === 'sweep').length, sweepOpen: spans.filter((x) => x.phase === 'sweep' && x.open > 0).length, nCtl: spans.filter((x) => x.phase === 'scratch').length, ctlOpen: spans.filter((x) => x.phase === 'scratch' && x.open > 0).length } : null;
+    const scratchCounts = {}; if (scratchFirst) for (const v of Object.values(scratchFirst)) scratchCounts[v] = (scratchCounts[v] || 0) + 1;
     const counts = {}; for (const v of Object.values(first)) counts[v] = (counts[v] || 0) + 1;
     const perTurn = {}; for (const t of starts) perTurn[t] = (perTurn[t] || 0) + 1;
     const over = run.long.filter((g) => g.ms > 3 * ctl.maxGap).map((g) => heldBy(g, starts, lists, gcs));
     const held = { sweep: heldBy(longestOf(run.long), starts, lists, gcs), control: heldBy(longestOf(ctl.long), [], lists, gcs), over: { n: over.length, rows: over.filter((x) => x.rows > 0).length, broadcast: over.filter((x) => x.broadcast).length, gc: over.filter((x) => x.gcMs > 0).length, top: [...over].sort((x, y) => y.ms - x.ms).slice(0, 5) }, node: process.version };
-    return { N, maxGap: +run.maxGap.toFixed(2), ctlGap: +ctl.maxGap.toFixed(2), rest: +run.maxRest.toFixed(2), restKind: run.restKind, restBuild: +run.restBuild.toFixed(2), ctlRest: +ctl.maxRest.toFixed(2), cast: +run.maxCast.toFixed(2), ctlCast: +ctl.maxCast.toFixed(2), saves: { sweep: savesSweep, control: savesCtl }, turns: run.turns, starts: starts.length, rowsPerTurn: Math.max(0, ...Object.values(perTurn)), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)], held };
+    return { N, maxGap: +run.maxGap.toFixed(2), ctlGap: +ctl.maxGap.toFixed(2), rest: +run.maxRest.toFixed(2), restKind: run.restKind, restBuild: +run.restBuild.toFixed(2), ctlRest: +ctl.maxRest.toFixed(2), cast: +run.maxCast.toFixed(2), ctlCast: +ctl.maxCast.toFixed(2), saves: { sweep: savesSweep, control: savesCtl }, turns: run.turns, starts: starts.length, rowsPerTurn: Math.max(0, ...Object.values(perTurn)), counts, steady: [...new Set(Object.values(steady))], syncHits: [...new Set(syncHits)], held, pair, scratch: amS ? { counts: scratchCounts, gone: scratchGone } : null, placed: { done: placed.done, phase: placed.phase } };
   };
-  const r13 = await f13();
+  const r13 = await f13(undefined, undefined, undefined, { scratch: true });
   ok(r13.counts.materialize === 200 && r13.steady.join() === 'written', 'F13: 200 fake rows — the first sweep materializes every one (archive + write), the next finds every one written', r13.counts);
   ok(r13.starts === 400 && r13.rowsPerTurn === 1, `F13: ONE row per loop turn — the two sweeps start ${r13.starts} row acts over ${r13.turns} turns of the loop, never more than ${r13.rowsPerTurn} between two turns`, r13);
   // r4384 / r4420 / r4585 THE LEG's FORM, LIKE AGAINST LIKE, the factor 3 unchanged: THE JUDGED LEG is the acts. The sweep's
@@ -160,6 +193,23 @@ console.log('F13 — the oat sweep never blocks the loop (moved from test-oat-ma
   // build — so on machine 1 alone it stood at 1.67 / 1.08 / 2.53 of its control: a pair at 84 % of its bound is not judged
   console.log(`    F13 (the broadcast, PRINTED, never judged; row B-ed9e): the longest turn that held a roster build in the sweeps' window ${r13.cast} ms against 3 × the control's broadcast turn ${r13.ctlCast} ms = ${+(3 * r13.ctlCast).toFixed(2)} ms — ${r13.ctlCast > 0 ? +(r13.cast / r13.ctlCast).toFixed(2) : 'n/a'} × its control`);
   console.log(`    F13 (the acts' longest turn, what it was): ${r13.rest} ms — ${r13.restKind === 'cast' ? `a broadcast's turn counted without its build's own ${r13.restBuild} ms` : r13.restKind === 'act' ? 'a turn that held no roster build' : 'no turn'}`);
+  // B-ed9e: THE BROADCAST PAIR LIKE AGAINST LIKE IN ITS FILE WORK TOO — the sweep's longest roster build (its own span) against 3 ×
+  // the scratch control's longest build, the factor unchanged; PRINTED (beside the old figure above) until three alone readings on
+  // machine 1 and three box rows read it at half its bound or less (r4585). A control build made with no scratch act in flight is
+  // a scratch control whose file work was not in force: said by name, never a figure
+  { const p = r13.pair;
+    if (!(p && p.nCtl > 0 && p.ctlOpen > 0)) console.log(`  ⊘ SKIP (named): F13's broadcast pair (B-ed9e) — the scratch control made ${p ? p.nCtl : 0} roster builds, ${p ? p.ctlOpen : 0} of them with a scratch act in flight: its file work was not in force`);
+    else console.log(`    F13 (the broadcast, B-ed9e's form, PRINTED until its proof law): the sweep's longest roster build ${p.sweep} ms against 3 × the scratch control's longest build ${p.ctl} ms = ${+(3 * p.ctl).toFixed(2)} ms — ${+(p.sweep / p.ctl).toFixed(2)} × its control (${p.nSweep} builds in the sweep, ${p.sweepOpen} with a row's act in flight; ${p.nCtl} in the scratch control, ${p.ctlOpen} with a scratch act in flight)`); }
+  ok(!!r13.scratch && r13.scratch.counts.materialize === 200 && r13.scratch.gone === true, 'F13 (B-ed9e): the scratch control\'s store materialized its 200 stand-in rows (the token and the logins built at run time) in its own window, and its folders are removed at the end', r13.scratch);
+  // THE PLACED RED (B-ed9e, law 1 of r5135: a control is judged on the fact that its plant was in force): one roster build of the
+  // sweep held 40 ms, read inside the sweep's window (the witness), reads the pair red; the same hold in a build of the scratch
+  // control raises the control's own figure and the pair reads green. A hold not read inside its window is a named skip
+  const rP = await f13(undefined, undefined, undefined, { scratch: true, place: 'sweep' });
+  if (!(rP.placed.done && rP.placed.phase === 'sweep' && rP.pair)) console.log('  ⊘ SKIP (named): RED control (F13, B-ed9e) — the placed 40 ms hold was not read inside the sweep\'s window: its plant was not in force');
+  else ok(rP.pair.sweep > 3 * rP.pair.ctl, `RED control (F13, B-ed9e): one roster build of the sweep held 40 ms (read inside the sweep's window) reads the pair red at will — the sweep's longest build ${rP.pair.sweep} ms against 3 × the scratch control's ${rP.pair.ctl} ms`, rP.pair);
+  const rQ = await f13(undefined, undefined, undefined, { scratch: true, place: 'scratch' });
+  if (!(rQ.placed.done && rQ.placed.phase === 'scratch' && rQ.pair)) console.log('  ⊘ SKIP (named): CONTROL (F13, B-ed9e) — the placed 40 ms hold was not read inside the scratch control\'s window: its plant was not in force');
+  else ok(rQ.pair.sweep <= 3 * rQ.pair.ctl, `CONTROL (F13, B-ed9e): the same 40 ms hold in a build of the scratch control (read inside its window) raises the control's own figure, and the pair reads green — the sweep's ${rQ.pair.sweep} ms against 3 × ${rQ.pair.ctl} ms`, rQ.pair);
   { const h = r13.held;   // r4340: what tells a hold from a stray stall (judges nothing)
     console.log(`    F13's longest gap ${h.sweep.ms} ms at turn ${h.sweep.turn}: rows started in it ${h.sweep.rows}, a roster broadcast ${h.sweep.broadcast ? 'inside' : 'not inside'}, the collector ${h.sweep.gcMs} ms inside; the control's ${h.control.ms} ms: a broadcast ${h.control.broadcast ? 'inside' : 'not inside'}, the collector ${h.control.gcMs} ms; gaps past 3 × the control's ${h.over.n} (with a row start ${h.over.rows}, a broadcast ${h.over.broadcast}, a pause ${h.over.gc}); node ${h.node}`);
     for (const x of h.over.top) console.log(`      a gap past the bound: ${x.ms} ms at turn ${x.turn}: rows started ${x.rows}, a broadcast ${x.broadcast ? 'inside' : 'not inside'}, the collector ${x.gcMs} ms inside`); }
