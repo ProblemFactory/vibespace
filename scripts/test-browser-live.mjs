@@ -218,6 +218,8 @@ async function legAttach() {
   // (the display, the driver, the viewer and the control's spawn keep `env`): the attach road's Chrome resolves no name off the box,
   // and the keeper's argv is the product's, unchanged
   const NP = chromeNamesProgram(path.join(R9, 'chrome-bin'), env), kenv = NP ? NP.env : env;
+  // (kenv also reaches the keeper's runtime and facts: a driver road that looked up google-chrome there would get the program, and its own
+  // DRIVER_NAMES comes after the program's rule — Chrome keeps the last copy of a switch, so the driver's one rule still wins: no conflict)
   const mkK = (o = {}) => K9.create({ dataDir: path.join(R9, o.data || 'data'), homeDir: env.HOME, env: () => kenv, serverSetting: (x) => settings[x], runtime: F.createBrowserRuntime({ env: kenv }), facts: F.createBrowserFacts({ env: kenv }), log: hidden, install: false, tickMs: 3600e3, attachSocketBase: SB, ...o.k });
   const abRun = (args, pairsEnv, timeout = 30000) => new Promise((resolve) => require('node:child_process').execFile(realBin, args, { env: { ...env, ...pairsEnv }, encoding: 'utf8', timeout }, (err, stdout, stderr) => resolve({ ok: !err, out: String(stdout || '').trim(), err: String(stderr || '').trim() })));
   const x = (args, xenv, timeout = 10000) => { try { return execFileSync(args[0], args.slice(1), { env: { ...env, ...xenv }, encoding: 'utf8', timeout }).trim(); } catch (e) { return null; } };

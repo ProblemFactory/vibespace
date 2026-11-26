@@ -28,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, chromeNames } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET, chromeNames, chromeNamesProgram } from './scratch.mjs';
 
 /** Boot ONE part of the xpra window family: everything above, up and checked ('worktree server boots'); returns the
  *  handles, the evidence deadlines, the shared measures and the part's end. `part` names the part in its verdict line. */
@@ -151,6 +151,9 @@ export async function bootXpraWindow(part) {
   // accessibility socket (2026-10-04 08:55Z, a loaded rerun of this suite) — test-architecture §76 holds every fixture to it
   const RUNTIME = path.join(fakeHome, 'run'); fs.mkdirSync(RUNTIME, { recursive: true }); fs.chmodSync(RUNTIME, 0o700);
   const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, XDG_RUNTIME_DIR: RUNTIME, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
+  // B-8695 (主开发 r4685 M1): a profile this hub starts takes the ATTACH road on a box with the driver (test-desktop-xpra-window-close §10h):
+  // the harness's own Chrome program, first on the hub's PATH, puts the names rule first — ONE seam for every suite that boots here
+  { const NP = chromeNamesProgram(path.join(fakeHome, 'chrome-bin'), srvEnv); if (NP) srvEnv.PATH = NP.env.PATH; }
   let srv = null;
   const srvLog = [];
   const bootServer = () => { srv = spawnCopy('the worktree server', wt, srvEnv); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
