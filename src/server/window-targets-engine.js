@@ -254,17 +254,31 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const leaseHold = HOLD.create({ file: leaseFile, valid: leasesShape, code: 'window_leases_unread', aside: (m) => leaseFile + '.corrupt-' + m,
     words: (h) => `the record of which agent holds which window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and the agents' window verbs wait until it reads`,
     log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) { applyLeases(v); endUnreachedRestored(); } liftPass(); publish(); if (leases.size || openerLost.size) ensureTimer(); } });
-  /** THE LIFT's MERGE (主开发 r4813): a person's act that takes access AWAY (a revoke, an Except, «this group only») is honoured while
-   *  the leases are held, its lease end OWED; when they read again every restored lease whose live holder the share no longer reaches
-   *  is ended by the release's own road for an exposure revoked (dropUnreached: audited by:user), before the restored table is
-   *  published. A gone holder's lease is the reconcile's (its grace). The share modes held: nothing is judged (the holder's next verb is) */
+  /** THE LIFT's MERGE (主开发 r4813, its law r4826): a person's act that takes access AWAY (a revoke, an Except, «this group only») is
+   *  honoured while the leases are held, its lease end OWED; when they read again a restored lease is ended ONLY on a share that WAS READ
+   *  and says «this holder is not reached» — the share modes held, the grants list unread (its health), a record or row of a shape the
+   *  reader does not know (unknown), or the holder's Task Groups unreadable: the lease STANDS and nothing is ended (the holder's next
+   *  verb decides, as requireReach does). What the lift ends is recorded as ended by a revoke made while the leases were held (by
+   *  'held-revoke'), never as a person's act of that moment; ONE save and ONE list after the loop, before the lift's own publish. A gone
+   *  holder's lease is the reconcile's (its grace); a desktop-class lease is the consent switch's */
   function endUnreachedRestored() {
-    if (reachHeld()) return;
-    for (const [h, l] of [...leases]) {
-      const rec = liveRecord(h);
-      if (!rec || !sessionLive(l.sessionId)) continue;
-      try { dropUnreached(rec, 'exposure revoked while the window leases could not be read'); } catch (e) { log.warn?.(`[window] ${h}: the lift could not judge its lease — ${e && e.message}`); }
-    }
+    let ended = 0;
+    try {
+      if (reachHeld()) return;
+      const g = grantsOf();
+      // r4835: a grants file holding rows this release cannot read (its `bad`) is no share READ either — the merge judges nothing
+      const gh = g && typeof g.health === 'function' ? g.health() : null;
+      if (!g || (gh && (!gh.readable || gh.bad > 0))) return;
+      for (const [h, l] of [...leases]) {
+        const rec = liveRecord(h);
+        if (!rec || l.origin === 'desktop' || !sessionLive(l.sessionId)) continue;
+        let v = null;
+        try { v = R.reachFor(reachRecord(rec.id), ctxOf({ sessionId: l.sessionId, session: sessionsMap().get(l.sessionId) })); } catch { v = null; }
+        if (!v || v.level === 'exposed' || v.unreadable || v.unknown) continue;   // only a share READ that says «not reached» ends a lease
+        dropLease(rec.id, 'its share no longer reaches it when the window leases read again (a revoke made while they could not be read)', { by: 'held-revoke' }); ended++;
+      }
+    } catch (e) { log.warn?.(`[window] the lift's merge stopped part-way — the leases not yet judged stand: ${e && e.message}`); }
+    finally { if (ended) { try { commit(); } catch (e) { log.warn?.(`[window] the lift's merge could not save its ends: ${e && e.message}`); } } }   // r4835: what was ended is saved, even after a throw
   }
   const reachHold = HOLD.create({ file: reachFile, valid: reachShape, code: 'window_reach_unread', aside: (m) => reachFile + '.corrupt-' + m,
     words: (h) => `the share mode of each window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and no agent reaches a window and no share changes until it reads`,
@@ -291,7 +305,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     for (const [h, p] of Object.entries((j && j.agentEnds) || {})) if (p && (!plain(p.at) || !plain(p.why))) odd++; else if (p && Number.isFinite(Number(p.at))) openerLost.set(String(h), { at: Number(p.at), told: !!p.told, why: p.why === 'opener-stopped' ? 'opener-stopped' : 'opener-ended', restored: true });
     for (const l of Object.values((j && j.leases) || {})) {
       if (!l || typeof l !== 'object' || !l.handle || !l.sessionId) continue;
-      if (![l.handle, l.sessionId, l.since, l.origin].every(plain)) { odd++; continue; }
+      if (![l.handle, l.sessionId, l.since, l.origin, l.browserKey].every(plain)) { odd++; continue; }
       if (leases.has(String(l.handle))) continue;
       leases.set(String(l.handle), { handle: String(l.handle), sessionId: String(l.sessionId), browserKey: l.browserKey || null, since: Number(l.since) || 0, origin: leaseOriginOf(l.origin), refs: null, snapshotAt: null, carrierLostAt: null, mode: null });
     }
