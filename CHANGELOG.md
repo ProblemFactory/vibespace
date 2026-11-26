@@ -14,6 +14,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace cannot read the requests waiting for you to take over a browser, it now says so and keeps them instead of writing over them.
 - An idle browser's page that failed to come back on the first try is now shown at the next look, so its live view no longer stays blank.
 - An agent's own browser timeout or debug setting no longer restarts its browser between commands, which made it lose the page's element references.
+- A kept agent browser that restores its tabs no longer gains a tab at each restart when the agent kept to one tab in its window: it gets that tab back.
 - A message you held behind a long running turn now keeps its bubble and its queue row when the page is opened again before it runs.
 - On a paired machine, OpenCode now starts below that machine's agent, as its other conversations do, when VibeSpace's lower CPU priority is on.
 - On a paired machine with many installed apps, the app launcher's list and its running apps load again: overlong lists are shortened, not failed.
@@ -21,7 +22,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent's service no longer takes over or removes a port forward you made by hand on its port; its card says why it is not published.
 - A publish setting that cannot be read no longer loses the published address; Publish and Unpublish wait until it reads.
 - When a page in an agent browser's live view stops drawing, a line under the view now says why and what to do, instead of a still picture with no word.
-- A kept agent browser that restores its tabs no longer gains a tab at each restart when the agent kept to one tab in its window: it gets that tab back.
 
 ## 2.369.419 — 2026-11-25
 
