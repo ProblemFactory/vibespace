@@ -411,7 +411,7 @@ console.log('⑦ r1044, the follow: the door\'s default, a re-scan keeps its cod
       page._initRemoteDirtySync();
       hub.invalidateDiscovery('hD');   // the real dirty signal: a conversation ended there
       for (const fn of fired.splice(0)) await fn();
-      if (hub._discPersistTimer) { clearTimeout(hub._discPersistTimer); hub._discPersistTimer = null; }
+      require(path.join(REPO, 'src/store-writer.js')).storeWriter().forget(hub._discFile);   // B-574d (lane nl-paired): the last-known list's write is the store writer's now — this leg's folder never owes it
       for (const m of pushed) handler && handler(m);
       return { pushed: pushed.length, rows: (page._wbRemoteHosts.get('hD').sessions || []).map((s) => s.sessionId).join() || '(empty)' };
     };

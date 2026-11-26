@@ -367,8 +367,9 @@ class HostManager {
    *  timer's was), written whole and SYNCED before the rename on the writer's thread. Before: writeFileSync + renameSync on the
    *  main thread 2 s after each result, its temp never synced — after a power loss the file could come back empty and an
    *  unreachable machine's last sessions were gone from the sidebar until it answered; a failure was swallowed. Paced, not
-   *  durable: a cache (a SIGKILL loses at most its last paced change; a stop's exit flush writes it). Its ONE reader is the
-   *  constructor above, at the next start; a failed write is the writer's to say (and it retries). */
+   *  durable: a cache (a SIGKILL loses at most its last paced change; a stop's exit flush writes it). Its readers: the constructor
+   *  above, at the next start, and the incident snapshot (src/server/incident-wiring.js, a debug copy of the counts: at most one paced
+   *  write older); a failed write is the writer's to say (and it retries). */
   _persistDiscovery(id, sessions) {
     this._persistedDisc[id] = { at: Date.now(), sessions };
     const W = this._storeWriter || require('./store-writer.js').storeWriter();

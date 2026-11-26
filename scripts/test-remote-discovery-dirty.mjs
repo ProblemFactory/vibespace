@@ -84,7 +84,8 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
 // B-574d (lane nl-paired, 主开发 r4752): THE LAST-KNOWN SESSIONS GO THROUGH THE STORE WRITER — a write at a cadence (after every
 // discovery result) never on the hub's loop: ONE hand-off per result under its row's name, the bytes made AT the write (the latest
 // lists), no synchronous write of the file; through the real writer the file lands and the next start reads it.
-// RED: a copy with the release's 2 s timer and its writeFileSync + renameSync on the loop — nothing handed to the writer.
+// RED: a copy with the release's 2 s timer and its writeFileSync + renameSync on the loop — nothing handed to the writer, and its
+// timer (fired at once inside the scene: setTimeout stubbed for the two calls) writes the file synchronously.
 {
   const fsm = require('fs');
   const REPO = require('path').resolve(new URL('..', import.meta.url).pathname);
@@ -94,8 +95,9 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
     const w0 = fsm.writeFileSync, r0 = fsm.renameSync; let syncWrites = 0;
     fsm.writeFileSync = function (f, ...a) { if (String(f).startsWith(hm._discFile)) syncWrites++; return w0.call(this, f, ...a); };
     fsm.renameSync = function (f, ...a) { if (String(f).startsWith(hm._discFile)) syncWrites++; return r0.call(this, f, ...a); };
-    try { hm._persistDiscovery('hA', [{ sessionId: 'sA' }]); hm._persistDiscovery('hB', [{ sessionId: 'sB' }]); } finally { fsm.writeFileSync = w0; fsm.renameSync = r0; }
-    if (hm._discPersistTimer) { clearTimeout(hm._discPersistTimer); hm._discPersistTimer = null; }   // a copy's timer never fires after its scene
+    const st0 = globalThis.setTimeout; globalThis.setTimeout = (fn) => { fn(); return { unref() { } }; };   // a timer fires at once: a write it holds is seen here
+    try { hm._persistDiscovery('hA', [{ sessionId: 'sA' }]); hm._persistDiscovery('hB', [{ sessionId: 'sB' }]); } finally { fsm.writeFileSync = w0; fsm.renameSync = r0; globalThis.setTimeout = st0; }
+    hm._discPersistTimer = null;   // a copy's stand-in timer (no real one was made)
     const last = handed[handed.length - 1];
     let bytes = null; try { bytes = last && JSON.parse(last[1].produce()); } catch { bytes = null; }
     return { handed: handed.length, file: !!last && last[0] === hm._discFile, name: last && last[1].name, both: !!(bytes && bytes.hA && bytes.hB && bytes.hB.sessions[0].sessionId === 'sB'), syncWrites };
@@ -110,7 +112,7 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
   ok(landed === true && !!hm2._persistedDisc.hC && hm2._persistedDisc.hC.sessions[0].sessionId === 'sC', 'B-574d: through the real writer the cache lands (durable answers true) and the next start reads the last-known list back');
   const X = mutantCopies('disc-cache-timer', REPO).load('src/hosts.js', anchored(src, "    const W = this._storeWriter || require('./store-writer.js').storeWriter();\n    W.dirty(this._discFile, { name: 'remote-sessions-cache.write', debounceMs: 2000, produce: () => JSON.stringify(this._persistedDisc) });\n", "    if (this._discPersistTimer) return;\n    this._discPersistTimer = setTimeout(() => { this._discPersistTimer = null; try { const tmp = this._discFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this._persistedDisc)); fs.renameSync(tmp, this._discFile); } catch { } }, 2000);   // MUTANT: the release's timer on the loop\n", 'disc-cache-timer'), 'disc-cache-timer').HostManager;
   const x = scene(X, 'red');
-  ok(x.handed === 0, 'CONTROL (the release\'s 2 s timer and its synchronous write, in a copy): nothing is handed to the writer — red ' + JSON.stringify(x));
+  ok(x.handed === 0 && x.syncWrites > 0, 'CONTROL (the release\'s 2 s timer and its synchronous write, in a copy): nothing is handed to the writer, and its timer writes the file on the loop — red ' + JSON.stringify(x));
 }
 
 console.log(fail ? `\n${fail} FAILED` : '\nALL PASS');
