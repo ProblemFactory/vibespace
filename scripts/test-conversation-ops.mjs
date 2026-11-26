@@ -283,6 +283,8 @@ console.log('⑤ MUTANTS (patched copies outside the tree)');
     fs.mkdirSync(path.join(dir, 'src', 'server'), { recursive: true });
     fs.copyFileSync(path.join(ROOT, 'src/conversation-spec.js'), path.join(dir, 'src/conversation-spec.js'));
     fs.copyFileSync(path.join(ROOT, 'src/task-membership.js'), path.join(dir, 'src/task-membership.js')); // PURE (lane open-task-binds): the birth bind's verdict
+    // B-ef83 unit 2's door (主开发 r4696): the module asks THE ONE DOOR for a spend verdict's words, and the door asks the authorizer (PURE)
+    for (const f of ['src/spend-words.js', 'src/spend-authorizer.js']) fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
     fs.writeFileSync(path.join(dir, 'src/backend-caps.js'), 'module.exports = { capsOf: () => ({}) };\n'); // the rename body's one import
     // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then «anchor missing»:
     // the mutant's own leg below reds too, nothing crashes)
