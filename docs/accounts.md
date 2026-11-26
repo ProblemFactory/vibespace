@@ -149,11 +149,14 @@ way around Anthropic's terms. The relevant choices:
   (`--input-format` / `--output-format stream-json`), which the CLI itself
   labels `sdk-cli` on its requests. VibeSpace adds no inference road of its
   own (no Agent SDK, no separate one-shot run) and never spoofs the CLI's
-  identity. The one label a person may change is the entry label a chat
+  identity. The one label that may be changed is the entry label a chat
   conversation reports — Settings → Claude → «Entry label of chat
-  conversations», off by default (the CLI's own label); Anthropic has not said
-  how it treats a name other than its own, so the choice, and any risk in it,
-  are the person's, and nothing is promised about cost or limits.
+  conversations», off by default (the CLI's own label). It is one choice for
+  every chat conversation on the instance; a conversation on a third-party
+  provider's account never carries it. Anthropic has not said how it treats a
+  name other than its own, so the choice, and any risk in it, are the instance
+  owner's, and nothing is promised about cost or limits. Neither mode adds a
+  print run or an SDK road of its own for inference.
 - **No background use of subscription credentials.** Usage is read passively
   from what the CLI itself already reports (above) — there is no timer that
   calls Anthropic's API with a subscription token, which is the behavior most

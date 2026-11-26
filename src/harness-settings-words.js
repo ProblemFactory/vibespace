@@ -100,9 +100,9 @@ const HARNESS_SETTINGS_WORDS = {
       // person's, no promise of saving, and when a running conversation takes it
       entryLabel: {
         label: t("Entry label of chat conversations (Claude)"),
-        description: t("The name a chat conversation's Claude CLI reports to Anthropic on each of its requests as the place it was started from. Off (the default) keeps the CLI's own label. Anthropic has not said how it treats other names: the choice, and any risk in it, are yours, and nothing is promised about cost or limits. A running conversation takes a change at its next start."),
+        description: t("The name this instance's chat conversations report to Anthropic through the Claude CLI on each request, as the place they were started from — one choice for everyone who uses this instance. Off (the default) keeps the CLI's own label. Anthropic has not said how it treats other names: the choice, and any risk in it, are the instance owner's, and nothing is promised about cost or limits. A running conversation takes a change at its next start."),
         details: [
-          t("\"vibespace\" reports VibeSpace's name; Custom… reports a name you type. Terminal conversations always keep the CLI's own label."),
+          t("\"vibespace\" reports VibeSpace's name; Custom… reports a name you type. Terminal conversations, and conversations on a third-party provider's account, always keep the CLI's own label."),
           t("A typed name is 1 to 32 characters of a–z, 0–9, _ and -, starting with a letter. Refused: cli (the CLI rewrites it on a chat start), names starting with sdk or remote, the CLI's own names (mcp, claude-vscode, claude-desktop and the others it uses) and local_projects. A refused name passes nothing — the CLI's own label stands, and the line under this setting says why."),
         ],
         placeholder: t("a name, e.g. my-team"),

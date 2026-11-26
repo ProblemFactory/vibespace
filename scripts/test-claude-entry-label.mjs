@@ -12,25 +12,26 @@
 //      buildSessionArgs call; the pairs are its env, built before every road).
 //   ③b 主开发 r4493: every other harness's adapter and the REAL create for every other backend, chat and terminal, with the name
 //      in every bag they are handed, hand nothing on; terminal Claude neither; the boot restore's remote re-adopt starts no CLI.
+//   ③c 主开发 r4672 (1): a third-party PROVIDER's conversation never carries it — the resolved account's kind, through the real create.
 //   ④ THE ROW: declared (a combobox, default off, options off and vibespace — no cli —, spawn mode chat, its fact tag), checkTable
 //      and the words census clean, the spawn conformance probe, the derived Settings row, the hub's typed read.
 //   ⑤ THE WORDS: the fact line for each kind of value; each refusal code its own words; zh and ja for every word.
 //   ⑥ THE VERDICT (src/entry-measure.js) over made-up summaries: PASS, each judged fact failing, a difference recorded, INCOMPLETE.
 //   ⑦ RED CONTROLS (scripts/mutant-copy.mjs, anchored edits): the adapter's mode guard dropped; a refused name passed as typed;
-//      the release's adapter (no entry label); the ten lines' push in the create WITHOUT its backend guard (r4493).
+//      the adapter without its entry line (the release's form, BUILT FROM THE TIP — never a skip: r4672 (4)) and OFF IS NOTHING
+//      against it byte for byte; the ten lines' push in the create WITHOUT its backend guard (r4493); the create handing no account
+//      kind (r4672 (1)).
 // Run: node scripts/test-claude-entry-label.mjs
 import './scratch.mjs';   // FIRST (§113 THE ROW): the create below reads a home — the re-home comes before any of this suite's code
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
 import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(import.meta.url);
-const RELEASE = 'eb7608d54';   // 2.369.419: the release this unit was built on (its adapter passes no entry label)
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, msg, detail) => {
   if (typeof msg !== 'string' || msg.length === 0) throw new TypeError(`ok(cond, name): the name is a ${typeof msg} — the arguments are swapped`);
@@ -64,12 +65,15 @@ console.log('— ① THE RULE: the vendor\'s naming rule, the stored value read'
   ok(L('cli') === '{"on":false,"refused":"entry_name_cli","typed":true}' && L('claude-desktop') === '{"on":false,"refused":"entry_name_vendor","typed":true}', 'a typed name the rule refuses: off, with its code — never a half-applied name');
   ok(EL.entryNameFor({ mode: 'chat', value: 'vibespace' }) === 'vibespace' && EL.entryNameFor({ mode: 'terminal', value: 'vibespace' }) === null && EL.entryNameFor({ mode: 'chat', value: 'cli' }) === null && EL.entryNameFor({ mode: 'chat' }) === null && EL.entryNameFor() === null,
     'entryNameFor: a chat start with a name the rule takes, never a terminal start, never a refused name, nothing by default');
+  ok(EL.PROVIDER_KIND === 'provider' && EL.entryNameFor({ mode: 'chat', value: 'vibespace', accountKind: 'provider' }) === null
+    && ['subscription', 'api', null, undefined].every((k) => EL.entryNameFor({ mode: 'chat', value: 'vibespace', accountKind: k }) === 'vibespace'),
+    '主开发 r4672 (1): a third-party PROVIDER\'s account (kind provider) never carries the name; a subscription, an API key or no account (the CLI\'s own login) does');
 }
 
 console.log('— ② THE ADAPTER: the name rides a CHAT start\'s env only');
 const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const mk = (A) => new A({ claudeCmd: '/opt/bin/claude', chatWrapper: '/w/chat', ptyWrapper: '/w/pty', buffersDir: '/b' });
-const specOf = (A, mode, value) => mk(A).buildSessionArgs({ cwd: '/home/u/proj', mode, permissionMode: 'default', settings: value === undefined ? {} : { entryLabel: value } });
+const specOf = (A, mode, value, more = {}) => mk(A).buildSessionArgs({ cwd: '/home/u/proj', ...(mode === undefined ? {} : { mode }), permissionMode: 'default', settings: value === undefined ? {} : { entryLabel: value }, ...more });
 const VALUES = [[undefined, null], ['off', null], ['', null], ['vibespace', 'vibespace'], ['my-team', 'my-team'], ['x'.repeat(32), 'x'.repeat(32)], ['x'.repeat(33), null], ['cli', null], ['sdk-mine', null], ['claude-desktop', null], ['remote-box', null], ['local_projects', null], ['My-Team', null], ['team\n--flag', null]];
 const chatCarries = (A) => VALUES.every(([v, want]) => { const e = specOf(A, 'chat', v).env; return want === null ? !Object.prototype.hasOwnProperty.call(e, ENTRY_VAR) : e[ENTRY_VAR] === want; });
 const terminalNever = (A) => VALUES.every(([v]) => !Object.prototype.hasOwnProperty.call(specOf(A, 'terminal', v).env, ENTRY_VAR));
@@ -80,6 +84,11 @@ const terminalNever = (A) => VALUES.every(([v]) => !Object.prototype.hasOwnPrope
   const same = ['chat', 'terminal'].every((m) => VALUES.every(([v]) => strip(specOf(ClaudeCodeAdapter, m, v)) === strip(specOf(ClaudeCodeAdapter, m, 'off'))));
   ok(same, 'in both modes the args, the wrapper and every other env name are the setting-off start\'s, byte for byte (the setting changes ONE env name)');
   ok(!specOf(ClaudeCodeAdapter, 'chat', 'vibespace').args.some((a) => String(a).includes(ENTRY_VAR)), 'the name never rides argv (env only)');
+  const has = (sp) => Object.prototype.hasOwnProperty.call(sp.env, ENTRY_VAR);
+  ok(!has(specOf(ClaudeCodeAdapter, 'chat', 'vibespace', { accountKind: 'provider' })) && specOf(ClaudeCodeAdapter, 'chat', 'vibespace', { accountKind: 'subscription' }).env[ENTRY_VAR] === 'vibespace'
+    && strip(specOf(ClaudeCodeAdapter, 'chat', 'vibespace', { accountKind: 'provider' })) === strip(specOf(ClaudeCodeAdapter, 'chat', 'off', { accountKind: 'provider' })),
+    '主开发 r4672 (1): the adapter handed a PROVIDER account\'s kind carries no name (its start is the setting-off start, byte for byte); a subscription\'s does');
+  ok(!has(specOf(ClaudeCodeAdapter, undefined, 'vibespace')), 'a caller that names no mode carries no name (the method\'s own default mode is chat — never the label\'s)');
 }
 
 console.log('— ③ THE ROADS: the real create on this machine\'s dtach road and the device agent\'s pipe road; the remote ladders\' lines');
@@ -90,11 +99,17 @@ const registry = () => createAdapterRegistry({
   claudeCmd: EXE, codexCmd: '/opt/bin/codex', chatWrapper: W('chat-wrapper.js'), codexChatWrapper: W('codex-chat-wrapper.js'),
   acpWrapper: W('acp-wrapper.js'), acpCommands: { opencode: '/opt/bin/opencode', antigravity: '/opt/bin/agy' }, ptyWrapper: W('pty-wrapper.js'), buffersDir: '/b',
 });
-const accountsStub = () => ({ _state: { accounts: [], defaultAccountId: null }, resolveForSpawn: () => null, get: () => null, poolMembership: () => [], poolCurrent: () => null });
+// the account store's answers by what the create asks (accounts.resolveForSpawn / src/server/provider-spawn.js shapes): a provider's and an
+// API key's stand-in — a dead loopback address, NO key (nothing is ever called)
+const STAND_ACCOUNTS = {
+  'acct-pv1': { id: 'acct-pv1', name: 'Stand-in provider', kind: 'provider', localEnv: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' }, argv: [], secret: null, plainEnv: {} },
+  'acct-k1': { id: 'acct-k1', name: 'Stand-in key', kind: 'api', localEnv: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:9' }, secret: null },
+};
+const accountsStub = () => ({ _state: { accounts: [], defaultAccountId: null }, resolveForSpawn: (id) => (id && STAND_ACCOUNTS[id] ? { ...STAND_ACCOUNTS[id] } : null), get: () => null, poolMembership: () => [], poolCurrent: () => null });
 const SOCK = scratchDir('entry-sock'), BUF = scratchDir('entry-buf'), CWD = scratchDir('entry-cwd');
 const wsCreate = require(path.join(REPO, 'src/ws-create.js'));
 /** one create through the REAL handler: `bag` = the claude spawn settings the hub's typed read hands it (harnessSpawnSettings) */
-async function createWith({ mode, bag, pipe = false, backend = 'claude', mod = wsCreate }) {
+async function createWith({ mode, bag, pipe = false, backend = 'claude', mod = wsCreate, accountId = null }) {
   const active = new Map(), noop = () => undefined, pipes = [], spawned = [], sent = [];
   const hosts = pipe ? { device: async () => ({ openPipeSession: async (spec) => { pipes.push(spec); return { pid: 4343, write() { }, kill() { } }; } }) } : null;
   const ctx = new Proxy({
@@ -113,7 +128,7 @@ async function createWith({ mode, bag, pipe = false, backend = 'claude', mod = w
     execFileAsync: async () => ({ stdout: '', stderr: '' }), pickCodexThreadCandidate: () => null,
     getSessionKey: (s) => `${s.backend}:${s.backendSessionId}`, normalizeComparablePath: (p) => p,
   });
-  await handler({ readyState: 1, send: (t) => sent.push(JSON.parse(t)) }, { type: 'create', mode, backend, cwd: CWD, reqId: 'r1' }, new Set());
+  await handler({ readyState: 1, send: (t) => sent.push(JSON.parse(t)) }, { type: 'create', mode, backend, cwd: CWD, reqId: 'r1', ...(accountId ? { accountId } : {}) }, new Set());
   return { spawned, pipes, sent, errors: sent.filter((m) => m.type === 'error').map((m) => m.message || m.code) };
 }
 /** the name a spawn hands the CLI: the env's, else an argv NAME=value word (the old `env` prefix) — null when it carries none */
@@ -190,6 +205,19 @@ async function othersThrough(mod, bag) {
     'the boot restore\'s remote chat re-adopt names NO program after the keeper\'s run (the create\'s tail does): it re-attaches to the first start\'s CLI, which carries the name exactly when that start did', runs);
 }
 
+console.log('— ③c 主开发 r4672 (1): a third-party PROVIDER\'s conversation never carries the name — the account\'s kind, through the real create');
+const providerLegs = async (mod) => {
+  const pv = await createWith({ mode: 'chat', bag: { entryLabel: 'vibespace' }, accountId: 'acct-pv1', mod });
+  const key = await createWith({ mode: 'chat', bag: { entryLabel: 'vibespace' }, accountId: 'acct-k1', mod });
+  const sp = spawnOf(pv), sk = spawnOf(key);
+  return { pv: sp ? { name: nameOn(sp), base: sp.env && sp.env.ANTHROPIC_BASE_URL } : { why: pv.errors.join(' | ') || 'no spawn' }, key: sk ? { name: nameOn(sk), base: sk.env && sk.env.ANTHROPIC_BASE_URL } : { why: key.errors.join(' | ') || 'no spawn' } };
+};
+const providerHolds = (r) => !!r.pv && r.pv.base === 'http://127.0.0.1:9' && r.pv.name === null && !!r.key && r.key.base === 'http://127.0.0.1:9' && r.key.name === 'vibespace';
+{
+  const r = await providerLegs(wsCreate);
+  ok(providerHolds(r), 'the real create on a PROVIDER account (its stand-in address reached the spawn): no name; on an API key\'s account, the same bag: the name — the fact is the resolved account\'s kind', r);
+}
+
 console.log('— ④ THE ROW: declared, checked, derived, read');
 const HS = require(path.join(REPO, 'src/harness-settings.js'));
 const HSW = require(path.join(REPO, 'src/harness-settings-words.js'));
@@ -241,9 +269,9 @@ console.log('— ⑤ THE WORDS: the fact line, the refusals, zh and ja');
   const lost = keys.filter((k) => { const z = new RegExp('  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': ("(?:\\\\.|[^"\\\\])*")').exec(zh), j = new RegExp('  ' + JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ': ("(?:\\\\.|[^"\\\\])*")').exec(ja); return !z || !j || ph(JSON.parse(z[1])) !== ph(k) || ph(JSON.parse(j[1])) !== ph(k); });
   ok(lost.length === 0, 'every translation keeps its {name} / {why} placeholders', lost);
   const face = rowWords.description;
-  ok(/Off \(the default\)/.test(face) && /has not said how it treats/.test(face) && /choice, and any risk in it, are yours/.test(face) && /nothing is promised about cost or limits/.test(face) && /next start/.test(face),
-    'the face says: what it changes, off by default, the vendor has not said how it treats other names, the choice and its risk are the person\'s, no promise of saving, a running conversation at its next start');
-  ok(/Terminal conversations always keep the CLI's own label/.test(rowWords.details[0]) && /Refused: cli/.test(rowWords.details[1]), 'the details: terminal keeps the CLI\'s label; the naming rule with cli refused');
+  ok(/^The name this instance's chat conversations report/.test(face) && /one choice for everyone who uses this instance/.test(face) && /Off \(the default\)/.test(face) && /has not said how it treats/.test(face) && /choice, and any risk in it, are the instance owner's/.test(face) && /nothing is promised about cost or limits/.test(face) && /next start/.test(face),
+    'the face says: this instance\'s chat conversations, one choice for everyone on it (主开发 r4672 (3)), off by default, the vendor has not said how it treats other names, the choice and its risk are the instance owner\'s, no promise of saving, a running conversation at its next start');
+  ok(/Terminal conversations, and conversations on a third-party provider's account, always keep the CLI's own label/.test(rowWords.details[0]) && /Refused: cli/.test(rowWords.details[1]), 'the details: terminal and provider conversations keep the CLI\'s label; the naming rule with cli refused');
 }
 
 console.log('— ⑥ THE VERDICT (src/entry-measure.js) over made-up summaries');
@@ -282,8 +310,8 @@ console.log('— ⑦ RED CONTROLS');
 {
   const M = mutantCopies('entry-label', REPO);
   const AS = read('src/adapters/claude-code.js');
-  const GUARD = '{ const en = ENTRY.entryNameFor({ mode, value: S.entryLabel }); if (en) env[ENTRY.ENTRY_VAR] = en; }';
-  const noGuard = M.load('src/adapters/claude-code.js', anchored(AS, GUARD, "{ const en = ENTRY.entryNameFor({ mode: 'chat', value: S.entryLabel }); if (en) env[ENTRY.ENTRY_VAR] = en; }", 'mode guard dropped'), 'mode');
+  const GUARD = '{ const en = ENTRY.entryNameFor({ mode: options.mode, value: S.entryLabel, accountKind: options.accountKind }); if (en) env[ENTRY.ENTRY_VAR] = en; }';
+  const noGuard = M.load('src/adapters/claude-code.js', anchored(AS, GUARD, "{ const en = ENTRY.entryNameFor({ mode: 'chat', value: S.entryLabel, accountKind: options.accountKind }); if (en) env[ENTRY.ENTRY_VAR] = en; }", 'mode guard dropped'), 'mode');
   ok(chatCarries(noGuard.ClaudeCodeAdapter) && !terminalNever(noGuard.ClaudeCodeAdapter), 'RED: the adapter reading every start as chat ⇒ the terminal leg goes RED (the chat leg still green: the control changes one thing)');
   const RS = read('src/claude-entry-label.js');
   const raw = M.load('src/claude-entry-label.js', anchored(RS, '  return r.ok ? { on: true, name: r.name, typed: true } : { on: false, refused: r.code, typed: true };', '  return { on: true, name: v, typed: true };', 'refused passed'), 'raw');
@@ -294,12 +322,18 @@ console.log('— ⑦ RED CONTROLS');
   const unguarded = M.load('src/ws-create.js', anchored(WS, PAIRS, PAIRS + "          { const ep = require('./claude-entry-label.js').entryNameFor({ mode: sessionMode, value: 'vibespace' }); if (ep) spawnEnvPairs.push(`CLAUDE_CODE_ENTRYPOINT=${ep}`); }\n", 'backend guard dropped'), 'unguarded');
   const carried = (await othersThrough(unguarded, {})).filter(([, , r]) => r.spawned && r.name === 'vibespace').map(([id, mode]) => `${id} ${mode}`);
   ok(carried.length >= 1, `RED: the push without its backend guard ⇒ the every-backend leg goes RED (${carried.join(', ') || 'NONE — the control proves nothing'} would hand the name on)`, carried);
-  let rel = null; try { rel = execFileSync('git', ['show', `${RELEASE}:src/adapters/claude-code.js`], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { rel = null; }
-  if (!rel) { skipped++; console.log(`  - SKIP the release's adapter (${RELEASE} is not in this clone's history)`); }
-  else {
-    const R = M.load('src/adapters/claude-code.js', rel, 'release');
-    ok(!chatCarries(R.ClaudeCodeAdapter) && terminalNever(R.ClaudeCodeAdapter), `RED: the release's adapter (${RELEASE}) ⇒ the chat leg goes RED (it passes no entry label)`);
-  }
+  // 主开发 r4672 (4): THE RELEASE'S FORM, BUILT FROM THE TIP (never a skip on a shallow clone): the adapter without its one entry line
+  const R = M.load('src/adapters/claude-code.js', anchored(AS, '    ' + GUARD + '\n', '', 'the entry line removed'), 'release-form');
+  ok(!chatCarries(R.ClaudeCodeAdapter) && terminalNever(R.ClaudeCodeAdapter), 'RED: the adapter without its entry line (the release\'s form) ⇒ the chat leg goes RED (it passes no entry label)');
+  const fullOf = (A, mode, v, more) => { const sp = specOf(A, mode, v, more); return JSON.stringify({ args: sp.args, env: sp.env, wrapper: sp.wrapper, mode: sp.mode }); };
+  const OFFS = [[undefined], ['off'], [''], ['cli'], ['claude-desktop'], ['vibespace', { accountKind: 'provider' }]];
+  const same = ['chat', 'terminal'].every((m) => OFFS.every(([v, more]) => fullOf(ClaudeCodeAdapter, m, v, more) === fullOf(R.ClaudeCodeAdapter, m, v, more)));
+  ok(same, 'OFF IS NOTHING: unset, off, an empty field, a refused name and a provider\'s account give the start of the adapter without the entry line, byte for byte, in both modes');
+  // 主开发 r4672 (1)'s red: the create without the account's kind ⇒ the provider leg goes RED (the adapter cannot know)
+  const KIND_LINE = '            accountKind: (spawnAccount && spawnAccount.kind) || null,\n';
+  const noKind = M.load('src/ws-create.js', anchored(WS, KIND_LINE, '', 'the account kind not handed'), 'no-kind');
+  const rk = await providerLegs(noKind);
+  ok(!providerHolds(rk) && !!rk.pv && rk.pv.name === 'vibespace', 'RED: the create that hands the adapter no account kind ⇒ the provider leg goes RED (the provider\'s spawn carries the name)', rk);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `ALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);

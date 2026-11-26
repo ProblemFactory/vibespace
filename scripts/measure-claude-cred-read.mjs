@@ -80,7 +80,7 @@
 //                                             without and with CLAUDE_CODE_ENTRYPOINT=<name>, vibespace unless named; a name the
 //                                             setting refuses is REFUSED before anything starts) — the record's entry-on result
 //                                             carries the billing line's labels, the user agents and the first stream events' shape;
-//                                             exit 5 when the pair read FAIL (src/entry-measure.js entryVerdict)
+//                                             exit 5 when the pair read FAIL (src/entry-measure.js entryVerdict) or never ran
 //
 // Needs `sudo -n` (for the network namespace) and `strace`. Without them it
 // REFUSES — it never runs a claude process that could reach the network.
@@ -238,6 +238,8 @@ async function main() {
   if (stopped) { console.error(`STOP: what the CLI sends differs with the checkpoint switch — ${stopped.note.slice(0, 400)}`); process.exit(4); }
   // 主开发 r4483: the entry pair's reading is said by the exit code too (its record is the --out file, read by the coordinator)
   const entryOn = results.find((x) => x.variant === 'entry-on');
+  // a pair asked but never read (a void before it, the launcher changed, an abort) is NO reading — never an exit 0 that looks like one
+  if (want.includes('entry-on') && !entryOn) { console.error(`ENTRY: the entry pair did not run${record.void ? ` (VOID: ${record.void})` : ''} — no reading`); process.exit(5); }
   if (entryOn && entryOn.verdict !== 'PASS') { console.error(`ENTRY: the entry pair read ${entryOn.verdict} — ${String(entryOn.note).slice(0, 600)}`); process.exit(5); }
   process.exit(0);
 }
