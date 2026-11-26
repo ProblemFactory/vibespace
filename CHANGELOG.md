@@ -25,6 +25,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In For you, sign-in notices are grouped under «Accounts and sign-ins», and a long-lived token's identity notice no longer offers a reply it cannot take.
 - A file copied between machines or across disks, uploaded over WebDAV or exported from a Task Group is now on disk before VibeSpace says it is saved.
 - A published page and a design's tweak values are also on disk before VibeSpace says so, and when the disk refuses you are told the file was not saved.
+- On storage that cannot sync files to disk, VibeSpace saves its own records again instead of retrying every save forever and losing them at a restart.
 
 ## 2.369.422 — 2026-11-27
 
