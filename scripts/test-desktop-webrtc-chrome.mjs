@@ -878,25 +878,34 @@ console.log('⑬ THE ESTIMATE: the agent reads its own transport-cc — werift 0
   /** THE ESTIMATE TRACKS WHAT WAS SENT (the census r2, 主开发 r4456 — the find: six fixed seconds and an absolute ≥ 2000 kbps floor were a
    *  rate read against a wall clock, which a loaded box's sender and pacing fail): the hub's own stats sampled until SIX carry a rate
    *  and an estimate (a generous bound, its expiry a NAMED line), the last three judged by the RATIO; the rate printed, not judged */
+  /** r4707 M3 (the round of line 1068): the high-rate regime ⑬ claims (test-stream-plan §9's RED CONTROL: werift's own estimate reads ~1/11
+   *  there) is WAITED FOR, never dropped — three stats samples IN A ROW at ≥ FLOOR kbps with an estimate tracking what was sent, inside the
+   *  same 60 s bound; its expiry is the named red line */
+  const FLOOR = 2000;
   const estimateRun = async (kbps) => {
     const hub = DW.create({ access: ACC.create({ hosts, install: false, log: quiet, vncPort: vnc.port, probeMs: 3000, env: () => ({ VIBESPACE_STREAM_FAKE_SOURCE: padded(kbps) }) }), log: quiet });
     R.setup({ ...BASE, webrtc: hub });
     const pg = await page(1280, 800, DESK);
     await pg.ev(`window.__open(${JSON.stringify(M)})`);
     const playingNow = await playing(pg);
-    const seen = [], until6 = Date.now() + 60000; let last = null;
-    while (seen.length < 6 && Date.now() < until6) { await sleep(1000); const st = (hub.facts('win-a')[0] || {}).stats || {}; if (st.bweKbps != null && st.kbps > 0 && st !== last) { seen.push([st.kbps, st.bweKbps]); last = st; } }
-    if (seen.length < 6) markTimedOut(seen, 60000, `⑬ at ${kbps} kbps: fewer than six stats samples with a rate and an estimate`);
-    const tail = seen.slice(-3);
+    const seen = [], until60 = Date.now() + 60000; let last = null, run = 0, reached = null;
+    const tracking = ([k, b]) => b >= 0.7 * k && b <= 2.5 * k;
+    while (!reached && Date.now() < until60) {
+      await sleep(1000); const st = (hub.facts('win-a')[0] || {}).stats || {};
+      if (st.bweKbps != null && st.kbps > 0 && st !== last) { last = st; seen.push([st.kbps, st.bweKbps]); run = st.kbps >= FLOOR && tracking([st.kbps, st.bweKbps]) ? run + 1 : 0; if (run >= 3) reached = seen.slice(-3); }
+    }
+    if (!reached) markTimedOut(seen, 60000, `⑬ at ${kbps} kbps: never three stats samples in a row at ≥ ${FLOOR} kbps with an estimate tracking what was sent`);
+    const tail = reached || seen.slice(-3);
     await pg.close(); hub.shutdown(); R.setup({ ...BASE });
-    return { up: playingNow, seen, tail, tracks: tail.length === 3 && tail.every(([k, b]) => b >= 0.7 * k && b <= 2.5 * k), oldFloor: tail.length === 3 && tail.every(([k]) => k >= 2000) };
+    return { up: playingNow, seen, tail, reached: !!reached, ratioOnly: tail.length === 3 && tail.every(tracking) };
   };
   const e3 = await estimateRun(3000);
-  ok(e3.up && e3.tracks, `⑬ ~3 Mbps through the real agent bundle to this Chrome: the agent's estimate tracks what it sent (sent/estimated kbps: ${e3.tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, e3.seen);
-  // PLACED (the census r2 — the find made red at will): the sender sending LESS (what a loaded box makes of it), planted as a 1.2 Mbps
-  // fixture — the old ≥ 2000 kbps floor reads RED while the estimate still tracks what was sent
+  ok(e3.up && e3.reached, `⑬ ~3 Mbps through the real agent bundle to this Chrome: three samples in a row at ≥ ${FLOOR} kbps with the agent's estimate tracking what it sent (sent/estimated kbps: ${e3.tail.map((x) => x.join('/')).join(', ')}) — werift's own would read ~1/11 (test-stream-plan §9's RED CONTROL)`, e3.seen);
+  // THE SLOW SENDER IS WAITED OUT, NEVER PASSED (the census r2's placement, kept — r4707): a sender sending LESS (what a loaded box makes of
+  // it), planted as a 1.2 Mbps fixture: the wait for the floor runs out (its named line above), so the leg is RED on it — while 6b9eddd32's
+  // ratio-only judge (the floor dropped) would have passed it
   const e1 = await estimateRun(1200);
-  ok(e1.up && e1.tracks && !e1.oldFloor, `PLACED ⑬: the sender at 1.2 Mbps — the old «≥ 2000 kbps» floor reads RED (${e1.tail.map((x) => x.join('/')).join(', ')}) while the estimate tracks what it sent`, e1.seen);
+  ok(e1.up && !e1.reached && e1.ratioOnly, `PLACED ⑬: the sender at 1.2 Mbps is waited out — never three samples at ≥ ${FLOOR} kbps in the 60 s bound (${e1.tail.map((x) => x.join('/')).join(', ')}): the leg is RED on it, while the ratio alone (6b9eddd32) would pass it`, e1.seen);
 }
 console.log('⑭ THE HAND-OVER (lane desktop-handover): the strip gives the stream to ONE conversation; its records reach THE resident script; the owner\'s input pauses it; 「收回」');
 {

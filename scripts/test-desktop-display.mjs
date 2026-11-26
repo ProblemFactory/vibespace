@@ -434,6 +434,11 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
         let steps = 0; const stepped = () => Date.now() + (steps++ ? 3500 : 0);
         const wStep = await settles(D.waitForXftDpi({ binPath: XRDB, env: { ...ctx.x11Env(':98765') }, deadlineMs: 400, stepMs: 100, now: stepped }), 30000, 'PLACED: the stepped dead display never settled');
         ok(!!wStep && wStep.ok === false && /within 400 ms/.test(wStep.why) && !(wStep.ms < 3000), `PLACED: a stepped clock — the dead display is reported by name (${wStep && wStep.why}) after ${wStep && wStep.ms} «ms»: the old «< 3000» verdict reads RED with nothing hung`);
+        // r4707 (the round's should): the deadline judged on the FUNCTION's own clock — a counting `now` that moves 100 a call: t0, one check
+        // per poll, the answer's ms — 400 / 100 ⇒ four polls (six calls) and «500 ms» exactly; a deadline honoured only loosely polls on
+        let calls = 0; const counting = () => 1000000 + 100 * calls++;
+        const wCount = await settles(D.waitForXftDpi({ binPath: XRDB, env: { ...ctx.x11Env(':98765') }, deadlineMs: 400, stepMs: 100, now: counting }), 30000, 'the counted dead display never settled');
+        ok(!!wCount && wCount.ok === false && calls === 6 && wCount.ms === 500 && /within 400 ms/.test(wCount.why), `the dead display's deadline on the function's own clock: ${calls - 2} polls, ${wCount && wCount.ms} «ms» (400 / 100 ⇒ 4 polls, 500) — never polled past it`, { calls, wCount });
         ok(wNo.ok === false && wNo.why === 'xrdb not on PATH' && !!wDead && wDead.ok === false && /no Xft\.dpi in the display's resources within 400 ms/.test(wDead.why), `CONTROL: no xrdb, and a display that never answers, are REPORTED by name within the deadline — never thrown, never a hang (${wDead.why})`, { wNo, wDead });
         const q0 = await xq();
         ok(/^Xft\.dpi:\s+144$/m.test(q0), `xpra started with ctx.dpi 144 ⇒ the display's resource database says Xft.dpi 144 before any client (${(q0.match(/^Xft\.dpi:.*$/m) || ['none'])[0]})`);
