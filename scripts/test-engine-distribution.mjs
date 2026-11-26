@@ -253,9 +253,18 @@ const kids = [];
 process.on('exit', () => { for (const k of kids) { try { k.kill('SIGKILL'); } catch { /* gone */ } } });
 async function runFrom(dir) { const exe = path.join(dir, 'sleep'); fs.copyFileSync(SLEEP, exe); fs.chmodSync(exe, 0o755); const k = spawn(exe, ['30'], { stdio: 'ignore' }); kids.push(k); await until(() => { try { return fs.readlinkSync(`/proc/${k.pid}/exe`).endsWith('/sleep'); } catch { return false; } }, 3000); return k; }
 const ended = (k) => new Promise((r) => { if (k.exitCode !== null || k.signalCode) return r(); k.once('exit', () => r()); k.kill('SIGKILL'); });
-const settled = async (Q) => { await sleep(40); if (typeof Q.ED.fleetSettled === 'function') await Q.ED.fleetSettled(); else await until(async () => { await sleep(80); return !Q.ED.fleetView().at || Q.gate.inflight ? null : true; }, 8000); }; // the run a change started (and its queued re-run) has ended
+// B-7e49 (lane artifacts-by-intent, 主开发 r4756 / r4340 law 1): WAITS ON FACTS, never a fixed span. A wait's expiry FAILS by a named
+// HARNESS line. readerHolds: the presets reader's merged fleet equals the cluster file on disk merged the same way (src/preset-layers.js).
+// cluster-presets' reloadOnce sets its merged view and calls its listeners in ONE turn, so once the reader holds a change the run it
+// starts (engine-distribution's follow → fleetChanged → syncFleet sets fleetRun at once) is in flight: fleetSettled then sees it.
+const PL = require('../src/preset-layers.js');
+const readerHolds = (Q) => { let disk = null; try { disk = PL.mergeFleet({ cluster: PL.parseFleet(JSON.parse(fs.readFileSync(path.join(Q.dir, 'fleet.json'), 'utf8'))) }); } catch { return false; } return JSON.stringify(disk ? disk.facts : null) === JSON.stringify(Q.presets.fleet()); };
+class HarnessStop extends Error {}   // r5406: a wait that ran out STOPS its leg — its named line is the one red (leg() says no second one)
+const factBy = async (fn, what, ms = 10000) => { const v = await until(fn, ms); if (!v) { ok(false, `HARNESS: ${what} — not within ${ms} ms (a wait on its fact ran out)`); throw new HarnessStop(what); } return v; };
+const answered = async (p, what, ms = 10000) => { let t; const done = await Promise.race([Promise.resolve(p).then(() => true, () => true), new Promise((r) => { t = setTimeout(() => r(false), ms); })]); clearTimeout(t); if (!done) { ok(false, `HARNESS: ${what} — not within ${ms} ms (a wait on its fact ran out)`); throw new HarnessStop(what); } return done; };
+const settled = async (Q) => { await factBy(() => readerHolds(Q), 'the presets reader holds the fleet file on disk'); if (typeof Q.ED.fleetSettled === 'function') await answered(Q.ED.fleetSettled(), 'the fleet runs settle (fleetSettled)', 30000); else await factBy(async () => { await sleep(80); return !Q.ED.fleetView().at || Q.gate.inflight ? null : true; }, 'the fleet run ends (no fleetSettled on this copy)', 8000); }; // the run a change started (and its queued re-run) has ended
 /** ONE leg that may THROW on another tree (a RED control run against the base / the round-1 tip) — said by name, the next leg runs. */
-async function leg(name, fn) { try { await fn(); } catch (e) { ok(false, `${name} — threw on this tree`, String((e && e.message) || e).slice(0, 200)); } }
+async function leg(name, fn) { try { await fn(); } catch (e) { if (e instanceof HarnessStop) return; ok(false, `${name} — threw on this tree`, String((e && e.message) || e).slice(0, 200)); } }
 
 console.log('— ① boot: the cluster pins shaA ⇒ installed, trusted by the cluster, the kernel preinstalled');
 const P = await pod('main', { boot: { relayUrl: '', browserEngine: engineAt(shaA, { preinstall: true }) } });
@@ -298,8 +307,8 @@ const refs3 = P.gate.refs.length;
 const release3 = P.holdGit();
 P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaA) });
 await until(() => P.gate.inflight === 1);
-P.writeFleet({ relayUrl: '', browserEngine: engineAt('v0.1.2') }); await until(() => P.presets.fleet().browserEngine.source.ref === 'v0.1.2'); await sleep(60);
-P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaB) }); await until(() => P.presets.fleet().browserEngine.source.ref === shaB); await sleep(60);
+P.writeFleet({ relayUrl: '', browserEngine: engineAt('v0.1.2') }); await until(() => P.presets.fleet().browserEngine.source.ref === 'v0.1.2');   // the reader holds it: the product heard it in that turn (B-7e49: no 60 ms span)
+P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaB) }); await until(() => P.presets.fleet().browserEngine.source.ref === shaB);   // (a second run's install queues behind the landing's lock: the scene's end reads it — refs in order, gate.max)
 const midRefs = P.gate.refs.slice(refs3);
 release3();
 await until(() => P.gate.refs.length >= refs3 + 2 && !P.gate.inflight); await settled(P);
@@ -311,7 +320,7 @@ FX.setMode({ fail: 'auth' });
 const f4 = fetches().length, t4 = P.todos.length;
 P.writeFleet({ relayUrl: '', browserEngine: engineAt(shaA) });
 const failed = await until(() => P.ED.fleetView().outcome === 'failed');
-await sleep(150); // a loop would ask git again within milliseconds
+await settled(P); await sleep(150); // a loop would ask git again within milliseconds — the settle (the failed run and any run it queued ended), THEN the 150 ms window to see NOTHING: a retry on a short timer or a backoff shows inside it (r5406: a wait to see nothing stays)
 ok(!!failed && fetches().length === f4 + 1 && P.todos.length === t4 + 1 && /the cluster's plugin could not be installed/.test(P.todos.at(-1).text) && /cluster's next change of the plugin \(or the next restart\)/.test(P.todos.at(-1).detail) && P.row().install.sha === shaB
   && P.journal.some((l) => l.includes(`fleet plugin: ${EID} could not be updated [`) && l.includes("tried again at the cluster's next change or the next restart")),
   'git refused ⇒ the run says it by name (journal + ONE For-you notice), the installed package stays; NO retry by itself (one fetch in 0.15 s)', { view: P.ED.fleetView(), fetches: fetches().length - f4 });
@@ -558,7 +567,7 @@ await leg('⑨ a start holding the place', async () => { // a start between its 
   const L = light(snapC, { inUse: () => used });
   const rel = await L.ED.holdPlace(EID, { leaseMs: 0 });
   const land = L.ED.landNext(EID);
-  await sleep(80);
+  await answered(land, 'the landing answers while a start holds the place'); // r3 (N2): a held place ⇒ «not now» at once — its answer is the fact (B-7e49: was an 80 ms span)
   const during = L.receipt();
   used = true; rel(); // the start spawned — a browser runs K2 now
   const l = await land;
@@ -1329,7 +1338,7 @@ await leg('M2', async () => { // M2 — no listener: the base's shape (a new pin
   const Q = await pod('m2', { EDM, ...bootA }); const rel = await pinMoves(Q); rel();
   const r0 = Q.gate.refs.length;
   const seen = await until(() => Q.presets.fleet().browserEngine.source.ref === shaB); // the reader HAS the new pin…
-  await sleep(100); // …and nothing acts on it (with the listener the install is asked within milliseconds of the reader's change)
+  await settled(Q); await sleep(100); // …and nothing acts on it — a NEVER: the settle (with the listener the reader's change starts the run in that same turn), THEN its 100 ms window to see nothing (r5406)
   const asked = Q.gate.refs.length > r0 || Q.row().install.sha === shaB;
   Q.close();
   ok(!!seen && !asked, 'control M2: with no presets listener (the base\'s shape) the pin change installs nothing until a restart — ② RED');
@@ -1342,10 +1351,10 @@ await leg('M3', async () => { // M3 — two runs in parallel
   // r4: the cluster's install holds the landing's ONE lock, so two runs' installs never overlap — the second run is seen by what it
   // DOES: two changes while the first run is held ⇒ two more runs beside it ⇒ TWO more installs (each reading the pin it finds — the
   // tag the single flight skips, or the latest pin twice: a re-pull); the single flight takes them as ONE re-run (③)
-  Q.writeFleet({ relayUrl: '', browserEngine: engineAt('v0.1.2') }); await until(() => Q.presets.fleet().browserEngine.source.ref === 'v0.1.2'); await sleep(60);
-  Q.writeFleet({ relayUrl: '', browserEngine: engineAt(shaC) }); await until(() => Q.presets.fleet().browserEngine.source.ref === shaC); await sleep(60);
+  Q.writeFleet({ relayUrl: '', browserEngine: engineAt('v0.1.2') }); await until(() => Q.presets.fleet().browserEngine.source.ref === 'v0.1.2');   // B-7e49: no 60 ms span (the reader holds it)
+  Q.writeFleet({ relayUrl: '', browserEngine: engineAt(shaC) }); await until(() => Q.presets.fleet().browserEngine.source.ref === shaC);
   rel();
-  await until(() => Q.gate.refs.length - r0 >= 2 && !Q.gate.inflight, 3000); await sleep(200); await settled(Q);
+  await until(() => Q.gate.refs.length - r0 >= 2 && !Q.gate.inflight, 3000); await settled(Q);   // B-7e49: no 200 ms span — the two MORE installs are the fact, settled the end
   const refs = Q.gate.refs.slice(r0); Q.close();
   ok(refs.length >= 2, 'control M3: without the single flight two changes during a held run start two MORE runs beside it — two more installs (r4: queued behind the lock, each reading the pin it finds) where ③ allows ONE — ③ RED', { refs: refs.map(short) });
 });
@@ -1387,7 +1396,7 @@ await leg('M7', async () => { // M7 — no critical section: a landing in flight
   const b = await (async () => { const l = await L.ED.landNext(EID); const rel = typeof L.ED.holdPlace === 'function' ? await L.ED.holdPlace(EID, { leaseMs: 0 }) : () => {}; const r = L.receipt(); rel(); return { l, r }; })();
   await A;
   const L2 = light(snapC, { EDM });
-  const rel = await L2.ED.holdPlace(EID, { leaseMs: 0 }); const land = L2.ED.landNext(EID); await sleep(80); const during = L2.receipt(); rel(); await land;
+  const rel = await L2.ED.holdPlace(EID, { leaseMs: 0 }); const land = L2.ED.landNext(EID); await answered(land, 'the landing answers (M7)'); const during = L2.receipt(); rel(); await land;   // B-7e49: its answer, not an 80 ms span
   ok(b.l === false && b.r === null && during === KSHA.k3, 'control M7: with no critical section the second start finds the place EMPTY mid-landing (it would spawn nothing — or the kernel about to be deleted) and a landing swaps the kernel under a start that holds it — ⑨ RED', { b, during: during === KSHA.k3 ? 'K3' : during });
 });
 if (SLEEP) await leg('M8', async () => { // M8 — the tip's in-use check: the place not realpath'd (a), an unreadable exe read as «not in use» (b)
