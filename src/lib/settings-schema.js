@@ -1524,7 +1524,7 @@ const SETTINGS_SCHEMA = {
   'pool.avoidOverageMembers': {
     type: 'boolean', default: false,
     label: t('Say when a conversation goes to an account billing paid overage'),
-    description: t('An account billing paid overage is always used last: after every account with quota left that can take the conversation. With this on, a move onto such an account says so; it wears a money icon in the quota panels.'),   // B-87fd (1) (主开发 r4668 / r4744): the ranking puts such an account last whatever this says; this names the bar only
+    description: t('An account billing paid overage is always used last: after every account with quota left that can take the conversation. With this on, a move onto such an account says so. Such an account wears a money icon in the quota panels either way.'),   // B-87fd (1) (主开发 r4668 / r4744): the ranking puts such an account last whatever this says; this names the bar only
     category: t('Spending'), liveApply: true,
   },
   'accounts.onDemandQuotaRefresh': {

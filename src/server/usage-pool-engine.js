@@ -5251,7 +5251,9 @@ function poolAlternativeFor(session, now = Date.now()) {
     const rc = poolReadCache(poolId);
     const readCache = (id) => (id === currentId ? { fetchedAt: now, sevenDay: { utilization: 1, resetsAt: 0 } } : rc(id));
     const d = decidePoolSwitch({ currentId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], ...providerIn(a, session), readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), explain: true });
-    return !!(d && d.to && !d.toCredits);
+    // r4903 M3 (主开发, by the owner's word «paying is last»): a landing on a member billing paid overage is no alternative either — the
+    // credit's own verdict decides first, in every band, as for a credits landing
+    return !!(d && d.to && !d.toCredits && !d.toPaying);
   } catch { return null; }
 }
 /** The tripped window's facts off a normalized snapshot: the bucket whose reset

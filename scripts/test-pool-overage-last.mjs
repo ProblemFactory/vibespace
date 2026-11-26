@@ -145,8 +145,6 @@ const M = mutantCopies('pool-overage-last', REPO);
     ['the other near the end of its login', [{ id: 'o', name: 'Paying' }, { id: 'r', name: 'Expiring' }], { o: fmM(0.3, 3 * D), r: fmM(0.4, 3 * D) }, { readLogin: (id) => (id === 'r' ? { state: 'expiring', msLeft: 10 * 60e3 } : { state: 'live', usable: true, expiresInSec: 40 * 86400 }) }],
     ['the other just refused this conversation', [{ id: 'o', name: 'Paying' }, { id: 'r', name: 'Refused' }], { o: fmM(0.3, 3 * D), r: fmM(0.4, 3 * D) }, { exclude: ['r'] }],
     ['the paying member alone in its pool', [{ id: 'o', name: 'Paying' }], { o: fmM(0.3, 3 * D) }, {}],
-    // the ruling (r4711): a scrap ALONE keeps it — under the reserve floor (40 % weekly under a 50 % floor)
-    ['the other a scrap under the reserve floor only', [{ id: 'o', name: 'Paying' }, { id: 'r', name: 'Floored' }], { o: fmM(0.3, 3 * D), r: fmM(0.6, 3 * D) }, { reserveFloorPct: 50 }],
     // …and a usage-credits member whose PREPAID quota is spent (billed onto billed is a move for nothing)
     ['the other a usage-credits member whose prepaid quota is spent', [{ id: 'o', name: 'Paying' }, { id: 'c', name: 'Credits' }], { o: fmM(0.3, 3 * D), c: fmM(0.99, 3 * D) }, { creditsIds: ['c'] }],
   ];
@@ -178,7 +176,9 @@ const M = mutantCopies('pool-overage-last', REPO);
     const mC = (mod, shape, warm) => mod.decidePoolSwitch({ currentId: 'o', members: memC, readCache: viewM(cC), nowSec: NOW, explain: true, ...PAY, creditsIds: ['c'], ...shape, warm });
     const IN = { warm: false, inTurn: true, agoSec: 400, ttlSec: 300 }, STOP = { warm: false, inTurn: false, agoSec: 400, ttlSec: 300 };
     const rows = shapes.map(([hn, shape]) => [hn, mC(P, shape, IN), mC(P, shape, STOP)]);
-    ck(`r4711 THE RULING: on a paying member, a usage-credits member holding prepaid quota — in a turn every shape (${shapes.length}) OWES the move to its stop (warm-soft-defer with paying, toward it)`, rows.every(([, h]) => !h.to && h.reason === 'warm-soft-defer' && h.paying === true && h.wouldTo === 'c'));
+    // a RUNNING conversation owes the move to its stop; a NEW one has no turn to cut and is placed at once (主开发 r4903 M2)
+    const running = rows.filter(([hn]) => !hn.startsWith('a new conversation')), placingRow = rows.find(([hn]) => hn.startsWith('a new conversation'));
+    ck(`r4711 THE RULING: on a paying member, a usage-credits member holding prepaid quota — in a turn each running shape (${running.length}) OWES the move to its stop (warm-soft-defer with paying, toward it); a new conversation is placed on it at once (r4903)`, running.every(([, h]) => !h.to && h.reason === 'warm-soft-defer' && h.paying === true && h.wouldTo === 'c') && !!placingRow && placingRow[1].to === 'c');
     ck('r4711 THE RULING: …at its stop every shape MOVES onto it — reason overage, the soft band; it lands on quota the member still holds, so no «last resort, pay-per-use» (no toCredits)', rows.every(([, , st]) => st.to === 'c' && st.reason === 'overage' && st.band === 'soft' && !st.toCredits));
     const withQuota = P.decidePoolSwitch({ currentId: 'o', members: [...memC, { id: 'r', name: 'Quota left' }], readCache: viewM({ ...cC, r: fmM(0.4, 3 * D) }), nowSec: NOW, explain: true, ...PAY, creditsIds: ['c'], hot: false });
     ck('r4711 THE RULING: …a quota member able to settle is still asked first (the tiers in order)', withQuota.to === 'r' && withQuota.reason === 'overage');
@@ -186,6 +186,34 @@ const M = mutantCopies('pool-overage-last', REPO);
     ck('r4711 THE RULING RED (4f3305b49 kept it): without the move it stays on the paying member at its stop', !mC(redC, shapes[0][1], STOP).to);
     const redH = M.load('src/account-pool-auto.js', anchored(src, '  const toPrepaid = (r) => ((warm && warm.inTurn)', '  const toPrepaid = (r) => ((false)', 'the ruling red: no hold in a turn'), 'ruling-hold-red');
     ck('r4744 THE RULING RED (its hold): a move that never waits for the stop cuts the conversation mid-turn', mC(redH, shapes[0][1], IN).to === 'c');
+    // r4903 (主开发's ruling, the owner's word): QUOTA HELD IN RESERVE IS USED BEFORE DOLLARS — beside a member under the reserve floor
+    // that clears the settle bar (40 % weekly under a 50 % floor), the conversation LEAVES the paying member: at its stop, owed in a turn
+    { const memF = [{ id: 'o', name: 'Paying' }, { id: 'r', name: 'Floored' }], cF = { o: fmM(0.3, 3 * D), r: fmM(0.6, 3 * D) };
+      const fl = (mod, warm) => mod.decidePoolSwitch({ currentId: 'o', members: memF, readCache: viewM(cF), nowSec: NOW, explain: true, ...PAY, reserveFloorPct: 50, hot: false, warm });
+      const atStop = fl(P, STOP), inTurn = fl(P, IN);
+      ck(`r4903 THE FLOOR: beside a member under the reserve floor that settles, it leaves the paying member at its stop (→ ${atStop.to}, ${atStop.reason}) and owes it in a turn (${inTurn.reason})`, atStop.to === 'r' && atStop.reason === 'overage' && !inTurn.to && inTurn.reason === 'warm-soft-defer');
+      const floorHolds = M.load('src/account-pool-auto.js', anchored(src, '    if (floor > 0 && wk != null && wk < floor && !curPayingTakes) { reserveBlocked.push(', '    if (floor > 0 && wk != null && wk < floor) { reserveBlocked.push(', 'the floor holding the member back'), 'floor-red');   // stale-pins: kept (the RED's text IS 0a6053698's line)
+      ck('r4903 THE FLOOR RED (0a6053698): with the floor holding the member back, the conversation stays on the paying member and bills', !fl(floorHolds, STOP).to); }
+    // r4903 M2 (主开发's ruling): A NEW CONVERSATION HAS NOTHING TO LOSE — placed off a paying default onto an ordinary member that can
+    // serve now under the settle bar (5h 11 %), and onto a credits member that holds quota when no ordinary member can
+    { const fm5 = (u5, u7) => ({ fiveHour: { utilization: u5, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + 3 * D }, scopedWeekly: [] });
+      const pl = (mod, members, caches, extra = {}) => mod.decidePoolSwitch({ currentId: 'o', members, readCache: viewM(caches), nowSec: NOW, explain: true, ...PAY, placing: true, hot: true, ...extra });
+      const toLow = pl(P, [{ id: 'o', name: 'Paying' }, { id: 'q', name: 'Quota, low 5h' }], { o: fmM(0.3, 3 * D), q: fm5(0.89, 0.4) });
+      const toCred = pl(P, [{ id: 'o', name: 'Paying' }, { id: 'c', name: 'Credits, low 5h' }], { o: fmM(0.3, 3 * D), c: fm5(0.89, 0.4) }, { creditsIds: ['c'] });
+      ck(`r4903 M2 PLACING: a new conversation is placed off a paying default onto an ordinary member that can serve under the settle bar (→ ${toLow.to}) and onto a credits member that holds quota (→ ${toCred.to})`, toLow.to === 'q' && toCred.to === 'c');
+      const keepsDefault = M.load('src/account-pool-auto.js', anchored(src, '  if (placing && curPayingTakes && !hardDead) {', '  if (false) {', 'the placing kept on the paying default'), 'placing-red');
+      const r = pl(keepsDefault, [{ id: 'o', name: 'Paying' }, { id: 'q', name: 'Quota, low 5h' }], { o: fmM(0.3, 3 * D), q: fm5(0.89, 0.4) });
+      ck(`r4903 M2 PLACING RED (0a6053698): the new conversation is kept on the paying default (${r.reason}) and bills`, !r.to); }
+    // r4903 M3: a landing on a paying member is MARKED whatever the setting (toPaying), and the engine's «is there an alternative to a
+    // prepaid reset credit?» refuses it as it refuses a credits landing
+    { const memW = [{ id: 'a', name: 'Walled' }, { id: 'p', name: 'Paying spent' }], cW = { a: fmM(0.99, 3 * D), p: fmM(0.99, 2 * D) };
+      const dW = P.decidePoolSwitch({ currentId: 'a', members: memW, readCache: viewM(cW), nowSec: NOW, explain: true, payingIds: new Set(['p']), hot: false });
+      ck(`r4903 M3: off a walled member onto a paying one past its quota the landing is marked (toPaying), the setting off (→ ${dW.to})`, dW.to === 'p' && !!(dW.toPaying && dW.toPaying.id === 'p') && !dW.toOverage);
+      const ENG = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+      const ALT = '    return !!(d && d.to && !d.toCredits && !d.toPaying);';
+      const alt = (t) => t.split(ALT).length === 2 && /function poolAlternativeFor\(session, now = Date\.now\(\)\) \{[\s\S]{0,4000}?return !!\(d && d\.to && !d\.toCredits && !d\.toPaying\);/.test(t);
+      ck('r4903 M3: poolAlternativeFor refuses a paying landing as an alternative to a prepaid reset credit, as it refuses a credits one', alt(ENG));
+      ck('r4903 M3 RED: the release\'s line (credits refused, paying taken) turns the pin red', !alt(anchored(ENG, ALT, '    return !!(d && d.to && !d.toCredits);', 'the release\'s alternative'))); }   // stale-pins: kept (the RED's text IS 0a6053698's line)
     // THE BAR (主开发 r4744): the move is VOLUNTARY, so its target clears the release's SETTLE bar in either tier — a credits member
     // that holds quota but cannot settle (5h 8 %: over its hard bar, under hot + gain) keeps the conversation where it is, and so does
     // a quota member in the same state (5h 11 %, 7d 60 %)
@@ -306,7 +334,7 @@ const M = mutantCopies('pool-overage-last', REPO);
     const oneRule = (t) => (t.match(/\b(?:credits|paying)\.has\(/g) || []).length === 2 && /const tierOf = \(id\) => /.test(bodyOf('poolTiers')) && ['decidePoolSwitch', 'rankPoolMembers', 'soonestUsableMember'].every((f) => { const b = bodyOf(f); return /poolTiers\(\{/.test(b) && /\.orderOf\(/.test(b) && !/\b(?:credits|paying)\.has\(/.test(b) && !/\(x\.(?:tier|credits|paying)\b(?!\))/.test(b); });
     ck('r4744 M1 BY THE SOURCE: the tier is read in poolTiers alone (two reads of the sets, both in its tierOf), and each of the three walks takes the tiers and their order from it, sorting by no tier rule of its own', oneRule(srcA));
     ck('r4744 M1 BY THE SOURCE RED: a walk that reads the credits set itself turns it red', !oneRule(anchored(srcA, '    const tier = tiers.tierOf(m.id);\n    if (tier !== TIER_QUOTA) {', '    const tier = tiers.credits && tiers.credits.has(m.id) ? TIER_CREDITS : tiers.tierOf(m.id);\n    if (tier !== TIER_QUOTA) {', 'a walk with its own read'))); }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 15 : 14, label: 'overage-last: ' })) ck(r.name, r.pass);   // the release copy counts only where it was made
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 17 : 16, label: 'overage-last: ' })) ck(r.name, r.pass);   // the release copy counts only where it was made
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
