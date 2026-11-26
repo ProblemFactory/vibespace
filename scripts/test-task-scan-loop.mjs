@@ -222,6 +222,11 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
         const answersOf = () => frames.filter((f) => f.type === 'attached' && f.sessionId === sidA).map((f) => f.attachId);
         const w0 = warmCalls;
         const acksOf = () => frames.filter((f) => f.type === 'attach-ack' && f.sessionId === sidA && !('progress' in f)).map((f) => f.attachId);   // the synchronous ack (its re-acks carry `progress`)
+        if (first === 'forged') {   // r4875's round: a malformed id (a string) acts as an old page's — answered, never stepped aside by the numeric one
+          const dA = await within(Promise.resolve(h.message(JSON.stringify({ type: 'attach', sessionId: sidA, attachId: 2 }))), 8000);
+          const dB = await within(Promise.resolve(h.message(JSON.stringify({ type: 'attach', sessionId: sidA, attachId: '1' }))), 8000);
+          return { first, answers: answersOf(), expired: !dA || !dB };
+        }
         if (first === 'two') {   // a SECOND socket (another tab or device) with its own, lower id: answered — the newest is kept per socket
           const h2 = {}, frames2 = [];
           const sock2 = { readyState: 1, bufferedAmount: 0, send: (x) => frames2.push(JSON.parse(x)), on: (ev, fn) => { h2[ev] = fn; }, ping() { }, terminate() { }, close() { } };
@@ -269,6 +274,8 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       ok(STEP_ARR.length === 1 && xa.warms === 2 && JSON.stringify(xa.answers) === '[2]', `RED CONTROL (the ARRIVAL step-aside alone taken out): the older attach does its waits before it steps aside (${xa.warms} warms; answers ${JSON.stringify(xa.answers)}, caught later) — the leg above can go red`, xa);
       const s2 = await idsScene(require(path.join(REPO, 'src/ws-handler.js')), 15, 'two');
       ok(!s2.expired && JSON.stringify(s2.answers) === '[5]' && JSON.stringify(s2.answers2) === '[1]', `B-a26e (r4857): two sockets of one conversation keep their own ids — a lower id on the second socket is answered (${JSON.stringify(s2.answers)} / ${JSON.stringify(s2.answers2)})`, s2);
+      const sf = await idsScene(require(path.join(REPO, 'src/ws-handler.js')), 16, 'forged');
+      ok(!sf.expired && JSON.stringify(sf.answers) === '[2,null]', `B-a26e (r4875's round): a malformed attach id (a string) is read as none — that attach is answered as an old page's, never stepped aside by the numeric one (${JSON.stringify(sf.answers)})`, sf);
       const xl = await idsScene(lastWins, 11, 'newer');
       ok(!stepOk(xl) && xl.answers.includes(1), `RED CONTROL (the hub keeps the LAST id to arrive — 4c2a64f15's form): newer first, the older attach is answered (${JSON.stringify(xl.answers)}) — the leg can go red`, xl);
     } finally { H.store.warmTaskState = realWts; }

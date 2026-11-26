@@ -322,7 +322,7 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     const real = { st: globalThis.setTimeout, ct: globalThis.clearTimeout, now: Date.now, doc: globalThis.document };
     const tick = (ms) => { const end = clock.now + ms; for (;;) { let nx = null; for (const h of clock.timers) if (h.live && h.due <= end && (!nx || h.due < nx.due)) nx = h; if (!nx) break; nx.live = false; clock.now = nx.due; try { nx.fn(); } catch { } } clock.now = end; };
     const R = {};
-    globalThis.setTimeout = (fn, ms) => { const h = { fn, due: clock.now + (Number(ms) || 0), live: true }; clock.timers.push(h); return h; };
+    globalThis.setTimeout = (fn, ms) => { const m = Number(ms) || 0; const h = { fn, due: clock.now + (clock.short && m > 600000 && m <= 900000 ? m / 100 : m), live: true }; clock.timers.push(h); return h; };   // clock.short: the chrome suite's own short clock (a long delay at 1/100, the wall clock real)
     globalThis.clearTimeout = (h) => { if (h && typeof h === 'object') h.live = false; };
     Date.now = () => clock.now;
     globalThis.document = { createElement: () => ({ className: '', textContent: '', parentNode: null, append() { }, remove() { } }) };
@@ -345,6 +345,38 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
       tick(5 * 60000 - 1000); R.asked1 = v3._attachHold?.note?.textContent;
       tick(2000); R.asked2 = v3._attachHold?.note?.textContent;
       v3._clearAttachHold();
+      // (a3) r4875: a hub that keeps ACKNOWLEDGING (it re-acks every 10 s while it works) — the ask began 15 minutes ago, the ladder
+      // waited on its acks: the bar says it is STILL WORKING, never the Reload words; when its acks stop, «waiting», and the Reload
+      // words 15 minutes after the last one (RED in the follow-6 form: the Reload words at the hold's start)
+      const v4 = stubs(mkView(), 'sid-working');
+      v4._lastAttachAckAt = Date.now();
+      v4._holdAttach({ type: 'attach', sessionId: 'sid-working' }, 1, null, Date.now() - 15 * 60000);
+      R.w0 = v4._attachHold?.note?.textContent;
+      for (let k = 0; k < 60; k++) { tick(10000); v4._lastAttachAckAt = Date.now(); v4._attachHoldWords?.(); }   // ten more minutes of acks
+      R.w1 = v4._attachHold?.note?.textContent;
+      tick(31000); R.w2 = v4._attachHold?.note?.textContent;   // its acks stopped 31 s ago
+      tick(15 * 60000 - 32000); R.w3 = v4._attachHold?.note?.textContent;   // 1 s before 15 minutes after the last ack
+      tick(2000); R.w4 = v4._attachHold?.note?.textContent;
+      v4._clearAttachHold();
+      // (a4) an acknowledgement from BEFORE the hold's ask is an earlier attach's (the window's last answered one, seconds before the
+      // drop): no sign of life for this hold — «waiting», and the Reload words 15 minutes after the ask (its own heavy read at
+      // f9f5f9687 found ③'s words pushed past the bound by such an ack; RED in that form: «still working» at the hold)
+      const v5 = stubs(mkView(), 'sid-old-ack');
+      v5._lastAttachAckAt = Date.now() - 5000;
+      v5._holdAttach({ type: 'attach', sessionId: 'sid-old-ack' }, 1, null, Date.now() - 2000);
+      R.o0 = v5._attachHold?.note?.textContent;
+      tick(15 * 60000 - 3000); R.o1 = v5._attachHold?.note?.textContent;   // 1 s before 15 minutes after the ask
+      tick(2000); R.o2 = v5._attachHold?.note?.textContent;
+      v5._clearAttachHold();
+      // (a5) THE SHORT CLOCK (the chrome suite's ③, its own heavy read at 28800d6f7): the long bound's timer fires at 1/100 while the
+      // wall clock runs real — its firing is the fact (no acknowledgement came since it was armed), never re-read against the clock
+      // (RED in that form: a re-check found 15 minutes not passed and re-armed for ever)
+      clock.short = true;
+      const v6 = stubs(mkView(), 'sid-short');
+      v6._holdAttach({ type: 'attach', sessionId: 'sid-short' }, 1, null, Date.now() - 1500);
+      tick(9500); R.s1 = v6._attachHold?.note?.textContent;
+      v6._lastAttachAckAt = Date.now(); v6._attachHoldWords?.(); R.s2 = v6._attachHold?.note?.textContent;   // an acknowledgement after the Reload words: alive again
+      v6._clearAttachHold(); clock.short = false;
       const handlers = [], sent = [], deferred = [];
       const fws = { send(m) { sent.push(m); }, onGlobal(h) { handlers.push(h); }, offGlobal(h) { const i = handlers.indexOf(h); if (i >= 0) handlers.splice(i, 1); } };
       const q = createReconnectQueue({ setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h), defer: (fn) => deferred.push(fn), rankOf: () => [0, 0], random: () => 0, now: () => Date.now() });
@@ -390,10 +422,13 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     ok('B-a26e: a NEW hold after the last one ended says the first words again', /^Still attaching — waiting for the hub to answer/.test(R.again || ''), R.again);
     ok(`B-a26e (r4708): a held retry counts as in flight until ITS OWN answer lands through the real cycle handler (${R.inFlightSent} → ${R.inFlightLanded}); the hold ends`, R.frame === true && R.inFlightSent === 1 && R.handlersSent === 1 && R.inFlightLanded === 0 && R.heldAfter === false, R);
     ok(`B-a26e (r4708): a cycle whose view another road attached unhooks its handler at its check (${R.n1} → ${R.n2})`, R.n0 === 0 && R.n1 === 1 && R.n2 === 0, R);
+    ok(`B-a26e (r4875): while the hub keeps ACKNOWLEDGING the bar says it is still working (at the hold «${R.w0}», ten minutes of acks on «${R.w1}»); its acks stopped: «waiting» (${R.w2 === undefined ? '?' : 'after 31 s'}), the Reload words 15 minutes after the last ack and not before`, /^Still attaching — the hub is still working/.test(R.w0 || '') && /^Still attaching — the hub is still working/.test(R.w1 || '') && /^Still attaching — waiting for the hub to answer/.test(R.w2 || '') && /^Still attaching — waiting for the hub to answer/.test(R.w3 || '') && /has not answered for 15 minutes/.test(R.w4 || ''), { w0: R.w0, w1: R.w1, w2: R.w2, w3: R.w3, w4: R.w4 });
+    ok(`B-a26e (its own heavy read at 28800d6f7): under a short clock the long bound's timer is the fact — the Reload words when it fires (${R.s1 && R.s1.slice(0, 48)}…), «still working» again at a later acknowledgement`, /has not answered for 15 minutes/.test(R.s1 || '') && /^Still attaching — the hub is still working/.test(R.s2 || ''), { s1: R.s1, s2: R.s2 });
+    ok(`B-a26e: an acknowledgement from BEFORE the hold's ask (an earlier, answered attach) is no sign of life for it — «waiting» at the hold (${R.o0 && R.o0.slice(0, 40)}…), the Reload words 15 minutes after the ask and not before`, /^Still attaching — waiting for the hub to answer/.test(R.o0 || '') && /^Still attaching — waiting for the hub to answer/.test(R.o1 || '') && /has not answered for 15 minutes/.test(R.o2 || ''), { o0: R.o0, o1: R.o1, o2: R.o2 });
     ok('B-a26e (r4857): the 15-minute words run from the ASK that began the hold (asked 10 minutes before: Reload 5 minutes on, not 15)', /^Still attaching — waiting for the hub to answer/.test(R.asked1 || '') && /has not answered for 15 minutes/.test(R.asked2 || ''), { asked1: R.asked1, asked2: R.asked2 });
-    const dOk = (d) => !!d && d.held === true && d.before.handlers === 2 && d.before.inFlight === 1 && d.atClose.handlers === 0 && d.atClose.has === false && d.atClose.inFlight === 0 && d.atClose.hold === null && d.atClose.holdTimerLive === false && d.after.handlers === 0 && d.after.sent === 0;
+    const dOk = (d) => !!d && d.held === true && d.before.handlers === 2 && d.before.inFlight === 1 && d.atClose.handlers === 0 && d.atClose.has === false && d.atClose.inFlight === 0 && d.atClose.hold === null && d.atClose.holdTimerLive === false && d.after.handlers === 0 && d.after.sent === 0 && d.after.liveTimers === 0;   // r4875's round: and no live timer of the closed view at all
     ok(`B-a26e (r4857, THE MUST): THE HOLD NEVER OUTLIVES ITS WINDOW — a view held by a real cycle, its retry counted (${R.d?.before?.handlers} handlers, ${R.d?.before?.inFlight} in flight), closed: at once no handler on the link (${R.d?.atClose?.handlers}), no slot or count, no hold, no live 15-minute timer; nothing sent in the twenty minutes after`, dOk(R.d), R.d || R.threw);
-    ok(`B-a26e RED CONTROL (r4857): the tip's dispose with its hold-clear line cut leaves the hold behind (${R.dx?.atClose?.handlers} handler(s), hold ${R.dx?.atClose?.hold ? 'up' : 'gone'}, its timer ${R.dx?.atClose?.holdTimerLive ? 'live' : 'cleared'}, ${R.dx?.atClose?.inFlight} counted) — the leg can go red`, mutantErr === null && !!R.dx && R.dx.held === true && !dOk(R.dx) && R.dx.atClose.handlers >= 1 && R.dx.atClose.hold !== null && R.dx.atClose.holdTimerLive === true, mutantErr || R.dx);
+    ok(`B-a26e RED CONTROL (r4857): the tip's dispose with its hold-clear line cut leaves the hold behind (${R.dx?.atClose?.handlers} handler(s), hold ${R.dx?.atClose?.hold ? 'up' : 'gone'}, its timer ${R.dx?.atClose?.holdTimerLive ? 'live' : 'cleared'}, ${R.dx?.atClose?.inFlight} counted) — the leg can go red`, mutantErr === null && !!R.dx && R.dx.held === true && !dOk(R.dx) && R.dx.atClose.handlers === 1 && R.dx.atClose.hold !== null && R.dx.atClose.holdTimerLive === true, mutantErr || R.dx);
   }
   {
     // un-hide mid-queue ⇒ attach NOW, slot cancelled; dispose ⇒ dequeued; a second drop ⇒ superseded
@@ -449,6 +484,7 @@ console.log('— reconnect wiring pins');
 {
   const cv = read('src/lib/chat-view.js'), app = read('src/lib/app.js'), rq = fs.existsSync(path.join(REPO, 'src/lib/reconnect-queue.js')) ? read('src/lib/reconnect-queue.js') : '';
   ok('the ChatView state handler re-attaches through _reconnectAttach (not a bare _reattach(true))', /this\._connNotice\.up\(\);\s*\n\s*this\._reconnectAttach\(\);/.test(cv));
+  ok('B-a26e (r4875): an acknowledgement of the live attach while held decides the bar\'s words again at once', /this\._lastAttachAckAt = Date\.now\(\); if \(this\._attachHold\) this\._attachHoldWords\(\); \}/.test(cv));
   ok('the queued view is decided by the DERIVED flag (_suspended), never a fourth flag', /if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cv));
   ok('B-a26e (r4686): a HELD window\'s retry is enqueued in its reconnect\'s pass (never a slot of its own)', /if \(q && this\._attachHold && !this\._readOnly && !this\._disposed\) \{\n[^\n]*setDisconnected\(true, 'attaching'\);[^\n]*\n\s*q\.enqueue\(this\);\n\s*return;/.test(cv));
   ok('_applySuspend(false) takes a queued view and attaches it now', /if \(!on && this\.app\?\._reconnectQueue\?\.take\(this\)\) this\._runQueuedReattach\('unhide'\);/.test(cv));

@@ -328,7 +328,16 @@ WS.prototype.emit = function (ev, data, ...a) { let attach = false; if (ev === '
   const wholeLog = scratch(`rstorm-${variant}-whole`); dirs.add(wholeLog);
   // (its reader's small 4) the hook's cost stays OUT of the suite's other timed legs: the suite writes this file once the
   // MEASURED storm (s1) is over; the next attach receipt disables the hook for good (never armed again in this server)
-  const wholeOff = path.join(path.dirname(wholeLog), `rstorm-${variant}-whole-off`);
+  // lane bl-release (its find, 11-26): the off-file was a FIXED name in the machine's shared /tmp that no run removed — on a reused
+  // test machine every run after the first found it and disarmed its meter at the second receipt (the (d) legs read zero turns)
+  const wholeOff = scratch(`rstorm-${variant}-whole-off`); dirs.add(wholeOff);
+  // 主开发 r4894: A LEFT-OVER FILE OF AN EARLIER RUN CANNOT DISARM THIS RUN's METER — one stands where the old form kept it (the fixed
+  // name in the shared temp folder): planted here exclusively when none is there (removed at the end only then), and the meter
+  // must still arm in both storms (its red: the fixed name back)
+  const OLD_OFF = path.join(path.dirname(wholeLog), `rstorm-${variant}-whole-off`);
+  let plantedOld = false; try { fs.writeFileSync(OLD_OFF, 'an earlier run\n', { flag: 'wx' }); plantedOld = true; } catch { }
+  if (plantedOld) dirs.add(OLD_OFF);
+  const leftover = { at: OLD_OFF, there: fs.existsSync(OLD_OFF), planted: plantedOld, own: wholeOff, ownAbsent: !fs.existsSync(wholeOff) };
   fs.appendFileSync(preload, `{ const wt = require('worker_threads'); if (wt.isMainThread) { let WS = null; try { WS = require('module').createRequire(process.cwd() + '/server.js')('ws'); } catch {}
 if (WS && WS.prototype && typeof WS.prototype.emit === 'function') { const ah = require('async_hooks');
 const now = typeof process.threadCpuUsage === 'function' ? () => { const c = process.threadCpuUsage(); return c.user + c.system; } : () => { const c = process.cpuUsage(); return c.user + c.system; };
@@ -568,7 +577,7 @@ WS.prototype.send = function (data, ...a) { const r = sd.call(this, data, ...a);
   await sleep(Math.max(0, s1.endWall + 33000 - Date.now()));
   const gaps = telemetryGaps(s1.dropWall - 200, s1.endWall + 33000);
   const sum = (xs) => Math.round(xs.reduce((a, b) => a + b, 0) * 10) / 10;
-  const result = { storm: s1, gapMax: gaps.length ? Math.max(...gaps) : 0, gaps, loopMax: loopDelay(s1.dropWall, s1.endWall), work: attachWork(s1), whole: wholeWork(s1),
+  const result = { leftover, storm: s1, gapMax: gaps.length ? Math.max(...gaps) : 0, gaps, loopMax: loopDelay(s1.dropWall, s1.endWall), work: attachWork(s1), whole: wholeWork(s1),
     // the server's own heartbeat counters over the storm's round(s): a round tainted by a stall > 5 s, a client terminated
     hb: { tainted: telemetryEvents('ws-heartbeat-stall-skip', s1.dropWall - 200, s1.endWall + 33000).length, terminated: telemetryEvents('ws-heartbeat-terminate', s1.dropWall - 200, s1.endWall + 33000).length },
     appended, jsonl: jsonlReads(s1.dropWall, s1.endWall),
@@ -789,6 +798,8 @@ check(`(d) the whole-attach meter SEES the work: the control's whole storm ${ms1
 // would make it see the work and turn a «control» red for the wrong reason — it is printed beside the floor above, not judged
 check(`(d) fix: the storm never lands on the server's loop in one piece — its costliest turn of WHOLE attach work ${ms1(F.whole.maxTurnUs)} ms ≤ ½ the control's whole storm ${ms1(C.whole.sumUs)} ms + the fresh server's first receipt ${ms1(F.work.firstUs)} ms; its «attached» sends in ${F.whole.sendTurns} distinct turns (≥ ${N - N_VISIBLE + 1} of the ${N} required) [${F.whole.perTurnSent.join(',')}], at most ${F.whole.maxTurnSent} in one (≤ the ${N_VISIBLE} displayed); the control's sends a turn [${C.whole.perTurnSent.join(',')}] (the meter counts a pile-up: printed) — ${F.work.clock === 'threadCpuUsage' ? 'thread' : 'process'} CPU, never a wall reading`,
   F.whole.done === N && F.whole.maxTurnUs <= C.whole.sumUs / 2 + F.work.firstUs && F.whole.maxTurnSent <= N_VISIBLE && F.whole.sendTurns >= N - N_VISIBLE + 1, { fix: F.whole, control: C.whole });
+check(`(d) a left-over switch-off file of an earlier run cannot disarm this run's meter: one stands at the old fixed name in the shared temp folder (fix ${fix.leftover?.there}, control ${control.leftover?.there}); each run's own off-file is its own scratch, absent at its start — the meter armed in both storms (fix ${F.whole.done}/${N}, control ${C.whole.done}/${N} attaches completed) (主开发 r4894; its red: the fixed name back)`,
+  !!fix.leftover && !!control.leftover && fix.leftover.there === true && control.leftover.there === true && fix.leftover.ownAbsent === true && control.leftover.ownAbsent === true && fix.leftover.own !== fix.leftover.at && control.leftover.own !== control.leftover.at && F.whole.done === N && C.whole.done === N, { fix: fix.leftover, control: control.leftover });
 check(`(d) the server's own heartbeat counters over both storms: no round tainted by a stall, no client terminated — the incident's failure (fix ${F.hb.tainted}/${F.hb.terminated}, control ${C.hb.tainted}/${C.hb.terminated})`,
   !F.hb.tainted && !F.hb.terminated && !C.hb.tainted && !C.hb.terminated);
 {
