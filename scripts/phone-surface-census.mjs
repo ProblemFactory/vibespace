@@ -188,6 +188,7 @@ export const OPENERS = {
     also: [{ label: 'confirm', open: `M['utils'].showConfirmDialog({ title: 'Delete this Task Group?', message: 'Its conversations stay in the list; its folders, grants and rules go with it. This cannot be undone.', confirmText: 'Delete', danger: true })` }] },
   'dialog:vault-ak-mint': { open: `M['vault-automation'].showMintDialog({ refresh: () => {} })`, mods: ['src/lib/vault-automation.js'] },
   'dialog:vault-login-add': { open: `M['vault-login-row'].showLoginAddDialog({})`, mods: ['src/lib/vault-login-row.js'] },
+  'dialog:vault-login-change': { open: `M['vault-login-row'].showLoginChangeDialog({ name: 'web-login:https://shop.example.test#alice', origin: 'https://shop.example.test', user: 'alice' })`, mods: ['src/lib/vault-login-row.js'] },   // B-ab6c: a login's Change password…
   'dialog:vault-secret-add': { open: `M['vault-paste-box'].showSecretAddDialog({})`, mods: ['src/lib/vault-paste-box.js'] },
   'dialog:vault-file-add': { open: `M['vault-file-row'].showFileAddDialog({})`, mods: ['src/lib/vault-file-row.js'] },   // lane lg-vault-file (B-0830 U1b): 添加… › 文件…
   'dialog:vault-totp-add': { open: `M['vault-totp-row'].showTotpAddDialog({})`, mods: ['src/lib/vault-totp-row.js'] },

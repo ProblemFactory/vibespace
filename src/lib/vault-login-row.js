@@ -98,6 +98,27 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
     };
     doors.push(confirmB, discardB);
   }
+  // B-ab6c (the owner 2026-11-26): the password changed HERE — the form with the site and the user name fixed, one field for the new one
+  const changeB = el('button', 'vw-btn vw-login-change', t('Change password…'));
+  changeB.type = 'button';
+  changeB.title = t('Type its new password — the current one is kept as the previous one');
+  changeB.onclick = () => showLoginChangeDialog(entry, { refresh });
+  doors.push(changeB);
+  // …and the previous one back by a swap (a person's press; shown only when the login keeps one — never its age or content here)
+  if (entry.hasPrevious) {
+    const prevB = el('button', 'vw-btn vw-login-previous', t('Use the previous password'));
+    prevB.type = 'button';
+    prevB.title = t('Makes the previous password current again — the current one becomes the previous one');
+    prevB.onclick = async () => {
+      prevB.disabled = true;
+      const r = await post('/api/vault/web-logins/use-previous', { name: entry.name, ...(entry.rev != null ? { rev: entry.rev } : {}) });
+      prevB.disabled = false;
+      if (r && r.ok) showToast(t('The previous password is now current — press «Use the previous password» again to undo'));
+      else showToast(loginRefusalWords(r && r.code, r), { type: 'error' });
+      try { refresh(); } catch { }
+    };
+    doors.push(prevB);
+  }
   const useB = el('button', 'vw-btn vw-login-grant', t('Use for…'));
   useB.type = 'button';
   useB.title = t('Choose who may sign in with this login — VibeSpace never hands them the password');
@@ -116,13 +137,14 @@ export function loginExtras(row, data, { refresh, show, doors: open = {} } = {})
  *  labelled `fields` in order, the add door's `hint`, the two-step field's list (`otpList` — placed under the field's row;
  *  `otpPick` its handle), `values()` (the body the add door posts) and `field()`. `addCode` = the caller's «Two-step code…»
  *  door, which the list offers when the vault holds no code. */
-export function loginFields({ site = '', fixed = false, addCode = null } = {}) {
+export function loginFields({ site = '', fixed = false, addCode = null, user: userName = '', fixedUser = false, change = false, totpName = '' } = {}) {   // B-ab6c: `fixedUser` + `change` — Change password… and the update card
   const field = (label, control) => { const l = el('label', 'vault-secret-field'); l.append(el('span', 'vault-secret-label', label), control); return l; };
   const input = (cls, type, ph) => { const i = el('input', `vault-pw ${cls}`); i.type = type; i.autocomplete = 'off'; i.spellcheck = false; i.placeholder = ph; return i; };
   const s = input('vault-login-site', 'text', t('The site — e.g. https://example.com'));
   if (fixed) { s.value = String(site || ''); s.readOnly = true; s.setAttribute('aria-readonly', 'true'); }   // the card's: the ask fixed it
   const user = input('vault-login-user', 'text', t('The user name or email you sign in with'));
-  const pw = input('vault-login-pass', 'password', t('Its password'));
+  if (fixedUser) { user.value = String(userName || ''); user.readOnly = true; user.setAttribute('aria-readonly', 'true'); }   // B-ab6c: the login's own, shown
+  const pw = input('vault-login-pass', 'password', change ? t('The new password') : t('Its password'));
   pw.autocomplete = 'new-password';
   const otp = input('vault-login-otp', 'text', t('Optional — the name of its two-step code in this vault'));
   // lane vault-totp-add: the field offers the two-step codes the vault holds (names only — GET /api/vault/totp). lane
@@ -130,13 +152,14 @@ export function loginFields({ site = '', fixed = false, addCode = null } = {}) {
   // headed, a row per code BY NAME (the vault's own names — no record is unsealed to decorate a row: the owner's word,
   // 2026-11-17 20:36Z) — never the browser's native list, which every platform draws as its own
   // suggestion (src/lib/vault-otp-field.js)
+  if (totpName) otp.value = String(totpName);   // B-ab6c: the two-step code bound now, shown and changeable
   const otpPick = otpField(otp, { addCode });
   const hint = el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.'));
   const values = () => ({ origin: s.value.trim(), username: user.value.trim(), loginPassword: pw.value, ...(otp.value.trim() ? { totpName: otp.value.trim() } : {}) });
   const otpRow = field(t('Two-step code'), otpPick.wrap);   // (not «otpField»: that is the imported field maker above — a local of that name put the maker's call in its dead zone)
   const otpWords = otpRow.querySelector('.vault-secret-label');   // the open list sits inside this <label>: the field is named by the label's words alone
   if (otpWords) { otpWords.id = `${otp.getAttribute('aria-controls')}-label`; otp.setAttribute('aria-labelledby', otpWords.id); }
-  return { site: s, user, pw, otp, otpPick, otpList: otpPick.el, hint, field, values, fields: [field(t('Site'), s), field(t('User name'), user), field(t('Password'), pw), otpRow] };
+  return { site: s, user, pw, otp, otpPick, otpList: otpPick.el, hint, field, values, fields: [field(t('Site'), s), field(t('User name'), user), field(change ? t('New password') : t('Password'), pw), otpRow] };
 }
 /** The add door's refusals in words — the dialog's and the card's (one map; the card's own codes too). */
 export function loginRefusalWords(code, r) {
@@ -144,6 +167,10 @@ export function loginRefusalWords(code, r) {
     : code === 'login_totp_unknown' || code === 'bad_totp' ? t('No two-step code of that name is in this vault — pick one from its list, or add it with «Two-step code…»') : code === 'login_password_lines' ? t('A password holds no line break — type or paste it again')
     : code === 'login_site_exists' && r && r.there && r.first ? t('{site} is this login\'s own first site and signs in there as {user} — to sign in there under another name, type a new login', { site: String(r.site || ''), user: String(r.there) })   // its first site cannot be removed: the one door is a new login
     : code === 'login_site_exists' && r && r.there ? t('{site} is on this login already and signs in there as {user} — to sign in there under another name, remove that site from the login in Vault ▸ Web logins first, or type a new login', { site: String(r.site || ''), user: String(r.there) })   // one login, several sites: the use road's own refusal
+    : code === 'login_would_update' ? t('{site} as {user} is already in the vault — saving changes its password (the current one is kept as the previous one). To add a separate login, change the user name.', { site: String((r && r.site) || ''), user: String((r && r.user) || '') })   // B-ab6c
+    : code === 'login_gone' ? t('That login is no longer in the vault — nothing was saved')
+    : code === 'login_no_previous' ? t('This login keeps no previous password')
+    : code === 'card_changed' ? t('That login changed after it was shown — nothing was changed; it is shown again now')
     : failWords(r);   // lane login-request-card
 }
 
@@ -165,13 +192,55 @@ export function showLoginAddDialog({ refresh = () => {} } = {}) {
   body.append(...f.fields, f.otpList, f.hint, err);
   dialog.append(foot);
   cancel.onclick = () => { f.pw.value = ''; close(); };
+  // B-ab6c: the form says it BEFORE the save when the site and user name name a login already here — the server's own naming
+  // (expect 'new' ⇒ login_would_update, nothing written); the button then reads «Change its password» and a second press updates.
+  // Another site or user name typed meanwhile is a new login again.
+  let expect = 'new', named = '';
+  const keyOf = () => `${f.site.value.trim()}\n${f.user.value.trim()}`;
+  const reset = () => { if (expect === 'update' && keyOf() !== named) { expect = 'new'; save.textContent = t('Save to vault'); err.textContent = ''; } };
+  f.site.addEventListener('input', reset); f.user.addEventListener('input', reset);
   save.onclick = saveNow = async () => {
     save.disabled = true;
-    const r = await post('/api/vault/web-logins', f.values());
+    const r = await post('/api/vault/web-logins', { ...f.values(), expect });
     save.disabled = false;
-    if (r && r.ok) { f.pw.value = ''; close(); showToast(r.updated ? t('Updated the login in the vault') : t('Saved the login to the vault')); try { refresh(); } catch { } return; }
+    if (r && r.ok) { f.pw.value = ''; close(); showToast(r.updated ? t('Password changed — the old one is kept as the previous one') : t('Saved the login to the vault')); try { refresh(); } catch { } return; }
+    if (r && r.code === 'login_would_update') { expect = 'update'; named = keyOf(); save.textContent = t('Change its password'); }
     err.textContent = loginRefusalWords(r && r.code, r);
   };
   setTimeout(() => f.site.focus(), 0);
+  return { dialog, close };
+}
+
+/** B-ab6c (the owner 2026-11-26: «现在修改已存网站密码的方式非常蠢»): Change password… — the row's own door. The add door's fields with
+ *  the site AND the user name fixed and shown, ONE field for the new password, the two-step code as bound now (changeable); the save
+ *  is an UPDATE (expect 'update': the old password kept as previous, the grants and the binding untouched; a login gone meanwhile is
+ *  refused, never created). It asks what the add door asks — an unlocked vault — and nothing more. */
+export function showLoginChangeDialog(entry, { refresh = () => {} } = {}) {
+  const site = String((entry && entry.origin) || ''), user = String((entry && entry.user) || '');
+  let saveNow = () => {}, f = null;
+  const { dialog, body, close, raised, ready } = createModalShell({ id: 'vault-login-change', key: (entry && entry.name) || '', title: t('Change password'),   // the subject: THIS login (one form a login)
+    dialogClass: 'vault-login-add-dialog vault-login-change-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => !!(f && f.pw.value), save: () => saveNow(), discard: () => { if (f) f.pw.value = ''; } }, kind: 'form' });
+  if (raised) return null;
+  f = loginFields({ site, fixed: true, user, fixedUser: true, change: true, totpName: (entry && entry.totpName) || '', addCode: () => showTotpAddDialog({ refresh: (r) => { if (r && typeof r.name === 'string' && r.name) { f.otpPick.added(r.name); try { refresh(); } catch { } } } }) });
+  const kept = el('div', 'vw-ak-hint vault-login-change-kept', t('The current password is kept as the previous one.'));
+  const pend = entry && (entry.pending === 'change' || entry.pending === 'register') ? el('div', 'vw-desc-pending vault-login-change-pending', t('A generated password waits for your confirmation — saving this drops it.')) : null;
+  const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
+  const foot = el('div', 'dialog-footer');
+  const cancel = el('button', 'btn-cancel', t('Cancel'));
+  const save = el('button', 'btn-create', t('Change password'));
+  cancel.type = save.type = 'button';
+  foot.append(cancel, save);
+  body.append(...f.fields, f.otpList, kept, ...(pend ? [pend] : []), err);
+  dialog.append(foot);
+  cancel.onclick = () => { f.pw.value = ''; close(); };
+  save.onclick = saveNow = async () => {
+    save.disabled = true;
+    const r = await post('/api/vault/web-logins', { ...f.values(), expect: 'update' });
+    save.disabled = false;
+    if (r && r.ok) { f.pw.value = ''; close(); showToast(t('Password changed — the old one is kept as the previous one')); try { refresh(); } catch { } return; }
+    err.textContent = loginRefusalWords(r && r.code, r);
+  };
+  ready.then((shell) => { if (shell) setTimeout(() => f.pw.focus(), 0); });   // §103 r4: a keyed form may wait behind the open one — its focus waits for its own open
   return { dialog, close };
 }

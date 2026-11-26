@@ -57,6 +57,7 @@ const REFUSALS = Object.freeze([
   'login_fill_live',
   'login_not_pending',
   'login_no_previous',
+  'login_would_update', 'login_gone',   // B-ab6c: the add door's `expect` — a save that would change a login here; an update whose login is gone
   'login_no_otp',
   'login_pending_exists',
   'login_fence_unavailable',
@@ -585,6 +586,23 @@ function ownerUpdatedRecord(rec, password, { totpName = undefined, now = 0 } = {
     current: { password: str(password), source: 'owner', strength: 'unknown', setAt: now },
     previous: sameAsCurrent ? r.previous : (prevBase ? { password: prevBase.password, source: prevBase.source, strength: prevBase.strength, replacedAt: now } : r.previous),
     pending: null,
+  });
+}
+
+/** B-ab6c (the owner 2026-11-26, lane login-request-card): «Use the previous password» — the PERSON's swap of `current` and `previous`
+ *  (rev+1, by owner): a new password typed wrong is undone, and pressed again it is undone again. A pending candidate stays as it is.
+ *  null = not a record, or nothing to swap (no current or no previous). */
+function previousSwappedRecord(rec, { now = 0 } = {}) {
+  const r = recordOf(rec);
+  if (!r || !r.current || !r.previous || typeof r.previous.password !== 'string' || !r.previous.password) return null;
+  const cur = r.current, prev = r.previous;
+  return recordOf({
+    ...r,
+    schema: 2,
+    rev: r.rev + 1,
+    by: 'owner',
+    current: { password: str(prev.password), source: prev.source || 'owner', strength: prev.strength || 'unknown', setAt: now },
+    previous: { password: str(cur.password), source: cur.source || 'owner', strength: cur.strength || 'unknown', replacedAt: now },
   });
 }
 
@@ -1155,7 +1173,7 @@ module.exports = {
   hasExplicitScheme, originOf, hostOf, siteOriginOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   SITES_MAX, sitesOf, userOnSite, holdsPair, loginResources, registrableOf, siteWords, addSiteVerdict, removeSiteVerdict, mergeVerdict,   // one login, several sites
   recordOf, textOf, publicOf, resolveSlotValue, scrubSecretsOf, mintEntryGen,
-  newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord, totpBoundRecord,
+  newRecord, mintChangeRecord, confirmPendingRecord, discardPendingRecord, ownerUpdatedRecord, previousSwappedRecord, totpBoundRecord,
   shouldRemindPending, pendingRemindKey,
   generatePassword, parseVaultFillSpec, fillVerdict,
   liveFillAllowsVerb, liveFillVerdict, postLiftOutcomeVerdict,

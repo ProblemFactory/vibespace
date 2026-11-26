@@ -13162,6 +13162,19 @@ export default {
   "Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.": "只会填到这个网站本身（精确到地址、经 https）— 绝不填到别的网站，也不填到嵌入它的框架里。",
   "Updated the login in the vault": "已更新保险库里的登录",
   "Saved the login to the vault": "已把登录存入保险库",
+  "The new password": "新的密码", // B-ab6c: a website login's Change password… and its previous one back
+  "Type its new password — the current one is kept as the previous one": "输入它的新密码——当前密码会保留为上一个密码", // B-ab6c: a website login's Change password… and its previous one back
+  "The current password is kept as the previous one.": "当前密码会保留为上一个密码。", // B-ab6c: a website login's Change password… and its previous one back
+  "A generated password waits for your confirmation — saving this drops it.": "有一个生成的密码在等你确认——保存会丢弃它。", // B-ab6c: a website login's Change password… and its previous one back
+  "Password changed — the old one is kept as the previous one": "密码已更改——旧密码保留为上一个密码", // B-ab6c: a website login's Change password… and its previous one back
+  "Use the previous password": "改用上一个密码", // B-ab6c: a website login's Change password… and its previous one back
+  "Makes the previous password current again — the current one becomes the previous one": "让上一个密码重新成为当前密码——当前密码变为上一个密码", // B-ab6c: a website login's Change password… and its previous one back
+  "The previous password is now current — press «Use the previous password» again to undo": "上一个密码现在是当前密码——再按一次「改用上一个密码」即可撤销", // B-ab6c: a website login's Change password… and its previous one back
+  "{site} as {user} is already in the vault — saving changes its password (the current one is kept as the previous one). To add a separate login, change the user name.": "{site} 的 {user} 已在保险库中——保存会更改它的密码（当前密码保留为上一个密码）。要另存一个登录，请修改用户名。", // B-ab6c: a website login's Change password… and its previous one back
+  "Change its password": "修改它的密码", // B-ab6c: a website login's Change password… and its previous one back
+  "That login is no longer in the vault — nothing was saved": "这个登录已不在保险库中——未保存任何内容", // B-ab6c: a website login's Change password… and its previous one back
+  "This login keeps no previous password": "这个登录没有保存上一个密码", // B-ab6c: a website login's Change password… and its previous one back
+  "That login changed after it was shown — nothing was changed; it is shown again now": "显示之后这个登录已改变——未做任何更改；现在重新显示", // B-ab6c: a website login's Change password… and its previous one back
   "Give the site's address over https (http only for this machine's localhost)": "请填写 https 的网站地址（http 只限本机 localhost）",
   "Give the user name (no spaces, no #)": "请填写用户名（不含空格和 #）",
   "Type its password": "请输入它的密码",

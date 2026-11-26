@@ -333,9 +333,9 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!v.ok) return v;
     if (v.totpName) { let names = []; try { names = vault.secretNames() || []; } catch { names = []; } if (!names.some((s) => s && s.name === `totp:${v.totpName}`)) return named('login_totp_unknown'); }
     let r = null;
-    try { r = logins.addOwn({ origin: q.target.origin, username: v.username, password: v.password, totpName: v.totpName }, { who: String(by).slice(0, 40) }); }
+    try { r = logins.addOwn({ origin: q.target.origin, username: v.username, password: v.password, totpName: v.totpName, expect: l.expect === 'update' ? 'update' : 'new' }, { who: String(by).slice(0, 40) }); }   // B-ab6c: never a silent overwrite — the card says it first
     catch (e) { log(`${q.requestId}: the website login could not be saved (${(e && e.code) || 'error'})`); return named('store_failed'); }
-    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c }; }
+    if (!r || !r.ok) { const c = String((r && r.code) || 'store_failed'); return { ok: false, code: c, words: (r && r.error) || MORE_WORDS[c] || P.WORDS[c] || c, ...(c === 'login_would_update' ? { site: r.site, user: r.user } : {}) }; }   // B-ab6c: the card's words name the login
     const entry = String(r.name), user = P.loginUserOf(entry);
     let allowed = false;
     if (l.allow === true && q.conv && typeof logins.grant === 'function') {

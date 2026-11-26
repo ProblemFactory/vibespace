@@ -873,7 +873,11 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     };
   }
 
-  function addOwn({ origin, username, password, totpName = null, notes = '' } = {}, { who = null } = {}) {
+  // B-ab6c (the owner 2026-11-26, lane login-request-card): `expect` — what the PERSON's form means. 'new' (the Add dialog, the new-login
+  // card): a site and user name that name a login already here is NOT saved over in silence: refused login_would_update with the
+  // site and user, nothing written, so the form says it before the save. 'update' (Change password…, the update card): saved only
+  // over the login that is there (the old password kept as previous), never a new one: refused login_gone. Absent: the release's road.
+  function addOwn({ origin, username, password, totpName = null, notes = '', expect = null } = {}, { who = null } = {}) {
     const o = BL.originOf(origin);
     if (!o) return named('login_bad_origin', 'a website address (https://host[:port])');
     if (!BL.secureOrigin(o)) return named('login_bad_origin', 'a login is kept for an https site (plain http on this machine\'s localhost only)');
@@ -891,6 +895,8 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     }
     const ex = open(n);
     if (!ex.ok) return ex;
+    if (expect === 'new' && ex.rec) return named('login_would_update', 'a login for this site and user name is already in the vault — saving changes its password (the current one is kept as previous); to keep a separate login, change the user name', { site: o, user: str(username).trim(), name: n });
+    if (expect === 'update' && !ex.rec) return named('login_gone', 'that login is no longer in the vault — nothing was saved', { name: n });
     const holder = ex.rec ? null : pairHolder(n, o, username);
     if (holder) return heldPair(holder, o, username);
     const baseEx = ex.rec && !ex.rec.entryGen ? { ...ex.rec, entryGen: BL.mintEntryGen(randomBytes) } : ex.rec;
@@ -903,6 +909,23 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     resolvePendingItemsForName(n, prevPendingItemId);
     try { vault.audit?.('vault-web-login-saved', { why: n, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name: n, updated: !!ex.rec };
+  }
+
+  /** B-ab6c: «Use the previous password» — the PERSON's swap (the row's door, a press): `current` ⇄ `previous`, rev+1, ONE audit line
+   *  (the entry, never a value). `rev` (the row's) guards a login that changed after it was shown. */
+  function usePrevious(name, { rev = undefined, who = null } = {}) {
+    if (!BL.parseName(name)) return named('not_found', 'no such web login');
+    if (vstate() !== 'unlocked') return named('vault_locked', 'the vault is locked — unlock it, then press again');
+    const o = open(name);
+    if (!o.ok) return o;
+    if (!o.rec) return named('not_found', 'no such web login');
+    if (rev !== undefined && rev !== null && Number(rev) !== o.rec.rev) return named('card_changed', 'that login changed after it was shown — nothing was swapped; read it again');
+    const rec = BL.previousSwappedRecord(o.rec, { now: now() });
+    if (!rec) return named('login_no_previous', 'this login keeps no previous password');
+    const w = writeEntry(name, rec, { actor: null, owner: null });
+    if (!w.ok) return w;
+    try { vault.audit?.('vault-web-login-previous-used', { why: name, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
+    return { ok: true, name, rev: rec.rev };
   }
 
   /** A login's two-step code BOUND or UNBOUND by the PERSON (the Vault window's row and the top of its 用于… dialog — the owner
@@ -1236,6 +1259,7 @@ function create({ vault, dataDir = null, grants = null, totpCode = null, forYou 
     noticeTakeoverSaveDropped,
     list,
     addOwn,
+    usePrevious,   // B-ab6c
     bindTotp,
     addAgent,
     drop,

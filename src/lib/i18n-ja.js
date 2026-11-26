@@ -13161,6 +13161,19 @@ export default {
   "Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.": "入力されるのはそのサイト自身（正確なアドレス、https）だけです — 別のサイトにも、それを埋め込んだフレームにも入力しません。",
   "Updated the login in the vault": "ボールトのログインを更新しました",
   "Saved the login to the vault": "ログインをボールトに保存しました",
+  "The new password": "新しいパスワードを入力", // B-ab6c: a website login's Change password… and its previous one back
+  "Type its new password — the current one is kept as the previous one": "新しいパスワードを入力します——現在のパスワードは以前のパスワードとして残ります", // B-ab6c: a website login's Change password… and its previous one back
+  "The current password is kept as the previous one.": "現在のパスワードは以前のパスワードとして残ります。", // B-ab6c: a website login's Change password… and its previous one back
+  "A generated password waits for your confirmation — saving this drops it.": "生成されたパスワードが確認待ちです——保存するとそれは破棄されます。", // B-ab6c: a website login's Change password… and its previous one back
+  "Password changed — the old one is kept as the previous one": "パスワードを変更しました——古いパスワードは以前のパスワードとして残ります", // B-ab6c: a website login's Change password… and its previous one back
+  "Use the previous password": "以前のパスワードに戻す", // B-ab6c: a website login's Change password… and its previous one back
+  "Makes the previous password current again — the current one becomes the previous one": "以前のパスワードを現在のものに戻します——現在のパスワードは以前のものになります", // B-ab6c: a website login's Change password… and its previous one back
+  "The previous password is now current — press «Use the previous password» again to undo": "以前のパスワードが現在のものになりました——もう一度「以前のパスワードに戻す」を押すと元に戻ります", // B-ab6c: a website login's Change password… and its previous one back
+  "{site} as {user} is already in the vault — saving changes its password (the current one is kept as the previous one). To add a separate login, change the user name.": "{site} の {user} はすでにボールトにあります——保存するとそのパスワードが変わります（現在のパスワードは以前のパスワードとして残ります）。別のログインとして追加するには、ユーザー名を変えてください。", // B-ab6c: a website login's Change password… and its previous one back
+  "Change its password": "そのパスワードを変更", // B-ab6c: a website login's Change password… and its previous one back
+  "That login is no longer in the vault — nothing was saved": "そのログインはもうボールトにありません——何も保存していません", // B-ab6c: a website login's Change password… and its previous one back
+  "This login keeps no previous password": "このログインには以前のパスワードがありません", // B-ab6c: a website login's Change password… and its previous one back
+  "That login changed after it was shown — nothing was changed; it is shown again now": "表示した後にこのログインが変わりました——何も変更していません。いま表示し直します", // B-ab6c: a website login's Change password… and its previous one back
   "Give the site's address over https (http only for this machine's localhost)": "https のサイトアドレスを入力してください（http はこのマシンの localhost のみ）",
   "Give the user name (no spaces, no #)": "ユーザー名を入力してください（空白と # は不可）",
   "Type its password": "そのパスワードを入力してください",

@@ -3161,7 +3161,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
           const ansCard = doorTip.answer(askCard.requestId, {
             answer: 'store',
             person: true,
-            login: { username: 'tuser', password: 'TuserUpd!2', totpName: 'shop2fa', allow: true },
+            login: { username: 'tuser', password: 'TuserUpd!2', totpName: 'shop2fa', allow: true, expect: 'update' },   // B-ab6c: the card's update is the person's second press (the first says login_would_update)
           });
 
           // Door 5: Takeover "Save login" card (`offerOwnerSaveCard` + `answerCard`) updates `.390` `prevuser`
@@ -3247,7 +3247,7 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             const twiceNull = BL_M24.recordOf(BL_M24.recordOf(rawAlice24)) === null;
             const mUpd = logM24.addOwn({ origin: 'https://shop.example.test', username: 'alice', password: 'New' }, { who: 'owner' });
             const mAsk = doorM24.request({ caller: { conversationId: 'c24', scope: 'c24', sessionKey: 's24', name: 'A' }, words: 'w', purpose: 'p', kind: 'login', hosts: ['https://shop.example.test'] });
-            const mCard = doorM24.answer(mAsk.requestId, { answer: 'store', person: true, login: { username: 'tuser', password: 'New', allow: true } });
+            const mCard = doorM24.answer(mAsk.requestId, { answer: 'store', person: true, login: { username: 'tuser', password: 'New', allow: true, expect: 'update' } });   // B-ab6c: the second press
             const mTkOffer = logM24.offerOwnerSaveCard({ origin: 'https://shop.example.test', username: 'prevuser', password: 'New' });
             const mTkAns = logM24.answerCard(mTkOffer.id, { approve: true, shown: mTkOffer.shown, who: 'owner' });
             const mGen = logM24.resolveFill({ tabOrigin: 'https://shop.example.test', spec: 'shop.example.test#aguser/password', generate: true, facts: { conversationKeys: ['conv-ag'] }, owners: ['conv-ag'] });

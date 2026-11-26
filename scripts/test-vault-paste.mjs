@@ -1284,9 +1284,12 @@ SENTINELS.push(S_LOGIN, S_LOGIN2, S_NL);
   const nd = noDoor.request({ caller: { conversationId: 'cid-off-9', scope: 'w9', name: 'Off lane' }, words: 'w', purpose: 'p', kind: 'login', hosts: SITE });
   ok(!nd.ok && nd.code === 'login_no_door', 'a hub with no web-login door refuses a login ask by name (nothing filed)', nd);
 
-  // AN UPDATE: the same account again ⇒ UPDATED (the old password kept one revision — the add door's)
+  // AN UPDATE: the same account again — B-ab6c: the card says it FIRST (login_would_update, nothing written, the item open); the
+  // person's second press (expect update) ⇒ UPDATED (the old password kept one revision — the add door's)
   const c = await S.agent(W.SESSION_TOKEN, { words: 'the shop login again', purpose: 'the password changed', kind: 'login', hosts: SITE });
-  const sc = await S.hit(`/api/vault/secret-requests/${c.json.requestId}/answer`, { body: { answer: 'store', username: 'owner@shop.example', loginPassword: S_LOGIN2, allow: true } });
+  const warn = await S.hit(`/api/vault/secret-requests/${c.json.requestId}/answer`, { body: { answer: 'store', username: 'owner@shop.example', loginPassword: S_LOGIN2, allow: true } });
+  ok(warn.status !== 200 && warn.json.code === 'login_would_update' && openReqs(W).some((i) => i.action.requestId === c.json.requestId), 'B-ab6c: the same account again on a card ⇒ FIRST login_would_update (nothing written, the item open) — never a silent overwrite', warn.json);
+  const sc = await S.hit(`/api/vault/secret-requests/${c.json.requestId}/answer`, { body: { answer: 'store', username: 'owner@shop.example', loginPassword: S_LOGIN2, allow: true, expect: 'update' } });
   const rcc = stashOf('cid-asker-1').filter((e) => e.ref === c.json.requestId);
   ok(sc.status === 200 && sc.json.updated === true && rcc.length === 1 && /UPDATED — the website login for/.test(rcc[0].text) && /kept one revision/.test(rcc[0].text), 'the same account again ⇒ UPDATED (the old one kept one revision)', rcc[0] && rcc[0].text);
   // REFUSE ⇒ the quiet period

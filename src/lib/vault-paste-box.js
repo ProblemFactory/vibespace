@@ -359,17 +359,26 @@ export async function submitSecretBox(model, item, box, answer) {
 const loginSay = (code, r) => (['vault_not_set_up', 'ask_settled', 'ask_unknown', 'todos-unread'].includes(code) ? refusalSay(code, r) : loginRefusalWords(code, r));   // B-44f3: a held For you — the page's own words
 /** lane login-request-card: the login box's press — its fields through the model's ONE verb (the same door); the password field
  *  is emptied once answered, every other field kept on a refusal (said in the box by the add door's own words). */
+/** B-ab6c: the card's save would change a login already in the vault (the server named it: login_would_update) — the box says so,
+ *  its Save reads «Change its password», and the next press is the update; another user name typed meanwhile is a new login again. */
+function loginWouldUpdate(box, user) {
+  const sb = box.querySelector('.ut-secret-save');
+  if (sb && !box.dataset.saveWords) box.dataset.saveWords = sb.textContent;
+  box.dataset.expect = 'update'; box.dataset.expectUser = user.value.trim();
+  if (sb) sb.textContent = t('Change its password');
+  user.addEventListener('input', () => { if (user.value.trim() !== box.dataset.expectUser) { delete box.dataset.expect; if (sb && box.dataset.saveWords) sb.textContent = box.dataset.saveWords; } }, { once: true });
+}
 async function submitLoginBox(model, item, box, answer) {
   const q = (s) => box.querySelector(s);
   const user = q('input.vault-login-user'), pw = q('input.vault-login-pass'), otp = q('input.vault-login-otp'), allow = q('input.ut-login-allow-box');
   const using = box.dataset.use || '';   // one login, several sites: the picked login — no password on this road
   const login = answer !== 'store' ? null : using ? { useLogin: using, username: user ? user.value.trim() : '', allow: !!(allow && allow.checked) }
-    : { username: user ? user.value.trim() : '', loginPassword: pw ? pw.value : '', ...(otp && otp.value.trim() ? { totpName: otp.value.trim() } : {}), allow: !!(allow && allow.checked) };
+    : { username: user ? user.value.trim() : '', loginPassword: pw ? pw.value : '', ...(otp && otp.value.trim() ? { totpName: otp.value.trim() } : {}), allow: !!(allow && allow.checked), expect: box.dataset.expect === 'update' && box.dataset.expectUser === (user ? user.value.trim() : '') ? 'update' : 'new' };   // B-ab6c: the card says it before it saves over a login already here
   const say = loginSay;
   box.dataset.busy = '1';
   box.querySelectorAll('button').forEach((b) => { b.disabled = true; });
   let done = false;
-  try { done = await model.runAction(item, answer, { login, onRefusal: (code, r) => applySecretBox(box, { error: say(code, r) }) }); }
+  try { done = await model.runAction(item, answer, { login, onRefusal: (code, r) => { if (code === 'login_would_update' && user) loginWouldUpdate(box, user); applySecretBox(box, { error: say(code, r) }); } }); }   // B-ab6c: the second press is the update
   finally { delete box.dataset.busy; box.querySelectorAll('button').forEach((b) => { b.disabled = false; }); }
   if ((done || answer === 'deny') && pw) pw.value = '';
   return !!done;
