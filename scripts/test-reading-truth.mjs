@@ -882,7 +882,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
         // r3630 (round wnv7929nx's must): the escape rides EVERY held cause (the chooser's one predicate), so the notice names the cause it
         // HAS — a member held only because its usage file cannot be read is never said to be on another account's instant (the wrong fix)
         const PU = poolWorld(realEng, { unread: 'after' }), PS = poolWorld(realEng, { unread: 'before' });
-        const engAlways = require(MUT.write(ENG, anchored(esrc, '(${heldWallWhy(curFor, readCache)})', "(held on another account's weekly instant)", 'b6a92-r3630-cause-always'), 'b6a92-r3630-cause-always'));   // stale-pins: kept (the red control puts the unconditional clause back)
+        const engAlways = require(MUT.write(ENG, anchored(esrc, "heldWhy: ds.escape === 'held-walled' ? heldWallWhy(curFor, readCache) : null", "heldWhy: ds.escape === 'held-walled' ? \"held on another account's weekly instant\" : null", 'b6a92-r3630-cause-always'), 'b6a92-r3630-cause-always'));   // stale-pins: kept (the red control puts the unconditional clause back; B-9369: through the move's builder, its `heldWhy`)
         const PUx = poolWorld(engAlways, { unread: 'after' });
         const noteOf = (w) => (w && w.notices.find((t) => /answered it with a limit while its own numbers are unknown/.test(t))) || null;
         const unreadNote = noteOf(PU), startedNote = noteOf(PS), unreadNoteX = noteOf(PUx);

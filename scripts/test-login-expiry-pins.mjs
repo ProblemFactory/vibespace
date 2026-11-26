@@ -40,7 +40,7 @@ console.log('— §5 wiring');
   ck('quotaVerdictFor cannot answer "usable" through a dead login', /loginUsable\(li\)/.test(eng) && /re-login needed/.test(eng));
   ck('the auth-failure notice branches on the login STATE (loginWallPhrase) and quotes the deadline only once it has passed (keeping the old wording otherwise)', /\$\{loginWallPhrase\(li\)\}/.test(eng) && /li\.msLeft <= 0 && li\.refreshExpiresAt\)/.test(eng) && /is failing authentication/.test(eng));
   ck('NEGATIVE CONTROL: the rung-branched sentence that narrated a future deadline as a past expiry is gone from the engine', !/login session expired \(refresh token expired at/.test(eng));
-  ck('the switch notice names the current member\'s login STATE too (a signed-out login is not "expired")', /\$\{nameOf\(currentId\)\}'s \$\{\(\(\) => \{ try \{ const l = accounts\.loginStateOf\(currentId, Date\.now\(\), \{ slot: true \}\); return l \? loginWallPhrase\(l\)/.test(eng)); // the SLOT reading (2026-10-13): a pooled member's token never reaches the pool
+  ck('the switch notice names the current member\'s login STATE too (a signed-out login is not "expired")', /from: nameOf\(currentId\), reason: d\.reason,/.test(eng) && /wall: d\.reason === 'login-expired' \? \(\(\) => \{ try \{ const l = accounts\.loginStateOf\(currentId, Date\.now\(\), \{ slot: true \}\); return l \? loginWallPhrase\(l\)/.test(eng) && /'login is signed out': SWITCH_KEYS\.poolSignedOut/.test(eng)); // B-9369: the state rides the builder's `wall`, a key per phrase. The SLOT reading (2026-10-13): a pooled member's token never reaches the pool
   ck('the "nowhere to go" notice reaches the pool-blocked branch for the login wall too', /d\.reason === 'all-logins-expired'\) \{/.test(eng));
   // ROUND 3: the sentence itself moved into the PURE module so §3d can assert
   // the STRING (it was composed inline here, so no test ever read it — and it
@@ -65,7 +65,9 @@ console.log('— §5 wiring');
         && /until a window resets/.test(strip('    serverNotice(k, `… until a window resets.`);'));
     })());
   ck('...while a switch onto a NEAR-expiry scrap tells the user the reprieve is short', /d\.toLoginNear/.test(eng) && /re-login it in Manage Agents now/.test(eng));
-  ck('...on BOTH switch surfaces — the per-session re-point (plan C) fires far more often than the pool-level one', /ds\.toLoginNear/.test(eng) && (eng.match(/re-login it in Manage Agents now/g) || []).length === 2);
+  // B-9369 (主开发 r5165): both surfaces hand their scrap to ONE clause (usage-pool-engine lastResortClause), worded in the page's language —
+  // a key per duration unit (now / s / min / h / days), so the words stand five times, once per key, never beside a builder
+  ck('...on BOTH switch surfaces — the per-session re-point (plan C) fires far more often than the pool-level one', /last: \{ toLoginNear: ds\.toLoginNear,/.test(engCode) && /last: \{ toLoginNear: d\.toLoginNear,/.test(engCode) && (engCode.match(/re-login it in Manage Agents now/g) || []).length === 5 && (engCode.match(/re-login it in Manage Agents now"\)/g) || []).length === 5);
   const apa = fs.readFileSync(path.join(REPO, 'src/account-pool-auto.js'), 'utf8');
   ck("the pure decision only claims 'all-logins-expired' when the login gate was the ONLY wall", /loginBlocked\.length && !quotaBlockedN\) \? 'all-logins-expired'/.test(apa) && /quotaBlockedN\+\+/.test(apa));
   // ROUND 2 phrasing + ROUND 3 placement, now both in the pure module.

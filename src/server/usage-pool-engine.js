@@ -249,7 +249,7 @@ function quotaBackendFor(key, session) {
   return 'claude';
 }
 const { quotaVerdict, THRESH: VERDICT_THRESH, lapseCleared, serveAfterFailure, SERVE_LAPSED, memberLapsed, readingFingerprint } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
-const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
+const { loginUsable, loginBucketLabel, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
 const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, anchorGroupFresh, wholeLedgerGate } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 usageAnchors.prime().catch(() => { });   // B-360d U1: every anchors file's last line, read once off the loop (the sweep waits for it)
@@ -1011,7 +1011,9 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // that cannot serve starts it where the automatic rules would (the pin kept on the session).
     // THE START's ONE ENTRY asks it too (B-87fd (1), 主开发 r5067): on a PAYING default those automatic rules carry the start's mark
     // (the placing law; a guess fail closed) — a pin that cannot serve is no pin for the placing. It hands the bare reading as the entry
-    // does (r5108's small): a held mark reaches the decision through readCache too today, so no decision moves; the two calls cannot part
+    // does (r5108's small): a held mark reaches the decision through readCache too today, so no decision moves; the two calls cannot part.
+    // That holds while poolReadCache passes a held string and a startedAgain field through as they are (the mark as it is, and the estimate
+    // overlay's spread): a change there re-reads this claim (the follow's round wf_caa8bf51-397, a small)
     if (pin) {
       const pm = healthyPoolMembers(poolId);
       const dp = require('../account-pool-auto.js').decideStart({ family: fam, hinted, baseReadCache: base, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), readReading: poolReadReading(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm), payingIds: overageInUseIds(pm) });
@@ -9525,14 +9527,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         // SCRAPS (round-2 verifier): this conversation had nowhere else to go
         // and landed on a member whose OWN login dies in minutes. The move is
         // right (zero minutes was the alternative) but silence about it would
-        // read as "it recovered", and it dies again shortly after.
-        const sScraps = ds.toLoginNear
-          ? ` — but ${toName}'s own login ${typeof ds.toLoginNear.msLeft === 'number' && ds.toLoginNear.msLeft > 0 ? `expires in ${loginAgeText(ds.toLoginNear.msLeft)}` : 'expires imminently'}; re-login it in Manage Agents now`
-          : ds.toCredits
-          ? ` — the last resort: ${toName} bills pay-per-use past its quota (usage credits)`
-          : ds.toOverage   // B-87fd (1) r4711 (c): the setting promises the bar is NAMED — landed on the paying tier, it says so
-          ? ` — the last resort: ${toName} is billing paid overage`
-          : '';
+        // read as "it recovered", and it dies again shortly after. The clause is lastResortClause's (B-9369: both sentences, in the
+        // page's language; a landing on the paying tier is NAMED too, B-87fd (1) r4711 (c))
         if (ds.toCredits) noteCreditsParking(poolId, ds.to, poolCreditsNotice({ toCredits: ds.toCredits, toRemaining: ds.toRemaining }, { poolName: a.name, memberName: toName }), now);
         if (ds.reason === 'not-a-member' && !ds.pinExhausted) removedMemberNotice(poolId, sid, s2, curFor, ds.to, !a.hot); // the removed-member words, whoever sees the removal first
         else if (ds.reason === 'pin-return') pinNotice(poolId, sid, s2, 'back', { member: ds.to }, !a.hot); // back on the pinned member at its stop
@@ -9540,7 +9536,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         else if (ds.pinExhausted) pinNotice(poolId, sid, s2, ds.pinWhy, { member: ds.pinned, target: ds.to }, !a.hot); // the pin cannot serve: running on the automatic pick, the pin kept
         else if (ds.reason === 'priority-return') priorityReturnNotice(poolId, sid, s2, ds, !a.hot); // manual priority: back on the higher-ranked member at its stop
         else if (ds.reason === 'spare-lane' && ds.to !== linkCur) spareLaneNotice(poolId, sid, s2, ds, curFor); // B-8a65 S5: an idle conversation moved off a member rich in a cap it does not use
-        else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${ds.reason === 'overage' ? ` — ${memberWord(poolId, curFor)} is billing paid overage, and ${toName} has quota left` : ''}${ds.escape === 'held-walled' ? ` — ${memberWord(poolId, curFor)} answered it with a limit while its own numbers are unknown (${heldWallWhy(curFor, readCache)})` : ''}${fam && ds.reason !== 'overage' ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
+        else if (ds.to !== linkCur) { const mw = sessionMoveWords({ pool: a.name, title: convName(s2, sid), target: toName, from: ds.reason === 'overage' || ds.escape === 'held-walled' ? memberWord(poolId, curFor) : null, priorityRank: ds.priorityRank, overage: ds.reason === 'overage', heldWhy: ds.escape === 'held-walled' ? heldWallWhy(curFor, readCache) : null, fam, fromRemaining: ds.fromRemaining, early: early ? { label: pc.label, line: pc.line, inMin: Math.max(1, Math.round(pc.inSec / 60)), rate: pc.pctPerMin } : null, leadMin: Math.round(lead / 60), hot: a.hot, last: { toLoginNear: ds.toLoginNear, toCredits: ds.toCredits, toOverage: ds.toOverage } }); serverNotice(`pool-sess-${sid}-${now}`, mw.text, { i18n: mw.i18n }); }   // B-9369: the conversation's move in the page's language
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})${ds.placedBy === 'priority' ? ` — ${ds.reason === 'priority-return' ? 'priority return' : 'priority'} #${ds.priorityRank ?? '-'}` : ''}${ds.reason === 'pin-return' ? ' — pin return (pinned)' : ds.pinExhausted && ds.to === ds.pinned ? ' — onto its pin (pinned)' : ds.pinExhausted ? ` — pin kept (${nameOf(ds.pinned)}: ${ds.pinWhy})` : ''}`);
         if (moveByClaim) console.log(`[pool] per-session switch ${poolId}/${sid}: moved onto ${nameOf(ds.to)} on your reset claim (${moveByClaim}) — unconfirmed until its first reading`);
         // a hot re-point does not move an idle limit-blocked session by itself
@@ -9689,28 +9685,14 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // SCRAPS (round-2 verifier): the only member left was itself minutes from
     // its login deadline. Moving beats staying on a dead member, but the user
     // has to hear that the reprieve is short — otherwise the pool "recovers"
-    // and dies again with no explanation.
-    const scraps = d.toLoginNear
-      ? ` — but ${d.toName}'s own login ${typeof d.toLoginNear.msLeft === 'number' && d.toLoginNear.msLeft > 0 ? `expires in ${loginAgeText(d.toLoginNear.msLeft)}` : 'expires imminently'}; re-login it in Manage Agents now`
-      : d.toCredits
-      ? ` — the last resort: ${d.toName} bills pay-per-use past its quota (usage credits)`
-      : d.toOverage   // B-87fd (1) r4711 (c): the setting promises the bar is NAMED — landed on the paying tier, it says so
-      ? ` — the last resort: ${d.toName} is billing paid overage`
-      : '';
+    // and dies again with no explanation. The clause is lastResortClause's (B-9369: in the page's language).
     if (d.toCredits) noteCreditsParking(poolId, d.to, poolCreditsNotice({ toCredits: d.toCredits, toRemaining: d.toRemaining }, { poolName: a.name, memberName: d.toName || d.to }), now);
-    serverNotice(`pool-auto-${poolId}-${now}`, d.reason === 'edf'
-      ? `Pool "${a.name}" switched to ${d.toName} — draining the member whose weekly quota resets soonest (use-it-or-lose-it)`
-      : d.reason === 'priority-return'
-      ? `Pool "${a.name}" is back on ${d.toName} (priority #${d.priorityRank ?? '?'}) — new conversations start there${hot ? '' : ' (restarting its conversations)'}`
-      : d.reason === 'not-a-member'
-      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} was removed from the pool${hot ? '' : ' (restarting its conversations)'}${scraps}`
-      : d.reason === 'overage'   // B-87fd (1): the member billing paid overage is left for one with quota
-      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} is billing paid overage, and ${d.toName} has quota left${hot ? '' : ' (restarting its conversations)'}${scraps}`
-      : d.reason === 'subscription-lapsed'
-      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s subscription is inactive; it rejoins by itself once it answers again${hot ? '' : ' (restarting its conversations)'}${scraps}`
-      : d.reason === 'login-expired'
-      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s ${(() => { try { const l = accounts.loginStateOf(currentId, Date.now(), { slot: true }); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })()}; re-login it in Manage Agents${hot ? '' : ' (restarting its conversations)'}${scraps}`
-      : `Pool "${a.name}" auto-switched to ${d.toName}${d.priorityRank ? ` (priority #${d.priorityRank})` : ''} (previous account ${dEarly ? `will be down to ${fromPct}% within ${Math.round(PROJECTION_LEAD_SEC / 60)} min — moved early, ${dEarly}` : `down to ${fromPct}% remaining`})${hot ? '' : ' — restarting its conversations'}${scraps}`);
+    // B-9369: the pool default's switch in the page's language — one table of keys (switchNoticeWords), the English its fill
+    const dw = poolSwitchWords({ pool: a.name, target: d.toName, from: nameOf(currentId), reason: d.reason, priorityRank: d.priorityRank, hot,
+      wall: d.reason === 'login-expired' ? (() => { try { const l = accounts.loginStateOf(currentId, Date.now(), { slot: true }); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })() : undefined,
+      pct: fromPct, early: dEarly ? { label: dpc.label, line: dpc.line, inMin: Math.max(1, Math.round(dpc.inSec / 60)), rate: dpc.pctPerMin } : null, leadMin: Math.round(PROJECTION_LEAD_SEC / 60),
+      last: { toLoginNear: d.toLoginNear, toCredits: d.toCredits, toOverage: d.toOverage } });
+    serverNotice(`pool-auto-${poolId}-${now}`, dw.text, { i18n: dw.i18n });
     console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left${dEarly ? `; ${dEarly}` : ''}, hot=${hot}, affected=${affected.length})`);
     if (defaultByClaim) console.log(`[pool] auto-switch ${poolId}: moved onto ${nameOf(d.to)} on your reset claim (${defaultByClaim}) — unconfirmed until its first reading`);
     if (!hot && affected.length) {
@@ -9916,6 +9898,103 @@ function answeringLogin(idv) {
  *    its folder's login as such; an id-only key ('acct:') is no identity;
  *  - each held name: in the row's own identity group (`groupIds`) or not, and its login (`loginOf`: the one reader);
  *  - the login that answered; whether the answer is in the held window; the panel's own verdict. Values stay in memory. */
+// ── B-9369 (主开发 r5165): THE POOL's TWO SWITCH NOTICES IN THE PAGE's LANGUAGE ──────────────────────────────────────────
+// A conversation's move (the per-session pass) and the pool default's switch: every clause is a KEY the client words with t()
+// (zh / ja), and the English `text` is the same sentence filled — one table, so the two cannot part. A sentence is ONE main key
+// with SLOTS; a slot is '' or a clause's own { key, params }. The client words a param that is words before the sentence fills,
+// ONE level deep (src/lib/app.js `said`), so a clause holds no clause: what varies inside one (a held member's cause, a sign-in's
+// wall, a duration's unit) is a key of its own. Names, counts and labels are the only plain params.
+// (module scope: create() requires its own copy, and a builder here sees only what this scope requires — test-server-globals; no
+// indented return of an object literal below create's own either: the engine's exports are found by the last one — test-pool-auto r2)
+const switchAgeText = require('../login-expiry.js').loginAgeText;
+const i18nKey = (s) => s;   // the extraction marker (scripts/i18n-extract.mjs; test-ui-language ②: every key has a zh and a ja row) — create() keeps its own
+const SWITCH_KEYS = Object.freeze({
+  move: i18nKey('Pool "{pool}": conversation "{title}" moved to {target}{priority}{overage}{held}{quota}{early}{restart}{last}'),
+  priority: i18nKey(' (priority #{rank})'),
+  moveOverage: i18nKey(' — {from} is billing paid overage, and {target} has quota left'),
+  heldInstant: i18nKey(" — {from} answered it with a limit while its own numbers are unknown (held on another account's weekly instant)"),
+  heldUnread: i18nKey(' — {from} answered it with a limit while its own numbers are unknown (its usage reading could not be read)'),
+  heldRestarted: i18nKey(' — {from} answered it with a limit while its own numbers are unknown (no whole usage reading has come since its reading file started again)'),
+  quota: i18nKey(' (its {fam} quota)'),
+  quotaWas: i18nKey(' (its {fam} quota was at {pct}%)'),
+  quotaWillBe: i18nKey(' (its {fam} quota will be at {pct}% within {min} min)'),
+  early: i18nKey(' — moved early, projected: {label} reaches its {line}% line in ~{inMin} min at {rate}%/min'),
+  restartIt: i18nKey(' — restarting it'),
+  nearNow: i18nKey(" — but {target}'s own login expires imminently; re-login it in Manage Agents now"),
+  nearS: i18nKey(" — but {target}'s own login expires in {n} s; re-login it in Manage Agents now"),
+  nearMin: i18nKey(" — but {target}'s own login expires in {n} min; re-login it in Manage Agents now"),
+  nearH: i18nKey(" — but {target}'s own login expires in {n} h; re-login it in Manage Agents now"),
+  nearDays: i18nKey(" — but {target}'s own login expires in {n} days; re-login it in Manage Agents now"),
+  lastCredits: i18nKey(' — the last resort: {target} bills pay-per-use past its quota (usage credits)'),
+  lastOverage: i18nKey(' — the last resort: {target} is billing paid overage'),
+  poolEdf: i18nKey('Pool "{pool}" switched to {target} — draining the member whose weekly quota resets soonest (use-it-or-lose-it)'),
+  poolPriority: i18nKey('Pool "{pool}" is back on {target} (priority #{rank}) — new conversations start there{restart}'),
+  poolRemoved: i18nKey('Pool "{pool}" switched to {target} — {from} was removed from the pool{restart}{last}'),
+  poolOverage: i18nKey('Pool "{pool}" switched to {target} — {from} is billing paid overage, and {target} has quota left{restart}{last}'),
+  poolLapsed: i18nKey("Pool \"{pool}\" switched to {target} — {from}'s subscription is inactive; it rejoins by itself once it answers again{restart}{last}"),
+  poolSignedOut: i18nKey("Pool \"{pool}\" switched to {target} — {from}'s login is signed out; re-login it in Manage Agents{restart}{last}"),
+  poolExpired: i18nKey("Pool \"{pool}\" switched to {target} — {from}'s login session expired; re-login it in Manage Agents{restart}{last}"),
+  poolUnusable: i18nKey("Pool \"{pool}\" switched to {target} — {from}'s login session is unusable; re-login it in Manage Agents{restart}{last}"),
+  poolAuto: i18nKey('Pool "{pool}" auto-switched to {target}{priority} (previous account down to {pct}% remaining){restart}{last}'),
+  poolAutoEarly: i18nKey('Pool "{pool}" auto-switched to {target}{priority} (previous account will be down to {pct}% within {min} min — moved early, projected: {label} reaches its {line}% line in ~{inMin} min at {rate}%/min){restart}{last}'),
+  restartTheirs: i18nKey(' (restarting its conversations)'),
+  restartTheirsDash: i18nKey(' — restarting its conversations'),
+});
+const switchFill = (key, params) => key.replace(/\{(\w+)\}/g, (m, k) => (params && params[k] !== undefined ? String(params[k]) : m));
+// a sentence's words: the English text (each slot's clause filled) and the i18n the client words (each slot its { key, params })
+function switchWords(key, plain, slots) {
+  const params = { ...plain }, filled = { ...plain };
+  for (const [k, c] of Object.entries(slots)) { params[k] = c || ''; filled[k] = c ? switchFill(c.key, c.params) : ''; }
+  const out = { text: switchFill(key, filled), i18n: { key, params } };
+  return out;
+}
+const HELD_WHY_KEYS = Object.freeze({ "held on another account's weekly instant": SWITCH_KEYS.heldInstant, 'its usage reading could not be read': SWITCH_KEYS.heldUnread, 'no whole usage reading has come since its reading file started again': SWITCH_KEYS.heldRestarted });
+const WALL_KEYS = Object.freeze({ 'login is signed out': SWITCH_KEYS.poolSignedOut, 'login session expired': SWITCH_KEYS.poolExpired, 'login session is unusable': SWITCH_KEYS.poolUnusable });
+const NEAR_UNIT_KEYS = Object.freeze({ s: SWITCH_KEYS.nearS, min: SWITCH_KEYS.nearMin, h: SWITCH_KEYS.nearH, days: SWITCH_KEYS.nearDays });
+// the LAST-RESORT clause both sentences end with: a scrap whose own login dies soon, a credits member past its quota, a paying one
+function lastResortClause({ target, toLoginNear = null, toCredits = false, toOverage = false } = {}) {
+  if (toLoginNear) {
+    if (!(typeof toLoginNear.msLeft === 'number' && toLoginNear.msLeft > 0)) return { key: SWITCH_KEYS.nearNow, params: { target } };
+    const [n, unit] = switchAgeText(toLoginNear.msLeft).split(' ');   // the ONE duration text (login-expiry loginAgeText): «17 h», «42 min», «5 days», «30 s»
+    const near = { key: NEAR_UNIT_KEYS[unit] || SWITCH_KEYS.nearDays, params: { target, n } };
+    return near;
+  }
+  if (toCredits) return { key: SWITCH_KEYS.lastCredits, params: { target } };
+  if (toOverage) return { key: SWITCH_KEYS.lastOverage, params: { target } };
+  return null;
+}
+// THE CONVERSATION's MOVE (the per-session pass): `early` = the projection's crossing { label, line, inMin, rate } when it moved early
+function sessionMoveWords({ pool, title, target, from, priorityRank = null, overage = false, heldWhy = null, fam = null, fromRemaining = null, early = null, leadMin = null, hot = true, last = {} } = {}) {
+  const pct = fromRemaining != null ? Math.round(fromRemaining) : null;
+  const quota = !fam || overage ? null
+    : pct == null ? { key: SWITCH_KEYS.quota, params: { fam } }
+    : early ? { key: SWITCH_KEYS.quotaWillBe, params: { fam, pct, min: leadMin } }
+    : { key: SWITCH_KEYS.quotaWas, params: { fam, pct } };
+  return switchWords(SWITCH_KEYS.move, { pool, title, target }, {
+    priority: priorityRank ? { key: SWITCH_KEYS.priority, params: { rank: priorityRank } } : null,
+    overage: overage ? { key: SWITCH_KEYS.moveOverage, params: { from, target } } : null,
+    held: heldWhy ? { key: HELD_WHY_KEYS[heldWhy] || SWITCH_KEYS.heldRestarted, params: { from } } : null,
+    quota,
+    early: early ? { key: SWITCH_KEYS.early, params: { label: early.label, line: early.line, inMin: early.inMin, rate: early.rate } } : null,
+    restart: hot ? null : { key: SWITCH_KEYS.restartIt, params: {} },
+    last: lastResortClause({ target, ...last }),
+  });
+}
+// THE POOL DEFAULT's SWITCH: `wall` = the sign-in's wall phrase (login-expired); `early` = the crossing when it moved early
+function poolSwitchWords({ pool, target, from, reason, priorityRank = null, hot = true, wall = 'login session expired', pct = null, early = null, leadMin = null, last = {} } = {}) {
+  const restart = hot ? null : { key: SWITCH_KEYS.restartTheirs, params: {} };
+  const lastC = lastResortClause({ target, ...last });
+  if (reason === 'edf') return switchWords(SWITCH_KEYS.poolEdf, { pool, target }, {});
+  if (reason === 'priority-return') return switchWords(SWITCH_KEYS.poolPriority, { pool, target, rank: priorityRank ?? '?' }, { restart });
+  if (reason === 'not-a-member') return switchWords(SWITCH_KEYS.poolRemoved, { pool, target, from }, { restart, last: lastC });
+  if (reason === 'overage') return switchWords(SWITCH_KEYS.poolOverage, { pool, target, from }, { restart, last: lastC });
+  if (reason === 'subscription-lapsed') return switchWords(SWITCH_KEYS.poolLapsed, { pool, target, from }, { restart, last: lastC });
+  if (reason === 'login-expired') return switchWords(WALL_KEYS[wall] || SWITCH_KEYS.poolUnusable, { pool, target, from }, { restart, last: lastC });
+  const slots = { priority: priorityRank ? { key: SWITCH_KEYS.priority, params: { rank: priorityRank } } : null, restart: hot ? null : { key: SWITCH_KEYS.restartTheirsDash, params: {} }, last: lastC };
+  if (early) return switchWords(SWITCH_KEYS.poolAutoEarly, { pool, target, pct, min: leadMin, label: early.label, line: early.line, inMin: early.inMin, rate: early.rate }, slots);
+  return switchWords(SWITCH_KEYS.poolAuto, { pool, target, pct }, slots);
+}
+const switchNoticeWords = Object.freeze({ KEYS: SWITCH_KEYS, sessionMove: sessionMoveWords, poolSwitch: poolSwitchWords, lastResort: lastResortClause });
 function heldLiftFactsOf({ key, idv, h, sameAccountIds = null, rowCache = null, rowEmail = null, loginOf = () => null } = {}) {
   const group = new Set(Array.isArray(sameAccountIds) ? sameAccountIds : [key]);   // the row's own identity group (its ids)
   const asLogin = (l) => (l && (l.orgUuid || l.email) ? { org: l.orgUuid || null, email: l.email || null } : null);
@@ -9927,4 +10006,4 @@ function heldLiftFactsOf({ key, idv, h, sameAccountIds = null, rowCache = null, 
   const facts = { rowKey, held, answer: answeringLogin(idv), onHeld: !!p7 && !!h && require('../reading-lag.js').weeklyNear(p7, h.phase) === true, panel: { refused: !!(idv && idv.refused), verified: !!(idv && idv.verified), phase: (idv && idv.phase) || null, org: (idv && idv.org) || null } };
   return facts;   // (never a line «  return {» after create's own: a census finds the engine's exports by its last one)
 }
-module.exports = { create, heldLiftFactsOf, groupKeyOf, identityGroupsOf };
+module.exports = { create, heldLiftFactsOf, groupKeyOf, identityGroupsOf, switchNoticeWords };
