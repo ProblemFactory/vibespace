@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - Settings → Claude has an entry label for chat conversations: off (the CLI's own label, the default), «vibespace», or a name you type.
+- If the copy of the sign-in record on a network home folder cannot be updated, For you now says so once, and the notice closes itself once the copy is written.
 
 ### Changed
 - If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
