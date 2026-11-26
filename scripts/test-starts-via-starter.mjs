@@ -973,7 +973,7 @@ WD.section('⑫');
       'THE PROGRAM, ARGV, BOUND AND BUFFER it hands: node <its own file> --suspects <mount>, 15 s, 64 MiB (as its execFile), the service env alone', q[0] && q[0].o);
     ok(got.lines.some((l) => l.includes(`${mp} held the main loop 6 s (statSync ← x.js:1)`) && l.includes('1 process groups press it')) && !got.lines.some((l) => l.includes('not read')) && got.detail.includes('rsync') && !got.detail.includes(NONE) && !got.detail.includes(UNREAD),
       'its answer is the table: one process group presses the mount, the item names it', got);
-    for (const [a, word] of [[{ unknown: true }, 'the starter gave no answer'], [{ started: true, timedOut: true, code: null }, 'no answer in 15000 ms'], [{ started: true, code: 1, stdout: '' }, 'exit 1'], [{ started: true, code: null, signal: 'SIGSEGV', stdout: '' }, 'ended by SIGSEGV'],
+    for (const [a, word] of [[{ unknown: true }, 'the starter gave no answer'], [{ started: true, timedOut: true, code: null }, 'no answer in 15000 ms'], [{ started: true, code: 1, stdout: '' }, 'exit 1'], [{ started: true, code: null, signal: 'SIGSEGV', stdout: '' }, 'ended by SIGSEGV'], [{ started: true, code: null, signal: null, error: 'EPERM', stdout: '' }, 'ended with no exit code (EPERM)'],
       [{ started: false, code: null, error: 'ENOENT' }, 'not started (ENOENT)'], [{ started: true, overflow: true, code: null }, `the table passed ${64 * 1024 * 1024} bytes`], [{ started: true, code: 0, stdout: 'not a table' }, 'Unexpected token']]) {
       answer = (cmd, args, o) => (cmd === nodeName ? a : prev11(cmd, args, o));
       const g2 = await hold(MHW);

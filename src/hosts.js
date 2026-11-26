@@ -2436,16 +2436,21 @@ class HostManager {
       // while an install keeps failing (connects come from polls). B-323e's remainder (lane nl-starts): it rides the hub's STARTER — its
       // bytes cannot cross the starter's line pipe, so the archive is written into its own stage folder (`-f`, the same members) and read
       // back here, off the loop: the same bound (15 s), the same cap (32 MiB), the service env (r1381 (1)). THE ARCHIVE HOLDS THE HOST'S
-      // TOKEN (主开发 r4910): it is born inside the stage mkdtemp made (0700 — no other user reaches it there) and is made 0600 before it is
-      // read back; its SIZE is asked first — past the bound it is refused by name and never read into memory; the stage (the token, the
+      // TOKEN (主开发 r4910): it is made EMPTY AND 0600 before tar writes into it (tar keeps an existing file's mode — so no road, a failed
+      // or orphaned tar included, leaves it wider), inside the stage mkdtemp made (0700), and set 0600 again before it is read back; its
+      // SIZE is asked first — past the bound it is refused by name and never read into memory; the stage (the token, the
       // archive) is removed on every road (a failed tar, a failed read-back, a failed or finished ssh — the catch below; a hub that ends
       // between leaves it to the OS's own temp cleaning: nothing of ours sweeps vs-agentd-stage-, src/temp-sweepers.js). Every failure
       // fails the install BY NAME — a tar with no reply or that failed in execFile's words («Command failed: tar …» + what it said, the
       // starter's silence as itself), a read-back that failed or an empty archive as theirs — never «nothing to install»
       const tarFile = path.join(stage, 'bundle.tar'), tarArgs = ['-c', '-f', tarFile, '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])];
+      try { await fs.promises.writeFile(tarFile, '', { mode: 0o600, flag: 'wx' }); } catch (e) { throw new Error(`the agent bundle's archive could not be made: ${(e && e.code) || (e && e.message) || e}`); }
       const tr = await require('./server/child-starter').childStarter().run('tar', tarArgs, { timeoutMs: 15000, capture: true, maxBuffer: 64 * 1024, envAdd: {} });
       if (!tr || tr.unknown || tr.timedOut || tr.overflow || tr.started === false || tr.code !== 0) {
-        const said = !tr || tr.unknown ? 'the starter gave no answer' : tr.timedOut ? 'no answer in 15000 ms' : tr.started === false ? `spawn tar ${tr.error || 'failed'}` : tr.overflow ? 'its output passed 64 KiB' : (String(tr.stderr || '').trim() || (tr.code == null ? `ended by ${tr.signal || 'a signal'}` : `exit ${tr.code}`));
+        // the starter gave NO answer (it may have ended with its tar still running, unbounded): the catch removes the stage now, and
+        // once more past the tar's own bound — a late write of an orphaned tar can keep the folder from going (its reader's find)
+        if (!tr || tr.unknown) { const late = setTimeout(() => { fs.promises.rm(stage, { recursive: true, force: true }).catch(() => { }); }, 15000 + 4000); late.unref?.(); }
+        const said = !tr || tr.unknown ? 'the starter gave no answer' : tr.timedOut ? 'no answer in 15000 ms' : tr.started === false ? `spawn tar ${tr.error || 'failed'}` : tr.overflow ? 'its output passed 64 KiB' : (String(tr.stderr || '').trim() || (tr.code == null ? (tr.signal ? `ended by ${tr.signal}` : `ended with no exit code${tr.error ? ` (${tr.error})` : ''}`) : `exit ${tr.code}`));
         throw Object.assign(new Error(`Command failed: tar ${tarArgs.join(' ')}\n${said}`), { code: tr && tr.started === false ? tr.error : tr ? tr.code : null });
       }
       let size = 0;
