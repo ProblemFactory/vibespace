@@ -43,6 +43,7 @@ const { addressableId } = require('../claude-lock-capture.js');
 const { capsOf } = require('../backend-caps.js');
 const { cleanName } = require('../channel-groups.js');
 const SA = require('../spend-authorizer.js');   // B-ef83 unit 1: the family «the gate could not judge»
+const { agentSpendWords } = require('../spend-words.js');   // B-ef83 unit 2 (r4696): THE ONE DOOR for a verdict's words to an agent
 const OWED_COMPACT_MAX_MS = 60 * 60 * 1000;   // r4410 (d): an owed compaction's age — the park's own bound (conversation-deliver RETRY_MAX_MS)
 
 // verify r2 ②: the ledger key is the brief's identity for REPLAY (a lost-answer retry / a restart). The optional
@@ -135,7 +136,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       let v = null;
       try { v = authorizeSpend({ reason: 'peer-compact', session: s, cid }); }
       catch (e) { v = { ok: false, why: 'authorizer-failed', detail: 'spend authorizer failed: ' + (e && e.message) }; }
-      if (v && v.ok === false) spend = { why: v.why || 'refused', detail: SA.isHeldWhy(v.why) ? `the spend gate could not judge (${v.why})` : (v.detail || v.why || 'refused'), ...(SA.isHeldWhy(v.why) ? { held: v.why } : {}) };   // B-ef83 unit 2's cure (r4668): a held verdict's words code-only (its detail names another process)   // B-ef83 unit 1 (i): the gate could not judge
+      if (v && v.ok === false) spend = { why: v.why || 'refused', detail: agentSpendWords(v) || 'refused', ...(SA.isHeldWhy(v.why) ? { held: v.why } : {}) };   // B-ef83 unit 2's cure (r4668): a held verdict's words code-only (its detail names another process)   // B-ef83 unit 1 (i): the gate could not judge
       else charge = { counted: false, identity: (v && v.identity) || null, hold: (v && v.hold) || null, session: s };
     }
     const verdict = M.dispatchVerdict({ ...base, pacer: pace, spend });

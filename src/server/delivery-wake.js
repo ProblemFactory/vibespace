@@ -27,6 +27,7 @@
  * claim back: the words keep waiting. The answer goes back to the park, which says it to the producers (`wake`).
  */
 const D = require('../delivery-wake.js');
+const { agentSpendWords } = require('../spend-words.js');   // B-ef83 unit 2 (r4696): THE ONE DOOR for a verdict's words to a caller that is not a person
 const BY = 'system:deliveries';   // the resume's actor in the activity log: «VibeSpace, by itself» (device-acts-dialog whoText) — never a person
 
 function create({ resumeLine, seams, getStashHandover, spendGuard = null, identityOf = null, quotaVerdictFor = null, usageCacheKeyFor = null, isPoolScope = () => false, jobGrantOf = () => false, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = () => { } } = {}) {
@@ -108,7 +109,7 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     } catch (e) { limit = { unread: true, why: `its account's limit could not be read (${String((e && e.message) || e).slice(0, 120)})` }; log(`[delivery-wake] ${cid}: ${limit.why} — it waits`); }
     let probe = null;
     if (verdict.ok && ended.ok && identity && !(limit && (limit.usable === false || limit.unread))) {
-      try { const v = spendGuard.authorize({ reason: entry.spendReason, session: payer, cid, identity, hold: false }); probe = v && v.ok === true ? { ok: true } : { ok: false, reason: (v && (v.detail || v.why)) || null, spendWhy: (v && v.why) || null }; }   // B-ef83 unit 1: the why rides (a held gate keeps the owed wake)
+      try { const v = spendGuard.authorize({ reason: entry.spendReason, session: payer, cid, identity, hold: false }); probe = v && v.ok === true ? { ok: true } : { ok: false, reason: agentSpendWords(v), spendWhy: (v && v.why) || null }; }   // B-ef83 unit 1: the why rides (a held gate keeps the owed wake)
       catch (e) { probe = { ok: false, reason: (e && e.message) || String(e) }; }
     }
     const g = D.gate({ verdict, ended, identity, limit, probe });

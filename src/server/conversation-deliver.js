@@ -30,6 +30,7 @@ const belt = require('../agent-output-belt.js'); // lane agent-output-sinks: the
 const stashSummary = require('../stash-summary.js'); const { kindOf: stashKindOf } = stashSummary; // PURE: an entry's kind (a peer's by its sender's name, VibeSpace's own by its path)
 const { owedOutcome, LIVE_FALLS, FALL_WHY, RESEND_HELPS } = require('../channel-groups.js');   // lane paced-wake-retry: a fall's cause and its words, from the ONE list
 const { RESERVE_TTL_MS } = require('../spend-authorizer.js'); // the park re-judges a parked delivery's authorization once its hold's TTL has passed (lane notify-retry)
+const { agentSpendWords } = require('../spend-words.js');   // B-ef83 unit 2 (r4696): THE ONE DOOR for a verdict's words to a caller that is not a person
 
 const STASH_CAP = 30; // per-conversation; oldest fall off
 // `about` on a stashed entry (lane channel-threads verify r3): its producer's description of where the words came
@@ -1883,7 +1884,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         const cap = v.why === 'hour-cap' ? v.limits?.perIdentityHour : v.why === 'day-cap' ? v.limits?.perIdentityDay : v.why === 'instance-cap' ? v.limits?.perInstanceDay : null;
         giveBack({ attempted: true });
         if (SA.isHeldWhy(v.why)) { waitLift(shown, v.why); return; }   // B-ef83 unit 1: the gate could not judge — kept, asked at its lift
-        for (const e of shown) fellRetry(e, 'spend-cap', `spend budget: ${v.detail || v.why}`, { why: v.why, identity: v.identity ? String(v.identity.name || v.identity.key) : undefined, cap: Number.isFinite(Number(cap)) ? Number(cap) : undefined, retryAfter: Number(v.retryAfter) > 0 ? Number(v.retryAfter) : undefined, capUnset: v.capUnset === true ? true : undefined });   // B-0a33 (3)
+        for (const e of shown) fellRetry(e, 'spend-cap', `spend budget: ${agentSpendWords(v)}`, { why: v.why, identity: v.identity ? String(v.identity.name || v.identity.key) : undefined, cap: Number.isFinite(Number(cap)) ? Number(cap) : undefined, retryAfter: Number(v.retryAfter) > 0 ? Number(v.retryAfter) : undefined, capUnset: v.capUnset === true ? true : undefined });   // B-0a33 (3)
         return;
       }
       charged = { reason: spendReason, identity: (v && v.identity) ? { key: v.identity.key, name: v.identity.name || v.identity.key } : identity, hold: (v && v.hold) || null, holdAt: now };
@@ -2512,7 +2513,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           const waitingNow = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
           if (waitingNow().length < RETRY_CAP || waitingNow().some((x) => !x.waitsHeld)) {
             const at = clock.now();
-            const e = parkRetry(cid, text, opts, { kind, spendReason, charged: null, attempt: { at, reason: `spend gate held: ${v.why}`, phase: 'spend', busy: null, late: 0, why: 'first' }, waitsLift: { why: String(v.why), since: at } });
+            const e = parkRetry(cid, text, opts, { kind, spendReason, charged: null, attempt: { at, reason: agentSpendWords(v), phase: 'spend', busy: null, late: 0, why: 'first' }, waitsLift: { why: String(v.why), since: at } });
             if (retry[cid] && retry[cid].includes(e)) {
               saidLift([e], v.why);   // the mark rode parkRetry's one write: said, nothing written again
               return { ok: false, lane: 'message', reason: `not woken yet — the spend gate could not judge (${v.why}); kept, asked again when it lifts`, parked: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, waitsLift: true, refused: 'spend', why: v.why };
@@ -2525,7 +2526,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         }
         // B-ef83 unit 2's cure (主开发 r4668, law (b) on every road): a HELD verdict's words are code-only — its detail names another
         // process's id and host (spend-authorizer's ledger-held-elsewhere), and this reason reaches a sending agent and a job's notice
-        return { ok: false, reason: `spend budget: ${SA.isHeldWhy(v.why) ? `the spend gate could not judge (${v.why})` : (v.detail || v.why)}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself
+        return { ok: false, reason: `spend budget: ${agentSpendWords(v)}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself
       }
       // CHARGE WHAT YOU AUTHORIZED (r4, reproduced). `identity` is null on the
       // local-session branch, and handing that null to the charge made

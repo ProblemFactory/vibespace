@@ -292,14 +292,14 @@ console.log('§5 (ii) an automation\'s open the gate could not judge RELEASES it
 const ENG = require(path.join(REPO, 'src/server/automation-engine.js'));
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
-async function autoWorld(Eng = ENG, bucket = HELD, answer = 'once') {
+async function autoWorld(Eng = ENG, bucket = HELD, answer = 'once', onRun = null) {
   const dir = path.join(scratchDir('shl-auto'), Math.random().toString(36).slice(2, 7)); fs.mkdirSync(dir, { recursive: true });
   const vault = VE.create({ dataDir: dir, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { }, error() { } }, idleTimer: false, register: false });
   await vault.setup(['made', 'up', 'scratch', 'phrase'].join(' '), {});
   const clock = Date.UTC(2026, 10, 1, 12, 0);
   const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 3600e3, now: () => clock });
   const ran = [];
-  const engine = Eng.create({ dataDir: dir, vault, userTodos, now: () => clock, verbs: { 'conversations.rename': () => { ran.push(1); return { ok: false, code: 'spend_refused', why: 'spend budget: another VibeSpace process on this data folder (pid 4242 on another-machine.example.invalid) keeps the record of unattended turns', bucket, retryAfter: 0 }; } } });   // the gate's own detail, as production words it
+  const engine = Eng.create({ dataDir: dir, vault, userTodos, now: () => clock, verbs: { 'conversations.rename': () => { ran.push(1); if (onRun) onRun(dir); return { ok: false, code: 'spend_refused', why: 'spend budget: another VibeSpace process on this data folder (pid 4242 on another-machine.example.invalid) keeps the record of unattended turns', bucket, retryAfter: 0 }; } } });   // the gate's own detail, as production words it
   engine.mint({ name: 'opener', scopes: ['conversations.rename'], by: 'user' });
   const caller = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Worker one', live: true, groups: [] };
   const cards = () => (userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'automation-ask');
@@ -307,6 +307,7 @@ async function autoWorld(Eng = ENG, bucket = HELD, answer = 'once') {
   await waitFor(() => cards().length > 0, 'the automation ask card filed', 5000);
   if (cards().length) engine.answer(cards()[0].action.askId, { answer });
   const r = await p;
+  if (onRun) { try { fs.chmodSync(dir, 0o700); } catch { } }   // the folder given back (the scratch sweep)
   const grants = ((engine.list().keys || [])[0] || {}).grants || [];
   return { r, grants, ran };
 }
@@ -315,7 +316,7 @@ const onceLeft = (W) => W.grants.some((g) => g.mode === 'once' && !g.spentAt);
   ok(!!(W.r.code === 'spend_refused' && W.r.bucket === HELD && W.ran.length === 1 && onceLeft(W)), 'refused held: the answer names the hold by its code (bucket) and the once-grant is RELEASED (there, unspent)', JSON.stringify({ code: W.r.code, bucket: W.r.bucket, grants: W.grants.map((g) => ({ mode: g.mode, spent: !!g.spentAt })) })); }
 { const W = await autoWorld();
   ok(!!(typeof W.r.why === 'string' && W.r.why.includes(HELD) && !/4242|another-machine/.test(W.r.why)), 'the held 429 names the hold by its code — never another process\'s pid and host (r4410, said)', JSON.stringify(W.r.why)); }
-{ const RED = copyOf('src/server/automation-engine.js', "result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `the spend gate could not judge", "false ? `the spend gate could not judge", 'the held 429 carrying the gate\'s detail (the release)');
+{ const RED = copyOf('src/server/automation-engine.js', "result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `${agentSpendWords(", "false ? `${agentSpendWords(", 'the held 429 carrying the gate\'s detail (the release)');
   ok(!!(!RED.err), 'RED CONTROL built: the held 429 carrying the gate\'s own detail', RED.err);
   if (!RED.err) { const W = await autoWorld(RED); ok(!!(/4242/.test(String(W.r.why))), 'RED (the release): the held 429 tells a key holder another process\'s pid and host', JSON.stringify(W.r.why)); } }
 { const W = await autoWorld(ENG, 'hour-cap');
@@ -621,7 +622,7 @@ async function jobsHeldTry(Deliver = CD, { full = false, Jobs = JobManager } = {
   const r = await BRIEF(W2, 0, 'a brief during the hold');
   ok(!!(LEAK.test(HELD_V.detail) && HELD_V.why === HELD && r.ok && !LEAK.test(JSON.stringify(r)) && String(r.record && r.record.why).includes(HELD)), '(b) r4668 MUST, the DISPATCH road: the real authorizer\'s held detail names another process\'s id and host — the dispatch answer, its record\'s why and its wake reason carry the code only', JSON.stringify({ why: r.record && r.record.why, wake: r.record && r.record.wake }));
   W2.close(); }
-{ const RED = copyOf('src/server/worker-dispatch.js', "detail: SA.isHeldWhy(v.why) ? `the spend gate could not judge (${v.why})` : (v.detail || v.why || 'refused'), ", "detail: v.detail || v.why || 'refused', ", 'the dispatch keeping the gate\'s detail (ec95cf642)');   // stale-pins: kept (the mutant's text IS ec95cf642's line)
+{ const RED = copyOf('src/server/worker-dispatch.js', "detail: agentSpendWords(v) || 'refused', ", "detail: v.detail || v.why || 'refused', ", 'the dispatch keeping the gate\'s detail (ec95cf642)');   // stale-pins: kept (the mutant's text IS ec95cf642's line)
   ok(!!(!RED.err), 'RED CONTROL built: the dispatch keeping the gate\'s detail', RED.err);
   if (!RED.err) { const W2 = dispatchWorld(RED); W2.setRefuse(HELD); W2.setDetail(HELD_V.detail); const r = await BRIEF(W2, 0, 'a brief during the hold'); ok(!!(LEAK.test(JSON.stringify(r))), 'RED (ec95cf642): the dispatch record tells the coordinating agent another process\'s id and host', JSON.stringify(r.record && r.record.why)); W2.close(); } }
 async function deliverHeldRoad(Deliver = CD) {
@@ -632,10 +633,10 @@ async function deliverHeldRoad(Deliver = CD) {
 }
 { const W = await deliverHeldRoad();
   ok(!!(W.plain.refused === 'spend' && W.plain.why === HELD && !LEAK.test(String(W.plain.reason)) && String(W.plain.reason).includes(HELD) && W.parked.parked === true && !LEAK.test(String(W.attempt.reason)) && !LEAK.test(String(W.parked.reason))), '(b) r4668 MUST, the DELIVER road: a plain send\'s held refusal (answered to the sending agent) and a parked first try\'s attempt carry the code only — no process id, no host', JSON.stringify({ plain: W.plain.reason, attempt: W.attempt.reason })); }
-{ const RED = copyOf('src/server/conversation-deliver.js', "`spend budget: ${SA.isHeldWhy(v.why) ? `the spend gate could not judge (${v.why})` : (v.detail || v.why)}`", "`spend budget: ${v.detail || v.why}`", 'the plain refusal saying the gate\'s detail (ec95cf642)');
+{ const RED = copyOf('src/server/conversation-deliver.js', "return { ok: false, reason: `spend budget: ${agentSpendWords(v)}`, refused: 'spend',", "return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend',", 'the plain refusal saying the gate\'s detail (ec95cf642)');   // stale-pins: kept (the RED's text IS 089a6fe3f's line)
   ok(!!(!RED.err), 'RED CONTROL built: the plain refusal saying the gate\'s detail', RED.err);
   if (!RED.err) { const W = await deliverHeldRoad(RED); ok(!!(LEAK.test(String(W.plain.reason))), 'RED (ec95cf642): the plain send\'s held refusal tells the sending agent another process\'s id and host', JSON.stringify(W.plain.reason)); } }
-{ const RED = copyOf('src/server/automation-engine.js', "result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `the spend gate could not judge", "'once' in heldOnce ? `the spend gate could not judge", 'the once-only scrub (ec95cf642)');   // stale-pins: kept (the mutant's text IS ec95cf642's line)
+{ const RED = copyOf('src/server/automation-engine.js', "result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `${agentSpendWords(", "'once' in heldOnce ? `${agentSpendWords(", 'the once-only scrub (ec95cf642)');   // stale-pins: kept (the mutant's text IS ec95cf642's line)
   ok(!!(!RED.err), 'RED CONTROL built: the once-only scrub', RED.err);
   if (!RED.err) { const W = await autoWorld(RED, HELD, 'always'); ok(!!(/4242/.test(String(W.r.why))), 'RED (ec95cf642): with the once-only scrub an always-grant key\'s held 429 tells another process\'s pid and host', JSON.stringify(W.r.why)); } }
 { const KEY = 'Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears';
@@ -647,6 +648,13 @@ async function deliverHeldRoad(Deliver = CD) {
   await lift(W.R, [HELD]);
   await waitFor(() => W.line.retries >= 1 || W.line.heldWhy === undefined, 'the later attempt\'s rewrite of the parked line');
   ok(!!(W.line.parked === true && W.line.heldWhy === undefined && JL.deliveryReasonWords(W.line, { t: (s) => s }) === String(W.line.reason) && !/could not judge its spending limits/.test(JL.deliveryReasonWords(W.line, { t: (s) => s }))), '(c) r4668 small: a parked line DROPS its held code when a later attempt\'s reason is not a held one — the row then reads that reason, never the stale held sentence', JSON.stringify({ line: W.line }));
+  W.R.setRefuse(HELD);   // r4696 should: the hold comes back — the next attempt meets it, and the park's own 'held' event marks the line held AGAIN
+  for (let i = 0; i < 6 && W.line.heldWhy !== HELD; i++) await W.R.advance(5 * 60_000);
+  ok(!!(W.line.heldWhy === HELD && JL.deliveryReasonWords(W.line, { t: (s) => s }) === KEY), '(c) r4696 should: a later held attempt marks the parked line held again — the row reads the held sentence again', JSON.stringify({ line: W.line }));
+  W.R.setRefuse(null); W.R.setAnswer(async () => ({ ok: true, phase: 'written', elapsedMs: 5 }));
+  await lift(W.R, [HELD]);
+  await waitFor(() => W.line.heldWhy === undefined, 'the delivered entry\'s parked line losing its held code');
+  ok(!!(W.line.heldWhy === undefined && (W.job.notifyLog || []).some((l) => l && l.ok === true)), '(c) r4696 should: once DELIVERED the parked line loses its held code (its ✓ row follows) — no stale «asks again» left', JSON.stringify({ line: W.line }));
   const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf8');
   ok(!!(PANEL.includes("${e.reason || e.heldWhy ? ' — ' + deliveryReasonWords(e, { t }) : ''}")), '…and the panel\'s Delivery-log row renders through it (its one wiring)');
   const RED = copyOf('src/jobs.js', "...(r.waitsLift === true && r.why ? { heldWhy: String(r.why) } : {}), phase: r.phase || null,", 'phase: r.phase || null,', 'the journal line with no held code (ec95cf642)');
@@ -667,6 +675,70 @@ async function deliverHeldRoad(Deliver = CD) {
 { const RED = copyOfAll('src/server/worker-dispatch.js', [['      const owedMine = ownOwed && !ownOwed.pending ? ownOwed : null;', '      const owedMine = null;'], ['      const owedWorker = owedMine ? null : ([...owedCompactions.values()].find((o) => o && o.to === cid && !o.pending) || null);', '      const owedWorker = null;']], 'the replay record silent on an owed compaction (ec95cf642)');
   ok(!!(!RED.err), 'RED CONTROL built: the replay record silent on an owed compaction', RED.err);
   if (!RED.err) { const W = await dispatchHeld(RED); const again = await BRIEF(W); ok(!!(again.replay === true && !/owed/.test(String(again.record.wake.reason))), 'RED (ec95cf642): the replay record says only «delivered» while the compaction is owed', JSON.stringify(again.record.wake.reason)); W.close(); } }
+
+console.log('§12b (主开发 r4696 / r4705) THE ONE DOOR: a spend verdict\'s words for any caller that is not a person (src/spend-words.js)');
+const SW = require(path.join(REPO, 'src/spend-words.js'));
+{ const held = SA.HELD_WHYS.map((w) => SW.agentSpendWords({ ok: false, why: w, detail: HELD_V.detail }));
+  ok(!!(held.every((t, i) => t === `the spend gate could not judge (${SA.HELD_WHYS[i]})`) && !held.some((t) => LEAK.test(t))), 'the door: each of the five held reasons gives «the spend gate could not judge (CODE)» — the code and the family, nothing else (no id, no host)', JSON.stringify(held));
+  const capV = { ok: false, why: 'hour-cap', detail: 'Work has 30 unattended turns this hour' };
+  ok(!!(SW.agentSpendWords(capV) === capV.detail && SW.agentSpendWords(null) === null && SW.agentSpendWords({ why: 'x' }) === 'x'), 'the door: any other verdict keeps its detail, as before; no verdict, no words'); }
+// THE FOURTH ROAD: an ended conversation's wake, started through the REAL resume line and the REAL delivery-wake start, probes the gate
+// with the REAL authorizer's held verdict — the answer a key's joined conversations.resume reads carries the code only
+const DWO = require(path.join(REPO, 'src/server/delivery-wake.js'));
+const RL = require(path.join(REPO, 'src/server/resume-line.js'));
+async function fourthRoad(Mod = DWO) {
+  const line = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : { ok: false, why: 'no start' }), log: () => { } });
+  const T = Date.UTC(2026, 10, 1, 12, 0);
+  const orch = Mod.create({ resumeLine: line, getStashHandover: () => ({}), now: () => T,
+    seams: { keyOf: (cid) => ({ sessionKey: 'claude:' + cid }),
+      factsOf: async () => ({ goal: 'none', timerMark: null, queue: 0, mode: 'chat', cwd: '/w', hostId: null, kept: true, stopReason: 'dead-socket-at-boot', stoppedAt: T - 60e3, endedBy: null, accountId: 'acct-1' }),
+      heldAccountOf: () => null, configAccountOf: () => null, dropKept: async () => false, isArchived: () => false, rowOf: () => ({ headless: true, resumeContinues: 'goal' }),
+      reopen: async () => ({ ok: false, why: 'never reached' }), noteResumed: () => { }, markPosting: () => { }, inboxOf: () => ({}), noteLateWake: () => { } },
+    spendGuard: { authorize: () => HELD_V },   // the REAL authorizer's verdict for a ledger another process keeps
+    identityOf: () => ({ key: 'slot-1', name: 'Personal' }), quotaVerdictFor: () => ({ usable: true }), usageCacheKeyFor: () => 'k-1', jobGrantOf: () => ({ granted: false, by: null }), sleep: () => Promise.resolve(), log: () => { } });
+  return orch.onEndedWake('eeee1111-0000-4000-8000-00000000c0de', { producer: 'jobs', spendReason: 'job-notification', metas: [] });
+}
+{ const r = await fourthRoad();
+  ok(!!(r && r.outcome === 'refused' && r.code === 'spend' && r.spendWhy === HELD && String(r.why).includes(HELD) && !LEAK.test(JSON.stringify(r))), '(b) r4696 THE FOURTH ROAD: an ended wake\'s start meets the held gate — its answer (what a key\'s joined conversations.resume reads) carries the code only: no process id, no host', JSON.stringify(r)); }
+{ const RED = copyOf('src/server/delivery-wake.js', '{ ok: false, reason: agentSpendWords(v), spendWhy:', '{ ok: false, reason: (v && (v.detail || v.why)) || null, spendWhy:', 'the ended wake\'s probe saying the gate\'s detail (089a6fe3f)');   // stale-pins: kept (the RED's text IS 089a6fe3f's line)
+  ok(!!(!RED.err), 'RED CONTROL built: the ended wake\'s probe saying the gate\'s detail', RED.err);
+  if (!RED.err) { const r = await fourthRoad(RED); ok(!!(LEAK.test(String(r && r.why))), 'RED (089a6fe3f): the fourth road tells a key holder another process\'s id and host', JSON.stringify(r && r.why)); } }
+{ const RED = copyOf('src/server/conversation-deliver.js', "attempt: { at, reason: agentSpendWords(v), phase: 'spend',", "attempt: { at, reason: `spend gate held: ${v.detail || v.why}`, phase: 'spend',", 'the parked attempt saying the gate\'s detail (3f60456cd)');
+  ok(!!(!RED.err), 'RED CONTROL built: the parked first try\'s attempt saying the gate\'s detail', RED.err);
+  if (!RED.err) { const W = await deliverHeldRoad(RED); ok(!!(LEAK.test(String(W.attempt.reason))), 'RED (3f60456cd): the parked first try\'s attempt reason tells a job\'s Delivery log another process\'s id and host', JSON.stringify(W.attempt.reason)); } }
+// THE CENSUS: in every src file that asks the gate, a read of a spend verdict's detail is the door's own or a NAMED allowlist row (a
+// person's page or the journal) — a new road beside the door is red
+const GATE_ASK = /\bauthorizeSpend\s*\(|\bspendGuard\.authorize\s*\(|\bguard\.authorize\s*\(/;
+const DETAIL_READ = /\b(?:v|g|av|hw|wr|verdict)\.detail\b|\brefused\.detail\b/;
+const DOOR_FILES = new Set(['src/spend-words.js', 'src/spend-authorizer.js', 'src/server/spend-guard.js']);
+const ALLOW = [   // [file, a substring unique to its line, audience, why]
+  ['src/server/auto-resume.js', 'detail: (v && v.detail) || null', 'person', 'the bulk resume page a person reads (routes/bulk-resume)'],
+  ['src/server/auto-resume.js', "${rec.refused.detail || ''}", 'journal', 'the bulk resume\'s journal line'],
+  ['src/server/usage-pool-engine.js', 'reset credit refused for ${session._webuiId}', 'person', 'a person\'s reset-credit press (its error at the press; a bearer is refused 403)'],
+  ['src/server/usage-pool-engine.js', 'reset credit refused for the helper on', 'person', 'the reset credit\'s helper, at a person\'s press'],
+  ['src/server/usage-pool-engine.js', 'error: hw.why ? `${hw.why}${hw.detail ?', 'person', 'the helper\'s error answered to the person\'s press'],
+  ['src/server/usage-pool-engine.js', 'error: wr.why ? `${wr.why}${wr.detail ?', 'person', 'the reset credit\'s error answered to the person\'s press'],
+  ['src/server/usage-pool-engine.js', '${wr.detail ? ` — ${String(wr.detail)', 'person', 'the wall card in the person\'s own window'],
+  ['src/server/worker-dispatch.js', 'the spend ceiling refused the compaction (${v.detail || v.why})', 'journal', 'the owed compaction\'s end, a log line (a cap: a held verdict never reaches it)'],
+];
+const srcFiles = () => { const out = new Map(); const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) out.set(rel, fs.readFileSync(path.join(REPO, rel), 'utf8')); } }; walk('src'); return out; };
+function census(files) {
+  const found = [], used = new Map(ALLOW.map((a, i) => [i, 0]));
+  for (const [rel, text] of files) {
+    if (DOOR_FILES.has(rel) || !GATE_ASK.test(text)) continue;
+    text.split('\n').forEach((l, i) => { if (!DETAIL_READ.test(l)) return; const k = ALLOW.findIndex(([f, sub]) => f === rel && l.includes(sub)); if (k < 0) found.push(`${rel}:${i + 1}`); else used.set(k, used.get(k) + 1); });
+  }
+  return { found, stale: [...used].filter(([, n]) => n !== 1).map(([k]) => ALLOW[k][0] + ' «' + ALLOW[k][1] + '»') };
+}
+{ const files = srcFiles();
+  const c = census(files);
+  ok(!!(c.found.length === 0 && c.stale.length === 0 && [...files.keys()].filter((f) => !DOOR_FILES.has(f) && GATE_ASK.test(files.get(f))).length >= 8), `THE CENSUS: in the ${[...files.keys()].filter((f) => !DOOR_FILES.has(f) && GATE_ASK.test(files.get(f))).length} src files that ask the gate, every read of a verdict\'s detail is the door\'s or one of the ${ALLOW.length} named rows (person ${ALLOW.filter((a) => a[2] === 'person').length}, journal ${ALLOW.filter((a) => a[2] === 'journal').length}), each row matched once`, JSON.stringify(c));
+  const planted = new Map(files); planted.set('src/server/worker-dispatch.js', files.get('src/server/worker-dispatch.js') + '\nconst leak = (v) => ({ why: v.detail });\n');
+  ok(!!(census(planted).found.length === 1), 'THE CENSUS RED: a road beside the door — a planted read of a verdict\'s detail in a copy of one file\'s text — is red', JSON.stringify(census(planted).found));
+  const newFile = new Map(files); newFile.set('src/server/made-up-road.js', "const v = authorizeSpend({ reason: 'peer-message' });\nanswer({ reason: v.detail });\n");
+  ok(!!(census(newFile).found.length === 1 && census(newFile).found[0].startsWith('src/server/made-up-road.js')), 'THE CENSUS RED: a NEW file that asks the gate and reads the detail is red', JSON.stringify(census(newFile).found)); }
+{ const W = await autoWorld(ENG, HELD, 'once', (dir) => fs.chmodSync(dir, 0o500));   // the grant's release write FAILS (its folder refuses): release() answers 'kept'
+  ok(!!(W.r.code === 'spend_refused' && !onceLeft(W) && !/grant is kept/.test(String(W.r.why)) && String(W.r.why).includes(HELD)), '(b) r4696 should: a once-grant that STAYS SPENT (its release could not be written) is never told «the grant is kept»', JSON.stringify({ why: W.r.why, grants: W.grants.map((g) => ({ mode: g.mode, spent: !!g.spentAt })) })); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

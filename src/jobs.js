@@ -1673,10 +1673,17 @@ class JobManager {
       if (line) { line.retries = retries; line.nextAt = extra.nextAt || null; if (last) { line.reason = last.reason; if (last.phase !== 'spend') delete line.heldWhy; line.phase = last.phase || null; line.busy = last.busy === true || last.busy === false ? last.busy : null; if (last.late) line.late = last.late; } this._dirty = true; }
       return false;
     }
+    // B-ef83 unit 2 (r4696 should): a parked line HELD AGAIN at a later attempt (the park's waitLift says 'held') reads the held sentence again
+    if (ev === 'held') {
+      const line = job ? [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id) : null;
+      if (line && extra && extra.why) { line.heldWhy = String(extra.why); this._dirty = true; }
+      return false;
+    }
     if (ev === 'delivered') {
       const via = extra.via || 'message';
       const lane = extra.lane || (via === 'prompt' ? 'stash' : 'message');
       if (job) {
+        { const pl = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (pl) delete pl.heldWhy; }   // r4696 should: a delivered line's held code goes (its ✓ row follows)
         if (!subscriber && via === 'message') job.lastNotify = { ts: now(), lane, ok: true, to: extra.peerName || null, retries };
         this._notifyLogPush(job, { lane, ok: true, to: extra.peerName || null, retries, deliveredAt: extra.deliveredAt || now(), parkedFor: Number(extra.parkedFor) || 0, via, ...(subscriber ? { sub: true } : {}) });
         if (via === 'prompt' && Number(entry.firstAt) >= M.terminalAt(job)) this.markAck(job, 'notified', now(), { quiet: true });   // rode the next prompt: read like a drained stash entry

@@ -50,6 +50,7 @@ const path = require('path');
 const crypto = require('crypto');
 const A = require('../automation-keys.js');
 const SA = require('../spend-authorizer.js');   // B-ef83 unit 1 (ii): the family «the gate could not judge»
+const { agentSpendWords } = require('../spend-words.js');   // B-ef83 unit 2 (r4696): THE ONE DOOR
 const { tokenMatches } = require('../pairing-token.js');   // lane fleet-feedback-marks: the maintainer key's sha, compared in constant time
 const GM = require('../grant-model.js');   // lane grants-unify: THE grant model (admits)
 // lane lg-group-parents U3d (its read, 3): a caller's lineage as the model reads it — none (undefined / null: no lineage handed), a
@@ -717,7 +718,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // its record held by another process, a restart's seconds) RELEASES the once-grant this call reserved, as the limits' refusal does
     // (a passing hold never costs the owner a grant); the 429's `bucket` names the hold by its code, as every spend refusal's does
     const heldOnce = held && result && result.ok === false && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? { once: release() } : {};
-    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `the spend gate could not judge this turn (${result.bucket}) — nothing was spent${heldOnce.once === 'released' ? ' and the grant is kept' : ''}; ask again shortly` : result && result.why), ...keep, args: v0.args }, key.id, { ...heldOnce, ...(asked ? { ask: asked } : {}), ...(noticeName ? { noticeName } : {}) });   // B-ef83 unit 2 (b) (主开发 r4606): a held 429 names the hold — never another process's pid and host — WHATEVER the grant's kind (keyed on the held family alone)
+    if (!result || result.ok === false) return done({ ...named((result && result.code) || 'failed', result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `${agentSpendWords({ why: result.bucket })} — nothing was spent${heldOnce.once === 'released' ? ' and the grant is kept' : ''}; ask again shortly` : result && result.why), ...keep, args: v0.args }, key.id, { ...heldOnce, ...(asked ? { ask: asked } : {}), ...(noticeName ? { noticeName } : {}) });   // B-ef83 unit 2 (b) (主开发 r4606): a held 429 names the hold — never another process's pid and host — WHATEVER the grant's kind (keyed on the held family alone)
     done({ ok: true, args: v0.args }, key.id, asked ? { ask: asked } : {});
     return { ok: true, keyId: key.id, key: key.name, verb, result, ms: now() - t0 };
   }

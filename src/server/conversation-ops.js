@@ -41,6 +41,7 @@
  * pins), scripts/test-spend-paths.mjs (the `headless-open` primitive must sit under the authorizer — a MUTANT without it
  * is UNWIRED), the ws suites unchanged (test-ws-contract, test-session-schema, test-agentd-session, test-restore-liveness).
  */
+const { agentSpendWords } = require('../spend-words.js');   // B-ef83 unit 2 (r4696): THE ONE DOOR for a verdict's words to a key holder
 const crypto = require('crypto');
 const { capsOf } = require('../backend-caps');
 const SPEC = require('../conversation-spec.js');
@@ -257,7 +258,7 @@ function opsOver(getDeps) {
     if (!spendGuard || typeof spendGuard.authorize !== 'function') return refusal('spend_refused', 'the spend guard is not wired — an automation spends nothing unguarded', { bucket: 'no-guard' });
     // A CONVERSATION NOBODY TYPED INTO (CLAUDE.md "A turn nobody typed"): the gate decides BEFORE the spawn
     const g = spendGuard.authorize({ reason: 'automation-open', identity, sessionName: v.spec.name || null });
-    if (!g || !g.ok) return refusal('spend_refused', (g && g.detail) || 'the spend guard refused', { bucket: (g && g.why) || 'unknown', retryAfter: (g && g.retryAfter) || 0 });
+    if (!g || !g.ok) return refusal('spend_refused', agentSpendWords(g) || 'the spend guard refused', { bucket: (g && g.why) || 'unknown', retryAfter: (g && g.retryAfter) || 0 });
     let r;
     try { r = await createHeadless(v.spec, b.by, birthBy); }
     catch (e) { try { spendGuard.release({ hold: g.hold }); } catch { } throw e; }
