@@ -7,6 +7,7 @@ const NAMES = Object.freeze({
   'user-todos': i18nKey('For you'), 'task-groups': i18nKey('the Task Groups'), 'hosts.json': i18nKey('the paired machines'), 'machine-mounts.json': i18nKey('the mounts of your paired machines'),   // 2b: both on the helper (each row is its file's)
   // the stores that joined the helper on the hotfix's tip (r3224 / r3233 — the family's rows): each list's plain name
   'accounts.json': i18nKey('your accounts list'),
+  'window-leases.json': i18nKey('the record of which agent holds which window'), 'window-reach.json': i18nKey('the share mode of each window'),   // lg-recovery (B-f276 slice window-targets): the window engine's two stores
   'port-forwards.json': i18nKey('the list of port forwards'),   // bl-machines-a (lines 702 + 749): the Ports panel's list
   'instance-url.json': i18nKey('the publish setting of this VibeSpace'),   // bl-machines-a (line 646): «Publish this VibeSpace»
   'instance.json': i18nKey('this VibeSpace’s own id'),   // 主开发 r3336 (src/auth.js): the sign-in's id file (a notice never names the folder)

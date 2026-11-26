@@ -2041,6 +2041,9 @@ const HELD_WORDS = Object.freeze({
   stage_unread: () => t('The Stage layout can’t be read right now — nothing was changed; it is read again by itself'),   // stage-sync.json
   uploads_unread: () => t('The list of recent uploads can’t be read right now — it is read again by itself'),   // uploads-sync.json
   settings_unread: () => t('The synced settings can’t be read right now — nothing was changed; they are read again by themselves'),   // settings-sync.json
+  // lg-recovery (B-f276 slice window-targets, 主开发 r4720): the window engine's two stores (src/server/window-targets-engine.js) — LIST holds
+  window_leases_unread: () => t('The record of which agent holds which window can’t be read right now — nothing was changed, and the agents’ window commands wait until it reads. VibeSpace reads it again by itself in a few minutes.'),   // window-leases.json
+  window_reach_unread: () => t('The share mode of each window can’t be read right now — nothing was changed, and no agent reaches a window and no share changes until it reads. VibeSpace reads it again by itself in a few minutes.'),   // window-reach.json
 });
 const HELD_CODE_RE = /(?:^|[_-])(?:unread|unreadable)$/i;   // THE STATED PATTERN the census finds held-looking codes by — never what the step words by (r3123)
 // 主开发 r3123 (a must of this unit, found by its own read): the pattern also matches codes that are NO list hold (a vault's unreadable key,

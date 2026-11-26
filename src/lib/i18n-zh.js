@@ -4667,6 +4667,10 @@ export default {
   "the record of messages already handed to agents": "已交给代理的消息记录",
   "The record of messages already handed to agents could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A message an agent hands back waits until it reads.": "已交给代理的消息记录刚才没能读取——VibeSpace 会自己再读一次；没有丢失，也没有改动。代理退回的消息要等读出来之后再处理。",
   "the record of the login warnings already filed": "已提交的登录提醒记录",
+  "the record of which agent holds which window": "哪个 agent 占用哪个窗口的记录",   // lg-recovery (B-f276 slice window-targets): the window engine's two stores
+  "the share mode of each window": "每个窗口的共享模式",
+  "The record of which agent holds which window can’t be read right now — nothing was changed, and the agents’ window commands wait until it reads. VibeSpace reads it again by itself in a few minutes.": "暂时读不出哪个 agent 占用哪个窗口的记录 —— 什么都没有改动，agent 的窗口命令会等它读出后再执行。VibeSpace 会在几分钟内自己再读一次。",
+  "The share mode of each window can’t be read right now — nothing was changed, and no agent reaches a window and no share changes until it reads. VibeSpace reads it again by itself in a few minutes.": "暂时读不出每个窗口的共享模式 —— 什么都没有改动，读出之前没有 agent 能使用窗口，共享也不会改动。VibeSpace 会在几分钟内自己再读一次。",
   "The record of the login warnings already filed could not be read just now — VibeSpace reads it again by itself; nothing was lost or changed. A new login warning waits until it reads.": "已提交的登录提醒记录刚才没能读取——VibeSpace 会自己再读一次；没有丢失，也没有改动。新的登录提醒要等读出来之后再提交。",
   "the record of the conversations a restart interrupted": "重启打断的会话记录",
   "this hub’s record of the Claude Code builds it measured": "本中心测量过的 Claude Code 版本记录",

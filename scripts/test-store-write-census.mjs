@@ -1058,6 +1058,8 @@ const STORE_READS = [
   { file: 'src/server/cli-registration.js', store: 'cli-registration.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: isRecord \}\);/ },
   { file: 'src/turn-carry.js', store: 'turn-carry-outstanding.json', state: 'answer', mark: /else \{ const a = SR\.storeAnswer\(read, \{ valid: isTable \}\); if \(hold\.start\(a\) === 'data'\) loadRows\(a\.value\); \}/ },   // B-f276 slice hub-own-ledgers (lane bl-scratch): the restart line's table held (src/store-read-hold.js)
   { file: 'src/server/cli-self-measure.js', store: 'cli-self-measure.json', state: 'answer', mark: /const a = SR\.storeAnswer\(\{ text: txt \}, \{ valid: isLedger \}\);\n      if \(a\.state !== 'data'\) \{ readFail = \{ code: 'torn bytes', at: now\(\) \}; hold\.start\(a\); return false; \}/ },   // B-f276 slice hub-own-ledgers (lane bl-scratch): torn bytes kept aside before the ledger reads empty
+  { file: 'src/server/window-targets-engine.js', store: 'window-leases.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: isObj \}\); if \(leaseHold\.start\(a\) === 'data'\) applyLeases\(a\.value\);/ },   // lg-recovery (B-f276 slice window-targets, 主开发 r4720): the agents' window holds held (src/store-read-hold.js)
+  { file: 'src/server/window-targets-engine.js', store: 'window-reach.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: isObj \}\); if \(reachHold\.start\(a\) === 'data'\) applyReach\(a\.value\);/ },   // …and the windows' share modes
   { file: 'src/plugins.js', store: 'plugins.json', state: 'answer', mark: /const a0 = SR\.storeAnswer\(read, \{ valid: PLUGINS_SHAPE \}\);\n    this\._state = this\._hold\.start\(a0\) === 'data' \? a0\.value : \{ plugins: \{\} \};/ },
   // r3004 (lane bl-loop-b): the setting holds through src/store-read-hold.js — a failed read HOLDS (no timed raise, nothing written)
   { file: 'src/server/setting-holds.js', store: 'setting-holds.json', state: 'answer', mark: /const a0 = SR\.storeAnswer\(read, \{ valid: HOLDS_SHAPE \}\);\n    if \(hold\.start\(a0\) === 'held'\)/ },
@@ -1112,6 +1114,7 @@ SITES['src/usage-history.js'] = 1;   // bl-ci (r3145 unit 2): pricing.json's tor
 SITES['src/server/sealed-json.js'] = 1;   // r3334 unit 2 (lane bl-chat-b): dropline-oauth.json's torn bytes, kept aside by the helper
 SITES['src/port-forward.js'] = 1;   // bl-machines-a (r3009, 1 of 2): port-forwards.json's torn bytes, kept aside by the helper
 SITES['src/server/instance-url.js'] = 1;   // bl-machines-a (r3009, 2 of 2): instance-url.json's torn bytes, kept aside by the helper
+SITES['src/server/window-targets-engine.js'] = 2;   // lg-recovery (B-f276 slice window-targets, 主开发 r4720): window-leases.json's and window-reach.json's torn bytes, kept aside by the helper
 const tokenHit = new Map();   // a text's verdict, once (the controls re-run the census over copies that differ in ONE file)
 function setAsideFiles(texts) {
   const out = [];
