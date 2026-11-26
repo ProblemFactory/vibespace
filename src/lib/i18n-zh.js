@@ -4812,6 +4812,7 @@ export default {
   "LLM · today not known / {cap} · this month {month}": "LLM · 今天未知 / {cap} · 本月 {month}",
   "paused: spend not known": "已暂停：花费未知",
   "the language model plugin’s journal of calls": "语言模型插件的调用日志",
+  "the automatic usage reads — paused while their pacing record cannot be read": "自动用量读取 —— 其节奏记录无法读取，已暂停",
   "the sign-in value your conversations report their usage with": "你的对话上报用量所用的登录值",
   "this VibeSpace’s anonymous usage id": "这个 VibeSpace 的匿名用量标识",
   "a paired machine’s link token": "一台已配对机器的连接令牌",

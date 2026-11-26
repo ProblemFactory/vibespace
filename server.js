@@ -1256,6 +1256,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
 }); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
+let autoCliLoop = null;   // B-574d (主开发 r5143): the auto-cli loop, made below — its held row reaches the family's one notice through the wiring (lazily)
 const { resumeRoad, settingHolds, decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, bootEngineDistribution, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), jobsWiring,
@@ -1264,6 +1265,7 @@ const { resumeRoad, settingHolds, decisionEngine, mounts, plugins, dialBridge, g
   bcastAll: (...a) => bcastAll(...a), serverNotice: (...a) => serverNotice(...a), // + agent browser P1: the keeper's runaway/ceiling notices
   serverSetting: (...a) => serverSetting(...a),
   otelTokenRow: otelIngest.tokenRow,   // B-f276 family unit 2: the OTel sign-in value's hold on the held list
+  autoCliRow: () => (autoCliLoop ? autoCliLoop.heldRow : null),   // B-574d (主开发 r5143): the /usage pacing state's unknown wait on the held list (the loop is made below)
   mountTokens, persistenceRouter, hosts,
   agentdDials, agentdHostToken,
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
@@ -1301,7 +1303,7 @@ const usage = setupUsage({ app, accounts, hosts, spendGuard, usageHistory, activ
 // ── auto-cli quota refresh loop (2.329.0; src/server/auto-cli-loop.js since
 // quota r2 — its pacing state persists in data/auto-cli-state.json). One
 // `claude -p /usage` spawn per 60 s tick at most, burn-aware, never a cadence.
-require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, accounts, autoCliReady, memberServeLapsed, USAGE_CACHE_DIR, usageIdentityGroupsCached, usageEstimator, projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path.join(__dirname, 'data') }).start();
+autoCliLoop = require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, accounts, autoCliReady, memberServeLapsed, USAGE_CACHE_DIR, usageIdentityGroupsCached, usageEstimator, projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path.join(__dirname, 'data') }); autoCliLoop.start();
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;

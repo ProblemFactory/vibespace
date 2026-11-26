@@ -85,7 +85,11 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   const strip = (t) => t.split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
   const srv = strip(fs.readFileSync(new URL('../src/server/auto-cli-loop.js', import.meta.url), 'utf8'));
   const boot = strip(fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8'));
-  ok(/require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(\{[^\n]*projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path\.join\(__dirname, 'data'\) \}\)\.start\(\);/.test(boot), 'WIRING PIN: server.js starts the ONE auto-cli loop with the engine\'s projection (+ its once-per-tick billing index, prod-stall-202), the attempt clock, the rung and the data dir');
+  ok(/require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(\{[^\n]*projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path\.join\(__dirname, 'data'\) \}\); autoCliLoop\.start\(\);/.test(boot), 'WIRING PIN: server.js starts the ONE auto-cli loop with the engine\'s projection (+ its once-per-tick billing index, prod-stall-202), the attempt clock, the rung and the data dir');
+  { const WIRE = fs.readFileSync(new URL('../src/server/mounts-plugins-wiring.js', import.meta.url), 'utf8');   // r5143: the loop's row on the family's one notice
+    ok(/^let autoCliLoop = null;/m.test(boot) && boot.includes('  autoCliRow: () => (autoCliLoop ? autoCliLoop.heldRow : null),') && WIRE.includes("  autoCliRow = () => null,")
+      && WIRE.includes("    { key: 'auto-cli-state.json', facts: () => { const r = autoCliRow(); return r ? r.facts() : null; }, onLift: (fn) => { const r = autoCliRow(); return r ? r.onLift(fn) : false; } },"),
+      'WIRING PIN (主开发 r5143): server.js keeps the loop it makes and hands its held row LAZILY to the wiring, whose held-lists older row has facts and one lift — no read-again (no press, no new road)'); }
   ok(/const pj = d\.projectionRereadFor\(a\.id, now, billingIndex\(\)\)[^\n]*\n[\s\S]{0,40}?list\.push\(\{[^\n]*projCrossInMs: pj \? pj\.inMs : null, estBurnPtPerMin: pj \? pj\.burnPtPerMin : 0/.test(srv), 'WIRING PIN: the auto-cli loop hands projectionRereadFor\'s crossing + burn to decideCliRefresh');
   ok(/const picks = decideCliRefresh\(list, now,[^\n]*\n\s*for \(const key of picks\) \{\n[^\n]*\n\s*attempts\.set\(key, now\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(\(await saveState\(d\.dataDir, st, warn, d\.storeWriter, landingMs\)\) !== true\) \{\n[^\n]*\n[^\n]*\n\s*continue;\n\s*\}\n\s*stampUnlanded = false;\n\s*let ok = false; try \{ ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\);/.test(srv), 'WIRING PIN: a pick is spent on usage.refreshViaCliPanel — the same rung, behind the same attempt clock, stamped on disk BEFORE the spawn (quota r3)');
   ok(/if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \} catch/.test(srv), 'WIRING PIN: the fresh reading takes the new-member wake — the pool re-decides on the READING (its own try, after the bookkeeping — quota r3)');
@@ -700,6 +704,7 @@ parentPort.on('message', (m) => {
       async run(minutes) { for (let i = 0; i < minutes; i++) { await loop.tick(); T += 60e3; } },
       restart() { loop = createAutoCliLoop(deps); },
       mem() { return loop.state; },   // r4771: the loop's memory (what a read again merges into)
+      row() { return loop.heldRow; },   // r5143: the loop's row on the family's one notice
       bump(ms) { T += ms; },   // r5030 (c): the world's clock moved while a read runs (placed)
       get now() { return T; },
     };
@@ -947,6 +952,49 @@ parentPort.on('message', (m) => {
       const h0 = await threeWaits(REAL_LOOP), h1 = await threeWaits(TODAY_READS);
       ok(!h0.harness && h0.started === 1 && h0.said === 3 && h0.calls === 0, `§ban-safety r5061 (1): three wait's ends over a read that never answers — ONE read started (${h0.started}), unreadable said once a wait (${h0.said}), no call (${h0.calls})`, h0);
       ok(!h1.harness && h1.started === 3 && h1.said === 3, `§ban-safety r5061 (1) RED CONTROL (today's lines): a read started at every wait's end — ${h1.started} reads held at once`, h1);
+    }
+    { // (i) 主开发 r5143: THE FAMILY's ONE NOTICE — the loop's held row. During the wait its facts: since = the FIRST unreadable moment, next =
+      //     the wait's end; since KEPT across a restarted wait; no read-again on the row. At the wait's end BY EACH ROAD of its read (the state
+      //     merged, the file not there, torn bytes kept aside) the wait says so ONCE and lifts the row ONCE, its facts null after.
+      //     REDS: since taken from the wait's own mark (it jumps at the restart); the lift cut on the merged road
+      const roads = async (loopFile, road) => { const pa = placeAgain(road === 'restart' ? 1 : 0);
+        try { const r0 = placed('eio', { stateFile: STATE, loopFile }), w = r0.w, row = w.row(); let lifted = 0; row.onLift(() => { lifted++; });
+          const f0 = row.facts();
+          if (road === 'missing') fs.rmSync(r0.file); if (road === 'torn') fs.writeFileSync(r0.file, JSON.stringify(STATE).slice(0, 30));
+          await w.run(WAIT_MIN + 1);
+          const f1 = row.facts(), lifted1 = lifted;
+          if (road === 'restart') await w.run(WAIT_MIN);   // the second wait's end: healed — merged
+          return { f0, f1, f2: row.facts(), lifted1, lifted, keys: Object.keys(row).join(), said: { merged: saidN(w, MERGED), missing: saidN(w, /pacing state not there at the end of its unknown wait/), torn: saidN(w, TORNED), still: saidN(w, STILL) } };
+        } finally { pa.restore(); } };
+      const WAIT = WAIT_MIN * 60e3, at = (f) => (f ? `${(f.since - T0) / 60e3}/${(f.next - T0) / 60e3}` : 'none');
+      const iM = await roads(REAL_LOOP, 'merged'), iN = await roads(REAL_LOOP, 'missing'), iT = await roads(REAL_LOOP, 'torn'), iR = await roads(REAL_LOOP, 'restart');
+      ok(iM.f0 && iM.f0.since === T0 && iM.f0.next === T0 + WAIT && iM.keys === 'key,facts,onLift' && iM.f1 === null && iM.lifted === 1 && iM.said.merged === 1,
+        `§ban-safety r5143 (i): the held row during the wait — since the first unreadable moment, next the wait's end (min ${at(iM.f0)}), no read-again on it (${iM.keys}); the state merged at the wait's end: said once (${iM.said.merged}), the row lifted ONCE (${iM.lifted}), its facts gone`, iM);
+      ok(iN.f1 === null && iN.lifted === 1 && iN.said.missing === 1 && iT.f1 === null && iT.lifted === 1 && iT.said.torn === 1,
+        `§ban-safety r5143 (i): the file NOT THERE at the wait's end — said once (${iN.said.missing}), lifted once (${iN.lifted}); TORN bytes kept aside — said once (${iT.said.torn}), lifted once (${iT.lifted})`, { iN, iT });
+      ok(iR.f1 && iR.f1.since === T0 && iR.f1.next === T0 + WAIT + WAIT && iR.lifted1 === 0 && iR.said.still === 1 && iR.f2 === null && iR.lifted === 1 && iR.said.merged === 1,
+        `§ban-safety r5143 (i): a RESTARTED wait (an error of the file system at its end) keeps the row — since unchanged, next moved (min ${at(iR.f1)}), no lift; the healed read at the next end lifts it once (${iR.lifted})`, iR);
+      const FIXED_SINCE_CUT = loopCut('loop-since-jumps', 'since: unknownSince != null ? unknownSince : st.unknownAt', 'since: st.unknownAt');
+      const LIFT_CUT = loopCut('loop-lift-cut', "every bucket kept)'); liftRow(); return; }", "every bucket kept)'); return; }");   // stale-pins: kept — the merged road as it was before the lift, planted back as the RED
+      const rS = await roads(FIXED_SINCE_CUT, 'restart'), rL = await roads(LIFT_CUT, 'merged');
+      ok(rS.f1 && rS.f1.since === T0 + WAIT, `§ban-safety r5143 (i) RED CONTROL (since taken from the wait's own mark): at the restart «since» jumps (min ${at(rS.f1)})`, rS);
+      ok(rL.f1 === null && rL.lifted === 0, `§ban-safety r5143 (i) RED CONTROL (the lift cut on the merged road): the wait ended and the row was never lifted (${rL.lifted}) — the notice would stand until a reload`, rL);
+    }
+    { // (j) the row in the REAL held-lists notice (src/server/held-lists.js, as the wiring's LAZY older row): listed by its key with since and
+      //     next and readAgain false — the press reads the state file NOT (no new road); at the wait's end ONE broadcast drops it
+      const HL = require(path.join(path.dirname(REAL_LOOP), 'held-lists.js'));
+      const pa = placeAgain(0);
+      try { const { w } = placed('eio', { stateFile: STATE }); const casts = [];
+        const lazy = { key: 'auto-cli-state.json', facts: () => w.row().facts(), onLift: (fn) => w.row().onLift(fn) };
+        const hl = HL.create({ broadcast: (m) => casts.push(JSON.parse(JSON.stringify(m))), older: [lazy], now: () => w.now });
+        const during = hl.list().find((r) => r.key === 'auto-cli-state.json') || null;
+        await hl.readAgain(); const pressReads = pa.reads(), c0 = casts.length;   // the press says the list once (the row in it)
+        await w.run(WAIT_MIN + 1);
+        const after = hl.list().filter((r) => r.key === 'auto-cli-state.json').length;
+        ok(!!during && during.what === 'auto-cli-state.json' && during.since === T0 && during.next === T0 + WAIT_MIN * 60e3 && during.readAgain === false && pressReads === 0 && after === 0 && c0 === 1 && casts[0].lists.some((r) => r.key === 'auto-cli-state.json') && casts.length - c0 === 1 && casts[casts.length - 1].lists.every((r) => r.key !== 'auto-cli-state.json'),
+          `§ban-safety r5143 (j): in the real held-lists notice — listed (${during ? during.what : 'absent'}, readAgain ${during ? during.readAgain : '-'}), the person's press reads the state file not (${pressReads} reads), the wait's end broadcasts ONCE (${casts.length - c0}) and the row is gone (${after})`, { during, casts: casts.length, c0, after, pressReads });
+        if (typeof hl.stop === 'function') hl.stop();
+      } finally { pa.restore(); }
     }
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts

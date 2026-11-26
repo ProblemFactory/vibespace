@@ -27,6 +27,7 @@ function create({ deliveryWakeDeps = () => ({}), app, server, rootDir, HOST, POR
   hosts, agentdDials, agentdDialDevices = null, agentdHostToken, agentdMintDialPair, deviceForDial, lockOutDialHolder = () => false,
   ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null, serverNotice = null, broadcastActiveSessions = null,
   otelTokenRow = null,   // B-f276 family unit 2: the OTel sign-in value's own hold, a row of the held list
+  autoCliRow = () => null,   // B-574d (主开发 r5143): the /usage pacing state's unknown wait — the loop's held row, asked lazily (the loop is made after this)
   // agent browser P1 second half (§3.2.5 / §3.8): the Task-Group default rung, the
   // zero-billed notice queue and the session-meta writer the pin persists through
   getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null, rebindSessionMeta = null,
@@ -483,6 +484,9 @@ const heldLists = require('./held-lists.js').create({
       onLift: (fn) => { const tg = typeof getTasks === 'function' ? getTasks() : null; if (!tg || typeof tg.onLift !== 'function') return false; tg.onLift(fn); return true; } },   // r3212: the manager's own lift signal (armed once it exists)
     decisionEngine.heldRow,   // B-f276 family (r4121): the paid judge's journal — its own hold (the counter and the memo are the helper's)
     ...(otelTokenRow ? [otelTokenRow] : []),   // B-f276 family unit 2: the OTel sign-in value (usage-history/otel-token)
+    // B-574d (主开发 r5143): the /usage pacing state that could not be read — the loop's row, LAZY (the loop is made after this; held-lists
+    // arms an older row again at every list until it answers): facts and one lift, NO read-again (no press, no new road)
+    { key: 'auto-cli-state.json', facts: () => { const r = autoCliRow(); return r ? r.facts() : null; }, onLift: (fn) => { const r = autoCliRow(); return r ? r.onLift(fn) : false; } },
   ],
 });
 app.delete('/api/hosts/:id/hub-pin', async (req, res) => {

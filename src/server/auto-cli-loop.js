@@ -229,7 +229,19 @@ function createAutoCliLoop(d) {
   // automatic read paused for ever on a file nobody can mend. The wait ends only here: while it runs nothing is picked or written.
   // 主开发 r5061 (1): AT MOST ONE READ OF THE STATE FILE IS EVER OUT — the read that has not answered is KEPT here; while it is out no new
   // read is started (a data folder that stays hung pins ONE thread of the hub's file pool, never one more each wait's end)
-  let readOut = null;
+  let readOut = null, readOutAt = null;
+  // 主开发 r5105 / r5143: THE FAMILY's ONE NOTICE — the unknown wait as an OLDER row of src/server/held-lists.js (as the decision engine's
+  // heldRow): facts and ONE lift, NO read-again press (the one capped read stays the wait's own: no new road). Its key is the store's base
+  // name, which the page names in plain words (no path, no account); since = the FIRST unreadable moment of this run (the wait's own mark
+  // moves at every restarted wait), next = the wait's end. A wait that ends — by any road of its read — says so ONCE and lifts the row once
+  let unknownSince = st.unknownAt != null ? st.unknownAt : null;
+  const lifts = new Set();
+  const liftRow = () => { unknownSince = null; for (const fn of [...lifts]) { lifts.delete(fn); try { fn(); } catch (e) { warn(`[auto-cli] the held-lists notice's lift failed: ${(e && e.message) || e}`); } } };
+  const heldRow = Object.freeze({
+    key: STATE_FILE,
+    facts: () => (st.unknownAt != null ? { since: unknownSince != null ? unknownSince : st.unknownAt, next: st.unknownAt + UNKNOWN_WAIT_MS } : null),
+    onLift: (fn) => { if (typeof fn !== 'function') return false; lifts.add(fn); return true; },
+  });
   async function readAgain(now) {
     if (!d.dataDir) { st.unknownAt = null; return; }
     const statePath = path.join(d.dataDir, STATE_FILE);   // its own name: the sync-fs census reads a path by its name across the file
@@ -239,9 +251,12 @@ function createAutoCliLoop(d) {
     // and the next wait's end may read anew
     const timedOut = () => ({ error: Object.assign(new Error(`no answer in ${Math.round(readAgainMs / 1000)} s`), { code: 'ETIMEDOUT' }) });
     let read;
-    if (readOut) read = timedOut();
+    // r5105's should: while a kept read is out the tick is answered AT ONCE (nothing earlier: no read is made, the wait starts again from
+    // this give-up) — and the journal says that no read was made, not «no answer in 30 s»
+    if (readOut) read = { error: Object.assign(new Error('a read is still out'), { code: `a read is still out since ${new Date(readOutAt).toISOString()}` }) };
     else {
       const mine = readOut = fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+      readOutAt = now;
       mine.then(() => { if (readOut === mine) readOut = null; });
       let timer = null;
       const bound = new Promise((resolve) => { timer = setTimeout(() => resolve(timedOut()), readAgainMs); if (timer.unref) timer.unref(); });
@@ -249,8 +264,8 @@ function createAutoCliLoop(d) {
       clearTimeout(timer);
     }
     const a = SR.storeAnswer(read, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v) });
-    if (a.state === 'data') { mergeState(st, fieldsOf(a.value, now, warn)); st.unknownAt = null; warn('[auto-cli] pacing state read again at the end of its unknown wait — merged into memory (every stamp the later, every count the larger, every bucket kept)'); return; }
-    if (a.state === 'missing') { st.unknownAt = null; return; }
+    if (a.state === 'data') { mergeState(st, fieldsOf(a.value, now, warn)); st.unknownAt = null; warn('[auto-cli] pacing state read again at the end of its unknown wait — merged into memory (every stamp the later, every count the larger, every bucket kept)'); liftRow(); return; }
+    if (a.state === 'missing') { st.unknownAt = null; warn('[auto-cli] pacing state not there at the end of its unknown wait — nothing to merge; the loop goes on with its memory'); liftRow(); return; }   // r5143: a wait that ended says so once
     if (a.state === 'corrupt') {
       const aside = `${statePath}.damaged-${new Date(now).toISOString().replace(/[:.]/g, '-')}`;
       let kept = null, why = null; try { await fs.promises.rename(statePath, aside); kept = path.basename(aside); } catch (e) { why = (e && (e.code || e.message)) || String(e); }
@@ -260,9 +275,12 @@ function createAutoCliLoop(d) {
       st.unknownAt = null;
       warn(kept ? `[auto-cli] pacing state's bytes are torn (${a.code}) — kept aside as ${kept}; the loop goes on with its memory`
         : `[auto-cli] pacing state's bytes are torn (${a.code}) and could not be kept aside (${why}) — the loop goes on with its memory; its next save writes over them`);
+      liftRow();
       return;
     }
     st.unknownAt = clock();   // r5061 (3): the wait counted from the clock read AFTER the read gave up (never up to its bound early)
+    // (a clock that stepped back is clamped by the tick's own guard — `if (st.unknownAt > now)` — at its next run: the tick reads its clock
+    //  again right after this read, so keep that re-read: r5105's should)
     warn(`[auto-cli] pacing state still unreadable (${a.code}) — the longest backoff starts again (${Math.round(UNKNOWN_WAIT_MS / 60e3)} min) before any /usage read`);
   }
   let ticking = false;
@@ -398,7 +416,7 @@ function createAutoCliLoop(d) {
     return out;
   }
   return {
-    tick, state: st,
+    tick, state: st, heldRow,
     start() { const t = setInterval(tick, 60000); t.unref?.(); return t; },
   };
 }

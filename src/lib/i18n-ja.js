@@ -4811,6 +4811,7 @@ export default {
   "LLM · today not known / {cap} · this month {month}": "LLM · 今日 不明 / {cap} · 今月 {month}",
   "paused: spend not known": "一時停止中：利用額不明",
   "the language model plugin’s journal of calls": "言語モデル プラグインの呼び出し記録",
+  "the automatic usage reads — paused while their pacing record cannot be read": "使用量の自動読み取り — ペース記録を読み取れないため一時停止中",
   "the sign-in value your conversations report their usage with": "会話が利用量を報告するためのサインイン値",
   "this VibeSpace’s anonymous usage id": "この VibeSpace の匿名の利用 ID",
   "a paired machine’s link token": "ペアリング済みマシンの接続トークン",
