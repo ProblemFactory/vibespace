@@ -9593,6 +9593,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    *  Each hold is told «live» only on ITS OWN confirmed answer (the kernel's command is idempotent); the count decides the OFF alone. */
   const tabWatchCounts = new Map();
   const tabWatchHolds = new Set();
+  const tabWatchLeased = new Set(); // r4808: the tabs (`profileId|TARGET`) a hold's ON was CONFIRMED for since their last OFF — the last share's leaving sends the OFF whatever its own reply was
   const profileOfTarget = (target) => {
     if (!target) return null;
     if (target.profileId) return String(target.profileId);
@@ -9618,7 +9619,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     let a = null;
     try { a = await paintWatch.setTabWatch(h.pid, h.id, true); } catch { a = null; }
     if (h.ask !== mine || !h.counted) return false;
-    if (a && a.ok && a.watching === true) { h.kw = { on: true }; return true; }
+    if (a && a.ok && a.watching === true) { tabWatchLeased.add(k); h.kw = { on: true }; return true; }
     const code = (a && a.code) || 'tab_watch_failed';
     // r4745 M2 (law 5, no lease left on): an ON the kernel did not CONFIRM (no answer in the bound, an odd answer) may still have been
     // taken — when no other hold counts the tab, ONE OFF goes out at once (idempotent); the kernel's own refusal took nothing
@@ -9636,20 +9637,25 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const k = `${h.pid}|${h.id}`, n = (tabWatchCounts.get(k) || 0) - 1;
     if (n > 0) { tabWatchCounts.set(k, n); return; }
     tabWatchCounts.delete(k);
-    if (!mayHold) return;
+    if (!mayHold && !tabWatchLeased.has(k)) return; // r4808: a refusal took nothing — but an earlier hold's CONFIRMED lease of the tab is on: the last share sends the OFF
+    tabWatchLeased.delete(k);
     try { const p = paintWatch && typeof paintWatch.setTabWatch === 'function' ? paintWatch.setTabWatch(h.pid, h.id, false) : null; if (p && typeof p.catch === 'function') p.catch(() => { /* the kernel ends it with the socket anyway */ }); } catch { /* the same */ }
   }
-  /** r4745 (S1) + r4779: the page watch of `profileId` (re)opened — the kernel ended every lease of the old socket: this profile's counts
-   *  go, every hold of it is counted out (its leaving releases nothing) and asks again on the new socket, its watch told the answer */
+  /** r4745 (S1) + r4779 + r4808: the page watch of `profileId` ended or (re)opened — the kernel ended every lease of the old socket: this
+   *  profile's counts go, every hold of it is counted out (its leaving releases nothing), its watch is told «stills» at once and it
+   *  asks again (on the new socket; while the page watch is down the ask answers tab_watch_unavailable), its watch told the answer */
   function tabWatchReset(profileId) {
     const pid = String(profileId || ''), pre = `${pid}|`;
     for (const k of [...tabWatchCounts.keys()]) if (k.startsWith(pre)) tabWatchCounts.delete(k);
+    for (const k of [...tabWatchLeased]) if (k.startsWith(pre)) tabWatchLeased.delete(k);
     for (const h of tabWatchHolds) if (h.pid === pid) { h.counted = false; h.ask++; h.kw = null; Promise.resolve().then(() => tabWatchAgain(h)).catch(() => { /* the hold's own */ }); }
   }
   async function tabWatchAgain(h) {
-    if (!tabWatchHolds.has(h) || !(await tabWatchOn(h)) || !tabWatchHolds.has(h) || !h.told) return;
-    try { h.told(tabWatchSaid(h)); } catch { /* the watch's own */ }
+    if (!tabWatchHolds.has(h)) return;
+    tabWatchTell(h); // r4808: «stills» AT ONCE — the old socket's lease is gone; the new ask's answer follows
+    if (await tabWatchOn(h)) tabWatchTell(h);
   }
+  const tabWatchTell = (h) => { if (tabWatchHolds.has(h) && h.told) { try { h.told(tabWatchSaid(h)); } catch { /* the watch's own */ } } };
 
   const api = {
     /** lane hub-loop-stalls «loop-day-report» M6: the browsers this keeper holds READY (a live record) and how many had no command for

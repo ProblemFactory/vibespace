@@ -181,39 +181,53 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
   // still draws. The stand-in kernel keeps leases per socket as the kernel says (its socket's end ends them); the fact judged is the
   // kernel's own lease set after the older left. And the older is TOLD: it asks again on the new socket (never a stale «live»)
   const reopenLeg = async (Kmod, tag) => {
-    const log = [], kernel = new Set(), told = [];
+    const log = [], kernel = new Set(), told = []; let ons = 0, releaseThird = null;
     const watchTarget = async (url, id) => ({ ok: true, close: () => log.push(`screencast-closed ${id.slice(0, 4)}`) });
     const kw = Kmod.create({ dataDir: path.join(ROOT, 'k-' + tag), homeDir: path.join(ROOT, 'h-' + tag), env: () => ({}), serverSetting: () => undefined, liveKeys: () => new Set(), log: quiet, install: false, watchTarget });
     kw.list();
     const PID = 'bp-0000d0e5';
     kw._reg().browsers[PID] = { profileId: PID, state: 'ready', cdpUrl: 'ws://127.0.0.1:9/devtools/browser/stand-in', browserChoice: { kind: 'plugin', id: 'acme.engine', tabWatch: true } };
     kw.setPaintWatch({ paintFacts: () => null, freezePaint: async () => ({ ok: false }), thawPaint: async () => ({ ok: true }),
-      setTabWatch: async (pid, id, on) => { log.push(`${on ? 'ON' : 'OFF'} ${id.slice(0, 4)}`); if (on) kernel.add(id); else kernel.delete(id); return { ok: true, watching: !!on, activeCount: kernel.size }; } });
+      setTabWatch: (pid, id, on) => { log.push(`${on ? 'ON' : 'OFF'} ${id.slice(0, 4)}`); if (on) kernel.add(id); else kernel.delete(id);
+        const ans = { ok: true, watching: !!on, activeCount: kernel.size };
+        if (on && ++ons === 3) return new Promise((r) => { releaseThird = () => r(ans); }); // r4808: the older's ask AGAIN — its reply held by the leg (a placed hold, never a clock)
+        return Promise.resolve(ans); } });
     const target = { ok: true, kind: 'attachment', profileId: PID };
     const flush = () => new Promise((r) => setImmediate(r));
     const older = await kw.watchTabFor(target, T(1), { onTabWatch: (tw) => told.push(tw) });
     kernel.clear(); log.push('REOPEN'); kw.tabWatchReset(PID); // the page watch's socket ended (the kernel ended its leases) and a new one opened: the dialogs tell the keeper (pinned in ④)
     const newer = await kw.watchTabFor(target, T(1), {});
     await flush();
+    const toldWhileAsking = told.slice(); // what the older watch was told BEFORE its new ask's reply
+    if (releaseThird) releaseThird();
+    await flush();
     older.close(); await flush();
     const drawsAfterOlder = kernel.has(T(1));
     newer.close(); await flush();
     try { kw.shutdown?.(); } catch { /* */ }
-    return { log, told, drawsAfterOlder, leftOn: kernel.has(T(1)), newer: newer.tabWatch };
+    return { log, told, toldWhileAsking, drawsAfterOlder, leftOn: kernel.has(T(1)), newer: newer.tabWatch };
   };
+  // Kold reproduces 73d130109's BEHAVIOUR (the reset drops the counts and leaves every hold counted), not its source byte for byte
   const Kold = M.load('src/server/browser-keeper.js', anchored(ksrc3, HOLDS_ANCH, "    // (the control: the reset drops the counts only, as at 73d130109)\n"), 'tw-reset-73d');
+  const STILLS_ANCH = ksrc3.split('\n').find((l) => l.startsWith('    tabWatchTell(h); // r4808')) || '\u0000';
+  if (!ksrc3.includes(STILLS_ANCH + '\n')) ok(false, 'the anchor of the control «told only the new ask\'s answer» is not in the source (src/server/browser-keeper.js)');
+  const Kstills = ksrc3.includes(STILLS_ANCH + '\n') ? M.load('src/server/browser-keeper.js', anchored(ksrc3, STILLS_ANCH + '\n', "    // (the control: told only the new ask's answer, as at bc7dd84d8)\n"), 'tw-no-stills') : null;
   const Kmute = M.load('src/server/browser-keeper.js', anchored(ksrc3, HOLDS_ANCH, "    for (const h of tabWatchHolds) if (h.pid === pid) { h.counted = false; h.ask++; h.kw = null; } // (the control: counted out, never asks again)\n"), 'tw-no-again');
-  const [ro, cRo, cMute] = await Promise.all([reopenLeg(K, 'reopen'), reopenLeg(Kold, 'c-reopen'), reopenLeg(Kmute, 'c-again')]);
+  const [ro, cRo, cMute, cSt] = await Promise.all([reopenLeg(K, 'reopen'), reopenLeg(Kold, 'c-reopen'), reopenLeg(Kmute, 'c-again'), Kstills ? reopenLeg(Kstills, 'c-stills') : Promise.resolve(null)]);
   ok(ro.newer && ro.newer.live === true && ro.drawsAfterOlder === true && ro.leftOn === false && ro.log.filter((x) => x === `OFF ${A1}`).length === 1,
     'r4779 THE MUST (law 5): the page watch reopens between two watchers of one tab and the OLDER leaves — the newer still draws (the kernel holds its lease); the last leaver\'s ONE OFF ends it', ro.log);
   ok(cRo.drawsAfterOlder === false, 'CONTROL (the reset drops the counts only, as at 73d130109): the older watcher\'s leaving switches the newer one\'s lease OFF — RED', cRo.log);
-  ok(J(ro.told) === J([{ live: true }]) && ro.log.indexOf(`ON ${A1}`, ro.log.indexOf('REOPEN') + 1) > -1 && ro.log.filter((x) => x === `ON ${A1}`).length === 3,
+  ok(J(ro.told) === J([{ live: false, code: 'tab_watch_lapsed' }, { live: true }]) && ro.log.indexOf(`ON ${A1}`, ro.log.indexOf('REOPEN') + 1) > -1 && ro.log.filter((x) => x === `ON ${A1}`).length === 3,
     'r4779 (the should beside it): the older watcher, whose lease ended with the old socket, asks AGAIN on the new one and is TOLD its answer (never a stale «live» under the half-second words)', { told: ro.told, log: ro.log });
+  ok(J(ro.toldWhileAsking) === J([{ live: false, code: 'tab_watch_lapsed' }]), 'r4808: at the reopen the older watcher is told «stills» AT ONCE — before its new ask\'s reply (held by the leg)', ro.toldWhileAsking);
+  if (cSt) ok(cSt.toldWhileAsking.length === 0, 'CONTROL (told only the new ask\'s answer, as at bc7dd84d8): while the new ask waits, the record keeps «live» over stills — RED', cSt.toldWhileAsking);
   ok(cMute.told.length === 0, 'CONTROL (counted out, never asks again): the older watcher is told nothing — its record keeps a «live» no socket holds — RED', cMute);
   // r4779 (law 3 — red at will by PLACED holds, never a clock): two ONs of one tab IN FLIGHT, each answer held by the leg.
   // (u) the race should: the second is confirmed, then the first answers «unanswered» (past its bound) — no OFF while the confirmed
   //     hold counts the tab. (l) r4745's should, now cured: the first is confirmed and its viewer LEAVES before the second's answer —
-  //     no OFF either (a hold counts from its ASK, so an OFF never passes an ON in flight). The fact: the kernel's own lease set
+  //     no OFF either (a hold counts from its ASK, so an OFF never passes an ON in flight). (r, r4808, both readers' should) the
+  //     first confirmed, the second asks, the first LEAVES, then the second is REFUSED by a code that holds nothing (target_crashed):
+  //     the last share's leaving sends the OFF — the first's confirmed lease is on. The fact: the kernel's own lease set
   const raceLeg = async (Kmod, tag, mode) => {
     const log = [], kernel = new Set(), held = [];
     const watchTarget = async (url, id) => ({ ok: true, close: () => log.push(`screencast-closed ${id.slice(0, 4)}`) });
@@ -227,9 +241,23 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
         return Promise.resolve({ ok: true, targetId: id, watching: false, activeCount: kernel.size }); } });
     const target = { ok: true, kind: 'attachment', profileId: PID };
     const flush = () => new Promise((r) => setImmediate(r));
+    let a, b;
+    if (mode === 'r') {
+      const pa = kw.watchTabFor(target, T(1), {});
+      if (held.length !== 1) return { log, unmade: `the scene was not made: ${held.length} ONs in flight` };
+      held[0](); a = await pa;
+      const pb = kw.watchTabFor(target, T(1), {});
+      if (held.length !== 2) return { log, unmade: `the scene was not made: ${held.length} ONs in flight` };
+      a.close(); await flush(); log.push('A-LEFT');
+      held[1]({ ok: false, code: 'target_crashed', targetId: T(1), watching: false, activeCount: kernel.size, limit: 4 }); b = await pb;
+      await flush();
+      const leftOn = kernel.has(T(1));
+      b.close(); await flush();
+      try { kw.shutdown?.(); } catch { /* */ }
+      return { log, b: b.tabWatch, leftOn };
+    }
     const pa = kw.watchTabFor(target, T(1), {}), pb = kw.watchTabFor(target, T(1), {});
     if (held.length !== 2) return { log, unmade: `the scene was not made: ${held.length} ONs in flight` };
-    let a, b;
     if (mode === 'u') { held[1](); b = await pb; held[0]({ ok: false, code: 'tab_watch_unanswered' }); a = await pa; }
     else { held[0](); a = await pa; a.close(); await flush(); log.push('A-LEFT'); held[1](); b = await pb; }
     await flush();
@@ -239,18 +267,25 @@ const keeperLeg = async (Kmod, tag, { tabWatch = true, cap = false, unconfirmed 
     try { kw.shutdown?.(); } catch { /* */ }
     return { log, drawsForB, a: a.tabWatch, b: b.tabWatch, leftOn: kernel.has(T(1)) };
   };
-  const CONF_ANCH = "    if (a && a.ok && a.watching === true) { h.kw = { on: true }; return true; }\n";
+  const CONF_ANCH = "    if (a && a.ok && a.watching === true) { tabWatchLeased.add(k); h.kw = { on: true }; return true; }\n";
   if (!ksrc3.includes(CONF_ANCH)) ok(false, 'the anchor of the control «counted only once confirmed» is not in the source (src/server/browser-keeper.js)');
   const Krace = M.load('src/server/browser-keeper.js', anchored(ksrc3, UNC_ANCH, "    tabWatchRelease(h, false); if (code === 'tab_watch_unanswered' || code === 'tab_watch_failed') paintWatch.setTabWatch(h.pid, h.id, false); // (the control: the OFF whoever else holds the tab, as at 73d130109)\n"), 'tw-race');
-  const Kconf = M.load('src/server/browser-keeper.js', anchored(anchored(ksrc3, ASK_ANCH, "    h.counted = true; // (the control: counted only once confirmed, as at 73d130109)\n"), CONF_ANCH, "    if (a && a.ok && a.watching === true) { tabWatchCounts.set(k, (tabWatchCounts.get(k) || 0) + 1); h.kw = { on: true }; return true; }\n"), 'tw-confirmed-count');
-  const [ru, cRu, rl, cRl] = await Promise.all([raceLeg(K, 'race-u', 'u'), raceLeg(Krace, 'c-race-u', 'u'), raceLeg(K, 'race-l', 'l'), raceLeg(Kconf, 'c-race-l', 'l')]);
-  for (const x of [ru, cRu, rl, cRl]) if (x.unmade) ok(false, `the race leg: ${x.unmade} — the leg cannot judge`, x.log);
+  const Kconf = ksrc3.includes(CONF_ANCH) ? M.load('src/server/browser-keeper.js', anchored(anchored(ksrc3, ASK_ANCH, "    h.counted = true; // (the control: counted only once confirmed, as at 73d130109)\n"), CONF_ANCH, "    if (a && a.ok && a.watching === true) { tabWatchCounts.set(k, (tabWatchCounts.get(k) || 0) + 1); tabWatchLeased.add(k); h.kw = { on: true }; return true; }\n"), 'tw-confirmed-count') : null;
+  const LEASED_ANCH = ksrc3.split('\n').find((l) => l.startsWith('    if (!mayHold && !tabWatchLeased.has(k)) return;')) || '\u0000';
+  if (!ksrc3.includes(LEASED_ANCH + '\n')) ok(false, 'the anchor of the control «a refusal sends no OFF» is not in the source (src/server/browser-keeper.js)');
+  const Kleased = ksrc3.includes(LEASED_ANCH + '\n') ? M.load('src/server/browser-keeper.js', anchored(ksrc3, LEASED_ANCH + '\n', "    if (!mayHold) return; // (the control: a refusal sends no OFF, as at bc7dd84d8)\n"), 'tw-refused-no-off') : null;
+  const [ru, cRu, rl, cRl, rr, cRr] = await Promise.all([raceLeg(K, 'race-u', 'u'), raceLeg(Krace, 'c-race-u', 'u'), raceLeg(K, 'race-l', 'l'), Kconf ? raceLeg(Kconf, 'c-race-l', 'l') : Promise.resolve(null),
+    raceLeg(K, 'race-r', 'r'), Kleased ? raceLeg(Kleased, 'c-race-r', 'r') : Promise.resolve(null)]);
+  for (const x of [ru, cRu, rl, cRl, rr, cRr].filter(Boolean)) if (x.unmade) ok(false, `the race leg: ${x.unmade} — the leg cannot judge`, x.log);
   ok(!ru.unmade && ru.b && ru.b.live === true && ru.a && ru.a.live === false && ru.a.code === 'tab_watch_unanswered' && ru.drawsForB === true && ru.leftOn === false,
     'r4779 (u): an unconfirmed ON in flight beside a confirmed one sends NO OFF while the confirmed hold counts the tab — the confirmed viewer still draws; the last leaving ends the lease', ru.log);
   ok(!cRu.unmade && cRu.drawsForB === false, 'CONTROL (the OFF whoever else holds the tab, as at 73d130109): the unconfirmed ON\'s OFF ends the confirmed viewer\'s lease — RED', cRu.log);
   ok(!rl.unmade && rl.a && rl.a.live === true && rl.b && rl.b.live === true && rl.drawsForB === true && rl.log.indexOf(`OFF ${A1}`) > rl.log.indexOf('A-LEFT') && rl.leftOn === false,
     'r4779 (l, r4745\'s should): the first ON confirmed and its viewer gone BEFORE the second\'s answer — no OFF passes the ON in flight (a hold counts from its ask); the second viewer draws', rl.log);
-  ok(!cRl.unmade && cRl.drawsForB === false && cRl.b && cRl.b.live === true, 'CONTROL (counted only once confirmed, as at 73d130109): the first leaver\'s OFF passes the second ON in flight — told «live» over no lease — RED', cRl.log);
+  if (cRl) ok(!cRl.unmade && cRl.drawsForB === false && cRl.b && cRl.b.live === true, 'CONTROL (counted only once confirmed, as at 73d130109): the first leaver\'s OFF passes the second ON in flight — told «live» over no lease — RED', cRl.log);
+  ok(!rr.unmade && rr.b && rr.b.live === false && rr.b.code === 'target_crashed' && rr.leftOn === false && rr.log.indexOf(`OFF ${A1}`) > rr.log.indexOf('A-LEFT'),
+    'r4808 (r): the first viewer\'s ON confirmed, the second asks, the first leaves, the second is REFUSED (a code that holds nothing) — the last share\'s leaving sends the OFF all the same: no lease stays on with nobody watching', rr.log);
+  if (cRr) ok(!cRr.unmade && cRr.leftOn === true, 'CONTROL (a refusal sends no OFF, as at bc7dd84d8): the first viewer\'s lease stays on with nobody watching until the socket ends — RED', cRr.log);
 }
 
 // ═══ ③b the launch's rule, by behaviour: the keeper's own launchEngineOf over a stand-in engine registry ═══
@@ -378,21 +413,31 @@ const dialogsLeg = async (Dmod) => {
   if (lkc) ok(!!lkc.busy && lkc.busy.ok === true && lkc.frozenAfterBusy > 0, 'CONTROL (no second look, as at the release): a browser whose viewer arrived during the fronts\' read is frozen anyway — RED', lkc);
   // r4779 (the should: the reset's wiring was pinned by nothing — ③ calls the keeper's reset itself): the page watch's OPEN tells the
   // keeper, with its profile. The fact judged: the keeper's own reset called when the socket opened. RED: the open without that call
+  // r4808: and the CURRENT socket's END tells it too (the leases ended there — a watch reads «stills» now, not at the next open). The
+  // stand-in browser goes away (no reopen can come); the fact waited on: the page watch's own facts gone (down ran — the same call)
   const resetLeg = async (Dmod) => {
-    const SI = await standIn(); const PID = 'bp-0000d0e7'; const resets = [];
+    const SI = await standIn(); const PID = 'bp-0000d0e7'; const resets = []; let gone = false;
     const D = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: SI.url }), holdsDialogsFor: () => true, tabWatchReset: (pid) => resets.push(String(pid)) }, log: quiet, leaseCountOf: () => 1, tabsOf: () => [] });
     try {
       await D.arm(PID, { budgetMs: 3000 });
       const opened = await until(() => !!D.paintFacts(PID), 3000);
-      return { opened, resets: resets.slice() };
-    } finally { try { D.shutdown(); } catch { /* */ } await SI.close(); }
+      const atOpen = resets.slice();
+      gone = true; await SI.close();
+      const down = opened ? await until(() => !D.paintFacts(PID), 3000) : false;
+      return { opened, atOpen, down, resets: resets.slice() };
+    } finally { try { D.shutdown(); } catch { /* */ } if (!gone) await SI.close(); }
   };
   const RST_ANCH = "      if (keeper && typeof keeper.tabWatchReset === 'function') { try { keeper.tabWatchReset(w.profileId); } catch { /* the keeper's own */ } } // r4745 (S1) + r4779: …so the keeper's counts of this profile go with them, and each watch of it asks again on THIS socket\n";
   if (!dsrc.includes(RST_ANCH)) ok(false, 'the anchor of the control «the open tells the keeper nothing» is not in the source (src/server/browser-dialogs.js)');
   const Dr = dsrc.includes(RST_ANCH) ? M.load('src/server/browser-dialogs.js', anchored(dsrc, RST_ANCH, "      // (the control: the open tells the keeper nothing)\n"), 'tw-no-reset') : null;
-  const [rs, rsc] = await Promise.all([resetLeg(DD), Dr ? resetLeg(Dr) : Promise.resolve(null)]);
-  ok(rs.opened && J(rs.resets) === J(['bp-0000d0e7']), 'r4779: the page watch\'s socket OPENING tells the keeper (its profile\'s counts go, each watch of it asks again on this socket)', rs);
-  if (rsc) ok(rsc.opened && rsc.resets.length === 0, 'CONTROL (the open tells the keeper nothing): no reset reaches the keeper — RED', rsc);
+  const DOWN_ANCH = dsrc.split('\n').find((l) => l.startsWith("    if (watches.get(w.profileId) === w && keeper && typeof keeper.tabWatchReset === 'function')")) || '\u0000';
+  if (!dsrc.includes(DOWN_ANCH + '\n')) ok(false, 'the anchor of the control «the socket\'s end tells the keeper nothing» is not in the source (src/server/browser-dialogs.js)');
+  const Dd = dsrc.includes(DOWN_ANCH + '\n') ? M.load('src/server/browser-dialogs.js', anchored(dsrc, DOWN_ANCH + '\n', "    // (the control: the socket's end tells the keeper nothing, as at bc7dd84d8)\n"), 'tw-down-silent') : null;
+  const [rs, rsc, rsd] = await Promise.all([resetLeg(DD), Dr ? resetLeg(Dr) : Promise.resolve(null), Dd ? resetLeg(Dd) : Promise.resolve(null)]);
+  ok(rs.opened && J(rs.atOpen) === J(['bp-0000d0e7']), 'r4779: the page watch\'s socket OPENING tells the keeper (its profile\'s counts go, each watch of it asks again on this socket)', rs);
+  if (rsc) ok(rsc.opened && rsc.atOpen.length === 0, 'CONTROL (the open tells the keeper nothing): no reset reaches the keeper — RED', rsc);
+  ok(rs.down && rs.resets.length >= 2 && rs.resets.every((p) => p === 'bp-0000d0e7'), /* ≥ 2: a reconnect's failed try may end one more watch */ 'r4808: the page watch\'s CURRENT socket ENDING tells the keeper too — every watch of the profile is told «stills» now (its ask answers unavailable), not at the next open', rs);
+  if (rsd) ok(rsd.down && rsd.resets.length === 1, 'CONTROL (the socket\'s end tells the keeper nothing, as at bc7dd84d8): no reset until a next open that may never come — RED', rsd);
 }
 
 // ═══ ⑤ the bridge's watching record ═══
@@ -400,12 +445,12 @@ console.log('— ⑤ the bridge: `live` / `capped` ride the watching record on t
 {
   const { WebSocket, WebSocketServer } = require('ws');
   const KA = 'bk-0000d0a1';
-  const bridgeLeg = async (tabWatch, BS = require('../src/server/browser-stream.js'), { again = false } = {}) => {
+  const bridgeLeg = async (tabWatch, BS = require('../src/server/browser-stream.js'), { again = false, early = false } = {}) => {
     let closes = 0, hooksOf = null;
     const fk = { setFor: () => ({ attachments: [{ profileId: 'bp-0000d0f1', alias: 'work', isDefault: true, label: 'Work' }], handles: ['work'], defaultId: 'bp-0000d0f1', children: [] }), list: () => ({ profiles: [{ id: 'bp-0000d0f1', label: 'Work' }] }),
       streamPortFor: async () => ({ ok: true, port: upPort }), inputStateFor: () => ({ input: 'agent' }), noteViewers: () => {},
       tabOwnersFor: async () => ({ ok: true, owners: { [T(1)]: 'agent', [T(2)]: 'agent' }, mediated: false, adoptable: false }),
-      watchTabFor: async (target, id, hooks) => { hooksOf = hooks; return { ok: true, close: () => { closes++; }, ...(tabWatch ? { tabWatch } : {}) }; } };
+      watchTabFor: async (target, id, hooks) => { hooksOf = hooks; if (early && typeof hooks.onTabWatch === 'function') hooks.onTabWatch({ live: true }); return { ok: true, close: () => { closes++; }, ...(tabWatch ? { tabWatch } : {}) }; } };
     const up = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await new Promise((r) => up.on('listening', r)); const upPort = up.address().port;
     up.on('connection', (ws) => { ws.send(JSON.stringify({ type: 'status', connected: true })); ws.send(JSON.stringify({ type: 'tabs', tabs: [{ tabId: 't1', targetId: T(1), title: 'A', url: 'https://a.example/', active: true }, { tabId: 't2', targetId: T(2), title: 'B', url: 'https://b.example/', active: false }] })); });
     const br = BS.create({ keeper: fk, activeSessions: new Map([['sess-w', { _browserKey: KA, webuiId: 'sess-w' }]]), requestAuthed: () => true, log: quiet });
@@ -416,11 +461,12 @@ console.log('— ⑤ the bridge: `live` / `capped` ride the watching record on t
     const owners = await until(() => got.some((x) => x.type === 'tab-owners'), 3000); // the fact the watch's judge reads: the tab is one of this browser's
     ws.send(JSON.stringify({ type: 'watch-tab', targetId: T(2) }));
     // the fact each road judges: the watch's own record (on the kernel's road its live / capped record; on stock its first record)
-    const want = (x) => x.type === 'watching' && x.targetId === T(2) && !x.refused && (tabWatch && (tabWatch.live || tabWatch.code === 'too_many_watched_tabs') ? ('live' in x || 'capped' in x) : true);
+    const want = (x) => x.type === 'watching' && x.targetId === T(2) && !x.refused && (early ? x.live === true : tabWatch && (tabWatch.live || tabWatch.code === 'too_many_watched_tabs') ? ('live' in x || 'capped' in x) : true);
     const settled = await until(() => got.some(want), 3000);
     // r4779: the page watch reopened — the keeper asked the kernel again and TELLS the watch its answer (here: first a still, then live)
     const toldAt = got.length;
     if (again && settled && hooksOf && typeof hooksOf.onTabWatch === 'function') { hooksOf.onTabWatch({ live: false, code: 'tab_watch_unavailable' }); hooksOf.onTabWatch({ live: true }); }
+    if (early && settled && hooksOf && typeof hooksOf.onMode === 'function') hooksOf.onMode('polling'); // r4808: the next record of the watch (its mode) says the kw it keeps
     // THE BRIDGE's OFF ROAD (r4745): the viewer follows the agent's tab again ⇒ the watch's close (the keeper's OFF) runs, once
     ws.send(JSON.stringify({ type: 'watch-tab', targetId: null }));
     const closed = await until(() => closes >= 1, 3000);
@@ -432,8 +478,14 @@ console.log('— ⑤ the bridge: `live` / `capped` ride the watching record on t
   const TOLD_ANCH = bsrc.split('\n').find((l) => l.startsWith('      onTabWatch: (tw) => {')) || '\u0000';
   if (!bsrc.includes(TOLD_ANCH + '\n')) ok(false, 'the anchor of the control «the bridge hears nothing of a reopen» is not in the source (src/server/browser-stream.js)');
   const Bmute = bsrc.includes(TOLD_ANCH + '\n') ? M.load('src/server/browser-stream.js', anchored(bsrc, TOLD_ANCH + '\n', '      // (the control: the bridge hears nothing of a reopen)\n'), 'tw-bridge-deaf') : null;
-  const [live, capped, stock, again, cAgain] = await Promise.all([bridgeLeg({ live: true }), bridgeLeg({ live: false, code: 'too_many_watched_tabs', limit: 4 }), bridgeLeg(null),
-    bridgeLeg({ live: true }, undefined, { again: true }), Bmute ? bridgeLeg({ live: true }, Bmute, { again: true }) : Promise.resolve(null)]);
+  // r4808 (the readers' microtask corner): a reopen's TOLD answer landing before the watch's own result — the result's older
+  // snapshot (here «lapsed») must not clear it. RED: the result written over a told answer
+  const SNAP_ANCH = bsrc.split('\n').find((l) => l.startsWith('      if (live() && seq === viewer.watchSeq && r.tabWatch && !w.told)')) || '\u0000';
+  if (!bsrc.includes(SNAP_ANCH + '\n')) ok(false, 'the anchor of the control «the result written over a told answer» is not in the source (src/server/browser-stream.js)');
+  const Bsnap = bsrc.includes(SNAP_ANCH + '\n') ? M.load('src/server/browser-stream.js', anchored(bsrc, SNAP_ANCH + '\n', SNAP_ANCH.replace(' && !w.told)', ')') + '\n'), 'tw-bridge-snapshot') : null;
+  const [live, capped, stock, again, cAgain, early, cEarly] = await Promise.all([bridgeLeg({ live: true }), bridgeLeg({ live: false, code: 'too_many_watched_tabs', limit: 4 }), bridgeLeg(null),
+    bridgeLeg({ live: true }, undefined, { again: true }), Bmute ? bridgeLeg({ live: true }, Bmute, { again: true }) : Promise.resolve(null),
+    bridgeLeg({ live: false, code: 'tab_watch_lapsed' }, undefined, { early: true }), Bsnap ? bridgeLeg({ live: false, code: 'tab_watch_lapsed' }, Bsnap, { early: true }) : Promise.resolve(null)]);
   if (!live.owners || !capped.owners || !stock.owners || !live.settled || !capped.settled || !stock.settled) ok(false, 'the bridge leg: the tab owners or the watch\'s own record never reached the viewer within 3 s — the leg cannot judge', { live: [live.owners, live.settled], capped: [capped.owners, capped.settled], stock: [stock.owners, stock.settled] });
   else {
     ok(live.watching.some((x) => x.targetId === T(2) && x.live === true) && !J(live.watching).includes('example'), 'the watching record says `live` on the kernel\'s road (a target id and a word, no address)', live.watching);
@@ -443,6 +495,8 @@ console.log('— ⑤ the bridge: `live` / `capped` ride the watching record on t
     ok(again.back && again.told.length === 2 && !('live' in again.told[0]) && !('capped' in again.told[0]) && again.told[1].live === true && !J(again.told).includes('example'),
       'r4779: the page watch reopened — the record says what the keeper was TOLD on asking again: a still drops «live» (the effect sentence goes), a confirmed answer brings it back', again.told);
     if (cAgain) ok(cAgain.back && cAgain.told.length === 0, 'CONTROL (the bridge hears nothing of a reopen): the record keeps its «live» whatever the kernel answered again — RED', cAgain.told);
+    ok(early.settled && early.told.some((x) => x.mode === 'polling' && x.live === true), 'r4808: a TOLD answer that lands before the watch\'s own result stands — the result\'s older snapshot does not clear it (the next record still says «live»)', early.told);
+    if (cEarly) ok(cEarly.settled && cEarly.told.some((x) => x.mode === 'polling') && !cEarly.told.some((x) => x.mode === 'polling' && x.live === true), 'CONTROL (the result written over a told answer): the older snapshot clears «live» silently — the next record drops it — RED', cEarly.told);
   }
 }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 3, label: '⑥ ' })) ok(r.pass, r.name, r.detail);
