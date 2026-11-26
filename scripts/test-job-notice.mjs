@@ -451,23 +451,36 @@ try {
     // milliseconds), so by Date.now() it may FIRE a millisecond early. So the leg records each setTimeout call of the publish
     // (its delay and Date.now() at the call) and judges the URL check's timer by its DUE INSTANT on Date.now(): exact arithmetic,
     // no slack. When it fires does not matter: the check looks when it fires, with no «too early» test of its own.
-    const own = async (JM, tag) => {
+    // the flake census round 2 (主开发 r4456, its find at the RED CONTROL below): `graceMs` the grace planted, `wait` whether the check is
+    // awaited (a planted grace of a minute is judged by its SCHEDULE alone, its timer never awaited), `hold` a PLACED hold of the loop
+    // between the run's start and the publish (what a loaded box does to the call that schedules the check)
+    const own = async (JM, tag, { graceMs = 300, wait = true, hold = 0 } = {}) => {
       said.length = 0; lines.length = 0;
-      const E = mkU(JM, tag, { urlGraceMs: 300, urlRelookMs: 20, urlAnswers: async (u) => u === TCP0 }); E._bootAt = Date.now() - 600_000;
+      const E = mkU(JM, tag, { urlGraceMs: graceMs, urlRelookMs: 20, urlAnswers: async (u) => u === TCP0 }); E._bootAt = Date.now() - 600_000;
       const runStart = Date.now(); const oj = jobU(tag, { runs: [{ startedAt: runStart, trigger: 'restart' }] }); E.jobs.set(oj.id, oj);
+      if (hold) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, hold);
       const realSetTimeout = globalThis.setTimeout, scheduled = new Map();
       globalThis.setTimeout = (fn, ms, ...a) => { const at = Date.now(), t = realSetTimeout(fn, ms, ...a); scheduled.set(t, { at, ms: Number(ms) || 0 }); return t; };
       try { relay.mode = 'tcp'; await E._ensurePublish(oj); } finally { globalThis.setTimeout = realSetTimeout; }
       const urlTimer = [...(E._urlTimers || [])].map((t) => scheduled.get(t)).find(Boolean) || null; // the URL check's own timer, by the engine's own set
-      await waitLine(oj.id, /public URL changed/);
-      const out = { said: said.slice(), dueAfterStart: urlTimer ? urlTimer.at + urlTimer.ms - runStart : null, urlTimer }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
+      if (wait) await waitLine(oj.id, /public URL changed/);
+      const out = { said: said.slice(), dueAfterStart: urlTimer ? urlTimer.at + urlTimer.ms - runStart : null, urlTimer, graceMs }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const o1 = await own(JobManager, 'own');
     ok(o1.dueAfterStart !== null && o1.dueAfterStart >= 300 && o1.said.length === 1, 'B-74f5 r2 (b): a service\'s OWN restart (its run 0 s old, the hub 10 min up) opens the grace too — its URL check is DUE no earlier than the run\'s start + the grace (judged on Date.now(), the clock the product schedules with)', JSON.stringify(o1));
     const START = '    const start = Math.max(this._bootAt || 0, this._relayAt || 0, this._runStartOf(job));';
     const JMo = mcB('job-notice-b74f5-own', ROOT).load('src/jobs.js', anchored(JSr, START, '    const start = Math.max(this._bootAt || 0, this._relayAt || 0);', 'B-74f5 r2 control: no grace from the job\'s start'), 'no-own-grace').JobManager;
-    const o0 = await own(JMo, 'ow0');
-    ok(o0.dueAfterStart !== null && o0.dueAfterStart < 300, 'RED CONTROL (B-74f5 r2 (b)): a grace measured from the hub\'s start only makes the job\'s restart\'s check DUE at once, inside its own grace', JSON.stringify(o0));
+    // r4456: the RED CONTROL read its grace on a CLOCK — the mutant's check due «< 300 ms» after the run's start — and a publish that ran
+    // 300 ms late on a loaded box made the mutant's due look like the grace, with nothing wrong. The grace is PLANTED at a minute (no box is
+    // that late) and the schedule judged against it, the timer never awaited: the fixed engine's check is due no earlier than the run's
+    // start + the grace; the mutant's at once (inside it). The same under a PLACED hold of 320 ms; and the old reading, placed, shown wrong.
+    const LONG = 60_000;
+    const oL = await own(JobManager, 'owL', { graceMs: LONG, wait: false }), o0 = await own(JMo, 'ow0', { graceMs: LONG, wait: false });
+    ok(oL.dueAfterStart !== null && oL.dueAfterStart >= LONG && o0.dueAfterStart !== null && o0.dueAfterStart < LONG, 'RED CONTROL (B-74f5 r2 (b)), by the SCHEDULE: a grace measured from the hub\'s start only makes the job\'s restart\'s check DUE at once, inside its own grace — the grace planted at a minute, judged against it (the fixed engine\'s check due after it)', JSON.stringify({ fixed: oL.dueAfterStart, mutant: o0.dueAfterStart }));
+    const oLh = await own(JobManager, 'owLh', { graceMs: LONG, wait: false, hold: 320 }), o0h = await own(JMo, 'ow0h', { graceMs: LONG, wait: false, hold: 320 });
+    ok(oLh.dueAfterStart !== null && oLh.dueAfterStart >= LONG && o0h.dueAfterStart !== null && o0h.dueAfterStart < LONG, 'PLACED: the loop held 320 ms between the run\'s start and the publish — the schedule reads the same (fixed: after the grace; mutant: inside it)', JSON.stringify({ fixed: oLh.dueAfterStart, mutant: o0h.dueAfterStart }));
+    const pl0 = await own(JMo, 'ow0p', { graceMs: 300, wait: false, hold: 320 });
+    ok(pl0.dueAfterStart !== null && pl0.dueAfterStart >= 300, `PLACED (the find): with the 300 ms grace and the same 320 ms hold, the mutant's check reads due ${pl0.dueAfterStart} ms after the run's start — the old reading («< 300») called it the grace: a clock, so the control is judged by the schedule now`, JSON.stringify(pl0));
     const twice = async (JM, tag) => {
       said.length = 0; lines.length = 0; const asked = new Map();
       const E = mkU(JM, tag, { urlAnswers: async (u) => { const n = (asked.get(u) || 0) + 1; asked.set(u, n); return u === TCP0 || (u === URL0 && n > 1); } });
