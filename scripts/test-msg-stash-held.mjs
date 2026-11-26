@@ -589,4 +589,26 @@ console.log('§12 主开发 r5164 (2), a silence of the release: the stash\'s he
   else ok(hx.h1.durable === true, '§12 RED CONTROL (the release\'s health): «durable» while nothing is written', hx);
 }
 
+console.log('§13 主开发 r5164 (2): the hand-back whose note the stash REFUSES (a failed write, the list readable) — the real road answers stash_refused, and the page\'s words say a hand-back with its warning, no path');
+{
+  const TT = require(path.join(REPO, 'src/browser-tabs.js'));
+  const refusedRun = async () => {
+    const dir = mk(), F = path.join(dir, 'msg-stash.json'); fs.writeFileSync(F, BYTES);
+    const D = CD.create(deps(dir));
+    const sess = { name: 'Agent One', backend: 'claude', backendSessionId: CC, claudeSessionId: CC, mode: 'chat' };
+    const keeper = { continueState: async () => ({ ok: true, tabs: [{ url: 'https://example.test/a', title: 'A' }], currentIndex: 0, tookOver: true, own: false, rerun: null, userActs: [] }) };
+    const hb = require(path.join(REPO, 'src/server/browser-handback.js')).create({ keeper, deliver: D, activeSessions: new Map([['s1', sess]]), emitCard: () => true, notice: () => { }, log: { log() { }, warn() { } } });
+    const realRename = fs.renameSync; let refused = 0;
+    // the plant: the stash's rename refused (EIO) while the list reads — a ref'd entry's write that fails is taken back with a throw; `refused` is its WITNESS
+    fs.renameSync = function (x, y, ...z) { if (path.resolve(String(y)) === path.resolve(F)) { refused++; throw Object.assign(new Error('EIO: i/o error, rename (placed)'), { code: 'EIO' }); } return realRename.call(this, x, y, ...z); };
+    let v; try { v = await hb.continueFor({ sessionId: 's1', note: 'pick the blue one' }); } finally { fs.renameSync = realRename; }
+    const routed = v && v.ok ? v : { error: String((v && (v.error || v.code)) || ''), code: v && v.code, handles: [] };   // src/routes/browser.js failVerdict's shape
+    const w = TT.handBackAnswerWords(routed);
+    return { refused, code: v && v.code, errorNamesFile: /msg-stash\.json/.test(String(v && v.error)), handedBack: w.handedBack, warn: w.warn, words: w.text, noPath: !/msg-stash|\.json|EIO/.test(w.text) };
+  };
+  const g = await refusedRun();
+  if (!(g.refused >= 1)) console.log(`  SKIP §13: the placed refusal was never read (${JSON.stringify(g)})`);
+  else ok(g.code === 'stash_refused' && g.handedBack && g.warn && /could not be queued/.test(g.words) && g.noPath, `§13 the real road: a refused stash write answers stash_refused (its error names the file: ${g.errorNamesFile}) — the page's words say HANDED BACK with a warning that the note was not queued, no path`, g);
+}
+
 report();

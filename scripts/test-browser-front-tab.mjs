@@ -830,4 +830,34 @@ console.log('— ④ the words: every key frontText asks t() for has a zh and a 
   keys.push('In front'); uniq.push('In front'); miss.push(...['In front'].filter((k) => !has(zh, k) || !has(ja, k))); // B-e674 (r608): the fold's word
   ok(uniq.length === 15 && miss.length === 0, `every key frontText / frontNoteText / madeText / handbackStayText (+ the handback's joiner, and the fold's «In front») ask t() for (${uniq.length}) has a zh and a ja row`, miss);
 }
+console.log('— ⑧ 主开发 r5164 (2), a silence of the release: the hand-back\'s answer read whole — a note not queued (stash_refused: handed back all the same), a note not on disk, said; no path, no value');
+{
+  // the route's own answers (src/routes/browser.js: ok ⇒ its fields; a refusal ⇒ failVerdict's { error, code, handles })
+  const ANS = { ok: { ok: true, id: 'bres-0a0b0c0d', stashed: true, durable: true, carded: true, tabs: 1 },
+    notQueued: { error: 'the note could not be queued for the agent\'s next turn: the stash could not be written to disk (msg-stash.json) — the entry was not stored', code: 'stash_refused', handles: [] },
+    notOnDisk: { ok: true, id: 'bres-0a0b0c0e', stashed: true, durable: false, carded: true, tabs: 1, why: 'taken, not on disk: the list could not be read' },
+    other: { error: 'the browser keeper is not available', code: 'unavailable', handles: [] } };
+  const words = (W) => Object.fromEntries(Object.entries(ANS).map(([k, r]) => [k, W(r)]));
+  const w = words(TT.handBackAnswerWords);
+  const noPath = [w.notQueued, w.notOnDisk].every((x) => !/msg-stash|\.json|EIO|\/srv\//.test(x.text));
+  ok(w.ok.handedBack && !w.ok.warn && /reads your note and the tabs/.test(w.ok.text) && w.notQueued.handedBack && w.notQueued.warn && /could not be queued for the agent's next turn/.test(w.notQueued.text) && w.notOnDisk.handedBack && w.notOnDisk.warn && /not on disk yet/.test(w.notOnDisk.text) && !w.other.handedBack && noPath,
+    '⑧ the hand-back\'s answer: queued and on disk ⇒ «handed back»; STASH_REFUSED ⇒ handed back WITH a warning that the note was not queued (never «could not hand back: <the stash\'s file>»); NOT ON DISK ⇒ a warning; another refusal ⇒ not handed back (the page\'s own words); never the stash\'s error text', JSON.stringify(w));
+  { // the three sentences each have a zh and a ja row (new words a person reads: zh and ja with them)
+    const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    const keys = []; const rec = (k) => { keys.push(k); return k; };
+    for (const r of Object.values(ANS)) TT.handBackAnswerWords(r, rec);
+    const lit = (k) => JSON.stringify(k).replace(/\\u([0-9a-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
+    const miss = [...new Set(keys)].filter((k) => !zh.includes(lit(k) + ':') || !ja.includes(lit(k) + ':'));
+    ok(new Set(keys).size === 3 && miss.length === 0, '⑧ …its three sentences each have a zh and a ja row', miss);
+  }
+  const LWS = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  ok(LWS.includes("    const w = handBackAnswerWords(r, t);\n    if (!w.handedBack) { renderMode(); showToast(t('Could not hand the browser back: {why}'") && LWS.includes('    showToast(w.text, w.warn ? { type: \'warn\', duration: 9000 } : { duration: 5000 });'),
+    '⑧ …the page decides by those words: a refusal only when not handed back, else its toast is the words (src/lib/browser-live-window.js)');
+  const TSRC = fs.readFileSync(path.join(REPO, 'src/browser-tabs.js'), 'utf8');
+  const cut1 = anchored(TSRC, "  if (r && (r.code === 'stash_refused' || (r.ok === true && r.stashed === false))) return { handedBack: true,", '  if (false) return { handedBack: true,', 'the release: a stash_refused read as a refusal');
+  const cut2 = anchored(cut1, '  if (r.durable === false) return { handedBack: true,', '  if (false) return { handedBack: true,', 'the release: durable not read');
+  const F = path.join(ROOT, 'browser-tabs-release-words.js'); fs.writeFileSync(F, absReq(cut2, path.join(REPO, 'src')));
+  const wx = words(require(F).handBackAnswerWords);
+  ok(!wx.notQueued.handedBack && !wx.notOnDisk.warn, '⑧ RED CONTROL (the release: the answer not read): a stash_refused reads «could not hand the browser back» (its error, the file named), a note not on disk «handed back»', JSON.stringify(wx));
+}
 report();

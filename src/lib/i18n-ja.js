@@ -7947,6 +7947,8 @@ export default {
   "e.g. I logged in — continue from the cart": "例：ログインしました——カートから続けて",
   "Could not hand the browser back: {why}": "ブラウザを戻せませんでした：{why}",
   "Handed back — the agent reads your note and the tabs with its next turn (nothing is sent now)": "戻しました——エージェントは次のターンでメモとタブを読みます（今は何も送信されません）",
+  "Handed back, but your note could not be queued for the agent's next turn (VibeSpace could not write it) — take the browser over again to hand it back anew": "戻しましたが、メモをエージェントの次のターンに入れられませんでした（VibeSpace が書き込めませんでした）——もう一度ブラウザを引き継げば、改めて戻せます",
+  "Handed back — your note is not on disk yet: if VibeSpace restarts before the agent's next turn, the agent will not read it": "戻しました——メモはまだディスクに書き込まれていません。エージェントの次のターンより前に VibeSpace が再起動すると、エージェントはそれを読めません",
   "Already handed back — the agent reads it with its next turn": "すでに戻してあります——エージェントは次のターンでそれを読みます",
   "Stopped — its {n} tab(s) are kept (not its logins: this browser is fenced to allowed domains). Resume reopens them": "停止中——{n} 個のタブを保持しています（ログインは保持されません：このブラウザは許可ドメインに限定されています）。再開すると開き直します",
   "Stopped — its {n} tab(s) are kept (not its logins). Resume reopens them": "停止中——{n} 個のタブを保持しています（ログインは保持されません）。再開すると開き直します",
