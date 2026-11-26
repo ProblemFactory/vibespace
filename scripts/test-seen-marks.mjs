@@ -865,7 +865,11 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     ok((w1.context || '').includes('FAULT-write') && w1.delivery && (w2.context || '').includes('FAULT-write-2') && said.length === 1,
       'r4 items 2b + 3: a throw planted at the FILE\'s write — the answer is whole AND keeps its confirm law (a delivery id): the file only serves the restart line, whose loss is said ONCE (not per answer)', said);
   }
-  for (const [label, bytes, word] of [['a number', '5', 'a number'], ['a string', '"x"', 'a string'], ['true', 'true', 'a boolean'], ['an array', '[1,2]', 'an array'], ['broken JSON', '{"a":', 'is not JSON']]) {
+  // B-f276 (lane bl-scratch, slice hub-own-ledgers): a file that holds no table is TORN under the store-read law — HELD while its bytes
+  // are kept aside (a copy beside it, byte for byte), then the table starts empty; the answer stays whole with its delivery id meanwhile.
+  // The wait is on that fact, bounded, and fails by a named line
+  const copyFact = async (dir, what, ms = 10000) => { const end = Date.now() + ms; const name = () => fs.readdirSync(dir).find((n) => n.startsWith('turn-carry-outstanding.json.corrupt-')) || null; while (Date.now() < end) { if (name()) return name(); await new Promise((r) => setTimeout(r, 10)); } ok(false, `HARNESS: «${what}» did not come within ${ms / 1000} s`); return null; };
+  for (const [label, bytes, why] of [['a number', '5', 'not the expected shape'], ['a string', '"x"', 'not the expected shape'], ['true', 'true', 'not the expected shape'], ['an array', '[1,2]', 'not the expected shape'], ['broken JSON', '{"a":', 'did not parse']]) {
     const bDir = fs.mkdtempSync(path.join(tmp, 'carry-b-'));
     fs.writeFileSync(path.join(bDir, 'turn-carry-outstanding.json'), bytes);
     routeLog.length = 0;
@@ -873,7 +877,10 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     add(F, 'NB', quiet); ssm.pushNotice('claude:NB', { kind: 'browser-proposal', text: 'BAD-FILE' });
     const b1 = askOn(F, P, 'NB');
     const lines = routeLog.filter((l) => /outstanding-deliveries file/.test(l));
-    ok(lines.length === 1 && lines[0].includes(word) && /started empty/.test(lines[0]) && (b1.context || '').includes('BAD-FILE') && b1.delivery, `r4 item 2a: the file holding ${label} is an EMPTY table, SAID once — the answer is whole with its delivery id`, lines);
+    const held = lines.filter((l) => l.includes(`turn-carry-outstanding.json did not parse (${why}) — held while its bytes are copied aside; then it starts empty`));
+    const copy = await copyFact(bDir, `the copy of the file holding ${label}`);
+    ok(held.length === 1 && !!copy && fs.readFileSync(path.join(bDir, copy), 'utf8') === bytes && (b1.context || '').includes('BAD-FILE') && b1.delivery,
+      `r4 item 2a under the store-read law (B-f276): the file holding ${label} is HELD while its bytes are kept aside (byte for byte), said once — then the table starts empty; the answer is whole with its delivery id`, lines);
     confirmOn(F, 'NB', b1.delivery);
   }
   {
@@ -891,8 +898,8 @@ console.log('§7b acceptance r1: by identity, a repeat is always said, the told 
     fs.writeFileSync(path.join(zDir, 'turn-carry-outstanding.json'), JSON.stringify({ 'claude:NBIG': { at: Date.now(), route: 'UserPromptSubmit', kinds: ['notices'] } }) + ' '.repeat(TC.OUTSTANDING_MAX_BYTES));
     const bigSaid = [];
     const big = TC.createOutstanding(zDir, { log: (l) => bigSaid.push(l) });
-    ok(!big.fromBefore('claude:NBIG') && big.size() === 0 && bigSaid.length === 1 && new RegExp(`is \\d+ B, beyond its ${TC.OUTSTANDING_MAX_BYTES} B bound .* not read; started empty`).test(bigSaid[0]),
-      `the tidy after r4 (item 3): a file past its ${TC.OUTSTANDING_MAX_BYTES} B bound is REFUSED BY NAME before it is read — never parsed (its valid row is not taken), said once`, bigSaid);
+    ok(!big.fromBefore('claude:NBIG') && big.size() === 0 && bigSaid.length === 1 && new RegExp(`is \\d+ B, beyond its ${TC.OUTSTANDING_MAX_BYTES} B bound .* — not read, and nothing is written over it in this run`).test(bigSaid[0]) && big.held()?.code === 'past its bound',
+      `the tidy after r4 (item 3), under the store-read law (B-f276): a file past its ${TC.OUTSTANDING_MAX_BYTES} B bound is REFUSED BY NAME before it is read — never parsed (its valid row is not taken), never written over in the run, said once`, bigSaid);
   }
   {
     // ════ the tidy after acceptance r4 (item 1): EVERY CLAIM HAS ITS BOUND FROM THE INSTANT IT IS STAMPED; a failing claim is SAID ════

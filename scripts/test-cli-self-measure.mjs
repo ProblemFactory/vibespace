@@ -353,15 +353,29 @@ const ledgerOf = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(di
   note(W.h); await sleep(5);
   ok(W.forks.length === 0 && !W.h.am.oatFileCaps().ok && !W.h.am.oatFileCaps().local, 'SWITCH OFF (accounts.cliSelfMeasure): nothing forked, the release road only (today\'s behaviour)');
 }
-{
-  const dir = path.join(tmp, 'orch-dmg2');
+// B-f276 (lane bl-scratch, slice hub-own-ledgers): a DAMAGED (torn) ledger is HELD while its bytes are kept aside OFF the loop (the
+// family's hold), and only then read as empty — the release read it as empty and its next keep() wrote over it. Waits on the fact
+async function damagedLedger(Mod, tag) {
+  const dir = path.join(tmp, 'orch-dmg2-' + tag);
   const h = await mkHub(dir);
-  fs.writeFileSync(path.join(dir, 'cli-self-measure.json'), '{"binaries": [');
+  const torn = '{"binaries": [';
+  fs.writeFileSync(path.join(dir, 'cli-self-measure.json'), torn);
   const forks = [], lines = [];
-  const o = ORCH.create({ accounts: () => h.am, dataDir: dir, forkFn: () => { const c = new FakeChild(); forks.push(c); return c; }, log: (...a) => lines.push(a.join(' ')), event: () => { } });
-  await o.tick(); note(h); await until(() => forks.length === 1);
-  ok(lines.filter((l) => /is damaged — read as empty/.test(l)).length === 1 && forks.length === 1, 'a DAMAGED ledger is said once and read as empty — fail closed: nothing trusted, the build is checked again', lines);
+  const o = Mod.create({ accounts: () => h.am, dataDir: dir, forkFn: () => { const c = new FakeChild(); forks.push(c); return c; }, log: (...a) => lines.push(a.join(' ')), event: () => { } });
+  await o.tick(); note(h); await until(() => forks.length === 1, 10000);
+  const copies = fs.readdirSync(dir).filter((n) => n.startsWith('cli-self-measure.json.corrupt-'));
   o.stop();
+  return { lines, forks: forks.length, copy: copies.length === 1 && fs.readFileSync(path.join(dir, copies[0]), 'utf8') === torn ? copies[0] : null };
+}
+{
+  const d = await damagedLedger(ORCH, 'tip');
+  ok(d.lines.filter((l) => /cli-self-measure\.json did not parse \(did not parse\) — held while its bytes are copied aside; then it starts empty/.test(l)).length === 1 && !!d.copy && d.forks === 1
+      && d.lines.some((l) => l.includes(`torn bytes, kept aside as ${d.copy} — it starts empty`)),
+    'a DAMAGED ledger is HELD while its bytes are kept aside (a copy beside it, byte for byte, named once), then read as empty — fail closed: nothing trusted, the build is checked again', d);
+  const RELEASE = mutantCopies('cli-self-measure-dmg', REPO).load('src/server/cli-self-measure.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/cli-self-measure.js'), 'utf8'),
+    "      if (a.state !== 'data') { readFail = { code: 'torn bytes', at: now() }; hold.start(a); return false; }", "      if (a.state !== 'data') { ledger = { schema: 1, binaries: merged({}) }; read = true; readFail = null; return true; }", 'the release\'s damaged read'), 'release-damaged');
+  const r = await damagedLedger(RELEASE, 'release');
+  ok(!r.copy && r.forks === 1, 'RED (the release\'s read: torn bytes read as empty at once): no copy kept aside — the next keep() writes over the only copy', { copy: r.copy, forks: r.forks });
 }
 {
   const W = await world('r4');
@@ -387,8 +401,12 @@ const ledgerOf = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(di
     clock += 31e3; await o.tick(); await sleep(5);
     ok(reads === 2 && said() === 1 && forks.length === 0, '…read again at the tick a minute later (no faster), still said once, still nothing forked', { reads, said: said() });
     fs.rmdirSync(path.join(dir, 'cli-self-measure.json'));
+    // B-f276 (lane bl-scratch): the family's hold owns the failed read — a file ABSENT right after it is read ONCE MORE (a storage coming
+    // back answers ENOENT first), never taken for «empty» at once
+    clock += 61e3; await o.tick(); await sleep(5);
+    const heldAfterOne = forks.length === 0 && o.state().read === false;
     clock += 61e3; await o.tick(); await until(() => forks.length === 1);
-    ok(forks.length === 1 && o.state().read === true, '…and the first read that succeeds decides: the unseen build is checked');
+    ok(heldAfterOne && forks.length === 1 && o.state().read === true && reads === 4, '…an ABSENT file right after the failed read is read once more (the store-read law: never «empty» at once), and the read that then answers decides: the unseen build is checked', { heldAfterOne, reads, forks: forks.length });
     o.stop();
   } finally { fs.promises.readFile = orig; }
 }

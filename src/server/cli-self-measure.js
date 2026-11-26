@@ -10,8 +10,10 @@
  * writer; writeJsonAtomic at every transition, so nothing waits for an exit flush):
  *   {schema: 1, binaries: {'<version>': {'<sha256>': {cli, sha256, size, path, probe, state: pass|fail|cannot-run|aborted,
  *    startedAt, gateAt, endedAt, gateMs, ms, gate: {variant: {verdict, note}}, variants: {…six}, evidence, reason: {code,
- *    observation}}}}} — at most VERSIONS_MAX versions (the one in use is kept); a damaged file is said once and read as empty
- *   (fail closed: nothing trusted, the probe runs again); a file that did not READ is never written (retried next tick).
+ *    observation}}}}} — at most VERSIONS_MAX versions (the one in use is kept); a damaged (torn) file is HELD while its bytes are
+ *   kept aside OFF the loop (the family's hold, src/store-read-hold.js: a dated copy beside it, once per content), then read as
+ *   empty (fail closed: nothing trusted, the probe runs again) — never written over before its copy stands (B-f276, lane
+ *   bl-scratch); a file that did not READ is never written (retried next tick).
  * THE HOLD LASTS AS LONG AS THE CHECK: the members stay held exactly as before (fail closed — law 2: nothing is placed under a
  * build without a PASS), the store says `checking` (its words: the pool card's one calm line, the roster's clause — no For-you
  * item inside the bound, ruling R2), and the GATE (oat-file, oat-file-401, oat-file-switch — ≈ 271 s measured on 2.1.321)
@@ -44,6 +46,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { fork } = require('child_process');
 const { writeJsonAtomic } = require('../channel-store.js'); // the ONE atomic data/*.json writer
+const SR = require('../store-read.js');   // B-f276 (lane bl-scratch, slice hub-own-ledgers): the store-read law's answer of one read…
+const HOLD = require('../store-read-hold.js');   // …and the family's hold: torn bytes kept aside before anything reads them as empty
 const { cliVersionOf, OAT_IN_FILE_GATE, oatInFile, MINT_VARIANT, scopesOk } = require('../cli-caps.js'); // PURE — oatInFile is THE judge (law I)
 const PROBE = require('../claude-oat-probe.js'); // SHARED: its constants here; the measurement itself runs only in the forked child
 
@@ -117,25 +121,41 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
   const lifeStart = now();
   // law G4: the live answer every reader of an arm's `checking` facet asks (auto-resume liveCause) — this run, still checking, or null
   global.__vsCliCheckingNow = () => (run && !run.settled ? { cli: run.cli, startedAt: run.startedAt } : null);
-  let ledger = { schema: 1, binaries: {} }, read = false, damagedSaid = false, loading = null;
+  let ledger = { schema: 1, binaries: {} }, read = false, loading = null;
   let readFail = null, readFailSaid = false; // law A: {code, at} of the last failed read — said ONCE per spell, retried no faster than the tick
   let run = null;           // {cli, sha, path, child, startedAt, gateAt, timer, attended, root, err}
   let viewKey = null;
 
   // ── the ledger ──
+  const isLedger = (j) => !!j && typeof j === 'object' && !!j.binaries && typeof j.binaries === 'object' && !Array.isArray(j.binaries);
+  // B-f276 (lane bl-scratch, slice hub-own-ledgers): TORN BYTES ARE KEPT ASIDE FIRST. The release read a damaged ledger as empty and
+  // the next keep() wrote over it (every measured build's PASS / FAIL record gone). Now the family's hold owns a torn file: it looks
+  // at the file once more, copies its bytes aside OFF the loop (once per content), and only then lifts it as empty — the decision
+  // runs again at the lift. Until the copy stands nothing is placed and keep() only notes in memory (`read` stays false); a copy
+  // that cannot be made keeps the hold (the live file is those bytes' only copy) and is tried again on the hold's own ladder
+  const hold = HOLD.create({ file, valid: isLedger, code: 'cli_measure_unread', aside: (m) => file + '.corrupt-' + m,
+    words: (h) => `this hub's record of the Claude Code builds it measured could not be read (${h && h.code}) — it is read again by itself; nothing is written over it meanwhile, and no build is placed on this hub's own measurement until it reads`,
+    log: (l) => log(`[cli-self-measure] ${l}`),
+    onLift: (v) => { ledger = { schema: 1, binaries: merged(isLedger(v) ? v.binaries : {}) }; read = true; readFail = null; readFailSaid = false; try { const a = accounts(); if (a) decide(a.oatFileCaps(), { attended: false }); } catch { } } });
   function load() {
     if (read) return Promise.resolve(true);
     if (loading) return loading;
+    // the hold owns the file until it lifts: the tick's read (law A's cadence) is the hold's read again — its judge keeps the family's
+    // rules (a «missing» right after a failed read is read once more; torn bytes kept aside before it starts empty)
+    if (hold.held()) {
+      loading = hold.again().then(() => { if (!read) readFail = { code: (hold.held() && hold.held().code) || (readFail && readFail.code) || 'held', at: now() }; return read; }, () => false).finally(() => { loading = null; });
+      return loading;
+    }
     loading = fs.promises.readFile(file, 'utf8').then((txt) => {
-      let j = null; try { j = JSON.parse(txt); } catch { j = null; }
-      const ok = j && typeof j === 'object' && j.binaries && typeof j.binaries === 'object' && !Array.isArray(j.binaries);
-      if (!ok) { if (!damagedSaid) { damagedSaid = true; log(`[cli-self-measure] ${file} is damaged — read as empty (nothing trusted from it; a new CLI is checked again)`); } ledger = { schema: 1, binaries: merged({}) }; }
-      else ledger = { schema: 1, binaries: merged(j.binaries) };
+      const a = SR.storeAnswer({ text: txt }, { valid: isLedger });
+      if (a.state !== 'data') { readFail = { code: 'torn bytes', at: now() }; hold.start(a); return false; }   // held: kept aside, then empty (onLift)
+      ledger = { schema: 1, binaries: merged(a.value.binaries) };
       read = true; readFail = null; readFailSaid = false; return true;
     }, (e) => {
       if (e && e.code === 'ENOENT') { ledger = { schema: 1, binaries: merged({}) }; read = true; readFail = null; readFailSaid = false; return true; }
       readFail = { code: (e && e.code) || String(e), at: now() };
       if (!readFailSaid) { readFailSaid = true; log(`[cli-self-measure] ${file} did not read (${readFail.code}) — until it does, nothing is placed on this hub's own measurement and nothing is checked; read again at the tick`); }
+      hold.start(SR.storeAnswer({ error: e }));   // HELD by the family's hold (its read's S4): a storage coming back answers ENOENT first — never taken for «empty» at once
       return false;
     }).finally(() => { loading = null; });
     return loading;
@@ -379,11 +399,11 @@ function create({ accounts = () => null, dataDir, enabled = () => true, onMember
     // THE OWNER'S PRESS (cookie only — an agent's bearer is refused: the person fixed something and asks; an agent may not)
     app.post('/api/accounts/cli-check-again', async (req, res) => {
       if (/^Bearer\s+(vsst_|jbt_|vsak_)/i.test(String((req.headers && req.headers.authorization) || ''))) return res.status(403).json({ error: 'only the owner can ask for this check again', code: 'agent_forbidden' });
-      try { const r = await checkAgain(); if (r && r.state === 'unreadable') return res.status(503).json({ error: 'the check\'s record on this machine (data/cli-self-measure.json) did not read — the journal says why', code: 'ledger_unreadable' }); res.json({ ok: true, ...r }); } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); }
+      try { const r = await checkAgain(); if (r && r.state === 'unreadable') return res.status(503).json(hold.held() ? { error: hold.words(), code: 'cli_measure_unread' } : { error: 'the check\'s record on this machine (data/cli-self-measure.json) did not read — the journal says why', code: 'ledger_unreadable' }); res.json({ ok: true, ...r }); } catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); }
     });
   }
   load();
-  const stop = () => { const me = run; stopRun('stopped'); if (me) { const rec = recOf(me.cli, me.sha); setView(rec ? viewOfRec(me.cli, me.sha, rec) : null); } }; // small 2: never left at «checking»
+  const stop = () => { try { hold.stop(); } catch { } const me = run; stopRun('stopped'); if (me) { const rec = recOf(me.cli, me.sha); setView(rec ? viewOfRec(me.cli, me.sha, rec) : null); } }; // small 2: never left at «checking»
   return { tick, checkAgain, decide, state: () => ({ read, readFail, running: run ? { cli: run.cli, sha256: run.sha, startedAt: run.startedAt, gateAt: run.gateAt } : null, ledger: JSON.parse(JSON.stringify(ledger)) }), stop, file };
 }
 
