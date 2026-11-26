@@ -1167,7 +1167,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     quietly(() => wk.reading(wk.s1, 88));
     ok('B-87fd …a STAMPED holder\'s reading still lands on its member (A, 88 %)', Math.round(wk.cacheOf(wk.A)?.sevenDay?.usedPercent) === 88, JSON.stringify(wk.cacheOf(wk.A)?.sevenDay));
     const pre = patchedEngine('unknownFiled', [
-      ["  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session)) { saidUnknownHolderReading(session, 'codex:' + source); return { key: null, snap, archived: true, why: 'holder-unknown' }; }\n", ''],
+      ["  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session, huw)) { saidUnknownHolderReading(session, 'codex:' + source, huw.why); return { key: null, snap, archived: true, why: 'holder-unknown' }; }\n", ''],
     ]);
     ok('B-87fd NEGATIVE CONTROL: the patch hit the product source (the codex writer\'s refusal — the one reading road of a non-hot holder)', !!pre);
     if (pre) {

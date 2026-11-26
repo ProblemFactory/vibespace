@@ -599,7 +599,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
     // window of its own, and clearing it beside the two turn pins (where it
     // looks like it belongs) put the banner's mark back on the member the turn
     // had just proved innocent.
-    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs(?:, closingLine)?\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; session\._turnWallRefuted = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
+    ok('PIN: the turn-end proof outlives the demotion and is then dropped on both exits', /try \{ onWalledTurn\(session, sigs(?:, closingLine)?\); \}[^\n]*\n\s*clearRefile\(\);\s*\n\s*return;/.test(eng2) && (eng2.match(/\n\s*clearRefile\(\);/g) || []).length === 2 && /const clearRefile = \(\) => \{ session\._turnWallRefile = null; session\._turnWallRefuted = null; session\._turnLedgerHeld = null; \};\s*\n\s*if \(sigs\.length/.test(eng2));
     // THE MECHANISM, NOT THE LITERAL. This pin exists to stop the demotion
     // growing a SECOND writer; it used to spell the call byte-for-byte, which
     // also froze WHICH member is written — and inc-mttbrtc0-6049 is precisely

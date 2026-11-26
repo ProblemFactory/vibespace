@@ -2218,8 +2218,11 @@ function persistHeldStamp(session) {
 }
 /** A non-hot pool session whose held member NOTHING can name (no stamp, no
  *  ledger row before it started — r3): money never moves on its behalf. */
-function heldPoolUnknown(session) {
+/** B-f276 r5109: is the slot ledger held now (asked without a read) */
+function ledgerHeldNow() { try { return !!(slotTransitions.held && slotTransitions.held()); } catch { return false; } }
+function heldPoolUnknown(session, out = null) {   // `out`: r5109 — out.why = 'ledger-held' when the slot ledger's hold is the cause (its words name the ledger)
   const r = poolMemberOfSessionFor(session);
+  if (out && r) out.why = (r.origin === 'unknown' && r.why) || null;
   return !!(r && r.origin === 'unknown');
 }
 /** THE member a pooled session's requests are BILLED to: its link, validated
@@ -2381,13 +2384,13 @@ function requestSlotFor(session, at = Date.now(), { requestOutAt = null } = {}) 
 // on (readingSlotFor → requestSlotFor): the two roads share no ladder this changes. Said in the journal with its COUNT, at the 1st,
 // 10th, 100th … dropped reading of a conversation, so a stream of them is seen.
 const unknownHolderDropped = new Map();   // sid → readings filed nowhere
-function saidUnknownHolderReading(session, what) {
+function saidUnknownHolderReading(session, what, why = null) {
   const sid = (session && session._webuiId) || '?';
   const n = (unknownHolderDropped.get(sid) || 0) + 1;
   if (unknownHolderDropped.size > 2000 && !unknownHolderDropped.has(sid)) unknownHolderDropped.clear();
   unknownHolderDropped.set(sid, n);
   if (!/^10*$/.test(String(n))) return;
-  console.log(`[pool] ${sid}: a ${what} reading is filed nowhere (${n} so far) — this process's held member cannot be named (no spawn stamp, no ledger row before its start), so it is never filed under the pool's current member`);
+  console.log(why === 'ledger-held' ? `[pool] a ${what} reading is filed nowhere (${n} so far) — the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again` : `[pool] ${sid}: a ${what} reading is filed nowhere (${n} so far) — this process's held member cannot be named (no spawn stamp, no ledger row before its start), so it is never filed under the pool's current member`);
 }
 // B-f276 slot-ledger-gap (主开发 r4989 / r4993): a reading whose slot the HELD ledger would decide is filed NOWHERE — never put on an
 // account by a guess, and never later (the lift attributes nothing back). Said with its COUNT at the 1st, 10th, 100th … reading,
@@ -2821,7 +2824,7 @@ function noteWallSignal(session, sig = {}) {
   // switch): the ring is the ≥2-walls corroboration OTHER conversations lean
   // on, and a wall whose window proved it is not this account's is none of its.
   const refutedKey = !!(key && session._turnWallRefuted && session._turnWallRefuted.from === key);
-  if (key && !refutedKey && !sigs.some((s) => s.key === key)) noteWallOnAccount(key, session._webuiId);
+  if (key && !refutedKey && !session._turnLedgerHeld && !sigs.some((s) => s.key === key)) noteWallOnAccount(key, session._webuiId);   // r5109: no ring mark under a hold (no account is marked)
   // THE LIMIT LANE (2026-09-08): which of the harness's windows this wall is
   // about — the harness's own `snapshot.limitId`, null when it has one lane
   // (claude). The armed wait carries it so the fresh-window edge can tell a
@@ -3268,7 +3271,7 @@ function noteTurnEnd(session, rec = null) {
     noteLateFact(session, 'turn end', liveFactVerdict(session, rec));
     session._turnWallSigs = []; session._turnWorkAfterSig = 0;
     session._turnLaneDefer = null; session._turnBannerLane = null;
-    session._turnReadingSlot = null; session._turnWallRefile = null; session._turnWallRefuted = null; session._turnAsks = null;
+    session._turnReadingSlot = null; session._turnWallRefile = null; session._turnWallRefuted = null; session._turnLedgerHeld = null; session._turnAsks = null;
     session._oatFileGen = null; // lane oat-identity-fix: a backlog's turn end says nothing about which token file the CLI holds
     session._turnLastError = null; // lane auto-resume-bulk: …and a backlog's error is not why the session stopped NOW
     return;
@@ -3301,7 +3304,7 @@ function noteTurnEnd(session, rec = null) {
   // pass asks the same proof for every signal that carries no window of its
   // own, so clearing it here (where the other two pins die) silently put the
   // banner's mark back on the member this turn had just proved innocent.
-  const clearRefile = () => { session._turnWallRefile = null; session._turnWallRefuted = null; };
+  const clearRefile = () => { session._turnWallRefile = null; session._turnWallRefuted = null; session._turnLedgerHeld = null; };
   if (sigs.length && workAfter <= 1) {
     // BLOCKED entry owns this turn's pool evaluation (B-2c9b): it runs AFTER
     // the demotion + the arm, so the link moves in the same tick and a hot
@@ -3563,7 +3566,7 @@ function wallRecordTarget(session, key, ev) {
     try { session._turnWallRefile = { from: key, to: d.key, at: Date.now() }; } catch { }
     return d.key;
   }
-  if (d.held) { heldLedgerWall(session, b, d); return null; }   // B-f276: marked on no account, and no account named (never «refuted»: nothing was judged)
+  if (d.held) { try { session._turnLedgerHeld = { at: Date.now() }; } catch { } heldLedgerWall(session, b, d); return null; }   // B-f276: marked on no account, and no account named (never «refuted»: nothing was judged); r5109 M1: the TURN carries the held mark (it dies with the turn)
   archiveWall(session, { id: key }, b, d, d.reason, 'rejection');
   // THE REFUTATION IS KEPT FOR THE TURN (lane-hot-switch): the banner that
   // follows this record states no time of its own and would otherwise fall
@@ -3638,7 +3641,7 @@ function demoteWalledAccount(session, sigs) {
   const slotSignal = sigs.some((x) => x && x.slot && (!x.key || ids.has(x.key)));
   if (!member) return { demoted: false, reason: 'not-a-member', key: wallKey };
   const now = Date.now();
-  if (!(last && last.key)) noteWallOnAccount(wallKey, session._webuiId, now); // a key-less signal joins the ring at resolution time — this turn IS a wall on that account
+  if (!(last && last.key) && !session._turnLedgerHeld) noteWallOnAccount(wallKey, session._webuiId, now); // a key-less signal joins the ring at resolution time — this turn IS a wall on that account (r5109: none under a hold)
   const walls = wallCount(wallKey, now);
   const slotMatch = slotSignal || (!!slot.slotOk && !!slot.id && ids.has(slot.id));
   // this member said no to THIS session — true whether or not we demote it,
@@ -3652,9 +3655,19 @@ function demoteWalledAccount(session, sigs) {
   const onPin = sigs.filter((x) => x && (!x.key || ids.has(x.key))).map((x) => {
     const kind = x.bucket || 'fiveHour';
     try {
-      return wallAttributionFor(session, poolId, { kind, scopedName: kind === 'scoped' ? String(x.scopedName || '').toLowerCase() : null, resetsAtMs: Number(x.resetsAtMs) || 0, atMs: Number(x.at) || 0 }, member.id).action;
+      const d0 = wallAttributionFor(session, poolId, { kind, scopedName: kind === 'scoped' ? String(x.scopedName || '').toLowerCase() : null, resetsAtMs: Number(x.resetsAtMs) || 0, atMs: Number(x.at) || 0 }, member.id);
+      if (d0 && d0.held) return 'held';   // r5109 M2: a held answer is its own verdict, never a refutation
+      return d0.action;
     } catch { return 'write'; }
   });
+  // B-f276 (主开发 r5109 M2): A TURN WHOSE SIGNALS THE HELD LEDGER CANNOT JUDGE — its own verdict, never «refuted»: said in the ledger's
+  // words (no account), the conversation STILL met its wall on that member (noted: no continue is armed at it), no event of a refutation
+  if (session._turnLedgerHeld || (onPin.length && onPin.includes('held') && !onPin.includes('write'))) {   // the turn's held mark too: a signal with no stated reset answers «write» before the ledger is asked
+    const sigLanes = new Set(sigs.filter((x) => x && (!x.key || ids.has(x.key))).map((x) => wallLaneOf(x.bucket || 'fiveHour', x.scopedName, !!x.guessed)));
+    noteSessionWall(session._webuiId, member.id, now, sigLanes.size === 1 ? [...sigLanes][0] : null);
+    console.log(`[wall] ${session._webuiId}: a walled turn is not judged on any account — the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again (the conversation keeps its own wall; no account is marked)`);
+    return { demoted: false, reason: 'ledger-held', key: member.id, walls };
+  }
   if (onPin.length && !onPin.includes('write')) {
     if (onPin.every((a) => a === 'archive')) {
       console.log(`[wall] ${session._webuiId}: ${member.name} did not refuse this turn — every signal of it was refuted by its own window; no demotion, not excluded`);
@@ -3990,7 +4003,8 @@ async function refreshCodexForPerson({ key = null, sessionId = null, timeoutMs =
   else { const c = sessionId ? activeSessions.get(String(sessionId)) : null; if (live(c)) s = c; }
   // B-87fd: a conversation whose held member cannot be named is refused BY ITS OWN NAME, before any read — its reading would be filed
   // nowhere (a key's carrier never picks it: pickLiveProbeSession)
-  if (s && heldPoolUnknown(s)) return { ok: false, code: 'holder_unknown', key: null, name: null, sessionId: s._webuiId, error: 'this conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' };
+  const hu = {};
+  if (s && heldPoolUnknown(s, hu)) return { ok: false, code: 'holder_unknown', key: null, name: null, sessionId: s._webuiId, error: hu.why === 'ledger-held' ? 'the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again — no reading is asked' : 'this conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' };
   // B-87fd follow (round wg6jz85ye): no carrier, but a running conversation of the member's pool was SKIPPED because its held member
   // cannot be named — the press says THAT, never «no session is running» while one visibly runs
   if (!s && key) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) return { ok: false, code: 'holder_unknown', key: String(key), name: nameOf(key), sessionId: null, error: 'the running Codex conversation\'s held member cannot be named — its reading would be filed nowhere, so none is read' }; }
@@ -4293,7 +4307,7 @@ function recordRateLimitEventNow(session, msg) {
         // archived with a reason, inside. The SESSION is still blocked whoever
         // owns the bucket, so the session-scoped half below still runs — we
         // refused to write a number, not to notice a wall.
-        maybePoolAutoSwitch(session);
+        if (!session._turnLedgerHeld) maybePoolAutoSwitch(session);   // r5109 M1: under a hold no switch is asked — only the conversation's own wall signal
         try { noteWallSignal(session, { resetsAtMs: (Number(ev.resetsAt) || 0) * 1000, bucket: ev.kind, scopedName: ev.scopedName, key, slot: !!slot?.slotOk }); } catch { }
         return;
       }
@@ -6370,7 +6384,8 @@ function writeCodexReading(snap, source, { session = null, key: forKey = null } 
   // `task_failed` states no reset it did not receive, so it is inert there.
   // the helper's reading names its identity (lane reset-path: no session — the key IS the login it ran on)
   // B-87fd: filed nowhere — a READING only: the limit banner is a REFUSAL (the wall's own road, as a claude rejection keeps rejectionSlotFor)
-  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session)) { saidUnknownHolderReading(session, 'codex:' + source); return { key: null, snap, archived: true, why: 'holder-unknown' }; }
+  const huw = {};
+  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session, huw)) { saidUnknownHolderReading(session, 'codex:' + source, huw.why); return { key: null, snap, archived: true, why: 'holder-unknown' }; }
   // 主开发 r3197 (the round's MUST): THE SECOND ROAD OF THE READINGS — a conversation that names an account while the list is UNREAD files
   // NOTHING here either (its key would fall to liveQuotaKeyFor: the pool's own id), on every source, said once a conversation
   if (!forKey && session && session._accountId) { const lh = accountsHeld(); if (lh) { sayHeldOnce('reading:' + (session._webuiId || '?'), lh, `[usage] codex:${source}: ${session._webuiId || '?'}'s readings are not filed — the accounts list could not be read (${lh.code || 'unread'})`); return { key: null, snap, archived: true, why: 'accounts-held' }; } }
@@ -6626,6 +6641,15 @@ function markLimitBannerNow(session, text) {
     // the member's OWN legitimate wall among them. The turn-end pass reaches
     // the same destination by asking the same proof (wallAttributionFor).
     let key = pinKey;
+    // B-f276 (主开发 r5109 M1): UNDER A HOLD NO ROAD MARKS AN ACCOUNT — the turn's held mark (its held rejection) or the ledger held
+    // now: the banner writes no cache and asks no switch; only the conversation's own wall signal stays (no ring mark)
+    if (session._turnLedgerHeld || ledgerHeldNow()) {
+      try { session._turnLedgerHeld = session._turnLedgerHeld || { at: Date.now() }; } catch { }
+      const hl = hit.kind === 'scoped' ? String(hit.name || '').toLowerCase() : BUCKET_LABEL[hit.kind] || hit.kind;
+      console.log(`[wall] ${session._webuiId}: a ${hl} banner is marked on no account — the slot ledger (slot-transitions.jsonl) could not be read — no move is read from it until it reads again`);
+      try { noteWallSignal(session, { bucket: hit.kind, scopedName: hit.kind === 'scoped' ? hit.name : null, key: pinKey, slot: !!slot.slotOk, guessed: !!hit.guessed }); } catch { }
+      return;
+    }
     const refile = session._turnWallRefile;
     if (refile && refile.from === key && refile.to) {
       console.log(`[wall] ${session._webuiId}: the banner follows this turn's proven re-file — marking ${nameOf(refile.to)}, not ${nameOf(key)} (the banner states no time of its own)`);
