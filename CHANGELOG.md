@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.421 — 2026-11-26
+
+### Fixed
+- Stop is sent to the agent first again. In 2.369.420, on a slow or network data folder, a Stop could arrive late and a queued message could still follow it.
+
 ## 2.369.420 — 2026-11-26
 
 ### Added
