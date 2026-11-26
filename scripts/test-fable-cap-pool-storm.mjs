@@ -3236,15 +3236,15 @@ console.log('— §19 the spare lane at a spawn');
     // a Fable conversation hinted as Opus must start where the pool would have put it, never on a Fable-spent member
     ok('§19 r1: a HINTED family places nothing — an Opus-hinted resume starts on the default (P)', tag(place(w.eng, w.P, 'claude-opus-4-8', true)) === 'personal');
     {
-      const mh = mutate('src/server/usage-pool-engine.js', 'hintplace', [['hot: true, placing: !hinted, readLogin:', 'hot: true, placing: true /* PATCHED: a guess places */, readLogin:']]);
+      const mh = mutate('src/server/usage-pool-engine.js', 'hintplace', [['decideStart({ family: fam, hinted, ', 'decideStart({ family: fam, hinted: false /* PATCHED: a guess places */, ']]);
       const wh = mh.hit ? mkWorld({ engineModule: mh.mod }) : null;
       const gotH = wh ? place(wh.eng, wh.P, 'claude-opus-4-8', true) : null;
       ok('§19 r1 CONTROL: placing on the hint puts the (Fable) resume on F, whose Fable is spent', !!wh && gotH === wh.id.fish, mh.why || String(gotH));
     }
     // NEGATIVE CONTROL: the chooser without the one word
     const mut = mutate('src/server/usage-pool-engine.js', 'noplacing', [[
-      'hot: true, placing: !hinted, readLogin: poolReadLogin(), membership,',
-      'hot: true, /* PRE-CHANGE: no placing */ readLogin: poolReadLogin(), membership,',
+      'decideStart({ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,',   // B-87fd (1) r4986: the chooser asks decideStart
+      "require('../account-pool-auto.js').decidePoolSwitch({ /* PRE-CHANGE: no placing */ currentId: cur,",
     ]]);
     ok('§19 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
     if (mut.hit) {

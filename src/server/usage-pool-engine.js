@@ -1029,9 +1029,8 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // or null — the store then re-points the default off it, or refuses the placement by name ('all_lapsed')
     if (verdictOnly && (!fam || (!staleDefault && memberServeLapsed(cur)))) return null;   // (r3319 MUST) the move back's verdict FAILS CLOSED: no family (a guess) or a lapsed default (its stand-in) is no verdict — the two returns below would pass by the exclusions
     if (!staleDefault && memberServeLapsed(cur)) return fallbackDefaultTarget(poolId, cur);
-    // B-6a92 (r2855): a start with no model family stays on the default — held on another account's instant, that is said once
-    if (!fam && !staleDefault && heldForPool(cur) && !_heldPlacedSaid.has(`nofam|${poolId}|${cur}`)) { _heldPlacedSaid.add(`nofam|${poolId}|${cur}`); if (_heldPlacedSaid.size > 256) _heldPlacedSaid.delete(_heldPlacedSaid.values().next().value); console.log(`[pool] spawn on "${a.name || poolId}": stays on the pool's default ${personNameOf(cur)}, held on another account's weekly instant (its numbers unknown until its own read) — the start names no model family to choose another member by`); }
-    if (!fam && !staleDefault) return cur; // no identity → the pool's default target
+    // (no identity, a default the pool still lists → the pool's default target: decideStart answers null for it below, unless the default
+    // PAYS — r4986: a resume is a start, judged fail closed)
     // decidePoolSwitch FROM the default target under the projected view: if
     // the default serves this family, stay (fewest distinct billing dirs);
     // if it doesn't, the switch verdict IS the placement. `placing` (B-8a65):
@@ -1042,10 +1041,16 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // THE PROVING SPAWN places ONE conversation (r3): the pool DEFAULT the store self-heals (`forDefault` — a signed-out,
     // lapsed or removed default) is chosen by the measured rule only — a default on a guess would carry every later
     // spawn and every conversation that reads the default link onto it. No proving input ⇒ no mark, no «spawn on» line.
-    const { decidePoolSwitch } = require('../account-pool-auto.js');
+    // THE START's ONE ENTRY (B-87fd (1), 主开发 r4986): every start this chooser makes is asked of decideStart — the release's own call where
+    // the default does not pay; on a paying default the placing law, a guessed or unknown family judged fail closed on the bare reading
+    const { decideStart } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const chooseNow = () => decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem), payingIds: overageInUseIds(mem) });
+    const chooseNow = () => decideStart({ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem), payingIds: overageInUseIds(mem) });
     const d = chooseNow();
+    // B-6a92 (r2855): a start with no model family that STAYS on a default held on another account's instant — said once. Asked AFTER
+    // the decision (B-87fd (1), r4986): on a PAYING default such a start is placed too, and a start that moved is never told it stays
+    if (!(d && d.to) && !fam && !staleDefault && heldForPool(cur) && !_heldPlacedSaid.has(`nofam|${poolId}|${cur}`)) { _heldPlacedSaid.add(`nofam|${poolId}|${cur}`); if (_heldPlacedSaid.size > 256) _heldPlacedSaid.delete(_heldPlacedSaid.values().next().value); console.log(`[pool] spawn on "${a.name || poolId}": stays on the pool's default ${personNameOf(cur)}, held on another account's weekly instant (its numbers unknown until its own read) — the start names no model family to choose another member by`); }
+    if (!d && !fam && !staleDefault) return cur;   // no identity, the default not paying: the pool's default (the release)
     if (verdictOnly) { if (d && d.reason === 'proving') return null; const placed = (d && d.to) || (staleDefault ? null : cur); return placed && !claimDecided(placed, () => { const b = chooseNow(); return (b && b.to) || cur; }) ? placed : null; }   // (B-d578 F3a) a member read as reset but unconfirmed is no place to come back to
     // THE POOL SAYS IT (lane account-reset-door r2, MUST 8): a placement the CLAIM decided — the same decision over the bare
     // reading names another member — is said, once, at the spawn; one the readings make says nothing new (asked BEFORE the
