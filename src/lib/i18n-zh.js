@@ -539,6 +539,7 @@ export default {
   "{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines": "{n} 条通知在等待——VibeSpace 重新接管其配对机器上仍在运行的对话后，它们会自行送达",
   "{n} notices are waiting — not woken yet: VibeSpace could not judge its spending limits just now; it asks again once that clears": "{n} 条通知在等待——尚未唤醒：VibeSpace 此刻无法判断其花费上限；一旦恢复会再询问一次",
   "Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears": "尚未唤醒——VibeSpace 此刻无法判断其花费上限；一旦恢复会再询问一次",
+  "Not woken — the retry park was full; its words wait in the stash for its next turn": "尚未唤醒——重试队列已满；它的内容在暂存区等待下一轮带到",
   "Could not mark them seen": "无法标为已看",
   "This job is the running VibeSpace: it is not stopped here": "这个任务就是正在运行的 VibeSpace：不在这里停止它",
   "Unknown event": "未知事件",

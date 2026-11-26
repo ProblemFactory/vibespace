@@ -539,6 +539,7 @@ export default {
   "{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines": "{n} 件の通知が待機中です——VibeSpace がペアリング済みマシンで動き続けている会話を引き継ぎ直した後、自動で届きます",
   "{n} notices are waiting — not woken yet: VibeSpace could not judge its spending limits just now; it asks again once that clears": "{n} 件の通知が待機中です——まだ起こしていません：VibeSpace はいま利用上限を判断できません。解消されたら一度だけもう一度確認します",
   "Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears": "まだ起こしていません——VibeSpace はいま利用上限を判断できません。解消されたら一度だけもう一度確認します",
+  "Not woken — the retry park was full; its words wait in the stash for its next turn": "まだ起こしていません——再試行の待ち行列がいっぱいでした。内容は保留箱で次のターンを待ちます",
   "Could not mark them seen": "既読にできませんでした",
   "This job is the running VibeSpace: it is not stopped here": "このジョブは実行中の VibeSpace そのものです。ここでは停止しません",
   "Unknown event": "不明なイベント",

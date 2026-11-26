@@ -2512,7 +2512,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           const waitingNow = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
           if (waitingNow().length < RETRY_CAP || waitingNow().some((x) => !x.waitsHeld)) {
             const at = clock.now();
-            const e = parkRetry(cid, text, opts, { kind, spendReason, charged: null, attempt: { at, reason: `spend gate held: ${v.detail || v.why}`, phase: 'spend', busy: null, late: 0, why: 'first' }, waitsLift: { why: String(v.why), since: at } });
+            const e = parkRetry(cid, text, opts, { kind, spendReason, charged: null, attempt: { at, reason: `spend gate held: ${v.why}`, phase: 'spend', busy: null, late: 0, why: 'first' }, waitsLift: { why: String(v.why), since: at } });
             if (retry[cid] && retry[cid].includes(e)) {
               saidLift([e], v.why);   // the mark rode parkRetry's one write: said, nothing written again
               return { ok: false, lane: 'message', reason: `not woken yet — the spend gate could not judge (${v.why}); kept, asked again when it lifts`, parked: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, waitsLift: true, refused: 'spend', why: v.why };
@@ -2523,7 +2523,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
             return { ok: false, lane: 'message', reason: `fell at once — the retry park is full of held wakes; its words are in the stash (the spend gate could not judge: ${v.why})`, fell: true, stashed: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, refused: 'spend', why: v.why };
           }
         }
-        return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself
+        // B-ef83 unit 2's cure (主开发 r4668, law (b) on every road): a HELD verdict's words are code-only — its detail names another
+        // process's id and host (spend-authorizer's ledger-held-elsewhere), and this reason reaches a sending agent and a job's notice
+        return { ok: false, reason: `spend budget: ${SA.isHeldWhy(v.why) ? `the spend gate could not judge (${v.why})` : (v.detail || v.why)}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself
       }
       // CHARGE WHAT YOU AUTHORIZED (r4, reproduced). `identity` is null on the
       // local-session branch, and handing that null to the charge made

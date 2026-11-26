@@ -11,7 +11,7 @@
  *   foldTasks(tasks, {expanded, sessionNames})  owner session → name family → rows
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
- *   deliveryReasonWords(line, {t})      a Delivery-log line's reason in a person's words (a held answer: one sentence, B-ef83 unit 2)
+ *   deliveryReasonWords(line, {t})      a Delivery-log line's reason in a person's words (a parked held line; a line that fell at once)
  *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
  *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · nodeHeapWords(job, t) · budgetWords(job, t) ·
  *   budgetRefusalPersonWords(budget, t, {create}) · runLeftWords(run, t)
@@ -169,18 +169,20 @@ export function pruneFolds(folds, layout) {
   return out;
 }
 
-/** The held-notification sentence (5b ①): STRUCTURE in, the device's own
- *  words out. `digest` = the server's heldDigest ({total, byConversation});
- *  `cid` narrows it to one conversation (the chat status-bar chip). */
-/** B-ef83 unit 2 (c) (主开发 r4606): a Delivery-log line's reason in a PERSON's words — a held answer (its journal line carries the
- *  verdict's code `heldWhy`, the agent-facing reason keeps it) reads the sentence, en / zh / ja by the device's own t(); else the
- *  line's own reason as before. → string */
+/** B-ef83 unit 2 (c) (主开发 r4606 / r4668): a Delivery-log line's reason in a PERSON's words, en / zh / ja by the device's own t().
+ *  A PARKED held line (its journal line carries the verdict's code `heldWhy`; the agent-facing reason keeps it) reads that it is
+ *  asked again once the hold clears — true only while it is parked. A line that FELL at once to the stash (`fell`) says its words
+ *  wait for the conversation's next turn — nothing asks it again. Else the line's own reason, as before. → string */
 export function deliveryReasonWords(line, { t } = {}) {
   const tr = typeof t === 'function' ? t : (s) => String(s);
   if (!line) return '';
-  if (line.heldWhy) return tr('Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears');
+  if (line.heldWhy && line.parked) return tr('Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears');
+  if (line.fell) return tr('Not woken — the retry park was full; its words wait in the stash for its next turn');
   return line.reason ? String(line.reason) : '';
 }
+/** The held-notification sentence (5b ①): STRUCTURE in, the device's own
+ *  words out. `digest` = the server's heldDigest ({total, byConversation});
+ *  `cid` narrows it to one conversation (the chat status-bar chip). */
 export function heldText(digest, { t, cid = null } = {}) {
   const tr = typeof t === 'function' ? t : (s, p) => String(s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] !== undefined ? p[k] : `{${k}}`));
   if (!digest) return '';

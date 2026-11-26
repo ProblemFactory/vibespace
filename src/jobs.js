@@ -1610,7 +1610,7 @@ class JobManager {
       } else if (r && r.stashed === true) {
         // B-ef83 unit 2 (a) (主开发 r4606): its park entry fell AT ONCE by the park's own road, and this engine's fall handler already
         // took its words into the stash — journaled (the held reason's code for the panel's words, (c)), never stashed a second time
-        this._notifyLogPush(job, { lane: 'message', ok: false, reason: r.reason || 'fell at once', ...(r.why ? { heldWhy: String(r.why) } : {}), ...(subscriber ? { sub: true } : {}) });
+        this._notifyLogPush(job, { lane: 'message', ok: false, reason: r.reason || 'fell at once', fell: true, ...(subscriber ? { sub: true } : {}) });   // r4668: NO held reason — nothing asks it again; its words wait in the stash
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable'), mark });
         if (r && r.notRunning === true) this._oweWake(cid, job, ev, { subscriber });   // the manager design's piece 7: the words are stashed (durable) FIRST
@@ -1670,7 +1670,7 @@ class JobManager {
       if (!job) return false;
       const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id);
       const last = entry.attempts[entry.attempts.length - 1];
-      if (line) { line.retries = retries; line.nextAt = extra.nextAt || null; if (last) { line.reason = last.reason; line.phase = last.phase || null; line.busy = last.busy === true || last.busy === false ? last.busy : null; if (last.late) line.late = last.late; } this._dirty = true; }
+      if (line) { line.retries = retries; line.nextAt = extra.nextAt || null; if (last) { line.reason = last.reason; if (last.phase !== 'spend') delete line.heldWhy; line.phase = last.phase || null; line.busy = last.busy === true || last.busy === false ? last.busy : null; if (last.late) line.late = last.late; } this._dirty = true; }
       return false;
     }
     if (ev === 'delivered') {
@@ -1691,7 +1691,7 @@ class JobManager {
       if (this._retryVerdicts) this._retryVerdicts.delete(entry.id);
       if (verdict === 'held-copy') return true;   // B-54b7 (iv): the copy is already on disk here — nothing to close, nothing stashed again
       if (verdict === 'held-file') {   // B-54b7 (主开发 r739): the previous process's entry while the file is held — TAKEN, never posted; its line waits with no next attempt
-        if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } this._dirty = true; }
+        if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; delete line.heldWhy; } this._dirty = true; }
         this._save(); return this._taken(this._parkCopyIn(cid, entry.id));
       }
       const why = extra.threw ? 'the delivery check failed — not delivered (withheld)'
@@ -1699,7 +1699,7 @@ class JobManager {
         : verdict === 'unknown' ? 'no live record proves its view — held for its next turn, judged there'
           : verdict === 'gone' ? 'nothing of the job remains — not delivered'
             : 'the subscriber can no longer view the job — not delivered';
-      if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; line.dropped = true; line.reason = why; } this._dirty = true; }
+      if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; line.dropped = true; line.reason = why; delete line.heldWhy; } this._dirty = true; }
       // the judge's HELD line (verdict unknown — retryOwed stashed it): the park's copy leaves its file only once the line it became
       // is on disk here (the moved2 cure 2's hunt (3) — the ladder rides this landing)
       // B-54b7 (ALSO CURED): a HELD VIEW's line (groups-unread) is a held line too — it answered a plain «taken» and the park's copy left
@@ -1713,7 +1713,7 @@ class JobManager {
       // parked Delivery-log line stayed one retry short of the attempts the stash line named (the last attempt's
       // failure IS the fall: no `attempt` event follows it) — the line is closed here with the attempts as counted
       const held = { kind: extra.kind || 'not-reachable', ...(extra.why ? { why: String(extra.why) } : {}), ...(extra.maybeDelivered === true ? { maybeDelivered: true } : {}), ...(extra.evicted === true ? { evicted: true } : {}), ...(extra.expired === true ? { expired: true } : {}), ...(extra.identity ? { identity: String(extra.identity) } : {}), ...(Number.isFinite(Number(extra.cap)) && extra.cap != null ? { cap: Number(extra.cap) } : {}), ...(Number(extra.retryAfter) > 0 ? { retryAfter: Number(extra.retryAfter) } : {}), attempts: Number(extra.attempts) || entry.attempts.length, ...(extra.phase ? { phase: String(extra.phase) } : {}), ...(extra.busy === true || extra.busy === false ? { busy: extra.busy } : {}) };
-      if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } }
+      if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; delete line.heldWhy; } }
       if (this._parkOnDisk && this._parkOnDisk.has(entry.id)) return true;   // B-54b7 (iv): its copy is already on disk here — never stashed twice
       const target = job || { id: meta.jobId, name: meta.jobName || meta.jobId };   // the record is gone: the stash still names it
       this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held, mark: !!meta.sub, park: entry.id });

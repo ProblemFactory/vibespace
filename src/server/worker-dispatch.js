@@ -118,8 +118,10 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       const pair = typeof ge.findPair === 'function' ? ge.findPair(from, cid) : null;
       const reply = await armReplyWake(ge, from, pair && pair.id);   // the earlier attempt armed it; re-arm (idempotent) so an old delivery predating this feature is corrected and the record is accurate
       // B-ef83 unit 2 (d) (主开发 r4606): while a compaction is owed for this worker (in memory), the replay's words say so
-      const owedNow = [...owedCompactions.values()].find((o) => o && o.to === cid) || null;
-      const record = M.dispatchRecord({ target: { cid, name }, verdict: pre, wake: { woke: false, reason: `delivered ${ago} s ago by the earlier attempt${owedNow ? ` — its compaction is owed to the lift of the hold (${owedNow.why}), asked once then` : ''}` }, waitMs, reply });
+      const ownOwed = owedCompactions.get(key);
+      const owedMine = ownOwed && !ownOwed.pending ? ownOwed : null;
+      const owedWorker = owedMine ? null : ([...owedCompactions.values()].find((o) => o && o.to === cid && !o.pending) || null);   // r4668 small: by the brief's key first
+      const record = M.dispatchRecord({ target: { cid, name }, verdict: pre, wake: { woke: false, reason: `delivered ${ago} s ago by the earlier attempt${owedMine ? ` — its compaction is owed to the lift of the hold (${owedMine.why}), asked once then` : owedWorker ? ` — a compaction of this worker is owed to the lift of the hold (${owedWorker.why}), asked once then` : ''}` }, waitMs, reply });
       log(M.journalLine({ from, record }));
       return { ok: true, replay: true, record, attempt: nonce || null };
     }
@@ -133,7 +135,7 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       let v = null;
       try { v = authorizeSpend({ reason: 'peer-compact', session: s, cid }); }
       catch (e) { v = { ok: false, why: 'authorizer-failed', detail: 'spend authorizer failed: ' + (e && e.message) }; }
-      if (v && v.ok === false) spend = { why: v.why || 'refused', detail: v.detail || v.why || 'refused', ...(SA.isHeldWhy(v.why) ? { held: v.why } : {}) };   // B-ef83 unit 1 (i): the gate could not judge
+      if (v && v.ok === false) spend = { why: v.why || 'refused', detail: SA.isHeldWhy(v.why) ? `the spend gate could not judge (${v.why})` : (v.detail || v.why || 'refused'), ...(SA.isHeldWhy(v.why) ? { held: v.why } : {}) };   // B-ef83 unit 2's cure (r4668): a held verdict's words code-only (its detail names another process)   // B-ef83 unit 1 (i): the gate could not judge
       else charge = { counted: false, identity: (v && v.identity) || null, hold: (v && v.hold) || null, session: s };
     }
     const verdict = M.dispatchVerdict({ ...base, pacer: pace, spend });
