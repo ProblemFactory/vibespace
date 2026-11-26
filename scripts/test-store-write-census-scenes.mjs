@@ -146,6 +146,9 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
     // (c) src/server/decision-engine.js — the month's journal tail (Settings › Spending's readout; 1 of the 23): A READ THAT CAN WAIT
     // ON STORAGE IS NOT MADE ON THE MAIN THREAD — after the engine's start (whose day-counter rebuild keeps its read at the call: once,
     // before any call can spend — B-a85f), a status opens NO byte of the journal on the loop; the month arrives off the loop.
+    // ITS RED CONTROL (主开发 r4841, lane bl-loop-a): the release's synchronous tail reader `journalTail` is `journalRead` since line 933
+    // (B-f276: it tells «not there» from «unread» and indexes the lines) — the mutant is the tip's own code made wrong in that one way:
+    // the status asks the month from the tip's synchronous reader in its own turn, and goes red because the journal is opened on the loop
     {
       const DESRC = readSrc('src/server/decision-engine.js');
       const OFF_A = "      monthP = journalTailOffLoop()\n";
@@ -166,7 +169,7 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
       };
       const r = await scene(require(path.join(REPO, 'src/server/decision-engine.js')), 'real');
       ok(r.syncOpens === 0 && r.usd === 0.25, '⑩c the month so far: a status opens NO byte of the journal on the loop — the figure (0.25) is the off-loop reads\' (the start\'s own, then the refresh after the 60 s memo)', r);
-      const x = await scene(mutantCopies('swc-de-tail', REPO).load('src/server/decision-engine.js', anchored(DESRC, OFF_A, "      monthP = Promise.resolve(journalTail())   // MUTANT: the release — the tail read at the call\n", 'de-sync-tail'), 'de-sync-tail'), 'sync-tail');
+      const x = await scene(mutantCopies('swc-de-tail', REPO).load('src/server/decision-engine.js', anchored(DESRC, OFF_A, "      monthP = Promise.resolve(journalRead().rows || null)   // MUTANT: the release's road by the tip's own synchronous reader — the tail read at the call\n", 'de-sync-tail'), 'de-sync-tail'), 'sync-tail');
       ok(x.syncOpens >= 1, 'CONTROL (the release\'s read, in a copy): a status reads the journal\'s 2 MB tail ON the loop (red)', x);
       // a journal that could not be READ is NO FIGURE (null), never a $0 month (主开发's read wf_3c7fc92a-819): the journal's path a folder
       const ERR_A = "    } catch (e) { if (e && e.code === 'ENOENT') return []; return null; } finally { if (fh) await fh.close().catch(() => { }); }";
