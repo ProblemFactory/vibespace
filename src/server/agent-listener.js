@@ -71,15 +71,23 @@ async function readRecord(stateFile) {
   try { read = { text: await fsp.readFile(stateFile, 'utf8') }; } catch (error) { read = { error }; }
   return SR.storeAnswer(read, { valid: recordValid });
 }
-async function keepPort(stateFile, port, log, hold = null) {
+async function keepPort(stateFile, port, log, hold = null, writer = null) {
   if (!stateFile) return;
   if (hold && !hold.writable('the agent door\'s port')) return;   // r3333 unit 1: never over a held record (said once by the helper)
-  const tmp = `${stateFile}.${process.pid}.tmp`;
-  try { await fsp.writeFile(tmp, JSON.stringify({ port }) + '\n', { mode: 0o600 }); await fsp.rename(tmp, stateFile); }
-  catch (e) { try { await fsp.unlink(tmp); } catch { } log(`[agent-door] its port could not be kept (${(e && e.code) || e}) — a remote session started now loses its tools at the next restart`); }
+  // B-574d «doors-small-state» (主开发 r4867 / r4874, lane nl-mounts): agent-door.json goes through THE STORE WRITER (src/store-writer.js: its
+  // thread writes the temp, SYNCS it, renames it — a power loss never leaves the record torn or empty, which the hold would then keep
+  // the next start from reading: a new port, every remote conversation's tools lost at that restart). Written once a start that needs
+  // a new port and once a lift — no person presses it; THIS ASYNC ROAD WAITS ON ITS LANDING (durable), the loop never does. A refused
+  // landing is SAID — truly: the record is kept in memory and the writer writes it when the storage answers (it retries); a restart
+  // before then reads the old record (or none) and takes a new port
+  const W = writer || require('../store-writer.js').storeWriter();
+  const bytes = JSON.stringify({ port }) + '\n';
+  let landed = false, code = null;
+  try { W.dirty(stateFile, { name: 'agent-door.write', mode: 0o600, produce: () => bytes }); landed = (await W.durable(stateFile)) === true; } catch (e) { code = (e && e.code) || null; }
+  if (!landed) { const why = (typeof W.whyNotDurable === 'function' && W.whyNotDurable(stateFile)) || null; log(`[agent-door] its port is not on disk yet (${code || (why && why.code) || 'the storage did not answer'}) — it is written when the storage answers; a restart before then gives remote conversations a new port (their tools end)`); }
 }
 
-const fresh = () => ({ server: null, port: 0, said: false, hold: null, during: null, kept: null, busyKept: 0, log: null });
+const fresh = () => ({ server: null, port: 0, said: false, hold: null, during: null, kept: null, busyKept: 0, log: null, writer: null });
 let state = fresh();   // during: the conversations whose tunnel took this run's port while the record was held; kept: the kept port's listener after the lift
 let startP = null;
 /** listen `srv` on 127.0.0.1:`port` (the door's one address) → { port } | { err } */
@@ -99,7 +107,7 @@ async function lifted(run, rec, facts, { log, stateFile, avoid }) {
   const named = (during) => during.length ? `${during.length} remote conversation(s) took this run's port ${now} while it was held: ${during.join(', ')}` : `no remote conversation took this run's port ${now} while it was held`;
   if (!kept) {   // torn bytes kept aside, the file gone, or a record with no port of the door's: this run's port is kept (as a start over no record keeps one)
     const during = namesOf(); run.during = null;
-    await keepPort(stateFile, now, log);
+    await keepPort(stateFile, now, log, null, run.writer);
     log(`[agent-door] its record read again (${facts && facts.setAside ? `torn bytes kept aside as ${facts.setAside}` : 'no port in it'}): this run's port ${now} is kept now — ${named(during)}; they keep their tools at the next restart`);
     return;
   }
@@ -121,7 +129,7 @@ async function lifted(run, rec, facts, { log, stateFile, avoid }) {
 }
 /** Start the door over the hub's own `app` (an express handler) — once per process, on its kept port when it has one
  *  (`stateFile`), never on `avoid` (the hub's own port). → Promise<port | 0> */
-function start({ app, log = (...a) => console.log(...a), stateFile = null, avoid = 0 } = {}) {
+function start({ app, log = (...a) => console.log(...a), stateFile = null, avoid = 0, storeWriter = null } = {}) {
   if (state.server) return startP || Promise.resolve(state.port);
   const server = http.createServer((req, res) => {
     if (!allowed(req.url)) {
@@ -135,6 +143,7 @@ function start({ app, log = (...a) => console.log(...a), stateFile = null, avoid
   state.server = server;
   const run = state;   // this start's own state (a close() makes a new one)
   run.log = log;   // r3764: the conversations named as they take the port after a busy lift (tunnelPort)
+  Object.assign(run, { writer: storeWriter });   // B-574d: the store writer agent-door.json is written by (a suite's; else the process's)
   const listen = (port) => listenOn(server, port);
   startP = (async () => {
     // r3333 unit 1: the record's one read through the family's helper — HELD when it cannot be read (never «no port kept»)
@@ -155,7 +164,7 @@ function start({ app, log = (...a) => console.log(...a), stateFile = null, avoid
     try { server.unref(); } catch { }
     server.on('error', (e) => log(`[agent-door] ${(e && e.code) || e} — the door keeps listening`)); // an accept error (EMFILE) is said, never an uncaught exit
     run.port = r.port;
-    if (!held && r.port !== want) await keepPort(stateFile, r.port, log, run.hold);
+    if (!held && r.port !== want) await keepPort(stateFile, r.port, log, run.hold, run.writer);
     log(held ? `[agent-door] its record could not be read — remote conversations' tunnels end at 127.0.0.1:${run.port} for this run (agent routes only; nothing written over the record — at its read the door also listens on the port it keeps)`
       : `[agent-door] remote conversations' tunnels end at 127.0.0.1:${run.port} (agent routes only${r.port === want ? ', its kept port' : ''})`);
     return run.port;

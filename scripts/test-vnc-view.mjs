@@ -524,6 +524,7 @@ process.on('SIGTERM', () => { try { fs.unlinkSync(lock(n)); } catch {} process.e
     const p0 = await freePort();
     const v0 = mk({ VncManager }, p0);
     const s0 = await v0.ensureRunning(); if (v0._own) started.push(v0._own.pid);
+    try { require('../src/store-writer.js').storeWriter().flushSync([path.join(dataDir, 'vnc.json')]); } catch { }   // B-574d (r4935): vnc.json rides the store writer and the start waits on no landing — landed before the file is read
     ok(s0.running && v0.display === ':7' && JSON.parse(fs.readFileSync(path.join(dataDir, 'vnc.json'), 'utf8')).display === ':7', 'the preferred display free ⇒ the Desktop takes it and records it (data/vnc.json)');
     try { process.kill(v0._own.pid, 'SIGTERM'); } catch {}
     for (let i = 0; i < 40 && locks().length; i++) await sleep(25);
@@ -534,6 +535,7 @@ process.on('SIGTERM', () => { try { fs.unlinkSync(lock(n)); } catch {} process.e
     let st = null, err = null;
     try { st = await v.ensureRunning(); } catch (e) { err = e.message; }
     if (v._own) started.push(v._own.pid);
+    try { require('../src/store-writer.js').storeWriter().flushSync([path.join(dataDir, 'vnc.json')]); } catch { }   // B-574d (r4935): vnc.json rides the store writer and the start waits on no landing — landed before the file is read
     const rec = (() => { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'vnc.json'), 'utf8')); } catch { return null; } })();
     ok(!!st && st.running && v.display !== ':7' && /^:\d+$/.test(v.display) && v.singletonFacts().display === v.display, `the preferred :7 held ⇒ the Desktop starts on the display the X server picked (${v.display}), and the desktop-singleton rung reads it`, { st, err, display: v.display });
     ok(!!rec && rec.display === v.display && rec.port === port && rec.pid === (v._own && v._own.pid), 'that display is RECORDED in data/vnc.json (with its port and pid)', rec);

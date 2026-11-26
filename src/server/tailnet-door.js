@@ -140,7 +140,11 @@ function create({ dataDir = null, reach = () => null, fresh = null, settleMs = S
   const kept = () => { try { const j = JSON.parse(fs.readFileSync(stateFile, 'utf8')); const p = Number(j.port); return { port: Number.isInteger(p) && p > 0 && p < 65536 ? p : 0, token: TR.pacPath(j.token) ? String(j.token) : '' }; } catch { return { port: 0, token: '' }; } };
   const keep = (state) => {
     if (!stateFile) return;
-    try { const tmp = `${stateFile}.${process.pid}.tmp`; fs.writeFileSync(tmp, JSON.stringify(state) + '\n', { mode: 0o600 }); fs.renameSync(tmp, stateFile); } catch (e) { sayOnce('keep', `its port could not be kept in ${stateFile} (${e && e.message}) — a browser that outlives a restart reaches tailnet hosts again at its next start`); }
+    // B-574d «doors-small-state» (主开发 r4867 / r4874, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js renameSynced,
+    // 0600) — written ONLY when the door opens on a NEW port or a new token (ensure: `got !== k.port || token !== k.token`); a road's
+    // flap reopens on the freed kept port and writes NOTHING; kept()'s synchronous read right after stays exact. A failed sync or close
+    // is a failed write (the temp removed, the old record stands) — said below; a file system with no sync at all lands, said once
+    try { require('../fd-close.js').renameSynced(`${stateFile}.${process.pid}.tmp`, stateFile, JSON.stringify(state) + '\n', { mode: 0o600, where: 'tailnet-door.json', say: (w) => sayOnce('keep-no-sync', w) }); } catch (e) { sayOnce('keep', `its port could not be kept in ${stateFile} (${e && e.message}) — a browser that outlives a restart reaches tailnet hosts again at its next start`); }
   };
   let px = null, starting = null, token = '', wanted = false;
   const port = () => (px ? px.port() : null);

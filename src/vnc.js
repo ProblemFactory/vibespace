@@ -89,15 +89,21 @@ function recordedDisplay(file, port, { whole = false } = {}) {
     return j && j.port === port && /^:\d{1,5}$/.test(String(j.display)) ? String(j.display) : null;
   } catch { return null; }
 }
+/** B-574d (r4874): a record's KEY — what it says, its time (`at`) left out: two records with the same key are the same record */
+function recordKey(o) {
+  return JSON.stringify({ display: o.display, port: o.port, pid: o.pid || null, start: o.pid ? (o.start == null ? null : o.start) : null, ...(Array.isArray(o.sessionNoReply) && o.sessionNoReply.length ? { sessionNoReply: o.sessionNoReply } : {}) });
+}
 
 class VncManager {
   /** `display` / `port` / `xvncBin` default to the env / PATH (server.js passes none; the suites pass stand-ins). */
-  constructor({ dataDir, stopOnShutdown = false, display = VNC_DISPLAY, port = VNC_PORT, xvncBin = null }) {
+  constructor({ dataDir, stopOnShutdown = false, display = VNC_DISPLAY, port = VNC_PORT, xvncBin = null, storeWriter = null }) {
+    this._storeWriter = storeWriter;   // B-574d «doors-small-state» (主开发 r4867 / r4874, lane nl-mounts): the store writer vnc.json is written by (a suite's; else the process's)
     this._pidFile = path.join(dataDir, 'vnc.pid');
     this._stateFile = path.join(dataDir, STATE_FILE);
     this.port = port;
     this._preferred = display;
     this.display = recordedDisplay(this._stateFile, port) || display; // B-956d: a running Desktop is on the display it TOOK
+    { const r0 = recordedDisplay(this._stateFile, port, { whole: true }); this._recKey = r0 ? recordKey(r0) : null; }   // B-574d (r4874): the record on disk, the time left out
     this._starting = null; // in-flight ensureRunning promise (dedupe)
     this._xvncBin = xvncBin;
     this._running = false;  // last status() answer — the desktop-app keeper's `desktop-singleton` rung reads it
@@ -161,7 +167,7 @@ class VncManager {
     this.display = r.display;
     if (x.pid) this._own = { pid: x.pid, start: procStart(x.pid) };
     try { fs.writeFileSync(this._pidFile, String(x.pid)); } catch {}
-    this._record(x.pid);
+    this._record(x.pid);   // B-574d (r4935): handed to the writer at once (urgent) — the start waits on no landing, whoever called it
     // Wait for the RFB port, then start the desktop session on that display.
     for (let i = 0; i < 50; i++) {
       if (await portListening(this.port)) break;
@@ -194,11 +200,13 @@ class VncManager {
   /** r2489 (2): the session's no-reply mark — this process's, else the one kept beside the display's record (a restart keeps it) */
   _noReplyMark() {
     if (this._sessionNoReply) return this._sessionNoReply;
+    if (this._markRun !== undefined) return this._markRun;   // B-574d (r4874): the mark THIS run set or cleared — its record may still be owed to the writer, so the file is not asked
     const r = recordedDisplay(this._stateFile, this.port, { whole: true });
     return r && Array.isArray(r.sessionNoReply) && r.sessionNoReply.length ? r.sessionNoReply : null;
   }
   /** the mark written beside the display's record (null clears it); the record's X server stays the one it names */
   _markRecord(list) {
+    this._markRun = Array.isArray(list) && list.length ? list : null;   // B-574d (r4874): the mark this run knows (its record rides the writer)
     const r = recordedDisplay(this._stateFile, this.port, { whole: true });
     const pid = (this._own && this._own.pid) || (r && r.pid) || null;
     if (pid) this._record(pid, list);
@@ -241,14 +249,28 @@ class VncManager {
     });
   }
 
-  /** B-956d: the display this Desktop took, for the next boot's adoption (tmp + rename: never a half-written file). */
+  /** B-956d: the display this Desktop took, for the next boot's adoption. */
   _record(pid, sessionNoReply = null) {
-    try {
-      const tmp = `${this._stateFile}.tmp-${process.pid}`;
-      fs.writeFileSync(tmp, JSON.stringify({ display: this.display, port: this.port, pid: pid || null, start: pid ? procStart(pid) : null, at: Date.now(), ...(Array.isArray(sessionNoReply) && sessionNoReply.length ? { sessionNoReply } : {}) }) + '\n');
-      fs.renameSync(tmp, this._stateFile);
-    } catch (e) { console.warn(`[vnc] could not record the Desktop's display (${e.message}) — a restart adopts ${this._preferred}`); }
+    // B-574d «doors-small-state» (主开发 r4867 / r4874, lane nl-mounts): vnc.json rides THE STORE WRITER on EVERY road (r4874: the Desktop
+    // window's reconnect ladder calls the start by itself — up to six times an open, exactly when nothing answers: a cadence) — its
+    // thread writes the temp, SYNCS it, renames it; the bytes made at the write, off the loop. NO WRITE WHEN NOTHING BUT THE TIME
+    // CHANGED: the record without its `at` the same as the last one asked (or read at the start) asks nothing. NO WAIT AT ALL (r4935
+    // (a)): the record is handed to the writer at once (an URGENT ask: its next write) and the route replies — the person's press and
+    // the ladder's calls alike, an X server spawned included (a ladder call after the display's program died spawns one). This run's
+    // readers answer from memory (_own, the mark this run knows: _noReplyMark); the file is the NEXT boot's. THE WRITER's CRASH
+    // WINDOW, the family's accepted cost: a hub KILLED before the record lands (a stop or a crash lands it at the exit) leaves the
+    // next start the older record — an X server spawned just before is adopted on the older (or the preferred) display, and a
+    // no-reply mark just set is lost (a reopened Desktop adopts the bare display without running the session's lookups again, until
+    // its X server is started anew). A refused landing is the writer's own line and stays owed
+    const rec = { display: this.display, port: this.port, pid: pid || null, start: pid ? procStart(pid) : null, ...(Array.isArray(sessionNoReply) && sessionNoReply.length ? { sessionNoReply } : {}) };
+    const key = recordKey(rec);
+    if (key === this._recKey) return;
+    this._recKey = key;
+    try { this._writer().dirty(this._stateFile, { name: 'vnc.write', urgent: true, produce: () => JSON.stringify({ display: rec.display, port: rec.port, pid: rec.pid, start: rec.start, at: Date.now(), ...(rec.sessionNoReply ? { sessionNoReply: rec.sessionNoReply } : {}) }) + '\n' }); }
+    catch (e) { console.warn(`[vnc] could not record the Desktop's display (${e.message}) — a restart adopts ${this._preferred}`); }
   }
+  _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
+
 
   /** Desktop session on the VNC display: XFCE preferred, fallbacks probed. */
   async _startSession() {

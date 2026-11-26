@@ -473,7 +473,7 @@ const DELETION_CALLS = Object.freeze({
   'src/opencode-serve.js': 2, 'src/opslog.js': 1, 'src/owner-mark.js': 5, 'src/plugins/frp.js': 6,
   'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 18,   /* r4828 (lane nl-journals): + the extraction journal's temp removed on a failed write */
   'src/routes/persistence.js': 6, 'src/routes/window-targets.js': 1, 'src/safe-fs-worker.js': 7, 'src/search-index-worker.js': 1,
-  'src/secret-box.js': 1, 'src/secret-file.js': 4, 'src/server/agent-listener.js': 1, 'src/server/agent-tool-generators.js': 2,
+  'src/secret-box.js': 1, 'src/secret-file.js': 4, 'src/server/agent-tool-generators.js': 2,
   'src/server/apps-ops-door.js': 2, 'src/server/automation-engine.js': 1, 'src/server/boot-restore.js': 9, 'src/server/browser-attach-launch.js': 1,
   'src/server/browser-builds-keeper.js': 8, 'src/server/browser-cli-install.js': 3, 'src/server/browser-clone-run.js': 2, 'src/server/browser-display-config.js': 2,
   // B-574d «browser-stores» 8/8 (lane nl-migrations): browser-keeper.js +1 — a download witness's own temp removed when its write, sync or close failed

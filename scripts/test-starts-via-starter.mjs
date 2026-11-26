@@ -509,9 +509,11 @@ WD.section('⑧');
     // (2) A HUB RESTART between the toast and the reopen: the mark is kept beside the display's record, honoured while its X server is still that one
     const restartRun = async (mod) => {
       const dir = vdir(); await firstStart(V, dir, process.pid);   // the hub before the restart (the real module) marked the display
+      try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync([path.join(dir, 'vnc.json')]); } catch { }   // B-574d (r4874): its record rides the store writer — landed before the restarted hub reads it (a hub's stop lands it at its exit)
       const after = new mod.VncManager({ dataDir: dir, port: vport, display: ':91' });   // the restarted hub: nothing in memory, its display read from the record
       answer = xtermOnly; const x0 = directOf('xterm');
       const r = await after.ensureRunning();
+      try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync([path.join(dir, 'vnc.json')]); } catch { }   // B-574d (r4874): vnc.json rides the store writer — the cleared mark lands before the file is read
       const rec = JSON.parse(fs.readFileSync(path.join(dir, 'vnc.json'), 'utf8'));
       return { display: after.display, started: directOf('xterm') - x0, session: r.session || null, markLeft: !!rec.sessionNoReply };
     };
