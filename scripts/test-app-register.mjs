@@ -27,8 +27,13 @@ let fails = 0, n = 0;
 const ok = (c, msg) => { n++; if (!c) { fails++; console.log(`  ✗ ${msg}`); } };
 const eq = (a, b, msg) => ok(JSON.stringify(a) === JSON.stringify(b), `${msg}: ${JSON.stringify(a)} ≠ ${JSON.stringify(b)}`);
 /** r5094 (unit C): this process's own children that carry HOME `home` (read from /proc: the kernel's child list, each one's environ)
- *  — waited until none is left, by their exit; the expiry a named line (the leg after it judges what is left) */
-const kidsWithHome = (home) => { let pids = []; try { pids = fs.readFileSync(`/proc/${process.pid}/task/${process.pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean); } catch { return []; }
+ *  — waited until none is left, by their exit; the expiry a named line (the leg after it judges what is left).
+ *  ITS ASSUMPTIONS (r5121, the round's should), named: it sees the DIRECT children of this process's main thread only — today the
+ *  xpra probe is one (desktop-display's xpraVersion runs execFile: the suite installs no starter); a child-starter, a shell or a wrapper
+ *  that exits early would hide the grandchild that writes, and a probe not yet spawned when the end runs is not waited for. A kernel
+ *  without CONFIG_PROC_CHILDREN gives no list at all: `kidsListed` says so, and the PLACED leg's red text names it */
+let kidsListed = true;
+const kidsWithHome = (home) => { let pids = []; try { pids = fs.readFileSync(`/proc/${process.pid}/task/${process.pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean); } catch { kidsListed = false; return []; }
   return pids.filter((k) => { try { return fs.readFileSync(`/proc/${k}/environ`, 'latin1').split('\0').includes('HOME=' + home); } catch { return false; } }); };
 const kidsEnded = async (home, ms) => { const t0 = Date.now(); let left = kidsWithHome(home); while (left.length && Date.now() - t0 < ms) { await new Promise((r) => setTimeout(r, 25)); left = kidsWithHome(home); }
   if (left.length) markTimedOut(left, ms, `children with HOME ${home} still alive`); return left; };
@@ -422,7 +427,7 @@ sec('⑩ rel254-verify-fixes: the OWNER routes over the real router (adopt-prefi
     return back;
   };
   const oldBack = await placedEnd(false), newBack = await placedEnd(true);
-  ok(oldBack === true && newBack === false, `PLACED ⑩'s end: a late writer of the section's own (a held moment, then its HOME): the old end (the removal at once) finds the folder BACK after it lands (${oldBack}); the end that waits for its own children leaves nothing (${!newBack})`);
+  ok(oldBack === true && newBack === false, `PLACED ⑩'s end: a late writer of the section's own (a held moment, then its HOME): the old end (the removal at once) finds the folder BACK after it lands (${oldBack}); the end that waits for its own children leaves nothing (${!newBack})${kidsListed ? '' : ' — THE KERNEL GIVES NO CHILDREN LIST (/proc/<pid>/task/<pid>/children unreadable: no CONFIG_PROC_CHILDREN), so no wait could see a child: this red is that'}`);
 }
 
 console.log(fails ? `\n${fails}/${n} FAILED` : `\nall ${n} passed`);
