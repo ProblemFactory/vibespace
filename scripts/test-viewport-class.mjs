@@ -377,14 +377,36 @@ console.log('⑤e the simulator\'s faults (主开发 r4463): the launch wears th
     '⑤e the cookie is read by its exact name, decoded, and refused unless it is a colour (a malformed escape is nothing)');
   // ON THE REAL PAGE: exactly the two launch grounds change — <html>'s inline style and the loading screen's
   const lit = IDX.split('#0c0c18').length - 1, out = LG.withGround(IDX, '#fafafa');
-  ok(out.includes('<html lang="en" style="background:#fafafa">') && /<div id="loading-screen" style="[^"]*background:#fafafa;/.test(out) && out.split('#0c0c18').length - 1 === lit - 2 && LG.withGround(IDX, null) === IDX && LG.withGround(IDX, 'white') === IDX && LG.withGround(IDX, LG.DARK) === IDX,
+  ok(out.includes('<html lang="en" style="background:#fafafa">') && /<div id="loading-screen" (?:data-ground="light" )?style="[^"]*background:#fafafa;/.test(out) && out.split('#0c0c18').length - 1 === lit - 2 && LG.withGround(IDX, null) === IDX && LG.withGround(IDX, 'white') === IDX && LG.withGround(IDX, LG.DARK) === IDX,
     `⑤e on public/index.html the remembered ground replaces exactly its two launch grounds (of ${lit} dark literals); no cookie, a word or the dark ground leave the page as it is`);
   // THE WIRING: the index route writes it before it sends; a theme that applies remembers its ground
   const routeOk = (src) => /const ground = launchGround\.groundOf\(req\.headers\.cookie\);[^\n]*\n(?:\s*html = launchImage\.withLinks\(html, ground\);[^\n]*\n)?\s*html = launchGround\.withGround\(html, ground\);[^\n]*\n\s*res\.set\('Cache-Control', 'no-cache'\)/.test(src);
-  ok(routeOk(SRV) && /app\.get\(\['\/', '\/index\.html'\], \(req, res, next\) => \{[\s\S]{0,700}const launchGround = require\('\.\/src\/launch-ground\.js'\);/.test(SRV) && /import \{ cookieFor \} from '\.\.\/launch-ground\.js';/.test(TH) && /const c = cookieFor\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); if \(c\) document\.cookie = c;/.test(TH),
+  ok(routeOk(SRV) && /app\.get\(\['\/', '\/index\.html'\], \(req, res, next\) => \{[\s\S]{0,700}const launchGround = require\('\.\/src\/launch-ground\.js'\);/.test(SRV) && /import \{ groundCookie \} from '\.\.\/launch-ground\.js';/.test(TH) && /try \{ document\.cookie = groundCookie\(getComputedStyle\(document\.documentElement\)\.getPropertyValue\('--bg-root'\)\); \}/.test(TH),
     '⑤e the index route writes the remembered ground into the page before it sends it; ThemeManager.apply remembers the applied theme\'s ground (a custom or plugin theme\'s as the page computes it)');
   ok(!routeOk(SRV.replace(/\n\s*html = launchGround\.withGround\([^\n]*/, '')), '⑤e RED CONTROL: 26d571cdb\'s route (no rewrite) — a light theme\'s launch stays dark');
   ok(LG.cookieFor('#fafafa') === 'vs_ground=%23fafafa; path=/; max-age=31536000; SameSite=Lax' && LG.cookieFor('red') === null, '⑤e the cookie: the whole origin, a year, never sent cross-site; nothing for a value that is no colour');
+  // r4681 required 3: a theme's ground that is no plain colour CLEARS the cookie — the next launch falls back to today's dark
+  ok(LG.CLEAR === 'vs_ground=; path=/; max-age=0; SameSite=Lax' && ['hsl(0, 0%, 10%)', 'oklch(0.2 0 0)', 'color-mix(in srgb, red, blue)', 'black', ''].every((v) => LG.groundCookie(v) === LG.CLEAR) && LG.groundCookie(' #fafafa') === LG.cookieFor('#fafafa'),
+    '⑤e a theme whose ground is no plain colour (an hsl(), oklch(), color-mix(), a name) writes the CLEARING cookie — the next launch falls back to today\'s dark, never the previous theme\'s ground');
+  ok(LG.cookieFor('hsl(0, 0%, 10%)') === null, '⑤e RED CONTROL: effa5382a\'s road (write only a colour) wrote NOTHING for such a ground — the previous theme\'s ground stayed in the cookie');
+  // r4681 required 2: THE WORDS ON A LIGHT GROUND — the loading screen's text and track follow the ground; the splash draws its stuck-start
+  // line and its Reload button in ON_LIGHT there (src/lib/boot-splash.js)
+  const lightOut = LG.withGround(IDX, '#f0f0f5'), darkOut = LG.withGround(IDX, '#1e1f29');
+  ok(lightOut.includes('<div id="loading-screen" data-ground="light" style="') && lightOut.includes(`background:#f0f0f5;color:${LG.ON_LIGHT.text};`) && lightOut.includes(`<div style="width:120px;height:3px;background:${LG.ON_LIGHT.track};`)
+    && !darkOut.includes('data-ground') && darkOut.includes('background:#1e1f29;color:#e2e8f0;') && darkOut.includes('<div style="width:120px;height:3px;background:rgba(255,255,255,0.07);'),
+    '⑤e over a LIGHT ground the loading screen is marked data-ground="light", its words dark and its track dark; over a dark ground (Dracula\'s) its words stay the release\'s');
+  const grounds = [...new Set([...CSS.matchAll(/--bg-root: (#[0-9a-fA-F]{3,8});/g)].map((m) => m[1]))];
+  const wordsOn = (g) => (LG.lightGround(g) ? [LG.ON_LIGHT.text, LG.ON_LIGHT.line, LG.ON_LIGHT.accent] : ['#e2e8f0', '#94a3b8', '#5eead4']);
+  const low = grounds.flatMap((g) => wordsOn(g).map((w) => [g, w, Math.round(LG.contrast(g, w) * 10) / 10]).filter((x) => x[2] < 4.5));
+  ok(grounds.length >= 6 && grounds.includes('#f0f0f5') && grounds.includes('#0c0c18') && low.length === 0,
+    `⑤e the loading screen's words (its text, the stuck-start line, the Reload button) over EVERY built-in theme's ground (${grounds.join(' ')}, read from style.css) stand at 4.5:1 or more (WCAG AA)`, low);
+  ok(LG.contrast('#f0f0f5', '#94a3b8') < 4.5 && LG.contrast('#f0f0f5', '#5eead4') < 4.5, `⑤e RED CONTROL: the release's words on the light ground — the line #94a3b8 ${Math.round(LG.contrast('#f0f0f5', '#94a3b8') * 10) / 10}:1, the Reload button #5eead4 ${Math.round(LG.contrast('#f0f0f5', '#5eead4') * 10) / 10}:1 — fall under 4.5:1`);
+  const BSJ = read('src/lib/boot-splash.js');
+  const splashOk = (t) => /import \{ ON_LIGHT \} from '\.\.\/launch-ground\.js';/.test(t) && t.includes("const onLight = (s) => !!s && !!s.dataset && s.dataset.ground === 'light';")
+    && t.includes("color:${onLight(s) ? ON_LIGHT.line : '#94a3b8'}") && t.includes("border:1px solid ${onLight(s) ? ON_LIGHT.accent : '#2dd4bf'}") && t.includes("color:${onLight(s) ? ON_LIGHT.accent : '#5eead4'}");
+  const splashWas = BSJ.replace("color:${onLight(s) ? ON_LIGHT.line : '#94a3b8'}", 'color:#94a3b8');   // stale-pins: kept — the CONTROL plants effa5382a's line colour back
+  ok(splashOk(BSJ), '⑤e boot-splash.js draws the stuck-start line and the Reload button in ON_LIGHT over a light ground (the loading screen\'s mark), in the release\'s colours over a dark one');
+  ok(splashWas !== BSJ && !splashOk(splashWas), '⑤e RED CONTROL: effa5382a\'s splash (the line drawn #94a3b8 whatever the ground) is caught');
   // FAULT 1: the page's chrome in ONE fixed container in the home-screen copy only
   const fixedOk = (css) => /html\[data-standalone\] #main-wrapper \{ position: fixed; top: 0; right: 0; bottom: 0; left: 0; height: auto; \}/.test(css);
   ok(fixedOk(CSS), '⑤e the home-screen copy\'s #main-wrapper is fixed at its own rectangle (主开发\'s simulator experiment: the system\'s top band then takes the bar\'s colour, the title sharp) — UNPROVEN on the device until the pictures');

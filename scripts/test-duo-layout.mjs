@@ -33,7 +33,9 @@
 //     (right 84, bottom 34 — the simulator's reading): inner 951×648 and outer 466×657 — the bar IN the column, global things
 //     only in their order, under the clock's room and above the bottom inset; the conversation's search and menu at the
 //     strip's «Conversation settings» door; a viewer's ✕ at its head; the never-overflow law at 951×360 (yields → ⚙'s rows);
-//     the outer's own head = the name's row. RED CONTROL: the release's stylesheet (the bar at right 0, 56 px) is red
+//     the outer's own head = the name's row; the outer display with the LIST OPEN — the list stops where the column begins, every
+//     button of the column the hit at its centre (r4681 MUST; RED: the rule cut by CSSOM). RED CONTROL: the release's stylesheet
+//     (the bar at right 0, 56 px) is red
 //   ④h THE SYSTEM's COLUMN ON THE LEFT (主开发 r4481 — the outer display held landscape, 678×445, insets left 84 · bottom 34):
 //     the bar IN the column at x 0 (84 wide, global things only, in order, from the top, above the bottom inset), the list
 //     column and the conversation after it (hidden: the conversation 84–678; shown: the list 84–404, the conversation from
@@ -568,6 +570,25 @@ try {
     const outRows = await evalJs(`[...document.querySelectorAll('.chat-status-settings-row')].map((r) => r.className.match(/chat-status-col-[a-z]+/)?.[0] || '')`);
     await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((m) => m.remove()); 1`);
     check('④b outer: the «Conversation settings» door ends with this conversation\'s search, its window\'s menu and «Close window» (the compact ✕\'s act, two presses)', outRows.slice(-3).join() === 'chat-status-col-search,chat-status-col-window,chat-status-col-close', outRows);
+    // r4681 MUST (the full round of line 1062): THE LIST OPEN ON THE OUTER DISPLAY — the home-screen copy's FIXED wrapper is its own
+    // stacking context, so the column's layer counts only inside it and the list (outside it, the phone's full-width overlay) covered
+    // every global door. The list now stops where the column begins: each of the column's buttons is the hit at its centre while it is open
+    const HITS = `(() => { const nav = document.getElementById('mobile-nav'), sb = document.querySelector('.sidebar'), r = sb.getBoundingClientRect();
+      const kids = [...nav.children].filter((e) => e.getClientRects().length && getComputedStyle(e).position !== 'fixed' && !e.classList.contains('mnav-gap'));
+      return { open: sb.classList.contains('open'), left: Math.round(r.left), right: Math.round(r.right), w: innerWidth, hits: kids.map((e) => { const b = e.getBoundingClientRect(), at = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return { id: e.id, hit: !!at && (at === e || e.contains(at)), on: at ? String(at.id || at.className || at.tagName).slice(0, 40) : null }; }) }; })()`;
+    const listSettled = `(() => { const s = document.querySelector('.sidebar'); return !!s && s.classList.contains('open') && Math.round(s.getBoundingClientRect().left) === 0 && !s.getAnimations().length; })()`;
+    await evalJs(`(app.sidebar.toggle(true), 1)`); await waitFor(listSettled, 5000);
+    const lo = await evalJs(HITS);
+    check(`④b outer, THE LIST OPEN: it stops where the column begins (0–${lo.right} of ${lo.w}); every one of the column's ${lo.hits.length} buttons is the hit at its centre`,
+      lo.open && lo.left === 0 && lo.right === lo.w - 84 && lo.hits.length >= 6 && lo.hits.every((h) => h.hit), lo);
+    // RED CONTROL: the stylesheet before this cure — its one rule taken out of the page's sheets (CSSOM), the list open
+    await evalJs(`(() => { let n = 0; for (const sh of document.styleSheets) { let rs; try { rs = sh.cssRules; } catch { continue; } for (let i = rs.length - 1; i >= 0; i--) if (rs[i].selectorText === 'html[data-vc="compact"][data-sidecol] .sidebar') { sh.deleteRule(i); n++; } } window.__cutRules = n; return n; })()`);
+    await waitFor(`(() => { const s = document.querySelector('.sidebar'); return !!s && Math.round(s.getBoundingClientRect().right) === innerWidth && !s.getAnimations().length; })()`, 5000);
+    const lr = await evalJs(HITS), cutN = await evalJs('window.__cutRules');
+    check(`④b RED CONTROL: without the cure (its rule cut from ${cutN} sheet(s)) the open list covers the column — ${lr.hits.filter((h) => !h.hit).length} of ${lr.hits.length} buttons under it (the hit: ${(lr.hits.find((h) => !h.hit) || {}).on})`,
+      cutN >= 1 && lr.right === lr.w && lr.hits.length >= 6 && lr.hits.some((h) => !h.hit), { cutN, lr });
+    await evalJs(`(app.sidebar.toggle(false), 1)`);
     // RED CONTROL: the release's stylesheet (everything from «THE SYSTEM's EDGES (B-78db» cut) — the bar at right 0, the conversation's buttons in it
     await device(951, 648); await load(); await attachBoth(); await sleep(300);
     await evalJs(`(async () => { const l = [...document.querySelectorAll('link[rel=stylesheet]')].find((x) => /\\/style\\.css/.test(x.href)); const css = await (await fetch(l.href)).text(); const cut = css.slice(0, css.indexOf('/* ── THE SYSTEM\\'s EDGES (B-78db')); const s = document.createElement('style'); s.textContent = cut; l.after(s); l.disabled = true; window.dispatchEvent(new Event('resize')); return cut.length; })()`);

@@ -1,4 +1,4 @@
-import { cookieFor } from '../launch-ground.js'; // B-78db: the launch's ground follows the applied theme (the server reads the cookie)
+import { groundCookie } from '../launch-ground.js'; // B-78db: the launch's ground follows the applied theme (the server reads the cookie)
 // Terminal color themes — ANSI 16 colors.
 // Contrast-audited: all foreground colors ≥4.5:1 on their theme background (WCAG AA).
 // ANSI "black" on dark bg is intentionally dim (~1.4:1) — it's rarely used as foreground.
@@ -91,7 +91,8 @@ class ThemeManager {
     this._clearInlineOverrides();
     // B-78db (主开发 r4463 fault 2): the NEXT launch wears THIS theme's ground from its first paint — the index route writes it from one cookie
     // (src/launch-ground.js: a hex or rgb() only); a custom or plugin theme's ground too, read as the page now computes it
-    try { const c = cookieFor(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); if (c) document.cookie = c; } catch { /* no document (a suite) */ }
+    // r4681 required 3: a ground that is no plain colour CLEARS the cookie (the next launch: today's dark, never the previous theme's)
+    try { document.cookie = groundCookie(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); } catch { /* no document (a suite) */ }
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('theme-colors-changed'));
   }
 

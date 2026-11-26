@@ -942,9 +942,9 @@ const converged = (w, pages) => { const st = slotsOf(w.serverState()); return pa
   const notOnMaster = (list) => { const left = new Map(); for (const x of MASTER_STORAGE_WRITES) left.set(x, (left.get(x) || 0) + 1); const out = []; for (const x of list) { if (left.get(x) > 0) left.set(x, left.get(x) - 1); else out.push(x); } return out; };
   // THE LAUNCH GROUND's ONE COOKIE (B-78db, 主开发 r4467): a colour or nothing by src/launch-ground.js's one strict rule — never an act,
   // a record's words, an id or a theme's name; declared by its exact statement in src/lib/themes.js, its writer imported from
-  // launch-ground.js. Any other cookie write, in that file or another, stays red
-  const GROUND_COOKIE = "try { const c = cookieFor(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); if (c) document.cookie = c; }";
-  const groundCookieOnly = (rel, text) => rel === 'src/lib/themes.js' && text.split('document.cookie').length === 2 && text.split(GROUND_COOKIE).length === 2 && /^import \{ cookieFor \} from '\.\.\/launch-ground\.js';/m.test(text);
+  // launch-ground.js (its ground, or the clearing cookie — r4681 required 3). Any other cookie write, in that file or another, stays red
+  const GROUND_COOKIE = "try { document.cookie = groundCookie(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); }";
+  const groundCookieOnly = (rel, text) => rel === 'src/lib/themes.js' && text.split('document.cookie').length === 2 && text.split(GROUND_COOKIE).length === 2 && /^import \{ groundCookie \} from '\.\.\/launch-ground\.js';/m.test(text);
   const DISPLAY = ['starredSessions', 'archivedSessions', 'archivedFolders', 'sessionCustomNames', 'sessionModes', 'sessionConfigs', 'sessionGroups', 'groupFolders'];
   const censusMemo = new Map();
   const censusOf = (texts) => {
