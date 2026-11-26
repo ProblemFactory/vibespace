@@ -546,6 +546,24 @@ function poolTiers({ creditsIds = null, payingIds = null, overageIds = null } = 
   return { tierOf, orderOf, credits, paying };
 }
 
+/**
+ * decideStart({family, hinted, defaultStale, baseReadCache, ...decidePoolSwitch's own args}) — THE START's ONE ENTRY (B-87fd item (1),
+ * 主开发 r4986: A RESUME IS A START). The engine's chooser (src/server/usage-pool-engine.js poolChooserForModel) asks it for EVERY start it
+ * makes — a new conversation, a resume by hand, each conversation of a resume-all — and test-pool-tier-invariants drives this same entry
+ * for every kind of start. With nobody paying on the default it is the release's own call: a start with no model family (and a
+ * default the pool still lists) stays on the default (→ null), else decidePoolSwitch with `placing` = a family the start NAMED (a
+ * hinted one is a guess: no spare-lane placing on it). On a PAYING default the placing law binds every start (`starting`): a cold spawn
+ * has no turn to cut, so the settle bar (a bar for MOVES) gives it no reason to bill. A guessed or unknown family is judged FAIL
+ * CLOSED: on the unprojected reading (`baseReadCache`, every bucket the guess could mean), no proving spawn on a guess; when no member
+ * can serve that way, the default stands. → the decision, or null (the default).
+ */
+function decideStart({ family = null, hinted = false, defaultStale = false, baseReadCache = null, ...args } = {}) {
+  const pays = poolTiers({ creditsIds: args.creditsIds, payingIds: args.payingIds, overageIds: args.overageIds }).tierOf(args.currentId) === TIER_PAYING;
+  if (!family && !defaultStale && !pays) return null;
+  if (pays && (!family || hinted)) return decidePoolSwitch({ ...args, readCache: baseReadCache || args.readCache, proving: null, placing: false, starting: true });
+  return decidePoolSwitch({ ...args, placing: !hinted, starting: pays });
+}
+
 function rankPoolMembers({ members, readCache, nowSec, readLogin = null, creditsIds = null, payingIds = null, priority = null, providerOf = null, fromProvider = null }) {
   const out = [];
   // THE PROVIDER (q-053 P0b): the snapshot is a list of HOT re-points the device makes by itself — a member of another
@@ -667,7 +685,7 @@ function evalGateOpen({ now, last = 0, force = false } = {}) {
 // a usable default is left for a settleable member with less SPARE lane (`reason:
 // 'spare-lane'`, see THE SPARE LANE). Omit it ⇒ byte-identical. A HOT pool's proactive pass
 // moves an idle running conversation the same way, past SPARE_MOVE_MARGIN_PCT (S5).
-function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, payingIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, providerOf = null, conversationModel = null, crossProvider = 'never', offer = true, proving = null, readReading = null, roster = null, held = null, explain = false }) {
+function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = false, hot = proactive, pessimism = {}, exclude = null, readLogin = null, reserveFloorPct = 0, overageIds = null, creditsIds = null, payingIds = null, warm = null, membership = null, priority = null, placing = false, pinned = false, providerOf = null, conversationModel = null, crossProvider = 'never', offer = true, proving = null, readReading = null, roster = null, held = null, starting = false, explain = false }) {
   const prioRank = priorityRankOf(priority);
   const order = priorityOrder(priority);
   const excluded = exclude && exclude.length ? new Set(exclude) : null;
@@ -787,7 +805,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // THE PROVING SPAWN asks first (see PROVING_HOLD_MS): an unread default is itself a guess a spawn may prove, so the
   // hold is answered after that rule — the verdict is 'no-data' exactly as before when it picks nobody
   const provingOn = !!placing && !pinned && proving != null;
-  const noDataHold = !cur.known && !proactive && !curLoginDead && !notMember && !prioRank && !curHeldStart && !curHeldWalled;
+  // r4986: a START on a paying member whose numbers are unknown (B-6a92's held mark) is no ignorance to stay on — it pays by its raw
+  // reading's own fact, and the placing law below binds every start, as it binds a start that named its family (curHeldStart)
+  const noDataHold = !cur.known && !proactive && !curLoginDead && !notMember && !prioRank && !curHeldStart && !curHeldWalled && !(starting && curPayingTakes);
   if (noDataHold && !provingOn) return none('no-data');
   if (!exhausted && !proactive && !prioRank && !placing) return none('healthy', { fromRemaining: cur.known ? cur.remaining : null });
 
@@ -871,7 +891,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
     if (tier === TIER_CREDITS) {
       creditsHeld.push({ id: m.id, name: m.name });
       // r4744 (the ruling): a move OFF a paying member is a voluntary one, so its credits target clears the release's settle bar
-      if (r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT)) creditsSettle.add(m.id);
+      if (r.known && br.length > 0 && br.every((b) => b.remaining >= THRESH[b.kind].hot + MIN_GAIN_PCT) && (!readLogin || loginSwitchTarget(li))) creditsSettle.add(m.id);   // r4986 (b): its sign-in gate as an ordinary target's
       creditsRanked.push({ id: m.id, name: m.name, eff, known: r.known, settleOk: false, remaining: r.known ? r.remaining : null, weeklyRemaining: weeklyRemaining(br), deadline: weeklyDeadline(c, nowSec), loginPenalty: loginRank(li), spare: spareLaneRemaining(c, nowSec), barredWhy: 'credits', dead: r.known && br.some(dead) });
       continue;
     }
@@ -1016,9 +1036,11 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // cache and a turn to lose). A new one is never placed on a paying default while an ordinary or a credits member can serve now,
   // whichever band: the ordinary members first (one that settles, else the most headroom read, as the hard band picks), then a usage-
   // credits member that holds quota
-  if (placing && curPayingTakes && !hardDead) {
+  // r4986 (主开发's ruling): A RESUME IS A START — the law binds EVERY start the chooser makes (`starting`, decideStart below), a new
+  // conversation, a resume by hand, each of a resume-all, with a model or without; `placing` keeps its spare-lane meaning of the hint
+  if ((placing || starting) && curPayingTakes && !hardDead) {
     const known = ranked.filter((r) => r.known);
-    const pick = ranked.find((r) => r.settleOk) || (known.length ? known.reduce((x, y) => (y.eff > x.eff ? y : x)) : ranked[0]) || creditsRanked.find((r) => !r.dead) || null;
+    const pick = ranked.find((r) => r.settleOk) || (known.length ? known.reduce((x, y) => (y.eff > x.eff ? y : x)) : ranked[0]) || creditsRanked.find((r) => !r.dead && r.loginPenalty < 2) || null;   // r4986 (b): a credits member whose sign-in is about to die is no place to start, as an ordinary one
     if (pick) return { to: pick.id, toName: pick.name, fromRemaining: cur.known ? cur.remaining : null, toRemaining: pick.remaining, reason: 'overage', band: 'soft', ...(prioRank ? { placedBy: 'priority', priorityRank: prioRank(pick.id) < priority.length ? prioRank(pick.id) + 1 : null } : {}) };
   }
   if (!pool.length) {
@@ -1139,7 +1161,9 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       // 100 %), so the gain floor does not apply to the last resort either.
       // …and a member the pool no longer lists is not a place to STAY at any
       // gain (2026-09-28): its remaining quota is the owner's to withhold.
-      if (!curLoginDead && !notMember && !usingCredits && !usingPaying && best.eff <= cur.remaining + MIN_GAIN_PCT) return none('stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...notBetterDetail(), ...bucketDetail(curBr) });
+      // r4986 (a): the gate stays (a move worth a point or two would hop back), but a paying member that still takes turns is no blocked
+      // pool — «no better», never the word that reads it blocked (RULE 5)
+      if (!curLoginDead && !notMember && !usingCredits && !usingPaying && best.eff <= cur.remaining + MIN_GAIN_PCT) return none(curPayingTakes ? 'no-better' : 'stuck', { fromRemaining: cur.remaining, bestRemaining: best.remaining, bestName: best.name || best.id, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...notBetterDetail(), ...bucketDetail(curBr) });
       // `reason` says why we LEFT (it gates the dwell-belt exemption and the
       // notice); `toLoginNear` says what we could get. Collapsing the two into
       // one string would have made a login-expired escape onto a scrap lose
@@ -2010,6 +2034,6 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   wallDoor, evalGateOpen, EVAL_GATE_MS,
-  quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, poolCheckingNotice, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember, poolTiers,
+  quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, poolCheckingNotice, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember, poolTiers, decideStart,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
   classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, cacheTtlSecFor, recordCacheFact, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice, PROVING_HOLD_MS, provingText, provingWindowOf };

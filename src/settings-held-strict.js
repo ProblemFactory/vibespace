@@ -20,7 +20,7 @@ const STRICT_WHILE_HELD = Object.freeze({
   'webhook.allowPrivateReplyUrl': row('safety', false, 'no reply to a private address'),
   'webhook.trustProxyHops': row('safety', 0, 'no proxy header is trusted'),
   // MONEY
-  'pool.avoidOverageMembers': row('money', true, 'no conversation is moved onto an account billing paid overage'),
+  'pool.avoidOverageMembers': row('money', true, 'a move onto an account billing paid overage is named as one (such an account is always used last, whatever this says)'),
   'spend.allowOverageTurns': row('money', false, 'no turn bills paid overage (an owner row: also refused by name)'),
   // VENDOR CALLS
   'accounts.activeUsagePolling': row('vendor', false, 'no usage is polled'),

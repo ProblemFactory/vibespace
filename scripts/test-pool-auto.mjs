@@ -539,7 +539,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   // only — a `//` comment can never satisfy the pin (the 2.369.134 lesson).
   const eng = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8')
     .split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
-  const calls = [...eng.matchAll(/decidePoolSwitch\(\{[^\n]*\}\)/g)].map((m) => m[0]);
+  const calls = [...eng.matchAll(/(?:decidePoolSwitch|decideStart)\(\{[^\n]*\}\)/g)].map((m) => m[0]);   // B-87fd (1) r4986: the placement site asks decideStart, the start's one entry
   const proactiveCalls = calls.filter((c) => /proactive:\s*hot/.test(c));
   const perSession = proactiveCalls.filter((c) => /exclude:\s*rejected/.test(c));
   const poolDefault = proactiveCalls.filter((c) => !/exclude:/.test(c));
@@ -2802,11 +2802,11 @@ await (async () => {
     const wm = world({});
     ck('r1 spawn: a default the pool lists is answered exactly as before (no family ⇒ the default itself)', where(wm, null) === 'martin' && where(wm, 'claude-fable-5-1') === 'martin');
     const esrc = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
-    const c1 = 'if (!fam && !staleDefault) return cur;', c2 = 'readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem), payingIds: overageInUseIds(mem) });';
-    ck('r1 spawn control: the patch (the chooser without the membership fact) hits', esrc.split(c1).length === 2 && esrc.split(c2).length === 2);
+    const c1 = 'if (!d && !fam && !staleDefault) return cur;', c1b = 'defaultStale: staleDefault, ', c2 = 'readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem), payingIds: overageInUseIds(mem) });';
+    ck('r1 spawn control: the patch (the chooser without the membership fact) hits', esrc.split(c1).length === 2 && esrc.split(c1b).length === 2 && esrc.split(c2).length === 2);
     const c3 = 'return (d && d.to) || (staleDefault ? ((d && d.holdTo) || fallbackDefaultTarget(poolId, cur) || null) : cur);'; // verify r2's fallback: stripped too (the chooser as r1 found it)
     ck('r1 spawn control: …and the r2 fallback clause hits', esrc.split(c3).length === 2);
-    const wo = staleWorld(MS.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(editAnchor(esrc, c1, 'if (!fam) return cur;', "src/server/usage-pool-engine.js"), c2, c2.replace(' membership,', ''), "src/server/usage-pool-engine.js"), c3, 'return (d && d.to) || cur;', "src/server/usage-pool-engine.js"), 'nomembership'));
+    const wo = staleWorld(MS.load('src/server/usage-pool-engine.js', editAnchor(editAnchor(editAnchor(editAnchor(esrc, c1, 'if (!d && !fam) return cur;', "src/server/usage-pool-engine.js"), c1b, 'defaultStale: false, ', "src/server/usage-pool-engine.js"), c2, c2.replace(' membership,', ''), "src/server/usage-pool-engine.js"), c3, 'return (d && d.to) || cur;', "src/server/usage-pool-engine.js"), 'nomembership'));
     ck('r1 spawn control: without it the new conversation starts on the REMOVED member (what verify r1 measured)', where(wo, 'claude-fable-5-1') === 'martin' && where(wo, null) === 'martin');
   }
   // ── verify r2 (identity, words): WHAT A PINNED CONVERSATION IS TOLD WHEN THE AUTOMATIC RULES MOVE IT ──────────

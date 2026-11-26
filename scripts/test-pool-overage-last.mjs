@@ -201,7 +201,7 @@ const M = mutantCopies('pool-overage-last', REPO);
       const toLow = pl(P, [{ id: 'o', name: 'Paying' }, { id: 'q', name: 'Quota, low 5h' }], { o: fmM(0.3, 3 * D), q: fm5(0.89, 0.4) });
       const toCred = pl(P, [{ id: 'o', name: 'Paying' }, { id: 'c', name: 'Credits, low 5h' }], { o: fmM(0.3, 3 * D), c: fm5(0.89, 0.4) }, { creditsIds: ['c'] });
       ck(`r4903 M2 PLACING: a new conversation is placed off a paying default onto an ordinary member that can serve under the settle bar (→ ${toLow.to}) and onto a credits member that holds quota (→ ${toCred.to})`, toLow.to === 'q' && toCred.to === 'c');
-      const keepsDefault = M.load('src/account-pool-auto.js', anchored(src, '  if (placing && curPayingTakes && !hardDead) {', '  if (false) {', 'the placing kept on the paying default'), 'placing-red');
+      const keepsDefault = M.load('src/account-pool-auto.js', anchored(src, '  if ((placing || starting) && curPayingTakes && !hardDead) {', '  if (false) {', 'the placing kept on the paying default'), 'placing-red');
       const r = pl(keepsDefault, [{ id: 'o', name: 'Paying' }, { id: 'q', name: 'Quota, low 5h' }], { o: fmM(0.3, 3 * D), q: fm5(0.89, 0.4) });
       ck(`r4903 M2 PLACING RED (0a6053698): the new conversation is kept on the paying default (${r.reason}) and bills`, !r.to); }
     // r4903 M3: a landing on a paying member is MARKED whatever the setting (toPaying), and the engine's «is there an alternative to a

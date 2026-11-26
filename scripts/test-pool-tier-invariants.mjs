@@ -2,11 +2,12 @@
 // B-87fd item (1), THE EXHAUSTIVE LEG (主开发 r4780 / r4903): the paying tier proved over a SPACE OF STATES, not scene by scene. The rule
 // page (int359/sched-1117/msgs/bl-accounts-B-87fd-1-rules-page.md) states five rules and the invariants; this suite builds EVERY pool of
 // its space and checks every invariant through the REAL exported functions (decidePoolSwitch, rankPoolMembers, soonestUsableMember):
-// the current member and up to three others, each in one of 16 states (ordinary / usage credits / paying × can serve and settles /
-// under the settle bar / soft / under the reserve floor (it settles) / past its quota, plus a lapsed sign-in), the others as multisets,
+// the current member and up to three others, each in one of 17 states (ordinary / usage credits / paying × can serve and settles /
+// under the settle bar / soft / under the reserve floor (it settles) / past its quota, plus a lapsed sign-in and an ordinary member whose
+// Fable cap is spent), the others as multisets,
 // in TWO ARRANGEMENTS (r4903 M1: list places and deadlines in tier order, and running AGAINST it with the current member never the
 // soonest); the pool hot and cold; the setting pool.avoidOverageMembers on and off; the engine's own reserve floor (15 %); each pool
-// decided out of a turn, in one (a warm and a cold cache) and as a NEW conversation's placing (r4903 M2). On every pool where a member
+// decided out of a turn, in one (a warm and a cold cache) and as EVERY KIND OF START through the chooser's own entry (r4986). On every pool where a member
 // pays: I1-I5, I7-I10. On every pool where none does (and for the walks of a pool where only the current member pays): I6, the release's
 // own module, byte for byte. Every account is made up; nothing is spawned, nothing read from a real folder; pure calls only.
 import fs from 'node:fs';
@@ -42,20 +43,23 @@ const FLOOR = 15;   // the engine's default pool.reserveFloorPct, handed to ever
 const STATES = [];
 for (const kind of ['o', 'c', 'p']) for (const q of ['live', 'low', 'soft', 'floor', 'spent']) STATES.push({ kind, q });
 STATES.push({ kind: 'o', q: 'lapsed' });
+STATES.push({ kind: 'o', q: 'fable' });   // r4986: its Fable cap spent, 5h and 7d fine — it can serve a NAMED opus start, never a guessed one
 // 5h / 7d utilization: live settles (5h 100 %, 7d 60 %); low can serve under the settle bar (5h 11 %: over its hot line, under hot +
 // gain); soft sits under its hot line, over its hard one (5h 8 %); floor is under the reserve floor and still settles (7d 12 %, the
 // floor 15, the settle bar 8); spent is under its hard bar (7d 1 %); lapsed reads live, signed out
-const U = { live: [0, 0.4], low: [0.89, 0.4], soft: [0.92, 0.4], floor: [0, 0.88], spent: [0, 0.99], lapsed: [0, 0.4] };
-const hasQuota = (s) => s.q !== 'spent' && s.q !== 'lapsed';                // RULE 1: CAN SERVE NOW
+const U = { live: [0, 0.4], low: [0.89, 0.4], soft: [0.92, 0.4], floor: [0, 0.88], spent: [0, 0.99], lapsed: [0, 0.4], fable: [0, 0.4, 0.99] };
+const hasQuota = (s) => s.q !== 'spent' && s.q !== 'lapsed';                // RULE 1: CAN SERVE NOW (under the conversation's own family: opus)
+const hasQuotaAll = (s) => hasQuota(s) && s.q !== 'fable';                  // …on EVERY bucket a guessed family could mean (r4986: fail closed)
 const takesTurn = (s) => s.q !== 'lapsed' && (hasQuota(s) || s.kind !== 'o');  // a credits or paying member past its quota still takes one, billed
-const settles = (s) => s.q === 'live' || s.q === 'floor';
+const settles = (s) => s.q === 'live' || s.q === 'floor' || s.q === 'fable';
 const place = (s) => (s.q === 'lapsed' ? 6 : hasQuota(s) ? { o: 0, c: 1, p: 2 }[s.kind] : { c: 3, p: 4, o: 5 }[s.kind]);   // RULE 3's one order
 const fmt = (s) => `${{ o: 'ordinary', c: 'credits', p: 'paying' }[s.kind]}-${s.q}`;
 const LIVE_LOGIN = { state: 'ok', msLeft: 40 * 86400e3 };
 const LAPSED_LOGIN = { state: 'ok', msLeft: 40 * 86400e3, serve: { state: 'lapsed', since: (NOW - 3600) * 1000 } };
 const BLOCKED = ['stuck', 'no-members', 'no-settleable', 'all-lapsed', 'all-logins-expired', 'all-rejected'];
-const CACHE = new Map();   // (state, its reset in days) → the projected reading, built once
-const cacheOf = (s, days) => { const k = `${s.kind}${s.q}${days}`; if (!CACHE.has(k)) { const [u5, u7] = U[s.q]; CACHE.set(k, projectCacheForFamily({ fiveHour: { utilization: u5, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + days * D }, scopedWeekly: [] }, 'opus')); } return CACHE.get(k); };
+const CACHE = new Map();   // (state, its reset in days, the view) → the reading, built once: the bare one and the one projected for opus
+const rawOf = (s, days) => { const [u5, u7, uf] = U[s.q]; return { fiveHour: { utilization: u5, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + days * D }, scopedWeekly: uf == null ? [] : [{ name: 'Fable', utilization: uf, resetsAt: NOW + days * D }] }; };
+const cacheOf = (s, days, bare = false) => { const k = `${s.kind}${s.q}${days}${bare ? 'b' : 'p'}`; if (!CACHE.has(k)) CACHE.set(k, bare ? rawOf(s, days) : projectCacheForFamily(rawOf(s, days), 'opus')); return CACHE.get(k); };
 
 // TWO ARRANGEMENTS (r4903 M1). In tier order: the others listed ordinary, credits, paying, a member's weekly reset sooner the earlier it
 // is listed, the current member the soonest. AGAINST it: the others listed paying, credits, ordinary, the first listed the soonest, the
@@ -66,17 +70,27 @@ function poolOf(cur, others, hot, setting, against) {
   const ids = all.map((_, i) => 'm' + i);
   const st = new Map(ids.map((id, i) => [id, all[i]]));
   const days = (i) => (against ? (i === 0 ? 5 : i) : 1 + i);
-  const caches = new Map(ids.map((id, i) => [id, cacheOf(all[i], days(i))]));
+  const caches = new Map(ids.map((id, i) => [id, cacheOf(all[i], days(i))])), bare = new Map(ids.map((id, i) => [id, cacheOf(all[i], days(i), true)]));
   const credits = ids.filter((id) => st.get(id).kind === 'c'), paying = ids.filter((id) => st.get(id).kind === 'p');
   return {
     st, members: ids.map((id) => ({ id, name: id })), others: ids.slice(1).map((id) => ({ id, name: id })), hot,
-    readCache: (id) => caches.get(id) ?? null, readLogin: (id) => (st.get(id) && st.get(id).q === 'lapsed' ? LAPSED_LOGIN : LIVE_LOGIN),
+    readCache: (id) => caches.get(id) ?? null, baseReadCache: (id) => bare.get(id) ?? null, readLogin: (id) => (st.get(id) && st.get(id).q === 'lapsed' ? LAPSED_LOGIN : LIVE_LOGIN),
     creditsIds: credits.length ? credits : null, payingIds: paying.length ? paying : null, overageIds: setting && paying.length ? paying : null,
     paying: paying.length > 0,
   };
 }
 const decide = (mod, pool, cur, extra = {}) => mod.decidePoolSwitch({ currentId: cur, members: pool.members, readCache: pool.readCache, nowSec: NOW, proactive: pool.hot, hot: pool.hot, readLogin: pool.readLogin, reserveFloorPct: FLOOR, creditsIds: pool.creditsIds, payingIds: pool.payingIds, overageIds: pool.overageIds, explain: true, ...extra });
-const PLACING = { placing: true, hot: true, proactive: false };   // the spawn chooser's own call (usage-pool-engine chooseNow)
+// THE STARTS (主开发 r4986: A RESUME IS A START): the chooser's own entry, decideStart, for each kind of start the callers hand it —
+// src/ws-create.js: a model sent (the family named), a resume's hint (the instance default stands in: a GUESS), no family at all. The
+// chooser's call is pinned below against this one (the two cannot part again)
+const START_KINDS = [['a model sent', { family: 'opus', hinted: false }], ['a hint only', { family: 'opus', hinted: true }], ['no family', { family: null, hinted: false }]];
+const startArgs = (pool, k) => ({ ...k, defaultStale: false, baseReadCache: pool.baseReadCache, currentId: 'm0', members: pool.members, readCache: k.family ? pool.readCache : pool.baseReadCache, nowSec: NOW, hot: true, readLogin: pool.readLogin, reserveFloorPct: FLOOR, creditsIds: pool.creditsIds, payingIds: pool.payingIds, overageIds: pool.overageIds, explain: true });
+// the RELEASE's own chooser for a start (eb7608d5's usage-pool-engine): no family ⇒ the default; else the decision with placing = a named family
+const releaseStart = (mod, pool, k) => { const { family, hinted, defaultStale, baseReadCache, ...args } = startArgs(pool, k); return !family ? null : mod.decidePoolSwitch({ ...args, placing: !hinted }); };
+const guessOf = (k) => !k.family || k.hinted;
+// the chooser's entry: decideStart; a tree without it (before r4986) is asked as ITS chooser asked — the release's call (so a red tree
+// shows what its starts did, counted by kind), and its absence is a red of its own below
+const startOf = (mod, pool, k) => (typeof mod.decideStart === 'function' ? mod.decideStart(startArgs(pool, k)) : releaseStart(mod, pool, k));
 const rankOf = (mod, pool) => mod.rankPoolMembers({ members: pool.others, readCache: pool.readCache, nowSec: NOW, readLogin: pool.readLogin, creditsIds: pool.creditsIds, payingIds: pool.payingIds });
 const fallbackOf = (mod, pool) => { const x = mod.soonestUsableMember({ members: pool.others, readCache: pool.readCache, nowSec: NOW, readLogin: pool.readLogin, creditsIds: pool.creditsIds, payingIds: pool.payingIds }); return x && typeof x === 'object' ? x.id : x; };
 const IN_TURN = [{ warm: true, inTurn: true, agoSec: 10, ttlSec: 300 }, { warm: false, inTurn: true, agoSec: 400, ttlSec: 300 }];
@@ -90,6 +104,23 @@ const rel = pre.mod;
 if (!rel && pre.why === 'shallow') console.log('  ⊘ SKIP I6 against eb7608d5 — the ref is not in this SHALLOW clone (the mirror\'s depth-1 checkout)');
 else ck(`the release copy (eb7608d5) loaded for I6${pre.why ? ` — ${pre.why}` : ''}`, !!rel && typeof rel.decidePoolSwitch === 'function');
 
+// B-6a92's HELD mark on a PAYING current member (the engine's { held: 'same-instant' }: its reading reads NONE; it pays by its raw
+// reading's own fact): every kind of start is judged as on the member read — the placing law binds it (r4986). Asked from the first
+// paying state only: the mark hides which one it is
+const HELD_MARK = { held: 'same-instant' };
+const P_HELD_FROM = STATES.find((s) => s.kind === 'p');
+const heldStarts = (mod, pool, others) => {
+  const h = (f) => (id) => (id === 'm0' ? HELD_MARK : f(id));
+  const hp = { ...pool, readCache: h(pool.readCache), baseReadCache: h(pool.baseReadCache) };
+  const out = [];
+  for (const [n, k] of START_KINDS) {
+    const dp = startOf(mod, hp, k), canServe = guessOf(k) ? hasQuotaAll : hasQuota;
+    const T = pool.st.get((dp && dp.to) || 'm0');
+    if (T.kind === 'p' && others.some((s) => s.kind !== 'p' && canServe(s))) out.push(['I5', n, `a start (${n}) on a paying member whose reading is held is placed on ${fmt(T)} (${dp && dp.to ? 'moved' : `kept: ${dp ? dp.reason : 'the default'}`}) while an ordinary or credits member can serve now`]);
+    if (guessOf(k) && dp && dp.to && !hasQuotaAll(T) && others.some(hasQuotaAll)) out.push(['I2', n, `a start (${n}) off a held paying member is placed on ${fmt(T)}, which cannot serve every bucket the guess could mean`]);
+  }
+  return out;
+};
 const INV = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10'];
 // each failure is filed under its invariant AND its KIND (a short name of the road that broke it), with the first scenes of each kind
 const bad = Object.fromEntries(INV.map((k) => [k, { n: 0, shapes: new Set(), kinds: new Map() }]));
@@ -130,7 +161,7 @@ for (const against of [false, true]) for (const cur of STATES) for (const ms of 
     // I6: with no member paying, every answer equals the release's module, byte for byte
     same('decision', decide(P, pool, 'm0'), decide(rel, pool, 'm0'));
     for (const w of IN_TURN) same('decision in a turn', decide(P, pool, 'm0', { warm: w }), decide(rel, pool, 'm0', { warm: w }));
-    same('placing', decide(P, pool, 'm0', PLACING), decide(rel, pool, 'm0', PLACING));
+    if (hot) for (const [n, k] of START_KINDS) same(`a start (${n})`, startOf(P, pool, k) ?? null, releaseStart(rel, pool, k));
     same('device list', rankOf(P, pool), rankOf(rel, pool));
     same('fallback', fallbackOf(P, pool), fallbackOf(rel, pool));
     continue;
@@ -145,10 +176,10 @@ for (const against of [false, true]) for (const cur of STATES) for (const ms of 
   if (JSON.stringify(decide(P, pool, 'm0')) !== JSON.stringify(d)) miss('I8', scene, 'two calls', 'two calls disagree');
   const blockedCheck = (x, who) => { if (x && BLOCKED.includes(x.reason) && payingServes) miss('I4', scene, `${who} «${x.reason}»`, `${who} is «${x.reason}» while a paying member can take a turn`); };
   blockedCheck(d, 'the decision');
-  const landing = (x, who) => {   // I2 / I5 / I10 on a decision that lands
+  const landing = (x, who, canServe = hasQuota) => {   // I2 / I5 / I10 on a decision that lands (a start judged on ITS view: a guess fail closed)
     const T = S(x.to);
     if (!takesTurn(T)) miss('I2', scene, `${who} onto a member taking no turn`, `${who} lands on ${fmt(T)}, which takes no turn`);
-    if (T.kind === 'p' && others.some((s) => s.kind !== 'p' && hasQuota(s))) miss('I5', scene, who, `${who} lands on a paying member while an earlier tier can serve`);
+    if (T.kind === 'p' && others.some((s) => s.kind !== 'p' && canServe(s))) miss('I5', scene, who, `${who} lands on a paying member while an earlier tier can serve`);
     if (T.kind === 'p' && !(x.toPaying && x.toPaying.id === x.to)) miss('I10', scene, who, `${who} lands on a paying member without marking it (toPaying) — the engine\'s «an alternative?» cannot tell`);
   };
   if (d.to) {
@@ -187,14 +218,21 @@ for (const against of [false, true]) for (const cur of STATES) for (const ms of 
     if (!d.to || S(d.to).kind === 'p') miss('I9', scene, 'stays on the paying member', `out of a turn it ${d.to ? `moves onto ${fmt(S(d.to))}` : `stays (${d.reason})`} beside a member that settles`);
     if (hasQuota(cur)) for (const [w, dw] of inTurn) if (dw.to || dw.reason !== 'warm-soft-defer') miss('I9', scene, 'in a turn: not owed to its stop', `in a turn (${w.warm ? 'warm' : 'cold'} cache): ${dw.to ? `moves onto ${fmt(S(dw.to))}` : dw.reason}`);
   }
-  // I5 on a NEW conversation's PLACING (r4903 M2, the ruling): a new conversation has nothing to lose — it is never placed on a paying
-  // member while an ordinary or a credits member can serve now, whichever band (the settle bar and the reserve floor bind a move only)
-  const dp = decide(P, pool, 'm0', PLACING);
-  blockedCheck(dp, 'the placing');
-  const placed = dp.to || 'm0';
-  if (dp.to) landing(dp, 'the placing');
-  if (S(placed).kind === 'p' && others.some((s) => s.kind !== 'p' && hasQuota(s))) miss('I5', scene, 'placing', `a new conversation is placed on ${fmt(S(placed))} (${dp.to ? 'moved' : `kept: ${dp.reason}`}) while an ordinary or credits member can serve now`);
-  if (all.some(takesTurn) && !takesTurn(S(placed))) miss('I2', scene, 'placing on a member taking no turn', `a new conversation is placed on ${fmt(S(placed))}, which takes no turn`);
+  // I5 on EVERY START (r4903 M2, r4986: A RESUME IS A START): a cold spawn has no turn to cut — it is never placed on a paying member while
+  // an ordinary or a credits member can serve now, whichever band; a GUESSED family (a hint, or none) is judged FAIL CLOSED, every bucket
+  if (hot) for (const [n, k] of START_KINDS) {
+    const dp = startOf(P, pool, k);
+    blockedCheck(dp, `the start (${n})`);
+    const canServe = guessOf(k) ? hasQuotaAll : hasQuota;
+    const placed = (dp && dp.to) || 'm0';
+    if (dp && dp.to) landing(dp, `the start (${n})`, canServe);
+    if (S(placed).kind === 'p' && others.some((s) => s.kind !== 'p' && canServe(s))) miss('I5', scene, `start: ${n}`, `a start (${n}) is placed on ${fmt(S(placed))} (${dp && dp.to ? 'moved' : `kept: ${dp ? dp.reason : 'the default'}`}) while an ordinary or credits member can serve now`);
+    // the fail-closed judgement and «a start lands where a turn can be taken» are the placing law's, which binds a PAYING default; a default
+    // that does not pay keeps the release's start (no family ⇒ the default; a lapsed one never reaches the entry: the chooser parks it first)
+    if (cur.kind === 'p' && guessOf(k) && dp && dp.to && !hasQuotaAll(S(dp.to)) && others.some(hasQuotaAll)) miss('I2', scene, `start on a guess (${n}) onto a member that cannot serve every bucket`, `a start (${n}) is placed on ${fmt(S(dp.to))}, which cannot serve every bucket the guess could mean`);
+    if (cur.kind === 'p' && all.some(takesTurn) && !takesTurn(S(placed))) miss('I2', scene, `start (${n}) on a member taking no turn`, `a start (${n}) is placed on ${fmt(S(placed))}, which takes no turn`);
+  }
+  if (hot && cur === P_HELD_FROM) for (const [k, n, why] of heldStarts(P, pool, others)) miss(k, scene, `start on a held paying member: ${n}`, why);
 }
 const ms = Date.now() - t0;
 console.log('  · rule 3\'s places: 0 ordinary that can serve, 1 credits that can, 2 paying that can, 3 credits past their quota, 4 paying past their quota, 5 a walled ordinary member, 6 a lapsed one');
@@ -203,7 +241,7 @@ console.log(`  · the space: ${pools} pools (${payingPools} with a member paying
 let wantPaying = 0, wantPlain = 0;
 for (const c of STATES) for (const m of multisets) { if (c.kind === 'p' || m.some((i) => STATES[i].kind === 'p')) wantPaying += 8; else wantPlain += 4; }
 ck(`the space was built whole: ${payingPools} pools with a member paying, ${plainPools} with none (counted apart: ${wantPaying} and ${wantPlain})`, payingPools === wantPaying && plainPools === wantPlain && wantPaying > 0 && wantPlain > 0);
-const WHAT = { I1: 'the walks stand in the same place of the one order', I2: 'nothing lands on a member that cannot serve while one can; a voluntary move only past the settle bar; never billed onto billed', I3: 'no ping-pong', I4: 'never blocked while a paying member can take a turn', I5: 'a paying member only when no earlier tier can serve — a NEW conversation\'s placing included', I6: 'with nobody paying (and for the walks where only the current member pays), byte for byte the release', I7: 'in a turn nothing moves off or onto a paying member while the current can serve', I8: 'the same readings give the same answer, on every pool', I9: 'a paying member beside a member that settles (under the reserve floor too) leaves it: out of a turn it moves, in one it is owed', I10: 'a landing on a paying member is marked (toPaying), whatever the setting' };
+const WHAT = { I1: 'the walks stand in the same place of the one order', I2: 'nothing lands on a member that cannot serve while one can; a voluntary move only past the settle bar; never billed onto billed', I3: 'no ping-pong', I4: 'never blocked while a paying member can take a turn', I5: 'a paying member only when no earlier tier can serve — EVERY START included (a model sent, a hint, no family; a guess judged fail closed)', I6: 'with nobody paying (and for the walks where only the current member pays), byte for byte the release', I7: 'in a turn nothing moves off or onto a paying member while the current can serve', I8: 'the same readings give the same answer, on every pool', I9: 'a paying member beside a member that settles (under the reserve floor too) leaves it: out of a turn it moves, in one it is owed', I10: 'a landing on a paying member is marked (toPaying), whatever the setting' };
 for (const k of INV) {
   const b = bad[k];
   ck(`${k} — ${WHAT[k]}: ${b.n} failing decisions in ${b.shapes.size} shapes`, b.n === 0);
@@ -229,7 +267,28 @@ const walksOnly = (mod) => {
   ck(`the walks' checks over the arrangement against the tiers: green at this tree (${nP})`, nP === 0);
   ck(`RED: the device list's last tier back on the release's own sort turns them red (${nR} failing checks)`, nR > 0);
   ck(`RED: the fallback without its tier key turns them red (${nF} failing checks)`, nF > 0); }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 3 : 2, label: 'tier-invariants: ' })) ck(r.name, r.pass);
+// THE HELD START's RED (r4986): with the no-data hold standing on a START too (the clause `!(starting && curPayingTakes)` taken out, in
+// a copy), a start with no family or a hint only stays on a held paying member — the checks above go red over the same pools
+const heldOnly = (mod) => {
+  let n = 0;
+  for (const against of [false, true]) for (const ms of multisets) for (const setting of [false, true]) {
+    const others = ms.map((i) => STATES[i]);
+    n += heldStarts(mod, poolOf(P_HELD_FROM, others, true, setting, against), others).length;
+  }
+  return n;
+};
+{ const src = fs.readFileSync(path.join(REPO, 'src/account-pool-auto.js'), 'utf8');
+  const holds = M.load('src/account-pool-auto.js', anchored(src, ' && !curHeldWalled && !(starting && curPayingTakes);', ' && !curHeldWalled;', 'the no-data hold on a start too'), 'held-start-red');   // stale-pins: kept (the RED's text IS 85bc67492's no-data hold)
+  const nP = heldOnly(P), nH = heldOnly(holds);
+  ck(`the starts on a held paying member: green at this tree (${nP} failing checks)`, nP === 0);
+  ck(`RED: the no-data hold standing on a start too turns them red (${nH} failing checks)`, nH > 0); }
+// THE PIN (r4986): the engine's chooser asks decideStart exactly as this leg does — the start's family, its hint, the default's staleness,
+// the bare reading, hot: true, no `placing` of its own, and no decision of its own beside it
+{ const eng = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+  const i = eng.indexOf('\nfunction poolChooserForModel('), j = eng.indexOf('\nfunction ', i + 10), body = i < 0 ? '' : eng.slice(i, j < 0 ? undefined : j);
+  const call = (body.match(/const chooseNow = \(\) => decideStart\(\{[^\n]*\}\);/) || [''])[0];
+  ck('THE PIN: the chooser\'s decision is decideStart\'s, called as this leg calls it (family, hint, stale default, bare reading, hot: true, no placing of its own), no decidePoolSwitch beside it', typeof P.decideStart === 'function' && /decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(call) && /hot: true/.test(call) && !/placing:/.test(call) && !/decidePoolSwitch\(/.test(body)); }
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 4 : 3, label: 'tier-invariants: ' })) ck(r.name, r.pass);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
