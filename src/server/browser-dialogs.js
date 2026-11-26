@@ -396,6 +396,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     w.ws = ws;
     ws.on('open', async () => {
       w.state = 'open'; w.openedAt = now(); w.fencesRearmed = false; w.tabWatched = new Set(); // r4689: a new socket holds no kernel lease (the old one's ended with it)
+      if (keeper && typeof keeper.tabWatchReset === 'function') { try { keeper.tabWatchReset(w.profileId); } catch { /* the keeper's own */ } } // r4745 (S1): …so the keeper's counts of this profile go with them
       // lane browser-passkey: a HEADED browser's passkey window is on this computer's desktop (the banner says so) — the browser's own word
       call(w, 'Browser.getVersion').then((v) => { const ua = v && v.result ? String(v.result.userAgent || '') : ''; w.headed = ua ? !/HeadlessChrome/.test(ua) : null; }).catch(() => { /* unknown */ });
       await probeKernel(w); // lane browser-surfaces: ONE source per browser — known before the first tab is tracked
@@ -1125,7 +1126,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const ENGN = require('../browser-engines.js');
     const a = ENGN.tabWatchAnswer(await settle(call(w, ENGN.TAB_WATCH_COMMAND, { targetId: tid, watch: !!watch }, null, callTimeoutMs)));
     if (!w.tabWatched) w.tabWatched = new Set();
-    if (a.ok && a.watching) w.tabWatched.add(tid); else w.tabWatched.delete(tid);
+    // r4745 M2 (law 5): a CONFIRMED answer decides; an UNCONFIRMED one (no answer in the bound, an odd answer — on either road) may
+    // have been taken, so the tab stays in the watched set (the freeze still skips it) until an OFF is confirmed or this socket
+    // ends; the kernel's own refusal (no_such_target, not_a_page, target_crashed, too_many_watched_tabs) holds no lease
+    if (a.ok) { if (a.watching) w.tabWatched.add(tid); else w.tabWatched.delete(tid); }
+    else if (a.code === 'tab_watch_unanswered' || a.code === 'tab_watch_failed') w.tabWatched.add(tid);
+    else w.tabWatched.delete(tid);
     return a;
   }
   async function freezePaint(profileId, { stillIdle = null } = {}) {
@@ -1137,9 +1143,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.flipTaken) return { ok: false, why: 'flip_tab_taken' };
     if (w.freezing) return { ok: false };
     w.freezing = true;
-    try { return await freezeNow(w); } finally { w.freezing = false; }
+    try { return await freezeNow(w, { stillIdle }); } finally { w.freezing = false; } // the move onto 2.369.420: the second look (r4745) rides into the release's split
   }
-  async function freezeNow(w) {
+  async function freezeNow(w, { stillIdle = null } = {}) {
     if (!w.flipChecked) { const tc = now(); if (!(await flipCheck(w))) return { ok: false, why: 'flip_tab_taken' }; if (w.state !== 'open' || w.paint === 'frozen' || w.thawing || w.open.size || (w.lastVerbAt || 0) >= tc) return { ok: false }; }
     // r4689: a tab the kernel draws for a viewer is never put frozen (its lease keeps it painting; the kernel's own law)
     const tabs = [...w.targets.entries()].filter(([tid, e]) => e.sid && !(w.tabWatched && w.tabWatched.has(String(tid).toUpperCase()))).map(([, e]) => e);
