@@ -773,12 +773,27 @@ function writeUsage(p) {
 // call. (Claude Code has no on-disk model cache, and stream-json doesn't emit
 // the model list, so this is the only zero-call way to grow the list.)
 /** torn bytes of the models list beside it, ONCE per content (the hub's names: `__models__.json.corrupt-<ms>`) → kept or not */
+/** torn bytes of the models list beside it, ONCE per content (the hub's names `__models__.json.corrupt-<ms>`, the hub's bound: the
+ *  newest 20 copies compared — src/store-read-hold.js COPY_LOOK), the copy written WHOLE under a part name first (0600, synced, then
+ *  linked into place; a filesystem with no links: an exclusive copy) — never a short file at a copy's name → kept or not */
+const COPY_LOOK = 20;
 function keepModelsAside(f, buf) {
   const dir = path.dirname(f), head = path.basename(f) + '.corrupt-';
-  let names = []; try { names = fs.readdirSync(dir).filter((n) => n.startsWith(head)); } catch { names = []; }
-  for (const n of names) { try { if (fs.readFileSync(path.join(dir, n)).equals(buf)) return true; } catch { /* not this one */ } }
+  let names = []; try { names = fs.readdirSync(dir).filter((n) => n.startsWith(head)).sort().slice(-COPY_LOOK); } catch { names = []; }
+  for (const n of names.reverse()) { try { if (fs.readFileSync(path.join(dir, n)).equals(buf)) return true; } catch { /* not this one */ } }
   for (let k = 0; k < 5; k++) {
-    try { fs.writeFileSync(path.join(dir, head + Date.now() + (k ? '-' + k : '')), buf, { flag: 'wx', mode: 0o600 }); return true; } catch (e) { if (!e || e.code !== 'EEXIST') return false; }
+    const to = path.join(dir, head + Date.now() + (k ? '-' + k : '')), part = path.join(dir, '.' + path.basename(to) + '.part');
+    let fd;
+    try { fd = fs.openSync(part, 'wx', 0o600); } catch (e) { if (e && e.code === 'EEXIST') continue; return false; }
+    try { try { fs.writeSync(fd, buf); fs.fsyncSync(fd); } finally { fs.closeSync(fd); } }   // a failed write, sync or CLOSE fails the keep (its bytes may not be whole)
+    catch { try { fs.unlinkSync(part); } catch { /* not there */ } return false; }
+    try { fs.linkSync(part, to); }
+    catch (e) {
+      if (e && e.code === 'EEXIST') { try { fs.unlinkSync(part); } catch { /* not there */ } continue; }
+      try { fs.copyFileSync(part, to, fs.constants.COPYFILE_EXCL); } catch (e2) { if (!e2 || e2.code !== 'EEXIST') { try { fs.unlinkSync(to); } catch { /* not there */ } } try { fs.unlinkSync(part); } catch { /* not there */ } return false; }
+    }
+    try { fs.unlinkSync(part); } catch { /* not there */ }
+    return true;
   }
   return false;
 }
@@ -797,15 +812,20 @@ function learnModel(p) {
   if (buf) {
     let parsed; try { parsed = JSON.parse(buf.toString('utf-8')); } catch { parsed = undefined; }
     if (Array.isArray(parsed)) list = parsed;
-    else if (!keepModelsAside(f, buf)) return;   // torn, and no copy beside it: nothing written over the only copy
+    else {
+      // r3986's law, the hub's own (store-read-hold fileConfirms): «TORN» IS A VERDICT ABOUT THE FILE — one more look, its size and
+      // its bytes, must agree; else a writer was mid-write and there is no answer (the next status line reads again)
+      let again = null; try { const st = fs.statSync(f); if (st.isFile() && st.size === buf.length) again = fs.readFileSync(f); } catch { again = null; }
+      if (!again || !again.equals(buf)) return;
+      if (!keepModelsAside(f, buf)) return;   // torn, and no copy beside it: nothing written over the only copy
+    }
   }
   if (list.some((x) => x && x.id === id)) return; // already known
   list.push({ id, label });
   if (list.length > 50) list = list.slice(-50);
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
   const tmp = f + '.' + process.pid + '.tmp';   // a temp name of this process's own (hooks run side by side)
-  fs.writeFileSync(tmp, JSON.stringify(list));
-  fs.renameSync(tmp, f);
+  try { fs.writeFileSync(tmp, JSON.stringify(list)); fs.renameSync(tmp, f); } finally { try { fs.unlinkSync(tmp); } catch { /* renamed into place */ } }
 }
 
 function defaultLine(p) {

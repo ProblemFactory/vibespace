@@ -508,7 +508,12 @@ function repairAttribution({ dataDir, historyDir, archiveDir, markers, transitio
       const f = path.join(historyDir, '.attrib-emptied.json');
       let read; try { read = { text: fs.readFileSync(f, 'utf-8') }; } catch (e) { read = { error: e }; }
       const a = SR.storeAnswer(read, { valid: Array.isArray });
-      if (!a.writable) { MR.absentOr(a.error || new SyntaxError(a.why || 'did not parse'), f); res.emptiedHeld = a.code || a.state; return res; }
+      if (!a.writable) {
+        // (r5060 (c)) TORN, this store's own sentence: the generic «move it aside» is the harm itself here — moved away, the list reads as
+        // «no conversation emptied» and their spend stays on the refuted account
+        if (a.state === 'corrupt' && MR.inMigration()) throw Object.assign(new Error('usage-history/.attrib-emptied.json is there and its bytes do not parse — not run: restore it from a copy; moved away it would read as «no conversation emptied» and their spend would stay on the refuted account; the next start runs it again'), { code: MR.CODE });
+        MR.absentOr(a.error || new SyntaxError(a.why || 'did not parse'), f); res.emptiedHeld = a.code || a.state; return res;
+      }
       const merged = [...new Set([...(a.state === 'data' ? a.value : []), ...emptied])].slice(-20000);
       _writeAtomic(f, JSON.stringify(merged));
     }

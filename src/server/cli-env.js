@@ -382,7 +382,17 @@ const _modelsPending = new Set();
 let _modelsHold = null;
 const modelsFile = () => path.join(USAGE_CACHE_DIR, '__models__.json');
 const modelsLabel = (id) => id.replace(/^claude-/, '').replace(/-(\d{8})$/, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-function writeModels(list) { try { fs.writeFileSync(modelsFile(), JSON.stringify(list)); return true; } catch { return false; } }
+// (r5060 (b)) WHOLE OR NOT AT ALL, OFF THE LOOP: the list is THE STORE WRITER's (src/store-writer.js — its temp, write and rename on
+// its own thread, the bytes made at the write from the newest list; a failed write said by the writer and written again; one owed at
+// a stop written by the hub's exit). A reader (the statusline hook) never meets a half-written list it could take as torn, and the
+// hub's own read takes what the writer still OWES first (a sighting right after another reads the newest list, never the older file)
+let _modelsList = null;
+const modelsWriter = () => require('../store-writer.js').storeWriter();
+function modelsOwed(file) { try { const w = modelsWriter(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } }
+function writeModels(list) {
+  _modelsList = list;
+  try { modelsWriter().dirty(modelsFile(), { name: 'models.write', produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }
+}
 function modelsHoldOf() {
   if (_modelsHold) return _modelsHold;
   const file = modelsFile();
@@ -404,7 +414,7 @@ function noteModelSeen(id) {
   if (_modelsHold && _modelsHold.held()) { _modelsPending.add(id); return; }   // HELD: no read on this road; the hold's lift writes it
   try {
     const fp = modelsFile();
-    let read; try { read = { text: fs.readFileSync(fp, 'utf-8') }; } catch (e) { read = { error: e }; }
+    let read; const owed = modelsOwed(fp); if (owed != null) read = { text: owed }; else try { read = { text: fs.readFileSync(fp, 'utf-8') }; } catch (e) { read = { error: e }; }
     const a = SR.storeAnswer(read, { valid: Array.isArray });
     const st = modelsHoldOf().start(a);
     if (st !== 'data' && st !== 'missing') { _modelsPending.add(id); return; }
