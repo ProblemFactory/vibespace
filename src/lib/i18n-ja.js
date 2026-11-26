@@ -538,6 +538,7 @@ export default {
   "Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted": "ここにある、まだ見ていない終了済みジョブをすべて既読にします — 赤い件数が減るだけで、何も削除されません",
   "{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines": "{n} 件の通知が待機中です——VibeSpace がペアリング済みマシンで動き続けている会話を引き継ぎ直した後、自動で届きます",
   "{n} notices are waiting — not woken yet: VibeSpace could not judge its spending limits just now; it asks again once that clears": "{n} 件の通知が待機中です——まだ起こしていません：VibeSpace はいま利用上限を判断できません。解消されたら一度だけもう一度確認します",
+  "Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears": "まだ起こしていません——VibeSpace はいま利用上限を判断できません。解消されたら一度だけもう一度確認します",
   "Could not mark them seen": "既読にできませんでした",
   "This job is the running VibeSpace: it is not stopped here": "このジョブは実行中の VibeSpace そのものです。ここでは停止しません",
   "Unknown event": "不明なイベント",

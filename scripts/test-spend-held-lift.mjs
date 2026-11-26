@@ -291,7 +291,7 @@ console.log('§5 (ii) an automation\'s open the gate could not judge RELEASES it
 const ENG = require(path.join(REPO, 'src/server/automation-engine.js'));
 const VE = require(path.join(REPO, 'src/server/vault-engine.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
-async function autoWorld(Eng = ENG, bucket = HELD) {
+async function autoWorld(Eng = ENG, bucket = HELD, answer = 'once') {
   const dir = path.join(scratchDir('shl-auto'), Math.random().toString(36).slice(2, 7)); fs.mkdirSync(dir, { recursive: true });
   const vault = VE.create({ dataDir: dir, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { }, error() { } }, idleTimer: false, register: false });
   await vault.setup(['made', 'up', 'scratch', 'phrase'].join(' '), {});
@@ -304,7 +304,7 @@ async function autoWorld(Eng = ENG, bucket = HELD) {
   const cards = () => (userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'automation-ask');
   const p = engine.use({ caller, verb: 'conversations.rename', args: { name: 'x' } });
   await waitFor(() => cards().length > 0, 'the automation ask card filed', 5000);
-  if (cards().length) engine.answer(cards()[0].action.askId, { answer: 'once' });
+  if (cards().length) engine.answer(cards()[0].action.askId, { answer });
   const r = await p;
   const grants = ((engine.list().keys || [])[0] || {}).grants || [];
   return { r, grants, ran };
@@ -314,7 +314,7 @@ const onceLeft = (W) => W.grants.some((g) => g.mode === 'once' && !g.spentAt);
   ok(!!(W.r.code === 'spend_refused' && W.r.bucket === HELD && W.ran.length === 1 && onceLeft(W)), 'refused held: the answer names the hold by its code (bucket) and the once-grant is RELEASED (there, unspent)', JSON.stringify({ code: W.r.code, bucket: W.r.bucket, grants: W.grants.map((g) => ({ mode: g.mode, spent: !!g.spentAt })) })); }
 { const W = await autoWorld();
   ok(!!(typeof W.r.why === 'string' && W.r.why.includes(HELD) && !/4242|another-machine/.test(W.r.why)), 'the held 429 names the hold by its code — never another process\'s pid and host (r4410, said)', JSON.stringify(W.r.why)); }
-{ const RED = copyOf('src/server/automation-engine.js', "'once' in heldOnce ? `the spend gate could not judge", "false ? `the spend gate could not judge", 'the held 429 carrying the gate\'s detail (the release)');
+{ const RED = copyOf('src/server/automation-engine.js', "result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `the spend gate could not judge", "false ? `the spend gate could not judge", 'the held 429 carrying the gate\'s detail (the release)');
   ok(!!(!RED.err), 'RED CONTROL built: the held 429 carrying the gate\'s own detail', RED.err);
   if (!RED.err) { const W = await autoWorld(RED); ok(!!(/4242/.test(String(W.r.why))), 'RED (the release): the held 429 tells a key holder another process\'s pid and host', JSON.stringify(W.r.why)); } }
 { const W = await autoWorld(ENG, 'hour-cap');
@@ -571,6 +571,68 @@ async function ladderHeld(Deliver = CD) {
 { const RED = copyOf('src/server/conversation-deliver.js', "      if (r && r.refused === 'spend' && SA.isHeldWhy(r.why)) { waitLift(shown, r.why); return; }   // B-ef83 unit 1: the gate could not judge — kept, asked at its lift\n", '', 'the ladder road felling a held wake (today)');
   ok(!!(!RED.err), 'RED CONTROL built: the ladder road with no held branch', RED.err);
   if (!RED.err) { const L = await ladderHeld(RED); ok(!!(!L.disk().length && L.events.some((e) => e.ev === 'fell')), 'RED (today): the held refusal FELLS the owed wake down the ladder road — its wake is lost', JSON.stringify(L.events.map((e) => e.ev))); try { L.D.closeRetries(); } catch { } } }
+
+console.log('§12 (B-ef83 unit 2, 主开发 r4606) the four the rounds left open');
+const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+/** the REAL job engine notifying its owner through the rig's REAL park; `full`: thirty owed wakes wait there first, their producer turning
+ *  held at once (PLACED) — read by parkRetry's own aside, after the room check */
+async function jobsHeldTry(Deliver = CD, { full = false, Jobs = JobManager } = {}) {
+  const R = rig('u2-' + Math.random().toString(36).slice(2, 6), { Deliver });
+  let held = false;
+  if (full) {
+    R.deliver.registerOwedWake('hold-test', { render: (cid) => ({ text: 'a held wake for ' + cid.slice(0, 8), kind: 'peer', fromName: 'Tester' }), held: () => held });
+    for (let k = 0; k < 30; k++) R.deliver.parkOwedWake(R.cid, { producer: 'hold-test', key: 'k' + k, retryInMs: 60_000, sender: 'ffffffff-0000-4000-8000-0000000000f0', reason: 'paced' });
+  }
+  const waiting0 = R.deliver.retryCount(R.cid);
+  held = true;
+  R.setRefuse(HELD);
+  const jdir = path.join(R.dir, 'jobs'); fs.mkdirSync(jdir, { recursive: true });
+  const answers = [];
+  const jm = new Jobs({ dataDir: jdir, broadcast() { }, log() { }, notifyUser: () => ({ ok: true }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true,
+    deliverToConversation: async (cid, text, opts) => { const r = await R.deliver.deliverToConversation(cid, text, opts); answers.push(r); return r; }, onRetry: (fn) => R.deliver.onRetry(fn), parkEndedWake: (cid, o) => R.deliver.parkEndedWake(cid, o) });
+  jm.init(); for (const t of jm._timers || []) clearInterval(t);
+  const own = { conversation: { id: R.cid }, sessionId: 's-u2', sessionCreatedAt: 1, groupsSnapshot: [] };
+  const cr = jm.create({ kind: 'cron', name: 'nightly-notes', schedule: { everyMs: 3600e3 }, action: { type: 'notify', text: 'post the nightly notes' }, owner: own, access: { view: 'group', control: 'session' } }, { conversationId: R.cid, sessionId: 's-u2', sessionCreatedAt: 1, groups: new Set() });
+  const job = cr.job ? jm.jobs.get(cr.job.id) : null;
+  if (job) jm._fireCron(job, 'cron');
+  await waitFor(() => answers.length >= 1, 'the ladder\'s answer to the job\'s notification');
+  await tick();   // the engine's own .then on that answer
+  return { R, jm, job, waiting0, answers, err: cr.error || null, line: (job && [...(job.notifyLog || [])].reverse().find((l) => l && l.lane === 'message')) || {} };
+}
+{ const W = await jobsHeldTry(CD, { full: true });
+  ok(!!(W.waiting0 === 30 && W.jm.notifCount(W.R.cid) === 1 && !W.line.parked && /fell at once/.test(String(W.line.reason || '')) && W.line.heldWhy === HELD && W.R.deliver.retryCount(W.R.cid) === 30), '(a) COUNTED: a held first try meets a full park whose thirty wakes turn held inside the park\'s own aside — its entry falls at once and its words are in the stash ONCE (the engine\'s fall took them); the answer says «fell, its words in the stash», never «parked», and the engine stashes nothing more', JSON.stringify({ waiting0: W.waiting0, stashed: W.jm.notifCount(W.R.cid), line: W.line, err: W.err })); }
+{ const RED = copyOf('src/server/conversation-deliver.js', "            return { ok: false, lane: 'message', reason: `fell at once", "            if (false) return { ok: false, lane: 'message', reason: `fell at once", 'the fallen entry answered as a plain refusal (ec95cf642)');
+  ok(!!(!RED.err), 'RED CONTROL built: the fallen entry answered as a plain refusal', RED.err);
+  if (!RED.err) { const W = await jobsHeldTry(RED, { full: true }); ok(!!(W.jm.notifCount(W.R.cid) === 2), 'RED (ec95cf642): the same scene stashes the words TWICE — the fall\'s copy and the caller\'s', JSON.stringify({ stashed: W.jm.notifCount(W.R.cid) })); } }
+{ const W = await autoWorld(ENG, HELD, 'always');
+  ok(!!(W.r.code === 'spend_refused' && typeof W.r.why === 'string' && W.r.why.includes(HELD) && !/4242|another-machine/.test(W.r.why) && !/grant is kept/.test(W.r.why)), '(b) THE ONE THAT MATTERS MOST: an ALWAYS-grant key\'s held 429 names the hold — no process id, no host (the words keyed on the held family alone, whatever the grant\'s kind)', JSON.stringify(W.r.why)); }
+{ const RED = copyOf('src/server/automation-engine.js', "result && result.code === 'spend_refused' && SA.isHeldWhy(result.bucket) ? `the spend gate could not judge", "'once' in heldOnce ? `the spend gate could not judge", 'the once-only scrub (ec95cf642)');   // stale-pins: kept (the mutant's text IS ec95cf642's line)
+  ok(!!(!RED.err), 'RED CONTROL built: the once-only scrub', RED.err);
+  if (!RED.err) { const W = await autoWorld(RED, HELD, 'always'); ok(!!(/4242/.test(String(W.r.why))), 'RED (ec95cf642): with the once-only scrub an always-grant key\'s held 429 tells another process\'s pid and host', JSON.stringify(W.r.why)); } }
+{ const JL = await import('../src/lib/jobs-layout.js');
+  const ZH = (await import('../src/lib/i18n-zh.js')).default, JA = (await import('../src/lib/i18n-ja.js')).default;
+  const KEY = 'Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears';
+  const tOf = (T) => (s) => (T[s] !== undefined ? T[s] : s);
+  const W = await jobsHeldTry(CD, { full: false });
+  const en = JL.deliveryReasonWords(W.line, { t: (s) => s }), zh = JL.deliveryReasonWords(W.line, { t: tOf(ZH) }), ja = JL.deliveryReasonWords(W.line, { t: tOf(JA) });
+  ok(!!(W.line.parked === true && W.line.heldWhy === HELD && String(W.line.reason).includes(HELD) && en === KEY && typeof ZH[KEY] === 'string' && zh === ZH[KEY] && typeof JA[KEY] === 'string' && ja === JA[KEY] && !en.includes(HELD)), '(c) the Delivery log\'s held line reads a PERSON\'s words, en / zh / ja, keyed on the verdict\'s reason (heldWhy); the agent-facing reason keeps its code', JSON.stringify({ line: W.line, en, zh, ja }));
+  ok(!!(JL.deliveryReasonWords({ reason: 'timeout' }, { t: (s) => s }) === 'timeout' && JL.deliveryReasonWords({ reason: 'not running' }, {}) === 'not running'), '…a line that is not held reads its own reason, as before');
+  const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf8');
+  ok(!!(PANEL.includes("${e.reason || e.heldWhy ? ' — ' + deliveryReasonWords(e, { t }) : ''}")), '…and the panel\'s Delivery-log row renders through it (its one wiring)');
+  const RED = copyOf('src/jobs.js', "...(r.waitsLift === true && r.why ? { heldWhy: String(r.why) } : {}), phase: r.phase || null,", 'phase: r.phase || null,', 'the journal line with no held code (ec95cf642)');
+  ok(!!(!RED.err), 'RED CONTROL built: the parked journal line with no held code', RED.err);
+  if (!RED.err) { const Wr = await jobsHeldTry(CD, { full: false, Jobs: RED.JobManager }); const raw = JL.deliveryReasonWords(Wr.line, { t: tOf(ZH) });
+    ok(!!(raw.includes(HELD) && raw === String(Wr.line.reason)), 'RED (ec95cf642): with no held code on the line, a person reads the raw English reason and its code', JSON.stringify(raw)); } }
+{ const W = await dispatchHeld();
+  const again = await BRIEF(W);
+  const words = String((again.record && again.record.wake && again.record.wake.reason) || '');
+  ok(!!(again.replay === true && /its compaction is owed to the lift of the hold \(ledger-held-elsewhere\)/.test(words)), '(d) while a compaction is owed in memory, the replay record says so (not only «delivered N s ago»)', JSON.stringify(words));
+  W.setRefuse(null); await liftD(W);
+  const after = await BRIEF(W); const w2 = String((after.record && after.record.wake && after.record.wake.reason) || '');
+  ok(!!(after.replay === true && !/owed/.test(w2) && /delivered \d+ s ago by the earlier attempt/.test(w2)), '…once the lift asked it, the replay says only «delivered»', JSON.stringify(w2)); W.close(); }
+{ const RED = copyOf('src/server/worker-dispatch.js', "      const owedNow = [...owedCompactions.values()].find((o) => o && o.to === cid) || null;", '      const owedNow = null;', 'the replay record silent on an owed compaction (ec95cf642)');
+  ok(!!(!RED.err), 'RED CONTROL built: the replay record silent on an owed compaction', RED.err);
+  if (!RED.err) { const W = await dispatchHeld(RED); const again = await BRIEF(W); ok(!!(again.replay === true && !/owed/.test(String(again.record.wake.reason))), 'RED (ec95cf642): the replay record says only «delivered» while the compaction is owed', JSON.stringify(again.record.wake.reason)); W.close(); } }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

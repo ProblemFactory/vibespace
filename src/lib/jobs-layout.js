@@ -11,6 +11,7 @@
  *   foldTasks(tasks, {expanded, sessionNames})  owner session → name family → rows
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
+ *   deliveryReasonWords(line, {t})      a Delivery-log line's reason in a person's words (a held answer: one sentence, B-ef83 unit 2)
  *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
  *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · nodeHeapWords(job, t) · budgetWords(job, t) ·
  *   budgetRefusalPersonWords(budget, t, {create}) · runLeftWords(run, t)
@@ -171,6 +172,15 @@ export function pruneFolds(folds, layout) {
 /** The held-notification sentence (5b ①): STRUCTURE in, the device's own
  *  words out. `digest` = the server's heldDigest ({total, byConversation});
  *  `cid` narrows it to one conversation (the chat status-bar chip). */
+/** B-ef83 unit 2 (c) (主开发 r4606): a Delivery-log line's reason in a PERSON's words — a held answer (its journal line carries the
+ *  verdict's code `heldWhy`, the agent-facing reason keeps it) reads the sentence, en / zh / ja by the device's own t(); else the
+ *  line's own reason as before. → string */
+export function deliveryReasonWords(line, { t } = {}) {
+  const tr = typeof t === 'function' ? t : (s) => String(s);
+  if (!line) return '';
+  if (line.heldWhy) return tr('Not woken yet — VibeSpace could not judge its spending limits just now; it asks again once that clears');
+  return line.reason ? String(line.reason) : '';
+}
 export function heldText(digest, { t, cid = null } = {}) {
   const tr = typeof t === 'function' ? t : (s, p) => String(s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] !== undefined ? p[k] : `{${k}}`));
   if (!digest) return '';

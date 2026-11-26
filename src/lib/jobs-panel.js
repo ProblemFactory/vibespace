@@ -17,7 +17,7 @@ import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
 import { nameOrGone } from './plain-words.js'; // lane ui-plain-words M2a: a gone conversation / group is named in words, its id in the tooltip
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, publishBlockedNote, memoryChip, hubBoundNote, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, budgetWords, budgetRefusalPersonWords, runLeftWords } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, publishBlockedNote, memoryChip, hubBoundNote, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, budgetWords, budgetRefusalPersonWords, runLeftWords, deliveryReasonWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', waiting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -563,7 +563,7 @@ async function expandDetail(app, el, j, refresh) {
       // schedule) and a delivery that came after retries say so in words, never as raw fields
       const retryWords = e.parked ? ' · ' + (e.retries ? t('retrying ({n} so far, {phase}, {busy})', { n: e.retries, phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') }) : t('parked for retry ({phase}, {busy})', { phase: e.phase || '?', busy: e.busy === true ? t('agent busy') : e.busy === false ? t('agent idle') : t('turn state unknown') })) + (e.nextAt || e.retryAt ? ' · ' + t('next attempt {at}', { at: clockOf(e.nextAt || e.retryAt) }) : '')
         : e.ok && e.retries ? ' · ' + t('after {n} retries', { n: e.retries }) + (e.via && e.via !== 'message' ? ' · ' + (e.via === 'prompt' ? t('rode the next prompt') : t('handed over')) : '') : '';
-      row.textContent = `${clockOf(e.ts, { seconds: true })} · ${e.lane}${e.sub ? ' (subscriber)' : ''} · ${e.ok ? '✓' : '✗'}${e.to ? ' → ' + e.to : ''}${e.reason ? ' — ' + e.reason : ''}${retryWords}`;
+      row.textContent = `${clockOf(e.ts, { seconds: true })} · ${e.lane}${e.sub ? ' (subscriber)' : ''} · ${e.ok ? '✓' : '✗'}${e.to ? ' → ' + e.to : ''}${e.reason || e.heldWhy ? ' — ' + deliveryReasonWords(e, { t }) : ''}${retryWords}`;
       d.appendChild(row);
     }
   }

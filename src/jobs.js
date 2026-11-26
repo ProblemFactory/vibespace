@@ -1605,8 +1605,12 @@ class JobManager {
         // parked, never stashed: the ladder retries it at the conversation's turn end and on its backoff; the
         // journal line is this engine's R2 measurement (phase / busy / late) and the panel's Delivery log reads it
         if (!subscriber) job.lastNotify = { ts: now(), lane: 'retry', ok: false, reason: r.reason || 'timeout', retryAt: r.retryAt || null };
-        this._notifyLogPush(job, { lane: 'message', ok: false, parked: true, id: r.id || null, reason: r.reason || 'timeout', phase: r.phase || null, busy: r.busy === true || r.busy === false ? r.busy : null, ...(Number(r.late) > 0 ? { late: Number(r.late) } : {}), retryAt: r.retryAt || null, retries: 0, to: String(cid).slice(0, 8), ...(subscriber ? { sub: true } : {}) });
+        this._notifyLogPush(job, { lane: 'message', ok: false, parked: true, id: r.id || null, reason: r.reason || 'timeout', ...(r.waitsLift === true && r.why ? { heldWhy: String(r.why) } : {}), phase: r.phase || null, busy: r.busy === true || r.busy === false ? r.busy : null, ...(Number(r.late) > 0 ? { late: Number(r.late) } : {}), retryAt: r.retryAt || null, retries: 0, to: String(cid).slice(0, 8), ...(subscriber ? { sub: true } : {}) });
         this.d.log(`[jobs] notify → parked for retry for ${cid} (${r.reason || 'timeout'}; phase ${r.phase || '?'}; target mid-turn: ${r.busy === true ? 'yes' : r.busy === false ? 'no' : 'unknown'}${Number(r.late) > 0 ? `; our loop was ${Number(r.late)} ms late` : ''}; next attempt ${r.retryAt ? new Date(r.retryAt).toISOString() : '?'} or at the turn end)`);
+      } else if (r && r.stashed === true) {
+        // B-ef83 unit 2 (a) (主开发 r4606): its park entry fell AT ONCE by the park's own road, and this engine's fall handler already
+        // took its words into the stash — journaled (the held reason's code for the panel's words, (c)), never stashed a second time
+        this._notifyLogPush(job, { lane: 'message', ok: false, reason: r.reason || 'fell at once', ...(r.why ? { heldWhy: String(r.why) } : {}), ...(subscriber ? { sub: true } : {}) });
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable'), mark });
         if (r && r.notRunning === true) this._oweWake(cid, job, ev, { subscriber });   // the manager design's piece 7: the words are stashed (durable) FIRST

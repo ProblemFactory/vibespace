@@ -2517,6 +2517,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
               saidLift([e], v.why);   // the mark rode parkRetry's one write: said, nothing written again
               return { ok: false, lane: 'message', reason: `not woken yet — the spend gate could not judge (${v.why}); kept, asked again when it lifts`, parked: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, waitsLift: true, refused: 'spend', why: v.why };
             }
+            // B-ef83 unit 2 (a) (主开发 r4606): GONE after the park's own aside — parkRetry's asideHeld turned every other waiting entry
+            // a producer's held one, so this entry was the cap's victim at once and its words went to the stash by the fall's own road
+            // (its producer took them, or the park's stash): said so, `stashed`, never «parked» (r4410 (e)) and never a second stash
+            return { ok: false, lane: 'message', reason: `fell at once — the retry park is full of held wakes; its words are in the stash (the spend gate could not judge: ${v.why})`, fell: true, stashed: true, id: e.id, retryAt: null, phase: 'spend', busy: null, late: 0, refused: 'spend', why: v.why };
           }
         }
         return { ok: false, reason: `spend budget: ${v.detail || v.why}`, refused: 'spend', why: v.why, retryAfter: v.retryAfter || 0, identity: v.identity ? { key: v.identity.key, name: v.identity.name || v.identity.key } : null, cap: Number.isFinite(Number(cap)) ? Number(cap) : null, ...(v.capUnset ? { capUnset: true } : {}) };   // B-0a33 (3): an empty cap is said as itself

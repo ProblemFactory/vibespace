@@ -117,7 +117,9 @@ function create({ activeSessions, getGroups = () => null, getSendUserInput = () 
       const ago = Math.max(0, Math.round((t0 - Number(entry.deliveredAt)) / 1000));
       const pair = typeof ge.findPair === 'function' ? ge.findPair(from, cid) : null;
       const reply = await armReplyWake(ge, from, pair && pair.id);   // the earlier attempt armed it; re-arm (idempotent) so an old delivery predating this feature is corrected and the record is accurate
-      const record = M.dispatchRecord({ target: { cid, name }, verdict: pre, wake: { woke: false, reason: `delivered ${ago} s ago by the earlier attempt` }, waitMs, reply });
+      // B-ef83 unit 2 (d) (主开发 r4606): while a compaction is owed for this worker (in memory), the replay's words say so
+      const owedNow = [...owedCompactions.values()].find((o) => o && o.to === cid) || null;
+      const record = M.dispatchRecord({ target: { cid, name }, verdict: pre, wake: { woke: false, reason: `delivered ${ago} s ago by the earlier attempt${owedNow ? ` — its compaction is owed to the lift of the hold (${owedNow.why}), asked once then` : ''}` }, waitMs, reply });
       log(M.journalLine({ from, record }));
       return { ok: true, replay: true, record, attempt: nonce || null };
     }
