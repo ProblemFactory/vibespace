@@ -391,6 +391,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     jm.startAnswer(jm.jobs.get(r.job.id), pressedAt).then((sa) => { if (sa && sa.error) return res.status(400).json({ error: sa.error }); const j1 = jm.jobs.get(r.job.id); if (j1) r.job = jm.snapshot(j1, { author: true }); reply(); });   // r4683 (b): the job as it is AFTER the starter answered
   });
   app.get('/api/jobs/:id', (req, res) => {
+    if (!jm.ready) return res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || (jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting') });   // B-f276 (s1126, r4994): the lock's hold by name — never «no such job» for a job it could not look for
     const job = jm.jobs.get(req.params.id);
     const tail = Math.min(Number(req.query.tail) || 0, 1000);
     if (!job) {
@@ -407,6 +408,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // acknowledged as user-opened (the same rule as the per-row ping), then ONE
   // save and ONE broadcast so every open panel + the badge repaint once.
   app.post('/api/jobs/seen', (req, res) => {
+    if (!jm.ready) return res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || (jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting') });   // B-f276 (s1126, r4994): the lock's hold by name — never «no such job» for a job it could not look for
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String).slice(0, 500) : [];
     if (!ids.length) return res.status(400).json({ error: 'ids required' });
     const acked = [];
@@ -420,6 +422,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, requested: ids.length, acked: acked.length, ids: acked, ...(saved ? {} : { notOnDisk: true }) }); } catch { } });
   });
   app.post('/api/jobs/:id/:act', (req, res) => {
+    if (!jm.ready) return res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || (jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting') });   // B-f276 (s1126, r4994): the lock's hold by name — never «no such job» for a job it could not look for
     const job = jm.jobs.get(req.params.id);
     const act = req.params.act;
     if (!job) {

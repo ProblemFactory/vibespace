@@ -1902,7 +1902,7 @@ function msgCaller(req, res) {
   const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token || '';
   if (token.startsWith('jbt_')) {
     const jm = getJobs && getJobs();
-    if (!jm || !jm.ready || !jm.jobByToken) { res.status(503).json({ error: 'the jobs engine is not ready — retry shortly', code: 'unavailable' }); return null; }
+    if (!jm || !jm.ready || !jm.jobByToken) { res.status(503).json({ error: (jm && jm.lockHeldWords && jm.lockHeldWords()) || 'the jobs engine is not ready — retry shortly', code: 'unavailable' }); return null; }   // B-f276 (s1126, r4994): the lock's hold by name
     const job = jm.jobByToken(token);
     if (!job) { const h = (jm && typeof jm.tokenHeldAnswer === 'function' ? jm.tokenHeldAnswer(token) : null); if (h) { res.status(h.status).json({ error: h.error, code: h.code }); return null; } res.status(401).json({ error: 'unknown job token', code: 'auth' }); return null; }   // B-f276 (r3230's table): jobs.json held ⇒ the hold by name
     const cid = (job.owner && job.owner.conversation && job.owner.conversation.id) || null;

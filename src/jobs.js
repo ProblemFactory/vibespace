@@ -4004,6 +4004,7 @@ class JobManager {
    *  records) — every door that looks a jbt_ token up asks this when the lookup finds nothing: the hold's words by name (503), never
    *  «unknown job token» to a job that may be running. → { status, code, error } | null */
   tokenHeldAnswer(raw) {
+    if (this._lockHold && raw && String(raw).startsWith('jbt_')) return { status: 503, code: 'jobs_lock_unread', error: `${this.lockHeldWords()} — a job's token cannot be checked meanwhile` };   // B-f276 (s1126, r4994): the lock held — never «unknown job token»
     if (!(this._unread && this._unread.store) || !raw || !String(raw).startsWith('jbt_')) return null;
     return { status: 503, code: 'records-unread', error: this.unreadWords('a job\'s token cannot be checked while the job records cannot be read') };
   }
@@ -4070,15 +4071,19 @@ class JobManager {
     }
     if (collapsed.length) this._logsWhole(collapsed); // lane job-logs-sweep: off the main thread (the remover's worker)
     for (const job of this.jobs.values()) {
-      try {
-        const replays = () => job.kind === 'service' && job.desiredUp && job.state === 'down' && !(job.supervise && job.supervise.parkedAt);
-        if (replays()) this._startAfter(job, 'boot', replays); // round 5: never beside what its last run left (its reap awaited)
-        else if (job.state === 'waiting') { if (this._waitLive(job)) this._startAfter(job, 'boot', () => this._waitLive(job)); else this._settleWait(job, 'its schedule was stopped or removed while it waited'); } // lane vault-job-road: judged again (locked at every boot ⇒ it waits on)
-        // lane job-wrapper-update-window: a one-shot task an update's window interrupted NEVER RAN — the restarted server
-        // runs it once; a cron child waits for its next fire (its schedule owns when it runs)
-        else if (job.kind === 'task' && !job.cronParent && job.state === 'interrupted' && (job.runs || []).length && job.runs[job.runs.length - 1].cause === 'update_window') this._spawn(job, 'update-rerun');
-      } catch (e) { this.d.log(`[jobs] replay failed for ${job.id}:`, e.message); }
+      try { this._bootReplayOne(job); } catch (e) { this.d.log(`[jobs] replay failed for ${job.id}:`, e.message); }
     }
+  }
+  /** THE BOOT'S REPLAY of ONE job — the boot's loop above, and (B-f276 s1126, 主开发 r4994) a run the boot met with its exit record
+   *  HELD, at its lift (_bootJudgeLate): what the start would have done for it, through the SAME door and the SAME conditions, read at
+   *  that moment — so never twice (a job already up again, or parked, or a person's own start meanwhile, meets no condition) */
+  _bootReplayOne(job) {
+    const replays = () => job.kind === 'service' && job.desiredUp && job.state === 'down' && !(job.supervise && job.supervise.parkedAt);
+    if (replays()) this._startAfter(job, 'boot', replays); // round 5: never beside what its last run left (its reap awaited)
+    else if (job.state === 'waiting') { if (this._waitLive(job)) this._startAfter(job, 'boot', () => this._waitLive(job)); else this._settleWait(job, 'its schedule was stopped or removed while it waited'); } // lane vault-job-road: judged again (locked at every boot ⇒ it waits on)
+    // lane job-wrapper-update-window: a one-shot task an update's window interrupted NEVER RAN — the restarted server
+    // runs it once; a cron child waits for its next fire (its schedule owns when it runs)
+    else if (job.kind === 'task' && !job.cronParent && job.state === 'interrupted' && (job.runs || []).length && job.runs[job.runs.length - 1].cause === 'update_window') this._spawn(job, 'update-rerun');
   }
   _readExit(job, run) { return this._ctlJson(job, run, 'exit.json'); }
   /** THE ONE ROAD of the park law (lane jobs-memory-bound, acceptance round 2): every end of a run — the sweep's and the boot's
@@ -4170,10 +4175,10 @@ class JobManager {
    *  boot's lines in _adoptAndReplay, after the record's read): its record's end, else a stamp of no boot unverified, else a wrapper that
    *  died with its environment (the boot's judge) — never the sweep's «ended, no code» */
   _bootJudgeLate(job, run, stamp, exit) {
-    if (exit) { this._finalizeRun(job, run, exit, 'boot'); return; }
-    if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); return; }
-    const sample = run && !run.endedAt ? this._ctlJson(job, run, 'pressure.json') : null;
-    this._bootNoExit(job, run, M.bootEndCause(sample, sample ? this._cgroupNow() : null));
+    if (exit) this._finalizeRun(job, run, exit, 'boot');
+    else if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); }
+    else { const sample = run && !run.endedAt ? this._ctlJson(job, run, 'pressure.json') : null; this._bootNoExit(job, run, M.bootEndCause(sample, sample ? this._cgroupNow() : null)); }
+    this._bootReplayOne(job);   // r4994: and the boot's REPLAY of it, once (a wanted service up again, an update window's task run) — its words true
   }
   /** THE LADDER's inputs (lane jobs-memory-bound): the owner's setting `jobs.memoryMb` (undefined while never set) and the
    *  cluster's default (the chart's env) — read live, per run */

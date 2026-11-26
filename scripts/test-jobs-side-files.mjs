@@ -23,7 +23,11 @@
 //   ③ THE EXIT RECORD: the sweep's road refused — the run not ended, said, no read again ON the loop while held; the lift judges it
 //      with its code. The boot's road refused — not judged at the boot; the lift judges it by the boot's judge (its code). Torn bytes
 //      kept beside it, then judged with no record. RED: the tip's «no exit record» (a copy)
-//   ④ PINS: the jobs doors (src/server/jobs-wiring.js, src/agent-routes.js) answer the lock's hold by name
+//      r4994: a WANTED SERVICE whose record was held at the boot gets the boot's own replay at the lift, ONCE (RED: the tip's late judge
+//      with no replay); a stamp with no boot id lifts to «unverified», as the boot says it
+//   ④ PINS: every jobs door (src/server/jobs-wiring.js: the list, the held digest, the wake rows, a create, a job's detail, seen, its
+//      acts; src/agent-routes.js; the job-token gates of src/agent-routes.js and src/routes/browser.js) answers the lock's hold by name;
+//      a job's token while held is answered by the hold (tokenHeldAnswer), never «unknown job token» (r4994)
 // Run: node scripts/test-jobs-side-files.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -65,6 +69,7 @@ const cut = (from, to, why) => MJ.load('src/jobs.js', anchored(JSRC, from, to, w
 // THE TIP's THREE READS, each placed back in a copy
 const TipHistory = cut("      const histA = SR.storeAnswer(read, { parse: (t) => t });", "      const histA = { state: 'data', value: read.text || '' };   /* MUTANT: the tip — a failed read is «no history» */", 'the history read as the tip');
 const TipLock = cut("    if (lockA.state === 'unreadable' || lockA.state === 'corrupt') return lockA;", "    /* MUTANT: the tip — a lock that could not be read is taken */", 'the lock taken as the tip');
+const TipLate = cut("    this._bootReplayOne(job);   // r4994: and the boot's REPLAY of it, once (a wanted service up again, an update window's task run) — its words true\n", '', 'the late judge with no replay as the tip');
 const TipExit = cut("    const a = this._ctlAnswer(job, run, 'exit.json');", "    const a0 = this._ctlAnswer(job, run, 'exit.json'), a = a0.state === 'unreadable' || a0.state === 'corrupt' ? { state: 'missing' } : a0;   /* MUTANT: the tip — «no exit record» */", 'the exit record as the tip');
 
 let n = 0;
@@ -120,7 +125,7 @@ const JOBS = [{ id: 'jb-0d1e2f30', kind: 'task', name: 'made-up kept record', st
     refused.add(lock);
     const { jm, logs } = engine(JM, dir);
     jm.init(); quiet(jm);
-    const held = { ready: jm.ready, readOnly: jm.readOnly, loaded: jm.jobs.size, words: typeof jm.lockHeldWords === 'function' ? jm.lockHeldWords() : null };
+    const held = { ready: jm.ready, readOnly: jm.readOnly, loaded: jm.jobs.size, words: typeof jm.lockHeldWords === 'function' ? jm.lockHeldWords() : null, tok: jm.tokenHeldAnswer(['jbt', 'madeup0token'].join('_')) };
     try { jm._dirty = true; jm._save({}); } catch { }   // a writer asked while held
     const made = (() => { try { return jm.create({ kind: 'task', name: 'asked while held', cmd: { argv: ['true'] } }, {}); } catch (e) { return { error: e.message }; } })();
     const lockHeld = bytes(lock), storeHeld = bytes(store);
@@ -128,7 +133,7 @@ const JOBS = [{ id: 'jb-0d1e2f30', kind: 'task', name: 'made-up kept record', st
     const lifted = jm._lockHold ? await jm._lockHold.again() : null;
     await until(() => jm.ready, 'the engine started at the lock\'s lift');
     quiet(jm);
-    const out = { held, made, lockSame: same(lockHeld, lock0), storeSame: same(storeHeld, store0), lifted, after: { ready: jm.ready, readOnly: jm.readOnly, loaded: jm.jobs.size }, lockAfter: realRead.call(fs, lock, 'utf8'), logs };
+    const out = { held, made, lockSame: same(lockHeld, lock0), storeSame: same(storeHeld, store0), lifted, after: { ready: jm.ready, readOnly: jm.readOnly, loaded: jm.jobs.size }, lockAfter: realRead.call(fs, lock, 'utf8'), storeAfterSame: same(bytes(store), store0), logs };
     end(jm);
     return out;
   };
@@ -138,6 +143,8 @@ const JOBS = [{ id: 'jb-0d1e2f30', kind: 'task', name: 'made-up kept record', st
     '② refused, a LIVE engine\'s lock there: HELD — not taken (its bytes unchanged), no record loaded, nothing written over jobs.json, a writer asked meanwhile writes nothing', a.held);
   ok(!!(a.held.words && /jobs\.lock/.test(a.held.words) && /\(EIO\)/.test(a.held.words) && /another VibeSpace may hold it/.test(a.held.words)), '② its words name the lock and the code (what every jobs door answers while held)', a.held.words);
   ok(!!(a.made && a.made.error === a.held.words), '② a start asked while held is refused BY the hold\'s words, never recorded', a.made);
+  ok(!!(a.held.tok && a.held.tok.status === 503 && a.held.tok.code === 'jobs_lock_unread' && a.held.tok.error.startsWith(a.held.words)), '② r4994: a job\'s token while held is answered BY the hold (503), never «unknown job token»', a.held.tok);
+  ok(!!(a.storeAfterSame), '② …and jobs.json is the same bytes after the lift too (read-only beside the live engine: nothing written, ever)');
   ok(!!(a.lifted === true && a.after.ready && a.after.readOnly === true && a.after.loaded === 1 && JSON.parse(a.lockAfter).pid === kid.pid && a.logs.some((l) => /another engine holds the lock/.test(l))),
     '② its lift: the live engine\'s lock read — READ-ONLY beside it (its records shown), the lock never written', { after: a.after, lock: a.lockAfter });
   ok(!!(r.held.ready === true && r.held.readOnly === false && JSON.parse(r.lockAfter).pid === process.pid),
@@ -164,8 +171,8 @@ const JOBS = [{ id: 'jb-0d1e2f30', kind: 'task', name: 'made-up kept record', st
 console.log('③ a gone wrapper\'s exit record that could not be read judges nothing');
 {
   const T = Date.now() - 60000;
-  const setup = (tag, exitText, stamp = { pid: 4194001, starttime: 1, bootId: PI.bootIdOf() }) => {
-    const dir = world(tag), job = { id: 'jb-5e6f7a8b', kind: 'task', name: 'made-up task', state: 'up', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T, trigger: 'manual' }], createdAt: T };
+  const setup = (tag, exitText, stamp = { pid: 4194001, starttime: 1, bootId: PI.bootIdOf() }, extra = {}) => {
+    const dir = world(tag), job = { id: 'jb-5e6f7a8b', kind: 'task', name: 'made-up task', state: 'up', owner: {}, access: { view: 'session', control: 'session' }, runs: [{ startedAt: T, trigger: 'manual' }], createdAt: T, ...extra };
     const ctl = path.join(dir, 'job-logs', job.id, String(T)); fs.mkdirSync(ctl, { recursive: true });
     fs.writeFileSync(path.join(ctl, 'pid.json'), JSON.stringify(stamp));   // a wrapper's stamp (by default one that stamped and is gone)
     const exitF = path.join(ctl, 'exit.json'); fs.writeFileSync(exitF, exitText);
@@ -218,6 +225,32 @@ console.log('③ a gone wrapper\'s exit record that could not be read judges not
   ok(!!(b.held.endedAt === null && b.held.state === 'up' && b.held.exit === undefined), '③ the BOOT\'s road, refused: the boot judges nothing (not «died with its environment»)', b.held);
   ok(!!(b.lifted === true && b.after.endedAt === T + 5000 && b.after.exit === 7), '③ its lift: judged by the boot\'s own judge with the record\'s code and end', b.after);
   ok(!!(br.held.endedAt !== null && br.held.exit !== 7), 'RED — the tip (a copy): the refused read at the boot is «no exit record» — judged by the boot\'s guess, the real code lost', br.held);
+  // r4994: A WANTED SERVICE whose record is held at the boot — judged at the lift by the boot's judge AND given the boot's replay, ONCE
+  // (the start's own door: _startAfter, stood in here so nothing is spawned). The record refused at the boot, then gone (a «missing»
+  // right after a failed read is read once more: two reads again)
+  const late = async (JM, stamp, extra) => {
+    const w = setup('exit-late', EXIT, stamp, extra); refused.add(w.exitF);
+    const { jm } = engine(JM, w.dir);
+    const starts = []; jm._startAfter = (job, why, cond) => { starts.push({ id: job.id, why, ok: !!(cond && cond()) }); return Promise.resolve(); };
+    jm.init(); quiet(jm);
+    const j = jm.jobs.get(w.id), atBoot = { state: j.state, starts: starts.length };
+    fs.unlinkSync(w.exitF); refused.delete(w.exitF);
+    const h = jm._exitHolds && jm._exitHolds.get(w.exitF);
+    if (h) { await h.hold.again(); await h.hold.again(); }
+    await jm._sweepPass().catch(() => { });
+    const once = starts.length;
+    await jm._sweepPass().catch(() => { }); await jm._sweepPass().catch(() => { });
+    const out = { atBoot, lifted: !!(h && h.lifted), once, starts: starts.slice(), state: j.state };
+    end(jm);
+    return out;
+  };
+  const SVC = { kind: 'service', name: 'made-up service', desiredUp: true, restart: 'always' };
+  const sv = await late(JobManager, undefined, SVC), svr = await late(TipLate, undefined, SVC);
+  ok(!!(sv.atBoot.state === 'up' && sv.atBoot.starts === 0 && sv.lifted && sv.once === 1 && sv.starts.length === 1 && sv.starts[0].why === 'boot' && sv.starts[0].ok && sv.starts[0].id === 'jb-5e6f7a8b'),
+    '③ r4994: a WANTED SERVICE whose record was held at the boot — nothing at the boot; at the lift the boot\'s judge sets it down and the boot\'s REPLAY starts it again (its own door, its conditions true), and two more sweeps start nothing more', sv);
+  ok(!!(svr.lifted && svr.once === 0 && svr.starts.length === 0 && svr.state === 'down'), 'RED — the tip\'s late judge (a copy, its replay cut): the service set down «the restarted server starts it again», and NOTHING starts it', svr);
+  const uv = await late(JobManager, { pid: 4194001, starttime: 1 }, {});
+  ok(!!(uv.lifted && uv.state === 'unverified' && uv.starts.length === 0), '③ …a stamp with no boot id, its record held at the boot: «unverified» at the lift, as the boot says it (nothing started)', uv);
   // TORN bytes: kept beside the record, then the run judged with no record
   const TORN = '{"code": 7, "endedA';
   const torn = async (JM) => {
@@ -241,9 +274,16 @@ console.log('④ the jobs doors say the lock\'s hold by name');
 {
   const W = realRead.call(fs, path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8'), A = realRead.call(fs, path.join(ROOT, 'src/agent-routes.js'), 'utf8');
   const HELD = '(jm.lockHeldWords && jm.lockHeldWords()) || ';
-  ok(W.split('if (!jm.ready) return res.status(503).json({ error: ' + HELD).length === 5 && !/if \(!jm\.ready\) return res\.status\(503\)\.json\(\{ error: (?!\(jm\.lockHeldWords)/.test(W),
-    '④ src/server/jobs-wiring.js: each of its four not-ready answers says the lock\'s hold first (none without it)');
+  ok(W.split('if (!jm.ready) return res.status(503).json({ error: ' + HELD).length === 8 && !/if \(!jm\.ready\) return res\.status\(503\)\.json\(\{ error: (?!\(jm\.lockHeldWords)/.test(W),
+    '④ src/server/jobs-wiring.js: each of its seven not-ready answers says the lock\'s hold first (none without it)');
+  const headOf = (route) => { const i = W.indexOf(route); return i < 0 ? '' : W.slice(i, W.indexOf('\n', W.indexOf('\n', i) + 1)); };
+  const doors = ["app.get('/api/jobs/:id', (req, res) => {", "app.post('/api/jobs/seen', (req, res) => {", "app.post('/api/jobs/:id/:act', (req, res) => {"];
+  ok(doors.every((d) => headOf(d).includes('if (!jm.ready) return res.status(503).json({ error: ' + HELD)),
+    '④ r4994: a job\'s DETAIL, SEEN and its ACTS (Stop, Start, Restart…) ask the hold FIRST — never «no such job» or a success with nothing done for a job it could not look for', doors.filter((d) => !headOf(d).includes(HELD)));
   ok(A.split('if (!jm.ready) { res.status(503).json({ error: ' + HELD).length === 2, '④ src/agent-routes.js: the agent\'s jobs door says it too');
+  const B = realRead.call(fs, path.join(ROOT, 'src/routes/browser.js'), 'utf8'), TOKEN = "(jm && jm.lockHeldWords && jm.lockHeldWords()) || 'the jobs engine is not ready — retry shortly'";
+  ok(A.split(TOKEN).length === 2 && B.split(TOKEN).length === 2 && !A.includes("{ error: 'the jobs engine is not ready — retry shortly'") && !B.includes("error: 'the jobs engine is not ready — retry shortly'"),   // stale-pins: kept — a deliberate absence check (the old «not ready» words gone from both gates)
+    '④ r4994: the two job-token gates that said «not ready» (src/agent-routes.js, src/routes/browser.js) say the lock\'s hold first');
 }
-for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 3, label: 'side-files ' })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 4, label: 'side-files ' })) ok(r.pass, r.name, r.detail);
 report();
