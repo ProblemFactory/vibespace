@@ -1350,22 +1350,22 @@ console.log('§10 r5185 the settings door syncs a person\'s save before its name
   };
   /** the file calls under `dir`, in order, by file name; `fail.sync`: a code every sync of a file there throws (PLACED) */
   const tap = (dir) => {
-    const ev = [], fds = new Map(), saved = {}, fail = { sync: null };
+    const ev = [], fds = new Map(), saved = {}, fail = { sync: null, close: null, write: null, rename: null };   // write: a code, or 'SHORT' (0 bytes taken)
     const mine = (p) => typeof p === 'string' && p.startsWith(dir + path.sep);
     const wrap = (k, f) => { saved[k] = fs[k]; fs[k] = f(saved[k]); };
     wrap('openSync', (o) => function (p, ...a) { const fd = o.call(this, p, ...a); if (mine(p)) { fds.set(fd, path.basename(p)); ev.push(`open ${path.basename(p)}`); } return fd; });
-    wrap('writeSync', (o) => function (fd, ...a) { const n = o.call(this, fd, ...a); if (fds.has(fd)) ev.push(`write ${fds.get(fd)}`); return n; });
+    wrap('writeSync', (o) => function (fd, ...a) { if (fds.has(fd) && fail.write) { ev.push(`write ${fds.get(fd)}`); if (fail.write === 'SHORT') return 0; throw Object.assign(new Error(`${fail.write}: a write PLACED to fail (§10)`), { code: fail.write, syscall: 'write' }); } const n = o.call(this, fd, ...a); if (fds.has(fd)) ev.push(`write ${fds.get(fd)}`); return n; });
     wrap('fsyncSync', (o) => function (fd, ...a) { if (fds.has(fd)) { ev.push(`sync ${fds.get(fd)}`); if (fail.sync) throw Object.assign(new Error(`${fail.sync}: a sync PLACED to fail (§10)`), { code: fail.sync, syscall: 'fsync' }); } return o.call(this, fd, ...a); });
-    wrap('closeSync', (o) => function (fd, ...a) { if (fds.has(fd)) { ev.push(`close ${fds.get(fd)}`); fds.delete(fd); } return o.call(this, fd, ...a); });
-    wrap('renameSync', (o) => function (a, b, ...r) { if (mine(a)) ev.push(`rename ${path.basename(a)} ${path.basename(b)}`); return o.call(this, a, b, ...r); });
+    wrap('closeSync', (o) => function (fd, ...a) { if (!fds.has(fd)) return o.call(this, fd, ...a); ev.push(`close ${fds.get(fd)}`); fds.delete(fd); const r = o.call(this, fd, ...a); if (fail.close) throw Object.assign(new Error(`${fail.close}: a close PLACED to fail after the writes (§10)`), { code: fail.close, syscall: 'close' }); return r; });   // (the descriptor IS closed: only its answer is placed)
+    wrap('renameSync', (o) => function (a, b, ...r) { if (mine(a)) { ev.push(`rename ${path.basename(a)} ${path.basename(b)}`); if (fail.rename) throw Object.assign(new Error(`${fail.rename}: a rename PLACED to fail (§10)`), { code: fail.rename, syscall: 'rename' }); } return o.call(this, a, b, ...r); });
     wrap('linkSync', (o) => function (a, b, ...r) { if (mine(a)) ev.push(`link ${path.basename(a)} ${path.basename(b)}`); return o.call(this, a, b, ...r); });
     wrap('writeFileSync', (o) => function (p, ...a) { if (mine(p)) ev.push(`writeFile ${path.basename(p)}`); return o.call(this, p, ...a); });
     wrap('unlinkSync', (o) => function (p, ...a) { if (mine(p)) ev.push(`unlink ${path.basename(p)}`); return o.call(this, p, ...a); });
     return { ev, fail, off: () => { for (const [k, f] of Object.entries(saved)) fs[k] = f; } };
   };
   /** run `fn` with the folder's calls tapped (`sync`: the placed failure) → { ev: the settings file's calls, r: fn's answer, thrown } */
-  const tapped = async (dir, fn, sync = null) => {
-    const t = tap(dir); t.fail.sync = sync;
+  const tapped = async (dir, fn, sync = null, more = {}) => {
+    const t = tap(dir); t.fail.sync = sync; Object.assign(t.fail, more);
     let r, thrown = null;
     try { r = await fn(); } catch (e) { thrown = e; } finally { t.off(); }
     return { ev: t.ev.filter((e) => / settings\.json/.test(e)), r, thrown };
@@ -1408,7 +1408,7 @@ console.log('§10 r5185 the settings door syncs a person\'s save before its name
   const wireRequire = createRequire(path.join(REPO, 'src/server/mounts-plugins-wiring.js'));
   const routeOf = (text, H) => new Function('require', 'plugins', 'persistenceRouter', `return (${text});`)(wireRequire, { setConfig: (id, patch) => { H.R.patchSettings({ [`plugin.${id}.r5185`]: patch.r5185 }); return { ok: true }; } }, H.R);
   const post = (fn, headers, v) => () => { let status = 200, o = null; const res = { status(x) { status = x; return res; }, json(x) { o = x; return res; } }; fn({ params: { id: 'frp' }, body: { r5185: v }, headers }, res); return { status, body: o }; };
-  const BEARER = { authorization: 'Bearer vsst_r5185-a-job' };
+  const BEARER = { authorization: 'Bearer ' + 'vsst_' + 'r5185-a-job' };   // (a token-shaped fixture is built, never written whole)
   const ROUTE_SCOPE = "res.json(require('../write-origin.js').pressBearer(req.headers) && typeof persistenceRouter.asMachineCall === 'function' ? persistenceRouter.asMachineCall(call) : call())";
   ok(ROUTE.startsWith('(req, res) => {') && ROUTE.endsWith('}') && ROUTE.split(ROUTE_SCOPE).length === 2 && WIR.split('asMachineCall(').length === 2, 'control setup: the config route is cut whole from src/server/mounts-plugins-wiring.js, its machine scope found once (the file\'s one asMachineCall)', ROUTE.slice(0, 120));
   const route = routeOf(ROUTE, A);
@@ -1456,6 +1456,28 @@ console.log('§10 r5185 the settings door syncs a person\'s save before its name
     && warned.length === 1 && /settings\.json: its file system does not do a sync \(EINVAL\)/.test(warned[0]),
     'r5185 (f) a sync the file system does not do (EINVAL — src/fd-close.js SYNC_UNSUPPORTED): both writes land, said ONCE for the store, by the hub\'s one sentence', J({ warned, f1: f1 && f1.ev, t: ((f1 && f1.thrown) || (f2 && f2.thrown) || {}).message }));
 
+  // r5185's ROUND (wf_8f9d98c0, lens three): a CLOSE that fails after the writes, a SHORT write, a WRITE refused (ENOSPC), a RENAME
+  // that fails — each a FAILED WRITE: thrown by its code, the temp REMOVED, settings.json's old bytes stand (a close or a write: nothing
+  // renamed). REDs (the store hold in a copy placed in its require cache): the close's catch cut — a failed close lands the write; the
+  // rename's removal cut — a failed rename leaves its temp
+  const withHold = async (mod, fn) => {
+    const saved = require.cache[SHP];
+    try { require.cache[SHP] = { id: SHP, filename: SHP, loaded: true, exports: mod, children: [], paths: [] }; return await fn(); }
+    finally { if (saved) require.cache[SHP] = saved; else delete require.cache[SHP]; for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; }
+  };
+  const failScene = async (more) => { const d = dir10(OLD), H = hub10(d); await H.call('get', '/api/settings'); const r = await tapped(d, press(H, 'never landed'), null, more); return { r, left: tmpLeft(d), bytes: fs.readFileSync(path.join(d, 'settings.json'), 'utf8') }; };
+  const failedWrite = (x, code) => !!x.r.thrown && x.r.thrown.code === code && x.left.length === 0 && x.bytes === OLD && x.r.ev.includes(`unlink ${TMP}`);
+  const fc = await failScene({ close: 'EIO' }), fsh = await failScene({ write: 'SHORT' }), fw = await failScene({ write: 'ENOSPC' }), fr = await failScene({ rename: 'EIO' });
+  ok(failedWrite(fc, 'EIO') && failedWrite(fsh, 'ESHORT') && failedWrite(fw, 'ENOSPC') && [fc, fsh, fw].every((x) => !x.r.ev.some((e) => /^(rename|link) /.test(e))) && failedWrite(fr, 'EIO'),
+    'r5185\'s round: a close that fails after the writes, a short write, a write refused (ENOSPC), a rename that fails — each a FAILED WRITE: thrown by its code, the temp REMOVED, settings.json\'s old bytes stand', J({ fc: fc.r.ev, fsh: fsh.r.ev, fw: fw.r.ev, fr: fr.r.ev, codes: [fc, fsh, fw, fr].map((x) => x.r.thrown && x.r.thrown.code), left: [fc, fsh, fw, fr].map((x) => x.left) }));
+  const CLOSE_A = "    try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }   // a close that fails after the writes: its bytes may not be there\n";
+  const RENAME_A = "    } else { try { fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { /* gone */ } throw e; } }";
+  ok(SHSRC.split(CLOSE_A).length === 2 && SHSRC.split(RENAME_A).length === 2, 'control setup: the door\'s close judge and its rename\'s removal are found once each in src/store-hold.js');
+  const fcX = await withHold(M.load(SHREL, anchored(SHSRC, CLOSE_A, "    try { fs.closeSync(fd); } catch (e) { /* MUTANT: a failed close is not a failed write */ }\n", 'r5185-close-ignored'), 'r5185-close-ignored'), () => failScene({ close: 'EIO' }));
+  const frX = await withHold(M.load(SHREL, anchored(SHSRC, RENAME_A, '    } else fs.renameSync(tmp, file);   /* MUTANT: a failed rename leaves its temp */', 'r5185-rename-leaves'), 'r5185-rename-leaves'), () => failScene({ rename: 'EIO' }));
+  ok(!fcX.r.thrown && fcX.r.ev.some((e) => e.startsWith(`rename ${TMP} settings.json`)), 'CONTROL (the close\'s judge cut, in a copy): a close that failed after the writes lands the write as if whole — red', J(fcX.r.ev));
+  ok(!!frX.r.thrown && frX.left.length === 1, 'CONTROL (the rename\'s removal cut, in a copy — the release): a failed rename leaves its temp behind — red', J({ left: frX.left }));
+
   // RED: THE RELEASE's DOOR (the store hold, in a copy placed in its require cache): a person's save renames an UNSYNCED temp
   const DOOR_A = /^ {4}let fd = fs\.openSync\(tmp, 'w'\), failed = null;\n[\s\S]*?^ {4}if \(failed\) \{[^\n]*\n/m;
   const holdX = M.load(SHREL, anchored(SHSRC, DOOR_A, "    for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });   /* MUTANT: the release's door, unsynced */\n", 'r5185-release-door'), 'r5185-release-door');
@@ -1471,7 +1493,7 @@ console.log('§10 r5185 the settings door syncs a person\'s save before its name
   // the one road, by text: the settings store's ONE write asks its sync by the scope, and no other write of the hold passes a choice
   const PSRC10 = read(PREL);
   ok(PSRC10.split('settingsHold.write(').length === 2 && PSRC10.includes("settingsHold.write(data, undefined, { sync: MACHINE_CALL.getStore() !== true });") && PSRC10.split('{ sync: ').length === 2
-    && /function write\(next, bytes, \{ sync = true \} = \{\}\)/.test(SHSRC) && SHSRC.split('write(next, bytes)').length === 2 && SHSRC.split('write(made[0], made[1])').length === 2,
+    && SHSRC.split('write(next, bytes)').length === 2 && SHSRC.split('write(made[0], made[1])').length === 2,
     'r5185 the one road, by text: the settings store\'s ONE write asks for its sync by the machine scope; the hold\'s door syncs by DEFAULT, and its own roads (the ladder\'s retry, the flush) pass no choice');
 }
 

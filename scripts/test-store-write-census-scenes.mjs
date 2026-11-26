@@ -244,9 +244,10 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       ok(r === 'missing' && nothing && ap && ap.code === 'store_appeared' && fs.readFileSync(F, 'utf8') === SEED && h.answer().kept === 'the person\'s', '⑪ «missing» writes NOTHING at the read; a real file that appeared later is READ and ADOPTED — the change refused by name, never a rename over it', ap);
       const d2 = scratchDir('hold-create'); roots.push(d2); const F2 = path.join(d2, 'store.json');
       const h2 = HMOD.create({ file: F2, valid, log: { warn() { } }, schedule: () => 0 }); h2.readAtStart();
-      const wf = fs.writeFileSync; const temps = [];
+      const wf = fs.writeFileSync, op = fs.openSync; const temps = [];
       fs.writeFileSync = function (f, ...x) { temps.push(String(f)); return wf.call(this, f, ...x); };
-      try { h2.write({ v: 1, kept: 'born' }); } finally { fs.writeFileSync = wf; }
+      fs.openSync = function (f, fl, ...x) { if (fl === 'w') temps.push(String(f)); return op.call(this, f, fl, ...x); };   // r5185: the door OPENS its temp (one descriptor, synced) — its name counted at the open
+      try { h2.write({ v: 1, kept: 'born' }); } finally { fs.writeFileSync = wf; fs.openSync = op; }
       ok(JSON.parse(fs.readFileSync(F2, 'utf8')).kept === 'born' && temps.length === 1 && temps[0].includes(`.${process.pid}.tmp`), '⑪ the first real change creates the file (exclusive create), through a temp name that carries the PID (R10)', temps);
     }
     // REDs (anchored, in copies)
