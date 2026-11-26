@@ -639,7 +639,11 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
   const VAL = { m1: 'lock-census-value-one-0123', m2: 'lock-census-value-two-4567', m3: 'lock-census-value-three-89' };
   const src = { vaultRows: () => ROWS, vaultReveal: (e, f) => (f === 'secretKey' ? VAL[e] || null : null) };
   const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 10)); } return fn(); };
+  // B-3dbd (r4729, lane bl-chat-b): EVERY WAIT OF THE LOCK CENSUS IS ON ITS FACT under a generous bound (FACT_MS) whose expiry is a NAMED
+  // line, never a silent read of whatever is there (was: 3 s and 2 s bounds a loaded machine beat — a green world read red)
+  const FACT_MS = 20000, KILL_MS = 300;
+  const until = async (fn, ms = FACT_MS, what = 'its fact') => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 10)); } const v = fn(); if (!v) ok(false, `the lock census waited ${ms} ms for ${what} — it never came (a harness line, never the census's verdict)`); return v; };
+  const settled = async (p, what, ms = FACT_MS) => { let t = null; const r = await Promise.race([p, new Promise((res) => { t = setTimeout(() => res({ code: 'still-waiting' }), ms); })]); clearTimeout(t); if (r && r.code === 'still-waiting') ok(false, `the lock census waited ${ms} ms for ${what} to settle — it never did (a harness line)`); return r; };
   async function lockWorld({ contentsMod = VC, doorMod = DOOR, autoMod = AE } = {}) {
     const top = path.join(ROOT, 'lock' + (++n)), dir = path.join(top, 'data');   // the data dir beside the work folder (a run never starts inside the data dir)
     fs.mkdirSync(dir, { recursive: true });
@@ -649,10 +653,14 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 3600e3 });
     const runRoot = path.join(top, 'run'), work = path.join(top, 'work'); fs.mkdirSync(runRoot); fs.mkdirSync(work);
     const contents = contentsMod.create({ vault: v, sources: { mounts: () => src } });
-    const door = doorMod.create({ dataDir: dir, vault: v, sources: { mounts: () => src }, userTodos, instanceKind: () => 'cluster', runRoot: () => runRoot, agentEnv: () => ({ ...process.env }), killGraceMs: 300, pipeGraceMs: 200, liveOf: () => true });
+    // r4729: the door's own timers, recorded — the lock's stop() arms the run's SIGKILL at its grace (KILL_MS) synchronously inside the lock,
+    // so «the lock did not stop the run» is a FACT read at once after it (no 3 s of waiting on a run that was never asked to end)
+    const armed = [];
+    const timers = { set: (fn, ms) => { armed.push(ms); return setTimeout(fn, ms); }, clear: (h) => clearTimeout(h) };
+    const door = doorMod.create({ dataDir: dir, vault: v, sources: { mounts: () => src }, userTodos, instanceKind: () => 'cluster', runRoot: () => runRoot, agentEnv: () => ({ ...process.env }), killGraceMs: KILL_MS, pipeGraceMs: 200, liveOf: () => true, timers });
     const auto = autoMod.create({ dataDir: dir, vault: v, userTodos, now: () => clock, verbs: { 'conversations.rename': () => ({ ok: true }) } });
     const open = () => userTodos.snapshot().open || [];
-    const cardOf = async (type, not = null) => { let c = null; await until(() => (c = open().find((i) => i.action && i.action.type === type && i.action.askId !== not)) != null); return c; };
+    const cardOf = async (type, not = null) => { let c = null; await until(() => (c = open().find((i) => i.action && i.action.type === type && i.action.askId !== not)) != null, FACT_MS, `the ${type} card`); return c; };
     // (a) THE VIEW: 验证是你 opened this page's window
     const rs = await contents.startReveal('who-1', PW);
     // (d) A RUN IN FLIGHT: a child that sleeps (its pid in a file), its card answered once (a cluster asks every run)
@@ -662,7 +670,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     const running = door.run({ caller, args: ['--env', 'T=vault://mounts/m1/secretKey', '--', process.execPath, '-e', 'require("fs").writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)', pidFile], cwd: work });
     const c1 = await cardOf('vault-run-ask');
     door.answer(c1.action.askId, { answer: 'once' });
-    await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').length > 0);
+    await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').length > 0, FACT_MS, 'the run\'s child pid');
     const pid = Number(fs.readFileSync(pidFile, 'utf8'));
     // (b) THE ASKS: a second run held on its card, an agent's request, a held automation call
     const held = door.run({ caller, args: ['--env', 'T=vault://mounts/m1/secretKey', '--', process.execPath, '-e', 'console.log(2)'], cwd: work });
@@ -677,22 +685,25 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     door.answerRequest(rg.askId, { answer: '8h', reauthed: true });
     auto.grant(key.key.id, ['session:conv-2'], { mode: 'once', by: 'user' });
     const live = { view: contents._windows.size === 1 && rs.ok, run: alive(pid) && door.running() === 1, asks: !!(c2 && rq.ok && reqId && c3), grants: door._grants.size === 1 && auto.list().keys[0].grants.some((g) => g.mode === 'once' && !g.spentAt) };
-    return { dir, v, contents, door, auto, userTodos, open, pid, running, held, call, rq, reqId, live, tick: (ms) => { clock += ms; } };
+    return { dir, v, contents, door, auto, userTodos, open, pid, running, held, call, rq, reqId, live, tick: (ms) => { clock += ms; }, killArmed: () => armed.includes(KILL_MS) };
   }
   /** What the lock ENDED — each of the four, judged from the outside. */
   async function ended(w) {
     const view = w.contents._windows.size === 0 && !w.contents.windowFacts('who-1', 'x'.repeat(32)).open;
-    const heldR = await Promise.race([w.held, new Promise((r) => setTimeout(() => r({ code: 'still-waiting' }), 2000))]);
-    const callR = await Promise.race([w.call, new Promise((r) => setTimeout(() => r({ code: 'still-waiting' }), 2000))]);
+    const heldR = await settled(w.held, 'the held run\'s answer');   // the lock withdraws it in every world and every mutant: a settle, never a race
+    const callR = await settled(w.call, 'the automation call\'s answer');
     const reqItem = w.reqId ? w.userTodos.get(w.reqId) : null;
     const asks = heldR.code === 'vault_locked' && callR.code === 'vault_locked' && !w.door._requests.size && !!reqItem && reqItem.status !== 'open' && reqItem.resolvedBy === 'vault_locked'
       && !w.open().some((i) => i.action && ['vault-run-ask', 'vault-grant-ask', 'automation-ask'].includes(i.action.type));
     const grants = w.door._grants.size === 0 && !w.auto.list().keys[0].grants.some((g) => g.mode === 'once' && !g.spentAt);
-    const gone = await until(() => !alive(w.pid) && w.door.running() === 0, 3000);
+    // THE NEVER CLAUSE read on the product's own act: a lock that stopped the run armed its SIGKILL (its grace) inside the lock — then its
+    // end is waited for; a lock that armed nothing never asked the run to end (read at once, never by a wait a mutant must outlast)
+    const armedKill = w.killArmed();
+    const gone = armedKill ? await until(() => !alive(w.pid) && w.door.running() === 0, FACT_MS, 'the stopped run\'s end') : false;
     const runR = gone ? await w.running : { code: 'still-running' };
     const runs = gone && runR.code === 'vault_locked' && runR.killed === true;
     if (!gone) w.door.closeAll();   // a mutant left it: end it here (never a stray past the suite)
-    return { view, asks, grants, runs, why: { heldR: heldR.code, callR: callR.code, reqItem: reqItem && [reqItem.status, reqItem.resolvedBy], runR: runR.code } };
+    return { view, asks, grants, runs, why: { heldR: heldR.code, callR: callR.code, reqItem: reqItem && [reqItem.status, reqItem.resolvedBy], runR: runR.code, armedKill } };
   }
   const four = (e) => CONSEQUENCES.every((c) => e[c] === true);
   for (const why of ['door', 'agent', 'idle']) {
@@ -701,6 +712,19 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     if (why === 'idle') { w.v.setIdleLock(1); w.tick(2 * 3600e3); w.v.idleTick(); } else w.v.lock(why);
     const e = await ended(w);
     ok(w.v.state() === 'locked' && four(e), `a lock by ${why === 'door' ? 'the DOOR (a person)' : why === 'agent' ? 'an AGENT' : 'the IDLE timer'} ENDS all four: the view closed · every ask withdrawn vault_locked (the run card, the request, the automation call) · every one-time grant ended · the running child gone (vault_locked, killed)`, JSON.stringify(e));
+    w.door.closeAll(); w.v.close();
+  }
+  {
+    // THE PLACEMENT (the family's law 1): the old fixed races read a GREEN world red whenever a withdrawal settled late — placed here by a
+    // hold the leg owns (the held run's answer gated until the old race has spoken), never by load: the old shape reads «still-waiting»,
+    // this leg's wait reads the answer
+    const w = await lockWorld(); w.v.lock('door');
+    let openGate = null; const gate = new Promise((r) => { openGate = r; });
+    const late = w.held.then(async (r) => { await gate; return r; });
+    const oldShape = await Promise.race([late, new Promise((r) => setTimeout(() => r({ code: 'still-waiting' }), 100))]);
+    openGate();
+    const newShape = await settled(late, 'the gated held run\'s answer');
+    ok(oldShape.code === 'still-waiting' && newShape.code === 'vault_locked', 'PLACED: a held run whose answer is held past the old fixed race reads «still-waiting» there (a green world red, at will); this leg\'s wait reads its answer, vault_locked', JSON.stringify({ oldShape: oldShape.code, newShape: newShape.code }));
     w.door.closeAll(); w.v.close();
   }
   {
@@ -726,7 +750,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     await v.unlock(PW);
     const still = auto.list().keys[0].grants.some((g) => g.mode === 'once' && !g.spentAt);
     const call = auto.use({ caller: { conversationId: 'conv-2', sessionKey: 'claude:conv-2', name: 'Two', live: true, groups: [] }, verb: 'conversations.rename', args: { name: 'x' } });
-    let card = null; await until(() => (card = (userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'automation-ask')) != null, 2000);
+    let card = null; await until(() => (card = (userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'automation-ask')) != null, FACT_MS, 'the automation card after the unlock');
     if (card) auto.answer(card.action.askId, { answer: 'deny', answeredBy: 'user' });
     const r = await call;
     ok(still && card && !ran.length && r.ok === false, 'a lock whose store write FAILED still ends the automation once-grant: the next use asks again (the engine remembers the lock), nothing ran', JSON.stringify({ still, card: !!card, ran: ran.length, code: r.code }));
