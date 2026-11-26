@@ -67,7 +67,9 @@ const WT = path.join(ROOT, 'wt'), BIN = path.join(ROOT, 'bin'), HOME = path.join
 const CMDS = path.join(ROOT, 'cmds'), OUT = path.join(ROOT, 'out');
 for (const d of [WT, BIN, HOME, PROJ, PROJ2, CMDS, OUT, path.join(HOME, '.claude'), path.join(HOME, '.config')]) fs.mkdirSync(d, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const until = async (fn, ms, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { let v = null; try { v = await fn(); } catch { v = null; } if (v) return v; await sleep(step); } return null; };
+// a DevTools call inside `fn` has a bound of its own (`send` below), so `fn` returns; a GONE browser is never swallowed
+// here: it ends the run at once as ONE named line (r4861), instead of every later wait reading it as «not yet»
+const until = async (fn, ms, step = 150) => { const end = Date.now() + ms; while (Date.now() < end) { let v = null; try { v = await fn(); } catch (e) { if (e && e.browserGone) throw e; v = null; } if (v) return v; await sleep(step); } return null; };
 const S = JSON.stringify;
 let pass = 0, fail = 0, skip = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : S(e)).slice(0, 900) : '')); } return !!c; };
@@ -259,21 +261,56 @@ try {
   CONV = 'e2e00000-0000-4000-8000-' + String(inited.pid).padStart(12, '0');
 
   // chrome on the real client
-  chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: 'ignore' });
+  // A DEAD BROWSER IS ONE NAMED LINE (主开发 r4861: on a hosted runner the suite's Chrome was gone after print-all and the
+  // next DevTools call waited for ever, read only at the 900 s deadline). Chrome's error output is KEPT (its last lines);
+  // its exit and the DevTools link's close settle every waiting call with the exit status, the signal and those lines,
+  // and every later call fails the same way at once. Bookkeeping first: Chrome may end before the link opens.
+  const tChrome = Date.now();
+  let chromeErr = '', chromeExit = null, gone = null, goneSoon = null, lastMethod = null;
+  const pend = new Map(); // id → { resolve, reject, method, timer }
+  const chromeLast = () => chromeErr.split('\n').map((l) => l.trim()).filter(Boolean).slice(-6).join(' ⏎ ').slice(-450);
+  const goneErr = (method) => Object.assign(new Error(`DevTools ${method}: ${gone}`), { browserGone: true });
+  const markGone = (why) => {
+    if (gone || cleaned) return;
+    const settle = () => {
+      goneSoon = null;
+      if (gone || cleaned) return;
+      gone = `the browser is gone (${why}) — chrome ${chromeExit ? `exited code=${chromeExit.code} signal=${chromeExit.signal} at +${chromeExit.at} ms` : 'had not exited 2 s after its link closed'}; the last DevTools method sent: ${lastMethod || 'none'}; its last lines: ${chromeLast() || '(none written)'}`;
+      console.log('  [design-window] ' + gone);
+      for (const [id, p] of pend) { pend.delete(id); clearTimeout(p.timer); p.reject(goneErr(p.method)); }
+    };
+    if (chromeExit) { clearTimeout(goneSoon); settle(); } else if (!goneSoon) goneSoon = setTimeout(settle, 2000); // the link closes first: its exit status follows
+  };
+  chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  chrome.stderr.on('data', (d) => { chromeErr = (chromeErr + d).slice(-4000); });
+  chrome.on('exit', (code, signal) => { chromeExit = { code, signal, at: Date.now() - tChrome }; markGone('chrome exited'); });
   const target = await until(async () => { try { return (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { return null; } }, 30000, 250);
-  if (!ok(!!target, 'headless chrome exposed a page target')) throw new Error('no chrome');
+  if (!ok(!!target, 'headless chrome exposed a page target', gone || chromeLast())) throw new Error('no chrome');
   cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
   await new Promise((r, e) => { cdp.on('open', r); cdp.on('error', e); });
+  cdp.on('close', (code) => markGone(`the DevTools link closed, code ${code}`));
   // EVERY SANDBOXED ARTBOARD FRAME IS ITS OWN TARGET in Chrome (an opaque origin = an out-of-process frame): the page
   // session's frame tree does not list them and its injected scripts never reach them. The suite auto-attaches every
   // child target (flattened onto this one socket), installs the witness BEFORE the frame's own scripts run (the target
   // waits for us), then lets it run; a frame is evaluated through ITS session and told apart by its own content.
-  let seq = 0; const pend = new Map(); const pageErrors = []; const children = new Map(); // child sessionId → targetInfo
-  const WITNESS = "(function(){try{window.__vsInj=1;if(window.top!==window){window.print=function(){window.__vsPrintCalled=(window.__vsPrintCalled||0)+1;try{window.top.postMessage({kind:'__vs_test_print'},'*')}catch(e){}}}else{window.__printCalls=0;addEventListener('message',function(e){if(e.data&&e.data.kind==='__vs_test_print')window.__printCalls++})}}catch(e){}})();";
-  const send = (method, params = {}, sessionId = undefined) => new Promise((r) => { const id = ++seq; pend.set(id, r); cdp.send(S(sessionId ? { id, method, params, sessionId } : { id, method, params })); });
+  let seq = 0; const pageErrors = []; const children = new Map(); // child sessionId → targetInfo
+  // __vsInjEarly: one of its runs in this window came while the document was still LOADING — the frame was held at its start
+  // until the witness was in, so the frame's own scripts (its print() call) meet the witness, never the browser's print().
+  // Installed into a document already running (late), it reads false and the print legs below turn red BY NAME.
+  const WITNESS = "(function(){try{window.__vsInj=1;window.__vsInjEarly=window.__vsInjEarly||document.readyState==='loading';if(window.top!==window){window.print=function(){window.__vsPrintCalled=(window.__vsPrintCalled||0)+1;try{window.top.postMessage({kind:'__vs_test_print'},'*')}catch(e){}}}else{window.__printCalls=0;addEventListener('message',function(e){if(e.data&&e.data.kind==='__vs_test_print')window.__printCalls++})}}catch(e){}})();";
+  // EVERY DevTools CALL HAS A BOUND OF ITS OWN: no answer within it ⇒ it fails BY NAME (the method, the bound); a link
+  // that refuses the write is a gone browser (the `ws` package drops a write on a closed socket silently without a callback)
+  const CDP_BOUND_MS = 30000, CDP_BOUNDS = { 'Page.printToPDF': 60000 };
+  const send = (method, params = {}, sessionId = undefined, bound = CDP_BOUNDS[method] || CDP_BOUND_MS) => new Promise((resolve, reject) => {
+    if (gone) { reject(goneErr(method)); return; }
+    const id = ++seq; lastMethod = method;
+    const timer = setTimeout(() => { if (pend.delete(id)) reject(new Error(`DevTools ${method} had no answer in ${bound} ms (its own bound)`)); }, bound);
+    pend.set(id, { resolve, reject, method, timer });
+    cdp.send(S(sessionId ? { id, method, params, sessionId } : { id, method, params }), (err) => { if (err && !gone) markGone(`the DevTools link refused ${method}: ${err.message}`); });
+  });
   cdp.on('message', (d) => {
     const m = JSON.parse(d);
-    if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; }
+    if (m.id && pend.has(m.id)) { const p = pend.get(m.id); pend.delete(m.id); clearTimeout(p.timer); p.resolve(m); return; }
     if (m.method === 'Runtime.exceptionThrown' && !m.sessionId) pageErrors.push(m.params?.exceptionDetails?.exception?.description || m.params?.exceptionDetails?.text || 'exception');
     else if (m.method === 'Target.attachedToTarget') {
       const { sessionId, targetInfo, waitingForDebugger } = m.params;
@@ -294,12 +331,26 @@ try {
   async function frameCtxByText(text) {
     for (const [sid, info] of [...children]) {
       if (info.type !== 'iframe') continue;
-      const r = await send('Runtime.evaluate', { expression: `!!(document.documentElement && document.documentElement.outerHTML.includes(${S(text)}))`, returnByValue: true }, sid);
+      let r = null;
+      try { r = await send('Runtime.evaluate', { expression: `!!(document.documentElement && document.documentElement.outerHTML.includes(${S(text)}))`, returnByValue: true }, sid, 5000); } catch (e) { if (e && e.browserGone) throw e; continue; } // a frame that does not answer a 5 s read is not the one asked for
       if (r.result && r.result.result && r.result.result.value === true) return sid;
     }
     return null;
   }
   const FRAME_MARK = { 'Evil.html': 'EVIL-MARK', 'Main.html': 'REPAINT-MARK-1', 'About.html': 'ABOUT-MARK' };
+  /** The print witness read inside a print frame (`left` = print all's count of artboard frames still loading). */
+  async function printWitness(sid) {
+    try { return JSON.parse(await evalInCtx(sid, 'JSON.stringify({ inj: window.__vsInj || 0, early: !!window.__vsInjEarly, called: window.__vsPrintCalled || 0, left: typeof left === "number" ? left : null })')); }
+    catch (e) { if (e && e.browserGone) throw e; return { unread: String((e && e.message) || e).slice(0, 200) }; }
+  }
+  /** Why a print leg cannot be judged a pass — null when the frame's own print() met the witness in time (r4861: every
+   *  road is a named red, none a skip). */
+  const printFault = (w) => !w ? 'the print frame was not reachable as a target'
+    : w.unread ? `the print frame did not answer the witness read (${w.unread})`
+    : !w.inj ? 'the witness never ran inside the print frame'
+    : !w.early ? 'the witness arrived LATE — after the print frame\'s document had begun, so the frame\'s own print() could reach the browser\'s'
+    : !(w.called > 0) ? 'the frame never called print() (the witness was in place from its start)'
+    : null;
   async function evalInCtx(sid, js) {
     const r = await send('Runtime.evaluate', { expression: js, awaitPromise: true, returnByValue: true }, sid);
     if (r.error) throw new Error('frame eval: ' + r.error.message);
@@ -624,13 +675,15 @@ try {
   }
   ok(!!printFrame && printFrame.sandbox === 'allow-scripts allow-modals' && printFrame.page && printFrame.prints && printFrame.hidden === 'true', 'Print = a transient frame sandboxed "allow-scripts allow-modals" (never allow-same-origin) carrying the row\'s @page (1280×800, fixed) and the print call', printFrame);
   const pctx = await until(() => frameCtxByText('setTimeout(function(){print()}'), 8000, 300);
-  const pw = pctx ? JSON.parse(await evalInCtx(pctx, 'JSON.stringify({ inj: window.__vsInj || 0, called: window.__vsPrintCalled || 0, top: window.top === window })').catch(() => '{}')) : null;
+  // the frame calls print() 60 ms after ITS load (design-canvas-model.js printSrcdoc), in a hidden cross-origin frame whose
+  // timers Chrome may hold back: the call is WAITED for (bounded), never read once — one early read was the old SKIP
+  const tw = Date.now();
+  const pw = pctx ? ((await until(async () => { const w = await printWitness(pctx); return w.called > 0 ? w : null; }, 10000, 100)) || (await printWitness(pctx))) : null;
+  const pwaited = Date.now() - tw;
   const printedTop = await ev('return window.__printCalls || 0;');
-  evidence.print = { ...printFrame, witness: pw, top: printedTop };
-  if (pw && pw.inj && pw.called > 0) ok(true, `print() was CALLED inside the sandboxed print frame (${pw.called}× in the frame, ${printedTop}× heard by the page) — the browser's print dialog is what follows; headless Chrome shows none`);
-  else if (pw && pw.inj) SKIP('the print dialog itself', `headless Chrome shows no print dialog, and the frame's print() ran before the witness reached its target (the frame, its sandbox "allow-scripts allow-modals", its @page and the call are pinned above; witness ${S(pw)})`);
-  else if (pw) SKIP('the print dialog itself', 'the witness script did not run inside the sandboxed print frame on this Chrome (the frame, its sandbox, its @page and the print call are pinned above)');
-  else ok(false, 'the print frame was reachable as a target', { pw, printedTop, ctx: !!pctx });
+  evidence.print = { ...printFrame, witness: pw, top: printedTop, waitedMs: pwaited };
+  const pf = printFault(pw);
+  ok(!pf, pf ? `print() inside the sandboxed print frame is judged: ${pf}` : `print() was CALLED inside the sandboxed print frame (${pw.called}× in the frame, ${printedTop}× heard by the page; seen ${pwaited} ms after the frame was found) — the witness was in place from the frame's start, so the browser's own print() was never reached; headless Chrome shows no print dialog`, { witness: pw, top: printedTop, ctx: !!pctx, waitedMs: pwaited });
   await ev(`${W}._designCanvas.focus(null); return true;`);
 
   // ── A⑩ present + print all + downloads (lane design-present) ──
@@ -680,11 +733,10 @@ try {
     const pa = await until(() => ev(`const f = document.querySelector('iframe.design-print-all'); if (!f) return null; const s = f.__frameDoc || ''; return { sandbox: f.getAttribute('sandbox'), frames: s.split('<iframe ').length - 1, pages: (s.match(/@page a\\d+\\{/g) || []).length, doc: s };`), 5000);
     ok(!!pa && pa.sandbox === 'allow-scripts allow-modals' && pa.frames === 2 && pa.pages === 2, 'Print with no artboard open on a page of two = PRINT ALL: one transient frame sandboxed "allow-scripts allow-modals" holding both artboards, a named page each', pa && { sandbox: pa.sandbox, frames: pa.frames, pages: pa.pages });
     const pactx = await until(() => frameCtxByText('function l(){if(--left<=0)go()}'), 10000, 300);
-    const paw = pactx ? await until(async () => { const v = JSON.parse(await evalInCtx(pactx, 'JSON.stringify({ called: window.__vsPrintCalled || 0, left: typeof left === "number" ? left : null })').catch(() => '{}')); return v.called > 0 ? v : null; }, 15000, 300) : null;
+    const paw = pactx ? ((await until(async () => { const w = await printWitness(pactx); return w.called > 0 ? w : null; }, 15000, 300)) || (await printWitness(pactx))) : null;
     evidence.printAll = { paw, ctx: !!pactx };
-    if (paw) ok(paw.called >= 1 && paw.left === 0, `print() was CALLED in the print-all frame once BOTH artboard frames had loaded (left ${paw.left}) — the browser's print dialog follows; headless Chrome shows none`, paw);
-    else if (pactx) SKIP('print-all\'s print() call', 'the witness did not see the call inside the print-all frame (its sandbox, its frames and named pages are pinned above)');
-    else ok(false, 'the print-all frame was reachable as a target', { ctx: !!pactx });
+    const paf = printFault(paw);
+    ok(!paf && paw.left === 0, paf ? `print-all's print() call is judged: ${paf}` : `print() was CALLED in the print-all frame once BOTH artboard frames had loaded (left ${paw.left}) — the witness in place from the frame's start, the browser's own print() never reached; headless Chrome shows no print dialog`, { paw, ctx: !!pactx });
     // Chrome's own PDF of that document (a fresh tab, the print call muted): one page per artboard, at its size
     const pdfOf = async (html) => {
       const { targetId } = await call('Target.createTarget', { url: 'about:blank' });
