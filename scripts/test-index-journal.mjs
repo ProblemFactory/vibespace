@@ -346,16 +346,45 @@ const TPL_E = path.join(ROOT, 'tpl-e');
   try { await e0.store.close?.(); } catch { }
   try { e0.stop(); } catch { }
 }
+// THE FIND OF 2026-11-26 (lane bl-loop-a, 主开发 r4781; one gate's box zone: «written 0, owed false»): the red control read the
+// index's state ONCE, after the journal was durable — and at that moment the index's own whole write can be IN FLIGHT: taken by the
+// writer (no longer `dirty`, so not owed) and not landed (not yet written). Every clause of this leg is now read after a WAIT ON ITS
+// FACT — the index's own durable(), which waits for a whole write in flight (it rides `wholeOwed`, kept until the landing) — with a
+// NAMED EXPIRY (a harness line, never a silent read of whatever is there). STANDX: a stand-in writer thread (the real writeJob) that
+// HOLDS an index.json write while `stallix` exists in its folder and says so (`stallix.held`) — the find placed red at will.
+const STANDX = path.join(ROOT, 'standx.cjs');
+fs.writeFileSync(STANDX, `'use strict';
+const { parentPort, workerData } = require('worker_threads'); const fs = require('fs'); const path = require('path');
+const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
+const S = new Int32Array(workerData.sab);
+parentPort.on('message', (m) => {
+  if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
+  Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null, own = null; const was = m.ev === 'write' && fs.existsSync(m.file), dirOf = path.dirname(m.file);
+  if (m.ev === 'write' && /index\\.json$/.test(m.file) && fs.existsSync(path.join(dirOf, 'stallix'))) { fs.writeFileSync(path.join(dirOf, 'stallix.held'), '1'); const z = new Int32Array(new SharedArrayBuffer(4)), t1 = Date.now(); while (fs.existsSync(path.join(dirOf, 'stallix')) && Date.now() - t1 < 20000) Atomics.wait(z, 0, 0, 10); }
+  if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else { try { own = (writeJob(m, fs) || {}).own || null; } catch (e) { err = { code: e.code || null, message: e.message }; try { if (m.tmp) fs.unlinkSync(m.tmp); } catch { } } }
+  if (m.ev === 'write' && m.ownOnly && !own && !was) { try { const st = fs.statSync(m.file, { bigint: true }); own = { dev: st.dev, ino: st.ino }; } catch { } }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  Atomics.store(S, 2, err ? 2 : 1); Atomics.store(S, 1, S[1] + 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err, file: m.file, own });
+});
+`);
+/** a wait ON A FACT with a NAMED EXPIRY: `pred` asked every 10 ms; past `ms` the leg fails by this harness line */
+async function waitFact(pred, ms, what) { const t0 = Date.now(); while (!pred()) { if (Date.now() - t0 > ms) throw new Error(`HARNESS ⑩: ${what} — not within ${ms} ms`); await new Promise((z) => setTimeout(z, 10)); } }
+const within = (p, ms, what) => { let t = null; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`HARNESS ⑩: ${what} — not within ${ms} ms`)), ms); })]).finally(() => clearTimeout(t)); };
 const siteOf = (stack) => String(stack).split('\n').slice(1).map((x) => x.trim()).filter((x) => !/channel-store\.js|node:|test-index-journal/.test(x)).slice(0, 2).map((x) => { const m = /([\w.-]+\.c?js):(\d+):\d+\)?$/.exec(x); const fn = /^at ([\w.$<>]+) \(/.exec(x); return m ? `${fn ? fn[1] + ' ' : ''}${m[1]}:${m[2]}` : x.replace(/^at /, ''); }).join(' ← ');
-async function engineLeg(EM, tag, rounds = 3) {
+async function engineLeg(EM, tag, rounds = 3, { placed = false } = {}) {
   const D = path.join(ROOT, `e-${tag}`); fs.cpSync(TPL_E, D, { recursive: true });
   refusing(true);
+  const sw0 = SW.storeWriter, standW = placed ? SW.create({ log: quiet, workerPath: STANDX }) : null;   // the placed find: the store's writer on STANDX
+  if (standW) SW.storeWriter = () => standW;
   try {
   const clock = { t: TE }, e = mkEng(EM, D, clock), ix = e.store.index;
   const named = [];
   if (ix.flushStats().lastFull !== 'boot') named.push(`${ix.flushStats().lastFull} @ the engine's create (before the tap)`);   // a whole touch during create
   ix.onWholeTouch((why) => named.push(`${why} @ ${siteOf(new Error().stack) || '?'}`));
   const f0 = ix.flushStats(), j0 = f0.journaled || 0;
+  const held = path.join(D, 'channels', 'stallix');
+  if (placed) fs.writeFileSync(held, '1');   // the storm's whole write is held at its start, IN FLIGHT
   for (let i = 0; i < rounds; i++) {
     clock.t = TE + (i + 1) * 20 * 60e3;
     await ix.update(() => { const en = ix.entry(AE, `s-${i * 7}`, { create: false }); en.unread = (en.unread || 0) + 1; en.lastAt = clock.t; en.authors = [{ id: `p${i}`, name: `Person ${i}`, isSelf: false }, ...(en.authors || []).slice(0, 4)]; });   // the mail driver
@@ -363,29 +392,42 @@ async function engineLeg(EM, tag, rounds = 3) {
     for (let k = 0; k < 20; k++) await new Promise((z) => setImmediate(z));
     await e.idle(AE); await e.idle(AR);
   }
+  let once = null, waited = null;
+  if (placed) {   // THE RELEASE's READ, ONCE, at the moment the whole write is in flight (the stand-in says it holds it)
+    try { await waitFact(() => fs.existsSync(held + '.held'), 20e3, 'the stand-in thread holding the index\'s whole write'); } catch (err) { waited = String(err.message); }
+    once = { wholeWrites: ix.flushStats().writes - f0.writes, indexOwed: ix.journalStats().indexOwed };
+    try { fs.unlinkSync(held); } catch { }
+  }
   await ix.journalDurable();
+  // every clause below is read after the index's own write could land: its durable() waits for one in flight (wholeOwed)
+  try { await within(ix.durable(), 20e3, 'the index\'s own write landing (its durable())'); } catch (err) { waited = waited || String(err.message); }
   const f1 = ix.flushStats(), js = ix.journalStats();
   const rows = ix.rows(), refused = Object.keys(rows).filter((k) => k.startsWith(`${AR}/`) && rows[k].lane && rows[k].lane.lastError && rows[k].lane.lastError.code === 'forbidden' && rows[k].lane.lastError.at > TE).length;
   const walked = Object.keys(rows).filter((k) => k.startsWith(`${AE}/`) && rows[k].walkedAt > TE).length;   // the empty pages' storm (ingest)
   const sample = Object.keys(rows).find((k) => k.startsWith(`${AR}/`) && rows[k].lane && rows[k].lane.lastError);
   const back = sample ? ((familyMap(kill(D + '/channels', `e-${tag}`)) || {})[sample] || {}).lane : null;   // the kill: the last refusal read back
-  const r = { named, wholeWrites: f1.writes - f0.writes, indexOwed: js.indexOwed, journaled: (f1.journaled || 0) - j0, journalBytes: js.journalBytes, refused, walked, lastRefusalKept: !!(sample && back && back.lastError && back.lastError.at === rows[sample].lane.lastError.at) };
+  const r = { named, wholeWrites: f1.writes - f0.writes, indexOwed: js.indexOwed, journaled: (f1.journaled || 0) - j0, journalBytes: js.journalBytes, refused, walked, once, waited, lastRefusalKept: !!(sample && back && back.lastError && back.lastError.at === rows[sample].lane.lastError.at) };
   try { e.stop(); } catch { }
   try { await e.store.close?.(); } catch { }
   return r;
-  } finally { refusing(false); }   // the fake put back whatever the leg does
+  } finally { refusing(false); SW.storeWriter = sw0; if (standW) { try { standW.stop(); } catch { } } }   // the fake and the writer put back whatever the leg does
 }
 {
   const r = await engineLeg(ENG, 'census');
   console.log(`   ⑩ the storm: ${r.refused} rows refused (${AR}), ${r.walked} rows walked from an empty page (${AE}), ${r.journaled} rows journaled (${r.journalBytes} bytes), index.json written ${r.wholeWrites} times, owed ${r.indexOwed}; whole touches: ${r.named.length ? r.named.join(' | ') : 'none'}`);
   ok(r.named.length === 0, `⑩ THE STATIC CENSUS: under the mail driver and the engine's passes, no update scope reached the whole map${r.named.length ? ' — BY NAME: ' + r.named.join(' | ') : ''}`, r.named);
-  ok(r.refused >= 300 && r.journaled >= r.refused + r.walked && r.wholeWrites <= Math.floor(r.journalBytes / (8 * 1024 * 1024)) && !r.indexOwed && r.lastRefusalKept,
+  ok(r.waited === null && r.refused >= 300 && r.journaled >= r.refused + r.walked && r.wholeWrites <= Math.floor(r.journalBytes / (8 * 1024 * 1024)) && !r.indexOwed && r.lastRefusalKept,
     `⑩ LAW 4 — THE REFUSAL STORM: ${r.refused} rows refused and ${r.walked} walked from an empty page (each a change of the row) rode the journal (${r.journaled} rows journaled, ${r.journalBytes} bytes, under its 8 MB bound) — index.json written ${r.wholeWrites} times and not owed (${r.indexOwed}); the kill copy holds the last refusal (${r.lastRefusalKept})`, r);
   const from = '      en.lane = { ...(en.lane || {}), lastError: { code, at: now(), why: String((err && err.message) || err).slice(0, 200) } };   // the refusal is a real change of the row…';
   const line = ENGSRC.slice(0, ENGSRC.indexOf(from)).split('\n').length;
   const EM = M.load('src/server/channels-engine.js', anchored(ENGSRC, from, 'void store.index.live(); ' + from.trimStart(), 'a refusal\'s update scope reads live()'), 'refusal-reads-live');
+  // THE FIND, PLACED RED AT WILL: the same red copy, its whole write HELD in flight at the release's one read — written 0 and not owed:
+  // the release's control reads «nothing» there; read after the wait on its fact (the write released), the same storm is written
+  const placedRed = await engineLeg(EM, 'census-red-placed', 1, { placed: true });
+  ok(!!placedRed.once && placedRed.once.wholeWrites === 0 && placedRed.once.indexOwed === false && placedRed.waited === null && placedRed.wholeWrites > 0,
+    `⑩ THE FIND PLACED: the whole write held in flight at a read made ONCE — written ${placedRed.once && placedRed.once.wholeWrites}, owed ${placedRed.once && placedRed.once.indexOwed} (the release's control red at will); read after the wait on its fact: written ${placedRed.wholeWrites}`, { once: placedRed.once, waited: placedRed.waited, written: placedRed.wholeWrites });
   const red = await engineLeg(EM, 'census-red', 1);
-  ok(red.named.some((x) => x.startsWith('update read live() @ ') && /channels-engine/.test(x) && x.includes(`:${line}`)) && (red.wholeWrites > 0 || red.indexOwed),
+  ok(red.waited === null && red.named.some((x) => x.startsWith('update read live() @ ') && /channels-engine/.test(x) && x.includes(`:${line}`)) && (red.wholeWrites > 0 || red.indexOwed),
     `⑩ RED CONTROL: a refusal's update scope that reads live() — the census names it (${red.named.length} whole touches, the first: ${red.named[0] || 'none'}) and the storm owes index.json (written ${red.wholeWrites}, owed ${red.indexOwed}) — both legs above would go red`, { first: red.named.slice(0, 2), line, wholeWrites: red.wholeWrites, indexOwed: red.indexOwed });
 }
 
