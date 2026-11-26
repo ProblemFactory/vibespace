@@ -207,15 +207,18 @@ console.log('② the census: every principal pick is the picker; no <select> of 
   for (const f of files) { const h = judge(read(`src/lib/${f}`)); if (h.length) found[f] = h; }
   ok(!Object.keys(found).length, `no <select> built from a principal roster is left in src/lib (${files.length} files)`, J(found));
   let pre = null;
-  try { pre = execFileSync('git', ['show', 'HEAD~1:src/lib/channel-reach-editor.js'], { cwd: REPO, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { pre = null; }
+  // r5051 (d): HEAD~1 stopped holding the pre-picker editor long ago (the control was dead even on a full clone); the base is PINNED at
+  // 3f1a6cd9d — the reach editor's last commit before the picker (8d9f94b42, 2026-09-28): it still builds `whoSel = el('select'…)`
+  const PRE_PICKER = '3f1a6cd9d';
+  try { pre = execFileSync('git', ['show', `${PRE_PICKER}:src/lib/channel-reach-editor.js`], { cwd: REPO, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { pre = null; }
   const planted = "const whoSel = el('select', 'chan-opt-input');\nfor (const p of roster) { const op = el('option', '', p.name); whoSel.appendChild(op); }\n";
   ok(judge(planted).length === 1, 'CONTROL: a planted `<select>` filled from `roster` IS flagged by the same judge');
   // lane-pairing ⑥: a <select> planted into the exit dialog (its rows are the picker's shape) is red
   const exitSrc = read('src/lib/exit-access-dialog.js');
   const plantedExit = exitSrc.replace("const pickerWrap = el('div', 'exit-access-picker');", "const pickerWrap = el('div', 'exit-access-picker');\n      const whoSel = el('select', 'exit-who');\n      for (const r of roster()) { const op = el('option', '', r.name); whoSel.appendChild(op); }");
   ok(plantedExit !== exitSrc && judge(plantedExit).length === 1 && judge(exitSrc).length === 0, 'CONTROL: a `<select>` planted into exit-access-dialog.js (filled from its roster) is flagged; the real dialog is clean');
-  if (pre && /whoSel = el\('select'/.test(pre)) ok(judge(pre).length >= 1, 'CONTROL: the pre-picker reach editor (git HEAD~1) is flagged — the census has teeth on the real shape');
-  else console.log('  SKIP CONTROL: the pre-picker reach editor is not reachable at HEAD~1 here (a depth-1 clone) — the planted control stands alone');
+  if (pre) ok(/whoSel = el\('select'/.test(pre) && judge(pre).length >= 1, `CONTROL: the pre-picker reach editor (git ${PRE_PICKER}) is flagged — the census has teeth on the real shape`);
+  else console.log(`  SKIP CONTROL: the pre-picker reach editor (${PRE_PICKER}) is not in this checkout (a depth-1 clone) — the planted control stands alone`);
 }
 
 // ═══ ③ patched-copy controls ═══

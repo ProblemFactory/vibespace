@@ -3026,11 +3026,12 @@ if (ok(typeof LF?.fillVaultElement === 'function', 'r22 browser-login-fill.js ex
             );
             BL390 = require(bl390Path);
             LM390 = require(lm390Path);
-          } catch {
+          } catch (e) {
             BL390 = null;
             LM390 = null;
+            console.log(`  ⊘ SKIP: the real .390 modules (05082bbd0) are not in this checkout — the hand-written .390 shape stands in (${String((e && e.message) || e).split('\n')[0].slice(0, 120)}) (r5051 (b))`);
           }
-        }
+        } else console.log('  ⊘ SKIP: the real .390 modules are not read (VS_TEST_NO_GIT_390=1) — the hand-written .390 shape stands in (r5051 (b))');
         const oracle390Label = (BL390 && LM390) ? '真实 .390 模块' : '手写形态（git 对象不在）';
 
         const populateMasterVault = async (vaultDir) => {

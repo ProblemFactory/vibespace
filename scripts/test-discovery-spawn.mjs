@@ -296,7 +296,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
   const git = spawnSync('git', ['show', `${PRE_FIX_REF}:src/session-store.js`],
     { cwd: REPO, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: gitEnvFrom(process.env) });
   if (git.status !== 0 || !git.stdout) {
-    ok(true, `NEGATIVE CONTROL SKIPPED — \`git show ${PRE_FIX_REF}:src/session-store.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
+    console.log(`  ⊘ SKIP: NEGATIVE CONTROL — \`git show ${PRE_FIX_REF}:src/session-store.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
   } else {
     controlsRan++;
     const pre = git.stdout;
@@ -495,7 +495,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     const git = spawnSync('git', ['show', `${PRE_FIX_REF}:server.js`],
       { cwd: REPO, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: gitEnvFrom(process.env) });
     if (git.status !== 0 || !git.stdout) {
-      ok(true, `NEGATIVE CONTROL SKIPPED — \`git show ${PRE_FIX_REF}:server.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
+      console.log(`  ⊘ SKIP: NEGATIVE CONTROL — \`git show ${PRE_FIX_REF}:server.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
     } else {
     controlsRan++;
       const preSrc = sliceFn(git.stdout, 'refreshWebuiPids');
@@ -635,7 +635,7 @@ const hasTmux = !!require(path.join(REPO, 'src/session-store.js')).tmuxOnPath();
     const git = spawnSync('git', ['show', `${PRE_FIX_REF}:src/ws-handler.js`],
       { cwd: REPO, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, env: gitEnvFrom(process.env) });
     if (git.status !== 0 || !git.stdout) {
-      ok(true, `NEGATIVE CONTROL SKIPPED — \`git show ${PRE_FIX_REF}:src/ws-handler.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
+      console.log(`  ⊘ SKIP: NEGATIVE CONTROL — \`git show ${PRE_FIX_REF}:src/ws-handler.js\` is unavailable here: ${(git.stderr || git.error?.message || 'no output').trim().slice(0, 160)}`);
     } else {
     controlsRan++;
       const preSrc = sliceKillBody(git.stdout);
