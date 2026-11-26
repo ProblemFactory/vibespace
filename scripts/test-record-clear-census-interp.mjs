@@ -760,6 +760,12 @@ const I_RECV = {
   'src/server/otel-ingest.js|t': ['words', 'the stash\'s trim plan: its `what` is made from counts only (`kept the newest N known lines inside 30 days and M unknown-org ones`)'],
   'src/server/spawn-priority.js|machine': ['host', 'a paired machine\'s record: the owner\'s name for the device (control bytes stripped, 64 characters)'],
   'src/usage-routes.js|acctMeta': ['account', 'the account\'s decision row (decisionRowOf): its sign-in facts\' reason code in the panel\'s why'],
+  // B-ef83 lines 987 / 1041 (主开发 r4840, the second hosted proof of 2.369.420): the owed compaction's road in the dispatch — each
+  // receiver read for what it HOLDS; none can hold a message's, a peer's or an item's words, so each is a row with that reason
+  'src/server/worker-dispatch.js|o': ['session', 'an owed compaction\'s record (memory only): the one field a sink reads is `from`, the dispatching SENDER\'s conversation id (the dispatch route\'s own caller, a cid of ours), cut to 8 characters in its journal lines; the brief itself (`o.rec`, a group message) goes only to the groups engine\'s wake, never to a sink here. ONLY `from`: any other field of this record read at a sink (its name, the brief it carries) asks this row judged again (主开发 r4859)'],
+  'src/server/worker-dispatch.js|pace': ['words', 'the wake pace\'s verdict (the groups engine\'s pacerFor → src/channel-groups.js paceVerdict): its `rule` / `reason` are the pace\'s own sentences (a rate floor, a wait in seconds) or `store-blocked` naming a file of ours — never a message\'s words'],
+  'src/server/worker-dispatch.js|v': ['words', 'a spend verdict on its NON-held branch (a held one is owed and returns above it): the authorizer\'s own detail (a cap sentence with counts, an account\'s name, a file of ours with its error code) or its own exception\'s message — never a message\'s or an item\'s words'],
+  'src/server/worker-dispatch.js|woke': ['words', 'the groups engine\'s wake answer (wake → the delivery ladder, src/server/conversation-deliver.js): a reason of ours (a code, the pace\'s or the spend gate\'s sentence, the inbox socket\'s timeout or write failure) or an Error\'s message, and an Error carries no record\'s words by this census\'s own error rule — never a message\'s or an item\'s words'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {
