@@ -88,7 +88,11 @@ const STALE = 400, POLL = 60, BOUND = 3 * (STALE + POLL);
 // 180 suites side by side W3's untouched ticket passed W1's old 4 s and W1 reaped it as a frozen head, the queue's own rule): W3 is
 // stopped across W2's release (≤ BOUND), W1's rejoin (≤ BOUND) and the free-try sleep (SLEEP_W). W1's staleness is DERIVED from that
 // sum — a stated multiple, so an edit of a bound moves it too — never a bare number.
-const SLEEP_W = 300, PAUSE_MAX = 2 * BOUND + SLEEP_W, W1_STALE = 4 * PAUSE_MAX;
+// …and W3's OWN staleness is derived the same way (主开发 r5094, the r3209 retally's unit B — 3 UTC reds at the current file, «H,W2,W1,W3»):
+// at the scene's STALE (400 ms) its own pause (≥ SLEEP_W + W2's release + W1's rejoin; 404 ms in the reds) passed its own life, and a W3
+// frozen between its ticket's touch and its queue read woke to read ITS OWN ticket stale, reap it and go back in line behind W1 — the
+// queue's own rule (a frozen head loses its turn), applied to the scene's live head. W2 keeps STALE: it must reap the frozen W1
+const SLEEP_W = 300, PAUSE_MAX = 2 * BOUND + SLEEP_W, W1_STALE = 4 * PAUSE_MAX, W3_STALE = 4 * PAUSE_MAX;
 async function frozenHead(ciUrl) {
   const d = scratch('frozen'), lock = path.join(d, 'lock'), log = path.join(d, 'log');
   const rel = (n) => path.join(d, 'rel' + n), o = { poll: POLL, headPoll: POLL, staleMs: STALE };
@@ -96,7 +100,7 @@ async function frozenHead(ciUrl) {
   await until(() => has(log, 'H', 'got'));
   const W1 = waiter(ciUrl, lock, 'W1', log, { ...o, hold: '-', staleMs: W1_STALE }); await until(() => has(log, 'W1', 'wait'));   // (W1 judges W3's pause as life: W1_STALE, derived above)
   const W2 = waiter(ciUrl, lock, 'W2', log, { ...o, hold: rel('W2') }); await until(() => has(log, 'W2', 'wait'));
-  const W3 = waiter(ciUrl, lock, 'W3', log, { ...o, hold: rel('W3') }); await until(() => has(log, 'W3', 'wait'));
+  const W3 = waiter(ciUrl, lock, 'W3', log, { ...o, hold: rel('W3'), staleMs: W3_STALE }); await until(() => has(log, 'W3', 'wait'));   // (W3's own pause is life: W3_STALE, derived above)
   const t1 = tickets(lock).find((n) => n.endsWith('-' + W1.pid));
   const r = { pidsRise: W1.pid < W2.pid && W2.pid < W3.pid };
   process.kill(W1.pid, 'SIGSTOP');
@@ -112,6 +116,10 @@ async function frozenHead(ciUrl) {
     r.noFreeTry = !has(log, 'W1', 'got') && !fs.existsSync(lock);
     // the tickets W1 judged, each with its age (its mtime is its last poll) — printed by the leg
     r.judged = tickets(lock).map((n) => { let age = '?'; try { age = Date.now() - fs.statSync(path.join(ticketDirOf(lock), n)).mtimeMs; } catch { } const who = n.endsWith('-' + W1.pid) ? 'W1' : n.endsWith('-' + W3.pid) ? 'W3' : '?'; return `${who} ${n} age ${typeof age === 'number' ? Math.round(age) + ' ms' : age}`; });
+    // THE PLACEMENT (r5094): W3 judged by the queue's OWN function at a wake PAST the old staleness (a placed clock — `now`, the function's
+    // own parameter — never a sleep), without reaping: at STALE its own ticket is dropped (the reds' road), at W3_STALE it lives
+    const wakeAt = Math.max(Date.now(), stopAt + STALE + POLL), w3In = (staleMs) => machineQueue(lock, { reap: false, staleMs, now: wakeAt }).some((t) => t.name.endsWith('-' + W3.pid));
+    r.placedOld = w3In(STALE); r.placedNew = w3In(W3_STALE); r.placedAt = wakeAt - stopAt;
     process.kill(W3.pid, 'SIGCONT'); r.paused = Date.now() - stopAt; await until(() => has(log, 'W3', 'got'), BOUND);
     fs.writeFileSync(rel('W3'), 'go'); await until(() => has(log, 'W1', 'got'), BOUND);
     r.order = gotOrder(log).join(',');
@@ -180,7 +188,8 @@ console.log('§2 reaping');
   // THE BOX'S HOLD IS SAID BY NAME (r234): a pause past the scene's own bound is the box, never «a wrong order»
   if (r.paused > W1_STALE) ok(false, `…the box held W3 for ${r.paused} ms, past the scene's own bound (W1's staleness ${W1_STALE} ms = 4 × the scene's longest pause ${PAUSE_MAX} ms) — the order (${r.order}) is not judged; tickets judged: ${(r.judged || []).join(' · ')}`);
   else ok(r.pidsRise && r.rejoined && r.noFreeTry && r.order === 'H,W2,W3,W1' && r.once, `…woken while the lock is FREE and W3 (older ticket, alive) is ahead, it takes NOTHING and rejoins at the BACK: served H, W2, W3, W1 (${r.order}) — by ticket time, not by pid (W1's is the lowest), never a free try, ONCE · W3 paused ${r.paused} ms (W1's staleness ${W1_STALE} ms, derived: 4 × ${PAUSE_MAX}) · tickets judged: ${(r.judged || []).join(' · ')}`);
-  ok(r.freeSaid, '…and a waiter behind the frozen head says the lock is FREE and it waits for the waiter ahead — never «a holder whose record cannot be read»'); }
+  ok(r.freeSaid, '…and a waiter behind the frozen head says the lock is FREE and it waits for the waiter ahead — never «a holder whose record cannot be read»');
+  if (r.served) ok(r.placedOld === false && (r.placedAt > W3_STALE || r.placedNew === true), `PLACED (r5094): W3 judged by the queue's own function ${r.placedAt} ms after it was stopped — at the scene's old STALE (${STALE} ms) its own ticket is DEAD (the reds' «H,W2,W1,W3»: a W3 frozen between its touch and its queue read goes back in line), at its derived ${W3_STALE} ms it lives (in the queue at the old: ${r.placedOld}; at the derived: ${r.placedNew})`); }
 { const d = scratch('future'), lock = path.join(d, 'lock'), log = path.join(d, 'log');
   const holder = spawn('sleep', ['30'], { stdio: 'ignore' }); kids.push(holder);
   fs.mkdirSync(ticketDirOf(lock));
