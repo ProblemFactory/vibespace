@@ -989,6 +989,14 @@ WD.section('⑫');
     answer = (cmd, args, o) => (cmd === nodeName ? { unknown: true } : prev11(cmd, args, o));
     const r11 = await hold(KEEPS);
     ok(r11.detail.includes(NONE) && !r11.detail.includes(UNREAD), `RED: a copy whose catch keeps the empty table — the item tells the person «${NONE}» for a table nobody read`, r11.detail);
+    // the EPISODE's road (the canary's second strike opens it — open()): its item says the same; RED a copy whose open() keeps the empty table
+    const episode = async (mod) => { const items = []; const todos = { add: (key, o) => { items.push(o); return { id: 'e' + items.length }; }, get: () => null, setStatus: () => { } };
+      const w = mod.create({ file: mp + '/package.json', mountpoint: mp, getUserTodos: () => todos, ownerIds: async () => ({}), log: { warn: () => { } }, mountinfo: () => '' });
+      w.onProbe({ strike: true, at: 1000, ms: 5000 }); w.onProbe({ strike: true, at: 2000, ms: 5000 }); await w.settled(); return items.length ? String(items[0].detail) : ''; };
+    const e11 = await episode(MHW);
+    const KEEPS_E = require(M.write('src/server/mount-health-watch.js', anchored(MHW_SRC, "catch (e) { suspects = null; log.warn?.(", "catch (e) { log.warn?.(", 'mh-episode-unread-as-none'), 'mh-episode-unread-as-none'));
+    const e11r = await episode(KEEPS_E);
+    ok(e11.includes(UNREAD) && !e11.includes(NONE) && e11r.includes(NONE) && !e11r.includes(UNREAD), `the EPISODE's item (two strikes open it) says «${UNREAD}» for a table not read — RED a copy whose open() keeps the empty table says «${NONE}»`, { e11, e11r });
     answer = (cmd, args, o) => (cmd === nodeName ? { started: true, code: 0, stdout: JSON.stringify(table) } : prev11(cmd, args, o));
     const OLD11 = require(M.write('src/server/mount-health-watch.js', anchored(MHW_SRC,
       "  return Promise.resolve().then(() => require('./child-starter').childStarter().run(process.execPath, [__filename, '--suspects', mountpoint], { timeoutMs: SCAN_TIMEOUT_MS, maxBuffer: SCAN_MAX_BUFFER, capture: true, envAdd: {} })).then((r) => {",
