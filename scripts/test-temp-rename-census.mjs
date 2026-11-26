@@ -3,9 +3,11 @@
 // FAST, PURE (acorn over the tracked src/ files and server.js that name a rename). THE LAW: A STORE'S NEW BYTES ARE ON DISK
 // BEFORE ITS NAME POINTS AT THEM. WHAT IT READS: every MEMBER call `X.rename(` / `X.renameSync(` of tracked src/ and server.js
 // on a file-system object (FS_OBJ), and every call through a BARE name `rename(` / `renameSync(` (red as unknown unless judged
-// by file). WHAT IT DOES NOT JUDGE, by name — two REGIONS, COUNTED BY FILE (a new one is red by name), judged in row B-bcb8:
-// (1) a `mv` inside a command string a child runs (src/: an install step, a device's state over ssh); (2) every rename under
-// data/bin (the wrappers' sidecar, buffer, pid and exit files the hub reads; the CLIs' own files).
+// by file). THE TWO REGIONS, JUDGED (row B-bcb8's first unit, lane bl-scratch, 主开发 r5170; counted by file before it):
+// (1) every rename under data/bin (the wrappers' records the hub reads, the tools' own files) is a ROW like src/'s, its class READ
+// the same way (BIN_ROWS); (2) a `mv` inside a command string a child runs (src/: an install step, a device's state over ssh, a
+// person's copy on another machine) is a ROW by its scope and its own words (SHELL_ROWS), its SYNC READ by text position (a `sync`
+// before it in its command) and the rest of its class judged by reading. Their owed sites are REGION_OWED_MAX, beside OWED_MAX.
 // Every judged rename is a ROW: its file, its CLASS (read here), its FAMILY (judged), one scope per site —
 //   synced    a file written, SYNCED, then renamed over its name (a sync before the rename in the same scope)
 //   unsynced  a file written in its scope, then renamed with no sync between
@@ -135,21 +137,24 @@ const FAMILIES = {
   'not-production': { verdict: 'named', classes: ['unsynced'], why: 'a road the hub never takes (B-574d unit 1, 主开发 r3455 line 3): a suite\'s stand-in, or a fallback for a caller that hands no live store; the production road is named in the row' },
   aside: { verdict: 'named', classes: ['unsynced', 'move'], why: 'a file SET ASIDE, not new bytes put in place (a stale lock moved out of the way)' },
   move: { verdict: 'named', classes: ['move'], why: 'no bytes written before it in its scope: an existing file or folder moved (a rotation, an aside of a damaged copy, a folder swap, a symlink swap) — its bytes were written and closed long before' },
+  sample: { verdict: 'named', classes: ['unsynced'], why: 'a READING of a live run, written again every 2 s while the job is over half its memory bound (data/bin/job-wrapper.js pressure.json; B-bcb8\'s first unit): read only to judge how a run that left no exit record ended (src/jobs.js _ctlJson reads a torn one as none) — after a power loss no sample is the environment\'s end, which the run\'s end then is' },
+  region: { verdict: 'owed', row: 'B-bcb8', classes: ['unsynced'], why: 'a file written by a command string the hub hands a child, or by a tool under data/bin, through its own temp + rename with no sync (judged in B-bcb8\'s first unit): after a power loss its name can point at an empty file, and each row says what that costs. Unit C of the row: the person\'s copies on another machine and the design file there (the command\'s own copy; the «person» family\'s cross-machine copy is the hub\'s local road), agy\'s conversation modes and the link beside its pictures' },
 };
 
 /** The census's verdict over its sites: rows matched by (file, class, scope), one scope per site. */
-export function judge(sites, rows, families = FAMILIES) {
+export function judge(sites, rows, families = FAMILIES, { stated = false } = {}) {   // stated: the class is the ROW's (a «mv» in a command string), its sync read
   const left = rows.map((r) => { const m = new Map(); for (const sc of r.slice(4)) m.set(sc, (m.get(sc) || 0) + 1); return m; });
   const noRow = [], extra = [], badFamily = [];
   let owed = 0;
   for (const s of sites) {
-    const cands = rows.map((r, i) => i).filter((i) => rows[i][0] === s.file && rows[i][1] === s.cls && left[i].has(s.scope));
+    const cands = rows.map((r, i) => i).filter((i) => rows[i][0] === s.file && (stated ? rows[i][1] === 'move' || (rows[i][1] === 'synced') === !!s.synced : rows[i][1] === s.cls) && left[i].has(s.scope));
     if (!cands.length) { noRow.push(s); continue; }
     const i = cands.find((k) => left[k].get(s.scope) > 0);
     if (i === undefined) { extra.push(s); continue; }
     left[i].set(s.scope, left[i].get(s.scope) - 1);
     const fam = families[rows[i][2]];
-    if (!fam || !fam.classes.includes(s.cls)) badFamily.push({ ...s, family: rows[i][2] });
+    const cls = stated ? rows[i][1] : s.cls;
+    if (!fam || !fam.classes.includes(cls)) badFamily.push({ ...s, cls, family: rows[i][2] });
     else if (fam.verdict === 'owed') owed++;
   }
   const gone = []; rows.forEach((r, i) => { for (const [sc, n] of left[i]) if (n > 0) gone.push({ file: r[0], cls: r[1], family: r[2], scope: sc, missing: n }); });
@@ -329,6 +334,68 @@ const OWED_MAX = 79;   // B-574d slice «journals-and-diagnostics» (lane nl-jou
 const OWED_BASELINE = 150;   // kept at the census's acceptance (round wl2wglpsq's cure: 148 + the Gmail copy + the outbox folder)
 const RISES = [];            // [n, row, why] — a named rise of the owed count (none)
 
+// ── THE TWO REGIONS, JUDGED (row B-bcb8's first unit, lane bl-scratch, 主开发 r5170; counted by file since round wl2wglpsq) ──────
+// (1) data/bin — every member rename on a file-system object of its tracked JavaScript tools (a bare call or an unknown object:
+// red by name): [file, class READ, family, note, ...one scope per site], judged as src/'s rows are
+const BIN_ROWS = [
+  ["data/bin/acp-wrapper.js", "synced", "self-synced", "the helper's one-line fallback (the same bytes as src/fd-close.js renameSynced, one spelling: test-fd-close-census ⑥), taken only when the helper cannot be loaded: synced, a failed sync a failed write", "<module>"],
+  ["data/bin/acp-wrapper.js", "move", "move", "the wrapper's log, rotated at 5 MB (appended, never written whole)", "log"],
+  ["data/bin/agy-wrapper.js", "synced", "self-synced", "the helper's one-line fallback (the same bytes as src/fd-close.js renameSynced, one spelling: test-fd-close-census ⑥), taken only when the helper cannot be loaded: synced, a failed sync a failed write", "<module>"],
+  ["data/bin/agy-wrapper.js", "synced", "self-synced", "the account's settings.json with an allow rule added (B-bcb8 unit A): synced, a failed sync a failed write, the file as it was", "addAllowRule"],
+  ["data/bin/agy-wrapper.js", "move", "move", "the wrapper's log, rotated at 5 MB (appended, never written whole)", "log"],
+  ["data/bin/agy-wrapper.js", "unsynced", "region", "UNIT C: the mode the person chose for the conversation (an empty one starts it again in the default mode), and the link beside its pictures that says whose they are", "recordConversationMode", "savePicture"],
+  ["data/bin/chat-wrapper.js", "synced", "self-synced", "the helper's one-line fallback (the same bytes as src/fd-close.js renameSynced, one spelling: test-fd-close-census ⑥), taken only when the helper cannot be loaded: synced, a failed sync a failed write", "<module>"],
+  ["data/bin/chat-wrapper.js", "move", "move", "the wrapper's log, rotated at 5 MB (appended, never written whole)", "log"],
+  ["data/bin/codex-chat-wrapper.js", "synced", "self-synced", "the helper's one-line fallback (the same bytes as src/fd-close.js renameSynced, one spelling: test-fd-close-census ⑥), taken only when the helper cannot be loaded: synced, a failed sync a failed write", "<module>"],
+  ["data/bin/codex-chat-wrapper.js", "move", "move", "the wrapper's log, rotated at 5 MB (appended, never written whole)", "log"],
+  ["data/bin/job-wrapper.js", "synced", "self-synced", "the helper's one-line fallback (the same bytes as src/fd-close.js renameSynced, one spelling: test-fd-close-census ⑥), taken only when the helper cannot be loaded: synced, a failed sync a failed write", "<module>"],
+  ["data/bin/job-wrapper.js", "move", "move", "the job's log, rotated at its cap (one generation kept, its descriptor closed first)", "writeLog"],
+  ["data/bin/job-wrapper.js", "unsynced", "sample", "pressure.json: the job's memory pressure, written again every sample while it is over half its bound", "startSampler"],
+  ["data/bin/pty-wrapper.js", "move", "move", "the wrapper's log, rotated at 5 MB (appended, never written whole)", "log"],
+  ["data/bin/vibespace-browser", "unsynced", "derived", "the sanctioned browser configuration, named by the digest of its bytes, written again whenever the file under that name differs", "composeConfig"],
+  ["data/bin/vibespace-channels", "unsynced", "region", "an attachment fetched (its declared size checked) into the attachment cache, or with --out to a path the agent names: that one is the person's file, empty after a power loss", "<module>"],
+  ["data/bin/vibespace-claude-subscription-login.mjs", "synced", "self-synced", "the isolated OAuth credential file of a subscription login: synced, a failed write said by name (credential-write), its temp removed", "atomicWritePrivate"],
+  ["data/bin/vibespace-design", "unsynced", "region", "a file of the person's design folder the design tool writes (design.json, a page): empty after a power loss", "writeInside"],
+  ["data/bin/vibespace-hook-register.mjs", "synced", "self-synced", "a CLI's own settings file with VibeSpace's hooks (B-ddf3): synced, a failed sync a failed write said by name", "commitWrite", "commitCreate"],
+  ["data/bin/vibespace-opencode-op", "unsynced", "region", "the record of the OpenCode serve on a machine (~/.vibespace/opencode-serve.json): an empty one refuses the next start or stop, its words naming the way out (r3675)", "writeRecord"],
+  ["data/bin/vibespace-usage", "unsynced", "store", "the account's usage reading (data/usage-cache/<key>.json, its windows with what it carries forward: other producers' limits, spend, the tombstones): the same file src/usage-cache-write.js writes, rowed «store» — a torn one is held unread by the hub, the account's automatic turns wait and the person is told; one cure with its twin (on a paired machine the same tool writes that machine's own cache)", "writeUsage"],
+  ["data/bin/vibespace-usage", "unsynced", "region", "the statusline's slot state, the lag-shadow guard's memory of the account a conversation's slot pointed at: a torn one skips the guard once, and a reading of the slot before can be filed on the account it points at now", "writeSlotState"],
+  ["data/bin/vibespace-usage", "unsynced", "derived", "the model ids the statusline has seen (at most 50, for the model menu): a torn list starts again, each id learned again when it is used", "learnModel"],
+  ["data/bin/vibespace-usage-scan", "unsynced", "derived", "the usage scan's cursor on a machine, written after its events are flushed: a torn one reads as none, and the next harvest sends from the start again, which the hub's dedup by event id absorbs", "<module>"],
+];
+// (2) shell — every `mv` a src/ file hands a child: [file, class, family, note, ...one «scope | its words» per site] (its words:
+// the command from the `mv` on — a template's ${…} as written, a program's argv by its source — white space folded, its first
+// MV_WORDS characters). ITS SYNC IS READ BY TEXT POSITION, as src/'s classifier reads a sync call: a `sync` command word anywhere
+// BEFORE it in its command — its own string, the pieces before it in a + chain, the ONE step before it in an array of steps (a
+// module const by its text), the command a template named by a const is interpolated into — reads «synced». A «synced» row takes
+// only a synced site, an «unsynced» row only an unsynced one, a «move» row either (no bytes are written before a move). So a sync
+// put in front of an unchanged `mv` — one sync for several too — is red on ITS row, and so is a sync taken away. ITS LIMITS, said:
+// the word is not tied to the file (a sync of another file, or the word in an echo, reads too); a sync in a helper the command
+// calls, or two steps before it in an array, is not seen; a sync put in front of the first of several unsynced `mv` reads for the
+// later ones too — red on their rows, never silent: their curing unit judges them
+const SHELL_ROWS = [
+  ["src/app-manifest.js", "unsynced", "region", "the app system's own records, written by root with no sync — the package list at a run's end (empty, the Desktop apps dialog names every package as installed outside VibeSpace), the base's dpkg status, an app's entries (.list, .desktop, .pin: what it brought) — and a .deb apt fetched in the same command renamed to its canonical name (torn, its stanza takes the torn bytes' digest and the local repository serves a broken package)", "<module> | mv -f \"$V/last-dpkg.list.tmp\" \"${LAST_LI", "<module> | mv -f \"$R/base/status.tmp\" \"$R/base/stat", "<module> | mv -f \"$R/entries/$ID.list.tmp\" \"$R/entr", "<module> | mv -f \"$R/entries/$ID.desktop.tmp\" \"$R/e", "<module> | mv -f \"$R/entries/$ID.pin.tmp\" \"$R/entri", "<module> | mv -f \"$f\" \"$D/$n\"; f=$D/$n; fi"],
+  ["src/app-manifest.js", "unsynced", "derived", "the local repository's index: a .deb's stanza (made again when it is empty or older than its .deb) and Packages (made again at every index)", "<module> | mv -f \"$s.tmp\" \"$s\"", "<module> | mv -f \"$D/Packages.tmp\" \"$D/Packages\""],
+  ["src/app-system.js", "unsynced", "region", "a new root filesystem moved into place (create's rootfs.new, unpacked by tar or debootstrap; a rebase's rootfs.next with the apps installed again): its sources and its identity file are synced (put()), its tree is not — sysok reads only the identity, so a torn system is used as it is until the person's rebase or rollback", "<module> | mv \"$S/rootfs.new\" \"$R\"", "<module> | mv \"$NX\" \"$R\"; say rebased \"$bad\"; say o"],
+  ["src/app-system.js", "synced", "self-synced", "put(), the helper and the sudoers file: each installed beside its name, synced (sync --), then moved; a failed sync refuses and removes the temp", "<module> | mv -fT \"./.$3.vs\" \"./$3\" ) || { r=$?; [ ", "<module> | mv -f \"$H.new\" \"$H\" || { rm -f \"$H.new\";", "<module> | mv -f \"$SD.new\" \"$SD\" || { rm -f \"$SD.ne"],
+  ["src/app-system.js", "move", "move", "a whole app system swapped as a folder (a rebase's old one set aside, the rollback's three moves), and the rollback's words shown to the person", "<module> | mv \"$R\" \"$P\"; mv \"$NX\" \"$R\"; say rebased", "<module> | mv \"$R\" \"$S/rootfs.swap\"; fi", "<module> | mv \"$P\" \"$R\"; if [ -e \"$S/rootfs.swap\" ]", "<module> | mv \"$S/rootfs.swap\" \"$P\"; fi", "sysCommands | mv ~/.vibespace/sysroot/rootfs ~/.vibesp"],
+  ["src/desktop-apps.js", "synced", "self-synced", "the xpra repository key: fetched, checked against its pin, synced by the step before it (XPRA_KEY_SYNC, B-bcb8 unit A), then moved; a failed sync exits 3 and nothing changes", "xpraRepoSteps | mv -f /usr/share/keyrings/xpra.asc.new /"],
+  ["src/hosts.js", "unsynced", "region", "the device agent's install over ssh, the hub's own script: its token and its agentd.js unpacked by tar and moved into place with no sync — a torn one can leave the machine unable to dial (its cure is in this text, not a device release)", "installAgentdScript | mv -f \"$S/token\" \"$D/state/token\" && chm", "installAgentdScript | mv -f \"$S/agentd.js\" \"$D/$V/agentd.js\" &", "installAgentdScript | mv -f \"$S/agentd.js\" \"$D/$V/agentd.js\" &"],
+  ["src/hosts.js", "move", "move", "a subscription's folder renamed on a machine (its files written before)", "HostManager.renameHostSubDir | mv \"$HOME/.vibespace/subs/${fromAcct}\" \""],
+  ["src/install-slot.js", "unsynced", "region", "the install runner's exit and pid records, read by its next start, by desktop-display's installState (an empty one reads as none) and by a follow WITHOUT the lock: an empty exit record makes the follow answer 2 (exit \"\"), an install reported failed instead of unrecorded", "<module> | mv -f \"$X.tmp\" \"$X\"; [ -z \"$w\" ] || rm -", "<module> | mv -f \"$P.tmp\" \"$P\"; w=1"],
+  ["src/mounts.js", "unsynced", "region", "the rclone binary copied to a local cache under a NEW name and used whenever that name exists: a torn copy is never made again (the prune runs only after a new copy lands), and every mount of the person's fails until the file is removed or rclone changes", "MountManager._fastBin | mv \"${tmp}\" \"${cached}\""],
+  ["src/mounts.js", "move", "move", "a mount point's folder moved aside (by mv, then by sudo mv)", "MountManager._ensureMountpointDir | mv mp dest", "MountManager._ensureMountpointDir | mv mp dest"],
+  ["src/remote-fs.js", "move", "move", "a person's file renamed or moved on another machine (mv -n: no bytes written)", "RemoteFs.rename | mv -n ${shqp(from)} ${shqp(to)}", "RemoteFs.move | mv -n ${shqp(from)} ${shqp(to)}"],
+  ["src/routes/files.js", "unsynced", "region", "UNIT C (it meets lane bl-vault's unit 3): a person's file copied to another machine, unpacked by tar or written by cat, then moved into place with no sync on that machine", "crossHostTransfer | mv ${shq(destParent + '/' + base)} ${shq", "crossHostTransfer | mv ${shq(stage + '/' + base)} ${shq(dest", "crossHostTransfer | mv -f ${shq(part)} ${shq(destPath)}; } |"],
+  ["src/server/design-engine.js", "unsynced", "region", "UNIT C: a person's design file written on another machine (base64 into a temp, then mv), no sync there", "remoteUserWriteScript | mv -f -- \"$t\" ${M.USER_FILE}; then print"],
+  ["src/spawn/ssh.js", "unsynced", "derived", "the editor's command-line tool moved out of the tool bundle just unpacked (the bundle is shipped again at every remote start)", "sshLadder > remoteAgentSetup | mv -f \"$HOME/.vibespace/bin/code\" \"$HOME"],
+];
+// THE REGIONS' OWED SITES: an EQUALITY like OWED_MAX and kept beside it (a src/ cure lowers OWED_MAX, a region's cure this one);
+// a rise above the kept baseline is red by name unless REGION_RISES names it with its row
+const REGION_OWED_MAX = 25;
+const REGION_OWED_BASELINE = 25;   // kept at the regions' judging (B-bcb8's first unit)
+const REGION_RISES = [];           // [n, row, why] — a named rise of the regions' owed count (none)
+
 const AC = require(path.join(REPO, 'node_modules/acorn'));
 const NAMES = /\brename(?:Sync)?\s*\(/;
 const sitesOfTree = (repo) => {
@@ -357,9 +424,9 @@ for (const g of J.gone) console.error(`  ✗ GONE (drop it from its row; a cure 
 for (const s of J.badFamily) console.error(`  ✗ ITS FAMILY «${s.family}» DOES NOT ADMIT ${s.cls}: ${say(s)}`);
 ok(J.noRow.length === 0 && J.extra.length === 0 && J.gone.length === 0, `every rename site has its row, and every row its sites (${J.noRow.length} new, ${J.extra.length} more, ${J.gone.length} gone)`);
 ok(J.badFamily.length === 0, 'every site\'s class is one its family admits (the writer\'s and a self-synced family\'s: synced only)');
-ok(ROWS.every((r) => !!FAMILIES[r[2]]) && Object.values(FAMILIES).every((f) => ['through the writer', 'named', 'cured', 'owed'].includes(f.verdict) && ((f.verdict !== 'owed' && f.verdict !== 'cured') || /^B-[0-9a-f]{4}$/.test(f.row))), 'every row names a family, and every family goes through the writer, is named, or is a cure (owed or done elsewhere) WITH its row');
+ok([...ROWS, ...BIN_ROWS, ...SHELL_ROWS].every((r) => !!FAMILIES[r[2]]) && Object.values(FAMILIES).every((f) => ['through the writer', 'named', 'cured', 'owed'].includes(f.verdict) && ((f.verdict !== 'owed' && f.verdict !== 'cured') || /^B-[0-9a-f]{4}$/.test(f.row))), 'every row names a family, and every family goes through the writer, is named, or is a cure (owed or done elsewhere) WITH its row');
 ok(J.owed === OWED_MAX, `OWED_MAX: ${J.owed} sites of the owed families (stated ${OWED_MAX}) — ${J.owed < OWED_MAX ? `LOWER OWED_MAX to ${J.owed} (a cure: the ratchet falls)` : J.owed > OWED_MAX ? 'a NEW owed site: the ratchet only falls (cure it, or name its family with its reason)' : 'held'}`);
-ok(Object.keys(FAMILIES).every((k) => ROWS.some((r) => r[2] === k)), `every family has its rows (${Object.keys(FAMILIES).filter((k) => !ROWS.some((r) => r[2] === k)).join(', ') || 'none empty'})`);
+ok(Object.keys(FAMILIES).every((k) => [...ROWS, ...BIN_ROWS, ...SHELL_ROWS].some((r) => r[2] === k)), `every family has its rows (${Object.keys(FAMILIES).filter((k) => ![...ROWS, ...BIN_ROWS, ...SHELL_ROWS].some((r) => r[2] === k)).join(', ') || 'none empty'})`);
 // THE CLASS's TWO DOORS (主开发 r4387): a door is a family that holds a writer for OTHERS (the `door` field names its file). The
 // device's (src/agentd/durable-file.js, a device input) and the hub's wrappers' (src/fd-close.js, row B-bcb8 — its family joins
 // here when it lands) stay TWO: one shared file would make every wrapper change a device release. A third door is red, and a
@@ -436,82 +503,106 @@ function doorsByModule(inputs, takers, named = DEVICE_DOOR_TAKERS) {
 }
 ok(OWED_MAX <= OWED_BASELINE + RISES.reduce((a, r) => a + r[0], 0) && RISES.every((r) => Number.isInteger(r[0]) && r[0] > 0 && /^B-[0-9a-f]{4}$/.test(r[1]) && !!r[2]), `the owed count rises only BY NAME: ${OWED_MAX} against the kept baseline ${OWED_BASELINE}${RISES.length ? ` + ${RISES.map((r) => `${r[0]} (${r[1]})`).join(' + ')}` : ''}`, { OWED_MAX, OWED_BASELINE, RISES });
 
-// ── THE TWO REGIONS NOT JUDGED HERE (round wl2wglpsq): COUNTED BY FILE — a new one is red by name; judged in row B-bcb8 ──────
-// (1) data/bin: every member rename on a file-system object (and every bare-name call) of its tracked files; (2) shell: every
-// `mv` inside a string or template a src/ file holds (a command a child runs: an install step, a device's state over ssh)
-const REGION_ROWS = [
-  ["data/bin", "data/bin/acp-wrapper.js", 2],   // B-bcb8 unit B: − its meta sidecar (through renameSynced), + the helper's one-line fallback (one spelling, test-fd-close-census ⑥)
-  ["data/bin", "data/bin/agy-wrapper.js", 5],   // B-bcb8 unit B: − its meta sidecar (through renameSynced), + the helper's fallback; its conversation modes and the person's link: unit C
-  ["data/bin", "data/bin/chat-wrapper.js", 2],   // B-bcb8 unit B: − the meta sidecar, the handed records and the buffer (through renameSynced), + the helper's fallback   // + B-5a4d root: the conversation's handed records (<buffers>/handed/<conversation id>.json), temp + rename
-  ["data/bin", "data/bin/codex-chat-wrapper.js", 2],   // B-bcb8 unit B: − the buffer and the meta sidecar (through renameSynced), + the helper's fallback   // + B-cd4b's said journal (the wrapper's hold): one more temp + rename
-  ["data/bin", "data/bin/job-wrapper.js", 3],   // B-bcb8 unit B: − pid.json, exit.json, bound.json (through renameSynced), + the helper's fallback; left: the log's rotation, pressure.json (rewritten each sample)
-  ["data/bin", "data/bin/pty-wrapper.js", 1],
-  ["data/bin", "data/bin/vibespace-browser", 1],
-  ["data/bin", "data/bin/vibespace-channels", 1],
-  ["data/bin", "data/bin/vibespace-claude-subscription-login.mjs", 1],
-  ["data/bin", "data/bin/vibespace-design", 1],
-  ["data/bin", "data/bin/vibespace-hook-register.mjs", 2],
-  ["data/bin", "data/bin/vibespace-opencode-op", 1],
-  ["data/bin", "data/bin/vibespace-usage", 3],
-  ["data/bin", "data/bin/vibespace-usage-scan", 1],
-  ["shell", "src/app-manifest.js", 8],
-  ["shell", "src/app-system.js", 10],
-  ["shell", "src/desktop-apps.js", 1],
-  ["shell", "src/hosts.js", 4],
-  ["shell", "src/install-slot.js", 2],
-  ["shell", "src/mounts.js", 3],
-  ["shell", "src/remote-fs.js", 2],
-  ["shell", "src/routes/files.js", 3],
-  ["shell", "src/server/design-engine.js", 1],
-  ["shell", "src/spawn/ssh.js", 1],
-];   // [region, file, count] — read on the census's base (round wl2wglpsq's cure): data/bin 30 renames in 14 files (B-cd4b's said journal +1 in the codex wrapper, at the live-tip cure), shell 35 «mv» in 10 files (the writer unit's cure: + the two at a template piece's end in src/routes/files.js, + «mv» as a program twice — mvCount)
 /** the `mv` a src/ file hands a child: in a string or a template piece, with its operands or at a piece's END before ${…} (the
  *  round's B-bcb8 read: «&& mv ${a} ${b}»), and 'mv' alone AS A PROGRAM — a call's first argument followed by its argv array
  *  (execFile('mv', [a, b])), or an argv element after flags only (['-n', 'mv', a, b]); never 'mv' as a word (a pointer event's
- *  type, a command-word table, an allow list) */
+ *  type, a command-word table, an allow list). Each SITE is { file, line, scope: «its scope | its words» } (SHELL_ROWS). */
 const MV = /(?:^|[\s;&|(])mv(?=\s|$)/g;
-function mvCount(src) {
-  const code = src.replace(/^#!.*/, ''), opts = { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowHashBang: true };
+const MV_WORDS = 40;
+const SYNC_WORD = /(?:^|[\s;&|({])sync(?=[\s;&|)]|$)/;   // the `sync` command, never srcsync / fsync / rsync / a const's NAME
+export function mvSites(rel, src) {
+  const code = src.replace(/^#!.*/, ''), opts = { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowHashBang: true, locations: true };
   let ast; try { ast = AC.parse(code, { ...opts, sourceType: 'script' }); } catch { ast = AC.parse(code, { ...opts, sourceType: 'module', allowReturnOutsideFunction: false }); }
-  let n = 0;
-  const isProgram = (x, parents) => {
+  const out = [], words = (t) => t.replace(/\s+/g, ' ').trim().slice(0, MV_WORDS);
+  // a template's text, its ${…} as written; a module const's text by its name (a step handed as a name: XPRA_KEY_SYNC)
+  const shapeOf = (tl) => tl.quasis.map((q, k) => String(q.value.cooked ?? q.value.raw) + (k < tl.expressions.length ? '${' + code.slice(tl.expressions[k].start, tl.expressions[k].end) + '}' : '')).join('');
+  const consts = new Map();
+  for (const st of ast.body) if (st.type === 'VariableDeclaration' && st.kind === 'const') for (const d of st.declarations) if (d.id.type === 'Identifier' && d.init && ((d.init.type === 'Literal' && typeof d.init.value === 'string') || d.init.type === 'TemplateLiteral')) consts.set(d.id.name, d.init.type === 'Literal' ? d.init.value : shapeOf(d.init));
+  const textOf = (n) => (!n ? '' : n.type === 'Literal' && typeof n.value === 'string' ? n.value : n.type === 'TemplateLiteral' ? shapeOf(n) : n.type === 'Identifier' ? consts.get(n.name) || '' : n.type === 'BinaryExpression' && n.operator === '+' ? textOf(n.left) + textOf(n.right) : '');
+  // what runs BEFORE a piece in its command: the pieces before it in a + chain, else the step before it in an array of steps
+  const before = (node, parents) => {
+    let k = parents.length - 1, cur = node;
+    while (k >= 0 && parents[k].type === 'BinaryExpression' && parents[k].operator === '+') { cur = parents[k]; k--; }
+    if (cur !== node) { const leaves = []; const flat = (n) => (n.type === 'BinaryExpression' && n.operator === '+' ? (flat(n.left), flat(n.right)) : leaves.push(n)); flat(cur); const i = leaves.indexOf(node); return leaves.slice(0, i).map(textOf).join(''); }
+    const up = parents[parents.length - 1];
+    if (up && up.type === 'ArrayExpression') { const i = up.elements.indexOf(node); return i > 0 ? textOf(up.elements[i - 1]) : ''; }
+    // a piece held by a const (through ?: / ||): the command a template of its function interpolates it into, up to ${name}
+    let j = parents.length - 1, held = node;
+    while (j >= 0 && (parents[j].type === 'ConditionalExpression' || parents[j].type === 'LogicalExpression')) { held = parents[j]; j--; }
+    const decl = parents[j];
+    if (decl && decl.type === 'VariableDeclarator' && decl.init === held && decl.id.type === 'Identifier') {
+      const name = decl.id.name, fnNode = parents.slice(0, j).reverse().find(isFn) || ast;
+      let into = '';
+      walk(fnNode, (t) => { if (into || t.type !== 'TemplateLiteral') return; const k = t.expressions.findIndex((e) => e.type === 'Identifier' && e.name === name); if (k >= 0) into = shapeOf({ quasis: t.quasis.slice(0, k + 1), expressions: t.expressions.slice(0, k) }); });
+      return into;
+    }
+    return '';
+  };
+  // a sync READ: a `sync` command word anywhere before this `mv` in its command (by text position)
+  const syncedAt = (head) => SYNC_WORD.test(head);
+  const site = (x, parents, w, head) => out.push({ file: rel, line: x.loc.start.line, scope: `${scopeOf(parents)} | ${words(w)}`, synced: syncedAt(head) });
+  // 'mv' AS A PROGRAM: the argv after it, or null
+  const argvAfter = (x, parents) => {
     const up = parents[parents.length - 1], up2 = parents[parents.length - 2];
-    if (up && up.type === 'CallExpression' && up.arguments[0] === x) return !!(up.arguments[1] && up.arguments[1].type === 'ArrayExpression');
-    if (up && up.type === 'ArrayExpression' && up2 && up2.type === 'CallExpression' && up2.arguments.includes(up)) { const i = up.elements.indexOf(x); return up.elements.slice(0, i).every((e) => e && e.type === 'Literal' && typeof e.value === 'string' && e.value.startsWith('-')); }
-    return false;
+    if (up && up.type === 'CallExpression' && up.arguments[0] === x) return up.arguments[1] && up.arguments[1].type === 'ArrayExpression' ? up.arguments[1].elements : null;
+    if (up && up.type === 'ArrayExpression' && up2 && up2.type === 'CallExpression' && up2.arguments.includes(up)) { const i = up.elements.indexOf(x); return up.elements.slice(0, i).every((e) => e && e.type === 'Literal' && typeof e.value === 'string' && e.value.startsWith('-')) ? up.elements.slice(i + 1) : null; }
+    return null;
   };
   walk(ast, (x, parents) => {
-    if (x.type === 'Literal' && typeof x.value === 'string') n += x.value === 'mv' ? (isProgram(x, parents) ? 1 : 0) : (x.value.match(MV) || []).length;
-    else if (x.type === 'TemplateElement') n += (String(x.value.cooked ?? x.value.raw).match(MV) || []).length;
+    if (x.type === 'Literal' && typeof x.value === 'string') {
+      if (x.value === 'mv') { const argv = argvAfter(x, parents); if (argv) site(x, parents, ['mv', ...argv.map((e) => (e ? code.slice(e.start, e.end) : ''))].join(' '), ''); return; }
+      const pre = before(x, parents);
+      for (const m of x.value.matchAll(MV)) { const at = m.index + m[0].length - 2; site(x, parents, x.value.slice(at), pre + '\n' + x.value.slice(0, at)); }
+    } else if (x.type === 'TemplateElement') {
+      const tl = parents[parents.length - 1], i = tl.quasis.indexOf(x), shape = shapeOf(tl);
+      let at0 = 0; for (let k = 0; k < i; k++) at0 += String(tl.quasis[k].value.cooked ?? tl.quasis[k].value.raw).length + '${'.length + (tl.expressions[k].end - tl.expressions[k].start) + 1;
+      const pre = before(tl, parents.slice(0, -1));
+      for (const m of String(x.value.cooked ?? x.value.raw).matchAll(MV)) { const at = at0 + m.index + m[0].length - 2; site(x, parents, shape.slice(at), pre + '\n' + shape.slice(0, at)); }
+    }
   });
-  return n;
+  return out;
 }
-const regionCount = () => {
-  const out = new Map(), add = (k, n) => { if (n) out.set(k, (out.get(k) || 0) + n); };
+const mvCount = (src) => mvSites('src/zz-plant.js', src).length;
+/** a data/bin file's renames: null when it is no JavaScript tool (a shell script has none of these calls) or names no rename */
+export function binSitesOf(rel, src) {
+  if (!/^#!.*\bnode\b/.test(src) && !/\.(?:c|m)?js$/.test(rel)) return null;
+  if (!NAMES.test(src)) return null;
+  return renameSites(rel, src, AC);
+}
+const regionSites = () => {
+  const bin = { sites: [], unknown: [], unparsed: [] }, shell = [];
   for (const rel of trackedFiles(REPO, 'data/bin')) {
     let src = ''; try { src = fs.readFileSync(path.join(REPO, rel), 'utf8'); } catch { continue; }
-    if (!/^#!.*\bnode\b/.test(src) && !/\.(?:c|m)?js$/.test(rel)) continue;   // the JavaScript tools (a shell script has none of these calls)
-    if (!NAMES.test(src)) continue;
-    let r; try { r = renameSites(rel, src, AC); } catch (e) { add(`data/bin | ${rel} | UNPARSED ${e.message}`.slice(0, 160), 1); continue; }
-    add(`data/bin | ${rel}`, r.sites.length + r.unknown.length);
+    let r; try { r = binSitesOf(rel, src); } catch (e) { bin.unparsed.push(`${rel}: ${e.message}`.slice(0, 160)); continue; }
+    if (r) { bin.sites.push(...r.sites); bin.unknown.push(...r.unknown); }
   }
   for (const rel of trackedFiles(REPO, 'src', 'server.js').filter((f) => /\.(?:c|m)?js$/.test(f))) {
     const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
-    if (!/\bmv\b/.test(src)) continue;
-    add(`shell | ${rel}`, mvCount(src));
+    if (/\bmv\b/.test(src)) shell.push(...mvSites(rel, src));
   }
-  return out;
+  return { bin, shell };
 };
+const REG = regionSites();
+const JB = judge(REG.bin.sites, BIN_ROWS), JS = judge(REG.shell, SHELL_ROWS, FAMILIES, { stated: true });
 {
-  const counted = regionCount(), rowed = new Map(REGION_ROWS.map((r) => [`${r[0]} | ${r[1]}`, r[2]]));
-  const off = [...new Set([...counted.keys(), ...rowed.keys()])].filter((k) => counted.get(k) !== rowed.get(k)).sort();
-  for (const k of off) console.error(`  ✗ REGION ROW: ${JSON.stringify([...k.split(' | '), counted.get(k) || 0])} (the row says ${rowed.get(k) ?? 'nothing'})`);
-  const by = (reg) => [...counted].filter(([k]) => k.startsWith(reg + ' |')).reduce((a, [, n]) => a + n, 0);
-  ok(off.length === 0, `the two regions not judged here, counted by file (judged in row B-bcb8): data/bin ${by('data/bin')} renames, shell ${by('shell')} «mv» in command strings — every file's count is its row's`);
+  const files = (xs) => new Set(xs.map((x) => x.file)).size, sayMv = (x) => `${x.file}:${x.line} ${JSON.stringify(x.scope)} (${x.synced ? 'reads synced' : 'no sync before it'})`;
+  console.log(`①b the two regions, judged (row B-bcb8): data/bin ${REG.bin.sites.length} renames in ${files(REG.bin.sites)} tools (${['synced', 'unsynced', 'move'].map((c) => `${REG.bin.sites.filter((x) => x.cls === c).length} ${c}`).join(', ')}); ${REG.shell.length} «mv» in command strings of ${files(REG.shell)} src/ files (${REG.shell.filter((x) => x.synced).length} read synced)`);
+  ok(REG.bin.unparsed.length === 0 && REG.bin.unknown.length === 0, 'every data/bin tool parses, and each of its renames is on the file system (an unknown object or a bare call is red by name)', REG.bin);
+  for (const x of JB.noRow) console.error(`  ✗ NO ROW (a rename under data/bin: give it its family): ${say(x)}`);
+  for (const x of JB.extra) console.error(`  ✗ ONE MORE SITE than its row says (data/bin): ${say(x)}`);
+  for (const x of JS.noRow) console.error(`  ✗ NO ROW (a «mv» in a command string: give it its class by reading and its family): ${sayMv(x)}`);
+  for (const x of JS.extra) console.error(`  ✗ ONE MORE SITE than its row says (a «mv»): ${sayMv(x)}`);
+  for (const g of [...JB.gone, ...JS.gone]) console.error(`  ✗ GONE (drop it from its row; an owed site's cure lowers REGION_OWED_MAX): ${g.file} ${JSON.stringify(g.scope)} (${g.cls}, ${g.family}) ×${g.missing}`);
+  for (const x of [...JB.badFamily, ...JS.badFamily]) console.error(`  ✗ ITS FAMILY «${x.family}» DOES NOT ADMIT ${x.cls}: ${x.file}:${x.line} ${x.scope}`);
+  const off = [JB, JS].reduce((n, j) => n + j.noRow.length + j.extra.length + j.gone.length, 0);
+  ok(off === 0, `every region site has its row, and every row its sites (data/bin: ${JB.noRow.length} new, ${JB.extra.length} more, ${JB.gone.length} gone; shell: ${JS.noRow.length} new, ${JS.extra.length} more, ${JS.gone.length} gone)`);
+  ok(JB.badFamily.length === 0 && JS.badFamily.length === 0, 'every region site\'s class (read under data/bin, judged by reading in a command string) is one its family admits');
+  ok(JB.owed + JS.owed === REGION_OWED_MAX, `REGION_OWED_MAX: ${JB.owed + JS.owed} sites of the owed families in the two regions (stated ${REGION_OWED_MAX}) — ${JB.owed + JS.owed < REGION_OWED_MAX ? `LOWER REGION_OWED_MAX to ${JB.owed + JS.owed} (a cure: the ratchet falls)` : JB.owed + JS.owed > REGION_OWED_MAX ? 'a NEW owed site: the ratchet only falls (cure it, or name its family with its reason)' : 'held'}`);
+  ok(REGION_OWED_MAX <= REGION_OWED_BASELINE + REGION_RISES.reduce((a, r) => a + r[0], 0) && REGION_RISES.every((r) => Number.isInteger(r[0]) && r[0] > 0 && /^B-[0-9a-f]{4}$/.test(r[1]) && !!r[2]), `the regions' owed count rises only BY NAME: ${REGION_OWED_MAX} against the kept baseline ${REGION_OWED_BASELINE}`, { REGION_OWED_MAX, REGION_OWED_BASELINE, REGION_RISES });
 }
 console.log('② the families:');
 for (const [k, f] of Object.entries(FAMILIES)) {
-  const rs = ROWS.filter((r) => r[2] === k), n = rs.reduce((a, r) => a + r.length - 4, 0);
+  const rs = [...ROWS, ...BIN_ROWS, ...SHELL_ROWS].filter((r) => r[2] === k), n = rs.reduce((a, r) => a + r.length - 4, 0);
   console.log(`  · ${k} — ${f.verdict}${f.row ? ' ' + f.row : ''} — ${n} site${n === 1 ? '' : 's'} in ${new Set(rs.map((r) => r[0])).size} file${new Set(rs.map((r) => r[0])).size === 1 ? '' : 's'}: ${f.why}`);
 }
 
@@ -533,6 +624,8 @@ console.log('③ the classifier on planted sources');
   ok(u.unknown.length === 1 && u.unknown[0].obj === 'thing' && u.skipped.length === 1 && u.sites.length === 0, 'an object nobody judged is red by name; a NOT_FS object is skipped by name', u);
   const mvs = [mvCount('const c = `mkdir -p ${d} && mv ${a} ${b}`;'), mvCount("execFile('mv', [a, b]); run('sudo', ['-n', 'mv', a, b]);"), mvCount("const c = 'cat > a.tmp && mv -f a.tmp a';"), mvCount("const t = 'a movie, a move'; const m = `remove ${x}`; const e = { t: 'mv' }; pointerMessage('mv', ev); const ok = Object.freeze(['ls', 'mv']); if (head === 'mv') { }")];
   ok(mvs.join() === '1,2,1,0', `the region's «mv» count: one at a template piece's end before \${…} (${mvs[0]}), «mv» as a program name (${mvs[1]}), one with its operands (${mvs[2]}), none in prose nor as a word (a pointer event's type, a command-word table, an allow list: ${mvs[3]})`, mvs);
+  const words = mvSites('src/zz-plant.js', "function f(a, b, t, d) { run('sudo', ['-n', 'mv', a, b]); const c = `cp x ${t} && mv -f ${t} ${d}; sync`; const e = 'rm -f z; mv  -T  \"$q\"\\n \"$r\"'; }\nfunction g() { return 'cat > \"$R.t\" && mv \"$R.t\" \"$R\"; sync -f \"$R\"; mv \"$NX\" \"$R\"; srcsync x; mv \"$P\" \"$Q/a-folder-name-long-enough-to-be-cut\"'; }\nconst K_SYNC = 'sync -- \"$K\"';\nconst STEPS = ['curl -o \"$K\"', K_SYNC, 'mv -f \"$K\" \"$KEY\"', `mv ${a} b`];\nconst CHAIN = 'tar x; sync&&' + 'mv u w';\nfunction h(a, x) { const post = a ? ` && mv ${a} z` : ''; const tail = `a${x};mv b c`; return `sync -f y && tar x${post}`; }\n").map((x) => `${x.scope}${x.synced ? ' (synced)' : ''}`);
+  ok(words.join(' · ') === "f | mv a b · f | mv -f ${t} ${d}; sync · f | mv -T \"$q\" \"$r\" · g | mv \"$R.t\" \"$R\"; sync -f \"$R\"; mv \"$NX\" \" · g | mv \"$NX\" \"$R\"; srcsync x; mv \"$P\" \"$Q/a- (synced) · g | mv \"$P\" \"$Q/a-folder-name-long-enough-to (synced) · <module> | mv -f \"$K\" \"$KEY\" (synced) · <module> | mv ${a} b · <module> | mv u w (synced) · h | mv ${a} z (synced) · h | mv b c", 'a «mv» is known by its scope and its words (a program by its argv, a template\'s ${…} as written, white space folded, cut at MV_WORDS, a template piece after ${…} at its own place), and a sync is READ only BEFORE it in its command: in its string (never after it, nor srcsync), in the step before it named by a const (not a template two steps on), in the pieces before it in a + chain (sync&&), in the command a const template is interpolated into', words);
   const bare = renameSites('src/zz-plant.js', `function z(a, b) { const { renameSync } = require('fs'); renameSync(a, b); }`, AC), judgedBare = renameSites('src/zz-plant.js', `function n() { return rename('a.txt'); }`, AC);
   ok(bare.unknown.length === 1 && bare.unknown[0].obj === '(a bare renameSync)' && judgedBare.unknown.length === 1 && judgedBare.unknown[0].scope === 'n', 'a call through a BARE name (destructured, aliased) is red as unknown, with its scope — only a judged SCOPE is skipped, never a whole file', { bare, judgedBare });
   // an open's flags through a CONST of its function (line 349's `fl`): every leaf an append — the rotation after it reads «move»;
@@ -593,4 +686,32 @@ console.log('④ the two diagnostics judged «derived»: their readers — a tor
   const rb = bootFacts(plantB), rc = capFacts(plantC), rw = capFacts(plantW);
   ok(rb.namers.includes('server.js') && rc.reader.includes('fs.readFileSync') && rw.writerReads.includes('fs.readFileSync'), 'RED ④ a reader planted in a copy\'s text (server.js reads the boot trace back; loop-holds parses a kept capture; the watchdog reads its temp back) is named — the «derived» judgment would no longer hold', { boot: rb.namers, cap: rc.reader, writer: rw.writerReads });
 }
+console.log('④b the regions\' judging, controlled (PURE, planted texts through the census\'s own readers; each control names what it planted)');
+  const P = 'src/zz-plant.js', plant = (body) => mvSites(P, `function k() { return '${body}'; }`);
+  const rows = [[P, 'unsynced', 'region', 'planted', 'k | mv -f "$t" "$d"; mv "$a" "$b"'], [P, 'move', 'move', 'planted', 'k | mv "$a" "$b"']];
+  const torn = plant('cat > "$t" && mv -f "$t" "$d"; mv "$a" "$b"'), J0 = judge(torn, rows, FAMILIES, { stated: true });
+  const cured = plant('cat > "$t" && sync -- "$t" && mv -f "$t" "$d"; mv "$a" "$b"'), J1 = judge(cured, rows, FAMILIES, { stated: true });
+  const witness = cured.find((x) => x.scope === rows[0][4]);
+  ok(J0.noRow.length + J0.extra.length + J0.gone.length === 0 && J0.owed === 1 && !!witness && witness.synced === true && J1.noRow.length === 1 && J1.noRow[0] === witness && J1.gone.length === 1 && J1.gone[0].family === 'region' && J1.owed === 0,
+    'CONTROL (the natural cure): a sync put in front of an UNCHANGED «mv» — the same words, its sync read — is red on ITS row (no row takes a synced site, its unsynced row is gone), the «move» beside it untouched, the owed count 1 → 0', { J0, J1, witness });
+  const two = [[P, 'unsynced', 'region', 'planted', 'k | mv -f "$S/a" "$D/a" && mv -f "$S/b" "$D/', 'k | mv -f "$S/b" "$D/b"']];
+  const oneSync = plant('tar -x -C "$S" && sync -f "$S" && mv -f "$S/a" "$D/a" && mv -f "$S/b" "$D/b"'), J1b = judge(oneSync, two, FAMILIES, { stated: true });
+  ok(judge(plant('tar -x -C "$S" && mv -f "$S/a" "$D/a" && mv -f "$S/b" "$D/b"'), two, FAMILIES, { stated: true }).owed === 2 && oneSync.length === 2 && oneSync.every((x) => x.synced) && J1b.noRow.length === 2 && J1b.gone.length === 2 && J1b.gone.every((g) => g.family === 'region' && g.missing === 1) && J1b.owed === 0,
+    'CONTROL (one sync for several): a sync put once in front of two unchanged «mv» reads for both — both are red on their row, the owed count 2 → 0', { oneSync, J1b });
+  const synced = [[P, 'synced', 'self-synced', 'planted', 'k | mv -f "$t" "$d"']];
+  const kept = judge(plant('install x "$t" && sync -- "$t" && mv -f "$t" "$d"'), synced, FAMILIES, { stated: true });
+  const lost = plant('install x "$t" && mv -f "$t" "$d"'), J2 = judge(lost, synced, FAMILIES, { stated: true });
+  ok(kept.noRow.length + kept.gone.length === 0 && lost.length === 1 && lost[0].synced === false && J2.noRow.length === 1 && J2.noRow[0] === lost[0] && J2.gone.length === 1 && J2.gone[0].family === 'self-synced',
+    'CONTROL (a sync taken away): a self-synced «mv» whose sync is gone reads unsynced and is red on its row', { kept, J2 });
+  const J3 = judge(torn, [[P, 'unsynced', 'self-synced', 'planted', rows[0][4]], rows[1]], FAMILIES, { stated: true });
+  ok(J3.badFamily.length === 1 && J3.badFamily[0].scope === rows[0][4] && J3.badFamily[0].cls === 'unsynced', 'CONTROL: an unsynced «mv» put in a self-synced family is red (that family admits synced only)', J3.badFamily);
+  const more = mvSites(P, `function k() { const n = 'cp y "$u" && mv "$u" "$v"'; return 'cat > "$t" && mv -f "$t" "$d"; mv "$a" "$b"'; }`), J4 = judge(more, rows, FAMILIES, { stated: true });
+  ok(J4.noRow.length === 1 && J4.noRow[0].scope === 'k | mv "$u" "$v"' && J4.gone.length === 0, 'CONTROL: a new «mv» in a judged scope, with its own words, has no row (the judged ones beside it keep theirs)', J4);
+  // data/bin, planted through the census's own reader (binSitesOf): a node tool's unsynced rename has no row; a shell script's
+  // text is no JavaScript tool (read as none)
+  const tool = binSitesOf('data/bin/zz-new', "#!/usr/bin/env node\nconst fs = require('fs');\nfunction keep(f, d) { fs.writeFileSync(f + '.tmp', d); fs.renameSync(f + '.tmp', f); }\n");
+  let sh; try { sh = binSitesOf('data/bin/zz-new.sh', '#!/bin/sh\nmv "$a.tmp" "$a"; node -e "fs.renameSync(a, b)"\n'); } catch (e) { sh = `threw: ${e.message}`; }
+  const J5 = tool ? judge(tool.sites, BIN_ROWS) : null;
+  ok(!!J5 && tool.sites.length === 1 && tool.sites[0].cls === 'unsynced' && tool.sites[0].scope === 'keep' && J5.noRow.length === 1 && J5.noRow[0] === tool.sites[0] && sh === null,
+    'CONTROL: a data/bin tool planted through the census\'s reader — its unsynced rename (scope keep) has no row; a shell script\'s text is read as none', { tool, sh });
 report();
