@@ -211,6 +211,162 @@ export function attachCensus(repo, { patch = {}, extra = {}, rows = ATTACH_ROWS 
   return out;
 }
 
+/** B-8695's follow, DOOR (a) (主开发 r4974 (1)): A REAL-DRIVER RUN's HOME HOLDS THE DRIVER's LINE. In a file of the DRIVER DOOR
+ *  (DOOR_FILE: one that can run the real driver), every home it HANDS — an object's `HOME:` (a child's environment) or `homeDir:`
+ *  (a keeper's home), or an assignment of one (`env.HOME = …`, `process.env.HOME = …`) — is CONFIGURED when, resolved to its binding in its own scope (acorn; an alias, an object's field and a
+ *  destructured name followed), that home gets `<home>/.agent-browser/config.json` written (the line itself is §47e's: built by
+ *  driverArgs, or counted there) or is made by scratch.mjs driverHome; or when the SAME object names its config outright
+ *  (AGENT_BROWSER_CONFIG or AGENT_BROWSER_ARGS, both §47e's too). The driver reads that file when no config is named, and the keeper builds
+ *  every launch config FROM it with its args kept (src/server/browser-keeper.js machineConfigFile): a home without it lets the
+ *  driver's own Chrome start with no names rule — the probe row 1024's three temporary-profile Chromes (test-browser-live ④'s F2
+ *  leg). The process's own home (process.env.HOME, os.homedir()) is configured only by a driverHome of it in the same file. NOT A
+ *  DRIVER's LAUNCH, said and counted apart (never a row): the environment of a call whose argv is ['--version'] (a version read), of a
+ *  spawn whose program is a Chrome (the suite's own Chrome: §47's launch census judges it), or an attach — an object that names
+ *  AGENT_BROWSER_CDP, or the env of a run whose argv begins with '--cdp' (the driver connects to a Chrome already there, starts none). Every other home handed is counted in HOME_ROWS, each READ (a fake driver, a pure keeper,
+ *  a stand-in, a run that only attaches by --cdp; `pin` = the text a row's reason rests on): a count that moves is red, as is a pin
+ *  that no longer holds and a row whose file is gone. */
+export const HOME_KEYS = Object.freeze(['HOME', 'homeDir']);
+export const HOME_EXPLICIT = Object.freeze(['AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_ARGS']);
+export const HOME_ROWS = Object.freeze({
+  'scripts/scratch.mjs': { n: 1, why: 'HANDED: the record of what the process was handed (its home compared by the re-home), never handed to a driver' },
+  'scripts/test-browser-ephemeral-life.mjs': { n: 2, why: 'the world\'s keeper home `w.KH` (a function\'s returned object, which the census does not follow): its config.json is written through driverArgs(...CHROME_QUIET) where the world is made (the pin)', pin: /fs\.writeFileSync\(path\.join\(KH, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(\.\.\.CHROME_QUIET\) \}\)/ },
+  'scripts/test-browser-ephemeral-wired.mjs': { n: 1, why: 'the world\'s keeper home `w.KH`: its config.json is written through driverArgs(...CHROME_QUIET) where the world is made (the pin)', pin: /fs\.writeFileSync\(path\.join\(KH, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(\.\.\.CHROME_QUIET\) \}\)/ },
+  'scripts/test-browser-live.mjs': { n: 2, why: '③ and ③b: worktree servers over a FAKE agent-browser and a fake claude — no real driver runs there', pin: /fake claude \+ fake agent-browser/ },
+  'scripts/test-browser-mediation-chrome.mjs': { n: 15, why: '③ r4\'s shell, whose CLI the stub answers with config = NAVCFG (built by driverArgs: §47e), and ⑧ to ⑩\'s keeper homes, whose browser is the FAKE kernel (an engine fixture\'s executablePath) — no real Chrome there' },
+  'scripts/test-browser-paired-scope.mjs': { n: 2, why: 'the PATH and HOME saved before the device\'s first dial and put back after it — a copy of the environment and its restore, no run' },
+  'scripts/test-browser-profiles.mjs': { n: 3, why: 'a shell fragment driven under sh (no driver), and a pure keeper whose admission is judged as data (no launch)' },
+  'scripts/test-browser-profiles-ui.mjs': { n: 4, why: '① to ④\'s FAKE driver home; the build list read from the process\'s home (a read); ⑦\'s keeper that reads the account\'s newest build and its run home, whose launches take the keeper\'s explicit config built from b5-home (written there)' },
+  'scripts/test-browser-resources.mjs': { n: 4, why: 'ⓘ\'s two homes of 38 and 39 bytes: their config.json is written through driverArgs in ONE loop over both (a loop name the census does not tie to them: the pin)', pin: /for \(const h of \[H38, H39\]\) \{ fs\.mkdirSync\(path\.join\(h, '\.agent-browser'\), \{ recursive: true \}\); fs\.writeFileSync\(path\.join\(h, '\.agent-browser', 'config\.json'\), JSON\.stringify\(\{ args: driverArgs\(/ },
+  'scripts/test-browser-stderr-pipe-real.mjs': { n: 1, why: 'the driver\'s line rides AGENT_BROWSER_ARGS built by driverArgs at each run (quietLeg) and an explicit config file: its home holds none on purpose (the pin)', pin: /quietLeg\('bspd', driverArgs\([\s\S]*quietLeg\('bspc', BE\.withQuietLogging\(driverArgs\(/ },
+  'scripts/test-browser-x-picture.mjs': { n: 1, why: 'the VIEWER Chrome the suite spawns itself (launchChrome(bin): §47\'s launch census judges it)' },
+  'scripts/test-home-verdict.mjs': { n: 14, why: 'stand-in programs only: the homes of its scenes and probes — the real driver never runs there' },
+});
+const SCOPES = new Set(['Program', 'FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'BlockStatement', 'ForStatement', 'ForInStatement', 'ForOfStatement', 'CatchClause', 'StaticBlock']);
+const keyOf = (p) => (p && !p.computed && p.key ? (p.key.type === 'Identifier' ? p.key.name : p.key.type === 'Literal' ? String(p.key.value) : null) : null);
+const calleeName = (c) => (c && c.type === 'Identifier' ? c.name : c && c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier' ? c.property.name : null);
+/** → { files, sites, configured, versionReads, chromeSpawns, attaches, open: [{file, line, key, what}], moved: [{file, n, want, lines}],
+ *  unpinned: [file], stale: [file], unparsed: [file] } */
+// ONE analysis per file text (a census is called with a file patched or planted: only that file is read again)
+const HOME_SITES = new Map();
+function homeSitesOf(f, src, acorn) {
+  const key = `${f}\0${src}`;
+  if (HOME_SITES.has(key)) return HOME_SITES.get(key);
+  const cnt = { configured: 0, attaches: 0, versionReads: 0, chromeSpawns: 0 };
+  const r = (() => {
+      let ast = null;
+      for (const sourceType of ['module', 'script']) { try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, locations: true }); break; } catch { } }
+      if (!ast) return { unparsed: true };
+      // pass 1: every binding, in the scope that declares it, with the ancestors it was declared under (its init is resolved there)
+      const decls = new Map(), bindOf = (scope) => { if (!decls.has(scope)) decls.set(scope, new Map()); return decls.get(scope); };
+      const nearest = (stack) => { for (let i = stack.length - 1; i >= 0; i--) if (SCOPES.has(stack[i].type)) return stack[i]; return ast; };
+      const visit = (n, stack, fn) => {
+        if (!n || typeof n.type !== 'string') return;
+        fn(n, stack); stack.push(n);
+        for (const k of Object.keys(n)) { if (k === 'start' || k === 'end' || k === 'loc') continue; const v = n[k]; if (Array.isArray(v)) for (const x of v) visit(x, stack, fn); else if (v && typeof v.type === 'string') visit(v, stack, fn); }
+        stack.pop();
+      };
+      visit(ast, [], (n, stack) => {
+        if (n.type === 'VariableDeclarator') {
+          const sc = nearest(stack), at = stack.slice();
+          if (n.id.type === 'Identifier') bindOf(sc).set(n.id.name, { init: n.init, at, configured: false });
+          else if (n.id.type === 'ObjectPattern') for (const p of n.id.properties) if (p.type === 'Property' && p.value.type === 'Identifier') bindOf(sc).set(p.value.name, { init: n.init ? { type: 'VsField', object: n.init, name: keyOf(p) } : null, at, configured: false });
+        } else if ((n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression')) {
+          for (const p of n.params) if (p.type === 'Identifier') bindOf(n).set(p.name, { init: null, at: stack.concat([n]), configured: false });
+        }
+      });
+      const lookup = (name, stack) => { for (let i = stack.length - 1; i >= 0; i--) { const m = decls.get(stack[i]); if (m && m.has(name)) return m.get(name); } const m = decls.get(ast); return (m && m.get(name)) || null; };
+      let processHome = false;
+      const isProcessHome = (n) => !!n && ((n.type === 'MemberExpression' && !n.computed && n.property.name === 'HOME' && n.object.type === 'MemberExpression' && !n.object.computed && n.object.object.type === 'Identifier' && n.object.object.name === 'process' && n.object.property.name === 'env')
+        || (n.type === 'CallExpression' && calleeName(n.callee) === 'homedir' && n.arguments.length === 0));
+      // the home a path.join of <home>, «.agent-browser» and «config.json» names (or an identifier bound to one)
+      const configHome = (n, stack, d = 0) => {
+        if (!n || d > 4) return null;
+        if (n.type === 'Identifier') { const b = lookup(n.name, stack); return b && b.init ? configHome(b.init, b.at, d + 1) : null; }
+        if (n.type !== 'CallExpression' || calleeName(n.callee) !== 'join' || n.arguments.length < 2) return null;
+        const rest = n.arguments.slice(1).map((a) => (a.type === 'Literal' ? String(a.value) : null));
+        if (rest.some((x) => x === null) || rest.join('/').replace(/\/+/g, '/') !== '.agent-browser/config.json') return null;
+        return { node: n.arguments[0], stack };
+      };
+      const mark = (n, stack, d = 0) => {   // a home node made configured
+        if (!n || d > 4) return;
+        if (isProcessHome(n)) { processHome = true; return; }
+        if (n.type === 'Identifier') { const b = lookup(n.name, stack); if (b) b.configured = true; }
+      };
+      // pass 2: the writes of a home's config, and every driverHome(<home>)
+      visit(ast, [], (n, stack) => {
+        if (n.type !== 'CallExpression') return;
+        const c = calleeName(n.callee);
+        if ((c === 'writeFileSync' || c === 'writeFile') && n.arguments[0]) { const h = configHome(n.arguments[0], stack); if (h) mark(h.node, h.stack); }
+        else if (c === 'driverHome' && n.arguments[0]) mark(n.arguments[0], stack);
+      });
+      // a home value → configured?
+      const homeOk = (n, stack, d = 0) => {
+        if (!n || d > 5) return false;
+        if (n.type === 'CallExpression' && calleeName(n.callee) === 'driverHome') return true;
+        if (isProcessHome(n)) return processHome;
+        if (n.type === 'Identifier') { const b = lookup(n.name, stack); if (!b) return false; if (b.configured) return true; return b.init ? homeOk(b.init, b.at, d + 1) : false; }
+        if (n.type === 'VsField' || (n.type === 'MemberExpression' && !n.computed && n.property.type === 'Identifier')) {
+          const obj = n.type === 'VsField' ? n.object : n.object, name = n.type === 'VsField' ? n.name : n.property.name;
+          let o = obj, st = stack;
+          for (let i = 0; i < 4 && o && o.type === 'Identifier'; i++) { const b = lookup(o.name, st); if (!b || !b.init) return false; o = b.init; st = b.at; }
+          if (!o || o.type !== 'ObjectExpression') return false;
+          const p = o.properties.find((x) => x.type === 'Property' && keyOf(x) === name);
+          return p ? homeOk(p.value, st, d + 1) : false;
+        }
+        return false;
+      };
+      // pass 3: the sites — every `HOME:` / `homeDir:` handed in an object literal, and every assignment of one
+      let sites = 0; const open = [];
+      visit(ast, [], (n, stack) => {
+        if (n.type === 'AssignmentExpression' && n.operator === '=' && n.left.type === 'MemberExpression' && !n.left.computed && n.left.property.type === 'Identifier' && HOME_KEYS.includes(n.left.property.name)) {
+          sites++;
+          if (homeOk(n.right, stack.concat([n]))) cnt.configured++; else open.push({ file: f, line: n.loc.start.line, key: n.left.property.name, what: src.slice(n.right.start, n.right.end).slice(0, 60) });
+          return;
+        }
+        if (n.type !== 'ObjectExpression') return;
+        const explicit = n.properties.some((p) => p.type === 'Property' && HOME_EXPLICIT.includes(keyOf(p)));
+        // not a driver's launch: an attach by a CDP grant; the env of a version read; the env of a spawn of a Chrome
+        const up = stack[stack.length - 1], opts = stack[stack.length - 2], call = stack[stack.length - 3];
+        const asEnvOf = up && up.type === 'Property' && keyOf(up) === 'env' && opts && opts.type === 'ObjectExpression' && call && (call.type === 'CallExpression' || call.type === 'NewExpression') && call.arguments.includes(opts) ? call : null;
+        const attach = n.properties.some((p) => p.type === 'Property' && keyOf(p) === 'AGENT_BROWSER_CDP')
+          || (!!asEnvOf && asEnvOf.arguments.some((a) => a.type === 'ArrayExpression' && a.elements[0] && a.elements[0].type === 'Literal' && a.elements[0].value === '--cdp'));
+        const version = !!asEnvOf && asEnvOf.arguments.some((a) => a.type === 'ArrayExpression' && a.elements.length === 1 && a.elements[0] && a.elements[0].type === 'Literal' && a.elements[0].value === '--version');
+        const a0 = asEnvOf && asEnvOf.arguments[0], chromeSpawn = !!a0 && ((a0.type === 'Identifier' && CHROMEISH.test(a0.name)) || (a0.type === 'Literal' && CHROME_PATH.test(String(a0.value))));
+        for (const p of n.properties) {
+          if (p.type !== 'Property' || !HOME_KEYS.includes(keyOf(p))) continue;
+          sites++;
+          if (attach) { cnt.attaches++; continue; }
+          if (version) { cnt.versionReads++; continue; }
+          if (chromeSpawn) { cnt.chromeSpawns++; continue; }
+          if (explicit || homeOk(p.value, stack.concat([n]))) { cnt.configured++; continue; }
+          open.push({ file: f, line: p.loc.start.line, key: keyOf(p), what: src.slice(p.value.start, p.value.end).slice(0, 60) });
+        }
+      });
+      return { unparsed: false, sites, open };
+  })();
+  const res = Object.freeze({ ...cnt, ...r });
+  HOME_SITES.set(key, res);
+  return res;
+}
+export function homeCensus(repo, { acorn, patch = {}, extra = {}, rows = HOME_ROWS } = {}) {
+  const out = { files: 0, sites: 0, configured: 0, versionReads: 0, chromeSpawns: 0, attaches: 0, open: [], moved: [], unpinned: [], stale: [], unparsed: [] };
+  for (const f of [...filesOf(repo), ...Object.keys(extra)]) {
+    const src = f in extra ? extra[f] : f in patch ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
+    if (!DOOR_FILE.test(src)) continue;
+    const r = homeSitesOf(f, src, acorn);
+    if (r.unparsed) { out.unparsed.push(f); continue; }
+    const { sites, open } = r;
+    for (const k of ['configured', 'attaches', 'versionReads', 'chromeSpawns']) out[k] += r[k];
+    if (sites) out.files++;
+    out.sites += sites;
+    const row = rows[f];
+    if (row) { if (open.length !== row.n) out.moved.push({ file: f, n: open.length, want: row.n, lines: open.map((o) => o.line) }); if (row.pin && !row.pin.test(src)) out.unpinned.push(f); }
+    else out.open.push(...open);
+  }
+  for (const f of Object.keys(rows)) if (!fs.existsSync(path.join(repo, f)) && !(f in extra)) out.stale.push(f);
+  return out;
+}
+
 /** THE ONE EXEMPT ROW: a suite that brings its OWN Secret Service on a private bus — never the person's (its pin: the private address) */
 export const EXEMPT = Object.freeze({
   'scripts/test-app-display-secrets-chrome.mjs': { why: 'it tests Chrome\'s OSCrypt key in a Secret Service — its OWN, started on the plan\'s private bus (DBUS_SESSION_BUS_ADDRESS = plan.address); never the session bus a lane inherits', pin: /DBUS_SESSION_BUS_ADDRESS: plan\.address/ },
