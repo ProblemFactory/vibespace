@@ -137,7 +137,10 @@ const personKept = (o) => o.rows.some((r) => r.id === person.id && r.publicUrl =
 ok(personKept(r4a), '§4: a service that does not publish stops — the person\'s row, its address and its path mount stay', r4a);
 ok(personKept(r4b) && !!r4b.facts.snap && r4b.facts.snap.publishState === 'refused' && /forwarded in the Ports panel by hand/.test(String(r4b.facts.snap.publishError || '')), `§4: a service that asks to publish on that port is REFUSED by name (never takes the person\'s row: «${r4b.facts.snap && r4b.facts.snap.publishError}») and its stop leaves the row`, r4b);
 const TD_FIND = 'rows.find((r) => r.ownerJob === job.id)', ISF_TAIL = '    return false;   // r3228: never found by a port alone (a row with no owner is a person\'s, or the release\'s until the reconcile claims it)\n';
-const byPort = anchored(anchored(JSRC, TD_FIND, 'rows.find((r) => this._isJobForward(job, r))', 'by-port'), ISF_TAIL, "    return rec.hostId === '__local__' && !rec.targetHost && Number(rec.remotePort) === Number((job.ports || [])[0]);\n", 'by-port');
+// r5334 (B-73c4's cure round, lane nl-mounts): the release ALSO accepted any ownerless row it found; the cure's own guard (an ownerless
+// row is a job's only by its «service: …» label) would hide the look-up's harm, so the copy restores the release's acceptance too
+const TD_ACCEPT = 'id = rec && (rec.ownerJob ? rec.ownerJob === job.id : this._claimLabels(job).includes(rec.label)) ? rec.id : null;', TD_ACCEPT_RELEASE = 'id = rec && (!rec.ownerJob || rec.ownerJob === job.id) ? rec.id : null;';
+const byPort = anchored(anchored(anchored(JSRC, TD_FIND, 'rows.find((r) => this._isJobForward(job, r))', 'by-port'), ISF_TAIL, "    return rec.hostId === '__local__' && !rec.targetHost && Number(rec.remotePort) === Number((job.ports || [])[0]);\n", 'by-port'), TD_ACCEPT, TD_ACCEPT_RELEASE, 'by-port');
 const r4red = await personScene(loadJM(byPort, 'by-port'), false);
 ok(!personKept(r4red), 'RED CONTROL §4: the release\'s look-up by the port (in a copy, the cure\'s first form) — a service that never published takes the person\'s forward and its address down', r4red);
 

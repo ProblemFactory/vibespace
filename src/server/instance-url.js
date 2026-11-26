@@ -38,6 +38,7 @@ const SR = require('../store-read.js');
 
 const PROXY_NAME = 'vibespace-instance';
 const SUB_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const OWED_PACE_MS = 5 * 60000;   // B-73c4 (r5334): a refused removal of this VibeSpace's address is asked again on this pace
 
 // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js
 // renameSynced) — written on a person's Publish / Unpublish or the publish's own rare event, never at a cadence; a failed sync or close
@@ -48,7 +49,7 @@ function writeJsonAtomic(file, obj) {
   require('../fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'instance-url.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[instance-url] ${w}`); } } });
 }
 
-function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, authEnabled = () => true, broadcast = () => { }, log = () => { } }) {
+function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, authEnabled = () => true, broadcast = () => { }, log = () => { }, owedPaceMs = OWED_PACE_MS }) {
   const file = path.join(dataDir, 'instance-url.json');
   let state = { desired: false, auto: false, sub: null, url: null, proto: null, at: null, error: null };
   // r3009 (B-f276 family, lane bl-machines-a): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure as «not
@@ -137,9 +138,12 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     }
     const preferSub = state.sub || f.selfDialSub || '';
     // our own server speaks plaintext http locally; the relay terminates TLS
+    if (owedTimer) { clearTimeout(owedTimer); owedTimer = null; }   // r5334: wanted again — no retry asked from now; one already OUT is waited for first
+    if (owedOut) await owedOut;
     const r = await plugins.frpPublish(PROXY_NAME, Number(port), { preferSub, proto: 'http' });
     if (!r || !r.url) throw new Error('the relay did not return a URL');
     state.url = r.url; state.proto = r.proto || 'http'; state.at = Date.now(); state.error = null;
+    delete state.unpublishOwed;   // r5334: the address is wanted again — its file written over: no removal owed
     if (r.subdomain) { state.sub = r.subdomain; try { plugins.setSelfDialSub?.(r.subdomain); } catch { } }
     save();
     return state.url;
@@ -159,7 +163,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
    *  Records + shows it, but stays `auto` so it cannot repoint share links. */
   async function ensurePublished() {
     hold.refuse('publishing this VibeSpace for a machine');   // r3174: held — a NAMED refusal (the release's null became the text «null» at the pairing road: a device minted with a dial address of «null»)
-    if (state.url) return state.url;
+    if (state.url && !state.unpublishOwed) return state.url;   // r5334: an address whose removal is owed is never handed out: published anew
     const u = await doPublish({});
     if (!state.desired) state.auto = true;
     save(); emit();
@@ -172,11 +176,39 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     try { if (plugins) await plugins.frpUnpublish(PROXY_NAME); } catch (e) { refused = e; log('[instance-url] unpublish: ' + e.message); }
     // B-73c4 (law 1, no silent failure): NOT confirmed — this VibeSpace's public address is still up: kept as it is and SAID on its row
     // (its error), never cleared; pressing Unpublish again asks the relay again
-    if (refused) { state.desired = false; state.auto = false; state.error = `its public address is still up — the relay did not confirm its removal (${(refused && refused.code) || (refused && refused.message) || 'an error'})`; save(); emit(); return { status: status(), error: state.error, code: (refused && refused.code) || 'relay_unpublish_failed' }; }
+    if (refused) {
+      state.desired = false; state.auto = false; state.error = stillUp(refused);
+      state.unpublishOwed = { code: (refused && refused.code) || 'relay_unpublish_failed', since: (state.unpublishOwed && state.unpublishOwed.since) || Date.now() };   // r5334: owed — retried at a start and on the pace
+      save(); emit(); retryOwed();
+      return { status: status(), error: state.error, code: state.unpublishOwed.code };
+    }
     // the SUBDOMAIN is kept: republishing should land on the same URL
     state.url = null; state.proto = null; state.desired = false; state.auto = false; state.at = null; state.error = null;
+    delete state.unpublishOwed;
     save(); emit();
     return { status: status() };
+  }
+  const stillUp = (e) => `its public address is still up — the relay did not confirm its removal (${(e && e.code) || (e && e.message) || 'an error'})`;
+  /** B-73c4 (r5334, law 3): a REFUSED unpublish is RETRIED — at a start (restore, once the file reads) and on a 5-minute pace — one ask out
+   *  at a time, off the loop (the relay's async verb). Confirmed ⇒ cleared as by Unpublish; refused ⇒ kept, said on its row, asked again
+   *  on the pace; a Publish meanwhile wants the address again (no removal owed) */
+  let owedTimer = null, owedOut = null, stopped = false;   // owedOut: the ask out at the relay (a publish waits for it)
+  function retryOwed(delayMs = owedPaceMs) {
+    if (stopped || owedTimer || owedOut || !state.unpublishOwed || state.desired || !plugins) return;
+    owedTimer = setTimeout(async () => {
+      owedTimer = null;
+      if (!state.unpublishOwed || state.desired) return;
+      if (hold.held()) { retryOwed(); return; }
+      let done; owedOut = new Promise((r) => { done = r; });
+      try {
+        await plugins.frpUnpublish(PROXY_NAME);
+        if (state.unpublishOwed && !state.desired) { state.url = null; state.proto = null; state.at = null; state.error = null; delete state.unpublishOwed; log('[instance-url] its public address is down now (the relay confirmed its removal)'); save(); emit(); }
+      } catch (e) {
+        if (state.unpublishOwed && !state.desired) { state.unpublishOwed = { code: (e && e.code) || 'relay_unpublish_failed', since: state.unpublishOwed.since }; state.error = stillUp(e); save(); emit(); }
+      } finally { owedOut = null; done(); }
+      retryOwed();
+    }, delayMs);
+    if (owedTimer.unref) owedTimer.unref();
   }
 
   /** Boot: a mapping the user asked for must come back by itself. The relay /
@@ -185,6 +217,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
    *  a cycle waiting on its timer has its next try pulled forward, none running ⇒ a new cycle. */
   function restore({ retries = 6, delayMs = 20000, firstMs = 3000, ifFailed = false } = {}) {
     if (hold.held()) { restoreAsked = restoreAsked && !restoreAsked.ifFailed ? restoreAsked : { retries, delayMs, firstMs, ifFailed }; return; }   // r3174: the STRONGER ask kept (a vault unlock's «only if it failed» never replaces the start's)   // r3009: held — unread, not «not desired»: the restore runs at the lift
+    if (state.unpublishOwed && !state.desired) retryOwed(firstMs);   // r5334: a start retries a refused removal of its address
     if (!state.desired) return;
     if (ifFailed && !state.error) return;
     if (nextTry) { if (healTimer) { clearTimeout(healTimer); healTimer = setTimeout(nextTry, firstMs); } return; }
@@ -208,7 +241,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     };
     healTimer = setTimeout(attempt, firstMs);
   }
-  const stop = () => { if (healTimer) { clearTimeout(healTimer); healTimer = null; } nextTry = null; };
+  const stop = () => { if (healTimer) { clearTimeout(healTimer); healTimer = null; } nextTry = null; stopped = true; if (owedTimer) { clearTimeout(owedTimer); owedTimer = null; } };
 
   function registerRoutes(app) {
     app.get('/api/instance-url', (req, res) => res.json(status()));

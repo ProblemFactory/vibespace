@@ -3702,7 +3702,7 @@ class JobManager {
     const rows = listed();
     // 0) a row the release's engine wrote (no owner yet, its own «service: …» label, this machine's port): claimed once
     for (const rec of rows) {
-      if (rec.ownerJob || rec.hostId !== '__local__' || rec.targetHost || !/^service: /.test(String(rec.label || ''))) continue;
+      if (rec.ownerJob || rec.forwardGone || rec.orphan || rec.hostId !== '__local__' || rec.targetHost || !/^service: /.test(String(rec.label || ''))) continue;   // r5334: never a removed row
       const onPort = services.filter((j) => Number((j.ports || [])[0]) === Number(rec.remotePort));
       const job = onPort.find((j) => this._claimLabels(j).includes(rec.label)) || (onPort.length === 1 && onPort[0].clearedAt ? onPort[0] : null);
       if (!job) continue;
@@ -3767,7 +3767,7 @@ class JobManager {
   _isJobForward(job, rec) {
     if (!rec) return false;
     if (rec.ownerJob) return rec.ownerJob === job.id;   // r3228: the row says whose it is
-    if (job._pfId) return job._pfId === rec.id;
+    if (job._pfId) return job._pfId === rec.id && this._claimLabels(job).includes(rec.label);   // r5334: an ownerless row by its id is this job's only by the release's own mark — a person's forward on that port (a removed row revived) never
     return false;   // r3228: never found by a port alone (a row with no owner is a person's, or the release's until the reconcile claims it)
   }
   /** THE RELAY'S FACT (lane job-notice-dedupe, fb-666f37fd38 — the URL answered 200 while `poll` still said «NOT published —
@@ -3817,6 +3817,7 @@ class JobManager {
     const t = setTimeout(async () => {
       if (gen !== job._pubGen || job.state !== 'up' || !job._pfId) return;
       const pf = this.d.getPorts && this.d.getPorts();
+      try { if (!this._isJobForward(job, ((pf && pf.list && pf.list()) || []).find((r) => r.id === job._pfId))) return; } catch { return; }   // r5334: never a re-probe of a row that is not this service's
       let r = null;
       try { r = pf && pf.reprobe ? await pf.reprobe(job._pfId) : null; } catch (e) { this.d.log('[jobs] re-probe failed for', job.id, '—', e.message); }
       if (gen !== job._pubGen) return;
@@ -3931,7 +3932,7 @@ class JobManager {
   _stillUpOf(job) {   // the Ports list read at most once a second for every card (a snapshot of many jobs asks once)
     try {
       const now = Date.now();
-      if (!this._stillUpMemo || now - this._stillUpMemo.at > 1000) { const pf = this.d.getPorts && this.d.getPorts(); this._stillUpMemo = { at: now, owners: new Set(pf && typeof pf.list === 'function' ? pf.list().filter((r) => r.unpublishOwed && r.ownerJob).map((r) => r.ownerJob) : []) }; }
+      if (!this._stillUpMemo || now - this._stillUpMemo.at > 1000) { const pf = this.d.getPorts && this.d.getPorts(); this._stillUpMemo = { at: now, owners: new Set(pf && typeof pf.list === 'function' ? pf.list().filter((r) => r.unpublishOwed && (r.unpublishOwed.ownerJob || r.ownerJob)).map((r) => r.unpublishOwed.ownerJob || r.ownerJob) : []) }; }
       return this._stillUpMemo.owners.has(job.id);
     } catch { return false; }
   }
@@ -3946,7 +3947,7 @@ class JobManager {
       // r3228 (round whu7689zw): ONLY the row that says it is this job's (its id, else its owner) — never one found by a port. While the
       // list is held nothing is known and nothing is owed: the reconcile after the lift takes down every row whose service is not wanted
       let id = job._pfId || null;
-      try { const rows = (pf.list && pf.list()) || []; const rec = id ? rows.find((r) => r.id === id) : rows.find((r) => r.ownerJob === job.id); id = rec && (!rec.ownerJob || rec.ownerJob === job.id) ? rec.id : null; } catch { }
+      try { const rows = (pf.list && pf.list()) || []; const rec = id ? rows.find((r) => r.id === id) : rows.find((r) => r.ownerJob === job.id); id = rec && (rec.ownerJob ? rec.ownerJob === job.id : this._claimLabels(job).includes(rec.label)) ? rec.id : null; } catch { }   // r5334: an ownerless row is this service's only by the release's own mark
       if (!id) return;
       let refused = false;
       try { await pf.unpublish(id, { keepName: !forget }); } catch (e) { if (e && e.code === 'ports_unread') refused = true; }

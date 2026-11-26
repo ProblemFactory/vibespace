@@ -274,7 +274,7 @@
   "/api/plugins/manifests",
   "/api/plugins/manifests/:id/capabilities",
   "/api/port-forwards",
-    "/api/port-forwards/relay-files",
+  "/api/port-forwards/relay-files",
   "/api/runtime",
   "/api/search",
   "/api/search/status",

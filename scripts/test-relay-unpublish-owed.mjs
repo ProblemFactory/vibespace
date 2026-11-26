@@ -17,10 +17,16 @@
 //         hub's ⇒ never touched nor listed; no mark ⇒ the words row's list only; the instance URL's own file and a recorded one ⇒ nothing;
 //         only on a READ list with this instance's own client running
 //      REDS (anchored copies): the release's swallow (every refusal answered «confirmed»); the orphan judgement without its mark test
+//      P9–P14 (r5334): a REMOVED row whose removal is owed belongs to NOBODY — a person's new forward over a job's removed row carries
+//         no owner (P9), a service over a person's removed row is accepted and takes it (P10), each RED on bee1c1b8f's revival; ONE
+//         orphan row a file however often it is judged (P11); a never-published row's unpublish never asks the relay (P12); a removed
+//         machine's removals join the owed pass's one-out (P13); an orphan's mark read once more before its removal (P14)
+//   I  the instance address (src/server/instance-url.js): a refused removal is OWED and retried at a start (I1)
 //   D  the «Try again» route (src/server/ports-relay-routes.js) is a PERSON's door: a bearer refused (human_only), a cross-site press
 //      refused (cross_site), a same-origin press answered; the unmarked files' route answers the list
 //   J  an agent's service: the job card says its public address is still up (jobs-layout publishBlockedNote; JobManager _stillUpOf)
-//   L  nothing synchronous on the loop: the relay's removal, its listing and its hub-id read are fs.promises only
+//   L  the relay's removal, its listing and its hub-id read name no synchronous fs call in their own text (fs.promises; the relay's
+//      pid-file read is the release's, as at every status call)
 //   LAW 1 (r5135): each control is judged on a WITNESS that its plant was read (the stand-in's calls, the refused errno, the stand-in
 //   client alive); a plant never read is a NAMED SKIP («⊘ SKIP: …»), never a ✓ and never a ✗.
 // Run: node scripts/test-relay-unpublish-owed.mjs
@@ -56,6 +62,7 @@ const FRP = require(path.join(REPO, 'src/plugins/frp.js'));
 // (the stand-in ends by itself within a minute)
 const fakeClient = (dir) => { const k = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', 'frpc'], { stdio: 'ignore' }); KIDS.push(k); fs.writeFileSync(path.join(dir, 'frpc.pid'), String(k.pid)); return k; };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const execd = async (pid) => { for (let i = 0; i < 300; i++) { try { if (fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('frpc')) return true; } catch { } await tick(10); } return false; };   // the stand-in client exec'd
 const relayOf = ({ peek = {} } = {}) => {
   const dir = dirOf('frp'), dataDir = dirOf('data'); fs.mkdirSync(path.join(dir, 'proxies'), { recursive: true });
   const rec = { ...peek };
@@ -85,16 +92,16 @@ console.log('F the relay plugin\'s own verbs (src/plugins/frp.js)');
   const realUnlink = fs.promises.unlink, unl = []; fs.promises.unlink = function (q, ...a) { unl.push(String(q)); return realUnlink.call(this, q, ...a); };   // the witness: the removal ASKED of the folder
   let s; try { s = await r.verbs.unpublish('pf-stuck').then((x) => ({ x }), (e) => ({ code: e && e.code, msg: e && e.message })); } finally { fs.promises.unlink = realUnlink; }
   judged(unl.includes(path.join(r.proxies, 'pf-stuck.toml')), s.code === 'relay_unpublish_unremoved' && fs.existsSync(path.join(r.proxies, 'pf-stuck.toml')), 'F3 a removal the folder refuses THROWS by name (relay_unpublish_unremoved), the file stays', s);
-  const r3 = relayOf(); const k3 = fakeClient(r3.dir); await tick(150);
+  const r3 = relayOf(); const k3 = fakeClient(r3.dir); const e3 = await execd(k3.pid);
   fs.writeFileSync(path.join(r3.proxies, 'pf-held.toml'), mark(HUB) + '[[proxies]]\n');
   const h3 = await r3.verbs.unpublish('pf-held').then((x) => ({ x }), (e) => ({ code: e && e.code }));
   const l3 = await r3.verbs.proxyFiles();
-  judged(alive(k3.pid), ['relay_held_elsewhere', 'relay_owner_unknown'].includes(h3.code) && fs.existsSync(path.join(r3.proxies, 'pf-held.toml')) && l3.held === true && (l3.files || []).length === 0, 'F4 another instance\'s relay client holds the folder: the unpublish REFUSED by name, its file untouched; proxyFiles answers held, lists nothing', { h3, l3 });
-  const r4 = relayOf({ peek: { desiredUp: true } }); const k4 = fakeClient(r4.dir); await tick(150);
+  judged(e3 && alive(k3.pid), ['relay_held_elsewhere', 'relay_owner_unknown'].includes(h3.code) && fs.existsSync(path.join(r3.proxies, 'pf-held.toml')) && l3.held === true && (l3.files || []).length === 0, 'F4 another instance\'s relay client holds the folder: the unpublish REFUSED by name, its file untouched; proxyFiles answers held, lists nothing', { h3, l3 });
+  const r4 = relayOf({ peek: { desiredUp: true } }); const k4 = fakeClient(r4.dir); const e4 = await execd(k4.pid);
   fs.writeFileSync(path.join(r4.proxies, 'pf-own.toml'), mark(HUB) + '[[proxies]]\n');
   const realFetch = globalThis.fetch, fetched = []; globalThis.fetch = (u, o) => { fetched.push(String(u)); return realFetch(u, o); };   // the witness: the reload ASKED of the client
   let h4; try { h4 = await r4.verbs.unpublish('pf-own').then((x) => ({ x }), (e) => ({ code: e && e.code, msg: e && e.message })); } finally { globalThis.fetch = realFetch; }
-  judged(alive(k4.pid) && fetched.some((u) => u.includes('/api/reload')), h4.code === 'relay_unpublish_unreloaded' && !fs.existsSync(path.join(r4.proxies, 'pf-own.toml')), 'F5 this instance\'s own client that does not take the reload: THROWS by name (relay_unpublish_unreloaded) after the file is gone — never «ok» while it may still serve', h4);
+  judged(e4 && alive(k4.pid) && fetched.some((u) => u.includes('/api/reload')), h4.code === 'relay_unpublish_unreloaded' && !fs.existsSync(path.join(r4.proxies, 'pf-own.toml')), 'F5 this instance\'s own client that does not take the reload: THROWS by name (relay_unpublish_unreloaded) after the file is gone — never «ok» while it may still serve', h4);
   for (const k of [k3, k4]) { try { k.kill('SIGKILL'); } catch { } }
 }
 
@@ -158,8 +165,7 @@ console.log('P the forwards store keeps a public address that is still up as a r
   const rl = relay(), w = worldOf(PFm, [pub(4, { hostId: 'h1' }), pub(5, { hostId: 'h1', publicUrl: null, publicName: null }), pub(6)], rl);
   w.pf.onMachineUnpaired('h1', { now: true });
   const atReturn = w.pf.list().map((x) => x.id).sort().join(','), kept = w.pf.list().find((x) => x.id === pub(4).id);
-  for (let i = 0; i < 40 && rl.calls.length < 1; i++) await tick(10);
-  await tick(60);
+  for (let i = 0; i < 300 && (rl.calls.length < 1 || w.pf._owedBusy); i++) await tick(10);   // the witness: the relay asked, its pass ended (never a fixed sleep)
   const after = w.pf.list().find((x) => x.id === pub(4).id);
   rl.refuse = false; w.pf._healRetryAt.delete(pub(4).id); await w.pf._owedPass('a leg');
   judged(rl.calls.length >= 1, !!(atReturn === [pub(4).id, pub(6).id].sort().join(',') && kept && kept.machineGone && kept.forwardGone && after && after.unpublishOwed && after.unpublishOwed.code === 'relay_unpublish_unremoved' && !w.pf.list().find((x) => x.id === pub(4).id)),
@@ -234,6 +240,186 @@ console.log('P6–P8 a forward again over an owed removal, a protocol change, a 
   judged(rl.calls.length === 1, !!(r && r.confirmed && !w.pf.list().find((x) => x.id === pub(16).id)), 'P8 unpublishing a row that is only an owed removal: confirmed ⇒ the row LEAVES (never a row «still up» with nothing to remove)', { r, rows: w.pf.list() });
 }
 
+console.log('P9–P14 (r5334) a removed row belongs to nobody; one orphan row a file; no false «still up»; the machine\'s removals one out; the mark read again');
+const PFrevive = copyOf(PF_REL, [["    const gone = rec && rec.forwardGone ? rec : null;\n    if (gone) rec = null;\n", "    if (rec && rec.forwardGone) { delete rec.forwardGone; delete rec.machineGone; }   // RED: bee1c1b8f's revival, before the ownership checks\n    const gone = null;\n"]], 'p-revive').PortForwardManager;
+{
+  const scene = async (PFM) => {
+    const rl = relay(), w = worldOf(PFM, [pub(20, { ownerJob: 'jb-a', label: 'service: a', forwardGone: true, unpublishOwed: { code: 'relay_held_elsewhere', reason: 'r', since: 1 } })], rl);
+    const before = w.pf._state.forwards.find((x) => x.id === pub(20).id), read = !!(before && before.ownerJob === 'jb-a' && before.forwardGone);   // the plant: a job's removed row, read from its file
+    await w.pf.forward('__local__', 7120, {});   // a person adds a forward by hand on that machine and port
+    const rec = w.pf._state.forwards.find((x) => x.id === pub(20).id), disk = w.disk().find((x) => x.id === pub(20).id);
+    const refused = await w.pf.publish(pub(20).id).then(() => null, (e) => e && e.code);
+    const listed = w.pf.list().find((x) => x.id === pub(20).id);
+    return { read, rec: rec && { ownerJob: rec.ownerJob || null, label: rec.label, forwardGone: !!rec.forwardGone, owed: !!rec.unpublishOwed, publicUrl: rec.publicUrl || null, publicSub: rec.publicSub || null }, stillUpOf: listed && listed.unpublishOwed ? listed.unpublishOwed.ownerJob : null, diskOwner: disk ? disk.ownerJob || null : 'no row', refused };
+  };
+  const t = await scene(PFm);
+  judged(t.read, !!(t.rec && t.rec.ownerJob === null && t.rec.label === '' && !t.rec.forwardGone && t.rec.owed && t.rec.publicUrl && t.rec.publicSub === null && t.stillUpOf === 'jb-a' && t.diskOwner === null && t.refused === 'unpublish_owed'),
+    'P9 a person\'s new forward over a JOB\'s removed row whose removal is owed: the row is the PERSON\'s (no owner, the caller\'s label — on disk too), its owed removal and old address kept (publish refused until it is down) and still the JOB\'s on its card; the job\'s subdomain never passes to it', t);
+  const red = await scene(PFrevive);
+  judged(red.read, !!(red.rec && red.rec.ownerJob === 'jb-a'), 'P9 RED CONTROL (bee1c1b8f\'s revival, in a copy): the person\'s forward comes back as the job\'s row — the engine would take it', red);
+}
+{
+  const scene = async (PFM) => {
+    const rl = relay(), w = worldOf(PFM, [pub(21, { forwardGone: true, unpublishOwed: { code: 'relay_unpublish_unreloaded', reason: 'r', since: 1 } })], rl);
+    const before = w.pf._state.forwards.find((x) => x.id === pub(21).id), read = !!(before && before.forwardGone && !before.ownerJob);   // the plant: a person's removed row
+    const err = await w.pf.forward('__local__', 7121, { owner: 'jb-b', label: 'service: b' }).then(() => null, (e) => (e && e.code) || 'threw');
+    const rec = w.pf._state.forwards.find((x) => x.id === pub(21).id);
+    return { read, err, rec: rec && { ownerJob: rec.ownerJob || null, label: rec.label, forwardGone: !!rec.forwardGone, owed: !!rec.unpublishOwed, publicUrl: rec.publicUrl || null } };
+  };
+  const t = await scene(PFm);
+  judged(t.read, !!(t.err === null && t.rec && t.rec.ownerJob === 'jb-b' && t.rec.label === 'service: b' && !t.rec.forwardGone && t.rec.owed && t.rec.publicUrl),
+    'P10 a service starting over a PERSON\'s removed row whose removal is owed: accepted, the row is the service\'s; its owed removal and old address kept', t);
+  const red = await scene(PFrevive);
+  judged(red.read, !!(red.err === 'forward_not_owned' && red.rec && !red.rec.forwardGone && !red.rec.ownerJob), 'P10 RED CONTROL (bee1c1b8f\'s revival, in a copy): the service refused «already forwarded by hand» AND the person\'s removed forward a live row again (the heal sweep starts it)', red);
+}
+{
+  const scene = async (PFM) => {
+    const rl = relay({ files: [{ name: 'pf-stuck-orphan', mark: 'mine' }] }), w = worldOf(PFM, [], rl);   // this hub's file no row names; its removal refused
+    await w.pf._owedPass('a leg');
+    w.pf._orphansAt = 0; w.pf._healRetryAt.clear(); await w.pf._owedPass('five minutes on');
+    return { listed: rl.listed, calls: rl.calls.length, n: w.pf._state.forwards.filter((x) => x.orphan && x.publicName === 'pf-stuck-orphan').length };
+  };
+  const t = await scene(PFm);
+  judged(t.listed === 3 && t.calls >= 1, t.n === 1, 'P11 an orphan whose removal is refused, judged again five minutes on: exactly ONE row stands for its file', t);
+  const red = await scene(copyOf(PF_REL, [['      if (standing.has(f.name)) continue;', '      // RED: no guard on the row that stands']], 'p-dup').PortForwardManager);
+  judged(red.listed === 3, red.n === 2, 'P11 RED CONTROL (no guard on the standing row, in a copy): a SECOND row for the same file', red);
+}
+{
+  const scene = async (PFM) => {
+    const rl = relay({ code: 'relay_held_elsewhere' }), w = worldOf(PFM, [pub(22, { publicUrl: null, publicName: null, publicSub: null })], rl);
+    await w.pf.unpublish(pub(22).id, { now: true });
+    const rec = w.pf._state.forwards.find((x) => x.id === pub(22).id);
+    return { calls: rl.calls.length, owed: !!(rec && rec.unpublishOwed) };
+  };
+  const t = await scene(PFm);
+  ok(t.calls === 0 && !t.owed, 'P12 unpublishing a row that never had an address (another hub holds the relay): the relay never asked, no owed mark — never a false «still up» row', t);
+  const red = await scene(copyOf(PF_REL, [['    const mayBeUp = !!(rec.publicUrl || rec.publicName || rec.unpublishOwed || rec.forwardGone || rec.orphan);', '    const mayBeUp = true;   // RED: every row asked']], 'p-never').PortForwardManager);
+  judged(red.calls === 1, red.owed, 'P12 RED CONTROL (every row asked, in a copy): the held relay\'s refusal writes a «still up» row for an address that never was', red);
+}
+{
+  const scene = async (PFM) => {
+    const rl = relay(), w = worldOf(PFM, [pub(23, { hostId: 'h2' }), pub(24, { hostId: 'h2' }), pub(25, { forwardGone: true, unpublishOwed: { code: 'x', reason: 'r', since: 1 } })], rl);
+    rl.hang.add(pub(25).publicName);   // an older owed removal the relay never answers: still OUT past its bound
+    const pass = w.pf._owedPass('a leg');
+    for (let i = 0; i < 300 && rl.calls.length < 1; i++) await tick(10);
+    w.pf.onMachineUnpaired('h2', { now: true });
+    await pass; for (let i = 0; i < 300 && w.pf._owedBusy; i++) await tick(10);
+    return { calls: rl.calls.slice(), maxOut: rl.maxOut, kept: w.pf.list().filter((x) => x.hostId === 'h2' && x.forwardGone).length };
+  };
+  const t = await scene(PFm);
+  judged(t.calls.length >= 1, t.maxOut === 1 && t.calls.length === 1 && t.kept === 2, 'P13 a machine removed while an owed removal is still out: its addresses wait in the owed pass — ONE out at the relay, their rows kept, owed', t);
+  const red = await scene(copyOf(PF_REL, [["r.forwardGone)) this._owedPass('a removed machine')", "r.forwardGone)) (async () => { for (const rec of this._state.forwards.filter((r) => r.hostId === hostId && r.forwardGone)) await this._relayUnpublish(rec); })()   // RED: its own removals beside the pass\n    ; if (0) this._owedPass('a removed machine')"]], 'p-beside').PortForwardManager);
+  judged(red.calls.length >= 1, red.maxOut === 2, 'P13 RED CONTROL (the machine\'s own removals beside the pass, in a copy): a SECOND removal out at the relay', red);
+}
+{
+  const scene = async (PFM) => {
+    const rl = relay({ files: [{ name: 'pf-now-theirs', mark: 'other' }] }); rl.refuse = false;
+    const w = worldOf(PFM, [{ id: 'pf-orphan-pf-now-theirs', hostId: null, remotePort: null, label: 'pf-now-theirs', orphan: true, publicName: 'pf-now-theirs', unpublishOwed: { code: 'relay_orphan', reason: 'r', since: 1 } }], rl);
+    w.pf._orphansAt = Date.now() + 60000;   // the folder's own judgement not due: only the re-read before the removal reads it
+    const read = !!w.pf._state.forwards.find((x) => x.orphan && x.publicName === 'pf-now-theirs');   // the plant: the orphan row, read from its file
+    await w.pf._owedPass('a leg');
+    return { read, listed: rl.listed, calls: rl.calls.length, rows: w.pf.list().map((x) => x.id) };
+  };
+  const t = await scene(PFm);
+  judged(t.read, t.listed === 1 && t.calls === 0 && !t.rows.length, 'P14 an orphan whose file carries ANOTHER hub\'s mark when its removal is due: read once more, never removed, its row leaves', t);
+  const red = await scene(copyOf(PF_REL, [["        const still = rec.orphan ? await this._orphanStill(rec) : 'mine';", "        const still = 'mine';   // RED: the removal trusts the old judgement"]], 'p-trust').PortForwardManager);
+  judged(red.read, red.listed === 0 && red.calls === 1, 'P14 RED CONTROL (the old judgement trusted, in a copy): another hub\'s file is asked to be removed', red);
+}
+
+{
+  const scene = async (PFM) => {
+    const rl = relay(), w = worldOf(PFM, [pub(26, { hostId: 'h3' }), pub(27, { hostId: 'h3' }), pub(28, { forwardGone: true, unpublishOwed: { code: 'x', reason: 'r', since: 1 } })], rl);
+    rl.refuse = false;   // every removal answers (after its 20 ms): the pass is busy while the machine goes
+    const pass = w.pf._owedPass('a leg');
+    for (let i = 0; i < 300 && rl.calls.length < 1; i++) await tick(2);
+    const busy = !!w.pf._owedBusy;   // the plant: the machine removed WHILE a pass runs
+    w.pf.onMachineUnpaired('h3', { now: true });
+    await pass; for (let i = 0; i < 300 && w.pf._owedBusy; i++) await tick(10);   // the «once more» round is the awaited pass's own
+    return { busy, calls: rl.calls.slice(), maxOut: rl.maxOut, left: w.pf.list().map((x) => x.id) };
+  };
+  const t = await scene(PFm);
+  judged(t.busy, t.calls.length === 3 && t.calls[0] === pub(28).publicName && t.maxOut === 1 && !t.left.length, 'P13 a machine removed WHILE a pass runs: that pass\'s «once more» round asks its addresses, ONE out at a time; confirmed ⇒ their rows leave', t);
+  const red = await scene(copyOf(PF_REL, [['    if (this._owedBusy) { this._owedAgain = true; return; }', '    if (this._owedBusy) return;   // RED: an ask while a pass runs is lost']], 'p-lost').PortForwardManager);
+  judged(red.busy, red.calls.length === 1 && red.left.length === 2, 'P13 RED CONTROL (an ask while a pass runs lost, in a copy): the removed machine\'s addresses wait for the next sweep', red);
+}
+
+console.log('I the instance address: a refused removal is owed and retried at a start (r5334)');
+{
+  const IU_REL = 'src/server/instance-url.js';
+  const scene = async (IU) => {
+    const d = dirOf('iurl'), f = path.join(d, 'instance-url.json');
+    fs.writeFileSync(f, JSON.stringify({ desired: true, auto: false, sub: 'made-sub', url: 'https://made-sub.relay.example.test/', proto: 'http', at: 1, error: null }));
+    const asked = []; let refuse = true;
+    const plugins = { relayStatus: () => ({ configured: true }), frpUnpublish: async (n) => { asked.push(n); await tick(5); if (refuse) throw Object.assign(new Error('a made-up refusal'), { code: 'relay_held_elsewhere' }); return { ok: true, confirmed: true }; } };
+    const mk = () => IU.create({ dataDir: d, plugins, port: 1, serverSetting: () => null, log: () => { } });
+    const iu = mk(); const r1 = await iu.unpublish(); const owed1 = !!JSON.parse(fs.readFileSync(f, 'utf8')).unpublishOwed; iu.stop();
+    refuse = false;
+    const iu2 = mk(); iu2.restore({ firstMs: 5 });   // a START over the same file: the owed mark is its record
+    for (let i = 0; i < 60 && (asked.length < 2 || iu2.status().published); i++) await tick(10);
+    const st = iu2.status(), disk = JSON.parse(fs.readFileSync(f, 'utf8')); iu2.stop();
+    for (const x of [iu, iu2]) { try { x._hold && x._hold.stop && x._hold.stop(); } catch { } }
+    return { asked: asked.length, r1: { error: !!(r1 && r1.error), code: r1 && r1.code }, owed1, published: st.published, error: st.error, diskOwed: !!disk.unpublishOwed, diskUrl: disk.url || null };
+  };
+  const [t, red] = await Promise.all([scene(require(path.join(REPO, IU_REL))), scene(copyOf(IU_REL, [['    if (state.unpublishOwed && !state.desired) retryOwed(firstMs);', '    // RED: a start does not retry']], 'iu-no-retry'))]);
+  judged(t.asked >= 1 && t.r1.code === 'relay_held_elsewhere', !!(t.asked >= 2 && t.r1.error && t.owed1 && t.published === false && t.error === null && !t.diskOwed && !t.diskUrl),
+    'I1 the instance address\'s refused removal: kept, said and OWED on disk; a start asks the relay again — confirmed ⇒ the address cleared', t);
+  judged(red.asked >= 1 && red.r1.code === 'relay_held_elsewhere', !!(red.asked === 1 && red.published === true && red.diskOwed), 'I1 RED CONTROL (no retry at a start, in a copy): the address stays up, owed, until someone presses Unpublish again', red);
+}
+{
+  const IU_REL = 'src/server/instance-url.js';
+  const world = (IU, { refusals = 2, slowMs = 5, paceMs = 20 } = {}) => {
+    const d = dirOf('iurl'), f = path.join(d, 'instance-url.json');
+    fs.writeFileSync(f, JSON.stringify({ desired: true, auto: false, sub: 'made-sub', url: 'https://made-sub.relay.example.test/', proto: 'http', at: 1, error: null }));
+    const ev = [];
+    const plugins = { relayStatus: () => ({ configured: true }),
+      frpUnpublish: async () => { ev.push('unpublish+'); await tick(slowMs); ev.push('unpublish-'); if (ev.filter((x) => x === 'unpublish-').length <= refusals) throw Object.assign(new Error('a made-up refusal'), { code: 'relay_unpublish_unreloaded' }); return { ok: true, confirmed: true }; },
+      frpPublish: async () => { ev.push('publish'); return { url: 'https://made-sub.relay.example.test/', proto: 'http' }; } };
+    const iu = IU.create({ dataDir: d, plugins, port: 1, serverSetting: () => null, log: () => { }, owedPaceMs: paceMs });
+    return { d, f, ev, iu, disk: () => JSON.parse(fs.readFileSync(f, 'utf8')) };
+  };
+  const done = (w) => { try { w.iu.stop(); } catch { } try { w.iu._hold && w.iu._hold.stop && w.iu._hold.stop(); } catch { } };
+  // I2: refused at the press, refused again at the pace, confirmed at the next — the pace re-arms after a refusal
+  const pace = async (IU) => {
+    const w = world(IU); await w.iu.unpublish();
+    for (let i = 0; i < 60 && (w.ev.filter((x) => x === 'unpublish-').length < 3 || w.iu.status().published); i++) await tick(10);
+    const r = { asks: w.ev.filter((x) => x === 'unpublish-').length, published: w.iu.status().published, owed: !!w.disk().unpublishOwed }; done(w); return r;
+  };
+  const [t2, red2] = await Promise.all([pace(require(path.join(REPO, IU_REL))), pace(copyOf(IU_REL, [['      } finally { owedOut = null; done(); }\n      retryOwed();\n', '      } finally { owedOut = null; done(); }\n      // RED: a refused retry never asks again\n']], 'iu-no-rearm'))]);
+  judged(t2.asks >= 2, t2.asks === 3 && t2.published === false && !t2.owed, 'I2 the instance address on the PACE: a refused retry is asked again; confirmed ⇒ cleared', t2);
+  judged(red2.asks >= 2, red2.asks === 2 && red2.published === true && red2.owed, 'I2 RED CONTROL (no re-arm after a refused retry, in a copy): owed for good', red2);
+  // I3: a Publish while a retry is OUT at the relay waits for it: its file is written after the removal, never removed under it
+  const race = async (IU) => {
+    const w = world(IU, { refusals: 1, slowMs: 60, paceMs: 5 }); await w.iu.unpublish();
+    for (let i = 0; i < 200 && w.ev.length < 3; i++) await tick(2);   // the pace's retry is OUT (its removal started)
+    const out = w.ev[w.ev.length - 1] === 'unpublish+';
+    const pub = await w.iu.publish({}).then((x) => !!(x && x.url), (e) => 'refused: ' + (e && e.message));
+    await tick(80);
+    const r = { out, pub, ev: w.ev.slice(), published: w.iu.status().published, owed: !!w.disk().unpublishOwed }; done(w); return r;
+  };
+  const [t3, red3] = await Promise.all([race(require(path.join(REPO, IU_REL))), race(copyOf(IU_REL, [['    if (owedOut) await owedOut;\n', '    // RED: a retry out is not waited for\n']], 'iu-race'))]);
+  judged(t3.out, t3.pub === true && t3.ev.join(',') === 'unpublish+,unpublish-,unpublish+,unpublish-,publish' && t3.published === true && !t3.owed, 'I3 a Publish while a retry is OUT: it waits for the removal, then writes its file — published, nothing owed', t3);
+  judged(red3.out, red3.ev.indexOf('publish') < red3.ev.lastIndexOf('unpublish-'), 'I3 RED CONTROL (the retry out not waited for, in a copy): the publish writes its file while the removal is still out — the removal lands after it', red3);
+}
+
+console.log('J2 the jobs engine never takes a person\'s forward by the job\'s own row id (r5334)');
+{
+  const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+  const JMred = copyOf('src/jobs.js', [["    if (job._pfId) return job._pfId === rec.id && this._claimLabels(job).includes(rec.label);", "    if (job._pfId) return job._pfId === rec.id;   // RED: bee1c1b8f's acceptance by id alone"], ["id = rec && (rec.ownerJob ? rec.ownerJob === job.id : this._claimLabels(job).includes(rec.label)) ? rec.id : null; } catch { }", "id = rec && (!rec.ownerJob || rec.ownerJob === job.id) ? rec.id : null; } catch { }   // RED"]], 'jobs-by-id').JobManager;
+  const scene = async (K) => {
+    const job = { id: 'jb-j', kind: 'service', name: 'web', _pfId: 'pf-__local__-7130', publish: true, ports: [7130] };
+    const person = { id: 'pf-__local__-7130', hostId: '__local__', remotePort: 7130, label: '', ownerJob: null }, release = { ...person, label: 'service: web' };
+    const asked = [];
+    const ctx = Object.create(K.prototype); ctx.labelOf = (j) => j.name; ctx._touch = () => { }; ctx._endUrlCheck = () => { }; ctx.d = { getPorts: () => ({ list: () => [person], unpublish: async (id) => { asked.push('unpublish ' + id); }, unforward: async (id) => { asked.push('unforward ' + id); } }), log: () => { } };
+    const own = { person: K.prototype._isJobForward.call(ctx, job, person), release: K.prototype._isJobForward.call(ctx, job, release) };
+    await K.prototype._teardownPublish.call(ctx, job, {});
+    return { own, asked };
+  };
+  const t = await scene(JobManager);
+  ok(t.own.person === false && t.own.release === true && !t.asked.length, 'J2 a person\'s forward on the job\'s old port (its row id the job\'s): never the job\'s — its stop removes nothing; the release\'s own row (its «service: …» label) still is', t);
+  const red = await scene(JMred);
+  ok(red.own.person === true && red.asked.length === 2, 'J2 RED CONTROL (acceptance by the row id alone, in a copy): the job\'s stop removes the person\'s forward', red);
+}
+
 console.log('D the «Try again» route is a person\'s door');
 {
   const handlers = {}; const app = { post: (p, f) => { handlers['POST ' + p] = f; }, get: (p, f) => { handlers['GET ' + p] = f; } };
@@ -266,7 +452,7 @@ console.log('L nothing synchronous on the loop in the relay\'s removal, listing 
   const F = srcOf('src/plugins/frp.js');
   const block = (a, b) => { const i = F.indexOf(a), j = F.indexOf(b, i + 1); return i >= 0 && j > i ? F.slice(i, j) : null; };
   const un = block('      async unpublish(name) {', '      async proxyFiles() {'), ls = block('      async proxyFiles() {', '        return { held: false, own: !!ownRunPid(), folder: dir, files };'), hid = block('    const hubIdNow = async () => {', '    const OWNER_RE =');
-  ok(!!un && !!ls && !!hid && ![un, ls, hid].some((s) => /\b[a-zA-Z]+Sync\(/.test(s.replace(/frpDaemonPid|ownRunPid|heldElsewhere/g, ''))), 'L the relay\'s removal, its listing and its hub-id read call no synchronous fs (fs.promises only)', { un: !!un, ls: !!ls, hid: !!hid });
+  ok(!!un && !!ls && !!hid && ![un, ls, hid].some((s) => /\b[a-zA-Z]+Sync\(/.test(s)), 'L the relay\'s removal, its listing and its hub-id read name no synchronous fs call in their own text (fs.promises; the pid-file read is the release\'s)', { un: !!un, ls: !!ls, hid: !!hid });
   ok((F.split('const toml = ownerLine(await hubIdNow()) + `[[proxies]]').length - 1) === 2, 'L both proxy files this instance writes carry the OWNER MARK (this hub\'s id) on their first line');
 }
 

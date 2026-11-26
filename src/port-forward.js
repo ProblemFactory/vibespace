@@ -346,7 +346,7 @@ class PortForwardManager {
       ownerGone: gone(r.ownerJob),   // r3327: its background job is gone (the engine can say so) — the Ports panel says it; unknown is never «gone»
       // B-73c4: a public address whose removal the relay has not CONFIRMED (the row stays until it is), and the rows that are nothing
       // else: a forward already removed (forwardGone; its machine removed: machineGone) or a relay file of this hub no forward names (orphan)
-      unpublishOwed: r.unpublishOwed ? { code: r.unpublishOwed.code || null, reason: r.unpublishOwed.reason || '', since: r.unpublishOwed.since || null } : null,
+      unpublishOwed: r.unpublishOwed ? { code: r.unpublishOwed.code || null, reason: r.unpublishOwed.reason || '', since: r.unpublishOwed.since || null, ownerJob: r.unpublishOwed.ownerJob || null } : null,
       forwardGone: !!r.forwardGone, machineGone: !!r.machineGone, orphan: !!r.orphan,
     }));
   }
@@ -593,7 +593,12 @@ class PortForwardManager {
     const isLan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost';
     const key = isLan ? `${targetHost}:${remotePort}` : String(remotePort);
     let rec = this._state.forwards.find((r) => r.hostId === hostId && r.remotePort === remotePort && (r.targetHost || '') === (isLan ? targetHost : ''));
-    if (rec && rec.forwardGone) { delete rec.forwardGone; delete rec.machineGone; }   // B-73c4: a forward again; its OLD address's removal stays owed (publish waits for it)
+    // B-73c4 (r5334): a REMOVED row whose old address's removal is still owed is OWNED BY NOBODY — never the ownership checks' row (a
+    // person's new forward is never a service's to take, a service is never refused over a forward a person removed): set aside here,
+    // revived AFTER them as a new row would be — the CALLER's owner (none for a person) and label; its owed removal and its old address
+    // stay, so a publish still waits for them
+    const gone = rec && rec.forwardGone ? rec : null;
+    if (gone) rec = null;
     // r3228 (round whu7689zw): OWNERSHIP IS WRITTEN ON THE ROW — the jobs engine (`owner` = a job id) makes, keeps or takes only a row
     // that says it is that job's service; a row a person made carries no owner and the engine never takes it. A row the release's
     // engine wrote (no owner yet) is claimed once by the release's own mark on it: its label «service: <that job's name>» (`claim`)
@@ -605,6 +610,14 @@ class PortForwardManager {
     if (owner && rec && !rec.ownerJob) {
       if (!(Array.isArray(claim) && claim.includes(rec.label))) throw Object.assign(new Error(`port ${remotePort} is already forwarded in the Ports panel by hand — that forward is not this service's: publish it there, or remove it and start the service again`), { code: 'forward_not_owned', status: 409 });
       rec.ownerJob = owner; this._persist({ now });
+    }
+    if (gone) {
+      rec = gone; const was = rec.ownerJob || null;
+      delete rec.forwardGone; delete rec.machineGone; if (owner) rec.ownerJob = owner; else delete rec.ownerJob; rec.label = label;
+      // a NEW owner: the old one's name preferences (its subdomain, port, protocol choice) never pass to it; the old address — owed — stays
+      // its old owner's (its card still says it is up)
+      if ((rec.ownerJob || null) !== was) { rec.publicSub = null; rec.publicPort = null; delete rec.protoOverride; if (rec.unpublishOwed && was) rec.unpublishOwed.ownerJob = was; }
+      this._persist({ now });
     }
     if (!rec) {
       rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}), ...(owner ? { ownerJob: owner } : {}) };
@@ -764,7 +777,10 @@ class PortForwardManager {
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) return;
     const gen0 = this._pubGen.get(id) || 0;
-    if (!(await this._relayUnpublish(rec, { bounded: false }))) { this._persist({ now }); this._emit(); return { ok: true, owed: rec.unpublishOwed }; }   // B-73c4: not confirmed — the address is still up: KEPT, owed
+    // r5334: the relay is asked only when this row MAY have a public address (one recorded, an owed removal, a removed row, an orphan) —
+    // never for a row that was never published: a refusal there wrote a false «still up» row that nothing could clear
+    const mayBeUp = !!(rec.publicUrl || rec.publicName || rec.unpublishOwed || rec.forwardGone || rec.orphan);
+    if (mayBeUp && !(await this._relayUnpublish(rec, { bounded: false }))) { this._persist({ now }); this._emit(); return { ok: true, owed: rec.unpublishOwed }; }   // B-73c4: not confirmed — the address is still up: KEPT, owed
     if (rec.forwardGone || rec.orphan) { this._settleConfirmed(rec); this._persist({ now }); this._emit(); return { ok: true, confirmed: true }; }   // B-73c4: confirmed — a row that was only an owed removal leaves
     // r3287: a publish that landed while this unpublish waited (a start in the same window) stands — its address is never cleared under it
     if ((this._pubGen.get(id) || 0) !== gen0) {   // r3327: said to the caller (a person's Unpublish press reads it), never a silent success
@@ -952,9 +968,9 @@ class PortForwardManager {
     this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId || r.forwardGone);   // B-73c4: a public address still up keeps its row
     this._persist({ now });   // r5036: a machine's REMOVAL by a person lands at once (its callers pass now); the unpair at a lift rides the writer
     this._emit();
-    // B-73c4: the removed machine's public addresses, each asked of the relay ONE at a time (off the loop); a confirmed one's row leaves
-    const owedRows = this._state.forwards.filter((r) => r.hostId === hostId && r.forwardGone);
-    if (owedRows.length) (async () => { for (const rec of owedRows) { if (await this._relayUnpublish(rec)) this._settleConfirmed(rec); } this._persist(); this._emit(); })().catch((e) => this.log('[ports] a removed machine\'s relay removals: ' + ((e && e.message) || e)));
+    // B-73c4 (r5334): the removed machine's public addresses are THE OWED PASS's (oldest first, ONE out at a time, each bounded, off the
+    // loop) — never a removal beside one still out; a pass already running takes them in the round it runs next; a confirmed one's row leaves
+    if (this._state.forwards.some((r) => r.hostId === hostId && r.forwardGone)) this._owedPass('a removed machine').catch((e) => this.log('[ports] a removed machine\'s relay removals: ' + ((e && e.message) || e)));
   }
 
   /** B-73c4 (主开发 r5159 / r5162): ONE removal of a row's public address — CONFIRMED by the relay (its file gone and its reload answered:
@@ -1001,7 +1017,8 @@ class PortForwardManager {
    *  pace (the heal sweep's); then this home's relay folder judged (law 4): only on a READ list and with this instance's own relay client
    *  running. Never on the loop: every relay call and folder read is the relay's async verbs */
   async _owedPass(why) {
-    if (this._owedBusy || this._hold.held() || !this.plugins) return;
+    if (this._owedBusy) { this._owedAgain = true; return; }   // r5334: asked while a pass runs (a removed machine): one more round after it
+    if (this._hold.held() || !this.plugins) return;
     this._owedBusy = true;
     let changed = false;
     try {
@@ -1010,6 +1027,11 @@ class PortForwardManager {
       for (const rec of due) {
         if (this._unpubOut > 0) break;   // ONE out: a removal the relay has not answered yet (past its bound too) is still out — nothing more is asked
         if (rec.orphan && this._namedFiles(rec).has(rec.publicName)) { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; continue; }   // a row names that file now: no longer an orphan, never removed
+        const still = rec.orphan ? await this._orphanStill(rec) : 'mine';   // r5334: an orphan's mark read once more, just before its removal
+        if (rec.orphan && (!this._state.forwards.includes(rec) || this._namedFiles(rec).has(rec.publicName))) { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; continue; }   // the re-read awaited: a row may name its file now — never removed
+        if (still === 'drop') { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; this.log(`[ports] the relay file ${rec.publicName} no longer carries this hub's mark — never removed; its row leaves`); continue; }
+        if (still === 'wait') { this._healRetryAt.set(rec.id, Date.now() + 5 * 60000); continue; }   // its folder not read now: nothing removed, asked on the pace
+        if (this._unpubOut > 0) break;   // (the re-read awaited: a removal asked meanwhile is out — still ONE)
         this._healRetryAt.set(rec.id, Date.now() + 5 * 60000);
         if (await this._relayUnpublish(rec)) this._settleConfirmed(rec);
         changed = true;
@@ -1018,6 +1040,17 @@ class PortForwardManager {
     } catch (e) { this.log(`[ports] ${why}: the owed relay removals — ${(e && e.message) || e}`); }
     finally { this._owedBusy = false; }
     if (changed) { this._persist(); this._emit(); }
+    if (this._owedAgain) { this._owedAgain = false; await this._owedPass(why + ', once more'); }
+  }
+  /** r5334: an orphan's relay file read once more just before its removal (the judgement may be minutes old, or from before a restart):
+   *  still THIS hub's mark, or the file gone already (its removal's reload confirms the address down) ⇒ 'mine'; another hub's mark or none
+   *  now ⇒ 'drop' (never removed: only its row leaves); the folder not read (held, not this instance's client, no listing) ⇒ 'wait' */
+  async _orphanStill(rec) {
+    let pf = null;
+    try { pf = typeof this.plugins.frpProxyFiles === 'function' ? await this.plugins.frpProxyFiles() : null; } catch { pf = null; }
+    if (!pf || pf.held || !pf.own) return 'wait';
+    const f = (pf.files || []).find((x) => x && x.name === rec.publicName);
+    return !f || f.mark === 'mine' ? 'mine' : 'drop';
   }
   /** B-73c4 (r5162 item 8): this home's relay folder, by OWNER MARK. A file carrying THIS hub's mark that no row names becomes an OWED row
    *  (an orphan: its removal asked like any owed one); a file with ANOTHER hub's mark is never touched nor listed; a file with NO mark and no
@@ -1033,9 +1066,11 @@ class PortForwardManager {
     try { pf = await this.plugins.frpProxyFiles(); } catch { return quiet(); }   // no relay, or a relay with no listing: nothing judged
     if (!pf || pf.held || !pf.own) return quiet();   // another instance's client holds the folder, or this instance's own client is not running
     const named = this._namedFiles();
+    const standing = new Set(this._state.forwards.filter((r) => r.orphan).map((r) => r.publicName));   // r5334: the orphans already rows
     let added = false; const unmarked = [];
     for (const f of pf.files || []) {
       if (!f || !f.name || named.has(f.name) || f.name === INSTANCE_PROXY) continue;
+      if (standing.has(f.name)) continue;   // r5334: its row stands already (a removal refused, or not asked yet) — never a second row
       if (f.mark === 'mine' && !/^[\w-]{1,60}$/.test(f.name)) { unmarked.push(f.name); continue; }   // a name the relay never writes: a hand's — listed, never touched
       if (f.mark === 'mine') {
         this._state.forwards.push({ id: 'pf-orphan-' + f.name, hostId: null, remotePort: null, label: f.name, orphan: true, publicName: f.name, unpublishOwed: { code: 'relay_orphan', reason: 'no forward of this instance names this public address', since: Date.now() } });
