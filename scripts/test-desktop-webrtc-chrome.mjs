@@ -904,6 +904,7 @@ console.log('⑬ THE ESTIMATE: the agent reads its own transport-cc — werift 0
   // THE SLOW SENDER IS WAITED OUT, NEVER PASSED (the census r2's placement, kept — r4707): a sender sending LESS (what a loaded box makes of
   // it), planted as a 1.2 Mbps fixture: the wait for the floor runs out (its named line above), so the leg is RED on it — while 6b9eddd32's
   // ratio-only judge (the floor dropped) would have passed it
+  // (its run is EXPECTED to run out: the «…did not come in 60 s…» line it prints is the placement's own, judged by the ok below)
   const e1 = await estimateRun(1200);
   ok(e1.up && !e1.reached && e1.ratioOnly, `PLACED ⑬: the sender at 1.2 Mbps is waited out — never three samples at ≥ ${FLOOR} kbps in the 60 s bound (${e1.tail.map((x) => x.join('/')).join(', ')}): the leg is RED on it, while the ratio alone (6b9eddd32) would pass it`, e1.seen);
 }
