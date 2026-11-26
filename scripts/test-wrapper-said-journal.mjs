@@ -14,7 +14,8 @@
 //  ⑥ THE CODEX WRAPPER: every record it says is in the file when said, its fence the same; RED: its journal cut
 //  ⑦ THE HUB'S GATE (src/server/session-stdout.js setupSessionPty `fence`, the REAL claude consumer): what the survivor said between
 //     its catch-up and its connect (dtach dropped it) reaches the consumer FIRST, the live lines once, the fence never; RED: the gap
-//     not fed ⇒ that line is lost; the bound: no fence ⇒ the held bytes are fed as they came, said
+//     not fed ⇒ that line is lost; the bound: no fence ⇒ the held bytes are fed as they came, said; (r4664) the SAME gate with the
+//     REAL codex consumer (src/server/stdout/codex-events.js), the line placed by order the same way, and its RED
 //  ⑧ THE GAP, PURE (src/said-journal.js fenceGap): a torn first line, the transport records, the preamble, a line not in the file
 //  ⑨ THE CENSUS: every ring add and every stdout write of both wrappers is classified — a said line goes through the journal; a new
 //     site is red BY NAME (planted controls)
@@ -257,7 +258,7 @@ setInterval(() => {}, 1e3);
     ok(r.thread === 'th-said-1' && r.anyOut && !r.fence, 'RED: its journal cut ⇒ a record is said with nothing of it in the file (the 1 s timer alone), and no fence is answered', r);
   }
 
-  console.log('— ⑦ THE HUB\'S GATE (session-stdout setupSessionPty `fence`, the REAL claude consumer)');
+  console.log('— ⑦ THE HUB\'S GATE (session-stdout setupSessionPty `fence`, the REAL claude consumer — and the REAL codex consumer)');
   {
     const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
     const { ptyListeners } = require(path.join(REPO, 'src/pty-duck.js'));
@@ -267,8 +268,11 @@ setInterval(() => {}, 1e3);
       return mod.create({ rootDir: dd, BUFFERS_DIR: path.join(dd, 'buffers'), META_DIR: path.join(dd, 'meta'), DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(dd, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine,
         checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null,
         getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(), getPages: () => null, getPermissionRules: () => null, agentEnv: () => ({}) }); };
-    const rec = (k) => JSON.stringify({ type: 'system', subtype: 'informational', level: 'info', content: `GAP-${k}` });
-    const run = async (so, { fence = true, answer = true, split = false } = {}) => {
+    const recClaude = (k) => JSON.stringify({ type: 'system', subtype: 'informational', level: 'info', content: `GAP-${k}` });
+    // r4664: the codex consumer's own shape (src/server/stdout/codex-events.js parses the codex wrapper's records): an agent message
+    const recCodex = (k) => JSON.stringify({ type: 'event_msg', timestamp: `2026-11-26T00:00:0${k}.000Z`, payload: { type: 'agent_message', message: `GAP-${k}` } });
+    const run = async (so, { fence = true, answer = true, split = false, backend = 'claude' } = {}) => {
+      const rec = backend === 'codex' ? recCodex : recClaude;
       const dir = fs.mkdtempSync(path.join(HOME, 'gate-')), file = path.join(dir, 'w.buf');
       fs.writeFileSync(file, rec(0) + '\n');                                   // what the catch-up read
       const rb = Object.assign(BR.restoreBufOf(file, fs.readFileSync(file)), { fence: true });   // a journaled wrapper's read (its sidecar adverts caps.fence)
@@ -276,7 +280,7 @@ setInterval(() => {}, 1e3);
       const Ld = ptyListeners(), Le = ptyListeners(), writes = [];
       const duck = { pid: 0, onData: (cb) => Ld.on(cb), onExit: (cb) => Le.on(cb), write(s) { writes.push(String(s)); }, resize() { }, kill() { } };
       const sid = 'w-fence7';
-      const sess = { mode: 'chat', backend: 'claude', buffer: rec(0) + '\n', sockName: null, clients: new Set(), _normalizer: createMessageManager('claude', sid) };
+      const sess = { mode: 'chat', backend, buffer: rec(0) + '\n', sockName: null, clients: new Set(), _normalizer: createMessageManager(backend, sid) };
       const warns = [], w0 = console.warn; console.warn = (...a) => { warns.push(a.map(String).join(' ')); };
       let threw = null;
       try {
@@ -307,6 +311,13 @@ setInterval(() => {}, 1e3);
     ok(!nf.threw && !nf.asked && nf.n[1] === 1, 'a wrapper with no fence (its sidecar adverts none): no ask, the live lines as before', nf);
     ok(!sp.threw && sp.asked && sp.n.join() === '1,1,1' && sp.at[0] < sp.at[1] && sp.at[1] < sp.at[2] && !sp.fence, `a fence SPLIT across two chunks is found (the previous tail + the new bytes), the order kept (${sp.at.join(' < ')})`, sp);
     ok(!bd.threw && bd.asked && bd.n[1] === 1 && bd.n[0] === 0 && bd.warns.some((w) => /no fence came back in 50 ms/.test(w)), 'the bound: no fence back ⇒ the held bytes are fed as they came, and that is SAID', bd);
+    // r4664: THE SAME GATE WITH THE CODEX CONSUMER — the gate is session-stdout's chat-mode code with no backend branch; the line said
+    // between the catch-up and the connect is placed by ORDER as above (appended after the catch-up's read, before the connect)
+    const gx = await run(soOf(SO, 'gx'), { backend: 'codex' });
+    const rx = await run(soOf(require(M.write('src/server/session-stdout.js', anchored(soSrc, '      else if (gap.lost) {', '      else if (false) {', 'gap-not-fed codex'), 'gap-not-fed-codex')), 'rx'), { backend: 'codex' });
+    ok(!gx.threw && gx.asked && gx.n.join() === '1,1,1' && gx.at[0] < gx.at[1] && gx.at[1] < gx.at[2] && !gx.fence,
+      `THE CODEX CONSUMER (src/server/stdout/codex-events.js): what the survivor said between the catch-up and the connect reaches it FIRST (${gx.at.join(' < ')}), each live line once, the fence record never`, gx);
+    ok(!rx.threw && rx.n[0] === 0 && rx.n[1] === 1 && rx.n[2] === 1, 'RED (the codex consumer): the gap not fed ⇒ the line said between the catch-up and the connect never reaches the conversation', rx);
   }
 
   console.log('— ⑧ THE GAP, PURE (src/said-journal.js fenceGap)');
