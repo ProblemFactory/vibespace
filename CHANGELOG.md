@@ -23,6 +23,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a restart, when the check of which of two windows of one conversation is still running fails, VibeSpace keeps both open instead of closing the older one.
 - Removing an account from a Codex pool now moves the pool to a member that is signed in, instead of leaving it on the removed account.
 - In For you, sign-in notices are grouped under «Accounts and sign-ins», and a long-lived token's identity notice no longer offers a reply it cannot take.
+- A file copied between machines or across disks, uploaded over WebDAV or exported from a Task Group is now on disk before VibeSpace says it is saved.
+- A published page and a design's tweak values are also on disk before VibeSpace says so, and when the disk refuses you are told the file was not saved.
 
 ## 2.369.421 — 2026-11-26
 
