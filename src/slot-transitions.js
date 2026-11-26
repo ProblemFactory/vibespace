@@ -316,7 +316,12 @@ class SlotTransitions {
       // is cut (the live file keeps every line; a half already appended is appended again by the next trim — a line twice in the
       // archive, never a line lost), said once. Synchronous by the rate rule (主开发 r4957): a save the code bounds to a rare event
       // (past MAX_LINES). Only a file system with no sync at all lands, said once.
-      const half = Buffer.from(lines.slice(0, cut).join('\n') + '\n');
+      // 主开发 r5124: THE HALF STARTS WITH A LINE BREAK. An append that failed part-way (a short write on a full disk, a power cut
+      // before the sync) leaves a torn tail with no line break; without one in front, the next trim's first row is glued to that
+      // tail, the reader drops the glued line, and the replace cuts that row from the live file: in neither. The readers skip the
+      // empty line. A trim that keeps failing AFTER its append landed appends the half again at each record past the bound: rows
+      // twice in the archive, the same slot at every time (the reader sorts; the same rows give the same answer).
+      const half = Buffer.from('\n' + lines.slice(0, cut).join('\n') + '\n');
       const fd = fs.openSync(out, 'a');
       let failed = null;
       try {
