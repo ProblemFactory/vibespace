@@ -15,7 +15,8 @@
 // - Each «text» (row B-360d, lane mask-value-shape, 主开发 r4523: one half of a browser COMMAND's output past the on-loop figure) is
 //   answered once, by its seq, in the SAME queue as the frames, with the text scrubbed by THE SAME compiled scrubber (the loop's
 //   scrubText). A text before any values, a scrub that throws, or one that passed the text budget (the scrubber's `overs` moved) is
-//   answered «withheld»: the hub refuses that command's output by name — nothing of it is printed.
+//   answered «withheld»: the hub refuses that command's output by name — nothing of it is printed. The work bound's answer carries
+//   `over: true` (line 1051's follow, 主开发 r4754 (3)): its refusal is worded on its own — running the command again cannot help.
 const { isMainThread, parentPort } = require('worker_threads');
 if (isMainThread) throw new Error('src/server/browser-scrub-worker.js runs as a worker only (src/server/browser-dialogs.js starts it)');
 const { answerMemory } = require('../worker-memory.js');
@@ -42,7 +43,8 @@ parentPort.on('message', (msg) => {
     const before = fn.overs;
     let out;
     try { out = fn(String(msg.text)); } catch { parentPort.postMessage({ type: 'done', seq: msg.seq, withheld: 'the scrub failed' }); return; }
-    if (fn.overs !== before || typeof out !== 'string') { parentPort.postMessage({ type: 'done', seq: msg.seq, withheld: 'the scrub passed its work bound (scrub_work_bound)' }); return; }
+    if (fn.overs !== before) { parentPort.postMessage({ type: 'done', seq: msg.seq, withheld: 'the scrub passed its work bound (scrub_work_bound)', over: true }); return; }
+    if (typeof out !== 'string') { parentPort.postMessage({ type: 'done', seq: msg.seq, withheld: 'the scrub failed' }); return; }
     parentPort.postMessage({ type: 'done', seq: msg.seq, r: { out } });
     return;
   }

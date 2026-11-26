@@ -2184,18 +2184,33 @@ router.post('/api/agent/browser/audit', async (req, res) => {
       // B-21cc (r2849 (5)): asked of the tab the watch knows WITHOUT a read (its only tab, or the last ack no mover followed) — silent rather than wrong
       try { const tF = dialogTargetFor(k, f, profileId); if (tF.ok) { const tidF = typeof ctx.dialogs.rememberedTabOf === 'function' ? ctx.dialogs.rememberedTabOf(tF) : null; otherSiteFrame = tidF ? ctx.dialogs.otherSiteFramesFor(tF, { targetId: tidF }) : null; } } catch { otherSiteFrame = null; }
     }
-    let scrubbed = null;
-    if (profileId && req.body?.output && typeof req.body.output === 'object' && ctx.dialogs && typeof ctx.dialogs.scrubOutput === 'function') {
-      const t = dialogTargetFor(k, f, profileId);
+    let scrubbed = null, scrubChecked = false;
+    // line 1051's follow (主开发 r4754 (1)): an output POSTED is answered with a word either way — `scrubChecked: true` when the hub
+    // checked it (`scrubbed` beside it where the text changed), HTTP 409 `scrub_unchecked` by name where it could not (no browser of
+    // this conversation by that name; the conversation's lease ended between the resolve and this audit; no scrub on this hub). The
+    // CLI prints its own copy ONLY on that word. The check needs the lease: one on a browser the conversation does not hold would
+    // tell it whether a text holds that browser's value.
+    if (req.body?.output && typeof req.body.output === 'object') {
+      const can = !!(ctx.dialogs && typeof ctx.dialogs.scrubOutput === 'function');
+      const t = profileId && can ? dialogTargetFor(k, f, profileId) : { ok: false, code: can ? 'not-found' : 'no_scrub' };
+      if (!t.ok) {
+        const why = t.code === 'not_attached' ? 'not_attached' : t.code === 'no_scrub' ? 'no_scrub' : 'not-found';
+        const said = why === 'not_attached' ? 'this conversation no longer holds that browser: its lease ended while the command ran' : why === 'no_scrub' ? 'this hub has no output scrub' : 'no browser of this conversation by that name';
+        const sz = (x) => (typeof x === 'string' ? Buffer.byteLength(x, 'utf8') : 0);
+        return res.status(409).json({ error: `the hub could not check this command's output for vault values (${said})`, code: 'scrub_unchecked', why, sizes: { out: sz(req.body.output.out), err: sz(req.body.output.err) } });
+      }
       // row B-360d (主开发 r4523): a half past the on-loop figure is scrubbed off the loop and AWAITED; a refusal answers by name (a code
       // and the sizes, never a value or a piece of the output) — the CLI then refuses [login_fill_live] and prints nothing
       if (t.ok) {
         const sc = await ctx.dialogs.scrubOutput(t, req.body.output);
-        if (sc && sc.refused) return res.status(503).json({ error: `the browser output could not be scrubbed off the hub's loop (${sc.refused})`, code: 'scrub_refused', why: String(sc.refused), sizes: sc.sizes || null });
-        if (sc && sc.changed) scrubbed = { out: sc.out, err: sc.err };
+        // line 1051's follow (r4754 (2)): a half past the text cap (an older CLI's 16 MiB) is refused by name, never handed to the worker
+        if (sc && sc.refused && sc.tooLarge) return res.status(413).json({ error: `this command's output is larger than the hub's vault scrub takes at once (${sc.cap} bytes a half)`, code: 'scrub_too_large', cap: sc.cap, sizes: sc.sizes || null });
+        if (sc && sc.refused) return res.status(503).json({ error: `the browser output could not be scrubbed off the hub's loop (${sc.refused})`, code: 'scrub_refused', why: String(sc.refused), ...(sc.over ? { workBound: true } : {}), sizes: sc.sizes || null });
+        scrubChecked = !!(sc && typeof sc.out === 'string' && typeof sc.err === 'string');   // the positive word: checked, nothing raw left
+        if (scrubChecked && sc.changed) scrubbed = { out: sc.out, err: sc.err };
       }
     }
-    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(otherSiteFrame ? { otherSiteFrame } : {}), ...(egressRefused ? { egressRefused } : {}), ...(scrubbed ? { scrubbed } : {}) });
+    res.json({ ok: true, ...(viewport ? { viewport } : {}), ...(interrupted ? { interrupted } : {}), ...dlg, ...(hint ? { hint } : {}), ...(rejected ? { proposalRejected: { site: rejected.site, text: rejected.text } } : {}), ...(tailnet ? { tailnet } : {}), ...(otherSiteFrame ? { otherSiteFrame } : {}), ...(egressRefused ? { egressRefused } : {}), ...(scrubChecked ? { scrubChecked: true } : {}), ...(scrubbed ? { scrubbed } : {}) });
   } catch (e) { fail(res, e); }
 });
 // ── lane browser-stuck (2026-09-28, the owner's ruling "让agent知道这个对话框的存在和交互能力"): A PAGE DIALOG IS A FACT OF THE
