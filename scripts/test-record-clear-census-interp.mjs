@@ -108,6 +108,11 @@ const iPortsWorded = (rail) => rail.includes("const svcWords = svcM ? (svcM[1] =
 const I_FIELD_RE = new RegExp(String.raw`([A-Za-z_$][\w$]*(?:(?:\?\.|\.)[A-Za-z_$][\w$]*|\[[^\]\n]{0,60}\])*?)(?:\?\.|\.)(` + I_FIELDS.join('|') + String.raw`)\b(?!\s*\()`, 'g');
 // the client's word functions: each returns a record's words (the model's, the dialog's, the PURE previews)
 const I_WORD_FN = /\b(wordsOf|detailOf|shownText|recordWords|previewWords|nameFor|matchSnippet)\s*\(/g;
+// THE ONE DOOR for a spend verdict's words (B-ef83 unit 2's door, line 1053: src/spend-words.js agentSpendWords): it hands a held
+// verdict's CODE and any other verdict's OWN DETAIL, so a call of it reads its argument's detail — a text field (主开发 r5229: a row is
+// judged on the code at its site; the door is another name for the read the release made, `R.detail || R.why`, never its end)
+const I_DOOR_FN = /\bagentSpendWords\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+let I_DOOR_ON = true;   // the r5229 RED below reads two files without it
 const iIsLib = (rel) => rel.startsWith('src/lib/') || rel === 'src/client.js';
 // [sink id, callee test (callee, rel, the text before the call), where its words go]
 const I_SINKS = [
@@ -242,6 +247,7 @@ function iReads(text) {
   while ((f = I_FIELD_RE.exec(code))) out.add(f[1].replace(/\s+/g, '') + '.' + f[2]);
   I_WORD_FN.lastIndex = 0;
   while ((f = I_WORD_FN.exec(code))) out.add(f[1] + '()');
+  if (I_DOOR_ON) { I_DOOR_FN.lastIndex = 0; while ((f = I_DOOR_FN.exec(code))) out.add(f[1] + '.detail'); }
   return [...out];
 }
 function iSplitArgs(text) {
@@ -352,11 +358,13 @@ function iAliases(src, rel, W) {
 /** every sink site × every text-field read in its words: {rel, line, sink, read, args} — per file, memoised on the
  *  file's text (a control re-scans only its patched copy) */
 const I_MEMO = new Map();
+let I_SCANS = 0;   // files scanned, not answered by the memo (the r5229 RED's witness)
 function interpCensus(srcs) {
   const rows = [];
   for (const [rel, src] of srcs) {
     const memo = I_MEMO.get(rel);
-    if (memo && memo.src === src) { rows.push(...memo.rows); continue; }
+    if (memo && memo.src === src && memo.door === I_DOOR_ON) { rows.push(...memo.rows); continue; }   // r5249: a memo filled with the door rule ON never answers a pass with it OFF
+    I_SCANS++;
     const at = rows.length;
     const W = iWrappers(src, rel);
     I_CALLEE.lastIndex = 0; let m;
@@ -391,7 +399,7 @@ function interpCensus(srcs) {
       }
     }
     rows.push(...iAliases(src, rel, W));   // verify r9: the one-level alias pass (a copy of a field into a local, to a sink in its block)
-    I_MEMO.set(rel, { src, rows: rows.slice(at) });
+    I_MEMO.set(rel, { src, door: I_DOOR_ON, rows: rows.slice(at) });
   }
   return rows;
 }
@@ -616,14 +624,14 @@ const I_RECV = {
   // lane notify-retry (2026-10-01): the retry park's journal lines — the primitive's reason (timeout / a socket error code) and
   // the ceiling's own sentence at a re-judge (an account name + numbers); a parked entry's WORDS are in its `text`, which no
   // journal line prints (the fall line names the entry by id and kind)
-  'src/server/conversation-deliver.js|v': ['delivery', 'the spend verdict at a parked delivery\'s re-judge: the ceiling\'s own detail (an account + numbers), never a record\'s words'],
+  'src/server/conversation-deliver.js|v': ['delivery', 'the spend verdict at a parked delivery\'s re-judge, through the one door (agentSpendWords, line 1053\'s door; r5229 restated): a held verdict\'s code only, else the ceiling\'s own detail (an account + numbers), never a record\'s words'],
   // notify-retry verify r1: a batch of parked entries posted as ONE frame — the entries' own stored text (a clear rewrote
   // the park's copies through redactStash, so a cleared one rides as the sentence under the head); `recorded` on the card
   'src/server/conversation-deliver.js|frame': ['delivery', 'the retry park\'s ONE frame of several parked entries: their STORED text joined (redactStash rewrites the park too — a cleared entry is the sentence) — the post and the card\'s `recorded`'],
   'src/server/conversation-deliver.js|attempt': ['delivery', 'a parked delivery\'s attempt record: the primitive\'s reason (timeout / a socket error code) + phase, never a record\'s words'],
   'src/jobs.js|r': ['delivery', 'the ladder\'s answer to a notification (a rung\'s refusal reason; the parked reason + phase)'], 'src/server/desktop-access.js|plan': ['desktop app', 'an install plan\'s label'],
   'src/server/desktop-app-keeper.js|rec': ['desktop app', 'an app label'], 'src/server/incident-wiring.js|req.body': ['caller', 'the owner\'s own incident note'],
-  'src/server/conversation-ops.js|g': ['quota', 'a spend verdict\'s detail (the authorizer\'s own sentence on the key\'s identity) in an automation\'s refusal (lane automation-verbs)'], 'src/server/conversation-ops.js|v.spec': ['session', 'the opened conversation\'s name (an automation\'s judged spec) in the open\'s journal line'],
+  'src/server/conversation-ops.js|g': ['quota', 'a spend verdict\'s words in an automation\'s refusal, through the one door (agentSpendWords, line 1053\'s door; r5229 restated): a held verdict\'s code only, else the authorizer\'s own sentence on the key\'s identity (lane automation-verbs)'], 'src/server/conversation-ops.js|v.spec': ['session', 'the opened conversation\'s name (an automation\'s judged spec) in the open\'s journal line'],
   'src/server/session-stdout.js|session': ['session', 'a session\'s name'], 'src/server/spend-guard.js|v': ['quota', 'a spend verdict\'s detail'], 'src/delivery-wake.js|probe': ['quota', 'the spend guard\'s probe verdict — its own refusal sentence, said to the sender and on the row (the manager design\'s piece 7)'],
   'src/server/stdout/acp-events.js|msg': ['harness', 'an ACP frame\'s reason'], 'src/server/stdout/codex-events.js|msg.payload': ['harness', 'a codex event\'s reason'],
   'src/server/usage-pool-engine.js|b': ['quota', 'a bucket\'s label'], 'src/server/usage-pool-engine.js|dest': ['account', 'a pool member'], 'src/server/usage-pool-engine.js|lane': ['quota', 'a lane\'s name'],
@@ -865,6 +873,24 @@ console.log('§I the interpolation census (verify r8): every message that embeds
   const J8 = iJudge(rows);
   ok(rows.length >= 250 && J8.unknownRecv.length === 0, `I every (file, receiver) whose text field reaches a sink is classified (${rows.length} site reads, ${Object.keys(I_RECV).length} receivers)`, J8.unknownRecv);
   ok(J8.deadRecv.length === 0 && J8.deadSites.length === 0, 'I no dead row (every receiver and every site class is still in the tree)', { recv: J8.deadRecv, sites: J8.deadSites });
+  // r5229 (主开发, the build machine's row 1110 at d1e3a09eb): THE ONE DOOR IS A READ. Line 1053's door (d80f170cd, moved d3d248366) took
+  // these two sites' `R.detail || R.why` through agentSpendWords, which still hands a verdict's own detail (a held one's code only): the
+  // receivers read their verdict's detail through the door, so their rows are RESTATED, not removed. RED (the census without the door
+  // rule, over the same two files — every pass of interpCensus is the file's own, so their rows are the whole tree's for them): they read
+  // nothing — the rows the release keeps would be dead, as they were at d1e3a09eb. r5249 (row 1111): the per-file memo answered the
+  // door-OFF pass with the rows of the door-ON one; the memo now keys the door's switch too, and the RED carries its WITNESS (law 1):
+  // the pass re-scanned both files, and the reader with the door off reads no detail from the door's call
+  { const recvOf = (rs) => new Set(rs.map((r) => `${iRel(r.rel)}|${iRecvOf(r.read)}`));
+    const door = recvOf(rows), RR = ['src/server/conversation-deliver.js|v', 'src/server/conversation-ops.js|g'];
+    const two = new Map(['src/server/conversation-deliver.js', 'src/server/conversation-ops.js'].map((rel) => [rel, srcs.get(rel)]));
+    const scans0 = I_SCANS;
+    I_DOOR_ON = false; let bare, offReads; try { bare = recvOf(interpCensus(two)); offReads = iReads('refusal(x, agentSpendWords(g))'); } finally { I_DOOR_ON = true; }
+    const scanned = I_SCANS - scans0, onReads = iReads('refusal(x, agentSpendWords(g))');
+    const atDoor = [...two.values()].every((s) => /agentSpendWords\(\s*[vg]\s*\)/.test(s || ''));
+    ok(atDoor && RR.every((k) => door.has(k)), 'I r5229 THE ONE DOOR IS A READ: the parked delivery\'s verdict (v) and the automation\'s refusal (g) read their verdict\'s detail through agentSpendWords — their rows stand, restated', [...door].filter((k) => RR.includes(k)));
+    ok(scanned === 2 && !offReads.includes('g.detail') && onReads.includes('g.detail'), `I r5249 THE RED's PLANT IN FORCE: the door-off pass re-scanned both files (${scanned}, no memo answered it), and the reader reads the door's call as a detail only with the rule on`, { scanned, offReads, onReads });
+    ok(RR.every((k) => !bare.has(k)), 'I r5229 RED (the census without the door rule, the same two files): neither receiver reads a text — the rows would be dead, as row 1110 read them at d1e3a09eb', [...bare].filter((k) => RR.includes(k)));
+  }
   ok(J8.bad.length === 0, `I every read of a record / a carrier at a sink is of a class the sink allows AND shows it (${J8.recordSites.length}: ${[...new Set(J8.recordSites.map((s) => s.cls))].join(' / ')})`, J8.bad);
   ok(Object.values(I_RECV).every(([k, why]) => k && why.length >= 6) && Object.values(I_SITES).every(([c, why]) => I_CHECK[c] && why.length >= 20), 'I every receiver names what it is; every site class names why');
   // r3664 (the box's red at ebc6d0672): the class length's forms — a size spelled String(<read>).length is shown (the retry park's
