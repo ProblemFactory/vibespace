@@ -6,7 +6,7 @@
 // controls: each rule taken out of a mutant copy turns its row red. ④ (lane inline-receipts-compose-api): a proposal whose
 // CLI waits on it (`api … --wait` / `api wait`) is read INLINE — its receipt message is never filed; a CLI that stopped
 // waiting leaves it to the message road (the fallback).
-import './scratch.mjs';
+import { landingWriter } from './scratch.mjs';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -72,7 +72,7 @@ function harness(cardsPath = path.join(ROOT, 'src/server/channel-api-cards.js'),
     stashOnDisk: (cid, ref) => landed && stash.some((x) => x.cid === cid && x.env.ref === ref), onStashLanded: (fn) => { lands.push(fn); } };
   const { create } = require(cardsPath);
   const names = (adapterId, convId) => (adapterId === 'lark-1' && convId === 'oc_known' ? 'Product room' : null);   // the channel store's name ladder
-  const cards = create({ dataDir: dir, api, userTodos, deliver, names, now: () => clock, timer: false, log: { warn() {}, log() {} }, ...(opts.collectWindowMs ? { collectWindowMs: opts.collectWindowMs } : {}) });
+  const cards = create({ dataDir: dir, api, userTodos, deliver, names, now: () => clock, timer: false, log: { warn() {}, log() {} }, writer: opts.writer || landingWriter(), ...(opts.collectWindowMs ? { collectWindowMs: opts.collectWindowMs } : {}) });
   const add = (o) => { const p = base({ bodySha: undefined, headers: undefined, tier: undefined, shape: undefined, ...o }); props[p.id] = p; writeFrozen(); return p; };
   return { dir, api, cards, add, todos, answered, delivered, stash, creds, granted, setClock: (t) => { clock = t; }, refuse: (v) => { refuse = v; }, taken: (v) => { taken = v; }, lift: ({ wrote = true } = {}) => { landed = wrote; for (const fn of lifts) fn(); }, land: () => { landed = true; for (const fn of lands) fn(); } };
 }
@@ -261,6 +261,38 @@ await om("todoId: (state.items[p.id] || {}).todoId || null, receipt: (state.item
   const WIRING = fs.readFileSync(path.join(ROOT, 'src/server/channels-wiring.js'), 'utf8'), ENG_SRC = fs.readFileSync(path.join(ROOT, 'src/server/channels-engine.js'), 'utf8');
   ok(WIRING.includes("grantsUnread: () => (typeof channels.grantsUnread === 'function' ? channels.grantsUnread() : false)") && ENG_SRC.includes('    grantsUnread: () => CG.unread(),'),
     'r3059 PIN: the hub wires the sweep to the engine\'s grants reader (channels-wiring → channels.grantsUnread → CG.unread)');
+}
+
+// ── B-574d slice «channels-small-stores» (lane nl-journals, 主开发 r4939): THE CARDS' STATE THROUGH THE STORE WRITER — a sweep's save hands
+// the file to the writer under its timed-sync row (the bytes made at the write: the newest state), and NOTHING is written on the hub's loop;
+// a sweep that changed nothing hands nothing; a writer that refuses the hand-off throws nothing out of the sweep. RED: the release's save
+console.log('⑥ B-574d the cards\' state through the store writer');
+{
+  const recWriter = ({ refuse = false } = {}) => { const calls = []; return { calls, dirty(file, o) { if (refuse) throw Object.assign(new Error('EIO: a placed refusal of the hand-off'), { code: 'EIO' }); calls.push({ file, name: o.name, makeDir: !!o.makeDir, bytes: o.produce ? o.produce() : null }); }, durable: () => Promise.resolve(true), pending: () => false, flushSync: () => ({ written: [], left: [] }), forget() { } }; };
+  // a mutant copy sits in a temp folder: its OWN relative requires (the groups' hold the sweep reads, the store writer) are re-rooted at the
+  // tree's files — else the sweep throws before any save (its catch says «sync failed») and a red is red for the wrong reason
+  const mutant6 = (from, to) => { const f = mutant('src/server/channel-api-cards.js', from, to); fs.writeFileSync(f, fs.readFileSync(f, 'utf8').replace(/require\('(\.{1,2}\/[^']+)'\)/g, (m0, p0) => `require(${JSON.stringify(path.join(ROOT, 'src/server', p0))})`)); return f; };
+  const loopWrites = async (h, fn) => { const f = path.join(h.dir, 'channels', 'api-cards.json'), o = { writeFileSync: fs.writeFileSync, renameSync: fs.renameSync }, seen = [];
+    fs.writeFileSync = function (p0, ...a) { if (String(p0).startsWith(f)) seen.push('write'); return o.writeFileSync.call(this, p0, ...a); };
+    fs.renameSync = function (a0, ...a) { if (String(a0).startsWith(f)) seen.push('rename'); return o.renameSync.call(this, a0, ...a); };
+    try { await fn(); } finally { Object.assign(fs, o); } return seen; };
+  const cardsOf = async (cardsPath) => {
+    const w = recWriter(), h = harness(cardsPath, { writer: w });
+    const loop = await loopWrites(h, async () => { h.add({ id: 'api-w1', at: T0 }); await h.cards.sync(); });
+    const handed = w.calls.length, last = w.calls[w.calls.length - 1] || {};
+    await h.cards.sync();
+    return { loop: loop.join(' '), handed, again: w.calls.length - handed, name: last.name, makeDir: last.makeDir, holds: !!last.bytes && JSON.parse(last.bytes).items['api-w1'] !== undefined, file: last.file === path.join(h.dir, 'channels', 'api-cards.json') };
+  };
+  const g = await cardsOf(undefined);
+  ok(g.loop === '' && g.handed >= 1 && g.name === 'channel-api-cards.write' && g.makeDir && g.holds && g.file, '⑥ a sweep\'s save HANDS the cards\' file to the store writer under its row (channel-api-cards.write) — the bytes made at the write hold the new proposal\'s item; nothing is written on the hub\'s loop', g);
+  ok(g.again === 0, '⑥ …a sweep that changed nothing hands nothing (no write when nothing changed)', g);
+  let threw = null; const hr = harness(undefined, { writer: recWriter({ refuse: true }) });
+  try { hr.add({ id: 'api-w2', at: T0 }); await hr.cards.sync(); } catch (e) { threw = e.message; }
+  ok(threw === null && hr.todos.length === 1, '⑥ a writer that refuses the hand-off throws nothing out of the sweep — the For-you item is still filed', { threw, todos: hr.todos.length });
+  const f = mutant6("  function save() { try { SW().dirty(stateFile, { name: 'channel-api-cards.write', makeDir: true, produce: () => JSON.stringify(state) }); } catch (e) { log.warn('[channel-api-cards] the state write was not handed to the store writer:', e && e.message); } }\n",
+    "  function save() { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api-cards] state write failed:', e && e.message); } }\n");   // stale-pins: kept (the release's save — this red control's own text)
+  const r = await cardsOf(f);
+  ok(/write/.test(r.loop) && /rename/.test(r.loop) && r.handed === 0, 'RED ⑥ the release\'s save: the cards\' file written and renamed ON the hub\'s loop at every sweep that changed it, nothing handed to the writer', r);
 }
 
 console.log(fail ? `FAILED: ${fail} of ${pass + fail}` : `ALL PASS (${pass})`);

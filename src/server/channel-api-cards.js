@@ -25,14 +25,20 @@ const P = require('../channel-policy.js');   // receiptRoad + COLLECT_WINDOW_MS 
 const INBOX_KEY = 'channels';          // the channels engine's For-you key (src/server/channels-engine.js INBOX_KEY)
 const SWEEP_EVERY_MS = 60 * 1000;
 
-function create({ dataDir, api, userTodos = null, deliver = null, names = null, now = () => Date.now(), log = console, timer = true, collectWindowMs = P.COLLECT_WINDOW_MS, grantsUnread = () => false } = {}) {
+function create({ dataDir, api, userTodos = null, deliver = null, names = null, now = () => Date.now(), log = console, timer = true, collectWindowMs = P.COLLECT_WINDOW_MS, grantsUnread = () => false, writer = null } = {}) {
   if (!dataDir) throw new Error('channel-api-cards: dataDir is required');
   const A = () => (typeof api === 'function' ? api() : api);
   const dir = path.join(dataDir, 'channels');
   const stateFile = path.join(dir, 'api-cards.json');
   const frozenFile = path.join(dir, 'api-proposals.json');   // the orchestrator's own file — READ only, for the frozen headers + body
   const state = (() => { try { const j = JSON.parse(fs.readFileSync(stateFile, 'utf8')); return { items: j.items || {} }; } catch { return { items: {} }; } })();
-  const save = () => { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api-cards] state write failed:', e && e.message); } };
+  // B-574d slice «channels-small-stores» (lane nl-journals, 主开发 r4939): THE STORE WRITER (src/store-writer.js — its own thread does
+  // the temp, the write, the SYNC and the rename, off the hub's loop). Every save here is a SWEEP's (the minute timer, an API change), the
+  // receipts' clearer or an agent CLI's inline read — never a person's press: the bytes made AT the write (the newest state, a burst one
+  // write); a write that fails is the writer's (said by it, kept owed, written again). Nothing is handed when nothing changed (the
+  // callers' own `dirty` / `n`). A suite may hand its own writer (`writer`).
+  const SW = () => writer || require('../store-writer.js').storeWriter();
+  function save() { try { SW().dirty(stateFile, { name: 'channel-api-cards.write', makeDir: true, produce: () => JSON.stringify(state) }); } catch (e) { log.warn('[channel-api-cards] the state write was not handed to the store writer:', e && e.message); } }
   const frozenOf = () => { try { return JSON.parse(fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };
   const ctxOf = (p) => ({ kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [], inheritedGroups: p.principal.inheritedGroups === null ? null : (p.principal.inheritedGroups || []), ...(p.principal.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() });   // a RECORDED principal carries the hold too (主开发 05:42Z (3)); today's one reader (liveness) returns before it while held, so the spread is inert there — kept so every principal built here hands the fact (the census reads it per site)
   /** The call's chat NAMED from what the channel store knows (card grammar ②) — and the conversation it opens; else nothing (the card shows the id chip). */
