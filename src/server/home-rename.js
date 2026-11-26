@@ -35,12 +35,15 @@ async function replaceSyncedAsync(tmp, final, text, log, what = 'the tries') {  
   } catch (e) { failed = e; }
   try { await fh.close(); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there
   if (failed) { await fs.promises.unlink(tmp).catch(() => { }); throw failed; }   // the temp goes; the old tries stand
-  await fs.promises.rename(tmp, final);
+  try { await fs.promises.rename(tmp, final); } catch (e) { await fs.promises.unlink(tmp).catch(() => { }); throw e; }   // follow 4 (r5221): a rename that fails leaves no temp either
 }
 // follow 3 (its reads): a held HOME marker's one safe hand — moved aside (torn, or a folder, a file or a link in its name), the next start
 // judges the move again over folders already moved (none old) and writes «kept»
 const HOME_KEEP = 'restore it from a backup — never move it aside (the move would be judged again over folders already moved)';
-const homeHint = (code) => (code === 'unparsable' ? `its bytes do not parse: ${HOME_KEEP}` : code === 'EISDIR' || code === 'ENOTDIR' || code === 'ELOOP' ? `something else stands in its name: ${HOME_KEEP}` : ownedHint(code));
+// follow 4 (r5221): a marker torn by an older release's plain write has no backup — the one hand a person can use: the marker is
+// written only AFTER the move ran, so a count above zero in it is true enough to have this data folder's old-home paths rewritten
+const HOME_TORN = `${HOME_KEEP}; with no backup: if this HOME's old project folders now stand under the new name (~/.claude/projects/-home-<new>-…), write {"judgedOld":1} into it — the next start rewrites this data folder's paths of the old home; if none of them was moved, write {"judgedOld":0} — this data folder keeps its paths`;
+const homeHint = (code) => (code === 'unparsable' ? `its bytes do not parse: ${HOME_TORN}` : code === 'no-record' ? `its bytes are no marker record (no count in them): ${HOME_TORN}` : code === 'EISDIR' || code === 'ENOTDIR' || code === 'ELOOP' ? `something else stands in its name: ${HOME_KEEP}` : ownedHint(code));
 const OLD_RE = /^[a-z][a-z0-9]*$/;   // an old user as claude-home's staleUsers reads it (-home-<old>-…)
 // B-8033 cure 2: the starts a folder that cannot move is tried, then the move is marked (said once). A try counts once per
 // TRY_GAP_MS — a restart loop during a short outage spends one, never all three
@@ -53,6 +56,7 @@ const MOVE_TRIES = 3, TRY_GAP_MS = 10 * 60e3;
 function homeMarkerState(hm) {
   let text; try { text = fs.readFileSync(hm, 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? { exists: false, judged: 0 } : { exists: true, judged: 0, unreadable: (e && e.code) || 'error' }; }
   let j = null; try { j = JSON.parse(text); } catch { return { exists: true, judged: 0, unreadable: 'unparsable' }; }
+  if (!j || typeof j !== 'object' || Array.isArray(j) || (!Number.isFinite(j.judgedOld) && !Number.isFinite(j.moved))) return { exists: true, judged: 0, unreadable: 'no-record' };   // follow 4 (r5221): bytes that are no marker record (null, a number, a count that is no number — every release's marker carries a finite count) are no verdict either
   return { exists: true, judged: j && Number.isFinite(j.judgedOld) ? j.judgedOld : Number(j && j.moved) || 0 };
 }
 /** Is /home/<old> gone? — the check claude-home's staleUsers asks too (B-8033 cure: both sources of an old user agree). */
@@ -214,7 +218,7 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
         let prev = null, triesHeld = null, triesText = null;
         try { triesText = fs.readFileSync(tf, 'utf8'); } catch (e) { if (e && e.code && e.code !== 'ENOENT') triesHeld = e.code; }
         if (triesText != null) { try { prev = JSON.parse(triesText); } catch { prev = null; if (triesText.startsWith('{"j')) triesHeld = 'unparsable'; else log.warn(`[migrate] home rename: the tries record of /home/${old} does not parse and carries no verdict (a count only) — read as none`); } }
-        if (triesHeld) { whole = false; lookRefused++; refusedLooks.push({ name: path.basename(tf), code: triesHeld, hint: triesHeld === 'unparsable' ? homeHint(triesHeld) : ownedHint(triesHeld) }); }
+        if (triesHeld) { whole = false; lookRefused++; refusedLooks.push({ name: path.basename(tf), code: triesHeld, hint: triesHeld === 'unparsable' ? `its bytes do not parse: ${HOME_KEEP}` : ownedHint(triesHeld) }); }   // follow 4: the tries keep the plain words (the hand of a torn HOME marker is the marker's alone)
         if (!triesHeld) for (const hr of hrs) {
           const ctx = {};   // B-8033 cure 3: ONE verdict per folder per boot — the move and the count of what is left share it
           const m = hr.moveUser(home, old, user, ctx) || 0;

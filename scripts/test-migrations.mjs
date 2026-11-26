@@ -4579,13 +4579,17 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const hk = { staleUsers: () => [], moveUser: () => 0, leftAfterMove: () => ({ failed: 0, judged: 0 }) };
       const out = [];
       for (const st of steps) {
+        if (st.homeDir) { fs.rmSync(hm, { recursive: true, force: true }); fs.mkdirSync(hm); }   // follow 4 (xxx): a folder in the HOME marker's name
         if (typeof st.home === 'string') fs.writeFileSync(hm, st.home);
         if (typeof st.dm === 'string') fs.writeFileSync(path.join(d, NAME), st.dm);   // a data marker placed by hand (xix)
         const warned = [], undo = st.refuse ? refusing(...st.refuse) : null;
-        let r = null;
+        let r = null, reads = 0;
+        const rf0 = fs.readFileSync;   // follow 4 (its read): the PRODUCT's reads of the HOME marker in this step (a plant's witness — never the leg's own read below)
+        fs.readFileSync = function (p, ...a) { if (String(p) === hm) reads++; return rf0.call(this, p, ...a); };
         try { r = Mod.migrateHomeRename({ dataDir: d, metaDir: meta, home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, ...(st.diskGone ? {} : { homeGone: () => true }), throwaway: () => false }); await r.written; }
-        finally { if (undo) undo(); }
-        out.push({ out: r, warned, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d), home: fs.existsSync(hm) ? fs.readFileSync(hm, 'utf8') : null });
+        finally { fs.readFileSync = rf0; if (undo) undo(); }
+        let homeNow = null; try { homeNow = fs.statSync(hm).isFile() ? fs.readFileSync(hm, 'utf8') : '<not a file>'; } catch { homeNow = null; }   // follow 4: a folder in its name is read as such, never thrown
+        out.push({ out: r, warned, reads, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d), home: homeNow });
       }
       return out;
     };
@@ -4857,6 +4861,72 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const SAR = await vsTmpRefused(() => fScene(M574.load('src/server/home-rename.js', anchored(HRT, SILA, '                .catch(() => { });   // MUTANT: the last copy\'s failure silent\n', 'the fallback\'s failure said'), 'fallback-silent'), 'xxvii-a-red', [{ named: true, moved: 1, left: { failed: 0, judged: 1 } }]));
     const SBR = await vsTmpRefused(() => sScene(M574.load('src/server/home-rename.js', anchored(HRT, SILB, '              .catch(() => { }));   // MUTANT: the waiting tries\' failure silent\n', 'the waiting tries\' failure said'), 'waiting-silent'), 'xxvii-b-red', [{}], { pre: DMDIR }));
     ok(!SAR[0].warned.some((l) => l.includes('could not be written either')) && !SBR[0].warned.some((l) => l.includes('— this start\'s verdict is NOT kept')), 'B-574d follow 3 RED (anchored copies: each failure silent): nothing says the verdict was lost — (xxvii) goes red', { a: SAR[0].warned, b: SBR[0].warned });
+    // (xxviii)–(xxxiii) B-574d follow 4 (主开发 r5221, the round's shoulds): each by a placed plant with a WITNESS that the product read it
+    // (r5135 law 1: a plant never read is a NAMED SKIP, not judged), each with its anchored RED
+    const skipF4 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
+    const refusingN = (fn, tail, code) => {   // refusing() with its witness: how many calls met the plant
+      const real = fs[fn], realEx = fs.existsSync; let hits = 0;
+      fs[fn] = function (p, ...a) { if (String(p).endsWith(tail)) { hits++; throw Object.assign(new Error(`${code}: a placed refusal`), { code }); } return real.call(this, p, ...a); };
+      if (fn === 'statSync') fs.existsSync = function (p) { if (String(p).endsWith(tail)) { hits++; return false; } return realEx.call(this, p); };
+      return { undo: () => { fs[fn] = real; fs.existsSync = realEx; }, hits: () => hits };
+    };
+    // (xxviii) the claude hook's whole-folder move: a refused look at the DESTINATION folder is no free name (the round's one HOME-side look
+    // still by an exists call) — nothing is renamed onto it
+    const destScene = (C, tag) => { const { h, P } = chWorld(tag); const p = refusingN('statSync', path.sep + '-home-userN-a', 'EACCES'); let moved = null; try { moved = C.moveUser(h, 'olduser', 'userN', {}); } finally { p.undo(); }
+      return { hits: p.hits(), moved, oldKept: fs.existsSync(path.join(P, '-home-olduser-a', 's1.jsonl')), destMade: fs.existsSync(path.join(P, '-home-userN-a')) }; };
+    const DS = destScene(CH, 'xxviii-real');
+    if (!DS.hits) skipF4('follow 4 (xxviii)', 'the destination folder was never looked at');
+    else ok(DS.oldKept && !DS.destMade, 'B-574d follow 4 (xxviii) the claude hook\'s whole-folder move: a refused look (EACCES) at the destination is NO free name — nothing is renamed onto it, the old folder stays (tried again)', DS);
+    { const DSx = destScene(M574.load('src/harnesses/claude-home.js', anchored(CHT, '      if (absentOnDisk(dst)) { fs.renameSync(src, dst); moved++; }', '      if (!fs.existsSync(dst)) { fs.renameSync(src, dst); moved++; }   /* RED: follow 3\'s exists call */', 'the destination by its stat'), 'f4-dest-exists'), 'xxviii-red');   // stale-pins: kept — follow 3's line in the RED copy
+      if (!DSx.hits) skipF4('follow 4 (xxviii) RED', 'the copy never looked at the destination');
+      else ok(!DSx.oldKept && DSx.destMade, 'RED (anchored copy: follow 3\'s exists call): the refused look reads as free and the whole folder is renamed onto it — (xxviii) goes red', DSx); }
+    // (xxix) the verdicts' own listing (ownersOf) refused while the count of what is left lists fine: not whole, never «judged none»
+    const ownScene = (C, tag) => { const { h } = chWorld(tag); const p = refusingN('readdirSync', path.sep + 'projects', 'EIO'); let owners = null; try { owners = C.ownersOf(h, 'olduser'); } finally { p.undo(); }
+      return { hits: p.hits(), left: C.leftAfterMove(h, 'olduser', 'userN', { owners }) }; };
+    const OS = ownScene(CH, 'xxix-real');
+    if (!OS.hits) skipF4('follow 4 (xxix)', 'the verdicts\' listing was never asked');
+    else ok(OS.left.failed === 1 && OS.left.unread === 1, 'B-574d follow 4 (xxix) the verdicts\' listing refused (EIO) while the count lists fine: a FAILED move (tried again) — never a whole move judged none (whose data half would write «kept»)', OS);
+    { const GUARD = "  if (owners.unlisted) { cannot('~/.claude/projects', owners.unlisted); return { failed, sameName, undecided, judged, unread, refused }; }";
+      const OSx = ownScene(M574.load('src/harnesses/claude-home.js', anchored(CHT, GUARD, '  /* RED: the refused listing of the verdicts never read */', 'the verdicts\' refused listing'), 'f4-unlisted'), 'xxix-red');
+      if (!OSx.hits) skipF4('follow 4 (xxix) RED', 'the copy never asked the verdicts\' listing');
+      else ok(OSx.left.failed === 0 && OSx.left.judged === 0, 'RED (anchored copy: the refused listing of the verdicts never read): the move reads WHOLE, judged 0 — (xxix) goes red', OSx); }
+    // (xxx) a FOLDER in the HOME marker's name: held, with the words of that case; (xxxi) bytes that are no marker record (null; a count
+    // that is no number): held; (xxxii) a torn HOME marker's words give the hands a person can use, and the hand works at the next start.
+    // Each judged on the product's own reads of the marker in that step (kScene's `reads` — never the leg's read after it)
+    const HDIR = { homeDir: true }, HNULL = 'null', HQUOTED = '{"judgedOld":"1"}', HAND = '{"judgedOld":1}';
+    const [FD] = await kScene(HR, 'xxx-real', [HDIR]);
+    if (!FD.reads) skipF4('follow 4 (xxx)', 'the HOME marker was never read');
+    else ok(FD.layouts === LAY0 && FD.mark === null && FD.warned.length === 1 && FD.warned[0].includes('could not be read (EISDIR: something else stands in its name: restore it from a backup — never move it aside'), 'B-574d follow 4 (xxx) a FOLDER in the HOME marker\'s name: HELD (nothing rewritten, no data marker), said with that case\'s words', { mark: FD.mark, warned: FD.warned });
+    { const EIS = "code === 'EISDIR' || code === 'ENOTDIR' || code === 'ELOOP' ? `something else stands in its name: ${HOME_KEEP}` : ";
+      const [FDx] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, EIS, '', 'the HOME marker\'s other-thing words'), 'f4-eisdir-words'), 'xxx-red', [HDIR]);
+      if (!FDx.reads) skipF4('follow 4 (xxx) RED', 'the copy never read the HOME marker');
+      else ok(FDx.warned.length === 1 && !FDx.warned[0].includes('something else stands in its name'), 'RED (anchored copy: no words for something else in its name): the folder is said as a refused read — (xxx) goes red', { warned: FDx.warned }); }
+    const [NU] = await kScene(HR, 'xxxi-null', [{ home: HNULL }]), [NQ] = await kScene(HR, 'xxxi-quoted', [{ home: HQUOTED }]);
+    if (!NU.reads || !NQ.reads) skipF4('follow 4 (xxxi)', 'the HOME marker was never read');
+    else ok([NU, NQ].every((x) => x.layouts === LAY0 && x.mark === null && x.warned.length === 1 && x.warned[0].includes('could not be read (no-record: its bytes are no marker record')), 'B-574d follow 4 (xxxi) a HOME marker whose bytes are NO marker record — `null`, or a count that is no number ({"judgedOld":"1"}) — HELD like torn bytes: never «judged none» (no «kept»)', { null: NU.warned, quoted: NQ.warned });
+    { const NOBJ = "  if (!j || typeof j !== 'object' || Array.isArray(j) || (!Number.isFinite(j.judgedOld) && !Number.isFinite(j.moved))) return { exists: true, judged: 0, unreadable: 'no-record' };";
+      const MN = M574.load('src/server/home-rename.js', anchored(HRT, NOBJ, '  /* RED: a non-record read as a verdict */', 'a non-record is no verdict'), 'f4-null-marker');
+      const [NUx] = await kScene(MN, 'xxxi-red-null', [{ home: HNULL }]), [NQx] = await kScene(MN, 'xxxi-red-quoted', [{ home: HQUOTED }]);
+      if (!NUx.reads || !NQx.reads) skipF4('follow 4 (xxxi) RED', 'the copy never read the HOME marker');
+      else ok(!!NUx.mark && !!NUx.mark.kept && !!NQx.mark && !!NQx.mark.kept, 'RED (anchored copy: a non-record read as a verdict): judged none — the data half writes «kept» for both — (xxxi) goes red', { null: NUx.mark, quoted: NQx.mark }); }
+    const [T1, T2] = await kScene(HR, 'xxxii-real', [{ home: TORNH }, { home: HAND }]);
+    if (!T1.reads) skipF4('follow 4 (xxxii)', 'the HOME marker was never read');
+    else ok(T1.mark === null && T1.warned.length === 1 && T1.warned[0].includes('with no backup: if this HOME\'s old project folders now stand under the new name') && T1.warned[0].includes('write {"judgedOld":1} into it') && T1.warned[0].includes('write {"judgedOld":0}')
+      && T2.reads > 0 && T2.layouts.includes('/home/userN/proj') && doneOf(T2.mark) && !T2.mark.kept,
+      'B-574d follow 4 (xxxii) a TORN HOME marker (an older release\'s plain write) is held with the hands a person can use — {"judgedOld":1} when its old folders stand under the new name, {"judgedOld":0} when none moved — and the first cures this data folder at the next start (done, never «kept»)', { first: T1.warned, second: T2.mark });
+    { const TORNW = "const homeHint = (code) => (code === 'unparsable' ? `its bytes do not parse: ${HOME_TORN}` :";
+      const [T1x] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, TORNW, "const homeHint = (code) => (code === 'unparsable' ? `its bytes do not parse: ${HOME_KEEP}` :   /* RED: follow 3's words */", 'the torn marker\'s hand'), 'f4-torn-words'), 'xxxii-red', [{ home: TORNH }]);
+      if (!T1x.reads) skipF4('follow 4 (xxxii) RED', 'the copy never read the HOME marker');
+      else ok(T1x.warned.length === 1 && !T1x.warned[0].includes('write {"judgedOld":'), 'RED (anchored copy: follow 3\'s words — a backup nobody has): no hand — (xxxii) goes red', { warned: T1x.warned }); }
+    // (xxxiii) the HOME marker's final rename REFUSED: the temp does not stay behind
+    const renameRefused = async (fn) => { const P = fs.promises, r0 = P.rename; let hits = 0; P.rename = async function (a, b) { if (String(a).endsWith(HMT)) { hits++; throw Object.assign(new Error('EIO: a placed refusal of the rename'), { code: 'EIO' }); } return r0.call(this, a, b); }; try { return { r: await fn(), hits }; } finally { P.rename = r0; } };
+    const RR = await renameRefused(() => hrScene(HR, 'xxxiii-real', 'no-such-tail', null)), RRh = hmOf(RR.r);
+    if (!RR.hits) skipF4('follow 4 (xxxiii)', 'the HOME marker\'s rename was never asked');
+    else ok(RRh.mark === null && !RRh.tmpLeft, 'B-574d follow 4 (xxxiii) the HOME marker\'s final rename refused (EIO): no marker and NO temp left behind', { home: RRh });
+    { const REN = '  try { await fs.promises.rename(tmp, final); } catch (e) { await fs.promises.unlink(tmp).catch(() => { }); throw e; }';
+      const RRx = await renameRefused(() => hrScene(M574.load('src/server/home-rename.js', anchored(HRT, REN, '  await fs.promises.rename(tmp, final);   /* RED: follow 3\'s plain rename */', 'the temp removed at a failed rename'), 'f4-rename-tmp'), 'xxxiii-red', 'no-such-tail', null)), RRxh = hmOf(RRx.r);
+      if (!RRx.hits) skipF4('follow 4 (xxxiii) RED', 'the copy never asked the HOME marker\'s rename');
+      else ok(RRxh.tmpLeft, 'RED (anchored copy: follow 3\'s plain rename): the temp stays behind — (xxxiii) goes red', { home: RRxh }); }
     }
   } catch (e) { ok(false, `B-574d: the synced replace's legs could not run on this tree (${(e && e.stack) || e})`); }
   finally { fs.rmSync(base, { recursive: true, force: true }); }
