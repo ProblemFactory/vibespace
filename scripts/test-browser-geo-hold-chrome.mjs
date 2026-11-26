@@ -10,6 +10,8 @@
 //   ② THE TAB OPEN AT THE ARM reads the place.
 //   ③ «BLOCKED» = the stored denial alone (no hold): the site allowed before reads «denied». RED: no stored denial ⇒ it keeps «granted».
 //   ④ REFUSED / ⑤ NEVER ANSWERED: the tab released UNPLACED inside the bound, said, and it reads «denied» — never this machine's.
+//      ⑤ (B-1217) is judged on its facts in order: the plant's witness (the place asked and swallowed, else a named skip), the release,
+//      then the read waited from the release; a released tab that ran with no read is a named skip, one that never ran is RED.
 //   ⑥ THE HOLD DIES: (a) a paused tab stays paused; (b) the next arm places and releases it; (c) a tab opened while it is down reads
 //      «denied»; (d) TODAY (no site allowed the place) a RUNNING placed tab reads «denied» before and after the hold's own socket dies.
 //   ⑦ ANOTHER CLIENT VISITS a held tab and leaves: the tab's next read is still the place.
@@ -112,15 +114,15 @@ function wrapped(ctl) {
   return class extends WS.WebSocket {
     constructor(...a) {
       super(...a); ctl.sockets.push(this);
-      this.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (m && m.method === 'Target.attachedToTarget' && m.params && m.params.targetInfo) ctl.attached.push({ tid: m.params.targetInfo.targetId, opener: m.params.targetInfo.openerId || null, sid: m.params.sessionId, waiting: !!m.params.waitingForDebugger }); });   // the hold's own attach events (r1707 (8): waited on, never a sleep)
+      this.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (m && m.method === 'Target.attachedToTarget' && m.params && m.params.targetInfo) ctl.attached.push({ tid: m.params.targetInfo.targetId, opener: m.params.targetInfo.openerId || null, sid: m.params.sessionId, waiting: !!m.params.waitingForDebugger, at: Date.now() }); if (m && m.id && ctl.relIds.has(m.id)) ctl.relReply.set(ctl.relIds.get(m.id), { at: Date.now(), error: m.error ? m.error.message : null }); });   // the hold's own attach events (r1707 (8): waited on, never a sleep)
     }
     send(data, ...rest) {
       let m = null; try { m = JSON.parse(String(data)); } catch { m = null; }
       if (m && m.method === 'Emulation.setGeolocationOverride' && m.sessionId) { ctl.asked.add(m.sessionId); if (!ctl.askedAt.has(m.sessionId)) ctl.askedAt.set(m.sessionId, Date.now()); }   // when the hold SENT a tab's place (one machine, one clock: the page's own callAt is compared)
-      if (m && m.method === 'Runtime.runIfWaitingForDebugger' && m.sessionId) ctl.released.add(m.sessionId);
+      if (m && m.method === 'Runtime.runIfWaitingForDebugger' && m.sessionId) { ctl.released.add(m.sessionId); if (!ctl.releasedAt.has(m.sessionId)) ctl.releasedAt.set(m.sessionId, Date.now()); ctl.relIds.set(m.id, m.sessionId); }
       if (m && m.method === 'Emulation.setGeolocationOverride' && ctl.place !== 'pass') {
         if (ctl.place === 'refuse') { setImmediate(() => this.emit('message', Buffer.from(J({ id: m.id, error: { code: -32000, message: 'refused (a stand-in)' } })), false)); return; }
-        if (ctl.place === 'swallow') return;
+        if (ctl.place === 'swallow') { if (m.sessionId) ctl.swallowed.add(m.sessionId); return; }   // B-1217: the plant's witness — this tab's place was asked and never sent
         const d = /^delay:(\d+)$/.exec(ctl.place); if (d) { setTimeout(() => { try { super.send(data, ...rest); } catch { /* gone */ } }, Number(d[1])); return; }
       }
       return super.send(data, ...rest);
@@ -128,7 +130,7 @@ function wrapped(ctl) {
   };
 }
 async function holdOn(c, plan, { G = GH, boundMs = 1500, rearmMs = [60000] } = {}) {
-  const ctl = { place: 'pass', sockets: [], attached: [], asked: new Set(), askedAt: new Map(), released: new Set() }, evs = [];
+  const ctl = { place: 'pass', sockets: [], attached: [], asked: new Set(), askedAt: new Map(), released: new Set(), releasedAt: new Map(), relIds: new Map(), relReply: new Map(), swallowed: new Set() }, evs = [];
   const h = G.create({ WebSocketImpl: wrapped(ctl), log: quiet, boundMs, closeMs: 1500, armMs: 8000, rearmMs, onEvent: (e) => evs.push(e) });
   const r = await h.arm(`bp-${c.tag}`, { url: c.url, plan });
   return { h, ctl, evs, armed: r };
@@ -190,7 +192,7 @@ for (const [stored, label] of [[true, '③ «BLOCKED» is the profile\'s own sto
   await stop(c);
 }
 // ④ the place REFUSED; ⑤ NEVER ANSWERED — the tab released UNPLACED inside the bound and said; it reads «denied» (the stored setting), never this machine's
-for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '⑤ the place NEVER ANSWERED']]) {
+for (const [mode, label] of [['refuse', '④ the place REFUSED']]) {
   const c = await chrome({ grant: false });
   const { h, ctl, evs } = await holdOn(c, PLACE, { boundMs: 1500 });
   const k = `unplaced-${mode}`;
@@ -198,6 +200,56 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED'], ['swallow', '�
   const got = await reportsOf((x) => x.k === k, 1, SPACING_MS + 6000);
   ok(got.length === 1 && got[0].err === 1 && got[0].perm === 'denied' && evs.some((e) => e.kind === 'unplaced'), `${label}: the tab it opened is RELEASED unplaced inside the bound and said — it reads «denied» (the profile's own setting), never this machine's position (${J(got[0] || null)})`, { got, evs });
   h.dispose(); await stop(c);
+}
+// ⑤ the place NEVER ANSWERED — B-1217 (主开发 r5169). 2.369.420's first hosted run read it red once (heavy 7/7, Node 22, the runner's Chrome
+// not recorded): «held», then «unplaced» 3 s later, and no read in one 9 s window counted from the open. Probed 24 times green (Chromium
+// 154 on the second test machine, Chrome 158.0.8127.36 on the first): each tab released about 1.5 s after its attach, read «denied» about
+// 10 ms later. Now judged on its FACTS IN ORDER, each waited on: the opener's tab paused by the hold, its place asked and SWALLOWED (the
+// plant's witness — else a named skip: the scene did not form); the product's acts (released unplaced inside the bound, said «not
+// answered»); then its read, waited from the RELEASE. A read that never comes is told apart: a tab that RAN with no read reaching the
+// suite is a named skip (the page's report, never the product's act); a released tab that never ran is RED — a stuck tab a person sees.
+const tabState = async (c, tid) => {
+  try {
+    const t = ((await c.cdp.send('Target.getTargets')).targetInfos || []).find((x) => x.targetId === tid) || null;
+    if (!t) return { gone: true };
+    const at = await c.cdp.send('Target.attachToTarget', { targetId: tid, flatten: true });
+    const v = await Promise.race([c.cdp.send('Runtime.evaluate', { expression: 'document.readyState + " " + location.href', returnByValue: true }, at.sessionId).then((r) => (r && r.result ? r.result.value : null)).catch(() => null), sleep(3000).then(() => null)]);
+    return { url: t.url, ran: typeof v === 'string', rs: v };
+  } catch (e) { return { threw: String(e && e.message) }; }
+};
+async function fiveLeg(G, tag) {
+  const c = await chrome({ grant: false });
+  const { h, ctl, evs } = await holdOn(c, PLACE, { G, boundMs: 1500 });
+  const k = `unplaced-swallow-${tag}`;
+  const opener = await openThenMode(c, ctl, k, 'swallow');
+  const child = opener ? await untilV(() => ctl.attached.find((a) => a.opener === opener) || null, 8000) : null;   // the tab the opener opens, paused by the hold
+  const planted = child ? await untilV(() => (ctl.swallowed.has(child.sid) ? true : null), 8000) : null;   // WITNESS: its place asked and swallowed
+  const r = { tag, scene: !opener ? 'the opener tab was never released' : !child ? 'the opener opened no tab the hold paused' : !planted ? 'the hold never asked that tab\'s place (the plant was not in force)' : null };
+  if (!r.scene) {
+    const relAt = await untilV(() => ctl.releasedAt.get(child.sid) || null, 1500 + 3000);   // the product's act: released (its bound 1.5 s, a margin)
+    const un = evs.find((e) => e.kind === 'unplaced') || null;
+    r.released = relAt ? relAt - child.at : null; r.why = un ? un.why : null; r.reply = ctl.relReply.get(child.sid) || null; r.got = [];
+    if (relAt) { r.got = await reportsOf((x) => x.k === k, 1, READ_MS + 6000); if (!r.got.length) r.state = await tabState(c, child.tid); }   // the read, waited from the release
+  }
+  h.dispose(); await stop(c);
+  return r;
+}
+{
+  const f5 = await fiveLeg(GH, 'r');
+  if (f5.scene) console.log(`  SKIP (named, counted): ⑤ the scene did not form — ${f5.scene}`);
+  else {
+    ok(f5.released !== null && f5.why === 'not answered', `⑤ the place NEVER ANSWERED: the tab it opened is RELEASED unplaced inside the bound and said («${f5.why}», released ${f5.released} ms after its attach)`, f5);
+    if (f5.released !== null) {
+      if (f5.got.length) ok(f5.got.length === 1 && f5.got[0].err === 1 && f5.got[0].perm === 'denied' && f5.got[0].lat === undefined, `⑤ …and it reads «denied» (the profile's own setting), never this machine's position (${J(f5.got[0])})`, f5.got);
+      else if (f5.state && f5.state.ran) console.log(`  SKIP (named, counted): ⑤ the released tab ran (${f5.state.rs}) but its read never reached the suite within ${(READ_MS + 6000) / 1000} s of its release — the page's report, not judged`);
+      else ok(false, '⑤ the tab the hold RELEASED never ran (still paused after its release) — a stuck tab a person would see', f5);
+    }
+  }
+  // RED (B-1217): a hold copy that never releases a tab it could not place — the leg above sees no release (the tab stays paused)
+  const noRel = MUT.load('src/server/browser-geo-hold.js', anchored(holdSrc, "    call(h, 'Runtime.runIfWaitingForDebugger', {}, sid, closeMs);\n    return placed;\n  }", "    if (placed) call(h, 'Runtime.runIfWaitingForDebugger', {}, sid, closeMs);\n    return placed;\n  }", 'geo chrome RED no unplaced release'), 'no-unplaced-release');
+  const f5R = await fiveLeg(noRel, 'red');
+  if (f5R.scene) console.log(`  SKIP (named, counted): ⑤ RED — the scene did not form (${f5R.scene})`);
+  else ok(f5R.released === null && f5R.why === 'not answered', '⑤ RED (B-1217): a hold copy that never releases a tab it could not place — it says «unplaced» but the tab is never released: the leg above sees it', f5R);
 }
 // ⑥ THE HOLD DIES INSIDE THE PAUSE. (a) the browser does NOT release the tab by itself; (b) the hold's own next arm does, its place
 // first; (c) a tab OPENED while the hold is down is not paused: it runs without the place (what it reads printed: the kb sentence)
