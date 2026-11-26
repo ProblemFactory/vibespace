@@ -48,6 +48,7 @@
 const fs = require('fs');
 const path = require('path');
 const C = require('../app-csp.js');
+const FC = require('../fd-close.js');   // B-574d (lane nl-journals): the re-judge's rewrite through the tree's one synced replace (renameSynced)
 
 const FILE = 'csp-reports.jsonl';
 const BODY_MAX = 32 * 1024;
@@ -155,7 +156,7 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
   /** A HUB THAT MET THE BUG (above): the lines on disk a sanitizer explains → `sanitizer-parse` lines, THEN the notices
    *  they filed closed, said once → { lines, closed }. Once per boot, with the For-you store up — none yet ⇒ nothing
    *  rewritten, `later: true`, tried again in `retryMs` (and by the next report). */
-  let rejudging = null, retry = null;
+  let rejudging = null, retry = null, noSyncSaid = false;   // noSyncSaid: a file system that does no sync — the rewrite lands, said once (B-574d)
   const storeUp = () => { try { const t = getUserTodos && getUserTodos(); return t && typeof t.idsWhere === 'function' && typeof t.setStatusMany === 'function' ? t : null; } catch { return null; } };
   function later() {
     if (!retry) { retry = setTimeout(() => { retry = null; rejudge(); }, retryMs); if (retry.unref) retry.unref(); }
@@ -171,14 +172,16 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
       for (const c of stale) { try { if ((await (await parseSites(c.script)).sites).has(`${c.r.line}:${c.r.column}`)) hits.push(c); } catch { /* no such script on disk: the line stays */ } }
       if (!hits.length) return { lines: 0, closed: 0 };
       // THE LINES FIRST — each file read, rewritten and renamed in one synchronous step (no append falls between); a line
-      // is re-judged once its file is renamed
+      // is re-judged once its file is renamed. B-574d (lane nl-journals): its temp written, SYNCED, closed, THEN renamed (src/fd-close.js
+      // renameSynced) — a power cut never leaves the name over no bytes after the notice it filed was closed; a sync that fails is a
+      // failed rewrite (the temp removed, the old lines stand, the notice stays — the next boot tries again)
       const raws = new Set(hits.map((h) => h.raw)), landed = new Set(), at = new Date(now()).toISOString();
       for (const f of [rotated, file]) {
         const t = textOf(f);
         if (t == null) continue;
         const was = t.split('\n'), out = was.map((l) => { if (!raws.has(l)) return l; const { noticed: _n, ...r } = JSON.parse(l); return JSON.stringify({ ...r, kind: C.KIND_SANITIZER, rejudged: at }); });
         if (out.every((l, i) => l === was[i])) continue;
-        try { fs.writeFileSync(f + '.rejudge', out.join('\n'), { mode: 0o600 }); fs.renameSync(f + '.rejudge', f); for (const l of was) if (raws.has(l)) landed.add(l); } catch (e) { log.warn?.(`[csp] data/${FILE} was not re-judged — ${e && e.code || e && e.message} (its notice stays; the next boot tries again)`); }
+        try { FC.renameSynced(f + '.rejudge', f, out.join('\n'), { mode: 0o600, where: '[csp] the re-judged report lines', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; log.warn?.(w); } } }); for (const l of was) if (raws.has(l)) landed.add(l); } catch (e) { log.warn?.(`[csp] data/${FILE} was not re-judged — ${e && e.code || e && e.message} (its notice stays; the next boot tries again)`); }
       }
       load();
       const done = hits.filter((h) => landed.has(h.raw));

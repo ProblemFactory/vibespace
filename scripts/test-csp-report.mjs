@@ -529,6 +529,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       ok(src.split(row).length === 2, 'the mutant anchor (the table\'s one row) is in src/app-csp.js');
       const MD = path.join(ROOT, 'mutant-table', 'src'); fs.mkdirSync(path.join(MD, 'server'), { recursive: true });
       fs.writeFileSync(path.join(MD, 'app-csp.js'), editAnchor(src, row, "const PARSE_SCRIPTS = Object.freeze(['/bundle.js']);", "src/app-csp.js"));
+      fs.copyFileSync(path.join(REPO, 'src/fd-close.js'), path.join(MD, 'fd-close.js'));   // B-574d: the sink's require('../fd-close.js') (its synced rewrite) beside the mutant table
       const M = require(path.join(MD, 'app-csp.js'));
       const cut = tableFails(M.PARSE_SCRIPTS);
       ok(cut.length === 1 && cut[0] === '/mermaid.js embeds a DOMPurify and is NOT in the table', `MUTANT (/mermaid.js cut from the table) ⇒ RED by name: «${cut.join('; ')}»`, cut);
@@ -554,7 +555,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       ok(Object.keys(was[0]).join() === 'at,directive,blocked,source,line,column,document,disposition,noticed', 'the old judge\'s line has the fields 2.369.361\'s shipped sink wrote, in its order (r3: measured on 5055b9ad6\'s own sink + store)', Object.keys(was[0]));
       store.stop(); // its debounced write flushed: what a hub on .361 left in data/
       const homes = {};
-      for (const n of ['mutant', 'null', 'throw', 'mutnull', 'stuck']) { homes[n] = path.join(ROOT, 'upgrade-' + n); fs.cpSync(UH, homes[n], { recursive: true }); }
+      for (const n of ['mutant', 'null', 'throw', 'mutnull', 'stuck', 'synced', 'syncfail', 'nosync', 'release']) { homes[n] = path.join(ROOT, 'upgrade-' + n); fs.cpSync(UH, homes[n], { recursive: true }); }
       // THE BOOT AS server.js DOES IT (r3 — nothing else starts the re-judge): server.js's OWN sink line (⑤), verbatim, its
       // For-you store made after it as server.js's top-level `const userTodos` is (the getter reads it at the boot's next
       // tick), NO rejudge() call; the one thing added: publicDir = this suite's build (the fast tier runs no npm run build)
@@ -638,6 +639,40 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       await until(HS2, 3000);
       ok(!bootFault(HS2), 'the next boot, the way clear ⇒ the line re-judged, its notice closed, said once', bootFault(HS2));
       await HS2.close();
+      // B-574d (lane nl-journals): THE REWRITE IS ON DISK BEFORE ITS NAME POINTS AT IT — every call on a `.rejudge` temp of that
+      // home, in order; a PLACED answer of its sync (an errno name), never a mount
+      const tracedRe = async (home, fn, { sync = null } = {}) => {
+        const D = path.join(home, 'data') + path.sep, isTmp = (p0) => String(p0).startsWith(D) && String(p0).endsWith('.rejudge');
+        const o = { openSync: fs.openSync, fsyncSync: fs.fsyncSync, closeSync: fs.closeSync, renameSync: fs.renameSync }, log = [];
+        let tfd = null;
+        fs.openSync = function (p0, ...a) { const fd = o.openSync.call(this, p0, ...a); if (isTmp(p0)) { tfd = fd; log.push('open'); } return fd; };
+        fs.fsyncSync = function (fd, ...a) { if (fd === tfd) { log.push('sync'); if (sync) throw Object.assign(new Error(`${sync}: a placed answer of the sync`), { code: sync }); } return o.fsyncSync.call(this, fd, ...a); };
+        fs.closeSync = function (fd, ...a) { if (fd === tfd) { log.push('close'); tfd = null; } return o.closeSync.call(this, fd, ...a); };
+        fs.renameSync = function (a0, b0, ...a) { if (isTmp(a0)) log.push('rename'); return o.renameSync.call(this, a0, b0, ...a); };
+        try { return { ...(await fn()), calls: log.join(' ') }; } finally { Object.assign(fs, o); }
+      };
+      const bootRe = (mod, home) => async () => { const H = await lateBoot(mod, home, (st) => st); const r = await H.sink.rejudge(); return { H, r }; };
+      const FS0 = path.join(homes.synced, 'data', SINK.FILE);
+      const s1 = await tracedRe(homes.synced, bootRe(SINK, homes.synced));
+      const fs1 = bootFault(s1.H);
+      ok(!fs1 && s1.r.lines === 1 && s1.calls === 'open sync close rename' && !fs.existsSync(FS0 + '.rejudge'), 'B-574d the re-judge\'s rewrite: its temp written, SYNCED, closed, THEN renamed over the lines — on disk before the notice it filed is closed', { calls: s1.calls, r: s1.r, fault: fs1 });
+      await s1.H.close();
+      const FF = path.join(homes.syncfail, 'data', SINK.FILE), before = fs.readFileSync(FF, 'utf8');
+      const s2 = await tracedRe(homes.syncfail, bootRe(SINK, homes.syncfail), { sync: 'EIO' });
+      ok(s2.r.lines === 0 && s2.r.closed === 0 && s2.calls === 'open sync close' && fs.readFileSync(FF, 'utf8') === before && !fs.existsSync(FF + '.rejudge') && openOf(s2.H.store) === 1 && s2.H.told.some((x) => /was not re-judged — EIO/.test(x)),
+        'B-574d a sync that FAILS (a placed EIO) is a failed rewrite: no rename, the old lines stand, the temp removed, its notice NOT closed, said', { calls: s2.calls, r: s2.r, told: s2.H.told });
+      await s2.H.close();
+      const FN = path.join(homes.nosync, 'data', SINK.FILE); fs.copyFileSync(FN, FN + '.1');   // the same lines in the rotated generation too: TWO rewrites
+      const s3 = await tracedRe(homes.nosync, bootRe(SINK, homes.nosync), { sync: 'EINVAL' });
+      const nos = s3.H.told.filter((x) => /does not do a sync \(EINVAL\)/.test(x)), rej = (f) => linesOf(f).some((l) => l.kind === C.KIND_SANITIZER && l.rejudged);
+      ok(s3.calls === 'open sync close rename open sync close rename' && rej(FN) && rej(FN + '.1') && nos.length === 1 && !nos[0].includes(path.sep + 'data'),
+        'B-574d a file system that does no sync at all (a placed EINVAL) LANDS both rewrites — said ONCE, no path in the words', { calls: s3.calls, said: nos, told: s3.H.told });
+      await s3.H.close();
+      const REL_AT = "        try { FC.renameSynced(f + '.rejudge', f, out.join('\\n'), { mode: 0o600, where: '[csp] the re-judged report lines', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; log.warn?.(w); } } }); for (const l of was) if (raws.has(l)) landed.add(l); }";
+      const REL = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(srcK, REL_AT, "        try { fs.writeFileSync(f + '.rejudge', out.join('\\n'), { mode: 0o600 }); fs.renameSync(f + '.rejudge', f); for (const l of was) if (raws.has(l)) landed.add(l); }", 'src/server/csp-reports.js'));   // stale-pins: kept (the release's rewrite — this red control's own text)
+      const s4 = await tracedRe(homes.release, bootRe(REL, homes.release));
+      ok(s4.r.lines === 1 && !/sync/.test(s4.calls) && /rename/.test(s4.calls), 'RED B-574d the release\'s rewrite: renamed over the lines with NO sync of its temp — a power cut can leave the name over no bytes after the notice closed', { calls: s4.calls, r: s4.r });
+      await s4.H.close();
     }
   }
 }
