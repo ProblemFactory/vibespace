@@ -554,4 +554,25 @@ const RN = require(path.join(REPO, 'src/refresh-note.js'));
   const pc = clearersOf(planted);
   ok(!!pc['src/server/a-third-clearer.js'] && !pc['src/server/a-third-clearer.js'].asks && Object.keys(pc).length === 3, 'RED: a third clearer (one that does not ask the stash) is named', pc['src/server/a-third-clearer.js']);
 }
+console.log('§11 主开发 r5164 (2), a silence of the release: the start\'s release of a dead process\'s claims whose write FAILS is said by name (was an empty catch)');
+{
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+  const CLAIMED = JSON.stringify({ [CA]: [{ source: 'agent', kind: 'peer', fromName: 'Ada', text: 'a message a dead process was handing over', ts: 1, ho: 'h-dead' }] });
+  const releaseRun = (Mod) => {
+    const dir = mk(), F = path.join(dir, 'msg-stash.json'); fs.writeFileSync(F, CLAIMED);
+    const logs = [], realRename = fs.renameSync; let refused = 0;
+    // the plant: the start's rename of msg-stash.json refused (EIO); `refused` is its WITNESS (r5135 law 1)
+    fs.renameSync = function (a, b, ...x) { if (path.resolve(String(b)) === path.resolve(F)) { refused++; throw Object.assign(new Error('EIO: i/o error, rename (placed)'), { code: 'EIO' }); } return realRename.call(this, a, b, ...x); };
+    let D = null; try { D = Mod.create(deps(dir, { log: (...a) => logs.push(a.join(' ')) })); } finally { fs.renameSync = realRename; }
+    const h = D.stashHealth();
+    return { refused, said: logs.some((l) => /the release of the earlier hand-over claims of 1 conversation could not be saved to disk/.test(l)), durable: h.durable, kept: fs.readFileSync(F, 'utf8') === CLAIMED, waits: D.stashCount ? D.stashCount(CA) : null };
+  };
+  const r = releaseRun(CD);
+  if (!(r.refused >= 1)) console.log(`  SKIP §11: the placed refusal was never read (${JSON.stringify(r)})`);
+  else ok(r.said && r.durable === false && r.kept, '§11 the release\'s failed write is said BY NAME, the stash\'s health says «not durable», the file keeps the claims (the next start releases them again)', r);
+  const rx = releaseRun(M.load('src/server/conversation-deliver.js', anchored(SRC, 'catch (e) { bootReleaseFailed = e; } }', 'catch { } }', 'the release\'s empty catch'), 'empty-catch'));
+  if (!(rx.refused >= 1)) console.log(`  SKIP §11 RED: the placed refusal was never read (${JSON.stringify(rx)})`);
+  else ok(!rx.said && rx.durable === true, '§11 RED CONTROL (the release\'s empty catch): nothing said, the health reads «durable» over a write that failed', rx);
+}
+
 report();

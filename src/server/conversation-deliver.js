@@ -179,7 +179,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return out;
   };
   releasedAtBoot.push(...releaseClaims(stash));
-  if (releasedAtBoot.length && stashHold.writable('the release of an earlier hand-over')) { try { fs.writeFileSync(stashFile + '.tmp', stashBody(), { mode: 0o600 }); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
+  let bootReleaseFailed = null;   // 主开发 r5164 (2): the release's write that failed — said by name below, its retry armed (was an empty catch)
+  if (releasedAtBoot.length && stashHold.writable('the release of an earlier hand-over')) { try { fs.writeFileSync(stashFile + '.tmp', stashBody(), { mode: 0o600 }); fs.renameSync(stashFile + '.tmp', stashFile); } catch (e) { bootReleaseFailed = e; } }
   // lane report-mark-on-ack: a `carry` claim is an UNCONFIRMED ANSWER's (src/turn-carry.js) — it posts no frame, so its line
   // names no hand-over to look for; a hand-over's keeps its words; both on one conversation are named apart
   const claimedWords = (ids) => {
@@ -227,6 +228,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       return false;
     }
   };
+  // r5164 (2), a silence of the release: the start's release of a dead process's claims that did not reach the disk was an EMPTY catch.
+  // Said by name now, the stash's health says it, and its own 30 s retry writes it again (the next start would release the same claims
+  // again with the same lines: nothing is lost, the entries wait again in memory)
+  if (bootReleaseFailed) {
+    lastWriteError = { at: Date.now(), message: String((bootReleaseFailed && bootReleaseFailed.message) || bootReleaseFailed) };
+    log(`[deliver] the release of the earlier hand-over claims of ${releasedAtBoot.length} conversation${releasedAtBoot.length === 1 ? '' : 's'} could not be saved to disk (${lastWriteError.message}) — the entries wait again in memory; the file still holds the claims, so the next start releases them again; written again in ${STASH_RETRY_MS / 1000} s`);
+    if (!retryTimer) { retryTimer = setTimeout(() => { retryTimer = null; writeStashNow(); }, STASH_RETRY_MS); retryTimer.unref?.(); }
+  }
   const persistStash = () => {
     if (stashTimer) return;
     stashTimer = setTimeout(() => { stashTimer = null; writeStashNow(); }, 500);
