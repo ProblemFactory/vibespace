@@ -6,6 +6,15 @@
 // runs a slice of the heavy tier there, writes data/ci-heavy/<sha>.{green,red},
 // removes its pid file and cleans the worktree up.
 //
+// THE SHARED REPOSITORY (主开发 r5113). The supersede legs need commits and branch tips the launcher judges in the repository
+// its ci.mjs sits in (ci.mjs takes its repository from its own place; the one git environment strips GIT_DIR by law), so this
+// suite writes there: TWO refs a run, named by its own process (its pid and that process's start mark, /proc/<pid>/stat field 22)
+// — refs/heads/vs-ci-launch-live-<pid>-<mark> and refs/remotes/origin/vs-ci-launch-remote-<pid>-<mark> — removed in a finally.
+// A run killed before its finally leaves them; the NEXT start removes its own refs of runs whose process is gone (that pid not
+// running, or running with another start mark: a reused pid), by those two exact shapes only — never another ref. A leg proves
+// nothing is left after a run, and after a run stopped mid-way (in a scratch repository of its own). KNOWN REMAINDER: the three
+// commits it mints (commit-tree off HEAD~1) stay in the shared repository as unreachable objects: it keeps no automatic collection.
+//
 // WHY IT WAS IN THE FAST TIER, AND WHY IT NO LONGER IS (B-f4cb, 2026-09-27).
 // It costs a real worktree + build + suite per launch (5.5 s when written,
 // 21.5 s after round 4, 131 s by 2.369.192 — it drives eight real heavy runs
@@ -54,6 +63,23 @@ const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail
 const head = spawnSync('git', ['-C', REPO, 'rev-parse', 'HEAD'], { encoding: 'utf-8', env: GIT_ENV });
 if (head.status !== 0) { console.log('SKIP: not a git checkout (no HEAD to name a marker after)'); process.exit(0); }
 const SHA = head.stdout.trim();
+// THE SUITE's OWN REFS IN THE SHARED REPOSITORY (r5113, the header): named by this process, swept at the start when their process is gone
+const startMarkOf = (pid) => { try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' ')[19] || null; } catch { return null; } };
+const RUN_MARK = `${process.pid}-${startMarkOf(process.pid) || 'na'}`;
+const LAUNCH_REF_RE = /^refs\/(?:heads\/vs-ci-launch-live|remotes\/origin\/vs-ci-launch-remote)-(\d+)(?:-(\d+|na))?$/;   // the two names, exactly (the mark-less form: before r5113)
+const processRuns = (pid, mark) => { try { process.kill(pid, 0); } catch (e) { if (!e || e.code !== 'EPERM') return false; } return !mark || mark === 'na' || startMarkOf(pid) === mark; };
+function sweepStaleLaunchRefs(repoDir) {
+  const out = spawnSync('git', ['-C', repoDir, 'for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/origin/'], { encoding: 'utf-8', env: GIT_ENV });
+  const swept = [], kept = [];
+  for (const ref of (out.stdout || '').split('\n').filter(Boolean)) {
+    const m = LAUNCH_REF_RE.exec(ref); if (!m) continue;
+    if (processRuns(Number(m[1]), m[2])) { kept.push(ref); continue; }
+    if (spawnSync('git', ['-C', repoDir, 'update-ref', '-d', ref], { env: GIT_ENV }).status === 0) swept.push(ref);
+  }
+  return { swept, kept };
+}
+const sweptAtStart = sweepStaleLaunchRefs(REPO);
+if (sweptAtStart.swept.length) console.log(`  · removed ${sweptAtStart.swept.length} ref(s) of earlier runs of this suite whose process is gone: ${sweptAtStart.swept.join(', ')}`);
 
 // The slice to run inside the launched child. It is named explicitly (not
 // "whatever is first") so that moving it out of the heavy tier fails HERE,
@@ -231,14 +257,14 @@ try {
     // it reads as live. Per-pid name; deleted below.
     const minted2 = spawnSync('git', ['-C', REPO, 'commit-tree', 'HEAD^{tree}', '-p', (p1.stdout || '').trim() || 'HEAD', '-m', 'test-ci-heavy-launch: an ABANDONED commit (on no branch)'],
       { encoding: 'utf-8', env: mintEnv });
-    const liveRef = `refs/heads/vs-ci-launch-live-${process.pid}`;
+    const liveRef = `refs/heads/vs-ci-launch-live-${RUN_MARK}`;   // r5113: named by this process (pid + start mark)
     // A THIRD dangling commit, reachable ONLY from a remote-tracking ref that
     // is not origin/master (2026-09-16, verifier): the shape of a branch that
     // was pushed and then had its LOCAL branch deleted — routine worktree
     // cleanup here — whose verdict is still wanted. Per-pid name; deleted below.
     const minted3 = spawnSync('git', ['-C', REPO, 'commit-tree', 'HEAD^{tree}', '-p', (p1.stdout || '').trim() || 'HEAD', '-m', 'test-ci-heavy-launch: a commit reachable ONLY from a remote-tracking ref'],
       { encoding: 'utf-8', env: mintEnv });
-    const remoteRef = `refs/remotes/origin/vs-ci-launch-remote-${process.pid}`;
+    const remoteRef = `refs/remotes/origin/vs-ci-launch-remote-${RUN_MARK}`;
     if (p1.status === 0 && p2.status === 0 && minted.status === 0 && minted2.status === 0 && minted3.status === 0) {
       const OLD = p1.stdout.trim(), OLD2 = p2.stdout.trim();
       const NOTANC = minted.stdout.trim();
@@ -246,6 +272,7 @@ try {
       const REMOTE = minted3.stdout.trim();
       spawnSync('git', ['-C', REPO, 'update-ref', liveRef, NOTANC], { env: GIT_ENV });
       spawnSync('git', ['-C', REPO, 'update-ref', remoteRef, REMOTE], { env: GIT_ENV });
+      try {   // r5113: the two refs are removed in a finally, whatever a leg below throws
       const refsContaining = (s) => (spawnSync('git', ['-C', REPO, 'for-each-ref', '--contains', s, 'refs/heads/', 'refs/remotes/'], { encoding: 'utf-8', env: GIT_ENV }).stdout || '').trim();
       ok(refsContaining(NOTANC).includes(liveRef) && refsContaining(ABANDONED) === '',
         `the live control is the tip of a local branch (${liveRef.slice(11)}) and the abandoned control is on NO branch (${ABANDONED.slice(0, 8)}) — the two shapes the launcher must tell apart`);
@@ -291,8 +318,12 @@ try {
         `NEG (2026-09-16): the SAME launch leaves the run for a sha reachable ONLY from a remote-tracking ref alone (pid ${rpid} alive, pid file kept) — pushed, local branch deleted, verdict still wanted`);
       for (const p of [opid, apid, rpid, spid, parkHolder]) { try { process.kill(-p, 'SIGKILL'); } catch { try { process.kill(p, 'SIGKILL'); } catch { } } }
       for (const s of [NOTANC, ABANDONED, REMOTE, OLD2]) { try { fs.unlinkSync(path.join(dir, `${s}.pid`)); } catch { } }
+      } finally {
       spawnSync('git', ['-C', REPO, 'update-ref', '-d', liveRef], { env: GIT_ENV });
       spawnSync('git', ['-C', REPO, 'update-ref', '-d', remoteRef], { env: GIT_ENV });
+      }
+      const leftHere = (spawnSync('git', ['-C', REPO, 'for-each-ref', '--format=%(refname)', 'refs/heads/', 'refs/remotes/origin/'], { encoding: 'utf-8', env: GIT_ENV }).stdout || '').split('\n').filter((r) => LAUNCH_REF_RE.test(r) && r.endsWith('-' + RUN_MARK));
+      ok(leftHere.length === 0, `NOTHING IS LEFT in the shared repository after the run: its two refs (…-${RUN_MARK}) removed in its finally${leftHere.length ? ' — left: ' + leftHere.join(', ') : ''}`);
       // The launch we just made is real; let it finish before the temp dir goes.
       for (let i = 0; i < 300 && fs.existsSync(path.join(dir, `${SHA}.pid`)); i++) await sleep(1000);
     } else {
@@ -302,6 +333,41 @@ try {
       try { process.kill(parkHolder, 'SIGKILL'); } catch { }
     }
     try { fs.rmSync(parkDir, { recursive: true, force: true }); } catch { }
+
+    // (1a') A RUN STOPPED MID-WAY (主开发 r5113): a run killed before its finally leaves its two refs; the next start's sweep removes them
+    // — and ONLY them: a running run's refs stay, a reused pid's are removed, every other name is never read. In a scratch repository of
+    // the suite's own (the shared repository is never this leg's stage)
+    {
+      const sr = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-launch-refs-'));
+      const idEnv = { ...GIT_ENV, GIT_AUTHOR_NAME: 'gate test', GIT_AUTHOR_EMAIL: 'gate@test.local', GIT_COMMITTER_NAME: 'gate test', GIT_COMMITTER_EMAIL: 'gate@test.local' };
+      const g = (args, input) => spawnSync('git', ['-C', sr, ...args], { encoding: 'utf-8', env: idEnv, input });
+      const dead = sleeper(), live = sleeper();
+      try {
+        g(['init', '-q']);
+        const tree = (g(['hash-object', '-t', 'tree', '-w', '--stdin'], '').stdout || '').trim();
+        const c = (g(['commit-tree', tree, '-m', 'a stand-in tip'], '').stdout || '').trim();
+        for (let i = 0; i < 100 && !(startMarkOf(dead) && startMarkOf(live)); i++) await sleep(20);
+        const dm = startMarkOf(dead), lm = startMarkOf(live);
+        const name = (pid, mark) => [`refs/heads/vs-ci-launch-live-${pid}-${mark}`, `refs/remotes/origin/vs-ci-launch-remote-${pid}-${mark}`];
+        const DEAD = name(dead, dm), LIVE = name(live, lm), REUSED = [`refs/heads/vs-ci-launch-live-${live}-${Number(lm) + 1}`], LEGACY = [`refs/heads/vs-ci-launch-live-${dead}`];
+        const FOREIGN = ['refs/heads/vs-ci-launch-live-x', `refs/heads/vs-ci-launch-livery-${dead}-${dm}`, `refs/heads/feature-${dead}-${dm}`, `refs/remotes/upstream/vs-ci-launch-remote-${dead}-${dm}`];
+        for (const r of [...DEAD, ...LIVE, ...REUSED, ...LEGACY, ...FOREIGN]) g(['update-ref', r, c]);
+        try { process.kill(-dead, 'SIGKILL'); } catch { try { process.kill(dead, 'SIGKILL'); } catch { } }   // THE PLACED STOP: the run ends before its finally
+        let gone = false;
+        for (let i = 0; i < 200 && !gone; i++) { try { process.kill(dead, 0); await sleep(25); } catch { gone = true; } }
+        if (!gone) ok(false, `HARNESS: the stopped run (pid ${dead}) was still there after 5 s — the sweep leg cannot judge`);
+        const has = (r) => g(['rev-parse', '-q', '--verify', r]).status === 0;
+        ok(gone && [...DEAD, ...LEGACY].every(has), 'a run stopped mid-way (killed before its finally) LEAVES its refs — the state the next start must clear');
+        const sw = sweepStaleLaunchRefs(sr);
+        ok(gone && ![...DEAD, ...LEGACY, ...REUSED].some(has) && [...sw.swept].sort().join(',') === [...DEAD, ...LEGACY, ...REUSED].sort().join(','),
+          `the next start's sweep removes the stopped run's refs, the mark-less legacy one and a REUSED pid's (same pid, another start mark) — exactly those (${sw.swept.length})`, );
+        ok(LIVE.every(has) && FOREIGN.every(has) && LIVE.every((r) => sw.kept.includes(r)),
+          'NEG: a RUNNING run\'s refs stay (its pid runs with its own mark), and every other name — a look-alike, another prefix, another remote — is never touched');
+      } finally {
+        for (const p of [dead, live]) { try { process.kill(-p, 'SIGKILL'); } catch { try { process.kill(p, 'SIGKILL'); } catch { } } }
+        try { fs.rmSync(sr, { recursive: true, force: true }); } catch { }
+      }
+    }
 
     // (1b) A SUPERSEDED RUN CLEANS UP AFTER ITSELF. Superseding SIGTERMs a run
     //      that is minutes into its tier, and node's default SIGTERM does not
