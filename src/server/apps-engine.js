@@ -321,9 +321,11 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
       let lost = 0; const hosts = new Set();
       for (const p of marked) {
         let on = false, held = false;
-        try { on = !!deliver && typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(p.by.conversation, p.id); held = !on && !!deliver && typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { on = false; }
-        if (held) { owedReceipts.set(p.id, p.by.conversation); startOwed.add(p.id); watchReceipts(); continue; }
+        const told = typeof p.receiptText === 'string' ? p.receiptText : undefined;   // the words TOLD (never made again: outcomeText names the machine's place); none kept (a mark the release wrote) ⇒ the ref alone, the release's word
+        try { on = !!deliver && typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(p.by.conversation, p.id, told); held = !on && !!deliver && typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { on = false; }
+        if (held) { owedReceipts.set(p.id, { conv: p.by.conversation, text: told }); startOwed.add(p.id); watchReceipts(); continue; }
         if (on) delete p.receipt; else { p.receipt = 'not-queued'; lost++; }
+        delete p.receiptText;
         syncCard(p); hosts.add(p.host);
       }
       if (hosts.size) { save(); for (const h of hosts) bump(h); }
@@ -538,26 +540,29 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
   // 主开发 r5164 (2) / r5176 (4), a silence of the release: the agent's receipt of the person's decision «queued in memory only» was a log line.
   // The proposal's card (the person's own record) says it now — `receipt: 'not-on-disk'` until the receipt LANDED (the stash's own word at a
   // landing) or a turn took it; `'not-queued'` when it could not be queued or the stash's cap dropped it unread (the agent was not told)
-  const owedReceipts = new Map();   // proposal id → conversation
+  // 主开发 r5319 (1): a proposal's receipts share ONE ref (the take-back filters by it) — an older one still on disk (a failed run's, before its
+  // Try again) is not the newer one the card's mark is about: the mark is judged on THIS receipt's words (the stash's word: stashOnDisk with them)
+  // (the words ride the stored proposal too while it is marked — `receiptText`, never in its view — so a START asks with the words TOLD)
+  const owedReceipts = new Map();   // proposal id → { conv, text }: the conversation and the words of the receipt the mark is about
   let receiptWatch = false, dueArmed = false;
   const receiptsDue = new Map(), startOwed = new Set();   // startOwed: the marks of the LAST run owed at a held start
   // the stash's words are read OFF their own turn (a drain is a prompt's road: nothing of ours — the card, the store's write — rides
   // it) and as ONE batch: one save for every card a word cleared
   const flushDue = () => {
     dueArmed = false; const hosts = new Set(); let n = 0;
-    for (const [id, word] of [...receiptsDue]) { receiptsDue.delete(id); startOwed.delete(id); if (!owedReceipts.delete(id)) continue; const p = get(id); if (!p) continue; if (word) p.receipt = word; else delete p.receipt; syncCard(p); hosts.add(p.host); n++; }
+    for (const [id, word] of [...receiptsDue]) { receiptsDue.delete(id); startOwed.delete(id); if (!owedReceipts.delete(id)) continue; const p = get(id); if (!p) continue; if (word) p.receipt = word; else delete p.receipt; delete p.receiptText; syncCard(p); hosts.add(p.host); n++; }
     if (n) { save(); for (const h of hosts) bump(h); }
   };
   const due = (id, word) => { receiptsDue.set(id, word); if (!dueArmed) { dueArmed = true; setImmediate(flushDue); } };
   // at a lift or a landing: on disk ⇒ the mark goes; a mark of the LAST run (owed at a held start) the stash does not hold now ⇒ lost
-  const onDiskNow = () => { let held = false; try { held = typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { held = false; } for (const [id, conv] of owedReceipts) { let on = false; try { on = typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(conv, id); } catch { on = false; } if (on) due(id, null); else if (startOwed.has(id) && !held) due(id, 'not-queued'); } };
+  const onDiskNow = () => { let held = false; try { held = typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { held = false; } for (const [id, o] of owedReceipts) { let on = false; try { on = typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(o.conv, id, o.text); } catch { on = false; } if (on) due(id, null); else if (startOwed.has(id) && !held) due(id, 'not-queued'); } };
   const watchReceipts = () => {
     if (receiptWatch || !deliver) return;
     receiptWatch = true;
     // a receipt taken while the list is HELD lands at the LIFT (onStashLift) or at a later landing (onStashLanded): the stash's own word
     try { if (typeof deliver.onStashLift === 'function') deliver.onStashLift(onDiskNow); } catch { /* no lift word */ }
     try { if (typeof deliver.onStashLanded === 'function') deliver.onStashLanded(onDiskNow); } catch { /* no landing word */ }
-    try { if (typeof deliver.onStash === 'function') deliver.onStash((ev, cid, entries) => { for (const e of entries || []) { const ref = e && e.ref ? String(e.ref) : ''; if (!owedReceipts.has(ref)) continue; if (ev === 'drained') due(ref, null); else if (ev === 'evicted') due(ref, 'not-queued'); } }); } catch { /* no events */ }
+    try { if (typeof deliver.onStash === 'function') deliver.onStash((ev, cid, entries) => { for (const e of entries || []) { const ref = e && e.ref ? String(e.ref) : '', o = owedReceipts.get(ref); if (!o || (o.text !== undefined && String(e.text || '') !== o.text)) continue; if (ev === 'drained') due(ref, null); else if (ev === 'evicted') due(ref, 'not-queued'); } }); } catch { /* no events */ }
   };
   /** `person`: the state move is a PERSON's decision (their Not now, or the run their Install approved) — only then does the card say
    *  the agent's receipt of «your answer» (an expiry, the agent's own withdraw, a restart's interruption: the release's log line) */
@@ -566,9 +571,9 @@ function create({ access, userTodos = null, deliver = null, activeSessions = () 
     const text = outcomeText(p);
     try {
       const st = deliver.stashFor(p.by.conversation, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: p.id, text });
-      if (st && st.stored === false) { log.warn?.(`[apps] ${p.id}: the outcome is queued in memory only — ${st.why}`); if (person) { p.receipt = 'not-on-disk'; owedReceipts.set(p.id, p.by.conversation); watchReceipts(); } }
-      else { delete p.receipt; owedReceipts.delete(p.id); }
-    } catch (e) { log.warn?.(`[apps] ${p.id}: the outcome could not be queued for ${p.by.conversation}: ${e.message}`); if (person) p.receipt = 'not-queued'; owedReceipts.delete(p.id); }
+      if (st && st.stored === false) { log.warn?.(`[apps] ${p.id}: the outcome is queued in memory only — ${st.why}`); if (person) { p.receipt = 'not-on-disk'; p.receiptText = text; owedReceipts.set(p.id, { conv: p.by.conversation, text }); watchReceipts(); } }
+      else { delete p.receipt; delete p.receiptText; owedReceipts.delete(p.id); }
+    } catch (e) { log.warn?.(`[apps] ${p.id}: the outcome could not be queued for ${p.by.conversation}: ${e.message}`); if (person) { p.receipt = 'not-queued'; delete p.receiptText; owedReceipts.delete(p.id); } }
   }
   /** The agent-facing sentence of a proposal's state (English — the agent's contract; the CLI prints it too). */
   function outcomeText(p) {

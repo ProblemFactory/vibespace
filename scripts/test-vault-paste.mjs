@@ -1545,6 +1545,56 @@ console.log('㉑ 主开发 r5164 (2) / r5176 (4): THE AGENT\'S RECEIPT OF THE PE
     ok(s1.atStart === null && s2.atStart === 'not-queued', '㉑b a mark of the LAST run at the start: the stash\'s own word — on disk ⇒ the mark goes; not on disk (the list readable) ⇒ lost, «the agent was not told»', { s1, s2 });
     ok(s3.atStart === 'not-on-disk' && s3.afterLift === 'not-queued', '㉑b …the list HELD at the start: the mark waits for the lift — and a lift that does not find the receipt says it was lost', s3);
   }
+  // ㉑c 主开发 r5319 (3): THE WORDS PROPOSAL's twin (a person's Allow or Deny) was silent — the paste's tell, mirrored: its receipt «queued in
+  // memory only» is said on the person's own record (the resolved words item) until the lift; one that could not be queued says «not told»
+  ok(W.vault.state() === 'unlocked' || (await W.vault.setup(PW)).ok, '㉑c the scratch vault of this world is set up and unlocked (a words proposal needs it)', W.vault.state());
+  const wrun = async (DoorMod, mode, tag, { lift = true } = {}) => {
+    const lifts = []; let onDisk = false, reached = 0, asked = null;
+    const dl = { stashFor: (cid, env) => { reached++; asked = { cid, ref: env && env.ref }; if (mode === 'throw') throw new Error('the stash could not be written to disk (msg-stash.json) — the entry was not stored'); return mode === 'held' ? { stored: false, taken: true, why: 'taken, not on disk' } : { stored: true }; },
+      onStashLift: (fn) => { lifts.push(fn); return () => { }; }, onStashLanded: () => () => { }, onStash: () => () => { }, stashOnDisk: (c, r) => onDisk && !!asked && c === asked.cid && r === asked.ref, stashHeld: () => null };
+    const door = DoorMod.create({ vault: W.vault, userTodos: W.userTodos, deliver: dl, logins: W.logins, log: (m) => LOGS.push(String(m)) });
+    const conv = 'cid-wr-' + tag, entry = [`agent:${conv}`, 'wkey'].join('/');
+    W.vault.agentMint(entry, { length: 24 });
+    const prop = door.propose({ caller: { conversationId: conv, sessionKey: 'w1', name: 'Words lane' }, entry, ref: `vault://secrets/${entry}/secret`, seen: true, name: 'Words of ' + tag });
+    const ans = prop.ok ? door.answerWords(prop.proposalId, { answer: 'deny', person: true }) : null;
+    const mark = () => { const it = W.userTodos.resolvedOf(P.WORDS_TYPE).find((i) => i.action && i.action.askId === prop.proposalId); return it ? ((it.resolvedFact && it.resolvedFact.receipt) || null) : 'no-record'; };
+    const after = mark();
+    if (lift && mode === 'held') { onDisk = true; for (const fn of lifts) fn(); }
+    await tick(); await tick();
+    return { proposed: prop.ok ? prop.proposalId : prop.code, answered: ans && ans.outcome, reached, after, cleared: mark() };
+  };
+  const wh = await wrun(DOOR0, 'held', 'held'), wq = await wrun(DOOR0, 'throw', 'throw'), ws = await wrun(DOOR0, 'stored', 'stored');
+  if (![wh, wq, ws].every((x) => x.reached === 1 && x.answered === 'refused')) console.log(`  SKIP ㉑c: the words receipt never reached the stash (${JSON.stringify({ wh, wq, ws })}) — a proposal\'s code is its «proposed»`);
+  else {
+    ok(wh.after === 'not-on-disk' && wh.cleared === null, '㉑c r5319 (3) a person\'s Deny of a words proposal, its receipt QUEUED IN MEMORY ONLY: the resolved words record says «not on disk yet» — and stops at the stash\'s LIFT', wh);
+    ok(wq.after === 'not-queued' && wq.cleared === 'not-queued', '㉑c …a words receipt that could NOT be queued: the record says the agent was not told', wq);
+    ok(ws.after === null, '㉑c …a words receipt on disk: the record says nothing more', ws);
+  }
+  const DOORw = mutant('src/server/vault-paste-door.js', " owedReceipts.set(w.proposalId, { conv: w.conv, todoId: w.todoId, who: w.who }); watchReceipts(); markReceipt(w.todoId, w.who, w.proposalId, 'not-on-disk'); }", ' }');
+  const whx = await wrun(DOORw, 'held', 'held-red');
+  if (!(whx.reached === 1 && whx.answered === 'refused')) console.log(`  SKIP ㉑c RED: the words receipt never reached the stash (${JSON.stringify(whx)})`);
+  else ok(whx.after === null, '㉑c RED CONTROL (the release\'s words tell: «queued in memory only» unsaid): the person\'s record says nothing', whx);
+  // ㉑d …and THE START's scan reads a words mark of the LAST run too (the paste's alone, before): not on disk, the list readable ⇒ lost.
+  // The WITNESS that run 2's start scan ran: its reads of the resolved records, by type (every door's start scan reads the SHARED store —
+  // a paste mark seeded here would be judged by the seeding door's own scan first, so it is no witness)
+  const wnext = async (DoorMod, tag) => {
+    const seed = await wrun(DOOR0, 'held', tag, { lift: false });   // run 1: the words receipt taken while held — its record says «not on disk yet»
+    const it = W.userTodos.resolvedOf(P.WORDS_TYPE).find((i) => i.action && i.action.askId === seed.proposed);
+    const asks = [];
+    const dl = { stashFor: () => ({ stored: true }), onStashLift: () => () => { }, onStashLanded: () => () => { }, onStash: () => () => { }, stashOnDisk: (c, r) => { asks.push(r); return false; }, stashHeld: () => null };
+    const types = [];
+    const ut = new Proxy(W.userTodos, { get: (t, k) => (k === 'resolvedOf' ? (type) => { types.push(type); return t.resolvedOf(type); } : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) });
+    DoorMod.create({ vault: W.vault, userTodos: ut, deliver: dl, logins: W.logins, log: (m) => LOGS.push(String(m)) });   // run 2's door
+    await tick(); await tick();
+    const x = it && W.userTodos.get(it.id);
+    return { seeded: seed.after, scanned: types.length, types, asked: asks.includes(seed.proposed), atStart: x && x.resolvedFact ? (x.resolvedFact.receipt || null) : 'no-record' };
+  };
+  const wn = await wnext(DOOR0, 'start');
+  if (!(wn.seeded === 'not-on-disk' && wn.scanned >= 1)) console.log(`  SKIP ㉑d: run 1's words mark or run 2's scan never came (${JSON.stringify(wn)})`);
+  else ok(wn.asked && wn.atStart === 'not-queued', '㉑d r5319 (3) a words mark of the LAST run at the start: the stash\'s own word asked — not on disk (the list readable) ⇒ lost, «the agent was not told»', wn);
+  const wnx = await wnext(mutant('src/server/vault-paste-door.js', 'for (const type of [P.ACTION_TYPE, P.WORDS_TYPE])', 'for (const type of [P.ACTION_TYPE])'), 'start-red');
+  if (!(wnx.seeded === 'not-on-disk' && wnx.scanned >= 1)) console.log(`  SKIP ㉑d RED: run 1's words mark or run 2's scan never came (${JSON.stringify(wnx)})`);
+  else ok(!wnx.asked && !wnx.types.includes(P.WORDS_TYPE) && wnx.atStart === 'not-on-disk', '㉑d RED CONTROL (the start scans the paste\'s marks alone — 09a71cb6c): the words mark says «not on disk yet» for good', wnx);
 }
 
 console.log('⑬ THE SURFACES THAT DRAW A LOGIN CARD — a census derived from the code (r3, law B)');

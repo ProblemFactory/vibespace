@@ -197,14 +197,16 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // verify r5 (2026-09-27): the LAST failure is remembered (`stashHealth`) and a failed write is RETRIED on its own
   // clock — a transient refusal (a full disk cleared a minute later) heals without waiting for the next mutation
   // r3988 (A) THE STASH's OWN WORD THAT AN ENTRY IS IN THE FILE: the (conversation, ref) pairs the LAST write that LANDED held — read only
-  // through stashOnDisk (THE ONE CLEARER of a receipt's «not on disk» asks it). A refused write (held) or a failed one changes nothing: the
+  // through stashOnDisk (THE ONE CLEARER of a receipt's «not on disk» asks it). 主开发 r5319 (1): beside each ref, the WORDS of its entries in that
+  // write — a producer's receipts may share ONE ref (an app proposal's failed run, then its Try again's outcome), so `stashOnDisk(cid, ref, text)`
+  // judges THIS receipt (an older one of the same ref on disk is not it); without `text`, any entry of the ref, as before. A refused write (held) or a failed one changes nothing: the
   // last landed list still says what is on disk. `landListeners` hear a write that lands after a spell of none landing (held, or failing) —
   // the lift's write that lands, or its retry's: never a lift whose write failed
-  const refsOf = (o) => { const m = new Map(); for (const c of Object.keys(o || {})) if (isConvName(c) && Array.isArray(o[c])) m.set(c, new Set(o[c].filter((e) => e && e.ref).map((e) => String(e.ref)))); return m; };
+  const refsOf = (o) => { const m = new Map(); for (const c of Object.keys(o || {})) if (isConvName(c) && Array.isArray(o[c])) { const r = new Map(); for (const e of o[c]) if (e && e.ref) { const k = String(e.ref); let t = r.get(k); if (!t) r.set(k, (t = new Set())); t.add(String(e.text || '')); } m.set(c, r); } return m; };
   let onDiskRefs = stashHold.held() ? new Map() : refsOf(stash);
   let landingOwed = !!stashHold.held();
   const landListeners = new Set();
-  const stashOnDisk = (cid, ref) => { const s0 = onDiskRefs.get(String(cid)); return !!(s0 && s0.has(String(ref))); };
+  const stashOnDisk = (cid, ref, text) => { const s0 = onDiskRefs.get(String(cid)); const t = s0 && s0.get(String(ref)); return !!t && (text === undefined || t.has(String(text))); };
   // r4023 (D)(i) NOTHING IS JUDGED INSIDE A WRITE: the landing is told on the loop's NEXT turn (setImmediate) — after the act that caused the
   // write has said its own word (a drain's «drained», an eviction's «evicted» are emitted right after its write, in the same turn); the lift
   // tells its own listeners (afterLift), so a write that lands AT the lift owes no landing besides (one reconcile, one journal line)

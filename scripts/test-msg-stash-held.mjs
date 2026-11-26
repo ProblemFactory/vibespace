@@ -663,4 +663,47 @@ console.log('§14 主开发 r5176 (4) on the REAL stash: a person\'s decision wh
   else ok(rx.after === 'not-on-disk' && rx.onDisk && rx.cleared === 'not-on-disk', '§14 RED CONTROL (the lift not listened to — the commit\'s first form): the receipt is on disk, the card still says it is not', rx);
 }
 
+console.log('§15 主开发 r5319 (1) on the REAL stash: a proposal\'s receipts share ONE ref — an OLDER receipt of it on disk is not the newer one the card\'s mark is about: the stash\'s word is asked with THIS receipt\'s words');
+{
+  const E = require(path.join(REPO, 'src/server/apps-engine.js'));
+  const STUB = require(path.join(REPO, 'scripts/fixtures/apps-stub.cjs'));
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const ESRC = fs.readFileSync(path.join(REPO, 'src/server/apps-engine.js'), 'utf8');
+  const quiet = { log() { }, warn() { }, error() { } };
+  const S1 = { agentToken: 'vsst_s1', claudeSessionId: CC, name: 'Session One', backend: 'claude' }, sessions = new Map([['w1', S1]]), keyOf = (x) => `claude:${x.claudeSessionId}`;
+  const tick = () => new Promise((r) => setImmediate(r));
+  const OLDER = 'Your proposal — an OLDER receipt of it (a failed run, before its Try again)';
+  const threeRuns = async (Eng) => {
+    const dir = mk(), d = mk(), F = path.join(dir, 'msg-stash.json');
+    const userTodos = new UserTodoManager({ dataDir: d, onChange: () => { }, expirySweepMs: 0 });
+    const engOver = (D) => Eng.create({ access: STUB.create({ log: quiet, delayMs: 5 }), userTodos, deliver: D, activeSessions: () => sessions, sessionStatusKey: keyOf, broadcast: () => { }, dataDir: d, log: quiet });
+    // run 1 (the list reads): the proposal, and an OLDER receipt of it that LANDS — the plant
+    const D1 = CD.create(deps(dir)); const e1 = engOver(D1);
+    const p = await e1.propose({ request: { kind: 'apt', packages: ['hello'] }, by: { kind: 'agent', sessionId: 'w1', conversation: CC, name: S1.name, sessionKey: keyOf(S1) } });
+    const st1 = D1.stashFor(CC, { source: 'agent', kind: 'notification', fromName: 'Desktop apps', ref: p.id, text: OLDER });
+    const plantInFile = ((readJson(F) || {})[CC] || []).some((e) => e && e.ref === p.id && e.text === OLDER);
+    // run 2 (the start's one read refused ⇒ HELD; `seen` its WITNESS): the person's decision — its receipt taken in memory only
+    const { D: D2, seen } = heldStart(CD, dir, fs.readFileSync(F, 'utf8'));
+    const heldBefore = !!D2.stashHeld();
+    const e2 = engOver(D2); await tick(); await tick();
+    const todoId = e2.get(p.id).todoId, card = () => { const it = userTodos.get(todoId); return it && it.card ? (it.card.receipt || null) : 'no-card'; };
+    e2.reject(p.id);
+    const after = card();
+    // run 3 (the list reads; the newer receipt never landed — it went with run 2): the stash's own word, by ref and by words
+    const D3 = CD.create(deps(dir));
+    const refOnDisk = D3.stashOnDisk(CC, p.id), olderOnDisk = D3.stashOnDisk(CC, p.id, OLDER), otherWords = D3.stashOnDisk(CC, p.id, 'other words');
+    engOver(D3); await tick(); await tick(); await tick();
+    return { stored1: !!(st1 && st1.stored), plantInFile, seen, heldBefore, after, refOnDisk, olderOnDisk, otherWords, atStart: card() };
+  };
+  const r = await threeRuns(E);
+  if (!(r.stored1 && r.plantInFile && r.seen === 1 && r.heldBefore && r.refOnDisk)) console.log(`  SKIP §15: the older receipt never landed, or the placed read refusal never held the list (${JSON.stringify(r)})`);
+  else {
+    ok(r.olderOnDisk === true && r.otherWords === false, '§15 the stash\'s word with words: the older receipt of the ref is on disk; other words of the same ref are not', r);
+    ok(r.after === 'not-on-disk' && r.atStart === 'not-queued', '§15 the decision\'s receipt taken while HELD, lost with that run; at the next start an OLDER receipt of the same ref is on disk: the card says the agent was not told', r);
+  }
+  const rx = await threeRuns(M.load('src/server/apps-engine.js', anchored(ESRC, 'deliver.stashOnDisk(p.by.conversation, p.id, told)', 'deliver.stashOnDisk(p.by.conversation, p.id)', 'the start judged by the ref alone'), 'apps-ref-alone'));
+  if (!(rx.stored1 && rx.plantInFile && rx.seen === 1 && rx.heldBefore && rx.refOnDisk)) console.log(`  SKIP §15 RED: the older receipt never landed, or the placed read refusal never held the list (${JSON.stringify(rx)})`);
+  else ok(rx.after === 'not-on-disk' && rx.atStart === null, '§15 RED CONTROL (the start judged by the ref alone — 09a71cb6c): the older receipt on disk clears the mark of the newer one that was lost', rx);
+}
+
 report();

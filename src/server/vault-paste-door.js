@@ -146,7 +146,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   // The person's own record says it now: the resolved For-you item carries `not-on-disk` (src/user-todos.js noteReceipt) until the receipt
   // LANDED (the stash's own word, stashOnDisk, at a landing) or a turn took it (`drained`); `not-queued` when it could not be queued, or the
   // stash's cap dropped it unread (`evicted`) — the agent was not told
-  const owedReceipts = new Map();   // requestId → { conv, todoId, who }
+  const owedReceipts = new Map();   // requestId (or a words proposal's id, r5319 (3)) → { conv, todoId, who }
   let receiptWatch = false, dueArmed = false;
   const receiptsDue = new Map();
   const markReceipt = (todoId, who, requestId, word) => { if (!userTodos || !todoId || typeof userTodos.noteReceipt !== 'function') return true; try { userTodos.noteReceipt(todoId, word); return true; } catch (e) { log(`${who}: the receipt mark of ${requestId} could not be written: ${e.message} — kept, written again at the stash's next word`); return false; } };
@@ -170,13 +170,13 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   function startReceipts() {
     if (receiptsStarted || !userTodos || userTodos.isHeldUnread?.()) return;
     receiptsStarted = true;
-    try { for (const it of userTodos.resolvedOf?.(P.ACTION_TYPE) || []) startReceipt(it); } catch (e) { log(`the receipt marks of the last run could not be read again: ${e.message}`); }
+    try { for (const type of [P.ACTION_TYPE, P.WORDS_TYPE]) for (const it of userTodos.resolvedOf?.(type) || []) startReceipt(it); } catch (e) { log(`the receipt marks of the last run could not be read again: ${e.message}`); }
   }
   setImmediate(() => { try { startReceipts(); } catch { /* the index runs it again */ } });
   /** r5176 (4): one `not-on-disk` receipt mark read at a START. */
   function startReceipt(it) {
     if (!it || !it.resolvedFact || it.resolvedFact.receipt !== 'not-on-disk' || !it.action) return;
-    const ref = String(it.action.requestId || ''), conv = String(it.action.conv || '');
+    const ref = String((it.action.type === P.WORDS_TYPE ? it.action.askId : it.action.requestId) || ''), conv = String(it.action.conv || '');
     if (owedReceipts.has(ref)) return;   // this run's own mark (its receipt told by this door): its stash's words decide, not the start
     let on = false, held = false;
     try { on = !!deliver && typeof deliver.stashOnDisk === 'function' && deliver.stashOnDisk(conv, ref); held = !on && !!deliver && typeof deliver.stashHeld === 'function' && !!deliver.stashHeld(); } catch { on = false; }
@@ -551,8 +551,12 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   const wforget = (w) => { wopen.delete(w.proposalId); settled.add(w.proposalId); while (settled.size > SETTLED_MAX) settled.delete(settled.values().next().value); };
   function wtell(w, o) {
     if (!deliver || typeof deliver.stashFor !== 'function' || !w.conv) { log(`${w.who}: the receipt for ${w.proposalId} has no road (no delivery stash)`); return false; }
-    try { deliver.stashFor(w.conv, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: w.proposalId, text: P.wordsReceiptText({ ...o, proposalId: w.proposalId, ref: w.ref }) }); return true; }
-    catch (e) { log(`${w.who}: the receipt for ${w.proposalId} could not be queued: ${e.message}`); return false; }
+    // 主开发 r5319 (3): the paste's tell, mirrored — a receipt «queued in memory only» or not queued is said on the person's own record
+    try {
+      const st = deliver.stashFor(w.conv, { source: 'agent', kind: 'notification', fromName: FROM_NAME, ref: w.proposalId, text: P.wordsReceiptText({ ...o, proposalId: w.proposalId, ref: w.ref }) });
+      if (st && st.stored === false) { log(`${w.who}: the receipt for ${w.proposalId} is queued in memory only — ${st.why}`); owedReceipts.set(w.proposalId, { conv: w.conv, todoId: w.todoId, who: w.who }); watchReceipts(); markReceipt(w.todoId, w.who, w.proposalId, 'not-on-disk'); }
+      return true;
+    } catch (e) { log(`${w.who}: the receipt for ${w.proposalId} could not be queued: ${e.message}`); markReceipt(w.todoId, w.who, w.proposalId, 'not-queued'); return false; }
   }
   /** Close a proposal's item by THIS door, forget it, tell the agent. outcome: applied | refused | withdrawn | gone. */
   function wsettle(w, outcome, { why = 'denied', to = null, now: nowWords = null } = {}) {

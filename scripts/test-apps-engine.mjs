@@ -835,13 +835,14 @@ console.log('§15 主开发 r5164 (2) / r5176 (4): the agent\'s receipt of the p
   const MUT = mutantCopies('apps-engine-receipt', repo);
   const eSrc = fs.readFileSync(path.join(repo, 'src/server/apps-engine.js'), 'utf8');
   const tick = () => new Promise((r) => setImmediate(r));
-  const scene = async (Eng, mode, tag, { road = 'lift', restartOnDisk = null, restartHeld = false } = {}) => {
+  const OLDER = 'Your proposal — an OLDER receipt of it (a failed run, before its Try again)';   // `olderOnly` below: the landed list holds an OLDER receipt of the ref, not this one
+  const scene = async (Eng, mode, tag, { road = 'lift', restartOnDisk = null, restartHeld = false, olderOnly = false, relabel = false } = {}) => {
     const d = path.join(dir, tag); fs.mkdirSync(d, { recursive: true });
     const userTodos = new UserTodoManager({ dataDir: d, onChange: () => { }, expirySweepMs: 0 });
-    const lifts = [], evs = []; let onDisk = false, reached = 0, held = false;
+    const lifts = [], evs = [], told = []; let onDisk = false, reached = 0, held = false, reads = 0;
     // a stash stand-in with the REAL contract (held ⇒ taken; the lift tells its LIFT listeners; a take emits `drained`) — `reached` its WITNESS
-    const deliver = { ...fakeDeliver(), stashFor: () => { reached++; if (mode === 'throw') throw new Error('the stash could not be written to disk (msg-stash.json)'); return { stored: false, taken: true, why: 'taken, not on disk' }; },
-      onStashLift: (fn) => { lifts.push(fn); return () => { }; }, onStashLanded: () => () => { }, onStash: (fn) => { evs.push(fn); return () => { }; }, stashOnDisk: (c, r) => onDisk && c === S1.claudeSessionId && typeof r === 'string' && r.startsWith('ap-'), stashHeld: () => (held ? { code: 'EIO' } : null) };
+    const deliver = { ...fakeDeliver(), stashFor: (c, env) => { reached++; told.push({ ref: env && env.ref, text: env && env.text }); if (mode === 'throw') throw new Error('the stash could not be written to disk (msg-stash.json)'); return { stored: false, taken: true, why: 'taken, not on disk' }; },
+      onStashLift: (fn) => { lifts.push(fn); return () => { }; }, onStashLanded: () => () => { }, onStash: (fn) => { evs.push(fn); return () => { }; }, stashOnDisk: (c, r, t) => { reads++; return onDisk && c === S1.claudeSessionId && typeof r === 'string' && r.startsWith('ap-') && (t === undefined || (!olderOnly && told.some((x) => x.ref === r && x.text === t))); }, stashHeld: () => (held ? { code: 'EIO' } : null) };
     const mk = () => Eng.create({ access: STUB.create({ log: quiet, delayMs: 5 }), userTodos, deliver, activeSessions: () => sessions, sessionStatusKey: (s) => keyOf(s), broadcast: () => { }, dataDir: d, log: quiet });
     const eng = mk();
     const p = await eng.propose({ request: { kind: 'apt', packages: ['hello'] }, by: agentBy(S1, 'w1') });
@@ -849,11 +850,16 @@ console.log('§15 主开发 r5164 (2) / r5176 (4): the agent\'s receipt of the p
     const card = () => { const it = userTodos.get(todoId); return it && it.card ? (it.card.receipt || null) : 'no-card'; };
     eng.reject(p.id);   // the person's decision: its receipt told to the agent at once
     const after = card();
+    const SF = path.join(d, 'app-proposals.json');
+    const storedOf = () => { try { const q = (JSON.parse(fs.readFileSync(SF, 'utf8')).proposals || []).find((x) => x.id === p.id); return q ? (q.receiptText === undefined ? null : q.receiptText) : 'no-proposal'; } catch (e) { return `unread: ${e.code}`; } };
+    const storedAt = storedOf(); let relabeled = null;
+    // `relabel`: the words the start would MAKE differ from the words TOLD (a stand-in for a renamed machine in outcomeText's place) — the stored label edited
+    if (relabel) { const j = JSON.parse(fs.readFileSync(SF, 'utf8')); const q = j.proposals.find((x) => x.id === p.id); q.label = 'a label renamed since the receipt'; fs.writeFileSync(SF, JSON.stringify(j)); relabeled = q.label; }
     let restart = null;
-    if (restartOnDisk !== null) { onDisk = restartOnDisk; held = restartHeld; mk(); await tick(); await tick(); restart = card(); if (restartHeld) { held = false; for (const fn of lifts) fn(); await tick(); await tick(); restart = { atStart: restart, afterLift: card() }; } }   // a NEW process over the same store
+    if (restartOnDisk !== null) { onDisk = restartOnDisk; held = restartHeld; const mk2 = mk(); await tick(); await tick(); restart = card(); if (restartHeld) { held = false; for (const fn of lifts) fn(); await tick(); await tick(); restart = { atStart: restart, afterLift: card() }; } if (relabeled) relabeled = { label: relabeled, readBack: (mk2 && mk2.get(p.id) || {}).label || null }; }   // a NEW process over the same store
     else if (road === 'lift') { onDisk = true; for (const fn of lifts) fn(); await tick(); await tick(); }
-    else if (road === 'drained') { for (const fn of evs) fn('drained', S1.claudeSessionId, [{ ref: p.id }]); await tick(); await tick(); }
-    return { reached, after, cleared: card(), restart };
+    else if (road === 'drained' || road === 'drained-older') { const took = road === 'drained' ? told[told.length - 1] : { ref: p.id, text: OLDER }; for (const fn of evs) fn('drained', S1.claudeSessionId, [took]); await tick(); await tick(); }
+    return { reached, reads, evs: evs.length, after, cleared: card(), restart, storedAt, storedAfter: storedOf(), told: told.length ? told[told.length - 1].text : null, relabeled };
   };
   const h = await scene(E, 'held', 'rcpt-held'), hd = await scene(E, 'held', 'rcpt-drained', { road: 'drained' }), q = await scene(E, 'throw', 'rcpt-throw');
   const rl = await scene(E, 'held', 'rcpt-restart-lost', { restartOnDisk: false }), ro = await scene(E, 'held', 'rcpt-restart-ondisk', { restartOnDisk: true }), rh = await scene(E, 'held', 'rcpt-restart-held', { restartOnDisk: false, restartHeld: true });
@@ -865,12 +871,38 @@ console.log('§15 主开发 r5164 (2) / r5176 (4): the agent\'s receipt of the p
     ok(rl.restart === 'not-queued' && ro.restart === null, '§15 …a mark read at a START: the stash\'s own word decides — not on disk ⇒ lost, «not told»; on disk (it landed, its clear not saved) ⇒ the mark goes', { rl, ro });
     ok(rh.restart && rh.restart.atStart === 'not-on-disk' && rh.restart.afterLift === 'not-queued', '§15 …the list HELD at that start: the mark waits for the lift — a lift that does not find the receipt says it was lost', rh);
   }
-  const hx = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, " p.receipt = 'not-on-disk'; owedReceipts.set(p.id, p.by.conversation); watchReceipts(); } }", ' } }', 'src/server/apps-engine.js'), 'rcpt-red'), 'held', 'rcpt-red');
+  const hx = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, " p.receipt = 'not-on-disk'; p.receiptText = text; owedReceipts.set(p.id, { conv: p.by.conversation, text }); watchReceipts(); } }", ' } }', 'src/server/apps-engine.js'), 'rcpt-red'), 'held', 'rcpt-red');
   if (hx.reached !== 1) console.log(`  SKIP §15 RED: the receipt never reached the stash (${JSON.stringify(hx)})`);
   else ok(hx.after === null, '§15 RED CONTROL (the release: «queued in memory only» a log line): the card says nothing', hx);
   const hdx = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, "if (ev === 'drained') due(ref, null);", "if (false) due(ref, null);", 'src/server/apps-engine.js'), 'rcpt-red-drained'), 'held', 'rcpt-red-drained', { road: 'drained' });
   if (hdx.reached !== 1) console.log(`  SKIP §15 RED 2: the receipt never reached the stash (${JSON.stringify(hdx)})`);
   else ok(hdx.after === 'not-on-disk' && hdx.cleared === 'not-on-disk', '§15 RED CONTROL 2 (a turn\'s take not read): the agent has the receipt, the card still says it is not on disk', hdx);
+  // 主开发 r5319 (1): a proposal's receipts share ONE ref — an OLDER receipt of it (taken by a turn, or on disk at a start) is not the newer one
+  // the card's mark is about: the mark is judged on THIS receipt's words
+  const ho = await scene(E, 'held', 'rcpt-older-drained', { road: 'drained-older' });
+  const rlo = await scene(E, 'held', 'rcpt-restart-older', { restartOnDisk: true, olderOnly: true });
+  if (!(ho.reached === 1 && ho.evs >= 1 && rlo.reached === 1 && rlo.reads >= 1)) console.log(`  SKIP §15 r5319 (1): the older receipt's plant was never read (${JSON.stringify({ ho, rlo })})`);
+  else {
+    ok(ho.after === 'not-on-disk' && ho.cleared === 'not-on-disk', '§15 r5319 (1) a turn that took an OLDER receipt of the same proposal (its other words) leaves the newer one\'s mark: the agent does not have THIS one yet', ho);
+    ok(rlo.restart === 'not-queued', '§15 r5319 (1) …at a START, an older receipt of the same ref on disk and THIS one not: lost, «not told» (the ref alone said «on disk»)', rlo);
+  }
+  // …the words TOLD ride the stored proposal while it is marked (`receiptText`) and go with the mark; a START asks with them, never with words
+  // it makes again (outcomeText names the machine's place: a renamed machine would make other words)
+  const rr = await scene(E, 'held', 'rcpt-restart-relabel', { restartOnDisk: true, relabel: true });
+  if (!(rr.reached === 1 && rr.reads >= 1 && rr.relabeled && rr.relabeled.readBack === rr.relabeled.label)) console.log(`  SKIP §15 the words told: the relabel plant was never read (${JSON.stringify(rr)})`);
+  else {
+    ok(h.storedAt === h.told && h.storedAfter === null && rl.storedAfter === null, '§15 the words TOLD ride the stored proposal while it is marked, and go with the mark (cleared at the lift; lost at a start)', { h, rl });
+    ok(rr.restart === null, '§15 …a START asks the stash with the words TOLD: on disk ⇒ the mark goes, though the words it would make now differ', rr);
+  }
+  const rrx = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, "const told = typeof p.receiptText === 'string' ? p.receiptText : undefined;", 'const told = outcomeText(p);', 'src/server/apps-engine.js'), 'rcpt-red-relabel'), 'held', 'rcpt-red-relabel', { restartOnDisk: true, relabel: true });
+  if (!(rrx.reached === 1 && rrx.reads >= 1 && rrx.relabeled && rrx.relabeled.readBack === rrx.relabeled.label)) console.log(`  SKIP §15 the words told RED: the relabel plant was never read (${JSON.stringify(rrx)})`);
+  else ok(rrx.restart === 'not-queued', '§15 RED CONTROL (the start makes the words again): a receipt on disk reads as lost once the words it makes differ', rrx);
+  const hox = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, "if (!o || (o.text !== undefined && String(e.text || '') !== o.text)) continue;", 'if (!o) continue;', 'src/server/apps-engine.js'), 'rcpt-red-older-drained'), 'held', 'rcpt-red-older-drained', { road: 'drained-older' });
+  if (!(hox.reached === 1 && hox.evs >= 1)) console.log(`  SKIP §15 r5319 (1) RED: the older receipt's take never reached the engine (${JSON.stringify(hox)})`);
+  else ok(hox.after === 'not-on-disk' && hox.cleared === null, '§15 r5319 (1) RED CONTROL (the take judged by its ref alone — 09a71cb6c): the older receipt\'s take clears the newer one\'s mark', hox);
+  const rlox = await scene(MUT.load('src/server/apps-engine.js', editAnchor(eSrc, 'deliver.stashOnDisk(p.by.conversation, p.id, told)', 'deliver.stashOnDisk(p.by.conversation, p.id)', 'src/server/apps-engine.js'), 'rcpt-red-restart-older'), 'held', 'rcpt-red-restart-older', { restartOnDisk: true, olderOnly: true });
+  if (!(rlox.reached === 1 && rlox.reads >= 1)) console.log(`  SKIP §15 r5319 (1) RED 2: the start never asked the stash (${JSON.stringify(rlox)})`);
+  else ok(rlox.restart === null, '§15 r5319 (1) RED CONTROL 2 (the start judged by the ref alone — 09a71cb6c): the older receipt on disk clears the mark of the newer one that was lost', rlox);
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}) in ${Date.now() - T0} ms`);
