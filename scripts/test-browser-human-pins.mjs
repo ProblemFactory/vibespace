@@ -151,6 +151,63 @@ console.log('— ③ THE HOLDER CENSUS');
   ok(/const userDrivesAnyWindowOf = \(profileId\) => \{ const pid = String\(profileId \|\| ''\); return holdersOn\(pid\)\.some\(\(h\) => h\.human \? h\.input === 'user' : \(\(inputs\.get\(inputKey\(h\.browserKey, pid\)\) \|\| \{\}\)\.input === 'user'\)\); \};/.test(src) && !('userDrivesAnyWindowOf' in sites), 'verify r5 ⑥ (lane browser-windows): userDrivesAnyWindowOf — a HOLDER question — goes through holdersOn (the conversations\' leases + their row), never reg.leases by hand');
 }
 
+// ── ③b THE IDLE-STAMP CENSUS (r4973 / r5091; r5247's required follow: the census itself goes red on a removal with no stamp) ──
+console.log('— ③b THE IDLE-STAMP CENSUS');
+{
+  // THE LAW: no tick ever sees a browser with no holder and a drop time older than the moment its last holder left. Every place
+  // the keeper REMOVES a holder (a conversation's lease, a person's row) stands here by a FIXED anchor with its function. Each
+  // live-browser removal must stamp `lastLeaseDroppedAt = now()` in the SAME synchronous step: no `await` of its function between the
+  // removal and its stamp, on either side. The source's own count of each removal form must equal the table's, so a NEW removal
+  // (a lease assignment, a person's row deleted or cleared) is red until it stands here with its stamp, or is named clean with why
+  const SITES = [
+    { anchor: 'reg.leases = d.remaining;', fn: 'detach', form: 0 },
+    { anchor: 'reg.leases = reg.leases.filter((l) => l.browserKey !== handle);', fn: 'dropChild', form: 0 },
+    { anchor: 'reg.leases = r.kept;', fn: 'reconcile', form: 0 },
+    { anchor: 'humans.delete(h.profileId);', fn: 'endHuman', form: 1 },
+    { anchor: 'reg.leases = reg.leases.map(', fn: 'attach', form: 0, clean: 'a REPLACE of one lease by its new form: the same holder stays' },
+    { anchor: 'humans.delete(id);', fn: 'removeProfile', form: 1, clean: 'the forget deletes the browser record with the row: no browser is left to idle' },
+    { anchor: 'humans.clear();', fn: 'loadFrom', form: 2, clean: 'the load rebuilds every valid person row in the same synchronous step' },
+  ];
+  const FORMS = [/reg\.leases\s*=(?!=)/g, /humans\.delete\(/g, /humans\.clear\(/g], FORM_NAMES = ['reg.leases =', 'humans.delete(', 'humans.clear('];
+  const FNS = /^  (?:async )?function (\w+)\(|^  const (\w+) = (?:\(|async|\w+ =>|\{)/, AWAIT = /\bawait\s/, STAMP = 'lastLeaseDroppedAt = now()';
+  const stampCensus = (text) => {
+    const L = String(text).split('\n'), code = L.map((l) => (/^\s*(\*|\/\/|\/\*)/.test(l) ? '' : l.replace(/\/\/.*$/, '')));
+    const fnStart = (i) => { for (let x = i; x >= 0; x--) { const m = FNS.exec(L[x]); if (m) return { at: x, name: m[1] || m[2] }; } return { at: 0, name: '(top)' }; };
+    const fnEnd = (i) => { for (let x = i + 1; x < L.length; x++) if (FNS.test(L[x])) return x; return L.length; };
+    const bad = [], rows = [];
+    for (const site of SITES) {
+      const hits = code.map((l, i) => (l.includes(site.anchor) ? i : -1)).filter((i) => i >= 0);
+      if (hits.length !== 1) { bad.push(`${site.fn}: its anchor «${site.anchor.slice(0, 60)}» stands ${hits.length} times (one meant)`); continue; }
+      const i = hits[0], f = fnStart(i), end = fnEnd(i);
+      if (f.name !== site.fn) { bad.push(`«${site.anchor.slice(0, 60)}» moved: it sits in ${f.name}, the table says ${site.fn}`); continue; }
+      if (site.clean) { rows.push(`${site.fn}: clean — ${site.clean}`); continue; }
+      // the synchronous step around the removal: the lines after the last await before it, up to the line before the next await
+      // after it (the anchor's own line counts unless an await shares it on that side)
+      const at = code[i].indexOf(site.anchor), before = code[i].slice(0, at), after = code[i].slice(at + site.anchor.length);
+      let lo = f.at, hi = end - 1;
+      if (AWAIT.test(before)) lo = i; else for (let x = i - 1; x > f.at; x--) if (AWAIT.test(code[x])) { lo = x + 1; break; }
+      if (AWAIT.test(after)) hi = i; else for (let x = i + 1; x < end; x++) if (AWAIT.test(code[x])) { hi = x - 1; break; }
+      const stamped = code.slice(lo, hi + 1).some((l) => l.includes(STAMP));
+      if (!stamped) bad.push(`${site.fn}: its removal «${site.anchor.slice(0, 60)}» has no «${STAMP}» in its synchronous step (lines ${lo + 1} to ${hi + 1})`);
+      else rows.push(`${site.fn}: stamped in its step`);
+    }
+    FORMS.forEach((re, k) => {
+      const n = code.reduce((a, l) => a + (l.match(re) || []).length, 0), table = SITES.filter((x) => x.form === k).length;
+      if (n !== table) bad.push(`${n} «${FORM_NAMES[k]}» site(s) in the keeper, ${table} in the table: a new removal stands here only with its stamp (or named clean, with why)`);
+    });
+    return { bad, rows };
+  };
+  const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const sc = stampCensus(ksrc);
+  ok(!sc.bad.length, `the IDLE-STAMP census: every holder removal of browser-keeper.js (${SITES.length} anchored sites: ${SITES.filter((x) => !x.clean).length} stamping in their own synchronous step, ${SITES.filter((x) => x.clean).length} named clean) — the source's removal counts equal the table`, sc.bad.length ? sc.bad : sc.rows);
+  // CONTROLS: a removal whose stamp is gone (dropChild's, the last one this law added) and a NEW person-row delete with no stamp each read RED
+  const noStamp = ksrc.replace('    for (const pid of leftOn) { const rec = reg.browsers[pid]; if (rec && B.isLiveBrowser(rec) && !holdersOn(pid).length) rec.lastLeaseDroppedAt = now(); }\n', '');
+  const newDelete = ksrc.replace('  function dropChild(handle) {', '  async function forgetPerson(pid) { humans.delete(pid); await Promise.resolve(); }\n  function dropChild(handle) {');
+  const c1 = stampCensus(noStamp), c2 = stampCensus(newDelete);
+  ok(noStamp !== ksrc && c1.bad.some((b) => /^dropChild: its removal/.test(b)) && newDelete !== ksrc && c2.bad.some((b) => /«humans\.delete\(» site/.test(b)), 'CONTROLS (r5247): a copy without dropChild\'s stamp, and a copy with a NEW person-row delete before an await, each read RED in the idle-stamp census', { c1: c1.bad, c2: c2.bad });
+}
+
+
 // ── ③ THE TAB-RELEASE CENSUS, its route pins and its CONTROLS (moved; the paths driven over the fake 0.38.1 stay in the heavy suite) ──
 console.log('— ③ THE TAB-RELEASE CENSUS, its route pins and its CONTROLS');
 {
