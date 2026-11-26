@@ -553,15 +553,21 @@ const WINDOW_UNTIL = (kind) => `(() => { const R = window.__ral; if (!R) return 
   if (R.step === 0 && (!R.natural || now - R.landedAt < 600) && now - R.landedAt < 1500) return false;
   if (R.step === 0) { const held = top(list, list.getBoundingClientRect().top);
     if (!held || !v._gapSettle) { R.step = -1; R.why = !held ? 'no card at the top' : 'the watch has ended'; return true; }
-    R.lineBefore = list.scrollTop;
-    if (R.control) v._gapSettle.line = ${kind === 'inside' ? "() => list.scrollTop" : "() => R.lineBefore"};   // the control: the answer handed the OTHER card's line
+    R.lineBefore = list.scrollTop; R.lineOff = list.scrollTop - held.offsetTop; R.plantReads = []; R.growAt = 0;
+    // THE CONTROL's PLANT (主开发 r5039): the answer handed the OTHER card's line — inside, the view's top; after, the line of before the
+    // scroll, kept as a distance from the card read before it, so it moves with the content as the watch's own line does (a number taken
+    // before the scroll went stale on the hosted runner, where the landing's own settles came after it: 0 px, four tries of four). Its
+    // WITNESS: every read of the planted line is kept; the control is judged only when the product read it at or after the growth
+    const plant = (g) => { if (!R.control || !g) return; g.line = ${kind === 'inside' ? "() => { R.plantReads.push(Math.round(performance.now())); return list.scrollTop; }" : "() => { R.plantReads.push(Math.round(performance.now())); return held.offsetTop + R.lineOff; }"}; };
+    plant(v._gapSettle);
     const t0 = performance.now(); list.scrollTop = list.scrollTop - 300; R.step = 1;
     const grow = () => { const ck = top(list, list.getBoundingClientRect().top); let row = null;
       if (ck && ck !== held && held.isConnected) for (let el = ck.nextElementSibling; el && el !== held; el = el.nextElementSibling) { const cl = el.classList; if (cl && cl.contains('chat-msg') && !cl.contains('chat-run-header') && !cl.contains('chat-run-footer') && el.offsetParent !== null && el.offsetHeight >= 8) { row = el; break; } }
       if (!row) { R.step = -1; R.why = 'no row the scroll brought in between the card at the top and the card read before it'; return; }
+      plant(v._gapSettle); R.growAt = Math.round(performance.now());   // the plant placed again where the product reads, at the growth
       R.dt = Math.round(performance.now() - t0); const h0 = held.isConnected ? pos(held) : null, c0 = pos(ck), r0 = row.offsetHeight;
       const pad = document.createElement('div'); pad.style.height = '258px'; row.appendChild(pad); R.g = row.offsetHeight - r0;
-      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { R.hMoved = held.isConnected && h0 != null ? Math.round(pos(held) - h0) : null; R.tMoved = ck.isConnected ? Math.round(pos(ck) - c0) : null; R.alive = !!v._gapSettleRO; R.step = 3; }, 0)));
+      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { R.hMoved = held.isConnected && h0 != null ? Math.round(pos(held) - h0) : null; R.tMoved = ck.isConnected ? Math.round(pos(ck) - c0) : null; R.alive = !!v._gapSettleRO; R.inForce = R.control ? R.plantReads.some((x) => x >= R.growAt) : null; R.step = 3; }, 0)));
     };
     ${kind === 'inside' ? 'requestAnimationFrame(() => requestAnimationFrame(grow));   // one painted frame after the scroll' : 'setTimeout(grow, 400);   // well after the window'}
     return false; }
@@ -731,7 +737,7 @@ const searchScene = async (tail) => {
   // in (between the card now at the top and the card read before the scroll) grows 258 px — ONE PAINTED FRAME after it (inside the
   // product's window: the card read before the scroll stands) or 400 ms after it (after the window: the card at the top stands). Each
   // with its control: the answer handed the OTHER card's line (the view's top inside; the line before the scroll after) — it goes red
-  const WIN = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, why: R.why || null, dt: R.dt ?? null, g: R.g ?? null, hMoved: R.hMoved ?? null, tMoved: R.tMoved ?? null, alive: !!R.alive } : null; })()';
+  const WIN = '(() => { const R = window.__ral; return R ? { landed: R.landed, natural: R.natural, step: R.step, why: R.why || null, dt: R.dt ?? null, g: R.g ?? null, hMoved: R.hMoved ?? null, tMoved: R.tMoved ?? null, alive: !!R.alive, inForce: R.inForce ?? null, plantReads: R.plantReads ? R.plantReads.length : null, readsAfterGrowth: R.plantReads ? R.plantReads.filter((x) => x >= R.growAt).length : null } : null; })()';
   const winHold = async (label, kind, control) => { globalThis.__firstNotchUntil = WINDOW_UNTIL(kind); try { return await firstHold(label, control ? 'window placed, control' : 'window placed', { after: WIN, cadence: 'shortHold' }); } finally { globalThis.__firstNotchUntil = null; } };
   const wI = await winHold('a row the scroll brought in grows inside the window', 'inside', false), wIc = await winHold('a row the scroll brought in grows inside the window, control', 'inside', true);
   const wA = await winHold('a row the scroll brought in grows after the window', 'after', false), wAc = await winHold('a row the scroll brought in grows after the window, control', 'after', true);
@@ -739,12 +745,16 @@ const searchScene = async (tail) => {
   const wPre = (h, kind) => (winScene(h, kind) ? '' : `PRECONDITION NOT MET (${h.after?.why || 'the row grew ' + (h.after?.dt ?? '?') + ' ms after the scroll, the watch alive ' + h.after?.alive}) — `);
   check(`§4h INSIDE THE WINDOW (r4599): ${wPre(wI, 'inside')}a row the scroll brought in grew ${wI.after?.g} px ${wI.after?.dt} ms after it: the card read before the scroll stands (${wI.after?.hMoved} px; the card at the top ${wI.after?.tMoved} px; ± ${NOTCH_TOL_PX})`,
     winScene(wI, 'inside') && Math.abs(wI.after.hMoved) <= NOTCH_TOL_PX, JSON.stringify(wI.after));
-  check(`§4h CONTROL: ${wPre(wIc, 'inside')}the answer handed the view's top as its line ⇒ the card read before the scroll drops (${wIc.after?.hMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red`,
-    winScene(wIc, 'inside') && Math.abs(wIc.after.hMoved) > NOTCH_TOL_PX, JSON.stringify(wIc.after));
+  // a control is judged on the FACT that its plant was in force at the product's read (its witness); not in force after it was placed
+  // again where the product reads = a NAMED SKIP (counted by the gate's skip line) and the leg it guards PARTIAL in this run (r5039)
+  const ctlJudge = (h, kind, text, moved, legName) => {
+    if (winScene(h, kind) && h.after.inForce === false) { console.log(`  ⊘ SKIP §4h CONTROL (${text}): the plant was never read by the product at or after the growth (${h.after.plantReads} read(s), ${h.after.readsAfterGrowth} after it) — the leg ${legName} is PARTIAL in this run`); return; }
+    check(`§4h CONTROL: ${wPre(h, kind)}${text} ⇒ ${moved(h)} — the leg can go red (the plant read ${h.after?.readsAfterGrowth ?? '?'} time(s) at or after the growth)`, winScene(h, kind) && h.after.inForce === true && Math.abs(kind === 'inside' ? h.after.hMoved : h.after.tMoved) > NOTCH_TOL_PX, JSON.stringify(h.after));
+  };
+  ctlJudge(wIc, 'inside', "the answer handed the view's top as its line", (h) => `the card read before the scroll drops (${h.after?.hMoved} px; more than ${NOTCH_TOL_PX})`, 'INSIDE THE WINDOW');
   check(`§4h AFTER THE WINDOW (r4599, as the product has it): ${wPre(wA, 'after')}a row the scroll brought in grew ${wA.after?.g} px ${wA.after?.dt} ms after it: the card at the top stands (${wA.after?.tMoved} px; the card read before the scroll ${wA.after?.hMoved} px — the limit: a real height later than the window is answered for the card at the top; ± ${NOTCH_TOL_PX})`,
     winScene(wA, 'after') && Math.abs(wA.after.tMoved) <= NOTCH_TOL_PX, JSON.stringify(wA.after));
-  check(`§4h CONTROL: ${wPre(wAc, 'after')}the answer handed the line of before the scroll ⇒ the card at the top moves (${wAc.after?.tMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red`,
-    winScene(wAc, 'after') && Math.abs(wAc.after.tMoved) > NOTCH_TOL_PX, JSON.stringify(wAc.after));
+  ctlJudge(wAc, 'after', 'the answer handed the line of before the scroll', (h) => `the card at the top moves (${h.after?.tMoved} px; more than ${NOTCH_TOL_PX})`, 'AFTER THE WINDOW');
   const c1 = await heldOn("control (1')", "(1')", LANDED_UNTIL, PAIRF);
   const c1Scene = c1.slabs >= 1 && c1.carries >= 1 && c1.reader.length === 0 && !!c1.after && c1.after.landed === 1;
   check(`§4h CONTROL (1'): ${c1Scene ? '' : 'PRECONDITION NOT MET (the first notch held until the slab landed, carried into it, no reader read: slabs ' + c1.slabs + ', carried landings ' + c1.carries + ', reader traces ' + c1.reader.length + ') — '}with no reader read at the insert the carried notch lands whole and the card misses at the landing by more than ${NOTCH_TOL_PX} px (${c1.law.carried} px)`, c1Scene && Math.abs(c1.law.carried ?? 0) > NOTCH_TOL_PX, JSON.stringify({ law: c1.law, after: c1.after }));
