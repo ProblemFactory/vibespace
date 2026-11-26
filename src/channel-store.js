@@ -873,7 +873,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // the update's `ix.conversations`, or `live()` — touches every row (conservative: the next write is a full one).
   let curTouch = null;         // the running update's touched keys (a Set; `.all` once it reached the whole map)
   let allDirty = true;         // the next write re-serializes every row (boot, a whole-map update, a verify drift)
-  const dirtyKeys = new Set();
+  let dirtyKeys = new Set();   // B-360d found holder 4: a sliced apply takes this Set WHOLE (a new one for the touches after), never a copy
   let layout = null;           // { chunks: [{ keys, buf, n }], chunkOf: Map<key, chunk> } — the cached rows
   // B-dfa4 cut 3: A BIG INDEX'S LAYOUT IS BUILT IN SLICES (walkSliced). The first write after a boot (and after a whole-map
   // touch, or a mass of touched rows: a boot's passes) laid out EVERY row on the loop: 1.6 s for 96 500 rows. An index of at
@@ -1203,6 +1203,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  applyTouched; a whole touch makes it stale (the next write lays out whole); a synchronous write meanwhile takes its
    *  rows back (never lost). The writer is answered LATER until it lands. */
   /** Do the rows touched since the last write fall in more than `limit` chunks (a row born counts as the last one)? */
+  /** B-360d found holder 4 (主开发 r4997): do the rows touched since the last write hold more than `limit` the layout does not
+   *  hold yet (BIRTHS: each joins the last chunk)? A new row is in no chunk, so touchedChunksOver never counted it, and a write
+   *  after a burst of births laid every one of them out in its own turn (296 / 679 / 1 344 ms at 28 000 / 55 000 / 115 043 births,
+   *  the probe of r4987). Counted until it passes `limit`. */
+  function bornOver(limit) { let n = 0; for (const k of dirtyKeys) { if (!layout.chunkOf.has(k) && hasOwn(ix.conversations, k) && ++n > limit) return true; } return false; }
   function touchedChunksOver(limit) {
     const seen = new Set();
     for (const k of dirtyKeys) { seen.add(layout.chunkOf.get(k) || null); if (seen.size > limit) return true; }
@@ -1210,24 +1215,39 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }
   function warmApply() {
     if (warm && !warm.stale) return warm.promise;
-    const job = { stale: false, promise: null, keys: [...dirtyKeys] };
-    warm = job; dirtyKeys.clear(); laterJobs++;
+    const job = { stale: false, promise: null, keys: dirtyKeys };   // THE STATED SNAPSHOT: the touched rows' Set itself (B-360d found holder 4: the release COPIED it here, a pass over every touched row in the caller's turn)
+    dirtyKeys = new Set(); warm = job; laterJobs++;
     job.promise = (async () => {
       const conv = ix.conversations;
       const stale = new Set();
-      for (const k of job.keys) {
+      const st = { slices: 0, maxSliceMs: 0 };
+      const alive = () => !closed && warm === job && !job.stale;
+      // B-360d found holder 4: each touched row's chunk — a BIRTH's place (it joins the last chunk, the map's own order) — taken in
+      // slices too: the release took them all here, in the caller's turn, before the first await. A synchronous write taking the
+      // job over meanwhile takes every key of it back (prepareIndex): a birth placed already is in its chunk, one not yet placed
+      // is placed there — the layout is whole either way
+      const place = (k) => {
         let c = layout.chunkOf.get(k);
         if (!c) {
-          if (!hasOwn(conv, k)) continue;
+          if (!hasOwn(conv, k)) return;
           c = layout.chunks[layout.chunks.length - 1];
           if (!c || c.keys.length >= INDEX_CHUNK) { c = { keys: [], buf: null, n: 0 }; layout.chunks.push(c); }
           c.keys.push(k); layout.chunkOf.set(k, c);
         }
         stale.add(c);
+      };
+      // walkSliced's own shape over the Set's iterator (no array of it is made): the first slice a turn after the call, a slice
+      // of LAYOUT_SLICE_MS, the seam between two slices, alive() after each yield
+      const it = job.keys.values(); let placed = 0, more = true;
+      await new Promise((r) => setImmediate(r));
+      while (more && alive()) {
+        const s0 = Date.now();
+        do { const r = it.next(); if (r.done) { more = false; break; } place(r.value); placed++; } while (Date.now() - s0 < LAYOUT_SLICE_MS);
+        const ms = Date.now() - s0; st.slices++; if (ms > st.maxSliceMs) st.maxSliceMs = ms;
+        if (more) { await new Promise((r) => setImmediate(r)); if (layoutSeam) await layoutSeam(placed, 'layout-keys'); }
       }
-      const st = { slices: 0, maxSliceMs: 0 };
       // a chunk whose bytes changed owes them AT ONCE: a synchronous write taking the job over writes them
-      await walkSliced([...stale], (c) => { if (serializeChunk(c, conv)) bytesOwed = true; }, { what: 'layout', sliceMs: LAYOUT_SLICE_MS, stats: st, onSlice: layoutSeam, alive: () => !closed && warm === job && !job.stale });
+      if (alive()) await walkSliced([...stale], (c) => { if (serializeChunk(c, conv)) bytesOwed = true; }, { what: 'layout', sliceMs: LAYOUT_SLICE_MS, stats: st, onSlice: layoutSeam, alive });
       if (st.maxSliceMs > flushStats.layoutMaxSliceMs) flushStats.layoutMaxSliceMs = st.maxSliceMs;
       flushStats.layoutSlices += st.slices;
       if (closed || warm !== job) return;
@@ -1312,7 +1332,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       const before = layout ? liveBufs() : null;
       buildLayout(conv); flushStats.full++;
       if (!before || !sameJoined(before, liveBufs())) bytesOwed = true;
-    } else if (!sync && !warmFailed && (warm || (layout.chunks.length * INDEX_CHUNK > LAYOUT_SYNC_ROWS && touchedChunksOver(APPLY_SYNC_CHUNKS)))) {   // B-dfa4 cut 3: a mass of touched rows (a boot's passes): their chunks in slices
+    } else if (!sync && !warmFailed && (warm || bornOver(LAYOUT_SYNC_ROWS) || (layout.chunks.length * INDEX_CHUNK > LAYOUT_SYNC_ROWS && touchedChunksOver(APPLY_SYNC_CHUNKS)))) {   // B-360d found holder 4: births count too   // B-dfa4 cut 3: a mass of touched rows (a boot's passes): their chunks in slices
       warmApply(); return NOT_READY;
     } else { applyTouched(conv); flushStats.incremental++; }
     const wasFull = full || allDirty;
