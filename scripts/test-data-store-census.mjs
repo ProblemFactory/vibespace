@@ -491,7 +491,7 @@ const DELETION_CALLS = Object.freeze({
   'src/server/published-pages.js': 2, 'src/server/rewind-keep-worker.js': 7, 'src/server/rewind-kept-door.js': 2, 'src/server/sealed-json.js': 1,
   'src/server/session-stdout.js': 5, 'src/server/spend-guard.js': 3, 'src/server/sync-fs-witness-worker.js': 2, 'src/server/usage-index-retire.js': 1,
   'src/server/usage-pool-engine.js': 2, 'src/server/vault-engine.js': 7, 'src/server/vault-run-door.js': 6, 'src/server/vault-totp.js': 1,
-  'src/server/window-targets-engine.js': 1, 'src/server/wrapper-files.js': 6, 'src/server/writes-lost.js': 1, 'src/signin-witness-worker.js': 2,
+  'src/server/window-targets-engine.js': 1, 'src/server/wrapper-files.js': 6, 'src/server/writes-lost.js': 3,   /* B-574d (lane nl-journals): + the off-loop write's temp removed on a failed write; + the exit's removal of a write's temp still in flight */ 'src/signin-witness-worker.js': 2,
   'src/signin-witness.js': 2, 'src/spawn/ssh.js': 1, 'src/ssh-key.js': 1, 'src/store-hold.js': 3,
   'src/store-read-hold.js': 6, 'src/store-writer-worker.js': 6, 'src/store-writer.js': 2, 'src/task-groups.js': 1,
   'src/transcript-service.js': 3, 'src/usage-cache-write.js': 1, 'src/usage-hold-road.js': 1, 'src/usage-ledger-dedup.js': 4,

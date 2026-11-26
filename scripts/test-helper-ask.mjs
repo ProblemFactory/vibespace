@@ -1634,6 +1634,7 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     let store = WL.install(opts);
     const brain = require(path.join(REPO, 'src/server/session-brain.js')).create({ engine: {}, applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => null });
     brain.noteWritesLost({ claudeSessionId: CID }, 'w-swl', rec({ planted: 'no such field', message: { content: 'x' } }));
+    await store.flush();   // B-574d (r4761): the record's write runs off the loop — the file is read once it landed
     const onDisk = JSON.parse(fs.readFileSync(path.join(dir, 'writes-lost.json'), 'utf8'));
     check('⑱f the brain keeps the record under the conversation id, reduced to the fields the warning reads, stamped with its instant — and the journal says it', onDisk.v === 1 && onDisk.byConversation[CID].length === 1 && onDisk.byConversation[CID][0].timestamp === iso(t0 + 5000) && !('planted' in onDisk.byConversation[CID][0]) && !('message' in onDisk.byConversation[CID][0]) && journal.some((l) => l.includes('[writes-lost]') && l.includes(CID) && l.includes('ENOSPC')), onDisk);
     // THE NEW LEG: a hub restart ⇒ a new store over the same file, a new session, the rebuild reads the JSONL
@@ -1663,6 +1664,7 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     let full = true; const realWrite = (file, text) => { if (full) throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); fs.writeFileSync(file, text); };
     const fullStore = WL.create({ dataDir: dir2, now: () => t0 + 5000, log: (...a) => j2.push(a.join(' ')), write: realWrite, retryMs: 5 });
     const threw = (() => { try { fullStore.note(rec()); fullStore.note(rec({ uuid: 'u-swl-3' })); return false; } catch { return true; } })();
+    await fullStore.flush();   // B-574d (r4761): the writes run off the loop — the failure is said once they answered
     const heldFile = fs.existsSync(path.join(dir2, 'writes-lost.json')), held = fullStore.cards({ conversationId: CID }).length, saidFull = j2.filter((l) => /held in memory/.test(l)).length;
     full = false;
     for (let i = 0; i < 400 && !fs.existsSync(path.join(dir2, 'writes-lost.json')); i++) await new Promise((r) => setTimeout(r, 10));
@@ -1675,53 +1677,108 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     for (let i = 0; i < WL.MAX_PER_CONVERSATION + 3; i++) bound.note(rec({ uuid: 'many-' + i, transcript_session_ids: ['c-many'], session_id: 'c-many' }));
     for (let i = 0; i < WL.MAX_CONVERSATIONS + 2; i++) bound.note(rec({ uuid: 'c-' + i, transcript_session_ids: ['c-' + i], session_id: 'c-' + i }));
     const hostile = bound.note(rec({ uuid: 'h', session_id: '__proto__', transcript_session_ids: ['../../etc', 'a/b', '__proto__'] }));
+    await bound.flush();   // B-574d: off the loop — read once landed
     const again = WL.create({ dataDir: dir3, log: () => { } });
     check('⑱f the file is bounded (' + WL.MAX_PER_CONVERSATION + ' newest per conversation, ' + WL.MAX_CONVERSATIONS + ' newest conversations); a path-shaped id is no key; a `__proto__` id round-trips as plain data and pollutes nothing', bound.rowsFor('c-0').length === 0 && bound.rowsFor('c-' + (WL.MAX_CONVERSATIONS + 1)).length === 1 && hostile.ids.join() === '__proto__' && again.rowsFor('__proto__').length === 1 && ({}).uuid === undefined && Object.keys(JSON.parse(fs.readFileSync(path.join(dir3, 'writes-lost.json'), 'utf8')).byConversation).length === WL.MAX_CONVERSATIONS, { ids: hostile.ids });
     const many = WL.create({ dataDir: scratch('helper-ask-writes-lost-many'), now: () => (t3 += 1000), log: () => { } });
     for (let i = 0; i < WL.MAX_PER_CONVERSATION + 3; i++) many.note(rec({ uuid: 'many-' + i, transcript_session_ids: ['c-many'], session_id: 'c-many' }));
     check('⑱f …the newest rows of one conversation are the ones kept', many.rowsFor('c-many').length === WL.MAX_PER_CONVERSATION && many.rowsFor('c-many').at(-1).uuid === 'many-' + (WL.MAX_PER_CONVERSATION + 2) && many.rowsFor('c-many')[0].uuid === 'many-3');
-    // B-574d (lane nl-journals): THE RECORD IS ON DISK BEFORE ITS NAME POINTS AT IT — the store's OWN write (writeAtomic, no `write`
-    // handed): every call on its temp, in order; a PLACED answer of the sync (an errno name), never a mount
-    const wlTraced = (file, fn, sync = null) => {
-      const tmp = file + '.tmp', o = { openSync: fs.openSync, fsyncSync: fs.fsyncSync, closeSync: fs.closeSync, renameSync: fs.renameSync }, calls = [];
-      let tfd = null, value, threw = null;
-      fs.openSync = function (p0, ...a) { const fd = o.openSync.call(this, p0, ...a); if (String(p0) === tmp) { tfd = fd; calls.push('open'); } return fd; };
-      fs.fsyncSync = function (fd, ...a) { if (fd === tfd) { calls.push('sync'); if (sync) throw Object.assign(new Error(`${sync}: a placed answer of the sync`), { code: sync }); } return o.fsyncSync.call(this, fd, ...a); };
-      fs.closeSync = function (fd, ...a) { if (fd === tfd) { calls.push('close'); tfd = null; } return o.closeSync.call(this, fd, ...a); };
-      fs.renameSync = function (a0, b0, ...a) { if (String(a0) === tmp) calls.push('rename'); return o.renameSync.call(this, a0, b0, ...a); };
-      try { value = fn(); } catch (err) { threw = err.code || err.message; } finally { Object.assign(fs, o); }
-      return { calls: calls.join(' '), value, threw };
+    // B-574d (lane nl-journals, 主开发 r4761 — the third shape): THE RECORD'S OWN WRITE RUNS OFF THE LOOP, SYNCED. Every call on the
+    // store's file and its temps, in order, on the promises road — and every SYNCHRONOUS one apart (the loop never waits on a folder
+    // that may be the very one failing); a PLACED answer of the sync (an errno name), never a mount
+    const wlTraced = async (file, fn, { sync = null, close = null, rename = null } = {}) => {
+      const ours = (p0) => String(p0).startsWith(file), o = { openSync: fs.openSync, renameSync: fs.renameSync, writeFileSync: fs.writeFileSync }, P0 = { open: fs.promises.open, rename: fs.promises.rename }, calls = [], loop = [];
+      for (const k of Object.keys(o)) fs[k] = function (p0, ...a) { if (ours(p0)) loop.push(k); return o[k].call(this, p0, ...a); };
+      fs.promises.open = async function (p0, ...a) {
+        const fh = await P0.open.call(this, p0, ...a);
+        if (!ours(p0)) return fh;
+        calls.push('open');
+        const s0 = fh.sync, c0 = fh.close;
+        fh.sync = async function () { calls.push('sync'); if (sync) throw Object.assign(new Error(`${sync}: a placed answer of the sync`), { code: sync }); return s0.call(this); };
+        fh.close = async function () { calls.push('close'); await c0.call(this); if (close) throw Object.assign(new Error(`${close}: a placed answer of the close`), { code: close }); };
+        return fh;
+      };
+      fs.promises.rename = async function (a0, b0, ...a) { if (ours(a0) && String(b0) === file) { calls.push('rename'); if (rename) throw Object.assign(new Error(`${rename}: a placed answer of the rename`), { code: rename }); } return P0.rename.call(this, a0, b0, ...a); };
+      try { const value = await fn(); return { value, calls: calls.join(' '), loop: loop.join(' ') }; } finally { Object.assign(fs, o); Object.assign(fs.promises, P0); }
     };
     const rowsOn = (d) => WL.create({ dataDir: d, log: () => { } }).rowsFor(CID).length;
     const dirS = scratch('helper-ask-writes-lost-synced'), jS = []; fs.mkdirSync(dirS, { recursive: true });
     const fS = path.join(dirS, 'writes-lost.json');
     const sStore = WL.create({ dataDir: dirS, now: () => t0 + 7000, log: (...a) => jS.push(a.join(' ')), retryMs: 36e5 });
-    const sOk = wlTraced(fS, () => sStore.note(rec({ uuid: 'u-sync-1' })));
-    check('⑱f B-574d the record\'s own write: its temp written, SYNCED, closed, THEN renamed over the store — on disk before its name points at it', sOk.calls === 'open sync close rename' && !sOk.threw && rowsOn(dirS) === 1, sOk);
+    const sOk = await wlTraced(fS, async () => { const r = sStore.note(rec({ uuid: 'u-off-1' })); const atOnce = fs.existsSync(fS); return { ids: r.ids, atOnce, landed: await sStore.flush() }; });
+    check('⑱f B-574d THE RECORD\'S WRITE RUNS OFF THE LOOP: note() answers before any byte is on disk and no synchronous WRITE touches the file or its temps (its one read at the first use is as it was) — then its temp is opened, written, SYNCED, closed and renamed on the promises road', sOk.value.atOnce === false && sOk.value.landed === true && sOk.loop === '' && sOk.calls === 'open sync close rename' && rowsOn(dirS) === 1 && !fs.existsSync(fS + '.w.tmp'), sOk);
     const sBefore = fs.readFileSync(fS, 'utf8');
-    const sBad = wlTraced(fS, () => sStore.note(rec({ uuid: 'u-sync-2' })), 'EIO');
-    check('⑱f B-574d a sync that FAILS (a placed EIO) is a failed write: no throw at the consumer, the old record stands, no temp left, the row held in memory, said once', sBad.calls === 'open sync close' && !sBad.threw && fs.readFileSync(fS, 'utf8') === sBefore && !fs.existsSync(fS + '.tmp') && sStore.rowsFor(CID).length === 2 && jS.filter((l) => /held in memory/.test(l)).length === 1, { sBad, jS });
-    const sRetry = wlTraced(fS, () => sStore.flush());
-    check('⑱f B-574d …its retry, the disk answering again, lands both rows — synced', sRetry.value === true && sRetry.calls === 'open sync close rename' && rowsOn(dirS) === 2, sRetry);
+    const sBad = await wlTraced(fS, async () => { sStore.note(rec({ uuid: 'u-off-2' })); return sStore.flush(); }, { sync: 'EIO' });
+    check('⑱f B-574d a sync that FAILS (a placed EIO) is a FAILED WRITE: no rename, the old record whole, no temp left, the row held in memory, said once — never a throw at the consumer', sBad.value === false && /^open sync close( open sync close)*$/.test(sBad.calls) && sBad.loop === '' && fs.readFileSync(fS, 'utf8') === sBefore && !fs.existsSync(fS + '.w.tmp') && sStore.rowsFor(CID).length === 2 && jS.filter((l) => /held in memory/.test(l)).length === 1, { sBad, jS });
+    const sRetry = await wlTraced(fS, () => sStore.flush());
+    check('⑱f B-574d …its next write (the disk answering again) lands both rows — synced, off the loop', sRetry.value === true && sRetry.calls === 'open sync close rename' && sRetry.loop === '' && rowsOn(dirS) === 2 && jS.some((l) => /reached the disk/.test(l)), sRetry);
+    for (const [what, place] of [['CLOSE that fails after the write (a deferred write error)', { close: 'EIO' }], ['RENAME that fails', { rename: 'EIO' }]]) {
+      const before = fs.readFileSync(fS, 'utf8');
+      const r = await wlTraced(fS, async () => { sStore.note(rec({ uuid: 'u-off-' + Object.keys(place)[0] })); return sStore.flush(); }, place);
+      check(`⑱f B-574d a ${what} (a placed EIO) is a FAILED WRITE too: false, the old record whole, no temp left`, r.value === false && /close/.test(r.calls) && r.loop === '' && fs.readFileSync(fS, 'utf8') === before && !fs.existsSync(fS + '.w.tmp'), r);
+      const back = await wlTraced(fS, () => sStore.flush());
+      check(`⑱f B-574d …after a ${what.split(' ')[0]} that failed, the next write lands every row`, back.value === true && back.calls === 'open sync close rename' && rowsOn(dirS) === sStore.rowsFor(CID).length, back);
+    }
     sStore.stop();
     const dirN = scratch('helper-ask-writes-lost-nosync'), jN = []; fs.mkdirSync(dirN, { recursive: true });
     const fN = path.join(dirN, 'writes-lost.json'), nStore = WL.create({ dataDir: dirN, now: () => t0 + 8000, log: (...a) => jN.push(a.join(' ')), retryMs: 36e5 });
-    const n1 = wlTraced(fN, () => nStore.note(rec({ uuid: 'u-ns-1' })), 'EINVAL'), n2 = wlTraced(fN, () => nStore.note(rec({ uuid: 'u-ns-2' })), 'EINVAL');
+    const nRun = await wlTraced(fN, async () => { nStore.note(rec({ uuid: 'u-ns-1' })); const a = await nStore.flush(); nStore.note(rec({ uuid: 'u-ns-2' })); return [a, await nStore.flush()]; }, { sync: 'EINVAL' });
     const nos = jN.filter((l) => /does not do a sync \(EINVAL\)/.test(l));
-    check('⑱f B-574d a file system that does no sync at all (a placed EINVAL) LANDS the record — said ONCE over two writes, no path in the words', n1.calls === 'open sync close rename' && n2.calls === n1.calls && rowsOn(dirN) === 2 && nos.length === 1 && !nos[0].includes(dirN), { n1, n2, jN });
+    check('⑱f B-574d a file system that does no sync at all (a placed EINVAL) LANDS the record — said ONCE over two writes, no path in the words', nRun.value.join() === 'true,true' && nRun.calls === 'open sync close rename open sync close rename' && rowsOn(dirN) === 2 && nos.length === 1 && !nos[0].includes(dirN), { nRun, jN });
     nStore.stop();
-    const WL_AT = "  try { FC.renameSynced(tmp, file, text, { where: '[writes-lost] the kept warnings', say }); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }";
-    const WLrel = require(MXd.write('src/server/writes-lost.js', editAnchor(read('src/server/writes-lost.js'), WL_AT, '  try { fs.writeFileSync(tmp, text); fs.renameSync(tmp, file); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }', 'src/server/writes-lost.js'), 'release-unsynced'));   // stale-pins: kept (the release's writeAtomic — this red control's own text)
-    const dirR = scratch('helper-ask-writes-lost-release'); fs.mkdirSync(dirR, { recursive: true });
-    const rStore = WLrel.create({ dataDir: dirR, now: () => t0 + 9000, log: () => { }, retryMs: 36e5 });
-    const rRun = wlTraced(path.join(dirR, 'writes-lost.json'), () => rStore.note(rec({ uuid: 'u-rel-1' })));
-    check('⑱f RED CONTROL B-574d: the release\'s write renames its temp over the store with NO sync — a power cut can leave the name over no bytes, read back as «no store»', !/sync/.test(rRun.calls) && /rename/.test(rRun.calls), rRun);
-    rStore.stop();
+    const dirY = scratch('helper-ask-writes-lost-exit'); fs.mkdirSync(dirY, { recursive: true });
+    const fY = path.join(dirY, 'writes-lost.json'), yStore = WL.create({ dataDir: dirY, now: () => t0 + 9000, log: () => { }, retryMs: 36e5 });
+    const yRun = await wlTraced(fY, async () => { yStore.note(rec({ uuid: 'u-exit-1' })); const ok = yStore.stop(), atStop = rowsOn(dirY); await yStore.flush(); return { ok, atStop }; });
+    check('⑱f B-574d THE EXIT writes SYNCHRONOUSLY through the door (the process ends next): a write still in flight off the loop is not waited for — the stop writes the rows itself, on disk when stop() returns, and the write in flight never renames after it', yRun.value.ok === true && yRun.value.atStop === 1 && /openSync/.test(yRun.loop) && /renameSync/.test(yRun.loop) && !/rename/.test(yRun.calls) && !fs.existsSync(fY + '.w.tmp') && rowsOn(dirY) === 1, yRun);
+    // THE RACE CLOSED: an off-loop write HELD at its rename (asked of the file system, not landed), a row noted after its snapshot, the
+    // exit — then the held rename goes on: it finds no temp (the exit took it away first); the file holds the exit's rows, the newest
+    const raceOf = async (Mod, name) => {
+      const d = scratch('helper-ask-writes-lost-' + name); fs.mkdirSync(d, { recursive: true });
+      const f = path.join(d, 'writes-lost.json'), st = Mod.create({ dataDir: d, now: () => t0 + 9800, log: () => { }, retryMs: 36e5 }), r0 = fs.promises.rename;
+      let release, asked; const gate = new Promise((r) => { release = r; }), at = new Promise((r) => { asked = r; });
+      fs.promises.rename = async function (a0, b0, ...a) { if (String(a0) === f + '.w.tmp') { asked(); await gate; } return r0.call(this, a0, b0, ...a); };
+      let ok;
+      try { st.note(rec({ uuid: 'u-race-1' })); await at; st.note(rec({ uuid: 'u-race-2' })); ok = st.stop(); release(); await st.flush(); } finally { fs.promises.rename = r0; }
+      const disk = JSON.parse(fs.readFileSync(f, 'utf8')).byConversation[CID].map((x) => x.uuid).join();
+      return { ok, disk, tmpLeft: fs.existsSync(f + '.w.tmp') };
+    };
+    const race = await raceOf(WL, 'race');
+    check('⑱f B-574d THE RACE CLOSED: a write off the loop HELD at its rename when the exit comes — the exit takes its temp away first, so the held rename lands nothing; the file holds the exit\'s rows (the newest, noted after that write began)', race.ok === true && race.disk === 'u-race-1,u-race-2' && !race.tmpLeft, race);
+    const onceOf = async (Mod, name) => {
+      const d = scratch('helper-ask-writes-lost-' + name), j = []; fs.mkdirSync(d, { recursive: true });
+      let tries = 0; const st = Mod.create({ dataDir: d, now: () => t0 + 9500, log: (...a) => j.push(a.join(' ')), write: () => { tries++; throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); }, retryMs: 36e5 });
+      st.note(rec({ uuid: 'u-once-1' })); await st.flush();
+      const before = tries, s1 = st.stop(), s2 = st.stop();
+      return { s1, s2, atStop: tries - before, said: j.filter((l) => /the hub stops with a warning that never reached/.test(l)).length };
+    };
+    const once = await onceOf(WL, 'once');
+    check('⑱f B-574d THE BOUND of a failing folder at the exit: ONCE A PROCESS — the stop tries its synchronous write once; a second stop() writes nothing and answers the first answer, the loss said once', once.s1 === false && once.s2 === false && once.atStop === 1 && once.said === 1, once);
+    const wlSrc = read('src/server/writes-lost.js');
+    const wlMut = (from, to, tag) => require(MXd.write('src/server/writes-lost.js', editAnchor(wlSrc, from, to, 'src/server/writes-lost.js'), tag));
+    const R1 = wlMut('  const writeOff = write || writeAtomicAsync, writeExit = write || writeAtomic;', '  const writeOff = write || writeAtomic, writeExit = write || writeAtomic;', 'wl-on-the-loop');
+    const dR1 = scratch('helper-ask-writes-lost-red-loop'); fs.mkdirSync(dR1, { recursive: true });
+    const r1s = R1.create({ dataDir: dR1, now: () => t0, log: () => { }, retryMs: 36e5 });
+    const r1 = await wlTraced(path.join(dR1, 'writes-lost.json'), async () => { r1s.note(rec({ uuid: 'u-red-1' })); return r1s.flush(); });
+    r1s.stop();
+    check('⑱f RED CONTROL B-574d: the record\'s write through the synchronous door (the first form) — synchronous calls on the hub\'s loop at a CLI\'s record', /openSync/.test(r1.loop) && /renameSync/.test(r1.loop), r1);
+    const R2 = wlMut("    try { await fh.sync(); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; if (typeof say === 'function') say(FC.syncUnsupportedWords('[writes-lost] the kept warnings', e.code)); }\n", '', 'wl-no-sync');
+    const dR2 = scratch('helper-ask-writes-lost-red-sync'); fs.mkdirSync(dR2, { recursive: true });
+    const r2s = R2.create({ dataDir: dR2, now: () => t0, log: () => { }, retryMs: 36e5 });
+    const r2 = await wlTraced(path.join(dR2, 'writes-lost.json'), async () => { r2s.note(rec({ uuid: 'u-red-2' })); return r2s.flush(); });
+    r2s.stop();
+    check('⑱f RED CONTROL B-574d: the write off the loop with its sync taken out — renamed over the record with NO sync of its temp', !/sync/.test(r2.calls) && /rename/.test(r2.calls), r2);
+    const R3 = wlMut('    if (stopped) return stopAnswer;\n', '', 'wl-exit-twice');
+    const R4 = wlMut("    if (writing) { dirty = true; try { fs.unlinkSync(file + '.w.tmp'); } catch { /* not there yet, or gone */ } }\n", '    if (writing) dirty = true;\n', 'wl-exit-race');
+    const race4 = await raceOf(R4, 'red-race');
+    check('⑱f RED CONTROL B-574d: the exit WITHOUT taking the in-flight temp away — the held rename lands its older rows after the exit\'s (the row noted since is gone from the file)', race4.disk === 'u-race-1', race4);
+    const once3 = await onceOf(R3, 'red-once');
+    check('⑱f RED CONTROL B-574d: the exit without its ONCE — a failing folder is written at every stop() (here twice), the loss said twice', once3.atStop === 2 && once3.said === 2, once3);
     // r3 M1 (round-2 acceptance): A ROW HELD AFTER A FAILED WRITE IS WRITTEN AT SHUTDOWN. The person frees the space and restarts the hub inside the 60-s retry
     const dirStop = scratch('helper-ask-writes-lost-stop'), jStop = []; fs.mkdirSync(dirStop, { recursive: true });
     let stopFull = true; const stopWrite = (file, text) => { if (stopFull) throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }); fs.writeFileSync(file, text); };
     const stopStore = WL.create({ dataDir: dirStop, now: () => t0 + 5000, log: (...a) => jStop.push(a.join(' ')), write: stopWrite, retryMs: 36e5 });
     stopStore.note(rec());
+    await stopStore.flush();   // B-574d: the ENOSPC write is tried off the loop (it fails) before the disk has room again
     const stopHeld = !fs.existsSync(path.join(dirStop, 'writes-lost.json'));
     stopFull = false; stopStore.stop();
     check('⑱f r3 M1: ENOSPC ⇒ the row only in memory; the disk then has room; stop() (the hub\'s SIGTERM, well inside the retry) ⇒ a new store over the same dir has the row', stopHeld && WL.create({ dataDir: dirStop, log: () => { } }).rowsFor(CID).length === 1, { stopHeld, jStop });
@@ -1739,6 +1796,7 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     const seedRead = WL.create({ dataDir: dirRead, now: () => t0, log: () => { } });
     const old = (i) => rec({ uuid: 'old-' + i, session_id: 'c-old' + i, transcript_session_ids: ['c-old' + i] });
     for (let i = 0; i < 5; i++) seedRead.note(old(i));
+    await seedRead.flush();   // B-574d: off the loop — read once landed
     const savedRead = fs.readFileSync(fRead);
     fs.rmSync(fRead); fs.mkdirSync(fRead);
     const sick = WL.create({ dataDir: dirRead, now: () => t0 + 1000, log: (...a) => jRead.push(a.join(' ')), retryMs: 0 });
@@ -1746,12 +1804,14 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     fs.rmdirSync(fRead); fs.writeFileSync(fRead, savedRead);
     const healed = sick.rowsFor('c-old0').length;
     sick.note(rec({ uuid: 'new-1', session_id: 'c-new', transcript_session_ids: ['c-new'] }));
+    await sick.flush();   // B-574d: off the loop — read once landed
     const keysRead = Object.keys(JSON.parse(fs.readFileSync(fRead, 'utf8')).byConversation).sort();
     check('⑱f r3 M2: 5 conversations on disk, one read failure (EISDIR), the cause clears ⇒ the SAME store reads again; the next lost write leaves 6 keys, the five old rows intact — before r3: [c-new] alone. The journal said the failure once', sickRows === '0,0' && healed === 1 && keysRead.join() === 'c-new,c-old0,c-old1,c-old2,c-old3,c-old4' && [0, 1, 2, 3, 4].every((i) => sick.rowsFor('c-old' + i).length === 1 && sick.rowsFor('c-old' + i)[0].uuid === 'old-' + i) && jRead.filter((l) => /not read \(EISDIR\)/.test(l)).length === 1 && jRead.some((l) => /can be read again/.test(l)), { sickRows, healed, keysRead, jRead });
     if (typeof process.getuid === 'function' && process.getuid() !== 0) {
       // the acceptance's probe, on a file that stays in place: a rename over a chmod-000 file SUCCEEDS, so only the store's own rule protects it
       const dirMode = scratch('helper-ask-writes-lost-mode'), fMode = path.join(dirMode, 'writes-lost.json'), jMode = []; fs.mkdirSync(dirMode, { recursive: true });
       const seedMode = WL.create({ dataDir: dirMode, now: () => t0, log: () => { } }); for (let i = 0; i < 5; i++) seedMode.note(old(i));
+      await seedMode.flush();   // B-574d: off the loop — read once landed
       const savedMode = fs.readFileSync(fMode);
       fs.chmodSync(fMode, 0o000);
       const denied = WL.create({ dataDir: dirMode, now: () => t0 + 1000, log: (...a) => jMode.push(a.join(' ')), retryMs: 0 });
@@ -1759,7 +1819,7 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
       const heldRow = denied.rowsFor('c-new').length;
       fs.chmodSync(fMode, 0o644);
       const untouched = fs.readFileSync(fMode).equals(savedMode);
-      const flushed = denied.flush();
+      const flushed = await denied.flush();   // B-574d: the write runs off the loop — its answer is a promise
       const keysMode = Object.keys(JSON.parse(fs.readFileSync(fMode, 'utf8')).byConversation).sort();
       check('⑱f r3 M2 …a lost write DURING the failure (chmod 000): the file is NOT overwritten, the row is held; once readable the two merge: 6 keys, nothing lost', heldRow === 1 && untouched && flushed === true && keysMode.join() === 'c-new,c-old0,c-old1,c-old2,c-old3,c-old4', { heldRow, untouched, flushed, keysMode, jMode });
     } else console.log('  ○ SKIP ⑱f r3 M2 chmod leg: root reads a chmod-000 file (the EISDIR leg above holds the law on any uid)');
@@ -1767,6 +1827,7 @@ console.log('⑱f (2.1.319 r2) session_writes_lost survives a reload, a hub rest
     fs.writeFileSync(fJunk, '{"v":1,"byConversation":{"c-old0":[{"tor');
     const junk = WL.create({ dataDir: dirJunk, now: () => t0 + 7, log: (...a) => jJunk.push(a.join(' ')), retryMs: 0 });
     junk.note(rec({ uuid: 'new-3', session_id: 'c-new', transcript_session_ids: ['c-new'] }));
+    await junk.flush();   // B-574d: off the loop — read once landed
     const aside = fs.readdirSync(dirJunk).filter((f) => f.includes('.unreadable-'));
     check('⑱f r3 M2 …a file that parses as no store cannot heal by retrying: its bytes are set aside, named in the journal, and the warning is kept in a new file — the store is not stuck in memory for good', aside.length === 1 && fs.readFileSync(path.join(dirJunk, aside[0]), 'utf8').startsWith('{"v":1') && Object.keys(JSON.parse(fs.readFileSync(fJunk, 'utf8')).byConversation).join() === 'c-new' && jJunk.some((l) => l.includes(aside[0])), { aside, jJunk });
     // THE WIRING: the hub installs it, the parse and the device feed call the same consumer
