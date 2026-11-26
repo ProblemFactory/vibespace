@@ -3713,6 +3713,7 @@ class JobManager {
       if (!rec0.ownerJob) continue;
       const rec = listed().find((r) => r.id === rec0.id);
       if (!rec || rec.ownerJob !== rec0.ownerJob) continue;   // gone or taken meanwhile (a start in the same window)
+      if (rec.unpublishOwed) { (out.owed = out.owed || []).push(rec.id); continue; }   // B-73c4: its address's removal is owed — the Ports store retries it on its own pace, never this pass
       const live = this.jobs.get(rec.ownerJob);
       const job = live && !LS.isSkeleton(live) ? live : null;
       const archived = job ? null : (() => { try { return this.archivedById(rec.ownerJob); } catch { return null; } })();
@@ -3925,6 +3926,14 @@ class JobManager {
         q.on('timeout', () => fin(false)); q.on('error', () => fin(false));
       } catch { fin(false); }
     });
+  }
+  /** B-73c4: a row of this job whose public address is still up (its relay removal not confirmed: the Ports store keeps it, owed) */
+  _stillUpOf(job) {   // the Ports list read at most once a second for every card (a snapshot of many jobs asks once)
+    try {
+      const now = Date.now();
+      if (!this._stillUpMemo || now - this._stillUpMemo.at > 1000) { const pf = this.d.getPorts && this.d.getPorts(); this._stillUpMemo = { at: now, owners: new Set(pf && typeof pf.list === 'function' ? pf.list().filter((r) => r.unpublishOwed && r.ownerJob).map((r) => r.ownerJob) : []) }; }
+      return this._stillUpMemo.owners.has(job.id);
+    } catch { return false; }
   }
   /** forget = the public name goes too (never on a stop / park: the next start publishes the same name). */
   async _teardownPublish(job, { forget = false } = {}) {
@@ -5819,7 +5828,7 @@ class JobManager {
     const out = {
       // the NAME: whole for its AUTHOR (the agent route's owner lineage, the create echo), belted for every other reader — the
       // Jobs panel's card title, the ask window's title, another lineage (r4, claim r3-1 FINDING 3; the record keeps it raw)
-      id: job.id, kind: job.kind, name: author || !job.name ? job.name : this.labelOf(job), note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
+      id: job.id, kind: job.kind, name: author || !job.name ? job.name : this.labelOf(job), note: job.note, state: job.state, publishedUrl: job.publishedUrl || null, publishStillUp: this._stillUpOf(job),
       // lane job-notice-dedupe: the down record is the state while the service runs (a re-publish in flight does not hide it);
       // a stopped service has none (teardown ends the episode)
       publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : job.publish && !job.publishedUrl && job.publishNotOwned ? 'refused' : null, publishRefusal: job.publishNotOwned ? (job.publishRefusal || 'by-hand') : null, publishError: job.publishHeld || job.publishNotOwned || (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,

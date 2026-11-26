@@ -57,7 +57,7 @@ const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
 // statusAsync (lane hub-sync-holds, rank 13): the fresh answer of a status that needs a child — async, bounded; status() then
 // answers the KEPT one with no child (a snapshot or a broadcast runs no synchronous child)
 const STATUS_BOUND_MS = 20000;
-const OPTIONAL_VERBS = ['statusAsync', 'setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'reach', 'reachFresh', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
+const OPTIONAL_VERBS = ['proxyFiles', 'statusAsync', 'setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'reach', 'reachFresh', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
 
 /** The ONE contract check — a plugin that breaks it is refused at registration, by name. */
 function validatePlugin(def, verbs) {
@@ -439,6 +439,8 @@ class PluginManager {
   async frpPublish(name, localPort, opts) { return this._provider('relay', 'publish', 'public URLs are not available')(name, localPort, opts); }
   setSelfDialSub(sub) { return this._provider('relay', 'setSelfDialSub', 'no relay')(sub); }
   async frpUnpublish(name) { return this._provider('relay', 'unpublish', 'no relay')(name); }
+  /** B-73c4: the relay folder's proxy files and their owner marks (its relay's optional verb; none ⇒ thrown by name) */
+  async frpProxyFiles() { return this._provider('relay', 'proxyFiles', 'no relay')(); }
   /** a tailnet name → { name, ip, ips } from whichever plugin declares 'tunnel' (its own peer table — lane
    *  tailscale-plugin-pod-dns: the container's resolver is never the tunnel's), null when none answers. Sync. */
   tunnelLookup(name) {

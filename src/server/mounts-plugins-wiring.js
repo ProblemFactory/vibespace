@@ -411,6 +411,7 @@ const plugins = new PluginManager({
 userTodos?.setPluginGate?.((id) => !!(plugins.defs()[id] || {}).provides?.includes('reminders')); // lane foryou-plugin-notices: a plugin files For-you reminders only when it DECLARES 'reminders'
 // port-forward can publish a forward publicly via the frp plugin (B-0b60)
 portForwards.plugins = plugins;
+require('./ports-relay-routes.js').register({ app, getPortForwards: () => portForwards });   // B-73c4: «Try again» (a person's press) on a row whose public address is still up; the unmarked relay files
 hosts.nameLookup = (name) => plugins.tunnelLookup(name); // lane tailscale-plugin-pod-dns: tailnet names for ssh hosts, never the container's resolver
 // lane tailnet-names: browsers reach tailnet hosts BY NAME through the hub's tailnet door (the PAC, the kernel door, the in-page
 // browser's agents, LAW 2's words) — the plugin asked through tunnelReach (+ tunnelReachFresh: a stale table's one bounded read)

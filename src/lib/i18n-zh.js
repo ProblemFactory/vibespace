@@ -15940,4 +15940,13 @@ export default {
   "The voice sign-in cannot be read right now": "暂时读不出语音登录",
   "The voice sign-in could not be read — connect again": "读不出语音登录——请重新连接",
   "your voice sign-in": "你的语音登录",   // lane bl-chat-b r3334 unit 2: the held list's plain name
+  "Its public address is still up: {reason}": "它的公开地址仍在线：{reason}",   // B-73c4 (lane nl-mounts): a public address still up
+  "the relay file could not be removed": "无法删除中继文件",   // B-73c4 (lane nl-mounts): a public address still up
+  "the relay client did not take the removal and may still serve the address until it reloads": "中继客户端未接受删除，在重新加载前可能仍在提供该地址",   // B-73c4 (lane nl-mounts): a public address still up
+  "the relay did not answer in time": "中继未及时回应",   // B-73c4 (lane nl-mounts): a public address still up
+  "no forward of this instance names it": "此实例没有任何转发对应它",   // B-73c4 (lane nl-mounts): a public address still up
+  "its removal is being asked of the relay": "正在请求中继删除它",   // B-73c4 (lane nl-mounts): a public address still up
+  "Its public address is down now.": "它的公开地址已下线。",   // B-73c4 (lane nl-mounts): a public address still up
+  "A relay file in this home has no owner mark and serves a public address: {names} — in {folder}. Remove it by hand if it is not wanted.": "此主目录中有中继文件没有所属标记，并在提供公开地址：{names}——位于 {folder}。如果不需要，请手动删除。",   // B-73c4 (lane nl-mounts): a public address still up
+  "Its public address is still up — it is kept in Ports until the relay confirms its removal.": "它的公开地址仍在线——会保留在“端口”中，直到中继确认已删除。",   // B-73c4 (lane nl-mounts): a public address still up
 };

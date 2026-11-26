@@ -22,6 +22,10 @@ const path = require('path');
 const { probeProto } = require('./plugins');
 
 const LOCAL_ID = '__local__'; // machine #0 — this instance itself
+// B-73c4: the instance URL's own relay file (src/server/instance-url.js PROXY_NAME — its own store's): never judged an orphan here
+const INSTANCE_PROXY = 'vibespace-instance';
+/** B-73c4: a name as the relay writes its file (src/plugins/frp.js: [^\w-] → _, 60 at most) */
+const relayFileName = (n) => String(n).replace(/[^\w-]/g, '_').slice(0, 60);
 // -p adds process names (own-user processes always visible; drop it if the ss
 // build errors). macOS/BSD: lsof (its first column IS the command name).
 const PORT_SCAN = `command -v ss >/dev/null 2>&1 && { ss -tlnpH 2>/dev/null || ss -tlnH 2>/dev/null; } || lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null`;
@@ -335,11 +339,15 @@ class PortForwardManager {
       proto: r.protoOverride || r.proto || null,
       protoDetected: r.proto || null, protoOverride: r.protoOverride || null,
       // public (frp relay) exposure, if published
-      publicUrl: r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl,
+      publicUrl: r.forwardGone || r.orphan ? null : r.publicUrl || null, publicProto: r.publicProto || null, published: !!r.publicUrl && !r.forwardGone && !r.orphan,   // B-73c4: an owed removal is no published forward
       publicSub: r.publicSub || null, pathMount: r.pathMount || null, pathPublic: !!r.pathPublic,
       ownerJob: r.ownerJob || null,   // r3228: the job whose service this row is (written by the jobs engine only); a person's row has none
       relayUnanswered: this._relayUnanswered.has(r.id),   // r3287: its replay's relay call did not answer within the bound — left as it is
       ownerGone: gone(r.ownerJob),   // r3327: its background job is gone (the engine can say so) — the Ports panel says it; unknown is never «gone»
+      // B-73c4: a public address whose removal the relay has not CONFIRMED (the row stays until it is), and the rows that are nothing
+      // else: a forward already removed (forwardGone; its machine removed: machineGone) or a relay file of this hub no forward names (orphan)
+      unpublishOwed: r.unpublishOwed ? { code: r.unpublishOwed.code || null, reason: r.unpublishOwed.reason || '', since: r.unpublishOwed.since || null } : null,
+      forwardGone: !!r.forwardGone, machineGone: !!r.machineGone, orphan: !!r.orphan,
     }));
   }
 
@@ -356,7 +364,7 @@ class PortForwardManager {
       // re-publish in the new mode — the URL SHAPE changes (subdomain vs
       // ip:port), so the old proxy must go first; keep the stored subdomain
       // so flipping back to http restores the same public URL
-      try { await this.plugins.frpUnpublish(rec.publicName || rec.id); } catch { }
+      await this._relayUnpublish(rec, { owe: false, bounded: false });   // B-73c4: its failure SAID (the journal, the row's error); the republish below writes the same-named file over it
       rec.publicUrl = null;
       try { await this.publish(id, { now }); } catch (e) { rec.error = 'republish: ' + e.message; this._persist({ now }); }
     }
@@ -585,6 +593,7 @@ class PortForwardManager {
     const isLan = targetHost && targetHost !== '127.0.0.1' && targetHost !== 'localhost';
     const key = isLan ? `${targetHost}:${remotePort}` : String(remotePort);
     let rec = this._state.forwards.find((r) => r.hostId === hostId && r.remotePort === remotePort && (r.targetHost || '') === (isLan ? targetHost : ''));
+    if (rec && rec.forwardGone) { delete rec.forwardGone; delete rec.machineGone; }   // B-73c4: a forward again; its OLD address's removal stays owed (publish waits for it)
     // r3228 (round whu7689zw): OWNERSHIP IS WRITTEN ON THE ROW — the jobs engine (`owner` = a job id) makes, keeps or takes only a row
     // that says it is that job's service; a row a person made carries no owner and the engine never takes it. A row the release's
     // engine wrote (no owner yet) is claimed once by the release's own mark on it: its label «service: <that job's name>» (`claim`)
@@ -684,7 +693,7 @@ class PortForwardManager {
     // keepName = a Background Work service stopping: its public name waits for the next start (forward() restores it)
     if (keepName && rec && (rec.publicSub || rec.publicPort)) (this._state.names = this._state.names || {})[id] = { sub: rec.publicSub || null, port: rec.publicPort || null, proto: rec.publicProto || rec.proto || null };
     else if (this._state.names) delete this._state.names[id];
-    if (rec?.publicUrl && this.plugins) { try { await this.plugins.frpUnpublish(rec.publicName || id); } catch {} }
+    const owed = !!(rec && (rec.publicUrl || rec.unpublishOwed) && !(await this._relayUnpublish(rec, { bounded: false })));   // B-73c4: confirmed, or the row KEPT as owed
     const l = this._live.get(id);
     if (l) {
       for (const s of l.sockets) { try { s.destroy(); } catch {} }
@@ -694,6 +703,9 @@ class PortForwardManager {
     this._published.delete(id);
     this._healRetryAt.delete(id);
     this._pubGen.delete(id); this._relayUnanswered.delete(id);   // r3327: the row leaves — its marks with it
+    // B-73c4: its public address is still up (the relay's removal not confirmed): the forward is gone, its ROW stays (owed: a Ports row
+    // with its reason and «Try again»), retried on the pace; it leaves only on a confirmed removal
+    if (owed) { rec.forwardGone = true; rec.pathMount = null; rec.pathPublic = false; this._persist({ now }); this._emit(); return { ok: true, owed: rec.unpublishOwed }; }
     this._state.forwards = this._state.forwards.filter((r) => r.id !== id);
     this._persist({ now });
     this._emit();
@@ -708,6 +720,7 @@ class PortForwardManager {
     if (!this.plugins) throw new Error('public URLs are not available on this instance');
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
+    if (rec.unpublishOwed || rec.forwardGone || rec.orphan) throw Object.assign(new Error('its earlier public address is still being taken down (Ports shows it) — publish again once it is down'), { code: 'unpublish_owed', status: 409 });   // B-73c4: never a new file over an owed removal
     if (sub !== undefined && sub !== null && String(sub).length) {
       if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(String(sub))) throw new Error('subdomain must be lowercase letters/digits/hyphens');
       rec.publicSub = String(sub);
@@ -751,7 +764,8 @@ class PortForwardManager {
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) return;
     const gen0 = this._pubGen.get(id) || 0;
-    try { if (this.plugins) await this.plugins.frpUnpublish(rec.publicName || id); } catch { }
+    if (!(await this._relayUnpublish(rec, { bounded: false }))) { this._persist({ now }); this._emit(); return { ok: true, owed: rec.unpublishOwed }; }   // B-73c4: not confirmed — the address is still up: KEPT, owed
+    if (rec.forwardGone || rec.orphan) { this._settleConfirmed(rec); this._persist({ now }); this._emit(); return { ok: true, confirmed: true }; }   // B-73c4: confirmed — a row that was only an owed removal leaves
     // r3287: a publish that landed while this unpublish waited (a start in the same window) stands — its address is never cleared under it
     if ((this._pubGen.get(id) || 0) !== gen0) {   // r3327: said to the caller (a person's Unpublish press reads it), never a silent success
       this.log(`[ports] unpublish ${id}: a publish came meanwhile — the new address stands`);
@@ -809,6 +823,7 @@ class PortForwardManager {
    *  Returns false on a failed publish so callers keep their retry backoff. */
   async _republish(rec) {
     if (!rec.publicUrl || !this.plugins) return true;
+    if (rec.unpublishOwed) return true;   // B-73c4: its address is owed a REMOVAL — never published again over it
     const localPort = this._live.get(rec.id)?.rec?.localPort;
     if (!localPort) return false; // not active — nothing to bind the proxy to
     try {
@@ -824,7 +839,7 @@ class PortForwardManager {
       if (!dropped) this.log('re-publish ' + rec.id + ': ' + e.message);
       else if (!this._dropSaid) { this._dropSaid = true; this.log('re-publish: ' + e.message + ' (said once — every published forward waits for it)'); }
       this._published.delete(rec.id);
-      try { await this.plugins.frpUnpublish(rec.publicName || rec.id); } catch { }
+      await this._relayUnpublish(rec, { owe: false, bounded: false });   // B-73c4: its failure SAID (the row still wants its address: the next republish writes its file again)
       rec.error = dropped ? 'public URL down — ' + e.message : 'public URL down — retrying republish';
       return false;
     }
@@ -838,6 +853,7 @@ class PortForwardManager {
     if (this._hold.held()) { this._restoreAsked = true; return; }   // r3009: held — the list is unread, not empty: the replay runs at the lift
     for (const rec of this._state.forwards) {
       if (this._live.has(rec.id)) continue;
+      if (rec.forwardGone || rec.orphan) continue;   // B-73c4: a row that is only an owed removal is no forward to start (a live forward owed its address's removal still runs: _republish skips it)
       try {
         await this._start(rec);
         rec.error = null;
@@ -848,13 +864,14 @@ class PortForwardManager {
         // _start failed but the pre-restart relay proxy toml persists on the
         // instance — take it down NOW or frpc serves the shared URL against
         // a freed loopback port until the heal/relink re-publishes
-        if (rec.publicUrl && this.plugins) { this.plugins.frpUnpublish(rec.publicName || rec.id).catch(() => {}); }
+        if (rec.publicUrl && this.plugins) await this._relayUnpublish(rec, { owe: false });   // B-73c4: awaited and SAID (the row still wants its address: the heal sweep republishes it)
       }
     }
     this._persist();   // B-574d (r4827): the boot's replay rides the writer (no person asked it)
     this._emit();
     this._replayed = true;   // r3287: the replay ENDED (each relay call bounded) — the gate the jobs reconcile waits for
     await this._jobsReconcile('the replay');   // r3228: after the replay settled — the jobs engine's ONE reconcile (at every start, after every lift)
+    await this._owedPass('the replay');   // B-73c4: then the owed removals retried and the relay folder judged — the list has READ
   }
 
   /** A machine (re)linked — bring up any of its recorded forwards (incl. the
@@ -863,6 +880,7 @@ class PortForwardManager {
   async onMachineLinked(hostId) {
     for (const rec of this._state.forwards) {
       if (rec.hostId !== hostId || this._live.has(rec.id)) continue;
+      if (rec.forwardGone || rec.orphan) continue;   // B-73c4: a row that is only an owed removal, never a forward
       try {
         await this._start(rec);
         rec.error = null;
@@ -886,9 +904,10 @@ class PortForwardManager {
     const jm = (() => { try { return this.getJobs && this.getJobs(); } catch { return null; } })();
     const asksNot = (rec) => { try { return !!(rec.ownerJob && jm && typeof jm.ownerAsks === 'function' && jm.ownerAsks(rec.ownerJob, rec.remotePort) === false); } catch { return false; } };
     for (const rec of this._state.forwards) {
+      if (rec.forwardGone || rec.orphan) continue;   // B-73c4: a row that is only an owed removal — the owed pass's (below)
       const needStart = !this._live.has(rec.id);
       const noAsk = !!(rec.publicUrl && asksNot(rec));
-      const needPublish = !!(rec.publicUrl && this.plugins && !this._published.has(rec.id)) && !noAsk;
+      const needPublish = !!(rec.publicUrl && this.plugins && !this._published.has(rec.id)) && !noAsk && !rec.unpublishOwed;   // B-73c4: never over an owed removal
       if (!needStart && !needPublish) continue;
       const at = this._healRetryAt.get(rec.id) || 0;
       if (Date.now() < at) continue;
@@ -905,6 +924,7 @@ class PortForwardManager {
       try { await this.reprobe(rec.id); } catch (e) { this.log('reprobe ' + rec.id + ': ' + e.message); }
     }
     if (changed) { this._persist(); this._emit(); }
+    await this._owedPass('the heal sweep');   // B-73c4: on the sweep's pace (each owed row its own 5-minute retry), one out at a time
   }
 
   /** A machine was unpaired/removed — drop its forwards. r5036 (主开发): a machine's REMOVAL is a PERSON's act — its two callers (removeHost in
@@ -921,16 +941,111 @@ class PortForwardManager {
       // unpublish FIRST — dropping the record without frpUnpublish left the
       // public relay proxy live (pointing at a freed loopback port) with no
       // UI handle left to ever remove it (review finding, high)
-      if (rec.publicUrl && this.plugins) { this.plugins.frpUnpublish(rec.publicName || rec.id).catch(() => {}); }
+      // B-73c4: its row is KEPT, owed, until the relay CONFIRMS the removal (asked below, after the landing) — never dropped at once
+      if ((rec.publicUrl || rec.unpublishOwed) && this.plugins) { rec.forwardGone = true; rec.machineGone = true; rec.pathMount = null; rec.pathPublic = false; rec.unpublishOwed = rec.unpublishOwed || { code: 'relay_unpublish_pending', reason: 'its removal is being asked of the relay', since: Date.now() }; }
       const l = this._live.get(rec.id);
       if (l) { for (const s of l.sockets) { try { s.destroy(); } catch {} } try { l.server.close(); } catch {} this._live.delete(rec.id); }
       this._published.delete(rec.id);
       this._healRetryAt.delete(rec.id);
       this._pubGen.delete(rec.id); this._relayUnanswered.delete(rec.id);   // r3327
     }
-    this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);
+    this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId || r.forwardGone);   // B-73c4: a public address still up keeps its row
     this._persist({ now });   // r5036: a machine's REMOVAL by a person lands at once (its callers pass now); the unpair at a lift rides the writer
     this._emit();
+    // B-73c4: the removed machine's public addresses, each asked of the relay ONE at a time (off the loop); a confirmed one's row leaves
+    const owedRows = this._state.forwards.filter((r) => r.hostId === hostId && r.forwardGone);
+    if (owedRows.length) (async () => { for (const rec of owedRows) { if (await this._relayUnpublish(rec)) this._settleConfirmed(rec); } this._persist(); this._emit(); })().catch((e) => this.log('[ports] a removed machine\'s relay removals: ' + ((e && e.message) || e)));
+  }
+
+  /** B-73c4 (主开发 r5159 / r5162): ONE removal of a row's public address — CONFIRMED by the relay (its file gone and its reload answered:
+   *  src/plugins/frp.js unpublish) or OWED, never swallowed. Owed = the row keeps `unpublishOwed` { code, reason, since }: a Ports row
+   *  with its reason and «Try again», retried at a start after the list reads and on the heal sweep's pace; it leaves only on a confirmed
+   *  removal. Bounded by the relay's own bound (no answer ⇒ relay_unanswered, owed). The reason is the relay's words: never a sign-in part */
+  async _relayUnpublish(rec, { owe = true, bounded = true } = {}) {
+    if (!this.plugins) return true;   // no relay on this instance: none of its addresses can be up through it
+    try {
+      const call = this.plugins.frpUnpublish(rec.publicName || rec.id);
+      // still OUT at the relay until it answers (even past the bound); a LATE confirmation settles the row at once (never 5 more minutes)
+      this._unpubOut = (this._unpubOut || 0) + 1;
+      Promise.resolve(call).then(() => 'ok', () => 'no').then((how) => { this._unpubOut--; if (how === 'ok' && owe && rec.unpublishOwed && rec.unpublishOwed.code === 'relay_unanswered') { delete rec.unpublishOwed; this._settleConfirmed(rec); this._persist(); this._emit(); } });
+      if (bounded) await this._relayBounded(call, rec, 'unpublish'); else await call;   // unbounded: a person's / the jobs engine's road (its caller judges lateness, as at the release)
+      if (rec.unpublishOwed) { delete rec.unpublishOwed; this.log(`[ports] the public address of ${rec.id} is down now (its relay removal confirmed)`); }
+      return true;
+    } catch (e) {
+      const code = (e && e.code) || 'relay_unpublish_failed', reason = String((e && e.message) || code).slice(0, 300), was = rec.unpublishOwed;
+      if (!owe) { rec.error = 'the old public address could not be taken down: ' + reason; this.log(`[ports] the old public address of ${rec.id} could not be taken down (${code}): ${reason}`); return false; }   // a cleanup: said, never owed
+      rec.unpublishOwed = { code, reason, since: (was && was.since) || Date.now() };
+      if (!was || was.code !== code) this.log(`[ports] the public address of ${rec.id} could not be taken down (${code}) — kept in Ports, owed: ${reason}`);
+      return false;
+    }
+  }
+  /** B-73c4: a CONFIRMED removal — a forward already gone, or an orphan, leaves; a forward that stays keeps its row, unpublished */
+  _settleConfirmed(rec) {
+    if (rec.forwardGone || rec.orphan) { this._state.forwards = this._state.forwards.filter((r) => r !== rec); this._healRetryAt.delete(rec.id); return; }
+    rec.publicUrl = null; rec.publicName = null; delete rec.protoPending; this._published.delete(rec.id);
+  }
+  /** B-73c4: «Try again» on a row whose public address is still up — a PERSON's press only (the route's door: src/server/ports-relay-routes.js) */
+  async unpublishAgain(id) {
+    this._hold.refuse('removing a public address');   // held: refused by name, nothing written
+    const rec = this._state.forwards.find((r) => r.id === id);
+    if (!rec || !rec.unpublishOwed) throw Object.assign(new Error('this row has no public address waiting to be taken down'), { code: 'not_owed', status: 404 });
+    const ok = await this._relayUnpublish(rec, { bounded: false });
+    if (ok) this._settleConfirmed(rec);
+    this._persist({ now: true }); this._emit();   // a person's act: on disk when the route replies
+    return { ok: true, confirmed: ok, ...(ok ? {} : { owed: rec.unpublishOwed }) };
+  }
+  /** B-73c4: the relay files of this home with NO owner mark and no row (written before this unit) — shown once in Ports as words, never
+   *  touched; null when none (or not judged yet) */
+  unmarkedRelayFiles() { return this._unmarked || null; }
+  /** B-73c4: THE OWED PASS — every owed removal whose retry is due, ONE out at a time (each awaited before the next), each its own 5-minute
+   *  pace (the heal sweep's); then this home's relay folder judged (law 4): only on a READ list and with this instance's own relay client
+   *  running. Never on the loop: every relay call and folder read is the relay's async verbs */
+  async _owedPass(why) {
+    if (this._owedBusy || this._hold.held() || !this.plugins) return;
+    this._owedBusy = true;
+    let changed = false;
+    try {
+      const at = Date.now();
+      const due = this._state.forwards.filter((r) => r.unpublishOwed && at >= (this._healRetryAt.get(r.id) || 0)).sort((a, b) => (a.unpublishOwed.since || 0) - (b.unpublishOwed.since || 0));
+      for (const rec of due) {
+        if (this._unpubOut > 0) break;   // ONE out: a removal the relay has not answered yet (past its bound too) is still out — nothing more is asked
+        if (rec.orphan && this._namedFiles(rec).has(rec.publicName)) { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; continue; }   // a row names that file now: no longer an orphan, never removed
+        this._healRetryAt.set(rec.id, Date.now() + 5 * 60000);
+        if (await this._relayUnpublish(rec)) this._settleConfirmed(rec);
+        changed = true;
+      }
+      if (at >= (this._orphansAt || 0)) { this._orphansAt = at + 5 * 60000; if (await this._judgeOrphans()) changed = true; }
+    } catch (e) { this.log(`[ports] ${why}: the owed relay removals — ${(e && e.message) || e}`); }
+    finally { this._owedBusy = false; }
+    if (changed) { this._persist(); this._emit(); }
+  }
+  /** B-73c4 (r5162 item 8): this home's relay folder, by OWNER MARK. A file carrying THIS hub's mark that no row names becomes an OWED row
+   *  (an orphan: its removal asked like any owed one); a file with ANOTHER hub's mark is never touched nor listed; a file with NO mark and no
+   *  row is never touched and never judged by its name — kept for the one words row in Ports. The instance URL's own file (its store's,
+   *  src/server/instance-url.js PROXY_NAME) is never an orphan here. → true when a row was added */
+  /** the relay file names the rows (but `except`) stand for — as the relay writes them (src/plugins/frp.js: [^\w-] → _, 60 at most) */
+  _namedFiles(except = null) { const s = new Set(); for (const r of this._state.forwards) { if (r === except || r.orphan) continue; for (const n of [r.id, r.publicName]) if (n) s.add(relayFileName(n)); } return s; }
+  async _judgeOrphans() {
+    const quiet = () => { if (this._unmarked) { this._unmarked = null; this._emit(); } return false; };   // not judged now: nothing listed
+    if (typeof this.plugins.frpProxyFiles !== 'function') return quiet();
+    if (this._tornCopy) return quiet();   // the list was lifted from TORN bytes this run: it is not «empty», nothing is judged against it
+    let pf = null;
+    try { pf = await this.plugins.frpProxyFiles(); } catch { return quiet(); }   // no relay, or a relay with no listing: nothing judged
+    if (!pf || pf.held || !pf.own) return quiet();   // another instance's client holds the folder, or this instance's own client is not running
+    const named = this._namedFiles();
+    let added = false; const unmarked = [];
+    for (const f of pf.files || []) {
+      if (!f || !f.name || named.has(f.name) || f.name === INSTANCE_PROXY) continue;
+      if (f.mark === 'mine' && !/^[\w-]{1,60}$/.test(f.name)) { unmarked.push(f.name); continue; }   // a name the relay never writes: a hand's — listed, never touched
+      if (f.mark === 'mine') {
+        this._state.forwards.push({ id: 'pf-orphan-' + f.name, hostId: null, remotePort: null, label: f.name, orphan: true, publicName: f.name, unpublishOwed: { code: 'relay_orphan', reason: 'no forward of this instance names this public address', since: Date.now() } });
+        added = true; this.log(`[ports] a relay file of this hub no forward names (${f.name}) — kept in Ports, owed its removal`);
+      } else if (f.mark === 'none') unmarked.push(f.name);   // 'other': another hub's — never touched, never listed
+    }
+    const was = JSON.stringify(this._unmarked || null);
+    this._unmarked = unmarked.length ? { folder: pf.folder || '', names: unmarked.sort() } : null;
+    if (!added && JSON.stringify(this._unmarked || null) !== was) this._emit();
+    return added;
   }
 }
 

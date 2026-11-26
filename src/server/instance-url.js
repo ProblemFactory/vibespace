@@ -168,7 +168,11 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
 
   async function unpublish() {
     hold.refuse('unpublishing this VibeSpace');   // r3009: held — refused by name, the relay's proxy left as it is
-    try { if (plugins) await plugins.frpUnpublish(PROXY_NAME); } catch (e) { log('[instance-url] unpublish: ' + e.message); }
+    let refused = null;
+    try { if (plugins) await plugins.frpUnpublish(PROXY_NAME); } catch (e) { refused = e; log('[instance-url] unpublish: ' + e.message); }
+    // B-73c4 (law 1, no silent failure): NOT confirmed — this VibeSpace's public address is still up: kept as it is and SAID on its row
+    // (its error), never cleared; pressing Unpublish again asks the relay again
+    if (refused) { state.desired = false; state.auto = false; state.error = `its public address is still up — the relay did not confirm its removal (${(refused && refused.code) || (refused && refused.message) || 'an error'})`; save(); emit(); return { status: status(), error: state.error, code: (refused && refused.code) || 'relay_unpublish_failed' }; }
     // the SUBDOMAIN is kept: republishing should land on the same URL
     state.url = null; state.proto = null; state.desired = false; state.auto = false; state.at = null; state.error = null;
     save(); emit();

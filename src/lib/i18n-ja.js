@@ -15939,4 +15939,13 @@ export default {
   "The voice sign-in cannot be read right now": "音声のサインインを今は読み取れません",
   "The voice sign-in could not be read — connect again": "音声のサインインを読み取れません——もう一度接続してください",
   "your voice sign-in": "あなたの音声サインイン",   // lane bl-chat-b r3334 unit 2: the held list's plain name
+  "Its public address is still up: {reason}": "公開アドレスはまだ公開中です：{reason}",   // B-73c4 (lane nl-mounts): a public address still up
+  "the relay file could not be removed": "中継ファイルを削除できませんでした",   // B-73c4 (lane nl-mounts): a public address still up
+  "the relay client did not take the removal and may still serve the address until it reloads": "中継クライアントが削除を受け付けず、再読み込みまでアドレスを提供し続ける可能性があります",   // B-73c4 (lane nl-mounts): a public address still up
+  "the relay did not answer in time": "中継が時間内に応答しませんでした",   // B-73c4 (lane nl-mounts): a public address still up
+  "no forward of this instance names it": "このインスタンスの転送はどれもそれを指していません",   // B-73c4 (lane nl-mounts): a public address still up
+  "its removal is being asked of the relay": "中継に削除を依頼しています",   // B-73c4 (lane nl-mounts): a public address still up
+  "Its public address is down now.": "公開アドレスは停止しました。",   // B-73c4 (lane nl-mounts): a public address still up
+  "A relay file in this home has no owner mark and serves a public address: {names} — in {folder}. Remove it by hand if it is not wanted.": "このホームに所有者の印がない中継ファイルがあり、公開アドレスを提供しています：{names}——場所 {folder}。不要なら手動で削除してください。",   // B-73c4 (lane nl-mounts): a public address still up
+  "Its public address is still up — it is kept in Ports until the relay confirms its removal.": "公開アドレスはまだ公開中です——中継が削除を確認するまで「ポート」に残ります。",   // B-73c4 (lane nl-mounts): a public address still up
 };

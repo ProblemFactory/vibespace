@@ -220,6 +220,8 @@ const runsNow = (j) => j.state === 'up' || j.state === 'starting' || j.state ===
 /** r3228 (round whu7689zw): a service's publish the Ports list REFUSED, in the card's words — the list held (unread: published by
  *  itself when it reads), or the port's row a person's (never taken) — '' otherwise. The card draws it (src/lib/jobs-panel.js). */
 export function publishBlockedNote(j, t) {
+  // B-73c4: its public address is still up (the relay's removal not confirmed) — kept in Ports, where a person retries it; never an agent's to remove
+  if (j && j.publishStillUp && !j.publishedUrl) return t('Its public address is still up — it is kept in Ports until the relay confirms its removal.');
   if (!j || !j.publish || j.publishedUrl) return '';
   if (j.publishState === 'held') return t('Not published yet: the list of forwards could not be read. It is published by itself when it reads.');
   if (j.publishState === 'refused' && j.publishRefusal === 'another-service') return t('Not published: port {port} is forwarded for another service that is still running. Stop that one, or give this service another port.', { port: (j.ports || [])[0] });   // r3287: the row is another live service's

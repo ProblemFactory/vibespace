@@ -10,6 +10,7 @@ const { pidCmdline, pidAlive, pidArgv } = require('./proc.js');
 const { replaceShredding } = require('../secret-file.js');   // lane vault-e2e-password-fix-r2: an older frpc.toml held the token
 const os = require('os');
 const crypto = require('crypto');
+const { hubIdOf } = require('../dial-facts.js');   // B-73c4: the hub id's PURE rule (the owner mark of a proxy file)
 const RT = require('../relay-token.js');   // lane relay-token-per-instance (design q-051): THE instance's own relay token (PURE)
 
 // frp (B-0b60 public port exposure): the frps RELAY server is shared fleet
@@ -68,6 +69,30 @@ module.exports = {
     // and an empty answer there would download a frpc the PATH already has
     const frpBinNow = async () => { const local = path.join(frpDir(), 'bin', 'frpc'); return fs.existsSync(local) ? local : whichNow('frpc'); };
     const frpProxiesDir = () => path.join(frpDir(), 'proxies');
+    // B-73c4 (主开发 r5159 / r5162): THE OWNER MARK — every proxy file this instance writes names THIS hub's own opaque id (never a
+    // folder's path) on its first line, a TOML comment. Read once, off the loop, from the file the dial door mints (data/agentd/hub-id,
+    // src/server/dial-pairing.js hubId), and minted here the same way (its one-time exclusive create) when no door has yet
+    let hubIdMemo = '', hubIdAsk = null;   // only an id is remembered (an unreadable one is asked again next time); one read in flight
+    const hubIdNow = async () => {
+      if (hubIdMemo) return hubIdMemo;
+      if (hubIdAsk) return hubIdAsk;
+      hubIdAsk = (async () => {
+        const f = h.dataDir ? path.join(h.dataDir, 'agentd', 'hub-id') : '';
+        if (!f) return '';
+        const read = async () => { try { return hubIdOf(await fs.promises.readFile(f, 'utf8')); } catch { return ''; } };
+        let id = await read();
+        if (!id) {   // minted WHOLE before its name exists (a temp linked into place: an exclusive create that is never seen empty)
+          const tmp = `${f}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+          try { await fs.promises.mkdir(path.dirname(f), { recursive: true, mode: 0o700 }); await fs.promises.writeFile(tmp, 'vh-' + crypto.randomBytes(8).toString('hex') + '\n', { flag: 'wx', mode: 0o600 }); await fs.promises.link(tmp, f); } catch { /* EEXIST: a twin minted it first */ }
+          try { await fs.promises.unlink(tmp); } catch { }
+          id = await read();
+        }
+        return (hubIdMemo = id);
+      })().finally(() => { hubIdAsk = null; });
+      return hubIdAsk;
+    };
+    const OWNER_RE = /^# vibespace-owner = "([^"\n]*)"/;
+    const ownerLine = (id) => (id ? `# vibespace-owner = "${id}"\n` : '');
     const frpConf = () => path.join(frpDir(), 'frpc.toml');
     const frpPidFile = () => path.join(frpDir(), 'frpc.pid');
     const frpAdminPw = () => {
@@ -863,7 +888,7 @@ module.exports = {
             : 'vs' + require('crypto').randomBytes(5).toString('hex'); // e.g. vs3f9a1c2b4d
           let refused = '';
           const tried = Date.now();
-          const toml = `[[proxies]]\nname = "${safe}"\ntype = "http"\nsubdomain = "${sub}"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nhostHeaderRewrite = "127.0.0.1"\n`;
+          const toml = ownerLine(await hubIdNow()) + `[[proxies]]\nname = "${safe}"\ntype = "http"\nsubdomain = "${sub}"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nhostHeaderRewrite = "127.0.0.1"\n`;
           fs.writeFileSync(file, toml, { mode: 0o600 });
           try { await frpReload(); } catch (e) { throw new Error('frpc reload failed: ' + e.message); }
           for (let t = 0; t < 12; t++) {
@@ -889,7 +914,7 @@ module.exports = {
         for (let i = 0; i < 8; i++) cand.push(cfg.portMin + Math.floor(((seed = (seed * 1103515245 + 12345) >>> 0) / 0xffffffff) * span));
         let lastErr = '';
         for (const remotePort of cand) {
-          const toml = `[[proxies]]\nname = "${safe}"\ntype = "tcp"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nremotePort = ${remotePort}\n`;
+          const toml = ownerLine(await hubIdNow()) + `[[proxies]]\nname = "${safe}"\ntype = "tcp"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nremotePort = ${remotePort}\n`;
           const tried = Date.now();
           let answered = false;
           fs.writeFileSync(file, toml, { mode: 0o600 });
@@ -932,10 +957,31 @@ module.exports = {
       async unpublish(name) {
         if (heldElsewhere()) throw heldRefusal();   // B-1217: another instance's proxy file is its own
         const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
-        try { fs.unlinkSync(path.join(frpProxiesDir(), safe + '.toml')); } catch { }
-        if (frpDaemonPid()) { try { await frpReload(); } catch { } }
+        // B-73c4 (主开发 r5162): CONFIRMED, or thrown BY NAME — the file gone (removed, or already missing) and the reload answered (or no
+        // client of this instance running): never «ok» over a file that stays or a client that still serves it. Off the loop.
+        try { await fs.promises.unlink(path.join(frpProxiesDir(), safe + '.toml')); } catch (e) { if (!e || e.code !== 'ENOENT') throw Object.assign(new Error(`its relay file could not be removed (${(e && e.code) || 'an error'})`), { code: 'relay_unpublish_unremoved' }); }
+        if (heldElsewhere()) throw heldRefusal();   // another instance's client came meanwhile: its reload is not ours — not confirmed
+        if (ownRunPid()) { try { await frpReload(); } catch (e) { throw Object.assign(new Error(`the relay client did not take the removal (${(e && e.message) || 'no answer'}) — it may still serve the address until it reloads`), { code: 'relay_unpublish_unreloaded' }); } }
         h.notify();
-        return { ok: true };
+        return { ok: true, confirmed: true };
+      },
+      /** B-73c4 (an OPTIONAL verb — plugins.js OPTIONAL_VERBS): the proxy files of this home's relay folder and each one's owner mark
+       *  ('mine' = this hub's id, 'other' = another hub's, 'none'), read off the loop. Another instance's client holding the folder answers
+       *  held: its files are never judged here */
+      async proxyFiles() {
+        const dir = frpProxiesDir();
+        if (heldElsewhere()) return { held: true, own: false, folder: dir, files: [] };
+        const hub = await hubIdNow();
+        let names = [];
+        try { names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.toml')); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
+        const files = [];
+        for (const n of names) {
+          let head = '';
+          try { const fh = await fs.promises.open(path.join(dir, n), 'r'); try { const b = Buffer.alloc(200); const { bytesRead } = await fh.read(b, 0, 200, 0); head = b.subarray(0, bytesRead).toString('utf8'); } finally { await fh.close(); } } catch { continue; }   // gone or unreadable: not judged; its first 200 bytes only
+          const m = OWNER_RE.exec(head);
+          files.push({ name: n.slice(0, -5), mark: !m ? 'none' : hub && m[1] === hub ? 'mine' : 'other' });
+        }
+        return { held: false, own: !!ownRunPid(), folder: dir, files };
       },
     };
     return verbs;

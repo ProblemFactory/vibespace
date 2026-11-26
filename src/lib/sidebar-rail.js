@@ -1083,12 +1083,16 @@ export function installSidebarRail(Sidebar) {
         let fwdsTorn = null;   // r3104: the list was damaged — its bytes kept aside under this name
         try { const fr = (await api('/api/port-forwards')) || {}; fwds = fr.forwards || []; fwdsHeld = fr.held || null; fwdsTorn = fr.torn || null; } catch { }
         await this._renderInstanceUrlRow(out, api, render);
+        let relayFiles = null; try { relayFiles = ((await api('/api/port-forwards/relay-files')) || {}).unmarked || null; } catch { }   // B-73c4: relay files with no owner mark
         // active forwards
         const sec = document.createElement('div');
         sec.innerHTML = `<div class="usage-section-title">${escHtml(tr('Active forwards'))}</div>`;
         if (fwdsTorn) sec.innerHTML += `<div class="empty-hint empty-hint-inline">${escHtml(tr('The list of port forwards was damaged; its damaged bytes are kept beside it as {name}. Addresses published before stay published at the relay and keep their names: a forward added again for the same port takes its old address back; one on another port that chooses one of those names is refused by the relay until you stop the relay plugin (which takes them all down) or choose another name. Add the forwards again, or mend the file by hand and restart VibeSpace.', { name: fwdsTorn }))}</div>`;
         if (!fwds.length) sec.innerHTML += `<div class="empty-hint empty-hint-inline">${escHtml(fwdsHeld ? tr('VibeSpace could not read its list of port forwards; it reads it again every few minutes. Nothing is lost: new forwards wait until it reads. Addresses published before stay published at the relay; to take them all down now, stop the relay plugin.') : tr('No forwards yet — scan a machine below'))}</div>`;
         for (const f of fwds) {
+          // B-73c4: a row that is nothing but an OWED removal (its forward already removed, or a relay file of this hub no forward names):
+          // its public address is still up — said with its reason, and «Try again» (a person's press); nothing else on it
+          if (f.forwardGone || f.orphan) { if (f.unpublishOwed) sec.appendChild(this._owedPortRow(f, api, render, nameOf)); continue; }
           const row = document.createElement('div');
           row.className = 'ports-row';
           row.dataset.forwardId = f.id; // lane artifacts-services-url: a service card's "Show in Ports" finds its forward's row
@@ -1100,12 +1104,14 @@ export function installSidebarRail(Sidebar) {
           const svcWords = svcM ? (svcM[1] === CLEARED_TEXT ? clearedText() : svcM[1]) : null;   // a cleared job's service in THIS device's words (verify r8)
           row.innerHTML = `<span class="ports-row-label" title="${label}">${label}${svcM ? ` <span class="ports-svc">${escHtml(svcWords)}</span>` : ''} ${protoChip(f.proto, { over: !!f.protoOverride })}${f.publicUrl ? ` <span class="ports-pub" title="${escHtml(f.publicUrl)}">${PORT_ICONS.globe}</span>` : ''}</span>`;
           if (f.ownerGone) row.insertAdjacentHTML('beforeend', `<div class="empty-hint empty-hint-inline">${escHtml(tr('Its background job is gone: this forward and its public address stay until you remove it here.'))}</div>`);   // r3327: a job row whose job is gone, said on it
+          if (f.unpublishOwed) row.insertAdjacentHTML('beforeend', `<div class="empty-hint empty-hint-inline">${escHtml(this._owedPortWords(f))}</div>`);   // B-73c4: its unpublish not confirmed — the address is still up
           // the proto chip is the override handle
           const chip = row.querySelector('.ports-proto');
           if (chip) chip.onclick = (ev) => this._portProtoMenu(ev, f, render);
           const acts = document.createElement('span');
           acts.className = 'ports-row-actions';
           const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
+          if (f.unpublishOwed) acts.append(this._owedRetryBtn(f, api, render, btn));   // B-73c4: «Try again» — a person's press
           if (f.url) acts.append(btn(PORT_ICONS.open, tr('Open (through the app proxy)'), () => this.app.openBrowser?.(f.publicUrl || f.url, { proxy: !f.publicUrl })));
           // publish tooltip states the OUTCOME per effective proto (a raw-TCP
           // service becomes tcp://ip:port, an http one a trusted https URL)
@@ -1208,6 +1214,9 @@ export function installSidebarRail(Sidebar) {
             sec.appendChild(ur);
           }
         }
+        // B-73c4 (r5162): relay files of this home with NO owner mark and no row — shown ONCE as words, never touched, no press (a person
+        // removes such a file by hand); the folder rides as a value, never inside the words
+        if (relayFiles && Array.isArray(relayFiles.names) && relayFiles.names.length) sec.insertAdjacentHTML('beforeend', `<div class="empty-hint">${escHtml(tr('A relay file in this home has no owner mark and serves a public address: {names} — in {folder}. Remove it by hand if it is not wanted.', { names: relayFiles.names.join(', '), folder: relayFiles.folder || '' }))}</div>`);
         out.appendChild(sec);
         // per-machine scan sections
         for (const m of machines) {
@@ -1327,6 +1336,41 @@ export function installSidebarRail(Sidebar) {
       });
     },
 
+    /** B-73c4: why a row's public address is still up, in the page's words (the relay's own codes worded here; another reason as the hub said it) */
+    _owedPortWords(f) {
+      const o = f.unpublishOwed || {}, c = o.code;
+      const why = c === 'relay_held_elsewhere' || c === 'relay_owner_unknown' ? relayRefusalWords({ code: c })
+        : c === 'relay_unpublish_unremoved' ? tr('the relay file could not be removed')
+        : c === 'relay_unpublish_unreloaded' ? tr('the relay client did not take the removal and may still serve the address until it reloads')
+        : c === 'relay_unanswered' ? tr('the relay did not answer in time')
+        : c === 'relay_orphan' ? tr('no forward of this instance names it')
+        : c === 'relay_unpublish_pending' ? tr('its removal is being asked of the relay')
+        : String(o.reason || '');
+      return tr('Its public address is still up: {reason}', { reason: why });
+    },
+    /** B-73c4: «Try again» on a row whose public address is still up — a person's press (the route refuses an agent's) */
+    _owedRetryBtn(f, api, render, btn) {
+      return btn(PORT_ICONS.globeOff, tr('Try again'), async () => {
+        const r = await api(`/api/port-forward/${encodeURIComponent(f.id)}/unpublish-again`, { method: 'POST' });
+        if (r?.error) { const why = relayRefusalWords(r); showToast(why || r.error, { type: 'error' }); }
+        else if (r?.confirmed) showToast(tr('Its public address is down now.'));
+        render();
+      });
+    },
+    /** B-73c4: a row that is nothing but an owed removal: its name, why its address is still up, «Try again» */
+    _owedPortRow(f, api, render, nameOf) {
+      const row = document.createElement('div');
+      row.className = 'ports-row';
+      row.dataset.forwardId = f.id;
+      const label = f.orphan ? escHtml(f.label || '') : `${escHtml(nameOf(f.hostId))}:${f.remotePort}`;
+      row.innerHTML = `<span class="ports-row-label" title="${label}">${label}</span><div class="empty-hint empty-hint-inline">${escHtml(this._owedPortWords(f))}</div>`;
+      const acts = document.createElement('span');
+      acts.className = 'ports-row-actions';
+      const btn = (icon, tip, fn) => { const b = document.createElement('button'); b.className = 'mounts-icon-btn'; b.innerHTML = icon; b.dataset.tip = tip; b.onclick = fn; return b; };
+      acts.append(this._owedRetryBtn(f, api, render, btn));
+      row.appendChild(acts);
+      return row;
+    },
     // Override the detected protocol of a forward. Auto = clear the override
     // (fall back to detection). A published forward re-publishes in the new
     // mode server-side, so the public URL SHAPE updates too.
