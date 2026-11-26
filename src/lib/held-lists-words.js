@@ -62,7 +62,7 @@ const NAMES = Object.freeze({
   'decision-memo.json': i18nKey('the language model plugin’s saved answers'),
   'decision-journal.jsonl': i18nKey('the language model plugin’s journal of calls'),   // r4121: the journal's own hold, an older row of the list (the engine's heldRow)
   'otel-token': i18nKey('the sign-in value your conversations report their usage with'),   // B-f276 family unit 2: the OTel sign-in value's own hold, an older row of the list
-  'auto-cli-state.json': i18nKey('the automatic usage reads — paused while their pacing record cannot be read'),   // B-574d (主开发 r5143): the auto-cli loop's unknown wait, an older row of the list (the loop's heldRow)   // B-f276 family unit 2: the OTel sign-in value's own hold, an older row of the list
+  'auto-cli-state.json': i18nKey('the automatic usage reads — paused while their pacing record cannot be read'),   // B-574d (主开发 r5143): the auto-cli loop's unknown wait, an older row of the list (the loop's heldRow) — shown only while the automatic reads are on (r5213)
   '.instance-id': i18nKey('this VibeSpace’s anonymous usage id'),   // B-f276 (r4721, lane lg-vault-stages): data/telemetry/.instance-id on the helper
   'jobs.lock': i18nKey('Background Work’s lock'),   // B-f276 slice jobs-side-files (lane bl-proposals s1126): held, no job starts and no record changes
   'exit.json': i18nKey('a background job run’s end record'),

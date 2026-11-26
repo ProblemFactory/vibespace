@@ -90,6 +90,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     ok(/^let autoCliLoop = null;/m.test(boot) && boot.includes('  autoCliRow: () => (autoCliLoop ? autoCliLoop.heldRow : null),') && WIRE.includes("  autoCliRow = () => null,")
       && WIRE.includes("    { key: 'auto-cli-state.json', facts: () => { const r = autoCliRow(); return r ? r.facts() : null; }, onLift: (fn) => { const r = autoCliRow(); return r ? r.onLift(fn) : false; } },"),
       'WIRING PIN (主开发 r5143): server.js keeps the loop it makes and hands its held row LAZILY to the wiring, whose held-lists older row has facts and one lift — no read-again (no press, no new road)'); }
+  ok(boot.includes('    try { if (autoCliLoop) autoCliLoop.noteSettingsWrite(next, prev); } catch { }') && /noteSettingsWrite,/.test(srv), 'WIRING PIN (主开发 r5213): server.js\'s settings write tells the loop\'s row when the automatic reads are switched on or off (the list told once)');
   ok(/const pj = d\.projectionRereadFor\(a\.id, now, billingIndex\(\)\)[^\n]*\n[\s\S]{0,40}?list\.push\(\{[^\n]*projCrossInMs: pj \? pj\.inMs : null, estBurnPtPerMin: pj \? pj\.burnPtPerMin : 0/.test(srv), 'WIRING PIN: the auto-cli loop hands projectionRereadFor\'s crossing + burn to decideCliRefresh');
   ok(/const picks = decideCliRefresh\(list, now,[^\n]*\n\s*for \(const key of picks\) \{\n[^\n]*\n\s*attempts\.set\(key, now\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(\(await saveState\(d\.dataDir, st, warn, d\.storeWriter, landingMs\)\) !== true\) \{\n[^\n]*\n[^\n]*\n\s*continue;\n\s*\}\n\s*stampUnlanded = false;\n\s*let ok = false; try \{ ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\);/.test(srv), 'WIRING PIN: a pick is spent on usage.refreshViaCliPanel — the same rung, behind the same attempt clock, stamped on disk BEFORE the spawn (quota r3)');
   ok(/if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \} catch/.test(srv), 'WIRING PIN: the fresh reading takes the new-member wake — the pool re-decides on the READING (its own try, after the bookkeeping — quota r3)');
@@ -661,7 +662,8 @@ parentPort.on('message', (m) => {
   const NO_PROFILE_LOOP = mutant('no-profile', "    if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;\n", PREMISE);
   const NO_MEASURE_LOOP = mutant('no-measure', "    if (!(row.oatCli && row.oatCli.measured === true)) return CLI_UNMEASURED;\n", PREMISE);
   const T0 = 1_800_000_000_000, H = 3600e3;
-  const world = ({ loopFile = REAL_LOOP, stateFile = null, readAgainMs = undefined } = {}) => {
+  const world = ({ loopFile = REAL_LOOP, stateFile = null, readAgainMs = undefined, refresh = 'auto-cli' } = {}) => {
+    let setting = refresh;   // r5213: the usage-refresh setting, switched by a leg as server.js's settings write would
     const { createAutoCliLoop } = require(loopFile);
     const dir = fs.mkdtempSync(path.join(scratch, 'w-')), cacheDir = path.join(dir, 'usage-cache'), dataDir = path.join(dir, 'data');
     fs.mkdirSync(cacheDir, { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
@@ -679,7 +681,7 @@ parentPort.on('message', (m) => {
     const deps = {
       storeWriter: { pending: new Map(), dirty(f, o) { this.pending.set(f, o); }, durable(f) { const o = this.pending.get(f); this.pending.delete(f); if (o) fs.writeFileSync(f, o.produce()); return Promise.resolve(true); } },   // B-574d: each save lands at once (the release's timing)
       now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {}, readAgainMs,
-      serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
+      serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? setting : undefined),
       accounts: { list: () => ({ accounts: rows }), decisionList: () => ({ accounts: rows }), signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }, autoCliReady: () => true, usageIdentityGroupsCached: () => [],
       usageEstimator: { estimateFor: () => null }, projectionRereadFor: () => null, lastMemberReadAt: () => 0,
       usage: {
@@ -706,6 +708,7 @@ parentPort.on('message', (m) => {
       mem() { return loop.state; },   // r4771: the loop's memory (what a read again merges into)
       row() { return loop.heldRow; },   // r5143: the loop's row on the family's one notice
       bump(ms) { T += ms; },   // r5030 (c): the world's clock moved while a read runs (placed)
+      setSetting(v) { const prev = { 'accounts.onDemandQuotaRefresh': setting }; setting = v; loop.noteSettingsWrite({ 'accounts.onDemandQuotaRefresh': v }, prev); },   // r5213: as server.js's onSettingsWrite
       get now() { return T; },
     };
   };
@@ -979,6 +982,11 @@ parentPort.on('message', (m) => {
       const rS = await roads(FIXED_SINCE_CUT, 'restart'), rL = await roads(LIFT_CUT, 'merged');
       ok(rS.f1 && rS.f1.since === T0 + WAIT, `§ban-safety r5143 (i) RED CONTROL (since taken from the wait's own mark): at the restart «since» jumps (min ${at(rS.f1)})`, rS);
       ok(rL.f1 === null && rL.lifted === 0, `§ban-safety r5143 (i) RED CONTROL (the lift cut on the merged road): the wait ended and the row was never lifted (${rL.lifted}) — the notice would stand until a reload`, rL);
+      // r5213's should: a red for each other road's lift (not there, torn)
+      const MISSING_LIFT_CUT = loopCut('loop-missing-lift-cut', "nothing to merge; the loop goes on with its memory'); liftRow(); return; }", "nothing to merge; the loop goes on with its memory'); return; }");   // stale-pins: kept — the road without its lift, planted as the RED
+      const TORN_LIFT_CUT = loopCut('loop-torn-lift-cut', "its next save writes over them`);\n      liftRow();\n      return;", "its next save writes over them`);\n      return;");   // stale-pins: kept — the road without its lift, planted as the RED
+      const rN = await roads(MISSING_LIFT_CUT, 'missing'), rT = await roads(TORN_LIFT_CUT, 'torn');
+      ok(rN.f1 === null && rN.lifted === 0 && rT.f1 === null && rT.lifted === 0, `§ban-safety r5143 (i) RED CONTROLS (the lift cut on the not-there road; on the torn road): the wait ended and the row was never lifted (${rN.lifted}, ${rT.lifted})`, { rN, rT });
     }
     { // (j) the row in the REAL held-lists notice (src/server/held-lists.js, as the wiring's LAZY older row): listed by its key with since and
       //     next and readAgain false — the press reads the state file NOT (no new road); at the wait's end ONE broadcast drops it
@@ -995,6 +1003,33 @@ parentPort.on('message', (m) => {
           `§ban-safety r5143 (j): in the real held-lists notice — listed (${during ? during.what : 'absent'}, readAgain ${during ? during.readAgain : '-'}), the person's press reads the state file not (${pressReads} reads), the wait's end broadcasts ONCE (${casts.length - c0}) and the row is gone (${after})`, { during, casts: casts.length, c0, after, pressReads });
         if (typeof hl.stop === 'function') hl.stop();
       } finally { pa.restore(); }
+    }
+    { // (k) 主开发 r5213 (the round's must): the row is given ONLY while the automatic reads are ON. Manual with the file unreadable at the
+      //     start: NO row, the wait runs on, no read made; the switch to the automatic form (as server.js's settings write tells it): the row,
+      //     the real held-lists notice told once; the switch away: the row leaves by ONE broadcast. RED: the gate removed — the row stands
+      //     under Manual, saying a next try that never comes
+      const HL = require(path.join(path.dirname(REAL_LOOP), 'held-lists.js'));
+      const gated = async (loopFile) => { const pa = placeAgain(0);
+        try { const { w } = placed('eio', { stateFile: STATE, loopFile, refresh: 'manual' }); const casts = [];
+          const lazy = { key: 'auto-cli-state.json', facts: () => w.row().facts(), onLift: (fn) => w.row().onLift(fn) };
+          const hl = HL.create({ broadcast: (m) => casts.push(JSON.parse(JSON.stringify(m))), older: [lazy], now: () => w.now });
+          const listed = () => hl.list().some((r) => r.key === 'auto-cli-state.json');
+          const lastHas = () => (casts.length ? casts[casts.length - 1].lists.some((r) => r.key === 'auto-cli-state.json') : null);
+          const manual0 = { facts: w.row().facts(), listed: listed() };
+          await w.run(WAIT_MIN + 5);   // past the wait's end under Manual: the tick returns at once — no read, the wait runs on
+          const manual1 = { facts: w.row().facts(), listed: listed(), unknown: w.mem().unknownAt != null, reads: pa.reads(), calls: w.calls.length };
+          w.setSetting('auto-cli'); const on = { facts: !!w.row().facts(), listed: listed(), casts: casts.length, last: lastHas() };
+          w.setSetting('manual'); const off = { facts: w.row().facts(), listed: listed(), casts: casts.length, last: lastHas() };
+          if (typeof hl.stop === 'function') hl.stop();
+          return { manual0, manual1, on, off };
+        } finally { pa.restore(); } };
+      const k0 = await gated(REAL_LOOP);
+      ok(k0.manual0.facts === null && !k0.manual0.listed && k0.manual1.facts === null && !k0.manual1.listed && k0.manual1.unknown && k0.manual1.reads === 0 && k0.manual1.calls === 0
+        && k0.on.facts && k0.on.listed && k0.on.casts === 1 && k0.on.last === true && k0.off.facts === null && !k0.off.listed && k0.off.casts === 2 && k0.off.last === false,
+        `§ban-safety r5213 (k): under MANUAL with the file unreadable — no row (listed ${k0.manual1.listed}), the wait runs on (${k0.manual1.unknown}), no read (${k0.manual1.reads}), no call (${k0.manual1.calls}); switched to the automatic form — the row, the list told once (${k0.on.casts}); switched away — the row leaves by ONE broadcast (${k0.off.casts - k0.on.casts})`, k0);
+      const GATE_CUT = loopCut('loop-row-ungated', 'st.unknownAt != null && autoOn() ? {', 'st.unknownAt != null ? {');   // stale-pins: kept — the row before its gate, planted back as the RED
+      const k1 = await gated(GATE_CUT);
+      ok(!!k1.manual1.facts && k1.manual1.listed, `§ban-safety r5213 (k) RED CONTROL (the setting's gate removed): under Manual the row stands (listed ${k1.manual1.listed}) — «paused … next try» with no read coming`, k1.manual1);
     }
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts

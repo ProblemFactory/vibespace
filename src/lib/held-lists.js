@@ -95,7 +95,7 @@ export function paintHeldLists(el) {
     const note = document.createElement('div'); note.className = 'empty-hint empty-hint-inline sys-held-note'; note.textContent = heldSectionNote(t);
     const press = document.createElement('button'); press.type = 'button'; press.className = 'mounts-btn sys-held-again'; press.textContent = heldPressLabel(t);
     press.onclick = () => { readHeldAgain().catch(() => { }); };
-    el.replaceChildren(title, ...rows, note, press);
+    el.replaceChildren(title, ...rows, note, ...(lists.some((r) => r.readAgain !== false) ? [press] : []));   // r5213's should: no idle press — drawn only when a listed row can be read again by it
     if (scrollWanted) { scrollWanted = false; try { el.scrollIntoView?.({ block: 'nearest' }); } catch { /* none */ } }
     // r3284: a next try that passes while the section stays open is worded again when it passes («in a moment»), by the section's own timer
     const due = lists.map((r) => Number(r.next) || 0).filter((n) => n > at);

@@ -611,6 +611,7 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
     // effective from the next turn, local and remote chat sessions alike) ⇒ the
     // verb goes to every running chat session whose ADAPTER has it. Sessions
     // spawned after the flip get it at spawn instead.
+    try { if (autoCliLoop) autoCliLoop.noteSettingsWrite(next, prev); } catch { } // B-574d (主开发 r5213): the automatic usage reads switched on or off while their pacing state is unread — the held-lists notice told once
     try { settingHolds.noteSettingsWrite(next, prev); } catch { } // lane setting-doors pick 2 (law B): a hand write of a held row ends its hold HERE, the moment it lands (before the wiring exists there is no hold)
     const landing = harnessConfig.onSettingsWrite(next, prev); try { plugins.onSettingsWrite(next, prev); } catch { } return (landing || toggled) ? Promise.all([toggled, landing]) : null; // B-ddf3 u2 line 1 (b): the switch's registration and the rows' landing ride back to the settings write's answer (src/server/landing-answer.js notLanded reads both) // lane plugin-settings-p0: a plugin row that re-applies (frp relay fields, Tailscale mode) moved ⇒ that plugin re-applies (before the plugin wiring exists nothing can have changed)
   } });

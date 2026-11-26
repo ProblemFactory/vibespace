@@ -236,14 +236,25 @@ function createAutoCliLoop(d) {
   // moves at every restarted wait), next = the wait's end. A wait that ends — by any road of its read — says so ONCE and lifts the row once
   let unknownSince = st.unknownAt != null ? st.unknownAt : null;
   const lifts = new Set();
-  const liftRow = () => { unknownSince = null; for (const fn of [...lifts]) { lifts.delete(fn); try { fn(); } catch (e) { warn(`[auto-cli] the held-lists notice's lift failed: ${(e && e.message) || e}`); } } };
+  const tellList = () => { for (const fn of [...lifts]) { try { fn(); } catch (e) { warn(`[auto-cli] the held-lists notice's lift failed: ${(e && e.message) || e}`); } } };
+  const liftRow = () => { unknownSince = null; const fns = [...lifts]; lifts.clear(); for (const fn of fns) { try { fn(); } catch (e) { warn(`[auto-cli] the held-lists notice's lift failed: ${(e && e.message) || e}`); } } };
+  // 主开发 r5213 (the round's must): the row is given ONLY while the automatic reads are in fact ON (the setting read at the facts) — under
+  // Manual, the popup form or Off the tick returns at once, no read is coming, and a row saying «paused … next try» would be untrue and could
+  // not be cleared; the wait itself runs on untouched (the tick is the base's)
+  const autoOn = () => { try { return d.serverSetting('accounts.onDemandQuotaRefresh') === 'auto-cli'; } catch { return false; } };
   const heldRow = Object.freeze({
     key: STATE_FILE,
-    facts: () => (st.unknownAt != null ? { since: unknownSince != null ? unknownSince : st.unknownAt, next: st.unknownAt + UNKNOWN_WAIT_MS } : null),
+    facts: () => (st.unknownAt != null && autoOn() ? { since: unknownSince != null ? unknownSince : st.unknownAt, next: st.unknownAt + UNKNOWN_WAIT_MS } : null),
     onLift: (fn) => { if (typeof fn !== 'function') return false; lifts.add(fn); return true; },
   });
+  /** r5213: the settings' write (server.js onSettingsWrite) — the automatic form switched on or off while the wait runs: the list is told
+   *  ONCE (its armed signal kept, never dropped), so an open page drops the row or shows it again */
+  function noteSettingsWrite(next, prev) {
+    const on = (s) => !!s && s['accounts.onDemandQuotaRefresh'] === 'auto-cli';
+    if (on(next) !== on(prev) && st.unknownAt != null) tellList();
+  }
   async function readAgain(now) {
-    if (!d.dataDir) { st.unknownAt = null; return; }
+    if (!d.dataDir) { st.unknownAt = null; liftRow(); return; }   // r5213's should: every road out of the wait lifts the row (production always has a data folder)
     const statePath = path.join(d.dataDir, STATE_FILE);   // its own name: the sync-fs census reads a path by its name across the file
     // r5030 (a): BOUNDED — a read with no answer past readAgainMs is an error of the file system (ETIMEDOUT): the wait starts again, said once.
     // r5061 (1): the read that missed its bound stays OUT; at the next wait's end, while it is still out, none is started and the tick takes
@@ -253,7 +264,8 @@ function createAutoCliLoop(d) {
     let read;
     // r5105's should: while a kept read is out the tick is answered AT ONCE (nothing earlier: no read is made, the wait starts again from
     // this give-up) — and the journal says that no read was made, not «no answer in 30 s»
-    if (readOut) read = { error: Object.assign(new Error('a read is still out'), { code: `a read is still out since ${new Date(readOutAt).toISOString()}` }) };
+    const stillOut = !!readOut;
+    if (readOut) read = { error: Object.assign(new Error(`a read is still out since ${new Date(readOutAt).toISOString()}`), { code: 'READ_STILL_OUT' }) };   // r5213's should: a short code, the words in the line
     else {
       const mine = readOut = fs.promises.readFile(statePath, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
       readOutAt = now;
@@ -281,7 +293,7 @@ function createAutoCliLoop(d) {
     st.unknownAt = clock();   // r5061 (3): the wait counted from the clock read AFTER the read gave up (never up to its bound early)
     // (a clock that stepped back is clamped by the tick's own guard — `if (st.unknownAt > now)` — at its next run: the tick reads its clock
     //  again right after this read, so keep that re-read: r5105's should)
-    warn(`[auto-cli] pacing state still unreadable (${a.code}) — the longest backoff starts again (${Math.round(UNKNOWN_WAIT_MS / 60e3)} min) before any /usage read`);
+    warn(`[auto-cli] pacing state still unreadable (${stillOut ? `a read is still out since ${new Date(readOutAt).toISOString()}` : a.code}) — the longest backoff starts again (${Math.round(UNKNOWN_WAIT_MS / 60e3)} min) before any /usage read`);
   }
   let ticking = false;
   async function tick() {
@@ -416,7 +428,7 @@ function createAutoCliLoop(d) {
     return out;
   }
   return {
-    tick, state: st, heldRow,
+    tick, state: st, heldRow, noteSettingsWrite,
     start() { const t = setInterval(tick, 60000); t.unref?.(); return t; },
   };
 }
