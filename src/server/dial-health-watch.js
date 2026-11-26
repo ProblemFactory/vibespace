@@ -39,7 +39,7 @@ function itemOf({ machine, from, since, every, live = null }) {
   return { text: fill(T), detail: ds.map(fill).join('\n'), i18n: { text: { key: T, params: p }, detail: ds.map((key) => ({ key, params: p })) } };
 }
 
-function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.now(), bcast = () => {}, hosts = null, tickMs = 60000 } = {}) {
+function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.now(), bcast = () => {}, hosts = null, tickMs = 60000, writer = null } = {}) {
   const file = path.join(dataDir, 'dial-health.json');
   let ledger = {}; // `<host id>|<kind>` → { machine, from, since, at, itemId, text, clearSince }
   // B-f276 THE STORE-READ LAW (主开发 r4718, slice machine-watch-ledgers, lane lg-remote-hardening; login-expiry.json's form): the release
@@ -53,14 +53,24 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   const hold = HOLD.create({ file, valid: isObj, code: 'dial_health_unread', aside: (m) => file + '.corrupt-' + m,
     words: (h) => `the record of the extra agents dialing in to the machines could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and a second dialing agent waits for it`,
     log: (l) => log(`[dial-health] ${l}`), onLift: (v) => { ledger = v && isObj(v.hosts) ? v.hosts : {}; heldSaid = false; try { sweep(); } catch (e) { log(`[dial-health] the pass at the lift failed: ${e.message}`); } } });
-  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+  // B-574d (主开发 r4760, lane lg-remote-hardening; login-expiry.json's form): the record is THE STORE WRITER's (save, below) — a suite's
+  // own writer, else the process's. The release wrote an unsynced temp and renamed it ON THE LOOP at every event; the writer makes the
+  // bytes at the write (the newest record), writes, syncs and renames on its thread, says a failed write and writes it again; one owed
+  // at a stop is written by the hub's exit (the writer's exitFlush). A second watch over this file in ONE process (a suite's restart)
+  // reads what the writer still OWES it, never the older file
+  const SW = () => writer || require('../store-writer.js').storeWriter();
+  const owedNow = () => { try { const w = SW(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } };
+  { let read; const owedBytes = owedNow(); if (owedBytes != null) read = { text: owedBytes }; else try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: isObj });
     if (hold.start(a) === 'data') ledger = isObj(a.value.hosts) ? a.value.hosts : {}; }
-  const save = () => {
+  function save() {
     if (!hold.writable('a write of the dialing agents record')) return;   // HELD: never over a file that could not be read
-    try { const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, hosts: ledger }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }
+    try { SW().dirty(file, { name: 'dial-health.write', mode: 0o600, produce: () => JSON.stringify({ version: 1, hosts: ledger }, null, 2) }); }
     catch (e) { log(`[dial-health] ledger not written: ${e.message}`); }
-  };
+  }
+  /** the record as memory holds it is on disk — true when written, false when the writer's write failed or passed its bound (it stays
+   *  owed); at once when nothing is owed (a suite's next life and its readers wait on it) */
+  const whenWritten = () => { try { return Promise.resolve(SW().durable(file)).then((ok) => ok !== false, () => false); } catch { return Promise.resolve(false); } };
   const lastLogAt = new Map(); // host id → the last journal line under the second-dialer verdict (in memory: a restart logs once more)
   const keyOf = (id) => `${String(id).slice(0, 160)}|${DH.SECOND}`;
   /** Retract OUR item (never one the user already handled, never anyone else's). */
@@ -124,7 +134,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     if (tickMs > 0) { timer = setInterval(() => { try { sweep(); } catch (e) { log(`[dial-health] sweep failed: ${e.message}`); } }, tickMs); timer.unref?.(); }
   }
   const byDevice = (deviceId) => { const h = hosts && hosts.findByDeviceId?.(deviceId); return h ? { h, v: observe(h, { connected: !!hosts.dialOnline?.(deviceId) }) } : null; };
-  return { observe, shouldLog, rowOf, sweep, byDevice, held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), stop: () => { if (timer) clearInterval(timer); timer = null; hold.stop(); }, _ledger: () => ledger };
+  return { observe, shouldLog, rowOf, sweep, byDevice, held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), whenWritten, stop: () => { if (timer) clearInterval(timer); timer = null; hold.stop(); }, _ledger: () => ledger };
 }
 
 module.exports = { create, itemOf, INBOX_KEY };

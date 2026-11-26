@@ -298,8 +298,6 @@ const ROWS = [
   ["src/server/desktop-access.js", "*", 1, "local-only", "knownFile = <dataDir>/desktop-machines.json (server.js passes <checkout>/data)"],
   ["src/server/desktop-webrtc.js", "pushMacHelper", 4, "local-only", "bin = helpersDir/vibespace-screen (+ .version, .identity.json — lane apple-signing); helpersDir = HELPERS_DIR = <checkout>/data/bin/helpers; manifestFile = MANIFEST_COPY = <checkout>/data/bin/vibespace-agentd.manifest.json (the release record beside the bundle). The prebuilt's digest is a stream, not a sync read."],
   ["src/server/device-alerts.js", "*", 1, "local-only", "ledgerFile = <dataDir>/device-alerts.json — its read at the start (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the write moved onto the store writer, 3 → 1)"],
-  ["src/server/device-upgrade-watch.js", "*", 2, "local-only", "file = <checkout>/data/device-upgrades.json (server.js create dataDir)"],
-  ["src/server/dial-health-watch.js", "*", 2, "local-only", "<dataDir>/dial-health.json (+ .tmp)"],
   ["src/host-keys.js", "writePinFile", 5, "local-only", "<dataDir>/ssh/known_hosts.d/<id> (+ .tmp) — a machine record's ssh host-key pin (lane lg-remote-hardening)"],
   ["src/server/dial-pairing.js", "*", 5, "local-only", "AGENTD_DIR = <checkout>/data/agentd (server.js): host-<id>.token, hub-id and the dir itself"],
   ["src/server/doc-engine.js", "*", 4, "local-only", "file = <dataDir>/doc-owners.json (server.js docEngine dataDir = <checkout>/data)"],

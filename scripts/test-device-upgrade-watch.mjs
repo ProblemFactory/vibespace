@@ -193,7 +193,8 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   const MH = mutantCopies('dus-held', REPO);
   const S = { hostKey: 'host-dial-HB1', machine: 'HB1', from: '2.369.199', to: '2.369.201', ...WIN };
   /** life one: a stuck update filed and recorded, and a pending deadline (another device) — on disk */
-  const lifeOne = (Mod = DW) => { const a = world(Mod); a.w.stuck(S); a.w.begun({ hostKey: 'host-dial-HB2', machine: 'HB2', from: '2.369.199', to: '2.369.201' }); a.w.stop();
+  // B-574d (r4760): the record is the store writer's, written on its thread — ON DISK before the next life meets the file
+  const lifeOne = async (Mod = DW) => { const a = world(Mod); a.w.stuck(S); a.w.begun({ hostKey: 'host-dial-HB2', machine: 'HB2', from: '2.369.199', to: '2.369.201' }); await a.w.whenWritten(); a.w.stop();
     const file = path.join(a.dir, 'device-upgrades.json'); return { ...a, file, bytes: fs.readFileSync(file, 'utf8'), itemId: a.open()[0].id }; };
   /** a held life: the same folder, its read refused once */
   const heldLife = (Mod, a, lines = []) => { const pr = placeReads(a.file); let w = null; try { w = Mod.create({ userTodos: a.todos, dataDir: a.dir, log: (l) => lines.push(l), tickMs: 0 }); } finally { pr.restore(); } return { w, lines, seen: pr.seen.n }; };
@@ -205,7 +206,7 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   const heldLife2 = (Mod, L, lines = []) => { const pr = placeReads(L.file), bc = { n: 0, row: undefined }; let w = null;
     try { w = Mod.create({ userTodos: L.todos, dataDir: L.dir, log: (l) => lines.push(l), tickMs: 0, bcast: () => { bc.n++; bc.row = w && w.rowOf('host-dial-HB1'); }, alerts: { file: (kind, f) => alerted.push([kind, f.hostKey]) } }); } finally { pr.restore(); }
     return { w, lines, seen: pr.seen.n, bc }; };
-  const a = lifeOne();
+  const a = await lifeOne();
   const h = heldLife2(DW, a); const e = events(h.w);
   ok(h.seen === 1 && !!h.w.held() && e.r1 && e.r1.held === true && e.m1 === false && e.f1 && e.f1.held === true && a.open().length === 1 && a.open()[0].id === a.itemId && fs.readFileSync(a.file, 'utf8') === a.bytes
     && h.lines.filter((l) => /waits — the record of the machines' agent updates could not be read \(EIO\)/.test(l)).length === 1 && JSON.stringify(h.w.rowOf('host-dial-HB1')) === JSON.stringify({ held: 'EIO' }),
@@ -222,22 +223,22 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   // and the re-dialed device keeps its deadline (it would be told «stopped answering»)
   const OSRC = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
   const Drop = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, 'heldUntil = now(); replayOwed(); try { bcast(); }', 'heldUntil = now(); try { bcast(); }', 'src/server/device-upgrade-watch.js'), 'owed-dropped');
-  const d = lifeOne(); const dh = heldLife2(Drop, d); events(dh.w); await dh.w.readAgain();
+  const d = await lifeOne(); const dh = heldLife2(Drop, d); events(dh.w); await dh.w.readAgain();
   ok(d.open().length === 1 && dh.w.gone()['host-dial-HB2'] && dh.w.gone()['host-dial-HB2'].pending === true, 'RED: a copy that drops what came during the hold — the landed update\'s item stays open, the device that answered keeps its deadline', { open: d.open().length });
   dh.w.stop();
   // RED (r4775's page, lens three): a copy that skips a refusal met during the hold WITHOUT owing it — its urgent item never filed
   const NoR = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, "heldNow('a refused update', () => refused(arguments[0]))", "heldNow('a refused update')", 'src/server/device-upgrade-watch.js'), 'refused-unowed');
-  const rr = lifeOne(); const rrh = heldLife2(NoR, rr); events(rrh.w); await rrh.w.readAgain();
+  const rr = await lifeOne(); const rrh = heldLife2(NoR, rr); events(rrh.w); await rrh.w.readAgain();
   ok(!rr.open().some((i) => /^HB4 REFUSED/.test(i.text)), 'RED: a copy that skips a refusal met during the hold without owing it — the refusal\'s urgent item is never filed (the LIFTED leg above would go red)', rr.open().map((i) => i.text));
   rrh.w.stop();
   // r4775 (主开发's should): THE LIFT BROADCASTS after the owed events — while held every row answers «held» (its «update failed» line
   // off an open machines list); a lift that owes nothing would leave the list so until some later change
-  const q = lifeOne(); const qh = heldLife2(DW, q); const q0 = qh.bc.n; await qh.w.readAgain();
+  const q = await lifeOne(); const qh = heldLife2(DW, q); const q0 = qh.bc.n; await qh.w.readAgain();
   ok(q0 === 0 && qh.bc.n === 1 && !!qh.bc.row && qh.bc.row.to === '2.369.201' && qh.bc.row.lost === 'commands',
     'LIFTED with nothing owed: the lift BROADCASTS once, and at that broadcast the row reads the record again (from → to, what no longer works) — an open machines list gets its «update failed» line back at once', qh.bc);
   qh.w.stop();
   const NoB = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, 'replayOwed(); try { bcast(); } catch { } } });', 'replayOwed(); } });', 'src/server/device-upgrade-watch.js'), 'lift-silent');   // stale-pins: kept (the red copy's own text)
-  const qb = lifeOne(); const qbh = heldLife2(NoB, qb); await qbh.w.readAgain();
+  const qb = await lifeOne(); const qbh = heldLife2(NoB, qb); await qbh.w.readAgain();
   ok(qbh.bc.n === 0, 'RED: a copy whose lift does not broadcast — a lift that owes nothing tells no open page (each row stays without its line)', qbh.bc);
   qbh.w.stop();
   // r4775's page (lens three): THE SILENCE COUNTS FROM THE LIFT — a deadline armed before a hold longer than goneAfterMs is not judged
@@ -245,7 +246,7 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   const silence = async (Mod) => { let clock = 2_000_000; const GA = 5 * 60e3, dir = fs.mkdtempSync(path.join(SCR, 'hu-'));
     const todos = new UserTodoManager({ dataDir: dir, now: () => clock });
     const mk = (M) => M.create({ userTodos: todos, dataDir: dir, log: () => { }, now: () => clock, tickMs: 0, goneAfterMs: GA });
-    const w0 = mk(DW); w0.begun({ hostKey: 'host-dial-HC1', machine: 'HC1', from: '2.369.199', to: '2.369.201' }); w0.stop();
+    const w0 = mk(DW); w0.begun({ hostKey: 'host-dial-HC1', machine: 'HC1', from: '2.369.199', to: '2.369.201' }); await w0.whenWritten(); w0.stop();
     clock += 60e3; const pr = placeReads(path.join(dir, 'device-upgrades.json')); let w = null; try { w = mk(Mod); } finally { pr.restore(); }
     const held = !!w.held(); clock += GA + 60e3; await w.readAgain(); clock += 1000; const swept = w.sweep();
     const open = todos._state.items.filter((t) => t.status === 'open' && t.sessionKey === 'machines').length, g = w.gone()['host-dial-HC1']; w.stop();
@@ -256,7 +257,7 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   const s2 = await silence(NoU);
   ok(s2.swept === true && s2.open === 1, 'RED: a copy whose lift leaves the silence\'s start — the first sweep after the lift tells the person a device stopped answering, on the hold\'s minutes', s2);
   // TORN: kept aside ONCE (byte for byte), the ledger then empty — the same stuck update re-filed is the SAME item in For you (its words)
-  const t0 = lifeOne(); const TORN = t0.bytes.slice(0, 30); fs.writeFileSync(t0.file, TORN);
+  const t0 = await lifeOne(); const TORN = t0.bytes.slice(0, 30); fs.writeFileSync(t0.file, TORN);
   const tw = DW.create({ userTodos: t0.todos, dataDir: t0.dir, log: () => { }, tickMs: 0 });
   for (let i = 0; i < 200 && tw.held(); i++) await sleep(10);
   const rt = tw.stuck(S);
@@ -268,10 +269,43 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   // never retracted, and the empty ledger is written over the file
   const RSRC = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
   const Rel = MH.load('src/server/device-upgrade-watch.js', editAnchor(RSRC, "    if (hold.start(a) === 'data') load(a.value); }\n", "    if (a.state === 'data') load(a.value); }\n", 'src/server/device-upgrade-watch.js'), 'tip-read');
-  const r = lifeOne(Rel); const rh = heldLife(Rel, r); rh.w.stuck({ ...S, to: '2.369.203' }); rh.w.stop();   // a NEWER version gave up, read over an empty ledger
+  const r = await lifeOne(Rel); const rh = heldLife(Rel, r); rh.w.stuck({ ...S, to: '2.369.203' }); await rh.w.whenWritten(); rh.w.stop();   // a NEWER version gave up, read over an empty ledger
   ok(r.open().length === 2 && fs.readFileSync(r.file, 'utf8') !== r.bytes, 'RED: the tip\'s read (a failed read taken as a first run) — a SECOND item beside the old one, never retracted, and the ledger written over the file', r.open().map((i) => i.text));
   for (const c of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1, label: 'mutant-copy (device-upgrades held): ' })) ok(c.pass, c.name, c.detail);
 }
+console.log('— B-574d (主开发 r4760): device-upgrades.json is THE STORE WRITER\'s — no write on the loop; on disk after its write; a restart reads what is owed —');
+{
+  const MWr = mutantCopies('dus-writer', REPO);
+  const USRC = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
+  /** the main thread's synchronous writes of the ledger (its temp or the file) while `fn` runs */
+  const syncWrites = (file, fn) => { const f = path.resolve(file), real = { w: fs.writeFileSync, r: fs.renameSync }, hits = [];
+    fs.writeFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p).startsWith(f)) hits.push('write ' + path.basename(p)); return real.w.call(this, p, ...a); };
+    fs.renameSync = function (a, b, ...r) { if (typeof b === 'string' && path.resolve(b) === f) hits.push('rename'); return real.r.call(this, a, b, ...r); };
+    try { fn(); } finally { fs.writeFileSync = real.w; fs.renameSync = real.r; } return hits; };
+  const life = async (Mod) => { const a = world(Mod); const file = path.join(a.dir, 'device-upgrades.json');
+    const hits = syncWrites(file, () => { a.w.stuck({ hostKey: 'host-dial-WR1', machine: 'WR1', from: '2.369.199', to: '2.369.201', ...WIN }); a.w.begun({ hostKey: 'host-dial-WR2', machine: 'WR2', from: '2.369.199', to: '2.369.201' }); });
+    const written = await a.w.whenWritten(); let disk = null; try { disk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { } a.w.stop(); return { hits, written, disk }; };
+  const L = await life(DW);
+  ok(L.hits.length === 0 && L.written === true && !!L.disk && L.disk.devices['host-dial-WR1'] && L.disk.devices['host-dial-WR1'].to === '2.369.201' && L.disk.gone['host-dial-WR2'] && L.disk.gone['host-dial-WR2'].pending === true,
+    'WRITTEN OFF THE LOOP: a stuck update and a push that began write NOTHING on the main thread (no temp, no rename) — the record is on disk after whenWritten(), both in it', { hits: L.hits, written: L.written });
+  const Rel = MWr.load('src/server/device-upgrade-watch.js', editAnchor(USRC, "    try { SW().dirty(file, { name: 'device-upgrades.write', mode: 0o600, produce: () => JSON.stringify({ version: 1, devices: ledger, gone }, null, 2) }); }\n", "    try { const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, devices: ledger, gone }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }\n", 'src/server/device-upgrade-watch.js'), 'release-save');   // stale-pins: kept (the red copy's own text: the release's save)
+  const R = await life(Rel);
+  ok(R.hits.length >= 2, 'RED: the release\'s save (an unsynced temp written and renamed ON THE LOOP) — the main thread\'s writes are seen', R.hits);
+  // A SECOND WATCH IN ONE PROCESS (a suite's restart) reads what the writer still OWES the file — a stand-in writer that holds every
+  // write (nothing lands); RED: a copy whose read takes the file only
+  const restart = (Mod) => { const dir = fs.mkdtempSync(path.join(SCR, 'rs-')), todos = new UserTodoManager({ dataDir: dir }), owedBy = new Map();
+    const writer = { dirty: (f, o) => { owedBy.set(f, o.produce); }, owed: (f) => (owedBy.has(f) ? owedBy.get(f)() : null), durable: () => Promise.resolve(true) };
+    const w1 = Mod.create({ userTodos: todos, dataDir: dir, log: () => { }, tickMs: 0, writer }); w1.stuck({ hostKey: 'host-dial-RS1', machine: 'RS1', from: '2.369.199', to: '2.369.201', ...WIN }); w1.stop();
+    const w2 = Mod.create({ userTodos: todos, dataDir: dir, log: () => { }, tickMs: 0, writer }); const row = w2.rowOf('host-dial-RS1'), onDisk = fs.existsSync(path.join(dir, 'device-upgrades.json')); w2.stop(); return { row, onDisk }; };
+  const rs = restart(DW);
+  ok(!rs.onDisk && !!rs.row && rs.row.to === '2.369.201', 'A SECOND WATCH IN ONE PROCESS (a suite\'s restart) reads what the writer still OWES the file — nothing on disk yet, the row there', rs);
+  const NoOwed = MWr.load('src/server/device-upgrade-watch.js', editAnchor(USRC, 'const owedBytes = owedNow(); if (owedBytes != null) read = { text: owedBytes }; else try {', 'try {', 'src/server/device-upgrade-watch.js'), 'no-owed-read');
+  const rx = restart(NoOwed);
+  ok(!rx.onDisk && rx.row === null, 'RED: a copy whose read takes the file only — the restarted watch has no record of the update that gave up (until the writer lands)', rx);
+  for (const c of copiesCensus(MWr.files, MWr.dir, REPO, { minCopies: 1, label: 'mutant-copy (device-upgrades writer): ' })) ok(c.pass, c.name, c.detail);
+}
+// B-574d: every ledger this suite wrote is on disk before its folder goes (the store writer writes on its thread)
+await require('../src/store-writer.js').storeWriter().whenDurable(fs.readdirSync(SCR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(SCR, d.name, 'device-upgrades.json')));
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

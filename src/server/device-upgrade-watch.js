@@ -110,7 +110,7 @@ function trustedItemOf({ machine, from, to, keyIds = [], by = null }) {
   return { text: fill(T, p), detail: [fill(D1, p), fill(D2, p)].join('\n'), i18n: { text: { key: T, params: p }, detail: [{ key: D1, params: p }, { key: D2, params: p }] } };
 }
 
-function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.now(), bcast = () => {}, tickMs = 30000, goneAfterMs = GONE_AFTER_MS, alerts = null, held = () => false } = {}) {
+function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.now(), bcast = () => {}, tickMs = 30000, goneAfterMs = GONE_AFTER_MS, alerts = null, held = () => false, writer = null } = {}) {
   const file = path.join(dataDir, 'device-upgrades.json');
   let ledger = {}; // hostKey → { machine, from, to, at, lost, itemId, text }
   let gone = {}; // hostKey → { machine, to, at (the upgrade began), pending, filedFor, itemId, text } (lane win-upgrade-pipe)
@@ -129,7 +129,14 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     // r4775: the lift BROADCASTS after the owed events — while held every row answered «held» (its «update failed» line off an open
     // machines list); a lift that owes nothing would leave the list so until some later change
     log: (l) => log(`[device-upgrade] ${l}`), onLift: (v) => { load(v); heldSaid = false; heldUntil = now(); replayOwed(); try { bcast(); } catch { } } });
-  { let read; try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
+  // B-574d (主开发 r4760, lane lg-remote-hardening; login-expiry.json's form): the record is THE STORE WRITER's (save, below) — a suite's
+  // own writer, else the process's. The release wrote an unsynced temp and renamed it ON THE LOOP at every event; the writer makes the
+  // bytes at the write (the newest record), writes, syncs and renames on its thread, says a failed write and writes it again; one owed
+  // at a stop is written by the hub's exit (the writer's exitFlush). A second watch over this file in ONE process (a suite's restart)
+  // reads what the writer still OWES it, never the older file
+  const SW = () => writer || require('../store-writer.js').storeWriter();
+  const owedNow = () => { try { const w = SW(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } };
+  { let read; const owedBytes = owedNow(); if (owedBytes != null) read = { text: owedBytes }; else try { read = { text: fs.readFileSync(file, 'utf-8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: isObj });
     if (hold.start(a) === 'data') load(a.value); }
   /** HELD: an event over an unread ledger changes NOTHING now — said once a hold, nothing filed, retracted, armed or written — and is
@@ -148,11 +155,14 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
     if (q.length || lost) log(`[device-upgrade] the record reads again — ${q.length} event(s) that came while it could not be read judged now${lost ? `; ${lost} more were not kept (over ${OWED_MAX}): each device's next hello says its state again` : ''}`);
     for (const fn of q) { try { fn(); } catch (e) { log(`[device-upgrade] an owed event failed at the lift: ${e.message}`); } }
   }
-  const save = () => {
+  function save() {
     if (!hold.writable('a write of the machines\' agent updates record')) return;   // HELD: never over a file that could not be read
-    try { const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, devices: ledger, gone }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }
+    try { SW().dirty(file, { name: 'device-upgrades.write', mode: 0o600, produce: () => JSON.stringify({ version: 1, devices: ledger, gone }, null, 2) }); }
     catch (e) { log(`[device-upgrade] ledger not written: ${e.message}`); }
-  };
+  }
+  /** the record as memory holds it is on disk — true when written, false when the writer's write failed or passed its bound (it stays
+   *  owed); at once when nothing is owed (a suite's next life and its readers wait on it) */
+  const whenWritten = () => { try { return Promise.resolve(SW().durable(file)).then((ok) => ok !== false, () => false); } catch { return Promise.resolve(false); } };
   /** Retract OUR item (never one the user already handled, never anyone else's — and never a REFUSAL's: a fact, not a state). */
   const retract = (rec) => {
     if (!rec || !rec.itemId || !userTodos || rec.refused) return;
@@ -310,7 +320,7 @@ function create({ userTodos = null, dataDir, log = () => {}, now = () => Date.no
   if (tick && tick.unref) tick.unref();
   /** THE door (hosts.onAgentUpgrade): 'stuck' | 'matched' | 'begun' | 'answered' | 'refused' | 'trusted'. */
   function onAgentUpgrade(event, facts) { return event === 'stuck' ? stuck(facts) : event === 'matched' ? matched(facts) : event === 'begun' ? begun(facts) : event === 'answered' ? answered(facts) : event === 'refused' ? refused(facts) : event === 'trusted' ? trusted(facts) : null; }
-  return { stuck, matched, begun, answered, refused, trusted, sweep, rowOf, onAgentUpgrade, ledger: () => JSON.parse(JSON.stringify(ledger)), gone: () => JSON.parse(JSON.stringify(gone)), held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), stop: () => { if (tick) clearInterval(tick); hold.stop(); }, INBOX_KEY };
+  return { stuck, matched, begun, answered, refused, trusted, sweep, rowOf, onAgentUpgrade, ledger: () => JSON.parse(JSON.stringify(ledger)), gone: () => JSON.parse(JSON.stringify(gone)), held: () => hold.held(), heldWords: () => hold.words(), readAgain: () => hold.again(), whenWritten, stop: () => { if (tick) clearInterval(tick); hold.stop(); }, INBOX_KEY };
 }
 
 module.exports = { create, itemOf, goneItemOf, refusedItemOf, trustedItemOf, REFUSAL_CODES, lostOf, INBOX_KEY, RESOLVED_BY, GONE_AFTER_MS };
