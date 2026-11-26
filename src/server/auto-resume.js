@@ -554,23 +554,27 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
    *  record back (a delivery that did not happen), or null: the record could not land — the caller delivers NOTHING (it gives its
    *  hold back; the arm and the breaker stand as they were, the tick tries again). A kill after the landing and before the delivery
    *  leaves the conversation not continued (never twice). */
-  // F1 (主开发 r4551): AT MOST ONE BOUNDED WAIT A TICK — once a landing of this tick is refused (its bound spent, or its write failed),
+  // F1 (主开发 r4551; said as it is by r5209): ONE REFUSED WAIT A TICK (a landing the storage answers waits its own write) — once a landing of this tick is refused (its bound spent, or its write failed),
   // every further landing refuses at once until the next tick starts (tick() clears it): the other due arms stay as they were. fireNow
   // and the bulk resume, outside a tick, share it until then. `refusedWhy` is the last refusal's code, for the journal
-  let landingRefused = false, refusedWhy = null;
+  let landingRefused = false, refusedWhy = null, refusedAtOnce = false;   // refusedAtOnce (r5209): this refusal waited on nothing — the tick's journal says a stall once
   function landRecord(why) {
+    refusedAtOnce = true;
     if (hold.held()) { refusedWhy = 'held'; return false; }   // held: nothing is written over its file (no record, so no continue — r3004 already refuses there)
     if (landingRefused) return false;
     const W = writer();
     if (typeof W.laneHeld === 'function' && W.laneHeld(file)) { landingRefused = true; refusedWhy = 'lane-held'; return false; }   // F1: the writer already reports that lane held — refused at once, without the wait
+    refusedAtOnce = false;   // from here the landing waits (bounded) or fails on its own write
     const was = saveHeld; saveHeld = 0;   // a bulk flip's batching never holds back the record a delivery waits on
     try { save(); } finally { saveHeld = was; }
     let r = null;
     try { r = W.flushSync([file], { waitedBy: `auto-resume.json: ${why}` }); } catch (e) { r = { left: [{ file, why: (e && e.message) || 'the writer threw' }] }; }
     // r4812 REQUIRED 2: LANDED means this store is among the files the flush WROTE — a flush that wrote nothing and left nothing (the
-    // save's hand-over threw, the producer gave nothing) is no landing
-    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write');
+    // save's hand-over threw, the producer gave nothing) is no landing; r5209: AND NOT AMONG THOSE IT LEFT — the flush can write an OLDER
+    // job of this file made earlier (parked behind a busy lane) and then leave the CURRENT version at the bound
+    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write') && !(r.left || []).some((x) => x && x.file === file);
     if (!landed) { landingRefused = true; refusedWhy = r && r.deferred ? 'stopping' : 'not-durable'; }
+    if (landed) putBacksOwed = 0;   // r5209 (a should): a landing writes the whole file — every put-back owed before is on disk with it
     return landed;
   }
   // r4812 M2: WHILE THE STORE IS HELD NOTHING TOUCHES THE ARMS OR THE FIRE RECORDS — recordBeforeDelivery refuses before either is
@@ -1608,7 +1612,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // refusal / far-reset sentences, which have no card of their own).
       const carried = { note: note && note.text ? note.text : null };
       const putBack = recordBeforeDelivery(id, key2, kind, origin);   // R9: the record on disk BEFORE the delivery
-      if (!putBack) { log(`[auto-resume] ${id}: the record of this continue could not be written to auto-resume.json — nothing was sent (tried again later)`); giveBack(); return false; }
+      if (!putBack) { if (!refusedAtOnce) log(`[auto-resume] ${id}: the record of this continue could not be written to auto-resume.json — nothing was sent (tried again later)`); giveBack(); return false; }
       try { ok = deliverContinue(session, verb, continuePromptFor(note, label2, freshRun(id, a2)), (s2, text) => sentNoted(s2, text, sendToSession(id, s2, text, carried))); } // B-3d90 item 2: the continue's own record — a rebuild still says VibeSpace sent it
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { putBack(); log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }

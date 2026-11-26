@@ -3,7 +3,9 @@
 // save(): dirty + produce, off the main thread). A SUITE that reads the file right after an act, or starts a second instance over the
 // same folder (a restart in process), calls landEveryAutoResumeSave() once: the process's own store writer (the one every instance and
 // every copy of the module reaches) then follows each auto-resume.json dirty() with its synchronous flush of that one file, on the
-// SUITE's thread — the bytes on disk are the product's own write, never a suite's copy. Other stores are untouched.
+// SUITE's thread — the bytes on disk are the product's own write, never a suite's copy. Other stores are untouched. Because it names
+// its own write in the record step's flush answer, test-auto-resume and test-auto-resume-loop cannot see a regression of «landed =
+// written and not left» (r4812 / r5209): test-auto-resume-record (M6, O — the real writer) guards that law.
 const path = require('path');
 const SW = require(path.join(__dirname, '..', '..', 'src', 'store-writer.js'));
 // r4812 REQUIRED 2 (the product's landing reads «this store is among the files the flush WROTE»): the record step saves and then flushes

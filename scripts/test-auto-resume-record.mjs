@@ -140,7 +140,7 @@ console.log('L. a record that cannot land: nothing is delivered, the arm stands'
   const l = landRun(AR);
   ok(l.auth === 2 && l.releasedOnce, 'L2 the refused landing\'s spend hold is given back EXACTLY once (the second, delivered, is charged)', l);
   ok(l.first === 0 && l.sentWhileRefused === 0 && l.armedWhileRefused && l.second === 1 && l.sent === 1 && l.armOnDisk === false, 'L1 a continue whose record cannot land is NOT delivered (the arm stands); with the disk answering the next tick continues it once, its record on disk', l);
-  const AMun = MUT.load('src/server/auto-resume.js', anchored(ARSRC, "    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write');", '    const landed = true;' + MARK('L'), 'landing unchecked'), 'landing-unchecked');
+  const AMun = MUT.load('src/server/auto-resume.js', anchored(ARSRC, "    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write') && !(r.left || []).some((x) => x && x.file === file);", '    const landed = true;' + MARK('L'), 'landing unchecked'), 'landing-unchecked');
   plantWindow();
   const lx = landRun(AMun), lxW = { read: plantRead('L'), fail: applied('fail') };
   redIf(lxW.read > 0 && lxW.fail > 0, `the copy's unchecked landing read ${lxW.read} time(s), the placed refusal applied ${lxW.fail} time(s)`, lx.sentWhileRefused === 1, 'RED CONTROL (a landing that is not checked): the continue goes out while its record is not on disk — red', lx);
@@ -202,10 +202,10 @@ console.log('M. F1 (主开发 r4551): at most ONE bounded wait a tick');
   const stallRun = async (Mod) => {
     plantWindow(); const d = dirOf('m'), W = mkW({ graceMs: 600 });   // its bound: a third of the grace, 200 ms
     let flushes = 0; const f0 = W.flushSync; W.flushSync = (...a) => { flushes++; return f0(...a); };
-    const auth = [], rel = [], sent = [];
+    const auth = [], rel = [], sent = [], logs = [];
     const sessions = new Map(['m1', 'm2', 'm3'].map((k) => [k, sess()]));
     const ar = hush(() => Mod.create({ dataDir: d, activeSessions: sessions, serverSetting: (k) => (k === 'claude.autoResumeOnLimit' ? true : undefined),
-      sendToSession: (id) => { sent.push(id); return true; }, notify: () => { }, broadcast: () => { }, storeWriter: W,
+      sendToSession: (id) => { sent.push(id); return true; }, notify: () => { }, broadcast: () => { }, storeWriter: W, log: (l) => logs.push(String(l)),
       authorizeSpend: (id, s2, ident, o) => { if (!(o && o.hold)) return { ok: true }; const h = { id, n: auth.length }; auth.push(h); return { ok: true, hold: h }; }, releaseSpend: (id, s2, h) => { rel.push(h); }, noteSpend: () => { } }));
     const resets = Date.now() + 60000;
     for (const k of sessions.keys()) hush(() => ar.armIfEnabled(k, sessions.get(k), resets, '5h limit'));
@@ -215,7 +215,7 @@ console.log('M. F1 (主开发 r4551): at most ONE bounded wait a tick');
     const t1 = { n: n1, flushes: flushes, sent: sent.length, auth: auth.length, released: rel.length, onceEach: rel.length === auth.length && new Set(rel).size === rel.length, plants: Object.fromEntries(PLANTS), held: applied('hold') };
     flushes = 0;
     const n2 = hush(() => ar.tick(resets + AR.GRACE_MS + 2));   // the next tick: the stalled job is still the lane's
-    const t2 = { n: n2, flushes: flushes, sent: sent.length, plants: Object.fromEntries(PLANTS) };
+    const t2 = { n: n2, flushes: flushes, sent: sent.length, plants: Object.fromEntries(PLANTS), said: logs.filter((l) => /could not be written to auto-resume\.json — nothing was sent \(tried again later\)/.test(l)).length };
     const snap = () => JSON.stringify({ s: W.stats().map(({ oldestAgeMs, maxAgeMs, ...x }) => x), p: W.pending(fileOf(d)), w: W.waits() });
     const before = snap(); for (let q = 0; q < 100; q++) W.laneHeld(fileOf(d));
     const readsOnly = snap() === before;
@@ -228,6 +228,7 @@ console.log('M. F1 (主开发 r4551): at most ONE bounded wait a tick');
   ok(m.t1.n === 0 && m.t1.flushes === 1 && m.t1.sent === 0 && m.t1.auth === 3 && m.t1.onceEach, 'M1 three due arms and a stalled writer: ONE bounded wait in the tick (one flush asked), nothing delivered, each spend hold given back once', m);
   ok(m.t2.n === 0 && m.t2.flushes === 0, 'N1 the next tick while the writer still reports that lane held: refused at once — no flush asked, no wait', m.t2);
   ok(m.n3 === 3 && m.sent === 3 && m.once, 'M2 the writer free again: the ticks that follow continue all three, each once (a landing a loaded disk answers past the bound waits for the next tick)', m);
+  ok(m.t2.said === 1, 'N3 the stall is said ONCE in the journal — by the landing that waited; the tick\'s other refusals and the next tick\'s (the lane still held) waited on nothing and say nothing again (r5209)', m.t2);
   ok(m.readsOnly === true, 'N2 laneHeld only READS: asked a hundred times while the lane is held, the writer\'s state is the same as before (no store, no lane, no wait changed)', m.readsOnly);
   const both = anchored(anchored(ARSRC, '    if (landingRefused) return false;\n', '   ' + MARK('M') + '\n', 'no per-tick refusal'), "    if (typeof W.laneHeld === 'function' && W.laneHeld(file)) { landingRefused = true; refusedWhy = 'lane-held'; return false; }   // F1: the writer already reports that lane held — refused at once, without the wait\n", '', 'no lane question');
   const mx = await stallRun(MUT.load('src/server/auto-resume.js', both, 'f1-off'));
@@ -392,9 +393,47 @@ console.log('M6. r4812 REQUIRED 2: landed means WRITTEN — a flush that wrote n
   const m6 = nothingRun(AR);
   ok(m6.n === 0 && m6.sent === 0 && m6.persistFailed, 'M6 the save\'s hand-over throws: the flush writes nothing and leaves nothing — NOT a landing: nothing is sent', m6);
   plantWindow();
-  const m6x = nothingRun(MUT.load('src/server/auto-resume.js', anchored(ARSRC, "    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write');", '    const landed = !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === file);' + MARK('M6'), 'not-left read as landed'), 'not-left-landed'));   // stale-pins: kept (the red copy plants the pre-cure form on purpose)
+  const m6x = nothingRun(MUT.load('src/server/auto-resume.js', anchored(ARSRC, "    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write') && !(r.left || []).some((x) => x && x.file === file);", '    const landed = !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === file);' + MARK('M6'), 'not-left read as landed'), 'not-left-landed'));   // stale-pins: kept (the red copy plants the pre-cure form on purpose)
   const m6xW = plantRead('M6');
   redIf(m6xW > 0 && m6x.persistFailed, `the copy's «not left» landing read ${m6xW} time(s), the placed hand-over throw ${m6x.persistFailed ? 'in force' : 'NOT in force'}`, m6x.sent === 1, 'RED CONTROL (this unit\'s tip: «not among the files left» read as landed): the continue goes out on a record only memory holds — red', m6x);
+}
+
+console.log('O. r5209: LANDED is WRITTEN and NOT LEFT — an older job of the file written, the current version left at the bound');
+{
+  const olderRun = async (Mod) => {
+    plantWindow();
+    const d = dirOf('o'), W = mkW({ graceMs: 600 }), F = fileOf(d), BUSY = path.join(d, 'busy.json');   // the bound: 200 ms
+    let answer = null; const f0 = W.flushSync; W.flushSync = (...a) => { const r = f0(...a); if (Array.isArray(a[0]) && a[0].includes(F)) answer = r; return r; };
+    const auth = [], rel = [], sent = [], sessions = new Map([['o1', sess()]]);
+    const ar = hush(() => Mod.create({ dataDir: d, activeSessions: sessions, serverSetting: (k) => (k === 'claude.autoResumeOnLimit' ? true : undefined),
+      sendToSession: (id) => { sent.push(id); return true; }, notify: () => { }, broadcast: () => { }, storeWriter: W,
+      authorizeSpend: (id, s2, ident, o) => { if (!(o && o.hold)) return { ok: true }; const h = { id, n: auth.length }; auth.push(h); return { ok: true, hold: h }; }, releaseSpend: (id, s2, h) => { rel.push(h); }, noteSpend: () => { } }));
+    // PLACED: another store's write holds the whole-write lane 100 ms; auto-resume.json's FIRST job of this writer, made meanwhile by
+    // the other lane, waits for it MADE (parked) — the older job
+    SAND.hold('busy.json', 100);
+    W.dirty(BUSY, { name: 'busy.write', produce: () => '{}' }); W.durable(BUSY).catch(() => { });
+    await waitFor(() => W.stats().some((x) => x.file === BUSY && x.inflight), 5000, 'the other store\'s write to hold the lane');
+    const resets = Date.now() + 60000;
+    hush(() => ar.armIfEnabled('o1', sessions.get('o1'), resets, '5h limit')); W.durable(F).catch(() => { });
+    await waitFor(() => W.stats().some((x) => x.file === F && x.inflight && !x.dirty), 5000, 'auto-resume.json\'s first job to wait for the lane, made');
+    const parked = W.stats().some((x) => x.file === BUSY && x.inflight);
+    // the loop held here, no turn of it: the other store's job ends on its thread, its answer unread — the older job stays parked
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+    SAND.holdSeq('auto-resume.json', [0, 400]);   // PLACED: the older job writes at once; the CURRENT version's write holds past the bound
+    const n = hush(() => ar.tick(resets + AR.GRACE_MS + 1));
+    SAND.unhold('auto-resume.json'); SAND.unhold('busy.json');
+    await waitFor(() => !W.stats().some((x) => x.file === F && x.inflight), 10000, 'the held write to settle');
+    const formed = parked && !!answer && (answer.written || []).includes('auto-resume.write') && (answer.left || []).some((x) => x && x.file === F);
+    return { parked, formed, written: answer && answer.written, left: answer && (answer.left || []).map((x) => x.name), n, sent: sent.length, auth: auth.length, releasedOnce: rel.length === 1 && rel[0] === auth[0], read: plantRead('O'), holds: applied('hold') };
+  };
+  const o = await olderRun(AR);
+  redIf(o.formed, `the scene: the older job parked behind the busy lane (${o.parked}), the flush wrote it and left the current version (written ${JSON.stringify(o.written)}, left ${JSON.stringify(o.left)}, holds applied ${o.holds})`,
+    o.n === 0 && o.sent === 0 && o.auth === 1 && o.releasedOnce, 'O1 an older job of the file written and the CURRENT version left: NOT landed — nothing sent, the spend hold given back once', o);
+  const ox = await olderRun(MUT.load('src/server/auto-resume.js', anchored(ARSRC, "    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write') && !(r.left || []).some((x) => x && x.file === file);", "    const landed = !!r && !r.deferred && Array.isArray(r.written) && r.written.includes('auto-resume.write');" + MARK('O'), 'left unchecked'), 'left-unchecked'));   // stale-pins: kept (the red copy plants the lined tip's form on purpose)
+  redIf(ox.formed && ox.read > 0, `the copy's «written» alone read ${ox.read} time(s); the scene formed: written ${JSON.stringify(ox.written)}, left ${JSON.stringify(ox.left)}`,
+    ox.sent === 1, 'RED CONTROL (the lined tip d88407e80: «written» alone read as landed): the continue goes out while the current record is left unwritten — red', ox);
+  // r4784 on every push (a source pin; the heavy loop suite judges the line itself): the continue's journal line names no account
+  ok(ARSRC.includes("${moved ? ' (landed on another account)' : ''} — continued immediately") && !/landed on \$\{/.test(ARSRC), 'O2 the continue\'s journal line names no account — «(landed on another account)», never a name (r4784)');
 }
 
 for (const W of lives) { try { W.stop(); } catch { } }

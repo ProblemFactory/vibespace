@@ -251,7 +251,7 @@ console.log('THE ROUND\'s SHOULDS (r4721\'s round)');
   const SFX = require(path.join(repo, 'scripts/fixtures/store-stand-writer.cjs'));
   const SWm = require(path.join(repo, 'src/store-writer.js')), realSW = SWm.storeWriter;
   const ctl = path.join(ROOT, 'k8-ctl'), S = SFX.make(ctl);
-  const HOLD_LINE = "if (fs.existsSync(hold)) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'hold '); } catch { } Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0); }";   // the stand-in writer's hold line as lane lg-store-writes' row B-9a24 left it (its applied record — law 1's witness — kept first)
+  const HOLD_LINE = "if (fs.existsSync(hold)) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'hold '); } catch { } let ms = 0; try { const seq = fs.readFileSync(hold, 'utf8').split(' ').filter(Boolean); ms = Number(seq[0]) || 0; if (seq.length > 1) fs.writeFileSync(hold, seq.slice(1).join(' ')); } catch { } Atomics.wait(Z, 0, 0, ms); }";   // the stand-in writer's hold line as lane lg-store-writes' row B-9a24 left it (its applied record — law 1's witness — kept first)
   const stand = realRF.call(fs, S.path, 'utf8');
   // the stall the leg OWNS: the writer thread holds THIS file's write while its hold file stands, and says it holds (the witness)
   if (stand.split(HOLD_LINE).length === 2) fs.writeFileSync(S.path, stand.replace(HOLD_LINE, "if (fs.existsSync(hold)) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'hold '); } catch { } try { fs.writeFileSync(path.join(CTL, 'reached-' + b), '1'); } catch { } while (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, 5); }"));

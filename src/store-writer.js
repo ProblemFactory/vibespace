@@ -826,6 +826,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   const waits = () => ({ timedOut: waitsTimedOut });
   /** (row B-9a24 R9's follow F1, 主开发 r4551) the lane that writes `file` still holds the very job a synchronous flush already gave up
    *  on at its bound: a caller that would wait on it again asks first and refuses at once (its next try after the job settles) */
+  // laneHeld is LANE-WIDE (r5209, a should): another store's job held on the same lane refuses this file's landing at once too
   const laneHeld = (file) => { const s = stores.get(file); const l = s && s.lane === 'A' ? LA : LW; return !!(l && l.inflight && l.heldBy && l.heldBy === l.inflight); };   // round 6's amend: waits that ended by their poll, not the write's end
   return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, flushDeadline, laneHeld, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, modes, verifyByRef: verifyByRefOn, stop, graceMs, durableMs, _now: now };   // durableMs: the bound a durable() waits by default (B-0248: the desktops' doors and points read it)
 }

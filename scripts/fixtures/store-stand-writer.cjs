@@ -23,7 +23,7 @@ parentPort.on('message', (m) => {
   Atomics.store(S, 0, m.id); const t0 = process.hrtime.bigint(); let err = null;
   const b = path.basename(m.file), hold = path.join(CTL, 'hold-' + b), die = path.join(CTL, 'die-' + b), dieAfter = path.join(CTL, 'dieafter-' + b);
   if (m.ev === 'write' && fs.existsSync(die)) { try { fs.unlinkSync(die); } catch { } process.exit(7); }
-  if (fs.existsSync(hold)) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'hold '); } catch { } Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0); }
+  if (fs.existsSync(hold)) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'hold '); } catch { } let ms = 0; try { const seq = fs.readFileSync(hold, 'utf8').split(' ').filter(Boolean); ms = Number(seq[0]) || 0; if (seq.length > 1) fs.writeFileSync(hold, seq.slice(1).join(' ')); } catch { } Atomics.wait(Z, 0, 0, ms); }
   if (fs.existsSync(path.join(CTL, 'fail-' + b))) { try { fs.appendFileSync(path.join(CTL, 'applied-' + b), 'fail '); } catch { } err = { code: 'EIO', message: 'the storage failed' }; }
   else if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } }
   else { try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; try { fs.unlinkSync(m.tmp); } catch { } } }
@@ -37,6 +37,8 @@ parentPort.on('message', (m) => {
   return {
     path: file,
     hold: (base, ms) => fs.writeFileSync(path.join(ctl, 'hold-' + base), String(ms)),
+    // a SEQUENCE of holds (r5209's leg): each write of the file takes the next number, the last one stays — holdSeq(base, [0, 400])
+    holdSeq: (base, list) => fs.writeFileSync(path.join(ctl, 'hold-' + base), list.map((x) => String(Number(x) || 0)).join(' ')),
     unhold: (base) => { try { fs.unlinkSync(path.join(ctl, 'hold-' + base)); } catch { } },
     die: (base) => fs.writeFileSync(path.join(ctl, 'die-' + base), '1'),
     dieAfter: (base) => fs.writeFileSync(path.join(ctl, 'dieafter-' + base), '1'),

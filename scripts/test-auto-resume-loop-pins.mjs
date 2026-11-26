@@ -126,6 +126,7 @@ console.log('— §2 / §3c the notice wiring and the near-arm drift guard (sour
   // now tolerates siblings while still forbidding a silent empty list.
   ok('WIRING: decidePoolSwitch takes the exclusion as a NAMED input and reports it (never a silent empty candidate list)', /exclude = null,[^)]*explain = false \}\)/.test(read('src/account-pool-auto.js')) && /excludedN \? 'all-rejected' :[\s\S]{0,120}'no-members'/.test(read('src/account-pool-auto.js')));
   ok('WIRING: session-schema documents the slot flag on the wall signals', /_turnWallSigs:[^\n]*\{at, resetsAtMs, bucket, scopedName, key, slot\}/.test(read('src/session-schema.js')), read('src/session-schema.js').split('\n').find((l) => /_turnWallSigs/.test(l)));
+  ok('WIRING (r5209): server.js hands the auto-resume create the restore\'s settled fact — the module\'s default () => true would bring the release\'s «not live = gone» back', /restoreSettled: \(\) => _arRestoreSettled/.test(read('server.js')));
   const ar2src = read('src/server/auto-resume.js');
   ok('WIRING: the refusal notice is chosen by the REASON (the call site passes the check through; round 1 computed `chk` and dropped it)', /breakerNotice\(id, session, label \|\| key, kind, chk\)/.test(ar2src) && /function breakerNotice\(id, session, label, kind, chk\) \{[\s\S]{0,700}refusalNoticeFor\(\{[\s\S]{0,200}reason: chk && chk\.reason/.test(ar2src));
   ok('WIRING: a journal-only refusal spends no notice budget (the return is ABOVE the stamp)', /if \(!n\) return;[\s\S]{0,220}r\.notices\[n\.cls\] = now; save\(\);/.test(ar2src));
