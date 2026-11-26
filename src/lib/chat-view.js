@@ -8254,9 +8254,10 @@ class ChatView {
     // WHILE A SLAB SETTLES ABOVE THE READER the rebuild keeps THE CARD BEING READ still — the settle watch's card (B-3e8b's
     // remainder, 主开发 r3822: the topmost element kept still moved the read card by what the rebuild changed between them);
     // outside a slab's life, or with no card (a navigation forgot it, the list let it go), the topmost element as below (B-f1f0)
-    // …and ONLY WHILE THAT CARD IS IN VIEW (line 960's round, its must: a continuous scroll — a fling, a scroll-bar drag, a smooth
-    // page-up — is ONE burst, so the card from before it can lie a viewport away when the rebuild runs; keeping that one moved what
-    // the person was looking at): a card out of view ⇒ the topmost element, the release's rule
+    // …and ONLY WHILE THAT CARD IS STILL THE ONE READ (line 960's round, its must: a continuous scroll — a fling, a scroll-bar drag, a
+    // smooth page-up — is ONE burst, so the card from before it can lie a viewport away when the rebuild runs; keeping that one moved
+    // what the person was looking at; its follow, r4397 (1): a card showing only in the view's lower third is not read either):
+    // otherwise the topmost element, the release's rule
     const card = this._gapSettle?.card?.();
     if (card && this._readCardInView(card, st, end)) {
       const out = { el: card, delta: card.offsetTop - st, h: card.offsetHeight, below: [], others: [], read: true };
@@ -8267,7 +8268,7 @@ class ChatView {
       }
       // what stands in view ABOVE the kept card is under the pointer too (B-ef04's stamp, `_runsMovedUnder`; the round's should)
       for (let el = card.previousElementSibling; el; el = el.previousElementSibling) {
-        if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer')) continue;
+        if (el.classList.contains('chat-run-header') || el.classList.contains('chat-run-footer') || el.offsetParent === null) continue;   // a folded member reads 0 by 0: passed (r4397 (4))
         if (el.offsetTop + el.offsetHeight <= st) break;
         if (el.offsetHeight > 0) out.others.push([el, el.offsetTop - st]);
       }
@@ -8284,15 +8285,19 @@ class ChatView {
     return out;
   }
 
+  /** B-3e8b's remainder, line 960's must and its follow (主开发 r4397 (1)): is the watch's card still THE CARD BEING READ — its top
+   *  above the view's lower third, and part of it below the view's top? A card that only shows in the lower third (after an
+   *  upward fling a little shorter than a viewport, a sliver at the bottom edge) is not what the person reads: the release's rule.
+   *  Not the middle: one notch up puts the card read before it about half a view down (300 px in the 706 px list, measured, with
+   *  the rebuild's headers above it) — the remainder's own scene */
+  _readCardInView(el, st, end) { return el.offsetTop < st + (end - st) * 2 / 3 && el.offsetTop + el.offsetHeight > st; }
+
   /** The anchor kept where the reader saw it after the pass. A PROGRAMMATIC FOLD NEVER MOVES A SCROLLED READER (B-f1f0): the
    *  anchor still shows at its height ⇒ it keeps its distance; it FOLDED (display:none) or a fold changed its height (a card the
    *  run compacts) ⇒ the first element below it in the view that still shows keeps ITS distance (what the reader was looking at
    *  stays put; the fold closes above it); nothing below it still shows ⇒ the anchor's own top when it still shows, else as
    *  before: back to its run header (directly above, where the folded content was — a press on it restores the view), forward
    *  only when nothing visible precedes it */
-  /** B-3e8b's remainder, line 960's must: does the watch's card stand in view (any part of it between the list's top and bottom)? */
-  _readCardInView(el, st, end) { return el.offsetTop < end && el.offsetTop + el.offsetHeight > st; }
-
   /** B-ef04 cure: what a pass can change in the view — how many members it folded, cards it compacted, headers it drew (three
    *  counts; a pass that changes none of them and moves no element of the view moved nothing under the pointer) */
   _runsSig(list) {

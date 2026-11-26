@@ -242,27 +242,42 @@ export function installChatSeek(ChatView) {
     // scroll replaces it as below, exactly as before; with no reader card the line is the viewport's top, as before.
     const seedLine = reader && reader.el && reader.el.isConnected ? reader.el.offsetTop - reader.top : null;
     const fr = { at: list.scrollTop, before: seedLine != null ? Math.max(list.scrollTop, seedLine) : list.scrollTop, moved: -Infinity, raf: 0, seed: reader && reader.el ? reader.el : null };
+    let rebaseQueued = false, stW = 0;   // a stamped write not yet re-seeded (`wrote` → `rebase`, below)
+    // THE LINE AS THE FRAME WOULD RECORD IT (line 960's follow, 主开发 r4397 (2) / (3)) — the ONE reading of this record, for
+    // every reader of the line (the answer below, the card a rebuild keeps): the record as the frame would leave it if it ran
+    // NOW. A move the frame has not recorded yet — a rebuild's pass or an answer in the same animation frame as a notch, ordered
+    // before the frame's own callback — is recorded as the frame records it (a new burst's line is where the view was before
+    // it); a STAMPED write whose re-seed is still queued is recorded already (the re-seed shifts the record by the writer's own
+    // move, never a person's). Nothing is written here.
+    const asFrame = () => {
+      const now = performance.now(), st = list.scrollTop, w = rebaseQueued ? st - stW : 0;
+      let at = fr.at + w, before = fr.before + w, moved = fr.moved;
+      if (Math.abs(st - at) >= 0.5) { if (now - moved > GAP_SETTLE_BURST_MS) before = at; moved = now; at = st; }
+      return { st, at, before, moved };
+    };
+    // …and the same reading KEPT (the frame's own act; a writer of the list records first, so no move goes unrecorded)
+    const record = () => { const f = asFrame(); fr.at = f.at; fr.before = f.before; fr.moved = f.moved; if (rebaseQueued) stW = f.st; return f; };
+    const lineOf = (f) => (f.moved === -Infinity || performance.now() - f.moved <= GAP_SETTLE_RECENT_MS ? Math.max(f.st, f.before) : f.st);
     const frame = () => {
       fr.raf = 0;
-      const now = performance.now(), st = list.scrollTop;
-      if (Math.abs(st - fr.at) >= 0.5) { if (now - fr.moved > GAP_SETTLE_BURST_MS) fr.before = fr.at; fr.moved = now; fr.at = st; }
-      if (this._disposed || now - t0 > GAP_SETTLE_CEIL_MS) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
+      record();
+      if (this._disposed || performance.now() - t0 > GAP_SETTLE_CEIL_MS) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
     };
     const onScroll = () => { if (!fr.raf) fr.raf = requestAnimationFrame(frame); };
     list.addEventListener('scroll', onScroll, { passive: true });
-    const lineNow = () => { const st = list.scrollTop; return fr.moved === -Infinity || performance.now() - fr.moved <= GAP_SETTLE_RECENT_MS ? Math.max(st, fr.before) : st; };
     // answer a batch of changed rows (document order, each row's old top rebuilt from the deltas before it)
     const answer = (changed) => {
       if (!changed.length || this._disposed) return;
       changed.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
-      const st = list.scrollTop, line = lineNow();
+      record();   // a notch not yet recorded is recorded first — the answer's own write below must not swallow it (r4397 (2))
+      const st = list.scrollTop, line = H.line();
       let before = 0, d = 0;
       for (const c of changed) {
         const oldTop = c.el.offsetTop - before;
         if (oldTop + c.was <= line) d += c.h - c.was;   // wholly above the reading line: it moved everything read below it
         before += c.h - c.was;
       }
-      if (d) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; fr.before += d; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st) }); }
+      if (d) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; fr.before += d; if (rebaseQueued) stW = list.scrollTop; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st) }); }
     };
     const ro = new ResizeObserver((entries) => {
       const late = this._disposed || performance.now() - t0 > GAP_SETTLE_CEIL_MS, changed = [];
@@ -278,7 +293,6 @@ export function installChatSeek(ChatView) {
       if (late) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
     });
     // what the movers ask (census above): pending answered BEFORE a mover measures; re-seeded AFTER a stamped write
-    let rebaseQueued = false, stW = 0;
     const rebase = () => {
       rebaseQueued = false;
       if (this._gapSettleRO !== ro) return;
@@ -290,7 +304,8 @@ export function installChatSeek(ChatView) {
       const moved = list.scrollTop - stW;
       fr.before += moved; fr.at += moved;
     };
-    this._gapSettle = {
+    const H = this._gapSettle = {
+      line: () => lineOf(asFrame()),   // the reading line the answer uses (above the line, a change moved what is read)
       flush: () => {
         const changed = [];
         for (const el of list.children) { const was = last.get(el); if (was === undefined) continue; const h = el.offsetHeight; if (h !== was) { last.set(el, h); changed.push({ el, was, h }); } }
@@ -305,12 +320,10 @@ export function installChatSeek(ChatView) {
       // (or the card now at the top after one down) — never aged out while the slab lives. A navigation forgets it (null: the
       // rebuild's own anchor, as outside a slab's life). One lookup, at the rebuild that asks; nothing is added to a frame.
       card: () => {
-        // a move this watch's frame has not recorded yet (a rebuild in the same animation frame, before the frame's own callback —
-        // line 960's round, measured once: the card from before the previous notch was kept, −30 px) is read as the frame would
-        // read it: a new burst's line is where the view was before it. Nothing is written here.
-        const st = list.scrollTop, unrec = Math.abs(st - fr.at) >= 0.5;
-        const before = unrec && performance.now() - fr.moved > GAP_SETTLE_BURST_MS ? fr.at : fr.before;
-        const el = fr.moved === -Infinity && !unrec ? fr.seed : (this._gapReaderCard(Math.max(st, before)) || {}).el;
+        // read as the frame would record it (asFrame: line 960's round, measured once — a rebuild in the same animation frame,
+        // before the frame's own callback, kept the card from before the previous notch, −30 px). Nothing is written here.
+        const f = asFrame();
+        const el = f.moved === -Infinity ? fr.seed : (this._gapReaderCard(Math.max(f.st, f.before)) || {}).el;
         return el && el.isConnected && el.parentNode === list && el.offsetParent !== null && el.offsetHeight > 0 ? el : null;
       },
     };
