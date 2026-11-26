@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - A conversation's status strip says when it runs on one of its pool's pay-as-you-go keys, with a button to move it back, or there while the pool asks.
+- The «Environment…» dialog says plainly whether a site you allow in the browser's own settings can read this computer's real location.
 
 ### Fixed
 - If VibeSpace cannot read your drafts, Stage layout or upload history, it no longer writes an empty copy over them; what you type meanwhile stays on the page.
