@@ -1560,7 +1560,7 @@ class DeviceManager {
     if (r.error) throw new Error(r.error);
     // B-5278 (主开发 r4358): the device cut its list / status within its named size — what it left out is said ONCE (the family's form)
     const c = r.result && r.result.cut;
-    if (c && (c.registry > 0 || c.apps > 0 || c.argsCut > 0)) this._saidLeftOnce('desktop-serve', `its desktop-app ${String(action).slice(0, 20)} reply was cut to 6 MiB: ${[c.registry > 0 ? `${c.registry} catalog row(s)` : '', c.apps > 0 ? `${c.apps} ended app record(s)` : '', c.argsCut > 0 ? `the command line of ${c.argsCut} live app(s)` : ''].filter(Boolean).join(', ')} left out`);
+    if (c && (c.registry > 0 || c.apps > 0 || c.argsCut > 0)) this._saidLeftOnce(`desktop-serve:${String(action).slice(0, 20)}`, `its desktop-app ${String(action).slice(0, 20)} reply was cut to 6 MiB: ${[c.registry > 0 ? `${c.registry} catalog row(s)` : '', c.apps > 0 ? `${c.apps} ended app record(s)` : '', c.argsCut > 0 ? `the command line of ${c.argsCut} live app(s)` : ''].filter(Boolean).join(', ')} left out`);
     return r.result || {};
   }
 

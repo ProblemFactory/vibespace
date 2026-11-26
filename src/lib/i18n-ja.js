@@ -6524,6 +6524,8 @@ export default {
   "Vendor budget reached — {n} {unit}/min (at most {r}/s, {b} at once) for this account; {k} conversations waiting, next refresh in {s} s": "ベンダー予算に達しました —— このアカウントは 1 分あたり {n} {unit}（1 秒あたり最大 {r}、一度に最大 {b}）；{k} 件の会話が待機中、次の更新は {s} 秒後",
   "Vendor budget reached — {n} {unit}/min (at most {r}/s, {b} at once) for this account, {a} of them by agent refreshes; {k} conversations waiting, next refresh in {s} s": "ベンダー予算に達しました —— このアカウントは 1 分あたり {n} {unit}（1 秒あたり最大 {r}、一度に最大 {b}）、うち {a} はエージェントの更新；{k} 件の会話が待機中、次の更新は {s} 秒後",
   "Open with LibreOffice": "LibreOffice で開く",
+  "{n} applications of this machine are not listed here — its list is longer than one answer from it carries.": "このマシンのアプリ {n} 件はここに表示されていません — 一覧が一回の応答で運べる量より長いためです。",
+  "{exec} — command line not shown": "{exec} — コマンドラインは表示されません",
   "Open in LibreOffice": "LibreOffice で開く",
   "Install LibreOffice on {machine}…": "{machine}に LibreOffice をインストール…",
   "Install LibreOffice on {machine}": "{machine}に LibreOffice をインストール",

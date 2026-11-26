@@ -811,6 +811,64 @@ console.log('⑮ r4358 (row B-5278\'s last question): a machine\'s desktop-serve
     'the op\'s lowered row (8 MiB) rests on its producer\'s named size (SERVE_REPLY_MAX 6 MiB) and the line\'s envelope — computed here, no longer a count in a comment');
 }
 
+console.log('⑯ r4443 (line 1003\'s follow): what a CUT makes the hub show and do — the launcher told its list is short; a cut command line said as cut; the said-once line once an action; a remote relaunch sends only its id');
+{
+  const K16 = require('../src/server/desktop-app-keeper.js'), D16 = require('../src/desktop-display.js');
+  const quiet16 = { log() { }, warn() { }, error() { } };
+  const root16 = path.join(tmp, 'keeper16'); fs.mkdirSync(path.join(root16, 'hub'), { recursive: true });
+  const calls = [];
+  const SLIM = { id: 'da-c16a', state: 'ready', label: 'big app', exec: '/usr/bin/bigapp', args: [], env: null, argsCut: true, startedAt: 5, pids: {}, starts: {} };
+  let listAnswer = { ok: true, apps: [], registry: [{ id: 'xterm', label: 'XTerm', exec: 'xterm', args: [], available: true }], availability: { backend: 'xpra' }, cut: { registry: 7, apps: 0, argsCut: 0 } };
+  const dev = { call: async (hostId, op, params) => {
+    calls.push({ hostId, op, params });
+    if (op === 'list') return listAnswer;
+    if (op === 'status') return { ok: true, apps: [SLIM], samples: {} };
+    if (op === 'relaunch') return { app: { id: 'da-c16b', state: 'ready', label: 'big app', exec: '/usr/bin/bigapp', args: [], startedAt: 6, pids: {}, starts: {} }, replaced: { ...SLIM, state: 'exited', stoppedBy: 'relaunch' } };
+    return { ok: true };
+  } };
+  const k = K16.create({ dataDir: path.join(root16, 'hub'), env: () => ({ PATH: '/usr/bin:/bin', HOME: root16 }), broadcast: () => { }, serverSetting: () => undefined, log: quiet16, serverNotice: () => 1,
+    display: { ...D16, hostFacts: async () => ({ hostId: 'local', bins: {}, xpra: null }), binOnPath: () => null }, access: () => dev, hostLabel: () => 'Lab box', remoteHosts: () => ['dev-a'] });
+  try {
+    // (1) THE PERSON IS TOLD: the keeper passes a paired machine's catalog cut on; a reply that was not cut carries no such key
+    const l1 = await k.list({ host: 'dev-a' });
+    listAnswer = { ...listAnswer, cut: undefined };
+    const l2 = await k.list({ host: 'dev-a' });
+    const LAUNCHER = read('src/lib/desktop-app-launcher.js');
+    ok(l1.catalogCut === 7 && !('catalogCut' in l2) && LAUNCHER.includes("if (!seenOnly && data && Number(data.catalogCut) > 0) {") && LAUNCHER.includes("t('{n} applications of this machine are not listed here — its list is longer than one answer from it carries.', { n: Number(data.catalogCut) })"),
+      'the launcher is TOLD its list is short: the keeper passes the machine\'s catalog cut on (catalogCut 7) and the catalog says it in one line (zh / ja); an uncut list carries no such key', { l1: l1.catalogCut, l2: l2.catalogCut });
+    // (2) a live record whose command line was cut: kept LIVE by the hub, drawn as «command line not shown», never as its bare program
+    await k.syncHost('dev-a');
+    const held = k.get('da-c16a');
+    const L16 = await import('../src/lib/desktop-app-launcher.js');
+    ok(held && held.state === 'ready' && held.argsCut === true && L16.recipeLine(held) === '/usr/bin/bigapp — command line not shown' && L16.recipeLine({ exec: 'xterm', args: ['-e', 'top'] }) === 'xterm -e top',
+      'a live record whose command line the machine cut stays LIVE on the hub and is drawn «/usr/bin/bigapp — command line not shown», never its bare program as the whole command; a whole record draws as before', held && { state: held.state, argsCut: held.argsCut });
+    // (4) THE RELAUNCH OF A REMOTE RECORD SENDS ONLY ITS ID (and the caller's body): nothing of the hub's (cut) copy rides to the machine
+    calls.length = 0;
+    await k.relaunch('da-c16a', { scaleChoice: 2 });
+    const rc = calls.find((c) => c.op === 'relaunch');
+    const sentOnly = (c) => !!c && JSON.stringify(Object.keys(c.params).sort()) === JSON.stringify(['body', 'id', 'settings']) && c.params.id === 'da-c16a' && JSON.stringify(c.params.body) === JSON.stringify({ scaleChoice: 2 }) && !JSON.stringify(c.params).includes('/usr/bin/bigapp') && !JSON.stringify(c.params).includes('argsCut');
+    ok(sentOnly(rc), 'the hub\'s relaunch of a remote record sends ONLY its id, the caller\'s body and the settings — the machine relaunches from its own whole record, never from the hub\'s cut copy', rc && rc.params);
+    const KSRC = read('src/server/desktop-app-keeper.js');
+    const Carry = M.load('src/server/desktop-app-keeper.js', anchored(KSRC, "      const r = await acc().call(ro.hostId, 'relaunch', { id, body: body || {}, settings: settingsForOp() });\n", "      const r = await acc().call(ro.hostId, 'relaunch', { id, body: { ...remoteGet(id), ...(body || {}) }, settings: settingsForOp() });\n", 'relaunch-carries-copy'), 'relaunch-carries-copy');
+    const kr = Carry.create({ dataDir: path.join(root16, 'hub-red'), env: () => ({ PATH: '/usr/bin:/bin', HOME: root16 }), broadcast: () => { }, serverSetting: () => undefined, log: quiet16, serverNotice: () => 1,
+      display: { ...D16, hostFacts: async () => ({ hostId: 'local', bins: {}, xpra: null }), binOnPath: () => null }, access: () => dev, hostLabel: () => 'Lab box', remoteHosts: () => ['dev-a'] });
+    try { await kr.syncHost('dev-a'); calls.length = 0; await kr.relaunch('da-c16a', { scaleChoice: 2 }); } finally { try { kr.shutdown(); } catch { } }
+    ok(!sentOnly(calls.find((c) => c.op === 'relaunch')), 'RED CONTROL: a copy whose relaunch carries the hub\'s stored copy sends the cut record\'s command (the program, `argsCut`) to the machine — the relaunch leg above would go red');
+  } finally { try { k.shutdown(); } catch { } }
+  // (3) ONCE A KIND: a list's cut and a status's cut are two things — each said once per machine
+  const { DeviceManager: DM16 } = require('../src/agentd/client.js');
+  const said16 = [], dm16 = Object.create(DM16.prototype);
+  let ans16 = { result: { ok: true, registry: [], cut: { registry: 4, apps: 0, argsCut: 0 } } };
+  Object.assign(dm16, { connect: async () => ({ info: { capabilities: ['desktop-serve'] } }), _request: async () => ans16, _log: (l) => said16.push(String(l)), _machine: 'big box' });
+  await dm16.desktopServe('list'); await dm16.desktopServe('list');
+  ans16 = { result: { ok: true, apps: [], cut: { registry: 0, apps: 3, argsCut: 1 } } };
+  await dm16.desktopServe('status'); await dm16.desktopServe('status');
+  ok(said16.length === 2 && /desktop-app list reply was cut to 6 MiB: 4 catalog row\(s\) left out$/.test(said16[0]) && /desktop-app status reply was cut to 6 MiB: 3 ended app record\(s\), the command line of 1 live app\(s\) left out$/.test(said16[1]),
+    'the said-once line is once an ACTION: a list\'s cut and a status\'s cut are each said once per machine (a status cut after a list cut is no longer silent)', said16);
+  // (5) the kb says what the order costs
+  ok(read('docs/kb-file-structure.md').includes('with six very large live records EVERY ended record leaves the reply, the newest too'), 'the kb says it: with six very large live records every ended record leaves the reply, the newest too, and comes back with the next reply that fits');
+}
+
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);
 fs.rmSync(tmp, { recursive: true, force: true });
 report();

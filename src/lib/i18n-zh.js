@@ -6525,6 +6525,8 @@ export default {
   "Vendor budget reached — {n} {unit}/min (at most {r}/s, {b} at once) for this account; {k} conversations waiting, next refresh in {s} s": "已到平台请求额度 —— 这个账号每分钟 {n} {unit}（每秒最多 {r}，一次最多 {b}）；{k} 个会话在排队，{s} 秒后继续刷新",
   "Vendor budget reached — {n} {unit}/min (at most {r}/s, {b} at once) for this account, {a} of them by agent refreshes; {k} conversations waiting, next refresh in {s} s": "已到平台请求额度 —— 这个账号每分钟 {n} {unit}（每秒最多 {r}，一次最多 {b}），其中 {a} 来自 agent 主动刷新；{k} 个会话在排队，{s} 秒后继续刷新",
   "Open with LibreOffice": "用 LibreOffice 打开",
+  "{n} applications of this machine are not listed here — its list is longer than one answer from it carries.": "这台机器有 {n} 个应用没有列在这里——它的列表比一次回复能带的更长。",
+  "{exec} — command line not shown": "{exec}——命令行未显示",
   "Open in LibreOffice": "在 LibreOffice 中打开",
   "Install LibreOffice on {machine}…": "在{machine}上安装 LibreOffice…",
   "Install LibreOffice on {machine}": "在{machine}上安装 LibreOffice",
