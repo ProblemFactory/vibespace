@@ -451,7 +451,7 @@ console.log('— ⑦ wiring pins');
   ok('test-architecture places src/opencode-serve.js in SHARED; ci.mjs runs this suite', /SHARED = new Set\(\[[\s\S]*?'src\/opencode-serve\.js'[\s\S]*?\]\);/.test(read('scripts/test-architecture.mjs')) && /'test-opencode-serve'/.test(read('scripts/ci.mjs')));
   const oc = read('src/opencode-serve.js');
   ok('opencode-serve talks to 127.0.0.1 only, never a vendor host, never a secret in argv', /http:\/\/127\.0\.0\.1:\$\{port\}/.test(oc) && /'--hostname', '127\.0\.0\.1'/.test(oc) && !/api\.anthropic\.com|api\.openai\.com|Bearer sk-/.test(oc) && !/OPENCODE_SERVER_PASSWORD.*args/.test(oc));
-  ok('the record is written atomically (tmp + rename) and the serve is spawned detached with ignored stdio under the caller env', /fs\.renameSync\(tmp, file\)/.test(oc) && /stdio: 'ignore', detached: true/.test(oc) && /env: env\(\)/.test(oc));
+  ok('the record is written atomically through the device\'s one door (B-574d: one sync of its temp, then its name) and the serve is spawned detached with ignored stdio under the caller env', /DFILE\.writeDurable\(\{ file, tmp: /.test(oc) && /stdio: 'ignore', detached: true/.test(oc) && /env: env\(\)/.test(oc));
   ok('docs: kb-file-structure essay + design S9 row + its INDEX-head line', /src\/opencode-serve\.js — /.test(read('docs/kb-file-structure.md')) && /\| S9 ✅/.test(read('docs/design-harness-plugins.md')) && /opencode-serve\.js — /.test(indexHead('docs/kb-file-structure.md')));
   ok('the manual live script exists', fs.existsSync(path.join(REPO, 'scripts/dev/opencode-serve-live.mjs')));
 }

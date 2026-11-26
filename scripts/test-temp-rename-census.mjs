@@ -129,7 +129,7 @@ const FAMILIES = {
   b0248: { verdict: 'owed', row: 'B-0248', classes: ['unsynced'], why: 'a store that moves onto the store writer in row B-0248 (lane bl-loop-b): synced once it is there' },
   spend: { verdict: 'owed', row: 'B-ef83', classes: ['unsynced'], why: 'the spend ledger (data/spend-budget.json): onto the store writer in row B-ef83' },
   person: { verdict: 'owed', row: 'B-ddf3', classes: ['unsynced'], why: 'a file of the PERSON\'s written through the hub (a copy across machines, a DAV upload, a design file, a CLI\'s settings, a rescued transcript, an export, a browser profile\'s preferences): after a power loss its name can point at an empty file — the person\'s own bytes' },
-  'device-door': { verdict: 'named', classes: ['synced'], door: 'src/agentd/durable-file.js', why: 'THE DEVICE\'S ONE DOOR (B-93e7, 主开发 r4381 / r4387): a record the device agent writes for itself takes its name only after ONE sync of its temp; a refused sync is SAID in the agent\'s own log (once a file) and the record still lands — and its bundle\'s landing (landBundle): the verdict, ONE sync, the name, `current`, where a sync that FAILS refuses the landing. It is a DEVICE INPUT (every change of it rides a signed agent release), so it is a door of its own: the hub\'s wrapper helper in src/fd-close.js (B-bcb8) changes with any hub release — the class\'s TWO doors, a third is red' },
+  'device-door': { verdict: 'named', classes: ['synced'], door: 'src/agentd/durable-file.js', why: 'THE DEVICE\'S ONE DOOR (B-93e7, 主开发 r4381 / r4387): a record the device agent writes for itself takes its name only after ONE sync of its temp; a refused sync is SAID in the agent\'s own log (once a file) and the record still lands — the record law, kept on BOTH sides by 主开发 r4834 for every module the device bundles (B-574d); a failed write, close or rename throws, the old file whole — and its bundle\'s landing (landBundle): the verdict, ONE sync, the name, `current`, where a sync that FAILS refuses the landing. It is a DEVICE INPUT (every change of it rides a signed agent release), so it is a door of its own: the hub\'s wrapper helper in src/fd-close.js (B-bcb8) changes with any hub release — the class\'s TWO doors, a third is red' },
   'synced-in-place': { verdict: 'named', classes: ['synced'], why: 'B-574d (主开发 r4761, the third shape): a write that already runs OFF the hub\'s loop (the promises road, or a worker thread) synced IN PLACE — its temp opened, written, synced, closed, then renamed on the road it already takes; the door\'s laws: a sync or a close that fails is a failed write (said by name, the old file whole, no temp left), and only a file system that does no sync at all lands it, said once a site' },
   derived: { verdict: 'named', classes: ['unsynced', 'move', 'synced'], why: 'bytes MADE AGAIN from a source that stays (a tool copied at every start, a download checked by its digest, an unpacked build, a generated wrapper or shim; a cache of a source still on disk — a torn cached copy may be served until it is pruned; B-574d, 主开发 r4761: a DIAGNOSTIC nobody reads back after a power loss — a torn copy is skipped or handed on as it is, nothing is held as damaged): no person\'s data and no source is lost' },
   'ruled-sync': { verdict: 'named', classes: ['unsynced'], why: 'kept SYNCHRONOUS ON THE LOOP BY THE COORDINATOR\'s RULING (r3455, B-574d unit 1): a grant is a person\'s rare press — its all-or-nothing answer before the reply and the use marks\' order after the grants\' landing are worth more than the move; opened again only if a measure shows a grant\'s write holding the loop or a torn grants file met in use' },
@@ -378,6 +378,62 @@ function doorsVerdict(families, rows) {
   const third = doorsVerdict({ ...FAMILIES, 'third-door': { verdict: 'named', classes: ['synced'], door: 'src/agentd/another-door.js', why: 'a planted third door' } }, [...ROWS, ['src/agentd/another-door.js', 'synced', 'third-door', '', 'write']]);
   const stray = doorsVerdict(FAMILIES, [...ROWS, ['src/agentd/agentd.js', 'synced', 'device-door', '', 'someOtherWriter']]);
   ok(!third.ok && !stray.ok, 'RED CONTROLS (planted): a THIRD door is red; a row of the device\'s door outside its file (but the landing) is red', { third: third.bad, stray: stray.strays.length });
+}
+// THE TWO DOORS BY MODULE (主开发 r4814 (1) / r4834 M1, B-574d): a module the device agent BUNDLES takes the device's door wherever it
+// runs (the hub runs some of them too); a module only the hub loads takes the hub's (src/fd-close.js); src/fd-close.js is never an
+// input of the bundle. The device door's takers are NAMED here (a new one is red until named); the hub door's takers are judged by
+// module (each named in the leg: hub slices add them). The bundle's inputs are esbuild's own (build:agentd's flags, nothing
+// written); a SECOND build with the hub's helper planted into a bundled module shows the leg can see it carried.
+const DEVICE_DOOR = 'src/agentd/durable-file.js', HUB_DOOR = 'src/fd-close.js';
+const DEVICE_DOOR_TAKERS = Object.freeze(['src/agentd/agentd.js', 'src/agentd/self-retire.js', 'src/agentd/stream-mac.js', 'src/app-serve.js', 'src/desktop-mic.js', 'src/migration-runner.js', 'src/opencode-serve.js']);
+async function bundleInputs(plant = null) {
+  const script = (JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).scripts || {})['build:agentd'] || '';
+  const m = /esbuild src\/agentd\/agentd\.js ([^&]*?)--outfile=/.exec(script), flags = m ? m[1] : '';
+  const plugins = plant ? [{ name: 'plant', setup(b) { b.onLoad({ filter: plant.filter }, (args) => ({ contents: fs.readFileSync(args.path, 'utf8') + plant.add, loader: 'js' })); } }] : [];
+  const r = await require('esbuild').build({ entryPoints: ['src/agentd/agentd.js'], absWorkingDir: REPO, bundle: true, platform: 'node', external: [...flags.matchAll(/--external:(\S+)/g)].map((x) => x[1]), preserveSymlinks: /--preserve-symlinks/.test(flags), write: false, metafile: true, logLevel: 'silent', plugins });
+  return new Set(Object.keys(r.metafile.inputs).filter((f) => !f.startsWith('node_modules/')));
+}
+const DOOR_REQ = /(?:^|[^\w$.])require\(\s*(['"])(\.{1,2}\/[^'"]+)\1\s*\)/g;
+/** [file, 'device' | 'hub'] for every file whose CODE requires one of the two doors (a comment line never counts) */
+function doorTakers(texts) {
+  const out = [];
+  for (const [rel, text] of texts) {
+    for (const line of text.split('\n')) {
+      if (/^\s*(?:\/\/|\*|\/\*)/.test(line)) continue;
+      for (const m of line.matchAll(DOOR_REQ)) {
+        let p = path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[2]));
+        if (!p.endsWith('.js')) p += '.js';
+        if (p === DEVICE_DOOR && rel !== DEVICE_DOOR) out.push([rel, 'device']);
+        if (p === HUB_DOOR && rel !== HUB_DOOR) out.push([rel, 'hub']);
+      }
+    }
+  }
+  return out;
+}
+function doorsByModule(inputs, takers, named = DEVICE_DOOR_TAKERS) {
+  const bad = [];
+  for (const [f, d] of takers) {
+    if (d === 'device' && !inputs.has(f)) bad.push(`${f}: a module only the hub loads takes the device's door`);
+    if (d === 'device' && !named.includes(f)) bad.push(`${f}: takes the device's door and is not named in DEVICE_DOOR_TAKERS`);
+    if (d === 'hub' && inputs.has(f)) bad.push(`${f}: a module the device bundles takes the hub's door`);
+  }
+  for (const f of named) if (!takers.some((x) => x[0] === f && x[1] === 'device')) bad.push(`${f}: named a taker of the device's door and takes it no more (drop its name)`);
+  if (inputs.has(HUB_DOOR)) bad.push(`${HUB_DOOR} is an input of the device bundle`);
+  return { ok: bad.length === 0, bad, hub: takers.filter((x) => x[1] === 'hub').map((x) => x[0]) };
+}
+{
+  const inputs = await bundleInputs();
+  const texts = trackedFiles(REPO, 'src', 'server.js').filter((f) => /\.(?:c|m)?js$/.test(f)).map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]);
+  const takers = doorTakers(texts), v = doorsByModule(inputs, takers);
+  ok(v.ok && inputs.has(DEVICE_DOOR), `the two doors BY MODULE (r4834 M1): the device's door is taken by the ${DEVICE_DOOR_TAKERS.length} modules named, each a device bundle input; the hub's door by ${v.hub.length} modules only the hub loads (${v.hub.join(', ')}); src/fd-close.js is no input of the bundle (${inputs.size} inputs)`, v.bad);
+  const hubOnly = texts.map(([f]) => f).find((f) => f.startsWith('src/server/') && !inputs.has(f));
+  const bundled = 'src/desktop-serve.js';
+  const planted = await bundleInputs({ filter: /[\\/]src[\\/]desktop-serve\.js$/, add: "\nrequire('./fd-close.js');\n" });
+  const p1 = doorsByModule(inputs, [...takers, [hubOnly, 'device']]), p2 = doorsByModule(planted, [...takers, [bundled, 'hub']]), p3 = doorsByModule(inputs, takers.filter((x) => x[0] !== 'src/desktop-mic.js'));
+  ok(!!hubOnly && inputs.has(bundled) && planted.has(HUB_DOOR) && !inputs.has(HUB_DOOR) && !p1.ok && !p2.ok && !p3.ok,
+    `RED CONTROLS: a module only the hub loads taking the device's door (${hubOnly}, planted); a SECOND BUILD with the hub's helper planted into a bundled module (${bundled}) carries src/fd-close.js — red; a named taker that takes it no more — red`, { p1: p1.bad, p2: p2.bad, p3: p3.bad, plantedCarries: planted.has(HUB_DOOR) });
+  const seen = doorTakers([['src/server/x.js', "const D = require('../agentd/durable-file.js');\n// const H = require('../fd-close.js');\nconst H2 = require('../fd-close');\n"]]);
+  ok(seen.length === 2 && seen[0][1] === 'device' && seen[1][1] === 'hub', 'CONTROL: a door required in code is read (with or without «.js»), one in a comment is not', seen);
 }
 ok(OWED_MAX <= OWED_BASELINE + RISES.reduce((a, r) => a + r[0], 0) && RISES.every((r) => Number.isInteger(r[0]) && r[0] > 0 && /^B-[0-9a-f]{4}$/.test(r[1]) && !!r[2]), `the owed count rises only BY NAME: ${OWED_MAX} against the kept baseline ${OWED_BASELINE}${RISES.length ? ` + ${RISES.map((r) => `${r[0]} (${r[1]})`).join(' + ')}` : ''}`, { OWED_MAX, OWED_BASELINE, RISES });
 
