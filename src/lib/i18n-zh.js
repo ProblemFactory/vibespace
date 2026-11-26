@@ -4741,6 +4741,8 @@ export default {
   "paused: spend not known": "已暂停：花费未知",
   "the language model plugin’s journal of calls": "语言模型插件的调用日志",
   "the sign-in value your conversations report their usage with": "你的对话上报用量所用的登录值",
+  "this VibeSpace’s anonymous usage id": "这个 VibeSpace 的匿名用量标识",
+  "a paired machine’s link token": "一台已配对机器的连接令牌",
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到 API 提案 — 没有做出任何决定，也没有执行任何请求。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到应用提案 — 没有安装或更改任何东西。几分钟后再按一次（它会自己再读一次）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace 暂时读不到设计列表 — 没有更改任何东西，设计文件夹保持原样。几分钟后再按一次（它会自己再读一次）。",

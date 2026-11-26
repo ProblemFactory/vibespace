@@ -4740,6 +4740,8 @@ export default {
   "paused: spend not known": "一時停止中：利用額不明",
   "the language model plugin’s journal of calls": "言語モデル プラグインの呼び出し記録",
   "the sign-in value your conversations report their usage with": "会話が利用量を報告するためのサインイン値",
+  "this VibeSpace’s anonymous usage id": "この VibeSpace の匿名の利用 ID",
+  "a paired machine’s link token": "ペアリング済みマシンの接続トークン",
   "VibeSpace cannot read its API proposals right now — nothing was decided or run. Press again in a few minutes (it reads them again by itself).": "VibeSpace は API の提案をいま読めません — 何も決定・実行していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its app proposals right now — nothing was installed or changed. Press again in a few minutes (it reads them again by itself).": "VibeSpace はアプリの提案をいま読めません — 何もインストール・変更していません。数分後にもう一度押してください（自動でもう一度読みます）。",
   "VibeSpace cannot read its list of designs right now — nothing was changed, and the design folders stay as they are. Press again in a few minutes (it reads it again by itself).": "VibeSpace はデザインの一覧をいま読めません — 何も変更しておらず、デザインのフォルダーもそのままです。数分後にもう一度押してください（自動でもう一度読みます）。",

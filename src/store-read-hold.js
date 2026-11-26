@@ -34,6 +34,9 @@
 //     secret material names its copy's ROAD, `copy: { bytes(buf), opens(onDisk) }`: bytes() the bytes the copy is WRITTEN with (a
 //     sealed store's: in a box under its own key from the copy's creation; null: no copy can be made now, the hold stands), opens() a
 //     copy's bytes back for the once-per-content compare (null: it cannot be judged — not this one). No road: the bytes as they are.
+//   A STORE OF ONE PLAIN VALUE (B-f276, r4721, lane lg-vault-stages — the telemetry instance id, a machine's link token): its read
+//     again is judged by the store's own `parse` (JSON stays the default: no store on the helper moves) — the same answer its start
+//     gave the caller's own SR.storeAnswer.
 const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js');
@@ -80,7 +83,7 @@ const CHANGE = new Set();
 const changed = () => { for (const fn of [...CHANGE]) { try { fn(); } catch { /* a listener's own */ } } };
 function onHoldsChange(fn) { if (typeof fn !== 'function') return () => {}; CHANGE.add(fn); return () => CHANGE.delete(fn); }
 
-function create({ file, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now, readMs = READ_MS, copy = null } = {}) {   // readMs: a number, or a function asked at each read (a store's own knob)
+function create({ file, parse = JSON.parse, valid = () => true, aside, words, code, log = () => { }, onLift = null, now = Date.now, readMs = READ_MS, copy = null } = {}) {   // readMs: a number, or a function asked at each read (a store's own knob); parse: B-f276 (r4721) a store of ONE plain value names its own (JSON the default)
   if (!file || typeof aside !== 'function' || typeof words !== 'function' || !code) throw new Error('store-read-hold: file, aside, words and code are required');
   if (copy && (typeof copy.bytes !== 'function' || typeof copy.opens !== 'function')) throw new Error('store-read-hold: a copy road is { bytes, opens }');
   const name = path.basename(file);
@@ -168,7 +171,7 @@ function create({ file, valid = () => true, aside, words, code, log = () => { },
     try {
       waitingSince = 0;
       if (!held || stopped) return false;
-      a = SR.storeAnswer(read, { valid });
+      a = SR.storeAnswer(read, { parse, valid });
       if (a.state === 'unreadable') { held.code = codeOf(a); missingAt = 0; held.emptyOnce = false; return false; }
       if (a.state === 'missing' && !missingAt) { missingAt = now(); held.emptyOnce = false; return false; }   // r4069: any judged read between two empty ones breaks their row
       if (a.state === 'corrupt') {
