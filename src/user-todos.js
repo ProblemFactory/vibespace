@@ -990,6 +990,14 @@ class UserTodoManager {
     const set = new Set(Array.isArray(keys) ? keys : [keys]);
     return this._state.items.filter((i) => set.has(i.sessionKey) && isHidden(i) && !i.clearedAt);
   }
+  /** B-8797 (lane hub-loop-stalls, 主开发 r5195): whether an item of (sessionKey, itemKey) was EVER filed and is still on the
+   *  ledger — in ANY state: open, done, dismissed or CLEARED (hiddenFor leaves a cleared one out; add() reopens a resolved one).
+   *  A producer that says a thing ONCE asks this before filing: the person's ✕ or Clear stays final. READ-ONLY (a held store
+   *  answers from its empty list — the caller asks isHeldUnread() first). An item pruned past the ledger's cap is forgotten. */
+  filedEver(sessionKey, itemKey) {
+    if (typeof itemKey !== 'string' || !itemKey) return false;
+    return this._state.items.some((i) => i.sessionKey === sessionKey && i.itemKey === itemKey);
+  }
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 

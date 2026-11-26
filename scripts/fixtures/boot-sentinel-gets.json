@@ -326,6 +326,7 @@
   "/api/workflow",
   "/api/chat-picture/:tx/:key/:n",
   "/api/chat-attachments/usage",
+  "/api/data-folder",
   "/api/chat-attachments/orphans",
   "/api/sessions/stopped",
   "/api/sessions/resume-stopped/:batchId"

@@ -550,7 +550,8 @@ class SettingsUI {
     if (schema.fact === 'browser-engine') this._renderEngineFact(info, row, path); // lane engine-plugin: where the default engine comes from + the engines here
     if (schema.fact === 'attention-today') this._renderAttentionToday(info);
     if (schema.fact === 'entry-label') this._renderEntryLabelFact(info, row, path);   // 主开发 r4483: what the stored value makes the next chat start pass
-    if (schema.fact === 'kept-files') this._renderKeptFiles(info);   // lane chat-attachments-persist: what the dropped files take, and the orphans' Remove door
+    if (schema.fact === 'kept-files') this._renderKeptFiles(info);
+    if (schema.fact === 'data-folder') this._renderDataFolderFact(info);   // B-8797 (lane hub-loop-stalls, r5195): where VibeSpace's own records live — WORDS, no press   // lane chat-attachments-persist: what the dropped files take, and the orphans' Remove door
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
@@ -695,6 +696,24 @@ class SettingsUI {
    *  /api/chat-attachments/usage) — and, apart, what belongs to conversations that no longer exist, with a Remove door that
    *  names the count and the size BEFORE it acts (the POST carries exactly those; the hub refuses if they moved). A read that
    *  fails is said, never «0». */
+  /** B-8797 (lane hub-loop-stalls, 主开发 r5195): WHERE VibeSpace's own records live (GET /api/data-folder — the hub's one verdict,
+   *  src/server/data-folder-notice.js): on this computer's own disk, or on a network / user-space drive with the For-you notice's
+   *  own words. Words only: no press on it, and nothing here silences the notice. */
+  _renderDataFolderFact(info) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact';
+    line.dataset.dataFolder = '1';
+    line.textContent = t('checking…');
+    info.appendChild(line);
+    const say = (v) => {
+      if (!v || typeof v !== 'object' || typeof v.folder !== 'string') return t('Could not read where VibeSpace keeps its own records');
+      if (v.state === 'local') return t('VibeSpace keeps its own records in {folder}, on this computer\'s own disk', { folder: v.folder });
+      if (v.state === 'remote' && v.kind === 'network') return `${t('VibeSpace keeps its own records in {folder}, which is on a network drive ({type}): if that drive stops answering, VibeSpace stops answering with it', { folder: v.folder, type: String(v.type || '') })}. ${t('VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.')}`;
+      if (v.state === 'remote') return `${t('VibeSpace keeps its own records in {folder}, which is on a drive served by a program in user space ({type}): if that program or its connection stops answering, VibeSpace stops answering with it', { folder: v.folder, type: String(v.type || '') })}. ${t('VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.')}`;
+      return t('Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read', { folder: v.folder });
+    };
+    fetchJson('/api/data-folder').then((v) => { line.textContent = say(v); }).catch(() => { line.textContent = say(null); });
+  }
   _renderKeptFiles(info) {
     const line = document.createElement('div');
     line.className = 'settings-row-fact';

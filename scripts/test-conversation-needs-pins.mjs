@@ -81,6 +81,7 @@ const PRODUCERS = {
   'src/server/mount-health-watch.js': { origin: 'server', scope: 'group', types: [] },
   'src/server/usage-reading-for-you.js': { origin: 'server', scope: 'group', types: ['usage-reading-unread'] },   // r3136 / r3200: an account's unreadable usage file — ONE item an account, its Set it aside door
   'src/server/queued-file-for-you.js': { origin: 'server', scope: 'group', types: ['queued-file-unread'] },   // B-e3fe follow-up: an unreadable data/msg-queued.json — ONE item, its Set it aside door
+  'src/server/data-folder-notice.js': { origin: 'server', scope: 'group', types: [] },   // B-8797 (lane hub-loop-stalls, r5195): the data folder on a network or user-space drive — a notice, no door (words only)
   'src/server/mount-for-you.js': { origin: 'server', scope: 'group', types: ['mount-reconnect', 'mount-reauth'] },   // B-e40d: + a replaced preset client's Re-authorize   // B-5ce7: a parked mount's item carries its Reconnect
   'src/server/hooks-late.js': { origin: 'agent', scope: 'group', types: [] },
   'src/server/apps-engine.js': { origin: 'apps', scope: 'mixed', types: ['app-install'] },

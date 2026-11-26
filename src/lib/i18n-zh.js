@@ -15963,4 +15963,12 @@ export default {
   "Its public address is down now.": "它的公开地址已下线。",   // B-73c4 (lane nl-mounts): a public address still up
   "A relay file in this home has no owner mark and serves a public address: {names} — in {folder}. Remove it by hand if it is not wanted.": "此主目录中有中继文件没有所属标记，并在提供公开地址：{names}——位于 {folder}。如果不需要，请手动删除。",   // B-73c4 (lane nl-mounts): a public address still up
   "Its public address is still up — it is kept in Ports until the relay confirms its removal.": "它的公开地址仍在线——会保留在“端口”中，直到中继确认已删除。",   // B-73c4 (lane nl-mounts): a public address still up
+  "VibeSpace keeps its own records in {folder}, which is on a network drive ({type}): if that drive stops answering, VibeSpace stops answering with it": "VibeSpace 把自己的记录保存在 {folder}，它位于网络驱动器（{type}）上：一旦该驱动器停止响应，VibeSpace 也会随之停止响应",   // B-8797 (lane hub-loop-stalls, r5195): the data folder on a network or user-space drive
+  "VibeSpace keeps its own records in {folder}, which is on a drive served by a program in user space ({type}): if that program or its connection stops answering, VibeSpace stops answering with it": "VibeSpace 把自己的记录保存在 {folder}，它位于由用户态程序提供的驱动器（{type}）上：一旦该程序或其连接停止响应，VibeSpace 也会随之停止响应",
+  "VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.": "VibeSpace 一直在读写这些记录，因此与该驱动器的连接一旦变慢或中断，整个 hub 都会被卡住。",
+  "The records are the data folder of VibeSpace's own folder, {install}.": "这些记录是 VibeSpace 自身文件夹 {install} 中的 data 文件夹。",
+  "The folder reaches that drive through a {view} view.": "该文件夹通过一个 {view} 视图访问那个驱动器。",
+  "VibeSpace keeps its own records in {folder}, on this computer's own disk": "VibeSpace 把自己的记录保存在 {folder}，位于这台电脑自己的磁盘上",
+  "Could not read where VibeSpace keeps its own records": "读不出 VibeSpace 把自己的记录保存在哪里",
+  "Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read": "不知道 VibeSpace 的记录（{folder}）位于哪里：无法读取挂载表",
 };

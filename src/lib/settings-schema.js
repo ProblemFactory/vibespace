@@ -1621,7 +1621,7 @@ const SETTINGS_SCHEMA = {
     label: t("Never let the server wait on a storage mount"),
     description: t("The server refuses any synchronous file call on a storage mount (rclone, SMB, WebDAV, a storage you added) from its main loop, so a slow or stuck mount can no longer freeze VibeSpace. Turn it off only if a refusal breaks something you need: the call then runs and is only logged. Either way the journal names any file call that holds the server."),
     tier: 'advanced',
-    category: t('Session'), liveApply: true,
+    category: t('Session'), liveApply: true, fact: 'data-folder',   // B-8797 (lane hub-loop-stalls, r5195): WHERE VibeSpace's own records live — words, no press (the guard never refuses that folder: it is the instance's own)
   },
   'mounts.vfsCacheRoot': {   // lane vfs-cache-local (B-4997): empty = the PURE rule in src/vfs-cache-place.js decides
     type: 'string', default: '',

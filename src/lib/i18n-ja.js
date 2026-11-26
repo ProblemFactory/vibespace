@@ -15962,4 +15962,12 @@ export default {
   "Its public address is down now.": "公開アドレスは停止しました。",   // B-73c4 (lane nl-mounts): a public address still up
   "A relay file in this home has no owner mark and serves a public address: {names} — in {folder}. Remove it by hand if it is not wanted.": "このホームに所有者の印がない中継ファイルがあり、公開アドレスを提供しています：{names}——場所 {folder}。不要なら手動で削除してください。",   // B-73c4 (lane nl-mounts): a public address still up
   "Its public address is still up — it is kept in Ports until the relay confirms its removal.": "公開アドレスはまだ公開中です——中継が削除を確認するまで「ポート」に残ります。",   // B-73c4 (lane nl-mounts): a public address still up
+  "VibeSpace keeps its own records in {folder}, which is on a network drive ({type}): if that drive stops answering, VibeSpace stops answering with it": "VibeSpace は自身の記録を {folder} に保存しています。これはネットワークドライブ（{type}）上にあります：そのドライブが応答しなくなると、VibeSpace も応答しなくなります",   // B-8797 (lane hub-loop-stalls, r5195): the data folder on a network or user-space drive
+  "VibeSpace keeps its own records in {folder}, which is on a drive served by a program in user space ({type}): if that program or its connection stops answering, VibeSpace stops answering with it": "VibeSpace は自身の記録を {folder} に保存しています。これはユーザー空間のプログラムが提供するドライブ（{type}）上にあります：そのプログラムまたはその接続が応答しなくなると、VibeSpace も応答しなくなります",
+  "VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.": "VibeSpace はこれらの記録を常に読み書きしているため、そのドライブへの接続が遅くなったり途切れたりすると、hub 全体が止まります。",
+  "The records are the data folder of VibeSpace's own folder, {install}.": "これらの記録は、VibeSpace 自身のフォルダ {install} の data フォルダです。",
+  "The folder reaches that drive through a {view} view.": "このフォルダは {view} ビューを通じてそのドライブにアクセスしています。",
+  "VibeSpace keeps its own records in {folder}, on this computer's own disk": "VibeSpace は自身の記録を {folder} に保存しています（このコンピューター自身のディスク上）",
+  "Could not read where VibeSpace keeps its own records": "VibeSpace が自身の記録をどこに保存しているか読み取れませんでした",
+  "Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read": "VibeSpace の記録（{folder}）がどこにあるか分かりません：マウント表を読み取れませんでした",
 };

@@ -4,7 +4,9 @@
 // 6.5 min: its main thread sat in the kernel's FUSE wait inside a sync fs call on an rclone storage mount (the journal at
 // 21:44 had named one such call: statSync of a OneDrive Task Group row, src/task-groups.js _kindOf, 1209 ms).
 //   ① every `fs.<x>Sync(` site of server.js, src/*.js, src/server/*.js, src/routes/*.js (scripts/sync-fs-census.mjs: acorn,
-//      the enclosing scope, the path arguments) whose path is not a constant — a literal, the checkout, the data dir,
+//      the enclosing scope, the path arguments) whose path is not a constant — a literal, the checkout, the data dir (B-8797: JUDGED,
+//      not assumed — the start's look lands it and names its mount by the sync-fs witness's own verdict, and says a network or
+//      user-space drive to the person: src/server/data-folder-notice.js, pinned in ②),
 //      os.homedir(), /proc, or a file constant built only of those — is claimed by EXACTLY ONE row
 //      [file, scope ('*' = the file's other scopes), n, proof, why, match?] (first row of the file whose scope — and match,
 //      over «fn(paths)» — fits). n is EXACT: a new site in a covered scope reds its row. The proofs:
@@ -27,6 +29,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { filesOf, sitesOf } from './sync-fs-census.mjs';
+import { anchored } from './scratch.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -287,6 +290,7 @@ const ROWS = [
   ["src/server/conversation-deliver.js", "*", 1, "local-only", "retryFile = <dataDir>/msg-retry.json and its .corrupt- aside; dataDir = server.js <checkout>/data"],
   ["src/server/csp-reports.js", "*", 5, "local-only", "file = <checkout>/data/csp-reports.jsonl (+ .1) or VIBESPACE_CSP_REPORTS_FILE, a chrome suite's scratch file (server.js create); lane csp-mermaid-sites r2 +2: the boot's re-judge writes the same file's .rejudge beside it and renames it over (a line the sanitizer explains; its read is the boot's own textOf); B-574d (lane nl-journals) −2: the re-judge's rewrite is src/fd-close.js renameSynced's. THE BOUND of its synchronous rewrite on the loop: ONCE A PROCESS (rejudging set once, never reset), at most two files, only on a hub that met the sanitizer bug"],
   ["src/server/static-public.js", "stampOf", 1, "local-only", "<checkout>/public/<script> — the build stamp of the checkout's own served script (lane csp-mermaid-sites r2: a stale ?v= redirected to it)"],
+  ["src/server/data-folder-notice.js", "*", 2, "local-only", "B-8797 (lane hub-loop-stalls, r5195): the data folder's landing walk (src/local-index.js landedPathOf) — its lstat / readlink run ONLY on components the mount table judged LOCAL first (a network or FUSE component is never touched: the walk stops there), once a start, 30 s after the listen"],
   ["src/server/decision-engine.js", "*", 2, "local-only", "F.memo / F.usage / F.journal = <dataDir>/decision-memo.json, decision-usage.json, decision-journal.jsonl"],
   ["src/server/delivery-wake.js", "*", 3, "local-only", "place-8 (piece 7): socketAlive statSync = the resumed session's own attach socket (VibeSpace's wrapper); readRegistryIds readdirSync + readFileSync = REGISTRY_DIR ~/.claude/sessions/<pid>.json (src/peer-messaging.js's folder), ONE shared read a tick"],
   ["src/server/desktop-access.js", "*", 1, "local-only", "knownFile = <dataDir>/desktop-machines.json (server.js passes <checkout>/data)"],
@@ -486,6 +490,15 @@ console.log('② the rows');
   ok(ROWS.every((r) => r[2] > 0 && FILES.includes(r[0])), 'no dead row: each names a scanned file and claims ≥ 1 site', ROWS.filter((r) => !(r[2] > 0 && FILES.includes(r[0]))).map((r) => r[0]));
   const stars = new Map(); for (const r of ROWS) if (r[1] === '*') stars.set(r[0], (stars.get(r[0]) || 0) + 1);
   ok([...stars.values()].every((n) => n === 1) && ROWS.every((r, i) => r[1] !== '*' || !ROWS.slice(i + 1).some((x) => x[0] === r[0])), 'a file has at most ONE \'*\' row and it is that file\'s last');
+  // B-8797 (lane hub-loop-stalls, 主开发 r5195): THE DATA FOLDER's EXEMPTION is JUDGED, not assumed — a path built of the data dir
+  // counts as a constant above because the START judges that folder: src/server/data-folder-notice.js (armed by server.js's listen)
+  // names its mount by THE ONE VERDICT (src/local-index.js netMountOf — the sync-fs witness's own question for the same folder) and
+  // says a network or user-space drive to the person (For you, once; Settings). RED: a copy of the look asking a question of its own
+  const DF = fs.readFileSync(path.join(REPO, 'src/server/data-folder-notice.js'), 'utf8'), WI = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness.js'), 'utf8'), SJ = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const judged = (df, wi, sj) => df.split('LI.netMountOf(').length === 2 && /require\('\.\.\/local-index\.js'\)\.netMountOf\(path\.resolve\(dataDir\), mi\)/.test(wi)
+    && sj.includes("require('./src/server/data-folder-notice.js').create({ dataDir: path.join(__dirname, 'data')") && sj.includes('  dataFolder.arm();');
+  ok(judged(DF, WI, SJ), 'B-8797: the data folder\'s exemption is JUDGED — the start\'s look (src/server/data-folder-notice.js, armed by server.js) and the sync-fs witness ask ONE verdict for that folder (src/local-index.js netMountOf)');
+  ok(!judged(anchored(DF, 'LI.netMountOf(', 'LI.mountOf(', 'b8797-own-verdict'), WI, SJ), 'CONTROL (the look asking a question of its own — mountOf, any file system — in a copy): the pin is red');
 }
 
 console.log('③ RED CONTROLS: a site with no row is RED');
