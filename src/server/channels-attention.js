@@ -64,7 +64,7 @@ const STOP = Object.freeze(['plugin-off', 'feature-off', 'no-key', 'daily-budget
 const hash16 = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').slice(0, 16);
 
 function create({ dataDir, decision = null, serverSetting = () => undefined, now = () => Date.now(), tailOf = () => [], notify = () => { },
-  accountNever = () => false, viewNow = null, log = console, policy = () => null, facts = () => () => ({}), factsOff = () => { }, rowState = () => null } = {}) {
+  accountNever = () => false, viewNow = null, log = console, policy = () => null, facts = () => () => ({}), factsOff = () => { }, rowState = () => null, writer = null } = {}) {
   const FILE = path.join(dataDir, 'decision-examples.json');
   // THE STORE-READ LAW (主开发 r3005, the content stores; src/store-read-hold.js). The release read ANY failure as «no label» and the
   // person's next Needs / Not wrote over the file: every label taught to the attention judge gone. HELD: a label is refused by name
@@ -97,11 +97,17 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     const a0 = SR.storeAnswer(read, { valid: EX_SHAPE });
     return hold.start(a0) === 'data' ? fromDoc(a0.value) : [];
   }
-  function save() {
-    if (!hold.writable('a label')) return;   // held: nothing written over it
-    const tmp = `${FILE}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ v: 1, examples }), { mode: 0o600 });
-    fs.renameSync(tmp, FILE);
+  // B-574d slice «channels-small-stores» (lane nl-journals, 主开发 r4939): THE STORE WRITER (src/store-writer.js — its thread does the temp,
+  // the write, the SYNC and the rename). The implicit learning is a TICK's save: handed only (off the loop, the bytes made at the write).
+  // A PERSON's label (`act`) lands by the writer's OWN synchronous flush before its answer (one writer for the file, never a second
+  // road beside it): false when it is not on disk — the label is kept in memory and written again by the writer. Held: nothing written.
+  const SW = () => writer || require('../store-writer.js').storeWriter();
+  function save({ act = false } = {}) {
+    if (!hold.writable('a label')) return true;   // held: nothing written over it (a label is refused by name before)
+    SW().dirty(FILE, { name: 'decision-examples.write', mode: 0o600, produce: () => JSON.stringify({ v: 1, examples }) });
+    if (!act) return true;
+    const r = SW().flushSync([FILE]);
+    return !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === FILE);   // a flush deferred to the exit's own is no landing
   }
   const setting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
   // B-dfa4 (the owner's hub, every hold over a second for five hours: the plugin's settings rebuilt once PER INDEXED
@@ -248,8 +254,10 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     const v = verdicts.get(key);
     const ex = M.exampleOf({ ...M.attentionRecord(view, tail), key, lastAt: at }, verdict, v && v.lastAt === at ? v.clauses : [], now());
     examples = M.addExample(examples, ex);
-    save();
+    const landed = save({ act: true });
     notify([key]);
+    // B-574d: a label not on disk is said BY NAME (not-durable — the page words it): kept in memory, the writer writes it again
+    if (!landed) return { ok: false, code: 'not-durable', status: 503, notOnDisk: true, label: verdict, examples: examples.length, error: 'the label was made, but data/decision-examples.json is not on disk yet (the storage did not write it) — it is kept and written again' };
     return { ok: true, label: verdict, examples: examples.length };
   }
 

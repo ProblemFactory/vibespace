@@ -380,6 +380,7 @@ console.log('⑪ IMPLICIT LABELS (decision.implicitLabels): a reply ⇒ "needs",
     E.eng.digest();
     await idle(E.eng);
     const file = path.join(E.dataDir, 'decision-examples.json');
+    await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(file);   // B-574d: the implicit learning is a tick's save, handed to the store writer — read once it landed
     const ex = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).examples : null;
     return { E, Wd, ex, judged, file };
   };
@@ -509,6 +510,36 @@ console.log('⑬ B-dfa4 (verdict): the law through the engine\'s OWN roads — a
   for (const x of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 2, label: '⑬ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
+
+// ── B-574d slice «channels-small-stores» (lane nl-journals, 主开发 r4939): THE LABELS THROUGH THE STORE WRITER — a person's label is handed
+// under its row and lands by the writer's OWN synchronous flush before its answer; a landing that fails is refused BY NAME (not-durable),
+// the label kept in memory and handed again; nothing written on the hub's loop. RED: the release's save (on the loop, no writer)
+console.log('⑩ B-574d the labels through the store writer');
+{
+  const recWriter = ({ landed = true } = {}) => { const calls = []; return { calls, dirty(file, o) { calls.push({ kind: 'dirty', file, name: o.name, mode: o.mode, bytes: o.produce ? o.produce() : null }); }, flushSync(files) { calls.push({ kind: 'flush', files }); return { written: landed ? files : [], left: landed ? [] : files.map((f) => ({ file: f, why: 'the write failed (EIO; 1 attempt)' })) }; }, durable: () => Promise.resolve(landed), pending: () => !landed, forget() { } }; };
+  const loopWrites = (dir, fn) => { const f = path.join(dir, 'decision-examples.json'), o = { writeFileSync: fs.writeFileSync, renameSync: fs.renameSync }, seen = [];
+    fs.writeFileSync = function (p0, ...a) { if (String(p0).startsWith(f)) seen.push('write'); return o.writeFileSync.call(this, p0, ...a); };
+    fs.renameSync = function (a0, b0, ...a) { if (String(b0) === f) seen.push('rename'); return o.renameSync.call(this, a0, b0, ...a); };
+    let value; try { value = fn(); } finally { Object.assign(fs, o); } return { value, loop: seen.join(' ') }; };
+  const labelOf = (mod, name, w) => { const d = path.join(ROOT, 'w-' + name); fs.mkdirSync(d, { recursive: true });
+    const a = mod.create({ dataDir: d, decision: decisionEngine(d), now, log: quiet, writer: w });
+    const r = loopWrites(d, () => a.label('im/w1', 1000, 'needs', { title: 'a made-up row', lastText: 'a made-up line', lastAt: 1000 }));
+    return { ...r, calls: w.calls, d }; };
+  const AT = require(path.join(REPO, 'src/server/channels-attention.js'));
+  const okW = recWriter(), g = labelOf(AT, 'landed', okW);
+  const dirty = g.calls.find((c) => c.kind === 'dirty'), flush = g.calls.find((c) => c.kind === 'flush');
+  ok(g.value.ok === true && g.loop === '' && !!dirty && dirty.name === 'decision-examples.write' && dirty.mode === 0o600 && JSON.parse(dirty.bytes).examples.some((x) => x.key === 'im/w1') && !!flush && flush.files.join() === dirty.file && g.calls.indexOf(dirty) < g.calls.indexOf(flush),
+    '⑩ a person\'s label is HANDED to the store writer under its row (0600, the new example in its bytes) and LANDS by the writer\'s own synchronous flush before the answer — nothing written on the hub\'s loop', { value: g.value, calls: g.calls.map((c) => c.kind + ':' + (c.name || (c.files || []).length)) });
+  const badW = recWriter({ landed: false }), b = labelOf(AT, 'refused', badW);
+  ok(b.value.ok === false && b.value.code === 'not-durable' && b.value.status === 503 && b.value.notOnDisk === true && b.value.examples === 1 && b.loop === '' && badW.calls.some((c) => c.kind === 'dirty'),
+    '⑩ a label whose landing FAILS is refused BY NAME (not-durable, 503 — the page words it) — the example kept in memory and handed, so the writer writes it again', b.value);
+  const MUTW = mutantCopies('decision-attention-writer', REPO);
+  const relSave = "  function save() {\n    if (!hold.writable('a label')) return;   // held: nothing written over it\n    const tmp = `${FILE}.${process.pid}.tmp`;\n    fs.writeFileSync(tmp, JSON.stringify({ v: 1, examples }), { mode: 0o600 });\n    fs.renameSync(tmp, FILE);\n  }\n";   // stale-pins: kept (the release's save — this red control's own text)
+  const curSave = attSrc.slice(attSrc.indexOf('  function save({ act = false } = {}) {'), attSrc.indexOf('\n  }\n', attSrc.indexOf('  function save({ act = false } = {}) {')) + 5);
+  const rel = MUTW.load('src/server/channels-attention.js', editAnchor(attSrc, curSave, relSave, 'src/server/channels-attention.js'), 'release-save');
+  const rw = recWriter(), r = labelOf(rel, 'release', rw);
+  ok(/write/.test(r.loop) && /rename/.test(r.loop) && !rw.calls.length, 'RED ⑩ the release\'s save: the label written and renamed ON the hub\'s loop, nothing handed to the writer', { loop: r.loop, calls: rw.calls.length });
+}
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -62,6 +62,7 @@ const STORES = Object.freeze({
   'browser-keeper-records.write': row('write', 'the keeper\'s records (browser-takeovers.json, known-good.json, install-running.json, verified.json)', 'src/server/browser-keeper.js', ['writeRecord']),   // 8/8: the records of the keeper's one door
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
+  'decision-examples.write': row('write', 'decision-examples', 'src/server/channels-attention.js', ['save']),   // B-574d slice «channels-small-stores» (lane nl-journals, r4939): the attention judge's labeled examples — a person's label lands by the writer's synchronous flush, the implicit learning (a tick) is handed only
   'channel-api-cards.write': row('write', 'channels/api-cards', 'src/server/channel-api-cards.js', ['save']),   // B-574d slice «channels-small-stores» (lane nl-journals, r4939): each proposal's For-you item, answered mark and receipt — a sweep's write, through the store writer
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),

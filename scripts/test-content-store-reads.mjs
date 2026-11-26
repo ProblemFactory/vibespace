@@ -691,7 +691,7 @@ console.log('FO [feedback-outbox.json] the origin key (the hub\'s marks come bac
     ['src/routes/apps.js', /const STATUS = \{ apps_unread: 503,/, 'the Apps routes (apps_unread)'],
     ['src/server/design-engine.js', /pages_unread: 503, designs_unread: 503,/, 'the design routes (pages_unread, designs_unread)'],
     ['src/routes/feedback.js', /const STATUS = \{ feedback_unread: 503,/, 'the feedback routes (feedback_unread)'],
-    ['src/routes/channels.js', /r\.code === 'labels_unread' \? 503 :/, 'the label route (labels_unread)'],
+    ['src/routes/channels.js', /\(r\.code === 'labels_unread' \|\| r\.status === 503\) \? 503 :/, 'the label route (labels_unread; B-574d: a not-durable label too)'],
   ];
   const miss = tables.filter(([f, re]) => !re.test(src(f))).map(([, , w]) => w);
   ok(!miss.length, `every held code answers 503 on the wire, by its routes' table: ${tables.map(([, , w]) => w).join('; ')}`, miss);
