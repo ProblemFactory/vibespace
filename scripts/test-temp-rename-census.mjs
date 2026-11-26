@@ -309,6 +309,7 @@ const ROWS = [
   ["src/server/vault-totp.js", "synced", "self-synced-best-effort", "", "writeJsonAtomic"],
   ["src/server/vault-use-grants.js", "unsynced", "ruled-sync", "the use marks' generation, written only after the grants write landed: the anti-replay order across two files (主开发 r3455)", "writeJsonAtomic"],
   ["src/server/window-targets-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/writes-lost.js", "synced", "synced-in-place", "the lost writes' record (data/writes-lost.json): its own write OFF the loop since B-574d (主开发 r4761) — its temp synced before the rename on the promises road; only the exit's write is synchronous, through the door (src/fd-close.js renameSynced), once a process", "writeAtomicAsync"],
   ["src/server/writes-lost.js", "move", "move", "", "create > load"],
   ["src/slot-transitions.js", "unsynced", "store", "", "SlotTransitions._maybeTrim"],
   ["src/store-hold.js", "unsynced", "b0248", "the hold's write (the desktops and their rollback points)", "create > write", "create > write"],

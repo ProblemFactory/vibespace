@@ -20,13 +20,20 @@
  * space and restarting therefore keeps it. Lost: a hub that exits while the disk still has no room (the journal says so), or
  * one killed outright inside the retry: SIGKILL or the OOM killer, where no code runs.
  *
+ * B-574d (主开发 r4761) — IT IS WRITTEN IN THE VERY MOMENT A FOLDER MAY BE FAILING, so the hub's loop never waits on it: the record's
+ * write runs OFF the loop (writeAtomicAsync — its temp opened, written, SYNCED, closed, renamed on the promises road), one write in
+ * flight, a change meanwhile written after it. Only an EXIT writes synchronously (writeAtomic, the tree's one synced door): the
+ * process ends next, and it writes ONCE a process (a second stop() writes nothing). It takes the temp of a write still in flight away
+ * first, so a rename already asked of the file system can never land older rows after the exit's own. Lost besides: a hub killed
+ * outright within the moment a record's write takes off the loop (milliseconds on a disk that answers).
+ *
  * A READ THAT FAILED IS TRIED AGAIN (data/ can sit on NFS). A store that has not read its file never writes it, so one
  * transient error cannot replace every other conversation's warnings; what was noted meanwhile waits in memory and is
  * merged. A file that parses as no store is set aside, its bytes kept: the writes are atomic, so no retry would mend it.
  */
 const fs = require('fs');
 const path = require('path');
-const FC = require('../fd-close.js');   // B-574d (lane nl-journals): the record's replace through the tree's one synced door (renameSynced)
+const FC = require('../fd-close.js');   // B-574d (lane nl-journals): the exit's replace through the tree's one synced door (renameSynced); the codes and words of a sync the file system does not do
 
 const MAX_CONVERSATIONS = 200;
 const MAX_PER_CONVERSATION = 8;
@@ -62,7 +69,7 @@ function conversationsOf(msg, sessionConversation) {
 }
 const rowOk = (r) => !!r && r.type === 'system' && r.subtype === 'session_writes_lost' && typeof r.uuid === 'string' && Array.isArray(r.lost) && Number.isFinite(Date.parse(r.timestamp));
 
-/** B-574d (lane nl-journals): THE RECORD IS ON DISK BEFORE ITS NAME POINTS AT IT — its temp written, SYNCED, closed, then renamed
+/** B-574d (lane nl-journals): THE EXIT'S WRITE (synchronous — the process ends next). THE RECORD IS ON DISK BEFORE ITS NAME POINTS AT IT — its temp written, SYNCED, closed, then renamed
  *  (src/fd-close.js renameSynced): after a power cut the name never points at no bytes (read back as «no store» and set aside — every
  *  conversation's warning gone, exactly when the person comes back to read it). A sync, a close or a rename that fails is a FAILED
  *  WRITE, thrown (the temp removed): the store holds the row, says it once and tries again. A file system that does no sync at all
@@ -72,13 +79,36 @@ function writeAtomic(file, text, say = null) {
   const tmp = file + '.tmp';
   try { FC.renameSynced(tmp, file, text, { where: '[writes-lost] the kept warnings', say }); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
 }
+/** B-574d (主开发 r4761, the third shape): THE RECORD'S OWN WRITE, OFF THE LOOP — its temp (never the exit's) opened, written, SYNCED,
+ *  closed, then renamed, each step on the promises road. The door's laws: a sync, a close or a rename that fails is a FAILED WRITE —
+ *  rejected, the temp removed, the old file whole; only a file system that does no sync at all lands it (`say`, the store's, once).
+ *  `live()` false before the rename (the store stopped: its exit wrote the rows itself): nothing renamed, the temp removed → false */
+async function writeAtomicAsync(file, text, say = null, live = () => true) {
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  const tmp = file + '.w.tmp';
+  let fh = null, failed = null, landed = false;
+  try {
+    fh = await fs.promises.open(tmp, 'w');
+    await fh.writeFile(text);
+    try { await fh.sync(); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; if (typeof say === 'function') say(FC.syncUnsupportedWords('[writes-lost] the kept warnings', e.code)); }
+  } catch (e) { failed = e; }
+  if (fh) { try { await fh.close(); } catch (e) { if (!failed) failed = e; } }   // a close that fails after the write: its bytes may not be there
+  if (!failed && live()) { try { await fs.promises.rename(tmp, file); landed = true; } catch (e) { failed = e; } }
+  if (!landed) await fs.promises.unlink(tmp).catch(() => { });   // a failed write, or a store stopped meanwhile: no temp left
+  if (failed) throw failed;
+  return landed;
+}
 
-function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.now(), write = writeAtomic, retryMs = RETRY_MS } = {}) {
+function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.now(), write = null, retryMs = RETRY_MS } = {}) {
   const file = path.join(dataDir, 'writes-lost.json');
+  // B-574d (r4761): the two roads' writers — the record's own write OFF the loop, the exit's synchronous one (the door); a suite that
+  // hands ONE `write` hands the storage of both roads (a full disk, a refused one)
+  const writeOff = write || writeAtomicAsync, writeExit = write || writeAtomic;
   // What this store holds: the file's rows once it has been read, plus every row noted since. A row noted before the file could be read waits here,
   // `dirty` until it reaches the disk. A STORE THAT HAS NOT READ ITS FILE NEVER WRITES IT: one transient read error must not replace everyone's rows.
   const rows = new Map();
   let read = false, dirty = false, timer = null, writeFailing = false, readFailing = false, noSyncSaid = false;
+  let writing = null, stopped = false, stopAnswer = null;   // B-574d (r4761): ONE write in flight off the loop; the exit's answer (once a process)
   const sayNoSync = (w) => { if (!noSyncSaid) { noSyncSaid = true; log(w); } };   // B-574d: a file system that does no sync — the record lands, said once
   const merged = (a, b) => { const seen = new Set(), out = []; for (const r of [...a, ...b]) if (!seen.has(r.uuid)) { seen.add(r.uuid); out.push(r); } return out.sort((x, y) => Date.parse(x.timestamp) - Date.parse(y.timestamp)).slice(-MAX_PER_CONVERSATION); };
   function arm() {
@@ -113,25 +143,39 @@ function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.
     readFailing = false;
     return true;
   }
-  function flush() {
-    if (!dirty) return true;
-    if (!load()) return false;
+  /** the rows as they are now, as the file's text (the newest MAX_CONVERSATIONS conversations kept) */
+  function rowsText() {
     if (rows.size > MAX_CONVERSATIONS) {
       const newest = (list) => Date.parse((list[list.length - 1] || {}).timestamp) || 0;
       for (const [id] of [...rows].sort((a, b) => newest(a[1]) - newest(b[1])).slice(0, rows.size - MAX_CONVERSATIONS)) rows.delete(id);
     }
-    try {
-      write(file, JSON.stringify({ v: 1, byConversation: Object.fromEntries(rows) }) + '\n', sayNoSync);
-      dirty = false;
+    return JSON.stringify({ v: 1, byConversation: Object.fromEntries(rows) }) + '\n';
+  }
+  /** B-574d (主开发 r4761): THE RECORD'S WRITE, OFF THE LOOP — the rows as they are now, ONE write in flight (a change meanwhile is
+   *  written after it). → a promise, never a rejection: true once they landed; false — held in memory, said once, tried again in
+   *  retryMs (a store that has not read its file never writes it) */
+  function flush() {
+    if (writing) return writing.then(() => flush());
+    if (stopped) return Promise.resolve(!dirty);
+    if (!dirty) return Promise.resolve(true);
+    if (!load()) return Promise.resolve(false);
+    const text = rowsText();
+    dirty = false;
+    writing = Promise.resolve().then(() => (stopped ? false : writeOff(file, text, sayNoSync, () => !stopped))).then((r) => {
+      writing = null;
+      if (r === false) { dirty = true; return false; }   // the store stopped meanwhile: its exit wrote the rows itself
       if (writeFailing) log('[writes-lost] the kept warnings reached the disk');
       writeFailing = false;
       return true;
-    } catch (e) {
-      if (!writeFailing) log(`[writes-lost] the warning could not reach ${file} (${e.code || e.message}) — held in memory, retrying`);
+    }, (e) => {
+      writing = null;
+      dirty = true;
+      if (!writeFailing) log(`[writes-lost] the warning could not reach ${file} (${(e && e.code) || (e && e.message) || e}) — held in memory, retrying`);
       writeFailing = true;
       arm();
       return false;
-    }
+    });
+    return writing;
   }
   /** the stdout consumer's door: never throws. {ids, row} — ids = the conversations it was kept for. */
   function note(msg, sessionConversation = null) {
@@ -155,11 +199,24 @@ function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.
     // the instant rides beside the record: `timestamp` is no field of its stream shape, and the replay would raise a drift card for it
     return rowsFor(cid).map(({ timestamp, ...record }) => ({ type: 'writes_lost', at: Date.parse(timestamp), record }));
   };
-  /** the hub's exits (server.js shutdownNow and the uncaughtException belt, the atomic-persistence law): a row still held is written now. What cannot be is said by name: the journal is all that is left of it. */
+  /** the hub's exits (server.js shutdownNow and the uncaughtException belt, the atomic-persistence law): a row still held is written now —
+   *  SYNCHRONOUSLY through the door (the process ends next; B-574d r4761: ONCE A PROCESS — a second stop() writes nothing and answers
+   *  the first's answer). A write still in flight off the loop is not known to land: the exit writes the rows itself. What cannot be
+   *  written is said by name: the journal is all that is left of it. */
   const stop = () => {
+    if (stopped) return stopAnswer;
+    stopped = true;
     if (timer) { clearTimeout(timer); timer = null; }
-    const ok = flush();
+    // a write still in flight off the loop is not known to land: the exit writes the rows itself — and takes that write's temp away FIRST,
+    // so a rename already asked of the file system finds no temp and can never land its older rows after the exit's
+    if (writing) { dirty = true; try { fs.unlinkSync(file + '.w.tmp'); } catch { /* not there yet, or gone */ } }
+    let ok = true;
+    if (dirty) {
+      if (!load()) ok = false;
+      else { try { writeExit(file, rowsText(), sayNoSync); dirty = false; } catch (e) { ok = false; log(`[writes-lost] the warning could not reach ${file} at the stop (${(e && e.code) || (e && e.message) || e})`); } }
+    }
     if (!ok) log(`[writes-lost] the hub stops with a warning that never reached ${file} — only these journal lines are left of it`);
+    stopAnswer = ok;
     return ok;
   };
   return { note, rowsFor, cards, flush, stop, file };
