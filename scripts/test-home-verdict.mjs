@@ -396,10 +396,17 @@ const S = await import(${JSON.stringify(url)});
 const R = S.REHOMED;
 const kid = spawnSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({ planted: process.env.HV_PLANTED_LATE ?? null, cfg: process.env.CLAUDE_CONFIG_DIR ?? null, noRow: process.env.HV_HANDED_NOROW ?? null, path: process.env.PATH, home: require("os").homedir() }))'], { encoding: 'utf8' }).stdout;
 console.log(JSON.stringify({ home: R && R.home, own: R && R.own, ownPath: R && R.ownPath, kid }));`;
-const start = (file, env, src, { exec = process.execPath, clean = false, cwd } = {}) => {
+// THE RUNNER's DRIVER NAMES NEVER REACH A SCENE BY INHERITANCE (主开发 r4804, the 2.369.420 candidate's real-driver row 965): such a
+// row hands THIS suite both driver names (its class asks), and a child started from the suite's own environment inherited them, so
+// the «no name» scene was a NAMED world and the door rightly linked the row's driver. ONE base for every child that inherits: the
+// suite's environment WITHOUT either name (`base`: the suite's own, or a planted one for the driver door's control). A scene that
+// means a named driver or a named browsers folder sets its own (D2-D4, the browsers scenes); a clean start takes its env whole.
+const DRIVER_VARS = Object.freeze([SM.DRIVER.env, SM.DRIVER.browsersEnv]);
+const unnamed = (env) => Object.fromEntries(Object.entries(env).filter(([k]) => !DRIVER_VARS.includes(k)));
+const start = (file, env, src, { exec = process.execPath, clean = false, cwd, base = process.env } = {}) => {
   if (src !== null) fs.writeFileSync(file, src);
   return new Promise((resolve) => {
-    const c = spawn(exec, [file], { env: clean ? env : { ...process.env, ...env }, timeout: 60000, ...(cwd ? { cwd } : {}) });
+    const c = spawn(exec, [file], { env: clean ? env : { ...unnamed(base), ...env }, timeout: 60000, ...(cwd ? { cwd } : {}) });
     let out = '', err = '';
     c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
     c.on('error', (e) => resolve({ j: null, err: String(e), status: null, out }));
@@ -873,10 +880,11 @@ console.log('— the driver\'s door: the one real driver the run NAMES reaches a
   ok(bareSites.length === 0 && sentenceSites.length >= 33 && suitesSaid.size >= 22 && ctlSites.length === 2 && ctlSites.filter((s) => !s.said).length === 1 && SM.DRIVER.skip.length > 20 && !/SKIP/.test(SM.DRIVER.skip),
     `THE ONE SENTENCE (r2095): every skip whose words say the real driver is absent begins «${SM.DRIVER.skip}» — ${sentenceSites.length} sites in ${suitesSaid.size} suites, none bare; it holds no skip word of its own (the line's own skip word stays first); CONTROL: a planted bare one is found, a Chrome-absent one is none`, bareSites.map((s) => `${s.f}:${s.at}`));
   const PROBE_DRV = (url) => `import fs from 'node:fs'; import path from 'node:path';
+const NAMED = ${JSON.stringify(DRIVER_VARS)}.filter((k) => k in process.env);   // read BEFORE the import: the names the child was STARTED with
 const S = await import(${JSON.stringify(url)});
 const on = (n) => { for (const d of String(process.env.PATH || '').split(':')) { const f = path.join(d, n); try { fs.accessSync(f, fs.constants.X_OK); return f; } catch { } } return null; };
 const ab = on('agent-browser'); let real = null; try { real = ab && fs.realpathSync(ab); } catch { }
-console.log(JSON.stringify({ home: S.REHOMED && S.REHOMED.home, linked: (S.REHOMED && S.REHOMED.linked) || [], ab, real, other: on('vs-hv-other-tool') }));`;
+console.log(JSON.stringify({ home: S.REHOMED && S.REHOMED.home, linked: (S.REHOMED && S.REHOMED.linked) || [], ab, real, other: on('vs-hv-other-tool'), named: NAMED, browsers: (S.REHOMED && S.REHOMED.browsers) || null }));`;
   const fake = (f, body) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, body, { mode: 0o755 }); return fs.realpathSync(f); };
   const REAL_BODY = '#!/bin/sh\necho 0.38.2\n', SHIM_BODY = `#!/bin/sh\n# ${VERBS.SHIM_MARKER}\nexit 2\n`;
   const scene = (tag, plant) => { const s = standin(`drv-${tag}`, { small: true }); return { s, ...plant(s) }; };
@@ -885,13 +893,21 @@ console.log(JSON.stringify({ home: S.REHOMED && S.REHOMED.home, linked: (S.REHOM
   const D3 = scene('gone', (s) => ({ onPath: fake(path.join(s.home, '.nvm/bin/agent-browser'), REAL_BODY), env: { VS_AGENT_BROWSER_BIN: path.join(s.seam, 'none/agent-browser') } }));
   const D4 = scene('shim', (s) => { const shim = path.join(s.seam, 'shim/agent-browser'); fake(shim, SHIM_BODY); return { env: { VS_AGENT_BROWSER_BIN: shim } }; });
   const CUT = mutant('drvcut', '  if (drv.path) {', '  if (false && drv.path) {');
-  const go = (d, tag, url = SCRATCH_URL, dir = DIR) => start(path.join(dir, `test-hv-drv-${tag}.mjs`), { ...d.s.env, ...(d.env || {}) }, PROBE_DRV(url));
-  const [r1, r2, r3, r4, rc] = await Promise.all([go(D1, 'noname'), go(D2, 'named'), go(D3, 'gone'), go(D4, 'shim'), go(D2, 'cut', CUT.url, path.dirname(CUT.probe))]);
+  const go = (d, tag, url = SCRATCH_URL, dir = DIR, base = process.env) => start(path.join(dir, `test-hv-drv-${tag}.mjs`), { ...d.s.env, ...(d.env || {}) }, PROBE_DRV(url), { base });
+  // r4804: a base that HOLDS both names, planted as a real-driver row hands them (D2's named program and a folder of builds)
+  const PLANT_BR = path.dirname(path.dirname(fake(path.join(DIR, 'drv-planted/builds/chrome-151.0.7922.34/chrome'), REAL_BODY)));
+  const PLANTED = { ...process.env, [SM.DRIVER.env]: D2.want, [SM.DRIVER.browsersEnv]: PLANT_BR };
+  const [r1, r2, r3, r4, rc, rp, rw] = await Promise.all([go(D1, 'noname'), go(D2, 'named'), go(D3, 'gone'), go(D4, 'shim'), go(D2, 'cut', CUT.url, path.dirname(CUT.probe)),
+    go(D1, 'planted', SCRATCH_URL, DIR, PLANTED), start(path.join(DIR, 'test-hv-drv-whole.mjs'), { ...PLANTED, ...D1.s.env }, PROBE_DRV(SCRATCH_URL), { clean: true })]);
   const own = (r) => !!(r.j && r.j.home && r.j.ab === path.join(r.j.home, '.vs-bin', 'agent-browser') && r.j.linked.includes('agent-browser'));
   ok(own(r2) && r2.j.real === D2.want && r2.j.other === null,
     'THROUGH THE IMPORT: the program VS_AGENT_BROWSER_BIN names reaches the re-homed suite in its OWN .vs-bin — that one program, never the PATH\'s driver, and nothing of its folder beside it', { j: r2.j, err: r2.err.slice(-300) });
   ok(!!r1.j && !r1.j.linked.includes('agent-browser') && r1.j.real !== D1.onPath && !/VS_AGENT_BROWSER_BIN names/.test(r1.err),
     'NO NAME, NO DRIVER (r2095): a driver standing on the handed PATH (node\'s own folder) is never picked up — the fence skips in its own words', { j: r1.j, err: r1.err.slice(-300) });
+  ok(!!r1.j && Array.isArray(r1.j.named) && r1.j.named.length === 0 && !!rp.j && Array.isArray(rp.j.named) && rp.j.named.length === 0 && !rp.j.linked.includes('agent-browser') && rp.j.real !== D2.want && rp.j.browsers === null && !/VS_AGENT_BROWSER_\w+ names/.test(rp.err),
+    `THE NO-NAME SCENE HOLDS NO NAME (r4804): its child starts with neither ${DRIVER_VARS.join(' nor ')}, on any row; PLACED: from a base that HOLDS both (as a real-driver row hands them) it still holds neither, links no driver and places no browsers`, { r1: r1.j && r1.j.named, rp: rp.j, err: rp.err.slice(-300) });
+  ok(!!rw.j && Array.isArray(rw.j.named) && rw.j.named.length === 2 && rw.j.linked.includes('agent-browser') && rw.j.real === D2.want && !!rw.j.browsers && !!rw.j.browsers.at,
+    'RED CONTROL: the same planted base taken WHOLE (the release\'s road: the suite\'s environment under the scene\'s) — the child holds both names, the door links the planted program and the browsers are placed: row 965\'s red, made at will', { j: rw.j, err: rw.err.slice(-300) });
   ok(!!r3.j && !r3.j.linked.includes('agent-browser') && r3.j.real !== D3.onPath && /VS_AGENT_BROWSER_BIN names .*none\/agent-browser: no usable agent-browser there/.test(r3.err),
     'a NAMED program that is not there is none — said by name on stderr; the PATH\'s driver never stands in for it', { j: r3.j, err: r3.err.slice(-300) });
   ok(!!r4.j && !r4.j.linked.includes('agent-browser') && /VS_AGENT_BROWSER_BIN names .*shim\/agent-browser: no usable agent-browser there/.test(r4.err),
