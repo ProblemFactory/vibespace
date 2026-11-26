@@ -13,6 +13,8 @@ const { createAdapterRegistry } = require('../adapters');
 const { createCliCmds } = require('./cli-cmd.js');
 const { capsOf, setVerifiedCap } = require('../backend-caps');
 const { realCliRefusal } = require('../machine-probes'); // B-ec25: no self-found agent CLI is started under VS_NO_REAL_CLI=1
+const SR = require('../store-read.js');   // B-f276 (s1126): the learned models list's read answers through the law
+const HOLD = require('../store-read-hold.js');   // …and its hold: a failed or torn read held, read again off the loop
 
 /** THE predicate "this harness's STORE is broken", or null. Module scope on
  *  purpose: /api/home (harnessAvailability) and the live harness-store-updated
@@ -370,16 +372,46 @@ const CLAUDE_KNOWN_MODELS = [
 // hook writes, so chat/remote sessions teach the dropdown too (both writers
 // preserve-merge; ingestPassiveModels picks it up within ~30s).
 const _modelsSeenRam = new Set();
+// (B-f276, lane lg-providers s1126) THE LIST's READ, by the store-read law through the family's hold (src/store-read-hold.js — as the
+// login-expiry store's): data merges, missing starts the list; a read that FAILS, or bytes that do not parse, HOLD the list: nothing
+// is written over it and NOTHING more is read on a sighting's road while it is held (the ids seen meanwhile wait in _modelsPending).
+// The hold reads again OFF the loop on store-read's ladder and keeps torn bytes aside off the loop (once per content); at its lift the
+// waiting ids are merged and written. A lift from torn bytes (or a file gone meanwhile) starts a fresh list and forgets what this
+// process had learned, so every model is learned again at its next sighting. Nothing synchronous is added: one read and one write.
+const _modelsPending = new Set();
+let _modelsHold = null;
+const modelsFile = () => path.join(USAGE_CACHE_DIR, '__models__.json');
+const modelsLabel = (id) => id.replace(/^claude-/, '').replace(/-(\d{8})$/, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+function writeModels(list) { try { fs.writeFileSync(modelsFile(), JSON.stringify(list)); return true; } catch { return false; } }
+function modelsHoldOf() {
+  if (_modelsHold) return _modelsHold;
+  const file = modelsFile();
+  _modelsHold = HOLD.create({ file, valid: Array.isArray, code: 'models_unread', aside: (m) => file + '.corrupt-' + m,
+    words: (h) => `the list of models VibeSpace learned from its conversations could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing is written over it; the models seen meanwhile are added once it reads`,
+    log: (l) => console.warn(`[models] ${l}`),
+    onLift: (v) => {
+      const list = Array.isArray(v) ? v.slice() : [];
+      if (!Array.isArray(v)) { const waiting = [..._modelsPending]; _modelsSeenRam.clear(); for (const id of waiting) _modelsSeenRam.add(id); }
+      for (const id of _modelsPending) if (!list.some((m) => m && m.id === id)) list.push({ id, label: modelsLabel(id) });
+      if (_modelsPending.size && !writeModels(list)) for (const id of _modelsPending) _modelsSeenRam.delete(id);   // a failed write: tried again at the next sighting
+      _modelsPending.clear();
+    } });
+  return _modelsHold;
+}
 function noteModelSeen(id) {
   if (!id || typeof id !== 'string' || id === '<synthetic>' || _modelsSeenRam.has(id)) return;
   _modelsSeenRam.add(id);
+  if (_modelsHold && _modelsHold.held()) { _modelsPending.add(id); return; }   // HELD: no read on this road; the hold's lift writes it
   try {
-    const fp = path.join(USAGE_CACHE_DIR, '__models__.json');
-    let list = [];
-    try { list = require('../usage-cache-write.js').readCacheJson(fp) || []; } catch { }   // lane lg-store-writes U6.4: the folder's models list through the cache module
+    const fp = modelsFile();
+    let read; try { read = { text: fs.readFileSync(fp, 'utf-8') }; } catch (e) { read = { error: e }; }
+    const a = SR.storeAnswer(read, { valid: Array.isArray });
+    const st = modelsHoldOf().start(a);
+    if (st !== 'data' && st !== 'missing') { _modelsPending.add(id); return; }
+    const list = st === 'data' ? a.value : [];
     if (!list.some((m) => m && m.id === id)) {
-      list.push({ id, label: id.replace(/^claude-/, '').replace(/-(\d{8})$/, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) });
-      fs.writeFileSync(fp, JSON.stringify(list));
+      list.push({ id, label: modelsLabel(id) });
+      if (!writeModels(list)) _modelsSeenRam.delete(id);   // a write that failed: tried again at the next sighting
     }
   } catch { }
 }
@@ -483,7 +515,7 @@ function refreshAvailableModels() {
     CLAUDE_CMD, CODEX_CMD, CODEX_LINUX_SANDBOX_CMD, CODEX_SANDBOX_SUPPORTED,
     CLAUDE_SUBSCRIPTION_LOGIN_HELPER, CLAUDE_SUPPORTS_NAME, PERMISSION_MODES,
     EFFORT_LEVELS, CLAUDE_MODEL_ALIASES, CLAUDE_KNOWN_MODELS, AVAILABLE_MODELS,
-    noteModelSeen, refreshAvailableModels, ACP_COMMANDS, harnessAvailability, noteHarnessModels, opencodeServe, cliCmds };
+    noteModelSeen, modelsHeld: () => (_modelsHold ? _modelsHold.held() : null), modelsReadAgain: () => (_modelsHold ? _modelsHold.again() : Promise.resolve(false)), refreshAvailableModels, ACP_COMMANDS, harnessAvailability, noteHarnessModels, opencodeServe, cliCmds };
 }
 // The declared-extras gate (ultracode rides only when the CLI parsed xhigh) lives in the PURE src/harness-efforts.js
 // since lane effort-menu-per-harness: /api/session-options answers each harness its OWN levels + extras per backend.

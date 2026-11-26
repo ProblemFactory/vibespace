@@ -40,6 +40,7 @@ const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthU
 // MG1 (r2929): inside a migration's run a failed read (anything but «not there») or bytes that do not parse THROW — not run, the
 // next start tries again; the boot's and the hourly identity repair (and every other caller) keep each catch's own answer
 const MR = require('./migration-reads.js');
+const SR = require('./store-read.js');   // B-f276 (s1126): the emptied list's read answers through the law
 
 function _readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) { MR.absentOr(e, f); return null; } }
 // a READING (a file of data/usage-cache): through the cache module's reader (lane lg-store-writes, B-0248 U6.3 — the one place
@@ -496,6 +497,25 @@ function repairAttribution({ dataDir, historyDir, archiveDir, markers, transitio
     res.archived++; dirty = true;
   }
   if (dirty) {
+    // (B-f276, lane lg-providers s1126) THE EMPTIED LIST FIRST — read through the store-read law BEFORE any write of this repair
+    // (the archive, the map, the list, the marker): a list that cannot be read, or whose bytes do not parse, refuses the whole repair
+    // here, nothing written (in the migration MR.absentOr makes it «not run» and the next start runs it whole — after the map's rewrite
+    // its re-run would no longer see the conversations it empties, and their spend would stay on the refuted account); its write
+    // lands BEFORE the map's and is not swallowed (a failed write stops the repair before the map and the marker move)
+    const emptied = [...sidsBefore].filter((sid) => !sidsKept.has(sid));
+    res.emptied = emptied.length;
+    if (emptied.length) {
+      const f = path.join(historyDir, '.attrib-emptied.json');
+      let read; try { read = { text: fs.readFileSync(f, 'utf-8') }; } catch (e) { read = { error: e }; }
+      const a = SR.storeAnswer(read, { valid: Array.isArray });
+      if (!a.writable) { MR.absentOr(a.error || new SyntaxError(a.why || 'did not parse'), f); res.emptiedHeld = a.code || a.state; return res; }
+      const merged = [...new Set([...(a.state === 'data' ? a.value : []), ...emptied])].slice(-20000);
+      _writeAtomic(f, JSON.stringify(merged));
+    }
+    // THE HAND-OFF TO THE RE-BAKE cleared next, still before the archive and the map: a removal that fails (anything but «not there»)
+    // refuses the repair (in its migration: «not run»), and a crash after the map's rewrite can no longer leave the marker in place
+    // with nothing left for a re-run to repair
+    try { fs.unlinkSync(path.join(historyDir, '.attrib-rebake-v1')); } catch (e) { if (!(e && e.code === 'ENOENT')) { MR.absentOr(e, path.join(historyDir, '.attrib-rebake-v1')); res.markerHeld = (e && e.code) || 'unlink'; return res; } }
     _appendArchive(archiveDir, 'readings-foreign-attribution.ndjson', archived);
     _writeAtomic(fp, out.join('\n') + (out.length ? '\n' : ''));
     // HAND-OFF TO THE RE-BAKE. The baked ledger events carry the acct this
@@ -516,15 +536,7 @@ function repairAttribution({ dataDir, historyDir, archiveDir, markers, transitio
     // still hold), which is exactly the un-refuted answer.
     // The list is APPENDED and kept: it stays true (those sids have no
     // attribution entries), so any later re-bake generation inherits it.
-    const emptied = [...sidsBefore].filter((sid) => !sidsKept.has(sid));
-    res.emptied = emptied.length;
-    if (emptied.length) {
-      const f = path.join(historyDir, '.attrib-emptied.json');
-      const prev = _readJson(f);
-      const merged = [...new Set([...(Array.isArray(prev) ? prev : []), ...emptied])].slice(-20000);
-      try { _writeAtomic(f, JSON.stringify(merged)); } catch { }
-    }
-    try { fs.unlinkSync(path.join(historyDir, '.attrib-rebake-v1')); } catch { }
+    // (the list itself is read and written FIRST, above — before the archive and the map: B-f276, lane lg-providers s1126; the marker too)
   }
   return res;
 }

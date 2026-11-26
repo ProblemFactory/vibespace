@@ -255,7 +255,7 @@ const CACHE_READ_ROWS = {
   'src/mounts.js': [5, 'another cache named cacheDir (the mounts\' own)'],
   'src/server/browser-keeper.js': [2, 'another cache named cacheDir (the browser\'s)'],
   'src/server/browser-display-config.js': [1, 'another cache named cacheDir (the browser\'s)'],
-  'src/server/cli-env.js': [3, 'another cache named cacheDir (a CLI\'s) + (lane lg-store-writes U6.4) the readings folder\'s models list (__models__.json) read through the cache module — a read of the usage cache this census now sees'],
+  'src/server/cli-env.js': [2, 'another cache named cacheDir (a CLI\'s) + the readings folder\'s models list (__models__.json): its path built ONCE (modelsFile) and read with store-read\'s answer, held through store-read-hold (B-f276 slice s1126, lane lg-providers — the cache module\'s reader line of lane lg-store-writes U6.4 gone: −1)'],
 };
 // r4: EVERY TOUCH, not one spelling — a line that names the cache (USAGE_CACHE_DIR, usage-cache, cacheDir, a cache-file
 // builder, a cache reader) and reads it, lists it or BUILDS A PATH into it (a read on the next line starts here), or that
