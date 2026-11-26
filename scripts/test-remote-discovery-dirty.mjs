@@ -90,7 +90,8 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
   const fsm = require('fs');
   const REPO = require('path').resolve(new URL('..', import.meta.url).pathname);
   const scene = (HM, tag) => {
-    const hm = new HM({ dataDir: scratch('disc-cache-writer-' + tag) });
+    const dd = scratch('disc-cache-writer-' + tag); fsm.mkdirSync(dd, { recursive: true });   // a data folder that exists, as the hub's does
+    const hm = new HM({ dataDir: dd });
     const handed = []; hm._storeWriter = { dirty: (f, o) => handed.push([f, o]) };
     const w0 = fsm.writeFileSync, r0 = fsm.renameSync; let syncWrites = 0;
     fsm.writeFileSync = function (f, ...a) { if (String(f).startsWith(hm._discFile)) syncWrites++; return w0.call(this, f, ...a); };
@@ -104,7 +105,7 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
   };
   const r = scene(HostManager, 'real');
   ok(r.handed === 2 && r.file && r.name === 'remote-sessions-cache.write' && r.both && r.syncWrites === 0, 'B-574d: the last-known sessions are handed to THE STORE WRITER under their row\'s name at every result (the bytes made at the write: both lists), with no synchronous write of the file on the loop — ' + JSON.stringify(r));
-  const dir = scratch('disc-cache-landed');
+  const dir = scratch('disc-cache-landed'); fsm.mkdirSync(dir, { recursive: true });   // the writer writes into the data folder; the hub's always exists
   const hm1 = new HostManager({ dataDir: dir });
   hm1._persistDiscovery('hC', [{ sessionId: 'sC' }]);
   const landed = await require('../src/store-writer.js').storeWriter().durable(hm1._discFile);
