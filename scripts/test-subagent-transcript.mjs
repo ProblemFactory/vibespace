@@ -447,10 +447,31 @@ console.log('⑨ THE CUT (主开发 r2874 (1)) — a transcript cut and written 
 console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that stops answering: answered by name at the bound, no second look, the next ask served');
 {
   const hooked = fs.promises.readdir;
-  let gate = null, rootLooks = 0;
+  let gate = null, rootLooks = 0, order = null;
   // THE STALL, PLACED: the projects folder's listing held until released (never made by load)
-  fs.promises.readdir = function (p, ...a) { if (p === PROJ) { rootLooks++; if (gate) return gate.p.then(() => hooked.call(fs.promises, p, ...a)); } return hooked.call(this, p, ...a); };
-  const stall = () => { let release; const p = new Promise((r) => { release = r; }); gate = { p, release }; };
+  fs.promises.readdir = function (p, ...a) { if (p === PROJ) { rootLooks++; if (gate) { const g = gate, lp = g.p.then(() => hooked.call(fs.promises, p, ...a)); g.looks.push(lp); return lp; } if (order) return hooked.call(fs.promises, p, ...a).then(order); } return hooked.call(this, p, ...a); };
+  const stall = () => { let release; const p = new Promise((r) => { release = r; }); gate = { p, release, looks: [] }; };
+  // THE LOOK'S RETURN AS THE PRODUCT STATES IT (B-3dbd, 主开发 r5212 / r5222; it was a count of 300 × 10 ms that went on silently, and
+  // under load the leg asked with the look still out): the held listing released, ITS OWN promise awaited (10 s, the bound's end a red),
+  // and its folder's mark read right after it — the mark clears when its look returns (markUnanswered), never later
+  const lateOf = (pr, ms) => { let t = null; return Promise.race([pr.then(() => false, () => false), new Promise((r) => { t = setTimeout(() => r(true), ms); })]).finally(() => clearTimeout(t)); };
+  const returned = async (TT, g) => { const t0 = Date.now(); g.release(); const late = await lateOf(Promise.allSettled(g.looks), 10000); await new Promise((r) => setImmediate(r)); return { settled: !late, looks: g.looks.length, ms: Date.now() - t0, marked: TT.stats().marked }; };
+  // an ask of the route that reads the helper's walk count AT the product's answer (inside its own res.json)
+  const askAt = (q, TT) => new Promise((resolve) => { const res = { code: 200 }; res.status = (c) => { res.code = c; return res; }; res.json = (o) => { res.body = o; res.walking = TT.stats().walking; resolve(res); return res; }; Promise.resolve(ROUTE({ query: q }, res)).catch((e) => resolve({ code: 'threw', body: { refused: String(e) }, walking: -1 })); });
+  // THE FIRST ASK AFTER THE LOOK RETURNED, on the product's own word: served; or «walk-unfinished» ONLY while its own walk truly goes
+  // (the walk count above zero at its answer: the witness) — then that walk's end waited for (10 s, its end a red) and the next ask
+  // served from the place the walk kept (the kept count up by one). A refusal by the mark, or any other code: red. No bound widened
+  // (the suite's 0.2 s stays: a fresh walk of the 300 project folders is about 50 ms, and under load it may not finish inside it).
+  const firstAfter = async (TT, askOnce) => {
+    const a = await askOnce(), code = ((a.body || {}).refusedCode || {}).code || null, cards = ((a.body || {}).messages || []).length;
+    if (a.code === 200 && cards > 0) return { ok: true, road: 'served', said: `served at once (200, ${cards} cards)` };
+    if (a.code === 503 && code === 'walk-unfinished' && a.walking > 0) {
+      const end = Date.now() + 10000; while (TT.stats().walking > 0 && Date.now() < end) await sleep(10);
+      const ended = TT.stats().walking === 0, k0 = TT.stats().kept, b = ended ? await askOnce() : null, k1 = TT.stats().kept, bCards = b ? ((b.body || {}).messages || []).length : 0;
+      return { ok: ended && b.code === 200 && bCards > 0 && k1 === k0 + 1, road: 'unfinished', said: `told «unfinished» while its own walk went (${a.walking} walking at its answer); ${ended ? `at that walk's end the next ask ${b.code}, ${bCards} cards, by the kept place ${k1 - k0}` : 'its walk did not end within 10 s'}` };
+    }
+    return { ok: false, road: 'refused', said: `${a.code} ${code || '-'} «${(a.body || {}).refused || ''}» (${a.walking} walking at its answer)` };
+  };
   const within = (p, ms) => Promise.race([p, sleep(ms).then(() => ({ late: true }))]);
   try {
     T._resetForTest(); T._setFindBoundForTest(200);
@@ -464,14 +485,14 @@ console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that 
     const H = hub(require(WSH_PATH));
     const at = await attachOf(H, BW);
     const looks = rootLooks;
-    gate.release(); gate = null;
-    for (let i = 0; i < 300 && T.stats().marked > 0; i++) await sleep(10);   // (a count: until the held listing has returned and its folder's mark is cleared)
-    const r3 = await ASK(ROUTE, { claudeSessionId: SID, cwd: CWD, agentId: BW });
+    const back = await returned(T, gate); gate = null;
+    const first = await firstAfter(T, () => askAt({ claudeSessionId: SID, cwd: CWD, agentId: BW }, T));
     ok(r1.code === 503 && /the projects folder did not answer within 0\.2 s/.test(r1.body.refused || ''), `a stalled listing of the projects folder: the route answers BY NAME at the bound (${r1.code}, «${r1.body.refused}», ${ms1} ms)`);
     // «at once» by the census, never a clock: the mark's own refusal (not the bound's) and one listing of the folder in all
     ok(r2.code === 503 && /did not answer \(a look there is still out\)/.test(r2.body.refused || '') && looks === 1, `…the next ask while that look is out starts NO second one (${looks} listing of the projects folder in all) and is refused by name at once, by the mark («${r2.body.refused}», ${ms2} ms)`);
     ok(!!at.frame && /did not answer/.test(at.frame.loadRefused || ''), `…the attach too, by name: «${(at.frame || {}).loadRefused}»`);
-    ok(r3.code === 200 && (r3.body.messages || []).length > 0, `the first ask after the stalled look returned is served (${r3.code}, ${(r3.body.messages || []).length} cards)`);
+    ok(back.settled && back.looks === 1 && back.marked === 0, `the stalled look's return clears its mark: its own listing settled ${back.ms} ms after the release and its folder's mark was gone right after it (${back.marked} marked) — read as the product states it, never a count`, back);
+    ok(first.ok, `the first ask after the look returned is never refused by the mark: served, or told «unfinished» only while its own walk truly goes and then served at that walk's end from the place it kept (${first.road}: ${first.said})`, first);
     // RED: today's finder — no bound, no count of its looks — planted in a copy
     const HSRC = fs.readFileSync(path.join(REPO, 'src/server/subagent-transcript.js'), 'utf-8');
     const unbounded = MUT.load('src/server/subagent-transcript.js', anchored(anchored(anchored(HSRC,
@@ -486,6 +507,27 @@ console.log('⑩ THE FIND\'S BOUND (主开发 r2881) — a projects folder that 
     gate.release(); gate = null;
     await Promise.all([u1, u2]);
     ok(a1.late && a2.late && stacked === 2, `RED CONTROL: today's finder never answers while the folder is stalled (neither ask in 0.6 s) and stacks a second look on it (${stacked}) — the legs above would be RED`);
+    // PLACED (r5222): the first ask after the look returned is told «unfinished» at will — the listing ordered with the agent's folder
+    // LAST and each look of a project folder 1 ms slower, so its own walk (about 300 looks) goes past the suite's 0.2 s bound — the
+    // road taken only on the product's word, its witness the walk count at its answer; served at that walk's end from its kept place
+    T._resetForTest(); T._setFindBoundForTest(200); rootLooks = 0; stall();
+    await askAt({ claudeSessionId: SID, cwd: CWD, agentId: BW }, T);
+    const backP = await returned(T, gate); gate = null;
+    const farDir = cwdToProjectDir(OTHER_CWD), rp0 = fs.promises.realpath;
+    order = (dirs) => [...dirs.filter((d) => String(d) !== farDir), ...dirs.filter((d) => String(d) === farDir)];
+    fs.promises.realpath = function (q, ...a) { return String(q).startsWith(PROJ + path.sep) ? sleep(1).then(() => rp0.call(fs.promises, q, ...a)) : rp0.call(this, q, ...a); };
+    let placed; try { placed = await firstAfter(T, () => askAt({ claudeSessionId: SID, cwd: CWD, agentId: BW }, T)); } finally { fs.promises.realpath = rp0; order = null; }
+    ok(backP.marked === 0 && placed.ok && placed.road === 'unfinished', `PLACED (each look 1 ms slower, the agent's folder listed last): the first ask after the look returned is told «unfinished» while its own walk goes, and is served at that walk's end from the place it kept (${placed.said})`, placed);
+    // RED CONTROL (r5222, the mark's law): a copy whose mark never clears when its look returns — its first ask after the return is
+    // refused by the mark, and the return's own leg reads it marked
+    const stays = MUT.load('src/server/subagent-transcript.js', anchored(HSRC, ' out.lp.then(clear, clear); };\n', ' };\n', 'the mark clears when its look returns'), 'find-mark-stays');
+    stays._resetForTest(); stays._setFindBoundForTest(200); rootLooks = 0; stall();
+    const askS = async () => { const r = await stays.agentTranscript({ claudeSessionId: SID, agentId: BW, exactDir: path.join(PROJ, cwdToProjectDir(CWD)), root: PROJ }); return { code: r.fp ? 200 : 503, body: { messages: r.records || [], refused: r.refused, refusedCode: r.said }, walking: stays.stats().walking }; };
+    await askS();
+    const backS = await returned(stays, gate); gate = null;
+    const firstS = await firstAfter(stays, askS);
+    ok(backS.settled && backS.marked === 1 && !firstS.ok && firstS.road === 'refused' && /a look there is still out/.test(firstS.said), `RED CONTROL: a copy whose mark never clears — its look settled ${backS.ms} ms after the release, its folder still marked (${backS.marked}), and the first ask after it is refused by the mark (${firstS.said}) — the two legs above would be RED`, { backS, firstS });
+    stays._resetForTest();
   } finally { if (gate) gate.release(); fs.promises.readdir = hooked; T._resetForTest(); }
 }
 
