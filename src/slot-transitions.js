@@ -174,6 +174,8 @@ class SlotTransitions {
     return rows;
   }
 
+  /** is the ledger HELD now (a read failed and has not read again) — asked without a read (the banner's road, r5109) */
+  held() { return !!this._st.held; }
   /** HOLD the ledger (a read that failed): nothing of that read kept; the ladder armed */
   _hold(failed) {
     const st = this._st;
@@ -202,7 +204,7 @@ class SlotTransitions {
       for (const f of names) if (/^slot-transitions-\d+\.jsonl$/.test(f)) { try { texts.push([await fs.promises.readFile(path.join(this.archiveDir, f)), false]); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; } }
       let live = null;
       try { live = await fs.promises.readFile(this.file); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
-      if (st.gen !== gen && !st.held) return;
+      if (st.gen !== gen) return;   // r5109: an append landed while this read was out — its rows are discarded, read again on the next rung
       const rows = [];
       for (const [buf] of texts) for (const line of buf.toString('utf-8').split('\n')) { if (!line) continue; try { const r = JSON.parse(line); if (r && r.to && Number.isFinite(r.at)) rows.push(r); } catch { } }
       let lines = 0;

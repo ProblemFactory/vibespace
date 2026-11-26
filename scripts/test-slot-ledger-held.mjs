@@ -8,7 +8,8 @@
 //   ① THE DOOR: all() / slotAt() / transitionsFor() refuse by name (ELEDGERHELD) on a live file or a shard that cannot be read;
 //      nothing of that read is kept; a file that is not there stays «no row» (ENOENT); a record while held still APPENDS.
 //   ② THE MONEY ROADS (the real engine over a real pool): a READING while held is filed NOWHERE (no member's numbers move), said
-//      once with a number, naming the ledger and no account; a REJECTION is archived on no account.
+//      once with a number, naming the ledger and no account; a REJECTION and its limit BANNER mark NO account (r5109 M1); the WALLED
+//      TURN's END is its own verdict — never «refuted», the conversation met its wall on its member, no line names an account (M2).
 //   ③ THE VENDOR: a panel ask of the member while held asks NOTHING (no get_usage written to the conversation), and the skip says
 //      the ledger's sentence.
 //   ④ THE LIFT: once the ledger reads whole again (its own ladder, off the loop) nothing is attributed late — the numbers filed
@@ -115,19 +116,26 @@ const quietLog = () => { const said = [], o = { log: console.log, warn: console.
   // the ledger can no longer be read (its kept rows dropped: the next read reads the file)
   refuse = ledgerOnly; w.eng.slotTransitions._cache = null;
   const q = quietLog();
+  const events = []; const origEvent = global.__vsEvent; global.__vsEvent = (name, v) => { events.push(String(name)); try { origEvent && origEvent(name, v); } catch { } };
   let threw = null;
   try {
     for (let i = 0; i < 3; i++) w.eng.recordRateLimitEvent(w.s, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.77, resets_at: w.R7, resetsAt: w.R7 } });
     w.eng.recordRateLimitEvent(w.s, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resets_at: w.R5, resetsAt: w.R5 } });
+    w.eng.markLimitBanner(w.s, "You've reached your 5-hour limit");   // r5109 M1: the banner of the same rejection
+    w.eng.noteTurnEnd(w.s);   // r5109 M2: the walled turn's end
   } catch (e) { threw = e; }
   const probe = await Promise.race([w.eng.probeUsageForAccountKey(w.B, { detailed: true }), sleep(50).then(() => 'pending')]);
-  q.done();
+  q.done(); global.__vsEvent = origEvent;
+  const allNamed = q.said.filter((l) => l.includes(w.A) || l.includes(w.B) || /Member [AB]/.test(l));
+  const metWall = !!(w.eng._sessionWalls && w.eng._sessionWalls.get(w.s._webuiId) && w.eng._sessionWalls.get(w.s._webuiId).has(w.B));
   const during = w.caches(), asksHeld = w.getUsageAsks() - asks0;
   const ledgerSaid = q.said.filter((l) => l.includes('slot-transitions.jsonl'));
   const namesAccount = ledgerSaid.some((l) => l.includes(w.A) || l.includes(w.B) || /Member [AB]/.test(l));
   const skipWhy = probe && probe !== 'pending' && Array.isArray(probe.skipped) ? probe.skipped.map((x) => x.why).join(' | ') : '';
   ok(!threw, `② no refusal reaches the producer as an uncaught throw (${threw ? threw.message : 'none'})`);
-  ok(during[w.A] === before[w.A] && during[w.B] === before[w.B], '② while held a READING is filed NOWHERE and a REJECTION on NO account: neither member\'s numbers moved', { changed: [w.A, w.B].filter((id) => during[id] !== before[id]) });
+  ok(during[w.A] === before[w.A] && during[w.B] === before[w.B], '② while held a READING is filed NOWHERE, a REJECTION and its BANNER on NO account, and the walled turn\'s end marks none: neither member\'s numbers moved', { changed: [w.A, w.B].filter((id) => during[id] !== before[id]) });
+  ok(!allNamed.length, `② no line of the held time names an account (the reading, the rejection, the banner, the turn\'s end): ${JSON.stringify(allNamed.slice(0, 2))}`, allNamed);
+  ok(metWall && !events.includes('wall-refuted'), `② THE TURN's END under the hold is its own verdict: the conversation met its wall on its member (noted: ${metWall}, so no continue is armed there) and no refutation was told (${events.filter((e) => /wall/.test(e)).join(', ') || 'no wall event'})`, { metWall, events });
   ok(ledgerSaid.length >= 1 && !namesAccount && ledgerSaid.some((l) => /\b\d+\b/.test(l)), `② it is SAID naming the ledger (slot-transitions.jsonl), with a number, never an account: ${JSON.stringify(ledgerSaid.slice(0, 2))}`, ledgerSaid);
   ok(asksHeld === 0 && /slot-transitions\.jsonl/.test(skipWhy), `③ THE VENDOR: a panel ask of the member while held asks NOTHING (${asksHeld} get_usage written) and its skip says the ledger's sentence («${skipWhy.slice(0, 160)}»)`, { asksHeld, skipWhy });
   // ④ THE LIFT: the read is refused no more; the ledger reads itself whole again on its own ladder (off the loop)
@@ -139,6 +147,27 @@ const quietLog = () => { const said = [], o = { log: console.log, warn: console.
   ok(asksLift === 0, `④ the lift starts NO ask by itself (${asksLift} get_usage written since the hold began)`);
   w.eng.probeUsageForAccountKey(w.B).catch(() => { });
   ok(w.getUsageAsks() - asks0 === 1, `④ the first ask after the lift is an ordinary one: ${w.getUsageAsks() - asks0} get_usage written`);
+}
+
+console.log('②b r5109 M2: a walled turn whose ONLY signal is a held rejection — its own verdict, never «refuted»');
+{
+  const w = world();
+  await sleep(3); w.s._lastRequestOutAt = Date.now(); await sleep(3);
+  const before = w.caches();
+  refuse = ledgerOnly; w.eng.slotTransitions._cache = null;
+  const q = quietLog();
+  const events = []; const origEvent = global.__vsEvent; global.__vsEvent = (name, v) => { events.push(String(name)); try { origEvent && origEvent(name, v); } catch { } };
+  let threw = null;
+  try {
+    w.eng.recordRateLimitEvent(w.s, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resets_at: w.R5, resetsAt: w.R5 } });
+    w.eng.noteTurnEnd(w.s);
+  } catch (e) { threw = e; }
+  q.done(); global.__vsEvent = origEvent; refuse = null;
+  const after = w.caches();
+  const named = q.said.filter((l) => l.includes(w.A) || l.includes(w.B) || /Member [AB]/.test(l));
+  const metWall = !!(w.eng._sessionWalls && w.eng._sessionWalls.get(w.s._webuiId) && w.eng._sessionWalls.get(w.s._webuiId).has(w.B));
+  ok(!threw && after[w.A] === before[w.A] && after[w.B] === before[w.B] && !named.length && metWall && !events.includes('wall-refuted'),
+    `②b the turn's end answers the hold as its own verdict: no member's numbers moved, no line names an account (${JSON.stringify(named.slice(0, 1))}), the conversation met its wall on its member (${metWall}: no continue armed there), no refutation told (${events.filter((e) => /wall/.test(e)).join(', ') || 'no wall event'})`, { threw: threw && threw.message, named, metWall, events });
 }
 
 console.log('⑤ the callers: every call of the three doors answers the held refusal by its one helper');
@@ -169,7 +198,9 @@ console.log('⑤ the callers: every call of the three doors answers the held ref
     }
     return out;
   };
-  const FILES = ['src/server/usage-pool-engine.js', 'src/accounts.js', 'src/ledger-slot-backfill.js', 'src/reading-repair.js'];
+  // r5109: every file of src/ that can reach the ledger's doors (it names the ledger's module or an instance of it), not a list of four
+  const walk = (d, out = []) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walk(r, out); else if (/\.js$/.test(e.name)) out.push(r); } return out; };
+  const FILES = walk('src').filter((f) => f !== 'src/slot-transitions.js' && /slot-transitions\.js|SlotTransitions|slotTransitions|\btransitions\s*\.\s*(all|slotAt|transitionsFor)\s*\(/.test(read(f)));
   const texts = Object.fromEntries(FILES.map((f) => [f, read(f)]));
   const rows = census(texts);
   const bad = rows.filter((r) => !r.listed || !r.handled);
