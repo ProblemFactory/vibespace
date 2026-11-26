@@ -66,6 +66,9 @@ const STORES = Object.freeze({
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
   'hosts.write': row('write', 'hosts', 'src/hosts.js', ['_save']),   // B-48a4: every save of hosts.json, through the store writer (the coordinator's word (e))
   'accounts.write': row('write', 'accounts', 'src/accounts.js', ['_save']),   // B-574d unit 1 (lane lg-store-writes, 主开发 r3455 / r3486): every save of accounts.json, through the store writer (a person's act answers after its landing)
+  'mounts.write': row('write', 'mounts', 'src/mounts.js', ['_save']),   // B-574d «mounts-and-forwards» (lane nl-mounts, 主开发 r4796): every save of mounts.json, through the store writer (a person's act lands before it answers; a remount, a landing, the watchdog: off the loop, nothing when nothing changed)
+  'machine-mounts.write': row('write', 'machine-mounts', 'src/machine-mounts.js', ['_save']),   // B-574d «mounts-and-forwards» (lane nl-mounts, 主开发 r4796): every save of machine-mounts.json but the boot's one-time ingest (a synced replace with its read-back), through the store writer
+  'port-forwards.write': row('write', 'port-forwards', 'src/port-forward.js', ['_persist']),   // B-574d «mounts-and-forwards» (lane nl-mounts, 主开发 r4796): every save of port-forwards.json, through the store writer (a dial-in, the heal sweep, a restart with nothing new write nothing)
   'device-audit.write': row('write', 'device-audit', 'src/device-audit.js', ['askDevice']),   // B-48a4: the device-act ring's appends, through the store writer (THE ONE APPENDER)
   'exit-audit.write': row('write', 'exit-audit', 'src/exit-proxy.js', ['_auditJournal']),   // B-48a4: the exit ring's appends, through the store writer (THE ONE APPENDER)
   // channel-store-off-loop (commit 1): the field-named doors through the store writer (it records each write's time here)

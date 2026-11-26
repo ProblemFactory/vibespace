@@ -617,7 +617,7 @@ try {
   }
   for (const S of STORES) {
     console.log(`⑤ should taken: ${S.name}'s own _save refuses while held (no door in front)`);
-    const run = (X) => { const d = dirOf(S.name + '-save'), f = path.join(d, S.name); const bytes = JSON.stringify(S.plant(d), null, 2); fs.writeFileSync(f, bytes); const un = refuse(f); let s = null; try { s = S.make(d, X); } finally { un(); } try { s._save(); } catch { } stopOf(s); return onDisk(f) === bytes; };
+    const run = (X) => { const d = dirOf(S.name + '-save'), f = path.join(d, S.name); const bytes = JSON.stringify(S.plant(d), null, 2); fs.writeFileSync(f, bytes); const un = refuse(f); let s = null; try { s = S.make(d, X); } finally { un(); } try { s._save(); } catch { } try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync([f]); } catch { } stopOf(s); return onDisk(f) === bytes; };   // B-574d (r4796): a store on the store writer (mounts.json) owes its save to the writer's next turn — landed before the file is read
     ok(run(undefined), `${S.name}: its _save called while held writes NOTHING (the guard of every save road with no door: a plugin's own record, the tokens' debounced save, a later migration)`);
     ok(!run(mutant(S.rel, [S.cut[0]])), `${S.name}: RED CONTROL — that one line cut, the same _save writes over the file`);
   }
@@ -981,7 +981,7 @@ try {
       ok(lg.legacyLeft && lg.owed && lg.ingested && lg.migrated, 'r3982 (3): after a torn boot the one-time ingest of the legacy mount stores is OWED (marked in the list the lift saves) and runs at the NEXT start', lg);
       ok(!lgx.ingested && !lgx.migrated, 'RED CONTROL — no mark (in a copy): the torn lift saves, the next start reads data, and the legacy store is never ingested', lgx);
       const lgN = await legacyRun(MMv, 'legacy-owed-none', { noLegacy: true }), lgD = await legacyRun(MMv, 'legacy-owed-dup', { dup: true });
-      const PAID = "this._migrateLegacy(); this._save(); }   // r4039 (f)", SKIP = "      if (!meets.length) added.push(r);\n";   // r4985 (lane lg-remote-hardening): the skip is _ingestLegacy's now (a record that meets the list is added only when nothing holds its id or mount point)
+      const PAID = "this._migrateLegacy(); this._save({ now: true, why: 'the owed ingest paid' }); }   // r4039 (f)",   /* B-574d (r4796): the paid mark lands at once (the start) — the anchor moved with its line */ SKIP = "      if (!meets.length) added.push(r);\n";   // r4985 (lane lg-remote-hardening): the skip is _ingestLegacy's now (a record that meets the list is added only when nothing holds its id or mount point)
       const lgNx = await legacyRun(mutant('src/machine-mounts.js', [[PAID, 'this._migrateLegacy(); }   // r4039 (f)']]).MachineMounts, 'legacy-owed-none-ctl', { noLegacy: true });
       const lgDx = await legacyRun(mutant('src/machine-mounts.js', [[SKIP, '      if (true) added.push(r);\n']]).MachineMounts, 'legacy-owed-dup-ctl', { dup: true });
       ok(lg.markGone && lgN.markGone && lgD.ids === 'mm-same08', 'r4039 (f): the owed mark is SAVED AWAY once it is paid — with no legacy store there too; the owed ingest SKIPS a record whose mount point the list already holds', { lg, lgN, lgD });

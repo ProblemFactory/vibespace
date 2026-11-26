@@ -1,25 +1,35 @@
 #!/usr/bin/env node
-// test-mount-store-writes — B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts). FIVE HUB STORES NO LONGER WRITE BY THEIR
-// OWN UNSYNCED TEMP + RENAME: after a power loss such a file could come back empty or torn, the next start then held it as damaged,
-// kept its bytes aside and started EMPTY — the person's storage list, the paired machines' mounts, the plugins' on-switches, the
-// port forwards with their public names, or «Publish this VibeSpace» gone from the page. Each of the six sites is a SYNCED replace
-// through the tree's one door (src/fd-close.js renameSynced: write, ONE fsync, close, rename), synchronous by ruling: each store is
-// written on a person's act, an agent's act or a rare event of its own, never at a cadence.
-// FAST, in-process: each store's REAL act over a scratch data folder; the faults are PLACED (a refused sync of the store's own temp)
-// — never a mount, never a clock, nothing spawned, nothing fetched.
-//   S1 a sync that FAILS (EIO placed at the fsync of the store's own temp) is a failed write that reaches its caller — mounts.json
-//      thrown to the act (setMyStorageConfig), machine-mounts.json said in its log (unmount; it was swallowed in silence),
-//      plugins.json said (setEnabled; it was swallowed in silence), port-forwards.json said (onMachineUnpaired), instance-url.json
-//      said (publish) — the OLD file stands byte for byte and no temp is left. RED per site: the release's body (an anchored copy)
-//      asks no sync, and the NEW bytes take the name.
-//   S2 a file system with no sync at all (EINVAL placed): two acts land, «does not do a sync» said ONCE a run, the store's name and
-//      the code (no path); the bytes on disk are the store's state as the release wrote them (JSON, two spaces).
-//   S3 the credential stores keep 0600 (mounts.json, machine-mounts.json, plugins.json). RED: the door asked without the mode.
-//   L  plugins.json's LOUD road (the one-time rename migration, renamePlugin): the placed EIO is THROWN (the runner tries it again
-//      at the next start) and the old record stands on disk. RED: the release's body.
-//   M  machine-mounts.json's one-time migration of the legacy stores: a failed sync is a failed save — the legacy store is NOT
-//      renamed .migrated beside a store not on disk, no machine-mounts.json, no temp; it runs again at the next start. RED: the
-//      release's migration renames the legacy store away with no sync asked.
+// test-mount-store-writes — B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts). FIVE HUB STORES NO LONGER
+// WRITE BY THEIR OWN UNSYNCED TEMP + RENAME: after a power loss such a file could come back empty or torn, the next start held it,
+// kept its bytes aside and started EMPTY — the person's storage list, the paired machines' mounts, the plugins' on-switches, the port
+// forwards with their public names, «Publish this VibeSpace». THE RATE RULE (r4758 / r4796): a save no person pressed (a dial-in, a
+// sweep, a landing, a restart, the start) never waits on the data folder on the hub's loop and never writes what is already there; a
+// person's own act lands before it answers.
+// FAST, in-process: each store's REAL code over a scratch data folder; the faults are PLACED (a refused sync of the store's own temp;
+// a stand-in writer thread that refuses a write) — never a mount, never a child, nothing fetched.
+//   W  three stores on THE STORE WRITER (mounts.json, machine-mounts.json, port-forwards.json), a real writer on a stand-in thread:
+//      W1 a person's act (a storage added, a pull mount removed, a machine unpaired) is ON DISK when its call returns (flushSync).
+//         RED: the act's save without `now` — not on disk at its return (owed to the writer's next turn)
+//      W2 mounts.json: a person's act whose landing FAILS throws not-durable with law F's one sentence, the old file stands, the writer
+//         said it, and the change lands once the storage answers; a save no person pressed under the same refusal throws NOTHING (a
+//         sweep, a timer, a promise never meet a throw). REDS: the throw taken out; the `now` gate taken out
+//      W3 mounts.json and machine-mounts.json keep 0600 through the writer. RED: the writer asked without the mode
+//   R  THE RATE LEGS — each event repeated N times over a recording writer writes zero or one time. RED each: its gate taken out
+//      R1 port-forwards.json: N dial-ins of a machine with no forward and of one whose forward is live
+//      R2 port-forwards.json: N heal sweeps of a forward that starts while its republish fails (each sweep one 5-min retry)
+//      R3 port-forwards.json: N restarts of a published service (the jobs engine's forward, same label, then its publish, same address)
+//      R4 machine-mounts.json: N landings of a pull alone on its folder write none; on a folder it shares with an older-stamped pull, one
+//      R5 mounts.json: N connects of a mount already mounted (the watchdog's adopt) write none
+//   D  two stores on the SYNCED REPLACE (src/fd-close.js renameSynced: plugins.json, instance-url.json), each through its real act:
+//      D1 a sync that FAILS (EIO placed at the fsync of its temp) reaches its caller, the old file stands; RED: the release's body
+//      D2 a file system with no sync at all: writes of TWO instances land, «does not do a sync» said ONCE a run (not once an
+//         instance); the release says nothing (its body asks no sync — D1's red shows it asks none)
+//      D3 plugins.json keeps 0600; RED: the door asked without the mode
+//   THE READERS (r4758: the three that need «written = on disk now»):
+//      M  machine-mounts.json's one-time ingest keeps its synced replace and its read-back: a failed sync keeps the legacy store and
+//         marks the ingest OWED (the next start runs it again). REDS: the release's ingest; the mark taken out
+//      L  plugins.json's loud migration write THROWS a failed sync (run again at the next start); RED: the release's body
+//      K  the relay's sealing: a plugin's quiet save is on disk when it returns (the clear value gone from the file); RED: deferred
 // Run: node scripts/test-mount-store-writes.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -32,17 +42,23 @@ import { checker } from './lib/check.mjs';
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const { ok, report } = checker();
-process.umask(0o022);   // S3's red reads a 0644 file: the mode asked, never the runner's own mask
+process.umask(0o022);   // a mode's red reads 0644: the mode asked, never the runner's own mask
+for (const k of Object.keys(process.env)) if (/^VIBESPACE_(S3|CEPHFS)_/.test(k)) delete process.env[k];   // the boot's env import of storage reads none
 const DIRS = [];
+let dirN = 0;
 process.on('exit', () => { for (const d of DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* gone */ } } });
-const dirOf = (name) => { const d = scratchDir(name); DIRS.push(d); return d; };
+/** a fresh scratch folder per world (the same name answers the same folder for the whole run: numbered) */
+const dirOf = (name) => { const d = scratchDir(`msw-${name}-${++dirN}`); DIRS.push(d); return d; };
 const MADE = [];   // the managers with a timer of their own (cleared at the end)
-/** a copy of a product module compiled AS that module's file (its relative requires resolve as the real one's) */
 const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
 const srcOf = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+/** a copy of a product module with its anchored edits (each anchor must stand in the source exactly once — else it throws by name) */
+const copyOf = (rel, edits, name) => { let code = srcOf(rel); for (const [a, b] of edits) code = anchored(code, a, b, name); return asModule(rel, code); };
 const bytes = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
 const temps = (dir, base) => fs.readdirSync(dir).filter((n) => n.startsWith(base + '.') && n.includes('tmp'));
 const modeOf = (f) => { try { return fs.statSync(f).mode & 0o777; } catch { return null; } };
+const tick = (ms = 2) => new Promise((r) => setTimeout(r, ms));
+const N = 5;
 
 /** THE PLACED SYNC: the fsync of a descriptor opened on the store's OWN temp (`<file>.tmp`) answers `code` (null: lets it through);
  *  every such sync asked is counted */
@@ -57,163 +73,298 @@ async function warnsOf(fn) { const w0 = console.warn, out = []; console.warn = (
 
 // made-up values built at runtime (no secret-shaped literal in the tree)
 const KEY_ID = ['made', 'up', 'key', 'id'].join('-'), KEY_SECRET = ['made', 'up', 'key', 'value', 'for', 'the', 'suite'].join('-');
-const LETTER = ['', 'a', 'b', 'c'];
-const PLUGIN = (id) => ({ id, label: `Made-up ${id}`, description: 'a made-up plugin of this suite', provides: [], create: () => ({ install: async () => ({}), start: () => ({}), stop: () => ({}), status: () => ({}) }) });
-const RELAY = { relayStatus: () => ({ configured: true }), frpPublish: async (name, port, o) => ({ url: `https://${o.preferSub}.example.test`, proto: 'http', subdomain: o.preferSub }), frpUnpublish: async () => { }, setSelfDialSub: () => { } };
-const pull = (n, d) => ({ id: `mm-made${n}`, dir: 'pull', hostId: 'host-made', remotePath: `/srv/made${n}`, mountpoint: path.join(d, `mnt${n}`), createdAt: n });
+const NOT_DURABLE = "Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.";
+const s3 = (n) => ({ type: 's3', name: `made-up-${n}`, endpoint: 'https://storage.example.test', bucket: `made-up-bucket-${n}`, accessKey: KEY_ID, secretKey: KEY_SECRET });
+const pull = (n, d, extra = {}) => ({ id: `mm-made${n}`, dir: 'pull', hostId: 'host-made', remotePath: `/srv/made${n}`, mountpoint: path.join(d, `mnt${n}`), createdAt: n, ...extra });
+const fwd = (n, extra = {}) => ({ id: `pf-made${n}`, hostId: `host-made${n}`, remotePort: 8000 + n, label: `made-up ${n}`, error: null, ...extra });
+const HOSTS = () => ({ held: () => false, get: () => { throw new Error('no such machine'); }, findByDeviceId: () => null, list: () => [] });
+const PLUGIN = (id, create) => ({ id, label: `Made-up ${id}`, description: 'a made-up plugin of this suite', provides: [], create: create || (() => ({ install: async () => ({}), start: () => ({}), stop: () => ({}), status: () => ({}) })) });
 
-// ── the five stores, each through its REAL act ────────────────────────────────────────────────────────────────────────────────
-const STORES = [
-  { rel: 'src/mounts.js', base: 'mounts.json', mode600: true,
-    world: (M) => { const d = dirOf('msw-mounts'), lines = []; const m = new M.MountManager({ dataDir: d, broadcast: () => { } }); return { d, file: path.join(d, 'mounts.json'), m, lines, state: () => m._state }; },
-    act: (w, n) => w.m.setMyStorageConfig({ endpoint: 'https://storage.example.test', bucket: `made-up-bucket-${n}`, accessKey: KEY_ID, secretKey: KEY_SECRET }),
-    landed: (doc, n) => !!doc && doc.includes(`made-up-bucket-${n}`),
-    failed: (t) => !!t.threw && t.threw.code === 'EIO',
-    tip: "    require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[mounts] ${w}`); } } });",
-    noMode: "    require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { where: 'mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[mounts] ${w}`); } } });",
-    rel0: "    const tmp = this._file + '.tmp';\n    fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });\n    fs.renameSync(tmp, this._file);" },   // stale-pins: kept — the release's body, compiled back in as the red control
-  { rel: 'src/machine-mounts.js', base: 'machine-mounts.json', mode600: true,
-    world: (M) => {
-      const d = dirOf('msw-machine'), lines = [];
-      fs.writeFileSync(path.join(d, 'machine-mounts.json'), JSON.stringify({ mounts: [1, 2, 3, 4].map((n) => pull(n, d)) }, null, 2));
-      const m = new M.MachineMounts({ dataDir: d, hosts: { held: () => false, get: () => { throw new Error('no such machine'); }, findByDeviceId: () => null, list: () => [] }, mountTokens: { mint: () => null }, log: (l) => lines.push(String(l)) });
-      m._recheckPairs = async () => m._held;   // the pair check after a removal reads real folders (a child's realpath): not this suite's
-      MADE.push(m);
-      return { d, file: path.join(d, 'machine-mounts.json'), m, lines, state: () => m._state };
-    },
-    act: (w, n) => w.m.unmount(`mm-made${n}`),
-    landed: (doc, n) => !!doc && !doc.includes(`"mm-made${n}"`),
-    failed: (t) => t.w.lines.some((l) => /machine-mounts\.json not written \(EIO\)/.test(l)),
-    tip: "    try { require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } }); } catch (e) { this.log(`machine-mounts.json not written (${(e && e.code) || 'error'}) — the old list stands on disk`); }",
-    noMode: "    try { require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } }); } catch (e) { this.log(`machine-mounts.json not written (${(e && e.code) || 'error'}) — the old list stands on disk`); }",
-    rel0: "    try { const t = this._file + '.tmp'; fs.writeFileSync(t, JSON.stringify(this._state, null, 2), { mode: 0o600 }); fs.renameSync(t, this._file); } catch { }" },   // stale-pins: kept — the release's body, compiled back in as the red control
-  { rel: 'src/plugins.js', base: 'plugins.json', mode600: true,
-    world: (M) => { const d = dirOf('msw-plugins'), lines = []; const pm = new M.PluginManager({ dataDir: d, plugins: [1, 2, 3].map((n) => PLUGIN(`made-up-${LETTER[n]}`)) }); return { d, file: path.join(d, 'plugins.json'), pm, lines, state: () => pm._state }; },
+const MO = 'src/mounts.js', MM = 'src/machine-mounts.js', PF = 'src/port-forward.js', PL = 'src/plugins.js', IU = 'src/server/instance-url.js';
+const mountsWorld = (M, W) => { const d = dirOf('mounts'); const m = new M.MountManager({ dataDir: d, broadcast: () => { }, storeWriter: W }); return { d, file: path.join(d, 'mounts.json'), m }; };
+const machineWorld = (M, W, recs) => {
+  const d = dirOf('machine'), file = path.join(d, 'machine-mounts.json'), lines = [];
+  fs.writeFileSync(file, JSON.stringify({ mounts: recs(d) }, null, 2));
+  const m = new M.MachineMounts({ dataDir: d, hosts: HOSTS(), mountTokens: { mint: () => null }, log: (l) => lines.push(String(l)), storeWriter: W });
+  m._recheckPairs = async () => m._held;   // the pair check after a removal reads real folders (a child's realpath): not this suite's
+  MADE.push(m);
+  return { d, file, m, lines };
+};
+const portsWorld = (M, W, rows) => {
+  const d = dirOf('ports'), file = path.join(d, 'port-forwards.json'), lines = [];
+  fs.writeFileSync(file, JSON.stringify({ forwards: rows }, null, 2));
+  const pf = new M.PortForwardManager({ hosts: { list: () => [] }, dataDir: d, plugins: null, broadcast: () => { }, log: (l) => lines.push(String(l)), getJobs: () => null, storeWriter: W });
+  MADE.push(pf);
+  return { d, file, pf, lines };
+};
+/** a RECORDING writer: every write ASKED (dirty) by its file's base name; a flush lands the bytes in this turn */
+function recorder() {
+  const r = { asked: [], stores: new Map() };
+  Object.assign(r, {
+    dirty: (file, o) => { r.asked.push(path.basename(file)); r.stores.set(file, o); },
+    pending: () => false, durable: async () => true, whyNotDurable: () => null,
+    flushSync: (names) => { for (const f of names || [...r.stores.keys()]) { const o = r.stores.get(f); if (o) fs.writeFileSync(f, o.produce({ sync: true })); } return { written: [], left: [] }; },
+  });
+  return r;
+}
+
+// THE REAL WRITER on a stand-in thread (scripts/fixtures/store-stand-writer.cjs: the real writeJob; `failOn` refuses a file's writes)
+const SW = require(path.join(REPO, 'src/store-writer.js'));
+const STAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs')).make(dirOf('stand'));
+const SAID = [];
+const sink = (...a) => SAID.push(a.map(String).join(' '));
+const RW = SW.create({ log: { log: sink, info: sink, warn: sink, error: sink }, workerPath: STAND.path });
+/** wait for a file's owed write to land on the real writer (a refused one is retried after its backoff): a few asks, one bound */
+async function landed(file) { let ok1 = false; for (let i = 0; i < 4 && !ok1; i++) ok1 = await RW.durable(file, { timeoutMs: 15000 }) === true; return ok1; }
+
+try {
+  console.log('W1 a PERSON\'s act on a writer store is on disk when its call returns (the writer\'s own flushSync)');
+  const W_ACTS = [
+    { base: 'mounts.json', rel: MO, world: (M) => mountsWorld(M, RW), act: (w) => w.m.add(s3(1)), landed: (doc) => !!doc && doc.includes('made-up-bucket-1'),
+      edits: [["    this._save({ now: true, why: 'a storage added' });", "    this._save();"]] },   // stale-pins: kept — the act's release-shaped save (no `now`), compiled back in as the red control
+    { base: 'machine-mounts.json', rel: MM, world: (M) => machineWorld(M, RW, (d) => [pull(1, d), pull(2, d)]), act: (w) => w.m.unmount('mm-made1'), landed: (doc) => !!doc && !doc.includes('"mm-made1"'),
+      edits: [["    this._save({ now: true, why: 'a mount removed' }); this._notify();", "    this._save(); this._notify();"]] },   // stale-pins: kept — the act's release-shaped save (no `now`), compiled back in as the red control
+    { base: 'port-forwards.json', rel: PF, world: (M) => portsWorld(M, RW, [fwd(1), fwd(2)]), act: (w) => w.pf.onMachineUnpaired('host-made1'), landed: (doc) => !!doc && !doc.includes('"host-made1"'),
+      edits: [["    this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);\n    this._persist({ now: true });", "    this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);\n    this._persist();"]] },   // stale-pins: kept — the act's release-shaped save (no `now`), compiled back in as the red control
+  ];
+  for (const R of W_ACTS) {
+    const scene = async (M) => { const w = R.world(M); let threw = null; try { await R.act(w); } catch (e) { threw = (e && e.message) || String(e); } const atReturn = R.landed(bytes(w.file)); const lands = await landed(w.file); return { atReturn, threw, later: lands && R.landed(bytes(w.file)), mode: (modeOf(w.file) || 0).toString(8) }; };
+    const t = await scene(require(path.join(REPO, R.rel)));
+    ok(t.atReturn === true && !t.threw && t.later === true, `W1 ${R.base} (${R.rel}): the person's act is on disk when its call returns`, t);
+    let red = null, why = null;
+    try { red = await scene(copyOf(R.rel, R.edits, `w1-${R.base}-no-now`)); } catch (e) { why = e.message; }
+    ok(!!red && red.atReturn === false && red.later === true, `W1 RED CONTROL ${R.base}: the act's save without \`now\` is NOT on disk at its return (owed to the writer's next turn), it lands later`, red || why);
+  }
+
+  console.log('W2 mounts.json: a person\'s act whose landing FAILS throws not-durable; a save no person pressed never throws');
+  {
+    const scene = async (M) => {
+      const w = mountsWorld(M, RW);
+      w.m.add(s3(1));
+      const old = bytes(w.file), s0 = SAID.length;
+      STAND.failOn('mounts.json', true);
+      let threw = null, sweepThrew = null;
+      try {
+        try { w.m.add(s3(2)); } catch (e) { threw = e; }
+        try { w.m._state.mounts[0].desired = 'mounted'; w.m._save(); } catch (e) { sweepThrew = e; }   // the watchdog's road: a save no person pressed
+      } finally { STAND.failOn('mounts.json', false); }
+      const kept = bytes(w.file) === old, said = SAID.slice(s0).some((l) => l.includes('mounts.write not written'));
+      const lands = await landed(w.file), doc = bytes(w.file) || '';
+      return { threw: threw ? { code: threw.code, sentence: threw.message === NOT_DURABLE } : null, sweepThrew: sweepThrew ? sweepThrew.code || sweepThrew.message : null, kept, said, later: lands && doc.includes('made-up-bucket-2') && doc.includes('"desired": "mounted"') };
+    };
+    const t = await scene(require(path.join(REPO, MO)));
+    ok(!!t.threw && t.threw.code === 'not-durable' && t.threw.sentence && !t.sweepThrew && t.kept && t.said && t.later === true,
+      'W2 mounts.json: the refused landing of a person\'s act throws not-durable with law F\'s one sentence, the old file stands, the writer said it, a save no person pressed under the same refusal throws nothing, and both land once the storage answers', t);
+    let r1 = null, y1 = null;
+    try { r1 = await scene(copyOf(MO, [["    if (miss) throw Object.assign(new Error('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { code: 'not-durable', status: 503, why: `${why}: ${miss.why || 'the write failed'}` });", "    if (miss) { }"]], 'w2-no-throw')); } catch (e) { y1 = e.message; }
+    ok(!!r1 && r1.threw === null, 'W2 RED CONTROL (the throw taken out): the person\'s act answers as if saved while nothing is on disk', r1 || y1);
+    let r2 = null, y2 = null;
+    try { r2 = await scene(copyOf(MO, [["    if (!now) return;\n", ""]], 'w2-every-save-waits')); } catch (e) { y2 = e.message; }
+    ok(!!r2 && !!r2.sweepThrew, 'W2 RED CONTROL (the `now` gate taken out): the sweep\'s save waits on the storage and throws into its road', r2 || y2);
+  }
+
+  console.log('W3 mounts.json and machine-mounts.json keep 0600 through the writer');
+  for (const [rel, base, mk, act, edit] of [[MO, 'mounts.json', (M) => mountsWorld(M, RW), (w) => w.m.add(s3(1)), ["    W.dirty(this._file, { name: 'mounts.write', mode: 0o600, produce: () => {", "    W.dirty(this._file, { name: 'mounts.write', produce: () => {"]],
+    [MM, 'machine-mounts.json', (M) => machineWorld(M, RW, (d) => [pull(1, d), pull(2, d)]), (w) => w.m.unmount('mm-made1'), ["      W.dirty(this._file, { name: 'machine-mounts.write', mode: 0o600, produce: () => {", "      W.dirty(this._file, { name: 'machine-mounts.write', produce: () => {"]]]) {
+    const scene = async (M) => { const w = mk(M); await act(w); await landed(w.file); return modeOf(w.file); };
+    const mode = await scene(require(path.join(REPO, rel)));
+    ok(mode === 0o600, `W3 ${base}: written by the store writer with its mode — 0600 (credentials, tokens)`, { mode: mode && mode.toString(8) });
+    let red = null, why = null;
+    try { red = await scene(copyOf(rel, [edit], `w3-${base}-no-mode`)); } catch (e) { why = e.message; }
+    ok(red !== null && (red & 0o077) !== 0, `W3 RED CONTROL ${base}: the writer asked without the mode leaves the file readable by others`, { mode: red !== null ? red.toString(8) : why });
+  }
+} finally { /* the real writer stops at the end */ }
+
+console.log('R THE RATE LEGS — each event repeated N times writes zero or one time (a recording writer counts every write asked)');
+{
+  // R1 port-forwards.json: N dial-ins
+  const r1 = async (M) => {
+    const rec = recorder(), w = portsWorld(M, rec, [fwd(1, { hostId: 'host-live' })]);
+    w.pf._live.set('pf-made1', { rec: { localPort: 47991 }, sockets: new Set(), server: { close() { } } });   // its forward is live
+    for (let i = 0; i < N; i++) { await w.pf.onMachineLinked('host-none'); await w.pf.onMachineLinked('host-live'); }
+    return rec.asked.length;
+  };
+  const a1 = await r1(require(path.join(REPO, PF)));
+  ok(a1 === 0, `R1 port-forwards.json: ${N} dial-ins of a machine with no forward and ${N} of one whose forward is live write NOTHING (the bytes on disk are the bytes)`, { asked: a1 });
+  let x1 = null, y1 = null; try { x1 = await r1(copyOf(PF, [["      if (json === this._asked && !W.pending(this.file)) return;\n", ""]], 'r1-no-gate')); } catch (e) { y1 = e.message; }
+  ok(x1 === 2 * N, 'R1 RED CONTROL (the gate taken out): every dial-in writes the list again', { asked: x1, why: y1 });
+
+  // R2 port-forwards.json: N heal sweeps of a forward that starts while its republish fails
+  const r2 = async (M) => {
+    const rec = recorder(), w = portsWorld(M, rec, [fwd(1)]);
+    w.pf._start = async () => { }; w.pf._probeForward = () => { }; w.pf._republish = async () => false;   // it starts; the relay does not take it
+    for (let i = 0; i < N; i++) { w.pf._healRetryAt.clear(); await w.pf._healSweep(); }   // each sweep: one 5-min retry come due
+    return rec.asked.length;
+  };
+  const a2 = await r2(require(path.join(REPO, PF)));
+  ok(a2 <= 1, `R2 port-forwards.json: ${N} heal sweeps of a forward whose republish keeps failing write at most once`, { asked: a2 });
+  let x2 = null, y2 = null; try { x2 = await r2(copyOf(PF, [["      if (json === this._asked && !W.pending(this.file)) return;\n", ""]], 'r2-no-gate')); } catch (e) { y2 = e.message; }
+  ok(x2 === N, 'R2 RED CONTROL (the gate taken out): every sweep writes the list again', { asked: x2, why: y2 });
+
+  // R3 port-forwards.json: N restarts of a published service
+  const r3 = async (M) => {
+    const rec = recorder(), owner = 'job-made1', id = 'pf-__local__-47001';
+    const w = portsWorld(M, rec, [{ id, hostId: '__local__', remotePort: 47001, label: 'service: made-up', ownerJob: owner, error: null }]);
+    w.pf._start = async () => { }; w.pf._probeForward = () => { }; w.pf._decideProto = async () => ({ proto: 'http', why: 'override' });
+    w.pf._live.set(id, { rec: { localPort: 47999 }, sockets: new Set(), server: { close() { } } });
+    w.pf.plugins = { frpPublish: async () => ({ url: 'https://made-up.example.test', name: 'made-up', proto: 'http', subdomain: 'made-up' }), frpUnpublish: async () => { } };
+    for (let i = 0; i < N; i++) { await w.pf.forward('__local__', 47001, { label: 'service: made-up', owner }); await w.pf.publish(id); }
+    return rec.asked.length;
+  };
+  const a3 = await r3(require(path.join(REPO, PF)));
+  ok(a3 <= 1, `R3 port-forwards.json: ${N} restarts of a published service (its forward with the same label, its publish of the same address) write at most once`, { asked: a3 });
+  let x3 = null, y3 = null; try { x3 = await r3(copyOf(PF, [["      if (json === this._asked && !W.pending(this.file)) return;\n", ""], ["    else if (label && rec.label !== label) { rec.label = label; this._persist({ now: true }); }   // B-574d (r4796 (b)): a service's restart names the same label — nothing to write", "    else if (label) { rec.label = label; this._persist({ now: true }); }"]], 'r3-no-gates')); } catch (e) { y3 = e.message; }
+  ok(x3 === 2 * N, 'R3 RED CONTROL (the gates taken out): every restart writes the list twice', { asked: x3, why: y3 });
+
+  // R4 machine-mounts.json: N landings of a pull
+  const r4 = async (M) => {
+    const ra = recorder(), wa = machineWorld(M, ra, (d) => [pull(1, d)]);
+    for (let i = 0; i < N; i++) { wa.m._stampLanding(wa.m._state.mounts[0]); await tick(); }
+    const rb = recorder(), wb = machineWorld(M, rb, (d) => [pull(1, d, { mountpoint: path.join(d, 'shared') }), pull(2, d, { mountpoint: path.join(d, 'shared'), lastLiveAt: 1 })]);
+    for (let i = 0; i < N; i++) { wb.m._stampLanding(wb.m._state.mounts[0]); await tick(); }
+    return { alone: ra.asked.length, shared: rb.asked.length, stamped: Number(wa.m._state.mounts[0].lastLiveAt) > 1 };
+  };
+  const a4 = await r4(require(path.join(REPO, MM)));
+  ok(a4.alone === 0 && a4.shared === 1 && a4.stamped, `R4 machine-mounts.json: ${N} landings of a pull alone on its folder write NOTHING (its stamp kept in memory); on a folder it shares with an older-stamped pull, ONE (the rank it moves)`, a4);
+  let x4 = null, y4 = null; try { x4 = await r4(copyOf(MM, [["  _stampLanding(rec) { const prev = Number(rec.lastLiveAt) || 0; rec.lastLiveAt = Date.now(); if (this._stampRanks(rec, prev)) this._save(); }", "  _stampLanding(rec) { rec.lastLiveAt = Date.now(); this._save(); }"]], 'r4-every-landing')); } catch (e) { y4 = e.message; }
+  ok(!!x4 && x4.alone === N && x4.shared === N, 'R4 RED CONTROL (the release\'s stamp: saved at every landing): every landing writes the list', x4 || y4);
+
+  // R5 mounts.json: N connects of a mount already mounted
+  const r5 = async (M) => {
+    const rec = recorder(), w = mountsWorld(M, rec);
+    const id = w.m.add(s3(1)); w.m._state.mounts.find((x) => x.id === id).desired = 'mounted'; w.m._save({ now: true, why: 'the suite' });
+    const n0 = rec.asked.length;
+    w.m.isMounted = () => true;   // its daemon answers: the watchdog's connect adopts it
+    for (let i = 0; i < N; i++) await w.m.mount(id);
+    return rec.asked.length - n0;
+  };
+  const a5 = await r5(require(path.join(REPO, MO)));
+  ok(a5 === 0, `R5 mounts.json: ${N} connects of a mount already mounted (the watchdog's adopt) write NOTHING`, { asked: a5 });
+  let x5 = null, y5 = null; try { x5 = await r5(copyOf(MO, [["    if (json === this._asked && !W.pending(this._file)) return;\n", ""]], 'r5-no-gate')); } catch (e) { y5 = e.message; }
+  ok(x5 === N, 'R5 RED CONTROL (the gate taken out): every connect writes the list again', { asked: x5, why: y5 });
+}
+
+// ── D: the two stores on the synced replace, each through its real act ──────────────────────────────────────────────────────
+const LETTER = ['', 'a', 'b', 'c', 'd'];
+const RELAY = { relayStatus: () => ({ configured: true }), frpPublish: async (name, port, o) => ({ url: `https://${o.preferSub}.example.test`, proto: 'http', subdomain: o.preferSub }), frpUnpublish: async () => { }, setSelfDialSub: () => { } };
+const DOOR = [
+  { rel: PL, base: 'plugins.json',
+    world: (M) => { const d = dirOf('plugins'), lines = []; const pm = new M.PluginManager({ dataDir: d, plugins: [1, 2, 3, 4].map((n) => PLUGIN(`made-up-${LETTER[n]}`)) }); return { d, file: path.join(d, 'plugins.json'), pm, lines }; },
     act: (w, n) => w.pm.setEnabled(`made-up-${LETTER[n]}`, true),
     landed: (doc, n) => !!doc && doc.includes(`"made-up-${LETTER[n]}"`),
     failed: (t) => t.said.some((l) => /^\[plugins\] plugins\.json not written \(EIO\)/.test(l)),
     tip: "      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'plugins.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[plugins] ${w}`); } } });\n    } catch (e) { if (loud) throw e; console.warn(`[plugins] plugins.json not written (${(e && e.code) || 'error'}) — the old file stands on disk`); }",
-    noMode: "      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { where: 'plugins.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[plugins] ${w}`); } } });\n    } catch (e) { if (loud) throw e; console.warn(`[plugins] plugins.json not written (${(e && e.code) || 'error'}) — the old file stands on disk`); }",
     rel0: "      const tmp = this._file + '.tmp';\n      fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2), { mode: 0o600 });\n      fs.renameSync(tmp, this._file);\n    } catch (e) { if (loud) throw e; }" },   // stale-pins: kept — the release's body, compiled back in as the red control
-  { rel: 'src/port-forward.js', base: 'port-forwards.json',
-    world: (M) => {
-      const d = dirOf('msw-ports'), lines = [];
-      fs.writeFileSync(path.join(d, 'port-forwards.json'), JSON.stringify({ forwards: [1, 2, 3, 4].map((n) => ({ id: `pf-made${n}`, hostId: `host-made${n}`, remotePort: 8000 + n, label: `made-up ${n}` })) }, null, 2));
-      const pf = new M.PortForwardManager({ hosts: { list: () => [] }, dataDir: d, plugins: null, broadcast: () => { }, log: (l) => lines.push(String(l)), getJobs: () => null });
-      MADE.push(pf);
-      return { d, file: path.join(d, 'port-forwards.json'), pf, lines, state: () => pf._state };
-    },
-    act: (w, n) => w.pf.onMachineUnpaired(`host-made${n}`),
-    landed: (doc, n) => !!doc && !doc.includes(`"host-made${n}"`),
-    failed: (t) => t.w.lines.some((l) => /^port-forward persist: .*EIO/.test(l)),
-    tip: "  require('./fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'port-forwards.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[ports] ${w}`); } } });",
-    rel0: "  const tmp = file + '.tmp';\n  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));\n  fs.renameSync(tmp, file);" },   // stale-pins: kept — the release's body, compiled back in as the red control
-  { rel: 'src/server/instance-url.js', base: 'instance-url.json',
-    world: (M) => { const d = dirOf('msw-publish'), lines = []; const iu = M.create({ dataDir: d, plugins: RELAY, port: 1, log: (l) => lines.push(String(l)) }); return { d, file: path.join(d, 'instance-url.json'), iu, lines, state: null }; },
+  { rel: IU, base: 'instance-url.json',
+    world: (M) => { const d = dirOf('publish'), lines = []; const iu = M.create({ dataDir: d, plugins: RELAY, port: 1, log: (l) => lines.push(String(l)) }); return { d, file: path.join(d, 'instance-url.json'), iu, lines }; },
     act: (w, n) => w.iu.publish({ sub: `made-up-sub${n}` }),
     landed: (doc, n) => !!doc && doc.includes(`made-up-sub${n}`),
     failed: (t) => t.w.lines.some((l) => /^\[instance-url\] persist failed: .*EIO/.test(l)),
     tip: "  require('../fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'instance-url.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[instance-url] ${w}`); } } });",
     rel0: "  fs.writeFileSync(file + '.tmp', JSON.stringify(obj, null, 2));\n  fs.renameSync(file + '.tmp', file);" },   // stale-pins: kept — the release's body, compiled back in as the red control
 ];
-
-/** one store's scene under a placed sync code: a first act lands (the old file), the second meets the placed sync */
-async function scene(R, M, code) {
+async function doorScene(R, M, code) {
   const w = R.world(M);
   await R.act(w, 1);
-  const old = bytes(w.file);
-  const p = placeSync(w.file, code);
-  let r = null, threw = null, said = [];
-  try { const x = await warnsOf(async () => { try { return await R.act(w, 2); } catch (e) { threw = e; return null; } }); r = x.r; said = x.out; } finally { p.restore(); }
-  return { w, r, threw, old, now: bytes(w.file), asked: p.asked.length, temps: temps(w.d, R.base), said };
+  const old = bytes(w.file), p = placeSync(w.file, code);
+  let threw = null, said = [];
+  try { const x = await warnsOf(async () => { try { return await R.act(w, 2); } catch (e) { threw = e; return null; } }); said = x.out; } finally { p.restore(); }
+  return { w, threw, old, now: bytes(w.file), asked: p.asked.length, temps: temps(w.d, R.base), said };
 }
-
-console.log('S1 a sync that FAILS is a failed write that reaches its caller; the old file stands (five stores, each through its real act)');
-for (const R of STORES) {
-  const M = require(path.join(REPO, R.rel));
-  const t = await scene(R, M, 'EIO');
-  const facts = { asked: t.asked, threw: t.threw && t.threw.code, oldKept: t.now === t.old, temps: t.temps, failedSaid: R.failed(t), said: t.said.slice(-2), lines: t.w.lines.slice(-2) };
-  console.log(`    ${R.base}: ${JSON.stringify(facts)}`);
+console.log('D1 the synced replace: a sync that FAILS reaches its caller; the old file stands');
+for (const R of DOOR) {
+  const t = await doorScene(R, require(path.join(REPO, R.rel)), 'EIO');
+  const facts = { asked: t.asked, threw: t.threw && t.threw.code, oldKept: t.now === t.old, temps: t.temps, failedSaid: R.failed(t) };
   ok(!!t.old && !R.landed(t.old, 2) && t.asked >= 1 && t.now === t.old && t.temps.length === 0 && R.failed(t),
-    `S1 ${R.base} (${R.rel}): a sync of its own temp asked; the placed EIO fails the write to its caller (thrown, or its own words), the OLD file stands byte for byte, no temp left`, facts);
-  // RED: the release's body — its own unsynced temp + rename
+    `D1 ${R.base} (${R.rel}): a sync of its own temp asked; the placed EIO fails the write to its caller (its own words), the OLD file stands byte for byte, no temp left`, facts);
   let red = null, why = null;
-  try { red = await scene(R, asModule(R.rel, anchored(srcOf(R.rel), R.tip, R.rel0, `s1-${R.base}-release`)), 'EIO'); } catch (e) { why = e.message; }
+  try { red = await doorScene(R, copyOf(R.rel, [[R.tip, R.rel0]], `d1-${R.base}-release`), 'EIO'); } catch (e) { why = e.message; }
   const rf = red && { asked: red.asked, newTookName: R.landed(red.now, 2), failedSaid: R.failed(red) };
-  console.log(`    RED copy ${R.base}: ${JSON.stringify(rf || why)}`);
-  ok(!!red && red.asked === 0 && rf.newTookName && !rf.failedSaid,
-    `S1 RED CONTROL ${R.base}: the release's body asks no sync — under the same placed EIO the NEW bytes take the name and the caller hears nothing`, rf || why);
+  ok(!!red && red.asked === 0 && rf.newTookName && !rf.failedSaid, `D1 RED CONTROL ${R.base}: the release's body asks no sync — under the same placed EIO the NEW bytes take the name and the caller hears nothing`, rf || why);
 }
-
-console.log('S2 a file system with no sync at all: the write lands, said ONCE a run; the bytes are the store\'s state as the release wrote them');
-for (const R of STORES) {
+console.log('D2 a file system with no sync at all: the writes land, said ONCE a run (two instances)');
+for (const R of DOOR) {
   const M = require(path.join(REPO, R.rel));
-  const w = R.world(M);
-  await R.act(w, 1);
-  const p = placeSync(w.file, 'EINVAL');
-  let a, b, d2 = null;
-  try { a = await warnsOf(() => R.act(w, 2)); d2 = bytes(w.file); b = await warnsOf(() => R.act(w, 3)); } finally { p.restore(); }
-  const lines = [...a.out, ...b.out, ...w.lines].filter((l) => l.includes(`${R.base}: its file system does not do a sync (EINVAL)`));
-  const doc = bytes(w.file);
-  const facts = { asked: p.asked.length, lines, landed: [R.landed(d2, 2), R.landed(doc, 3)], temps: temps(w.d, R.base), asState: w.state ? doc === JSON.stringify(w.state(), null, 2) : 'n/a' };
-  ok(p.asked.length >= 2 && lines.length === 1 && !lines[0].includes(w.d) && facts.landed.every(Boolean) && facts.temps.length === 0 && facts.asState !== false,
-    `S2 ${R.base}: two writes on a file system that does no sync (EINVAL) both land; «does not do a sync» is said ONCE a run, with the store's name and the code (no path); the bytes are its state, two-space JSON`, facts);
+  const wa = R.world(M), wb = R.world(M);
+  await R.act(wa, 1); await R.act(wb, 1);
+  const pa = placeSync(wa.file, 'EINVAL'), pb = placeSync(wb.file, 'EINVAL');
+  let a, b;
+  try { a = await warnsOf(() => R.act(wa, 2)); b = await warnsOf(() => R.act(wb, 3)); } finally { pb.restore(); pa.restore(); }
+  const lines = [...a.out, ...b.out, ...wa.lines, ...wb.lines].filter((l) => l.includes(`${R.base}: its file system does not do a sync (EINVAL)`));
+  const facts = { asked: pa.asked.length + pb.asked.length, lines, landed: [R.landed(bytes(wa.file), 2), R.landed(bytes(wb.file), 3)], temps: [...temps(wa.d, R.base), ...temps(wb.d, R.base)] };
+  ok(facts.asked >= 2 && lines.length === 1 && !lines[0].includes(wa.d) && !lines[0].includes(wb.d) && facts.landed.every(Boolean) && facts.temps.length === 0,
+    `D2 ${R.base}: writes of TWO instances on a file system that does no sync (EINVAL) land; «does not do a sync» is said ONCE a run, with the store's name and the code (no path)`, facts);
 }
-
-console.log('S3 the credential stores keep 0600');
-for (const R of STORES.filter((x) => x.mode600)) {
-  const M = require(path.join(REPO, R.rel));
-  const w = R.world(M);
-  await R.act(w, 1);
-  const mode = modeOf(w.file);
-  ok(mode === 0o600, `S3 ${R.base}: written through the door with its mode — 0600 (the person's credentials and tokens)`, { mode: mode && mode.toString(8) });
+console.log('D3 plugins.json keeps 0600');
+{
+  const R = DOOR[0];
+  const mode = await (async () => { const w = R.world(require(path.join(REPO, PL))); await R.act(w, 1); return modeOf(w.file); })();
+  ok(mode === 0o600, 'D3 plugins.json: written through the door with its mode — 0600', { mode: mode && mode.toString(8) });
   let red = null, why = null;
-  try { const C = asModule(R.rel, anchored(srcOf(R.rel), R.tip, R.noMode, `s3-${R.base}-no-mode`)); const wr = R.world(C); await R.act(wr, 1); red = modeOf(wr.file); } catch (e) { why = e.message; }
-  ok(red !== null && (red & 0o077) !== 0, `S3 RED CONTROL ${R.base}: the door asked without the mode leaves the file readable by others`, { mode: red !== null ? red.toString(8) : why });
+  try { const w = R.world(copyOf(PL, [[R.tip, "      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { where: 'plugins.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[plugins] ${w}`); } } });\n    } catch (e) { if (loud) throw e; console.warn(`[plugins] plugins.json not written (${(e && e.code) || 'error'}) — the old file stands on disk`); }"]], 'd3-no-mode')); await R.act(w, 1); red = modeOf(w.file); } catch (e) { why = e.message; }
+  ok(red !== null && (red & 0o077) !== 0, 'D3 RED CONTROL: the door asked without the mode leaves the file readable by others', { mode: red !== null ? red.toString(8) : why });
+}
+
+console.log('M machine-mounts.json\'s one-time ingest: a failed sync keeps the legacy store and marks the ingest owed');
+{
+  const boot = (M) => {
+    const d = dirOf('migrate'), lines = [], file = path.join(d, 'machine-mounts.json'), legacy = path.join(d, 'host-mounts.json');
+    fs.writeFileSync(legacy, JSON.stringify({ mounts: [{ id: 'hm-made1', hostId: 'host-made', folder: '/srv/made', mountpoint: path.join(d, 'mnt'), mode: 'ro', os: 'linux', method: 'rclone-webdav', tokenId: 'tk-made', tunnelPort: 40001, mountedAt: 1 }] }));
+    const p = placeSync(file, 'EIO'), rec = recorder();
+    let m = null, threw = null;
+    try { m = new M.MachineMounts({ dataDir: d, hosts: HOSTS(), mountTokens: { mint: () => null }, log: (l) => lines.push(String(l)), storeWriter: rec }); } catch (e) { threw = e.message; } finally { p.restore(); }
+    if (m) MADE.push(m);
+    return { asked: p.asked.length, threw, store: bytes(file), legacyKept: fs.existsSync(legacy), migrated: fs.existsSync(legacy + '.migrated'), temps: temps(d, 'machine-mounts.json'), owed: !!(m && m._state.legacyOwed), failedSaid: lines.some((l) => l.startsWith('migration save FAILED') && l.includes('EIO')) };
+  };
+  const t = boot(require(path.join(REPO, MM)));
+  ok(t.asked === 1 && !t.threw && t.store === null && t.legacyKept && !t.migrated && t.temps.length === 0 && t.failedSaid && t.owed,
+    'M the ingest\'s save under a placed EIO: a sync asked, the save FAILED and said, no machine-mounts.json and no temp, the legacy store NOT renamed .migrated, the ingest marked OWED (the next start runs it again)', t);
+  let r1 = null, y1 = null; try { r1 = boot(copyOf(MM, [["      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, json, { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } });", "      const t = this._file + '.tmp';\n      fs.writeFileSync(t, json, { mode: 0o600 });\n      fs.renameSync(t, this._file);"]], 'm-release-ingest')); } catch (e) { y1 = e.message; }
+  ok(!!r1 && r1.asked === 0 && !!r1.store && r1.store.includes('hm-made1') && r1.migrated && !r1.legacyKept,
+    'M RED CONTROL: the release\'s ingest asks no sync — the store takes its name unsynced and the legacy store is renamed away beside it', r1 || y1);
+  let r2 = null, y2 = null; try { r2 = boot(copyOf(MM, [["this._state.legacyOwed = true; this.log(", "this.log("]], 'm-no-owed-mark')); } catch (e) { y2 = e.message; }
+  ok(!!r2 && r2.owed === false, 'M RED CONTROL (the mark taken out): a failed ingest is not owed — a later save of the merged list leaves the legacy store behind for good', r2 || y2);
 }
 
 console.log('L plugins.json\'s loud road (the one-time rename migration): a failed sync is THROWN, the old record stands');
 {
-  const R = STORES.find((x) => x.base === 'plugins.json');
+  const R = DOOR[0];
   const loud = async (M) => {
-    const d = dirOf('msw-plugins-loud'), file = path.join(d, 'plugins.json');
+    const d = dirOf('plugins-loud'), file = path.join(d, 'plugins.json');
     fs.writeFileSync(file, JSON.stringify({ plugins: { 'made-up-old': { enabled: true } } }, null, 2));
     const pm = new M.PluginManager({ dataDir: d, plugins: [PLUGIN('made-up-a')] });
     const old = bytes(file), p = placeSync(file, 'EIO');
     let threw = null; try { pm.renamePlugin('made-up-old', 'made-up-a'); } catch (e) { threw = e; } finally { p.restore(); }
     return { old, now: bytes(file), threw: threw && threw.code, asked: p.asked.length, temps: temps(d, 'plugins.json') };
   };
-  const t = await loud(require(path.join(REPO, R.rel)));
+  const t = await loud(require(path.join(REPO, PL)));
   ok(t.asked === 1 && t.threw === 'EIO' && t.now === t.old && t.now.includes('"made-up-old"') && t.temps.length === 0,
     'L plugins.json (renamePlugin, the migration\'s write): the placed EIO is THROWN to the migration (run again at the next start), the old record stands byte for byte, no temp left', t);
   let red = null, why = null;
-  try { red = await loud(asModule(R.rel, anchored(srcOf(R.rel), R.tip, R.rel0, 'l-plugins-release'))); } catch (e) { why = e.message; }
-  ok(!!red && red.asked === 0 && !red.threw && !!red.now && red.now.includes('"made-up-a"'),
-    'L RED CONTROL: the release\'s body asks no sync — the migration «succeeds» and the moved record takes the name unsynced', red || why);
+  try { red = await loud(copyOf(PL, [[R.tip, R.rel0]], 'l-release')); } catch (e) { why = e.message; }
+  ok(!!red && red.asked === 0 && !red.threw && !!red.now && red.now.includes('"made-up-a"'), 'L RED CONTROL: the release\'s body asks no sync — the migration «succeeds» and the moved record takes the name unsynced', red || why);
 }
 
-console.log('M machine-mounts.json\'s one-time migration: a failed sync is a failed save — the legacy store kept, nothing renamed away');
+console.log('K the relay\'s sealing: a plugin\'s quiet save is on disk when it returns');
 {
-  const REL = 'src/machine-mounts.js';
-  const MIG_TIP = "      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } });";
-  const MIG_REL0 = "      const t = this._file + '.tmp';\n      fs.writeFileSync(t, JSON.stringify(this._state, null, 2), { mode: 0o600 });\n      fs.renameSync(t, this._file);";   // stale-pins: kept — the release's body, compiled back in as the red control
-  const boot = (M) => {
-    const d = dirOf('msw-migrate'), lines = [], file = path.join(d, 'machine-mounts.json'), legacy = path.join(d, 'host-mounts.json');
-    fs.writeFileSync(legacy, JSON.stringify({ mounts: [{ id: 'hm-made1', hostId: 'host-made', folder: '/srv/made', mountpoint: path.join(d, 'mnt'), mode: 'ro', os: 'linux', method: 'rclone-webdav', tokenId: 'tk-made', tunnelPort: 40001, mountedAt: 1 }] }));
-    const p = placeSync(file, 'EIO');
-    let m = null, threw = null;
-    try { m = new M.MachineMounts({ dataDir: d, hosts: { held: () => false, get: () => { throw new Error('no such machine'); }, findByDeviceId: () => null, list: () => [] }, mountTokens: { mint: () => null }, log: (l) => lines.push(String(l)) }); } catch (e) { threw = e.message; } finally { p.restore(); }
-    if (m) MADE.push(m);
-    return { asked: p.asked.length, threw, store: bytes(file), legacyKept: fs.existsSync(legacy), migrated: fs.existsSync(legacy + '.migrated'), temps: temps(d, 'machine-mounts.json'), failedSaid: lines.some((l) => l.startsWith('migration save FAILED') && l.includes('EIO')) };
+  const R = DOOR[0];
+  const seal = (M) => {
+    const d = dirOf('plugins-seal'), file = path.join(d, 'plugins.json');
+    let H = null;
+    const pm = new M.PluginManager({ dataDir: d, plugins: [PLUGIN('made-up-k', (h) => { H = h; return { install: async () => ({}), start: () => ({}), stop: () => ({}), status: () => ({}) }; })] });
+    H.rec().clearValue = 'made-up-clear'; H.save();   // the clear value written
+    delete H.rec().clearValue; H.rec().sealedMark = true; H.save();   // sealed: the clear value dropped — the sealing then says «sealed»
+    const atReturn = bytes(file);
+    return { pm, atReturn: atReturn === null ? null : { clear: atReturn.includes('made-up-clear'), sealed: atReturn.includes('sealedMark') } };
   };
-  const t = boot(require(path.join(REPO, REL)));
-  ok(t.asked === 1 && !t.threw && t.store === null && t.legacyKept && !t.migrated && t.temps.length === 0 && t.failedSaid,
-    'M the migration\'s save under a placed EIO: a sync asked, the save FAILED and said, no machine-mounts.json and no temp, the legacy store NOT renamed .migrated (the ingest runs again at the next start)', t);
+  const t = seal(require(path.join(REPO, PL)));
+  ok(!!t.atReturn && !t.atReturn.clear && t.atReturn.sealed, 'K plugins.json: the sealing\'s quiet save is ON DISK when h.save() returns — the clear value is gone from the file before the sealing says sealed', t.atReturn);
   let red = null, why = null;
-  try { red = boot(asModule(REL, anchored(srcOf(REL), MIG_TIP, MIG_REL0, 'm-migrate-release'))); } catch (e) { why = e.message; }
-  ok(!!red && red.asked === 0 && !!red.store && red.store.includes('hm-made1') && red.migrated && !red.legacyKept,
-    'M RED CONTROL: the release\'s migration asks no sync — the store takes its name unsynced and the legacy store is renamed away beside it', red || why);
+  try { red = seal(copyOf(PL, [[R.tip, "      { const bytes = JSON.stringify(this._state, null, 2); setImmediate(() => require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, bytes, { mode: 0o600, where: 'plugins.json' })); }\n    } catch (e) { if (loud) throw e; console.warn(`[plugins] plugins.json not written (${(e && e.code) || 'error'}) — the old file stands on disk`); }"]], 'k-deferred')); } catch (e) { why = e.message; }
+  ok(!!red && !(red.atReturn && !red.atReturn.clear && red.atReturn.sealed), 'K RED CONTROL (the save deferred a turn): at the return the file does not hold the sealed record yet', red ? red.atReturn : why);
+  await tick(20);   // the red's deferred writes land in their own folder before the run ends
 }
 
 for (const x of MADE) { try { clearInterval(x._sweep); clearInterval(x._watch); } catch { /* none */ } }
+try { RW.stop(); } catch { /* stopped */ }
 report();

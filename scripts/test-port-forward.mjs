@@ -290,7 +290,7 @@ try {
     const pdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pfpub-'));
     const logs = [];
     const mk = (PF = PortForwardManager) => new PF({ hosts, dataDir: pdir, plugins: fakePlugins, broadcast: () => {}, log: (l) => logs.push(l) });
-    const disk = () => JSON.parse(fs.readFileSync(path.join(pdir, 'port-forwards.json'), 'utf-8'));
+    const disk = () => { try { require('../src/store-writer.js').storeWriter().flushSync([path.join(pdir, 'port-forwards.json')]); } catch { } return JSON.parse(fs.readFileSync(path.join(pdir, 'port-forwards.json'), 'utf-8')); };   // B-574d (r4796): port-forwards.json is the store writer's — a save no person pressed (a reprobe) lands before the file is read
     const id = 'pf-__local__-' + P;
 
     // the probe: a port nobody listens on is UNDECIDED (throws), not 'tcp'

@@ -420,6 +420,7 @@ console.log('§4 THE MINTED CLIENT (B-e40d): a preset swapped under the same key
       mm._state.mounts = [rec('sw-a', 'Alpha', ORG1), rec('sw-b', 'Beta', ORG1), rec('sw-c', 'Gamma', null), rec('sw-d', 'Delta', ORG1), rec('sw-own', 'Own', ORG1, { clientId: 'own.apps.googleusercontent.com', clientSecretEnc: mm._enc('own-secret') })];
       use([g('org1', S_M)]); await mm.clientSwapCheck(); at.before = open().map((i) => i.id);
       use([swapped]); await mm.clientSwapCheck(); at.swap = open().map((i) => ({ id: i.id, n: i.i18n.text.params.n, text: i.text, detail: i.detail, action: i.action, door: FA.doorOf(i) }));
+      try { require('../src/store-writer.js').storeWriter().flushSync([mm._file]); } catch { }   // B-574d (r4796): mounts.json is the store writer's — the swap check's save (no person pressed it) lands before the file is read
       at.memo = JSON.parse(fs.readFileSync(mm._file, 'utf8')).clientSwaps;
       { // a RESTART: a NEW MountManager over the same data dir (its own _load of mounts.json) and a NEW producer over the same For-you
         // store — the boot's check says nothing new

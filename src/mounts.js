@@ -76,7 +76,6 @@ const PROBE_OUT_MAX = 1024 * 1024;   // B-323e: a probe's output bound — the o
 const LIVENESS = require('./mount-liveness.js');
 const SR = require('./store-read.js');
 const HOLD = require('./store-read-hold.js');   // B-f276 family unit 1: mounts.json under the store-read law
-let noSyncSaid = false;   // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): mounts.json's file system with no sync at all is said once a run
 const MOUNTS_SHAPE = (v) => !!v && typeof v === 'object' && !Array.isArray(v);   // lane mount-liveness: THE sweep's verdict table (PURE)
 const MW = require('./mount-error-words.js');   // B-af94: a row's words BY CODE — the page words them in its language
 const CACHE_PLACE = require('./vfs-cache-place.js');   // lane vfs-cache-local: where the VFS cache lives + the dirty witnesses (PURE)
@@ -167,7 +166,8 @@ function writeOnly(out, m) {
   return out;
 }
 class MountManager {
-  constructor({ dataDir, broadcast, getSetting }) {
+  constructor({ dataDir, broadcast, getSetting, storeWriter = null }) {
+    this._storeWriter = storeWriter;   // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): the store writer mounts.json is written by (a suite's; else the process's)
     // Gmail-as-a-folder engine (2.134.0) — lazy so plain deployments pay nothing
     const { GmailSync } = require('./gmail-sync');
     this.gmail = new GmailSync({ presets: () => MountManager.drivePresets(), onProgress: () => this._notify(), onClientProven: (id, client, rt) => { try { const m = this._state.mounts.find((x) => x.id === id); if (m && rt && MountManager._rtOf(this._dec(m.tokenEnc)) === rt) this._adoptClient(m, client); } catch { } } });   // B-e40d: adopted only while the record holds the token that refreshed
@@ -303,7 +303,7 @@ class MountManager {
       accessKey: String(accessKey), secretKeyEnc: enc,
       importedFromEnv: false, updatedAt: Date.now(),
     };
-    this._save();
+    this._save({ now: true, why: 'the storage settings' });
     this._notify();
   }
 
@@ -544,10 +544,14 @@ class MountManager {
       log: (s) => console.warn('[mounts] ' + s),
       onLift: (v) => this._lifted(v),
     });
+    // B-574d (r4796): a list made AGAIN in this process (a suite's restart on the same data folder) lands what the last one still owed
+    // before it reads the file; a hub's start owes nothing (pending() is false: no wait)
+    { const W = this._writer(); if (W.pending(this._file)) W.flushSync([this._file], { waitedBy: 'mounts.json, a list made again in this process' }); }
     let read; try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: MOUNTS_SHAPE });
     if (this._hold.start(a) === 'data') this._state = a.value;
     this._shapeState();
+    this._asked = a.state === 'data' && !this._hold.held() ? JSON.stringify(this._state, null, 2) : null;   // B-574d (r4796 (b)): the bytes read — a save that would write them again writes nothing
     if (!this._hold.held()) this._maybeMigrateDrive();
   }
   _shapeState() {
@@ -559,6 +563,7 @@ class MountManager {
   _lifted(v) {
     this._state = v || { mounts: [], shares: [] };
     this._shapeState();
+    this._asked = v ? JSON.stringify(this._state, null, 2) : null;   // B-574d (r4796 (b)): read again — what it holds is on disk
     this._maybeMigrateDrive();
     this._maybeImportEnvStorage();
     this._notify();
@@ -570,13 +575,29 @@ class MountManager {
   /** a lift from torn bytes in this run: the copy's base name (the Storage section says where the old bytes are) — null when none */
   tornCopy() { const t = this._hold.torn(); return t ? t.copy : null; }
 
-  _save() {
+  _save({ now = false, why = 'the storage change' } = {}) {
     if (!this._hold.writable('a storage change')) return;   // held: nothing is written over the file
-    // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js
-    // renameSynced) — written on a person's act or a mount's own rare event, never at a cadence; a failed sync or close is a failed write
-    // THROWN to the caller as before (the temp removed, the old file stands); only a file system with no sync at all lands, said once a run
-    require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[mounts] ${w}`); } } });
+    // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): mounts.json goes through THE STORE WRITER (src/store-writer.js: its
+    // thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the write;
+    // ONE road for the file, so a later state always lands last. NO WRITE WHEN NOTHING CHANGED (r4796 (b)): the bytes the writer was
+    // last handed are never asked again — the watchdog's remount of a mount that dies after each start (60 s floor), the boot's env
+    // import, a landing that changes nothing write NOTHING. A save no person pressed (a remount or a landing, the watchdog's park,
+    // the cache's place, a client refresh, a Gmail landing, the boot) rides the writer off the loop: a failed landing is the writer's
+    // own line (its first failure and every tenth) and stays owed — never thrown into a sweep, a timer or a promise. A PERSON's own act
+    // (`now`: add, add a child, convert, edit, remove, Disconnect, the Drive sign-in, a share minted or revoked, the storage settings, an
+    // import) lands before it answers — the writer's own synchronous road (flushSync); a landing that fails throws `not-durable` with
+    // law F's one sentence (kept in memory, written when the storage can)
+    const W = this._writer(), json = JSON.stringify(this._state, null, 2);
+    if (json === this._asked && !W.pending(this._file)) return;
+    W.dirty(this._file, { name: 'mounts.write', mode: 0o600, produce: () => {
+      const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
+    } });
+    if (!now) return;
+    let r = null; try { r = W.flushSync([this._file], { waitedBy: `mounts.json: ${why}` }); } catch (e) { r = { left: [{ file: this._file, why: (e && e.message) || 'the writer threw' }] }; }
+    const miss = !r ? { why: 'the store writer did not answer' } : r.deferred ? null : (r.left || []).find((x) => x && x.file === this._file);   // deferred: the hub is stopping — its exit flush writes it
+    if (miss) throw Object.assign(new Error('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { code: 'not-durable', status: 503, why: `${why}: ${miss.why || 'the write failed'}` });
   }
+  _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
 
   _notify() { this.broadcast({ type: 'mounts-updated', mounts: this.list() }); }
 
@@ -706,7 +727,7 @@ class MountManager {
     }
     if (Array.isArray(bundle.shares)) {
       for (const s of bundle.shares) if (!this._state.shares.some(x => x.id === s.id)) this._state.shares.push(s);
-      this._save();
+      this._save({ now: true, why: 'an import' });
     }
     this._notify();
   }
@@ -1025,7 +1046,7 @@ class MountManager {
       for (const [k, v] of Object.entries(cfg.extraParams)) m.extraParamsEnc[k] = this._enc(String(v));
     }
     this._state.mounts.push(m);
-    this._save();
+    this._save({ now: true, why: 'a storage added' });
     this._notify();
     return m.id;
   }
@@ -1057,7 +1078,7 @@ class MountManager {
     if (!row.child) throw new Error(`credentials of type "${p.type}" don't support mount points yet`);
     row.child(m, cfg, p, this);
     this._state.mounts.push(m);
-    this._save();
+    this._save({ now: true, why: 'a folder added' });
     this._notify();
     return m.id;
   }
@@ -1076,7 +1097,7 @@ class MountManager {
       if (this._childrenOf(id).length) throw new Error('Remove its mount points first');
       delete m.kind;
     }
-    this._save();
+    this._save({ now: true, why: 'a storage converted' });
     this._notify();
     return m.id;
   }
@@ -1108,7 +1129,7 @@ class MountManager {
     // a CHILD removes the cache (up to vfsCacheMaxSizeGB, 164 788 files over NFS on the owner's box): fs.rm on the
     // libuv threadpool is the FUSE-threadpool outage class this module exists to prevent (lane vfs-cache-local)
     for (const dir of new Set([this._cacheDirOf(m), m.cacheOld].filter(Boolean))) this._dropCacheDir(m, dir, { removing: true });
-    this._save();
+    this._save({ now: true, why: 'a storage removed' });
     this._notify();
     this.clientSwapCheck().catch(() => { });   // B-e40d: a removed mount is no longer counted on its preset's old client
   }
@@ -1180,7 +1201,7 @@ class MountManager {
       // a sync worker's scope change answers 'reseed': its state file goes (the folder is the dedup index)
       if (said === 'reseed' && row.syncStateFile) { try { fs.rmSync(path.join(this.pathOf(m), row.syncStateFile), { force: true }); } catch { } }
     }
-    this._save();
+    this._save({ now: true, why: 'a storage edited' });
     this._notify();
     this.clientSwapCheck().catch(() => { });   // B-e40d: a renamed mount, or one moved to another preset key, is said as it is now
     // Auto-remount after an edit — a FAILED remount must reach the row (the
@@ -2784,7 +2805,7 @@ class MountManager {
       this._bumpWord(id);   // its follow: the person's word — a Connect that joined a connect in flight reads it again before it connects anew
       if (m.parked) this._unpark(m, 'unmounted');   // B-5ce7: the person ended supervision — its For-you item resolves
       this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }   // …and a stopped-process notice with it (r1 #9: even one a hub before this one filed)
-      this._save();
+      this._save({ now: true, why: 'a Disconnect' });
     }
     const finish = (ok) => {
       // Lazy unmounts detach asynchronously — give the kernel a beat before
@@ -3425,7 +3446,7 @@ class MountManager {
     const hrow = rowFor(this, holder);   // the row stores the token where its record keeps it
     if (!hrow.writeToken) throw new Error('Not an OAuth cloud connection');
     hrow.writeToken(holder, tok, this);
-    this._save();
+    this._save({ now: true, why: 'a Drive sign-in' });
     this._notify();
     if (hrow.afterToken) await hrow.afterToken(holder, this);   // the row's follow-up (OneDrive resolves its drive now)
     const bounce = async (m) => {
@@ -3534,7 +3555,7 @@ class MountManager {
       createdAt: Date.now(),
     };
     this._state.shares.push(share);
-    this._save();
+    this._save({ now: true, why: 'a share minted' });
     const link = this.buildShareLink({ ...share, secretKey: cred.secretKey, sessionToken: cred.sessionToken });
     return { share, link };
   }
@@ -3628,7 +3649,7 @@ class MountManager {
       name: shareName, path: full, mode: minted.mode, client: minted.client, createdAt: Date.now(),
     };
     this._state.shares.push(share);
-    this._save();
+    this._save({ now: true, why: 'a share minted' });
     const payload = {
       name: shareName, mons: minted.mons, fsName: minted.fsName, path: minted.path,
       user: minted.client, secret: minted.key, mode: minted.mode,
@@ -3652,7 +3673,7 @@ class MountManager {
     if (share.kind === 'cephmount' && share.client && this.cephMintAvailable()) {
       await this._mintCall('/revoke', { client: share.client }).catch(() => {});
       this._state.shares = this._state.shares.filter(x => x.id !== id);
-      this._save(); this._notify();
+      this._save({ now: true, why: 'a share revoked' }); this._notify();
       return;
     }
     if (share.method === 'service-account') {
@@ -3670,7 +3691,7 @@ class MountManager {
     }
     // STS shares just expire; either way drop the record
     this._state.shares = this._state.shares.filter(s => s.id !== id);
-    this._save();
+    this._save({ now: true, why: 'a share revoked' });
     return true;
   }
 

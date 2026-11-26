@@ -529,6 +529,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     const M = new Mod.MachineMounts(deps(d, [], [])); clearInterval(M._sweep);
     M._state.mounts.push({ id: 'mm-x', dir: 'push', hostId: 'h-x', folder: '/z', mountpoint: '/w', tokenId: 'tok-x' });
     M._save();
+    try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync([F]); } catch { }   // B-574d (r4796): machine-mounts.json's saves are the store writer's — what the save owes lands before the file is read
     const kept = bodyOf(F) === (asRoot ? '(a folder)' : body);
     M._hold.stop(); if (!asRoot) { try { fs.chmodSync(F, 0o644); } catch { } }
     return { kept };

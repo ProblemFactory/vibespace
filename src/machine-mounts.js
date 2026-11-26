@@ -132,7 +132,8 @@ const legacyKey = (r) => String((r && (r.id || r.mountpoint)) || '');   // r4985
 
 class MachineMounts {
   /** @param deps { hosts, mountTokens, publicUrl:()=>string|null, localPort:()=>number|null, rcloneBin:()=>string, broadcast, log } */
-  constructor({ dataDir, hosts, mountTokens, publicUrl, localPort, rcloneBin, broadcast, log }) {
+  constructor({ dataDir, hosts, mountTokens, publicUrl, localPort, rcloneBin, broadcast, log, storeWriter = null }) {
+    this._storeWriter = storeWriter;   // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): the store writer machine-mounts.json is written by (a suite's; else the process's)
     this.dataDir = dataDir;
     this.hosts = hosts;
     this.mountTokens = mountTokens;
@@ -152,6 +153,9 @@ class MachineMounts {
       file: this._file, valid: STORE_SHAPE, code: 'mounts-unread', aside: (mark) => this._asideName(mark),
       words: (f) => this._heldWords(f), log: (m) => this.log(m), onLift: (value, info) => this._lifted(value, info),
     });
+    // B-574d (r4796): a list made AGAIN in this process (a suite's restart on the same data folder) lands what the last one still owed
+    // before it reads the file; a hub's start owes nothing (pending() is false: no wait)
+    { const W = this._writer(); if (W.pending(this._file)) W.flushSync([this._file], { waitedBy: 'machine-mounts.json, a list made again in this process' }); }
     let read;
     try { read = { text: fs.readFileSync(this._file, 'utf-8') }; } catch (error) { read = { error }; }
     const a0 = SR.storeAnswer(read, { valid: STORE_SHAPE });
@@ -167,7 +171,7 @@ class MachineMounts {
         normed = true;
       }
     }
-    if (normed) this._save();
+    if (normed) this._save({ now: true, why: 'the start\'s hygiene' });   // B-574d (r4758): the start's save lands at once
     this._live = new Map(); // pull rec.id → { teardown, mountpoint }
     this._realMp = new Map(); // B-844b: pull rec.id → its mount point's REAL path (a child's realpath; as written until resolved)
     this._startedAt = Date.now();   // B-844b r4: the pair rank's grace (PAIR_GRACE_MS) runs from here
@@ -232,11 +236,15 @@ class MachineMounts {
     if (nPush === -1 || nPull === -1) this._state.legacyOwed = true;   // r5127: torn bytes owed too — a repaired file is read at the next start
     if (nPush === null && nPull === null) return;
     try {
-      // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace (src/fd-close.js renameSynced) — a failed sync or
-      // close is a failed save HERE (the legacy stores kept, re-run next boot): never renamed away beside a store not on disk
-      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } });
+      // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): the boot's one-time ingest keeps a SYNCED replace (src/fd-close.js
+      // renameSynced: at the start, once, its read-back right after it) — a failed sync or close is a failed save HERE: the legacy stores
+      // are never renamed away beside a store not on disk, and the ingest is marked OWED (r4796's also: a later save of the merged list
+      // would otherwise leave them behind for good — the next start runs it again, its dedupe taking nothing twice)
+      const json = JSON.stringify(this._state, null, 2);
+      require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, json, { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } });
       JSON.parse(fs.readFileSync(this._file, 'utf-8')); // verify before renaming legacy stores
-    } catch (e) { this.log('migration save FAILED — legacy stores kept, will re-run next boot: ' + e.message); return; }
+      this._asked = json;
+    } catch (e) { this._state.legacyOwed = true; this.log('migration save FAILED — legacy stores kept, will re-run next boot: ' + e.message); return; }
     try { if (nPush >= 0 && fs.existsSync(hmF)) fs.renameSync(hmF, hmF + '.migrated'); } catch { }
     try { if (nPull >= 0 && fs.existsSync(dvF)) fs.renameSync(dvF, dvF + '.migrated'); } catch { }
     // its read (MUST 2): a store ingested wholly at a start leaves no judged list behind (the file is renamed above)
@@ -315,6 +323,7 @@ class MachineMounts {
   _loadAnswer(a, { atLift = false } = {}) {   // data | missing — the start's answer, or a lift's (torn bytes kept: missing + setAside)
     this._state = a.state === 'data' ? a.value : { mounts: [] };
     if (!Array.isArray(this._state.mounts)) this._state.mounts = [];
+    this._asked = a.state === 'data' ? JSON.stringify(this._state, null, 2) : null;   // B-574d (r4796 (b)): the bytes read — a save that would write them again writes nothing
     // B-f276 family unit 2 (主开发 r3081): TORN BYTES NEVER LIFT AS AN EMPTY LIST BY THEMSELVES — the orphan token sweep (restore's
     // first step) would revoke every machine's reverse-mount token over it. The lift is MARKED, and the mark saved at once: a token
     // minted before it is UNKNOWN to the sweep, which revokes none of them until the list reads (the copy put back: no mark) or a
@@ -323,11 +332,11 @@ class MachineMounts {
     // r3982 (3): a lift with no mounts read (torn bytes kept, a gone file) mid-life OWES the one-time legacy ingest to the next start —
     // marked in the list it saves (the torn lift saves: the next start reads data, and without the mark the ingest never ran again)
     if (a.state !== 'data' && atLift) this._state.legacyOwed = true;
-    if (tornCopy) { this._state.tornAt = Date.now(); this._tornCopy = tornCopy; this._save(); }
+    if (tornCopy) { this._state.tornAt = Date.now(); this._tornCopy = tornCopy; this._save({ now: true, why: 'a lift from torn bytes' }); }
     // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
     // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
     if (a.state !== 'data' && !atLift) this._migrateLegacy();
-    else if (a.state === 'data' && !atLift && this._state.legacyOwed) { delete this._state.legacyOwed; this.log('machine-mounts.json: the one-time ingest of the legacy mount stores owed by a mid-life lift runs at this start'); this._migrateLegacy(); this._save(); }   // r4039 (f): the mark goes once it is paid (saved even when no legacy store was there)
+    else if (a.state === 'data' && !atLift && this._state.legacyOwed) { delete this._state.legacyOwed; this.log('machine-mounts.json: the one-time ingest of the legacy mount stores owed by a mid-life lift runs at this start'); this._migrateLegacy(); this._save({ now: true, why: 'the owed ingest paid' }); }   // r4039 (f): the mark goes once it is paid (saved even when no legacy store was there)
     else if (a.state !== 'data') this.log('machine-mounts.json read again with no mounts — the one-time ingest of the legacy mount stores is not run mid-life (a legacy store still there is ingested at the next start: the lift marks it owed)');
   }
   _asideName(mark = Date.now()) { return this._file + '.corrupt-' + mark; }   // ONE set-aside name: the helper's keep and the copies' prefix (the census counts the names)
@@ -349,11 +358,40 @@ class MachineMounts {
   _refuseIfUnread(what) {
     if (this._unread) throw Object.assign(new Error(`${what}: ${this.unreadWords()}`), { code: 'mounts-unread', status: 503 });
   }
-  _save() {
+  _save({ now = false, why = 'a mount change' } = {}) {
     if (!this._hold.writable('a machine-mounts.json write')) return;   // (said once a hold, by the helper)
-    // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace (src/fd-close.js renameSynced); a failed sync or close
-    // is a failed write — the old file stands, and it is SAID (it was swallowed in silence); no sync at all lands, said once a run
-    try { require('./fd-close.js').renameSynced(this._file + '.tmp', this._file, JSON.stringify(this._state, null, 2), { mode: 0o600, where: 'machine-mounts.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; this.log(w); } } }); } catch (e) { this.log(`machine-mounts.json not written (${(e && e.code) || 'error'}) — the old list stands on disk`); }
+    // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): machine-mounts.json goes through THE STORE WRITER (src/store-writer.js:
+    // its thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the
+    // write; ONE road for the file, so a later state always lands last. NO WRITE WHEN NOTHING CHANGED (r4796 (b)): the bytes the writer
+    // was last handed are never asked again. A pull's landing (no person pressed it — see _stampLanding) rides the writer off the
+    // loop; a PERSON's act (`now`: a push or pull mount added, a mount removed) and the start's own saves (its hygiene, a lift's mark,
+    // the owed ingest paid — r4758: the start) land before they answer — the writer's own synchronous road (flushSync). A failed landing is the writer's own line (its first failure and every
+    // tenth) and stays owed; nothing is thrown (as the release: a mount's change never failed its act on the file)
+    try {
+      const W = this._writer(), json = JSON.stringify(this._state, null, 2);
+      if (json === this._asked && !W.pending(this._file)) return;
+      W.dirty(this._file, { name: 'machine-mounts.write', mode: 0o600, produce: () => {
+        const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
+      } });
+      if (now) W.flushSync([this._file], { waitedBy: `machine-mounts.json: ${why}` });
+    } catch (e) { this.log(`machine-mounts.json: its write could not be asked (${(e && e.code) || (e && e.message) || 'an error'})`); }
+  }
+  _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
+  /** B-574d (r4796 M2): a pull's landing stamp (`lastLiveAt`) has ONE reader, the pair rank (_recheckPairs: «the record live LAST
+   *  keeps its folder after a restart»), and it ranks only records on ONE folder (or nested). The stamp is SAVED only when it can
+   *  change that order — another pull on its folder whose stamp is not below this record's last one — so a pull that lands again and
+   *  again (every dial-in tears a live pull down and up, the 90 s sweep remounts one whose program died) writes NOTHING while it alone
+   *  holds its folder or already ranks live-last; its stamp in memory rides the next save */
+  _stampLanding(rec) { const prev = Number(rec.lastLiveAt) || 0; rec.lastLiveAt = Date.now(); if (this._stampRanks(rec, prev)) this._save(); }
+  /** → true when a landing's stamp can move the pair rank (another pull on its folder, or nested, whose stamp is not below `prev`) */
+  _stampRanks(rec, prev) {
+    const real = this._realMp.get(rec.id) || path.resolve(String(rec.mountpoint || ''));
+    return this._state.mounts.some((o) => {
+      if (o === rec || o.dir !== 'pull') return false;
+      const ro = this._realMp.get(o.id) || path.resolve(String(o.mountpoint || ''));
+      const nests = ro === real || (ro !== '/' && real.startsWith(ro + '/')) || (real !== '/' && ro.startsWith(real + '/'));
+      return nests && (Number(o.lastLiveAt) || 0) >= prev;
+    });
   }
   _notify() { this.broadcast({ type: 'machine-mounts-updated', mounts: this.list() }); }
 
@@ -690,7 +728,7 @@ class MachineMounts {
     if (tunnelPort) this._pushTunnelOwned.add(id);
     this._state.mounts.push(rec);
     if (door) (this._doors || (this._doors = new Map())).set(id, Promise.resolve(door));
-    this._save(); this._notify();
+    this._save({ now: true, why: 'a push mount added' }); this._notify();
     return { id, mountpoint: mp, os: osKind, method, via: tunnelPort ? 'tunnel' : 'public' };
     } catch (e) {
       // a FAILED push must not leak its freshly-minted credential — every
@@ -804,7 +842,7 @@ class MachineMounts {
       rec = { id: 'mm-' + require('crypto').randomBytes(4).toString('hex'), dir: 'pull', hostId, remotePath, mountpoint: mp, createdAt: Date.now() };
       if (askedReal) this._realMp.set(rec.id, askedReal);   // r6 (read 5 #1): only a REAL answer is kept — no answer is asked again (never the path as written)
       this._state.mounts.push(rec);
-      this._save();
+      this._save({ now: true, why: 'a pull mount added' });
     }
     await this._upAsked(rec);
     this._notify();
@@ -900,7 +938,7 @@ class MachineMounts {
       if (!this._state.mounts.some((m) => m.id === rec.id)) { try { await h.teardown(); } catch { } return; }   // cure 2: removed while it was being mounted (B-844b: canRelease keeps a folder another record now holds)
       entry = { teardown: h.teardown, released: h.released, mountpoint: rec.mountpoint, at: Date.now() };
       this._live.set(rec.id, entry);
-      rec.lastLiveAt = Date.now(); this._save();   // B-844b (read 2): the record live LAST holds its folder after a restart (the rank in _recheckPairs)
+      this._stampLanding(rec);   // B-844b (read 2): the record live LAST holds its folder after a restart (the rank in _recheckPairs); B-574d (r4796 M2): saved only when it can move that rank
       this._bare?.delete(rec.id);   // B-fcc7: mounted — its bare folder's verdict goes (shadowedBy)
       for (const f of pullLiveListeners) { try { f(rec.mountpoint); } catch { } }   // B-fcc7 (read 6): who skipped the folder while it was away writes now
       if (this._pullErrors && this._pullErrors.delete(rec.id)) this._notify();
@@ -983,7 +1021,7 @@ class MachineMounts {
       this._pushDown?.delete(id);
     }
     this._state.mounts.splice(i, 1);   // (its real path stays known: a chain of it still ending must see a record added again on that folder)
-    this._save(); this._notify();
+    this._save({ now: true, why: 'a mount removed' }); this._notify();
     if (rec.dir === 'pull') this._recheckPairs().catch(() => { });   // B-844b / B-6c4f: the record it held back may be free now
     // r3813: a push mount's machine side that could not be reached is SAID (its token is revoked, so the stale mount there opens nothing)
     return { ok: true, ...(side ? { machineSide: side } : {}) };

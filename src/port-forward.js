@@ -51,13 +51,6 @@ const NONWEB_PROCS = new Set([
 ]);
 const NONWEB_PORTS = new Set([22, 25, 53, 111, 631]);
 
-// B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js
-// renameSynced) — written on an act or a forward's own rare event, never at a cadence; a failed sync or close is a failed write thrown
-// to _persist (said there; the temp removed, the old file stands); only a file system with no sync at all lands, said once a run
-let noSyncSaid = false;
-function writeJsonAtomic(file, obj) {
-  require('./fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'port-forwards.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[ports] ${w}`); } } });
-}
 
 // r3009 (B-f276 family, lane bl-machines-a): port-forwards.json under THE STORE-READ LAW (src/store-read-hold.js, one helper for
 // every store of the family) — see the constructor's read
@@ -71,7 +64,8 @@ const RELAY_BOUND_MS = 20000;
 
 class PortForwardManager {
   /** @param deps { hosts, dataDir, broadcast, log, plugins, serverSetting } */
-  constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting, getJobs, relayBoundMs = RELAY_BOUND_MS }) {
+  constructor({ hosts, dataDir, broadcast, log, plugins, serverSetting, getJobs, relayBoundMs = RELAY_BOUND_MS, storeWriter = null }) {
+    this._storeWriter = storeWriter;   // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): the store writer port-forwards.json is written by (a suite's; else the process's)
     this.relayBoundMs = relayBoundMs;   // r3287: a relay call of the replay waits at most this long
     this._replayed = false;             // r3287: the list has REPLAYED once (restore's end) — the jobs reconcile's gate
     this._relayUnanswered = new Set();  // r3287: rows whose replay the relay did not answer within the bound (left as they are)
@@ -95,10 +89,14 @@ class PortForwardManager {
       words: (h) => `port-forwards.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. No forward is lost: nothing is written over it, and new forwards wait until it reads. Addresses published before stay published at the relay; to take them all down now, stop the relay plugin.`,
       log: (m) => this.log('[ports] ' + m), onLift: (v, f) => this._lifted(v, f),
     });
+    // B-574d (r4796): a list made AGAIN in this process (a suite's restart on the same data folder) lands what the last one still owed
+    // before it reads the file; a hub's start owes nothing (pending() is false: no wait)
+    { const W = this._writer(); if (W.pending(this.file)) W.flushSync([this.file], { waitedBy: 'port-forwards.json, a list made again in this process' }); }
     let read; try { read = { text: fs.readFileSync(this.file, 'utf-8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: PF_SHAPE });
     this._state = this._hold.start(a) === 'data' ? a.value : { forwards: [] };
     if (!Array.isArray(this._state.forwards)) this._state.forwards = [];
+    this._asked = a.state === 'data' && !this._hold.held() ? JSON.stringify(this._state, null, 2) : null;   // B-574d (r4796 (b)): the bytes on disk — a save that would write them again writes nothing
     // vscode-style NEW-port watch: sweep machines with a LIVE device link and
     // announce listeners that appeared since the last sweep (the machine's
     // first sweep is a silent baseline). Never opens a connection just to
@@ -253,7 +251,27 @@ class PortForwardManager {
     }
   }
 
-  _persist() { if (!this._hold.writable('a forward change')) return; try { writeJsonAtomic(this.file, this._state); } catch (e) { this.log('port-forward persist: ' + e.message); } }   // r3009: held ⇒ nothing written over the file
+  _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
+  /** B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): port-forwards.json goes through THE STORE WRITER (src/store-writer.js:
+   *  its thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the
+   *  write; ONE road for the file, so a later state always lands last. NO WRITE WHEN NOTHING CHANGED (r4796 (b)): the bytes the writer
+   *  was last handed are never asked again — a dial-in of a machine with nothing to change, the heal sweep's retry that changed
+   *  nothing, a service's restart that publishes the same address write NOTHING. A save no person pressed (a dial-in, the heal sweep,
+   *  a probe's answer) rides the writer off the loop; a PERSON's act from the Ports panel, the jobs engine's publish of a service and
+   *  the boot's replay (r4758: the start) (`now`) land before they answer — the writer's own synchronous road (flushSync). A failed landing
+   *  is the writer's own line (said at its first failure and every tenth) and stays owed; nothing is thrown (as before: said, never
+   *  thrown). r3009: held ⇒ nothing written over the file */
+  _persist({ now = false } = {}) {
+    if (!this._hold.writable('a forward change')) return;
+    try {
+      const W = this._writer(), json = JSON.stringify(this._state, null, 2);
+      if (json === this._asked && !W.pending(this.file)) return;
+      W.dirty(this.file, { name: 'port-forwards.write', produce: () => {
+        const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
+      } });
+      if (now) W.flushSync([this.file], { waitedBy: 'port-forwards.json: a forward changed by a person or a service' });
+    } catch (e) { this.log('port-forward persist: ' + e.message); }
+  }
   /** r3009: the words the Ports panel reads while port-forwards.json is held (null when it reads) */
   heldWords() { return this._hold.words(); }
   /** r3104: after torn bytes lifted as empty — the copy's base name (the panel says the list was damaged and where those bytes are kept;
@@ -262,6 +280,7 @@ class PortForwardManager {
   /** r3009: the hold LIFTED — the records read (null: empty); the boot's replay runs now if it was asked while held; every page is told */
   _lifted(v, facts) {
     this._state = v || { forwards: [] };
+    this._asked = null;   // B-574d (r4796 (b)): read again — the next save writes
     this._tornCopy = (facts && facts.setAside) || null;   // r3104: torn bytes lifted as EMPTY — the panel says where they are kept
     if (!Array.isArray(this._state.forwards)) this._state.forwards = [];
     this._emit();
@@ -328,14 +347,14 @@ class PortForwardManager {
     if (!rec) throw new Error('no such forward');
     if (proto !== null && !['http', 'https', 'tcp'].includes(proto)) throw new Error('proto must be http, https, tcp or null (auto)');
     if (proto) rec.protoOverride = proto; else delete rec.protoOverride;
-    this._persist();
+    this._persist({ now: true });
     if (rec.publicUrl && this.plugins) {
       // re-publish in the new mode — the URL SHAPE changes (subdomain vs
       // ip:port), so the old proxy must go first; keep the stored subdomain
       // so flipping back to http restores the same public URL
       try { await this.plugins.frpUnpublish(rec.publicName || rec.id); } catch { }
       rec.publicUrl = null;
-      try { await this.publish(id); } catch (e) { rec.error = 'republish: ' + e.message; this._persist(); }
+      try { await this.publish(id); } catch (e) { rec.error = 'republish: ' + e.message; this._persist({ now: true }); }
     }
     this._emit();
     return this.list().find((r) => r.id === id);
@@ -568,20 +587,20 @@ class PortForwardManager {
     // a row of ANOTHER job: refused — unless the engine names that job as no longer asking for it (`reown`: removed, stopped)
     if (owner && rec && rec.ownerJob && rec.ownerJob !== owner) {
       if (!reown || rec.ownerJob !== reown) throw Object.assign(new Error(`port ${remotePort} is forwarded for another service`), { code: 'forward_owned', status: 409 });
-      rec.ownerJob = owner; this._persist();
+      rec.ownerJob = owner; this._persist({ now: true });
     }
     if (owner && rec && !rec.ownerJob) {
       if (!(Array.isArray(claim) && claim.includes(rec.label))) throw Object.assign(new Error(`port ${remotePort} is already forwarded in the Ports panel by hand — that forward is not this service's: publish it there, or remove it and start the service again`), { code: 'forward_not_owned', status: 409 });
-      rec.ownerJob = owner; this._persist();
+      rec.ownerJob = owner; this._persist({ now: true });
     }
     if (!rec) {
       rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}), ...(owner ? { ownerJob: owner } : {}) };
       // a stopped service's forward left its public name behind (unforward keepName) — its next start gets it back
       const kept = this._state.names && this._state.names[rec.id];
       if (kept) { rec.publicSub = kept.sub || null; rec.publicPort = kept.port || null; if (kept.proto) rec.proto = kept.proto; delete this._state.names[rec.id]; }
-      this._state.forwards.push(rec); this._persist();
+      this._state.forwards.push(rec); this._persist({ now: true });
     }
-    else if (label) { rec.label = label; this._persist(); }
+    else if (label && rec.label !== label) { rec.label = label; this._persist({ now: true }); }   // B-574d (r4796 (b)): a service's restart names the same label — nothing to write
     await this._start(rec);
     this._probeForward(rec);
     this._emit();
@@ -672,7 +691,7 @@ class PortForwardManager {
     this._healRetryAt.delete(id);
     this._pubGen.delete(id); this._relayUnanswered.delete(id);   // r3327: the row leaves — its marks with it
     this._state.forwards = this._state.forwards.filter((r) => r.id !== id);
-    this._persist();
+    this._persist({ now: true });
     this._emit();
   }
 
@@ -700,7 +719,7 @@ class PortForwardManager {
     if (d.why === 'probe' && r.proto) rec.proto = r.proto; // publish probe refreshes detection
     if (d.pending) rec.protoPending = true; else delete rec.protoPending;
     this.log(`[ports] publish ${id}: ${r.proto || d.proto} (${d.why}) → ${r.url}`);
-    this._persist(); this._emit();
+    this._persist({ now: true }); this._emit();
     return { publicUrl: r.url, proto: r.proto || d.proto, pending: !!d.pending, previousUrl };
   }
 
@@ -737,7 +756,7 @@ class PortForwardManager {
     rec.publicUrl = null; rec.publicName = null; delete rec.protoPending;
     if (!keepName) { rec.publicSub = null; rec.publicPort = null; rec.publicProto = null; if (this._state.names) delete this._state.names[id]; }
     this._published.delete(id);
-    this._persist(); this._emit();
+    this._persist({ now: true }); this._emit();
   }
 
   /** Mount a forward under the MAIN domain at /svc/<name>/ (2.358.0, owner
@@ -749,7 +768,7 @@ class PortForwardManager {
     this._hold.refuse("changing a forward's path");   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
-    if (name === null || name === undefined || name === '') { rec.pathMount = null; rec.pathPublic = false; this._persist(); this._emit(); return { pathMount: null }; }
+    if (name === null || name === undefined || name === '') { rec.pathMount = null; rec.pathPublic = false; this._persist({ now: true }); this._emit(); return { pathMount: null }; }
     name = String(name).toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) throw new Error('path name must be lowercase letters/digits/hyphens');
     const clash = this._state.forwards.find((r) => r.id !== id && r.pathMount === name);
@@ -763,7 +782,7 @@ class PortForwardManager {
     // DEFAULT stays private — exposure is an explicit act, never a side
     // effect of mounting. Re-posting the same name with a flag toggles it.
     if (pub !== undefined) rec.pathPublic = !!pub;
-    this._persist(); this._emit();
+    this._persist({ now: true }); this._emit();
     return { pathMount: name, public: !!rec.pathPublic, url: `/svc/${name}/` };
   }
 
@@ -828,7 +847,7 @@ class PortForwardManager {
         if (rec.publicUrl && this.plugins) { this.plugins.frpUnpublish(rec.publicName || rec.id).catch(() => {}); }
       }
     }
-    this._persist();
+    this._persist({ now: true });   // B-574d (r4758): the start's replay lands at once
     this._emit();
     this._replayed = true;   // r3287: the replay ENDED (each relay call bounded) — the gate the jobs reconcile waits for
     await this._jobsReconcile('the replay');   // r3228: after the replay settled — the jobs engine's ONE reconcile (at every start, after every lift)
@@ -899,7 +918,7 @@ class PortForwardManager {
       this._pubGen.delete(rec.id); this._relayUnanswered.delete(rec.id);   // r3327
     }
     this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);
-    this._persist();
+    this._persist({ now: true });
     this._emit();
   }
 }
