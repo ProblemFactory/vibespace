@@ -5675,6 +5675,11 @@ export default {
   "scopes {list}": "权限 {list}",
   "This account’s token was minted under this client. Switching the client means signing in again — Save opens Re-authorize.": "这个账号的 token 是用这个客户端铸出的。换一个客户端就要重新授权 —— 保存时会直接打开「重新授权」。",
   "Sign-in": "授权状态",
+  "Sign-in record": "登录记录",   // B-dc3f (3): the network home's witness notice (src/auth.js) — its For-you head
+  "The copy of the sign-in record on your network home folder could not be updated": "网络主目录上的登录记录副本未能更新",   // B-dc3f (3): the network home's witness notice (src/auth.js)
+  "People still sign in on this machine as before. The copy on the home folder is tried again at the next start or password change; check that the home folder is mounted and writable.": "此机器上的登录照常进行。主目录上的副本会在下次启动或修改密码时再试；请检查主目录是否已挂载且可写。",   // B-dc3f (3): the network home's witness notice (src/auth.js)
+  "The copy of the sign-in record on your network home folder is waiting": "网络主目录上的登录记录副本正在等待",   // B-dc3f (3): the network home's witness notice (src/auth.js)
+  "Earlier requests to the home folder have not finished, so its copy is not updated yet. People still sign in on this machine as before; the copy is updated when the home folder answers. Check that the home folder is mounted.": "之前对主目录的请求尚未完成，因此副本还没有更新。此机器上的登录照常进行；主目录响应后会更新副本。请检查主目录是否已挂载。",   // B-dc3f (3): the network home's witness notice (src/auth.js)
   // lane ui-controls-and-bugs pick 2 — the billing menu says what it is
   "This session’s billing account": "本会话的计费账号",
   "it connects to the vendor’s servers (measured)": "会连接厂商服务器（实测）",

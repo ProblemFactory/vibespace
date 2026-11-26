@@ -47,6 +47,13 @@ const { TOKEN_COOKIE, TOKEN_TTL_MS, TOKEN_IDLE_MS, TOKEN_SLIDE_SAVE_MS, OWN_RULE
   heldJournal, HELD_UPGRADE, hashSync, hashMatches, migrateTokens, addLogin, heldPage, heldJson, loginCookie, CLEAR_COOKIE, cookieTokenOf, rateCheck, rateFail } = require('./signin-table.js');
 const { loginHtml } = require('./login-page.js');   // the sign-in page, one for both holders
 const SW = require('./signin-witness.js');   // B-dc3f (1): the data folder's own id inside it, the witness outside it (the plain form)
+// B-dc3f (3): the network home's refused witness write — its For-you notice's fixed key, source and words (en; zh / ja in the dictionaries)
+const i18nKey = (s) => s;   // extraction marker (scripts/i18n-extract.mjs)
+const WITNESS_INBOX_KEY = 'signin', WITNESS_ITEM = 'signin-witness-', WITNESS_SOURCE = i18nKey('Sign-in record'), WITNESS_CAUSES = Object.freeze(['refused', 'waiting']);
+const WITNESS_WORDS = Object.freeze({
+  refused: Object.freeze({ text: i18nKey('The copy of the sign-in record on your network home folder could not be updated'), detail: i18nKey('People still sign in on this machine as before. The copy on the home folder is tried again at the next start or password change; check that the home folder is mounted and writable.') }),
+  waiting: Object.freeze({ text: i18nKey('The copy of the sign-in record on your network home folder is waiting'), detail: i18nKey('Earlier requests to the home folder have not finished, so its copy is not updated yet. People still sign in on this machine as before; the copy is updated when the home folder answers. Check that the home folder is mounted.') }),
+});
 const SRH = require('./store-read-hold.js');   // 主开发 r3336: the id file under the store-read law — held while unread, read again off the loop
 /** B-dc3f (1), 主开发 r2780 (2) H1 + r2869: the network home's look — its bound, its re-ask (one look out at a time) and its read size */
 const NET_BOUND_MS = 5000, NET_REASK_MS = 30000, NET_REASK_MAX_MS = 8 * 60 * 1000, NET_ENDING_MAX = 2, NET_MAX_BYTES = 4096;
@@ -65,7 +72,10 @@ function refuseHeld(held, req, res, { sso = false, page = false } = {}) {
 const heldError = (held) => Object.assign(new Error(`the sign-in file is held (${held.why}) — nothing is written over it`), { code: 'signin-held' });
 
 class Auth {
-  constructor(dataDir, { clerk = null, witness = null } = {}) {
+  constructor(dataDir, { clerk = null, witness = null, todos = null } = {}) {
+    // B-dc3f (3): `todos` = the hub's For-you store, handed as a GETTER (server.js builds the store after Auth) — the network home's
+    // refused witness write is said there (_noticeWitness); null = the journal alone (the piped form, a suite's other Auth)
+    this._todosOf = typeof todos === 'function' ? todos : (todos ? () => todos : null);
     this._file = path.join(dataDir, 'auth.json');
     // B-dc3f (1): `witness` = the start's inputs for the witness ({env, throwaway, …}; server.js passes its env and THE ONE TEST's
     // answer to the PLAIN form only; the home is read when the facts are) — null = no folder check (the piped form's hub, which
@@ -146,6 +156,52 @@ class Auth {
     if (!this._held) this._afterLoad();   // the start opened: what it skipped while the id was unknown
   }
   _sayOnce(k, line) { if (this._said.has(k)) return; this._said.add(k); try { console.warn(line); } catch { } }
+  /** B-dc3f (3) (lane lg-providers, package s1126-2): THE NETWORK HOME's REFUSED WRITE IS SAID WHERE A PERSON LOOKS — ONE For-you notice a
+   *  cause (`refused`: a write or removal of the home folder's copy did not land; `waiting`: it waits behind earlier asks of the home still
+   *  stuck), its key fixed (one item across starts, re-worded), closed by itself when a write or removal of the home copy next lands, or a
+   *  start with no sign-in READS the home and finds no copy (a later refusal is then said again); «waiting» closes when the parked ask is
+   *  asked (its own end says the rest). Its words name NO path, NO account and NO sign-in value: what was refused and what to do. The journal
+   *  line keeps the path (the operator's). For you held unread: owed to the store's «when it reads» door; no store (yet): the journal is the
+   *  word. Nothing here throws into the queue that calls it (a store that throws is said once) */
+  _inbox() { try { const t = this._todosOf && this._todosOf(); return t && typeof t.add === 'function' ? t : null; } catch { return null; } }
+  /** the store held unread? (a store that cannot answer is taken as held: nothing is written over a list not read) */
+  _heldInbox(store) { try { return typeof store.isHeldUnread === 'function' && !!store.isHeldUnread(); } catch { return true; } }
+  _noticeWitness(cause) {
+    if (!this._noticed) this._noticed = new Set();
+    const w = WITNESS_WORDS[cause], store = this._inbox();
+    if (!w || this._noticed.has(cause) || !store) return;
+    if (cause === 'waiting') this._waitingMaybe = true;   // filed now or owed to the read: the parked ask's run closes it either way
+    if (this._heldInbox(store)) return this._owedAtRead(store, { [cause]: 'file' });
+    this._noticed.add(cause);
+    try { store.add(WITNESS_INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Sign-in record', itemKey: WITNESS_ITEM + cause, text: w.text, detail: w.detail, i18n: { text: { key: w.text }, detail: [{ key: w.detail }], source: { key: WITNESS_SOURCE } } }); }
+    catch (e) { this._noticed.delete(cause); this._sayOnce('witness-notice', `[auth] the sign-in record's For-you notice was not filed — ${(e && e.message) || e}`); }
+  }
+  /** closes the open notices of these causes (every cause by default: a landing; «waiting» alone: its parked ask asked) */
+  _closeWitnessNotices(causes = WITNESS_CAUSES) {
+    if (this._noticed) for (const c of causes) this._noticed.delete(c);
+    if (causes.includes('waiting')) this._waitingMaybe = false;
+    const store = this._inbox();
+    if (!store || typeof store.idsWhere !== 'function') return;
+    if (this._heldInbox(store)) return this._owedAtRead(store, Object.fromEntries(causes.map((c) => [c, 'close'])));
+    const keys = new Set(causes.map((c) => WITNESS_ITEM + c));
+    try { for (const x of store.idsWhere((i) => i.sessionKey === WITNESS_INBOX_KEY && keys.has(i.itemKey) && i.status === 'open') || []) store.setStatus(x, 'done', 'system'); }
+    catch (e) { this._sayOnce('witness-notice-close', `[auth] the sign-in record's For-you notice was not closed — ${(e && e.message) || e}; it closes at the home copy's next landing`); }
+  }
+  /** For you held unread: each cause's word waits for the store's read — ONE wait, each cause's LAST word kept (a landing after a refusal
+   *  closes it; a refusal after a landing files it), never a word dropped while the list is unread */
+  _owedAtRead(store, ops) {
+    const o = this._atRead || (this._atRead = { ops: new Map(), waiting: false });
+    for (const c of Object.keys(ops)) o.ops.set(c, ops[c]);
+    if (o.waiting || typeof store.whenRead !== 'function') return;
+    o.waiting = true;
+    try {
+      store.whenRead(() => {
+        const owed = [...o.ops.entries()];
+        o.ops.clear(); o.waiting = false;
+        for (const [c, op] of owed) { if (op === 'close') this._closeWitnessNotices([c]); else this._noticeWitness(c); }
+      }, 'the sign-in record\'s notice');
+    } catch { o.waiting = false; }   // the words stay owed: the next refusal or landing asks the door again
+  }
   /** B-dc3f (1): after the load — the folder's id written ONCE (never while held), then the witness learned */
   _afterLoad() {
     if (this._held || !this._witnessCfg) return;
@@ -232,7 +288,7 @@ class Auth {
     if (!this._pool) { this._netStartNewOwed = true; return; }   // attachWitnessPool runs it
     this._netStartNewOwed = false;
     const root = SW.digestOf(f.root);
-    this._netQueue(() => this._netAsk('netRemove', { path: f.netHome, root }).then(done), (e) => this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netHome} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`), 'start-new');
+    this._netQueue(() => this._netAsk('netRemove', { path: f.netHome, root }).then(() => { done(); this._closeWitnessNotices(); }), (e) => { this._noticeWitness('refused'); this._sayOnce('start-new-net', `[auth] the sign-in witness on the home folder ${f.netHome} could not be removed (${(e && e.message) || e}) — ${marker} stays, and the next start removes it again`); }, 'start-new');
   }
   /** ONE ask of the witness worker, bounded (a pool that throws is a refusal, never a throw out of the start) */
   _netAsk(op, payload) { try { return Promise.resolve(this._pool.call(op, payload, { timeoutMs: this._netBound() })); } catch (e) { return Promise.reject(e); } }
@@ -243,9 +299,11 @@ class Auth {
       if (ending >= NET_ENDING_MAX) {   // r3219 (1): a WRITE is never asked past the same two stuck threads — OWED (the latest of its kind), asked at a thread's exit
         (this._netOwed || (this._netOwed = new Map())).set(kind, [run, onFail]);
         const f = this._facts;
+        this._noticeWitness('waiting');
         this._sayOnce('net-write-parked', `[auth] the sign-in witness on the home folder ${f && f.netHome} is not ${kind === 'start-new' ? 'removed' : 'written or removed'} now: ${ending} earlier asks of the home folder still hold their worker threads (stuck in the kernel) — it is asked when one of them exits, or at the next start`);
         return;
       }
+      if (this._waitingMaybe !== false && !(this._netOwed && this._netOwed.size)) this._closeWitnessNotices(['waiting']);   // B-dc3f (3): nothing waits now — its own end says the rest
       return run();
     }).catch(onFail);
     this._netChain = next; this._netWrites = next; return next;
@@ -361,19 +419,20 @@ class Auth {
     const f = this._facts;
     if (!f || !f.netHome || !this._pool || this._held || (this._net && !this._net.done) || !f.instance) return null;
     const set = !!(this._state && this._state.passwordHash), id = f.instance.id, home = f.netHome, root = SW.digestOf(f.root);
-    const say = (act, e) => this._sayOnce('net-witness', `[auth] the sign-in witness on the home folder ${home} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start${e && e.code === 'EWITNESSFOLDER' ? '; until that folder is mended, a data folder missing at a start is not caught by the home folder\'s copy' : ''}`);
+    const say = (act, e) => (this._noticeWitness('refused'), this._sayOnce('net-witness', `[auth] the sign-in witness on the home folder ${home} could not be ${act} (${(e && e.message) || e}) — it is ${act} again at the next start${e && e.code === 'EWITNESSFOLDER' ? '; until that folder is mended, a data folder missing at a start is not caught by the home folder\'s copy' : ''}`));
     // this start's look answered already: never read twice; the START-NEW start reads none of the home (r2926): its copy is the act's to remove
-    const seen = atStart && this._startNewUsed ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;
+    const madeUp = atStart && this._startNewUsed, seen = madeUp ? { answered: true, found: null } : atStart && this._net && this._net.done ? this._net.answer : null;
     return this._netQueue(async () => {
       if (this._held) return;   // 主开发 r4440 (c): a write queued before a put-back asks the hold again when it RUNS — a held start writes and removes nothing
       if (atStart) {   // H2: a start reads it first, and with no password keeps another folder's copy as it is
         const a = seen || SW.netAnswerOf(await this._netAsk('netRead', { path: home, root, maxBytes: NET_MAX_BYTES }).then((result) => ({ result }), (error) => ({ error })), { root: f.root, dataDir: f.dataDir });
         if (!a.answered) return say(set ? 'written' : 'removed', a.why);
         if (!set && a.found && SW.foreignAt([a.found], startId)) return this._sayOnce('foreign', `[auth] a sign-in witness names another data folder than ${this._dataDir} (${a.found.file}) — this start keeps it as it is`);
-        if (!set && !a.found) return;
+        if (!set && !a.found) return madeUp ? undefined : this._closeWitnessNotices();   // B-dc3f (3): the home READ, no copy to remove — as it should be (the start-new start's «none» is no read: the removal's own end says)
       }
       if (set) await this._netAsk('netWrite', { path: home, root, uid: f.uid, content: JSON.stringify(SW.witnessDoc({ root: f.root, dataDir: f.dataDir, id })) });
       else await this._netAsk('netRemove', { path: home, root });
+      this._closeWitnessNotices();   // B-dc3f (3): the home copy's write / removal LANDED — its notices close by themselves
     }, (e) => say(set ? 'written' : 'removed', e));
   }
   /** B-dc3f (1): the opt-in declaration (VIBESPACE_SIGNIN=required, set nowhere by default) — read from the start's inputs */
