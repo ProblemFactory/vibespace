@@ -2368,13 +2368,18 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     'const relaunchFitPlan = (g, next) => (!g || !next || closed ? null : (relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next }) || null));',
     '    const plan = relaunchFitPlan(geo, next);\n    relaunchPlanned = relaunchPlanFor(geo, next, plan);\n    fitAfterRelaunch(geo, next, plan);',
     // B-a52d (主开发 r4884): the plan and the fit at the FIRST of the two events — the answer (after retarget) or the record's door
-    '    retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)\n    planRelaunch(r.app);\n    relaunchPress = null; // B-a52d: whatever the answer',
-    '    if (!relaunchPressTakes(relaunchPress, { nextId: next && next.id, now: Date.now() })) return false;\n    const geo = relaunchPress.geo;\n    relaunchPress = null;',
+    '    retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)\n    planRelaunch(r.app, { answer: true });',
+    '    relaunchPress = null; // B-a52d: whatever the answer',
+    '  function planRelaunch(next, { answer = false } = {}) {\n    if (!relaunchPressTakes(relaunchPress, { nextId: next && next.id, now: Date.now(), answer })) return false;',
+    "    const id0 = id; // r5322",
+    '/api/desktop/apps/${encodeURIComponent(id0)}/relaunch',
+    "    if (r && r.code === 'app-asked' && !closed) {\n      relaunchPress = null; // B-a52d (r5322)",
+    '      relaunchPress = { fromId: id0, geo, at: Date.now() }; // B-a52d (r5322): the confirmed request is a press of its own, from now\n      r = await post(true);',
+    '    const geo = relaunchPress.geo;\n    relaunchPress = null;\n    const plan = relaunchFitPlan(geo, next);',
     '    const geo = relaunchGeometry();\n    relaunchPress = { fromId: id, geo, at: Date.now() };',
     '    applyMinSize(null);\n    if (relaunchPress && relaunchPress.fromId === id) relaunchPress = { ...relaunchPress, nextId };',
     '    reveal();\n    planRelaunch(r); // B-a52d',
     "    if (!r || r.error || !r.app || !r.app.id) { relaunchPress = null;",
-    '      if (relaunchPress) relaunchPress = { ...relaunchPress, at: Date.now() }; // B-a52d: the confirmed request is the one in flight now\n      r = await post(true);',
     '    const ask = fitAsk(g, p), fit = app.wm.fitSizeFor(winInfo.id, ask);\n    const pane = relaunchHandOver({ fit, chrome: g.chrome, uiScale: uiScale() });',
     "return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height }, landed: false } : null;",
     '    const done = app.wm.resizeWindowTo(winInfo.id, fitAsk(g, p));',
@@ -2456,13 +2461,13 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   // events: 'broadcast' (the hub's successor, followed: retarget → the record's door), 'answer' (the press's answer naming it: retarget,
   // planRelaunch, the press ends), 'refusal' / 'lost' (the answer refuses, or never comes: the press ends), 'other' (ANOTHER relaunch
   // later — another client's: its broadcast followed to a newer record), 'connect' (the view of the current record maps at once)
-  const pressScene = async (DFm, events, { pressAt = 0, now = 1000, noPress = false, doorPlans = true, endsWithAnswer = true } = {}) => {
+  const pressScene = async (DFm, events, { pressAt = 0, now = 1000, noPress = false, doorPlans = true, endsWithAnswer = true, askedKeeps = false } = {}) => {
     const el = { style: { width: '1634px', height: '1264px' } };
-    let id = 'old', press = noPress ? null : { fromId: 'old', at: pressAt }, planned = null, fits = 0, asked = 0, doorSkipped = 0, keptAfterAnswer = 0;
+    let id = 'old', press = noPress ? null : { fromId: 'old', at: pressAt }, planned = null, fits = 0, asked = 0, doorSkipped = 0, keptAfterAnswer = 0, heldThroughAsked = 0;
     const maps = [];
-    const planRelaunch = (next) => {
+    const planRelaunch = (next, answer = false) => {
       asked++;
-      if (!DFm.relaunchPressTakes(press, { nextId: next.id, now })) return false;
+      if (!DFm.relaunchPressTakes(press, { nextId: next.id, now, answer })) return false;
       press = null;
       const p = DFm.relaunchHandOver({ fit: FITW, chrome: CH, uiScale: 1 });
       planned = p ? { ...p, id: next.id, fit: FITW, fitCss: { w: FITW.w + 'px', h: FITW.h + 'px' }, at: { w: el.style.width, h: el.style.height }, landed: false } : null;
@@ -2475,12 +2480,14 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     const end = () => { if (endsWithAnswer) press = null; else if (press) keptAfterAnswer++; };
     for (const ev of events) {
       if (ev === 'broadcast') { retarget('new'); if (doorPlans) planRelaunch({ id: 'new' }); else doorSkipped++; }
-      else if (ev === 'answer') { retarget('new'); planRelaunch({ id: 'new' }); end(); }
+      else if (ev === 'answer') { retarget('new'); planRelaunch({ id: 'new' }, true); end(); }
+      else if (ev === 'asked') { if (!askedKeeps) press = null; else if (press) heldThroughAsked++; }                     // the first request answered «app-asked»: no press while the person decides
+      else if (ev === 'confirm') { press = { fromId: id, at: now }; }                 // the confirmed request: a press of its own
       else if (ev === 'refusal' || ev === 'lost') end();
       else if (ev === 'other') { const nx = id === 'new' ? 'later' : 'new'; retarget(nx); if (doorPlans) planRelaunch({ id: nx }); }
       else if (ev === 'connect') maps.push((await firstMap(V, read, false, { w: Number.parseInt(el.style.width, 10), h: Number.parseInt(el.style.height, 10) - CH.h })).first); // the pane as it stands then
     }
-    return { map: maps[0] || null, maps, fits, asked, doorSkipped, keptAfterAnswer };
+    return { map: maps[0] || null, maps, fits, asked, doorSkipped, keptAfterAnswer, heldThroughAsked };
   };
   const PS = {
     broadcastFirst: [['broadcast', 'connect', 'answer']],                  // the placed stall's order: the window followed the broadcast, mapped, then the answer
@@ -2493,9 +2500,15 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     answeredThenOther: [['broadcast', 'connect', 'answer', 'other', 'connect']], // (a) a press answered, then another client's relaunch: its successor maps as a second client's
     secondClient: [['broadcast', 'connect', 'answer'], { noPress: true }], // a window that did not press: as at the release
     pastBound: [['broadcast', 'connect'], { pressAt: 0, now: 60001 }],
+    lateAnswer: [['answer', 'connect'], { pressAt: 0, now: 61000 }],          // r5322: this press's own answer 61 s after the press still plans and fits
+    lateAfterDoor: [['broadcast', 'connect', 'answer'], { pressAt: 0, now: 61000 }], // the door past its bound maps as before; the late answer still fits (the release's refit, never none)
+    askedThenOther: [['asked', 'other', 'connect']],                          // r5322: while the person decides on «app-asked», another client's relaunch: as a second client's
+    askedConfirmed: [['asked', 'confirm', 'broadcast', 'connect', 'answer']], // the confirmed request is a press of its own: mapped once at its final size
   };
   const pg = {}; for (const [k, [ev, o]] of Object.entries(PS)) pg[k] = await pressScene(DF, ev, o || {});
   const fin = (x) => same(x.map, [1818, 1232]) && x.fits === 1, asRelease = (x) => same(x.map, [1634, 1232]) && x.fits === 0;
+  ok(fin(pg.lateAnswer) && same(pg.lateAfterDoor.map, [1634, 1232]) && pg.lateAfterDoor.fits === 1 && fin(pg.askedConfirmed) && asRelease(pg.askedThenOther),
+    'B-a52d (主开发 r5322): the press\'s OWN answer is never refused by the age bound — an answer 61 s after the press plans and fits (1818×1232, one fit); past the door\'s bound the window maps as at the release and the late answer still fits it (the release\'s refit, never no fit); while the person decides on «app-asked» there is NO press (another client\'s relaunch maps as a second client\'s), and the confirmed request is a press of its own', { lateAnswer: pg.lateAnswer, lateAfterDoor: pg.lateAfterDoor, askedThenOther: pg.askedThenOther, askedConfirmed: pg.askedConfirmed });
   ok(fin(pg.broadcastFirst) && fin(pg.answerFirst) && fin(pg.answerThenBroadcast) && fin(pg.lostAfterBroadcast) && fin(pg.atBound),
     'B-a52d (主开发 r4884): the successor maps ONCE at its FINAL size whichever comes first — the hub\'s broadcast (the window followed it, mapped, THEN the answer) or the answer; the second plans nothing and fits nothing (one fit each); a broadcast met while the request was in flight plans even when its answer is then lost', pg);
   ok(asRelease(pg.refusedThenOther) && asRelease(pg.lostThenOther) && same(pg.answeredThenOther.maps, [[1818, 1232], [1818, 1232]]) && pg.answeredThenOther.fits === 1 && asRelease(pg.secondClient) && asRelease(pg.pastBound),
@@ -2503,20 +2516,31 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   ok(DF.RELAUNCH_PRESS_MS === 60000 && DF.relaunchPressTakes(null, { nextId: 'b', now: 1 }) === false && DF.relaunchPressTakes({ fromId: 'a', at: 0 }, { nextId: 'b', now: 1 }) === false
     && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'c', now: 1 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'a', at: 0 }, { nextId: 'a', now: 1 }) === false
     && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 5 }, { nextId: 'b', now: 4 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'b', now: 60000 }) === true
-    && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'b', now: 60001 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: null, now: 1 }) === false,
-    'B-a52d (PURE): relaunchPressTakes — no press, a press its window has not retargeted yet (no successor named), another record, a successor that is the press\'s own record, a clock before the press, past 60 s ⇒ false; the named successor inside 60 s ⇒ true');
+    && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'b', now: 60001 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: null, now: 1 }) === false
+    && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'b', now: 600000, answer: true }) === true && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'c', now: 1, answer: true }) === false
+    && DF.relaunchPressTakes({ fromId: 'a', at: 0 }, { nextId: 'b', now: 1, answer: true }) === false && DF.relaunchPressTakes(null, { nextId: 'b', now: 1, answer: true }) === false,
+    'B-a52d (PURE): relaunchPressTakes — no press, a press its window has not retargeted yet (no successor named), another record, a successor that is the press\'s own record, a clock before the press, past 60 s ⇒ false; the named successor inside 60 s ⇒ true; THE ANSWER (r5322): its named successor at any age ⇒ true, another record, none named or no press ⇒ false');
   const relX = await pressScene(DF, ['broadcast', 'connect', 'answer'], { doorPlans: false });
   if (relX.doorSkipped !== 1) skip(`RED CONTROL (B-a52d, the release's window): its plant — the record's door planning nothing — was never reached (${relX.doorSkipped} door(s) passed by): not judged`);
   else ok(same(relX.map, [1634, 1232]) && relX.fits === 1, `RED CONTROL (B-a52d, the release's window: the plan and the fit made only at the answer): the window that followed the broadcast maps the STALE pane (${relX.map}) and the answer's fit lands after the map — the refit a person sees`, relX);
   const keptX = await pressScene(DF, ['lost', 'other', 'connect']).then(async (a) => ({ a, b: await pressScene(DF, ['lost', 'other', 'connect'], { endsWithAnswer: false }) }));
   if (keptX.b.keptAfterAnswer !== 1) skip(`RED CONTROL (B-a52d, r5011 (a)): its plant — a press kept past its lost answer — was never in force (${keptX.b.keptAfterAnswer} kept): not judged`);
   else ok(asRelease(keptX.a) && same(keptX.b.map, [1818, 1232]) && keptX.b.fits === 1, `RED CONTROL (B-a52d, r5011 (a)): a press KEPT past its lost answer shapes another client's later relaunch — the window is fitted for it (${keptX.b.map}, one fit) where a second client maps its pane`, keptX);
-  const DFnoTake = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return age >= 0 && age <= RELAUNCH_PRESS_MS;', '  return false;', 'B-a52d control: a press nothing takes'), 'a52d-no-take')).href);
+  const DFnoTake = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(anchored(dfsrc, '  return age >= 0 && age <= RELAUNCH_PRESS_MS;', '  return false;', 'B-a52d control: a press nothing takes (the door)'), '  if (answer) return true;', '  if (answer) return false;', 'B-a52d control: a press nothing takes (the answer)'), 'a52d-no-take')).href);
   const redNoTake = await pressScene(DFnoTake, ['broadcast', 'connect', 'answer']);
   const PRESS_W = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 1000 }], PRESS_LATE = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 60001 }];
   // the WITNESS (law 1): the scene asked the planted module, and the plant answers otherwise than the module does, on the scene's own input
-  if (!(redNoTake.asked > 0 && DFnoTake.relaunchPressTakes(...PRESS_W) === false && DF.relaunchPressTakes(...PRESS_W) === true)) skip(`RED CONTROL (B-a52d): its plant — a press nothing takes — was never read (${redNoTake.asked} asks): not judged`);
+  if (!(redNoTake.asked > 0 && DFnoTake.relaunchPressTakes(...PRESS_W) === false && DF.relaunchPressTakes(...PRESS_W) === true && DFnoTake.relaunchPressTakes(PRESS_W[0], { ...PRESS_W[1], answer: true }) === false)) skip(`RED CONTROL (B-a52d): its plant — a press nothing takes — was never read (${redNoTake.asked} asks): not judged`);
   else ok(same(redNoTake.map, [1634, 1232]) && redNoTake.fits === 0, `RED CONTROL (B-a52d): a press nothing takes plans nothing at either event — the broadcast's follow maps the stale pane (${redNoTake.map}), no fit at all`, redNoTake);
+  // RED (r5322, e06b22906's rule): the answer's road under the door's 60 s bound — an answer 61 s after the press gets NO fit at all
+  const DFansBound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  if (answer) return true;', '  void answer;', 'B-a52d control: the answer under the age bound'), 'a52d-answer-bound')).href);
+  const redAnsBound = await pressScene(DFansBound, ['answer', 'connect'], { pressAt: 0, now: 61000 });
+  const PRESS_ANS = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 61000, answer: true }];
+  if (!(redAnsBound.asked > 0 && DFansBound.relaunchPressTakes(...PRESS_ANS) === false && DF.relaunchPressTakes(...PRESS_ANS) === true)) skip(`RED CONTROL (B-a52d, r5322): its plant — the answer under the age bound — was never read (${redAnsBound.asked} asks): not judged`);
+  else ok(same(redAnsBound.map, [1634, 1232]) && redAnsBound.fits === 0, `RED CONTROL (B-a52d, r5322 — e06b22906's rule): with the answer's road under the 60 s bound, an answer 61 s after the press plans NOTHING — the successor maps at the old pane (${redAnsBound.map}) and is never refit (no fit at all)`, redAnsBound);
+  const askedX = await pressScene(DF, ['asked', 'other', 'connect'], { askedKeeps: true });
+  if (askedX.heldThroughAsked !== 1) skip('RED CONTROL (B-a52d, r5322): its plant — a press kept open through «app-asked» — was never read: not judged');
+  else ok(same(askedX.map, [1818, 1232]) && askedX.fits === 1, `RED CONTROL (B-a52d, r5322 — e06b22906's press through «app-asked»): a press kept open while the person decides is fitted for another client's relaunch (${askedX.map}, one fit) where a second client maps its pane`, askedX);
   const DFnoBound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return age >= 0 && age <= RELAUNCH_PRESS_MS;', '  return true;', 'B-a52d control: a press with no bound'), 'a52d-no-bound')).href);
   const redNoBound = await pressScene(DFnoBound, ['broadcast', 'connect'], { pressAt: 0, now: 60001 });
   if (!(redNoBound.asked > 0 && DFnoBound.relaunchPressTakes(...PRESS_LATE) === true && DF.relaunchPressTakes(...PRESS_LATE) === false)) skip(`RED CONTROL (B-a52d): its plant — a press with no bound — was never read (${redNoBound.asked} asks): not judged`);

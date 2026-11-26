@@ -1115,8 +1115,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
    *  the successor's record at its door (applyRecord, before the view connects), whichever comes first; the press goes with it, so
    *  the second changes nothing (PURE relaunchPressTakes). The fit runs after retarget (the old app's view gone, its minimum cleared):
    *  the old app is never resized for the press. A declaration: applyRecord names it above. */
-  function planRelaunch(next) {
-    if (!relaunchPressTakes(relaunchPress, { nextId: next && next.id, now: Date.now() })) return false;
+  function planRelaunch(next, { answer = false } = {}) {
+    if (!relaunchPressTakes(relaunchPress, { nextId: next && next.id, now: Date.now(), answer })) return false; // r5322: the answer's own road has no age bound
     const geo = relaunchPress.geo;
     relaunchPress = null;
     const plan = relaunchFitPlan(geo, next);
@@ -1133,11 +1133,13 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     relaunching = true;
     const geo = relaunchGeometry();
     relaunchPress = { fromId: id, geo, at: Date.now() }; // B-a52d: the press keeps what its plan is made from — the plan waits for the successor's record
-    const post = (force) => fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: choice, dpr: launchDpr(), uiScale: launchUiScale(), ...(force ? { force: true } : {}) }) });
+    const id0 = id; // r5322 (the release's own): the relaunch asked is THIS press's app — a broadcast that retargets the window while the person decides never turns the confirmed request onto the successor
+    const post = (force) => fetchJson(`/api/desktop/apps/${encodeURIComponent(id0)}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: choice, dpr: launchDpr(), uiScale: launchUiScale(), ...(force ? { force: true } : {}) }) });
     let r = await post(false);
     if (r && r.code === 'app-asked' && !closed) {
-      if (!(await confirmDiscard({ name, act: 'relaunch' })) || closed) { relaunching = false; relaunchPress = null; showToast(t('{app} keeps running — answer its question in its window', { app: name }), { duration: 4000 }); return; }
-      if (relaunchPress) relaunchPress = { ...relaunchPress, at: Date.now() }; // B-a52d: the confirmed request is the one in flight now
+      relaunchPress = null; // B-a52d (r5322): NO press while the person decides — another client's relaunch meanwhile maps here as a second client's
+      if (!(await confirmDiscard({ name, act: 'relaunch' })) || closed) { relaunching = false; showToast(t('{app} keeps running — answer its question in its window', { app: name }), { duration: 4000 }); return; }
+      relaunchPress = { fromId: id0, geo, at: Date.now() }; // B-a52d (r5322): the confirmed request is a press of its own, from now
       r = await post(true);
     }
     relaunching = false;
@@ -1150,7 +1152,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     // B-a52d (主开发 r4884): the hub broadcasts the successor BEFORE this answer, and the window follows it at once — so the plan and
     // the fit are made at the FIRST of the two (planRelaunch): here when the answer is first, else at the record's door already
     retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)
-    planRelaunch(r.app);
+    planRelaunch(r.app, { answer: true }); // r5322: this press's own answer plans whenever it comes
     relaunchPress = null; // B-a52d: whatever the answer, the press ends with it — never left to shape a later relaunch (another press, another client's)
   }
   /** A record that names its successor (`replacedBy`): this window follows it — same window, the picture reconnects. */

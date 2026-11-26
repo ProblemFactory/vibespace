@@ -115,13 +115,16 @@ export function relaunchPlanHolds({ at = null, fit = null, now = null, refused =
  * the window's retarget names the successor on ITS OWN press (`nextId`); the first event that carries that record — the answer,
  * or the record's door before the view connects — takes the press and plans; the second finds none and changes nothing.
  * `press` = { fromId, nextId?, at } (this window's own press, in flight), `nextId` = the record's id, `now` (ms). → true = plan now.
- * A press waits at most RELAUNCH_PRESS_MS for its successor and ENDS WITH ITS ANSWER whatever it is (desktop-app-window.js relaunchAt:
+ * THE ANSWER TO THIS WINDOW's OWN PRESS IS THE PRESS's WHENEVER IT COMES (主开发 r5322: a slow start on a far machine; the release always
+ * planned and fitted on the answer): `answer` true takes the named successor with no age test. At the record's door (a broadcast,
+ * which may be somebody else's) a press waits at most RELAUNCH_PRESS_MS for its successor. It ENDS WITH ITS ANSWER whatever it is (desktop-app-window.js relaunchAt:
  * a refusal, a lost answer or the successor named) — nothing it leaves can shape a later relaunch, another press's or another
  * client's (主开发 r5011 (a)); a window that did not press has none (a second client is as before).
  */
 export const RELAUNCH_PRESS_MS = 60 * 1000;
-export function relaunchPressTakes(press, { nextId = null, now = 0 } = {}) {
+export function relaunchPressTakes(press, { nextId = null, now = 0, answer = false } = {}) {
   if (!press || !press.nextId || !nextId || press.nextId !== nextId || press.nextId === press.fromId) return false;
+  if (answer) return true;   // r5322: the press's own answer — never refused by the age bound (the bound is the record's door's)
   const age = Number(now) - (Number(press.at) || 0);
   return age >= 0 && age <= RELAUNCH_PRESS_MS;
 }
