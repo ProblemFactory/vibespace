@@ -492,7 +492,7 @@ async function pushSealedOrders(poolId) {
     // meantime would be an unreachable fallback. Members near/past their
     // login deadline never enter the snapshot.
     readLogin: poolReadLogin(),
-    creditsIds: creditsMemberIds(members), // usage-credits members walk LAST (B-ad05)
+    creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), // usage-credits members walk LAST (B-ad05)
     priority: poolPriorityOf(a), // the owner's manual order walks first (2026-09-28)
     providerOf: pv, fromProvider: pv(defMember), // (q-053 P0b) a reflex is a HOT re-point: never another provider
   }).map((m) => ({ id: m.id, dir: accounts.subDir(m.id), creds: accounts.subCredsPath(m.id) }));
@@ -943,12 +943,22 @@ function readRawUsageCache(id) {
 function readRawReading(id) {
   return usageWrite.readReading(path.join(USAGE_CACHE_DIR, String(id).replace(/[^\w.-]/g, '_') + '.json'), id, { via: RR });
 }
-function overageMemberIds(members) {
+/** B-87fd (1) (THE OWNER's WORD, 主开发 r4668): THE FACT — the members billing paid overage NOW, read from the RAW reading only (the
+ *  producer's stated overage, never an estimate: P7), handed to every decision ALWAYS (`payingIds`): such a member is never preferred
+ *  over a member with quota left — it ranks with the credits members, the last resort. → Set | null */
+function overageInUseIds(members) {
   try {
-    if (serverSetting('pool.avoidOverageMembers') !== true) return null;
     const out = new Set();
     for (const m of members || []) if (overageState(readRawUsageCache(m.id)).inUse === 'yes') out.add(m.id);
     return out.size ? out : null;
+  } catch { return null; }
+}
+/** THE BAR's NAMING (D3c, `pool.avoidOverageMembers`, default off): with the setting on, the same set is handed as `overageIds`, and a
+ *  verdict then NAMES the bar (overageBlocked / toOverage); the ranking is the fact's above, whatever the setting. → Set | null */
+function overageMemberIds(members) {
+  try {
+    if (serverSetting('pool.avoidOverageMembers') !== true) return null;
+    return overageInUseIds(members);
   } catch { return null; }
 }
 // USAGE CREDITS (B-ad05, ALWAYS on — it is a ranking, not a bar): members
@@ -1000,7 +1010,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // that cannot serve starts it where the automatic rules would (the pin kept on the session)
     if (pin) {
       const pm = healthyPoolMembers(poolId);
-      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm) });
+      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm), payingIds: overageInUseIds(pm) });
       // (q-053 P0b) a pin of ANOTHER provider is never where a spawn starts: its model is the request's, the pin's provider
       // would serve it under another id — it applies through the conversation's cold switch (the pin kept), so the spawn
       // is placed by the automatic rules below
@@ -1034,7 +1044,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // spawn and every conversation that reads the default link onto it. No proving input ⇒ no mark, no «spawn on» line.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const chooseNow = () => decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const chooseNow = () => decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem), payingIds: overageInUseIds(mem) });
     const d = chooseNow();
     if (verdictOnly) { if (d && d.reason === 'proving') return null; const placed = (d && d.to) || (staleDefault ? null : cur); return placed && !claimDecided(placed, () => { const b = chooseNow(); return (b && b.to) || cur; }) ? placed : null; }   // (B-d578 F3a) a member read as reset but unconfirmed is no place to come back to
     // THE POOL SAYS IT (lane account-reset-door r2, MUST 8): a placement the CLAIM decided — the same decision over the bare
@@ -5281,7 +5291,7 @@ function poolAlternativeFor(session, now = Date.now()) {
     // and spend a credit the switch rung did not need.
     const rc = poolReadCache(poolId);
     const readCache = (id) => (id === currentId ? { fetchedAt: now, sevenDay: { utilization: 1, resetsAt: 0 } } : rc(id));
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], ...providerIn(a, session), readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], ...providerIn(a, session), readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), explain: true });
     return !!(d && d.to && !d.toCredits);
   } catch { return null; }
 }
@@ -7680,7 +7690,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
     }
-    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), payingIds: overageInUseIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { return RR.entryExists(accounts.sessionPoolLinkPath(poolId, sid)); } catch { return false; } })();
@@ -8510,7 +8520,7 @@ function crossVerdictNow(poolId, sid, now = Date.now()) {
   const fam = projectionFamilyFor(s2, sessionModelFor(s2));
   const readCache = (id) => projectCacheForFamily(base(id), fam);
   const members = [...switchCandidates(poolId), ...fallbackRows(a)];
-  const d = decidePoolSwitch({ ...providerIn(a, s2), crossProvider: 'allow', currentId: curFor, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+  const d = decidePoolSwitch({ ...providerIn(a, s2), crossProvider: 'allow', currentId: curFor, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), explain: true });
   if (!d || !d.to) return { why: (d && d.reason) || 'hold' };
   return { d, curFor, s2 };
 }
@@ -8577,14 +8587,14 @@ function fileUnplacedAsk(poolId, sid, s, unp, d, now = Date.now()) {
   } catch (e) { console.warn('[pool] unplaced: the For-you card could not be filed:', e.message); return null; }
 }
 /** ONE decision for an UNPLACED conversation (above) → {placed, why}. */
-function placeUnplaced(poolId, sid, s2, unp, { now = Date.now(), hot = false, members = null, readLogin = null, creditsIds = null, membership = null, priority = null } = {}) {
+function placeUnplaced(poolId, sid, s2, unp, { now = Date.now(), hot = false, members = null, readLogin = null, creditsIds = null, payingIds = null, membership = null, priority = null } = {}) {
   const a = accounts.get(poolId);
   if (!a || !s2) return { placed: false, why: 'gone' };
   const mem = members || switchCandidates(poolId);
   const base = poolReadCache(poolId);
   const fam = projectionFamilyFor(s2, sessionModelFor(s2));
   const readCache = (id) => projectCacheForFamily(base(id), fam);
-  const d = decidePoolSwitch({ currentId: unp.member, members: mem, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, s2), pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], readLogin: readLogin || poolReadLogin(), membership: membership || poolMembershipOf(poolId), priority: priority || poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsIds || creditsMemberIds(mem), explain: true });
+  const d = decidePoolSwitch({ currentId: unp.member, members: mem, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, s2), pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], readLogin: readLogin || poolReadLogin(), membership: membership || poolMembershipOf(poolId), priority: priority || poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsIds || creditsMemberIds(mem), payingIds: payingIds || overageInUseIds(mem), explain: true });
   if (d && d.to && d.cross) { const r = applyCrossMove(poolId, sid, s2, unp.member, d, now); return { placed: !!r.moved, why: r.why }; } // the pool's 'allow': cold, with its line
   if (d && d.to) {
     try { accounts.ensureSessionPoolLink(poolId, sid, d.to, { why: 'removed-from-pool' }); } catch (e) { console.warn(`[pool] unplaced ${poolId}/${sid}: re-place failed:`, e.message); return { placed: false, why: 'repoint-failed' }; }
@@ -8726,7 +8736,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   const base = poolReadCache(poolId);
   const fam = projectionFamilyFor(s, sessionModelFor(s));
   const readCache = (id) => projectCacheForFamily(base(id), fam);
-  const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: current, members, readCache, nowSec: nowSecOf(now), proactive: false, hot: true, ...providerIn(a, s), pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members) });
+  const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: current, members, readCache, nowSec: nowSecOf(now), proactive: false, hot: true, ...providerIn(a, s), pessimism: darkTaintedAccounts(now), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members) });
   if (d && d.reason === 'pin' && d.to && d.cross) {
     // (q-053 P0b) the owner pinned a member of ANOTHER provider: the owner's own act (never silent) — a COLD move, the model
     // re-resolved, the line in the conversation (applyCrossMove); no client to restart it ⇒ it waits, the pin kept
@@ -8919,11 +8929,11 @@ function removalVerdict(poolId, fromId, session = null, sid = null, now = Date.n
   // provider is the per-session pass's cold move (or the owner's card) at its next tick
   const pinRec = session ? poolPinOf(session, poolId) : null;
   if (pinRec) {
-    const dp = decidePinnedPlacement({ explicit: true, pin: pinRec.memberId, currentId: fromId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(now), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId) });
+    const dp = decidePinnedPlacement({ explicit: true, pin: pinRec.memberId, currentId: fromId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(now), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), membership: poolMembershipOf(poolId) });
     if (dp && dp.reason === 'pin' && dp.to && !dp.cross) return dp; // (q-053 P0b) never a pin on another provider here: this re-point is hot
     if (dp && dp.reason === 'pin-exhausted') return { ...dp, reason: dp.autoReason };
   }
-  return decidePoolSwitch({ currentId: fromId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(now), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId), explain: true, roster: roster || evaluationRoster(poolId) }); // R2: every listed member named when blocked (read only then, once — per sweep, r3)
+  return decidePoolSwitch({ currentId: fromId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(now), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), membership: poolMembershipOf(poolId), explain: true, roster: roster || evaluationRoster(poolId) }); // R2: every listed member named when blocked (read only then, once — per sweep, r3)
 }
 /** Where the pool DEFAULT goes when the member it sits on left the pool — a
  *  DECISION (never the first member in the list). null = nobody can take it. */
@@ -8952,7 +8962,7 @@ function fallbackDefaultTarget(poolId, fromId = null) {
     const members = switchCandidates(poolId).filter((m) => m && m.id !== fromId && membership.includes(m.id));
     // (q-053 P0b) parking never lands on another provider: the default's own (a deleted member's = the pool's own)
     const pv = poolProviderOf(a), fromProv = pv(fromId || accounts.poolCurrent(poolId));
-    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: nowSecOf(), priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
+    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: nowSecOf(), priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), payingIds: overageInUseIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
   } catch (e) { console.warn('[pool] default fallback failed:', e.message); return null; }
 }
 /** THE ONE ENTRY POINT: members `removedIds` no longer belong to `poolId` — move
@@ -9115,6 +9125,7 @@ function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid)
   }
   if (d.reason === 'warm-soft-defer') {
     const b = d.softBucket || {};
+    if (d.paying) { console.log(`[pool] defer ${sid}: its member is billing paid overage, but it is mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`); return; }   // B-87fd (1)
     console.log(`[pool] defer ${sid}: soft-exhausted (${b.label || '?'} ${b.remaining ?? '?'}% < hot ${b.hot ?? '?'}%) but mid-turn with a warm cache — moves at its first stop (to ${d.wouldToName || d.wouldTo})${scope}`);
     return;
   }
@@ -9281,6 +9292,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
     const roster = evaluationRoster(poolId, rosters); // …and ONE roster read for it, shared by every conversation's decision (acceptance r2) and the tick's sweep (r3)
     const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
+    const payingIds = overageInUseIds(members);    // B-87fd (1): the members billing paid overage, the same once a tick
     const burnOf = projectionBurnMemo(now); // ONE burn read per member for this whole tick (B-f69c ③)
     const membership = poolMembershipOf(poolId); // the removed-member wall (2026-09-28): a member the pool no longer LISTS is a hard wall for every decision below
     const priority = poolPriorityOf(a); // MANUAL PRIORITY (2026-09-28): the owner's order — null = automatic (EDF + the warm hold)
@@ -9315,7 +9327,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       // (lane pool-provider-latents, q-055 M2) UNPLACED by a deletion: decided from its deleted member — its own provider, the
       // pool's 'allow', or the owner's card; never the default, never another provider by itself
       const unp = !linkCur && hasOwnLink ? accounts.unplacedOf(poolId, sid) : null;
-      if (unp) { placeUnplaced(poolId, sid, s2, unp, { now, hot, members, readLogin, creditsIds, membership, priority }); continue; }
+      if (unp) { placeUnplaced(poolId, sid, s2, unp, { now, hot, members, readLogin, creditsIds, payingIds, membership, priority }); continue; }
       if (!hasOwnLink || !linkCur) continue;
       // Decide FROM the member whose credentials this session's CLI reads —
       // its token slot (2026-09-07, reversing B-2c9b plan B for DECISIONS):
@@ -9364,8 +9376,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       const pinRec = poolPinOf(s2, poolId);
       const decideSession = () => {
       const members = decideMembers; // B-d578 F2
-      const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm }) : null;
-      return dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
+      const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, payingIds, warm }) : null;
+      return dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(now), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, payingIds, warm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
       };
       const ds = decideSession();
       { const t = _poolDecisions.get(poolId) || { session: 0, pool: 0 }; t.session++; _poolDecisions.set(poolId, t); }   // B-f4a1: counted
@@ -9466,7 +9478,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         else if (ds.pinExhausted) pinNotice(poolId, sid, s2, ds.pinWhy, { member: ds.pinned, target: ds.to }, !a.hot); // the pin cannot serve: running on the automatic pick, the pin kept
         else if (ds.reason === 'priority-return') priorityReturnNotice(poolId, sid, s2, ds, !a.hot); // manual priority: back on the higher-ranked member at its stop
         else if (ds.reason === 'spare-lane' && ds.to !== linkCur) spareLaneNotice(poolId, sid, s2, ds, curFor); // B-8a65 S5: an idle conversation moved off a member rich in a cap it does not use
-        else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${ds.escape === 'held-walled' ? ` — ${memberWord(poolId, curFor)} answered it with a limit while its own numbers are unknown (${heldWallWhy(curFor, readCache)})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
+        else if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${ds.priorityRank ? ` (priority #${ds.priorityRank})` : ''}${ds.reason === 'overage' ? ` — ${memberWord(poolId, curFor)} is billing paid overage, and ${toName} has quota left` : ''}${ds.escape === 'held-walled' ? ` — ${memberWord(poolId, curFor)} answered it with a limit while its own numbers are unknown (${heldWallWhy(curFor, readCache)})` : ''}${fam && ds.reason !== 'overage' ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})${ds.placedBy === 'priority' ? ` — ${ds.reason === 'priority-return' ? 'priority return' : 'priority'} #${ds.priorityRank ?? '-'}` : ''}${ds.reason === 'pin-return' ? ' — pin return (pinned)' : ds.pinExhausted && ds.to === ds.pinned ? ' — onto its pin (pinned)' : ds.pinExhausted ? ` — pin kept (${nameOf(ds.pinned)}: ${ds.pinWhy})` : ''}`);
         if (moveByClaim) console.log(`[pool] per-session switch ${poolId}/${sid}: moved onto ${nameOf(ds.to)} on your reset claim (${moveByClaim}) — unconfirmed until its first reading`);
         // a hot re-point does not move an idle limit-blocked session by itself
@@ -9514,7 +9526,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // decision on the estimate of NOW (a projection alone never moves a warm
     // conversation).
     const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), nowSecOf(now), PROJECTION_LEAD_SEC);
-    const decideDefault = () => decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: nowSecOf(now), proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(now), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
+    const decideDefault = () => decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: nowSecOf(now), proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(now), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, payingIds, warm: defaultWarm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
     const d = decideDefault();
     { const t = _poolDecisions.get(poolId) || { session: 0, pool: 0 }; t.pool++; _poolDecisions.set(poolId, t); }   // B-f4a1: counted
     const defaultByClaim = d && d.to && d.to !== currentId ? claimDecided(d.to, () => { const b = decideDefault(); return (b && b.to) || currentId; }) : null; // MUST 8: the pool's own move, said when the claim decided it
@@ -9625,6 +9637,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       ? `Pool "${a.name}" is back on ${d.toName} (priority #${d.priorityRank ?? '?'}) — new conversations start there${hot ? '' : ' (restarting its conversations)'}`
       : d.reason === 'not-a-member'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} was removed from the pool${hot ? '' : ' (restarting its conversations)'}${scraps}`
+      : d.reason === 'overage'   // B-87fd (1): the member billing paid overage is left for one with quota
+      ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)} is billing paid overage, and ${d.toName} has quota left${hot ? '' : ' (restarting its conversations)'}`
       : d.reason === 'subscription-lapsed'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s subscription is inactive; it rejoins by itself once it answers again${hot ? '' : ' (restarting its conversations)'}${scraps}`
       : d.reason === 'login-expired'

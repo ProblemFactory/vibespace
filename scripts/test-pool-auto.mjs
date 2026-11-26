@@ -630,7 +630,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('WIRING PIN: the pool-default site computes NO inTurn (the soft hold is dropped) but still hands `warm: defaultWarm` to the decision',
     !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
     && /const w = warmCache\(\{ \.\.\.cacheFactsOf\(s, now\), nowMs: now \}\);/.test(eng)
-    && /creditsIds, warm: defaultWarm, explain: true[^;\n]*\}\);/.test(eng)); // (+ the roster thunk, lane pool-silent-members R2)
+    && /creditsIds, payingIds, warm: defaultWarm, explain: true[^;\n]*\}\);/.test(eng)); // (+ the roster thunk, lane pool-silent-members R2; + the paying set, B-87fd (1))
   ck('WIRING PIN: the per-session site journals a warm-soft-defer through noteWarmHold under a :soft key (nothing else is recorded — the stop re-decides from the facts); the default site has none',
     (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*sid \+ ':soft'\); continue; \}/g) || []).length === 1
     && !/':default:soft'/.test(eng) // …and the default no longer journals one (it never defers a soft move)
@@ -2802,7 +2802,7 @@ await (async () => {
     const wm = world({});
     ck('r1 spawn: a default the pool lists is answered exactly as before (no family ⇒ the default itself)', where(wm, null) === 'martin' && where(wm, 'claude-fable-5-1') === 'martin');
     const esrc = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
-    const c1 = 'if (!fam && !staleDefault) return cur;', c2 = 'readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });';
+    const c1 = 'if (!fam && !staleDefault) return cur;', c2 = 'readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem), payingIds: overageInUseIds(mem) });';
     ck('r1 spawn control: the patch (the chooser without the membership fact) hits', esrc.split(c1).length === 2 && esrc.split(c2).length === 2);
     const c3 = 'return (d && d.to) || (staleDefault ? ((d && d.holdTo) || fallbackDefaultTarget(poolId, cur) || null) : cur);'; // verify r2's fallback: stripped too (the chooser as r1 found it)
     ck('r1 spawn control: …and the r2 fallback clause hits', esrc.split(c3).length === 2);
@@ -4223,6 +4223,99 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
       ck(`r3 ⑧ ONE ROSTER PER TICK: the sweep over 20 conversations on a narrowed-out member (${held} held) and the evaluation after it read the roster ${calls} time(s) — the tick's one memo (b552c972: 20 in the sweep alone)`, calls === 1 && held === 20); }
   }
 }
+
+// ── B-87fd (1) (THE OWNER's WORD, 主开发 r4668 «改成永远排最后»): a member BILLING PAID OVERAGE is never preferred over a member
+//    with quota left — it ranks with the credits members, below the scraps, under ONE rule; the engine hands the in-use set ALWAYS
+//    (read from the raw reading only); the setting pool.avoidOverageMembers (default unchanged) decides only whether a verdict NAMES
+//    the bar. Every account here is made up. ──
+await (async () => {
+  const fs = require('node:fs');
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const REPO = path.resolve('.');
+  const M = mutantCopies('pool-overage-last', REPO);
+  const P = require(path.resolve('src/account-pool-auto.js'));
+  const { projectCacheForFamily } = require(path.resolve('src/model-family.js'));
+  const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
+  // TODAY's RANKING (the RED): the in-use set read as nothing — the release's ranking for every pool where the setting is off
+  const today = M.load('src/account-pool-auto.js', editAnchor(src, '  const paying = new Set([...(payingIds || []), ...(overageIds || [])]);', '  const paying = new Set([...(overageIds || [])]);', 'src/account-pool-auto.js'), 'today');
+  const fm = (u7, resetIn, { u5 = 0 } = {}) => ({ fiveHour: { utilization: u5, resetsAt: NOW + 1800 }, sevenDay: { utilization: u7, resetsAt: NOW + resetIn }, scopedWeekly: [] });
+  const view = (caches) => (id) => projectCacheForFamily(caches[id] ?? null, 'opus');
+  const mem = [{ id: 'a', name: 'Default' }, { id: 'r', name: 'Quota left' }, { id: 'o', name: 'Paying overage' }];
+  const dec = (mod, caches, opts = {}) => mod.decidePoolSwitch({ currentId: 'a', members: mem, readCache: view(caches), nowSec: NOW, explain: true, hot: true, ...opts });
+  const dead = fm(0.99, 3 * D);   // the default cannot serve: its 7d under the hard bar
+  const PAY = { payingIds: new Set(['o']) };   // the engine's in-use set, handed ALWAYS
+  // THE PROBE's FIVE, as a table (the scratch probe on the release, RUN 61bf201c5-20261125223100-box, read them TODAY)
+  const T = [];
+  { const c = { a: dead, r: fm(0.6, 3 * D), o: fm(0.3, 3 * D) };
+    T.push(['P1 the paying member has MORE left on the same deadline — a switch, the setting OFF', dec(P, c, PAY).to, 'r'],
+      ['P1 …a NEW conversation whose default cannot serve (placing), the setting OFF', dec(P, c, { ...PAY, placing: true }).to, 'r'],
+      ['P1 …the setting ON', dec(P, c, { ...PAY, overageIds: ['o'] }).to, 'r']); }
+  { const c1 = { a: dead, r: fm(0.6, 1 * D), o: fm(0.3, 5 * D) }, c2 = { a: dead, r: fm(0.6, 5 * D), o: fm(0.3, 1 * D) };
+    T.push(['P2 the quota member resets first', dec(P, c1, PAY).to, 'r'], ['P2 the PAYING member resets first — the quota member still', dec(P, c2, PAY).to, 'r']); }
+  { const c = { a: fm(0.4, 3 * D), r: fm(0.6, 3 * D), o: fm(0.1, 3 * D) }; const d = dec(P, c, { ...PAY, placing: true, hot: false });
+    T.push(['P3 a healthy default keeps a new conversation (no move)', d.to || 'a', 'a']); }
+  { const c = { a: dead, r: fm(0.99, 3 * D), o: fm(0.3, 3 * D) }; const off = dec(P, c, PAY), on = dec(P, c, { ...PAY, overageIds: ['o'] });
+    T.push(['P4 / line (a): the paying member is the ONLY one that can serve — it still serves (the setting off)', off.to, 'o'],
+      ['P4 …and the verdict names where it went (to / toName)', off.toName, 'Paying overage'],
+      ['P4 …the setting ON serves there too', on.to, 'o'],
+      ['P4 …and NAMES the bar (toOverage)', !!(on.toOverage && on.toOverage.id === 'o'), true],
+      ['P4 …the setting OFF names no bar, as the release (no toOverage, no toCredits)', !off.toOverage && !off.toCredits, true]); }
+  { const c = { a: dead, r: fm(0.6, 3 * D), o: fm(0.3, 3 * D) };
+    T.push(['P5 a usage-credits member ranks below every member with quota left, as before', dec(P, c, { creditsIds: ['o'] }).to, 'r']); }
+  for (const [n, got, want] of T) ck(`overage-last: ${n} → ${JSON.stringify(got)}`, got === want);
+  ck('overage-last RED (today\'s ranking): P1 — a switch with the setting off goes to the PAYING member', dec(today, { a: dead, r: fm(0.6, 3 * D), o: fm(0.3, 3 * D) }, PAY).to === 'o');
+  ck('overage-last RED (today\'s ranking): P2 — the paying member resetting first is drained first', dec(today, { a: dead, r: fm(0.6, 5 * D), o: fm(0.3, 1 * D) }, PAY).to === 'o');
+  // LINE (b): a conversation ALREADY running on a paying member, at its next decision
+  { const memB = [{ id: 'o', name: 'Paying overage' }, { id: 'r', name: 'Quota left' }];
+    const decB = (mod, caches, opts = {}) => mod.decidePoolSwitch({ currentId: 'o', members: memB, readCache: view(caches), nowSec: NOW, explain: true, hot: true, ...opts });
+    const c = { o: fm(0.3, 3 * D), r: fm(0.4, 3 * D) };
+    const mv = decB(P, c, PAY);
+    ck('overage-last (b): on a paying member with a quota member that can settle, its next decision MOVES it there (reason overage, the soft band — the release\'s own soft-move rules)', mv.to === 'r' && mv.reason === 'overage' && mv.band === 'soft');
+    const warm = decB(P, c, { ...PAY, warm: { warm: true, inTurn: true, agoSec: 10, ttlSec: 300 } });
+    ck('overage-last (b): …mid-turn with a warm cache it is NOT cut — the move is owed to its first stop (warm-soft-defer, the release\'s own hold)', !warm.to && warm.reason === 'warm-soft-defer' && warm.paying === true && warm.wouldTo === 'r');
+    const cold = decB(P, c, { ...PAY, warm: { warm: false, inTurn: true, agoSec: 900, ttlSec: 300 } });
+    ck('overage-last (b): …a cold cache moves at once, as the soft band does', cold.to === 'r' && cold.reason === 'overage');
+    const stay = decB(P, { o: fm(0.3, 3 * D), r: fm(0.99, 3 * D) }, PAY);
+    ck('overage-last (b): …with no quota member able to settle it STAYS — the release\'s own answer (healthy), never «no member can settle»', !stay.to && stay.reason === 'healthy');
+    const todayB = decB(today, c, PAY);
+    ck('overage-last (b) RED (today\'s ranking): the conversation on the paying member stays put', !todayB.to); }
+  // THE NO-OVERAGE IDENTITY TABLE: many made-up pools with NO member in overage — every placement and every switch, byte for byte the
+  // release's (eb7608d54, this commit's parent: the historical rung where the ref is here, mirror-197) — and the rank / fallback walks too
+  const pre = await preFixCopy(M, 'eb7608d5', 'src/account-pool-auto.js', 'release');
+  const rel = pre.mod;
+  if (!rel && pre.why === 'shallow') skipPreFix('overage-last: ', 'eb7608d5');
+  else ck(`overage-last: the release copy (eb7608d5) loaded for the identity table${pre.why ? ` — ${pre.why}` : ''}`, !!rel && typeof rel.decidePoolSwitch === 'function');
+  { const ref = rel || today;   // ref-free half (a shallow clone): today's ranking
+    let seed = 11; const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+    let same = 0, n = 0, diff = null;
+    for (let i = 0; i < 400; i++) {
+      const caches = {}; for (const id of ids) caches[id] = rnd() < 0.1 ? null : acct(Math.round(rnd() * 100) / 100, Math.round(rnd() * 6 * D) + H, { u5: Math.round(rnd() * 100) / 100, uf: rnd() < 0.5 ? Math.round(rnd() * 100) / 100 : null });
+      const memI = ids.filter(() => rnd() < 0.85).map((id) => ({ id, name: id.toUpperCase() }));
+      const cur = ids[Math.floor(rnd() * ids.length)];
+      const proactive = rnd() < 0.5;
+      const w = rnd() < 0.3 ? { warm: rnd() < 0.5, agoSec: 10, ttlSec: 300, inTurn: rnd() < 0.5 } : null;
+      const base = { currentId: cur, members: memI, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive, hot: proactive, placing: rnd() < 0.3, exclude: rnd() < 0.2 ? ['b'] : null, creditsIds: rnd() < 0.2 ? ['e'] : null, warm: w, explain: true };
+      for (const pay of [null, new Set(), []]) {   // nobody pays: the engine's null, an empty set, an empty list
+        n++;
+        const want = JSON.stringify(ref.decidePoolSwitch(base)), got = JSON.stringify(P.decidePoolSwitch({ ...base, payingIds: pay }));
+        if (got === want) same++; else if (!diff) diff = { i, pay: pay === null ? 'null' : 'empty', want, got };
+      }
+      const rk = { members: memI, readCache: (id) => caches[id] ?? null, nowSec: NOW, creditsIds: base.creditsIds };
+      n++; if (JSON.stringify(ref.rankPoolMembers(rk)) === JSON.stringify(P.rankPoolMembers({ ...rk, payingIds: null }))) same++; else if (!diff) diff = { i, rank: true };
+      n++; if (JSON.stringify(ref.soonestUsableMember(rk)) === JSON.stringify(P.soonestUsableMember({ ...rk, payingIds: null }))) same++; else if (!diff) diff = { i, soonest: true };
+    }
+    ck(`overage-last: THE NO-OVERAGE IDENTITY — ${n} seeded placements, switches, ranks and fallbacks with NO member in overage are byte-identical to ${rel ? 'the release (eb7608d5)' : 'today\'s ranking (ref-free)'}`, same === n);
+    if (same !== n) console.log('    first difference: ' + JSON.stringify(diff).slice(0, 600)); }
+  // THE ENGINE's READER, pinned to the RAW reading (P7: a stated overage, never an estimate), and handed beside EVERY credits set
+  { const ENG = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
+    const body = (t) => { const m = /function overageInUseIds\(members\) \{([\s\S]*?)\n\}/.exec(t); return m ? m[1] : ''; };
+    const pin = (t) => /overageState\(readRawUsageCache\(m\.id\)\)\.inUse === 'yes'/.test(body(t)) && !/poolReadCache|readCacheFor|estimat/.test(body(t)) && (t.match(/creditsIds: creditsMemberIds\((\w+)\)(?!, payingIds: overageInUseIds\(\1\))/g) || []).length === 0 && /serverSetting\('pool\.avoidOverageMembers'\) !== true\) return null;\n    return overageInUseIds\(members\);/.test(t);
+    ck('overage-last: the engine\'s in-use reader reads the RAW reading only, the setting gates only the bar\'s naming, and every credits set handed to a decision has the paying set beside it', pin(ENG));
+    ck('overage-last RED: a reader on the pool\'s estimated view turns the pin red', !pin(editAnchor(ENG, "if (overageState(readRawUsageCache(m.id)).inUse === 'yes') out.add(m.id);\n    return out.size ? out : null;\n  } catch { return null; }\n}\n/** THE BAR", "if (overageState(poolReadCache(m.id)).inUse === 'yes') out.add(m.id);\n    return out.size ? out : null;\n  } catch { return null; }\n}\n/** THE BAR", 'src/server/usage-pool-engine.js')));
+    ck('overage-last RED: one decision handed no paying set turns the pin red', !pin(editAnchor(ENG, 'creditsIds: creditsMemberIds(alive), payingIds: overageInUseIds(alive)', 'creditsIds: creditsMemberIds(alive)', 'src/server/usage-pool-engine.js'))); }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 2 : 1, label: 'overage-last: ' })) ck(r.name, r.pass);   // the release copy counts only where it was made
+})();
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

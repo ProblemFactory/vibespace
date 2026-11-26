@@ -2778,8 +2778,8 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
 
     // NEGATIVE CONTROL: the engine WITHOUT the per-session wiring moves the warm conversation too.
     const mut = mutate('src/server/usage-pool-engine.js', 'warm', [[
-      'overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster });',
-      'overageIds: overageMemberIds(members), creditsIds, explain: true, roster }); // PRE-FIX: no warm-cache hold',
+      'overageIds: overageMemberIds(members), creditsIds, payingIds, warm, explain: true, roster });',
+      'overageIds: overageMemberIds(members), creditsIds, payingIds, explain: true, roster }); // PRE-FIX: no warm-cache hold',
     ]]);
     ok('§17 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
     if (mut.hit) {
