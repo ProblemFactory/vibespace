@@ -318,6 +318,14 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     const DISPOSE_CLEAR = '    try { this._clearAttachHold(); } catch { }   // B-a26e: a closed view\'s attach hold ends (its timer, its queue slot, its line)\n';
     let CVx = null, mutantErr = null;
     try { ({ ChatView: CVx } = await import(mutantCopies('hold-dispose', REPO).write('src/lib/chat-view.js', anchored(read('src/lib/chat-view.js'), DISPOSE_CLEAR, '', 'dispose-no-hold-clear'), 'dispose-no-hold-clear', { esm: true }))); } catch (e) { mutantErr = String((e && e.message) || e).slice(0, 300); }
+    // r5118: ONE MUTANT a words leg — each a copy of chat-view with ONE anchored line put back to the form its leg reds
+    const CV_SRC = read('src/lib/chat-view.js'), WORDS_MUT = {}, wordsMutErr = [];
+    for (const [k, anchor, to] of [
+      ['a3', '    const now = Date.now(), life = Math.max(H.askedAt || 0, ack);', '    const now = Date.now(), life = H.askedAt || 0;'],   // the clock from the ask only (follow 6's form)
+      ['a4', 'ack = ackAt >= Math.max(H.askedAt || 0, H.cycleAt || 0) ? ackAt : 0;', 'ack = ackAt;'],   // any acknowledgement counts (an earlier attach's too)
+      ['a5', 'this._attachHoldWords(true); }, longLeft);', 'this._attachHoldWords(); }, longLeft);'],   // the long timer re-reads the clock
+      ['a6', ' this._attachHold.cycleAt = Date.now(); this._attachHoldWords(); }', ' }'],   // the new ask decides nothing
+    ]) { try { ({ ChatView: WORDS_MUT[k] } = await import(mutantCopies('hold-words-' + k, REPO).write('src/lib/chat-view.js', anchored(CV_SRC, anchor, to, 'words-' + k), 'words-' + k, { esm: true }))); } catch (e) { wordsMutErr.push(k + ': ' + String((e && e.message) || e).slice(0, 160)); } }
     const clock = { now: 1.8e12, timers: [] };
     const real = { st: globalThis.setTimeout, ct: globalThis.clearTimeout, now: Date.now, doc: globalThis.document };
     const tick = (ms) => { const end = clock.now + ms; for (;;) { let nx = null; for (const h of clock.timers) if (h.live && h.due <= end && (!nx || h.due < nx.due)) nx = h; if (!nx) break; nx.live = false; clock.now = nx.due; try { nx.fn(); } catch { } } clock.now = end; };
@@ -345,38 +353,55 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
       tick(5 * 60000 - 1000); R.asked1 = v3._attachHold?.note?.textContent;
       tick(2000); R.asked2 = v3._attachHold?.note?.textContent;
       v3._clearAttachHold();
-      // (a3) r4875: a hub that keeps ACKNOWLEDGING (it re-acks every 10 s while it works) — the ask began 15 minutes ago, the ladder
-      // waited on its acks: the bar says it is STILL WORKING, never the Reload words; when its acks stop, «waiting», and the Reload
-      // words 15 minutes after the last one (RED in the follow-6 form: the Reload words at the hold's start)
-      const v4 = stubs(mkView(), 'sid-working');
-      v4._lastAttachAckAt = Date.now();
-      v4._holdAttach({ type: 'attach', sessionId: 'sid-working' }, 1, null, Date.now() - 15 * 60000);
-      R.w0 = v4._attachHold?.note?.textContent;
-      for (let k = 0; k < 60; k++) { tick(10000); v4._lastAttachAckAt = Date.now(); v4._attachHoldWords?.(); }   // ten more minutes of acks
-      R.w1 = v4._attachHold?.note?.textContent;
-      tick(31000); R.w2 = v4._attachHold?.note?.textContent;   // its acks stopped 31 s ago
-      tick(15 * 60000 - 32000); R.w3 = v4._attachHold?.note?.textContent;   // 1 s before 15 minutes after the last ack
-      tick(2000); R.w4 = v4._attachHold?.note?.textContent;
-      v4._clearAttachHold();
-      // (a4) an acknowledgement from BEFORE the hold's ask is an earlier attach's (the window's last answered one, seconds before the
-      // drop): no sign of life for this hold — «waiting», and the Reload words 15 minutes after the ask (its own heavy read at
-      // f9f5f9687 found ③'s words pushed past the bound by such an ack; RED in that form: «still working» at the hold)
-      const v5 = stubs(mkView(), 'sid-old-ack');
-      v5._lastAttachAckAt = Date.now() - 5000;
-      v5._holdAttach({ type: 'attach', sessionId: 'sid-old-ack' }, 1, null, Date.now() - 2000);
-      R.o0 = v5._attachHold?.note?.textContent;
-      tick(15 * 60000 - 3000); R.o1 = v5._attachHold?.note?.textContent;   // 1 s before 15 minutes after the ask
-      tick(2000); R.o2 = v5._attachHold?.note?.textContent;
-      v5._clearAttachHold();
-      // (a5) THE SHORT CLOCK (the chrome suite's ③, its own heavy read at 28800d6f7): the long bound's timer fires at 1/100 while the
-      // wall clock runs real — its firing is the fact (no acknowledgement came since it was armed), never re-read against the clock
-      // (RED in that form: a re-check found 15 minutes not passed and re-armed for ever)
-      clock.short = true;
-      const v6 = stubs(mkView(), 'sid-short');
-      v6._holdAttach({ type: 'attach', sessionId: 'sid-short' }, 1, null, Date.now() - 1500);
-      tick(9500); R.s1 = v6._attachHold?.note?.textContent;
-      v6._lastAttachAckAt = Date.now(); v6._attachHoldWords?.(); R.s2 = v6._attachHold?.note?.textContent;   // an acknowledgement after the Reload words: alive again
-      v6._clearAttachHold(); clock.short = false;
+      // THE WORDS LEGS (r4875 / its own heavy reads / r5118), one function over a ChatView class: the tip's, and below one mutant
+      // copy a leg (主开发 r5118: each red RUN, never only stated)
+      const wordsLegs = (CV) => {
+        const X = {};
+        const mkv = (sid, extra) => { const v = stubs(mkView(), sid, extra); Object.setPrototypeOf(v, CV.prototype); return v; };
+        // (a3) r4875: a hub that keeps ACKNOWLEDGING (it re-acks every 10 s while it works) — the ask began 15 minutes ago, the
+        // ladder waited on its acks: «still working», never the Reload words; its acks stopped: «waiting», the Reload words 15
+        // minutes after the last one
+        const v4 = mkv('sid-working');
+        v4._lastAttachAckAt = Date.now();
+        v4._holdAttach({ type: 'attach', sessionId: 'sid-working' }, 1, null, Date.now() - 15 * 60000);
+        X.w0 = v4._attachHold?.note?.textContent;
+        for (let k = 0; k < 60; k++) { tick(10000); v4._lastAttachAckAt = Date.now(); v4._attachHoldWords?.(); }   // ten more minutes of acks
+        X.w1 = v4._attachHold?.note?.textContent;
+        tick(31000); X.w2 = v4._attachHold?.note?.textContent;   // its acks stopped 31 s ago
+        tick(15 * 60000 - 32000); X.w3 = v4._attachHold?.note?.textContent;   // 1 s before 15 minutes after the last ack
+        tick(2000); X.w4 = v4._attachHold?.note?.textContent;
+        v4._clearAttachHold();
+        // (a4) an acknowledgement from BEFORE the hold's ask is an earlier attach's (the window's last answered one): «waiting»,
+        // the Reload words 15 minutes after the ask
+        const v5 = mkv('sid-old-ack');
+        v5._lastAttachAckAt = Date.now() - 5000;
+        v5._holdAttach({ type: 'attach', sessionId: 'sid-old-ack' }, 1, null, Date.now() - 2000);
+        X.o0 = v5._attachHold?.note?.textContent;
+        tick(15 * 60000 - 3000); X.o1 = v5._attachHold?.note?.textContent;   // 1 s before 15 minutes after the ask
+        tick(2000); X.o2 = v5._attachHold?.note?.textContent;
+        v5._clearAttachHold();
+        // (a5) THE SHORT CLOCK (the chrome suite's ③): the long bound's timer fires at 1/100 while the wall clock runs real — its
+        // firing is the fact, never re-read against the clock
+        clock.short = true;
+        const v6 = mkv('sid-short');
+        v6._holdAttach({ type: 'attach', sessionId: 'sid-short' }, 1, null, Date.now() - 1500);
+        tick(9500); X.s1 = v6._attachHold?.note?.textContent;
+        v6._lastAttachAckAt = Date.now(); v6._attachHoldWords?.(); X.s2 = v6._attachHold?.note?.textContent;   // an acknowledgement after the Reload words: alive again
+        v6._clearAttachHold(); clock.short = false;
+        // (a6) r5118: held and «still working», then a RECONNECT's new cycle — the dropped socket's last acknowledgement is not this
+        // ask's: «waiting» at once; the new attach's acknowledgement: «still working» again
+        const v7 = mkv('sid-recycle', { ws: { send() { }, onGlobal() { }, offGlobal() { } } });
+        v7._lastAttachAckAt = Date.now();
+        v7._holdAttach({ type: 'attach', sessionId: 'sid-recycle' }, 1, null, Date.now() - 1000);
+        X.r0 = v7._attachHold?.note?.textContent;
+        tick(5000); v7._reattach(true); X.r1 = v7._attachHold?.note?.textContent;
+        tick(100); v7._lastAttachAckAt = Date.now(); v7._attachHoldWords?.(); X.r2 = v7._attachHold?.note?.textContent;
+        try { v7._clearAttachHold(); v7._cycleOff?.(); } catch { }
+        return X;
+      };
+      R.wl = wordsLegs(ChatView);
+      R.wm = {};
+      for (const [k, CVm] of Object.entries(WORDS_MUT)) { try { R.wm[k] = wordsLegs(CVm); } catch (e) { R.wm[k] = { threw: String((e && e.message) || e).slice(0, 200) }; } }
       const handlers = [], sent = [], deferred = [];
       const fws = { send(m) { sent.push(m); }, onGlobal(h) { handlers.push(h); }, offGlobal(h) { const i = handlers.indexOf(h); if (i >= 0) handlers.splice(i, 1); } };
       const q = createReconnectQueue({ setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h), defer: (fn) => deferred.push(fn), rankOf: () => [0, 0], random: () => 0, now: () => Date.now() });
@@ -422,9 +447,16 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     ok('B-a26e: a NEW hold after the last one ended says the first words again', /^Still attaching — waiting for the hub to answer/.test(R.again || ''), R.again);
     ok(`B-a26e (r4708): a held retry counts as in flight until ITS OWN answer lands through the real cycle handler (${R.inFlightSent} → ${R.inFlightLanded}); the hold ends`, R.frame === true && R.inFlightSent === 1 && R.handlersSent === 1 && R.inFlightLanded === 0 && R.heldAfter === false, R);
     ok(`B-a26e (r4708): a cycle whose view another road attached unhooks its handler at its check (${R.n1} → ${R.n2})`, R.n0 === 0 && R.n1 === 1 && R.n2 === 0, R);
-    ok(`B-a26e (r4875): while the hub keeps ACKNOWLEDGING the bar says it is still working (at the hold «${R.w0}», ten minutes of acks on «${R.w1}»); its acks stopped: «waiting» (${R.w2 === undefined ? '?' : 'after 31 s'}), the Reload words 15 minutes after the last ack and not before`, /^Still attaching — the hub is still working/.test(R.w0 || '') && /^Still attaching — the hub is still working/.test(R.w1 || '') && /^Still attaching — waiting for the hub to answer/.test(R.w2 || '') && /^Still attaching — waiting for the hub to answer/.test(R.w3 || '') && /has not answered for 15 minutes/.test(R.w4 || ''), { w0: R.w0, w1: R.w1, w2: R.w2, w3: R.w3, w4: R.w4 });
-    ok(`B-a26e (its own heavy read at 28800d6f7): under a short clock the long bound's timer is the fact — the Reload words when it fires (${R.s1 && R.s1.slice(0, 48)}…), «still working» again at a later acknowledgement`, /has not answered for 15 minutes/.test(R.s1 || '') && /^Still attaching — the hub is still working/.test(R.s2 || ''), { s1: R.s1, s2: R.s2 });
-    ok(`B-a26e: an acknowledgement from BEFORE the hold's ask (an earlier, answered attach) is no sign of life for it — «waiting» at the hold (${R.o0 && R.o0.slice(0, 40)}…), the Reload words 15 minutes after the ask and not before`, /^Still attaching — waiting for the hub to answer/.test(R.o0 || '') && /^Still attaching — waiting for the hub to answer/.test(R.o1 || '') && /has not answered for 15 minutes/.test(R.o2 || ''), { o0: R.o0, o1: R.o1, o2: R.o2 });
+    const WORK = /^Still attaching — the hub is still working/, WAIT = /^Still attaching — waiting for the hub to answer/, LONG = /has not answered for 15 minutes/;
+    const a3ok = (x) => !!x && WORK.test(x.w0 || '') && WORK.test(x.w1 || '') && WAIT.test(x.w2 || '') && WAIT.test(x.w3 || '') && LONG.test(x.w4 || '');
+    const a4ok = (x) => !!x && WAIT.test(x.o0 || '') && WAIT.test(x.o1 || '') && LONG.test(x.o2 || '');
+    const a5ok = (x) => !!x && LONG.test(x.s1 || '') && WORK.test(x.s2 || '');
+    const a6ok = (x) => !!x && WORK.test(x.r0 || '') && WAIT.test(x.r1 || '') && WORK.test(x.r2 || '');
+    ok('B-a26e (r4875): while the hub keeps ACKNOWLEDGING the bar says it is still working (at the hold, and through ten minutes of acks); its acks stopped: «waiting» after 31 s, the Reload words 15 minutes after the last ack and not before', a3ok(R.wl), R.wl);
+    ok('B-a26e (r5118): a RECONNECT while held — the dropped socket\'s last acknowledgement is not the new ask\'s: «waiting» at once, «still working» again at the new attach\'s acknowledgement', a6ok(R.wl), R.wl && { r0: R.wl.r0, r1: R.wl.r1, r2: R.wl.r2 });
+    ok(`B-a26e RED CONTROLS (r5118: each words leg's red RUN, one mutant of chat-view a leg): the clock from the ask only — a3 red (${!a3ok(R.wm.a3)}); any acknowledgement counts — a4 red (${!a4ok(R.wm.a4)}); the long timer re-reads the clock — a5 red (${!a5ok(R.wm.a5)}); the new ask decides nothing — a6 red (${!a6ok(R.wm.a6)}); each mutant leaves the other legs green`, wordsMutErr.length === 0 && Object.keys(R.wm).length === 4 && !a3ok(R.wm.a3) && a4ok(R.wm.a3) && a5ok(R.wm.a3) && !a4ok(R.wm.a4) && a3ok(R.wm.a4) && a5ok(R.wm.a4) && !a5ok(R.wm.a5) && a3ok(R.wm.a5) && a4ok(R.wm.a5) && !a6ok(R.wm.a6) && a3ok(R.wm.a6) && a4ok(R.wm.a6) && a5ok(R.wm.a6), wordsMutErr.join(' | ') || R.wm);
+    ok('B-a26e (its own heavy read at 28800d6f7): under a short clock the long bound\'s timer is the fact — the Reload words when it fires, «still working» again at a later acknowledgement', a5ok(R.wl), R.wl && { s1: R.wl.s1, s2: R.wl.s2 });
+    ok('B-a26e: an acknowledgement from BEFORE the hold\'s ask (an earlier, answered attach) is no sign of life for it — «waiting» at the hold, the Reload words 15 minutes after the ask and not before', a4ok(R.wl), R.wl && { o0: R.wl.o0, o1: R.wl.o1, o2: R.wl.o2 });
     ok('B-a26e (r4857): the 15-minute words run from the ASK that began the hold (asked 10 minutes before: Reload 5 minutes on, not 15)', /^Still attaching — waiting for the hub to answer/.test(R.asked1 || '') && /has not answered for 15 minutes/.test(R.asked2 || ''), { asked1: R.asked1, asked2: R.asked2 });
     const dOk = (d) => !!d && d.held === true && d.before.handlers === 2 && d.before.inFlight === 1 && d.atClose.handlers === 0 && d.atClose.has === false && d.atClose.inFlight === 0 && d.atClose.hold === null && d.atClose.holdTimerLive === false && d.after.handlers === 0 && d.after.sent === 0 && d.after.liveTimers === 0;   // r4875's round: and no live timer of the closed view at all
     ok(`B-a26e (r4857, THE MUST): THE HOLD NEVER OUTLIVES ITS WINDOW — a view held by a real cycle, its retry counted (${R.d?.before?.handlers} handlers, ${R.d?.before?.inFlight} in flight), closed: at once no handler on the link (${R.d?.atClose?.handlers}), no slot or count, no hold, no live 15-minute timer; nothing sent in the twenty minutes after`, dOk(R.d), R.d || R.threw);
