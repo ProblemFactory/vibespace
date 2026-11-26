@@ -74,6 +74,7 @@ const STORES = Object.freeze({
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)
   'channels-acts.read': row('read', 'channels/index-acts', 'src/channel-store.js'),
   'hosts.write': row('write', 'hosts', 'src/hosts.js', ['_save']),   // B-48a4: every save of hosts.json, through the store writer (the coordinator's word (e))
+  'remote-sessions-cache.write': row('write', 'remote-sessions-cache', 'src/hosts.js', ['_persistDiscovery']),   // B-574d (lane nl-paired, 主开发 r4752): the paired machines' last-known sessions, through the store writer (paced: a cache)
   'accounts.write': row('write', 'accounts', 'src/accounts.js', ['_save']),   // B-574d unit 1 (lane lg-store-writes, 主开发 r3455 / r3486): every save of accounts.json, through the store writer (a person's act answers after its landing)
   'mounts.write': row('write', 'mounts', 'src/mounts.js', ['_save']),   // B-574d «mounts-and-forwards» (lane nl-mounts, 主开发 r4796): every save of mounts.json, through the store writer (a person's act lands before it answers; a remount, a landing, the watchdog: off the loop, nothing when nothing changed)
   'machine-mounts.write': row('write', 'machine-mounts', 'src/machine-mounts.js', ['_save']),   // B-574d «mounts-and-forwards» (lane nl-mounts, 主开发 r4796): every save of machine-mounts.json but the boot's one-time ingest (a synced replace with its read-back), through the store writer

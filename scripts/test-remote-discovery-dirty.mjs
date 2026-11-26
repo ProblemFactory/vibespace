@@ -8,7 +8,8 @@
  */
 import { readFileSync } from 'fs';
 import { createRequire } from 'module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';   // B-574d (lane nl-paired): the cache's red control loads a copy
 const require = createRequire(import.meta.url);
 const { HostManager } = require('../src/hosts.js');
 
@@ -78,6 +79,38 @@ ok(/onDiscoveryDirty[\s\S]{0,700}wss\.clients\.size/.test(srv), 'no computation 
   // by checking the SWR branch is gated on ttlMs > 0 in source).
   const src2 = readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf-8');
   ok(/ttlMs > 0 && !hit && this\._persistedDisc/.test(src2), 'SWR branch is gated on ttlMs > 0 (explicit ⟳ still scans)');
+}
+
+// B-574d (lane nl-paired, 主开发 r4752): THE LAST-KNOWN SESSIONS GO THROUGH THE STORE WRITER — a write at a cadence (after every
+// discovery result) never on the hub's loop: ONE hand-off per result under its row's name, the bytes made AT the write (the latest
+// lists), no synchronous write of the file; through the real writer the file lands and the next start reads it.
+// RED: a copy with the release's 2 s timer and its writeFileSync + renameSync on the loop — nothing handed to the writer.
+{
+  const fsm = require('fs');
+  const REPO = require('path').resolve(new URL('..', import.meta.url).pathname);
+  const scene = (HM, tag) => {
+    const hm = new HM({ dataDir: scratch('disc-cache-writer-' + tag) });
+    const handed = []; hm._storeWriter = { dirty: (f, o) => handed.push([f, o]) };
+    const w0 = fsm.writeFileSync, r0 = fsm.renameSync; let syncWrites = 0;
+    fsm.writeFileSync = function (f, ...a) { if (String(f).startsWith(hm._discFile)) syncWrites++; return w0.call(this, f, ...a); };
+    fsm.renameSync = function (f, ...a) { if (String(f).startsWith(hm._discFile)) syncWrites++; return r0.call(this, f, ...a); };
+    try { hm._persistDiscovery('hA', [{ sessionId: 'sA' }]); hm._persistDiscovery('hB', [{ sessionId: 'sB' }]); } finally { fsm.writeFileSync = w0; fsm.renameSync = r0; }
+    if (hm._discPersistTimer) { clearTimeout(hm._discPersistTimer); hm._discPersistTimer = null; }   // a copy's timer never fires after its scene
+    const last = handed[handed.length - 1];
+    let bytes = null; try { bytes = last && JSON.parse(last[1].produce()); } catch { bytes = null; }
+    return { handed: handed.length, file: !!last && last[0] === hm._discFile, name: last && last[1].name, both: !!(bytes && bytes.hA && bytes.hB && bytes.hB.sessions[0].sessionId === 'sB'), syncWrites };
+  };
+  const r = scene(HostManager, 'real');
+  ok(r.handed === 2 && r.file && r.name === 'remote-sessions-cache.write' && r.both && r.syncWrites === 0, 'B-574d: the last-known sessions are handed to THE STORE WRITER under their row\'s name at every result (the bytes made at the write: both lists), with no synchronous write of the file on the loop — ' + JSON.stringify(r));
+  const dir = scratch('disc-cache-landed');
+  const hm1 = new HostManager({ dataDir: dir });
+  hm1._persistDiscovery('hC', [{ sessionId: 'sC' }]);
+  const landed = await require('../src/store-writer.js').storeWriter().durable(hm1._discFile);
+  const hm2 = new HostManager({ dataDir: dir });
+  ok(landed === true && !!hm2._persistedDisc.hC && hm2._persistedDisc.hC.sessions[0].sessionId === 'sC', 'B-574d: through the real writer the cache lands (durable answers true) and the next start reads the last-known list back');
+  const X = mutantCopies('disc-cache-timer', REPO).load('src/hosts.js', anchored(src, "    const W = this._storeWriter || require('./store-writer.js').storeWriter();\n    W.dirty(this._discFile, { name: 'remote-sessions-cache.write', debounceMs: 2000, produce: () => JSON.stringify(this._persistedDisc) });\n", "    if (this._discPersistTimer) return;\n    this._discPersistTimer = setTimeout(() => { this._discPersistTimer = null; try { const tmp = this._discFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(this._persistedDisc)); fs.renameSync(tmp, this._discFile); } catch { } }, 2000);   // MUTANT: the release's timer on the loop\n", 'disc-cache-timer'), 'disc-cache-timer').HostManager;
+  const x = scene(X, 'red');
+  ok(x.handed === 0, 'CONTROL (the release\'s 2 s timer and its synchronous write, in a copy): nothing is handed to the writer — red ' + JSON.stringify(x));
 }
 
 console.log(fail ? `\n${fail} FAILED` : '\nALL PASS');

@@ -358,22 +358,21 @@ class HostManager {
     this._discFile = path.join(dataDir, 'remote-sessions-cache.json');
     this._persistedDisc = {};
     try { this._persistedDisc = JSON.parse(fs.readFileSync(this._discFile, 'utf-8')) || {}; } catch { }
-    this._discPersistTimer = null;
     this._load();
     try { this._copies().refresh().catch(() => { }); } catch { }   // B-f276 family unit 2 commit 3: the kept copies read off the loop at the start
   }
 
+  /** B-574d (lane nl-paired, 主开发 r4752): the last-known lists go through THE STORE WRITER — a write at a cadence (after every
+   *  discovery result) never on the hub's loop, its bytes made AT the write (the latest lists: a burst is one write, as the 2 s
+   *  timer's was), written whole and SYNCED before the rename on the writer's thread. Before: writeFileSync + renameSync on the
+   *  main thread 2 s after each result, its temp never synced — after a power loss the file could come back empty and an
+   *  unreachable machine's last sessions were gone from the sidebar until it answered; a failure was swallowed. Paced, not
+   *  durable: a cache (a SIGKILL loses at most its last paced change; a stop's exit flush writes it). Its ONE reader is the
+   *  constructor above, at the next start; a failed write is the writer's to say (and it retries). */
   _persistDiscovery(id, sessions) {
     this._persistedDisc[id] = { at: Date.now(), sessions };
-    if (this._discPersistTimer) return;
-    this._discPersistTimer = setTimeout(() => {
-      this._discPersistTimer = null;
-      try {
-        const tmp = this._discFile + '.tmp';
-        fs.writeFileSync(tmp, JSON.stringify(this._persistedDisc));
-        fs.renameSync(tmp, this._discFile);
-      } catch { }
-    }, 2000);
+    const W = this._storeWriter || require('./store-writer.js').storeWriter();
+    W.dirty(this._discFile, { name: 'remote-sessions-cache.write', debounceMs: 2000, produce: () => JSON.stringify(this._persistedDisc) });
   }
 
   /** Drop the in-memory discovery cache for a host so the NEXT sidebar poll
