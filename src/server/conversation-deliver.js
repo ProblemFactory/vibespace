@@ -241,7 +241,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     stashTimer = setTimeout(() => { stashTimer = null; writeStashNow(); }, 500);
   };
   /** Is the file behind the queue current? `{durable, error}` — a producer's reply can say so. */
-  const stashHealth = () => ({ durable: !lastWriteError, error: lastWriteError ? lastWriteError.message : null, since: lastWriteError ? lastWriteError.at : null });
+  // 主开发 r5164 (2), a silence of the release: the health read only the last write's ERROR — while the list is HELD (unread: every write
+  // refused, what comes kept in memory) it answered «durable» over a file nothing is written to. A hold and an owed landing count now;
+  // a failed write answers as before (durable false, its error), a healed one durable again
+  const stashHealth = () => { const held = !!stashHold.held(), owed = !held && !lastWriteError && landingOwed; return { durable: !lastWriteError && !held && !landingOwed, error: lastWriteError ? lastWriteError.message : held ? 'the list of messages waiting for conversations could not be read — nothing is written over it until it reads' : owed ? 'a write is owed: it has not landed yet' : null, since: lastWriteError ? lastWriteError.at : null, ...(held ? { held: true } : {}), ...(owed ? { owed: true } : {}) }; };
   // SIGTERM/SIGINT belt (review-caught): a debounced-only write loses a
   // just-stashed "queued" promise on the ROUTINE restart path — same law as
   // every other data/*.json store.
