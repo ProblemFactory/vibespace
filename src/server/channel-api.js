@@ -28,7 +28,7 @@ const TAIL_BYTES = 4 * 1024 * 1024;      // …read backwards from its end, neve
 const PROPOSALS_KEEP = 200;
 const TOKEN_KEYS = /^(access_token|refresh_token|id_token|tenant_access_token|app_access_token|user_access_token|client_secret|authorization|password|secret)$/i;
 
-function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fetch === 'function' ? fetch : null), now = () => Date.now(), broadcast = () => {}, log = console } = {}) {
+function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fetch === 'function' ? fetch : null), now = () => Date.now(), broadcast = () => {}, log = console, writer = null } = {}) {
   if (!dataDir) throw new Error('channel-api: dataDir is required');
   const eng = () => (typeof engine === 'function' ? engine() : engine);
   const dir = path.join(dataDir, 'channels');
@@ -59,7 +59,20 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   const stamps = new Map();        // `${cred}|${principal id}` -> call instants (the grant's budget)
   const mountTokens = new Map();   // mountId -> { token, until } (a refreshed access token, memory only)
   const refreshing = new Map();    // mountId -> the ONE refresh in flight (single-flight) | { failedUntil } after a refusal (paced)
-  const save = () => { if (!hold.writable('an API proposal change')) return; try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api] state write failed:', e && e.message); } };
+  // B-574d slice «channels-small-stores» (lane nl-journals, 主开发 r4939): THE STORE WRITER (src/store-writer.js — its thread does the temp,
+  // the write, the SYNC and the rename, off the hub's loop; ONE writer for this file). An agent's proposal, the hold's lift and the groups'
+  // change signal HAND the file (the bytes made at the write); a PERSON's decision (Approve — its «running» mark before the call and its
+  // outcome after —, Reject, Resubmit, a shape's revoke) also LANDS by the writer's own synchronous flush before its answer: false when it
+  // is not on disk (kept in memory, written again by the writer). The cards' sync reads this file: it takes the writer's owed bytes first.
+  const SW = () => writer || require('../store-writer.js').storeWriter();
+  function save({ act = false } = {}) {
+    if (!hold.writable('an API proposal change')) return true;
+    try { SW().dirty(stateFile, { name: 'api-proposals.write', makeDir: true, produce: () => JSON.stringify(state) }); } catch (e) { log.warn('[channel-api] the state write was not handed to the store writer:', e && e.message); return false; }
+    if (!act) return true;
+    const r = SW().flushSync([stateFile]);
+    return !!r && !r.deferred && !(r.left || []).some((x) => x && x.file === stateFile);   // a flush deferred to the exit's own is no landing
+  }
+  const notOnDisk = (what) => ({ ok: false, code: 'not-durable', status: 503, notOnDisk: true, error: `${what}, but data/channels/api-proposals.json is not on disk yet (the storage did not write it) — it is kept and written again` });
   const credDir = (cred) => path.join(dir, String(cred).replace(/[^A-Za-z0-9._-]/g, '_'), 'api.ndjson');
   const pkOf = (ctx) => `${ctx.kind}:${ctx.id}`;
   /** The call shapes this principal's cards made always-allowed on one credential (the verdict's `shapes`). */
@@ -393,7 +406,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       const heldNow = require('./groups-hold.js').held();
       const mark = { stamped: false };
       state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark, KEEP));
-      if (state.shapes.length !== n || mark.stamped) save();
+      if (state.shapes.length !== n || mark.stamped) save({ act: by === 'user' });   // B-574d: the OWNER's tier change prunes the shapes — it lands before the answer (a pruned shape never comes back after a crash)
       notifyOwner([]);
     }
     return r;
@@ -447,14 +460,21 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const c = credentialOf(p.cred);
     // a decided card that runs nothing is a refused call on its log line, like any other (lane channel-api-log-blank)
     const refused = (code) => audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req: req || p.frozen, verdict: 'refused', code, proposal: p.id, by }));
-    if (!req || !c) { p.status = 'failed'; p.reason = !req ? 'the frozen request no longer matches its digest — nothing ran' : 'the credential is gone'; refused('api_frozen_mismatch'); save(); notifyOwner([p.id]); return { ok: false, code: 'api_frozen_mismatch', error: p.reason }; }
+    if (!req || !c) { p.status = 'failed'; p.reason = !req ? 'the frozen request no longer matches its digest — nothing ran' : 'the credential is gone'; refused('api_frozen_mismatch'); save({ act: true }); notifyOwner([p.id]); return { ok: false, code: 'api_frozen_mismatch', error: p.reason }; }
     // the follow-owed read: Task Groups HELD and the card's access comes through a group — its tier is UNKNOWN: refused BY NAME, the card
     // stays pending (never used up on «no longer holds API access», a false end)
     if (tierNow(ctx, p.cred).tier === 'none' && heldTierUnknown(ctx, p.cred)) return unknownRefusal(p.principal);
-    if (tierNow(ctx, p.cred).tier === 'none') { p.status = 'failed'; p.reason = 'the agent no longer holds API access to this credential — nothing ran'; refused('api_not_granted'); save(); notifyOwner([p.id]); return { ok: false, code: 'api_not_granted', error: p.reason }; }
+    if (tierNow(ctx, p.cred).tier === 'none') { p.status = 'failed'; p.reason = 'the agent no longer holds API access to this credential — nothing ran'; refused('api_not_granted'); save({ act: true }); notifyOwner([p.id]); return { ok: false, code: 'api_not_granted', error: p.reason }; }
+    const was = { decidedAt: p.decidedAt, decidedBy: p.decidedBy }, shapesBefore = state.shapes.length;
     p.status = 'running'; p.decidedAt = now(); p.decidedBy = by;
     if (always && p.offersAlways) state.shapes.push({ id: `shape-${crypto.randomBytes(5).toString('hex')}`, cred: p.cred, principal: `${ctx.kind}:${ctx.id}`, principalName: ctx.name || null, groups: ctx.groups, ...(ctx.inheritedGroups === null ? { inheritedGroups: null } : ctx.inheritedGroups && ctx.inheritedGroups.length ? { inheritedGroups: ctx.inheritedGroups } : {}), ...markOf(p.principal), shape: F.shapeOf(req), at: now(), by });   // the shape keeps the list's own mark
-    save();
+    // B-574d: THE RUN'S MARK IS ON DISK BEFORE THE CALL RUNS (the writer's synchronous flush) — else NOTHING runs: a restart would offer the
+    // same card again and a second Approve would call the vendor twice. The card goes back to pending, said by name (api_not_recorded)
+    if (!save({ act: true })) {
+      p.status = 'pending'; p.decidedAt = was.decidedAt; p.decidedBy = was.decidedBy; state.shapes.length = shapesBefore;
+      save(); notifyOwner([p.id]);
+      return { ok: false, code: 'api_not_recorded', status: 503, notOnDisk: true, error: 'the Approve could not be recorded — the storage did not write it, so nothing ran; the card is still pending: approve it again once the storage answers' };
+    }
     const kept = {};
     const r = await run(ctx, p.cred, c, req, kept);
     p.status = r.ok ? 'ran' : 'failed';
@@ -462,8 +482,8 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     // 重新提交 (B-fc37): the target the vendor pointed at, kept SERVER-side (its query may be signed) for resubmit()
     if (!r.ok && r.resubmit === true && kept.target) p.redirect = { status: r.status, ...kept.target };
     audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req, status: r.status || null, bytes: r.bytes || 0, ms: r.ms || 0, verdict: r.ok ? 'approved' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, proposal: p.id, by, redirect: r.ok ? null : r.to ? { to: r.to, why: r.why } : null }));
-    save(); notifyOwner([p.id]);
-    return { ok: true, proposal: proposalView(p) };
+    const landed = save({ act: true }); notifyOwner([p.id]);
+    return { ok: true, proposal: proposalView(p), ...(landed ? {} : { notOnDisk: true }) };   // B-574d: the call RAN — its outcome kept in memory and written again when not on disk
   }
   /** 重新提交 (B-fc37) — the user's door on an approved card whose run the vendor redirected to a target the fence did not
    *  clear (it would need the user, or is heavier than the call): that target becomes a NEW proposal — its own card,
@@ -491,7 +511,8 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const np = fileProposal({ ...ctx, groupsUnreadable: p.principal.groupsUnreadable === true }, p.cred, c, v.req, { cls, sensitive, note: p.note || null, why: 'resubmit', extra: { resubmitOf: p.id } });   // the new record keeps the OLD list's mark (its groups were recorded then)
     p.resubmittedAs = np.id;
     audit(p.cred, F.auditLine({ at: now(), principal: ctx, conv: p.conv, cred: p.cred, req: v.req, verdict: 'resubmitted', proposal: np.id, by }));
-    save(); notifyOwner([p.id, np.id]);
+    const landed = save({ act: true }); notifyOwner([p.id, np.id]);
+    if (!landed) return notOnDisk('The new card was filed');
     return { ok: true, proposal: proposalView(np) };
   }
   function reject(id, { reason = null, by = 'user' } = {}) {
@@ -501,7 +522,8 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (p.status !== 'pending') return { ok: false, code: 'not-pending', error: `this proposal is ${p.status} already` };
     p.status = 'rejected'; p.decidedAt = now(); p.decidedBy = by; p.reason = reason ? String(reason).slice(0, 500) : null;
     audit(p.cred, F.auditLine({ at: now(), principal: p.principal, conv: p.conv, cred: p.cred, req: F.thaw(p.frozen) || p.frozen, verdict: 'rejected', proposal: p.id, by }));
-    save(); notifyOwner([p.id]);
+    const landed = save({ act: true }); notifyOwner([p.id]);
+    if (!landed) return notOnDisk('The card was rejected');
     return { ok: true, proposal: proposalView(p) };
   }
   function revokeShape(id) {
@@ -509,7 +531,8 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const n = state.shapes.length;
     state.shapes = state.shapes.filter((s) => s.id !== id);
     if (state.shapes.length === n) return { ok: false, code: 'not-found', error: 'no such always-allowed shape' };
-    save(); notifyOwner([]);
+    const landed = save({ act: true }); notifyOwner([]);
+    if (!landed) return notOnDisk('The always-allowed call was revoked');
     return { ok: true };
   }
 

@@ -60,10 +60,12 @@ async function storeLegs(s) {
   {
     const d = world(s.tag + '1'), { F, ids } = await s.seed(d);
     ok(ids.length === 2 && ids.every(Boolean) && s.onDisk(json(F)).length === 2, `${s.tag}1 setup: two rows by the store's own calls, both on disk`, { ids });
+    if (s.landed) await s.landed();   // B-574d: a store on the writer — the file read once landed (its own hook: ④'s settle(inst) reads an instance)
     const before = disk(F), pr = placeReads(F, 1);
     let inst = null, a = null;
     try { await quietly(async () => { inst = await s.mk(d); a = await run(() => s.next(inst, 3)); }); } finally { pr.restore(); }
     ok(pr.seen.n === 1, `${s.tag}1 setup: the placed refusal met the store's read once`, pr.seen);
+    if (s.landed) await s.landed();   // B-574d: a write over it while held would land after a read made too soon — read once landed
     ok(disk(F) === before && codeOf(a) === s.code, `${s.tag}1 KEPT — a read that failed once is never written over by its ordinary next write: refused by name (${s.code}), the file byte for byte`, a);
     if (s.held2) await s.held2(inst, { d, F, ids, run, codeOf });
     ok(disk(F) === before, `${s.tag}2 nothing was written over the file while held`, null);
@@ -73,9 +75,11 @@ async function storeLegs(s) {
   // ③ a RESTART while held
   {
     const d = world(s.tag + '3'), { F } = await s.seed(d);
+    if (s.landed) await s.landed();
     const before = disk(F), pr = placeReads(F, 2);
     let b = null, a = null;
     try { await quietly(async () => { const x = await s.mk(d); x._hold.stop(); b = await s.mk(d); a = await run(() => s.next(b, 3)); }); } finally { pr.restore(); }
+    if (s.landed) await s.landed();
     ok(pr.seen.n === 2 && !!b._hold.held() && codeOf(a) === s.code && disk(F) === before, `${s.tag}3 a restart while held reads the same file again and is held again: refused, nothing written`, { placed: pr.seen.n, a });
     b._hold.stop();
   }
@@ -424,6 +428,9 @@ console.log('AP [channels/api-proposals.json] the pending API proposals, the dec
   const AGENT = { kind: 'agent', id: 'conv-A', name: 'Agent A', groups: [] };
   const propose = (api, n) => api.call(AGENT, { cred: 'lark-1', method: 'POST', path: `/open-apis/docx/v1/documents/doxMADEUP${n}/blocks`, body: `{"title":"made-up ${n}"}` });
   const mk = (d) => ORCH.create({ dataDir: d, engine: engineOf(d), fetchFn: noFetch, broadcast: () => { }, log: quiet });
+  // B-574d (lane nl-journals, r4939): the proposals and the cards go through THE STORE WRITER — the world reads their files once landed
+  const SWr = () => require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+  const landedAll = async () => { for (const st of SWr().stats()) if (st.dirty || st.inflight) await SWr().durable(st.file); };
   await storeLegs({
     tag: 'AP', mk, code: 'api_unread', torn: '{"proposals": {"api-madeup": {"id": "api-mad',
     seed: async (d) => {
@@ -433,9 +440,11 @@ console.log('AP [channels/api-proposals.json] the pending API proposals, the dec
       const ids = [(await propose(a, 1)).proposal?.id, (await propose(a, 2)).proposal?.id];
       const c = CARDS.create({ dataDir: d, api: a, userTodos: todos(d), now: () => Date.now(), timer: false, log: quiet });
       await c.sync(); c.stop(); a.close();
+      await landedAll();
       return { F: path.join(d, 'channels', 'api-proposals.json'), ids };
     },
     next: (a, n) => propose(a, n),
+    landed: () => landedAll(), settle: () => landedAll(),
     passed: (r) => !!r && r.code === 'api_pending',
     onDisk: (doc) => Object.keys((doc && doc.proposals) || {}),
     listed: (a) => (a.ownerView().proposals || []).map((p) => p.id),
@@ -444,9 +453,10 @@ console.log('AP [channels/api-proposals.json] the pending API proposals, the dec
       ok(r.every((x) => codeOf(x) === 'api_unread'), 'AP2 an Approve, a Reject, a Resubmit, a shape\'s revoke and the agent\'s `api wait` are refused by name (api_unread) — never «no such API proposal»', r.map(codeOf));
       const v = a.ownerView();
       ok(v.code === 'api_unread' && /cannot read /.test(v.held || ''), 'AP2 the owner\'s view says it (the API access dialog and the Outbox read it)', { code: v.code });
+      await landedAll();
       const CF = path.join(d, 'channels', 'api-cards.json'), cardsBefore = disk(CF), n0 = openCards(d);
       const c = CARDS.create({ dataDir: d, api: a, userTodos: todos(d), now: () => Date.now(), timer: false, log: quiet });
-      await c.sync(); c.stop();
+      await c.sync(); c.stop(); await landedAll();   // B-574d: a cards write while held would land after — read once landed
       ok(cardsBefore !== null && disk(CF) === cardsBefore && openCards(d) === n0 && n0 === 2, 'AP2 THE REMOVER (the cards\' sync drops its rows of proposals the view no longer names): while held it removes ZERO — its file byte for byte, both For-you items open', { n0, after: openCards(d) });
     },
     remover: async ({ d, inst }) => {
@@ -687,7 +697,7 @@ console.log('FO [feedback-outbox.json] the origin key (the hub\'s marks come bac
   const src = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const tables = [
     ['src/agent-routes.js', /const API_STATUS = Object\.freeze\(\{ api_unread: 503,/, 'the agent\'s API answers (api_unread)'],
-    ['src/routes/channels.js', /r\.code === 'api_unread' \? 503 :/, 'the owner\'s proposal routes (api_unread)'],
+    ['src/routes/channels.js', /\(r\.code === 'api_unread' \|\| r\.status === 503\) \? 503 :/, 'the owner\'s proposal routes (api_unread; B-574d: a not-durable decision too)'],
     ['src/routes/apps.js', /const STATUS = \{ apps_unread: 503,/, 'the Apps routes (apps_unread)'],
     ['src/server/design-engine.js', /pages_unread: 503, designs_unread: 503,/, 'the design routes (pages_unread, designs_unread)'],
     ['src/routes/feedback.js', /const STATUS = \{ feedback_unread: 503,/, 'the feedback routes (feedback_unread)'],
@@ -695,7 +705,7 @@ console.log('FO [feedback-outbox.json] the origin key (the hub\'s marks come bac
   ];
   const miss = tables.filter(([f, re]) => !re.test(src(f))).map(([, , w]) => w);
   ok(!miss.length, `every held code answers 503 on the wire, by its routes' table: ${tables.map(([, , w]) => w).join('; ')}`, miss);
-  const owner = (src('src/routes/channels.js').match(/r\.code === 'api_unread' \? 503 :/g) || []).length;
+  const owner = (src('src/routes/channels.js').match(/\(r\.code === 'api_unread' \|\| r\.status === 503\) \? 503 :/g) || []).length;
   ok(owner >= 4, `the owner's proposal routes (approve, resubmit, reject, revoke — and setTiers' shared answer) map api_unread to 503 (${owner})`, owner);
   const words = ['src/session-status.js', 'src/server/channel-api.js', 'src/server/apps-engine.js', 'src/server/design-engine.js', 'src/server/channels-attention.js', 'src/server/feedback-store.js', 'src/server/feedback-forward.js', 'src/server/published-pages.js'].filter((f) => /in VibeSpace's data folder could not be read/.test(src(f)));
   ok(!words.length, 'no held words of the chain name a file under the data folder (agents pass them on): «VibeSpace cannot read …», by the plain name', words);

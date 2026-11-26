@@ -39,7 +39,8 @@ function create({ dataDir, api, userTodos = null, deliver = null, names = null, 
   // callers' own `dirty` / `n`). A suite may hand its own writer (`writer`).
   const SW = () => writer || require('../store-writer.js').storeWriter();
   function save() { try { SW().dirty(stateFile, { name: 'channel-api-cards.write', makeDir: true, produce: () => JSON.stringify(state) }); } catch (e) { log.warn('[channel-api-cards] the state write was not handed to the store writer:', e && e.message); } }
-  const frozenOf = () => { try { return JSON.parse(fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };
+  // B-574d (r4939): the orchestrator's file through THE STORE WRITER — its newest bytes may still be owed: the writer's owed bytes first, then the file
+  const frozenOf = () => { try { const w = SW(), owed = w && typeof w.owed === 'function' ? w.owed(frozenFile) : null; return JSON.parse(owed != null ? owed : fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };
   const ctxOf = (p) => ({ kind: p.principal.kind, id: p.principal.id, name: p.principal.name, groups: p.principal.groups || [], inheritedGroups: p.principal.inheritedGroups === null ? null : (p.principal.inheritedGroups || []), ...(p.principal.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() });   // a RECORDED principal carries the hold too (主开发 05:42Z (3)); today's one reader (liveness) returns before it while held, so the spread is inert there — kept so every principal built here hands the fact (the census reads it per site)
   /** The call's chat NAMED from what the channel store knows (card grammar ②) — and the conversation it opens; else nothing (the card shows the id chip). */
   const objectOf = (p) => {

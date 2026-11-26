@@ -292,6 +292,23 @@ console.log('⑥ B-574d the cards\' state through the store writer');
   const f = mutant6("  function save() { try { SW().dirty(stateFile, { name: 'channel-api-cards.write', makeDir: true, produce: () => JSON.stringify(state) }); } catch (e) { log.warn('[channel-api-cards] the state write was not handed to the store writer:', e && e.message); } }\n",
     "  function save() { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api-cards] state write failed:', e && e.message); } }\n");   // stale-pins: kept (the release's save — this red control's own text)
   const r = await cardsOf(f);
+  // the cards' SECOND READER of the proposals' file (the frozen headers and body) takes the WRITER's owed bytes first — the orchestrator's
+  // newest write may not have landed yet (B-574d: its file is the store writer's too). RED: the release's reader (the file alone)
+  const owedOf = async (cardsPath) => {
+    let owedText = null;
+    const w = { calls: [], dirty() { }, durable: () => Promise.resolve(true), pending: () => false, flushSync: () => ({ written: [], left: [] }), forget() { }, owed: (f) => (String(f).endsWith(path.join('channels', 'api-proposals.json')) ? owedText : null) };
+    const ho = harness(cardsPath, { writer: w });
+    ho.add({ id: 'api-o1', at: T0 });
+    const pf = path.join(ho.dir, 'channels', 'api-proposals.json');
+    owedText = fs.readFileSync(pf, 'utf8'); fs.writeFileSync(pf, JSON.stringify({ proposals: {} }));   // the newest bytes owed, the disk not holding them yet
+    await ho.cards.sync();
+    const rec = ho.cards.records().find((r) => r.id === 'api-o1');
+    return { rec: !!rec, headers: rec ? rec.headers : null };
+  };
+  const ow = await owedOf(undefined);
+  ok(ow.rec && !!ow.headers && ow.headers['Content-Type'] === 'application/json', '⑥ the cards\' second reader of the proposals\' file takes the WRITER\'s owed bytes first: a card whose frozen request is not on disk yet still shows its headers', ow);
+  const owr = await owedOf(mutant6("  const frozenOf = () => { try { const w = SW(), owed = w && typeof w.owed === 'function' ? w.owed(frozenFile) : null; return JSON.parse(owed != null ? owed : fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };", "  const frozenOf = () => { try { return JSON.parse(fs.readFileSync(frozenFile, 'utf8')).proposals || {}; } catch { return {}; } };"));   // stale-pins: kept (the release's reader — this red control's own text)
+  ok(owr.rec && (!owr.headers || owr.headers['Content-Type'] !== 'application/json'), 'RED ⑥ the release\'s reader (the file alone): the card is there, and its frozen request — owed — shows no headers', owr);
   ok(/write/.test(r.loop) && /rename/.test(r.loop) && r.handed === 0, 'RED ⑥ the release\'s save: the cards\' file written and renamed ON the hub\'s loop at every sweep that changed it, nothing handed to the writer', r);
 }
 

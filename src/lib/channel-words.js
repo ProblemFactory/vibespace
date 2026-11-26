@@ -75,6 +75,8 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
   switch (code) {
     // hub-loop-stalls commit 2 round 3 (law F's last third): a person's act kept in memory, not on disk yet — said in the
     // person's language, never dropped
+    // B-574d (lane nl-journals): an Approve whose «running» mark could not reach the disk — nothing ran, the card still pending
+    case 'api_not_recorded': return t('The Approve could not be recorded — the storage did not write it, so nothing ran; the card is still pending: approve it again once the storage answers');
     case 'not-durable': return t('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.');
     case 'not-found': return t('No such conversation');
     // B-92fc follow (主开发 r3021 (4)): «Try again» on a removed account's leftovers — its five refusals, in the person's language

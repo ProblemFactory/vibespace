@@ -194,7 +194,11 @@ vendor.keepAliveTimeout = 120e3;
 await new Promise((r) => vendor.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${vendor.address().port}`;
 const fetchFn = (url, init) => { const u = new URL(url); return fetch(base + u.pathname + u.search, { ...init, headers: { ...init.headers, 'x-test-host': u.host } }); };
-const mkOrch = (Mod, eng, dataDir) => Mod.create({ dataDir, engine: eng, fetchFn, broadcast: () => {} });
+// B-574d (lane nl-journals, 主开发 r4939): the API proposals go through THE STORE WRITER now. This suite's world reads and plants the
+// file right after its doors, so each orchestrator here is handed a writer that writes AT the call, as the release did (LW); the
+// writer's own road is ⑤'s writer rows (handed / rejectLands / approveGuard, a recording writer)
+const LW = () => ({ dirty(file, o = {}) { const b = o.produce ? o.produce() : null; if (b == null) return; if (o.makeDir) fs.mkdirSync(path.dirname(file), { recursive: true }); const tmp = `${file}.${process.pid}.tmp`; fs.writeFileSync(tmp, b); fs.renameSync(tmp, file); }, flushSync: () => ({ written: [], left: [] }), durable: () => Promise.resolve(true), pending: () => false, owed: () => null, forget() { } });
+const mkOrch = (Mod, eng, dataDir) => Mod.create({ dataDir, engine: eng, fetchFn, broadcast: () => {}, writer: LW() });
 function fakeEngine() {
   const e = { rows: [], charged: 0, backoffSec: null, gateRefusal: null };
   e.apiAccounts = () => [{ id: 'lark-1', kind: 'lark', label: 'Lark (test)' }];
@@ -396,6 +400,9 @@ console.log('④ vibespace-channels api … end to end');
 console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card digest, the mount refresh, the echoed token, the withheld audit');
 {
   const grantA = (api, cred, tier) => api.setTiers(cred, [{ principal: { kind: 'agent', id: 'conv-A' }, tier }]);
+  // B-574d: a recording writer (its landing placed: `landed`) and the writes ON the hub's loop to the proposals' file
+  const recW = ({ landed = true } = {}) => { const calls = []; return { calls, landed, dirty(file, o) { calls.push({ kind: 'dirty', file, name: o.name, bytes: o.produce ? o.produce() : null }); }, flushSync(files) { calls.push({ kind: 'flush', files, at: seen.length }); return this.landed ? { written: files, left: [] } : { written: [], left: files.map((f) => ({ file: f, why: 'the write failed (EIO; 1 attempt)' })) }; }, durable() { return Promise.resolve(this.landed); }, pending: () => false, owed: () => null, forget() { } }; };
+  const loopWA = async (dir, fn) => { const f = path.join(dir, 'channels', 'api-proposals.json'), o = { writeFileSync: fs.writeFileSync, renameSync: fs.renameSync }, w = []; fs.writeFileSync = function (p0, ...a) { if (String(p0).startsWith(f)) w.push('write'); return o.writeFileSync.call(this, p0, ...a); }; fs.renameSync = function (a0, b0, ...a) { if (String(b0) === f) w.push('rename'); return o.renameSync.call(this, a0, b0, ...a); }; try { await fn(); } finally { Object.assign(fs, o); } return w.join(' '); };
   const SEND = { cred: 'lark-1', method: 'POST', path: '/open-apis/im/v1/messages?receive_id_type=chat_id', body: '{"receive_id":"oc_1"}' };
   const mountTok = () => ({ token: { access_token: 'ya29.OLD', expiry: '2020-01-01T00:00:00Z', refresh_token: '1//r' }, clientId: 'cid', clientSecret: 'cs' });
   const mounts = { oauthClientsFor: () => [{ mountId: 'm1', name: 'Drive' }], oauthTokenOf: mountTok, oauthApiRows: () => MountManager.OAUTH_API };
@@ -412,7 +419,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
       const fr = st.proposals[card.id].frozen; fr.method = 'PATCH'; fr.path = '/open-apis/im/v1/chats/oc_9/announcement'; fr.digest = F.digestOf(fr); fs.writeFileSync(sf, JSON.stringify(st));
       const n0 = seen.length; const r = await mkOrch(Mod, eng, dir).approve(card.id, { digest: card.digest });
       return r.code === 'api_frozen_mismatch' && seen.length === n0; },
-    async refresh(Mod) { const eng = fakeEngine(); const mk = () => Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => mounts, fetchFn, broadcast: () => {} });
+    async refresh(Mod) { const eng = fakeEngine(); const mk = () => Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => mounts, fetchFn, broadcast: () => {}, writer: LW() });
       const api = mk(); await grantA(api, 'mount:m1', 'read'); tokenHits = 0;
       await Promise.all([1, 2, 3, 4, 5].map(() => api.call(A, { cred: 'mount:m1', method: 'GET', path: '/drive/v3/files' })));
       const one = tokenHits === 1; const api2 = mk(); tokenFail = true; tokenHits = 0;
@@ -424,7 +431,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
     // the owner's grants answer store-blocked by name (never api_not_granted / «no such credential»)
     async mountWords(Mod, which = 'creds') { const eng = fakeEngine(); let held = false;
       const hm = { oauthClientsFor: () => (held ? [] : [{ mountId: 'm1', name: 'Drive' }]), oauthTokenOf: mountTok, oauthApiRows: () => MountManager.OAUTH_API, unreadWords: () => (held ? 'mounts.json could not be read (EIO) — the storage list is held' : null) };
-      const api = Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => hm, fetchFn, broadcast: () => {} });
+      const api = Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => hm, fetchFn, broadcast: () => {}, writer: LW() });
       await grantA(api, 'mount:m1', 'write-ask');
       held = true;
       if (which === 'creds') { const c = api.creds(A); return /held/.test(String(c.mountsHeld)); }
@@ -434,7 +441,7 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
     async mountGrants(Mod) { return legs.mountWords(Mod, 'grants'); },
     async mountHeld(Mod) { const eng = fakeEngine(); let held = false;
       const hm = { oauthClientsFor: () => (held ? [] : [{ mountId: 'm1', name: 'Drive' }]), oauthTokenOf: mountTok, oauthApiRows: () => MountManager.OAUTH_API, unreadWords: () => (held ? 'mounts.json could not be read (EIO) — the storage list is held' : null) };
-      const api = Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => hm, fetchFn, broadcast: () => {} });
+      const api = Mod.create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'd-')), engine: eng, getMounts: () => hm, fetchFn, broadcast: () => {}, writer: LW() });
       await grantA(api, 'mount:m1', 'write-ask');
       const r = await api.call(A, { cred: 'mount:m1', method: 'POST', path: '/drive/v3/files', body: '{}' }); const card = r && r.proposal; if (!card) return false;
       held = true; const a = await api.approve(card.id, { digest: card.digest }); const stillPending = api.pending().some((p) => p.id === card.id);
@@ -447,6 +454,19 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
       slowNext = async () => { await grantA(api, 'lark-1', 'none'); };
       const r = await api.call(A, SEND); const l = api.auditTail('lark-1', { n: 1 })[0];
       return r.code === 'api_not_granted' && !r.status && l.verdict === 'withheld' && l.status === 200; },
+    // B-574d (lane nl-journals, 主开发 r4939): THE PROPOSALS THROUGH THE STORE WRITER — a recording writer stands in, its landing PLACED
+    async handed(Mod) { const eng = fakeEngine(), dir = fs.mkdtempSync(path.join(tmpRoot, 'w-')), w = recW(); const api = Mod.create({ dataDir: dir, engine: eng, fetchFn, broadcast: () => {}, writer: w }); await grantA(api, 'lark-1', 'write-ask');
+      const n0 = w.calls.length; let r; const loop = await loopWA(dir, async () => { r = await api.call(A, SEND); }); const mine = w.calls.slice(n0);
+      return r.code === 'api_pending' && loop === '' && mine.some((c) => c.kind === 'dirty' && c.name === 'api-proposals.write' && !!JSON.parse(c.bytes).proposals[r.proposal.id]) && !mine.some((c) => c.kind === 'flush'); },
+    async rejectLands(Mod) { const eng = fakeEngine(), dir = fs.mkdtempSync(path.join(tmpRoot, 'w-')), w = recW(); const api = Mod.create({ dataDir: dir, engine: eng, fetchFn, broadcast: () => {}, writer: w }); await grantA(api, 'lark-1', 'write-ask');
+      const c1 = (await api.call(A, SEND)).proposal, n0 = w.calls.length, a = api.reject(c1.id), after = w.calls.slice(n0).map((c) => c.kind).join();
+      w.landed = false; const c2 = (await api.call(A, { ...SEND, body: '{"receive_id":"oc_2"}' })).proposal, b = api.reject(c2.id);
+      return a.ok === true && after === 'dirty,flush' && b.ok === false && b.code === 'not-durable' && b.status === 503 && b.notOnDisk === true && api.ownerView().proposals.find((p) => p.id === c2.id).status === 'rejected'; },
+    async approveGuard(Mod) { const eng = fakeEngine(), dir = fs.mkdtempSync(path.join(tmpRoot, 'w-')), w = recW({ landed: false }); const api = Mod.create({ dataDir: dir, engine: eng, fetchFn, broadcast: () => {}, writer: w }); await grantA(api, 'lark-1', 'write-ask');
+      const card = (await api.call(A, SEND)).proposal, n0 = seen.length, r = await api.approve(card.id, { digest: card.digest });
+      const stays = r.ok === false && r.code === 'api_not_recorded' && r.status === 503 && seen.length === n0 && api.ownerView().proposals.find((p) => p.id === card.id).status === 'pending';
+      w.landed = true; const f0 = w.calls.length, n1 = seen.length, r2 = await api.approve(card.id, { digest: card.digest }), flushes = w.calls.slice(f0).filter((c) => c.kind === 'flush');
+      return stays && r2.ok === true && flushes.length >= 2 && flushes[0].at === n1 && seen.length > n1; },
   };
   const R1 = [
     ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ['state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark, KEEP));', 'state.shapes = state.shapes.filter((s) => true || shapeStays(s, cred, heldNow, mark, KEEP));']],
@@ -458,6 +478,9 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
     ['mountGrants', 'mounts.json HELD: the owner\'s grants on a mount credential answer store-blocked by name — never «no such credential» (the reader table)', ["const mh = String(cred || '').startsWith('mount:') ? mountsHeldOf() : null; return mh ? { ok: false, code: 'store-blocked', error: mh } : { ok: false, code: 'not-found', error: 'no such credential' };", "return { ok: false, code: 'not-found', error: 'no such credential' };"]],
     ['mountHeld', 'mounts.json HELD: a person\'s Approve of a pending proposal on a mount\'s client is refused by name, the card stays pending, and it runs after the lift (B-f276 family unit 2, MS1\'s second road)', ["if (String(cred || '').startsWith('mount:')) { const w = mountsHeldOf(); return w ? { error: w, code: 'storage_unread' } : null; }", "if (String(cred || '').startsWith('mount:')) return null;"]],
     ['echo', 'the bearer echoed by the vendor in a BINARY body never reaches the agent (M5)', ['...beltBody(scrubToken(b.body, token),', '...beltBody(b.body,']],
+    ['handed', 'B-574d an agent\'s proposal HANDS the proposals\' file to the store writer under its row (the new card in its bytes) — nothing written on the hub\'s loop, no synchronous flush (an agent\'s act)', ["    try { SW().dirty(stateFile, { name: 'api-proposals.write', makeDir: true, produce: () => JSON.stringify(state) }); } catch (e) { log.warn('[channel-api] the state write was not handed to the store writer:', e && e.message); return false; }", "    try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api] state write failed:', e && e.message); return false; }"]],   // stale-pins: kept (the release's save — this red control's own text)
+    ['rejectLands', 'B-574d a person\'s Reject is handed and LANDS by the writer\'s own synchronous flush before its answer; a landing that fails is refused BY NAME (not-durable, 503) — the rejection kept in memory, written again', ["    if (!landed) return notOnDisk('The card was rejected');\n", '']],
+    ['approveGuard', 'B-574d an Approve\'s «running» mark LANDS before the call runs; when it cannot, NOTHING runs (no vendor call), the card stays pending, said by name (api_not_recorded, 503) — a restart could never offer it for a second call', ['    if (!save({ act: true })) {\n      p.status = \'pending\';', '    if (!save({ act: true }) && false) {\n      p.status = \'pending\';']],
     ['withheld', 'a revoke while the vendor stalls: the answer withheld, the audit says `withheld` with the vendor\'s status (M6)', ["verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status", "verdict: r.ok ? 'ok' : 'refused', code: r.ok ? null : r.code, status"]],
   ];
   for (const [leg, name, mut] of R1) {
@@ -529,7 +552,7 @@ module.exports = { ...adapter, consent: Object.freeze({ mode: 'ephemeral', landi
   await engA.store.adapters.update((a) => { a.adapters.push({ id: 'acme-1', kind: 'acme', label: 'Acme (test)', enabled: true, options: {} }); });
   const hosts = [];
   const fetchA = (url, init) => { hosts.push(new URL(url).host); return fetchFn(url, init); };
-  const api = ORCH.create({ dataDir, engine: engA, fetchFn: fetchA, broadcast: () => {} });
+  const api = ORCH.create({ dataDir, engine: engA, fetchFn: fetchA, broadcast: () => {}, writer: LW() });
   ok((await api.setTiers('acme-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }])).ok && api.creds(A).creds.some((c) => c.id === 'acme-1' && c.kind === 'acme'), 'acme: the account is a raw-API credential (the engine read its adapter\'s declared row — no list of kinds)', api.creds(A));
   let r = await api.call(A, { cred: 'acme-1', method: 'GET', path: '/v1/items', query: { page: '1' } });
   let last = seen[seen.length - 1];
@@ -833,7 +856,7 @@ console.log('⑨ the API receipt road (lane inline-receipts-compose-api): api �
     const deliver = { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return { ok: true }; }, stashFor: (cid, env) => { stash.push({ cid, env }); } };
     let cards = null;
     const dir = fs.mkdtempSync(path.join(tmpRoot, 'road-'));
-    const api = ORCH.create({ dataDir: dir, engine: eng, fetchFn, broadcast: (m) => { if (cards) cards.onUpdate(m); } });
+    const api = ORCH.create({ dataDir: dir, engine: eng, fetchFn, broadcast: (m) => { if (cards) cards.onUpdate(m); }, writer: LW() });
     let frozenAt = null;   // the cards' clock (the product's `now` seam): null = the wall clock
     cards = CARDS.create({ dataDir: dir, api, userTodos: null, deliver, timer: false, collectWindowMs: windowMs, log: { warn() {}, log() {} }, now: () => (frozenAt === null ? Date.now() : frozenAt) });
     await api.setTiers('lark-1', [{ principal: { kind: 'agent', id: 'conv-A' }, tier: 'write-ask' }]);

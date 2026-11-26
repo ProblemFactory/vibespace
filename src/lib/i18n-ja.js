@@ -14526,6 +14526,7 @@ export default {
   "Checking Claude Code on this machine again — about five minutes": "このマシンで Claude Code をもう一度確認しています——約 5 分",
   "Could not start the check": "確認を始められませんでした",
   "Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.": "保存しましたが、まだディスクに書かれていません — ストレージがまだ書き込んでいません（遅いか、失敗しています）。メモリに残り、ストレージが書けるときに書かれます。それまでに再起動すると失われます。",
+  "The Approve could not be recorded — the storage did not write it, so nothing ran; the card is still pending: approve it again once the storage answers": "承認を記録できませんでした——ストレージが書き込まなかったため、何も実行していません。このカードは保留中のままです：ストレージが応答したら、もう一度承認してください",   // lane nl-journals B-574d: an Approve not recorded — nothing ran
   "Saved here — it finishes by itself when the storage answers (it is slow or failing). A restart before then undoes it.": "ここで保存しました——ストレージが応答すると自動で完了します（ストレージが遅いかエラーです）。それまでに再起動すると取り消されます。",
   "Not started: its run could not be saved first (the storage is slow or failing) — nothing was started. Start it again once the storage answers.": "開始していません：実行の記録を先に保存できませんでした（ストレージが遅いかエラーです）——何も開始していません。ストレージが応答したらもう一度開始してください。",
   // lane account-reset-door: the reset claim, the reset a reading shows, the pool's causes in a person's words (one per cause)
