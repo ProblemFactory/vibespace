@@ -4467,6 +4467,7 @@ export default {
   "Path copied": "路径已复制",
   "Reading…": "读取中…",
   "Running…": "运行中…",
+  "It ran, but its outcome is not on disk yet (the storage did not write it); it is written again. If VibeSpace restarts first, this card stays at «Running…» — the call ran once and never runs again.": "已运行，但结果尚未写入磁盘（存储没有写入它），会再次写入。如果 VibeSpace 先重启，这张卡片会一直显示「运行中…」——这次调用只运行了一次，不会再运行。",
   "(no output)": "(无输出)",
   "stderr:": "标准错误 (stderr):",
   "exit {code}": "退出码 {code}",

@@ -441,6 +441,26 @@ console.log('§12a rank 12a — a boot with the update switch on (no NO_AUTO_UPD
   ok('RED B-574d a save that hands every pass (the release wrote at every pass, lastSyncAt alone): the unmoved cursor is written', r1.a === 1, r1);
   const r2 = await cursorScene('red-file', (gs) => { gs._readState = function (w) { return JSON.parse(fs.readFileSync(this._statePath(w), 'utf-8')); }; });
   ok('RED B-574d the file-alone read: the next pass takes the stale cursor from disk and writes 101 AGAIN', r2.c === 2, r2);
+  // the pass WAITS for its moved cursor's LANDING (off the loop) before it is done — the release's order: a person who empties the folder
+  // after a pass never gets the old cursor back (主开发 r5041's read: proven, with its red). RED (one instance's method swapped): a save
+  // whose landing nobody waits for
+  const waitScene = async (name, swap = null) => {
+    const MD = path.join(tmp, 'mail-wait-' + name); fs.mkdirSync(MD, { recursive: true });
+    const SF = path.join(MD, '.vibespace-gmail-state.json'); fs.writeFileSync(SF, JSON.stringify({ historyId: '100', email: 'stand-in@example.invalid' }));
+    let release; const gate = new Promise((r) => { release = r; }); let owed = null;
+    const rec = { dirty(file, o) { if (file === SF) owed = o.produce(); }, durable: () => gate, owed: (f) => (f === SF ? owed : null), pending: () => false, forget() { } };
+    const gs = new GmailSync({ storeWriter: rec }); gs._api = async () => ({ history: [], historyId: '101' });
+    if (swap) swap(gs);
+    const w = { cfg: { id: 'wait-' + name, dir: MD, pollSeconds: 300 }, tok: {}, email: 'stand-in@example.invalid', stopped: false, timer: null };
+    let done = false; const pass = gs._syncOnce(w).then(() => { done = true; });
+    for (let i = 0; i < 200 && !done; i++) await new Promise((r) => setTimeout(r, 5));
+    const before = done; release(true); await pass;
+    return { before, after: done, handed: owed !== null };
+  };
+  const wt = await waitScene('real');
+  ok('B-574d …a pass that moved its cursor is NOT done until the cursor LANDED (it waits off the loop) — the release\'s order', wt.handed && wt.before === false && wt.after === true, wt);
+  const wr = await waitScene('red-nowait', (gs) => { const orig = gs._saveState; gs._saveState = function (w, state) { orig.call(this, w, state); return undefined; }; });
+  ok('RED B-574d a save whose landing nobody waits for: the pass is done while its cursor is still owed', wr.before === true, wr);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

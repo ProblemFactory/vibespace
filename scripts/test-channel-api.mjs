@@ -35,6 +35,7 @@ const ACL = require(path.join(REPO, 'src/channel-acl.js'));
 const ORCH = require(path.join(REPO, 'src/server/channel-api.js'));
 const { REDACTED } = require(path.join(REPO, 'src/secret-shapes.js'));
 const CARD = require(path.join(REPO, 'src/channel-api-card.js'));
+const CARDS = require(path.join(REPO, 'src/server/channel-api-cards.js'));   // r5041: the cards' sweep, the machine that ends a card
 const LARK = require(path.join(REPO, 'src/channels/lark.js'));
 const SLACK = require(path.join(REPO, 'src/channels/slack.js'));
 const GMAIL = require(path.join(REPO, 'src/channels/gmail.js'));
@@ -467,6 +468,22 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
       const stays = r.ok === false && r.code === 'api_not_recorded' && r.status === 503 && seen.length === n0 && api.ownerView().proposals.find((p) => p.id === card.id).status === 'pending';
       w.landed = true; const f0 = w.calls.length, n1 = seen.length, r2 = await api.approve(card.id, { digest: card.digest }), flushes = w.calls.slice(f0).filter((c) => c.kind === 'flush');
       return stays && r2.ok === true && flushes.length >= 2 && flushes[0].at === n1 && seen.length > n1; },
+    // r5041 (主开发, MUST 2): THE CARDS' SWEEP ends a card (expired by the clock; withdrawn when the agent's access is gone) on a timer or an
+    // agent's broadcast — HANDED to the writer, NO synchronous flush (counted on the seam), under a writer whose landing never comes; a
+    // restart before that ending landed reads the card PENDING again and the next sweep ends it again (the release's rule)
+    async sweepHands(Mod) { const eng = fakeEngine(), dir = fs.mkdtempSync(path.join(tmpRoot, 'w-')), quiet = { log() {}, info() {}, warn() {}, error() {} }, late = () => Date.now() + CARD.TTL_MS + 60000;
+      const api1 = mkOrch(Mod, eng, dir); await grantA(api1, 'lark-1', 'write-ask'); const card = (await api1.call(A, SEND)).proposal;
+      const w = recW({ landed: false }), api2 = Mod.create({ dataDir: dir, engine: eng, fetchFn, broadcast: () => {}, writer: w });
+      const c2 = CARDS.create({ dataDir: dir, api: api2, now: late, timer: false, writer: w, log: quiet });
+      const n0 = w.calls.length; await c2.sync(); c2.stop(); const mine = w.calls.slice(n0), stOf = (api) => (api.ownerView().proposals.find((x) => x.id === card.id) || {}).status;
+      const ended = stOf(api2), api3 = mkOrch(Mod, eng, dir), again = stOf(api3);
+      const c3 = CARDS.create({ dataDir: dir, api: api3, now: late, timer: false, writer: LW(), log: quiet }); await c3.sync(); c3.stop();
+      return ended === 'rejected' && mine.some((c) => c.kind === 'dirty' && c.name === 'api-proposals.write') && !mine.some((c) => c.kind === 'flush') && again === 'pending' && stOf(api3) === 'rejected'; },
+    // r5041 (a): the owner's tier change whose prune of the always-allowed shapes is NOT on disk says so, as a Reject and a revoke do
+    async tiersSay(Mod) { const eng = fakeEngine(), dir = fs.mkdtempSync(path.join(tmpRoot, 'w-')), w = recW(); const api = Mod.create({ dataDir: dir, engine: eng, fetchFn, broadcast: () => {}, writer: w }); await grantA(api, 'lark-1', 'write-ask');
+      const r1 = await api.call(A, SEND); await api.approve(r1.proposal.id, { always: true, digest: r1.proposal.digest });
+      w.landed = false; const r = await grantA(api, 'lark-1', 'read');
+      return !!r && r.ok === false && r.code === 'not-durable' && r.status === 503 && r.notOnDisk === true; },
   };
   const R1 = [
     ['shapes', 'an always-allowed shape ends when the tier drops below "Read + write" — a re-widen asks again (M1)', ['state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark, KEEP));', 'state.shapes = state.shapes.filter((s) => true || shapeStays(s, cred, heldNow, mark, KEEP));']],
@@ -481,6 +498,8 @@ console.log('⑤ verify r1: shapes vs a downgrade, the pending wall, the card di
     ['handed', 'B-574d an agent\'s proposal HANDS the proposals\' file to the store writer under its row (the new card in its bytes) — nothing written on the hub\'s loop, no synchronous flush (an agent\'s act)', ["    try { SW().dirty(stateFile, { name: 'api-proposals.write', makeDir: true, produce: () => JSON.stringify(state) }); } catch (e) { log.warn('[channel-api] the state write was not handed to the store writer:', e && e.message); return false; }", "    try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state)); fs.renameSync(stateFile + '.tmp', stateFile); } catch (e) { log.warn('[channel-api] state write failed:', e && e.message); return false; }"]],   // stale-pins: kept (the release's save — this red control's own text)
     ['rejectLands', 'B-574d a person\'s Reject is handed and LANDS by the writer\'s own synchronous flush before its answer; a landing that fails is refused BY NAME (not-durable, 503) — the rejection kept in memory, written again', ["    if (!landed) return notOnDisk('The card was rejected');\n", '']],
     ['approveGuard', 'B-574d an Approve\'s «running» mark LANDS before the call runs; when it cannot, NOTHING runs (no vendor call), the card stays pending, said by name (api_not_recorded, 503) — a restart could never offer it for a second call', ['    if (!save({ act: true })) {\n      p.status = \'pending\';', '    if (!save({ act: true }) && false) {\n      p.status = \'pending\';']],
+    ['sweepHands', 'B-574d (主开发 r5041) the cards\' SWEEP ending a card (expired, withdrawn — a timer\'s or an agent\'s) HANDS the ending to the writer: no synchronous flush, under a writer whose landing never comes; a restart before it landed reads the card pending and the next sweep ends it again (the release\'s rule)', ["    const landed = save({ act: by === 'user' }); notifyOwner([p.id]);\n", "    const landed = save({ act: true }); notifyOwner([p.id]);\n"]],
+    ['tiersSay', 'B-574d (r5041 (a)) the owner\'s tier change whose prune of the always-allowed calls is not on disk is refused BY NAME (not-durable, 503), as a Reject and a revoke are — never a 200 over a prune that did not land', ["      if (!landed) return notOnDisk('The access was changed and its always-allowed calls ended');", "      if (false) return notOnDisk('The access was changed and its always-allowed calls ended');"]],
     ['withheld', 'a revoke while the vendor stalls: the answer withheld, the audit says `withheld` with the vendor\'s status (M6)', ["verdict: r.ok ? 'ok' : r.withheld ? 'withheld' : 'refused', code: r.ok ? null : r.code, status", "verdict: r.ok ? 'ok' : 'refused', code: r.ok ? null : r.code, status"]],
   ];
   for (const [leg, name, mut] of R1) {

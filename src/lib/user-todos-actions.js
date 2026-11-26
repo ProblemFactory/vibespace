@@ -712,7 +712,7 @@ export function inboxModel(app) {
       const r = answer === 'reject'
         ? await fetchJson(`/api/channels/api/proposals/${id}/reject`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         : await fetchJson(`/api/channels/api/proposals/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });
-      if (r && r.ok) { showToast(answer === 'reject' ? t('Rejected — the agent is told on its next turn') : t('Approved — the card in the conversation shows how it went')); return true; }
+      if (r && r.ok) { showToast(r.notOnDisk && answer !== 'reject' ? t('It ran, but its outcome is not on disk yet (the storage did not write it); it is written again. If VibeSpace restarts first, this card stays at «Running…» — the call ran once and never runs again.') : answer === 'reject' ? t('Rejected — the agent is told on its next turn') : t('Approved — the card in the conversation shows how it went'), r.notOnDisk ? { type: 'warn' } : undefined); return true; }   // B-574d (r5041 (b)): an outcome not on disk is said
       showToast(r && r.code === 'not-pending' ? t('That request was already decided') : r && r.code === 'proposal_changed' ? t('That card changed after it was shown — nothing ran; read it again') : heldRefusalText(r && r.code) || (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }

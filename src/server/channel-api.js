@@ -406,8 +406,9 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
       const heldNow = require('./groups-hold.js').held();
       const mark = { stamped: false };
       state.shapes = state.shapes.filter((s) => shapeStays(s, cred, heldNow, mark, KEEP));
-      if (state.shapes.length !== n || mark.stamped) save({ act: by === 'user' });   // B-574d: the OWNER's tier change prunes the shapes — it lands before the answer (a pruned shape never comes back after a crash)
+      const landed = state.shapes.length !== n || mark.stamped ? save({ act: by === 'user' }) : true;   // B-574d: the OWNER's tier change prunes the shapes — it lands before the answer (a pruned shape never comes back after a crash)
       notifyOwner([]);
+      if (!landed) return notOnDisk('The access was changed and its always-allowed calls ended');   // r5041 (a): said as a Reject and a revoke say it (not-durable, 503)
     }
     return r;
   }
@@ -522,7 +523,10 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     if (p.status !== 'pending') return { ok: false, code: 'not-pending', error: `this proposal is ${p.status} already` };
     p.status = 'rejected'; p.decidedAt = now(); p.decidedBy = by; p.reason = reason ? String(reason).slice(0, 500) : null;
     audit(p.cred, F.auditLine({ at: now(), principal: p.principal, conv: p.conv, cred: p.cred, req: F.thaw(p.frozen) || p.frozen, verdict: 'rejected', proposal: p.id, by }));
-    const landed = save({ act: true }); notifyOwner([p.id]);
+    // r5041 (主开发, MUST 2): ONLY A PERSON's Reject lands by the synchronous flush — the cards' sweep ends a card (expired by the clock,
+    // withdrawn when the agent's conversation or access is gone) on a timer or an agent's broadcast: HANDED, like every machine-made write.
+    // A restart before that ending lands reads the card pending again, and the next sweep ends it again (the release's rule)
+    const landed = save({ act: by === 'user' }); notifyOwner([p.id]);
     if (!landed) return notOnDisk('The card was rejected');
     return { ok: true, proposal: proposalView(p) };
   }

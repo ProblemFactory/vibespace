@@ -4466,6 +4466,7 @@ export default {
   "Path copied": "パスをコピーしました",
   "Reading…": "読み取り中…",
   "Running…": "実行中…",
+  "It ran, but its outcome is not on disk yet (the storage did not write it); it is written again. If VibeSpace restarts first, this card stays at «Running…» — the call ran once and never runs again.": "実行しましたが、結果はまだディスクにありません（ストレージが書き込みませんでした）。もう一度書き込まれます。その前に VibeSpace が再起動すると、このカードは「実行中…」のままになります——呼び出しは一度だけ実行され、二度と実行されません。",
   "(no output)": "(出力なし)",
   "stderr:": "標準エラー (stderr):",
   "exit {code}": "終了コード {code}",

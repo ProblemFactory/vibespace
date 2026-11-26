@@ -31,6 +31,7 @@ export async function answerApiProposal(id, answer, { shown = null, always = fal
       ? await fetchJson(`/api/channels/api/proposals/${pid}/resubmit`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown }) }).catch(no)
       : await fetchJson(`/api/channels/api/proposals/${pid}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ shown, always }) }).catch(no);
   if (!r || !r.ok) showToast(r && r.code === 'not-pending' ? t('That request was already decided') : heldRefusalText(r && r.code) || (r && r.error) || t('server unreachable'), { type: 'error' });
+  else if (r.notOnDisk) showToast(t('It ran, but its outcome is not on disk yet (the storage did not write it); it is written again. If VibeSpace restarts first, this card stays at «Running…» — the call ran once and never runs again.'), { type: 'warn' });   // B-574d (主开发 r5041 (b)): an Approve that RAN whose outcome is not on disk yet
   refreshApiCards({ changed: true });   // the answer changed the records: a read already in flight is read once more
   return !!(r && r.ok);
 }
