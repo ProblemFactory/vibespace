@@ -3387,7 +3387,6 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
       ['const scoped = (u.scopedWeekly', 'hands each scoped bucket to eff()'],
       ['const e = (est?.scopedWeekly', 'an estimate lookup'],
     ],
-    'settings-schema.js': [['its utilization stays under 100%', 'words in a setting\'s description']],
     'usage-eta.js': [['num(b.usedPercent) ?? (num(b.utilization)', 'the countdown asks «spent?» only; bucketEta refuses a reset that passed (no percentage drawn)']],
     'usage-meter.js': [
       ["${estStat(pp5, estPop, 'fiveHour')}", 'usage-predict P2: the lane KEY names the projection\'s verdict state (the band\'s words), never a bucket\'s reading'],

@@ -9589,12 +9589,15 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     // MANUAL PRIORITY at the DEFAULT of a pool that cannot hot-switch: returning
     // the default RESTARTS every follower, so the return waits for them to stop
     // (never mid-turn — the owner's 17:22 rule); a follower's stop re-decides it
-    if (d.reason === 'priority-return' && !hot) {
+    // B-87fd (1) r4696 M2: leaving a member BILLING PAID OVERAGE is the same kind of voluntary move — on a pool that cannot hot-switch
+    // it waits for every follower to stop as the priority return does (never a follower cut mid-turn)
+    if ((d.reason === 'priority-return' || d.reason === 'overage') && !hot) {
       let busy = null;
       for (const [sid, s] of activeSessions) {
         if (s._accountId !== poolId || s.host || hasOwnPoolLink(poolId, sid)) continue;
         if (conversationInTurn({ isStreaming: s._isStreaming, turnState: s._turnState })) { busy = sid; break; }
       }
+      if (busy && d.reason === 'overage') { noteWarmHold(poolId, busy, { ...d, reason: 'warm-soft-defer', paying: true, wouldTo: d.to, wouldToName: d.toName }, now, ' (pool default)', poolId + ':default:overage'); return; }
       if (busy) { noteWarmHold(poolId, busy, { ...d, reason: 'priority-hold', wouldTo: d.to, wouldToName: d.toName }, now, ' (pool default)', poolId + ':default:prio'); return; }
     }
     const lastSwitch = _poolSwitchAt.get(poolId) || 0;
