@@ -1124,6 +1124,7 @@ class MountManager {
     this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }
     try { this.onRemoved?.(m); } catch { }   // its stranded-files notice too (the cap counts live records)
     this._unmountWhy?.delete(id);   // its follow: a press's reason leaves with the record
+    this._unmountNotOnDisk?.delete(id);   // B-574d (r4853): …and its «not on disk yet» mark
     this._mountGen?.delete(id); this._cantTell?.delete(mpRemoved);   // B-e783: its generation and any «can't tell» wait leave with the record (after the unmount, which moves it)
     this._state.mounts = this._state.mounts.filter(x => x.id !== id);
     setTimeout(() => this._cleanupEmptyMountpoint(mpRemoved), 1500);
