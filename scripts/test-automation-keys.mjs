@@ -2362,6 +2362,13 @@ console.log('㉓ B-2083 unit A — conversations.pin: the person\'s pin road for
   ok(rx.code === 'paid_member', 'RED CONTROL (the money asked of any id — in a copy): a stranger id is answered paid_member — the «writer\'s own refusals by name» leg above tells the two apart', rx);
   sessions.get('sess-p-2')._poolPin = null;
   OPS.provide(null); OPS.provide(before);
+  // THE CLI's typed verb and its usage lines (vibespace-api ships alone: by hand)
+  const CLI = R('data/bin/vibespace-api');
+  const c1 = CLI.typed(['conversations', 'pin', 'worker-p', '--member', 'sub-free']), c2 = CLI.typed(['conversations', 'pin', 'worker-p', '--automatic']), c3 = CLI.typed(['conversations', 'pin', 'worker-p', '--member']), c4 = CLI.typed(['conversations', 'pin', 'worker-p', '--automatic', 'yes']);
+  ok(c1.verb === PIN && JSON.stringify(c1.args) === '{"member":"sub-free","target":"worker-p"}' && c2.verb === PIN && JSON.stringify(c2.args) === '{"automatic":true,"target":"worker-p"}' && /--member needs a value/.test(c3.error) && /stray word "yes"/.test(c4.error),
+    'the CLI: `conversations pin <target> (--member <id> | --automatic)` — --member takes the id, --automatic takes none (both / neither: the verb refuses by name)', { c1, c2, c3, c4 });
+  ok(/vibespace-api conversations pin <target> \(--member <id> \| --automatic\)   pin it to one member of its own pool, or place it automatically again/.test(CLI.USAGE) && /paid_member — a member/.test(CLI.USAGE) && /a key never moves a conversation onto money/.test(CLI.USAGE) && /a person's resume follows that person's page/.test(CLI.USAGE),
+    'the usage lines name the verb, its refusals, the money law and how long the pin holds');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
