@@ -129,32 +129,29 @@ const idsOf = (f) => { landed(f); return JSON.parse(fs.readFileSync(f, 'utf8')).
     const PERREAD = M.load('src/server/cli-env.js', anchored(CE_SRC, '  const excl = _modelsExclusive;\n', '  const excl = exclusive;\n', 'the small mark per read'), 'models-mark-per-read');
     const sr = await sticky(PERREAD, 'hub-sticky-red');
     ok(!sr.kept && JSON.stringify(JSON.parse(fs.readFileSync(sr.F, 'utf8')).map((m) => m.id)) === '["claude-s-1","claude-s-2"]', 'CONTROL (the small\'s mark judged per read, run): the second sighting turns the door off and the first write lands over the hook\'s list — the hook\'s id gone', fs.readFileSync(sr.F, 'utf8').slice(0, 80));
-    // (the read's should) THE MARK OUTLIVES A FAILURE THAT IS NOT «appeared»: the first exclusive write fails EACCES (the usage-cache
-    // folder made read-only — placed; the writer names the failure: its witness), the hook's list appears, a second sighting reads the
-    // hub's own owed list as data — the retry is STILL exclusive: the hook's list kept. Its RED: the mark dropped at any failure. A
-    // machine that lets a write through a read-only folder (root) cannot place it: a named SKIP, never a green
+    // (the read's should, r5300: placed AT THE CALL) THE MARK OUTLIVES A FAILURE THAT IS NOT «appeared»: the first exclusive write FAILS on
+    // the writer's own thread — a stand-in thread running the REAL writeJob (scripts/fixtures/store-stand-writer.cjs) refuses the models
+    // file's write with EIO (the writer names it: the witness) — the hook's list appears, a second sighting reads the hub's own owed list
+    // as data: the retry is STILL exclusive and the hook's list kept. Its RED: the mark dropped at any failure. cli-env asks for the
+    // process's writer at each write, so this scene hands it the stand-in's (restored after it)
+    const STAND = require(path.join(REPO, 'scripts/fixtures/store-stand-writer.cjs')).make(mk('stand'));
     const failedFirst = async (Mod, tag) => {
-      const R = mk(tag), F = modelsOf(R), D = path.dirname(F), env = envOf(Mod, R);
-      said(() => env.noteModelSeen('claude-f-1'));   // read missing: the write owed, exclusive
-      let placed = false, why = null;
-      fs.chmodSync(D, 0o500);
+      const R = mk(tag), F = modelsOf(R), env = envOf(Mod, R), base = path.basename(F);
+      const SW0 = SWR.storeWriter, W = SWR.create({ log: { log() { }, info() { }, warn() { }, error() { } }, workerPath: STAND.path, durableMs: 1500 });
+      SWR.storeWriter = () => W;
       try {
-        try { fs.writeFileSync(path.join(D, '.probe'), 'x'); fs.unlinkSync(path.join(D, '.probe')); } catch (e) { placed = !!e && e.code === 'EACCES'; }
-        said(() => landed(F));
-        why = SWR.storeWriter().whyNotDurable(F);
-      } finally { fs.chmodSync(D, 0o700); }
-      fs.writeFileSync(F, HOOKS2); const hb = fs.readFileSync(F);   // the hook's list appears before the retry lands
-      said(() => env.noteModelSeen('claude-f-2')); said(() => landed(F));   // the second sighting reads the owed list: the retry
-      return { placed, why, kept: fs.readFileSync(F).equals(hb) };
+        said(() => env.noteModelSeen('claude-f-1'));   // read missing: the write owed, exclusive
+        STAND.failOn(base, true); said(() => landed(F)); const why = W.whyNotDurable(F); STAND.failOn(base, false);
+        fs.writeFileSync(F, HOOKS2); const hb = fs.readFileSync(F);   // the hook's list appears before the retry lands
+        said(() => env.noteModelSeen('claude-f-2')); said(() => landed(F));   // the second sighting reads the owed list: the retry
+        return { why, kept: fs.readFileSync(F).equals(hb) };
+      } finally { SWR.storeWriter = SW0; STAND.failOn(base, false); try { W.stop(); } catch { } }
     };
     const ff = await failedFirst(CE, 'hub-failed-first');
-    if (!ff.placed) console.log('  ⊘ SKIP the mark outlives a failure that is not «appeared»: this machine let a write through a read-only folder (root) — the EACCES cannot be placed here');
-    else {
-      ok(!!ff.why && ff.why.code === 'EACCES' && ff.kept, 'THE MARK OUTLIVES A FAILURE THAT IS NOT «appeared» (the read\'s should): the first exclusive write failed EACCES (named by the writer), the hook\'s list appeared, the second sighting read the owed list — the retry stayed exclusive and the hook\'s list is kept', ff);
-      const ANYFAIL = M.load('src/server/cli-env.js', anchored(CE_SRC, '    if (ok) { _modelsExclusive = false; return; }', '    _modelsExclusive = false; if (ok) return;', 'the mark dropped at any failure'), 'models-mark-any-failure');
-      const fr = await failedFirst(ANYFAIL, 'hub-failed-first-red');
-      ok(fr.placed && !!fr.why && fr.why.code === 'EACCES' && !fr.kept, 'CONTROL (the mark dropped at any failure, run): the first write failed EACCES (named by the writer), and the retry — no longer exclusive — lands over the hook\'s list', fr);
-    }
+    ok(!!ff.why && ff.why.code === 'EIO' && ff.kept, 'THE MARK OUTLIVES A FAILURE THAT IS NOT «appeared» (the read\'s should, placed at the call): the first exclusive write failed EIO on the writer\'s thread (named by the writer), the hook\'s list appeared, the second sighting read the owed list — the retry stayed exclusive and the hook\'s list is kept', ff);
+    const ANYFAIL = M.load('src/server/cli-env.js', anchored(CE_SRC, '    if (ok) { _modelsExclusive = false; return; }', '    _modelsExclusive = false; if (ok) return;', 'the mark dropped at any failure'), 'models-mark-any-failure');
+    const fr = await failedFirst(ANYFAIL, 'hub-failed-first-red');
+    ok(!!fr.why && fr.why.code === 'EIO' && !fr.kept, 'CONTROL (the mark dropped at any failure, run): the first write failed EIO on the writer\'s thread (named by the writer), and the retry — no longer exclusive — lands over the hook\'s list', fr);
     // A REFUSAL WHOSE FILE IS LATER REMOVED: the next «missing» read clears the writer's «appeared» and writes again — EXCLUSIVELY (a hook's
     // list that appears before THAT write lands is kept too). Its RED: «appeared» left standing — every later write dropped, the writer
     // naming why. Each plant has its witness (law 1): the first write met the hook's file (kept byte for byte); a FRESH id each round,

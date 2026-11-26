@@ -401,6 +401,12 @@ let _modelsExclusive = false;
 function writeModels(list, { exclusive = false } = {}) {
   _modelsList = list;
   let w, file; try { w = modelsWriter(); file = modelsFile(); } catch { return false; }   // no writer: nothing written (the id is asked again)
+  // THE ORDER IS LOAD-BEARING (r5300): the clearing call below has no producer of its own, so the writer ALSO queues a NON-exclusive
+  // write of the old bytes (schedule() only arms a timer; post() reads s.exclusive when it makes the job) — safe ONLY because the
+  // exclusive dirty() at the end of this function follows IN THE SAME TURN and sets exclusive again before any job leaves. Never split
+  // the two (a writer verb that clears «appeared» without dirtying would be the clean form). A clear that throws leaves «appeared»
+  // standing: the writer then drops this function's write (and says so) until a later «missing» read's clear succeeds — dirty() does
+  // not throw today.
   if (exclusive && _modelsAppeared) { try { w.dirty(file, { exclusive: false }); _modelsAppeared = false; } catch { /* «appeared» stands: the writer drops this write */ } }   // the file that appeared is gone: the writer's «appeared» cleared
   if (exclusive) _modelsExclusive = true;
   const excl = _modelsExclusive;
