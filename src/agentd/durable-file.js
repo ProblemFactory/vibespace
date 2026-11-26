@@ -11,6 +11,10 @@
 // THIS FILE IS A DEVICE BUNDLE INPUT: every change of it rides a SIGNED device-agent release. That is why it is a door of its own
 // and not the hub's wrapper helper in src/fd-close.js, which changes with any hub release (r4387: the class's two doors stay two;
 // scripts/test-temp-rename-census.mjs names both, and a third is red).
+// B-574d (主开发 r4806): four SHARED modules the device bundles write their records through it too — the migrations' ledger
+// (src/migration-runner.js), the OpenCode serve's record (src/opencode-serve.js), the kept default microphone (src/desktop-mic.js)
+// and the apps' index (src/app-serve.js) — on the hub's own runs of them as well. So this file is SHARED in the layer rule
+// (scripts/test-architecture.mjs: node's fs and path only), and src/fd-close.js still never becomes a device input.
 const nodeFs = require('fs');
 const nodePath = require('path');
 

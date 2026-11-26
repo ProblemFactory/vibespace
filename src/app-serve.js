@@ -53,6 +53,7 @@ const K = require('./app-kinds/index.js'); // PURE — an app kind is its own fi
 const FP = require('./app-kinds/flatpak.js'); // PURE — the flatpak door (lane app-register-model)
 const RG = require('./app-kinds/registered.js'); // PURE — a registered app's declaration + THE witness-match rule
 const AWD = require('./argv-words.js'); // PURE — an argv shown as one line
+const DFILE = require('./agentd/durable-file.js'); // B-574d (lane bl-machines-b): THE device's one door — the apps' index is a RECORD (the device bundles this module)
 const W = require('./app-witness.js'); // PURE — what is installed OUTSIDE the door, by witness (lane apps-launcher-witness)
 const PLAN_KINDS = Object.freeze([...K.PLAN_KINDS, ...SYS.SYS_KINDS]); // design 019: `move` = the user's click (the host apps INTO the app system), `forget` = its second step
 /** A file VibeSpace staged for a proposal: `<16 hex>.deb` / `.AppImage` / `.icon.png|svg` (a download in flight: `.part`). */
@@ -74,7 +75,9 @@ const STAGING_KEEP_MS = 24 * 3600 * 1000;
 
 const named = (code, msg) => { const e = new Error(msg); e.code = code; return e; };
 const setKey = (l) => [...new Set(l || [])].sort().join(' '); // a package SET (design 019: a move = the same set in the other layer)
-/** writeJsonAtomic (tmp + rename), mode 0600 — the index is the user's. */
+/** writeJsonAtomic (tmp + rename), mode 0600. B-574d (lane bl-machines-b, 主开发 r4806): ONLY the two DERIVED files go here, with
+ *  no sync — the last scan (state.json) and the desktop's witness list, each made again by the next scan. The index
+ *  (manifest.json) is the person's: it goes through THE device's one door (writeManifest). */
 async function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await fsp.writeFile(tmp, JSON.stringify(obj, null, 2) + '\n', { mode: 0o600 });
@@ -254,7 +257,8 @@ function create({ home = os.homedir(), stateDir, env = () => process.env, log = 
   async function writeManifest(m, { corrupt = false } = {}) {
     await ensureDirs();
     if (corrupt) { try { await fsp.rename(manifestFile, `${manifestFile}.corrupt-${now()}`); } catch { /* gone already */ } }
-    await writeJsonAtomic(manifestFile, m);
+    // B-574d: a RECORD — its name only after ONE sync of its temp (THE device's one door: a refused sync said once, the index lands)
+    DFILE.writeDurable({ file: manifestFile, data: JSON.stringify(m, null, 2) + '\n', mode: 0o600, log: (l) => log.warn?.(`[apps] ${l}`), what: MANIFEST_FILE });
   }
   async function readState() { try { const j = JSON.parse(await fsp.readFile(stateFile, 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; } }
   async function writeState(patch) { await ensureDirs(); const s = { ...(await readState()), ...patch }; await writeJsonAtomic(stateFile, s); return s; }
