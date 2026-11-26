@@ -301,7 +301,6 @@ const ROWS = [
   ["src/server/doc-engine.js", "*", 1, "local-only", "file = <dataDir>/doc-owners.json (server.js docEngine dataDir = <checkout>/data)"],
   ["src/server/exit-routes.js", "*", 1, "local-only", "toolDir = AGENT_BIN_DIR = <checkout>/data/bin; n = a tool name from HostManager.agentTools() echoed back by the host probe"],
   ["src/server/fd-gauge.js", "*", 3, "local-only", "procSelf = /proc/self: fd dir, limits, mountinfo (server.js passes no override)"],
-  ["src/server/feedback-forward.js", "*", 2, "local-only", "file = <dataDir>/feedback-outbox.json (mounts-plugins-wiring passes <rootDir>/data); r3193: + its write time once at the lift (statSync — the reports owed are those filed after it)"],
   ["src/server/feedback-store.js", "*", 1, "local-only", "file = <dataDir>/feedback.json (mounts-plugins-wiring passes <checkout>/data)"],
   ["src/server/goal-sync.js", "create > checkClaudeGoalStatus", 3, "local-only", "fp = findSessionJsonlPath: ~/.claude/projects/*/<id>.jsonl or <checkout>/data/remote-jsonl/<host>/<id>.jsonl (cwd only encodes the projdir name)."],
   ["src/server/grants-migration.js", "readStore", 1, "local-only", "file = <dataDir>/<store rel>; dataDir = the boot migration's data dir (migrations.js:700)."],

@@ -412,12 +412,13 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   function setEnabled(id, on, { trusted = false } = {}) {
     heldRefuse(on ? (trusted ? 'enabling (and trusting) a plugin' : 'enabling a plugin') : 'switching a plugin off');   // r3305 (b): no consent asked or recorded over it
     const rec = plugins.get(id);
+    let trustedNow = false;
     const was = { enabled: Object.prototype.hasOwnProperty.call(registry.enabled, id) ? [registry.enabled[id]] : null, trust: Object.prototype.hasOwnProperty.call(registry.trust, id) ? [registry.trust[id]] : null };   // B-574d: put back if the write fails
     if (!rec) throw httpErr(404, `unknown plugin "${id}"`);
     if (on && !rec.manifest) throw httpErr(400, `plugin "${id}" is invalid: ${rec.errors.join('; ')}`);
     if (on && needsConsent(rec.manifest)) {
       const hash = hashOf(rec);
-      if (trusted) { registry.trust[id] = { trusted: true, trustedAt: Date.now(), capabilitiesHash: hash }; tele('plugin-trusted', id); }
+      if (trusted) { registry.trust[id] = { trusted: true, trustedAt: Date.now(), capabilitiesHash: hash }; trustedNow = true; }   // its telemetry after the write that keeps it (B-574d)
       else if (!isTrusted(rec)) {
         const had = registry.trust[id];
         throw httpErr(409, had ? `"${id}" changed its capabilities since you trusted it — review them and enable it with "Enable (trusted)"` : `"${id}" needs your consent: it asks for capabilities beyond the sandbox — review them and enable it with "Enable (trusted)"`,
@@ -430,6 +431,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
       if (was.trust) registry.trust[id] = was.trust[0]; else delete registry.trust[id];
       throw httpErr(500, `the plugin list could not be saved on the server — "${id}" was not ${on ? 'enabled' : 'switched off'}; try again in a minute`, { code: 'write_failed' });
     }
+    if (trustedNow) tele('plugin-trusted', id);   // B-574d (round wf_70014efd): counted only once the trust is on disk
     rec.enabled = !!on && !!rec.manifest;
     rec.notice = null;
     if (rec.enabled) { rec.crashes = []; if (rec.state === 'parked') rec.state = 'stopped'; startChild(rec); }

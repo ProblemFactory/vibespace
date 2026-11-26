@@ -167,7 +167,8 @@ const docActs = async (e) => { e.ownerOf({ path: '/w/BRIEF.md', from: 'w1' }); }
 const FFW = require(path.join(REPO, 'src/server/feedback-forward.js'));
 const FFM = require(path.join(REPO, 'src/feedback-forward-model.js'));
 const TARGET = () => ({ url: 'https://hub.example.test', token: 'made-up' });
-const fbRow = (n) => ({ id: `fb-madeup${n}`, text: `a made-up report ${n}`, about: 'vibespace-task', kind: 'other', at: 1000 + n, session: { id: `sess-${n}`, name: `Made-up ${n}` } });
+const fbRow = (n) => ({ id: `fb-00000000${String(n).padStart(2, '0')}`,   // a report id as the origin mints it (fb- and 10 hex digits: the receiving hub's rule)
+   text: `a made-up report ${n}`, about: 'vibespace-task', kind: 'other', at: 1000 + n, session: { id: `sess-${n}`, name: `Made-up ${n}` } });
 const outbox = (M, d, writer, more = {}) => M.create({ dataDir: d, writer, target: TARGET, instance: () => ({ name: 'made-up', version: '0' }), backlog: () => [], fetch: async () => { throw new Error('no network in this suite'); }, now: () => 1000, setTimeout: () => ({ unref() { } }), clearTimeout: () => { }, log: () => { }, ...more });
 const noKey = (s) => String(s || '').replace(/"fk_[A-Za-z0-9_-]+"/g, '"KEY"');
 const W_REGS = [
@@ -251,7 +252,7 @@ console.log('O1 a report QUEUED is on disk when enqueue returns (a crash after i
     const r = o.enqueue(fbRow(11));
     const at = bytes(f);   // read in the SAME turn as the call's return — no wait, no clock
     o.stop();
-    return { queued: !!r && r.queued === true, onDiskAtReturn: (at || '').includes('fb-madeup11') };
+    return { queued: !!r && r.queued === true, onDiskAtReturn: (at || '').includes(fbRow(11).id) };
   };
   try {
     const tip = scene1(FFW, 'tip');
