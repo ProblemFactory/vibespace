@@ -1001,6 +1001,7 @@ async function pruneBoundRun(BBm) {
   const bb = BBm.create({ dataDir: dir, log: quiet });
   const S = KS0.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0 });
   await S.reconciled();
+  if (typeof bb.landed === 'function') bb.landed();   // B-574d browser-stores: the file is the document's copy, on disk once the store writer landed it
   const out = { restored: bb.lookup(C) === K, notedKept: bb.lookup(CP) === P, n: Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'browser-env', 'bindings.json'), 'utf8')).byConversation).length };
   try { S.shutdown(); } catch { }
   return out;
@@ -1259,6 +1260,34 @@ console.log('㊵ r4145: THE FOLLOW — a running conversation\'s own kept folder
   const R4 = '...(spawnKeyNotKept ? { browserKey: undefined, browserKeyFor: undefined, browserEnv: undefined } : {}),', R5 = "spawnKeyNotKept = true; try { require('./server/browser-kept-note.js').markNotKept(bk.key); } catch { }", R5k = "const notKeptMark = B.isBrowserKey(bk) && require('./browser-kept-note.js').isNotKept(bk);";
   ok(WC5.includes(R4) && WC5.includes(R5) && KPS.includes(R5k) && KPS.includes("const g = ks && typeof ks.startGate === 'function' ? await ks.startGate(bk) : { kept: false, code: 'kept_reconcile_unfinished' };"),
     'WIRING (4)(5): the create\'s record drops the not-kept browser\'s environment pairs with its key; the key is marked in the note module even with no live store, and the keeper\'s gate reads that mark when it has no store', null);
+}
+
+// ── B-574d «browser-stores» commit 1 (lane nl-migrations, 主开发 r5101): THE BINDINGS ARE MEMORY-AUTHORITATIVE — one document a file
+// across every instance, read once under the store-read law, every change handed to the store writer (off the loop, synced). The
+// file was its own database: every call read it again and a record rewrote it whole from those bytes, so a write that lands LATER
+// would let the next record drop the last (a lost update) and let a lookup in the next statement answer nothing. RED (anchored copy):
+// the release's read of the FILE at every call, over the writer's later landing
+console.log('B-574d browser-stores: the bindings, one document on the store writer');
+{
+  const KA = 'bk-0000a11a', KB = 'bk-0000b22b', CA = 'c0ffee11-aaaa-4bbb-8ccc-000000000001', CB = 'c0ffee11-aaaa-4bbb-8ccc-000000000002';
+  const docScene = (BBmod, tag) => {
+    const dir = path.join(ROOT, `bs1-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const b1 = BBmod.create({ dataDir: dir, log: quiet }), b2 = BBmod.create({ dataDir: dir, log: quiet });
+    const r1 = b1.record(CA, KA), r2 = b2.record(CB, KB);   // two instances, one turn: nothing has landed yet
+    const seen = { a: b2.lookup(CA), b: b1.lookup(CB) };   // the NEXT statement, each the other instance's record
+    const shareRefused = b2.record('c0ffee11-aaaa-4bbb-8ccc-000000000003', KA) === false;   // the refusal judges the record not landed yet
+    const landed = b1.landed();
+    let disk = {}; try { disk = JSON.parse(fs.readFileSync(path.join(dir, 'browser-env', 'bindings.json'), 'utf8')).byConversation; } catch { disk = null; }
+    if (typeof BBmod._forgetDocument === 'function') BBmod._forgetDocument(b1.file);   // a NEW process over the landed file
+    const b3 = BBmod.create({ dataDir: dir, log: quiet });
+    return { r1, r2, seen, shareRefused, landed, disk: disk ? Object.keys(disk).sort().join(',') : null, again: [b3.lookup(CA), b3.lookup(CB)].join(','), mode: (() => { try { return (fs.statSync(b1.file).mode & 0o777).toString(8); } catch { return null; } })() };
+  };
+  const D1 = docScene(BB0, 'real');
+  ok(D1.r1 && D1.r2 && D1.seen.a === KA && D1.seen.b === KB && D1.shareRefused && D1.landed && D1.disk === [CA, CB].sort().join(',') && D1.again === `${KA},${KB}` && D1.mode === '600',
+    'B-574d browser-stores (1) two instances record in ONE turn: each lookup in the next statement sees the other\'s record, a share of a key not landed yet is still refused; landed, the file holds BOTH (no lost update), 0600, and a new process reads them back', D1);
+  const READ1 = "    { const d = DOCS.get(file); if (d) return { state: d.state, all: d.doc }; }   // browser-stores: the ONE document, read once\n";
+  const D1x = docScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, READ1, '', 'the one document read once'), 'bs1-disk-each-call'), 'red');
+  ok(D1x.seen.a !== KA || D1x.disk !== [CA, CB].sort().join(','), 'RED (anchored copy: the release\'s read of the FILE at every call, the writes landing later): a record in the next statement is not seen, or the second record\'s rewrite drops the first — (1) goes red', D1x);
 }
 
 report();
