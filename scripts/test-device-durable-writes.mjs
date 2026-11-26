@@ -14,9 +14,11 @@
 //   ⑥ THE AGENT ITSELF (a bundle built from the tree; a scratch root that trusts a test key; a placer preloaded into that process):
 //      its allow list (`--write-policy`) — a refused sync said in its log, the file landed; the bundle's landing (`--land-upgrade`,
 //      a stand-in release signed by the test key): the ORDER (the verdict's read, ONE sync, the name, `current`); a sync that FAILS
-//      refuses the landing by name (VS-AGENTD-FAILED — the hub tries again; `current` untouched, nothing left); a sync NOT OFFERED is
-//      said and the landing goes on. RED: the same bundle with its landing's sync cut
-//   ⑦ the class: every device record goes through the door (its calls by file)
+//      refuses the landing by name (VS-AGENTD-DEFERRED — the hub tries again; `current` untouched, nothing left); a sync NOT OFFERED is
+//      said and the landing goes on; a refused signature syncs nothing; the STREAM road's refusal carries its code and the hub's own
+//      reader keeps its tries. RED: the same bundle with its landing's sync cut
+//   ⑦ the class: every device RECORD goes through the door (13, by file); the usage CURSOR is a cache and asks no sync (r4671),
+//      counted on its commit. RED: the cursor written through the door (the line's first form)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -121,7 +123,7 @@ const retireRun = async (SRm, refuse) => {
 console.log('⑤ the mac stream helper\'s state goes through the door');
 const SM_REL = 'src/agentd/stream-mac.js', SM_SRC = src(SM_REL);
 const SP = require(path.join(REPO, 'src/stream-plan.js'));
-const macRun = (SMm, refuse) => {
+const macRun = (SMm, refuse, tmpOf = (P) => `${P.state}.${process.pid}.tmp`) => {
   const H = fs.mkdtempSync(path.join(ROOT, 'mac-')), P = SP.macHelperPaths(H);
   fs.mkdirSync(P.dir, { recursive: true });
   fs.writeFileSync(P.state, JSON.stringify({ version: 'v-suite-1' }));
@@ -129,7 +131,7 @@ const macRun = (SMm, refuse) => {
   const h = SMm.createMacHelper({ execFile: () => { }, fs: s.f, home: H, log: (m) => said.push(m), version: 'v-suite-1' });
   const asked = h.rowAsked();
   let st = {}; try { st = JSON.parse(fs.readFileSync(P.state, 'utf8')); } catch { }
-  return { asked, st, said, ord: orderOf(s.calls, P.state + '.tmp', P.state) };
+  return { asked, st, said, ord: orderOf(s.calls, tmpOf(P), P.state) };
 };
 {
   const SMm = require(path.join(REPO, SM_REL));
@@ -137,8 +139,8 @@ const macRun = (SMm, refuse) => {
   ok(a.asked === false && a.st.rowAsked === 'v-suite-1' && a.ord.ok, 'the helper\'s state written through the door (its row asked once): ONE sync before its name', a.ord);
   const b = macRun(SMm, 'EIO');
   ok(b.st.rowAsked === 'v-suite-1' && b.said.filter((m) => /could not be synced to disk \(EIO\)/.test(m)).length === 1, 'a placed refusal of its sync (EIO): said once in the agent\'s log, and the state still lands', b.said);
-  const MX = MUT.load(SM_REL, anchored(SM_SRC, "DFILE.writeDurable({ fs, file: P.state, tmp: P.state + '.tmp', data: JSON.stringify(o), log, what: 'the mac screen helper\\'s state' });", "fs.writeFileSync(P.state + '.tmp', JSON.stringify(o)); fs.renameSync(P.state + '.tmp', P.state);", 'the release\'s writeState'), 'sm-release');   // stale-pins: kept — the release's form, put back as a red control
-  const x = macRun(MX, null);
+  const MX = MUT.load(SM_REL, anchored(SM_SRC, "DFILE.writeDurable({ fs, file: P.state, tmp: `${P.state}.${process.pid}.tmp`, data: JSON.stringify(o), log, what: 'the mac screen helper\\'s state' });", "fs.writeFileSync(P.state + '.tmp', JSON.stringify(o)); fs.renameSync(P.state + '.tmp', P.state);", 'the release\'s writeState'), 'sm-release');   // stale-pins: kept — the release's form, put back as a red control
+  const x = macRun(MX, null, (P) => P.state + '.tmp');
   ok(!x.ord.ok && x.ord.sync < 0, 'RED CONTROL (the mac helper\'s release writeState: written and renamed, no sync): red', x.ord);
 }
 
@@ -220,6 +222,25 @@ if (realVersion) {
   ok(d.status === 0 && /^VS-AGENTD-LANDED 9\.9\.10 /.test(d.out) && curOf(root) === '9.9.10' && d.order.ok, 'a bundle staged READ-ONLY (0400) still lands: its sync opens it read-only on this platform (its fresh read: a read-write open would refuse every push)', { status: d.status, out: d.out.slice(0, 80) });
   const e = land(root, '9.9.11', { match: 'agentd.js.tmp', code: 'ENOTSUP', closeCode: 'EIO' });
   ok(e.status === 3 && /^VS-AGENTD-DEFERRED bundle-not-synced from=/.test(e.out) && curOf(root) === '9.9.10' && !fs.existsSync(e.dir), 'a sync NOT OFFERED whose CLOSE then fails (EIO, placed — a write-back error surfacing at the close) refuses the landing: a close that fails is never «not offered»', { status: e.status, out: e.out.slice(0, 120), current: curOf(root) });
+  // a refused SIGNATURE syncs nothing (the verdict FIRST: the new block can only refuse)
+  {
+    const v = '9.9.12', stub = Buffer.from(`/* a stand-in release ${v} */ module.exports = {};\n`);
+    const stage = path.join(root, 'state', `stage-${v}.js`), mf = path.join(root, 'state', `stage-${v}.manifest.json`);
+    fs.writeFileSync(stage, stub); fs.writeFileSync(mf, JSON.stringify(SIG.sign(K1.privateKeyPem, Buffer.from('other bytes'), v, C)));
+    const r = run(root, ['--land-upgrade', stage, '--version', v, '--manifest', mf], null);
+    const tmp = path.join(root, v, 'agentd.js.tmp');
+    ok(r.status === 3 && /^VS-AGENTD-REFUSED bad-signature /.test(r.out) && !r.ev.some((e) => e[0] === 'fsync' && e[1] === tmp) && curOf(root) === '9.9.10', 'a REFUSED signature (a manifest over other bytes) syncs NOTHING: the verdict comes first, and the sync is only on its yes', { status: r.status, out: r.out.slice(0, 80), synced: r.ev.some((e) => e[0] === 'fsync' && e[1] === tmp) });
+  }
+  // THE STREAM ROAD's refused landing: its answer carries the code, and the hub's OWN reader (DeviceManager._refused) keeps its tries
+  {
+    const AD = src('src/agentd/agentd.js');
+    const i = AD.indexOf('const verdict = landBundle(tmp, dir, version, { sig, localProof }, { dialed });');
+    const carries = i > 0 && /if \(!verdict\.ok\) \{\s*try \{ mux\.control\(\{ op: 'upgrade-failed', version, code: verdict\.code,/.test(AD.slice(i, i + 400));
+    const { DeviceManager } = require(path.join(REPO, 'src/agentd/client.js'));
+    const reader = (code) => { const led = { tries: 1, gaveUp: false }, heard = []; const me = { _ledgerWrite: () => { }, _log: () => { }, _onUpgradeRefused: (...a) => heard.push(a), _releaseState: () => ({ sha256: null }) }; DeviceManager.prototype._refused.call(me, { code }, '1.0.0', '9.9.9', led); return { gaveUp: led.gaveUp, heard: heard.length }; };
+    const ns = reader('bundle-not-synced'), bs = reader('bad-signature');
+    ok(carries && !ns.gaveUp && ns.heard === 0 && bs.gaveUp && bs.heard === 1, 'THE STREAM ROAD: its refused landing answers `upgrade-failed` with the landing\'s code, and the hub\'s own reader does NOT give up on bundle-not-synced (it keeps its tries) — while it does give up on a signature refusal (the contrast: the reader can see)', { carries, notSynced: ns, badSignature: bs });
+  }
   // the hub's side of the answer: a DEFERRED landing is no refusal for good, and no install
   {
     const HM = require(path.join(REPO, 'src/hosts.js'));
@@ -241,8 +262,15 @@ if (realVersion) {
 // ── ⑦ THE CLASS: every device record through the door ──
 console.log('⑦ every device record goes through the door');
 {
-  const want = { 'src/agentd/agentd.js': 11, 'src/agentd/self-retire.js': 1, 'src/agentd/stream-mac.js': 2 };
+  const want = { 'src/agentd/agentd.js': 10, 'src/agentd/self-retire.js': 1, 'src/agentd/stream-mac.js': 2 };
   const seen = Object.fromEntries(Object.keys(want).map((f) => [f, (src(f).match(/\bDFILE\.writeDurable\(/g) || []).length]));
-  ok(Object.keys(want).every((f) => seen[f] === want[f]), `the door's callers by file (${Object.entries(want).map(([f, n]) => `${path.basename(f)} ${n}`).join(' · ')}) — the 14 records B-93e7 named; the rename census holds every other device rename`, seen);
+  ok(Object.keys(want).every((f) => seen[f] === want[f]), `the door's callers by file (${Object.entries(want).map(([f, n]) => `${path.basename(f)} ${n}`).join(' · ')}) — the 13 RECORDS; the rename census holds every other device rename`, seen);
+  // THE CURSOR IS A CACHE (主开发 r4671): its commit asks no sync on any road — counted on the commit's own body
+  const commitOf = (txt) => { const a = txt.indexOf('st.commit = (cur) => {'); if (a < 0) return null; const b = txt.indexOf('\n            };', a); return b > a ? txt.slice(a, b) : null; };
+  const syncs = (body) => (body ? (body.match(/\b(?:fsyncSync|fdatasyncSync|fsync|fdatasync|writeDurable)\(/g) || []).length : -1);
+  const AD = src('src/agentd/agentd.js'), body = commitOf(AD);
+  ok(!!body && syncs(body) === 0 && /fs\.renameSync\(ctmp, cursorFile\)/.test(body) && /process\.pid/.test(body), 'THE USAGE CURSOR asks NO sync (a cache: an old or torn cursor only walks again, the hub drops every row it holds by its own id) — its commit: temp + rename, its temp carrying the pid', { syncRoads: syncs(body) });
+  const tipForm = body ? body.replace(/const ctmp = [^\n]*\n\s*fs\.writeFileSync\(ctmp, JSON\.stringify\(cur\)\);\n\s*fs\.renameSync\(ctmp, cursorFile\);/, "DFILE.writeDurable({ fs, file: cursorFile, tmp: cursorFile + '.tmp', data: JSON.stringify(cur), log, what: 'a usage cursor' });") : '';   // stale-pins: kept — the line's first form, put back as a red control
+  ok(!!body && tipForm !== body && syncs(tipForm) === 1, 'RED CONTROL (the line\'s first form: the cursor written through the door, synced on the loop): counted, red', { syncRoads: syncs(tipForm) });
 }
 report();
