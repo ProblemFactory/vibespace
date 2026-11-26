@@ -494,7 +494,7 @@ function persistBuffer() {
   // B-5a4d (its reader): tmp + rename, as the sidecar — a hub that restarts reads this file once, and a person's CLI follows it by
   // its path: a reader sees the whole old file or the whole new one, never a truncated one mid-write (write-through made it often)
   const tmp = `${bufferFile}.${process.pid}.tmp`;
-  try { renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log, sync: false }); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced; B-bcb8 unit B: synced before its name
+  try { renameSynced(tmp, bufferFile, buffer, { where: 'the chat buffer', say: log, sync: false }); if (JOURNAL) JOURNAL.rewritten(); }   // the journal's descriptor named the file the rename replaced; B-bcb8 unit B: the one helper, NO sync (a buffer — r4563 / r4578), its write and close judged
   catch (e) { try { fs.unlinkSync(tmp); } catch {} if (!persistBuffer.said) { persistBuffer.said = true; log(`history buffer write failed: ${e.message}`); } }
 }
 

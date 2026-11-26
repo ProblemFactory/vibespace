@@ -38,8 +38,8 @@ const SYNC_UNSUPPORTED = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
 function syncUnsupportedWords(where, code) { return `${where}: its file system does not do a sync (${code}) — its new bytes took their name unsynced`; }
 
 /** B-bcb8 unit B (主开发 r4367; r4474's law): A RECORD THE HUB READS TAKES ITS NAME ONLY AFTER ONE SYNC OF ITS TEMP — the job wrapper's
- *  pid / exit / bound records, the conversation wrappers' meta sidecar, buffer and handed records (after a power cut or a full disk the
- *  hub read a record with its name and no bytes). `bytes` written to `tmp` (its mode), synced ONCE, closed, renamed to `final`.
+ *  pid / exit / bound records, the conversation wrappers' meta sidecars and the chat wrapper's handed records (after a power cut or a full
+ *  disk the hub read a record with its name and no bytes); the two BUFFERS (chat, codex) pass `sync: false` (r4563 / r4578). `bytes` written to `tmp` (its mode), synced ONCE, closed, renamed to `final`.
  *  A sync that FAILS — or a close that fails after the write (a deferred write error) — is a FAILED WRITE: the temp is removed, the
  *  error THROWN as writeFileSync's was, the OLD record stands; each caller's own try is unchanged. ONLY a sync the file system does not
  *  do at all (SYNC_UNSUPPORTED) is SAID once (the site's name, the code — no path) and the record still takes its name. WHAT is written

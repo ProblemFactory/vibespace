@@ -641,12 +641,12 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
   const LINED_FB = "const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode); try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } try { fs.fsyncSync(fd); } catch (e) { try { if (typeof say === 'function') say(`${where}: its new bytes could not be synced before it took its name (${(e && e.code) || 'error'}) \u2014 after a power cut it may read empty`); } catch { } } } finally { fd = closeWritten(fd, where, say); } fs.renameSync(tmp, final); };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census \u2465)";
   const linedFb = fbOf(LINED_FB);
   const roadOf = (r, said) => (r.threw ? 'threw' : r.r instanceof Error ? 'returned its error' : r.r === false && said.length ? 'returned false, said' : said.length ? 'said' : 'swallowed');
-  const rec6 = {}, nos6 = {}, red6 = {}, rel6 = {};
+  const rec6 = {}, nos6 = {}, red6 = {}, rel6 = {}, wc6 = {};
   let k6 = 0;
   for (const R of RECORDS) {
     const key = `${path.basename(R.f)} ${R.name}`, t = FILES[R.f] || '', fb = fbOf(t), code = R.code(t);
-    if (!fb || !code || !code.includes(R.tip) || !linedFb) { rec6[key] = nos6[key] = red6[key] = rel6[key] = 'its code, its anchor or the lined copy is gone'; continue; }
-    const scene = (rs, sync) => { const d = scratchDir(`fdc-rec-${++k6}`), s = []; const final = fresh(d, R.name); const r = placed6(() => R.run(code, rs, (l) => s.push(l), d), { sync }); return { r, said: s, old: fs.readFileSync(final, 'utf8') === OLD, tmps: fs.readdirSync(d).filter((x) => x.endsWith('.tmp')) }; };
+    if (!fb || !code || !code.includes(R.tip) || !linedFb) { rec6[key] = nos6[key] = red6[key] = rel6[key] = wc6[key] = 'its code, its anchor or the lined copy is gone'; continue; }
+    const scene = (rs, sync, more = {}) => { const d = scratchDir(`fdc-rec-${++k6}`), s = []; const final = fresh(d, R.name); const r = placed6(() => R.run(code, rs, (l) => s.push(l), d), { sync, ...more }); return { r, said: s, old: fs.readFileSync(final, 'utf8') === OLD, tmps: fs.readdirSync(d).filter((x) => x.endsWith('.tmp')) }; };
     const w = scene(fb, 'EIO'), n = scene(fb, 'EINVAL'), x = scene(linedFb, 'EIO'), h = scene(FCm.renameSynced, 'EIO'), hn = scene(FCm.renameSynced, 'EINVAL');   // fb: a scratch copy's road; FCm: the installed road (src/ beside it)
     const v = (() => { const d = scratchDir(`fdc-rec-${++k6}`), s = []; fresh(d, R.name); const r = placed6(() => R.run(code.split(R.tip).join(R.rel), fb, (l) => s.push(l), d), { sync: 'EIO' }); return { asked: r.asked, old: fs.readFileSync(path.join(d, R.name), 'utf8') === OLD }; })();
     const mine = (r) => r.asked.length === 1 && r.asked[0].startsWith(R.name) && r.asked[0].endsWith('.tmp');
@@ -655,12 +655,21 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
     rec6[key] = stands(w) && stands(h) ? `old stands, ${R.road}` : J({ fallback: { asked: w.r.asked, old: w.old, tmps: w.tmps, road: roadOf(w.r, w.said), said: w.said }, helper: { asked: h.r.asked, old: h.old, tmps: h.tmps, road: roadOf(h.r, h.said), said: h.said } });
     nos6[key] = landed(n) && landed(hn) ? 'said, landed' : J({ fallback: { asked: n.r.asked, old: n.old, threw: n.r.threw, said: n.said }, helper: { asked: hn.r.asked, old: hn.old, threw: hn.r.threw, said: hn.said } });
     rel6[key] = !v.asked.length && !v.old ? 'no sync asked' : J(v);
+    // r4594 (2): a refusal placed at the WRITE (ENOSPC) and at the CLOSE (EIO) for this record too, through the helper and the fallback
+    const wc = [fb, FCm.renameSynced].flatMap((rs) => [scene(rs, null, { write: 'ENOSPC' }), scene(rs, null, { close: 'EIO' })]);
+    wc6[key] = wc.every((s) => s.old && !s.tmps.length && roadOf(s.r, s.said) === R.road) ? `old stands, ${R.road}` : J(wc.map((s) => ({ old: s.old, tmps: s.tmps, road: roadOf(s.r, s.said), said: s.said })));
     red6[key] = !x.old ? 'the good record replaced' : J({ old: x.old, threw: x.r.threw });
   }
   ok(Object.keys(rec6).length === 8 && Object.values(rec6).every((v) => /^old stands, /.test(v)), '⑥ EACH RECORD, from its wrapper\'s own code over a GOOD older record: by the helper AND by its fallback: ONE sync asked, of its own temp; FAILED (EIO, placed) — the old record stands byte for byte, the temps gone, the caller\'s own road taken (the job\'s pid throws at its start, its exit and bound swallowed as at the release; chat\'s meta returns its error, its handed records return false and say it; codex\'s, acp\'s and agy\'s swallowed) — the EIGHT durable records (r4563)', rec6);
   ok(Object.keys(nos6).length === 8 && Object.values(nos6).every((v) => v === 'said, landed'), '⑥ EACH RECORD: a sync the file system does not do (EINVAL, placed) — said once in that wrapper\'s own sink, the record LANDED', nos6);
   ok(Object.keys(red6).length === 8 && Object.values(red6).every((v) => v === 'the good record replaced'), 'RED (bf8355a8a\'s spelling, in a copy): the failed sync said, the temp renamed OVER the good record — for every record', red6);
   ok(Object.keys(rel6).length === 8 && Object.values(rel6).every((v) => v === 'no sync asked'), 'RED (the release\'s form of each record, in a copy): no sync asked at all — the record took its name over the good one unsynced', rel6);
+  ok(Object.keys(wc6).length === 8 && Object.values(wc6).every((v) => /^old stands, /.test(v)), '⑥ EACH OF THE EIGHT RECORDS (r4594): a refusal placed at the WRITE (ENOSPC) and at the CLOSE (EIO), through the helper and the fallback — the old record byte for byte, the temps gone, the caller\'s own road', wc6);
+  // r4594 (3): THE FIVE FALLBACKS ARE ONE LINE, letter for letter (a CONTROL in memory: one letter changed in one of them is red)
+  const fbLines = WR6.map((f) => ((FILES[f] || '').split('\n').find((l) => l.startsWith('const renameSynced = FC && FC.renameSynced ? FC.renameSynced : ')) || ''));
+  const same5 = (ls) => ls.length === 5 && ls.every((l) => l && l === ls[0]);
+  const alt5 = fbLines.map((l, i) => (i === 2 ? l.replace("code: 'ESHORT'", "code: 'ESHORT2'") : l));
+  ok(same5(fbLines) && alt5[2] !== fbLines[2] && !same5(alt5), '⑥ THE FIVE FALLBACKS (job, chat, codex, acp, agy) are one line, letter for letter; CONTROL: one letter changed in one of them (in memory) is red', fbLines.map((l) => l.length));
   // THE TWO BUFFERS (主开发 r4563 + r4578 — A BUFFER IS NOT A DURABLE RECORD): the buffer file asks NO sync on ANY road — the timer's
   // (every 1–2 s, 250 ms while a person follows), the exit flushes, and the durable road's (chat's persistNow: the queue's records, a
   // turn's state, the journal's rewrite; codex's journal rewrite — the next timer write renames an unsynced ring over it within 2 s).
