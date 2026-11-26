@@ -222,38 +222,98 @@ ok(ungated && admission(ungated).agentAnswering === false && admission(ungated).
 // the keeper's clock, its DevTools port refusing — filed "has not answered since …" instead of the unstable notice: the
 // misses of each RELAUNCHED chrome (another pid) were added to the closed one's. Fake clock, 14 leased ticks over a real
 // daemon whose chrome keeps closing (ended between ticks): relaunched every tick, 0 verdicts, 0 notices; a patched copy without the guard files one.
+// B-1217 (主开发 r5169, the 2.369.420 third hosted run's red then green): the leg used to end the chrome named LAST in the fake daemon's
+// pid log — a log the daemon writes AFTER it spawns, so under load it lagged one relaunch: the leg ended a pid already dead while
+// the keeper had recorded the new, LIVE chrome, which then refused two asks 4 min apart — a TRUE verdict of that world (the leg's,
+// never the product's). PLACED by a hold of the log (scratch probe 0f10fc5b9, run 0f10fc5b9-20261126161003-UTC: the hosted red's
+// exact shape twice). Now the leg ends EVERY chrome the daemon runs (its children, from the process table) and WAITS ON THAT FACT
+// — each gone and reaped — before each tick; a tick where it does not hold within its bound is a NAMED SKIP, never judged.
 console.log('— ⑥ a closed-again browser inside its relaunch loop (fake clock, 14 ticks)');
 const CHROME_SRC = "const fs=require('fs'),path=require('path'),os=require('os');const d=(process.argv.find((x)=>x.startsWith('--user-data-dir='))||'').slice(16);fs.mkdirSync(d,{recursive:true});const L=path.join(d,'SingletonLock');try{fs.unlinkSync(L)}catch{}fs.symlinkSync(os.hostname()+'-'+process.pid,L);fs.writeFileSync(path.join(d,'DevToolsActivePort'),'1\\n/devtools/browser/x\\n');setInterval(()=>{},1e9);";
-const DAEMON_SRC = "const {spawn}=require('child_process'),fs=require('fs'),path=require('path');let cur=null;const d=process.env.AGENT_BROWSER_PROFILE;const go=()=>{cur=spawn(process.execPath,['-e',process.env.FAKE_CHROME_SRC,'--','--user-data-dir='+d],{stdio:'ignore',env:{}});fs.appendFileSync(path.join(process.env.FAKE_AB_STATE,'chromes.log'),cur.pid+'\\n');};process.on('SIGUSR2',()=>{if(!cur||cur.exitCode!==null||cur.signalCode!==null)go();});go();setInterval(()=>{},1e9);";
+const DAEMON_SRC = "const {spawn}=require('child_process'),fs=require('fs'),path=require('path');let cur=null;const d=process.env.AGENT_BROWSER_PROFILE;const H=process.env.FAKE_LOG_HOLD||'';const go=()=>{cur=spawn(process.execPath,['-e',process.env.FAKE_CHROME_SRC,'--','--user-data-dir='+d],{stdio:'ignore',env:{}});const pid=cur.pid;const w=()=>{if(H&&fs.existsSync(H))return setTimeout(w,5);fs.appendFileSync(path.join(process.env.FAKE_AB_STATE,'chromes.log'),pid+'\\n');};w();};process.on('SIGUSR2',()=>{if(!cur||cur.exitCode!==null||cur.signalCode!==null)go();});go();setInterval(()=>{},1e9);";
 const deadSrv = net.createServer(); await new Promise((r) => deadSrv.listen(0, '127.0.0.1', r)); const DEAD_PORT = deadSrv.address().port; await new Promise((r) => deadSrv.close(r));
 const KEY_C = 'bk-0000000c';
 const goneSoon = async (pid) => { for (let i = 0; i < 100 && fs.existsSync('/proc/' + pid); i++) await sleep(10); }; // dead AND reaped by its daemon
-async function closerLeg(Kmod, tag, ticks = 14) {
-  const st = path.join(ROOT, 'closer-' + tag); fs.mkdirSync(st, { recursive: true });
-  const env = { ...rtEnv, FAKE_AB_STATE: st, FAKE_CLOSER: '1', FAKE_CDP_PORT: String(DEAD_PORT), FAKE_CHROME_SRC: CHROME_SRC, FAKE_DAEMON_SRC: DAEMON_SRC };
+// B-1217: the chromes the daemon RUNS — its children from the process table (a zombie is not running; /proc/<pid>/task/<pid>/children,
+// else a scan of /proc for the parent) — never the daemon's own pid log, which it writes after the spawn
+const zombieP = (pid) => { try { const t = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return t.slice(t.lastIndexOf(')') + 2)[0] === 'Z'; } catch { return false; } };
+const kidsOf = (pid) => { let t = null; try { t = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8'); } catch { t = null; }
+  if (t != null) return t.trim().split(/\s+/).filter(Boolean).map(Number);
+  const out = []; for (const d of fs.readdirSync('/proc')) { if (!/^\d+$/.test(d)) continue; try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'); if (Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]) === pid) out.push(Number(d)); } catch { /* gone */ } } return out; };
+const runningKids = (pid) => kidsOf(pid).filter((k) => fs.existsSync('/proc/' + k) && !zombieP(k));
+// B-1217 (主开发 r5231, THE KILL LAW): a signal goes ONLY to a pid that is, at the signal, a RUNNING child of a daemon that is ALIVE and is
+// THIS leg's own — its environment carries the leg's own state folder (FAKE_AB_STATE=<st>): an identity, never a name or a pattern; the
+// daemon itself is ended by the product's stop, and only if it still carries that identity after it is it ended here
+const envOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0'); } catch { return null; } };
+const ownDaemon = (pid, st) => Number.isInteger(pid) && pid > 1 && fs.existsSync('/proc/' + pid) && !zombieP(pid) && (envOf(pid) || []).includes('FAKE_AB_STATE=' + st);
+const daemonsIn = (st) => { let t = ''; try { t = fs.readFileSync(path.join(st, 'launches.log'), 'utf8'); } catch { return []; } return t.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).pid).filter((d) => ownDaemon(d, st)); };
+const ownRunning = (st) => daemonsIn(st).flatMap(runningKids);
+const endOwnSync = (st, pid) => { if (!ownRunning(st).includes(pid)) return false; try { process.kill(pid, 'SIGKILL'); return true; } catch { return false; } };
+const closerStates = new Set();   // every leg's state folder: at the suite's exit, what is still its own is ended by the same law
+process.on('exit', () => { for (const st of closerStates) { try { for (const x of ownRunning(st)) endOwnSync(st, x); for (const d of daemonsIn(st)) { try { process.kill(d, 'SIGKILL'); } catch { /* gone */ } } } catch { /* best effort at exit */ } } });
+async function closerLeg(Kmod, tag, ticks = 14, { killBy = 'running', lagAt = -1 } = {}) {
+  const st = path.join(ROOT, 'closer-' + tag); fs.mkdirSync(st, { recursive: true }); closerStates.add(st);
+  const HOLD = path.join(st, 'log-hold');   // B-1217: the PLACED lag — while it exists the daemon does not log the pid it spawned
+  const env = { ...rtEnv, FAKE_AB_STATE: st, FAKE_CLOSER: '1', FAKE_CDP_PORT: String(DEAD_PORT), FAKE_CHROME_SRC: CHROME_SRC, FAKE_DAEMON_SRC: DAEMON_SRC, FAKE_LOG_HOLD: HOLD };
   let c = Date.now(); const items = [], jl = [];
   const store = { add: (k, it) => { const x = { id: 'uc-' + (items.length + 1), status: 'open', ...it }; items.push(x); return x; }, get: (id) => items.find((x) => x.id === id) || null, setStatus() { } };
   const jlog = (m) => jl.push(String(m));
   const kk = Kmod.create({ dataDir: path.join(st, 'data'), homeDir: HOME, env: () => env, broadcast: () => { }, serverSetting: () => undefined, serverNotice: null, getTelemetry: () => null,
     liveKeys: () => new Set([KEY_C]), runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log: jlog, warn: jlog, error: jlog }, now: () => c, install: false, tickMs: 3600e3, answerAskMs: 250, userTodos: store });
-  const r = { tag, verdicts: 0 };
+  const r = { tag, killBy, verdicts: 0, skips: 0, judged: 0, lag: null };
+  // r5231: the end of a chrome — only a running child of this leg's own live daemon, at the signal; then waited until gone and reaped
+  const endOwn = async (pid) => { if (!endOwnSync(st, pid)) return false; await goneSoon(pid); return true; };
+  const endAllRunning = async (rounds) => { const ended = []; for (let k = 0; k < rounds; k++) { const now = ownRunning(st); if (!now.length) break; for (const x of now) if (await endOwn(x) && !ended.includes(x)) ended.push(x); } return { ended, left: ownRunning(st) }; };
   try {
     const q = kk.createProfile({ label: 'Closer ' + tag }, { owner: { kind: 'instance', id: null } });
     await kk.attach({ profileId: q.id, browserKey: KEY_C, sessionId: 'sess-c' });
     const chromes = () => fs.readFileSync(path.join(st, 'chromes.log'), 'utf8').trim().split('\n').map(Number);
-    for (let i = 0; i < ticks; i++) { const last = chromes().pop(); try { process.kill(last, 'SIGKILL'); } catch { } await goneSoon(last); c += 4 * 60000; await kk.tick(); if (kk.browserOf(q.id).unresponsive) r.verdicts++; }
+    for (let i = 0; i < ticks; i++) {
+      const running = ownRunning(st), logged = chromes(), last = logged[logged.length - 1]; let ended = [], held = true;
+      // the shipped end: the chrome the daemon's LOG names last — signalled only while it is a running child of this leg's own daemon
+      // (r5231: under the placed lag it is not, so nothing is signalled; the live chrome is never ended either way)
+      if (killBy === 'log') { if (await endOwn(last)) ended = [last]; }
+      else {
+        // THE FACT the tick judges: the browser is closed — every chrome the daemon runs ended AND reaped (its daemon has seen it go)
+        for (let k = 0; k < 100; k++) { const now = ownRunning(st); if (!now.length) break; for (const x of now) if (await endOwn(x) && !ended.includes(x)) ended.push(x); }
+        held = !ownRunning(st).length && !ended.some((x) => fs.existsSync('/proc/' + x));
+      }
+      // the placed lag's WITNESS: at the tick after it, the pid the log names is not a chrome the daemon was running
+      if (i === lagAt + 1) { r.lag = { logged: last || null, running, inForce: running.length > 0 && !running.includes(last) }; try { fs.unlinkSync(HOLD); } catch { } }
+      if (i === lagAt) fs.writeFileSync(HOLD, '');
+      if (!held) { r.skips++; continue; }   // the browser was not closed before this tick: a NAMED SKIP — no tick of a world the leg did not make
+      c += 4 * 60000; await kk.tick();
+      r.judged++; if (kk.browserOf(q.id).unresponsive) r.verdicts++;
+    }
     r.chromes = chromes().length;
     r.closed = (kk.browserOf(q.id).closed || {}).code || null;
     r.notices = items.filter((x) => x.action && x.action.type === 'browser-restart').map((x) => x.text);
     r.lines = jl.filter((l) => /not answering since/.test(l)).length;
+    r.endSweep = await endAllRunning(5);   // r5231: BEFORE the product's stop — the daemon alive, its running children its own, each reaped
     await kk.stop(q.id).catch(() => { });
-  } catch (e) { r.threw = String(e && e.stack); }
+  } catch (e) { r.threw = String(e && e.stack); try { r.endSweep = await endAllRunning(5); } catch { /* the exit's own sweep follows */ } }
   kk.shutdown();
-  for (const n of ['launches.log', 'chromes.log']) { let t = ''; try { t = fs.readFileSync(path.join(st, n), 'utf8'); } catch { } for (const l of t.trim().split('\n').filter(Boolean)) { try { process.kill(n === 'chromes.log' ? Number(l) : JSON.parse(l).pid, 'SIGKILL'); } catch { } } }
+  try { fs.unlinkSync(HOLD); } catch { /* lifted */ }
+  // the daemon is the product's stop's to end; one that still carries this leg's identity after it is ended here (and said)
+  r.daemonsLeft = daemonsIn(st);
+  for (const d of r.daemonsLeft) { try { process.kill(d, 'SIGKILL'); } catch { /* gone */ } await goneSoon(d); }
   return r;
 }
 const cl = await closerLeg(K, 'fixed');
-ok(!cl.threw && cl.chromes >= 6 && cl.verdicts === 0 && cl.notices.length === 0 && cl.lines === 0, `⑥ a closed-again browser inside its relaunch loop is never judged unresponsive: ${cl.chromes} chromes in 14 ticks 4 min apart (each relaunched one refused its ask), ${cl.verdicts} verdicts, ${cl.notices.length} notices, ${cl.lines} journal lines (then \`${cl.closed}\`)`, cl);
+const sayLeft = (x) => { if (x.endSweep && x.endSweep.left.length) console.log(`  NOTE ⑥ ${x.tag}: ${x.endSweep.left.length} chrome(s) of the leg still running after its end sweep`); if (x.daemonsLeft && x.daemonsLeft.length) console.log(`  NOTE ⑥ ${x.tag}: its daemon outlived the product's stop and was ended by its identity`); };
+sayLeft(cl);
+if (cl.skips) console.log(`  SKIP (named, counted): ⑥ ${cl.skips} of ${cl.skips + cl.judged} ticks — the browser was not closed before the tick within the bound (a chrome of the daemon still running); the leg ticked the other ${cl.judged}`);
+ok(!cl.threw && cl.judged >= 6 && cl.chromes >= 6 && cl.verdicts === 0 && cl.notices.length === 0 && cl.lines === 0, `⑥ a closed-again browser inside its relaunch loop is never judged unresponsive: ${cl.chromes} chromes in 14 ticks 4 min apart (each relaunched one refused its ask; every chrome the daemon ran ended and reaped before the tick), ${cl.verdicts} verdicts over ${cl.judged} judged ticks, ${cl.notices.length} notices, ${cl.lines} journal lines (then \`${cl.closed}\`)`, cl);
+// B-1217: the same with the daemon's pid log PLACED one relaunch behind at tick 3 — the leg ends what the daemon runs, not what it logged
+const cg = await closerLeg(K, 'fixed-lag', 14, { lagAt: 3 });
+sayLeft(cg);
+if (cg.skips) console.log(`  SKIP (named, counted): ⑥ lag ${cg.skips} of ${cg.skips + cg.judged} ticks — the browser was not closed before the tick within the bound; the leg ticked the other ${cg.judged}`);
+ok(!cg.threw && cg.judged >= 6 && !!cg.lag && cg.lag.inForce === true && cg.verdicts === 0 && cg.notices.length === 0 && cg.lines === 0, `⑥ B-1217: with the daemon's pid log placed one relaunch behind (its witness: the logged pid ${cg.lag && cg.lag.logged} was not among the chromes it ran, ${JSON.stringify(cg.lag && cg.lag.running)}) the leg still ends the browser and the keeper judges nothing (${cg.verdicts} verdicts over ${cg.judged} judged ticks)`, cg);
+// RED (B-1217): the shipped kill — by the log — under the same placed lag: the live chrome is never ended and refuses two asks 4 min
+// apart: one TRUE verdict of that world (the hosted red's shape); judged only on its witness that the lag was in force
+const cr = await closerLeg(K, 'log-lag', 6, { killBy: 'log', lagAt: 3 });
+if (!(cr.lag && cr.lag.inForce)) console.log(`  SKIP (named, counted): ⑥ RED — the placed lag was not in force at tick 4 (${JSON.stringify(cr.lag)}): no judgement`);
+else ok(!cr.threw && cr.verdicts >= 1, `⑥ RED (B-1217): the shipped end by the daemon's pid log under the placed lag names the dead pid ${cr.lag.logged} (never signalled: it is no running chrome of the leg's daemon) while ${JSON.stringify(cr.lag.running)} runs, never ended — ${cr.verdicts} verdict(s): the leg's own world, never the product's`, cr);
 // the control: the keeper's guard removed (the .220 shape — the asks chained across processes, a closed record asked)
 const kSrc = fs.readFileSync(new URL('../src/server/browser-keeper.js', import.meta.url), 'utf8');
 const SRV = path.dirname(new URL('../src/server/browser-keeper.js', import.meta.url).pathname);
@@ -262,7 +322,8 @@ const G_TO = 'const v = BS.browserAnswerVerdict(known, { answered, at, pidAlive:
 if (kSrc.includes(G_FROM)) {
   const mf = path.join(MUT, 'keeper-unguarded.js');
   fs.writeFileSync(mf, kSrc.replace(G_FROM, G_TO).replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => 'require(' + JSON.stringify(path.resolve(SRV, rel)) + ')'));
-  const cm = await closerLeg(require(mf), 'unguarded', 4);
+  const cm = await closerLeg(require(mf), 'unguarded', 4);   // the cure's kill (every chrome the daemon runs)
+  sayLeft(cm); if (cm.skips) console.log(`  SKIP (named, counted): ⑥ CONTROL ${cm.skips} of ${cm.skips + cm.judged} ticks — the browser was not closed before the tick; the control ticked the other ${cm.judged}`);
   ok(!cm.threw && cm.verdicts > 0 && cm.notices.length >= 1 && /has not answered since/.test(cm.notices[0]), `⑥ CONTROL: a keeper copy without the guard judges the closing-again browser unresponsive (${cm.verdicts} verdict ticks) and files "${cm.notices && cm.notices[0]}" — the leg above can go red`, cm);
 } else ok(false, '⑥ CONTROL: the guarded verdict call was not found in src/server/browser-keeper.js');
 
