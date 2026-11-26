@@ -325,8 +325,8 @@ console.log('⑨ a hub that ended between a start\'s ask and its answer: the nex
   };
   const good = await scene(JM, 'now');
   ok(good.asked && good.gone && good.looked, '⑨ the next boot removes the spec of a start asked and never stamped BEFORE it judges the run (off the loop), and looks at that run late — no wrapper starts from it after the boot\'s read', good);
-  const BOOT = "        if (run && run.ask === 'asked' && !stamp && !this.readOnly) {";
-  const NoBoot = MJ.load('src/jobs.js', anchored(JSRC, BOOT, "        if (false) {", 'red-boot-keeps-spec'), 'boot-keeps-spec');
+  const BOOT = "    if (run && run.ask === 'asked' && !stamp && !this.readOnly) {";   // (B-f276 the stamp unit: the boot's adoption of one job is one helper now, _bootAdoptOne)
+  const NoBoot = MJ.load('src/jobs.js', anchored(JSRC, BOOT, "    if (false) {", 'red-boot-keeps-spec'), 'boot-keeps-spec');
   const red = await scene(NoBoot, 'red');
   ok(red.asked && !red.gone && !red.looked, 'RED (the boot\'s step cut): the spec stays readable after the boot and nothing looks late at that run', red);
 }

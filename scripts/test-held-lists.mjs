@@ -197,7 +197,7 @@ const CALLERS = { 'src/server/decision-engine.js': ['decision-memo.json', 'decis
   'src/sync-store.js': { sites: 1, stores: ['drafts.json', 'settings-sync.json', 'uploads-sync.json', 'stage-sync.json'] },   // lg-recovery (r3489): ONE create site (SyncStore._load), a store per file
   // B-f276 slice jobs-side-files (lane bl-proposals s1126): Background Work's lock (one), and a gone wrapper's exit record (ONE create site, a
   // hold a run, each listed by its file's name)
-  'src/jobs.js': { sites: 2, stores: ['jobs.lock', 'exit.json'] } };
+  'src/jobs.js': { sites: 3, stores: ['jobs.lock', 'exit.json', 'pid.json'] } };   // + B-f276 the stamp unit: a run's process record held at the boot (a hold a run)
 // r3354: A FILE THAT ONLY ASKS the helper (its kept copies: copiesOf — no create site, inline or bound, and no destructured create) holds
 // no store through it: it needs no row and no plain name (hosts.js, jobs.js, machine-mounts.js ask it for their OLDER holds' copies, which
 // the notice bridges by their own doors). A file in the map is never let off this way (its rows would go dead unseen), and an asker that

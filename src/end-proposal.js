@@ -116,7 +116,7 @@ function answerText({ terminated = [], kept = [], changed = [], failed = [], end
   if (terminated.length) parts.push(`terminated: ${list(terminated)}`);
   if (kept.length) parts.push(`kept: ${list(kept)}`);
   if (changed.length) parts.push(`not ended — something started in it after the card was drawn: ${list(changed)}`);
-  if (failed.length) parts.push(`not ended — the end failed: ${failed.map((r) => `${r.name || r.key} (${r.key}; ${r.failed || 'failed'})`).join(', ')}`);
+  if (failed.length) parts.push(`not ended — the end failed: ${failed.map((r) => `${r.name || r.key} (${r.key}; ${r.failed || 'failed'}${r.why ? `: ${r.why}` : ''})`).join(', ')}`);   // B-f276 (r5074 (2)): a held engine's own words
   if (ended.length) parts.push(`already ended: ${list(ended)}`);
   if (granted.length) parts.push(`its jobs that may now wake it after the end: ${jobs(granted)}`);
   if (withdrawn.length) parts.push(`its jobs that may no longer wake it: ${jobs(withdrawn)}`);

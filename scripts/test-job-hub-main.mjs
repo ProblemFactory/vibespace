@@ -119,7 +119,7 @@ async function hubEndScene(wrapperText, tag, capMs, { launcher = false } = {}) {
   const reapSelf = { ...self({ code: 0, hubMain: true }), d: { log: (l) => logs.push(l) }, _wrapperUnproven: () => { throw new Error('reached the kill road'); } };
   const reaped = await JM.prototype._reapOnce.call(reapSelf, { id: 'jb-hm' }, { endedAt: 1 });
   ok(reaped === true && logs.some((l) => /its main process was the VibeSpace hub — what is left in its scope is the hub's: not reaped/.test(l)), 'the reap itself refuses a hub-main run\'s scope (said in the journal), whatever road asked', { reaped, logs });
-  const BOOT = "        if (!((exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept))) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { });";
+  const BOOT = "    if (!((exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept))) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { });";
   const SWEEP = "        if (!(exit.scopeEmpty === true || (exit.left && exit.left.kept) || this._hubMainOf(run, exit))) this._reapScope(job, run).catch(() => { });";
   ok(JSRC.includes(BOOT) && JSRC.includes(SWEEP), 'WIRING: the boot\'s adopt and the sweep\'s judged end never start a reap of a hub-main run\'s scope');
   const PEND = "    return !((exit && exit.scopeEmpty === true) || this._hubMainOf(run, exit));";
