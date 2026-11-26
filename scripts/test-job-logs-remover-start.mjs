@@ -243,8 +243,35 @@ try {
     const WG = '    if (timedOut && !it.ended) wedge(it, false); else if (unknown) wedge(it, true);';
     const r1 = await scene(MC.load('src/job-logs-sweep.js', anchored(LSsrc, WG, '    if (unknown) wedge(it, true);', 'red-no-wedge'), 'red-no-wedge'));
     ok(!(r1.a2 && r1.a2.held) || r1.heldAt.n !== 1, 'RED: a timeout that does not hold the remover starts a second child beside the killed one', r1.heldAt);
-    const r2 = await scene(MC.load('src/job-logs-sweep.js', anchored(LSsrc, WG, '    if (timedOut && !it.ended) wedge(it, false);', 'red-no-grace'), 'red-no-grace'));
-    ok(r2.gapMs < 140, `RED: with no wait after an unknown run the batch is started again at once (${r2.gapMs} ms)`);
+    const LSm = MC.load('src/job-logs-sweep.js', anchored(LSsrc, WG, '    if (timedOut && !it.ended) wedge(it, false);', 'red-no-grace'), 'red-no-grace');
+    // the flake census round 2 (主开发 r4456, its find at this leg): the RED control read a CLOCK — the mutant's restart «< 140 ms» after an
+    // unknown run — and a loop held 140 ms on a loaded box (GC, a busy test machine) made it read the mutant as waiting, with nothing
+    // wrong. It is restated on a COUNT: the wedged wait PLANTED long (60 s: no box is that late), the fixed remover starts the batch ONCE
+    // and holds; the mutant starts it again at once: TWICE. The same scene under a PLACED hold (the unknown start holds the loop 160 ms)
+    // reads the count the same, and shows the old clock reading wrong (the find, placed). Each scene waits on its fact, never a span.
+    let uScenes = 0;
+    const unknownScene = async (L, { wedgedMs = 60000, hold = 0 } = {}) => {
+      let mode = 'unknown', n = 0; const at = [];
+      const run = (c, a) => {
+        n++; at.push(Date.now()); const i = a.indexOf('--request'); if (i > 0) { try { fs.unlinkSync(path.join(a[2], a[i + 1])); } catch { } }
+        if (mode === 'unknown') { mode = 'answer'; if (hold) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, hold); return Promise.resolve({ unknown: true, why: 'the starter ended' }); }
+        return Promise.resolve({ started: true, code: 0, stdout: JSON.stringify({ removed: 0, entries: 0, keptAlive: 0, gone: [], kept: [], keptWhy: {}, more: false }) + '\n' });
+      };
+      const Du = path.join(T, 'd5u-' + (++uScenes)), Lu = path.join(Du, 'job-logs'); fs.mkdirSync(Lu, { recursive: true });
+      const R = L.createRemover({ logsDir: Lu, log: () => { }, timeoutMs: 100, wedgedMs, runImpl: run });
+      // the wait is ON THE FACT the leg judges (主开发 r4340 law 1): the batch answered (it was started again), or the remover HELD after
+      // its one start — whichever comes first; a generous bound whose expiry is said by name (never a silent read of whatever is there)
+      const fact = (async () => { for (let i = 0; i < 1000; i++) { if (n >= 1 && R.held()) return { hung: true }; await sleep(5); } return { expired: true }; })();
+      const a = await Promise.race([R.whole(['jb-0e1a0007']).then(() => ({ answered: true })), fact]);
+      if (a && a.expired) console.log('  HARNESS: the unknown-run scene\'s bound (5 s) expired with neither fact — the remover neither held nor answered');
+      return { starts: n, hung: !!(a && a.hung), expired: !!(a && a.expired), held: R.held(), gapMs: at.length >= 2 ? at[1] - at[0] : null };
+    };
+    const u1 = await unknownScene(LS), u0 = await unknownScene(LSm);
+    ok(u1.starts === 1 && u1.hung && u0.starts === 2 && !u0.hung, 'RED (by a COUNT): after an unknown run the remover waits its wedged wait (the batch started ONCE, held); with no wait the batch is started again at once (TWICE) — the wait planted at 60 s, no clock read', { fixed: u1, mutant: u0 });
+    const u1h = await unknownScene(LS, { hold: 160 }), u0h = await unknownScene(LSm, { hold: 160 });
+    ok(u1h.starts === 1 && u1h.hung && u0h.starts === 2 && !u0h.hung, 'PLACED: the loop held 160 ms at the unknown start — the count reads the same (once held; twice at once)', { fixed: u1h, mutant: u0h });
+    const p0 = await unknownScene(LSm, { wedgedMs: 150, hold: 160 });
+    ok(p0.starts === 2 && p0.gapMs !== null && p0.gapMs >= 140, `PLACED (the find): with the release's 150 ms wedged wait and the same 160 ms hold, the mutant's restart gap reads ${p0.gapMs} ms — the old clock reading («< 140 ms») called it waiting: a clock, so the leg is a count now`, p0);
   }
 
   // ── §5 THE MEASURE ──────────────────────────────────────────────────────────────────────────────────────────────────
