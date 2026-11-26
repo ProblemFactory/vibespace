@@ -331,7 +331,7 @@ const SKEL_LINE = '      const job = live && !LS.isSkeleton(live) ? live : null;
 const r12red = await tornScene(loadJM(anchored(JSRC, SKEL_LINE, '      const job = live || null;\n', 'skeleton-known'), 'skeleton-known'));
 ok(tornScene.before.some((c) => c[0] === 'unpublish' && c[1] === skRow.id), 'RED CONTROL §12: a skeleton taken for a job (in a copy) — the torn list takes the address down', tornScene.before);
 const SRV12 = read('server.js');
-ok(/app\.delete\('\/api\/port-forward\/:id'[\s\S]{0,200}portForwards\.unforward\(String\(req\.params\.id\)\)/.test(SRV12) && !/ownerJob/.test(SRV12.slice(SRV12.indexOf("app.delete('/api/port-forward/:id'"), SRV12.indexOf("app.delete('/api/port-forward/:id'") + 300)), 'the person\'s door (DELETE /api/port-forward/:id) asks no owner of the row');
+ok(/app\.delete\('\/api\/port-forward\/:id'[\s\S]{0,200}portForwards\.unforward\(String\(req\.params\.id\), \{ now: true \}\)/.test(SRV12) && !/ownerJob/.test(SRV12.slice(SRV12.indexOf("app.delete('/api/port-forward/:id'"), SRV12.indexOf("app.delete('/api/port-forward/:id'") + 300)), 'the person\'s door (DELETE /api/port-forward/:id) asks no owner of the row (B-574d r4827: it asks its landing — `now`, the person\'s side)');
 
 console.log('§13 HOLD 3 + the shoulds\' words: the card says the removal\'s refusal and the other service\'s row in the reader\'s language');
 {

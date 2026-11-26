@@ -14,12 +14,20 @@
 //         said it, and the change lands once the storage answers; a save no person pressed under the same refusal throws NOTHING (a
 //         sweep, a timer, a promise never meet a throw). REDS: the throw taken out; the `now` gate taken out
 //      W3 mounts.json and machine-mounts.json keep 0600 through the writer. RED: the writer asked without the mode
+//      W4 a landing that FAILED, then an UNCHANGED state (its save asks nothing): the owed write is still written once the storage
+//         answers. RED: a producer that answers «nothing to write» for bytes it already handed (the failed ones)
+//      W5 a person's DISCONNECT is done first (detached) and its record lands after; a landing that fails answers what is true —
+//         detached, notOnDisk (the route's answer, the page says it) — and the record lands once the storage answers. RED: the
+//         cure's own first shape (the landing asked before the detach, thrown)
 //   R  THE RATE LEGS — each event repeated N times over a recording writer writes zero or one time. RED each: its gate taken out
 //      R1 port-forwards.json: N dial-ins of a machine with no forward and of one whose forward is live
 //      R2 port-forwards.json: N heal sweeps of a forward that starts while its republish fails (each sweep one 5-min retry)
 //      R3 port-forwards.json: N restarts of a published service (the jobs engine's forward, same label, then its publish, same address)
 //      R4 machine-mounts.json: N landings of a pull alone on its folder write none; on a folder it shares with an older-stamped pull, one
 //      R5 mounts.json: N connects of a mount already mounted (the watchdog's adopt) write none
+//      R6 port-forwards.json, THE CALLER NAMES THE SIDE (r4827): a writer whose store is OWED (pending) while N restarts of a service
+//         forward and publish the same address (the jobs engine's calls: no `now`) — the synchronous landing is NEVER asked, nothing
+//         written. RED: the cure's tip shape (publish landing «now» whoever calls, the gate stepping aside while a write is owed)
 //   D  two stores on the SYNCED REPLACE (src/fd-close.js renameSynced: plugins.json, instance-url.json), each through its real act:
 //      D1 a sync that FAILS (EIO placed at the fsync of its temp) reaches its caller, the old file stands; RED: the release's body
 //      D2 a file system with no sync at all: writes of TWO instances land, «does not do a sync» said ONCE a run (not once an
@@ -50,6 +58,7 @@ process.on('exit', () => { for (const d of DIRS) { try { fs.rmSync(d, { recursiv
 /** a fresh scratch folder per world (the same name answers the same folder for the whole run: numbered) */
 const dirOf = (name) => { const d = scratchDir(`msw-${name}-${++dirN}`); DIRS.push(d); return d; };
 const MADE = [];   // the managers with a timer of their own (cleared at the end)
+process.env.VIBESPACE_MOUNT_BASE = dirOf('mount-base');   // a storage's folder (a Disconnect's empty-folder sweep) under the scratch root, never the home
 const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Module(abs, null); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
 const srcOf = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 /** a copy of a product module with its anchored edits (each anchor must stand in the source exactly once — else it throws by name) */
@@ -98,12 +107,12 @@ const portsWorld = (M, W, rows) => {
   return { d, file, pf, lines };
 };
 /** a RECORDING writer: every write ASKED (dirty) by its file's base name; a flush lands the bytes in this turn */
-function recorder() {
-  const r = { asked: [], stores: new Map() };
+function recorder({ owed = false } = {}) {
+  const r = { asked: [], stores: new Map(), flushes: 0 };
   Object.assign(r, {
     dirty: (file, o) => { r.asked.push(path.basename(file)); r.stores.set(file, o); },
-    pending: () => false, durable: async () => true, whyNotDurable: () => null,
-    flushSync: (names) => { for (const f of names || [...r.stores.keys()]) { const o = r.stores.get(f); if (o) fs.writeFileSync(f, o.produce({ sync: true })); } return { written: [], left: [] }; },
+    pending: () => owed, durable: async () => true, whyNotDurable: () => null,   // owed: the store has a write owed (a slow or failing data folder)
+    flushSync: (names) => { r.flushes++; for (const f of names || [...r.stores.keys()]) { const o = r.stores.get(f); if (o) fs.writeFileSync(f, o.produce({ sync: true })); } return { written: [], left: [] }; },
   });
   return r;
 }
@@ -121,11 +130,11 @@ try {
   console.log('W1 a PERSON\'s act on a writer store is on disk when its call returns (the writer\'s own flushSync)');
   const W_ACTS = [
     { base: 'mounts.json', rel: MO, world: (M) => mountsWorld(M, RW), act: (w) => w.m.add(s3(1)), landed: (doc) => !!doc && doc.includes('made-up-bucket-1'),
-      edits: [["    this._save({ now: true, why: 'a storage added' });", "    this._save();"]] },   // stale-pins: kept — the act's release-shaped save (no `now`), compiled back in as the red control
-    { base: 'machine-mounts.json', rel: MM, world: (M) => machineWorld(M, RW, (d) => [pull(1, d), pull(2, d)]), act: (w) => w.m.unmount('mm-made1'), landed: (doc) => !!doc && !doc.includes('"mm-made1"'),
-      edits: [["    this._save({ now: true, why: 'a mount removed' }); this._notify();", "    this._save(); this._notify();"]] },   // stale-pins: kept — the act's release-shaped save (no `now`), compiled back in as the red control
-    { base: 'port-forwards.json', rel: PF, world: (M) => portsWorld(M, RW, [fwd(1), fwd(2)]), act: (w) => w.pf.onMachineUnpaired('host-made1'), landed: (doc) => !!doc && !doc.includes('"host-made1"'),
-      edits: [["    this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);\n    this._persist({ now: true });", "    this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);\n    this._persist();"]] },   // stale-pins: kept — the act's release-shaped save (no `now`), compiled back in as the red control
+      edits: [["    this._save({ now: true, why: 'a storage added' });", "    this._save();"]] },   // stale-pins: kept — the release-shaped text, compiled back in as the red control
+    { base: 'machine-mounts.json', rel: MM, world: (M) => machineWorld(M, RW, (d) => [pull(1, d), pull(2, d)]), act: (w) => w.m.unmount('mm-made1', { now: true }), landed: (doc) => !!doc && !doc.includes('"mm-made1"'),   // the route's call (server.js passes now)
+      edits: [["    this._save({ now, why: 'a mount removed' }); this._notify();", "    this._save({ why: 'a mount removed' }); this._notify();"]] },
+    { base: 'port-forwards.json', rel: PF, world: (M) => portsWorld(M, RW, [fwd(1), fwd(2)]), act: (w) => w.pf.unforward('pf-made1', { now: true }), landed: (doc) => !!doc && !doc.includes('"pf-made1"'),   // the Ports route's call (server.js passes now)
+      edits: [["    this._state.forwards = this._state.forwards.filter((r) => r.id !== id);\n    this._persist({ now });", "    this._state.forwards = this._state.forwards.filter((r) => r.id !== id);\n    this._persist();"]] },   // stale-pins: kept — the release-shaped text, compiled back in as the red control
   ];
   for (const R of W_ACTS) {
     const scene = async (M) => { const w = R.world(M); let threw = null; try { await R.act(w); } catch (e) { threw = (e && e.message) || String(e); } const atReturn = R.landed(bytes(w.file)); const lands = await landed(w.file); return { atReturn, threw, later: lands && R.landed(bytes(w.file)), mode: (modeOf(w.file) || 0).toString(8) }; };
@@ -159,19 +168,62 @@ try {
     try { r1 = await scene(copyOf(MO, [["    if (miss) throw Object.assign(new Error('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { code: 'not-durable', status: 503, why: `${why}: ${miss.why || 'the write failed'}` });", "    if (miss) { }"]], 'w2-no-throw')); } catch (e) { y1 = e.message; }
     ok(!!r1 && r1.threw === null, 'W2 RED CONTROL (the throw taken out): the person\'s act answers as if saved while nothing is on disk', r1 || y1);
     let r2 = null, y2 = null;
-    try { r2 = await scene(copyOf(MO, [["    if (!now) return;\n", ""]], 'w2-every-save-waits')); } catch (e) { y2 = e.message; }
+    try { r2 = await scene(copyOf(MO, [["    if (!now) return true;\n", ""]], 'w2-every-save-waits')); } catch (e) { y2 = e.message; }
     ok(!!r2 && !!r2.sweepThrew, 'W2 RED CONTROL (the `now` gate taken out): the sweep\'s save waits on the storage and throws into its road', r2 || y2);
   }
 
   console.log('W3 mounts.json and machine-mounts.json keep 0600 through the writer');
   for (const [rel, base, mk, act, edit] of [[MO, 'mounts.json', (M) => mountsWorld(M, RW), (w) => w.m.add(s3(1)), ["    W.dirty(this._file, { name: 'mounts.write', mode: 0o600, produce: () => {", "    W.dirty(this._file, { name: 'mounts.write', produce: () => {"]],
-    [MM, 'machine-mounts.json', (M) => machineWorld(M, RW, (d) => [pull(1, d), pull(2, d)]), (w) => w.m.unmount('mm-made1'), ["      W.dirty(this._file, { name: 'machine-mounts.write', mode: 0o600, produce: () => {", "      W.dirty(this._file, { name: 'machine-mounts.write', produce: () => {"]]]) {
+    [MM, 'machine-mounts.json', (M) => machineWorld(M, RW, (d) => [pull(1, d), pull(2, d)]), (w) => w.m.unmount('mm-made1', { now: true }), ["      W.dirty(this._file, { name: 'machine-mounts.write', mode: 0o600, produce: () => {", "      W.dirty(this._file, { name: 'machine-mounts.write', produce: () => {"]]]) {
     const scene = async (M) => { const w = mk(M); await act(w); await landed(w.file); return modeOf(w.file); };
     const mode = await scene(require(path.join(REPO, rel)));
     ok(mode === 0o600, `W3 ${base}: written by the store writer with its mode — 0600 (credentials, tokens)`, { mode: mode && mode.toString(8) });
     let red = null, why = null;
     try { red = await scene(copyOf(rel, [edit], `w3-${base}-no-mode`)); } catch (e) { why = e.message; }
     ok(red !== null && (red & 0o077) !== 0, `W3 RED CONTROL ${base}: the writer asked without the mode leaves the file readable by others`, { mode: red !== null ? red.toString(8) : why });
+  }
+
+  console.log('W4 a FAILED landing, then an UNCHANGED state: the owed write is still written once the storage answers');
+  {
+    const scene = async (M) => {
+      const w = mountsWorld(M, RW);
+      w.m.add(s3(1));
+      STAND.failOn('mounts.json', true);
+      let threw = null; try { w.m.add(s3(2)); } catch (e) { threw = e && e.code; } finally { STAND.failOn('mounts.json', false); }
+      w.m._save();   // nothing changed since the failed landing: asks nothing
+      const lands = await landed(w.file), doc = bytes(w.file) || '';
+      return { threw, lands, written: doc.includes('made-up-bucket-2') };
+    };
+    const t = await scene(require(path.join(REPO, MO)));
+    ok(t.threw === 'not-durable' && t.lands === true && t.written === true, 'W4 mounts.json: the person\'s act whose landing failed, followed by an unchanged state (its save asks nothing), is still WRITTEN once the storage answers (the writer keeps it owed)', t);
+    let red = null, why = null;
+    try { red = await scene(copyOf(MO, [["      const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;\n", "      const j = JSON.stringify(this._state, null, 2); if (j === this._asked) return null; this._asked = j; return j;\n"]], 'w4-null-when-handed')); } catch (e) { why = e.message; }
+    ok(!!red && red.written === false, 'W4 RED CONTROL (a producer that answers «nothing to write» for bytes it already handed): the failed change is never written', red || why);
+  }
+
+  console.log('W5 a person\'s DISCONNECT is done first; its record lands after; a failed landing answers detached + notOnDisk');
+  {
+    const GM = { id: 'mnt-gm1', name: 'made-up mail', type: 'gmail', origin: 'manual', mode: 'rw', customPath: null, expiresAt: null, desired: 'mounted', createdAt: 1, email: 'made-up@example.test' };
+    const scene = async (M) => {
+      const d = dirOf('disconnect'), file = path.join(d, 'mounts.json');
+      fs.writeFileSync(file, JSON.stringify({ mounts: [GM], shares: [] }, null, 2));
+      const m = new M.MountManager({ dataDir: d, broadcast: () => { }, storeWriter: RW });
+      const stops = []; m.gmail.stop = (id) => { stops.push(id); };   // its row's own unmount: the sync worker stopped (in-process)
+      STAND.failOn('mounts.json', true);
+      let ok1 = null, threw = null;
+      try { ok1 = await m.unmount(GM.id, { press: true }); } catch (e) { threw = (e && e.code) || String(e); } finally { STAND.failOn('mounts.json', false); }
+      const disk0 = JSON.parse(bytes(file) || '{}'), nd = !!(m.unmountNotOnDisk && m.unmountNotOnDisk(GM.id));
+      const lands = await landed(file), disk1 = JSON.parse(bytes(file) || '{}');
+      const desiredOf = (j) => ((j.mounts || []).find((x) => x.id === GM.id) || {}).desired || null;
+      return { ok: ok1, threw, detached: stops.includes(GM.id), memory: m._state.mounts.find((x) => x.id === GM.id).desired, notOnDisk: nd, diskAtAnswer: desiredOf(disk0), lands, diskLater: desiredOf(disk1) };
+    };
+    const t = await scene(require(path.join(REPO, MO)));
+    const route = srcOf('src/server/mounts-plugins-wiring.js').includes("res.json({ success: ok, ...(mounts.unmountNotOnDisk?.(req.params.id) ? { notOnDisk: true } : {}) });");
+    ok(t.ok === true && !t.threw && t.detached && t.memory === 'unmounted' && t.notOnDisk && t.diskAtAnswer === 'mounted' && t.lands === true && t.diskLater === 'unmounted' && route,
+      'W5 a Disconnect whose landing fails: DETACHED first, answered with notOnDisk (the route says it — the page\'s sayNotOnDisk), the old record still on disk at the answer, the new one landed once the storage answers', { ...t, route });
+    let red = null, why = null;
+    try { red = await scene(copyOf(MO, [["      this._save();   // B-574d (r4827): the Disconnect's record rides the writer — the act is DONE first; a person's press lands it after its detach (unmount)", "      this._save({ now: true, why: 'a Disconnect' });"], ["    road = road.then((ok) => { if (this._save({ now: true, why: 'a Disconnect', quiet: true }) === false) (this._unmountNotOnDisk = this._unmountNotOnDisk || new Set()).add(id); return ok; });\n", ""]], 'w5-landing-first')); } catch (e) { why = e.message; }   // stale-pins: kept — the release-shaped text, compiled back in as the red control
+    ok(!!red && (red.threw === 'not-durable' || !red.detached), 'W5 RED CONTROL (the landing asked before the detach, as at dd2e53e79): the press throws «not on disk» while the mount was never detached', red || why);
   }
 } finally { /* the real writer stops at the end */ }
 
@@ -186,7 +238,7 @@ console.log('R THE RATE LEGS — each event repeated N times writes zero or one 
   };
   const a1 = await r1(require(path.join(REPO, PF)));
   ok(a1 === 0, `R1 port-forwards.json: ${N} dial-ins of a machine with no forward and ${N} of one whose forward is live write NOTHING (the bytes on disk are the bytes)`, { asked: a1 });
-  let x1 = null, y1 = null; try { x1 = await r1(copyOf(PF, [["      if (json === this._asked && !W.pending(this.file)) return;\n", ""]], 'r1-no-gate')); } catch (e) { y1 = e.message; }
+  let x1 = null, y1 = null; try { x1 = await r1(copyOf(PF, [["      if (json === this._asked && !(now && W.pending(this.file))) return;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)\n", ""]], 'r1-no-gate')); } catch (e) { y1 = e.message; }
   ok(x1 === 2 * N, 'R1 RED CONTROL (the gate taken out): every dial-in writes the list again', { asked: x1, why: y1 });
 
   // R2 port-forwards.json: N heal sweeps of a forward that starts while its republish fails
@@ -198,7 +250,7 @@ console.log('R THE RATE LEGS — each event repeated N times writes zero or one 
   };
   const a2 = await r2(require(path.join(REPO, PF)));
   ok(a2 <= 1, `R2 port-forwards.json: ${N} heal sweeps of a forward whose republish keeps failing write at most once`, { asked: a2 });
-  let x2 = null, y2 = null; try { x2 = await r2(copyOf(PF, [["      if (json === this._asked && !W.pending(this.file)) return;\n", ""]], 'r2-no-gate')); } catch (e) { y2 = e.message; }
+  let x2 = null, y2 = null; try { x2 = await r2(copyOf(PF, [["      if (json === this._asked && !(now && W.pending(this.file))) return;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)\n", ""]], 'r2-no-gate')); } catch (e) { y2 = e.message; }
   ok(x2 === N, 'R2 RED CONTROL (the gate taken out): every sweep writes the list again', { asked: x2, why: y2 });
 
   // R3 port-forwards.json: N restarts of a published service
@@ -213,7 +265,7 @@ console.log('R THE RATE LEGS — each event repeated N times writes zero or one 
   };
   const a3 = await r3(require(path.join(REPO, PF)));
   ok(a3 <= 1, `R3 port-forwards.json: ${N} restarts of a published service (its forward with the same label, its publish of the same address) write at most once`, { asked: a3 });
-  let x3 = null, y3 = null; try { x3 = await r3(copyOf(PF, [["      if (json === this._asked && !W.pending(this.file)) return;\n", ""], ["    else if (label && rec.label !== label) { rec.label = label; this._persist({ now: true }); }   // B-574d (r4796 (b)): a service's restart names the same label — nothing to write", "    else if (label) { rec.label = label; this._persist({ now: true }); }"]], 'r3-no-gates')); } catch (e) { y3 = e.message; }
+  let x3 = null, y3 = null; try { x3 = await r3(copyOf(PF, [["      if (json === this._asked && !(now && W.pending(this.file))) return;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)\n", ""], ["    else if (label && rec.label !== label) { rec.label = label; this._persist({ now }); }   // B-574d (r4796 (b)): a service's restart names the same label — nothing to write", "    else if (label) { rec.label = label; this._persist({ now: true }); }"]], 'r3-no-gates')); } catch (e) { y3 = e.message; }
   ok(x3 === 2 * N, 'R3 RED CONTROL (the gates taken out): every restart writes the list twice', { asked: x3, why: y3 });
 
   // R4 machine-mounts.json: N landings of a pull
@@ -240,8 +292,23 @@ console.log('R THE RATE LEGS — each event repeated N times writes zero or one 
   };
   const a5 = await r5(require(path.join(REPO, MO)));
   ok(a5 === 0, `R5 mounts.json: ${N} connects of a mount already mounted (the watchdog's adopt) write NOTHING`, { asked: a5 });
-  let x5 = null, y5 = null; try { x5 = await r5(copyOf(MO, [["    if (json === this._asked && !W.pending(this._file)) return;\n", ""]], 'r5-no-gate')); } catch (e) { y5 = e.message; }
+  let x5 = null, y5 = null; try { x5 = await r5(copyOf(MO, [["    if (json === this._asked && !(now && W.pending(this._file))) return true;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)\n", ""]], 'r5-no-gate')); } catch (e) { y5 = e.message; }
   ok(x5 === N, 'R5 RED CONTROL (the gate taken out): every connect writes the list again', { asked: x5, why: y5 });
+
+  // R6 port-forwards.json: the caller names the side — a store with a write OWED while N restarts publish the same address
+  const r6 = async (M) => {
+    const rec = recorder({ owed: true }), owner = 'job-made6', id = 'pf-__local__-47006';
+    const w = portsWorld(M, rec, [{ id, hostId: '__local__', remotePort: 47006, label: 'service: made-up', ownerJob: owner, error: null, publicUrl: 'https://made-up.example.test', publicName: 'made-up', publicProto: 'http', publicSub: 'made-up', publicPort: null }]);
+    w.pf._start = async () => { }; w.pf._probeForward = () => { }; w.pf._decideProto = async () => ({ proto: 'http', why: 'override' });
+    w.pf._live.set(id, { rec: { localPort: 47998 }, sockets: new Set(), server: { close() { } } });
+    w.pf.plugins = { frpPublish: async () => ({ url: 'https://made-up.example.test', name: 'made-up', proto: 'http', subdomain: 'made-up' }), frpUnpublish: async () => { } };
+    for (let i = 0; i < N; i++) { await w.pf.forward('__local__', 47006, { label: 'service: made-up', owner }); await w.pf.publish(id); }   // the jobs engine's calls: no `now`
+    return { flushes: rec.flushes, asked: rec.asked.length };
+  };
+  const a6 = await r6(require(path.join(REPO, PF)));
+  ok(a6.flushes === 0 && a6.asked === 0, `R6 port-forwards.json: a store whose write is OWED while ${N} restarts of a service forward and publish the same address — no synchronous landing is ever asked, nothing written`, a6);
+  let x6 = null, y6 = null; try { x6 = await r6(copyOf(PF, [["      if (json === this._asked && !(now && W.pending(this.file))) return;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)\n", "      if (json === this._asked && !W.pending(this.file)) return;\n"], ["    this._persist({ now }); this._emit();\n    return { publicUrl: r.url, proto: r.proto || d.proto, pending: !!d.pending, previousUrl };", "    this._persist({ now: true }); this._emit();\n    return { publicUrl: r.url, proto: r.proto || d.proto, pending: !!d.pending, previousUrl };"]], 'r6-tip-shape')); } catch (e) { y6 = e.message; }   // stale-pins: kept — the release-shaped text, compiled back in as the red control
+  ok(!!x6 && x6.flushes === N, 'R6 RED CONTROL (the cure\'s tip shape: publish lands «now» whoever calls, the gate steps aside while a write is owed): every restart waits on a landing', x6 || y6);
 }
 
 // ── D: the two stores on the synced replace, each through its real act ──────────────────────────────────────────────────────

@@ -332,7 +332,7 @@ class MachineMounts {
     // r3982 (3): a lift with no mounts read (torn bytes kept, a gone file) mid-life OWES the one-time legacy ingest to the next start —
     // marked in the list it saves (the torn lift saves: the next start reads data, and without the mark the ingest never ran again)
     if (a.state !== 'data' && atLift) this._state.legacyOwed = true;
-    if (tornCopy) { this._state.tornAt = Date.now(); this._tornCopy = tornCopy; this._save({ now: true, why: 'a lift from torn bytes' }); }
+    if (tornCopy) { this._state.tornAt = Date.now(); this._tornCopy = tornCopy; this._save({ now: true, why: 'a lift from torn bytes (once a torn file)' }); }
     // the one-time legacy ingest reads the data folder SYNCHRONOUSLY — the boot's road only; at a read again (mid-life, the main loop
     // running) it waits for the next start (its read: never a synchronous read of the data folder on the loop)
     if (a.state !== 'data' && !atLift) this._migrateLegacy();
@@ -363,13 +363,15 @@ class MachineMounts {
     // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): machine-mounts.json goes through THE STORE WRITER (src/store-writer.js:
     // its thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the
     // write; ONE road for the file, so a later state always lands last. NO WRITE WHEN NOTHING CHANGED (r4796 (b)): the bytes the writer
-    // was last handed are never asked again. A pull's landing (no person pressed it — see _stampLanding) rides the writer off the
-    // loop; a PERSON's act (`now`: a push or pull mount added, a mount removed) and the start's own saves (its hygiene, a lift's mark,
-    // the owed ingest paid — r4758: the start) land before they answer — the writer's own synchronous road (flushSync). A failed landing is the writer's own line (its first failure and every
+    // was last handed are never asked again, even while a write is owed. THE CALLER NAMES THE SIDE (r4827): a person's own act from
+    // the routes (server.js passes `now`: a push or pull mount added, a mount removed, a mount again) lands before it answers — the
+    // writer's own synchronous road (flushSync); so do the start's one-time saves (the hygiene, the owed ingest paid — r4758) and a
+    // lift from torn bytes (once a torn file, at the hold's read again); every caller no person pressed (a pull's landing — see
+    // _stampLanding —, a machine's unpair road) rides the writer off the loop. A failed landing is the writer's own line (its first failure and every
     // tenth) and stays owed; nothing is thrown (as the release: a mount's change never failed its act on the file)
     try {
       const W = this._writer(), json = JSON.stringify(this._state, null, 2);
-      if (json === this._asked && !W.pending(this._file)) return;
+      if (json === this._asked && !(now && W.pending(this._file))) return;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)
       W.dirty(this._file, { name: 'machine-mounts.write', mode: 0o600, produce: () => {
         const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
       } });
@@ -600,7 +602,7 @@ class MachineMounts {
     }
   }
 
-  async _mountPushInner(hostId, { folder, mode = 'ro', mountpoint, publicUrlFallback } = {}) {
+  async _mountPushInner(hostId, { folder, mode = 'ro', mountpoint, publicUrlFallback, now = false } = {}) {
     // expand ~ BEFORE resolving — a literal '~' resolved against cwd made the
     // token mint fail with a bare 'root does not exist' (real report)
     const expanded = String(folder || os.homedir()).replace(/^~(?=$|\/)/, os.homedir());
@@ -728,7 +730,7 @@ class MachineMounts {
     if (tunnelPort) this._pushTunnelOwned.add(id);
     this._state.mounts.push(rec);
     if (door) (this._doors || (this._doors = new Map())).set(id, Promise.resolve(door));
-    this._save({ now: true, why: 'a push mount added' }); this._notify();
+    this._save({ now, why: 'a push mount added' }); this._notify();
     return { id, mountpoint: mp, os: osKind, method, via: tunnelPort ? 'tunnel' : 'public' };
     } catch (e) {
       // a FAILED push must not leak its freshly-minted credential — every
@@ -803,7 +805,7 @@ class MachineMounts {
     }
   }
 
-  async _mountPullInner(hostId, { remotePath, mountpoint } = {}) {
+  async _mountPullInner(hostId, { remotePath, mountpoint, now = false } = {}) {
     const h = this.hosts.get(hostId); // throws for unknown machine
     // '~' paths are what the dialog's own autocomplete suggests — expand them
     // against the MACHINE's home (review finding: suggest-then-reject)
@@ -842,7 +844,7 @@ class MachineMounts {
       rec = { id: 'mm-' + require('crypto').randomBytes(4).toString('hex'), dir: 'pull', hostId, remotePath, mountpoint: mp, createdAt: Date.now() };
       if (askedReal) this._realMp.set(rec.id, askedReal);   // r6 (read 5 #1): only a REAL answer is kept — no answer is asked again (never the path as written)
       this._state.mounts.push(rec);
-      this._save({ now: true, why: 'a pull mount added' });
+      this._save({ now, why: 'a pull mount added' });
     }
     await this._upAsked(rec);
     this._notify();
@@ -969,7 +971,7 @@ class MachineMounts {
   }
 
   /** Manual remount (the pull row's ↻ — e.g. after a failed heal). */
-  async remount(id) {
+  async remount(id, { now = false } = {}) {
     this._refuseIfUnread('mounting again');   // remainder of B-f276: a held machine-mounts.json takes no change
     const rec = this._state.mounts.find((m) => m.id === id);
     if (!rec) throw MW.refusal('unknown_mount');
@@ -979,9 +981,9 @@ class MachineMounts {
       // the raw token is unrecoverable (hashed at rest), so re-creating with
       // the SAME params is the remount — old record/token dropped first
       const { hostId, folder, mode, mountpoint } = rec;
-      try { await this.unmount(id); } catch { }
+      try { await this.unmount(id, { now }); } catch { }
       this._pushDown?.delete(id);
-      return this.mountPush(hostId, { folder, mode, mountpoint });
+      return this.mountPush(hostId, { folder, mode, mountpoint, now });
     }
     const live = this._live.get(id);
     if (live) { try { await live.teardown(); } catch { } this._live.delete(id); }
@@ -992,7 +994,7 @@ class MachineMounts {
 
   // ═══ shared lifecycle ═══
 
-  async unmount(id) {
+  async unmount(id, { now = false } = {}) {
     this._refuseIfUnread('removing a mount');   // remainder of B-f276: a held machine-mounts.json takes no change
     const i = this._state.mounts.findIndex((m) => m.id === id);
     if (i < 0) throw MW.refusal('unknown_mount');
@@ -1021,7 +1023,7 @@ class MachineMounts {
       this._pushDown?.delete(id);
     }
     this._state.mounts.splice(i, 1);   // (its real path stays known: a chain of it still ending must see a record added again on that folder)
-    this._save({ now: true, why: 'a mount removed' }); this._notify();
+    this._save({ now, why: 'a mount removed' }); this._notify();
     if (rec.dir === 'pull') this._recheckPairs().catch(() => { });   // B-844b / B-6c4f: the record it held back may be free now
     // r3813: a push mount's machine side that could not be reached is SAID (its token is revoked, so the stale mount there opens nothing)
     return { ok: true, ...(side ? { machineSide: side } : {}) };

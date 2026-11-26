@@ -140,6 +140,7 @@ try {
     const live = fs.readFileSync(f); let whole = false; try { JSON.parse(live.toString('utf8')); whole = true; } catch { }
     ok(S.count(s) === 0 && (live.equals(torn) || whole), `${S.name}: then it starts EMPTY (the live file is the torn bytes until a save replaces them whole)`);
     stopOf(s);
+    try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync([f]); } catch { }   // B-574d (r4796): a store on the store writer (mounts.json) lands what its lift still owes BEFORE the torn bytes are planted again — never after, over them
     fs.writeFileSync(f, torn);   // the SAME torn bytes met again at the next start (a store whose lift saved has replaced them)
     const s2 = S.make(d); await lifted(s2);
     ok(asides().length === 1, `${S.name}: a second start over the SAME torn bytes makes no second copy (kept aside ONCE per content)`, asides());

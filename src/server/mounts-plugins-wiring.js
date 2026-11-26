@@ -1186,7 +1186,7 @@ app.post('/api/mounts/:id/unmount', async (req, res) => {
   try {   // B-323e (r1501 (8)): a person's press — said while it runs, joined
     const ok = await mounts.unmount(req.params.id, { press: true }), w = mounts.unmountWhyOf?.(req.params.id);
     if (w) { const MW = require('../mount-error-words.js'); res.status(409).json(MW.errorBody(MW.refusal(w.code, { why: w.why }))); return; }   // its follow (r1890 (1)): its road threw — said by what is known, with its reason, in the page's words
-    res.json({ success: ok });
+    res.json({ success: ok, ...(mounts.unmountNotOnDisk?.(req.params.id) ? { notOnDisk: true } : {}) });   // B-574d (r4827): detached, its record not yet on disk — the page says it (sayNotOnDisk)
   }
   catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });

@@ -118,6 +118,7 @@ try {
   ok(toA === path.join(LOCAL_ROOT, 'A') && A.m.cacheDir === toA && A.m.cacheOld === A.dir, '④ a clean cache on the network dataDir MOVES at the remount: the new daemon gets ~/.cache/vibespace/vfs-cache/<id>, the record remembers both dirs', JSON.stringify({ toA, A: A.m }));
   ok(fs.readdirSync(toA).length === 0 && fs.existsSync(path.join(A.dir, 'vfs', 'od', 'f0.txt')), '④ a SWITCH, never a copy: the new dir starts empty; the old one stays until the new daemon mounted');
   ok((fs.statSync(LOCAL_ROOT).mode & 0o777) === 0o700, '④ the local root is 0700');
+  try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync([g._file]); } catch { }   // B-574d (r4796): mounts.json is the store writer's — the cache's place (no person pressed it) rides it off the loop; landed before the file is read
   ok(JSON.parse(fs.readFileSync(g._file, 'utf8')).mounts.find((x) => x.id === 'A').cacheDir === toA, '④ m.cacheDir is persisted through the mounts store');
   for (const [id, metas, rc, why] of [['B', [META_CLEAN, META_DIRTY], null, 'dirty'], ['N', [META_NOSPACE], null, 'dirty'], ['U', [META_CLEAN, '{"ModTime": '], null, 'unread'], ['Q', [META_CLEAN], { queue: [{ name: 'od/a.txt' }] }, 'dirty'], ['E', [META_CLEAN], { error: 'no answer' }, 'unread']]) {
     const S = seed(g, id, metas);

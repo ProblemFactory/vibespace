@@ -223,6 +223,7 @@ try {
     await pf.setProtoOverride(f.id, 'tcp');
     rec = pf.list().find((r) => r.id === f.id);
     check('override wins over detection (effective proto)', rec.proto === 'tcp' && rec.protoOverride === 'tcp' && rec.protoDetected === 'http', JSON.stringify(rec));
+    try { require('../src/store-writer.js').storeWriter().flushSync([path.join(dataDir, 'port-forwards.json')]); } catch { }   // B-574d (r4827): a suite's direct call names no side — its save rides the writer; landed before the file is read
     const disk = JSON.parse(fs.readFileSync(path.join(dataDir, 'port-forwards.json'), 'utf-8'));
     check('override persists to disk', disk.forwards.find((r) => r.id === f.id)?.protoOverride === 'tcp');
     await pf.setProtoOverride(f.id, null);
@@ -354,6 +355,7 @@ try {
     check('the sticky adopt line is present once', PF_SRC.split(STICKY).length === 2);
     const PF1 = M.load('src/port-forward.js', editAnchor(PF_SRC, STICKY, 'rec.publicSub = r.subdomain || null;', "src/port-forward.js"), 'pre-sticky').PortForwardManager;
     const drive = async (PF) => {
+      try { require('../src/store-writer.js').storeWriter().flushSync([path.join(pdir, 'port-forwards.json')]); } catch { }   // B-574d (r4827): the last life's owed write lands BEFORE the file is removed (never after, over the fresh start)
       fs.rmSync(path.join(pdir, 'port-forwards.json'), { force: true });
       const pm = mk(PF);
       await down(); await up('http');
@@ -373,6 +375,7 @@ try {
     const plugMut = M.write('src/plugins.js', editAnchor(PL_SRC, THROW, '', "src/plugins.js"), 'pre-throw');
     const PF2 = M.load('src/port-forward.js', editAnchor(PF_SRC, "require('./plugins')", `require(${JSON.stringify(plugMut)})`, "src/port-forward.js"), 'pre-probe').PortForwardManager;
     const drive2 = async (PF) => {
+      try { require('../src/store-writer.js').storeWriter().flushSync([path.join(pdir, 'port-forwards.json')]); } catch { }   // B-574d (r4827): the last life's owed write lands BEFORE the file is removed (never after, over the fresh start)
       fs.rmSync(path.join(pdir, 'port-forwards.json'), { force: true });
       const pm = mk(PF);
       await down(); await up('http');

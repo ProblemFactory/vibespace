@@ -575,7 +575,7 @@ class MountManager {
   /** a lift from torn bytes in this run: the copy's base name (the Storage section says where the old bytes are) — null when none */
   tornCopy() { const t = this._hold.torn(); return t ? t.copy : null; }
 
-  _save({ now = false, why = 'the storage change' } = {}) {
+  _save({ now = false, why = 'the storage change', quiet = false } = {}) {
     if (!this._hold.writable('a storage change')) return;   // held: nothing is written over the file
     // B-574d «mounts-and-forwards» (主开发 r4751 / r4758 / r4796, lane nl-mounts): mounts.json goes through THE STORE WRITER (src/store-writer.js: its
     // thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the write;
@@ -585,17 +585,20 @@ class MountManager {
     // the cache's place, a client refresh, a Gmail landing, the boot) rides the writer off the loop: a failed landing is the writer's
     // own line (its first failure and every tenth) and stays owed — never thrown into a sweep, a timer or a promise. A PERSON's own act
     // (`now`: add, add a child, convert, edit, remove, Disconnect, the Drive sign-in, a share minted or revoked, the storage settings, an
-    // import) lands before it answers — the writer's own synchronous road (flushSync); a landing that fails throws `not-durable` with
-    // law F's one sentence (kept in memory, written when the storage can)
+    // import; a Disconnect lands AFTER its detach — unmount's press) lands before it answers — the writer's own synchronous road
+    // (flushSync); a landing that fails throws `not-durable` with law F's one sentence (kept in memory, written when the storage can),
+    // or answers false to a `quiet` caller that says it itself. An unchanged state asks nothing, even while a write is owed (r4827)
     const W = this._writer(), json = JSON.stringify(this._state, null, 2);
-    if (json === this._asked && !W.pending(this._file)) return;
+    if (json === this._asked && !(now && W.pending(this._file))) return true;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)
     W.dirty(this._file, { name: 'mounts.write', mode: 0o600, produce: () => {
       const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
     } });
-    if (!now) return;
+    if (!now) return true;
     let r = null; try { r = W.flushSync([this._file], { waitedBy: `mounts.json: ${why}` }); } catch (e) { r = { left: [{ file: this._file, why: (e && e.message) || 'the writer threw' }] }; }
     const miss = !r ? { why: 'the store writer did not answer' } : r.deferred ? null : (r.left || []).find((x) => x && x.file === this._file);   // deferred: the hub is stopping — its exit flush writes it
+    if (miss && quiet) return false;   // r4827: the caller says it (a Disconnect: detached, its record not yet on disk)
     if (miss) throw Object.assign(new Error('Saved, but not on disk yet — the storage has not written it (it is slow or failing). It stays in memory and is written when the storage can; a restart before then loses it.'), { code: 'not-durable', status: 503, why: `${why}: ${miss.why || 'the write failed'}` });
+    return true;
   }
   _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
 
@@ -2783,7 +2786,12 @@ class MountManager {
     if (joins.has(id)) return joins.get(id);
     (this._disconnecting = this._disconnecting || new Set()).add(id); this._notify();
     this._unmountWhy?.delete(id);   // its follow: a new road's reason is its own
+    this._unmountNotOnDisk?.delete(id);
     let road; try { road = Promise.resolve(this._unmountRoad(id, opts)); } catch (e) { road = Promise.reject(e); }
+    // B-574d (r4827): a person's Disconnect is DONE first (detached) and its record (desired «unmounted») lands AFTER — its own landing;
+    // one that fails says what is true: detached, its record not yet on disk (unmountNotOnDisk — the route answers notOnDisk, the
+    // writer keeps it owed and writes it when the storage can)
+    road = road.then((ok) => { if (this._save({ now: true, why: 'a Disconnect', quiet: true }) === false) (this._unmountNotOnDisk = this._unmountNotOnDisk || new Set()).add(id); return ok; });
     const done = road.finally(() => { joins.delete(id); this._disconnecting.delete(id); this._notify(); });
     joins.set(id, done);
     return done;
@@ -2792,6 +2800,8 @@ class MountManager {
   /** its follow (主开发 r1890 (1)): when the person's last Disconnect of a record THREW — { code, why } (unmount_threw: not detached; unmount_unconfirmed:
    *  detached, its process not confirmed ended), null otherwise — the route words it */
   unmountWhyOf(id) { return (this._unmountWhy && this._unmountWhy.get(id)) || null; }
+  /** B-574d (r4827): the person's last Disconnect of a record detached it while its record did not land inside the writer's bound — true */
+  unmountNotOnDisk(id) { return !!(this._unmountNotOnDisk && this._unmountNotOnDisk.has(id)); }
 
   _unmountRoad(id, opts = {}) {
     const m = this._get(id);
@@ -2805,7 +2815,7 @@ class MountManager {
       this._bumpWord(id);   // its follow: the person's word — a Connect that joined a connect in flight reads it again before it connects anew
       if (m.parked) this._unpark(m, 'unmounted');   // B-5ce7: the person ended supervision — its For-you item resolves
       this._killedSaid?.delete(id); try { this.onAnswered?.(m); } catch { }   // …and a stopped-process notice with it (r1 #9: even one a hub before this one filed)
-      this._save({ now: true, why: 'a Disconnect' });
+      this._save();   // B-574d (r4827): the Disconnect's record rides the writer — the act is DONE first; a person's press lands it after its detach (unmount)
     }
     const finish = (ok) => {
       // Lazy unmounts detach asynchronously — give the kernel a beat before

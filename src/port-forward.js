@@ -256,16 +256,18 @@ class PortForwardManager {
    *  its thread writes the temp, SYNCS it and renames it — a power loss never leaves the list empty or torn), the bytes made AT the
    *  write; ONE road for the file, so a later state always lands last. NO WRITE WHEN NOTHING CHANGED (r4796 (b)): the bytes the writer
    *  was last handed are never asked again — a dial-in of a machine with nothing to change, the heal sweep's retry that changed
-   *  nothing, a service's restart that publishes the same address write NOTHING. A save no person pressed (a dial-in, the heal sweep,
-   *  a probe's answer) rides the writer off the loop; a PERSON's act from the Ports panel, the jobs engine's publish of a service and
-   *  the boot's replay (r4758: the start) (`now`) land before they answer — the writer's own synchronous road (flushSync). A failed landing
+   *  nothing, a service's restart that publishes the same address write NOTHING. THE CALLER NAMES THE SIDE (r4827): ONLY a person's own
+   *  act from the Ports routes (server.js passes `now`) lands before it answers — the writer's own synchronous road (flushSync); every
+   *  caller no person pressed (the jobs engine's forward and publish at a service's start or restart, its recheck, reprobe, the heal
+   *  sweep, a dial-in, a probe's answer, an unpair's road, the boot's replay) rides the writer off the loop, and an unchanged state
+   *  asks nothing even while a write is owed (no landing waited for, whatever the storage). A failed landing
    *  is the writer's own line (said at its first failure and every tenth) and stays owed; nothing is thrown (as before: said, never
    *  thrown). r3009: held ⇒ nothing written over the file */
   _persist({ now = false } = {}) {
     if (!this._hold.writable('a forward change')) return;
     try {
       const W = this._writer(), json = JSON.stringify(this._state, null, 2);
-      if (json === this._asked && !W.pending(this.file)) return;
+      if (json === this._asked && !(now && W.pending(this.file))) return;   // r4827: unchanged — nothing asked (a person's act still lands what is owed)
       W.dirty(this.file, { name: 'port-forwards.write', produce: () => {
         const j = JSON.stringify(this._state, null, 2); this._asked = j; return j;
       } });
@@ -341,20 +343,20 @@ class PortForwardManager {
 
   /** User override of the detected protocol ('http'|'https'|'tcp'|null=auto).
    *  A published forward is transparently re-published in the new mode. */
-  async setProtoOverride(id, proto) {
+  async setProtoOverride(id, proto, { now = false } = {}) {
     this._hold.refuse("changing a forward's protocol");   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
     if (proto !== null && !['http', 'https', 'tcp'].includes(proto)) throw new Error('proto must be http, https, tcp or null (auto)');
     if (proto) rec.protoOverride = proto; else delete rec.protoOverride;
-    this._persist({ now: true });
+    this._persist({ now });
     if (rec.publicUrl && this.plugins) {
       // re-publish in the new mode — the URL SHAPE changes (subdomain vs
       // ip:port), so the old proxy must go first; keep the stored subdomain
       // so flipping back to http restores the same public URL
       try { await this.plugins.frpUnpublish(rec.publicName || rec.id); } catch { }
       rec.publicUrl = null;
-      try { await this.publish(id); } catch (e) { rec.error = 'republish: ' + e.message; this._persist({ now: true }); }
+      try { await this.publish(id, { now }); } catch (e) { rec.error = 'republish: ' + e.message; this._persist({ now }); }
     }
     this._emit();
     return this.list().find((r) => r.id === id);
@@ -570,7 +572,7 @@ class PortForwardManager {
 
   /** Start a forward (idempotent by hostId+remotePort). Binds a local port and
    *  pipes each connection into device.tcpForward(remotePort). */
-  async forward(hostId, remotePort, { label = '', targetHost = '', owner = null, claim = null, reown = null } = {}) {
+  async forward(hostId, remotePort, { label = '', targetHost = '', owner = null, claim = null, reown = null, now = false } = {}) {
     this._hold.refuse('adding a forward');   // r3009: held — refused by name, nothing written
     remotePort = Number(remotePort);
     if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535) throw new Error('invalid remote port');
@@ -587,20 +589,20 @@ class PortForwardManager {
     // a row of ANOTHER job: refused — unless the engine names that job as no longer asking for it (`reown`: removed, stopped)
     if (owner && rec && rec.ownerJob && rec.ownerJob !== owner) {
       if (!reown || rec.ownerJob !== reown) throw Object.assign(new Error(`port ${remotePort} is forwarded for another service`), { code: 'forward_owned', status: 409 });
-      rec.ownerJob = owner; this._persist({ now: true });
+      rec.ownerJob = owner; this._persist({ now });
     }
     if (owner && rec && !rec.ownerJob) {
       if (!(Array.isArray(claim) && claim.includes(rec.label))) throw Object.assign(new Error(`port ${remotePort} is already forwarded in the Ports panel by hand — that forward is not this service's: publish it there, or remove it and start the service again`), { code: 'forward_not_owned', status: 409 });
-      rec.ownerJob = owner; this._persist({ now: true });
+      rec.ownerJob = owner; this._persist({ now });
     }
     if (!rec) {
       rec = { id: 'pf-' + hostId + '-' + key.replace(/[^\w.-]/g, '_'), hostId, remotePort, label, ...(isLan ? { targetHost } : {}), ...(owner ? { ownerJob: owner } : {}) };
       // a stopped service's forward left its public name behind (unforward keepName) — its next start gets it back
       const kept = this._state.names && this._state.names[rec.id];
       if (kept) { rec.publicSub = kept.sub || null; rec.publicPort = kept.port || null; if (kept.proto) rec.proto = kept.proto; delete this._state.names[rec.id]; }
-      this._state.forwards.push(rec); this._persist({ now: true });
+      this._state.forwards.push(rec); this._persist({ now });
     }
-    else if (label && rec.label !== label) { rec.label = label; this._persist({ now: true }); }   // B-574d (r4796 (b)): a service's restart names the same label — nothing to write
+    else if (label && rec.label !== label) { rec.label = label; this._persist({ now }); }   // B-574d (r4796 (b)): a service's restart names the same label — nothing to write
     await this._start(rec);
     this._probeForward(rec);
     this._emit();
@@ -674,7 +676,7 @@ class PortForwardManager {
   }
 
   /** Tear down a forward and forget it. */
-  async unforward(id, { keepName = false } = {}) {
+  async unforward(id, { keepName = false, now = false } = {}) {
     this._hold.refuse('removing a forward');   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     // keepName = a Background Work service stopping: its public name waits for the next start (forward() restores it)
@@ -691,7 +693,7 @@ class PortForwardManager {
     this._healRetryAt.delete(id);
     this._pubGen.delete(id); this._relayUnanswered.delete(id);   // r3327: the row leaves — its marks with it
     this._state.forwards = this._state.forwards.filter((r) => r.id !== id);
-    this._persist({ now: true });
+    this._persist({ now });
     this._emit();
   }
 
@@ -699,7 +701,7 @@ class PortForwardManager {
    *  opts.sub = a user-CHOSEN fixed subdomain (2.358.0 — frps routes any
    *  name under subDomainHost; persisted, so it survives restarts like the
    *  broker-assigned ones; a taken name fails loudly at the relay). */
-  async publish(id, { sub } = {}) {
+  async publish(id, { sub, now = false } = {}) {
     this._hold.refuse('publishing a forward');   // r3009: held — refused by name, nothing written
     if (!this.plugins) throw new Error('public URLs are not available on this instance');
     const rec = this._state.forwards.find((r) => r.id === id);
@@ -719,7 +721,7 @@ class PortForwardManager {
     if (d.why === 'probe' && r.proto) rec.proto = r.proto; // publish probe refreshes detection
     if (d.pending) rec.protoPending = true; else delete rec.protoPending;
     this.log(`[ports] publish ${id}: ${r.proto || d.proto} (${d.why}) → ${r.url}`);
-    this._persist({ now: true }); this._emit();
+    this._persist({ now }); this._emit();
     return { publicUrl: r.url, proto: r.proto || d.proto, pending: !!d.pending, previousUrl };
   }
 
@@ -742,7 +744,7 @@ class PortForwardManager {
 
   /** Take a forward's public URL down. An EXPLICIT unpublish (the user, the API) is the one act that forgets the public
    *  name (lane job-publish-stable); keepName = a stopping service, whose next start publishes the same name again. */
-  async unpublish(id, { keepName = false } = {}) {
+  async unpublish(id, { keepName = false, now = false } = {}) {
     this._hold.refuse('unpublishing a forward');   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) return;
@@ -756,7 +758,7 @@ class PortForwardManager {
     rec.publicUrl = null; rec.publicName = null; delete rec.protoPending;
     if (!keepName) { rec.publicSub = null; rec.publicPort = null; rec.publicProto = null; if (this._state.names) delete this._state.names[id]; }
     this._published.delete(id);
-    this._persist({ now: true }); this._emit();
+    this._persist({ now }); this._emit();
   }
 
   /** Mount a forward under the MAIN domain at /svc/<name>/ (2.358.0, owner
@@ -764,11 +766,11 @@ class PortForwardManager {
    *  local port per request, so mounts survive restarts with zero
    *  re-establishment — and they sit behind VibeSpace auth (a feature the
    *  public frp URL deliberately lacks). name=null unmounts. */
-  setPathMount(id, name, { public: pub } = {}) {
+  setPathMount(id, name, { public: pub, now = false } = {}) {
     this._hold.refuse("changing a forward's path");   // r3009: held — refused by name, nothing written
     const rec = this._state.forwards.find((r) => r.id === id);
     if (!rec) throw new Error('no such forward');
-    if (name === null || name === undefined || name === '') { rec.pathMount = null; rec.pathPublic = false; this._persist({ now: true }); this._emit(); return { pathMount: null }; }
+    if (name === null || name === undefined || name === '') { rec.pathMount = null; rec.pathPublic = false; this._persist({ now }); this._emit(); return { pathMount: null }; }
     name = String(name).toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) throw new Error('path name must be lowercase letters/digits/hyphens');
     const clash = this._state.forwards.find((r) => r.id !== id && r.pathMount === name);
@@ -782,7 +784,7 @@ class PortForwardManager {
     // DEFAULT stays private — exposure is an explicit act, never a side
     // effect of mounting. Re-posting the same name with a flag toggles it.
     if (pub !== undefined) rec.pathPublic = !!pub;
-    this._persist({ now: true }); this._emit();
+    this._persist({ now }); this._emit();
     return { pathMount: name, public: !!rec.pathPublic, url: `/svc/${name}/` };
   }
 
@@ -847,7 +849,7 @@ class PortForwardManager {
         if (rec.publicUrl && this.plugins) { this.plugins.frpUnpublish(rec.publicName || rec.id).catch(() => {}); }
       }
     }
-    this._persist({ now: true });   // B-574d (r4758): the start's replay lands at once
+    this._persist();   // B-574d (r4827): the boot's replay rides the writer (no person asked it)
     this._emit();
     this._replayed = true;   // r3287: the replay ENDED (each relay call bounded) — the gate the jobs reconcile waits for
     await this._jobsReconcile('the replay');   // r3228: after the replay settled — the jobs engine's ONE reconcile (at every start, after every lift)
@@ -918,7 +920,7 @@ class PortForwardManager {
       this._pubGen.delete(rec.id); this._relayUnanswered.delete(rec.id);   // r3327
     }
     this._state.forwards = this._state.forwards.filter((r) => r.hostId !== hostId);
-    this._persist({ now: true });
+    this._persist();   // B-574d (r4827): an unpair's own road (no Ports press) rides the writer
     this._emit();
   }
 }

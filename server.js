@@ -1142,22 +1142,22 @@ app.post('/api/machine-mounts/:hostId', async (req, res) => {
   try {
     const b = req.body || {};
     if (b.dir === 'pull') {
-      res.json(await machineMounts.mountPull(req.params.hostId, { remotePath: b.remotePath, mountpoint: b.mountpoint }));
+      res.json(await machineMounts.mountPull(req.params.hostId, { remotePath: b.remotePath, mountpoint: b.mountpoint, now: true }));
     } else {
       // PRIMARY transport = the agentd tunnel (inside mountPush — no public
       // address needed). The request-derived URL is only the last-resort
       // fallback for hosts without the device agent.
       let pub = b.publicUrl ? String(b.publicUrl) : null;
       if (!pub) pub = require('./src/write-origin.js').ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }) || null; // the request's own origin: THE one rule
-      res.json(await machineMounts.mountPush(req.params.hostId, { folder: b.folder, mode: b.mode, mountpoint: b.mountpoint, publicUrlFallback: pub }));
+      res.json(await machineMounts.mountPush(req.params.hostId, { folder: b.folder, mode: b.mode, mountpoint: b.mountpoint, publicUrlFallback: pub, now: true }));
     }
   } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }
 });
 app.delete('/api/machine-mounts/:id', async (req, res) => {
-  try { res.json(await machineMounts.unmount(String(req.params.id))); } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }
+  try { res.json(await machineMounts.unmount(String(req.params.id), { now: true })); } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }
 });
 app.post('/api/machine-mounts/:id/remount', async (req, res) => {
-  try { res.json(await machineMounts.remount(String(req.params.id))); } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }
+  try { res.json(await machineMounts.remount(String(req.params.id), { now: true })); } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ ...require('./src/mount-error-words.js').errorBody(e), ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }
 });
 
 // ── Port forwarding (B-0b60, tunnel path): expose a machine's loopback
@@ -1182,28 +1182,28 @@ app.get('/api/hosts/:id/ports', async (req, res) => {
 app.post('/api/hosts/:id/port-forward', async (req, res) => {
   try {
     const b = req.body || {};
-    res.json(await portForwards.forward(req.params.id, b.port, { label: b.label || '', targetHost: b.targetHost || '' }));
+    res.json(await portForwards.forward(req.params.id, b.port, { label: b.label || '', targetHost: b.targetHost || '', now: true }));
   } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 app.delete('/api/port-forward/:id', async (req, res) => {
-  try { await portForwards.unforward(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
+  try { await portForwards.unforward(String(req.params.id), { now: true }); res.json({ ok: true }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 // public exposure (frp relay) — publish/unpublish a forward; body.sub = a
 // user-chosen FIXED subdomain (2.358.0; blank keeps prior/random)
 app.post('/api/port-forward/:id/publish', async (req, res) => {
-  try { res.json(await portForwards.publish(String(req.params.id), { sub: (req.body || {}).sub })); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it); r3174: the store's own status (503 while the list is held)
+  try { res.json(await portForwards.publish(String(req.params.id), { sub: (req.body || {}).sub, now: true })); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code (the page words it); r3174: the store's own status (503 while the list is held)
 });
 app.delete('/api/port-forward/:id/publish', async (req, res) => {
-  try { await portForwards.unpublish(String(req.params.id)); res.json({ ok: true }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code; r3174: the store's own status (503 while the list is held)
+  try { await portForwards.unpublish(String(req.params.id), { now: true }); res.json({ ok: true }); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-1217: the relay's code; r3174: the store's own status (503 while the list is held)
 });
 // main-domain PATH mount (2.358.0): /svc/<name>/ → the forward. body.public
 // (2.359.0) = shareable WITHOUT login; default private, auth enforced
 // per-mount inside path-mounts (the /svc prefix is middleware-exempt).
 app.post('/api/port-forward/:id/path', (req, res) => {
-  try { res.json(portForwards.setPathMount(String(req.params.id), (req.body || {}).name ?? null, { public: (req.body || {}).public })); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
+  try { res.json(portForwards.setPathMount(String(req.params.id), (req.body || {}).name ?? null, { public: (req.body || {}).public, now: true })); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 app.delete('/api/port-forward/:id/path', (req, res) => {
-  try { res.json(portForwards.setPathMount(String(req.params.id), null)); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
+  try { res.json(portForwards.setPathMount(String(req.params.id), null, { now: true })); } catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 const pathMounts = require('./src/server/path-mounts.js').create({ getPortForwards: () => portForwards, requestAuthed: (req) => auth.requestAuthed(req) });
 app.use('/svc', pathMounts.handler);
@@ -1215,7 +1215,7 @@ publishedPages.registerRoutes(app); // 2.364.0 published pages (/p/<id> + /api/p
 // protocol override: {proto: 'http'|'https'|'tcp'|null} (null = back to auto);
 // a published forward is transparently re-published in the new mode
 app.post('/api/port-forward/:id/proto', async (req, res) => {
-  try { res.json(await portForwards.setProtoOverride(String(req.params.id), (req.body || {}).proto ?? null)); }
+  try { res.json(await portForwards.setProtoOverride(String(req.params.id), (req.body || {}).proto ?? null, { now: true })); }
   catch (e) { res.status(e.status || 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}) }); }
 });
 // Kill a LOCAL orphaned listener (B-16d9): killOrphan re-verifies the
