@@ -467,7 +467,7 @@ const DELETION_CALLS = Object.freeze({
   'src/app-secrets.js': 1, 'src/app-serve.js': 8, 'src/app-system-serve.js': 1, 'src/browser-facts.js': 1,
   'src/browser-serve.js': 4, 'src/channel-outbox-files.js': 1, 'src/channel-store.js': 9, 'src/claude-oat-probe.js': 8,
   'src/design-fs.js': 1, 'src/desktop-display.js': 1, 'src/desktop-mic.js': 3, 'src/desktop-serve.js': 7,
-  'src/exit-proxy.js': 2, 'src/fd-close.js': 2,   /* r4938 (lane nl-journals): + the temp removed on a failed rename */ 'src/fixture-ledger-purge.js': 1, 'src/gmail-sync.js': 1, 'src/harness-config.js': 2,   // fd-close (B-bcb8 unit B, r4474): renameSynced removes ITS OWN temp after a failed write — no store's remover
+  'src/exit-proxy.js': 2, 'src/fd-close.js': 4,   /* r4938 (lane nl-journals): + the temp removed on a failed rename */ 'src/fixture-ledger-purge.js': 1, 'src/gmail-sync.js': 1, 'src/harness-config.js': 2,   // fd-close (B-bcb8 unit B, r4474): renameSynced removes ITS OWN temp after a failed write — no store's remover   // fd-close +2 (B-574d «usage-readings», r5075 (C)): its asynchronous twin renameSyncedAsync removes its own temp after a failed write and after a failed rename — no store's remover
   'src/harnesses/antigravity.js': 3, 'src/harnesses/claude-home.js': 1, 'src/harnesses/codex.js': 1, 'src/host-keys.js': 1,
   'src/hosts.js': 9, 'src/interface/main.js': 2, 'src/job-logs-sweep-worker.js': 11, 'src/jobs.js': 4,   // hosts.js +1 (B-323e's remainder, lane nl-starts): the bundle stage's late removal past the tar's bound — a temp folder, no store   // jobs.js +1 (B-91aa's remainder, r4591): a FAILED START's own spec, removed off the loop — no store's remover
   'src/kept-copies.js': 2, 'src/machine-probes.js': 2, 'src/mounts.js': 5, 'src/node-runtime.js': 3,
