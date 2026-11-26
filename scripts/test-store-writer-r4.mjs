@@ -32,7 +32,7 @@ import os from 'node:os';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;   // skipped: r5135 law 1's named skips (⑫: a plant never read)
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
@@ -693,10 +693,15 @@ parentPort.on('message', (m) => {
 //       ONE line is said over all of them, in the hub door's spelling; (b) ten durable() writes (the message's road alone); (c) the same
 //       code at the append, the pieces, the rewrite (its temp; its folder's sync — the let-be codes landed and named, ENOSYS there still
 //       ERENAMEDNOSYNC, as before), and the main-thread road (one line); (d) a placed EIO / EROFS at the same sync is still a FAILED
-//       write (the old bytes, owed, «not written (EIO; attempt 1)», no no-sync line); (e) a WRITE's own EINVAL is never judged by the set.
+//       write (the old bytes, owed, «not written (EIO; attempt 1)», no no-sync line); (e) a WRITE's own EINVAL is never judged by the set;
+//   (f) ONE CONSTANT, proven: a code added to the hub door's Set in this process lands on the writer too (a list of its own would not);
+//   (g) the WAITED road's failure (a flushed EIO) says no no-sync line; (h) a write IN PIECES through the thread lands, said once;
+//   (i) a placed EIO at the sync, a write's own EINVAL and a close's EIO FAIL on the append, the pieces and the rewrite too (the old
+//   bytes); (j) the rewrite's folder: EACCES at its open and EISDIR at its sync stay let be and SILENT, as before.
 //   REDS (anchored copies): the base's law (every refused sync a failed write: nothing lands); the said-once flag cut (said at every
 //   write); the cells' reading cut (the waited road says nothing); every code let through (EIO lands); the write's own error judged
-//   by the set (the write's EINVAL lands).
+//   by the set (the write's EINVAL lands); a list of its own; the waited road's failure guard cut; the pieces road's code dropped; every
+//   folder let-be code named.
 console.log('⑫ r5010 — a sync the file system does not do lands, said once a writer; any other failed sync, and a write\'s own error, is a failed write');
 await (async () => {
   const { anchored } = await import('./scratch.mjs');
@@ -714,10 +719,13 @@ await (async () => {
 const fs = require('fs'), P = require('path');
 const at = new Map();
 const cfgOf = (dir) => { try { return JSON.parse(fs.readFileSync(P.join(dir, 'place.json'), 'utf8')); } catch { return null; } };
-const placed = (fd, kind) => { const w = at.get(fd); if (!w) return null; const c = cfgOf(w.dir ? w.p : P.dirname(w.p)); return c && c.at === kind ? c.code : null; };
+// r5135 law 1: every refusal FIRED is recorded in its folder's «hits» (the witness that the product read the plant)
+const hit = (dir, kind, code) => { try { fs.appendFileSync(P.join(dir, 'hits'), kind + ' ' + code + '\\n'); } catch { } };
+const placed = (fd, kind) => { const w = at.get(fd); if (!w) return null; const dir = w.dir ? w.p : P.dirname(w.p), c = cfgOf(dir); if (c && c.at === kind) { hit(dir, kind, c.code); return c.code; } return null; };
 module.exports = { ...fs,
-  openSync(p, ...a) { const fd = fs.openSync(p, ...a); let dir = false; try { dir = fs.fstatSync(fd).isDirectory(); } catch { } at.set(fd, { p: String(p), dir }); return fd; },
-  closeSync(fd) { at.delete(fd); return fs.closeSync(fd); },
+  openSync(p, ...a) { let isDir = false; try { isDir = fs.statSync(p).isDirectory(); } catch { } if (isDir) { const c = cfgOf(String(p)); if (c && c.at === 'diropen') { hit(String(p), 'diropen', c.code); } if (c && c.at === 'diropen') throw Object.assign(new Error('placed: the folder refused'), { code: c.code }); }
+    const fd = fs.openSync(p, ...a); let dir = false; try { dir = fs.fstatSync(fd).isDirectory(); } catch { } at.set(fd, { p: String(p), dir }); return fd; },
+  closeSync(fd) { const c = placed(fd, 'close'); at.delete(fd); fs.closeSync(fd); if (c) throw Object.assign(new Error('placed: the close refused'), { code: c }); },
   writeSync(fd, ...a) { const c = placed(fd, 'write'); if (c) throw Object.assign(new Error('placed: the write refused'), { code: c }); return fs.writeSync(fd, ...a); },
   fsyncSync(fd) { const w = at.get(fd); const c = placed(fd, w && w.dir ? 'dir' : 'file'); if (c) throw Object.assign(new Error('placed: the sync refused'), { code: c }); return fs.fsyncSync(fd); },
 };
@@ -732,15 +740,29 @@ require(${JSON.stringify(wkPath)}).serve(parentPort, new Int32Array(workerData.s
     const M = mutantCopies('store-r4-nosync', REPO);
     const UNSYNCED = "const unsynced = (e) => { if (!e || !SYNC_UNSUPPORTED.has(e.code)) throw e; return e.code; };";
     const WHOLE = 'try { writeAll(fs, fd, m.parts); try { fs.fsyncSync(fd); } catch (e) { noSync = unsynced(e); } } catch (e) { err = e; }';
-    const STAND = standIn(path.join(REPO, 'src/store-writer-worker.js'), 'real');
+    // the real worker's path held apart from the stand-in's name (test-architecture §51 reads a name built from the tree's src/ path as a
+    // write target wherever that name is written to — ⑪'s own STAND is one)
+    const WK_PATH = require.resolve(path.join(REPO, 'src/store-writer-worker.js')), TH_REAL = standIn(WK_PATH, 'real');
     const STAND_BASE = standIn(M.write('src/store-writer-worker.js', anchored(wsrc, UNSYNCED, 'const unsynced = (e) => { throw e; };', 'the base\'s law: every refused sync a failed write'), 'base-law'), 'base-law');
     const STAND_ALL = standIn(M.write('src/store-writer-worker.js', anchored(wsrc, UNSYNCED, 'const unsynced = (e) => { if (!e) throw e; return e.code || \'EIO\'; };', 'every code let through'), 'all-through'), 'all-through');
     const STAND_WRITE = standIn(M.write('src/store-writer-worker.js', anchored(wsrc, WHOLE, 'try { writeAll(fs, fd, m.parts); fs.fsyncSync(fd); } catch (e) { try { noSync = unsynced(e); } catch { err = e; } }', 'the write\'s own error judged by the set'), 'write-judged'), 'write-judged');
     const SW_EVERY = M.load('src/store-writer.js', anchored(swsrc, '    if (!code || noSyncSaid) return;\n', '    if (!code) return;\n', 'the said-once flag cut'), 'every');
+    const SW_NOGUARD = M.load('src/store-writer.js', anchored(swsrc, '    if (s && Atomics.load(S, 2) !== 2 && Atomics.load(S, 3) > 0) noSyncSeen(', '    if (s && Atomics.load(S, 3) > 0) noSyncSeen(', 'the waited road\'s failure guard cut'), 'noguard');
+    const WK_OWNLIST = M.load('src/store-writer-worker.js', anchored(wsrc, "const { SYNC_UNSUPPORTED } = require('./fd-close.js');", "const SYNC_UNSUPPORTED = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);", 'a list of its own'), 'own-list');
+    const WK_ALLDIR = M.load('src/store-writer-worker.js', anchored(wsrc, 'after = e; else if (SYNC_UNSUPPORTED.has(e.code)) noSync = noSync || e.code; }\n  if (dfd != null)', 'after = e; else noSync = noSync || e.code; }\n  if (dfd != null)', 'every folder let-be code named'), 'all-dir');
+    const STAND_NOPIECE = standIn(M.write('src/store-writer-worker.js', anchored(wsrc, ', noSync: cur.err ? null : (cur.noSync || null) } };', ' } };', 'the pieces road\'s code dropped'), 'no-piece'), 'no-piece');
     const SW_NOCELL = M.load('src/store-writer.js', anchored(swsrc, "    if (s && Atomics.load(S, 2) !== 2 && Atomics.load(S, 3) > 0) noSyncSeen(s, jobErrorCode(l));   // r5010: a LANDED job's no-sync code rides the same cells\n", '', 'the cells\' reading cut'), 'nocell');
     let nDir = 0;
     const folder = (code, kind = 'file', bytes = '{"v":0}') => { const d = path.join(T12, `d${++nDir}`); fs.mkdirSync(d); if (code) fs.writeFileSync(path.join(d, 'place.json'), JSON.stringify({ code, at: kind })); const f = path.join(d, 'store.json'); fs.writeFileSync(f, bytes); return { d, f }; };
     const sink = () => { const lines = []; return { lines, log: { warn: (l) => lines.push(String(l)), log: () => { }, error: () => { } } }; };
+    // r5135 LAW 1: a leg or a control is JUDGED only when every folder it planted recorded a refusal its product read (the witness);
+    // a plant never read is a NAMED SKIP («⊘ SKIP: …», counted in the closing line) — never a ✓ and never a ✗
+    const hitsOf = (d) => { try { return fs.readFileSync(path.join(d, 'hits'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+    const judged = (dirs, cond, name, detail) => {
+      const unread = (dirs || []).filter((d) => !hitsOf(d));
+      if (!dirs || !dirs.length || unread.length) { skipped++; console.log(`  ⊘ SKIP: ${name} — its plant was never read (${unread.length} of ${(dirs || []).length} placed folder(s)): not judged`); return; }
+      ok(cond, name, detail);
+    };
     const noSyncOf = (lines) => lines.filter((l) => / its file system does not do a sync \(/.test(l));
     const wordsOf = (name, code) => `[store-write] ${FC.syncUnsupportedWords(name, code)} (said once: every later write of this writer whose sync is refused so lands the same way)`;
     const temps = (d) => fs.readdirSync(d).filter((n) => n.includes('.tmp-'));
@@ -755,27 +777,27 @@ require(${JSON.stringify(wkPath)}).serve(parentPort, new Int32Array(workerData.s
         for (v = 2; v <= 10; v++) { w.dirty(A.f, { name: 'a.write', produce: () => JSON.stringify({ v }), debounceMs: 0 }); landed.push(await w.durable(A.f, { timeoutMs: 8000 })); }
         w.dirty(B.f, { name: 'b.write', produce: () => '{"b":1}', debounceMs: 0 }); const bLanded = await w.durable(B.f, { timeoutMs: 8000 });
         await new Promise((r) => setTimeout(r, 30));   // the flushed job's own message is read too: it says nothing more
-        return { warmed, written: (r0 && r0.written) || [], atOnce, first, landed, bLanded, bytes: fs.readFileSync(A.f, 'utf8'), bBytes: fs.readFileSync(B.f, 'utf8'), owed: !!(w.pending(A.f) || w.pending(B.f)), left: temps(A.d).concat(temps(B.d)), said: noSyncOf(lines) };
+        return { warmed, written: (r0 && r0.written) || [], atOnce, first, landed, bLanded, bytes: fs.readFileSync(A.f, 'utf8'), bBytes: fs.readFileSync(B.f, 'utf8'), owed: !!(w.pending(A.f) || w.pending(B.f)), left: temps(A.d).concat(temps(B.d)), said: noSyncOf(lines), dirs: [A.d, B.d] };
       } finally { try { w.stop(); } catch { } }
     };
     const tenOk = (r, code) => r.warmed === true && r.written.includes('a.write') && r.first === '{"v":1}' && r.atOnce === 1 && r.landed.length === 9 && r.landed.every((x) => x === true)
       && r.bLanded === true && r.bytes === '{"v":10}' && r.bBytes === '{"b":1}' && !r.owed && !r.left.length && r.said.length === 1 && r.said[0] === wordsOf('a.write', code);
     const msgRoad = async (code) => {
-      const { lines, log } = sink(), w = SW.create({ log, workerPath: STAND }), A = folder(code);
+      const { lines, log } = sink(), w = SW.create({ log, workerPath: TH_REAL }), A = folder(code);
       try { const landed = []; for (let v = 1; v <= 10; v++) { w.dirty(A.f, { name: 'm.write', produce: () => JSON.stringify({ v }), debounceMs: 0 }); landed.push(await w.durable(A.f, { timeoutMs: 8000 })); }
-        return { landed, bytes: fs.readFileSync(A.f, 'utf8'), owed: !!w.pending(A.f), said: noSyncOf(lines) };
+        return { landed, bytes: fs.readFileSync(A.f, 'utf8'), owed: !!w.pending(A.f), said: noSyncOf(lines), dirs: [A.d] };
       } finally { try { w.stop(); } catch { } }
     };
     const mainRoad = async (code) => {
       const { lines, log } = sink(), w = SW.create({ log, fs: PL, workerPath: DIE, restartsMax: 0 }), A = folder(code);
       try { const landed = []; for (let v = 1; v <= 3; v++) { w.dirty(A.f, { name: 'main.write', produce: () => JSON.stringify({ v }), debounceMs: 0 }); landed.push(await w.durable(A.f, { timeoutMs: 8000 })); }
-        return { landed, bytes: fs.readFileSync(A.f, 'utf8'), said: noSyncOf(lines), mode: w.mode ? w.mode() : null };
+        return { landed, bytes: fs.readFileSync(A.f, 'utf8'), said: noSyncOf(lines), mode: w.mode ? w.mode() : null, dirs: [A.d] };
       } finally { try { w.stop(); } catch { } }
     };
     const failRoad = async (stand, code, kind = 'file') => {
       const { lines, log } = sink(), w = SW.create({ log, workerPath: stand }), A = folder(code, kind);
       try { w.dirty(A.f, { name: 'f.write', produce: () => '{"v":1}', debounceMs: 0 }); const landed = await w.durable(A.f, { timeoutMs: 8000 });
-        return { landed, bytes: fs.readFileSync(A.f, 'utf8'), owed: !!w.pending(A.f), left: temps(A.d), said: noSyncOf(lines), failed: lines.filter((l) => l.startsWith(`[store-write] f.write not written (${code}; attempt 1) — kept in memory`)).length };
+        return { landed, bytes: fs.readFileSync(A.f, 'utf8'), owed: !!w.pending(A.f), left: temps(A.d), said: noSyncOf(lines), failed: lines.filter((l) => l.startsWith(`[store-write] f.write not written (${code}; attempt 1) — kept in memory`)).length, dirs: [A.d] };
       } finally { try { w.stop(); } catch { } }
     };
     const failOk = (r) => r.landed === false && r.bytes === '{"v":0}' && r.owed && !r.left.length && !r.said.length && r.failed === 1;
@@ -784,32 +806,76 @@ require(${JSON.stringify(wkPath)}).serve(parentPort, new Int32Array(workerData.s
       const run = (f) => { try { return { r: f(), e: null }; } catch (e) { return { r: null, e: e && e.code }; } };
       const ap = folder(code, 'file', 'x\n'), a = run(() => W0.writeJob({ file: ap.f, parts: SW.partsOf({ append: 'y\n' }).parts, append: true }, PL));
       const pc = folder(code), p = run(() => W0.pieceJob({ id: 1, first: true, last: true, file: pc.f, tmp: pc.f + '.tmp-p', parts: ['{"p":1}'] }, null, PL));
-      const rwOf = (kind) => { const s = folder(code, kind, 'a1\nb22\n'), pr = SW.partsOf({ rewrite: { ranges: Float64Array.from([0, 3]), size: 7 }, then: 'F6\n' }); return { ...run(() => W0.writeJob({ file: s.f, tmp: s.f + '.tmp-r', parts: pr.parts, append: false, rewrite: pr.rewrite }, PL)), bytes: fs.readFileSync(s.f, 'utf8'), left: temps(s.d) }; };
-      return { append: { ...a, bytes: fs.readFileSync(ap.f, 'utf8') }, pieces: { ...p, bytes: fs.readFileSync(pc.f, 'utf8'), left: temps(pc.d) }, rewrite: rwOf('file'), folder: rwOf('dir') };
+      const rwOf = (kind) => { const s = folder(code, kind, 'a1\nb22\n'), pr = SW.partsOf({ rewrite: { ranges: Float64Array.from([0, 3]), size: 7 }, then: 'F6\n' }); return { ...run(() => W0.writeJob({ file: s.f, tmp: s.f + '.tmp-r', parts: pr.parts, append: false, rewrite: pr.rewrite }, PL)), bytes: fs.readFileSync(s.f, 'utf8'), left: temps(s.d), d: s.d }; };
+      const rw1 = rwOf('file'), rw2 = rwOf('dir');
+      return { append: { ...a, bytes: fs.readFileSync(ap.f, 'utf8') }, pieces: { ...p, bytes: fs.readFileSync(pc.f, 'utf8'), left: temps(pc.d) }, rewrite: rw1, folder: rw2, dirs: [ap.d, pc.d, rw1.d, rw2.d] };
     };
     const roadsOk = (o, code) => !o.append.e && o.append.r && o.append.r.noSync === code && o.append.bytes === 'x\ny\n'
       && !o.pieces.e && o.pieces.r && o.pieces.r.done && !o.pieces.r.done.err && o.pieces.r.done.noSync === code && o.pieces.bytes === '{"p":1}' && !o.pieces.left.length
       && !o.rewrite.e && o.rewrite.r && o.rewrite.r.noSync === code && o.rewrite.bytes === 'a1\nF6\n' && !o.rewrite.left.length
       && (LET_BE.includes(code) ? !o.folder.e && o.folder.r && o.folder.r.noSync === code : o.folder.e === 'ERENAMEDNOSYNC') && o.folder.bytes === 'a1\nF6\n';
-    const per = await Promise.all(CODES.map(async (code) => ({ code, ten: await tenWrites(SW, STAND, code), msg: await msgRoad(code), main: await mainRoad(code), roads: roads(WK, code) })));
+    const per = await Promise.all(CODES.map(async (code) => ({ code, ten: await tenWrites(SW, TH_REAL, code), msg: await msgRoad(code), main: await mainRoad(code), roads: roads(WK, code) })));
     for (const { code, ten, msg, main, roads: o } of per) {
-      ok(tenOk(ten, code), `⑫ (a) ${code}: ten writes of a store (the first by a synchronous flush, said from the cells before a turn of the loop: ${ten.atOnce}) and a second store's — every one landed, nothing owed, no temp left, ONE line («${(ten.said[0] || '').slice(0, 120)}»)`, ten);
-      ok(msg.landed.length === 10 && msg.landed.every((x) => x === true) && msg.bytes === '{"v":10}' && !msg.owed && msg.said.length === 1 && msg.said[0] === wordsOf('m.write', code), `⑫ (b) ${code}: ten durable() writes — the message's road says it once (${msg.said.length})`, msg);
-      ok(roadsOk(o, code), `⑫ (c) ${code}: the append, the pieces and the rewrite's temp land with the code in their answer; the rewrite's folder sync ${LET_BE.includes(code) ? 'lets it be and names it' : 'is ERENAMEDNOSYNC as before (not its let-be code)'}`, o);
-      ok(main.mode === 'main' && main.landed.every((x) => x === true) && main.bytes === '{"v":3}' && main.said.length === 1 && main.said[0] === wordsOf('main.write', code), `⑫ (c) ${code}: the main-thread road (its thread gone) lands and says it once`, main);
+      judged(ten.dirs, tenOk(ten, code), `⑫ (a) ${code}: ten writes of a store (the first by a synchronous flush, said from the cells before a turn of the loop: ${ten.atOnce}) and a second store's — every one landed, nothing owed, no temp left, ONE line («${(ten.said[0] || '').slice(0, 120)}»)`, ten);
+      judged(msg.dirs, msg.landed.length === 10 && msg.landed.every((x) => x === true) && msg.bytes === '{"v":10}' && !msg.owed && msg.said.length === 1 && msg.said[0] === wordsOf('m.write', code), `⑫ (b) ${code}: ten durable() writes — the message's road says it once (${msg.said.length})`, msg);
+      judged(o.dirs, roadsOk(o, code), `⑫ (c) ${code}: the append, the pieces and the rewrite's temp land with the code in their answer; the rewrite's folder sync ${LET_BE.includes(code) ? 'lets it be and names it' : 'is ERENAMEDNOSYNC as before (not its let-be code)'}`, o);
+      judged(main.dirs, main.mode === 'main' && main.landed.every((x) => x === true) && main.bytes === '{"v":3}' && main.said.length === 1 && main.said[0] === wordsOf('main.write', code), `⑫ (c) ${code}: the main-thread road (its thread gone) lands and says it once`, main);
     }
-    const [eio, erofs, wInval] = await Promise.all([failRoad(STAND, 'EIO'), failRoad(STAND, 'EROFS'), failRoad(STAND, 'EINVAL', 'write')]);
-    ok(failOk(eio) && failOk(erofs), `⑫ (d) a placed EIO / EROFS at the same sync is still a FAILED write: the old bytes, owed, «not written (code; attempt 1)», no no-sync line`, { eio, erofs });
-    ok(failOk(wInval), `⑫ (e) a WRITE's own EINVAL is never judged by the set: a failed write`, wInval);
+    const [eio, erofs, wInval] = await Promise.all([failRoad(TH_REAL, 'EIO'), failRoad(TH_REAL, 'EROFS'), failRoad(TH_REAL, 'EINVAL', 'write')]);
+    judged([...eio.dirs, ...erofs.dirs], failOk(eio) && failOk(erofs), `⑫ (d) a placed EIO / EROFS at the same sync is still a FAILED write: the old bytes, owed, «not written (code; attempt 1)», no no-sync line`, { eio, erofs });
+    judged(wInval.dirs, failOk(wInval), `⑫ (e) a WRITE's own EINVAL is never judged by the set: a failed write`, wInval);
+    // (f) ONE CONSTANT, proven: a code added to the hub door's own Set (this process's fd-close module) lands on the writer's road too
+    const efake = (W0) => { const s = folder('EFAKE'); FC.SYNC_UNSUPPORTED.add('EFAKE'); try { let r = null, e = null; try { r = W0.writeJob({ file: s.f, tmp: s.f + '.tmp-f', parts: ['{"f":1}'] }, PL); } catch (x) { e = x.code; } return { r, e, bytes: fs.readFileSync(s.f, 'utf8'), dirs: [s.d] }; } finally { FC.SYNC_UNSUPPORTED.delete('EFAKE'); } };
+    const fk = efake(WK), fkRed = efake(WK_OWNLIST);
+    judged(fk.dirs, !fk.e && fk.r && fk.r.noSync === 'EFAKE' && fk.bytes === '{"f":1}' && !FC.SYNC_UNSUPPORTED.has('EFAKE'), `⑫ (f) ONE CONSTANT: a code added to the hub door's Set lands on the writer's road (${fk.r && fk.r.noSync})`, fk);
+    judged(fkRed.dirs, fkRed.e === 'EFAKE' && fkRed.bytes === '{"v":0}', `⑫ (f) RED (a list of its own): the added code FAILS there (${fkRed.e})`, fkRed);
+    // (g) the waited road's failure: a flushed EIO says its failure, never a no-sync line (the cells carry its error code)
+    const waitedFail = async (SWm) => {
+      const { lines, log } = sink(), w = SWm.create({ log, workerPath: TH_REAL }), warm = folder(null), A = folder('EIO');
+      try { w.dirty(warm.f, { name: 'warm.write', produce: () => '{"w":1}', debounceMs: 0 }); await w.durable(warm.f, { timeoutMs: 8000 });
+        w.dirty(A.f, { name: 'g.write', produce: () => '{"v":1}', debounceMs: 0 }); const r = w.flushSync([A.f]);
+        return { written: (r && r.written) || [], bytes: fs.readFileSync(A.f, 'utf8'), owed: !!w.pending(A.f), said: noSyncOf(lines), failed: lines.filter((l) => l.startsWith('[store-write] g.write not written (EIO; attempt 1)')).length, dirs: [A.d] };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const [wf, wfRed] = await Promise.all([waitedFail(SW), waitedFail(SW_NOGUARD)]);
+    judged(wf.dirs, !wf.written.includes('g.write') && wf.bytes === '{"v":0}' && wf.owed && !wf.said.length && wf.failed === 1, `⑫ (g) the waited road's failure (a flushed EIO): said as failed, no no-sync line`, wf);
+    judged(wfRed.dirs, wfRed.said.length === 1 && /\(EIO\)/.test(wfRed.said[0]), `⑫ (g) RED (the waited road's failure guard cut): a flushed EIO says «does not do a sync (EIO)» — a false line that spends the once`, wfRed.said);
+    // (h) a write IN PIECES through the thread (more than one piece's bytes, by reference)
+    const piecesRoad = async (stand) => {
+      const { lines, log } = sink(), w = SW.create({ log, workerPath: stand }), A = folder('ENOTSUP'), big = Buffer.alloc(SW.PIECE_BYTES + 1, 97);
+      try { w.dirty(A.f, { name: 'h.write', produce: () => SW.byRef([big]), debounceMs: 0, urgent: true }); const landed = await w.durable(A.f, { timeoutMs: 15000 });
+        return { landed, size: fs.statSync(A.f).size, owed: !!w.pending(A.f), left: temps(A.d), said: noSyncOf(lines), dirs: [A.d] };
+      } finally { try { w.stop(); } catch { } }
+    };
+    const [pr, prRed] = await Promise.all([piecesRoad(TH_REAL), piecesRoad(STAND_NOPIECE)]);
+    judged(pr.dirs, pr.landed === true && pr.size === SW.PIECE_BYTES + 1 && !pr.owed && !pr.left.length && pr.said.length === 1 && pr.said[0] === wordsOf('h.write', 'ENOTSUP'), `⑫ (h) a write in pieces through the thread: landed (${pr.size} bytes), said once`, pr);
+    judged(prRed.dirs, prRed.landed === true && !prRed.said.length, `⑫ (h) RED (the pieces road's code dropped): it lands but nothing is said (${prRed.said.length})`, prRed);
+    // (i) the failures at the other sites, called over the placed fs: a sync's EIO, a write's own EINVAL, a close's EIO
+    const failsAt = (code, kind) => {
+      const run = (f) => { try { const r = f(); return r && r.done ? (r.done.err ? r.done.err.code : null) : null; } catch (e) { return e && e.code; } };
+      const ap = folder(code, kind, 'x\n'), a = run(() => WK.writeJob({ file: ap.f, parts: SW.partsOf({ append: 'y\n' }).parts, append: true }, PL));
+      const pc = folder(code, kind), p = run(() => WK.pieceJob({ id: 1, first: true, last: true, file: pc.f, tmp: pc.f + '.tmp-p', parts: ['{"p":1}'] }, null, PL));
+      const rw = folder(code, kind, 'a1\nb22\n'), pr2 = SW.partsOf({ rewrite: { ranges: Float64Array.from([0, 3]), size: 7 }, then: 'F6\n' }), r = run(() => WK.writeJob({ file: rw.f, tmp: rw.f + '.tmp-r', parts: pr2.parts, append: false, rewrite: pr2.rewrite }, PL));
+      const wh = folder(code, kind), h = run(() => WK.writeJob({ file: wh.f, tmp: wh.f + '.tmp-w', parts: ['{"w":1}'] }, PL));
+      return { append: [a, fs.readFileSync(ap.f, 'utf8')], pieces: [p, fs.readFileSync(pc.f, 'utf8'), temps(pc.d).length], rewrite: [r, fs.readFileSync(rw.f, 'utf8')], whole: [h, fs.readFileSync(wh.f, 'utf8')], dirs: [ap.d, pc.d, rw.d, wh.d] };
+    };
+    const fat = [['EIO', 'file'], ['EINVAL', 'write'], ['EIO', 'close']].map(([c, k]) => ({ c, k, o: failsAt(c, k) }));
+    for (const { c, k, o } of fat) judged(o.dirs, o.append[0] === c && o.append[1] === (k === 'close' ? 'x\ny\n' : 'x\n') && o.pieces[0] === c && o.pieces[1] === '{"v":0}' && !o.pieces[2] && o.rewrite[0] === c && o.rewrite[1] === 'a1\nb22\n' && o.whole[0] === c && o.whole[1] === '{"v":0}',
+      `⑫ (i) a placed ${c} at the ${k === 'file' ? 'sync' : k}: a FAILED write on the append (truncated back; a close's error comes after the bytes, as before), the pieces (temp removed), the rewrite and the whole write — the old bytes each`, o);
+    // (j) the rewrite's folder: EACCES at its open, EISDIR at its sync — let be and SILENT, as before
+    const dirRoad = (W0, code, kind) => { const s = folder(code, kind, 'a1\nb22\n'), pr3 = SW.partsOf({ rewrite: { ranges: Float64Array.from([0, 3]), size: 7 }, then: 'F6\n' }); let r = null, e = null; try { r = W0.writeJob({ file: s.f, tmp: s.f + '.tmp-r', parts: pr3.parts, append: false, rewrite: pr3.rewrite }, PL); } catch (x) { e = x.code; } return { r: r || null, e, bytes: fs.readFileSync(s.f, 'utf8'), dirs: [s.d] }; };
+    const dj = [dirRoad(WK, 'EACCES', 'diropen'), dirRoad(WK, 'EISDIR', 'dir')], djRed = dirRoad(WK_ALLDIR, 'EACCES', 'diropen');
+    judged(dj.flatMap((x) => x.dirs), dj.every((x) => !x.e && x.r === null && x.bytes === 'a1\nF6\n'), `⑫ (j) the rewrite's folder: EACCES at its open and EISDIR at its sync — landed, let be, nothing named`, dj);
+    judged(djRed.dirs, !djRed.e && djRed.r && djRed.r.noSync === 'EACCES', `⑫ (j) RED (every folder let-be code named): EACCES would be said as «does not do a sync»`, djRed);
     // REDS
-    const [rBase, rEvery, rNoCell, rAll, rWrite] = await Promise.all([failRoad(STAND_BASE, 'EINVAL'), tenWrites(SW_EVERY, STAND, 'EINVAL'), tenWrites(SW_NOCELL, STAND, 'EINVAL'), failRoad(STAND_ALL, 'EIO'), failRoad(STAND_WRITE, 'EINVAL', 'write')]);
-    ok(rBase.landed === false && rBase.owed && rBase.failed === 1, `⑫ RED (the base's law): a sync the file system does not do FAILS the write — nothing lands, it is owed and retried («not written (EINVAL; attempt 1)»)`, rBase);
-    ok(!tenOk(rEvery, 'EINVAL') && rEvery.said.length >= 11, `⑫ RED (the said-once flag cut): said at every write — ${rEvery.said.length} lines over 11 writes (the flushed one by its cells and again by its message)`, rEvery.said.length);
-    ok(!tenOk(rNoCell, 'EINVAL') && rNoCell.atOnce === 0 && rNoCell.said.length === 1, `⑫ RED (the cells' reading cut): the waited road says nothing at once (${rNoCell.atOnce}) — the line comes only with the message`, { atOnce: rNoCell.atOnce, said: rNoCell.said.length });
-    ok(!failOk(rAll) && rAll.landed === true, `⑫ RED (every code let through): a placed EIO lands (${rAll.landed})`, rAll);
-    ok(!failOk(rWrite) && rWrite.landed === true, `⑫ RED (the write's own error judged by the set): the write's EINVAL lands (${rWrite.landed}, ${JSON.stringify(rWrite.bytes)})`, rWrite);
+    const [rBase, rEvery, rNoCell, rAll, rWrite] = await Promise.all([failRoad(STAND_BASE, 'EINVAL'), tenWrites(SW_EVERY, TH_REAL, 'EINVAL'), tenWrites(SW_NOCELL, TH_REAL, 'EINVAL'), failRoad(STAND_ALL, 'EIO'), failRoad(STAND_WRITE, 'EINVAL', 'write')]);
+    judged(rBase.dirs, rBase.landed === false && rBase.owed && rBase.failed === 1, `⑫ RED (the base's law): a sync the file system does not do FAILS the write — nothing lands, it is owed and retried («not written (EINVAL; attempt 1)»)`, rBase);
+    judged(rEvery.dirs, !tenOk(rEvery, 'EINVAL') && rEvery.said.length >= 11, `⑫ RED (the said-once flag cut): said at every write — ${rEvery.said.length} lines over 11 writes (the flushed one by its cells and again by its message)`, rEvery.said.length);
+    judged(rNoCell.dirs, !tenOk(rNoCell, 'EINVAL') && rNoCell.atOnce === 0 && rNoCell.said.length === 1, `⑫ RED (the cells' reading cut): the waited road says nothing at once (${rNoCell.atOnce}) — the line comes only with the message`, { atOnce: rNoCell.atOnce, said: rNoCell.said.length });
+    judged(rAll.dirs, !failOk(rAll) && rAll.landed === true, `⑫ RED (every code let through): a placed EIO lands (${rAll.landed})`, rAll);
+    judged(rWrite.dirs, !failOk(rWrite) && rWrite.landed === true, `⑫ RED (the write's own error judged by the set): the write's EINVAL lands (${rWrite.landed}, ${JSON.stringify(rWrite.bytes)})`, rWrite);
   } finally { fs.rmSync(T12, { recursive: true, force: true }); }
 })();
 
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} named skip(s)` : ''})` : `\nALL PASS (${pass})${skipped ? ` — ${skipped} named skip(s)` : ''}`);
 process.exit(fail ? 1 : 0);

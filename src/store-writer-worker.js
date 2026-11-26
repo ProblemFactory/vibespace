@@ -8,7 +8,8 @@
  * whole-instance outages was that pool filled by calls stuck in a slow mount). ONE write at a time: a storage that hangs
  * holds this thread alone.
  * The shared cells (workerData.sab, Int32): [0] the job in flight (0 = idle), [1] jobs done, [2] the last job's outcome
- * (1 ok, 2 failed), [3] the length of a failed job's error code, its ASCII bytes at offset 16 (≤ 32) — the main thread
+ * (1 ok, 2 failed), [3] the length of a failed job's error code — or, r5010, of a LANDED job's no-sync code (its outcome 1) —, its
+ * ASCII bytes at offset 16 (≤ 32) — the main thread
  * waits on [1] with Atomics.wait when its loop cannot turn (a synchronous flush, the exit), and THIS thread notifies [1]
  * (round 6's amend: it notified [0], so every waited write ended at the wait's 50 ms poll, never at the write's end).
  */
@@ -147,12 +148,14 @@ function rewriteJob(m, fs) {
   // a failure from here on comes AFTER the rename: the file IS rewritten (its lines in it) — said by its own code, ERENAMEDNOSYNC,
   // never as a failed rewrite (主开发 r915 2)
   let after = null, dfd = null;
-  try { dfd = fs.openSync(path.dirname(m.file), 'r'); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; else noSync = noSync || e.code; }   // r5010: a let-be code is said by the writer's one no-sync line
+  // r5010: a let-be code OF THE SET (a file system that does no sync) is named by the writer's one no-sync line; EISDIR / EPERM / EACCES (a
+  // folder the platform will not open or sync) stay let be and silent, as before — those words would not be true of them
+  try { dfd = fs.openSync(path.dirname(m.file), 'r'); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; else if (SYNC_UNSUPPORTED.has(e.code)) noSync = noSync || e.code; }
   if (dfd != null) {
-    try { fs.fsyncSync(dfd); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; else noSync = noSync || e.code; }
+    try { fs.fsyncSync(dfd); } catch (e) { if (!UNSYNCABLE.includes(e && e.code)) after = e; else if (SYNC_UNSUPPORTED.has(e.code)) noSync = noSync || e.code; }
     try { fs.closeSync(dfd); } catch (e) { if (!after) after = e; }
   }
-  if (after) throw Object.assign(new Error(`the rewrite landed (renamed over the file); its directory's fsync did not: ${(after && (after.code || after.message)) || after}`), { code: 'ERENAMEDNOSYNC' });
+  if (after) throw Object.assign(new Error(`the rewrite landed (renamed over the file); its directory's fsync did not: ${(after && (after.code || after.message)) || after}`), { code: 'ERENAMEDNOSYNC' });   // (its temp's no-sync code, if any, is not named then: the failure is said)
   return noSync ? { noSync } : undefined;
 }
 /** ONE job. A whole-file write: temp, every byte, fsync (B-9275), close (its error is the write's), rename — NOTHING is renamed
