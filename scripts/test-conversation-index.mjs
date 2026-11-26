@@ -8,6 +8,9 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { ConversationIndex } = require(REPO + '/src/conversation-index.js');
+// B-574d (lane bl-jobs): the index is THE STORE WRITER's (paced 1.5 s, synced on its thread) — the suite lands it through the writer
+const SW = require(REPO + '/src/store-writer.js').storeWriter();
+const land = (d) => SW.flushSync([path.join(d, 'conversation-index.json')]);
 let pass=0, fail=0; const ok=(c,n)=>{c?(pass++,console.log('  ✓ '+n)):(fail++,console.error('  ✗ '+n));};
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ci-'));
@@ -34,13 +37,13 @@ ix2.note(SID, 'live-host', {});
 ok(ix2.ownerHost(SID) === 'live-host', 'a week-fresher claim is decisive');
 
 // persistence round-trip
-ix._flush();
+land(dir);
 const ix3 = new ConversationIndex({ dataDir: dir });
 ok(ix3.ownerHost(SID, (h) => h === 'host-a') === 'host-a', 'index survives restart');
 
 // bound: 5000 newest kept
 for (let i = 0; i < 5200; i++) ix.note(`bbbb${String(i).padStart(4,'0')}-1111-2222-3333-444444444444`, 'host-a', {});
-ix._flush();
+land(dir);
 ok(Object.keys(JSON.parse(fs.readFileSync(path.join(dir,'conversation-index.json'),'utf8')).conv).length <= 5000, 'bounded at 5000 conversations');
 
 fs.rmSync(dir, { recursive: true, force: true });

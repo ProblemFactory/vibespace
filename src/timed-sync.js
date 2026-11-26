@@ -44,6 +44,7 @@ const STORES = Object.freeze({
   'jobs-notifs.write': row('write', 'job-notifications', 'src/jobs.js', ['_save', '_saveNotifs']),
   'jobs.read': row('read', 'jobs', 'src/jobs.js'),
   'jobs-logs-sweep.write': row('write', 'jobs-logs-sweep', 'src/jobs.js', ['_logsSave']),   // through the store writer (lane job-logs-sweep: the job-logs catch-up's record — paced, the hub's bookkeeping)
+  'conversation-index.write': row('write', 'conversation-index', 'src/conversation-index.js', ['_schedule']),   // B-574d (lane bl-jobs): through the store writer, paced (1.5 s)
   'providers.write': row('write', 'providers', 'src/server/provider-store.js', ['save']),   // through the store writer (lane lg-providers U1 cure (C): the third-party provider records, a person's act durable before its answer)
   'device-upgrades.write': row('write', 'device-upgrades', 'src/server/device-upgrade-watch.js', ['save']),   // B-574d (lane lg-remote-hardening, 主开发 r4760): the machines' agent updates record, through the store writer
   'dial-health.write': row('write', 'dial-health', 'src/server/dial-health-watch.js', ['save']),   // B-574d (lane lg-remote-hardening, 主开发 r4760): the extra dialing agents record, through the store writer
