@@ -347,7 +347,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   const vaultUsesOf = (j) => (typeof jm.vaultUsesOf === 'function' ? jm.vaultUsesOf(j) : []);
   const unreadAnswer = () => ({ error: jm.unreadWords(), code: 'records-unread', why: (jm._unread.store && jm._unread.store.code) || 'unknown' });
   app.get('/api/jobs', (req, res) => {
-    if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
+    if (!jm.ready) return res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || (jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting') });   // B-f276 (s1126): the lock's hold by name
     if (jm._unread && jm._unread.store && req.query.archived !== '1') return res.status(503).json(unreadAnswer());   // B-f276 cure r1: an empty list says why
     // ?archived=1 = the archive list, SAME snapshot shape + archivedAt/archivedWhy
     // (triage §13 rule 5) — fetched by the panel only when the user asks
@@ -364,14 +364,14 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // (src/lib/jobs-held.js: one ask a page, shared). The same digest every jobs-updated carries; never a job's snapshot (the list
   // above snapshots and enriches EVERY job on the loop). Before /api/jobs/:id, which would take «held» for an id.
   app.get('/api/jobs/held', (req, res) => {
-    if (!jm.ready) return res.status(503).json({ error: jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting' });
+    if (!jm.ready) return res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || (jm.initError ? `jobs engine down: ${jm.initError}` : 'jobs engine starting') });   // B-f276 (s1126): the lock's hold by name
     res.json({ held: jm.heldDigest() });
   });
   // the manager design's piece 7: the rows the person's doors list (the Terminate confirm, the proposal card) — each registered
   // job or schedule the conversation OWNS that can still deliver (a cron's runs ride their parent's row; an ended one-shot
   // delivers nothing more), with its next fire and its STORED grant (PURE src/delivery-wake.js wakeChoiceRows). Read-only.
   app.get('/api/jobs-wake-grants', (req, res) => {
-    if (!jm.ready) return res.status(503).json({ error: 'jobs engine starting' });
+    if (!jm.ready) return res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || 'jobs engine starting' });   // B-f276 (s1126): the lock's hold by name
     // B-f276 family unit 2, the reader table (r3230): jobs.json HELD — its memory is empty because UNREAD, never «owns no job»
     if (jm._unread && jm._unread.store) return res.status(503).json({ error: jm.unreadWords('a conversation\'s jobs cannot be listed while the job records cannot be read'), code: 'records-unread' });
     const cid = String(req.query.conversation || '');
@@ -381,7 +381,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   });
   // user-side create (the panel's ＋New — no vsst_ token in the browser)
   app.post('/api/jobs', (req, res) => {
-    if (!jm.ready) return res.status(503).json({ error: 'jobs engine starting' });
+    if (!jm.ready) return res.status(503).json({ error: (jm.lockHeldWords && jm.lockHeldWords()) || 'jobs engine starting' });   // B-f276 (s1126): the lock's hold by name
     const b = req.body || {};
     const spec = { ...b, owner: { conversation: null, sessionId: null, sessionCreatedAt: 0, createdBy: 'user', groupsSnapshot: [] } };
     const pressedAt = Date.now();   // B-91aa's remainder (r4591 (2)): the create's start is answered by the STARTER's answer — a failed start in today's words

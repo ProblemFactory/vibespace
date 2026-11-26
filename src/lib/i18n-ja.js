@@ -15884,6 +15884,8 @@ export default {
   "prices not known": "価格不明",
   "your edited prices": "編集した価格",
   "What you typed in the editor was not saved — set your prices again once they read.": "エディターで入力した内容は保存されていません — 価格を読み込めるようになったら設定し直してください。",
+  "Background Work’s lock": "バックグラウンド作業のロック",
+  "a background job run’s end record": "バックグラウンド作業の実行の終了記録",
   "Your edited prices cannot be read right now, so this backup leaves them out — the Usage window says why": "編集した価格をいま読み込めないため、このバックアップには含めません — 理由は使用量ウィンドウに表示されます",
   "Your prices file was damaged and could not be read. Its bytes are kept beside it in VibeSpace’s data folder as {copy}, and VibeSpace’s default prices are back: set your prices again in «Pricing…», or mend the file by hand and restart VibeSpace.": "価格ファイルが壊れていて読み込めませんでした。そのバイトは VibeSpace のデータフォルダ内で隣に {copy} として保存され、VibeSpace の既定の価格に戻りました。「価格…」で価格を設定し直すか、ファイルを手で直して VibeSpace を再起動してください。",
   "VibeSpace cannot read your voice sign-in right now — nothing was changed and no sign-in is lost. It reads it again by itself; try again in a few minutes, or read it again from For you.": "VibeSpace は今、音声のサインインを読み取れません——何も変更しておらず、サインインは失われていません。自動で読み直します。数分後にもう一度試すか、「あなた宛て」から読み直してください。", // lane bl-chat-b r3334 unit 2 (the voice sign-in's file)

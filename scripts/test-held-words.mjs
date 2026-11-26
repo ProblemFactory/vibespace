@@ -82,6 +82,7 @@ const NOT_HELD = {
   scrub_refused: 'row B-360d (lane mask-value-shape, 主开发 r4523): a browser command\'s output the hub\'s scrub worker could not answer (lost, silent past its bound, past its ceiling or its work bound) — refused whole, never a held list; the CLI words it itself (data/bin/vibespace-browser: what happened, run it again, read less at once)',
   'not-durable': 'a person\'s act kept in memory, not on disk yet — channel-words / ws words «not on disk yet» (written later)',
   'todos-not-on-disk': 'B-0248 (lane bl-loop-b): a For-you act made, its write not on disk yet (the store writer still to land it) — the For-you handlers word it (src/lib/user-todos-actions.js, -panel.js), en / zh / ja',
+  exit_record_unread: 'B-f276 slice jobs-side-files (lane bl-proposals s1126): a gone wrapper\'s exit record held — its run waits to be judged; no route answers it (its row and the journal say it; the family\'s notice names it by its plain name)',
   not_durable: 'the same as not-durable (the exit routes\' spelling)',
   no_engine: 'a browser engine plugin not installed',
   'no-engine': 'a browser engine plugin not installed (the other spelling)',
@@ -135,6 +136,7 @@ const OWN_DOOR = {
   // B-f276 (r4721, lane lg-vault-stages): two single values on the helper, with their own parse
   instance_id_unread: 'the telemetry instance id (src/telemetry.js): no route refuses with it — this life answers its own id while the file is held; the family\'s notice names the file by its plain name',
   link_token_unread: 'a paired machine\'s link token in the no-vault window (src/server/host-tokens.js): its refusal carries its own words (the machine named) wherever the link\'s error is said; the family\'s notice names the file by its shape',
+  jobs_lock_unread: 'B-f276 slice jobs-side-files (lane bl-proposals s1126): Background Work\'s lock held — no route refuses with this code; every jobs door answers the hold\'s own sentence (JobManager.lockHeldWords) where it said «jobs engine starting»; the family\'s notice names it by its plain name',
 };
 function census(codes, table) {
   const red = [], held = [], generic = [];
@@ -166,6 +168,8 @@ const LEFT_ALONE = [
   ['own', 'a job or For-you record of its own (its For-you item or its door words the hold)', ['archive-unread', 'archive_unread', 'groups-unread', 'notifs-unread', 'sweep-record-unread', 'todos_unread', 'task-groups-unread', 'queued-file-unread', 'usage-reading-unread', 'machines_unread' /* r3349: the reading file's set-aside door refused while the machines' list is held — the door's own words (its toast reads `error`) */]],
   ['own', 'a money store (the spend guard, the pool, the ledger, a reset credit): its refusal names the guard\'s own state — never a generic list sentence', ['settings-unread', 'spend-unread', 'memo-unread', 'spend-settings-unread', 'plans-unread', 'ledger-unreadable', 'ledger-lock-unreadable', 'lock-unreadable', 'spend-ledger-unreadable', 'slot-unreadable', 'attempts-unreadable', 'attempts_unread', 'limit_unread']],
   ['own', 'a store whose own door words its refusal BY ITS MESSAGE (bulk-resume.js codeOf / answerWords) — a reworded message would lose that door\'s words', ['auto_resume_unread']],
+  ['own', 'B-f276 slice jobs-side-files (s1126): Background Work\'s lock held — the jobs doors answer the hold\'s own sentence (lockHeldWords)', ['jobs_lock_unread']],
+  ['not', 'B-f276 slice jobs-side-files (s1126): a gone wrapper\'s exit record held — its run waits to be judged; no route answers it', ['exit_record_unread']],
   ['own', 'r3333 unit 2: the extraction journal held — the files page words its refusal by its own code (fsErrorText, zh / ja)', ['extract_journal_unread']],
   ['own', 'B-f276 (r4721, lane lg-vault-stages): two single values held on the helper — the telemetry instance id (no route refuses with it: this life answers its own id) and a paired machine\'s link token in the no-vault window (its refusal carries its own words, the machine named)', ['instance_id_unread', 'link_token_unread']],
   ['own', 'r3333 unit 3: an operator\'s POST /api/maintenance refused while the banner\'s record is held — the answer carries its own words (no page sends it)', ['maintenance_unread']],
