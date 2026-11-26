@@ -260,6 +260,10 @@ const ROW_OF = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.type, r])));
 // list is not kept by hand: test-needs-doors ⑩ reads every producer's stored words in this tree and in the last release (git) — a
 // release-stored sentence keeps its rows or is named here.
 const STORED_WORDS_LEGACY = Object.freeze({
+  // B-574d (lane nl-paired, 主开发 r5047): a machine pinning this hub whose key it could not read — the item's detail says what to check and
+  // when it is read again now; the detail a hub up to 2.369.421 filed stays drawable (moved onto the train's first candidate, r5384: the
+  // last release that stored it is the one this tree is cut from)
+  'hub-key-unavailable-detail': Object.freeze({ left: '2.369.421', filedBy: 'src/server/host-key-watch.js', key: "{machine} pins this hub's key, and this hub could not read it to prove it. Its link is refused until it can; its next greeting asks again." }),
   // B-8703 (主开发 r4450): the long-lived token identity check's four items name no account and no road now (their door opens the place) — the
   // titles a hub up to 2.369.419 filed stay drawable
   'oat-identity-mark-other': Object.freeze({ left: '2.369.419', filedBy: 'src/server/oat-identity.js', key: "{account}'s long-lived token belongs to another account (its usage matches {other}) — re-mint it or re-bind it in Manage Agents" }),

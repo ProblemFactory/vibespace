@@ -197,6 +197,7 @@ const ROWS = {
   'src/server/sealed-json.js': [['the vault is locked — ', 'carried', 'a sealed JSON file (the voice pair) read while locked', { via: 'src/voice-model.js' }]],
   'src/agentd/attach-cli.js': [["the hub's signature waits for the vault", 'log', 'lane lg-remote-hardening (unit 5\'s cure): the attach child\'s own log line on the device — its exit 7 is the pty wrapper\'s vault wait, which says the owner has been told and where to unlock']],
   'src/server/host-tokens.js': [['the vault is locked — the link token of ', 'carried', 'a device link token read while locked — the link\'s session error', { via: 'src/lib/chat-status-bar.js' }],
+    ['until the vault is locked and unlocked', 'log', 'B-574d (lane nl-paired, r5047): the journal line of this hub\'s key that could not be sealed into the vault — said once; a lock and an unlock try it once more'],
     ['the vault is locked — this hub\'s own key opens after ', 'carried', 'lane lg-remote-hardening (D3 half b): the hub\'s own key read while locked — the device link\'s session error (vault_locked), worded by the chat\'s status chip like the link token\'s', { via: 'src/lib/chat-status-bar.js' }]],
   'src/dial-session-bridge.js': [['the vault is locked', 'carried', 'the dial bridge\'s session-error fallback (the status bar recognises it)', { via: 'src/lib/chat-status-bar.js' }]],
   'src/session-schema.js': [['WAITS for the vault', 'label', 'a session field\'s note for engineers (the schema census) — nobody reads it in the product']],

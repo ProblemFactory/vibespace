@@ -33,7 +33,11 @@ const FILE_RE = /^host-([\w.-]+)\.token$/;
 // B-574d (lane nl-paired, 主开发 r4982 + its own read's must): A FIRST MINT THAT CANNOT LAND is said ONCE and remembered for the life of
 // the hub PROCESS, by its key file — the hub builds TWO HostTokens over one data folder (server.js's, for the dial road, and
 // mounts-plugins-wiring's, for the ssh road and the renew), so the memory is the module's, never an instance's: no hello and no read of
-// either tries it again. Only a renew that LANDS ends it; a restart starts afresh.
+// either tries it again. Only a renew that LANDS ends it; a restart starts afresh (the vault's road: also a lock and an unlock — its epoch).
+// r5047 (主开发, the pinned road's hole): A REFUSED READ OF THE KEY FILE (any code but «no such file»: EACCES after a restore that changed
+// its owner, EIO, a stalled storage) is HELD by its own code — said once, thrown as hub_identity_unreadable (no renew is offered for it:
+// the key may be whole), read again only at its next rung (30 s doubling to 5 min), never at every hello. By the key file, the module's.
+const READ_HELD = new Map();   // path.resolve(<the key file>) → { error, tries, nextAt }
 const MINT_FAILED = new Map();   // '<road>:' + path.resolve(<the key file>) → the error of its first mint that could not land (road: the file before the vault, or the vault)
 const CFG_RE = /^session-.+\.json$/;
 const entryOf = (hostId) => 'host:' + hostId;
@@ -151,7 +155,9 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   const IDENTITY_ENTRY = 'host:hub-identity';
   // r4982: the memory of a first mint that could not land is the MODULE's (MINT_FAILED), by this key file — every hello would otherwise pay
   // the key file's sync (and its folder's) on the hub's loop at the reconnect cadence
-  const mintKey = (st) => (st === 'not_set_up' ? 'file:' : 'vault:') + path.resolve(identityFile());   // its read's should: the VAULT's mint is remembered too
+  // the vault's road is keyed by the vault's EPOCH (it moves at every lock and every unlock): the person's unlock tries the vault's mint once more
+  const vaultEpoch = () => { try { const v = SB.vaultForDir(dataDir); return v && typeof v.epoch === 'function' ? v.epoch() : 0; } catch { return 0; } };
+  const mintKey = (st) => (st === 'not_set_up' ? 'file:' : `vault@${vaultEpoch()}:`) + path.resolve(identityFile());   // its read's should: the VAULT's mint is remembered too
   /** B-574d (lane nl-paired, the early round's should): a linked name on disk too — its folder synced, BEST EFFORT (not every platform
    *  opens or syncs a folder); the descriptor closed once through the tree's one close and forgotten in that statement */
   function syncFolderOf(file) {
@@ -161,13 +167,57 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   }
   const identityFile = () => path.join(agentdDir, 'hub-identity.pem');
   const identityLocked = () => Object.assign(new Error('the vault is locked — this hub\'s own key opens after the owner unlocks the vault (no machine link until then)'), { code: 'vault_locked' });
+  /** the hold's rungs: 30 s doubling to 5 min (store-read's ladder) */
+  const rungMs = (tries) => Math.min(30000 * 2 ** (tries - 1), 300000);
+  /** r5047: a refused read of the key file (or its adopt into the vault — `what`) → the held error (said once; its next rung armed) */
+  function keyUnreadable(e, what = 'could not be read') {
+    const k = path.resolve(identityFile()), h = READ_HELD.get(k), cause = String((e && (e.code || e.name)) || 'unreadable').slice(0, 40), tries = h ? h.tries + 1 : 1;
+    const err = Object.assign(new Error(`this hub's own key file ${what} (${cause}) — nothing is made or written over it; check the file's owner, its permissions and the storage it is on; it is read again at the next greeting after its wait`), { code: 'hub_identity_unreadable', cause });
+    READ_HELD.set(k, { error: err, tries, nextAt: Date.now() + rungMs(tries) });
+    if (!h) log.warn?.(`[hub-key] ${err.message}`);
+    return err;
+  }
+  /** r5047: a «no such file» right after a held read is read ONCE more at the next rung (a storage coming back answers ENOENT first —
+   *  the family's rule) → true when it re-armed the hold (the caller throws the held error) */
+  function onceMore(k, h) {
+    if (!h || h.missingOnce) return false;
+    READ_HELD.set(k, { ...h, missingOnce: true, nextAt: Date.now() + rungMs(h.tries) });
+    return true;
+  }
+  /** r5047: THE KEY FILE's READ before the vault — only «no such file» is no file (null); any other refusal is HELD (keyUnreadable). A
+   *  «no such file» right after a held read is read ONCE more at the next rung (a storage coming back answers ENOENT first — the family's rule) */
+  function readKeyFile() {
+    const k = path.resolve(identityFile()), h = READ_HELD.get(k);
+    if (h && Date.now() < h.nextAt) throw h.error;   // HELD: no read until its next rung
+    try { const t = fs.readFileSync(identityFile(), 'utf8'); READ_HELD.delete(k); return t; }
+    catch (e) {
+      if (e && e.code === 'ENOENT') {
+        if (onceMore(k, h)) throw h.error;
+        READ_HELD.delete(k); return null;
+      }
+      throw keyUnreadable(e);
+    }
+  }
+  /** r5047 (its read's must): is there a key file left from before the vault? — only «no such file» is none; any other refusal of the look is HELD */
+  function keyFileThere() {
+    const k = path.resolve(identityFile()), h = READ_HELD.get(k);
+    try { fs.lstatSync(identityFile()); return true; }
+    catch (e) { if (e && e.code === 'ENOENT') { if (onceMore(k, h)) throw h.error; READ_HELD.delete(k); return false; } throw keyUnreadable(e); }
+  }
   function readIdentity() {
     const st = stateOf();
-    if (st === 'not_set_up') { try { return fs.readFileSync(identityFile(), 'utf8'); } catch { return null; } }
+    if (st === 'not_set_up') return readKeyFile();
     const v = SB.vaultForDir(dataDir);
     if (st !== 'unlocked' || !v) throw identityLocked();
     let r = v.secretGet(IDENTITY_ENTRY), adopted = false;
-    if (r.ok && !r.value && fs.existsSync(identityFile())) { r = v.secretAdopt(IDENTITY_ENTRY, identityFile()); adopted = true; }
+    if (r.ok && !r.value) {
+      const held = READ_HELD.get(path.resolve(identityFile()));
+      if (held && Date.now() < held.nextAt) throw held.error;   // r5047: a key file whose read was refused — no look, no adopt until its next rung
+      if (keyFileThere()) { r = v.secretAdopt(IDENTITY_ENTRY, identityFile()); adopted = true; }
+    }
+    if (!r.ok && adopted && /^key-unreadable:/.test(String(r.code)) && r.code !== 'key-unreadable:vault_locked') throw keyUnreadable({ code: String(r.code).slice('key-unreadable:'.length) }, 'could not be taken into the vault');   // r5047: the adopt refused (its read, or its record's write) — HELD as the door's
+    if (r.ok && adopted && !r.value) { const kk = path.resolve(identityFile()), hh = READ_HELD.get(kk); if (onceMore(kk, hh)) throw hh.error; }   // the name gone inside the adopt: once more after a held read
+    if (r.ok && adopted) READ_HELD.delete(path.resolve(identityFile()));
     if (!r.ok && adopted && r.code === 'key-malformed') return null;   // r4982's read: an EMPTY key file left from before the vault is no key — the vault mints one, once (its entry answers from then on)
     if (!r.ok) { if (r.code === KF.VAULT_LOCKED) throw identityLocked(); throw Object.assign(new Error(`this hub's own key could not be read from the vault (${r.code})`), { code: r.code }); }
     if (!r.value) return null;
@@ -205,7 +255,7 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
         try { fs.linkSync(tmp, f); linked = true; } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }
         try { fs.unlinkSync(tmp); } catch { }
         if (linked) { syncFolderOf(f); return pem; }
-        const onDisk = fs.readFileSync(f, 'utf8');
+        let onDisk; try { onDisk = fs.readFileSync(f, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') throw keyUnreadable(e); onDisk = ''; }   // r5047: a refused read is HELD as a read — never taken for an empty file (no heal over it); a name gone since the link is no file
         if (usable(onDisk)) return onDisk;   // another hub process's key (two on one first boot): the one on disk is kept
         // r4982: A KEY FILE THAT IS NO KEY — empty, or bytes that are no key (zero bytes, NULs, a cut PEM) — and, identity() counted the pins
         // first, no machine pins it: HEALED by ONE mint through the SECRET FAMILY's replace (its read's should: a cut PEM can hold a private
@@ -215,6 +265,7 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
         say('this hub\'s own key file was empty or not a key and no machine pins it — a new key was written over it once');
         return pem;
       } catch (e) {
+        if (e && e.code === 'hub_identity_unreadable') throw e;   // a refused READ is held as a read (its own words), never remembered as a failed write
         const k = mintKey(st);
         if (!MINT_FAILED.has(k)) { MINT_FAILED.set(k, e); say(`this hub's own key could not be written (${(e && e.code) || 'error'}) — no machine can pin it until it is; it is not tried again until the hub starts again`); }
         throw e;
@@ -230,7 +281,7 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
     if (!put.ok) {
       if (put.code === KF.VAULT_LOCKED) throw identityLocked();
       const e = Object.assign(new Error(`this hub's own key could not be sealed into the vault (${put.code})`), { code: put.code });
-      if (!replace && !MINT_FAILED.has(vk)) { MINT_FAILED.set(vk, e); log.warn?.(`[hub-key] this hub's own key could not be sealed into the vault (${put.code}) — no machine can pin it until it is; it is not tried again until the hub starts again`); }
+      if (!replace && !MINT_FAILED.has(vk)) { for (const old of [...MINT_FAILED.keys()]) if (old !== vk && old.startsWith('vault@') && old.endsWith(':' + path.resolve(identityFile()))) MINT_FAILED.delete(old); MINT_FAILED.set(vk, e); log.warn?.(`[hub-key] this hub's own key could not be sealed into the vault (${put.code}) — no machine can pin it until it is; it is not tried again until the vault is locked and unlocked, or the hub starts again`); }
       throw e;
     }
     return pem;
@@ -272,7 +323,7 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
     // removed before any rename) — by its code, the page's own words (src/lib/sidebar-mounts.js); a locked vault keeps its own refusal
     try { writeIdentity(fresh, { replace: true }); }
     catch (e) { if (e && e.code === 'vault_locked') throw e; throw Object.assign(new Error(`a new hub key could not be written (${(e && e.code) || 'error'}) — this hub's key was not changed; the renew can be tried again`), { code: 'hub_key_renew_failed', cause: (e && e.code) || null }); }
-    MINT_FAILED.delete(mintKey('not_set_up')); MINT_FAILED.delete(mintKey('unlocked'));   // the person's new key landed: a remembered failed first mint (either road) ends with it
+    MINT_FAILED.delete(mintKey('not_set_up')); MINT_FAILED.delete(mintKey('unlocked')); READ_HELD.delete(path.resolve(identityFile()));   // the person's new key landed: a remembered failed first mint (either road) ends with it
     log.log?.('[hub-key] a new hub key was made by the person — every machine pairs again');
     return asIdentity(fresh);
   }
