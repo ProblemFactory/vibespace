@@ -247,7 +247,9 @@ let seq = 0; const pend = new Map(); const pageErrors = [];
 // its first check). Every main-frame commit is recorded. The suite's own Page.navigate / Page.reload opens a BOOT window that
 // waitApp closes at the app's ready: only inside it is an evaluate cut by a navigation re-asked (the navigation's own commit
 // is waited on first). A main-frame commit while no boot window is open is a NAMED red that prints its address, never swallowed.
-const nav = { commits: [], booting: false, asked: 0 };
+// The window starts OPEN (r4899): Chrome's own first document may commit between Page.enable and the suite's first navigate —
+// before any app exists, never «after the app was up»; the first waitApp closes it.
+const nav = { commits: [], booting: true, asked: 0 };
 const lastNav = () => { const c = nav.commits[nav.commits.length - 1]; return c ? `${c.url} (loader ${c.loaderId}, commit ${nav.commits.length})` : 'none since the suite began'; };
 sock.on('message', (d) => {
   const m = JSON.parse(d);
@@ -260,16 +262,16 @@ sock.on('message', (d) => {
 });
 // every DevTools call has a bound of its own and fails BY NAME; the link's close fails every waiting call at once (r4861)
 sock.on('close', (code) => { for (const [id, f] of pend) { pend.delete(id); f({ error: { message: `the DevTools link closed (code ${code}) — chrome exit ${chrome.exitCode}, signal ${chrome.signalCode}` } }); } });
-const cdp = (method, params = {}) => new Promise((res, rej) => {
+const cdp = (method, params = {}, bound = 30000) => new Promise((res, rej) => {
   const id = ++seq;
   if (method === 'Page.navigate' || method === 'Page.reload') { nav.booting = true; nav.asked = nav.commits.length; } // the suite's own: its commit is waited on in waitApp
-  const timer = setTimeout(() => { if (pend.delete(id)) rej(new Error(`DevTools ${method} had no answer in 30000 ms (its own bound)`)); }, 30000);
+  const timer = setTimeout(() => { if (pend.delete(id)) rej(new Error(`DevTools ${method} had no answer in ${bound} ms (its own bound)`)); }, bound);
   pend.set(id, (m) => { clearTimeout(timer); if (m.error) rej(new Error(`${method}: ${m.error.message}` + (/navigated or closed|context was destroyed|Cannot find context/i.test(m.error.message) ? ` — the page's last navigation: ${lastNav()}` : ''))); else res(m.result); });
   if (sock.readyState !== 1) { pend.get(id)({ error: { message: `the DevTools link is closed — chrome exit ${chrome.exitCode}, signal ${chrome.signalCode}` } }); pend.delete(id); return; }
   sock.send(JSON.stringify({ id, method, params }));
 });
-const evalJs = async (expr) => {
-  const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+const evalJs = async (expr, bound) => {
+  const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }, bound);
   if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
   return r.result.value;
 };
@@ -277,14 +279,18 @@ const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date
 const APP_WAIT = 'new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })';
 /** The app up after the suite's own navigate / reload: ① THAT navigation's commit (a main-frame commit after the ask, 20 s
  *  bound), ② the app's ready; an evaluate a navigation cuts during this boot is re-asked (the app's own reload while it boots),
- *  each re-ask printed with the page's address, all within 45 s; at the ready the boot window closes (any later navigation is red). */
+ *  each re-ask printed with the page's address, all within 45 s; at the ready the boot window closes (any later navigation is red).
+ *  THE APP WAIT'S OWN BOUND (r4899): the page's loop bounds only window.app's arrival (20 s) — the app's READY it then awaits has
+ *  no inner bound — so its evaluate takes the wait's whole budget, 45 s, not the 30 s every other DevTools call has: a slow
+ *  runner's boot is waited out as the old suite waited, and a boot past 45 s is a named red («Runtime.evaluate had no answer»). */
+const APP_WAIT_MS = 45000;
 const waitApp = async () => {
   const t0 = Date.now();
   while (nav.booting && nav.commits.length <= nav.asked && Date.now() - t0 < 20000) await sleep(50);
   if (nav.booting && nav.commits.length <= nav.asked) throw new Error(`waitApp: the suite's navigation never committed in 20 s (the page's last navigation: ${lastNav()})`);
   for (;;) {
-    try { await evalJs(APP_WAIT); break; } catch (e) {
-      if (!nav.booting || !/navigated or closed|context was destroyed|Cannot find context/i.test(String(e && e.message)) || Date.now() - t0 > 45000) throw e;
+    try { await evalJs(APP_WAIT, APP_WAIT_MS); break; } catch (e) {
+      if (!nav.booting || !/navigated or closed|context was destroyed|Cannot find context/i.test(String(e && e.message)) || Date.now() - t0 > APP_WAIT_MS) throw e;
       console.log(`  · waitApp: a navigation cut the app wait during boot — re-asked (the page's last navigation: ${lastNav()})`);
       await sleep(100);
     }
