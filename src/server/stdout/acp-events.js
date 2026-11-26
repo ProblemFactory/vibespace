@@ -15,6 +15,13 @@ const protocol = 'acp-events';
  *  the hub never learned it, the resumed window's chip said «default» while agy ran «Never ask»). */
 const DTACH_CLEAR_PREAMBLE = /^(?:\x1b\[H|\x1b\[[0-3]?J)+/;
 
+/** 主开发 r5164 (2) / r5176 / r5235, a silence of the release: on every road of a hand-back (the ladder's own stash, a hand-over's restore,
+ *  the re-stash) the entry is the ONLY copy of the frame a wrapper handed back — a stash whose file is not current (a held list, a failed
+ *  write: its own health) is said by name in the journal, with its bound, never a path (the file system's code) */
+function sayHandBackNotOnDisk(deliverRef, id, cid, n) {
+  const h = cid ? deliverRef?.stashHealth?.() : null;
+  if (h && h.durable === false) console.warn(`[deliver] ${id}: the frame the wrapper handed back (${n} chars, for ${cid}) is not on disk — ${h.held ? 'the list of messages waiting for conversations could not be read: lost if VibeSpace restarts before it reads again, unless that conversation\'s next turn takes it first' : `the stash could not be written (${h.code || (h.owed ? 'a write is owed' : 'its write failed')}): lost if VibeSpace restarts before it is written, unless that conversation's next turn takes it first`}`);
+}
 function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
   // sessionModelFor: the session's OWN model (lane agy-wall-signal r2 — the wall's group; server.js's literal must carry
   // every name destructured here: test-fable-cap-pool-storm §10)
@@ -199,10 +206,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
                 try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
                 catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
               }
-              // 主开发 r5164 (2), a silence of the release: on every road of a hand-back (the ladder's own stash, a hand-over's restore, the
-              // re-stash) the entry is the ONLY copy of the frame the wrapper handed back — a stash whose file is not current (a held list, a
-              // failed write: its own health) is said by name in the journal (r5176: the journal only)
-              try { const h = cid ? deliverRef?.stashHealth?.() : null; if (h && h.durable === false) console.warn(`[deliver] ${id}: the frame the wrapper handed back (${String(msg.text).length} chars, for ${cid}) is not on disk — ${h.held ? 'the list of messages waiting for conversations could not be read: lost if VibeSpace restarts before it reads again, unless that conversation\'s next turn takes it first' : `the stash could not be written (${h.error || 'its write is owed'}): lost if VibeSpace restarts before it is written, unless that conversation's next turn takes it first`}`); } catch { /* the health is a report */ }
+              try { sayHandBackNotOnDisk(deliverRef, id, cid, String(msg.text).length); } catch { /* the health is a report */ }   // r5164 (2): the frame's only copy, not on disk — said
             }
             // ② a notification this harness could not fold into the running turn took another lane — said, like codex's
             // `turn/steer refused` line (an ACP / agy wrapper has no free steer: it waits for its own turn after this one)

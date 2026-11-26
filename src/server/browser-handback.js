@@ -392,7 +392,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     const sess = sessionFor(sessionId, browserKey);
     if (!sess) return { ok: false, code: 'no_live_session', error: 'the conversation is not running — nothing to hand the browser back to' };
     const cid = conversationIdOf(sess.s);
-    if (!cid || !deliver || typeof deliver.stashFor !== 'function') return { ok: false, code: 'stash_refused', error: !cid ? 'this conversation has no id yet (its first reply has not come back) — hand it back after the agent has answered once' : 'the delivery stash is not wired on this server' };
+    if (!cid || !deliver || typeof deliver.stashFor !== 'function') return { ok: false, code: !cid ? 'no_conversation_id' : 'unavailable', error: !cid ? 'this conversation has no id yet (its first reply has not come back) — hand it back after the agent has answered once' : 'the delivery stash is not wired on this server' };   // 主开发 r5235: a refusal BEFORE any act (the takeover not ended) has its own code — `stash_refused` is only the road after it (below)
     if (!keeper || typeof keeper.continueState !== 'function') return { ok: false, code: 'unavailable', error: 'the browser keeper is not available' };
     const st = await keeper.continueState({ browserKey, profileId, sessionId: sess.id });
     if (!st || !st.ok) return st || { ok: false, code: 'unavailable', error: 'no answer' };

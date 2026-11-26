@@ -611,4 +611,27 @@ console.log('§13 主开发 r5164 (2): the hand-back whose note the stash REFUSE
   else ok(g.code === 'stash_refused' && g.handedBack && g.warn && /could not be queued/.test(g.words) && g.noPath, `§13 the real road: a refused stash write answers stash_refused (its error names the file: ${g.errorNamesFile}) — the page's words say HANDED BACK with a warning that the note was not queued, no path`, g);
 }
 
+console.log('§13b 主开发 r5235 (MUST): the hand-back refused BEFORE any act (the conversation has no id yet — the takeover NOT ended) — the real road answers its own code, and the page\'s words say NOT handed back');
+{
+  const TT = require(path.join(REPO, 'src/browser-tabs.js'));
+  const HBSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-handback.js'), 'utf8');
+  const earlyRun = async (HBm) => {
+    const dir = mk(); const D = CD.create(deps(dir));
+    const sess = { name: 'Agent Fresh', backend: 'claude', mode: 'chat' };   // its first reply has not come back: no conversation id
+    let asked = 0;   // the WITNESS: the keeper's continueState (the act) is never reached on this road
+    const keeper = { continueState: async () => { asked++; return { ok: true, tabs: [], currentIndex: 0, tookOver: true, own: false, rerun: null, userActs: [] }; } };
+    const hb = HBm.create({ keeper, deliver: D, activeSessions: new Map([['s1', sess]]), emitCard: () => true, notice: () => { }, log: { log() { }, warn() { } } });
+    const v = await hb.continueFor({ sessionId: 's1', note: 'a note before the first reply' });
+    const routed = v && v.ok ? v : { error: String((v && (v.error || v.code)) || ''), code: v && v.code, handles: [] };   // src/routes/browser.js failVerdict's shape
+    const w = TT.handBackAnswerWords(routed);
+    return { asked, code: v && v.code, handedBack: w.handedBack, words: w.text };
+  };
+  const e = await earlyRun(require(path.join(REPO, 'src/server/browser-handback.js')));
+  if (!(e.code && e.asked === 0)) console.log(`  SKIP §13b: the early road was not the one taken (${JSON.stringify(e)})`);
+  else ok(e.code === 'no_conversation_id' && e.handedBack === false && /^Not handed back — this conversation has no id yet/.test(e.words), '§13b the refusal BEFORE any act answers no_conversation_id (the takeover not ended: the keeper never asked) — the page\'s words: NOT handed back, hand it back after the agent has answered once', e);
+  const ex = await earlyRun(M.load('src/server/browser-handback.js', anchored(HBSRC, "code: !cid ? 'no_conversation_id' : 'unavailable', error: !cid ?", "code: 'stash_refused', error: !cid ?", 'the early refusal under the after-the-act code'), 'early-stash-refused'));   // stale-pins: kept (2e3d064a1's early code — this red control's own)
+  if (!(ex.code && ex.asked === 0)) console.log(`  SKIP §13b RED: the early road was not the one taken (${JSON.stringify(ex)})`);
+  else ok(ex.handedBack === true, '§13b RED CONTROL (2e3d064a1: the early refusal answered stash_refused): the page would say «handed back» while the takeover is still on', ex);
+}
+
 report();

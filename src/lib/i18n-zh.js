@@ -7948,6 +7948,7 @@ export default {
   "e.g. I logged in — continue from the cart": "例如：我已登录——从购物车继续",
   "Could not hand the browser back: {why}": "无法交还浏览器：{why}",
   "Handed back — the agent reads your note and the tabs with its next turn (nothing is sent now)": "已交还——agent 会在下一轮读到你的留言和标签页（现在不会发送任何内容）",
+  "Not handed back — this conversation has no id yet (its first reply has not come back): hand it back after the agent has answered once": "没有交还——这个对话还没有 id（它的第一条回复还没回来）：等 agent 回答过一次后再交还",
   "Handed back, but your note could not be queued for the agent's next turn (VibeSpace could not write it) — take the browser over again to hand it back anew": "已交还，但你的留言没能排进 agent 的下一轮（VibeSpace 写不进去）——再接管一次浏览器即可重新交还",
   "Handed back — your note is not on disk yet: if VibeSpace restarts before the agent's next turn, the agent will not read it": "已交还——你的留言尚未写入磁盘：如果 VibeSpace 在 agent 的下一轮之前重启，agent 将读不到它",
   "Already handed back — the agent reads it with its next turn": "已经交还过了——agent 会在下一轮读到它",

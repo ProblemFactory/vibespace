@@ -422,18 +422,18 @@ console.log('⑨ B-0248 unit 3: desktop-apps-hosts.json written off the loop; a 
 console.log('⑫ 主开发 r5164 (2), a silence of the release: the park\'s FAILED write — said ONCE a spell with its count, written again on the park\'s own clock (the stash\'s 30 s form)');
 {
   const RELEASE_CATCH = "    try { fs.writeFileSync(retryFile + '.tmp', JSON.stringify(out)); fs.renameSync(retryFile + '.tmp', retryFile); return true; }\n    catch (e) { log('[deliver] retry park persist failed:', e.message); return false; }\n  };\n";   // stale-pins: kept (the release's text — this red control's own)
-  const NEW_CATCH = "    try {\n      fs.writeFileSync(retryFile + '.tmp', JSON.stringify(out)); fs.renameSync(retryFile + '.tmp', retryFile);\n      if (parkFailing) { log(`[deliver] the retry park is on disk again (${parkFailing.n} failed write${parkFailing.n === 1 ? '' : 's'} since ${new Date(parkFailing.at).toISOString()})`); parkFailing = null; }\n      if (parkRetryTimer) { clock.clearTimeout(parkRetryTimer); parkRetryTimer = null; }   // healed by another write: no retry left behind\n      return true;\n    } catch (e) {\n      // 主开发 r5164 (2), a silence of the release: the park's failed write was a log line at every call with NO retry clock (the stash has\n      // its own 30 s one). Now said ONCE A SPELL with what it holds, and written again on its own clock — the stash's form\n      if (!parkFailing) {\n        parkFailing = { at: clock.now(), n: 0 };\n        const n = Object.values(out).reduce((k, q) => k + (Array.isArray(q) ? q.length : 0), 0);\n        log(`[deliver] the retry park could not be saved to disk (${(e && e.message) || e}) — its ${n} parked entr${n === 1 ? 'y is' : 'ies are'} held in memory only: ${retryClosed ? 'the stop\\'s own write, so they are lost with this stop' : `lost if VibeSpace restarts before it is written; written again every ${STASH_RETRY_MS / 1000} s`} (counted at this first failure)`);\n      }\n      parkFailing.n++;\n      if (!parkRetryTimer && !retryClosed) parkRetryTimer = clock.setTimeout(() => { parkRetryTimer = null; if (!retryClosed) writeRetryNow(); }, STASH_RETRY_MS);   // the park's own clock (unref'd); never after the stop\n      return false;\n    }\n  };\n";
+  const NEW_CATCH = "    try {\n      fs.writeFileSync(retryFile + '.tmp', JSON.stringify(out)); fs.renameSync(retryFile + '.tmp', retryFile);\n      if (parkFailing) { log(`[deliver] the retry park is on disk again (${parkFailing.n} failed write${parkFailing.n === 1 ? '' : 's'} since ${new Date(parkFailing.at).toISOString()})`); parkFailing = null; }\n      if (parkRetryTimer) { clock.clearTimeout(parkRetryTimer); parkRetryTimer = null; }   // healed by another write: no retry left behind\n      return true;\n    } catch (e) {\n      // 主开发 r5164 (2), a silence of the release: the park's failed write was a log line at every call with NO retry clock (the stash has\n      // its own 30 s one). Now said ONCE A SPELL with what it holds, and written again on its own clock — the stash's form\n      if (!parkFailing) {\n        parkFailing = { at: clock.now(), n: 0 };\n        const n = Object.values(out).reduce((k, q) => k + (Array.isArray(q) ? q.length : 0), 0);\n        log(`[deliver] the retry park could not be saved to disk (${(e && e.code) || 'an error'}) — its ${n} parked entr${n === 1 ? 'y is' : 'ies are'} held in memory only: ${retryClosed ? 'the stop\\'s own write, so they are lost with this stop' : `lost if VibeSpace restarts before it is written; written again every ${STASH_RETRY_MS / 1000} s`} (counted at this first failure)`);\n      }\n      parkFailing.n++;\n      if (!parkRetryTimer && !retryClosed) parkRetryTimer = clock.setTimeout(() => { parkRetryTimer = null; if (!retryClosed) writeRetryNow(); }, STASH_RETRY_MS);   // the park's own clock (unref'd); never after the stop\n      return false;\n    }\n  };\n";
   const failRun = async (DL) => {
-    const w = world(DL), realRename = fs.renameSync; let refused = 0, failing = true;
+    const w = world(DL), realRename = fs.renameSync; let refused = 0, failing = true, writes = 0;
     // the plant: the park's rename refused (EIO) while `failing`; `refused` is its WITNESS (r5135 law 1: a plant never read is a skip)
-    fs.renameSync = function (a, b, ...x) { if (failing && path.resolve(String(b)) === w.file) { refused++; throw stand('EIO'); } return realRename.call(this, a, b, ...x); };
+    fs.renameSync = function (a, b, ...x) { if (path.resolve(String(b)) === w.file) { writes++; if (failing) { refused++; throw stand('EIO'); } } return realRename.call(this, a, b, ...x); };
     try {
       w.park(B, 'k-f1'); w.park(B, 'k-f2');   // two parks: two failed writes
       const said = w.logs.filter((l) => /the retry park could not be saved to disk/.test(l)).length, before = w.onDisk();
-      failing = false;
+      failing = false; const w0 = writes;
       await w.advanceTo(w.c.now + 31_000);   // the park's own clock moves past one retry (its due wake at 60 s is not reached)
       const disk = JSON.parse(w.onDisk() || '{}');
-      return { refused, said, before, healed: (disk[B] || []).length, back: w.logs.some((l) => /the retry park is on disk again/.test(l)) };
+      return { refused, said, before, windowWrites: writes - w0, healed: (disk[B] || []).length, back: w.logs.some((l) => /the retry park is on disk again/.test(l)) };
     } finally { fs.renameSync = realRename; }
   };
   const f = await failRun(DELIVER0);
@@ -441,7 +441,11 @@ console.log('⑫ 主开发 r5164 (2), a silence of the release: the park\'s FAIL
   else {
     ok(f.said === 1 && f.before === null, '⑫ the park\'s failed write is said ONCE for the spell (two failed writes, one line naming what it holds) — nothing on disk meanwhile', f);
     ok(f.healed === 2 && f.back, '⑫ …and written again on the park\'s own clock: past 30 s both parked wakes are on disk, the heal said', f);
+    ok(f.windowWrites === 1, '⑫ …by ONE timer: two failed writes, ONE retry write in its window (no pile-up)', f);
   }
+  const fp = await failRun(cut(DSRC, "      if (!parkRetryTimer && !retryClosed) parkRetryTimer = clock.setTimeout(", "      if (!retryClosed) parkRetryTimer = clock.setTimeout(", 'a timer armed at every failed write', 'mr-park-pile'));
+  if (!(fp.refused >= 2)) console.log(`  SKIP ⑫ PILE RED: the placed refusal was not read twice (${JSON.stringify(fp)})`);
+  else ok(fp.windowWrites >= 2, '⑫ RED CONTROL (a timer armed at EVERY failed write): two retry writes in one window', fp);
   const fx = await failRun(cut(DSRC, NEW_CATCH, RELEASE_CATCH, 'the release\'s catch: a log line, no retry clock', 'mr-park-noclock'));
   if (!(fx.refused >= 1)) console.log(`  SKIP ⑫ RED: the placed refusal was never read (${JSON.stringify(fx)})`);
   else ok(fx.healed === 0 && fx.said === 0, '⑫ RED CONTROL (the release\'s catch: a log line per call, no clock): nothing is written again — the parked wakes stay in memory only', fx);
@@ -463,6 +467,9 @@ console.log('⑫ 主开发 r5164 (2), a silence of the release: the park\'s FAIL
   const s1x = await stopRun(cut(DSRC, "      if (!parkRetryTimer && !retryClosed) parkRetryTimer = clock.setTimeout(() => { parkRetryTimer = null; if (!retryClosed) writeRetryNow(); }, STASH_RETRY_MS);", "      if (!parkRetryTimer) parkRetryTimer = clock.setTimeout(() => { parkRetryTimer = null; writeRetryNow(); }, STASH_RETRY_MS);", 'a retry armed after the stop', 'mr-park-afterstop'));
   if (!(s1x.atStop >= 2)) console.log(`  SKIP ⑫b RED: the placed refusal was not read at the park and at the stop (${JSON.stringify(s1x)})`);
   else ok(s1x.after >= 1, '⑫b RED CONTROL (the retry armed with no stop guard): a write is tried AFTER the stop', s1x);
+  const s1y = await stopRun(cut(DSRC, "    if (parkFailing && !retryHeld && (flushedNow ? parkFailing.n > failedBefore : !writeRetryNow())) {", "    if (false) {", 'the stop neither writes nor says', 'mr-park-stopsilent'));
+  if (!(s1y.atStop >= 1)) console.log(`  SKIP ⑫b RED 2: the placed refusal was never read (${JSON.stringify(s1y)})`);
+  else ok(!s1y.said && s1y.atStop === 1, '⑫b RED CONTROL (the stop neither writes nor says): what memory alone held is lost with no word', s1y);
 }
 
 report();

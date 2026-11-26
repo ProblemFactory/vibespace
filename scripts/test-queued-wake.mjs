@@ -976,8 +976,7 @@ console.log('㉖ 主开发 r5164 (2), a silence of the release: a frame a wrappe
     try { feed(JSON.stringify(REC[kind]) + '\n'); } finally { console.warn = w0; console.log = l0; }
     return { reached, healthReads, said: warns.some((l) => /the frame the wrapper handed back \(\d+ chars, for cid-hb\) is not on disk — the list of messages waiting for conversations could not be read: lost if VibeSpace restarts before it reads again, unless that conversation's next turn takes it first/.test(l)) };
   };
-  const NEW = 'try { const h = cid ? deliverRef?.stashHealth?.() : null; if (h && h.durable === false) console.warn(';
-  const OLD = 'try { const h = null; if (h && h.durable === false) console.warn(';
+  const NEW = '  const h = cid ? deliverRef?.stashHealth?.() : null;\n', OLD = '  const h = null;\n';   // the helper's read of the stash's health (sayHandBackNotOnDisk)
   for (const [kind, rel] of [['acp', 'src/server/stdout/acp-events.js'], ['codex', 'src/server/stdout/codex-events.js']]) {
     for (const road of ['restash', 'ours']) {
       const r = scene(require(path.join(REPO, rel)), kind, road);

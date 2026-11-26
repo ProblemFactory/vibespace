@@ -500,10 +500,13 @@ function handbackStayText(n, tIn) {
  *  queued; `durable` false = in memory only, not on disk yet), or `stash_refused` — the takeover ENDED and the card was shown, only the note
  *  could not be queued (its error text names the stash's file: never shown). The page said «handed back» for every ok, and «could not
  *  hand the browser back: <the error>» for a stash_refused that did hand it back. → { handedBack, text, warn } (text '' when not handed
- *  back: the page's own refusal words stand). No path, no value. */
+ *  back: the page's own refusal words stand; `no_conversation_id` — refused BEFORE any act, the takeover still on — its own words). No
+ *  path, no value. */
 function handBackAnswerWords(r, tIn) {
   const t = tOf(tIn);
   if (r && (r.code === 'stash_refused' || (r.ok === true && r.stashed === false))) return { handedBack: true, warn: true, text: t('Handed back, but your note could not be queued for the agent\'s next turn (VibeSpace could not write it) — take the browser over again to hand it back anew') };
+  // r5235: the refusal BEFORE any act (the conversation has no id yet: the takeover NOT ended) — never «handed back»; its own words
+  if (r && r.code === 'no_conversation_id') return { handedBack: false, warn: false, text: t('Not handed back — this conversation has no id yet (its first reply has not come back): hand it back after the agent has answered once') };
   if (!r || r.error || r.ok === false) return { handedBack: false, warn: false, text: '' };
   if (r.durable === false) return { handedBack: true, warn: true, text: t('Handed back — your note is not on disk yet: if VibeSpace restarts before the agent\'s next turn, the agent will not read it') };
   return { handedBack: true, warn: false, text: t('Handed back — the agent reads your note and the tabs with its next turn (nothing is sent now)') };
