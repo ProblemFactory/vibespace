@@ -1209,6 +1209,7 @@ function create(engineCtx) {
     // 主开发 r2878 + r2943: part of its local copy COULD NOT be removed now — the person is told what is left (its kinds) and that the
     // Channels panel lists it with «Try again» (nothing removes it by itself), or that it could not be noted there (markUnwritten)
     if (purged && Array.isArray(purged.left) && purged.left.length) return { ok: true, removed: true, id: rec.id, purgeLeft: purged.left.slice(), ...(purged.journalClean === false ? { journalOwed: true } : {}), ...(purged.markUnwritten ? { markUnwritten: true } : {}), note: purged.markUnwritten ? 'removed — part of its local copy could not be removed now, and it could not be noted for the Channels panel (purge-pending.json not written)' : 'removed — part of its local copy could not be removed now; the Channels panel lists it with Try again' };
+    if (purged && purged.purged && purged.stampsHeld) return { ok: true, removed: true, id: rec.id, stampsHeld: purged.stampsHeld, note: 'removed — its poll times are not erased from disk yet: their file (or the conversation list) could not be read at this start; they are erased after the next start that reads it' };   // r5016 (1)
     if (purged && purged.purged && purged.journalClean === false) return { ok: true, removed: true, id: rec.id, journalOwed: true, note: 'removed — some of its saved data is not erased from disk yet; it is erased when the disk takes the next write' };
     return { ok: true, removed: true, id: rec.id };
   }
@@ -1278,6 +1279,7 @@ function create(engineCtx) {
     let stampsClean = true;
     try { if (r && r.stamps) stampsClean = (await r.stamps) !== false; } catch { stampsClean = false; }
     if (!stampsClean) log.warn(`[channels] ${rec.id}: removed — but its poll times are not off the disk yet (the side file's write failed, or its family is held): they leave at the next write that lands`);
+    const indexClean = journalClean, stampsHeld = !stampsClean && r && r.stampsHeld ? r.stampsHeld : null;   // r5016 (1): which file is held, for the person's words
     journalClean = journalClean && stampsClean;
     // r2943 (L2): a purge REFUSED by name (the accounts' records not read, a record under the id, a bad id) — NOTHING was removed: its
     // local copy is answered as left, whole, and stays listed (its mark stands)
@@ -1292,7 +1294,7 @@ function create(engineCtx) {
     if (left.length) log.warn(`[channels] ${rec.id}: removed, but part of its local copy could NOT be removed now (${left.map((x) => `${x.folder}: ${x.code}`).join('; ')}) — listed on the Channels panel with Try again (nothing removes it by itself)`);
     else log.log(`[channels] ${rec.id}: removed with its local copy (${said('logs', 'message logs')}, ${said('files', 'fetched files')}, ${said('own', 'pictures and memos')}, ${ended.length} ended proposal(s)) — the adapter declares purge-on-remove`);
     try { store.audit({ kind: 'account', op: left.length ? 'purge-left' : journalClean ? 'purge' : 'purge-owed', id: rec.id, proposals: ended.length, ...(left.length ? { left: left.map((x) => x.folder) } : {}), at: now() }); } catch {}
-    return { purged: !left.length, left: left.map((x) => x.what), proposals: ended.length, journalClean, ...(r.markUnwritten ? { markUnwritten: true } : {}) };   // r1542 (1): the person's answer says a failed compaction
+    return { purged: !left.length, left: left.map((x) => x.what), proposals: ended.length, journalClean, ...(stampsHeld && indexClean ? { stampsHeld } : {}), ...(r.markUnwritten ? { markUnwritten: true } : {}) };   // r1542 (1): the person's answer says a failed compaction
   }
   /** r2943 (B-92fc, L1): «TRY AGAIN» — a PERSON's press on the Channels panel's line that shows what is left of a removed account: its
    *  purge once more. L2: refused by name while the accounts' records are not read, while a record carries the id, or while their file
@@ -1317,7 +1319,7 @@ function create(engineCtx) {
     else log.log(`[channels] ${id}: tried again — the rest of its local copy was removed`);
     try { store.audit({ kind: 'account', op: left.length ? 'purge-again-left' : 'purge-again', id, ...(left.length ? { left: left.map((x) => x.folder) } : {}), at: now() }); } catch {}
     notify([]);
-    return { ok: true, id, done: !left.length, ...(left.length ? { purgeLeft: left.map((x) => x.what) } : {}), ...(stampsClean ? {} : r && r.stampsHeld ? { stampsHeld: true } : { journalOwed: true }), ...(r.markUnwritten ? { markUnwritten: true } : {}) };
+    return { ok: true, id, done: !left.length, ...(left.length ? { purgeLeft: left.map((x) => x.what) } : {}), ...(stampsClean ? {} : r && r.stampsHeld ? { stampsHeld: r.stampsHeld } : { journalOwed: true }), ...(r.markUnwritten ? { markUnwritten: true } : {}) };
   }
   /** DUPLICATE an account (r4 §8.1 #2, D4): a NEW record of the same type
    *  carrying EXACTLY `DUPLICATE_FIELDS` (the custom secret re-sealed), named
