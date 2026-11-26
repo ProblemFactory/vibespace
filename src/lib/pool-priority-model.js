@@ -231,8 +231,19 @@ const pinCountParts = (r, t) => {
   if (r.here > 0) parts.push(t(i18nKey('{n} already pinned here.'), { n: r.here }));
   if (r.provider > 0) parts.push(t(i18nKey('{n} stay: they run on another provider — pin each of those by itself.'), { n: r.provider }));
   if (r.remote > 0) parts.push(t(i18nKey('{n} stay: they run on another machine.'), { n: r.remote }));
+  if (r.unread > 0) parts.push(t(i18nKey('{n} stay: their member could not be read — pin each by itself.'), { n: r.unread }));
   return parts;
 };
+/** r5294 MUST 1 — THE MONEY, ONE PLAIN SENTENCE BEFORE THE ACT: the plan's `pays` (the target's paying facts) → the sentence | null */
+const pinPaysWords = (pays, t, name) => (pays === 'overage' ? t(i18nKey('{name} is billing paid overage now — these conversations will be billed there.'), { name })
+  : pays === 'credits' ? t(i18nKey('{name} can bill usage credits past its quota — these conversations will be billed there once its quota is spent.'), { name })
+  : pays === 'unknown' ? t(i18nKey('It is not known yet whether {name} bills past its quota — these conversations may be billed there.'), { name })
+  : null);
+/** a refusal of the press in plain words (never its code) */
+const pinRefusedWhy = (code, t) => (code === 'pin_not_saved' ? t(i18nKey('its record could not be saved'))
+  : code === 'ended' ? t(i18nKey('it ended meanwhile'))
+  : t(i18nKey('it was refused')));
+const pinBusy = (r, t) => (r && r.code === 'press_running' ? t(i18nKey('A press on this pool is still running — its answer comes when every conversation is done.')) : null);
 const pinWaitTotal = (r) => Object.values((r && r.waits) || {}).reduce((x, y) => x + (Number(y) || 0), 0);
 /** The confirm the press shows FIRST, from the hub's plan (GET …/pin-all): {ask:true, title, message, confirmText} — or {ask:false,
  *  text} when no conversation would be pinned (nothing to confirm; the sentence says why) */
@@ -241,25 +252,27 @@ export function pinAllConfirmWords(plan, t, { poolName = '', memberName = '' } =
   const pins = (Number(p.now) || 0) + (Number(p.restart) || 0) + pinWaitTotal(p);
   const parts = pinCountParts(p, t);
   if (!(pins > 0)) return { ask: false, text: [t(i18nKey('No conversation of “{pool}” to move to “{name}”.'), { pool: poolName, name: memberName }), ...parts].join(' ') };
-  return { ask: true, title: t(i18nKey('Pin every conversation of “{pool}” to “{name}”?'), { pool: poolName, name: memberName }), message: parts.join(' '), confirmText: t(i18nKey('Pin them here')) };
+  const money = pinPaysWords(p.pays, t, memberName);   // FIRST: what it may cost is said before the counts
+  return { ask: true, title: t(i18nKey('Pin every conversation of “{pool}” to “{name}”?'), { pool: poolName, name: memberName }), message: [money, ...parts].filter(Boolean).join(' '), confirmText: t(i18nKey('Pin them here')) };
 }
 /** The answer of the press (POST …/pin-all), in the same plain counts → {text, type} */
 export function pinAllWords(r, t, { poolName = '', memberName = '' } = {}) {
-  if (!r || r.ok === false || r.error) return { type: 'error', text: (r && r.error) || t(i18nKey('Nothing was pinned — try again.')) };
+  if (!r || r.ok === false || r.error) return { type: 'error', text: pinBusy(r, t) || (r && r.error) || t(i18nKey('Nothing was pinned — try again.')) };
   const pinned = (Number(r.now) || 0) + (Number(r.restart) || 0) + pinWaitTotal(r);
   const head = t(i18nKey('{n} conversation(s) of “{pool}” pinned to {name}.'), { n: pinned, pool: poolName, name: memberName });
   const refused = Object.values(r.refused || {}).reduce((x, y) => x + (Number(y) || 0), 0);
-  const tail = refused > 0 ? [t(i18nKey('{n} could not be pinned — try again.'), { n: refused })] : [];
+  const tail = Object.entries(r.refused || {}).filter(([, n]) => Number(n) > 0).map(([code, n]) => t(i18nKey('{n} could not be pinned: {why} — try again.'), { n, why: pinRefusedWhy(code, t) }));
   return { type: refused > 0 ? 'error' : undefined, text: [head, ...pinCountParts({ ...r, here: 0, provider: 0, remote: 0 }, t), ...tail].join(' ') };
 }
 /** The answer of «Back to automatic» (POST …/pin-all {clear:true}) → {text, type} */
 export function pinClearWords(r, t, { poolName = '', memberName = '' } = {}) {
-  if (!r || r.ok === false || r.error) return { type: 'error', text: (r && r.error) || t(i18nKey('Nothing was changed — try again.')) };
+  if (!r || r.ok === false || r.error) return { type: 'error', text: pinBusy(r, t) || (r && r.error) || t(i18nKey('Nothing was changed — try again.')) };
   const n = Number(r.cleared) || 0;
   const refused = Object.values(r.refused || {}).reduce((x, y) => x + (Number(y) || 0), 0);
   const head = n > 0 ? t(i18nKey('{n} conversation(s) of “{pool}” are placed automatically again.'), { n, pool: poolName })
     : t(i18nKey('No conversation of “{pool}” was pinned to {name}.'), { pool: poolName, name: memberName });
-  return { type: refused > 0 ? 'error' : undefined, text: refused > 0 ? `${head} ${t(i18nKey('{n} could not be changed — try again.'), { n: refused })}` : head };
+  const tail = Object.entries(r.refused || {}).filter(([, n]) => Number(n) > 0).map(([code, k]) => t(i18nKey('{n} could not be changed: {why} — try again.'), { n: k, why: pinRefusedWhy(code, t) }));
+  return { type: refused > 0 ? 'error' : undefined, text: [head, ...tail].join(' ') };
 }
 
 /** THE BILLING SWITCHER'S POOL SUBMENU (2026-09-28, owner: "变成池的子菜单，直接选池本身就是自动切换，

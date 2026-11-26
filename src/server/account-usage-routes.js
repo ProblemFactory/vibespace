@@ -728,7 +728,8 @@ require('./conversation-ops.js').provide({ pin: pinRoad({ engine, activeSessions
 // were pinned to another member, stay); POST {memberId} pins every conversation of the pool to the member, ONE pin each through the
 // engine's ONE writer (setConversationPin — every law of the pin inside it); POST {memberId, clear: true} places every conversation
 // pinned to it automatically again. The plan's read and the press are a PERSON's: routes/vault.js personVerdict, the tree's one
-// verdict (an agent's, a job's and an automation's sign-in refused by name). Codes: not_pooled · not_member · human_only.
+// verdict (an agent's, a job's and an automation's sign-in refused by name). Codes: not_pooled · not_member · human_only · press_running
+// (a second press on the pool while one runs). The plan carries `pays` (the target member's paying facts: overage / credits / unknown).
 const pinAllPerson = (req, res) => {
   const who = require('../routes/vault.js').personVerdict(req);
   if (who.ok) return true;
@@ -744,12 +745,12 @@ app.get('/api/accounts/:poolId/pin-all', (req, res) => {
     res.json(r);
   } catch (e) { res.status(500).json({ ok: false, code: 'failed', error: e.message }); }
 });
-app.post('/api/accounts/:poolId/pin-all', (req, res) => {
+app.post('/api/accounts/:poolId/pin-all', async (req, res) => {
   try {
     if (!pinAllPerson(req, res)) return;
     if (typeof engine.pinAll !== 'function' || typeof engine.clearPinsTo !== 'function') return res.status(503).json({ ok: false, code: 'no_engine', error: 'pool engine unavailable' });
     const poolId = String(req.params.poolId || ''), memberId = String(req.body?.memberId || '');
-    const r = req.body?.clear === true ? engine.clearPinsTo(poolId, memberId, { by: 'user' }) : engine.pinAll(poolId, memberId, { by: 'user' });
+    const r = req.body?.clear === true ? await engine.clearPinsTo(poolId, memberId, { by: 'user' }) : await engine.pinAll(poolId, memberId, { by: 'user' });   // one pin a turn of the loop (r5294 MUST 3): the answer when all are done
     if (!r || !r.ok) return res.status((r && r.status) || 400).json({ ok: false, code: (r && r.code) || 'refused', error: (r && r.error) || 'refused' });
     try { broadcastActiveSessions(); } catch { }
     res.json(r);

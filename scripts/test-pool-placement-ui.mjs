@@ -94,10 +94,34 @@ console.log('B-2083 unit B — THE MEMBER ROW\'s ONE PRESS «Move every conversa
   const none = M.pinAllConfirmWords({ ok: true, now: 0, restart: 0, waits: {}, here: 2, provider: 0, remote: 1, elsewhere: 0 }, tEn, { poolName: 'Team', memberName: 'Member U' });
   ok(none.ask === false && /^No conversation of “Team” to move to “Member U”\. 2 already pinned here\. 1 stay: they run on another machine\.$/.test(none.text), 'nothing to pin: no confirm, the sentence says why', none);
   const done = M.pinAllWords({ ok: true, now: 3, restart: 0, waits: { 'pin-recovering': 1 }, here: 0, provider: 0, remote: 0, elsewhere: 1, refused: { pin_not_saved: 1 } }, tEn, { poolName: 'Team', memberName: 'Member U' });
-  ok(done.type === 'error' && done.text.startsWith('4 conversation(s) of “Team” pinned to Member U.') && done.text.includes('1 wait until it can serve them: its quota is not back yet.') && done.text.includes('1 could not be pinned — try again.') && !/pin_not_saved/.test(done.text),
-    'the answer in the same plain counts; one that could not be pinned is said, never its code', done);
+  ok(done.type === 'error' && done.text.startsWith('4 conversation(s) of “Team” pinned to Member U.') && done.text.includes('1 wait until it can serve them: its quota is not back yet.') && done.text.includes('1 could not be pinned: its record could not be saved — try again.') && !/pin_not_saved/.test(done.text),
+    'the answer in the same plain counts; one that could not be pinned is said with its plain why, never its code (r5294 should)', done);
   ok(M.pinClearWords({ ok: true, cleared: 3, refused: {} }, tEn, { poolName: 'Team', memberName: 'Member U' }).text === '3 conversation(s) of “Team” are placed automatically again.'
     && M.pinClearWords({ ok: true, cleared: 0, refused: {} }, tZh, { poolName: 'Team', memberName: 'Member U' }).text === '「Team」没有固定在 Member U 上的对话。', 'the clear\'s answer (en, zh)');
+
+  // r5294 MUST 1 — THE MONEY, ONE PLAIN SENTENCE BEFORE THE ACT: the plan's `pays` (the target's paying facts) said first, in en / zh / ja
+  const P0 = { ok: true, now: 44, restart: 0, waits: {}, here: 0, provider: 0, remote: 0, unread: 0, elsewhere: 0, refused: {} };
+  const SAY = {
+    overage: ['Member U is billing paid overage now — these conversations will be billed there.', 'Member U 现在正在按量计费超额用量——这些对话将在那里计费。', 'Member U は現在、有料の超過利用で課金中です — これらの会話はそこで課金されます。'],
+    credits: ['Member U can bill usage credits past its quota — these conversations will be billed there once its quota is spent.', 'Member U 超出额度后会用额外用量（usage credits）按量计费——额度用完后，这些对话将在那里计费。', 'Member U はクォータを超えると追加利用(usage credits)で従量課金されます — クォータを使い切ると、これらの会話はそこで課金されます。'],
+    unknown: ['It is not known yet whether Member U bills past its quota — these conversations may be billed there.', '还不知道 Member U 超出额度后是否计费——这些对话可能会在那里计费。', 'Member U がクォータを超えて課金されるかはまだ分かりません — これらの会話はそこで課金される可能性があります。'],
+  };
+  const sayOf = (mod, pays, t) => mod.pinAllConfirmWords({ ...P0, pays }, t, { poolName: 'Team', memberName: 'Member U' }).message;
+  for (const [pays, [en, zhs, jas]] of Object.entries(SAY)) {
+    ok(sayOf(M, pays, tEn).startsWith(en + ' 44 move there now.') && sayOf(M, pays, tZh).startsWith(zhs) && sayOf(M, pays, tJa).startsWith(jas),
+      `«${pays}»: the confirm says the money FIRST, in one plain sentence, in en / zh / ja — then the counts`, [sayOf(M, pays, tEn), sayOf(M, pays, tZh), sayOf(M, pays, tJa)]);
+  }
+  ok(sayOf(M, null, tEn) === '44 move there now.', 'a member that bills nothing past its quota: no money sentence', sayOf(M, null, tEn));
+  ok(M.pinAllConfirmWords({ ...P0, now: 1, unread: 2 }, tEn, { poolName: 'Team', memberName: 'Member U' }).message.includes('2 stay: their member could not be read — pin each by itself.'), 'a conversation whose member cannot be read is said apart (r5294 should)');
+  ok(M.pinAllWords({ ok: false, code: 'press_running', error: 'x' }, tEn).text === 'A press on this pool is still running — its answer comes when every conversation is done.'
+    && M.pinClearWords({ ok: false, code: 'press_running', error: 'x' }, tZh).text === '这个池的一次操作仍在进行——所有对话处理完后会给出结果。', 'a second press while one runs: refused in the page\'s words (en, zh)');
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const MCp = mutantCopies('pin-all-words', path.resolve('.'));
+    const SRCm = require('node:fs').readFileSync(path.resolve('src/lib/pool-priority-model.js'), 'utf8');
+    const RED = await import(MCp.write('src/lib/pool-priority-model.js', editAnchor(SRCm, '  const money = pinPaysWords(p.pays, t, memberName);   // FIRST: what it may cost is said before the counts\n', '  const money = null;\n', 'src/lib/pool-priority-model.js'), 'money-silent', { esm: true }));
+    ok(sayOf(RED, 'credits', tEn) === '44 move there now.', 'RED: a confirm with the money sentence cut reads «44 move there now.» alone onto a member that bills', sayOf(RED, 'credits', tEn));
+  }
 }
 
 console.log('§3 the chip / Session Properties note');
