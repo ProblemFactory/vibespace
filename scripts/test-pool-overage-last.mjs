@@ -7,7 +7,8 @@
 // line's (a) the only servable member pays — it still serves; (b) a conversation already on a paying member — moved by the soft band,
 // owed to its stop, kept with nowhere to go, moved to a credits member's PREPAID quota at its stop (the ruling); r4714's leg (b) and
 // its twin; the hop guard; THE NO-OVERAGE IDENTITY TABLE against the release's own module; REDs that are the earlier rankings; the
-// engine's reader pinned to the raw reading, its notices naming the bar. Every account is made up; nothing is spawned or read.
+// engine's reader pinned to the raw reading, its notices naming the bar. B-9369 (主开发 r5165): both switch notices in the page's language —
+// the builders' every clause a key with a zh and a ja row, the English the release's sentence. Every account is made up; nothing is spawned or read.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,13 +121,91 @@ const M = mutantCopies('pool-overage-last', REPO);
     ck('overage-last: the engine\'s in-use reader reads the RAW reading only, the setting gates only the bar\'s naming, and every credits set handed to a decision has the paying set beside it', pin(ENG));
     ck('overage-last RED: a reader on the pool\'s estimated view turns the pin red', !pin(anchored(ENG, "if (overageState(readRawUsageCache(m.id)).inUse === 'yes') out.add(m.id);\n    return out.size ? out : null;\n  } catch { return null; }\n}\n/** THE BAR", "if (overageState(poolReadCache(m.id)).inUse === 'yes') out.add(m.id);\n    return out.size ? out : null;\n  } catch { return null; }\n}\n/** THE BAR", 'a reader on the estimated view')));
     ck('overage-last RED: one decision handed no paying set turns the pin red', !pin(anchored(ENG, 'creditsIds: creditsMemberIds(alive), payingIds: overageInUseIds(alive)', 'creditsIds: creditsMemberIds(alive)', 'a decision handed no paying set')));
-    // r4711 (c) / r4714 2.: the setting's words promise the bar is NAMED — BOTH notice builders (a conversation's move, the pool
-    // default's switch) say «— the last resort: X is billing paid overage» on a landing in the paying tier (English in this commit)
-    const clause = (t) => (t.match(/: (?:ds|d)\.toOverage\b[^\n]*\n\s*\? ` — the last resort: \$\{(?:toName|d\.toName)\} is billing paid overage`/g) || []).length;
-    ck('r4714 the notices: both builders name a landing on a paying member — «the last resort: X is billing paid overage»', clause(ENG) === 2);
-    ck('r4714 the notices RED: a builder without the clause turns the pin red', clause(anchored(ENG, '          : ds.toOverage', '          : false && ds.toOverage', 'the per-conversation clause')) === 1);
-    // the move's own reason in words, in both builders: «X is billing paid overage, and Y has quota left»
-    ck('r4744 the notices: both builders say why a conversation left a paying member («is billing paid overage, and … has quota left»)', (ENG.match(/ is billing paid overage, and \$\{(?:toName|d\.toName)\} has quota left/g) || []).length === 2);
+    // r4711 (c) / r4714 2. / r4744, and B-9369 (主开发 r5165): BOTH switch notices (a conversation's move, the pool default's switch) are
+    // the builders' words (switchNoticeWords): their English text AND the i18n the client words in the page's language — no clause is
+    // written beside them (the last resort, «is billing paid overage, and … has quota left»: the builders' variants below)
+    const wired = (t) => /const mw = sessionMoveWords\(\{[^\n]*\}\); serverNotice\(`pool-sess-\$\{sid\}-\$\{now\}`, mw\.text, \{ i18n: mw\.i18n \}\);/.test(t)
+      && /const dw = poolSwitchWords\(\{/.test(t) && t.includes('serverNotice(`pool-auto-${poolId}-${now}`, dw.text, { i18n: dw.i18n });')
+      && !/ — the last resort: \$\{/.test(t) && !/ is billing paid overage, and \$\{/.test(t);   // stale-pins: kept (deliberate absence: c4988dd6f's clauses, never beside a builder)
+    ck('B-9369 the notices: both switch notices are the builders\' words — the English text and the i18n — and no clause is written beside them', wired(ENG));
+    ck('B-9369 the notices RED: an English template beside the builder (c4988dd6f\'s form of the conversation\'s move) turns the pin red', !wired(anchored(ENG, 'serverNotice(`pool-sess-${sid}-${now}`, mw.text, { i18n: mw.i18n });', 'serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation moved to ${toName}${ds.toOverage ? ` — the last resort: ${toName} is billing paid overage` : \'\'}`);', 'an English template beside the builder')));
+  }
+  // B-9369 (主开发 r5165): EVERY CLAUSE IN THE PAGE's LANGUAGE — the builders driven through every variant: the English text exactly the
+  // sentence the release says, each key (the sentence's and each slot's) a row in BOTH dictionaries with the same {params}, the plain
+  // params only names and numbers, and the sentence worded as the client words it (src/lib/app.js: a param that is words first, one
+  // level) leaves no slot and no English clause. Every key of the table is met by a variant.
+  { const ENG_REL = 'src/server/usage-pool-engine.js', ENG = fs.readFileSync(path.join(REPO, ENG_REL), 'utf8');
+    const { dictEntries } = await import('./i18n-extract.mjs');
+    const dictOf = (f) => new Map(dictEntries(fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf8')).map((e) => [e.key, e.value]));
+    const DICT = { zh: dictOf('i18n-zh.js'), ja: dictOf('i18n-ja.js') };
+    const fill = (s, ps) => s.replace(/\{(\w+)\}/g, (m, k) => (ps && ps[k] !== undefined ? String(ps[k]) : m));
+    const said = (lang, i18n) => { const t = (k, ps) => fill(DICT[lang].get(k) || k, ps); const ps = Object.fromEntries(Object.entries(i18n.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key, v.params || undefined) : v])); return t(i18n.key, ps); };
+    const clausesOf = (i18n) => [{ key: i18n.key, params: i18n.params }, ...Object.values(i18n.params || {}).filter((v) => v && typeof v === 'object')];
+    const ph = (s) => [...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',');
+    const PLAIN = new Set(['pool', 'title', 'target', 'from', 'rank', 'pct', 'fam', 'min', 'label', 'line', 'inMin', 'rate', 'n']);
+    const ENGLISH = /\b(moved to|switched to|billing|resort|restarting|re-login|answered|quota|projected|remaining|login|subscription|removed|draining|conversations? start)\b/;
+    const variants = (W) => {
+      const base = { pool: 'Pool A', title: 'conv', target: 'Member B' }, EARLY = { label: '5h', line: 10, inMin: 4, rate: 0.5 };
+      const move = (o) => W.sessionMove({ ...base, hot: true, ...o }), sw = (o) => W.poolSwitch({ pool: 'Pool A', target: 'Member B', from: 'Member A', hot: true, ...o });
+      const M0 = 'Pool "Pool A": conversation "conv" moved to Member B', HW = ' — Member H answered it with a limit while its own numbers are unknown';
+      const NEAR = (ms) => ({ last: { toLoginNear: { msLeft: ms } } }), RL = '; re-login it in Manage Agents now';
+      return [
+        ['the move, alone', move({}), M0],
+        ['the move: priority, paying, restart', move({ from: 'Member P', priorityRank: 2, overage: true, fam: 'opus', fromRemaining: 40, hot: false }), M0 + ' (priority #2) — Member P is billing paid overage, and Member B has quota left — restarting it'],
+        ['the move: held on an instant, the family', move({ from: 'Member H', heldWhy: "held on another account's weekly instant", fam: 'opus' }), M0 + HW + " (held on another account's weekly instant) (its opus quota)"],
+        ['the move: held unread, was at', move({ from: 'Member H', heldWhy: 'its usage reading could not be read', fam: 'opus', fromRemaining: 37.4 }), M0 + HW + ' (its usage reading could not be read) (its opus quota was at 37%)'],
+        ['the move: held restarted, will be, early', move({ from: 'Member H', heldWhy: 'no whole usage reading has come since its reading file started again', fam: 'opus', fromRemaining: 8, early: EARLY, leadMin: 5 }), M0 + HW + ' (no whole usage reading has come since its reading file started again) (its opus quota will be at 8% within 5 min) — moved early, projected: 5h reaches its 10% line in ~4 min at 0.5%/min'],
+        ['the move: a scrap dying now', move(NEAR(0)), M0 + " — but Member B's own login expires imminently" + RL],
+        ['the move: a scrap in seconds', move(NEAR(30e3)), M0 + " — but Member B's own login expires in 30 s" + RL],
+        ['the move: a scrap in minutes', move(NEAR(42 * 60e3)), M0 + " — but Member B's own login expires in 42 min" + RL],
+        ['the move: a scrap in hours', move(NEAR(17 * 3600e3)), M0 + " — but Member B's own login expires in 17 h" + RL],
+        ['the move: a scrap in days', move(NEAR(5 * 86400e3)), M0 + " — but Member B's own login expires in 5 days" + RL],
+        ['the move: the last resort, credits', move({ last: { toCredits: true } }), M0 + ' — the last resort: Member B bills pay-per-use past its quota (usage credits)'],
+        ['the move: the last resort, paying', move({ last: { toOverage: true } }), M0 + ' — the last resort: Member B is billing paid overage'],
+        ['the switch: soonest reset', sw({ reason: 'edf' }), 'Pool "Pool A" switched to Member B — draining the member whose weekly quota resets soonest (use-it-or-lose-it)'],
+        ['the switch: priority return, restart', sw({ reason: 'priority-return', priorityRank: 1, hot: false }), 'Pool "Pool A" is back on Member B (priority #1) — new conversations start there (restarting its conversations)'],
+        ['the switch: removed, the last resort paying', sw({ reason: 'not-a-member', last: { toOverage: true } }), 'Pool "Pool A" switched to Member B — Member A was removed from the pool — the last resort: Member B is billing paid overage'],
+        ['the switch: paying, restart', sw({ reason: 'overage', hot: false }), 'Pool "Pool A" switched to Member B — Member A is billing paid overage, and Member B has quota left (restarting its conversations)'],
+        ['the switch: lapsed', sw({ reason: 'subscription-lapsed' }), "Pool \"Pool A\" switched to Member B — Member A's subscription is inactive; it rejoins by itself once it answers again"],
+        ['the switch: signed out', sw({ reason: 'login-expired', wall: 'login is signed out' }), "Pool \"Pool A\" switched to Member B — Member A's login is signed out; re-login it in Manage Agents"],
+        ['the switch: expired, the last resort credits', sw({ reason: 'login-expired', wall: 'login session expired', last: { toCredits: true } }), "Pool \"Pool A\" switched to Member B — Member A's login session expired; re-login it in Manage Agents — the last resort: Member B bills pay-per-use past its quota (usage credits)"],
+        ['the switch: unusable', sw({ reason: 'login-expired', wall: 'login session is unusable' }), "Pool \"Pool A\" switched to Member B — Member A's login session is unusable; re-login it in Manage Agents"],
+        ['the switch: automatic, priority, restart', sw({ reason: 'exhausted', priorityRank: 3, pct: 12, hot: false }), 'Pool "Pool A" auto-switched to Member B (priority #3) (previous account down to 12% remaining) — restarting its conversations'],
+        ['the switch: automatic, early', sw({ reason: 'exhausted', pct: 8, early: EARLY, leadMin: 5 }), 'Pool "Pool A" auto-switched to Member B (previous account will be down to 8% within 5 min — moved early, projected: 5h reaches its 10% line in ~4 min at 0.5%/min)'],
+      ];
+    };
+    const judge = (W) => {
+      const bad = [], met = new Set();
+      for (const [n, w, en] of variants(W)) {
+        if (w.text !== en) bad.push(`${n}: the English «${w.text}» ≠ «${en}»`);
+        for (const c of clausesOf(w.i18n)) {
+          met.add(c.key);
+          for (const lang of ['zh', 'ja']) { const v = DICT[lang].get(c.key); if (v === undefined) bad.push(`${n}: no ${lang} row for «${c.key}»`); else if (ph(v) !== ph(c.key)) bad.push(`${n}: the ${lang} row of «${c.key}» says {${ph(v)}}, the key {${ph(c.key)}}`); }
+          for (const [k, v] of Object.entries(c.params || {})) if (!(v && typeof v === 'object') && v !== '' && !PLAIN.has(k)) bad.push(`${n}: «${k}» is a plain string param (${String(v).slice(0, 60)}) — words, never a name`);
+        }
+        for (const lang of ['zh', 'ja']) { const s = said(lang, w.i18n); if (/\{\w+\}/.test(s) || s === w.text || ENGLISH.test(s)) bad.push(`${n}: worded in ${lang} «${s}» keeps a slot or English`); }
+      }
+      return { bad, met };
+    };
+    const E = require(path.join(REPO, ENG_REL)), here = judge(E.switchNoticeWords);
+    ck(`B-9369 every clause in the page's language: ${variants(E.switchNoticeWords).length} variants — the English exactly the release's sentence, each key a row in zh and ja with its {params}, worded with no slot and no English left`, here.bad.length === 0);
+    for (const b of here.bad.slice(0, 8)) console.log('    ' + b);
+    const all = Object.values(E.switchNoticeWords.KEYS), unmet = all.filter((k) => !here.met.has(k));
+    ck(`B-9369 every key of the table is met by a variant (${all.length} keys)`, all.length >= 30 && unmet.length === 0);
+    if (unmet.length) console.log('    unmet: ' + unmet.join(' | '));
+    // RED (a plant on the paying last resort: an English sentence as its own key, never a dictionary row) — its witness: the copy's
+    // clause is the plant's, not the table's
+    const english = M.load(ENG_REL, anchored(ENG, '  if (toOverage) return { key: SWITCH_KEYS.lastOverage, params: { target } };', "  if (toOverage) return { key: ' — the last resort: ' + target + ' is billing paid overage', params: {} };", 'an English last resort'), 'switch-english');
+    const ew = english.switchNoticeWords.sessionMove({ pool: 'Pool A', title: 'conv', target: 'Member B', hot: true, last: { toOverage: true } });
+    ck('B-9369 RED CONTROL in force: the copy\'s last resort is the plant\'s sentence, not the table\'s key', ew.i18n.params.last && ew.i18n.params.last.key !== E.switchNoticeWords.KEYS.lastOverage);
+    ck('B-9369 RED: a last resort written as an English sentence turns the judge red', judge(english.switchNoticeWords).bad.some((b) => /no zh row/.test(b)));
+    // RED (r4714's: a builder without the paying last resort) — its witness: the copy says nothing past the move
+    const none = M.load(ENG_REL, anchored(ENG, '  if (toOverage) return { key: SWITCH_KEYS.lastOverage, params: { target } };\n', '', 'no paying last resort'), 'switch-no-clause');
+    const nw = none.switchNoticeWords.sessionMove({ pool: 'Pool A', title: 'conv', target: 'Member B', hot: true, last: { toOverage: true } });
+    ck('B-9369 RED CONTROL in force: the copy names no last resort on a paying landing', nw.i18n.params.last === '');
+    ck('r4714 the notices RED: a builder without the paying last resort turns the judge red', judge(none.switchNoticeWords).bad.some((b) => /the last resort, paying/.test(b)));
+  }
+  { const ENG = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
     // THE POOL DEFAULT never cuts a follower mid-turn (r4696 M2): on a pool that cannot hot-switch, an 'overage' move waits for every
     // follower to stop, as the priority return does — the default's decision reads no inTurn of its own, so this wait IS its hold
     const waits = (t) => t.includes("if ((d.reason === 'priority-return' || d.reason === 'overage') && !hot) {") && t.includes("if (busy && d.reason === 'overage') { noteWarmHold(poolId, busy, { ...d, reason: 'warm-soft-defer', paying: true,") && t.includes("poolId + ':default:overage'");
@@ -334,7 +413,7 @@ const M = mutantCopies('pool-overage-last', REPO);
     const oneRule = (t) => (t.match(/\b(?:credits|paying)\.has\(/g) || []).length === 2 && /const tierOf = \(id\) => /.test(bodyOf('poolTiers')) && ['decidePoolSwitch', 'rankPoolMembers', 'soonestUsableMember'].every((f) => { const b = bodyOf(f); return /poolTiers\(\{/.test(b) && /\.orderOf\(/.test(b) && !/\b(?:credits|paying)\.has\(/.test(b) && !/\(x\.(?:tier|credits|paying)\b(?!\))/.test(b); });
     ck('r4744 M1 BY THE SOURCE: the tier is read in poolTiers alone (two reads of the sets, both in its tierOf), and each of the three walks takes the tiers and their order from it, sorting by no tier rule of its own', oneRule(srcA));
     ck('r4744 M1 BY THE SOURCE RED: a walk that reads the credits set itself turns it red', !oneRule(anchored(srcA, '    const tier = tiers.tierOf(m.id);\n    if (tier !== TIER_QUOTA) {', '    const tier = tiers.credits && tiers.credits.has(m.id) ? TIER_CREDITS : tiers.tierOf(m.id);\n    if (tier !== TIER_QUOTA) {', 'a walk with its own read'))); }
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 17 : 16, label: 'overage-last: ' })) ck(r.name, r.pass);   // the release copy counts only where it was made
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 19 : 18, label: 'overage-last: ' })) ck(r.name, r.pass);   // the release copy counts only where it was made
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
