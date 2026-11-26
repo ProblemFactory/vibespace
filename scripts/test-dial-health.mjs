@@ -337,12 +337,13 @@ console.log('— B-f276 (主开发 r4718): dial-health.json UNDER THE STORE-READ
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const MH = mutantCopies('dhl-held', REPO);
   /** life one: a second dialer named — ONE item filed and recorded, on disk */
-  const lifeOne = (Mod = HW) => { const Wd = world(Mod); const a = Wd.mk(); a.observe(macHost(Wd), { connected: true }); a.stop();
+  // B-574d (r4760): the record is the store writer's, written on its thread — ON DISK before the next life meets the file
+  const lifeOne = async (Mod = HW) => { const Wd = world(Mod); const a = Wd.mk(); a.observe(macHost(Wd), { connected: true }); await a.whenWritten(); a.stop();
     const file = path.join(Wd.dir, 'dial-health.json'); return { Wd, file, bytes: fs.readFileSync(file, 'utf8'), itemId: Wd.open()[0].id }; };
   const heldLife = (L) => { const pr = placeReads(L.file); let w = null; try { w = L.Wd.mk(); } finally { pr.restore(); } return { w, seen: pr.seen.n }; };
   const passes = (L, w) => { L.Wd.tick(30e3); const v = w.observe(macHost(L.Wd), { connected: true });   // it still knocks
     L.Wd.tick(15 * MIN); w.observe(macHost(L.Wd, { refAt: L.Wd.now() - 14 * MIN }), { connected: true }); return v; };   // a clear pass
-  const L1 = lifeOne();
+  const L1 = await lifeOne();
   const h = heldLife(L1); const v = passes(L1, h.w);
   ok(h.seen === 1 && !!h.w.held() && v && v.kind === DH.SECOND && L1.Wd.open().length === 1 && L1.Wd.open()[0].id === L1.itemId && fs.readFileSync(L1.file, 'utf8') === L1.bytes
     && L1.Wd.logs().filter((l) => /a pass skipped — the record of the extra dialing agents could not be read \(EIO\)/.test(l)).length === 1,
@@ -366,7 +367,7 @@ console.log('— B-f276 (主开发 r4718): dial-health.json UNDER THE STORE-READ
   ok(lr.n === 0, 'RED: a copy whose lift does not pass — the knocking machine is not told until the next tick', lr);
   // THE PASS's GUARD (the adversarial read: pinned only by its line before): a DISMISSED item is not reopened while the record is unread —
   // over an empty ledger a pass would file again, and For you's add matches by words across statuses (it reopens a dismissed item)
-  const runDismissed = async (Mod) => { const L = lifeOne(Mod); L.Wd.todos.setStatus(L.itemId, 'dismissed', 'user'); const hd = heldLife(L); L.Wd.tick(30e3); hd.w.observe(macHost(L.Wd), { connected: true }); const st = L.Wd.todos.get(L.itemId).status; hd.w.stop(); return st; };
+  const runDismissed = async (Mod) => { const L = await lifeOne(Mod); L.Wd.todos.setStatus(L.itemId, 'dismissed', 'user'); const hd = heldLife(L); L.Wd.tick(30e3); hd.w.observe(macHost(L.Wd), { connected: true }); const st = L.Wd.todos.get(L.itemId).status; hd.w.stop(); return st; };
   const keep = await runDismissed(HW);
   const GSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-health-watch.js'), 'utf8');
   const guardLine = "    { const hd = hold.held(); if (hd) { if (!heldSaid) { heldSaid = true; log(`[dial-health] a pass skipped — the record of the extra dialing agents could not be read (${hd.code || 'unread'}); nothing filed, retracted or written until it reads`); } return v; } }   // HELD: the verdict answers, the ledger is not touched\n";
@@ -375,7 +376,7 @@ console.log('— B-f276 (主开发 r4718): dial-health.json UNDER THE STORE-READ
   const reopened = await runDismissed(MH.load('src/server/dial-health-watch.js', GP.join(''), 'pass-unguarded'));
   ok(keep === 'dismissed' && reopened !== 'dismissed', `HELD: an item the person DISMISSED stays dismissed through a pass over the unread record; RED: a copy without the pass's guard files over the empty ledger and the item comes back (${reopened})`, { keep, reopened });
   // TORN: kept aside ONCE, byte for byte; the ledger empty — the same knocking re-files the SAME item in For you (its words)
-  const T1 = lifeOne(); const TORN = T1.bytes.slice(0, 30); fs.writeFileSync(T1.file, TORN);
+  const T1 = await lifeOne(); const TORN = T1.bytes.slice(0, 30); fs.writeFileSync(T1.file, TORN);
   const tw = T1.Wd.mk();
   for (let i = 0; i < 200 && tw.held(); i++) await sleep(10);
   T1.Wd.tick(30e3); tw.observe(macHost(T1.Wd), { connected: true });
@@ -388,10 +389,45 @@ console.log('— B-f276 (主开发 r4718): dial-health.json UNDER THE STORE-READ
   const RelSrc = RSRC.split("    if (hold.start(a) === 'data') ledger = isObj(a.value.hosts) ? a.value.hosts : {}; }\n");
   ok(RelSrc.length === 2, 'the hold\'s start line is spelled once (the red copy patches exactly it)');
   const Rel = MH.load('src/server/dial-health-watch.js', RelSrc.join("    if (a.state === 'data') ledger = isObj(a.value.hosts) ? a.value.hosts : {}; }\n"), 'tip-read');
-  const R = lifeOne(Rel); const rh = heldLife(R); passes(R, rh.w); rh.w.stop();
+  const R = await lifeOne(Rel); const rh = heldLife(R); passes(R, rh.w); await rh.w.whenWritten(); rh.w.stop();
   ok(fs.readFileSync(R.file, 'utf8') !== R.bytes, 'RED: the tip\'s read (a failed read taken as a first run) — the ledger written over the file (the episode begun again)', JSON.parse(fs.readFileSync(R.file, 'utf8')));
   for (const c of copiesCensus(MH.files, MH.dir, REPO, { minCopies: 1, label: 'mutant-copy (dial-health held): ' })) ok(c.pass, c.name, c.detail);
 }
+console.log('— B-574d (主开发 r4760): dial-health.json is THE STORE WRITER\'s — no write on the loop; on disk after its write; a restart reads what is owed —');
+{
+  const MWr = mutantCopies('dhl-writer', REPO);
+  const WSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-health-watch.js'), 'utf8');
+  /** the main thread's synchronous writes of the ledger (its temp or the file) while `fn` runs */
+  const syncWrites = (file, fn) => { const f = path.resolve(file), real = { w: fs.writeFileSync, r: fs.renameSync }, hits = [];
+    fs.writeFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p).startsWith(f)) hits.push('write ' + path.basename(p)); return real.w.call(this, p, ...a); };
+    fs.renameSync = function (a, b, ...r) { if (typeof b === 'string' && path.resolve(b) === f) hits.push('rename'); return real.r.call(this, a, b, ...r); };
+    try { fn(); } finally { fs.writeFileSync = real.w; fs.renameSync = real.r; } return hits; };
+  const life = async (Mod) => { const Wd = world(Mod); const a = Wd.mk(); const file = path.join(Wd.dir, 'dial-health.json');
+    const hits = syncWrites(file, () => { a.observe(macHost(Wd), { connected: true }); });
+    const written = await a.whenWritten(); let disk = null; try { disk = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { } a.stop(); return { hits, written, disk, item: Wd.open()[0] && Wd.open()[0].id }; };
+  const L = await life(HW);
+  const rec = L.disk && L.disk.hosts && L.disk.hosts[`host-dial-Macbook|${DH.SECOND}`];
+  ok(L.hits.length === 0 && L.written === true && !!rec && !!L.item && rec.itemId === L.item, 'WRITTEN OFF THE LOOP: a pass that files the item writes NOTHING on the main thread (no temp, no rename) — the record is on disk after whenWritten(), its item id in it', { hits: L.hits, written: L.written });
+  const Rel = MWr.load('src/server/dial-health-watch.js', editAnchor(WSRC, "    try { SW().dirty(file, { name: 'dial-health.write', mode: 0o600, produce: () => JSON.stringify({ version: 1, hosts: ledger }, null, 2) }); }\n", "    try { const tmp = file + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, hosts: ledger }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, file); }\n", 'src/server/dial-health-watch.js'), 'release-save');   // stale-pins: kept (the red copy's own text: the release's save)
+  const R = await life(Rel);
+  ok(R.hits.length >= 2, 'RED: the release\'s save (an unsynced temp written and renamed ON THE LOOP) — the main thread\'s writes are seen', R.hits);
+  // A SECOND WATCH IN ONE PROCESS (a suite's restart) reads what the writer still OWES the file — a stand-in writer that holds every
+  // write (nothing lands); RED: a copy whose read takes the file only
+  const restart = (Mod) => { const Wd = world(Mod), owedBy = new Map();
+    const writer = { dirty: (f, o) => { owedBy.set(f, o.produce); }, owed: (f) => (owedBy.has(f) ? owedBy.get(f)() : null), durable: () => Promise.resolve(true) };
+    const mk = () => Mod.create({ userTodos: Wd.todos, dataDir: Wd.dir, log: () => { }, now: Wd.now, tickMs: 0, writer });
+    const w1 = mk(); w1.observe(macHost(Wd), { connected: true }); w1.stop();
+    const w2 = mk(); const rec2 = w2._ledger()[`host-dial-Macbook|${DH.SECOND}`], onDisk = fs.existsSync(path.join(Wd.dir, 'dial-health.json')); w2.stop();
+    return { kept: !!rec2 && !!Wd.open()[0] && rec2.itemId === Wd.open()[0].id, onDisk }; };
+  const rs = restart(HW);
+  ok(!rs.onDisk && rs.kept, 'A SECOND WATCH IN ONE PROCESS (a suite\'s restart) reads what the writer still OWES the file — nothing on disk yet, the episode and its item id there', rs);
+  const NoOwed = MWr.load('src/server/dial-health-watch.js', editAnchor(WSRC, 'const owedBytes = owedNow(); if (owedBytes != null) read = { text: owedBytes }; else try {', 'try {', 'src/server/dial-health-watch.js'), 'no-owed-read');
+  const rx = restart(NoOwed);
+  ok(!rx.onDisk && !rx.kept, 'RED: a copy whose read takes the file only — the restarted watch has no record of the episode (its item id lost until the writer lands)', rx);
+  for (const c of copiesCensus(MWr.files, MWr.dir, REPO, { minCopies: 1, label: 'mutant-copy (dial-health writer): ' })) ok(c.pass, c.name, c.detail);
+}
+// B-574d: every ledger this suite wrote is on disk before its folder goes (the store writer writes on its thread)
+await require('../src/store-writer.js').storeWriter().whenDurable(fs.readdirSync(SCR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(SCR, d.name, 'dial-health.json')));
 fs.rmSync(SCR, { recursive: true, force: true });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
