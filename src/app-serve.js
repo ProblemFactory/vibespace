@@ -25,7 +25,7 @@
  *                    the RECORD after the slot ran: the script's `= …` lines read from the slot's own log (keyed by the
  *                    run's nonce), the rows and package lists read from the ROOT-OWNED ~/.vibespace/apps/sys (an agent
  *                    runs as this same user — it may edit manifest.json, never what root wrote), the index written
- *                    through writeJsonAtomic. Nothing here ever runs apt as root.
+ *                    through THE device's one door (B-574d: one sync before its name). Nothing here ever runs apt as root.
  *   the catalog      catalogRows(): one row per .desktop file root listed for an entry (re-parsed from apt's own
  *                    /usr/share/applications, never from the user-writable index) — desktop-serve's registry() serves
  *                    them beside DEFAULT_REGISTRY; iconFile(): the one icon a row may show (PNG / SVG under /usr/share).
@@ -33,7 +33,9 @@
  *                    `flatpak list --app --user|--system` + the user's and the system's desktop entries, read as the user
  *                    (bounded, ≤ 5 s), cached in <stateDir>/desktop-apps-witness.json — rows of their OWN group
  *                    (`seen.<…>`, src/app-witness.js), never catalog rows.
- * Every probe is a bounded async child or an async fs call — never a sync walk on the loop (the hub's event loop).
+ * Every probe is a bounded async child or an async fs call — never a sync walk on the loop (the hub's event loop). ONE synchronous
+ * write (B-574d, r4806): the index's, through the device's door (open, write, ONE sync, close, rename) — at a person's install or
+ * removal, or a reconcile that changed the index; never at a cadence.
  */
 const fs = require('fs');
 const fsp = fs.promises;
