@@ -399,7 +399,7 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         const res = await fetchJson(`${base}/only`, { method: 'PUT', headers: JSON_HDR, body: JSON.stringify({ principal: { kind: 'group', id: r.id, name: r.name }, only: on }) });
         busy = false;
         if (!res || res.error) showToast(failText(res, t('Could not change «this group only»')), { type: 'error' });
-        else view = res;
+        else { view = res; if (res.only && res.only.leaseEndsWhenRead) showToast(t('If an agent holds this window, it loses it as soon as the list of window holders can be read again')); }   // B-f276 (r4813): the holder's end owed to the lift
         if (live()) draw();
       },
       onToggle: async (kind, r, on) => {
@@ -408,7 +408,7 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         const res = await fetchJson(base, { method: on ? 'POST' : 'DELETE', headers: JSON_HDR, body: JSON.stringify({ principal }) });
         busy = false;
         if (!res || res.error) showToast(failText(res, on ? t('Could not share the window') : t('Could not stop sharing the window')), { type: 'error' });
-        else { view = res; if (!on && res.revoked && res.revoked.leaseDropped) showToast(kind === 'everyone' ? t('The agent that held this window no longer reaches it') : t('{name} no longer holds this window', { name: r.name || r.id })); }
+        else { view = res; if (!on && res.revoked && res.revoked.leaseEndsWhenRead) showToast(t('If an agent holds this window, it loses it as soon as the list of window holders can be read again')); if (!on && res.revoked && res.revoked.leaseDropped) showToast(kind === 'everyone' ? t('The agent that held this window no longer reaches it') : t('{name} no longer holds this window', { name: r.name || r.id })); }
         if (live()) draw();
       },
       // «除了» (lane grants-unify): the members left OUT of a shared Task Group / All agents — the whole list, one PUT
@@ -417,7 +417,7 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         const res = await fetchJson(`${base}/except`, { method: 'PUT', headers: JSON_HDR, body: JSON.stringify({ except, ...(removeExcept.length ? { removeExcept } : {}) }) });
         busy = false;
         if (!res || res.error) showToast(failText(res, t('Could not change who is left out')), { type: 'error' });
-        else { view = res; if (res.excepted && res.excepted.leaseDropped) showToast(t('The agent that held this window no longer reaches it')); }
+        else { view = res; if (res.excepted && res.excepted.leaseEndsWhenRead) showToast(t('If an agent holds this window, it loses it as soon as the list of window holders can be read again')); if (res.excepted && res.excepted.leaseDropped) showToast(t('The agent that held this window no longer reaches it')); }
         if (live()) draw();
       },
       onMode: async (m) => {

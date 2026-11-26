@@ -246,13 +246,26 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   // the cure round (r4783 + the adversarial read): THE SHAPES — a file that parses to another shape is TORN (kept aside), never a
   // throw out of the start with nothing held: each lease row's fields the start reads are plain values, `windows` a plain object
   const plain = (x) => x == null || typeof x === 'string' || typeof x === 'number' || typeof x === 'boolean';
-  const leasesShape = (v) => isObj(v) && (v.leases == null || (isObj(v.leases) && Object.values(v.leases).every((l) => !isObj(l) || (plain(l.handle) && plain(l.sessionId) && plain(l.since) && plain(l.origin)))))
-    && (v.agentEnds == null || (isObj(v.agentEnds) && Object.values(v.agentEnds).every((p) => !isObj(p) || (plain(p.at) && plain(p.why)))));
+  // r4813: the lease file's CONTAINERS are its shape; one row with a field that is no plain value is that row's, skipped at the read
+  // (applyLeases), never every lease into the aside copy
+  const leasesShape = (v) => isObj(v) && (v.leases == null || isObj(v.leases)) && (v.agentEnds == null || isObj(v.agentEnds));
   const reachShape = (v) => isObj(v) && (v.windows == null || isObj(v.windows));
   const LEASES_UNREAD = 'window_leases_unread', REACH_UNREAD = 'window_reach_unread';
   const leaseHold = HOLD.create({ file: leaseFile, valid: leasesShape, code: 'window_leases_unread', aside: (m) => leaseFile + '.corrupt-' + m,
     words: (h) => `the record of which agent holds which window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and the agents' window verbs wait until it reads`,
-    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) applyLeases(v); liftPass(); publish(); if (leases.size || openerLost.size) ensureTimer(); } });
+    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) { applyLeases(v); endUnreachedRestored(); } liftPass(); publish(); if (leases.size || openerLost.size) ensureTimer(); } });
+  /** THE LIFT's MERGE (主开发 r4813): a person's act that takes access AWAY (a revoke, an Except, «this group only») is honoured while
+   *  the leases are held, its lease end OWED; when they read again every restored lease whose live holder the share no longer reaches
+   *  is ended by the release's own road for an exposure revoked (dropUnreached: audited by:user), before the restored table is
+   *  published. A gone holder's lease is the reconcile's (its grace). The share modes held: nothing is judged (the holder's next verb is) */
+  function endUnreachedRestored() {
+    if (reachHeld()) return;
+    for (const [h, l] of [...leases]) {
+      const rec = liveRecord(h);
+      if (!rec || !sessionLive(l.sessionId)) continue;
+      try { dropUnreached(rec, 'exposure revoked while the window leases could not be read'); } catch (e) { log.warn?.(`[window] ${h}: the lift could not judge its lease — ${e && e.message}`); }
+    }
+  }
   const reachHold = HOLD.create({ file: reachFile, valid: reachShape, code: 'window_reach_unread', aside: (m) => reachFile + '.corrupt-' + m,
     words: (h) => `the share mode of each window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and no agent reaches a window and no share changes until it reads`,
     log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) applyReach(v); liftPass(); publishReach(); if (shareHandles().length) ensureTimer(); } });
@@ -269,15 +282,20 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     }
     const e = heldError(leaseHold, LEASES_UNREAD); if (e) throw e;   // HELD: every reader and writer of the leases is refused by name
   }
-  /** a good read's leases → memory, ADDED: a lift never replaces a lease made since (none can be — every verb waited) */
+  /** a good read's leases → memory, ADDED: no lease is MADE while they are held (every verb that makes one waits), so a lift never
+   *  replaces one; a lease END owed while held (a person's narrowing share act — r4813) is the lift's MERGE, endUnreachedRestored.
+   *  A row with a field that is no plain value (a hand-made file) is skipped and said once — the other rows load */
   function applyLeases(j) {
+    let odd = 0;
     // lane e2a r4 (verify r2 #2): an agent browser's pending end (its opener gone / its own stop waiting on the user) survives a restart
-    for (const [h, p] of Object.entries((j && j.agentEnds) || {})) if (p && Number.isFinite(Number(p.at))) openerLost.set(String(h), { at: Number(p.at), told: !!p.told, why: p.why === 'opener-stopped' ? 'opener-stopped' : 'opener-ended', restored: true });
+    for (const [h, p] of Object.entries((j && j.agentEnds) || {})) if (p && (!plain(p.at) || !plain(p.why))) odd++; else if (p && Number.isFinite(Number(p.at))) openerLost.set(String(h), { at: Number(p.at), told: !!p.told, why: p.why === 'opener-stopped' ? 'opener-stopped' : 'opener-ended', restored: true });
     for (const l of Object.values((j && j.leases) || {})) {
       if (!l || typeof l !== 'object' || !l.handle || !l.sessionId) continue;
+      if (![l.handle, l.sessionId, l.since, l.origin].every(plain)) { odd++; continue; }
       if (leases.has(String(l.handle))) continue;
       leases.set(String(l.handle), { handle: String(l.handle), sessionId: String(l.sessionId), browserKey: l.browserKey || null, since: Number(l.since) || 0, origin: leaseOriginOf(l.origin), refs: null, snapshotAt: null, carrierLostAt: null, mode: null });
     }
+    if (odd) log.warn?.(`[window] ${LEASE_FILE}: ${odd} row(s) that are no plain record were skipped at the read (a hand-made file?) — the other leases load`);
   }
   /** a background pass's question (the reconcile, the kill path, the boot, the stream's gate): are the leases held? — their one read
    *  made first; never throws for the hold */
@@ -1842,8 +1860,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (!s.ok) throw namedError(s.code, s.why);
     putReach(rec.id, s.record, 'user', [], on === true ? null : p.id);
     audit({ handle: rec.id, verb: 'reach-only', by: 'user', ok: true, principal: { kind: p.kind, id: p.id }, only: on === true, changed: s.changed });
-    if (on === true) dropUnreached(rec, 'shared with this Task Group only by the user');
-    return { ...reachOf(rec.id), only: { principal: { kind: 'group', id: p.id }, on: on === true, changed: s.changed } };
+    const dropped = on === true ? dropUnreached(rec, 'shared with this Task Group only by the user') : false;
+    return { ...reachOf(rec.id), only: { principal: { kind: 'group', id: p.id }, on: on === true, changed: s.changed, ...(on === true && !dropped && leasesHeld() ? { leaseEndsWhenRead: true } : {}) } };   // r4813: the holder's end owed to the lift
   }
   function revokeReach(handle, principal) {
     const rec = requireWindow(handle);
@@ -1854,7 +1872,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     audit({ handle: rec.id, verb: 'reach-revoke', by: 'user', ok: true, principal: { kind: p.kind, id: p.id }, changed: r.changed });
     const dropped = dropUnreached(rec, 'exposure revoked by the user');
     commitReach();
-    return { ...reachOf(rec.id), revoked: { changed: r.changed, leaseDropped: dropped } };
+    return { ...reachOf(rec.id), revoked: { changed: r.changed, leaseDropped: dropped, ...(!dropped && leasesHeld() ? { leaseEndsWhenRead: true } : {}) } };   // r4813: the holder's end owed to the lift
   }
   /** lane grants-unify — «除了»: the members left OUT of this window's shared Task Groups / All agents (the whole list; a
    *  live session by its id). A holder now left out loses its lease at once (a narrowing is a revoke). */
@@ -1867,7 +1885,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     audit({ handle: rec.id, verb: 'reach-except', by: 'user', ok: true, except: r.record.except.map((p) => ({ kind: p.kind, id: p.id })), changed: r.changed });
     const dropped = dropUnreached(rec, 'left out of the share by the user');
     commitReach();
-    return { ...reachOf(rec.id), excepted: { changed: r.changed, leaseDropped: dropped } };
+    return { ...reachOf(rec.id), excepted: { changed: r.changed, leaseDropped: dropped, ...(!dropped && leasesHeld() ? { leaseEndsWhenRead: true } : {}) } };   // r4813: the holder's end owed to the lift
   }
   function setShareMode(handle, mode) {
     const rec = requireWindow(handle);
@@ -1883,6 +1901,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const v = R.normShare(share);
     if (!v.ok) throw namedError(v.code, v.why);
     if (!v.share) return null;
+    if (!v.share.principals.length && v.share.mode === 'auto') return null;   // r4813: a share that writes nothing (nobody, auto — the default) is no act
     const rec = requireWindow(handle);
     let rr = reachRecord(rec.id);
     const lifted = [];

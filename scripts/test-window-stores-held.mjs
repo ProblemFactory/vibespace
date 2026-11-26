@@ -186,6 +186,56 @@ console.log('§1 window-leases.json UNREADABLE: HELD — readers and writers ref
   g.engine.shutdown();
 }
 
+console.log('§1b (主开发 r4813) A PERSON\'s REVOKE WHILE THE LEASES ARE HELD is honoured: the reply says the holder\'s end waits for the read; the LIFT ends the revoked holder\'s lease before it publishes — the person\'s pane is theirs');
+{
+  const NO_MERGE = () => copyOf('no-merge', ['onLift: (v) => { if (v) { applyLeases(v); endUnreachedRestored(); }', 'onLift: (v) => { if (v) { applyLeases(v); }']);
+  const scene = async (Mod) => {
+    const dir = mk(); firstLife(dir);
+    const w = heldLife(Mod, dir, LEASES); w.pr.restore();
+    const rv = tryOf(() => w.engine.revokeReach('da-one', { kind: 'session', id: 'w-A', name: 'agent A' }));
+    const lifted = await HOLD.readAgainOf(LEASES);
+    const out = { rv: rv.v ? rv.v.revoked : rv, lifted, lease: tryOf(() => w.engine.leaseOf('da-one')).v, gate: w.engine.inputPolicy('da-one', 'v-person'),
+      disk: Object.keys(JSON.parse(bytesOf(dir, LEASES) || '{}').leases || {}), lists: w.sent.filter((m) => m.type === 'window-leases-updated').map((m) => m.leases.map((l) => l.handle).join(',')) };
+    w.engine.shutdown();
+    return out;
+  };
+  const g = await scene(ENGINE);
+  ok(!!(g.rv && g.rv.changed === true && g.rv.leaseDropped === false && g.rv.leaseEndsWhenRead === true), 'THE REVOKE ACTS while the leases are held, and its reply says the holder\'s lease ends as soon as the list can be read (leaseEndsWhenRead)', g.rv);
+  ok(!!(g.lifted === true && g.lease === null && g.gate && g.gate.relay === true && !g.disk.includes('da-one') && g.lists.length >= 1 && g.lists.every((x) => !x.split(',').includes('da-one'))),
+    'THE LIFT CARRIES IT OUT: the revoked agent\'s restored lease is ended before any list is published — the file drops it and the person\'s input reaches the window', g);
+  const r = await scene(NO_MERGE());
+  ok(!!(r.lease && r.lease.sessionId === 'w-A' && r.gate && r.gate.relay === false && r.gate.code === 'watch-mode'), 'RED (the tip before r4813): the lift brings the revoked agent\'s lease back — the person\'s own pane in watch mode behind it', r);
+}
+
+console.log('§1c a lease row with one odd field is dropped AT THE READ (that row only), the window-reach file\'s wrong shape is torn (kept aside)');
+{
+  const dir = mk(); const f = firstLife(dir);
+  const j = JSON.parse(f.leases); j.leases['da-odd'] = { handle: 'da-odd', sessionId: { toString: 0, valueOf: 0 }, since: 1 };
+  fs.writeFileSync(path.join(dir, LEASES), JSON.stringify(j, null, 2));
+  const w = life(ENGINE, dir); const b = tryOf(() => w.engine.boot());
+  const views = tryOf(() => w.engine.leases().map((l) => l.handle).join(','));
+  ok(!!(b.v && !b.v.held && views.v === 'da-one' && fs.readdirSync(dir).every((n) => !n.startsWith(LEASES + '.corrupt-')) && w.logs.some((l) => /1 row\(s\) that are no plain record were skipped/.test(l))),
+    'ONE ODD ROW: that row skipped and said, every other lease loads (da-one), nothing put aside', { b, views, logs: w.logs });
+  w.engine.shutdown();
+  const ROW = copyOf('odd-row-thrown', ['      if (![l.handle, l.sessionId, l.since, l.origin].every(plain)) { odd++; continue; }\n', '']);
+  const w2 = life(ROW, dir); const b2 = tryOf(() => w2.engine.boot());
+  ok(!!(b2.code === undefined && /Cannot convert object to primitive value/.test(b2.message || '') && heldRows(LEASES).length === 0), 'RED: without the row check the odd row throws out of the start — nothing held, the read lost', b2);
+  w2.engine.shutdown();
+  const d2 = mk(); firstLife(d2);
+  const BAD = JSON.stringify({ v: 1, savedAt: 1, windows: [{ windowId: 'x', mode: 'pixels' }] });
+  fs.writeFileSync(path.join(d2, REACH), BAD);
+  const w3 = life(ENGINE, d2); const b3 = w3.engine.boot();
+  await waitFor(() => !tryOf(() => w3.engine.reachViews()).code, 5000, 'the wrong-shaped share modes\' lift');
+  const c3 = fs.readdirSync(d2).filter((n) => n.startsWith(REACH + '.corrupt-'));
+  ok(!!(Array.isArray(b3.held) && b3.held.join() === REACH && c3.length === 1 && fs.readFileSync(path.join(d2, c3[0]), 'utf8') === BAD), 'A SHARE-MODES FILE OF ANOTHER SHAPE (windows a list) is TORN: held, kept aside byte for byte', { b3, c3 });
+  w3.engine.shutdown();
+  const SHAPELESS = copyOf('reach-shape-isobj', ['const a = SR.storeAnswer(read, { valid: reachShape });', 'const a = SR.storeAnswer(read, { valid: isObj });']);
+  const d3 = mk(); firstLife(d3); fs.writeFileSync(path.join(d3, REACH), BAD);
+  const w4 = life(SHAPELESS, d3); w4.engine.boot();
+  ok(fs.readdirSync(d3).every((n) => !n.startsWith(REACH + '.corrupt-')) && bytesOf(d3, REACH) !== BAD, 'RED: a shape of «any object» — the list read as handles 0, 1…, pruned and written over; no copy kept', bytesOf(d3, REACH));
+  w4.engine.shutdown();
+}
+
 console.log('§2 window-leases.json TORN: held while its bytes are kept aside (once, byte for byte), then it starts empty and the verbs act');
 {
   const dir = mk(); const f = firstLife(dir);
@@ -314,10 +364,27 @@ console.log('§6 THE ROUTES, DRIVEN over loopback (the cure round): the relaunch
   const Rh = heldLife(ENGINE, (() => { const d = mk(); firstLife(d); return d; })(), REACH); Rh.pr.restore();
   const la = await drive(RT, Rh, '/api/desktop/apps', SHARE);
   ok(!!(la.status === 503 && la.body && la.body.code === 'window_reach_unread' && Rh.launched.length === 0), 'A LAUNCH WITH A SHARE while the share modes are held: 503 window_reach_unread BEFORE anything starts (nothing launched)', la);
-  const RLA = M.load(ROUTES_REL, anchored(RT_SRC, "  if (share != null && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.storesReadable === 'function') { try { ctx.windowEngine.storesReadable({ reach: true }); } catch (e) { return fail(res, e); } }\n", '', 'launch-before-the-share'), 'launch-first');
+  const RLA = M.load(ROUTES_REL, anchored(RT_SRC, "  if (shareWrites && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.storesReadable === 'function') { try { ctx.windowEngine.storesReadable({ reach: true }); } catch (e) { return fail(res, e); } }\n", '', 'launch-before-the-share'), 'launch-first');
   const la2 = await drive(RLA, Rh, '/api/desktop/apps', SHARE);
   ok(!!(Rh.launched.length === 1 && la2.body && la2.body.reachError && la2.body.reachError.code === 'window_reach_unread'), 'RED: the launch before the share\'s question — the app starts, then its share is refused (an app running unshared behind a refusal)', la2);
+  // r4813: a share that writes nothing (nobody, auto — the default) is no act: the launch goes on while the share modes are held
+  const EMPTY = { appId: 'gedit', share: { principals: [], mode: 'auto' } };
+  const le = await drive(RT, Rh, '/api/desktop/apps', EMPTY);
+  ok(!!(le.status === 200 && Rh.launched.length === 2 && le.body && !le.body.reachError), 'A LAUNCH WITH A SHARE THAT WRITES NOTHING (nobody, auto) while the share modes are held: it starts, no refusal, no share error', le);
+  const RLE = M.load(ROUTES_REL, anchored(RT_SRC, "  if (shareWrites && host === 'local' && ctx.windowEngine", "  if (share != null && host === 'local' && ctx.windowEngine", 'any-share-asks'), 'any-share');   // stale-pins: kept — the red's own text (the tip's gate)
+  const le2 = await drive(RLE, Rh, '/api/desktop/apps', EMPTY);
+  ok(le2.status === 503 && Rh.launched.length === 2, 'RED: the gate on any share object — an empty share (no act) refused while the share modes are held', le2);
   Rh.engine.shutdown();
+  // the request that ends another agent's hold asks the leases first (src/server/window-request.js)
+  const WR_REL = 'src/server/window-request.js', WR_SRC = fs.readFileSync(path.join(REPO, WR_REL), 'utf8');
+  const reqOf = (Mod, w) => Mod.create({ engine: w.engine, deliver: { stashFor: () => ({ stored: true }) }, activeSessions: w.sessions, log: { warn() {}, log() {} } });
+  const Lq = heldLife(ENGINE, (() => { const d = mk(); firstLife(d); return d; })(), LEASES); Lq.pr.restore(); Lq.dir = path.dirname(Lq.engine.leaseFile);
+  const q = await tryAsync(() => reqOf(require(path.join(REPO, WR_REL)), Lq).request({ handle: 'da-three', sessionId: 'w-B', endHold: true }));
+  ok(named(q, 'window_leases_unread') && grantRows(Lq, 'da-three') === 0, 'A REQUEST THAT ENDS ANOTHER AGENT\'S HOLD while the leases are held: refused by name BEFORE the grant (no row written)', { q, rows: grantRows(Lq, 'da-three') });
+  const WRB = M.load(WR_REL, anchored(WR_SRC, "    if (endHold && typeof engine.storesReadable === 'function') engine.storesReadable({ leases: true });\n", '', 'request-grants-first'), 'request-first');
+  const q2 = await tryAsync(() => reqOf(WRB, Lq).request({ handle: 'da-three', sessionId: 'w-B', endHold: true }));
+  ok(!!(q2.v && q2.v.endedHold === false && grantRows(Lq, 'da-three') === 1), 'RED: the request that grants first — the grant written and the hold\'s end silently skipped (no holder known while held)', { q2: q2.v ? { endedHold: q2.v.endedHold } : q2 });
+  Lq.engine.shutdown();
 }
 
 report();
