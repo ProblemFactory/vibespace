@@ -388,10 +388,16 @@ const modelsLabel = (id) => id.replace(/^claude-/, '').replace(/-(\d{8})$/, '').
 // hub's own read takes what the writer still OWES first (a sighting right after another reads the newest list, never the older file)
 let _modelsList = null;
 const modelsWriter = () => require('../store-writer.js').storeWriter();
-function modelsOwed(file) { try { const w = modelsWriter(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } }
-function writeModels(list) {
+let _modelsAppeared = false;   // (r5110) the writer refused an exclusive write — a file appeared: its owed bytes are the REFUSED list, not the file's
+function modelsOwed(file) { if (_modelsAppeared) return null; try { const w = modelsWriter(); return typeof w.owed === 'function' ? w.owed(file) : null; } catch { return null; } }
+// (r5110) A LIST READ MISSING IS WRITTEN EXCLUSIVELY (the store writer's door, B-f276 1b): a file that appeared since — the statusline
+// hook's — is kept as it is, never written over; the writer answers onWritten(false, EEXIST) and the ids this write carried are
+// forgotten here, so their next sighting reads the file that appeared and merges into it (a read that answered DATA writes as before)
+function writeModels(list, { exclusive = false } = {}) {
   _modelsList = list;
-  try { modelsWriter().dirty(modelsFile(), { name: 'models.write', produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }
+  const refused = (ok, err) => { if (!ok && err && err.code === 'EEXIST') { _modelsAppeared = true; for (const m of _modelsList || []) if (m && m.id) _modelsSeenRam.delete(m.id); } };
+  if (!exclusive) _modelsAppeared = false;   // this write took the file in (its read answered data): the writer's owed bytes are ours again
+  try { modelsWriter().dirty(modelsFile(), { name: 'models.write', exclusive, onWritten: refused, produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }
 }
 function modelsHoldOf() {
   if (_modelsHold) return _modelsHold;
@@ -399,11 +405,11 @@ function modelsHoldOf() {
   _modelsHold = HOLD.create({ file, valid: Array.isArray, code: 'models_unread', aside: (m) => file + '.corrupt-' + m,
     words: (h) => `the list of models VibeSpace learned from its conversations could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing is written over it; the models seen meanwhile are added once it reads`,
     log: (l) => console.warn(`[models] ${l}`),
-    onLift: (v) => {
+    onLift: (v, facts) => {
       const list = Array.isArray(v) ? v.slice() : [];
       if (!Array.isArray(v)) { const waiting = [..._modelsPending]; _modelsSeenRam.clear(); for (const id of waiting) _modelsSeenRam.add(id); }
       for (const id of _modelsPending) if (!list.some((m) => m && m.id === id)) list.push({ id, label: modelsLabel(id) });
-      if (_modelsPending.size && !writeModels(list)) for (const id of _modelsPending) _modelsSeenRam.delete(id);   // a failed write: tried again at the next sighting
+      if (_modelsPending.size && !writeModels(list, { exclusive: !Array.isArray(v) && !(facts && facts.setAside) })) for (const id of _modelsPending) _modelsSeenRam.delete(id);   // a failed write: tried again at the next sighting; a lift from «missing» writes exclusively
       _modelsPending.clear();
     } });
   return _modelsHold;
@@ -421,7 +427,7 @@ function noteModelSeen(id) {
     const list = st === 'data' ? a.value : [];
     if (!list.some((m) => m && m.id === id)) {
       list.push({ id, label: modelsLabel(id) });
-      if (!writeModels(list)) _modelsSeenRam.delete(id);   // a write that failed: tried again at the next sighting
+      if (!writeModels(list, { exclusive: st === 'missing' })) _modelsSeenRam.delete(id);   // a write that failed: tried again at the next sighting
     }
   } catch { }
 }

@@ -83,12 +83,32 @@ const idsOf = (f) => { landed(f); return JSON.parse(fs.readFileSync(f, 'utf8')).
     env4.noteModelSeen('claude-w-1'); env4.noteModelSeen('claude-w-2');
     const owedNow = SWR.storeWriter().owed(F4);
     ok(JSON.stringify(idsOf(F4)) === '["claude-w-1","claude-w-2"]' && !fs.readdirSync(path.dirname(F4)).some((n) => n.endsWith('.tmp')), 'THE HUB\'s WRITE IS THE STORE WRITER\'s (r5060 (b)): two sightings in a row — the second read what the first still OWED — land as one whole list, no temp beside it', { owed: owedNow != null, ids: idsOf(F4) });
-    const INPLACE = M.load('src/server/cli-env.js', anchored(CE_SRC, "  try { modelsWriter().dirty(modelsFile(), { name: 'models.write', produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }\n", "  try { fs.writeFileSync(modelsFile(), JSON.stringify(list)); return true; } catch { return false; }\n", 'the release write in place'), 'models-inplace-write');
+    const INPLACE = M.load('src/server/cli-env.js', anchored(CE_SRC, "  try { modelsWriter().dirty(modelsFile(), { name: 'models.write', exclusive, onWritten: refused, produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }\n", "  try { fs.writeFileSync(modelsFile(), JSON.stringify(list)); return true; } catch { return false; }\n", 'the release write in place'), 'models-inplace-write');
     const R5 = mk('hub-inplace'), F5 = modelsOf(R5), env5 = envOf(INPLACE, R5);
     env5.noteModelSeen('claude-w-1');
     const hw5 = halfWrites(F5); try { env5.noteModelSeen('claude-w-2'); } finally { hw5.restore(); }
     let torn5 = false; try { JSON.parse(fs.readFileSync(F5, 'utf8')); } catch { torn5 = true; }
     ok(hw5.seen.n === 1 && torn5, 'CONTROL (the release\'s write in place, run): a write that dies half-way leaves the list TORN — a reader would meet half a list', fs.readFileSync(F5, 'utf8').slice(0, 60));
+  }
+  // (r5110) A LIST READ MISSING IS WRITTEN EXCLUSIVELY (the store writer's door): the hook's list appears between the hub's read
+  // («missing») and its write's landing — kept as it is, and the refused id is learned again at its next sighting, merged into it.
+  // Its RED: the follow's write, not exclusive, lands over the hook's list
+  {
+    const HOOKS = JSON.stringify([{ id: 'claude-hook-1', label: 'Hook 1' }]);
+    const R6 = mk('hub-excl'), F6 = modelsOf(R6), env6 = envOf(CE, R6);
+    said(() => env6.noteModelSeen('claude-e-1'));   // the read answered missing: the write owed, exclusive
+    fs.writeFileSync(F6, HOOKS);   // the hook's list appears before the hub's write lands (written here directly: no flush first)
+    const hb = fs.readFileSync(F6);
+    said(() => landed(F6));
+    ok(fs.readFileSync(F6).equals(hb), 'A LIST READ MISSING IS WRITTEN EXCLUSIVELY (r5110): the hook\'s list that appeared meanwhile is kept as it is (byte for byte), never written over', fs.readFileSync(F6, 'utf8').slice(0, 80));
+    await until(() => { said(() => env6.noteModelSeen('claude-e-1')); try { return idsOf(F6).includes('claude-e-1'); } catch { return false; } }, 'the refused id learned again at a later sighting');
+    ok(JSON.stringify(idsOf(F6)) === '["claude-hook-1","claude-e-1"]', '…and the refused id is learned again at its next sighting, merged into the list that appeared', idsOf(F6));
+    const NOEX = M.load('src/server/cli-env.js', anchored(CE_SRC, "name: 'models.write', exclusive, onWritten: refused,", "name: 'models.write', onWritten: refused,", 'the follow write, not exclusive'), 'models-not-exclusive');
+    const R7 = mk('hub-noexcl'), F7 = modelsOf(R7), env7 = envOf(NOEX, R7);
+    said(() => env7.noteModelSeen('claude-e-1'));
+    fs.writeFileSync(F7, HOOKS);
+    said(() => landed(F7));
+    ok(JSON.stringify(JSON.parse(fs.readFileSync(F7, 'utf8')).map((m) => m.id)) === '["claude-e-1"]', 'CONTROL (the follow\'s write, not exclusive, run): it lands over the hook\'s list — the hook\'s id gone', fs.readFileSync(F7, 'utf8').slice(0, 80));
   }
   // THE TIP's read (the RED): a failed or torn read read as an empty list
   const TIP = M.load('src/server/cli-env.js', anchored(CE_SRC, '    const a = SR.storeAnswer(read, { valid: Array.isArray });\n', "    const a = (() => { try { const v = JSON.parse(read.text); return { state: 'data', value: Array.isArray(v) ? v : [] }; } catch { return { state: 'data', value: [] }; } })();\n", 'the tip read'), 'models-tip-read');
