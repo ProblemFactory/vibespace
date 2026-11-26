@@ -28,7 +28,8 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { endDaemonsAndWait } from './scratch.mjs';
+import { endDaemonsAndWait, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const SIG = require('../src/agentd-signature.js');
@@ -441,7 +442,7 @@ try {
   console.log('— ③b the ssh road: the agent already on the host judges what the hub ships —');
   const { HostManager, installAgentdScript, installAgentdAnswer } = require('../src/hosts.js');
   const fbin = path.join(tmp, 'fake-bin'); fs.mkdirSync(fbin);
-  fs.writeFileSync(path.join(fbin, 'ssh'), '#!/bin/sh\n# a fake ssh: drop the options up to --, run the remote step on the fake host (HOME); a real host has none of the test\'s roots\nH=""\nwhile [ "$#" -gt 0 ] && [ "$1" != "--" ]; do case "$1" in VsFakeHost=*) H="${1#VsFakeHost=}";; esac; shift; done; shift\nunset VIBESPACE_AGENTD_ROOT VIBESPACE_DEVICE_ROOT VIBESPACE_AGENTD_VERSION\nHOME="$H" exec sh -c "$1"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(fbin, 'ssh'), '#!/bin/sh\n# a fake ssh: drop the options up to --, run the remote step on the fake host (HOME); a real host has none of the test\'s roots\nH=""\nwhile [ "$#" -gt 0 ] && [ "$1" != "--" ]; do case "$1" in VsFakeHost=*) H="${1#VsFakeHost=}";; esac; shift; done; shift\ncase "$H" in *vs-ssh-down*) echo "ssh: connect to host vs-ssh-down port 22: Connection refused" >&2; exit 255;; esac\nunset VIBESPACE_AGENTD_ROOT VIBESPACE_DEVICE_ROOT VIBESPACE_AGENTD_VERSION\nHOME="$H" exec sh -c "$1"\n', { mode: 0o755 });
   process.env.PATH = fbin + path.delimiter + path.dirname(process.execPath) + path.delimiter + process.env.PATH;
   const sshHosts = {}, events = [];
   const fakeHM = { get: (id) => sshHosts[id], sshArgs: (h) => ['-o', 'VsFakeHost=' + h.home], sshEnv: HostManager.prototype.sshEnv, onAgentUpgrade: (ev, f) => events.push([ev, f]) }; // sshEnv: the REAL one (lane spawn-env-debts — every ssh road's env)
@@ -457,7 +458,79 @@ try {
   const rFresh = sshHost('fresh', null), rU = sshHost('pinned-u', bsrc, [row(K1)]), rS = sshHost('pinned-s', bsrc, [row(K1)]), rT = sshHost('nopin', bsrc, null);
   const rL = sshHost('legacy', '/* an agent from before the release signature */\n', null), rC = sshHost('same', relS, null), rD = sshHost('floor', bsrc, [row(K1)]), rJ = sshHost('junkpin', bsrc, null);
   fs.writeFileSync(path.join(rJ, 'state', 'trusted-keys.json'), 'junk', { mode: 0o600 });
+  // B-323e's remainder (lane nl-starts): THE BUNDLE'S TAR RIDES THE HUB'S STARTER — over the eight ships below, every tar is asked of
+  // the starter (its archive written into its own stage folder, read back), NONE started from this process (counted at
+  // ChildProcess.prototype.spawn); the legs that follow are the differential: every host lands what it landed on the release's road
+  const CPm3 = require('child_process'), realCpSpawn3 = CPm3.ChildProcess.prototype.spawn, tarDirect = [];
+  CPm3.ChildProcess.prototype.spawn = function (o) { if (path.basename(String((o && o.file) || '')) === 'tar') tarDirect.push((o && o.args) || []); return realCpSpawn3.call(this, o); };
+  const CS3 = require('../src/server/child-starter.js'), real3 = CS3.childStarter(), tarAsked = [];
+  CS3.setChildStarter({ run: (cmd, args, o) => { if (path.basename(String(cmd)) === 'tar') tarAsked.push({ args, o }); return real3.run(cmd, args, o); }, stats: () => real3.stats(), closePipe: () => real3.closePipe() });
   const [sFresh, sU, sS, sT, sL1, sC, sD, sJ] = await Promise.all([ship('fresh', hubU), ship('pinned-u', hubU), ship('pinned-s', hubS), ship('nopin', hubS), ship('legacy', hubU), ship('same', hubU), ship('floor', hubOld), ship('junkpin', hubX)]);
+  CPm3.ChildProcess.prototype.spawn = realCpSpawn3; CS3.setChildStarter(real3);
+  ok(tarAsked.length === 8 && tarDirect.length === 0 && tarAsked.every((x) => x.o.timeoutMs === 15000 && JSON.stringify(x.o.envAdd) === '{}' && !x.o.wholeEnv && x.args[0] === '-c' && x.args[1] === '-f'
+    && /\/vs-agentd-stage-[^/]+\/bundle\.tar$/.test(String(x.args[2])) && x.args[3] === '-C' && String(x.args[2]).startsWith(String(x.args[4]) + '/') && x.args.slice(5, 7).join(' ') === 'agentd.js token'),
+    `B-323e's remainder: the eight ships' bundle tars are ASKED of the hub's starter (${tarAsked.length}) — each written into its own stage folder, 15 s, the service env — NONE started from the hub's process (${tarDirect.length})`, { asked: tarAsked.map((x) => x.args), direct: tarDirect });
+  {   // RED: a copy of src/hosts.js on the release's road (the tar from the hub's process) — one more fresh host shipped through it
+    const HSRC = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+    const OLDH = require(mutantCopies('agentd-upgrade-signature', REPO).write('src/hosts.js', anchored(HSRC,
+      "      const tr = await require('./server/child-starter').childStarter().run('tar', tarArgs, { timeoutMs: 15000, capture: true, maxBuffer: 64 * 1024, envAdd: {} });\n",
+      "      const tr = await new Promise((res) => execFile('tar', tarArgs, { env: serviceEnv(process.env), timeout: 15000 }, (e) => res(e ? { started: true, code: 1, stderr: String(e.message) } : { started: true, code: 0 })));\n",
+      'bundle-tar-old-road'), 'bundle-tar-old-road'));
+    const rRed = sshHost('fresh-red', null), d0 = tarDirect.length, a0 = tarAsked.length;
+    CPm3.ChildProcess.prototype.spawn = function (o) { if (path.basename(String((o && o.file) || '')) === 'tar') tarDirect.push((o && o.args) || []); return realCpSpawn3.call(this, o); };
+    let sRed; try { sRed = await OLDH.HostManager.prototype.installAgentd.call(fakeHM, 'fresh-red', hubU, '0.0.0', 'vsht_' + crypto.randomBytes(12).toString('hex')).then((r) => r, (e) => ({ error: e.message })); } finally { CPm3.ChildProcess.prototype.spawn = realCpSpawn3; }
+    ok(tarDirect.length - d0 === 1 && tarAsked.length === a0 && sRed.landed === 'fresh' && cur(rRed) === '9.9.2' && fs.readFileSync(path.join(rRed, '9.9.2', 'agentd.js')).equals(relS),
+      `RED: a copy on the release's road starts the tar from the hub's process (${tarDirect.length - d0}) — and lands the same bundle (the differential)`, sRed);
+  }
+  {   // r4910 (1)–(3): THE ARCHIVE ON DISK holds the host's token — its stage 0700 and the archive 0600 when it is read back; both gone on
+      // EVERY road (a tar with no reply, a failed tar, a failed read-back, an archive past the bound or empty, a failed ssh, a landing);
+      // its SIZE asked first — past 32 MiB refused by name, never read; every failure fails the install by name, never «nothing to install»
+    const reads = [], rf0 = fs.promises.readFile, ARCH = /\/vs-agentd-stage-[^/]+\/bundle\.tar$/;
+    fs.promises.readFile = async function (f, ...a) { if (ARCH.test(String(f))) { let mode = null, dmode = null; try { mode = fs.statSync(f).mode & 0o777; dmode = fs.statSync(path.dirname(String(f))).mode & 0o777; } catch { } reads.push({ f: String(f), mode, dmode }); } return rf0.call(this, f, ...a); };
+    let fake = null; const asked = [];
+    CS3.setChildStarter({ run: (cmd, args, o) => { if (path.basename(String(cmd)) === 'tar') { asked.push(args); if (fake) return Promise.resolve().then(() => fake(args)); } return real3.run(cmd, args, o); }, stats: () => real3.stats(), closePipe: () => real3.closePipe() });
+    const HM = require('../src/hosts.js');
+    const shipOne = async (mod, name, how) => {
+      fake = how; const a0 = asked.length, r0 = reads.length; sshHost(name, null);
+      let r; try { r = await mod.HostManager.prototype.installAgentd.call(fakeHM, name, hubU, '0.0.0', 'vsht_' + crypto.randomBytes(12).toString('hex')).then((x) => x, (e) => ({ error: String((e && e.message) || e) })); } finally { fake = null; }
+      const stage = asked[a0] ? String(asked[a0][4]) : '';
+      return { r, stage, left: !stage || fs.existsSync(stage), reads: reads.slice(r0) };
+    };
+    // tar's own archive, made the way a 022 umask makes it (0644) — the hub's read-back must find it 0600 in its 0700 stage
+    const born644 = (args) => { const t = spawnSync('tar', args.map(String), { stdio: 'ignore' }); try { fs.chmodSync(String(args[2]), 0o644); } catch { } return { started: true, code: t.status, stdout: '', stderr: '' }; };
+    const BIG = 33 * 1024 * 1024;
+    const FAILS = [
+      ['a tar the starter did not reply to', () => ({ unknown: true }), /^Command failed: tar -c -f \S+\/bundle\.tar -C \S+ agentd\.js token\nthe starter gave no answer$/],
+      ['a tar that failed', () => ({ started: true, code: 2, stdout: '', stderr: 'tar: agentd.js: Cannot stat: No such file or directory' }), /^Command failed: tar [^\n]*\ntar: agentd\.js: Cannot stat/],
+      ['a tar ended by a signal', () => ({ started: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }), /^Command failed: tar [^\n]*\nended by SIGKILL$/],
+      ['a read-back that failed (no archive on disk)', () => ({ started: true, code: 0, stdout: '', stderr: '' }), /^the agent bundle's tar could not be read back: ENOENT$/],
+      ['an archive past the bound', (args) => { fs.writeFileSync(String(args[2]), ''); fs.truncateSync(String(args[2]), BIG); return { started: true, code: 0, stdout: '', stderr: '' }; }, new RegExp(`^the agent bundle's tar is ${BIG} bytes — past its 32 MiB bound$`)],
+      ['an empty archive', (args) => { fs.writeFileSync(String(args[2]), ''); return { started: true, code: 0, stdout: '', stderr: '' }; }, /^the agent bundle's tar is empty$/],
+    ];
+    try {
+      const good = await shipOne(HM, 'arch-ok', born644);
+      ok(good.r.landed === 'fresh' && good.reads.length === 1 && good.reads[0].mode === 0o600 && good.reads[0].dmode === 0o700 && !good.left,
+        `THE ARCHIVE'S MODES: read back 0600 (born 0644) inside its 0700 stage; the stage gone after the landing`, { r: good.r, reads: good.reads, left: good.left });
+      const res = [];
+      for (const [i, [what, how, words]] of FAILS.entries()) res.push({ what, words, ...(await shipOne(HM, 'arch-fail-' + i, how)) });
+      for (const x of res) ok(!!x.r.error && x.words.test(x.r.error) && !x.r.landed && !x.r.refused && !x.left && (!/past the bound/.test(x.what) || !x.reads.length),
+        `${x.what}: the install fails BY NAME («${String(x.r.error).split('\n').pop()}»), the stage (token and archive) removed${/past the bound/.test(x.what) ? ', the archive never read into memory' : ''}`, { r: x.r, stage: x.stage, left: x.left, reads: x.reads.length });
+      const down = await shipOne(HM, 'vs-ssh-down', null);
+      ok(!!down.r.error && !down.r.landed && down.reads.length === 1 && !down.left, `an ssh that failed (unreachable): the install fails by name («${down.r.error}»), the stage removed`, down);
+      // REDs (copies of the tip's src/hosts.js): the catch that keeps the stage; no chmod; the size asked after the read
+      const HSRC2 = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8'), MCA = mutantCopies('agentd-upgrade-archive', REPO);
+      const KEEPS = require(MCA.write('src/hosts.js', anchored(HSRC2, "    } catch (e) { try { fs.rmSync(stage, { recursive: true, force: true }); } catch {}; throw e; }\n", "    } catch (e) { throw e; }\n", 'archive-stage-kept'), 'archive-stage-kept'));
+      const k1 = await shipOne(KEEPS, 'arch-red-keep', FAILS[1][1]);
+      ok(!!k1.r.error && k1.left, 'RED: a copy whose catch keeps the stage — a failed tar leaves the token and its archive on disk', k1);
+      if (k1.stage) { try { fs.rmSync(k1.stage, { recursive: true, force: true }); } catch { } }   // the RED's left stage, removed by the suite
+      const NOCH = require(MCA.write('src/hosts.js', anchored(HSRC2, "try { await fs.promises.chmod(tarFile, 0o600); size = ", "try { size = ", 'archive-no-chmod'), 'archive-no-chmod'));
+      const k2 = await shipOne(NOCH, 'arch-red-mode', born644);
+      ok(k2.reads.length === 1 && k2.reads[0].mode === 0o644, `RED: a copy without the chmod reads back an archive of mode ${k2.reads[0] ? (k2.reads[0].mode).toString(8) : '?'}`, k2.reads);
+      const RFIRST = require(MCA.write('src/hosts.js', anchored(HSRC2, "      if (size > 32 * 1024 * 1024) throw new RangeError(", "      if (false) throw new RangeError(", 'archive-unbounded-read'), 'archive-unbounded-read'));
+      const k3 = await shipOne(RFIRST, 'arch-red-big', FAILS[4][1]);
+      ok(k3.reads.length === 1 && !k3.r.landed, `RED: a copy with no size bound reads the ${BIG}-byte archive into memory (${k3.reads.length} read)`, { r: k3.r, reads: k3.reads.length });
+    } finally { fs.promises.readFile = rf0; CS3.setChildStarter(real3); fake = null; }
+  }
   ok(sFresh.landed === 'fresh' && cur(rFresh) === '9.9.2' && fs.readFileSync(path.join(rFresh, '9.9.2', 'agentd.js')).equals(relS) && (fs.statSync(path.join(rFresh, 'state', 'token')).mode & 0o777) === 0o600, 'a FRESH host (nothing installed): the first install lands as is — the owner\'s add-host act, the installer\'s trust-on-first-use (token 0600)', sFresh);
   ok(sU.refused === 'unsigned-local-build' && sU.from === realVersion && cur(rU) === realVersion && !fs.existsSync(path.join(rU, '9.9.2')), 'an INSTALLED host + an UNSIGNED hub build ⇒ refused before anything moves (unsigned-local-build; current unmoved)', sU);
   ok(sS.landed === 'verified' && cur(rS) === '9.9.2' && fs.readFileSync(path.join(rS, '9.9.2', 'agentd.js')).equals(relS) && /begins — staged over ssh/.test(fs.readFileSync(path.join(rS, 'state', 'agentd.log'), 'utf8')) && /release signature ok \(key [0-9a-f]{16}\)/.test(fs.readFileSync(path.join(rS, 'state', 'agentd.log'), 'utf8')), 'an INSTALLED host + the SIGNED release ⇒ its own agent verified it (--land-upgrade) and landed it', sS);
