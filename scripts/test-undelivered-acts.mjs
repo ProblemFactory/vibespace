@@ -10,6 +10,8 @@
 //      first, a rebuild draws nothing, a live view keeps the bubble; the hub's door: the person only (both frames), once, words only;
 //      (r4682 M1) a Send again HELD mid-turn and then taken back (Stop's put-back, the removal) ends its record there — the CLI's exit
 //      never brings it back «Not delivered»; RED: the tip's wrapper (no ending) does; the door's two REDs (no pending mark, no person check)
+//      (r5202, 2.369.421's law 6) a held Send again at a STOP: the Stop reaches the CLI while the records' sync is HELD (the hotfix's own
+//      preload, its mark the witness), the record written after; RED: the write where it stood (inside the drop, before the forward)
 // Run: node scripts/test-undelivered-acts.mjs
 import { anchored } from './scratch.mjs';
 import fs from 'node:fs';
@@ -59,9 +61,9 @@ function conversation(tag, { conv = uuid(++k), transcript = null } = {}) {
 function writeTranscript(c, id, recs) { fs.writeFileSync(c.tfile(id), recs.map((r) => J({ sessionId: id, cwd: c.cwd, ...r })).join('\n') + '\n'); }
 const recordsOf = (c, id = c.conv) => { try { return new Map(JSON.parse(fs.readFileSync(HANDED.fileOf(c.buffers, id), 'utf8')).frames.map((r) => [r.msgId, r])); } catch { return new Map(); } };
 /** the REAL wrapper as the hub starts a resumed claude conversation (a NEW hub id each time): `--resume <conv>` (+ extra argv) */
-function startWrapper(c, hubId, { wrapper = WRAPPER, extra = [], env: more = {} } = {}) {
+function startWrapper(c, hubId, { wrapper = WRAPPER, extra = [], env: more = {}, node = [] } = {}) {
   const buf = path.join(c.buffers, hubId + '.buf'), meta = path.join(c.buffers, hubId + '.json');
-  const child = spawn(process.execPath, [wrapper, buf, meta, process.execPath, STAND_IN, '--resume', c.conv, ...extra], { cwd: c.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, HOME, CLAUDE_CONFIG_DIR: CFG, VIBESPACE_SKIP_AGENT_HOOKS: '1', STAND_IN_LONG_MS: '60000', ...more } });
+  const child = spawn(process.execPath, [...node, wrapper, buf, meta, process.execPath, STAND_IN, '--resume', c.conv, ...extra], { cwd: c.cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, HOME, CLAUDE_CONFIG_DIR: CFG, VIBESPACE_SKIP_AGENT_HOOKS: '1', STAND_IN_LONG_MS: '60000', ...more } });
   const out = []; let lb = '';
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { out.push(JSON.parse(l)); } catch { } } });
@@ -223,6 +225,54 @@ WD.section('㉗');
     'a Send again HELD mid-turn and taken back — by Stop and by the removal — ends its record in that road («dismissed»); the CLI\'s exit leaves it so and the rebuild draws no «Not delivered»', { TBs, TBr });
   ok(R_TIP.counts.join() === '1,1' && TBred.exited && TBred.after === 'undelivered' && TBred.chip === 'undelivered' && TBredR.exited && TBredR.after === 'undelivered' && TBredR.chip === 'undelivered',
     'RED (the tip\'s wrapper), on BOTH roads: nothing ends the record — the CLI\'s exit settles the words the person took back (by Stop, by the removal) «not delivered», offered again', { TBred, TBredR });
+
+  // (h) r5202 (the hotfix 2.369.421's law 6): A HELD SEND AGAIN AT A STOP — the Stop reaches the CLI FIRST, the taken-back record's write
+  // after it. The hotfix's own scene: the wrapper's first fsync of a handed records file after ARM is HELD by a preload until this run
+  // releases it (never a clock); its mark names the file it held — the WITNESS that the hold was in force (r5135 law 1)
+  const HOLDJS = path.join(BASE, 'hold-sync.cjs');
+  fs.writeFileSync(HOLDJS, [
+    "'use strict';",
+    "const fs = require('fs'), E = process.env, ARM = E.SYNC_HOLD_ARM || '', MARK = E.SYNC_HOLD_MARK || '', REL = E.SYNC_HOLD_RELEASE || '';",
+    "const paths = new Map(), open = fs.openSync;",
+    "fs.openSync = function (p, ...a) { const fd = open.call(fs, p, ...a); try { paths.set(fd, String(p)); } catch (e) { } return fd; };",
+    "const realSync = fs.fsyncSync; let done = false;",
+    "fs.fsyncSync = function (fd) {",
+    "  if (!done && ARM && fs.existsSync(ARM) && /[\\\\/]handed[\\\\/]/.test(paths.get(fd) || '')) {   // only the handed records' sync: a meta timer's passes",
+    "    done = true;",
+    "    try { fs.writeFileSync(MARK, JSON.stringify({ file: paths.get(fd) || null })); } catch (e) { }",
+    "    const sab = new Int32Array(new SharedArrayBuffer(4)), end = Date.now() + 30000;   // the run releases it; 30 s only names a run that never did",
+    "    while (!fs.existsSync(REL) && Date.now() < end) Atomics.wait(sab, 0, 0, 10);",
+    "  }",
+    "  return realSync.call(fs, fd);",
+    "};",
+  ].join('\n') + '\n');
+  const OWED_LINE = "  if (changed) { if (handedAfterStop) handedDue = true; else if (!writeRecords()) log(`handed records: ${ids.join(', ')} taken back (${via}) — its record could not be written now (this wrapper carries it: the next records write takes it)`); }\n";
+  const R_INDROP = redWrapper('u3-indrop', [[OWED_LINE, "  if (changed && !writeRecords()) log(`handed records: ${ids.join(', ')} taken back (${via})`);   /* MUTANT: the write where it stood — inside the drop, before the forward */\n"]]);
+  const stopHeld = async (tag, wrapper) => {
+    const c = conversation('u3-sh-' + tag), cap = path.join(BASE, 'cap-sh-' + tag), arm = path.join(BASE, 'arm-sh-' + tag), mark = path.join(BASE, 'held-sh-' + tag), rel = path.join(BASE, 'rel-sh-' + tag);
+    place(c, [recordOf('mSH-old', null, { state: 'undelivered', settledAt: Date.now() - 1000 })]);
+    const w = startWrapper(c, 'sess-u3-sh-' + tag, { ...(wrapper ? { wrapper } : {}), node: ['-r', HOLDJS], env: { STUB_CAPTURE: cap, SYNC_HOLD_ARM: arm, SYNC_HOLD_MARK: mark, SYNC_HOLD_RELEASE: rel } });
+    await live(w);
+    w.child.stdin.write(ad.formatChatInput('TOOL-A run a slow command', 'm-tool-sh-' + tag).stdinPayload + '\n');   // a turn that runs a tool
+    await until(() => w.out.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')), 6000);
+    sendAgain(w, words('mSH-old'), 'mSH-new', 'mSH-old');   // HELD behind the running turn — its record written «handed» now, before the hold is armed
+    const queued = await until(() => w.out.some((r) => r.type === 'queued_input' && r.msg_id === 'mSH-new'), 6000);
+    fs.writeFileSync(arm, '1');   // ARM: the next fsync of a handed records file waits for this run's release
+    w.child.stdin.write(J({ type: 'control_request', request_id: 'sh-stop-' + tag, request: { subtype: 'interrupt' } }) + '\n');   // THE PERSON's STOP
+    const held = await until(() => fs.existsSync(mark), 6000);   // the witness: the taken-back record's sync is held now
+    const cliGotStop = await until(() => capOf(cap).includes('"subtype":"interrupt"'), 3000);   // the Stop in the CLI's stdin WHILE the sync is held — its absence past 3 s is the red, said by name
+    const onDisk = recordsOf(c).get('mSH-new')?.state;   // while held: still «handed» in the file
+    fs.writeFileSync(rel, '1');   // RELEASE
+    const written = await until(() => recordsOf(c).get('mSH-new')?.state === 'dismissed', 6000);
+    await stop(w);
+    let file = null; try { file = JSON.parse(fs.readFileSync(mark, 'utf8')).file; } catch { }
+    return { queued, held, file, cliGotStop, onDisk, written };
+  };
+  const SH = await stopHeld('owed'), SHr = await stopHeld('indrop', R_INDROP.path);
+  ok(SH.queued && SH.held && /[\\/]handed[\\/]/.test(SH.file || '') && SH.cliGotStop && SH.onDisk === 'handed' && SH.written,
+    'a held Send again at a Stop: the Stop reaches the CLI WHILE the records sync is held (the witness: the held file is a handed records file), and the taken-back record is written «dismissed» after it', SH);
+  ok(R_INDROP.counts.join() === '1' && SHr.queued && SHr.held && !SHr.cliGotStop && SHr.written,
+    'RED: the write where it stood (inside the drop, before the forward) — the held sync holds the Stop: the CLI has not read it while the sync is held', SHr);
   // (e) THE HUB'S DOOR (src/server/undelivered-door.js): the person only at BOTH frames, the advert, once, the words only
   {
     const DOOR = require(path.join(ROOT, 'src/server/undelivered-door.js'));
