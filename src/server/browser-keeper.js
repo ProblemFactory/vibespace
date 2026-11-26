@@ -9603,7 +9603,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // r4745 M2 (law 5, no lease left on): an ON the kernel did not CONFIRM (no answer in the bound, an odd answer) may still have been
     // taken — when no other hold counts the tab, ONE OFF goes out at once (idempotent); the kernel's own refusal took nothing
     tabWatchRelease(h, code === 'tab_watch_unanswered' || code === 'tab_watch_failed');
-    log.log?.(`[browser] ${h.pid}: a viewer's watched tab is not drawn by its kernel (${code}${a && a.activeCount != null ? `, ${a.activeCount} watched` : ''}) — it stays a still every half second`);
+    if (code !== 'tab_watch_unavailable') log.log?.(`[browser] ${h.pid}: a viewer's watched tab is not drawn by its kernel (${code}${a && a.activeCount != null ? `, ${a.activeCount} watched` : ''}) — it stays a still every half second`);
     h.kw = { on: false, code, limit: a && a.limit ? a.limit : null };
     return true;
   }
@@ -9614,7 +9614,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!h.counted) return;
     h.counted = false;
     const k = `${h.pid}|${h.id}`, n = (tabWatchCounts.get(k) || 0) - 1;
-    if (n > 0) { tabWatchCounts.set(k, n); return; }
+    if (n > 0) { tabWatchCounts.set(k, n); if (mayHold) tabWatchLeased.add(k); return; } // r5006: a share that MAY hold a lease (confirmed, unanswered, or leaving before its reply) leaves beside others: the tab is marked, so the last leaving sends the OFF (idempotent)
     tabWatchCounts.delete(k);
     if (!mayHold && !tabWatchLeased.has(k)) return; // r4808: a refusal took nothing — but an earlier hold's CONFIRMED lease of the tab is on: the last share sends the OFF
     tabWatchLeased.delete(k);
