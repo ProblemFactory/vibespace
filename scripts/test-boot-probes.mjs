@@ -19,6 +19,13 @@
 //     EAGAIN start, pgrep's own fault) is never evidence — nothing retired or signalled — and is said once per (program, socket).
 //     REDs: a copy on the release's runner starts all seven here; the release's «no answer» retires a socket on an EAGAIN; the pass's
 //     text names starterP at its four asking calls (a remote member's fuser reverted ⇒ 3).
+//   ③d A DUPLICATE PAIR'S SCAN THAT IS NOT ITS OWN CLEAN ZERO HOLDS THE PAIR UNDECIDED (B-b2d3, 主开发 r5000): at the START (runChild's
+//     fakes: a non-zero exit, its shell killed by a signal, an output past the buffer, a zero its shell said an error under) both sockets
+//     are adopted probe-pending and named «fd-scan», nothing retired or signalled, the failure said by what it was; in the RE-PROBE (the
+//     starter stand-in: a non-zero exit, a zero with its shell's error, a start error, an output past the buffer, a signal, a run that
+//     rejects, an end with no exit code) every pass leaves the pair pending, said once in its own words; after the last pass a person
+//     sees TWO live cards of one conversation and ⚙ Diagnostics' «gave up … kept alive». REDs: the release's degrade at the start, the
+//     release's «clean» (any zero) and the release's re-probe reading each retire the OLDER socket and SIGTERM its process (our own husk).
 //   ④ THE CENSUS: src/server/boot-restore.js holds no sync child (execFileSync / spawnSync / execSync) — a planted one is RED.
 // The fakes: `fuser` / `pgrep` read a mode file per (tool,) socket basename (hang = TERM ignored, never answers — the
 // D-state stand-in; alive; dead) and `cut` (the fd scan's last stage) hangs on demand. The legs that wait run side by
@@ -63,7 +70,7 @@ const CUT = realBin('cut');
 const HANG = (what) => `echo "$$ ${what}" >> "$d/pids"; trap '' TERM; exec sleep 60`; // <pid> <socket basename or cut>
 fs.writeFileSync(path.join(ROOT, 'bin', 'fuser'), `#!/bin/sh\nd=${JSON.stringify(ROOT)}\nfor a; do last=$a; done\nm=$(cat "$d/mode-$(basename "$0")-$(basename "$last")" 2>/dev/null || cat "$d/mode-$(basename "$last")" 2>/dev/null || cat "$d/mode" 2>/dev/null || echo hang)\ncase "$m" in\n  alive) cat "$d/alive-pid"; exit 0;;\n  dead) exit 1;;\nesac\n${HANG('$(basename "$last")')}\n`, { mode: 0o755 });
 fs.copyFileSync(path.join(ROOT, 'bin', 'fuser'), path.join(ROOT, 'bin', 'pgrep')); fs.chmodSync(path.join(ROOT, 'bin', 'pgrep'), 0o755);
-fs.writeFileSync(path.join(ROOT, 'bin', 'cut'), `#!/bin/sh\nd=${JSON.stringify(ROOT)}\nif [ "$(cat "$d/mode-cut" 2>/dev/null)" = hang ]; then ${HANG('cut')}; fi\nexec ${CUT} "$@"\n`, { mode: 0o755 });
+fs.writeFileSync(path.join(ROOT, 'bin', 'cut'), `#!/bin/sh\nd=${JSON.stringify(ROOT)}\ncase "$(cat "$d/mode-cut" 2>/dev/null)" in\n  hang) ${HANG('cut')};;\n  fail) exit 2;;\n  kill) kill -9 $PPID; exit 0;;\n  flood) head -c 5000000 /dev/zero | tr '\\000' x; exit 0;;\n  noisy) echo 'sh: 1: Cannot fork' >&2;;\nesac\nexec ${CUT} "$@"\n`, { mode: 0o755 });   // B-b2d3: fail / kill (its shell by a signal) / flood / noisy (a zero its shell said an error under) = a scan that does not end in its own clean zero
 const mode = (name, m) => fs.writeFileSync(path.join(ROOT, name ? `mode-${name}` : 'mode'), m); // name = '<socket>' or '<tool>-<socket>' or 'cut'
 mode(null, 'hang'); mode('cut', 'real');
 process.env.PATH = path.join(ROOT, 'bin') + ':' + process.env.PATH;
@@ -330,6 +337,75 @@ try {
       ok(rp !== '' && rr.starter === 4 && rr.runChild === 0 && rr.asks === 4, `the pass's four asking calls name starterP (${rr.starter}), none runChildP (${rr.runChild})`, rr);
       ok(red5.starter === 3 && red5.asks === 4, `RED: the remote member's fuser back on its default runner — the count says it (${red5.starter} of 4)`, red5);
     } finally { CPm.ChildProcess.prototype.spawn = realCpSpawn; CS.setChildStarter(real); mute = null; }
+  }
+
+  console.log('③d B-b2d3 (主开发 r5000): A DUPLICATE PAIR\'S SCAN THAT IS NOT ITS OWN CLEAN ZERO HOLDS THE PAIR UNDECIDED — at the start and in the re-probe; REDs the release\'s readings');
+  {
+    const CS = require(path.join(REPO, 'src/server/child-starter.js')), real = CS.childStarter();
+    let mute = null;
+    CS.setChildStarter({ run: (cmd, args, o) => (mute ? Promise.resolve().then(() => mute(path.basename(String(cmd)), args)) : real.run(cmd, args, o)), stats: () => real.stats(), closePipe: () => real.closePipe() });
+    const husk = () => { const v = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(v); fs.writeFileSync(path.join(ROOT, 'alive-pid'), String(v.pid)); return v; };
+    const pair = (X, n) => { const cid = `5f0c2a8e-7d41-4b9a-9e36-0c1d2b3a${n}`; const older = X.add(n, { backend: 'claude', claudeSessionId: cid, name: 'claude older' }), newer = X.add(n + 1, { backend: 'claude', claudeSessionId: cid, name: 'claude newer' }); mode(older.sock, 'alive'); mode(newer.sock, 'alive'); return { cid, older, newer }; };
+    // a boot of its own: the cap raised for it (the real /proc walk behind a fake `cut` that does not read must end inside it on a busy machine)
+    const boot = async (BRm, tag, n, cutMode) => { const X = instance(BRm, dataDir(tag)), p = pair(X, n); mode('cut', cutMode); process.env.VIBESPACE_PROBE_CAP_MS = '20000'; let t; try { t = await logged(async () => { await X.api.probeSockets(); return X.api.restoreSessions(); }); } finally { mode('cut', 'real'); process.env.VIBESPACE_PROBE_CAP_MS = String(CAP); } return { X, p, lines: t.lines }; };
+    const pend = (X) => [...X.api.probePending()].map(([f, q]) => f + ':' + q.join()).sort().join(' ');
+    const quiet = (p) => { for (const s of [p.older, p.newer]) mode('pgrep-' + s.sock, 'dead'); };   // a pair left pending keeps its own re-probe timer: a later pass on the REAL starter never signals a pid the shared alive-pid file names
+    // THE RELEASE'S READINGS, in copies of the tip: the start's degrade (a failed scan = «nobody is live»), the re-probe's (only a timeout waits), the release's «clean» (any exit 0)
+    const NB_A = '  if (dedupIds.length && sameIds(P.dedupIds, dedupIds) && P.liveConvos) liveConvos = P.liveConvos;\n', NB_Z = '    convosUnknown = true;\n  }\n';
+    const nbAt = brSrc.indexOf(NB_A), nbEnd = nbAt >= 0 ? brSrc.indexOf(NB_Z, nbAt) : -1, NB = nbAt >= 0 && nbEnd > nbAt ? brSrc.slice(nbAt, nbEnd + NB_Z.length) : NB_A;
+    const OLD_START = editAnchor(editAnchor(brSrc, NB, "  if (dedupIds.length && sameIds(P.dedupIds, dedupIds) && (P.liveConvos || P.fdScanError)) {\n    if (P.liveConvos) liveConvos = P.liveConvos; else console.warn('[boot-restore] live-conversation fd scan failed:', P.fdScanError);\n  } else if (dedupIds.length) convosUnknown = true;\n", 'src/server/boot-restore.js'),   // stale-pins: kept (the release's degrade, put back in a RED copy)
+      '    if (out.dedupIds.length && !out.liveConvos) { // the conversations', '    if (out.dedupIds.length && !out.liveConvos && !out.fdScanError) { // the conversations', 'src/server/boot-restore.js');   // stale-pins: kept (the release's condition)
+    const OLDB = require(M.write('src/server/boot-restore.js', OLD_START, 'b2d3-start-degrade'));
+    const OLDR = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, 'if (fdScanClean(r)) live = liveConvosOf(ids, r.out); else known = false; }', "if (r.code === 0) live = liveConvosOf(ids, r.out); else if (r.code === 'TIMEOUT') known = false; }", 'src/server/boot-restore.js'), 'b2d3-reprobe-degrade'));   // stale-pins: kept (the release's re-probe reading)
+    const OLDC = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, "const fdScanClean = (r) => !!r && r.code === 0 && !String(r.err || '').trim();", 'const fdScanClean = (r) => !!r && r.code === 0;', 'src/server/boot-restore.js'), 'b2d3-any-zero'));
+    try {
+      // (b) FIRST, beside its own boot (the pair's own 10 s re-probe timer must not run before it): the start of a scan that exits 2, then
+      // SEVEN ends in the re-probe at the starter stand-in, a pass each — the pair stays pending, nothing retired or signalled, said once
+      const R3 = await boot(BR, 'b2d3-start-fail', 111, 'fail'), s1 = signals.length, kinds = [];
+      const KINDS = [['a non-zero exit', { started: true, code: 1, signal: null, stdout: '', stderr: 'cut: write error: Broken pipe\n' }], ['a zero its shell said an error under', { started: true, code: 0, signal: null, stdout: '', stderr: 'sh: 1: Cannot fork\n' }],
+        ['a start error', { started: false, code: null, error: 'EAGAIN' }], ['an output past the buffer', { started: true, overflow: true, code: 0, signal: null, stdout: '', stderr: '' }], ['a signal', { started: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '' }],
+        ['a run that rejects', null], ['an end with no exit code', { started: true, code: null, signal: null, error: 'EPERM', stdout: '', stderr: '' }]];
+      for (const [what, ans] of KINDS) {
+        mute = (cmd) => { if (cmd !== 'sh') throw new Error('the leg: only the fd scan is asked'); if (!ans) throw new Error('the leg: a run that rejects'); return ans; };
+        let t; try { t = await logged(async () => R3.X.api.reprobePending()); } finally { mute = null; }
+        kinds.push({ what, t: t.r, said: t.lines.filter((l) => l.startsWith('[child] the live-conversation fd scan')) });
+      }
+      ok(kinds.every((x) => x.t.open.slice().sort().join() === [R3.p.older.sock, R3.p.newer.sock].sort().join() && !x.t.duplicate.length && !x.t.dead.length) && signals.length === s1 && fs.existsSync(R3.p.older.sockPath) && fs.existsSync(R3.p.newer.sockPath),
+        `IN THE RE-PROBE ${kinds.map((x) => x.what).join(' / ')}: every pass leaves the pair pending — nothing retired, nothing signalled`, kinds.map((x) => ({ what: x.what, t: x.t })));
+      ok(kinds[0].said.length === 1 && kinds[0].said[0] === '[child] the live-conversation fd scan did not end in its own clean zero (1: cut: write error: Broken pipe) — its duplicate pair stays undecided, never a kill' && kinds.slice(1).every((x) => !x.said.length),
+        `…said once, in its own words: ${kinds[0].said[0]}`, kinds.map((x) => x.said));
+      // (c) WHAT A PERSON SEES AFTER THE LAST PASS: two live cards of one conversation, Diagnostics' «gave up … kept alive»
+      const cards = [...R3.X.activeSessions.keys()].filter((id) => id === R3.p.older.id || id === R3.p.newer.id);
+      ok(cards.length === 2 && R3.X.attached.includes(R3.p.older.id) && R3.X.attached.includes(R3.p.newer.id) && R3.X.notes.some((l) => /^re-probe gave up after 5 tries: .* kept alive — a non-answer is never a kill$/.test(l) && l.includes(R3.p.older.sock) && l.includes(R3.p.newer.sock)),
+        'AFTER THE LAST PASS a person sees TWO live cards of one conversation (both sessions adopted and attached), and ⚙ Diagnostics says «re-probe gave up after 5 tries: … kept alive — a non-answer is never a kill» — no tray item', { cards, notes: R3.X.notes.slice(-2) });
+      quiet(R3.p);
+      // (a) AT THE START, four ends that are not the scan's own clean zero: each pair adopted probe-pending (dedup), named `fd-scan` in the
+      // restore's note, both sockets kept, no Duplicate line, no signal, the failure said
+      const s0 = signals.length, starts = [{ k: 'fail', ...R3 }];
+      for (const [i, k] of ['kill', 'flood', 'noisy'].entries()) { const b0 = await boot(BR, 'b2d3-start-' + k, 113 + i * 2, k); quiet(b0.p); starts.push({ k, ...b0 }); }
+      const restoreNote = (X) => String(X.notes.find((l) => /session\(s\) adopted probe-pending/.test(l)) || '');
+      ok(starts.every(({ X, p, lines }) => (X === R3.X || pend(X) === `${p.older.sock}:dedup ${p.newer.sock}:dedup`) && X.activeSessions.has(p.older.id) && X.activeSessions.has(p.newer.id) && fs.existsSync(p.older.sockPath) && fs.existsSync(p.newer.sockPath)
+        && restoreNote(X).includes(`fd-scan ${p.older.sock}`) && restoreNote(X).includes(`fd-scan ${p.newer.sock}`) && !lines.some((l) => l.includes('Duplicate of')) && lines.some((l) => l.startsWith('[boot-restore] live-conversation fd scan failed:'))) && signals.length === s0,
+        `AT THE START a scan that ${starts.map((x) => x.k).join(' / ')} (exit 2, its shell killed by a signal, past its buffer, a zero its shell said an error under) holds the pair UNDECIDED: both adopted probe-pending and named «fd-scan» in the restore's note, nothing retired or signalled, «live-conversation fd scan failed» still said`,
+        starts.map(({ k, X, lines }) => ({ k, pend: pend(X), note: restoreNote(X), lines: lines.filter((l) => /fd scan|Duplicate/.test(l)) })));
+      ok(starts.find((x) => x.k === 'noisy').lines.some((l) => l === '[boot-restore] live-conversation fd scan failed: exit 0, but its shell said: sh: 1: Cannot fork'),
+        '…a zero its shell said an error under is said as one (the others keep the release\'s words: runChild\'s first line of what failed)', starts.map(({ k, lines }) => ({ k, lines: lines.filter((l) => /fd scan/.test(l)) })));
+      // REDs at the start: the release's degrade (a failed scan reads «nobody») and the release's «clean» (any zero) retire the OLDER socket
+      for (const [Mod, tag, n, k, what] of [[OLDB, 'b2d3-start-red', 121, 'fail', 'the release\'s degrade — a scan that exits 2 reads «nobody is live»'], [OLDC, 'b2d3-zero-red', 123, 'noisy', 'the release\'s «clean» — any exit 0 is an answer, the shell\'s own error unread']]) {
+        const v0 = husk(), rs = await boot(Mod, tag, n, k);
+        await until(() => !alive(v0.pid), 3000);
+        ok(rs.lines.some((l) => l.includes(`⤫ Duplicate of ${rs.p.cid} — retiring stale ${rs.p.older.sock}`)) && !fs.existsSync(rs.p.older.sockPath) && !rs.X.activeSessions.has(rs.p.older.id) && signals.some(([pid, sig]) => pid === v0.pid && sig === 'SIGTERM'),
+          `RED: ${what}: the OLDER socket retired, its process SIGTERMed (the pgrep answer's pid)`, rs.lines.filter((l) => /Duplicate|fd scan/.test(l)));
+      }
+      // (d) RED: the release's re-probe reading (only a timeout waits) — a scan that exits 1 decides the pair and SIGTERMs the older one's process
+      const rr = await boot(OLDR, 'b2d3-reprobe-red', 131, 'fail');
+      const v1 = husk();
+      mute = (cmd) => (cmd === 'sh' ? { started: true, code: 1, signal: null, stdout: '', stderr: '' } : { started: true, code: 0, signal: null, stdout: `${v1.pid}\n`, stderr: '' });
+      let rt; try { rt = await logged(async () => rr.X.api.reprobePending()); } finally { mute = null; }
+      await until(() => !alive(v1.pid), 3000);
+      ok(rt.r.duplicate.join() === rr.p.older.sock && !fs.existsSync(rr.p.older.sockPath) && signals.some(([pid, sig]) => pid === v1.pid && sig === 'SIGTERM'),
+        'RED: the release\'s re-probe reading — a scan that exits 1 decides the pair: the OLDER socket retired, its process SIGTERMed', rt.r);
+    } finally { CS.setChildStarter(real); mute = null; mode('cut', 'real'); process.env.VIBESPACE_PROBE_CAP_MS = String(CAP); }
   }
 
   console.log('④ the census: no sync child in the boot restore');

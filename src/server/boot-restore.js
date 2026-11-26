@@ -301,7 +301,9 @@ const starterP = (bin, args, ms) => {
     .then((r) => r, (e) => ({ rejected: String((e && e.message) || e) || 'rejected' }))
     .then((raw) => {
       const r = { ...starterRead(raw), ms: Date.now() - t0 };
-      if (typeof r.code !== 'number' || ((bin === 'fuser' || bin === 'pgrep') && noAnswer(r))) { const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin); if (!starterSaid.has(key)) { starterSaid.add(key); console.warn(`[child] ${key}: no answer through the hub's starter (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}) — no answer, never a kill`); } }
+      // said once: a rung's no answer (noAnswer); the fd scan's anything but its own clean zero (B-b2d3) — in its own words
+      if (bin === 'sh' && !fdScanClean(r)) { if (!starterSaid.has('sh')) { starterSaid.add('sh'); console.warn(`[child] the live-conversation fd scan did not end in its own clean zero (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}${String(r.err || '').trim() && r.code !== 'TIMEOUT' ? `: ${String(r.err).trim().split('\n')[0].slice(0, 160)}` : ''}) — its duplicate pair stays undecided, never a kill`); } }
+      else if (bin !== 'sh' && noAnswer(r)) { const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin); if (!starterSaid.has(key)) { starterSaid.add(key); console.warn(`[child] ${key}: no answer through the hub's starter (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}) — no answer, never a kill`); } }
       return r;
     });
 };
@@ -311,6 +313,9 @@ const starterP = (bin, args, ms) => {
 // process or file table), a signal ended it, its output passed the buffer, or the tool's own fault (pgrep 2 / 3) — the release read
 // all but the first two as «nobody owns it» and a LIVE socket could be retired
 const noAnswer = (r) => !(r.code === 0 || r.code === 1);
+// B-b2d3: the fd scan's OWN clean end — exit 0 and NOTHING its shell said (its chunks silence ls; a fork that failed inside it —
+// EAGAIN at a full process table — is said only by the shell, and the pipeline's 0 is cut's, not the scan's)
+const fdScanClean = (r) => !!r && r.code === 0 && !String(r.err || '').trim();
 const ownedP = async (sp, rung2, ask = () => { }, own = new Set(), run = runChildP) => { ask('fuser'); const r = await run('fuser', [sp], 2000); if (r.code === 0) return r.out.trim().length > 0; if (!rung2) return noAnswer(r) ? null : false; ask('pgrep'); const g = await run('pgrep', ['-f', sp], 2000); return noAnswer(g) ? null : g.code === 0 && g.out.split('\n').some((x) => x.trim() && !own.has(Number(x))); };
 let probed = null, probing = null;
 function probeSockets() {
@@ -327,13 +332,13 @@ function probeSockets() {
     const answer = (map, key, v) => { if (!closed) map.set(key, v); };
     const asks = sockets.map((sockFile) => async () => answer(out.alive, sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), true, (q) => { if (closed) throw new Error('past the cap'); asking.set(sockFile, q); })));
     for (const { sockFile, m } of metas) if (m.host) asks.push(async () => answer(out.remoteAlive, sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), false)));
-    if (out.dedupIds.length) asks.unshift(async () => { const r = await runChildP('sh', ['-c', fdScanScript(out.dedupIds)], 20000); if (closed || r.code === 'TIMEOUT') return; if (r.code === 0) out.liveConvos = liveConvosOf(out.dedupIds, r.out); else out.fdScanError = r.err.split('\n')[0] || String(r.code); });
+    if (out.dedupIds.length) asks.unshift(async () => { const r = await runChildP('sh', ['-c', fdScanScript(out.dedupIds)], 20000); if (closed || r.code === 'TIMEOUT') return; if (fdScanClean(r)) out.liveConvos = liveConvosOf(out.dedupIds, r.out); else out.fdScanError = r.code === 0 ? `exit 0, but its shell said: ${String(r.err).trim().split('\n')[0]}` : (r.err.split('\n')[0] || String(r.code)); });
     const drain = async () => { for (let a; !closed && (a = asks.shift());) { try { await a(); } catch { } } };
     let cap = null;
     await Promise.race([Promise.all([drain(), drain(), drain(), drain()]), new Promise((r) => { cap = setTimeout(() => { out.capped = true; r(); }, capMs); })]);
     clearTimeout(cap); closed = true;
     for (const sockFile of sockets) if (out.alive.get(sockFile) == null) out.unanswered.set(sockFile, asking.get(sockFile) || 'not asked');
-    if (out.dedupIds.length && !out.liveConvos && !out.fdScanError) { // the conversations the fd scan did not cover: only a duplicate's matter (a lone socket is never retired by the dedup)
+    if (out.dedupIds.length && !out.liveConvos) { // the conversations the fd scan did not cover — no answer, or (B-b2d3) an answer that was not its own clean zero: only a duplicate's matter (a lone socket is never retired by the dedup)
       const n = new Map(); for (const { m } of metas) n.set(dedupKey(m), (n.get(dedupKey(m)) || 0) + 1);
       for (const { sockFile, m } of metas) if (!m.host && n.get(dedupKey(m)) > 1 && !out.unanswered.has(sockFile)) out.unanswered.set(sockFile, 'fd-scan');
     }
@@ -670,7 +675,7 @@ async function reprobePass() {
     if (rows.some((r) => r.p && r.p.q.has('alive'))) continue;
     let live = new Set(), known = true;
     const ids = dedupIdsOf(rows.filter((r) => !r.m.host));
-    if (ids.length) { const r = await starterP('sh', ['-c', fdScanScript(ids)], 20000); if (r.code === 0) live = liveConvosOf(ids, r.out); else if (r.code === 'TIMEOUT') known = false; }
+    if (ids.length) { const r = await starterP('sh', ['-c', fdScanScript(ids)], 20000); if (fdScanClean(r)) live = liveConvosOf(ids, r.out); else known = false; }   // B-b2d3: anything but its own clean zero is no answer — the pair waits for the next pass
     const remote = new Map();
     for (const r of rows) if (r.m.host) { const v = await ownedP(path.join(SOCKETS_DIR, r.sockFile), false, undefined, undefined, starterP); if (v == null) known = false; remote.set(r.sockFile, v); }
     if (!known) continue;
@@ -822,12 +827,15 @@ function restoreSessions() {
   // procStart counter-capture so pid reuse cannot fake it.
   let liveConvos = new Set(), convosUnknown = false;
   const dedupIds = dedupIdsOf(dedupMetas);
-  if (dedupIds.length && sameIds(P.dedupIds, dedupIds) && (P.liveConvos || P.fdScanError)) {
-    // Degrading to "nobody is live" is survivable (the dedup falls back to
-    // createdAt), but it must never be silent again — that is what hid this
-    // for as long as it was broken.
-    if (P.liveConvos) liveConvos = P.liveConvos; else console.warn('[boot-restore] live-conversation fd scan failed:', P.fdScanError);
-  } else if (dedupIds.length) convosUnknown = true; // B-92a4: the scan gave NO answer for these conversations (its bound or the cap ran out, or a socket appeared since) — never asked here; their duplicates wait for the re-probe
+  if (dedupIds.length && sameIds(P.dedupIds, dedupIds) && P.liveConvos) liveConvos = P.liveConvos;
+  else if (dedupIds.length) {
+    // B-b2d3 (主开发 r5000, lane nl-starts): a scan that did not END CLEANLY WITH ITS OWN ZERO (a start error, an output past its
+    // buffer, a signal, a non-zero exit) is no answer either — its duplicates wait for the re-probe, UNDECIDED, as a timeout's do;
+    // the release degraded it to «nobody is live» and the newer socket won (its older one's process SIGTERMed). Still said.
+    if (P.fdScanError && sameIds(P.dedupIds, dedupIds)) console.warn('[boot-restore] live-conversation fd scan failed:', P.fdScanError);
+    convosUnknown = true;
+  }
+  // B-92a4: the scan gave NO answer for these conversations (its bound or the cap ran out, or a socket appeared since) — never asked here; their duplicates wait for the re-probe
   // REMOTE sockets: the /proc scan can't see a claude running ON THE HOST, so
   // claudeAlive was unconditionally false and duplicate sockets of one remote
   // conversation could retire the wrong one (audit 2.192.0/B-82ea). Substitute
