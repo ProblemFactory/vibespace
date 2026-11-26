@@ -17,6 +17,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const SKF = require('./ssh-key-format.js');
+const FC = require('./fd-close.js');   // B-574d (lane nl-paired): a pin file's bytes on disk before its name (the synced replace)
+/** a file system that does no sync at all: said ONCE a run in the hub's journal (the site's name, the code — no path); the pin still lands */
+let noSyncSaid = false;
+const sayNoSync = (l) => { if (noSyncSaid) return; noSyncSaid = true; console.warn(`[hosts] ${l}`); };
 
 /** ssh's own fingerprint of a public key (base64 of its wire blob): `SHA256:<base64, no padding>`. */
 const fingerprintOf = (b64) => 'SHA256:' + crypto.createHash('sha256').update(Buffer.from(String(b64 || ''), 'base64')).digest('base64').replace(/=+$/, '');
@@ -103,7 +107,13 @@ function pinRefusal(h, why) {
   return Object.assign(new Error(`${who}: its host-key pin cannot be used — ${why}, so VibeSpace does not connect to it. Remove it and add it again with its plain address (${NAME_DOOR.replace('{machine}', who)})`), { code: 'host-key-name', hostId: h.id || null, host: who });
 }
 
-/** Write (or heal) a pinned record's file — 0600 in a 0700 folder, through a temporary name. Unpinned ⇒ removed. */
+/** Write (or heal) a pinned record's file — 0600 in a 0700 folder, through a temporary name SYNCED before its rename. Unpinned ⇒ removed.
+ *  B-574d (lane nl-paired, 主开发 r4752): ITS BYTES ARE ON DISK BEFORE ITS NAME — the tree's one synced replace (src/fd-close.js
+ *  renameSynced). Its reader is ssh, a CHILD process, at the record's very next connection, so the write is synchronous, never queued;
+ *  a rare write (a person's pin or unpin, an import, the boot heal of a file whose text differs). Before, a power loss after the
+ *  rename could leave the name on an empty file: a strict check over no key, every connection refused until the next start's heal.
+ *  A sync or close that FAILS is a failed write THROWN to the caller (its try says the pin was not written), the temp removed, the
+ *  old file standing; only a file system with no sync at all lands, said once a run. */
 function writePinFile(sshDir, h) {
   // a pin that cannot be used (pinUnusable) is never written: its files go and the refusal is said (the caller's log / warning).
   // r3431: the HOP's file and the machine's, each following the record — ONE writer, a temporary name for each
@@ -115,8 +125,7 @@ function writePinFile(sshDir, h) {
     let now = null; try { now = fs.readFileSync(f, 'utf8'); } catch { /* absent */ }
     if (now === text) continue;
     const tmp = f + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, text, { mode: 0o600 });
-    fs.renameSync(tmp, f);
+    FC.renameSynced(tmp, f, text, { mode: 0o600, where: 'a host-key pin file', say: sayNoSync });
   }
   if (why) throw pinRefusal(h, why);
   return files[1][1] === null ? null : files[1][0];

@@ -99,6 +99,29 @@ const dataDir = path.join(SCR, 'data with space'); fs.mkdirSync(dataDir, { recur
   const smug = { id: 'host-smug', name: 'smug', host: `smug.example.test\n* ssh-ed25519 ${KA}`, port: 22, hostKeys: [{ type: 'ssh-ed25519', key: KA }] };
   let we = null; try { HK.writePinFile(hm._sshDir, smug); } catch (e) { we = e; }
   ok(we && we.code === 'host-key-name' && !fs.existsSync(HK.pinFileOf(hm._sshDir, 'host-smug')), 'a pinned record whose address smuggles a second line: its pin file is NOT written (refused by name, host-key-name)', we && we.message);
+  // B-574d (lane nl-paired, 主开发 r4752): THE PIN'S BYTES ARE ON DISK BEFORE ITS NAME (src/fd-close.js renameSynced) — ssh, a child,
+  // reads it at the record's very next connection. A sync REFUSED (placed: fs.fsyncSync throws EIO) is a FAILED WRITE: writePinFile
+  // throws, the pin on disk stands byte for byte, no temp is left; a file system with no sync at all (EINVAL) lands, said ONCE a run.
+  // RED: a copy with the release's unsynced write + rename — the placed refusal is never met and the new pin takes its name.
+  {
+    const KN = blob('ssh-ed25519', 9);
+    const rec = { ...h, hostKeys: [{ type: 'ssh-ed25519', key: KN, fp: HK.fingerprintOf(KN) }] };
+    const placedSync = (code, fn) => { const s0 = fs.fsyncSync; let n = 0; fs.fsyncSync = function () { n++; throw Object.assign(new Error(`${code}: a placed sync refusal`), { code }); }; try { return { r: fn(), n }; } catch (e) { return { threw: (e && e.code) || String(e), n }; } finally { fs.fsyncSync = s0; } };
+    const pinScene = (M, code) => {
+      fs.writeFileSync(file, 'OLD', { mode: 0o600 });
+      const warns = [], cw = console.warn; console.warn = (...a) => warns.push(a.join(' '));
+      let out; try { out = placedSync(code, () => M.writePinFile(hm._sshDir, rec)); } finally { console.warn = cw; }
+      const left = fs.readdirSync(path.dirname(file)).filter((f) => f.endsWith('.tmp')).length;
+      return { ...out, now: fs.readFileSync(file, 'utf8'), left, said: warns.filter((l) => /^\[hosts\] a host-key pin file: its file system does not do a sync \(EINVAL\)/.test(l)).length };
+    };
+    const e = pinScene(HK, 'EIO'), u = pinScene(HK, 'EINVAL'), u2 = pinScene(HK, 'EINVAL');
+    ok(e.threw === 'EIO' && e.n === 1 && e.now === 'OLD' && e.left === 0 && u.r === file && u.n === 1 && u.now === HK.pinText(rec) && u.said === 1 && u.left === 0 && u2.now === HK.pinText(rec) && u2.said === 0,
+      'B-574d: a host-key pin file is SYNCED before its name — a refused sync (EIO, placed) is a failed write (thrown to the caller, the old pin stands, no temp left); a file system with no sync (EINVAL) lands, said ONCE a run', { e, u, u2 });
+    const XK = mutantCopies('host-key-pin-unsynced', REPO).load('src/host-keys.js', anchored(read('src/host-keys.js'), "    FC.renameSynced(tmp, f, text, { mode: 0o600, where: 'a host-key pin file', say: sayNoSync });\n", "    fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, f);   // MUTANT: the release's unsynced write\n", 'pin-unsynced'), 'pin-unsynced');
+    const x = pinScene(XK, 'EIO');
+    ok(!x.threw && x.n === 0 && x.now === HK.pinText(rec), 'CONTROL (the release\'s unsynced pin, in a copy): no sync asked — the placed refusal is never met and the new pin takes its name unsynced — red', x);
+    HK.writePinFile(hm._sshDir, h);   // the record's own pin back for the legs below
+  }
   const idS = hm.add({ name: 'spaced', user: 'me', host: 'spaced host.example.test' });
   const noBin = path.join(SCR, 'no-bin'); fs.mkdirSync(noBin, { recursive: true });
   const P0 = process.env.PATH; process.env.PATH = noBin; // no program at all: the refusal must come before any scan
