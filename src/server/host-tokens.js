@@ -22,6 +22,7 @@ const path = require('path');
 const SB = require('../secret-box.js');
 const KF = require('../key-file.js');
 const { replaceShredding, shredFile } = require('../secret-file.js');
+const FC = require('../fd-close.js');   // B-574d (lane nl-paired): the first mint's temp synced before its link
 
 const VB = require('../vault-blocked.js');   // PURE: who a refusal stopped (lane vault-locked-refusal-notice)
 const SR = require('../store-read.js');            // B-f276 (r4721): the store-read law — the legacy token file's read has three answers
@@ -157,13 +158,21 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
     const pem = r.value.toString('utf8'); r.value.fill(0); return pem;
   }
   /** `replace` = the person's renew (overwrite); a FIRST mint publishes exclusively (link, never over an existing key: two hub
-   *  processes on a first boot never pin two different keys) → the key that is on disk now */
+   *  processes on a first boot never pin two different keys) → the key that is on disk now.
+   *  B-574d (lane nl-paired, 主开发 r4752): THE KEY'S BYTES ARE ON DISK BEFORE ITS NAME. Before, both roads wrote an unsynced temp: a
+   *  power loss after the rename (or the link) could leave the name on an empty key — read as no key, so with a machine pinning this
+   *  hub every link refused `hub_identity_lost` until each machine paired again. The renew is the SECRET FAMILY's replace
+   *  (src/secret-file.js replaceShredding: the temp synced, renamed, its folder synced, the RETIRED key's bytes overwritten in place;
+   *  never through a link); the first mint's temp is written through the tree's one synced replace (src/fd-close.js renameSynced, into
+   *  the temp's own name) BEFORE it is linked in. Both stay synchronous: a person's act or the first pairing, read back at once. A sync
+   *  or close that FAILS is a failed write thrown to the caller (the old key stands, the temp removed); only a file system with no sync
+   *  at all lets the first mint land, said in the journal. */
   function writeIdentity(pem, { replace = false } = {}) {
     const st = stateOf();
     if (st === 'not_set_up') {
       ensureDir(); const f = identityFile(), tmp = f + '.' + process.pid + '.tmp';
-      fs.writeFileSync(tmp, pem, { mode: 0o600 });
-      if (replace) { fs.renameSync(tmp, f); return pem; }
+      if (replace) { replaceShredding(f, pem); return pem; }
+      FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: "this hub's key (its first mint)", say: (l) => log.warn?.(`[hub-key] ${l}`) });
       try { fs.linkSync(tmp, f); } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }
       try { fs.unlinkSync(tmp); } catch { }
       return fs.readFileSync(f, 'utf8');

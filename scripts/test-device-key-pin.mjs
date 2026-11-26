@@ -639,6 +639,36 @@ console.log('— ⑦ D3 half b: THE HUB PROVES ITS KEY (主开发\'s ruling 2026
   }
   const id2 = ht.renewIdentity();
   ok(MA.isPub(id2.publicKey) && id2.publicKey !== id1.publicKey && ht.identity().publicKey === id2.publicKey, '… a new key is the person\'s act (renewIdentity)');
+  // B-574d (lane nl-paired, 主开发 r4752): THE KEY'S BYTES ARE ON DISK BEFORE ITS NAME (before the vault is set up). The renew is the
+  // secret family's replace (src/secret-file.js replaceShredding: synced, renamed, the RETIRED key's bytes overwritten in place); the
+  // first mint's temp is synced (src/fd-close.js renameSynced) before its link. A sync REFUSED (placed: fs.fsyncSync throws EIO) is a
+  // FAILED WRITE: a first mint throws and leaves no key and no temp; a renew throws and the old key stands byte for byte.
+  // RED (a copy): the release's unsynced roads — the placed refusal is never met, and the retired key's bytes stay in its inode.
+  {
+    const placedSync = (code, fn) => { const s0 = fs.fsyncSync; let n = 0; fs.fsyncSync = function () { n++; throw Object.assign(new Error(`${code}: a placed sync refusal`), { code }); }; try { return { r: fn(), n }; } catch (e) { return { threw: (e && e.code) || String(e), n }; } finally { fs.fsyncSync = s0; } };
+    const keyScene = (H, tag) => {
+      const d = path.join(tmp, 'ht-sync-' + tag); fs.mkdirSync(d, { recursive: true });
+      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn() { } } });
+      const ad = path.join(d, 'agentd'), k = path.join(ad, 'hub-identity.pem');
+      const others = () => fs.readdirSync(ad).filter((f) => f !== 'hub-identity.pem').length;
+      const first = placedSync('EIO', () => h.identity());
+      const firstKey = fs.existsSync(k), firstLeft = others();
+      const made = h.identity(), old = fs.readFileSync(k, 'utf8');
+      const oldFd = fs.openSync(k, 'r');   // the inode the renew retires, opened before it
+      const renew = placedSync('EIO', () => h.renewIdentity());
+      const kept = fs.readFileSync(k, 'utf8') === old;
+      const id3 = h.renewIdentity();
+      const retired = Buffer.alloc(Buffer.byteLength(old)); fs.readSync(oldFd, retired, 0, retired.length, 0); fs.closeSync(oldFd);
+      return { first: first.threw || 'landed', firstN: first.n, firstKey, firstLeft, renew: renew.threw || 'landed', renewN: renew.n, kept,
+        renewed: id3.publicKey !== made.publicKey && fs.readFileSync(k, 'utf8') !== old && h.identity().publicKey === id3.publicKey, shredded: retired.toString('utf8') !== old, left: others() };
+    };
+    const r = keyScene(HT, 'real');
+    ok(r.first === 'EIO' && r.firstN === 1 && !r.firstKey && r.firstLeft === 0 && r.renew === 'EIO' && r.renewN === 1 && r.kept && r.renewed && r.shredded && r.left === 0,
+      'B-574d: this hub\'s key is SYNCED before its name — a first mint under a refused sync (EIO, placed) leaves no key and no temp; a renew under one throws and the old key stands; the renew that lands overwrites the RETIRED key\'s bytes in place', r);
+    const XH = mutantCopies('hub-key-unsynced', REPO).load('src/server/host-tokens.js', anchored(read('src/server/host-tokens.js'), "      if (replace) { replaceShredding(f, pem); return pem; }\n      FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say: (l) => log.warn?.(`[hub-key] ${l}`) });\n", "      fs.writeFileSync(tmp, pem, { mode: 0o600 });   // MUTANT: the release's unsynced roads\n      if (replace) { fs.renameSync(tmp, f); return pem; }\n", 'hub-key-unsynced'), 'hub-key-unsynced');
+    const x = keyScene(XH, 'red');
+    ok(x.first === 'landed' && x.firstN === 0 && x.firstKey && x.renew === 'landed' && x.renewN === 0 && !x.kept && !x.shredded, 'CONTROL (the release\'s unsynced roads, in a copy): no sync asked — the placed refusal is never met, the new key takes its name unsynced, the retired key\'s bytes stay in its inode — red', x);
+  }
   // ②b THE VAULT ROAD (the reader's must 1): a LAWFUL entry — the pre-vault key ADOPTED into the vault (the same key: the machines
   // that pinned it keep working), read back from it, a locked vault ⇒ vault_locked
   {
