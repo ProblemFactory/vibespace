@@ -126,9 +126,14 @@ async function bindScene(BBm, how) {
   const bindings = BBm.create({ dataDir: dir, log: quiet });
   for (let i = 0; i < KEYS.length; i++) bindings.record(CONVS[i], KEYS[i], { at: clock });   // each kept browser's conversation CAN come back
   const bfile = path.resolve(bindings.file);
+  // B-574d browser-stores 1/8: the bindings are memory-authoritative — the file is read ONCE, at a process's first use. The scene is a
+  // NEW process over the landed file: its records landed, the process's document forgotten; the refusal / the torn bytes meet that read
+  if (typeof bindings.judged === 'function') await bindings.judged();   // 2/8 + 7b: on disk once the start's records judged them
+  if (typeof bindings.landed === 'function') bindings.landed();
   const S = KS0.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings, log: quiet, sweepEveryMs: 0, thereEveryMs: 0, graceMs: 60000, now: () => clock });
   for (const k of KEYS) { S.noteStart(k, { hasDir: true }); fs.mkdirSync(S.dirOf(k), { recursive: true }); fs.writeFileSync(path.join(S.dirOf(k), 'Cookies'), 'a sign-in'); }
   clock += 3600e3;   // an hour later: both stopped far past the grace — only their bindings keep them
+  if (typeof BBm._forgetDocument === 'function') BBm._forgetDocument(bindings.file);   // the new process's document not read yet: its ONE read meets the plant (the kept store's own start above read it)
   if (how === 'torn') fs.writeFileSync(bfile, fs.readFileSync(bfile, 'utf8').slice(0, 40));   // torn bytes (a write cut short)
   const bytes = fs.readFileSync(bfile, 'utf8');
   // PLACED on the very read: the bindings file's reads refused (EIO — a share that does not answer), never a mount, never a mode change
@@ -140,6 +145,7 @@ async function bindScene(BBm, how) {
     sw = await S.sweep();   // THE REAL KEPT SWEEP (the hourly pass) over the REAL bindings
     rec = bindings.record('c-cccc3333-0000-4000-8000-000000000003', 'bk-0000c013', { at: clock });   // a record while the file cannot be read
   } finally { fs.readFileSync = realRead; }
+  if (typeof bindings.landed === 'function') bindings.landed();   // B-574d browser-stores 1/8: a record that was made is on disk once the store writer landed it (the release's copy writes over the file)
   const left = KEYS.filter((k) => fs.existsSync(path.join(S.dirOf(k), 'Cookies'))).length;
   // r3585: torn bytes are copied aside OFF the loop (the helper's own read again) — waited for, bounded (a loaded machine is slower)
   const hasCopy = () => fs.readdirSync(path.dirname(bfile)).some((n) => n.startsWith('bindings.json.corrupt-') && realRead(path.join(path.dirname(bfile), n), 'utf8') === bytes);
@@ -1001,6 +1007,7 @@ async function pruneBoundRun(BBm) {
   const bb = BBm.create({ dataDir: dir, log: quiet });
   const S = KS0.create({ dataDir: dir, keeper: stoppedKeeper, liveKeys: () => new Set(), bindings: bb, log: quiet, sweepEveryMs: 0, thereEveryMs: 0 });
   await S.reconciled();
+  if (typeof bb.judged === 'function') await bb.judged();   // 2/8 + 7b: a binding made again before the start's records answer lands once they judged it
   if (typeof bb.landed === 'function') bb.landed();   // B-574d browser-stores: the file is the document's copy, on disk once the store writer landed it
   const out = { restored: bb.lookup(C) === K, notedKept: bb.lookup(CP) === P, n: Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'browser-env', 'bindings.json'), 'utf8')).byConversation).length };
   try { S.shutdown(); } catch { }
@@ -1270,23 +1277,24 @@ console.log('㊵ r4145: THE FOLLOW — a running conversation\'s own kept folder
 console.log('B-574d browser-stores: the bindings, one document on the store writer');
 {
   const KA = 'bk-0000a11a', KB = 'bk-0000b22b', CA = 'c0ffee11-aaaa-4bbb-8ccc-000000000001', CB = 'c0ffee11-aaaa-4bbb-8ccc-000000000002';
-  const docScene = (BBmod, tag) => {
+  const docScene = async (BBmod, tag) => {
     const dir = path.join(ROOT, `bs1-${tag}`); fs.mkdirSync(dir, { recursive: true });
     const b1 = BBmod.create({ dataDir: dir, log: quiet }), b2 = BBmod.create({ dataDir: dir, log: quiet });
     const r1 = b1.record(CA, KA), r2 = b2.record(CB, KB);   // two instances, one turn: nothing has landed yet
     const seen = { a: b2.lookup(CA), b: b1.lookup(CB) };   // the NEXT statement, each the other instance's record
     const shareRefused = b2.record('c0ffee11-aaaa-4bbb-8ccc-000000000003', KA) === false;   // the refusal judges the record not landed yet
+    if (typeof b1.judged === 'function') await b1.judged();   // 2/8 + 7b: a binding made before the start's records answer is on disk once they judged it
     const landed = b1.landed();
     let disk = {}; try { disk = JSON.parse(fs.readFileSync(path.join(dir, 'browser-env', 'bindings.json'), 'utf8')).byConversation; } catch { disk = null; }
     if (typeof BBmod._forgetDocument === 'function') BBmod._forgetDocument(b1.file);   // a NEW process over the landed file
     const b3 = BBmod.create({ dataDir: dir, log: quiet });
     return { r1, r2, seen, shareRefused, landed, disk: disk ? Object.keys(disk).sort().join(',') : null, again: [b3.lookup(CA), b3.lookup(CB)].join(','), mode: (() => { try { return (fs.statSync(b1.file).mode & 0o777).toString(8); } catch { return null; } })() };
   };
-  const D1 = docScene(BB0, 'real');
+  const D1 = await docScene(BB0, 'real');
   ok(D1.r1 && D1.r2 && D1.seen.a === KA && D1.seen.b === KB && D1.shareRefused && D1.landed && D1.disk === [CA, CB].sort().join(',') && D1.again === `${KA},${KB}` && D1.mode === '600',
     'B-574d browser-stores (1) two instances record in ONE turn: each lookup in the next statement sees the other\'s record, a share of a key not landed yet is still refused; landed, the file holds BOTH (no lost update), 0600, and a new process reads them back', D1);
   const READ1 = "    { const d = DOCS.get(file); if (d) return { state: d.state, all: d.doc }; }   // browser-stores: the ONE document, read once\n";
-  const D1x = docScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, READ1, '', 'the one document read once'), 'bs1-disk-each-call'), 'red');
+  const D1x = await docScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, READ1, '', 'the one document read once'), 'bs1-disk-each-call'), 'red');
   ok(D1x.seen.a !== KA || D1x.disk !== [CA, CB].sort().join(','), 'RED (anchored copy: the release\'s read of the FILE at every call, the writes landing later): a record in the next statement is not seen, or the second record\'s rewrite drops the first — (1) goes red', D1x);
 }
 
@@ -1303,7 +1311,8 @@ console.log('B-574d browser-stores: the start\'s records judge the refusals');
     const dir = path.join(ROOT, `bs2-${tag}`); fs.mkdirSync(path.join(dir, 'browser-env'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'browser-env', 'bindings.json'), JSON.stringify({ v: 1, byConversation: {} }));
     let release = null; const gate = early ? new Promise((r) => { release = r; }) : null;
-    const listMetas = async () => { if (gate) await gate; return { ok: true, rows: [[KX, CX, '', '', CX, 1000]] }; };
+    let asked = 0;   // 主开发 r5135 law 1: the plant's witness — the product asked for the conversations' records (the placed rows)
+    const listMetas = async () => { asked++; if (gate) await gate; return { ok: true, rows: [[KX, CX, '', '', CX, 1000]] }; };
     const said = [], b = BBmod.create({ dataDir: dir, log: { warn: (l) => said.push(String(l)), log() { } }, listMetas });
     const out = {};
     if (!early) { out.fresh = b.record(CZ, KZ); await b.judged(); out.yRecord = b.record(CY, KX); }   // the records read first, then Y offered X's key
@@ -1314,24 +1323,26 @@ console.log('B-574d browser-stores: the start\'s records judge the refusals');
     }
     out.y = b.lookup(CY); out.f = b.lookup(CF); out.x = b.record(CX, KX); out.xNow = b.lookup(CX);
     out.said = said.filter((l) => l.includes('taken back') || l.includes('refused to bind')).length;
+    out.asked = asked;
     b.landed();
     return out;
   };
+  const skip2 = (name) => console.log(`  SKIP ${name}: the conversations' records (the placed rows) were never asked for — its plant was never read (主开发 r5135 law 1): not judged`);
   const J1 = await killScene(BB0, 'judged-first');
-  ok(J1.fresh === true && J1.yRecord === false && J1.y === '' && J1.x === true && J1.xNow === KX && J1.said >= 1,
+  if (!J1.asked) skip2('(2) judged first'); else ok(J1.fresh === true && J1.yRecord === false && J1.y === '' && J1.x === true && J1.xNow === KX && J1.said >= 1,
     'B-574d browser-stores (2) a row not landed at the last stop: the start reads the conversations\' records, so Y offered X\'s key is REFUSED (a share), X\'s own record binds it — no holder handed another holder\'s', J1);
   const J2 = await killScene(BB0, 'judged-after', { early: true });
-  ok(J2.yRecord === true && J2.yBefore === KX && J2.diskEarly === 'off disk' && J2.y === '' && J2.f === KF && J2.xNow === KX && J2.said >= 1,
+  if (!J2.asked) skip2('(2) judged after'); else ok(J2.yRecord === true && J2.yBefore === KX && J2.diskEarly === 'off disk' && J2.y === '' && J2.f === KF && J2.xNow === KX && J2.said >= 1,
     'B-574d browser-stores (2) …offered WHILE the records are read: kept in memory but NOT on disk until they judge it (never the next start\'s document), taken back when they answer (said); a fresh conversation\'s binding made meanwhile stays; X binds its own', J2);
   const OFFDISK = '      if (J && J.state !== \'ok\' && J.early.size) { const by = { ...doc.byConversation }; for (const sid of J.early) delete by[sid]; return JSON.stringify({ ...doc, byConversation: by }, null, 2); }\n';
   const J2d = await killScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, OFFDISK, '', 'the early bindings off the disk'), 'bs2-early-landed'), 'red-ondisk', { early: true });
-  ok(J2d.diskEarly === 'on disk', 'RED (anchored copy: the early bindings written as made): Y\'s unjudged binding lands — a kill then makes it the next start\'s document — (2) goes red', J2d);
+  if (!J2d.asked) skip2('(2) RED on disk'); else ok(J2d.diskEarly === 'on disk', 'RED (anchored copy: the early bindings written as made): Y\'s unjudged binding lands — a kill then makes it the next start\'s document — (2) goes red', J2d);
   const SHAREJ = '      if (against) return refuseShare(sid, against, String(key));\n';
   const J1x = await killScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, SHAREJ, '', 'the records judge a share'), 'bs2-no-share'), 'red-share');
-  ok(J1x.y === KX, 'RED (anchored copy: the records\' share refusal cut): Y takes X\'s browser — (2) goes red', J1x);
+  if (!J1x.asked) skip2('(2) RED share'); else ok(J1x.y === KX, 'RED (anchored copy: the records\' share refusal cut): Y takes X\'s browser — (2) goes red', J1x);
   const EARLYJ = '    judgeEarly(file, J, log);\n';
   const J2x = await killScene(MUT.load('src/server/browser-bindings.js', anchored(BBS, EARLYJ, '', 'the early bindings judged'), 'bs2-no-early'), 'red-early', { early: true });
-  ok(J2x.y === KX, 'RED (anchored copy: the bindings made while the records are read never judged): Y keeps X\'s browser — (2)\'s early road goes red', J2x);
+  if (!J2x.asked) skip2('(2) RED early'); else ok(J2x.y === KX, 'RED (anchored copy: the bindings made while the records are read never judged): Y keeps X\'s browser — (2)\'s early road goes red', J2x);
 }
 
 report();

@@ -1261,6 +1261,14 @@ router.get('/api/browser/takeovers', (req, res) => {
 });
 /** The person's Done / Hand back on a request: TAKEN ⇒ the explicit handback of its lease (the keeper moves the request to
  *  done in the same event; the handback's ONE delivery names it); WAITING ⇒ resolved `done` (the announcer tells the agent once). */
+// B-574d «browser-stores» 8/8 (lane nl-migrations, 主开发 r5101): a person's Done answers AFTER the takeover queue landed (the keeper
+// hands it to the store writer) — on the writer's synchronous answer road (also at the hub's stop). The act is in effect before that
+// (the request closed, the lease handed back), so a landing that failed is never a false refusal: the answer carries notOnDisk (the
+// tree's words for it, as the share acts' and the jobs'), said by the keeper; a keeper without the road answers as before
+const doneAnswer = (res, k, body) => {
+  if (typeof k.requestsAnswer !== 'function') return res.json(body);
+  k.requestsAnswer((ok) => { try { require('../store-writer.js').identityAtExit(res); res.json(ok ? body : { ...body, notOnDisk: true }); } catch { /* the answer could not go out */ } });
+};
 router.post('/api/browser/takeovers/:id/done', (req, res) => {
   if (refuseAgentBearer(req, res, TAKEOVERS_ARE_USERS)) return;
   const k = keeperOr503(res); if (!k) return;
@@ -1274,11 +1282,11 @@ router.post('/api/browser/takeovers/:id/done', (req, res) => {
     if (rec.state === 'taken' && k.inputStateFor(rec.browserKey, rec.profileId).input === 'user') {
       const r = k.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null, pressed: pressOf(req) });
       if (!r.ok) return failVerdict(res, r);
-      return res.json({ ok: true, how: 'handback', request: TQ.viewOf(k.takeoverRequest(id)) });
+      return doneAnswer(res, k, { ok: true, how: 'handback', request: TQ.viewOf(k.takeoverRequest(id)) });
     }
     const r = k.resolveTakeoverRequest(id, 'done', { pressed: pressOf(req) });
     if (!r.ok) return failVerdict(res, r);
-    res.json({ ok: true, how: 'done', request: TQ.viewOf(r.request) });
+    doneAnswer(res, k, { ok: true, how: 'done', request: TQ.viewOf(r.request) });
   } catch (e) { fail(res, e); }
 });
 /** P3 (§4.3): answer a pending --confirm-actions confirmation from the

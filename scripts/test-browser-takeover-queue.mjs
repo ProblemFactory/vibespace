@@ -22,7 +22,8 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, deadPort } from './scratch.mjs';
+import { scratch, freePort, deadPort, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81) // lane H: copiesCensus; lane J r2: the stale sweep's patched-copy control
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
@@ -135,8 +136,9 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   ok(q1.length === 1 && q1[0].id === id && q1[0].profileId === p.id && q1[0].browserKey === KEY_C && q1[0].sessionId === 'sess-c' && q1[0].conversationName === 'Bank reconcile' && q1[0].profileLabel === 'Bank', 'the keeper\'s queue lists it: the lease (browser key × profile), the session, the conversation\'s and the profile\'s names');
   const bcLast = bc12.filter((m) => m.type === 'browser-takeovers-updated').pop();
   ok(bcLast && bcLast.requests.length === 1 && bcLast.requests[0].id === id && !('takenBy' in bcLast.requests[0]), 'broadcast with the change (`browser-takeovers-updated`, the owner\'s queue — no viewer id)');
+  if (typeof k12._recordsLanded === 'function') k12._recordsLanded();   // B-574d browser-stores 8/8: an agent's ask is handed to the store writer, never awaited — on disk once it landed
   const disk = JSON.parse(fs.readFileSync(path.join(D12, 'browser-takeovers.json'), 'utf8'));
-  ok(disk.version === 1 && disk.requests.length === 1 && disk.requests[0].id === id && disk.requests[0].state === 'waiting', 'persisted (data/browser-takeovers.json, writeJsonAtomic)');
+  ok(disk.version === 1 && disk.requests.length === 1 && disk.requests[0].id === id && disk.requests[0].state === 'waiting', 'persisted (data/browser-takeovers.json, on the store writer)');
   const it1 = items();
   ok(it1.length === 1 && it1[0].status === 'open' && it1[0].urgency === 'urgent' && it1[0].action.requestId === id && it1[0].sessionKey === 'claude:conv-c' && it1[0].origin === 'browser' && it1[0].i18n.text.params.words === 'Log in to the bank and solve the captcha', 'the SAME request rides ONE For-you item: urgent (band 1), action browser-takeover naming it, under the conversation\'s key');
   ok(k12.takeoverRequest(id).itemId === it1[0].id && k12.takeoverRequest(id).conversationKey === 'claude:conv-c', 'the record knows its item (one record, two places)');
@@ -186,6 +188,39 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   ok(d2.status === 409 && d2.json.code === 'closed' && delivered.length === n0 + 1, 'CONTROL: a second Done is refused closed — nothing is told twice');
   const dAgent = await call('POST', `/api/browser/takeovers/${id3}/done`, {}, asC);
   ok(dAgent.status === 403 && dAgent.json.code === 'agent_forbidden', 'an agent\'s bearer never presses Done');
+  // B-574d «browser-stores» 8/8 (lane nl-migrations, 主开发 r5101): the takeover queue on the store writer — an agent's ask handed, never
+  // awaited; a PERSON's Done answers after its landing (the writer's answer road), and a landing that fails answers notOnDisk — the
+  // Done is in effect (the request closed), never a false refusal — and the writer's retry lands it. RED (an anchored copy of the
+  // routes mounted beside them): the Done answered before its landing — the failed landing answered as plain done
+  {
+    const QF = path.join(D12, 'browser-takeovers.json');
+    const doneOver = async (callFn) => {
+      const a = await callFn('POST', '/api/agent/browser/takeover-request', { text: 'Sign the form' }, asC);
+      const rid = a.json && a.json.request && a.json.request.id;
+      k12._recordsLanded();
+      fs.rmSync(QF, { force: true }); fs.mkdirSync(QF);   // the queue's name taken by a folder: its next landing fails
+      const d = await callFn('POST', `/api/browser/takeovers/${rid}/done`, {});
+      const WQ = require('../src/store-writer.js').storeWriter();
+      const failedNow = () => !!((WQ.stats().find((x) => x.file === QF) || {}).failures > 0);
+      const planted = failedNow() || ((await WQ.durable(QF, { timeoutMs: 8000 })) === false && failedNow());   // the real route answered at the failure; a copy that answers first waits for the write's try   // 主开发 r5135 law 1: the plant's witness — the queue's write with the folder in its name failed
+      fs.rmSync(QF, { recursive: true, force: true });   // the writer retries over the freed name
+      k12._recordsLanded();
+      let landed = null; try { const doc = JSON.parse(fs.readFileSync(QF, 'utf8')); const row = (doc.requests || []).find((x) => x.id === rid); landed = row ? row.state : 'absent'; } catch (e) { landed = 'unread:' + (e.code || e.message); }
+      return { planted, ask: a.status, status: d.status, how: d.json && d.json.how, notOnDisk: !!(d.json && d.json.notOnDisk), landed, rid };
+    };
+    const skip8 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
+    const D8 = await doneOver(call);
+    if (!D8.planted) skip8('8/8', 'the folder in the queue\'s name: the writer\'s write of it never failed'); else ok(D8.ask === 200 && D8.status === 200 && D8.how === 'done' && D8.notOnDisk === true && D8.landed === 'done', 'B-574d browser-stores 8/8: a person\'s Done answers after the takeover queue LANDED — a landing that fails answers notOnDisk (the Done in effect, never a false refusal), and the writer\'s retry lands the request done', D8);
+    const MR = mutantCopies('takeover-done-8', REPO), RSRC = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
+    const R2 = MR.load('src/routes/browser.js', anchored(RSRC, "  if (typeof k.requestsAnswer !== 'function') return res.json(body);", '  return res.json(body);   // MUTANT: the Done answered before its landing', 'the Done waits for its landing'), 'done-unwaited');
+    R2.setup({ keeper: k12, activeSessions: active, browserEnv: () => null, notice: () => { } });
+    const app2 = express(); app2.use(express.json()); app2.use(R2.router);
+    const srv2 = http.createServer(app2), P2 = await freePort(); await new Promise((r) => srv2.listen(P2, '127.0.0.1', r)); servers.push(srv2);
+    const call2 = async (method, p0, body, headers = {}) => { const r = await fetch(`http://127.0.0.1:${P2}` + p0, { method, headers: { 'Content-Type': 'application/json', ...headers }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }); let json = null; try { json = await r.json(); } catch { json = null; } return { status: r.status, json }; };
+    const D8x = await doneOver(call2);
+    R.setup({ keeper: k12, activeSessions: active, browserEnv: () => null, notice: () => { } });   // the real routes' own setup again for the legs after
+    if (!D8x.planted) skip8('8/8 RED', 'the folder in the queue\'s name: the writer\'s write of it never failed'); else ok(D8x.status === 200 && D8x.notOnDisk === false, 'RED (anchored copy of the routes: the Done answered before its landing): the failed landing is answered as plain done — 8/8 goes red', D8x);
+  }
   // Done on a TAKEN request = the explicit handback
   const a4 = await call('POST', '/api/agent/browser/takeover-request', { text: 'Pick the right account' }, asC);
   k12.takeover({ browserKey: KEY_C, profileId: p.id, viewerId: 63, sessionId: 'sess-c' });
@@ -257,6 +292,7 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   // the lease ending withdraws it; a restart is a handback (taken ⇒ waiting)
   const a8 = await call('POST', '/api/agent/browser/takeover-request', { text: 'Last one' }, asC);
   k12.takeover({ browserKey: KEY_C, profileId: p.id, viewerId: 65, sessionId: 'sess-c' });
+  k12._recordsLanded();   // B-574d browser-stores 8/8: the queue is the store writer's record — a restart in one process reads it after its landing (a process's exit lands it)
   const k12b = mkKeeper();
   ok(k12b.takeoverRequest(a8.json.request.id).state === 'waiting', 'a restart is a handback by construction: a request TAKEN at shutdown waits again at load (nobody said it is done)');
   k12b.shutdown();

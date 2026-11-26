@@ -1239,6 +1239,7 @@ console.log('\n⑰ a fenced effective config skips the C rung (r4)');
   const P4 = path.join(ROOT, 'proj-c-pin'); fs.mkdirSync(P4, { recursive: true });
   fs.mkdirSync(e.configPathFor(K4), { recursive: true });
   const r4 = e.envFor({ browserKey: K4, integrationOn: true, cwd: P4 });
+  ok(e._cwdLanded(K4), 'the C rung\'s sidecar LANDED (B-574d browser-stores: the store writer\'s record — read after its landing)');
   ok(r4.variant === 'C' && JSON.parse(fs.readFileSync(e.cwdPathFor(K4), 'utf8')).cwd === P4, 'on C the session\'s cwd is recorded in `<key>.cwd` beside the link');
   ok((fs.statSync(e.cwdPathFor(K4)).mode & 0o777) === 0o600, '…0600, like every file this module writes');
   fs.writeFileSync(path.join(P4, 'agent-browser.json'), JSON.stringify({ allowedDomains: ['later.example'] }));   // the fence appears AFTER spawn, at project level
@@ -1248,7 +1249,7 @@ console.log('\n⑰ a fenced effective config skips the C rung (r4)');
     'a pin on the C rung is refused by a PROJECT-level fence — the check reads the session directory\'s file, which round 3\'s `effectiveConfig(null)` could not see');
   fs.rmSync(path.join(P4, 'agent-browser.json'));
   ok(e.repointPin(K4, pinned).ok === true && e.repointPin(K4, null).ok === true, 'NEGATIVE CONTROL: with the project fence gone the same pin applies (and unpins)');
-  fs.unlinkSync(e.cwdPathFor(K4));
+  e._cwdDrop(K4); fs.unlinkSync(e.cwdPathFor(K4));   // B-574d browser-stores: the record is read from memory first — the stand-in for a pre-r4 spawn drops the memory too
   const pm = e.repointPin(K4, pinned);
   ok(pm.ok === false && /not recorded/.test(pm.why) && /\.cwd/.test(pm.why),
     'a C-rung session WITHOUT the record (a pre-r4 spawn) is refused BY NAME, never half-checked against the user file alone');
@@ -1283,6 +1284,7 @@ console.log('\n⑰ a fenced effective config skips the C rung (r4)');
   const K7 = 'bk-17171707';
   fs.mkdirSync(e.configPathFor(K7), { recursive: true });
   e.envFor({ browserKey: K7, integrationOn: true, cwd: P4 });
+  ok(e._cwdLanded(K7), '…K7\'s sidecar landed before it is aged (B-574d browser-stores: an owed one is spared by the sweep)');
   const old = Date.now() / 1000 - 7200;
   for (const p of [e.configPathFor(K7), e.cwdPathFor(K7), e.scratchDirFor(K7)]) { try { fs.utimesSync(p, old, old); } catch { } }
   try { fs.lutimesSync(e.linkPathFor(K7), old, old); } catch { }

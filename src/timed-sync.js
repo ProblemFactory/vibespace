@@ -58,6 +58,7 @@ const STORES = Object.freeze({
   'window-targets.write': row('write', 'window-leases.json + window-reach.json', 'src/server/window-targets-engine.js', ['writeWindowStore']),   // 5/8: the window leases and share modes
   'browser-lineage-ledger.write': row('write', 'the browser lineage ledger (ndjson)', 'src/server/browser-keeper.js', ['lineageLedger']),   // 6/8: the lineage ledger's appends and its trim, one file lane
   'browser-env-cwd.write': row('write', 'browser-env/<key>.cwd', 'src/server/browser-env.js', ['writeCwdSidecar']),   // 7/8: a C rung's cwd record
+  'browser-keeper-records.write': row('write', 'the keeper\'s records (browser-takeovers.json, known-good.json, install-running.json, verified.json)', 'src/server/browser-keeper.js', ['writeRecord']),   // 8/8: the records of the keeper's one door
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)

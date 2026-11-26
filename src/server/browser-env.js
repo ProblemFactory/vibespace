@@ -828,7 +828,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     // each registered directory's identity ONCE per sweep; an unresolvable one (null) makes every compare unknown ⇒ spared
     const regIds = regDirs ? regDirs.map((d) => dirIdentity(d)) : null;
     const isRegistered = (p) => { if (!regIds) return true; if (!regIds.length) return false; const id = dirIdentity(p); return id === null || regIds.some((r) => r === null || r === id); };
-    let regSpared = 0;
+    let regSpared = 0, owedSpared = 0;   // owedSpared (B-574d browser-stores 8/8): sidecars whose write is still owed
     const sweptAt = Date.now();
     for (const [dir, isDir] of [[ENV_DIR, false], [PROFILE_DIR, true]]) {
       let names = []; try { names = fs.readdirSync(dir); } catch { continue; }
@@ -855,13 +855,20 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         // tmpfs, first run).
         try { ageMs = Math.max(0, sweptAt - fs.lstatSync(path.join(dir, n)).mtimeMs); } catch { }
         if (graceMs > 0 && ageMs < graceMs) { spared.push({ name: n, ageMs: Math.round(ageMs) }); kept++; continue; }
+        if (!isDir && n.endsWith('.cwd')) {   // B-574d browser-stores 8/8 (its reads): a sidecar is the store writer's record — one whose write is still OWED is spared (its file's mtime is the old one until the write lands: the grace cannot see it); any other's memory and pending state are dropped before the removal (a late landing never brings it back)
+          const cf = path.join(dir, n);
+          let spare = false;
+          try { const SW = require('../store-writer.js').storeWriter(); spare = SW.pending(cf); if (!spare) SW.forget(cf); } catch { /* nothing owed */ }
+          if (spare) { owedSpared++; continue; }
+          CWD_MEMO.delete(cf);
+        }
         try { fs.rmSync(path.join(dir, n), { recursive: true, force: true }); swept++; } catch { }
       }
     }
-    if (swept || spared.length) {
-      try { log.log?.(`[browser] swept ${swept} orphaned browser env object(s); ${kept} live${notedSpared ? `; ${notedSpared} key-named folder(s) spared (${bindingsUnread ? 'the bindings could not be read' : noted === null ? 'the kept folders\' notes are not read to their end yet' : 'a note in the folder names its conversation'})` : ''}${keptDirs ? `; ${keptDirs} kept browser director${keptDirs === 1 ? 'y' : 'ies'} left to the kept store${keptSet ? '' : ' (its file could not be read — every key-named directory was spared)'}` : ''}${regSpared ? `; ${regSpared} director${regSpared === 1 ? 'y' : 'ies'} a named profile registered in place spared${regDirs ? '' : ' (the profile registry could not be read — every key-named directory was spared)'}` : ''}${spared.length ? `; spared ${spared.length} younger than ${graceMs}ms (a create may still be in flight)` : ''}`); } catch { }
+    if (swept || spared.length || owedSpared) {
+      try { log.log?.(`[browser] swept ${swept} orphaned browser env object(s); ${kept} live${notedSpared ? `; ${notedSpared} key-named folder(s) spared (${bindingsUnread ? 'the bindings could not be read' : noted === null ? 'the kept folders\' notes are not read to their end yet' : 'a note in the folder names its conversation'})` : ''}${keptDirs ? `; ${keptDirs} kept browser director${keptDirs === 1 ? 'y' : 'ies'} left to the kept store${keptSet ? '' : ' (its file could not be read — every key-named directory was spared)'}` : ''}${regSpared ? `; ${regSpared} director${regSpared === 1 ? 'y' : 'ies'} a named profile registered in place spared${regDirs ? '' : ' (the profile registry could not be read — every key-named directory was spared)'}` : ''}${spared.length ? `; spared ${spared.length} younger than ${graceMs}ms (a create may still be in flight)` : ''}${owedSpared ? `; ${owedSpared} sidecar(s) spared: written by this process, not landed yet` : ''}`); } catch { }
     }
-    return { swept, kept, spared, sweptAt, graceMs, keptDirs, keptUnreadable: !keptSet, registeredDirs: regSpared, registryUnreadable: !regDirs, notedSpared, bindingsUnread, notesUnknown: noted === null };
+    return { swept, kept, spared, owedSpared, sweptAt, graceMs, keptDirs, keptUnreadable: !keptSet, registeredDirs: regSpared, registryUnreadable: !regDirs, notedSpared, bindingsUnread, notesUnknown: noted === null };
   }
 
   /**
@@ -1007,6 +1014,10 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     tmpDir: () => { if (tmpMade) return tmpMade; try { mkdirPrivate(ENV_DIR); } catch { } const d = makeBrowserTmpDir({ dataDir, log }); if (d) tmpMade = d; return d; }, // lane browser-tmpdir-socket-length: TMP_DIR only while Chrome's socket fits
     // paths, so the suite asserts the real ones rather than its own guess
     ENV_DIR, PROFILE_DIR, TMP_DIR, configPathFor, linkPathFor, cwdPathFor, scratchDirFor, effectiveConfig, ensureSocketDir,
+    // B-574d browser-stores 8/8: a suite's read of a C rung's sidecar after an act (its owed write landed: the writer's bounded flush), and its
+    // stand-in for a sidecar never written (a pre-r4 spawn: the memory and the owed write dropped, the suite removes the file)
+    _cwdLanded: (key) => { try { const f = cwdPathFor(key), W = require('../store-writer.js').storeWriter(); if (!W.pending(f)) return true; const r = W.flushSync([f]); return !r.deferred && !(r.left || []).some((x) => x.file === f); } catch { return false; } },
+    _cwdDrop: (key) => { const f = cwdPathFor(key); CWD_MEMO.delete(f); try { require('../store-writer.js').storeWriter().forget(f); } catch { /* nothing owed */ } },
     // takeover r2: the base the remote prelude's short socket dir is built on — `/resolve` names it to a
     // rung-H CLI, which keeps a shell AGENT_BROWSER_SOCKET_DIR only when it is `<base>/vs-ab-<its uid>`
     socketDirBase: B.socketDirBaseOf(socketDirBase),

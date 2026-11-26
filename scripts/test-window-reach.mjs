@@ -684,6 +684,7 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
     let leaseErr = null; try { e1.attach('da-h1', e1.factsForToken('vsst_P89')); } catch (x) { leaseErr = (x && (x.code || x.message)) || String(x); }
     const before = { lease: !!e1.leaseOf('da-h1'), shares: rows89(e1, 'da-h1') + rows89(e1, 'da-h2') };
     const carried = new Set(Object.keys(handed89(k1)));
+    e1.storesLanded?.();   // B-574d browser-stores 5/8: the leases and shares are the store writer's — a restart in one process reads them after their landing (a process's exit lands them)
     k1.shutdown();
     // (2) the restart whose read of desktop-apps.json FAILS — its boot reconcile
     const k2 = keeperAt(false), said = [];
@@ -691,6 +692,7 @@ console.log('lane e2c: launchModeVerdict beside the mode set');
     const factHanded = (() => { try { const h = handed89(k2); return typeof h.held === 'function' && h.held() === true; } catch { return false; } })();
     const e2 = engineOver(k2, EM, { log() { }, warn: (m) => said.push(String(m)) });
     const r = e2.reconcile({ graceMs: 0 });
+    e2.storesLanded?.();   // …and what the held reconcile wrote (a red copy's drops) lands before the next start reads
     k2.shutdown();
     // (3) the start after the file reads again: what the held reconcile left
     const k3 = keeperAt(true), e3 = engineOver(k3, ENG89);
