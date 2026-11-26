@@ -91,7 +91,7 @@ export function relaunchHandOver({ fit = null, chrome = null, uiScale = 1 } = {}
  * from before the fit (`at`) counts only while the fit has NOT run yet (`landed` false); once the fit ran, a window back at its
  * old size (the person snapped it into the same zone in the «Starting…» wait) drops the plan, as does any other size. Sizes as
  * the window's own style strings ('' = never sized).
- * IN THE PRODUCT THE FIT RUNS IN THE PLAN's OWN TICK (relaunchAt: relaunchPlanFor, then fitAfterRelaunch), so the not-landed
+ * IN THE PRODUCT THE FIT RUNS IN THE PLAN's OWN TICK (planRelaunch: relaunchPlanFor, then fitAfterRelaunch), so the not-landed
  * branch is met by NO road today: it is the order's own safety — if the fit ever lands later again, the first map still takes
  * the plan — and the stall suite (its copy holds the fit past the map) is its one reader (the coordinator's r2391).
  */
@@ -105,4 +105,23 @@ export function relaunchPlanHolds({ at = null, fit = null, now = null, refused =
   if (refused || !fit || !now) return false;
   const same = (a, b) => String(a.w) === String(b.w) && String(a.h) === String(b.h);
   return same(now, fit) || (!landed && !!at && same(now, at));
+}
+/**
+ * B-a52d (主开发 r4884) — THE PLAN IS MADE AT THE FIRST OF THE TWO EVENTS. The hub broadcasts a relaunch's successor BEFORE it
+ * answers the press (src/desktop-serve.js relaunch: commit, then the old app's stop, then the answer) and the window follows the
+ * broadcast at once, so its new connection could map before the answer's plan and fit existed (a stale map, then the refit a
+ * person sees: the placed stall 823b4235e-20261126093305-box, every relaunch that changes the size). The press keeps only what the
+ * plan is made from (the window's geometry — the plan itself needs the successor's RECORD: «auto» is the server's to resolve);
+ * the window's retarget names the successor on ITS OWN press (`nextId`); the first event that carries that record — the answer,
+ * or the record's door before the view connects — takes the press and plans; the second finds none and changes nothing.
+ * `press` = { fromId, nextId?, at } (this window's own press, in flight), `nextId` = the record's id, `now` (ms). → true = plan now.
+ * A press waits at most RELAUNCH_PRESS_MS for its successor and ENDS WITH ITS ANSWER whatever it is (desktop-app-window.js relaunchAt:
+ * a refusal, a lost answer or the successor named) — nothing it leaves can shape a later relaunch, another press's or another
+ * client's (主开发 r5011 (a)); a window that did not press has none (a second client is as before).
+ */
+export const RELAUNCH_PRESS_MS = 60 * 1000;
+export function relaunchPressTakes(press, { nextId = null, now = 0 } = {}) {
+  if (!press || !press.nextId || !nextId || press.nextId !== nextId || press.nextId === press.fromId) return false;
+  const age = Number(now) - (Number(press.at) || 0);
+  return age >= 0 && age <= RELAUNCH_PRESS_MS;
 }

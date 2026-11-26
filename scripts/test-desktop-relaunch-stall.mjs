@@ -10,6 +10,11 @@
 // as not reproduced). Printed whole — «B-92aa VERDICT: …». It runs at every gate that runs its class (never behind a flag).
 // r1635: row 104 NAMED the order (3 of 5 relaunches mapped stale); the cure hands the fit's plan to the new connection's first
 // map, so this suite is now THE PROOF: with the hold in place, a stale map is a red check, not a verdict.
+// B-a52d (主开发 r4884) — THE SECOND ORDER: the hub broadcasts the successor BEFORE it answers the press, and the window follows the
+// broadcast at once. The same copy also HOLDS THE PRESS's ANSWER until the successor's main window is mapped (bounded 8 s), so the
+// window's new connection maps before the answer — at the release every relaunch that changes the size mapped stale and was refit
+// (the placed stall 823b4235e-20261126093305-box, DPR 1 and 2). Each walk picks its hold (the page's __vsStallMode: 'fit' | 'reply');
+// the answer's order is walked at DPR 1 and DPR 2 (tonight's reds at both), the fit's at DPR 1 as before.
 // The boot (the worktree server on the real xpra rung, headless chrome, the private runtime dir) and the teardown are
 // scripts/xpra-window-boot.mjs's (the xpra window family's helper; this suite is no part of that family: it holds none of the
 // giant's §§, test-ci-gate-tiers §8d). §15's walk (runScale14 and what it reads) is copied from test-desktop-xpra-window-scale,
@@ -24,7 +29,7 @@ import { bootXpraWindow } from './xpra-window-boot.mjs';
 
 const require = createRequire(import.meta.url);
 const { bin, bootedCopy, check, copyLeft, crashed, ctlServers, endCopy, ensureActive, finish, launchOn, mkPage, openPage, page, PORT, readyOn,
-  repo, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, until, worktrees, wt } = await bootXpraWindow('test-desktop-relaunch-stall');
+  repo, sizeWinOn, skip, dropPage, sleep, spawnCopy, srvEnv, target, threw, until, worktrees, wt } = await bootXpraWindow('test-desktop-relaunch-stall');
 let p1 = await page(target);
 try {
   console.log('B-92aa — the relaunch fit held past the new connection\'s map (a placed stall on a copy), F3 measured on §15\'s own walk at DPR 1');
@@ -40,7 +45,7 @@ try {
     let col = null; try { const cv = el && el.querySelector('canvas'); if (cv && main) { const W = Math.min(cv.width, main.w), H = Math.min(cv.height, main.h), y = Math.floor(H * 0.9); const d = cv.getContext('2d').getImageData(0, y, W, 1).data; const b = [d[12], d[13], d[14]]; let lo = -1, hi = -1; for (let i = 0; i < W; i++) { const q = i * 4; if (Math.abs(d[q] - b[0]) + Math.abs(d[q + 1] - b[1]) + Math.abs(d[q + 2] - b[2]) > 12) { if (lo < 0) lo = i; hi = i; } } col = { css: (hi - lo + 1) / v.ratio, left: lo / v.ratio, right: (W - 1 - hi) / v.ratio, bg: b.join(',') }; } } catch (e) { col = String(e); }
     return { wmId: w.id, status: v.status.textContent, seamless: !!(w._desktopSeamless && w._desktopSeamless.seamless), ratio: v.ratio, picture: v.pictureScale, stageScale: v.stageScale, badge: v.fitBadge.style.display !== 'none',
       pane: { x: pr.x, y: pr.y, w: pr.width, h: pr.height }, win: { x: er.x, y: er.y, w: er.width, h: er.height }, main: main && { x: main.x, y: main.y, w: main.w, h: main.h, premap: !!main.premap, hints: main.meta['size-constraints'] || null },
-      margins: mr && { l: mr.x - pr.x, t: mr.y - pr.y, r: pr.right - mr.right, b: pr.bottom - mr.bottom }, col, fit: w._desktopRelaunchFit || null, max: !!w.isMaximized, holds: (w._desktopStallHolds || []).slice() }; })()`;
+      margins: mr && { l: mr.x - pr.x, t: mr.y - pr.y, r: pr.right - mr.right, b: pr.bottom - mr.bottom }, col, fit: w._desktopRelaunchFit || null, max: !!w.isMaximized, holds: (w._desktopStallHolds || []).slice(), replyHolds: (w._desktopReplyHolds || []).slice() }; })()`;
   /** the pane's own pixels (a screenshot at the page's device scale): the fraction whose colour is the PANE's background
    *  (var(--bg-secondary)) — the app never paints it (the calculator's own background is its own rgb) */
   const bare14 = async (P, id) => {
@@ -70,12 +75,13 @@ try {
   let runScale14 = null; // B-92aa: the placed-stall leg below runs it on its own copy
   if (!CALC14) skip('§15 the scale-geometry legs', 'gnome-calculator not on PATH');
   else {
-    runScale14 = async (origin, dpr, wtree, tag) => {
+    runScale14 = async (origin, dpr, wtree, tag, mode = null) => {
       const H = await mkPage(origin, { width: 1400, height: 1000, deviceScaleFactor: dpr, mobile: false });
       const out = { steps: [], dpr, tag };
       try {
         await H.p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: TAP14 });
         await H.p.evalJs(`localStorage.removeItem('vibespace.uiScale'); true`); await openPage(H.p, origin);
+        if (mode) await H.p.evalJs(`globalThis.__vsStallMode = ${JSON.stringify(mode)}; true`); // B-a52d: the copy's hold for this walk (none outside the copy)
         const l = await launchOn(H.p, { appId: 'gnome-calculator', uiScale: 1 });
         let id = l && l.id;
         if (!id) { out.err = l; return out; }
@@ -132,11 +138,14 @@ try {
     for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wts}/${f} && cp -r ${wt}/${f} ${wts}/${f}`);
     fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wts, 'node_modules'));
     fs.mkdirSync(path.join(wts, 'data'), { recursive: true });
-    const FROM = "    fitAfterRelaunch(geo, r.app, plan); // lane D (a) F2: the window keeps the app's size at the new scale — the SAME plan";
-    const TO = "    { const g9 = geo, a9 = r.app, p9 = plan, t9 = Date.now(); const held = () => { const c9 = view && view.client; if ((c9 && c9.mainWid) || Date.now() - t9 > 8000) { (winInfo._desktopStallHolds = winInfo._desktopStallHolds || []).push(Date.now() - t9); fitAfterRelaunch(g9, a9, p9); } else setTimeout(held, 20); }; setTimeout(held, 20); } // B-92aa PLACED STALL: the relaunch fit held until the new connection's main window is mapped";
+    const FROM = "    fitAfterRelaunch(geo, next, plan); // lane D (a) F2: the window keeps the app's size at the new scale — the SAME plan";
+    const TO = "    if (globalThis.__vsStallMode !== 'fit') fitAfterRelaunch(geo, next, plan); else { const g9 = geo, a9 = next, p9 = plan, t9 = Date.now(); const held = () => { const c9 = view && view.client; if ((c9 && c9.mainWid) || Date.now() - t9 > 8000) { (winInfo._desktopStallHolds = winInfo._desktopStallHolds || []).push(Date.now() - t9); fitAfterRelaunch(g9, a9, p9); } else setTimeout(held, 20); }; setTimeout(held, 20); } // B-92aa PLACED STALL: the relaunch fit held until the new connection's main window is mapped";
+    const FROM2 = "    let r = await post(false);";
+    const TO2 = "    const id9 = id; let r = await post(false); if (globalThis.__vsStallMode === 'reply') await new Promise((res9) => { const t9 = Date.now(); const held = () => { const c9 = view && view.client; const mapped = id !== id9 && !!(c9 && c9.mainWid); if (mapped || Date.now() - t9 > 8000) { (winInfo._desktopReplyHolds = winInfo._desktopReplyHolds || []).push({ ms: Date.now() - t9, mapped }); res9(); } else setTimeout(held, 20); }; held(); }); // B-a52d PLACED STALL: the press's answer held until the successor's main window is mapped";
     const wf = path.join(wts, 'src/lib/desktop-app-window.js'); const src9 = fs.readFileSync(wf, 'utf8');
     check('B-92aa stall: the relaunch fit\'s call is spelled exactly once (the copy holds exactly it)', src9.split(FROM).length === 2);
-    fs.writeFileSync(wf, src9.replace(FROM, TO));
+    check('B-a52d stall: the press\'s answer is read exactly once (the copy holds exactly it)', src9.split(FROM2).length === 2);
+    fs.writeFileSync(wf, src9.replace(FROM, TO).replace(FROM2, TO2));
     execSync('npm run build:bundles', { cwd: wts, stdio: 'ignore' });
     const [PORTS] = await freePorts(1);
     const homeS = scratchHome('deskxpra-stall-home', fs);
@@ -146,7 +155,7 @@ try {
     if (upS) {
       const OS = `http://127.0.0.1:${PORTS}`;
       try {
-        const o = await runScale14(OS, 1, wts, 'stall');
+        const o = await runScale14(OS, 1, wts, 'stall', 'fit');
         const rows = o.steps.filter((st) => st.tap && st.tap.some((e) => e.ty === 'new-window')).map((st) => {
           const nw = st.tap.find((e) => e.ty === 'new-window');
           const map = st.tap.find((e) => e.ty === 'map-window' && nw && e.g[0] === nw.g[0]);
@@ -161,6 +170,32 @@ try {
         check(`B-92aa THE CURE (r1635): with the relaunch fit HELD past the new connection's map, every relaunch maps at its FINAL size — the first map takes the fit's plan (row 104 at 0cc12963d: 3 of 5 mapped stale)`, holds.length >= 1 && stale.length === 0, rows);
         check(`B-92aa stall: the copy HELD the relaunch fit past the map (${holds.length} held: ${holds.join(', ')} ms)`, holds.length >= 1, o.steps.map((x) => x.label));
         check(`B-92aa stall: the stalled-fit copy ran its transitions (${rows.length} connects measured)`, rows.length >= 4, o.steps.map((x) => x.label + (x.err ? ':' + JSON.stringify(x.err) : '')));
+        for (const [o2, id] of ids14.splice(0)) await fetch(`${o2}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+        await dropPage(o.H); await sleep(1500);
+        // B-a52d (主开发 r4884): THE ANSWER HELD past the successor's map — the window followed the hub's broadcast, its new connection
+        // mapped, THEN the answer came. At the release every relaunch that changes the size mapped stale and was refit (DPR 1: 3 of 3,
+        // DPR 2: 4 of 4 — 823b4235e-20261126093305-box); the cure plans and fits at the FIRST of the two events
+        for (const dpr of [1, 2]) {
+          const oR = await runScale14(OS, dpr, wts, 'stall-reply', 'reply');
+          const rowsR = oR.steps.filter((st) => st.tap && st.tap.some((e) => e.ty === 'new-window')).map((st) => {
+            const nw = st.tap.find((e) => e.ty === 'new-window');
+            const map = st.tap.find((e) => e.ty === 'map-window' && nw && e.g[0] === nw.g[0]);
+            const refits = map ? st.tap.filter((e) => e.ty === 'configure-window' && e.g[0] === nw.g[0] && e.at > map.at).map((e) => [e.at - map.at, e.g.slice(3, 5)]) : [];
+            return { label: st.label, map: map && map.g.slice(3, 5), main: st.g && st.g.main && [st.g.main.w, st.g.main.h], refits };
+          });
+          const staleR = rowsR.filter((x) => x.map && x.main && (x.map[0] !== x.main[0] || x.map[1] !== x.main[1]) && x.refits.length);
+          const holdsR = ([...oR.steps].reverse().find((st) => st.g && Array.isArray(st.g.replyHolds)) || { g: { replyHolds: [] } }).g.replyHolds;
+          const pastMap = holdsR.filter((h) => h && h.mapped);
+          console.log(`    MEASURE B-a52d (not a proof): the answer held at DPR ${dpr} — holds ${JSON.stringify(holdsR)}; ${rowsR.map((x) => `${x.label} map ${x.map} = main ${x.main}${x.refits.length ? ` (the client refit ${JSON.stringify(x.refits)})` : ''}`).join('; ')}`);
+          // r5135 law 1: the CURE is judged only when the plant was IN FORCE — an answer held past a successor's map (its witness: the
+          // copy's own hold list); a walk whose answer was never held past a map is a NAMED SKIP, counted, never a red or a green
+          if (!pastMap.length) skip(`B-a52d THE CURE, DPR ${dpr}`, `the answer was never held past a successor's map (${holdsR.length} hold(s), none on a map): the plant was not in force — not judged`);
+          else check(`B-a52d THE CURE (主开发 r4884), DPR ${dpr}: with the press's answer HELD past the successor's map (the window followed the hub's broadcast first), every relaunch maps at its FINAL size — the plan and the fit are made at the first of the two events (the release: every relaunch that changes the size mapped stale)`, pastMap.length >= 1 && staleR.length === 0, rowsR);
+          if (pastMap.length) console.log(`    B-a52d stall DPR ${dpr}: the plant's witness — the copy HELD the answer past a successor's map (${pastMap.length} of ${holdsR.length}: ${holdsR.map((h) => `${h.ms} ms${h.mapped ? '' : ' (bound)'}`).join(', ')})`);
+          check(`B-a52d stall DPR ${dpr}: the answer's walk ran its transitions (${rowsR.length} connects measured)`, rowsR.length >= 4, oR.steps.map((x) => x.label + (x.err ? ':' + JSON.stringify(x.err) : '')));
+          for (const [o2, id] of ids14.splice(0)) await fetch(`${o2}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+          await dropPage(oR.H); await sleep(1500);
+        }
       } catch (e) { threw('B-92aa stall', e); }
       finally { for (const [o2, id] of ids14.splice(0)) await fetch(`${o2}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); await sleep(1500); }
     }

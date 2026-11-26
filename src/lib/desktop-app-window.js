@@ -178,7 +178,7 @@ import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into �
 import { shortModeBadge } from './live-bar-layout.js';
 import { minPaneCss } from './xpra-proto.js';
 import { seamlessVerdict, windowSeamless, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
-import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel, relaunchHandOver, relaunchPlanHolds, relaunchPlanAfterFit } from './desktop-app-scale.js';
+import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel, relaunchHandOver, relaunchPlanHolds, relaunchPlanAfterFit, relaunchPressTakes } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, satellitePlacement, setSatelliteOffset } from './desktop-app-prefs.js';
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
 import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
@@ -509,6 +509,10 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   // answer (refused ⇒ none; capped ⇒ the capped), dropped when the fit applied another size or the window was resized by
   // anything else before the read (relaunchPlanHolds), and when the successor's record never answers a running app
   let relaunchPlanned = null;
+  // B-a52d (主开发 r4884): THIS WINDOW's OWN PRESS in flight — { fromId, geo, at, nextId? } — what the plan is made from, kept until
+  // the FIRST event that carries the successor's record plans it (planRelaunch: the answer, or the record's door), and ENDED by its
+  // answer whatever it is (r5011 (a): never left to shape a later relaunch); null otherwise
+  let relaunchPress = null;
   const viewOpts = () => ({
     firstPane: () => { const p = relaunchPlanned; relaunchPlanned = null; if (!p || p.id !== id) return null; const el = winInfo.element; return relaunchPlanHolds({ at: p.at, fit: p.fitCss, now: { w: el.style.width, h: el.style.height }, refused: !app.wm.fitSizeFor(winInfo.id, p.ask), landed: !!p.landed }) ? { width: p.width, height: p.height } : null; },
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
@@ -927,6 +931,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   const applyRecord = (r) => {
     if (closed || followReplacement(r) || decideExit(r)) return;
     reveal();
+    planRelaunch(r); // B-a52d: the successor of this window's own press, met here FIRST (the broadcast's follow): planned and fitted before its view connects
     rec = r; ensureView(streamKindOf(r)); render();
     // the keeper's answer is the fact: ready (just came up, or ADOPTED after a
     // restart) and the picture is not up ⇒ connect; the view's own ladder
@@ -1106,6 +1111,19 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (relaunchPlanned && relaunchPlanned.id === next.id) relaunchPlanned = relaunchPlanAfterFit(relaunchPlanned, done);
     return done;
   };
+  /** B-a52d (主开发 r4884): THE PLAN AND THE FIT, AT THE FIRST OF THE TWO EVENTS — the answer to this window's press (relaunchAt) or
+   *  the successor's record at its door (applyRecord, before the view connects), whichever comes first; the press goes with it, so
+   *  the second changes nothing (PURE relaunchPressTakes). The fit runs after retarget (the old app's view gone, its minimum cleared):
+   *  the old app is never resized for the press. A declaration: applyRecord names it above. */
+  function planRelaunch(next) {
+    if (!relaunchPressTakes(relaunchPress, { nextId: next && next.id, now: Date.now() })) return false;
+    const geo = relaunchPress.geo;
+    relaunchPress = null;
+    const plan = relaunchFitPlan(geo, next);
+    relaunchPlanned = relaunchPlanFor(geo, next, plan);
+    fitAfterRelaunch(geo, next, plan); // lane D (a) F2: the window keeps the app's size at the new scale — the SAME plan
+    return true;
+  }
   async function relaunchAt(choice, scale) {
     if (relaunching || !rec) return;
     const name = titleText();
@@ -1114,23 +1132,26 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (!okd || closed) return;
     relaunching = true;
     const geo = relaunchGeometry();
+    relaunchPress = { fromId: id, geo, at: Date.now() }; // B-a52d: the press keeps what its plan is made from — the plan waits for the successor's record
     const post = (force) => fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: choice, dpr: launchDpr(), uiScale: launchUiScale(), ...(force ? { force: true } : {}) }) });
     let r = await post(false);
     if (r && r.code === 'app-asked' && !closed) {
-      if (!(await confirmDiscard({ name, act: 'relaunch' })) || closed) { relaunching = false; showToast(t('{app} keeps running — answer its question in its window', { app: name }), { duration: 4000 }); return; }
+      if (!(await confirmDiscard({ name, act: 'relaunch' })) || closed) { relaunching = false; relaunchPress = null; showToast(t('{app} keeps running — answer its question in its window', { app: name }), { duration: 4000 }); return; }
+      if (relaunchPress) relaunchPress = { ...relaunchPress, at: Date.now() }; // B-a52d: the confirmed request is the one in flight now
       r = await post(true);
     }
     relaunching = false;
-    if (!r || r.error || !r.app || !r.app.id) { showToast(r?.error || t('Could not relaunch the app'), { type: 'error' }); return; }
+    if (!r || r.error || !r.app || !r.app.id) { relaunchPress = null; showToast(r?.error || t('Could not relaunch the app'), { type: 'error' }); return; } // B-a52d: the press ends with its answer — a refusal or a lost one leaves nothing for a later relaunch
     showToast(t('{app} relaunched at {scale}×', { app: name, scale: r.app.scale }), { duration: 3500 });
     // B-92aa (r1635, int361's row 104: «the ORDER IS NAMED»): the fit planned ONCE, so the NEW connection's first map takes the
     // planned pane — final whenever the window's resize lands (a loaded box landed it after the map: a stale map, then a refit).
     // r2217: handed only as the size the window TAKES, asked of the window manager once the retarget cleared the old app's
     // minimum (the same tick: the new connection reads it behind the record fetch and the ready gate)
-    const plan = relaunchFitPlan(geo, r.app);
+    // B-a52d (主开发 r4884): the hub broadcasts the successor BEFORE this answer, and the window follows it at once — so the plan and
+    // the fit are made at the FIRST of the two (planRelaunch): here when the answer is first, else at the record's door already
     retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)
-    relaunchPlanned = relaunchPlanFor(geo, r.app, plan);
-    fitAfterRelaunch(geo, r.app, plan); // lane D (a) F2: the window keeps the app's size at the new scale — the SAME plan
+    planRelaunch(r.app);
+    relaunchPress = null; // B-a52d: whatever the answer, the press ends with it — never left to shape a later relaunch (another press, another client's)
   }
   /** A record that names its successor (`replacedBy`): this window follows it — same window, the picture reconnects. */
   function followReplacement(r) {
@@ -1149,6 +1170,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     mainMeta = null; viewConnected = false; appIconified = false; startCenterEnding = false; applySeamless();
     seats = { known: false, active: null, viewers: [] }; optimistic = null; lease = null; myTag = null;
     applyMinSize(null);
+    if (relaunchPress && relaunchPress.fromId === id) relaunchPress = { ...relaunchPress, nextId }; // B-a52d: the successor of THIS window's own press — named on it, whichever road retargets first
     id = nextId;
     winInfo._desktopAppId = id;
     winInfo._openSpec = { action: 'openDesktopApp', id };

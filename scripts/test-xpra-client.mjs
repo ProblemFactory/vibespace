@@ -29,6 +29,9 @@ const fileUrl = (p) => pathToFileURL(p).href;
 
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
+// r5135 law 1: a control whose plant was never read is a NAMED SKIP — counted and said in the closing line, never a red, never a green
+let skipped = 0;
+const skip = (m) => { skipped++; console.log(`  ⚠ SKIP: ${m}`); };
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
@@ -2363,7 +2366,15 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   const dsrc = read('src/lib/desktop-app-window.js');
   const PINS = [
     'const relaunchFitPlan = (g, next) => (!g || !next || closed ? null : (relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next }) || null));',
-    '    const plan = relaunchFitPlan(geo, r.app);\n    retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)\n    relaunchPlanned = relaunchPlanFor(geo, r.app, plan);\n    fitAfterRelaunch(geo, r.app, plan);',
+    '    const plan = relaunchFitPlan(geo, next);\n    relaunchPlanned = relaunchPlanFor(geo, next, plan);\n    fitAfterRelaunch(geo, next, plan);',
+    // B-a52d (主开发 r4884): the plan and the fit at the FIRST of the two events — the answer (after retarget) or the record's door
+    '    retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)\n    planRelaunch(r.app);\n    relaunchPress = null; // B-a52d: whatever the answer',
+    '    if (!relaunchPressTakes(relaunchPress, { nextId: next && next.id, now: Date.now() })) return false;\n    const geo = relaunchPress.geo;\n    relaunchPress = null;',
+    '    const geo = relaunchGeometry();\n    relaunchPress = { fromId: id, geo, at: Date.now() };',
+    '    applyMinSize(null);\n    if (relaunchPress && relaunchPress.fromId === id) relaunchPress = { ...relaunchPress, nextId };',
+    '    reveal();\n    planRelaunch(r); // B-a52d',
+    "    if (!r || r.error || !r.app || !r.app.id) { relaunchPress = null;",
+    '      if (relaunchPress) relaunchPress = { ...relaunchPress, at: Date.now() }; // B-a52d: the confirmed request is the one in flight now\n      r = await post(true);',
     '    const ask = fitAsk(g, p), fit = app.wm.fitSizeFor(winInfo.id, ask);\n    const pane = relaunchHandOver({ fit, chrome: g.chrome, uiScale: uiScale() });',
     "return pane ? { id: next.id, width: pane.width, height: pane.height, ask, fit, fitCss: { w: fit.w + 'px', h: fit.h + 'px' }, at: { w: winInfo.element.style.width, h: winInfo.element.style.height }, landed: false } : null;",
     '    const done = app.wm.resizeWindowTo(winInfo.id, fitAsk(g, p));',
@@ -2372,7 +2383,7 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
     "      if (!r || r.error || r.code === 'not-found') relaunchPlanned = null;",
   ];
   const pmiss = PINS.filter((x) => dsrc.split(x).length !== 2);
-  ok(pmiss.length === 0 && dsrc.split('relaunchPaneCss(').length === 2 && dsrc.split('relaunchPlanned = ').length === 6, 'B-92aa (r1635\'s law; r2217): the relaunch fit is computed ONCE (relaunchFitPlan, the one relaunchPaneCss call) and resizes the window; the new connection is handed only what the window manager says the window TAKES (fitSizeFor → relaunchHandOver), keyed by the relaunched id, checked at the read (relaunchPlanHolds), dropped when the fit applied another size or the successor never answered', pmiss.map((x) => x.slice(0, 60)));
+  ok(pmiss.length === 0 && dsrc.split('relaunchPaneCss(').length === 2 && dsrc.split('relaunchPlanned = ').length === 6 && dsrc.split('planRelaunch(').length === 4 && dsrc.split('relaunchPress = ').length === 9 && dsrc.split('fitAfterRelaunch(').length === 2, 'B-92aa (r1635\'s law; r2217; B-a52d: made at the first of the answer and the record\'s door — planRelaunch, its two callers; the press set at the press, re-stamped for a confirmed request, ended by its answer whatever it is): the relaunch fit is computed ONCE (relaunchFitPlan, the one relaunchPaneCss call) and resizes the window; the new connection is handed only what the window manager says the window TAKES (fitSizeFor → relaunchHandOver), keyed by the relaunched id, checked at the read (relaunchPlanHolds), dropped when the fit applied another size or the successor never answered', pmiss.map((x) => x.slice(0, 60)));
 
   // r2217 — THE CONNECTION IS HANDED ONLY A SIZE THE WINDOW TOOK. The window's hand-over composed exactly as desktop-app-window.js
   // composes it (pinned above): the window manager's answer to the fit's ask (null = refused; capped or raised = what it applies)
@@ -2434,6 +2445,82 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
   ok(same(redHeldRefused, [1818, 1232]), `RED CONTROL (B-92aa r2391): a plan kept whatever the fit did — the fit refused, and the next read still maps the plan (${redHeldRefused}) in a 1634×1232 pane`, redHeldRefused);
   ok(same(redBack, [1818, 1232]), `RED CONTROL (B-92aa r2389, e659077a0's «at» branch): the window put back at its old size after the fit maps the fit's plan (${redBack}) in a 1634×1232 pane — cropped, nothing refits it`, redBack);
 
+  // B-a52d (主开发 r4884; the placed stall 823b4235e-20261126093305-box: with the press's answer held past the successor's map, EVERY
+  // relaunch that changes the size mapped stale and was refit — 1634×1232 → 1818×1232 among them) — THE PLAN AT THE FIRST OF THE TWO
+  // EVENTS. The hub broadcasts the successor BEFORE it answers the press, and the window follows the broadcast at once. The window
+  // composed as desktop-app-window.js composes it (pinned above): the press keeps the geometry; retarget names the successor on THIS
+  // window's press; the record's door (applyRecord) and the answer (relaunchAt) each call planRelaunch — the first takes the press
+  // (PURE relaunchPressTakes), plans and fits (the pane then stands at the fit), the second finds none; the connect reads the plan
+  // once (firstPane). Each scene's events run in the order given; the connect maps at once.
+  const FITW = { w: 1818, h: 1264 };
+  // events: 'broadcast' (the hub's successor, followed: retarget → the record's door), 'answer' (the press's answer naming it: retarget,
+  // planRelaunch, the press ends), 'refusal' / 'lost' (the answer refuses, or never comes: the press ends), 'other' (ANOTHER relaunch
+  // later — another client's: its broadcast followed to a newer record), 'connect' (the view of the current record maps at once)
+  const pressScene = async (DFm, events, { pressAt = 0, now = 1000, noPress = false, doorPlans = true, endsWithAnswer = true } = {}) => {
+    const el = { style: { width: '1634px', height: '1264px' } };
+    let id = 'old', press = noPress ? null : { fromId: 'old', at: pressAt }, planned = null, fits = 0, asked = 0, doorSkipped = 0, keptAfterAnswer = 0;
+    const maps = [];
+    const planRelaunch = (next) => {
+      asked++;
+      if (!DFm.relaunchPressTakes(press, { nextId: next.id, now })) return false;
+      press = null;
+      const p = DFm.relaunchHandOver({ fit: FITW, chrome: CH, uiScale: 1 });
+      planned = p ? { ...p, id: next.id, fit: FITW, fitCss: { w: FITW.w + 'px', h: FITW.h + 'px' }, at: { w: el.style.width, h: el.style.height }, landed: false } : null;
+      el.style.width = FITW.w + 'px'; el.style.height = FITW.h + 'px'; fits++; // fitAfterRelaunch: the window took the fit
+      planned = DFm.relaunchPlanAfterFit(planned, FITW);
+      return true;
+    };
+    const retarget = (nextId) => { if (nextId === id) return; if (press && press.fromId === id) press = { ...press, nextId }; id = nextId; };
+    const read = () => { const q = planned; planned = null; if (!q || q.id !== id) return null; return DFm.relaunchPlanHolds({ at: q.at, fit: q.fitCss, now: { w: el.style.width, h: el.style.height }, refused: false, landed: !!q.landed }) ? { width: q.width, height: q.height } : null; };
+    const end = () => { if (endsWithAnswer) press = null; else if (press) keptAfterAnswer++; };
+    for (const ev of events) {
+      if (ev === 'broadcast') { retarget('new'); if (doorPlans) planRelaunch({ id: 'new' }); else doorSkipped++; }
+      else if (ev === 'answer') { retarget('new'); planRelaunch({ id: 'new' }); end(); }
+      else if (ev === 'refusal' || ev === 'lost') end();
+      else if (ev === 'other') { const nx = id === 'new' ? 'later' : 'new'; retarget(nx); if (doorPlans) planRelaunch({ id: nx }); }
+      else if (ev === 'connect') maps.push((await firstMap(V, read, false, { w: Number.parseInt(el.style.width, 10), h: Number.parseInt(el.style.height, 10) - CH.h })).first); // the pane as it stands then
+    }
+    return { map: maps[0] || null, maps, fits, asked, doorSkipped, keptAfterAnswer };
+  };
+  const PS = {
+    broadcastFirst: [['broadcast', 'connect', 'answer']],                  // the placed stall's order: the window followed the broadcast, mapped, then the answer
+    answerFirst: [['answer', 'connect', 'broadcast']],                     // the release's usual order
+    answerThenBroadcast: [['answer', 'broadcast', 'connect']],
+    lostAfterBroadcast: [['broadcast', 'connect', 'lost']],                // the broadcast came while the request was in flight; its answer never came
+    atBound: [['broadcast', 'connect'], { pressAt: 0, now: 60000 }],
+    refusedThenOther: [['refusal', 'other', 'connect']],                   // (a) a press its answer refused, then another client's relaunch: as a second client
+    lostThenOther: [['lost', 'other', 'connect']],                         // (a) a press whose answer never came, then another client's relaunch
+    answeredThenOther: [['broadcast', 'connect', 'answer', 'other', 'connect']], // (a) a press answered, then another client's relaunch: its successor maps as a second client's
+    secondClient: [['broadcast', 'connect', 'answer'], { noPress: true }], // a window that did not press: as at the release
+    pastBound: [['broadcast', 'connect'], { pressAt: 0, now: 60001 }],
+  };
+  const pg = {}; for (const [k, [ev, o]] of Object.entries(PS)) pg[k] = await pressScene(DF, ev, o || {});
+  const fin = (x) => same(x.map, [1818, 1232]) && x.fits === 1, asRelease = (x) => same(x.map, [1634, 1232]) && x.fits === 0;
+  ok(fin(pg.broadcastFirst) && fin(pg.answerFirst) && fin(pg.answerThenBroadcast) && fin(pg.lostAfterBroadcast) && fin(pg.atBound),
+    'B-a52d (主开发 r4884): the successor maps ONCE at its FINAL size whichever comes first — the hub\'s broadcast (the window followed it, mapped, THEN the answer) or the answer; the second plans nothing and fits nothing (one fit each); a broadcast met while the request was in flight plans even when its answer is then lost', pg);
+  ok(asRelease(pg.refusedThenOther) && asRelease(pg.lostThenOther) && same(pg.answeredThenOther.maps, [[1818, 1232], [1818, 1232]]) && pg.answeredThenOther.fits === 1 && asRelease(pg.secondClient) && asRelease(pg.pastBound),
+    'B-a52d (主开发 r5011 (a)): a press ENDS WITH ITS ANSWER — refused, lost or answered — so nothing it leaves can shape a LATER relaunch: another client\'s relaunch after it maps as a second client\'s (no plan, no fit; after an answered press its pane stays where the first fit put it); a window that did not press maps the pane as at the release; a request in flight past 60 s plans nothing', { refusedThenOther: pg.refusedThenOther, lostThenOther: pg.lostThenOther, answeredThenOther: pg.answeredThenOther, secondClient: pg.secondClient, pastBound: pg.pastBound });
+  ok(DF.RELAUNCH_PRESS_MS === 60000 && DF.relaunchPressTakes(null, { nextId: 'b', now: 1 }) === false && DF.relaunchPressTakes({ fromId: 'a', at: 0 }, { nextId: 'b', now: 1 }) === false
+    && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'c', now: 1 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'a', at: 0 }, { nextId: 'a', now: 1 }) === false
+    && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 5 }, { nextId: 'b', now: 4 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'b', now: 60000 }) === true
+    && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: 'b', now: 60001 }) === false && DF.relaunchPressTakes({ fromId: 'a', nextId: 'b', at: 0 }, { nextId: null, now: 1 }) === false,
+    'B-a52d (PURE): relaunchPressTakes — no press, a press its window has not retargeted yet (no successor named), another record, a successor that is the press\'s own record, a clock before the press, past 60 s ⇒ false; the named successor inside 60 s ⇒ true');
+  const relX = await pressScene(DF, ['broadcast', 'connect', 'answer'], { doorPlans: false });
+  if (relX.doorSkipped !== 1) skip(`RED CONTROL (B-a52d, the release's window): its plant — the record's door planning nothing — was never reached (${relX.doorSkipped} door(s) passed by): not judged`);
+  else ok(same(relX.map, [1634, 1232]) && relX.fits === 1, `RED CONTROL (B-a52d, the release's window: the plan and the fit made only at the answer): the window that followed the broadcast maps the STALE pane (${relX.map}) and the answer's fit lands after the map — the refit a person sees`, relX);
+  const keptX = await pressScene(DF, ['lost', 'other', 'connect']).then(async (a) => ({ a, b: await pressScene(DF, ['lost', 'other', 'connect'], { endsWithAnswer: false }) }));
+  if (keptX.b.keptAfterAnswer !== 1) skip(`RED CONTROL (B-a52d, r5011 (a)): its plant — a press kept past its lost answer — was never in force (${keptX.b.keptAfterAnswer} kept): not judged`);
+  else ok(asRelease(keptX.a) && same(keptX.b.map, [1818, 1232]) && keptX.b.fits === 1, `RED CONTROL (B-a52d, r5011 (a)): a press KEPT past its lost answer shapes another client's later relaunch — the window is fitted for it (${keptX.b.map}, one fit) where a second client maps its pane`, keptX);
+  const DFnoTake = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return age >= 0 && age <= RELAUNCH_PRESS_MS;', '  return false;', 'B-a52d control: a press nothing takes'), 'a52d-no-take')).href);
+  const redNoTake = await pressScene(DFnoTake, ['broadcast', 'connect', 'answer']);
+  const PRESS_W = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 1000 }], PRESS_LATE = [{ fromId: 'old', nextId: 'new', at: 0 }, { nextId: 'new', now: 60001 }];
+  // the WITNESS (law 1): the scene asked the planted module, and the plant answers otherwise than the module does, on the scene's own input
+  if (!(redNoTake.asked > 0 && DFnoTake.relaunchPressTakes(...PRESS_W) === false && DF.relaunchPressTakes(...PRESS_W) === true)) skip(`RED CONTROL (B-a52d): its plant — a press nothing takes — was never read (${redNoTake.asked} asks): not judged`);
+  else ok(same(redNoTake.map, [1634, 1232]) && redNoTake.fits === 0, `RED CONTROL (B-a52d): a press nothing takes plans nothing at either event — the broadcast's follow maps the stale pane (${redNoTake.map}), no fit at all`, redNoTake);
+  const DFnoBound = await import(pathToFileURL(MUTXC.write('src/lib/desktop-app-scale.js', anchored(dfsrc, '  return age >= 0 && age <= RELAUNCH_PRESS_MS;', '  return true;', 'B-a52d control: a press with no bound'), 'a52d-no-bound')).href);
+  const redNoBound = await pressScene(DFnoBound, ['broadcast', 'connect'], { pressAt: 0, now: 60001 });
+  if (!(redNoBound.asked > 0 && DFnoBound.relaunchPressTakes(...PRESS_LATE) === true && DF.relaunchPressTakes(...PRESS_LATE) === false)) skip(`RED CONTROL (B-a52d): its plant — a press with no bound — was never read (${redNoBound.asked} asks): not judged`);
+  else ok(same(redNoBound.map, [1818, 1232]) && redNoBound.fits === 1, `RED CONTROL (B-a52d): a press with no bound plans a successor met ${60001} ms later (${redNoBound.map}, one fit) — the 60 s bound is what ends it`, redNoBound);
   // r2217 (b) THE MARK GOES AT THE FIRST MAIN WHATEVER THE MODE, and (c) A WATCHING PANE'S HELLO TAKES THE PANE (as at the release);
   // the plan is READ either way (one connect's: never left for a later one)
   const modes = async (Vmod) => {
@@ -2476,5 +2563,5 @@ console.log('§B-92aa (the coordinator\'s r1635; int361\'s row 104: «the ORDER 
 
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
-console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
+console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} SKIPPED` : ''})` : skipped ? `\n${pass} passed, ${skipped} SKIPPED (named above) — not ALL PASS` : `\nALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);
