@@ -688,7 +688,7 @@ class UsageHistory {
       if (!this._emptiedHeldSaid) { this._emptiedHeldSaid = true; console.warn('[usage-history] re-bake not run: the list of emptied conversations (usage-history/.attrib-emptied.json) could not be read or does not parse — nothing re-baked; it is read again by itself and the re-bake runs once it reads. Restore the file from a copy if its bytes are torn: moved away, it would read as «nothing emptied» and those conversations\' spend would stay on the refuted account'); }
       return;
     }
-    this._emptiedHeldUntil = 0; this._emptiedTries = 0;
+    this._emptiedHeldUntil = 0; this._emptiedTries = 0; this._emptiedHeldSaid = false;   // a later hold in the same run is said again
     const attrib = this._attribMap();
     const meta = this._metaMap();
     let shards = [];

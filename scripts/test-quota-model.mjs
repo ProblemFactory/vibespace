@@ -355,7 +355,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/reading-repair.js', 'its generic _writeAtomic serves the ANCHOR and ATTRIBUTION stores; its three usage-cache writes go through _writeCacheAtomic → writeCacheObject({replace:true})'],
       ['src/quota-model-migrate.js', 'the backfill migration: its usage-cache writes go through writeCacheObject({replace:true}); its own appendFileSync is the archive-never-destroy ndjson'],
       ['src/weekly-lanes-unfold.js', 'the weekly-lanes repair (inc-mubu23bd-5vxi): its usage-cache writes go through captureRateLimitEvent → the write path (the plan week, the model cap and the fold rule all apply); its own writeFileSync calls are the archive-never-destroy copy under data/archive/'],
-      ['src/server/cli-env.js', 'writes __models__.json — the served-model list, not a reading; every cache scanner excludes it by name (isCacheFileName)'],
+      // (B-f276 s1126 follow, lane lg-providers: src/server/cli-env.js left this list — __models__.json is the store writer's now, the module holds no write primitive)
       ['src/usage-routes.js', "writeUsageCache() hands data/usage-cache.json to the store writer (B-360d part 3 U2) — the machine login's SECOND snapshot and the boot seed of _rateLimitCache, a different file outside the directory (the r6 repair essay names it)"],
       ['src/server/usage-pool-engine.js', "writes data/archive/readings-window-mismatch.ndjson — the window guard's ARCHIVE of readings it refused, a different store; its own cache writes go through the write path"],
       // The rest are candidates because the rule is FILE-LEVEL: they mention this
