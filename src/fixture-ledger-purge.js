@@ -41,18 +41,28 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { renameSynced } = require('./fd-close.js');   // B-574d «usage-ledger-repairs» (lane nl-migrations): the one synced replace
 const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 const { isFixtureSid, isFixtureCwd, isFixtureProjectDir } = require('./fixture-guard.js');
 
+/** B-574d «usage-ledger-repairs» (lane nl-migrations, 主开发 r4881): a repair's rewritten file takes its name only after ONE sync of its
+ *  temp (src/fd-close.js renameSynced: written whole, synced, its close judged, renamed) — synchronous as before. A failed write, sync or
+ *  close THROWS (the temp removed, the old file standing) into the repair's own road: its migration is not recorded and runs again at
+ *  the next start (every repair here archives before it rewrites and finds its rows already moved when run again). Only a file system
+ *  with no sync lets the bytes take their name, said once (the file's name and the code, no path). */
 function _writeAtomic(fp, text) {
   fs.mkdirSync(path.dirname(fp), { recursive: true });
-  fs.writeFileSync(fp + '.tmp', text);
-  fs.renameSync(fp + '.tmp', fp);
+  renameSynced(fp + '.tmp', fp, text, { where: `[migrate] ${path.basename(fp)}`, say: (l) => console.warn(l) });
 }
 function _readJson(fp) { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { MR.absentOr(e, fp); return null; } }
 /** Append-only, DATED shard: two rotations in the same millisecond must not
  *  overwrite each other (the slot-transitions r2 lesson). */
-function _appendArchive(archiveDir, name, rows) {
+// B-574d (主开发 r4936 (1)): what an EARLIER run of the same migration archived (its rows' store, file and whole entry) — a rerun after a failed
+// landing never archives a row twice (a restore from the archive would double it); never grown within a run, as its sibling's
+// (src/ledger-slot-backfill.js): two identical rows the ledger genuinely holds are two rows leaving it, both archived
+const _archKey = (r) => `${r.store}\n${r.file || ''}\n${JSON.stringify(r.entry)}`;
+function _appendArchive(archiveDir, name, rows, seen = null) {
+  if (seen) rows = rows.filter((r) => !seen.has(_archKey(r)));
   if (!rows.length) return;
   fs.mkdirSync(archiveDir, { recursive: true });
   fs.appendFileSync(path.join(archiveDir, name), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
@@ -94,6 +104,22 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
 
   // ── ① the ledger shards ────────────────────────────────────────────────
   const removedTs = [];      // instants whose cost must no longer be claimed
+  // B-574d «usage-ledger-repairs» (the slice's own read, F3): A RUN THAT FAILED PARTWAY IS RESUMED — the rows an earlier run of THIS
+  // migration already removed (its archive names them, appended before each shard's rewrite) still void their anchors at ④: a shard that
+  // landed before the failure is clean at the rerun, yet the cost its rows put into an anchor's costSince is still owed. ② and ③ key on
+  // the fixture predicates and need nothing of it; and what it archived is never archived again (`seen`)
+  const seen = new Set();
+  try {
+    for (const n of fs.readdirSync(archiveDir)) {
+      if (!/^fixture-ledger-rows-\d{4}-\d{2}-\d{2}\.ndjson$/.test(n)) continue;
+      for (const l of fs.readFileSync(path.join(archiveDir, n), 'utf-8').split('\n')) {
+        let a = null; try { a = l ? JSON.parse(l) : null; } catch { continue; }
+        if (!a || a.migration !== id) continue;
+        seen.add(_archKey(a));
+        if (a.store === 'usage-history' && a.entry && typeof a.entry.ts === 'number') removedTs.push(a.entry.ts);
+      }
+    }
+  } catch (e) { MR.absentOr(e, 'archive'); }
   const sids = new Set();
   let shardNames = [];
   try { shardNames = fs.readdirSync(historyDir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)).sort(); } catch (e) { MR.absentOr(e, 'usage-history'); }
@@ -125,7 +151,7 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
         ? `session id is in the synthetic fixture family — a hand-written transcript, no API request ever happened (sid ${r.sid})`
         : `recorded in a test fixture's throwaway cwd (${r.cwd}); the usage walk refuses that convention from this release, so the ledger no longer counts this class`,
       entry: r,
-    })));
+    })), seen);
     _writeAtomic(fp, keep.length ? keep.join('\n') + '\n' : '');
   }
   // The synthetic ids are the ones a reader needs by name; the rest are real
@@ -155,7 +181,7 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
           migration: id, at: now, store: 'usage-history/_cursors.json',
           reason: 'byte cursors for transcripts under a test fixture\'s throwaway cwd — the directories are gone and the walk refuses the convention',
           entry: dropped,
-        }]);
+        }], seen);
         _writeAtomic(fp, JSON.stringify(cur));
       }
     }
@@ -176,7 +202,7 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
       if (drop.length && !dryRun) {
         _appendArchive(archiveDir, `fixture-ledger-rows-${_day(now)}.ndjson`, drop.map((r) => ({
           migration: id, at: now, store: 'attribution', reason: `billing attribution for a synthetic conversation (sid ${r.sid})`, entry: r,
-        })));
+        })), seen);
         _writeAtomic(fp, keep.length ? keep.join('\n') + '\n' : '');
       }
     }
@@ -223,7 +249,7 @@ function purgeFixtureLedger({ dataDir, id, now = Date.now(), dryRun = false }) {
         migration: id, at: now, store: 'usage-anchors/rates.json',
         reason: 'learned from anchor pairs whose costSince counted test-fixture rows — re-learned from the cleaned pairs',
         entry: cur,
-      }]);
+      }], seen);
       try { fs.unlinkSync(rates); report.ratesReset = true; } catch { }
     } else if (cur && report.anchorsVoided && dryRun) report.ratesReset = true;
   }

@@ -1848,6 +1848,10 @@ function apiWitnessEligibility(session, slot, key) {
 // repairSidecarsByApiPhase). Idempotent, archive-never-destroy, one journal
 // line with the counts, and the established-window memo is dropped so the
 // guard reads the repaired sidecars at once.
+// B-574d «usage-ledger-repairs» (主开发 r4881 (2)): the identity repair's failure is said ONCE a failing stretch (the hourly pass would say
+// it every hour); the pass that succeeds again says so once. The guard reads what is on disk after a failure as after a success (the
+// finally's warm drops the memo): a file the failed pass did not land is never taken as repaired
+let _identityRepairFailing = false;
 function repairIdentityAnchors(why = 'boot', { since } = {}) {
   let list = [];   // B-6a92 r7: in scope for the finally's warm (read below, on the decision road)
   try {
@@ -1866,8 +1870,15 @@ function repairIdentityAnchors(why = 'boot', { since } = {}) {
     if (why !== 'hourly' || changed) console.log(`[usage] identity repair (${why}): ${JSON.stringify(c)} in ${rep.ms} ms`);
     if (changed) global.__vsEvent?.('usage-identity-repaired', `${why}:${c.restamped}/${c.replaced}/${c.readmitted}`);
     rep.changed = changed;
+    if (_identityRepairFailing) { _identityRepairFailing = false; console.log(`[usage] identity repair (${why}): it succeeds again`); }
     return rep;
-  } catch (e) { console.warn('[usage] identity repair failed:', e.message); return { error: e.message, counts: null, identities: [] }; }
+  } catch (e) {
+    if (!_identityRepairFailing) console.warn('[usage] identity repair failed:', e.message, '— said once until a pass succeeds');
+    _identityRepairFailing = true;
+    // (F6) what the failed pass DID land rides its error (its rows, its counts): handed on, so a verdict it wrote is applied
+    const part = e && e.report && typeof e.report === 'object' ? e.report : null, pc = (part && part.counts) || {};
+    return { error: e.message, counts: part ? pc : null, identities: part ? (part.identities || []) : [], changed: !!(pc.restamped || pc.replaced || pc.emptied || pc.stripped || pc.readmitted || pc.stamped) };
+  }
   // B-6a92 r6/r7: the held facts in memory, off the poll — after the repair's own rewrites, and even when the repair failed
   finally { try { warmHeldWindows(list); } catch { } }
 }

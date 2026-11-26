@@ -34,6 +34,7 @@
 // restart-safe (each store is rewritten atomically, tmp+rename).
 const fs = require('fs');
 const path = require('path');
+const { renameSynced } = require('./fd-close.js');   // B-574d «usage-ledger-repairs» (lane nl-migrations): the one synced replace
 const { accountLoginState } = require('./login-state.js');
 const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthUsage — the accounts a reading can land on
 // MG1 (r2929): inside a migration's run a failed read (anything but «not there») or bytes that do not parse THROW — not run, the
@@ -44,7 +45,17 @@ function _readJson(f) { try { return JSON.parse(fs.readFileSync(f, 'utf-8')); } 
 // a READING (a file of data/usage-cache): through the cache module's reader (lane lg-store-writes, B-0248 U6.3 — the one place
 // that will consult a write still on its way first); null on any failure, as _readJson
 function _readCacheJson(f) { try { return _usageWrite.readCacheJson(f); } catch (e) { MR.absentOr(e, f); return null; } }
-function _writeAtomic(f, text) { fs.writeFileSync(f + '.tmp', text); fs.renameSync(f + '.tmp', f); }
+/** B-574d «usage-ledger-repairs» (lane nl-migrations, 主开发 r4881): a repair's rewritten file takes its name only after ONE sync of its
+ *  temp (src/fd-close.js renameSynced: written whole, synced, its close judged, renamed) — synchronous as before. A failed write, sync or
+ *  close THROWS (the temp removed, the old file standing) into the repair's own road: its migration is not recorded and runs again at
+ *  the next start (each repair archives what it moves — the sidecar repair in a finally, so a later write's throw never loses it — and
+ *  finds its rows already moved when run again). Only a file system
+ *  with no sync lets the bytes take their name, said once (the file's name and the code, no path).
+ *  THE HOURLY ROAD (主开发 r4881 (2)): repairSidecarsByApiPhase also runs from the identity repair (boot, hourly, a person's press) —
+ *  synced there too: it writes only on a disagreement and its caller reads the files right after (a writer's later landing would
+ *  hand the guard the old bytes); one hourly pass pays at most two syncs per account on the decision list (its witness out of
+ *  phase; its cache when the cache door refused). */
+function _writeAtomic(f, text) { renameSynced(f + '.tmp', f, text, { where: `[usage-repair] ${path.basename(f)}`, say: (l) => console.warn(l) }); }
 // THE ONE WRITE PATH, in its REPLACE mode (src/usage-cache-write.js). This
 // migration is the single writer allowed to replace a cache's limits instead of
 // merging into them: its whole job is to remove a bucket that is provably not
@@ -1354,6 +1365,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   const archived = [];
   // 2.369.422 hotfix (主开发 r5407 / r5410): NO ROW IS SKIPPED BECAUSE ITS PHASE IS ANOTHER ACCOUNT'S INSTANT — the vendor states a
   // weekly reset on the hour, so two honest accounts share one; the repair seeds, restamps and confirms as it did at 2.369.418
+  try {
   for (const key of ids) {
     const apiwinPath = path.join(cacheDir, apiWindowSidecarName(key));
     const apiwin = _readCacheJson(apiwinPath);
@@ -1472,7 +1484,8 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     if (row.readmitted) archived.push({ migration: id, at: now, store: 'usage-cache', key, action: 'readmitted', count: row.readmitted, newest: cands[cands.length - 1].at,
       reason: `${row.readmitted} slot-verified rate-limit reading(s) of the last ${Math.round(readmitMs / 3600e3)} h, archived by the guard against a sidecar that was not this account's, written back — their window is ${nameOf(key)}'s API-derived window ${windowFingerprint(apiWindow)}` });
   }
-  _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived);
+  } catch (e) { if (e && typeof e === 'object') e.report = report; throw e; }   // B-574d (F6): the pass's report so far rides the error (what landed)
+  finally { _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived); }   // B-574d (F5): what was moved is archived even when a later write throws
   report.ms = Date.now() - t0;
   return report;
 }

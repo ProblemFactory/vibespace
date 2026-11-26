@@ -40,11 +40,17 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { renameSynced } = require('./fd-close.js');   // B-574d «usage-ledger-repairs» (lane nl-migrations): the one synced replace
 const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 
 const REPLAY_WINDOW_MS = 2000; // = the walkers' FORK REPLAY window
 
-function _writeAtomic(fp, text) { fs.writeFileSync(fp + '.tmp', text); fs.renameSync(fp + '.tmp', fp); }
+/** B-574d «usage-ledger-repairs» (lane nl-migrations, 主开发 r4881): a repair's rewritten file takes its name only after ONE sync of its
+ *  temp (src/fd-close.js renameSynced: written whole, synced, its close judged, renamed) — synchronous as before. A failed write, sync or
+ *  close THROWS (the temp removed, the old file standing) into the repair's own road: its migration is not recorded and runs again at
+ *  the next start (every repair here archives before it rewrites and finds its rows already moved when run again). Only a file system
+ *  with no sync lets the bytes take their name, said once (the file's name and the code, no path). */
+function _writeAtomic(fp, text) { renameSynced(fp + '.tmp', fp, text, { where: `[migrate] ${path.basename(fp)}`, say: (l) => console.warn(l) }); }
 function _day(ms) { return new Date(ms).toISOString().slice(0, 10); }
 
 // The rollout's first line (session_meta) → its fork instant, 0 = not a fork,

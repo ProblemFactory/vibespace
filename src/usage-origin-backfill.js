@@ -43,6 +43,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { renameSynced } = require('./fd-close.js');   // B-574d «usage-ledger-repairs» (lane nl-migrations): the one synced replace
 const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
 // THE SAME project-cwd ladder the walk uses (src/usage-walker.js): this
@@ -58,10 +59,14 @@ const CWD_RE = /"cwd":"([^"]{0,4096})"/; // no alternation: this runs over untru
 const CHUNK = 8 * 1024 * 1024;
 
 const _day = (now) => new Date(now).toISOString().slice(0, 10);
+/** B-574d «usage-ledger-repairs» (lane nl-migrations, 主开发 r4881): a repair's rewritten file takes its name only after ONE sync of its
+ *  temp (src/fd-close.js renameSynced: written whole, synced, its close judged, renamed) — synchronous as before. A failed write, sync or
+ *  close THROWS (the temp removed, the old file standing) into the repair's own road: its migration is not recorded and runs again at
+ *  the next start (every repair here archives before it rewrites and finds its rows already moved when run again). Only a file system
+ *  with no sync lets the bytes take their name, said once (the file's name and the code, no path). */
 function _writeAtomic(fp, text) {
   fs.mkdirSync(path.dirname(fp), { recursive: true });
-  fs.writeFileSync(fp + '.tmp', text);
-  fs.renameSync(fp + '.tmp', fp);
+  renameSynced(fp + '.tmp', fp, text, { where: `[migrate] ${path.basename(fp)}`, say: (l) => console.warn(l) });
 }
 
 /** Feed every COMPLETE line of a file to onLine as a Buffer view (no copy, no

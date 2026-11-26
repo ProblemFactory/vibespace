@@ -83,6 +83,7 @@
 const fs = require('fs');
 const { eachLineSync } = require('./ndjson-lines.js'); // row B-360d: the OTel stash read by its rows, never one string
 const path = require('path');
+const { renameSynced } = require('./fd-close.js');   // B-574d «usage-ledger-repairs» (lane nl-migrations): the one synced replace
 const MR = require('./migration-reads.js'); // MG1 (r2929): a failed read inside a migration's run = not run (every other caller keeps this module's answer)
 const { decideLagShadow } = require('./reading-lag.js');
 const { deathMarkers, isForeign, _sessionKeyMap, sessionKeysFor } = require('./reading-repair.js');
@@ -90,10 +91,14 @@ const { deathMarkers, isForeign, _sessionKeyMap, sessionKeysFor } = require('./r
 const PRE_FIRST_GRACE_MS = 10 * 60 * 1000; // usage-history `_acctAt`: spawn-ordering skew before the first entry
 
 function _readJson(fp) { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { MR.absentOr(e, fp); return null; } }
+/** B-574d «usage-ledger-repairs» (lane nl-migrations, 主开发 r4881): a repair's rewritten file takes its name only after ONE sync of its
+ *  temp (src/fd-close.js renameSynced: written whole, synced, its close judged, renamed) — synchronous as before. A failed write, sync or
+ *  close THROWS (the temp removed, the old file standing) into the repair's own road: its migration is not recorded and runs again at
+ *  the next start (every repair here archives before it rewrites and finds its rows already moved when run again). Only a file system
+ *  with no sync lets the bytes take their name, said once (the file's name and the code, no path). */
 function _writeAtomic(fp, text) {
   fs.mkdirSync(path.dirname(fp), { recursive: true });
-  fs.writeFileSync(fp + '.tmp', text);
-  fs.renameSync(fp + '.tmp', fp);
+  renameSynced(fp + '.tmp', fp, text, { where: `[migrate] ${path.basename(fp)}`, say: (l) => console.warn(l) });
 }
 /** Append-only archive; THROWS on failure — an unarchived row must never leave
  *  its store (the caller rewrites only after this returned). */

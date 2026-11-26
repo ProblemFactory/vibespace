@@ -1799,7 +1799,7 @@ app.post('/api/usage/repair-identity', async (req, res) => {
   // the keeper's queue — never the timer's unbounded settle
   let settled = null; try { settled = await accounts.signinFactsNow(null); } catch { }
   const rep = repairIdentityAnchors('manual', { since: settled && settled.since });
-  if (rep && rep.error) return res.status(500).json({ error: 'identity repair failed: ' + rep.error, code: 'repair-failed' });
+  if (rep && rep.error) { if (rep.changed) { try { reloadRateLimitCache(rep); } catch { } } return res.status(500).json({ error: 'identity repair failed: ' + rep.error, code: 'repair-failed' }); }   // B-574d (F6): what landed is applied first
   try { reloadRateLimitCache(rep); } catch { }   // r2430: the repair's verdict for the machine login's reading outranks memory
   try { for (const k of Object.keys(_onDemandUsageAt)) delete _onDemandUsageAt[k]; } catch { }
   // the folders this press could NOT compare (not read inside the person's bound, or unreadable) are NAMED in its reply (round

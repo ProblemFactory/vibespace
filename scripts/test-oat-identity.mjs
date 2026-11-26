@@ -1676,6 +1676,93 @@ console.log('§7 the REAL producer (usage-pool-engine recordRateLimitEvent) — 
       ok(early.v === 'confirmed' && early.st === 'confirmed', '…and the same stamp written BEFORE the row\'s first token is still its identity (no generation of the token existed) — confirmed', early);
     } finally { Date.now = realNow; try { done(); } catch { } }
   });
+  // ── §9f2 B-574d «usage-ledger-repairs» (主开发 r4881 (2)): THE HOURLY ROAD'S SYNCED WRITE ──
+  // the sidecar repair's witness (<key>.apiwin) goes through src/fd-close.js renameSynced on the hourly road too. (a) AN AGREEING SET WRITES
+  // NOTHING: a pass over what the last one wrote asks no write, no sync, no rename, leaves no temp under the data folder; (b) A WRITE THAT
+  // FAILS ON THAT ROAD (the witness's sync refused, EIO) is said ONCE a failing stretch (two failing passes: one line) and the file is not
+  // taken as repaired — the witness on disk is the old one (none) and the guard reads what is on disk (the memo dropped, the window as the
+  // disk has it); the pass that succeeds again says so once and lands. REDs (anchored copies): the witness written on every pass (a); the
+  // flag cut — said at every pass (b); the guard's memo kept over a failed pass (b)
+  await guard9(async () => {
+    const { anchored } = await import('./scratch.mjs');
+    const ENG_SRC = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8'), RR_SRC = fs.readFileSync(path.join(REPO, 'src/reading-repair.js'), 'utf8');
+    const RRpath = require.resolve(path.join(REPO, 'src/reading-repair.js')); require(RRpath);
+    const mkWith = (w, mod) => mod.create({ app: { get() { }, post() { }, put() { }, delete() { }, patch() { }, use() { }, locals: {} }, rootDir: path.dirname(path.dirname(w.cd)), USAGE_CACHE_DIR: w.cd, activeSessions: new Map(),
+      wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice() { }, serverSetting: () => undefined, getAccounts: () => w.a, getHosts: () => null,
+      getUsageHistory: () => null, recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null, getUserTodos: () => w.td });
+    // one pass of the hourly repair, its fs counted under the data folder; `code`: the answer of the witness temp's sync
+    const pass = (eng, w, A, code) => {
+      const dd = path.dirname(w.cd), tail = path.sep + readingLag.apiWindowSidecarName(A) + '.tmp', o = fs.openSync, sy = fs.fsyncSync, rn = fs.renameSync, wf = fs.writeFileSync, cl = fs.closeSync, fds = new Set(), warnPrev = console.warn;
+      const under = (p) => String(p).startsWith(dd + path.sep);
+      const cnt = { opens: 0, syncs: 0, renames: 0, writes: 0 }, warned = [];
+      fs.openSync = function (p, fl, ...a) { const fd = o.call(fs, p, fl, ...a); if (under(p) && fl !== undefined && fl !== 'r' && fl !== 0) cnt.opens++; if (String(p).endsWith(tail)) fds.add(fd); return fd; };
+      fs.fsyncSync = function (fd) { if (fds.has(fd)) { cnt.syncs++; if (code) throw Object.assign(new Error(`${code}: a placed answer of the sync`), { code }); } return sy.call(fs, fd); };
+      fs.renameSync = function (a1, b1) { if (under(b1)) cnt.renames++; return rn.call(fs, a1, b1); };
+      fs.writeFileSync = function (p, ...a) { if (typeof p === 'string' && under(p)) cnt.writes++; return wf.call(fs, p, ...a); };
+      fs.closeSync = function (fd) { fds.delete(fd); return cl.call(fs, fd); };   // a number is forgotten at its close: a later file never inherits the refusal
+      console.warn = (...a) => { warned.push(a.map(String).join(' ')); };
+      let rep = null;
+      try { rep = eng.repairIdentityAnchors('hourly'); } finally { fs.openSync = o; fs.fsyncSync = sy; fs.renameSync = rn; fs.writeFileSync = wf; fs.closeSync = cl; console.warn = warnPrev; }
+      const temps = fs.readdirSync(w.cd).filter((n) => n.endsWith('.tmp')).length;
+      return { rep, cnt, warned, temps, witness: w.sidecar(A, 'apiwin'), failSaid: warned.filter((l) => l.includes('identity repair failed')).length };
+    };
+    const fact = (x) => (x ? JSON.stringify({ sevenDay: x.sevenDay ?? null, producer: x.producer ?? null, seededBy: x.seededBy ?? null }) : 'null');   // the window as the guard judges it
+    const scene = (mod, tag) => {
+      const w = world(), am9 = w.a, done = quiet(); void tag;
+      try {
+        const A = am9.createSubscription({ name: 'Work' }).id;
+        w.writeCache(A, W_A); w.stamp(A, { sevenDay: W_A, producer: 'login', verifiedAt: Date.now() - 3600e3, verifiedBy: 'api-phase' });
+        seedAnchors(w, A, W_A);
+        const eng = mkWith(w, mod);
+        const memo0 = fact(eng.establishedWindows()[A]);   // the guard's memo, warmed before the passes
+        const f1 = pass(eng, w, A, 'EIO'), seen1 = fact(eng.establishedWindows()[A]), disk1 = fact(w.sidecar(A)), f2 = pass(eng, w, A, 'EIO');
+        const s3 = pass(eng, w, A, null), q4 = pass(eng, w, A, null);
+        return { f1, f2, s3, q4, memo0, seen1, disk1 };
+      } finally { done(); }
+    };
+    const R = scene(engMod, 'real');
+    ok(R.f1.rep && R.f1.rep.error && R.f1.witness === null && R.f1.temps === 0 && R.f1.failSaid === 1 && R.f2.rep.error && R.f2.failSaid === 0,
+      'B-574d (b) the hourly road: the witness\'s sync REFUSED (EIO) — the pass fails by its caller\'s road, NO witness on disk (the old state), no temp; said ONCE a failing stretch (the second failing pass says nothing)', { f1: [R.f1.rep && R.f1.rep.error, R.f1.failSaid, R.f1.witness, R.f1.temps], f2: R.f2.failSaid });
+    ok(R.seen1 === R.disk1 && R.disk1 !== R.memo0, 'B-574d (b) …and the guard reads what is ON DISK after the failed pass (its memo dropped: the window as the disk has it, never as the failed pass meant it)', { seen: R.seen1, disk: R.disk1, memo0: R.memo0 });
+    ok(R.s3.rep && !R.s3.rep.error && R.s3.witness && R.s3.witness.source === 'repair' && R.s3.cnt.syncs === 1 && R.s3.warned.length === 0,
+      'B-574d (b) the pass that succeeds again lands the witness (synced before its name: one sync) — the stretch over', { s3: [R.s3.cnt, R.s3.witness && R.s3.witness.source] });
+    ok(R.q4.rep && !R.q4.rep.error && R.q4.cnt.opens === 0 && R.q4.cnt.syncs === 0 && R.q4.cnt.renames === 0 && R.q4.cnt.writes === 0 && R.q4.temps === 0,
+      'B-574d (a) AN AGREEING SET WRITES NOTHING: the hourly pass over what the last one wrote opens nothing for writing, syncs nothing, renames nothing, leaves no temp', R.q4.cnt);
+    // the REDs
+    const FLAG = "    if (!_identityRepairFailing) console.warn('[usage] identity repair failed:', e.message, '— said once until a pass succeeds');\n";
+    const RF = scene(compileAs('src/server/usage-pool-engine.js', anchored(ENG_SRC, FLAG, "    console.warn('[usage] identity repair failed:', e.message, '— said once until a pass succeeds');   // MUTANT: no stretch\n", 'the failing stretch')), 'flag-cut');
+    ok(RF.f2.failSaid === 1, 'RED (anchored copy: the stretch\'s flag cut): the second failing pass says it again — (b)\'s «once a failing stretch» goes red', { f1: RF.f1.failSaid, f2: RF.f2.failSaid });
+    const WARM = '  try { _ownWin = null; _ownWinAt = 0; establishedWindows(); } catch { }';
+    const RM = scene(compileAs('src/server/usage-pool-engine.js', anchored(ENG_SRC, WARM, '  try { establishedWindows(); } catch { }', 'the memo dropped after a pass')), 'memo-kept');
+    ok(RM.seen1 !== RM.disk1, 'RED (anchored copy: the guard\'s memo kept over the failed pass): the guard serves what the pass meant, not the disk — (b)\'s read goes red', { seen: RM.seen1, disk: RM.disk1 });
+    const AGREE = '    if (!apiwin || !(Number(apiwin.sevenDay) > 0) || weeklyNear(apiwin.sevenDay, api) === false) {';
+    const rrMut = compileAs('src/reading-repair.js', anchored(RR_SRC, AGREE, '    if (true) {', 'the witness written only on a disagreement'));
+    const entry = require.cache[RRpath], realRR = entry.exports;
+    let RA = null; try { entry.exports = rrMut; RA = scene(engMod, 'always-writes'); } finally { entry.exports = realRR; }
+    ok(RA.q4.cnt.syncs > 0 || RA.q4.cnt.renames > 0, 'RED (anchored copy: the witness written on every pass): the agreeing pass writes and syncs — (a) goes red', RA.q4.cnt);
+    // (b2) the slice's own read (F5, F6): a pass that RESTAMPS a window and THEN has its witness write refused — what it moved is archived (the
+    // archive in a finally) and its rows ride the failure, handed on as changed (a verdict it wrote is applied). RED (anchored copy): the
+    // archive written only when the loop finished
+    const rsScene = () => {
+      const w = world(), am9 = w.a, done = quiet();
+      try {
+        const C = am9.createSubscription({ name: 'Moved' }).id, W_C2 = slot(2, 20);
+        w.writeCache(C, W_C); w.stamp(C, { sevenDay: W_C, producer: 'login', verifiedAt: Date.now() - 3600e3, verifiedBy: 'api-phase' });
+        seedAnchors(w, C, W_C2);   // its API evidence moved: the repair restamps it
+        const eng = mkWith(w, engMod);
+        const f = pass(eng, w, C, 'EIO');
+        let arch = []; try { arch = fs.readFileSync(path.join(path.dirname(w.cd), 'archive', 'readings-foreign-usage-cache.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { }
+        return { err: !!(f.rep && f.rep.error), changed: !!(f.rep && f.rep.changed), rowRestamped: ((f.rep && f.rep.identities) || []).some((x) => x.key === C && x.sidecar === 'restamped'), stamped: (w.sidecar(C) || {}).sevenDay === W_C2, archived: arch.some((x) => x.key === C && x.action === 'restamped'), witness: f.witness };
+      } finally { done(); }
+    };
+    const RS = rsScene();
+    ok(RS.err && RS.stamped && RS.archived && RS.changed && RS.rowRestamped && RS.witness === null,
+      'B-574d (b2) a pass that RESTAMPED a window before its witness write was refused: the restamp is ARCHIVED (the old window kept), its row rides the failure and the pass is handed on as changed (the verdict applied), no witness on disk', RS);
+    const FIN = "  finally { _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived); }   // B-574d (F5): what was moved is archived even when a later write throws\n";
+    const rrFin = compileAs('src/reading-repair.js', anchored(RR_SRC, FIN, "  finally { }\n  _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived);   // MUTANT: archived only when the loop finished\n", 'the archive in a finally'));
+    let RSM = null; try { entry.exports = rrFin; RSM = rsScene(); } finally { entry.exports = realRR; }
+    ok(RSM.stamped && !RSM.archived, 'RED (anchored copy: the archive only when the loop finished): the restamped window\'s old value is lost — (b2) goes red', RSM);
+  });
   // ── §9g THE LOW ROADS (verify r3 L-R1 / L-R2 / L-R3) ──
   await guard9(async () => {
     const w = world(), am9 = w.a, done = quiet();

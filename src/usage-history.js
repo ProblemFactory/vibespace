@@ -16,6 +16,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { renameSynced } = require('./fd-close.js');   // B-574d «usage-ledger-repairs» (lane nl-migrations): the one synced replace
 const os = require('os');
 const crypto = require('crypto');
 const { globalUsageKeyOf } = require('./backend-caps.js'); // PURE: the machine login's ledger key per harness
@@ -603,7 +604,11 @@ class UsageHistory {
   pricesTorn() { const t = this._pricingHold && this._pricingHold.torn(); return t ? { copy: t.copy, since: t.since } : null; }
   /** what the usage answer carries about the prices: { held, torn, lifted } — the page says them in place */
   pricesFacts() { const held = this.pricesHeld(), torn = this.pricesTorn(); return held || torn || this._pricesLift ? { held: held || null, torn: torn || null, lifted: !held && this._pricesLift ? { since: this._pricesLift.since, at: this._pricesLift.at } : null } : null; }
-  _writeAtomic(f, data) { const t = f + '.tmp'; fs.writeFileSync(t, data); fs.renameSync(t, f); }
+  /** B-574d «usage-ledger-repairs» (lane nl-migrations): the prices file and the rebake's shards take their name only after ONE sync of
+   *  the temp (src/fd-close.js renameSynced) — synchronous as before; a failed write, sync or close THROWS (the temp removed, the old file
+   *  standing). The defaults at a first start and an old flat file's migration still swallow it (named, not cured: written again at the
+   *  next start); the rebake's throw skips its marker (it runs again); setPricing's is the person's refusal. */
+  _writeAtomic(f, data) { renameSynced(f + '.tmp', f, data, { where: `[usage-history] ${path.basename(f)}`, say: (l) => console.warn(l) }); }
   _shardFor(ts) { const d = new Date(ts); return path.join(this.dir, `events-${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}.ndjson`); }
 
   // Build claudeSessionId → {acct, mode, host, backend, name} from session-meta.
@@ -670,13 +675,14 @@ class UsageHistory {
   _maybeRebakeAttribution() {
     const marker = path.join(this.dir, '.attrib-rebake-v1');
     try { if (fs.existsSync(marker)) return; } catch {}
+    if (this._rebakeRefused) return;   // B-574d (the slice's own read, F7): a rebake whose write failed waits for the next start — said once
     if (this._accountsListHeld()) return;   // r3060 Q1: never re-baked against an unread list (its marker NOT written: it runs at a later start)
     const attrib = this._attribMap();
     const emptied = this._emptiedAttribSids();
     const meta = this._metaMap();
     let shards = [];
     try { shards = fs.readdirSync(this.dir).filter((f) => /^events-\d{4}-\d{2}\.ndjson$/.test(f)); } catch {}
-    let changed = 0;
+    let changed = 0, wrote = 0;
     for (const fn of shards) {
       const fp = path.join(this.dir, fn);
       let data = ''; try { data = fs.readFileSync(fp, 'utf-8'); } catch { continue; }
@@ -705,7 +711,10 @@ class UsageHistory {
         }
         out.push(line);
       }
-      if (dirty) this._writeAtomic(fp, out.join('\n') + '\n');
+      if (dirty) {
+        try { this._writeAtomic(fp, out.join('\n') + '\n'); wrote++; }
+        catch (e) { this._rebakeRefused = true; if (wrote) this._rebuildInWorker('a re-attribution rewrote shards before a write failed'); throw e; }   // (F7) memory follows the shards that DID land; the marker stays unwritten
+      }
     }
     if (changed) { this._rebuildInWorker('a re-attribution rewrote shards'); } // sizes may match — force a clean reload (the index re-checks its marks)
     try { fs.writeFileSync(marker, JSON.stringify({ at: Date.now(), changed })); } catch {}
@@ -2710,16 +2719,23 @@ class UsageHistory {
     if (bad.length) throw Object.assign(new Error(`prices not saved — ${bad.slice(0, 3).join('; ')}${bad.length > 3 ? `; and ${bad.length - 3} more` : ''}`), { code: 'rate-invalid', fields: bad });
     const cur = this._pricingFile || this._pricing; // the table on disk — a catalog row is never written to pricing.json
     const next = { version: 2, tiers: { ...cur.tiers, ...CP.personTiers(patch.tiers, this._pricing, cur, patch.sources) }, accounts: { ...cur.accounts } };
-    this._lastCatalogSkips = CP.catalogSkips(patch.tiers, patch.sources); // said to the importer (persistence's summary)
+    const skips = CP.catalogSkips(patch.tiers, patch.sources); // said to the importer (persistence's summary)
     if (patch.accounts) {
       for (const [id, cfg] of Object.entries(patch.accounts)) {
         if (cfg == null) delete next.accounts[id];       // null clears an override
         else next.accounts[id] = cfg;
       }
     }
+    // B-574d (主开发 r4881 (3)): A PERSON'S SAVE THAT FAILED LEAVES MEMORY AS THE DISK IS — the table is computed, WRITTEN FIRST (synced;
+    // a failed write, sync or close throws: the route's refusal) and taken into memory only once it landed (the release took it first:
+    // a failed write answered the person an error while the hub priced with the new table until a restart brought the old one back)
+    // (the slice's own read, F4) _withCatalog REPORTS (the disagreements, said to the catalog) — so the PURE merge is asked first (a table
+    // that cannot be merged throws here, nothing written) and the report only for a table that landed
+    CP.mergePricing(next, CATALOG_PRICES, { shipped: DEFAULT_PRICING, checked: SHIPPED_PRICES_CHECKED });
+    this._writeAtomic(this.pricingFile, JSON.stringify(next, null, 2));
     this._pricingFile = next;
     this._pricing = this._withCatalog(next);
-    this._writeAtomic(this.pricingFile, JSON.stringify(next, null, 2));
+    this._lastCatalogSkips = skips;
     return this._pricing;
   }
 }
