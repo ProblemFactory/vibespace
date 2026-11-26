@@ -21,6 +21,9 @@
 //   ④ (the cache ON) G7's road as shipped: the exit ends on the page before VibeSpace — and whether the older document
 //      it went through was LOADED or kept by the cache is said as measured (Chrome 154: loaded — the cache names
 //      ConflictingBrowsingInstance; a kept one going on is test-back-guard's fake-world leg, RED from round 2)
+//   ⑤ (the cache ON, 主开发 r5133 — THE PERSON'S QUESTION, Chrome 158's common scene) G7's road as shipped onto a page the
+//      browser KEEPS: the exit ends on it; a FORWARD press brings VibeSpace back with the App shown (no splash left), it
+//      stays past the intent's 10 s (back-guard.js EXIT_INTENT_MS), and NOTHING is filed (no cost / capture row, no incident)
 // Round 4 moved the lines round 2's swaps anchor on (the bound's and the tap's); round 3's own RED roads live in
 // test-exit-slow-chrome. Its own clock: 600 s (suite-watchdog); run bare it assumes its ci.mjs row's budget (900 s).
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-exit-hop-chrome.mjs
@@ -47,6 +50,13 @@ const chromeRoot = scratch('exit-hop-chrome');
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const AUX = `http://localhost:${AUX_PORT}`; // another site
 let pass = 0, fail = 0;
+// A SCENE THAT DID NOT FORM (主开发 r5133, Chrome 158): a road onto a page that must be ASKED AGAIN judges nothing of the
+// product when the browser's back/forward cache showed that page again instead — such a leg is a NAMED, COUNTED skip (the
+// gate's SKIP_LINE), never a red of both legs; and only on POSITIVE evidence, a main-frame BackForwardCacheRestore commit of
+// exactly that page during the road (a product that never goes there leaves none: its leg stays a red).
+const auxKept = []; let skipped = 0;
+const keptSince = (k0, url) => auxKept.slice(k0).some((x) => x.url === url);
+const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, c, e); };
 const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -62,6 +72,13 @@ const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...V
 // /slow-<n> — a page the first time, then one 8 s late; both no-store AND with an unload listener, so a back asks the
 // site again (measured on Chrome 154 with the cache on: a no-store page left for a VibeSpace page was KEPT and shown again
 // — no second visit, no 204; an unload listener still keeps a page out: UnloadHandlerExistsInMainFrame); /hits — the counts
+// r5133 (Chrome 158): neither of those keeps a page out any more — the vendor: «This deprecation is now complete in Chrome»,
+// «complete as of Chrome 155» (developer.chrome.com/docs/web-platform/deprecating-unload); «In Chrome, the default allowlist
+// for unload is (), which means that unload handlers do not run unless a document opts in» (MDN, Permissions-Policy: unload);
+// no-store pages may enter the cache since its 2025 rollout (developer.chrome.com/docs/web-platform/bfcache-ccns). So the
+// page OPTS BACK IN: «Permissions-Policy: unload=self» («This Permission Policy was extended in Chrome 117 … to opt-in to
+// continuing to try to fire unload handlers even after Chrome deprecated it by default»), its listener live again. That it
+// keeps the page out on 157 and 158 is the run's to say: a page the cache showed again is a named skip (judged, below).
 const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').createServer((q, s) => {
   const p = q.url.split('?')[0]; hits[p] = (hits[p] || 0) + 1;
   s.setHeader('content-type', 'text/html');
@@ -69,7 +86,7 @@ const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').cre
   if (p === '/hits') return s.end(JSON.stringify(hits));
   if (p === '/link') return s.end('<a href="/b" style="display:block;width:100%;height:200px;background:#eee">follow</a>');
   const asked = p.startsWith('/p204-') || p.startsWith('/slow-'), body = asked ? page + '<script>addEventListener("unload", () => {});</script>' : page;
-  if (asked) s.setHeader('cache-control', 'no-store');
+  if (asked) { s.setHeader('cache-control', 'no-store'); s.setHeader('permissions-policy', 'unload=self'); }
   if (p.startsWith('/p204-') && hits[p] > 1) { s.statusCode = 204; return s.end(); }
   if (p.startsWith('/slow-') && hits[p] > 1) return setTimeout(() => s.end(body), 8000);
   s.end(body);
@@ -96,6 +113,7 @@ const onMessage = (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); }
   if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.frame.url.startsWith(ORIGIN)) { if (m.params.type === 'BackForwardCacheRestore') restores++; else appLoads++; }
+  if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.type === 'BackForwardCacheRestore' && !m.params.frame.url.startsWith(ORIGIN)) auxKept.push({ t: Date.now(), url: m.params.frame.url }); // a page of the other site shown again from the cache (r5133)
   if (m.method === 'Page.backForwardCacheNotUsed') notUsed.push({ t: Date.now(), why: (m.params.notRestoredExplanations || []).map((x) => x.reason) });
   if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
 };
@@ -148,6 +166,9 @@ const afterBoot = async () => { await waitFor('!app.layoutManager._restoring', 1
 const atHome = async () => { await evalJs('document.querySelectorAll("[data-popover]").forEach((e) => e.remove()); if (!app.sidebar.isOpen) app.sidebar.toggle(true); true'); await sleep(300); };
 const toasts = () => evalJs(`[...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent)`).catch(() => []);
 const diary = () => evalJs(`JSON.parse(sessionStorage.getItem('vibespace.navLog') || '[]')`);
+const incidents = async () => ((await (await fetch(`${ORIGIN}/api/incidents`)).json()).incidents || []);
+/** The App shown: booted, the loading screen faded or gone (src/client.js fades it at app.ready, removes it 300 ms later). */
+const SHOWN = `!!window.app && (() => { const s = document.getElementById('loading-screen'); return !s || s.style.opacity === '0'; })()`;
 /** The window's beforeunload listeners (the DevTools command line's getEventListeners). */
 const unloadListeners = async () => (await cdp('Runtime.evaluate', { expression: '(getEventListeners(window).beforeunload || []).length', includeCommandLineAPI: true, returnByValue: true })).result?.value;
 /** navigation.activation gone (as on Chromium 102–122 / Safari 26.0–26.1 — entries() stays): an init script while held. */
@@ -195,7 +216,7 @@ const iframeRoad = async (prev, tag) => {
 const cancelRoad = async (kind) => {
   const prev = `${AUX}/${kind === '204' ? 'p204' : 'slow'}-${++nth}`;
   const armed = await iframeRoad(prev, kind);
-  const t0 = Date.now(), l0 = appLoads;
+  const t0 = Date.now(), l0 = appLoads, k0 = auxKept.length;
   await browserBack(100); // the exit: lands ON the older document, which goes on onto `prev`
   if (kind === 'stop') { // once the hop's go() asked the slow site (its second visit), the person taps stop — never an evaluate before: one waits while a traversal is pending
     const p = new URL(prev).pathname;
@@ -208,7 +229,7 @@ const cancelRoad = async (kind) => {
   const rows = (await diary().catch(() => [])).filter((r) => r.t >= t0 - 500);
   const go = rows.find((r) => r.k === 'hop' && r.skip), stayed = rows.find((r) => r.k === 'hop' && r.stay);
   const n = await nav(), asked = await (await fetch(AUX + '/hits')).json().then((h) => h[new URL(prev).pathname] || 0).catch(() => 0);
-  return { armed, asked, loads: appLoads - l0, onApp: onApp(n), url: n.url.slice(0, 40), booted: !!bootedAt, ms: go && bootedAt ? bootedAt - go.t : null, hop: go ? go.n : null, why: stayed ? stayed.why : null,
+  return { prevKept: keptSince(k0, prev) ? new URL(prev).pathname : null, cache: notUsed.filter((x) => x.t >= t0).map((x) => x.why.join('+')), armed, asked, loads: appLoads - l0, onApp: onApp(n), url: n.url.slice(0, 40), booted: !!bootedAt, ms: go && bootedAt ? bootedAt - go.t : null, hop: go ? go.n : null, why: stayed ? stayed.why : null,
     unload: await unloadListeners().catch(() => null), intent: await evalJs(`sessionStorage.getItem('vibespace.exitIntent')`).catch(() => 'unreadable') };
 };
 /** ③ — navigation.activation removed: G3's exit (past an older document, onto the page before VibeSpace), then a
@@ -241,6 +262,27 @@ const keptRoad = async () => {
   const n = await nav();
   return { armed, outside: n.url.startsWith(AUX), loads: appLoads - l0, restored: restores - r0, cache: notUsed.filter((x) => x.t >= t0).map((x) => x.why.join('+')) };
 };
+/** ⑤ (r5133) — the cache ON, G7's road as shipped onto a PLAIN page the browser keeps: where the tab ends, then a FORWARD
+ *  press back into VibeSpace — what the person sees on the document that comes back, and what was filed meanwhile. */
+const keptForwardRoad = async () => {
+  const prev = `${AUX}/plain-${++nth}`;
+  const armed = await iframeRoad(prev, 'kept-forward');
+  const i0 = (await incidents()).length;
+  const t0 = Date.now(), k0 = auxKept.length;
+  await browserBack(3500); // the exit
+  const out = await nav();
+  const kept = keptSince(k0, prev);
+  const l0 = appLoads, r0 = restores, f0 = Date.now();
+  await key('ArrowRight'); // the person goes forward: back into VibeSpace
+  let shownIn = null;
+  for (const until = Date.now() + 10000; Date.now() < until && shownIn === null;) { try { if (onApp(await nav()) && await evalJs(SHOWN)) shownIn = Date.now() - f0; } catch { } if (shownIn === null) await sleep(150); }
+  await sleep(Math.max(0, t0 + 10500 - Date.now())); // past the intent's window (EXIT_INTENT_MS, 10 s from the exit): any hop out came by now
+  const n = await nav();
+  const stays = onApp(n) && await evalJs(SHOWN).catch(() => false);
+  const rows = onApp(n) ? (await diary().catch(() => [])).filter((r) => r.t >= t0 - 500) : [];
+  return { armed, outside: out.url === prev, kept, url: n.url.slice(0, 40), loads: appLoads - l0, restored: restores - r0, shownIn, stays,
+    filed: rows.filter((r) => r.k === 'cost' || r.k === 'capture').map((r) => r.k + (r.why ? ':' + r.why : '')), incidents: (await incidents()).length - i0, hops: rows.filter((r) => r.k === 'hop').length };
+};
 
 try {
   const round2 = await buildRound2();
@@ -253,27 +295,30 @@ try {
     const R = {}, G = {};
     if (round2) { useBundle(round2); try { R.c204 = await cancelRoad('204'); R.stop = await cancelRoad('stop'); R.fwd = await forwardRoad(); } finally { useBundle(realBundle); } }
     G.c204 = await cancelRoad('204'); G.stop = await cancelRoad('stop'); G.fwd = await forwardRoad();
-    if (cache === 'on') G.kept = await keptRoad();
+    if (cache === 'on') { G.kept = await keptRoad(); G.keptFwd = await keptForwardRoad(); }
     console.log(`  · round 2 ${JSON.stringify(R).slice(0, 900)}`);
     console.log(`  · shipped ${JSON.stringify(G).slice(0, 900)} (a booted page's own beforeunload listeners: ${own})`);
     const C = cache === 'off' ? 'I' : 'II';
     const red = (x) => !!x && x.armed && x.asked === 2 && x.hop === 1 && !x.booted && x.unload >= 1 && !!x.intent && x.intent !== 'unreadable';
     const kept = (x) => { try { return JSON.parse(x.intent).hop === 1; } catch { return false; } };
     const green = (x) => x.armed && x.asked === 2 && x.hop === 1 && x.booted && x.ms !== null && x.ms <= 4000 && x.onApp && x.loads === 1 && x.why === 'cancelled' && x.unload === own && kept(x);
-    check(`${C}① RED (round 2): the hop's go() onto a page that answers 204 — the older document stands on the splash for good: no App, its beforeunload listener held, the intent kept`, red(R.c204), R.c204);
-    check(`${C}① the shipped rules: the same 204 — the App boots within 4 s of the hop's go() (the diary: hop stay why cancelled), no beforeunload listener of the module left, the intent kept for a late commit (round 4)`, green(G.c204), G.c204);
-    check(`${C}② RED (round 2): the hop's go() onto a slow page, stopped while it loads — the splash for good, the listener held, the intent kept`, red(R.stop), R.stop);
-    check(`${C}② the shipped rules: the same stop — the App boots within 4 s of the hop's go(), no beforeunload listener of the module left, the intent kept (round 4)`, green(G.stop), G.stop);
+    judged(`${C}① RED (round 2): the hop's go() onto a page that answers 204 — the older document stands on the splash for good: no App, its beforeunload listener held, the intent kept`, R.c204, red(R.c204), R.c204);
+    judged(`${C}① the shipped rules: the same 204 — the App boots within 4 s of the hop's go() (the diary: hop stay why cancelled), no beforeunload listener of the module left, the intent kept for a late commit (round 4)`, G.c204, green(G.c204), G.c204);
+    judged(`${C}② RED (round 2): the hop's go() onto a slow page, stopped while it loads — the splash for good, the listener held, the intent kept`, R.stop, red(R.stop), R.stop);
+    judged(`${C}② the shipped rules: the same stop — the App boots within 4 s of the hop's go(), no beforeunload listener of the module left, the intent kept (round 4)`, G.stop, green(G.stop), G.stop);
     check(`${C}③ RED (round 2): navigation.activation removed (entries() kept) — the exit, then a FORWARD press inside 10 s: the person is hopped back OUT of the page they went forward onto`, !!R.fwd && R.fwd.api.activation === 'absent' && R.fwd.api.entries && R.fwd.left && !R.fwd.stays && R.fwd.url.startsWith(AUX), R.fwd);
     check(`${C}③ the shipped rules: no key, no hop — the exit writes no intent there, and the page the person went forward onto boots and stays (${G.fwd.restored ? 'kept by the cache and shown again' : 'loaded'})`, G.fwd.api.activation === 'absent' && G.fwd.left && G.fwd.stays && !G.fwd.hops.some((h) => /^n/.test(h)), G.fwd);
     if (G.kept) check(`II④ the cache ON, G7's road as shipped: the exit ends on the page before VibeSpace; the older document it went through was ${G.kept.restored ? 'KEPT by the cache and went on' : `LOADED (the cache said: ${G.kept.cache.join(' · ') || 'nothing'})`}`, G.kept.armed && G.kept.outside && G.kept.loads + G.kept.restored === 1, G.kept);
+    if (G.keptFwd && !G.keptFwd.kept) { skipped++; console.log(`  ⊘ SKIP II⑤ the person's question: PRECONDITION NOT MET (the page before VibeSpace was LOADED by the exit, not shown again from the cache — the scene is a page the browser kept) — not judged in this run`); }
+    else if (G.keptFwd) check(`II⑤ THE PERSON'S QUESTION (r5133), the cache ON: the exit as shipped onto a page the browser KEPT ends on it; a FORWARD press brings VibeSpace back with the App shown (no splash left${G.keptFwd.shownIn !== null ? ', in ' + G.keptFwd.shownIn + ' ms' : ''}), it stays past the intent's 10 s, and NOTHING is filed (no cost or capture row, no incident)`,
+      G.keptFwd.armed && G.keptFwd.outside && G.keptFwd.shownIn !== null && G.keptFwd.stays && G.keptFwd.filed.length === 0 && G.keptFwd.incidents === 0, G.keptFwd);
     await quit();
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (err) {
   fail++; console.log('  ✗ the suite threw: ' + (err?.stack || err));
 }
-console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
+console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`}`);
 await quit();
 await sleep(300);
 process.exit(fail ? 1 : 0);

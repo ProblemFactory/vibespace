@@ -53,6 +53,13 @@ const chromeRoot = scratch('exit-slow-chrome');
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const AUX = `http://localhost:${AUX_PORT}`; // another site
 let pass = 0, fail = 0;
+// A SCENE THAT DID NOT FORM (主开发 r5133, Chrome 158): a road onto a page that must be ASKED AGAIN judges nothing of the
+// product when the browser's back/forward cache showed that page again instead — such a leg is a NAMED, COUNTED skip (the
+// gate's SKIP_LINE), never a red of both legs; and only on POSITIVE evidence, a main-frame BackForwardCacheRestore commit of
+// exactly that page during the road (a product that never goes there leaves none: its leg stays a red).
+const auxKept = []; let skipped = 0;
+const keptSince = (k0, url) => auxKept.slice(k0).some((x) => x.url === url);
+const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, c, e); };
 const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -65,14 +72,15 @@ const stubPath = `${wt}-claude-stub`; // never a vendor CLI: the boot probes get
 fs.writeFileSync(stubPath, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // the other site: /link — one link (the older document's embedded page); /p204-<n> — a page the first time, then 204
-// (no-store + an unload listener, so a back asks the site again — test-exit-hop-chrome's measured trap); /plain-<n> — a page
+// (no-store + an unload listener, so a back asks the site again — test-exit-hop-chrome's measured trap; on Chrome 158 the
+// listener runs only by «Permissions-Policy: unload=self» — test-exit-hop-chrome's r5133 note); /plain-<n> — a page
 const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').createServer((q, s) => {
   const p = q.url.split('?')[0]; hits[p] = (hits[p] || 0) + 1;
   s.setHeader('content-type', 'text/html');
   const page = '<title>other</title><h1>another site</h1>';
   if (p === '/hits') return s.end(JSON.stringify(hits));
   if (p === '/link') return s.end('<a href="/b" style="display:block;width:100%;height:200px;background:#eee">follow</a>');
-  if (p.startsWith('/p204-')) { s.setHeader('cache-control', 'no-store'); if (hits[p] > 1) { s.statusCode = 204; return s.end(); } return s.end(page + '<script>addEventListener("unload", () => {});</script>'); }
+  if (p.startsWith('/p204-')) { s.setHeader('cache-control', 'no-store'); s.setHeader('permissions-policy', 'unload=self'); if (hits[p] > 1) { s.statusCode = 204; return s.end(); } return s.end(page + '<script>addEventListener("unload", () => {});</script>'); }
   s.end(page);
 }).listen(${AUX_PORT}, '127.0.0.1')`], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // rule nine: the suite's own aux server carries a HOME in the root
 let chrome = null;
@@ -100,6 +108,7 @@ const onMessage = (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); }
   if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.frame.url.startsWith(ORIGIN)) { if (m.params.type === 'BackForwardCacheRestore') restores++; else appLoads++; }
+  if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.type === 'BackForwardCacheRestore' && !m.params.frame.url.startsWith(ORIGIN)) auxKept.push({ t: Date.now(), url: m.params.frame.url }); // a page of the other site shown again from the cache (r5133)
   if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
   if (m.method === 'Fetch.requestPaused') {
     const { requestId, request } = m.params, go = () => cdp('Fetch.continueRequest', { requestId }).catch(() => { });
@@ -255,7 +264,7 @@ const cancelBackRoad = async () => {
   await afterNavigation(cdp, () => evalJs(`location.href = '/?session=exit-slow-cancel'; true`), { bootMs: 25000, what: 'after location.href = /?session=exit-slow-cancel…' }); await afterBoot(); await tapAt(191, 300);
   await atHome(); await browserBack(300);
   const armed = (await toasts()).includes(TOAST);
-  const t0 = Date.now();
+  const t0 = Date.now(), k0 = auxKept.length;
   await browserBack(100); // the exit: onto `prev`, which answers 204 — announced, then nothing
   await sleep(4200); // past the 3 s bound (and the first toast's 2 s)
   const asked = await (await fetch(AUX + '/hits')).json().then((h) => h[new URL(prev).pathname] || 0).catch(() => 0);
@@ -267,7 +276,7 @@ const cancelBackRoad = async () => {
   const said = (await toasts()).includes(TOAST);
   const loads = appLoads - l0, restored = restores - r0;
   const rows = await diaryFrom(t0);
-  return { armed, asked, stayed, loads, restored, onApp: onApp(n), same, said, rows: told(rows) };
+  return { prevKept: keptSince(k0, prev) ? new URL(prev).pathname : null, armed, asked, stayed, loads, restored, onApp: onApp(n), same, said, rows: told(rows) };
 };
 /** ⑧ — G7's road, the older document's HTML held 6 s; a tap 1 s into the exit's pending go(). The tap: a pointerdown and
  *  its pointerup (round 7: a tap ends in one) the page dispatches to itself on a timer set just before the back
@@ -342,10 +351,10 @@ try {
       !!R.later && R.later.held >= 1 && R.later.onApp && R.later.booted && R.later.incidents.length === 0, R.later);
     check(`${C}⑥ the shipped rules: at 12 s the older document boots and files ONE incident «a slow exit» (the diary: leave slow ≈12 s, then its cost row why slow)`,
       G.later.held >= 1 && G.later.onApp && G.later.booted && G.later.incidents.length === 1 && /a slow exit/.test(G.later.incidents[0]) && /slow:\d+/.test(G.later.rows) && /cost:slow/.test(G.later.rows) && G.later.slow >= 11900, G.later);
-    check(`${C}⑦ RED (round 3): a cancelled exit (the page before VibeSpace answers 204), then a back — no sentinel above the page: the browser's own back LOADED the older document`,
-      !!R.back && R.back.armed && R.back.asked === 2 && !R.back.same && R.back.loads + R.back.restored === 1, R.back);
-    check(`${C}⑦ the shipped rules: after the stay the page stands on a sentinel again (rearm why cancelled), and the next back is ours — the 「再返回一次退出」 toast on the same document, no load`,
-      G.back.armed && G.back.asked === 2 && G.back.stayed?.st?.vs === 1 && G.back.same && G.back.said && G.back.loads === 0 && /cancelled rearm:cancelled/.test(G.back.rows), G.back);
+    judged(`${C}⑦ RED (round 3): a cancelled exit (the page before VibeSpace answers 204), then a back — no sentinel above the page: the browser's own back LOADED the older document`,
+      R.back, !!R.back && R.back.armed && R.back.asked === 2 && !R.back.same && R.back.loads + R.back.restored === 1, R.back);
+    judged(`${C}⑦ the shipped rules: after the stay the page stands on a sentinel again (rearm why cancelled), and the next back is ours — the 「再返回一次退出」 toast on the same document, no load`,
+      G.back, G.back.armed && G.back.asked === 2 && G.back.stayed?.st?.vs === 1 && G.back.same && G.back.said && G.back.loads === 0 && /cancelled rearm:cancelled/.test(G.back.rows), G.back);
     check(`${C}⑧ RED (round 3): a tap 1 s into the exit's pending go() (the older document at 6 s) — the traversal went on: the older document LOADED and booted, the tap lost`,
       !!R.tap && R.tap.armed && !R.tap.same && R.tap.onApp && R.tap.loads === 1, R.tap);
     check(`${C}⑧ the shipped rules: the tap ABORTS the pending go() by the step onto the sentinel above — the page stays, re-armed (leave why input, rearm why input), the older document never loads`,
@@ -365,7 +374,7 @@ try {
 } catch (err) {
   fail++; console.log('  ✗ the suite threw: ' + (err?.stack || err));
 }
-console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
+console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`}`);
 await quit();
 await sleep(300);
 process.exit(fail ? 1 : 0);

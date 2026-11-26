@@ -56,6 +56,13 @@ const chromeRoot = scratch('exit-late-chrome');
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const AUX = `http://localhost:${AUX_PORT}`; // another site
 let pass = 0, fail = 0;
+// A SCENE THAT DID NOT FORM (主开发 r5133, Chrome 158): a road onto a page that must be ASKED AGAIN judges nothing of the
+// product when the browser's back/forward cache showed that page again instead — such a leg is a NAMED, COUNTED skip (the
+// gate's SKIP_LINE), never a red of both legs; and only on POSITIVE evidence, a main-frame BackForwardCacheRestore commit of
+// exactly that page during the road (a product that never goes there leaves none: its leg stays a red).
+const auxKept = []; let skipped = 0;
+const keptSince = (k0, url) => auxKept.slice(k0).some((x) => x.url === url);
+const judged = (n, x, c, e) => { if (x && x.prevKept) { skipped++; console.log(`  ⊘ SKIP ${n}: PRECONDITION NOT MET (the page before VibeSpace, ${x.prevKept}, came back from the back/forward cache and was never asked again) — not judged in this run`); return; } check(n, c, e); };
 const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -68,7 +75,8 @@ const stubPath = `${wt}-claude-stub`; // never a vendor CLI: the boot probes get
 fs.writeFileSync(stubPath, '#!/bin/sh\nfor a in "$@"; do case "$a" in --version) echo "2.1.288 (Claude Code) stub"; exit 0;; esac; done\nexit 0\n', { mode: 0o755 });
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
 // the other site: /link — one link (the older document's embedded page); /slowp-<n> — a page, never kept (no-store + an
-// unload listener, so a back asks the site again — test-exit-hop-chrome's measured trap: the Fetch domain can hold it);
+// unload listener, so a back asks the site again — test-exit-hop-chrome's measured trap: the Fetch domain can hold it; on
+// Chrome 158 the listener runs only by «Permissions-Policy: unload=self» — test-exit-hop-chrome's r5133 note);
 // /plain-<n> — a page
 const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').createServer((q, s) => {
   const p = q.url.split('?')[0]; hits[p] = (hits[p] || 0) + 1;
@@ -76,7 +84,7 @@ const aux = spawn(process.execPath, ['-e', `const hits = {}; require('http').cre
   const page = '<title>other</title><h1>another site</h1>';
   if (p === '/hits') return s.end(JSON.stringify(hits));
   if (p === '/link') return s.end('<a href="/b" style="display:block;width:100%;height:200px;background:#eee">follow</a>');
-  if (p.startsWith('/slowp-')) { s.setHeader('cache-control', 'no-store'); return s.end(page + '<script>addEventListener("unload", () => {});</script>'); }
+  if (p.startsWith('/slowp-')) { s.setHeader('cache-control', 'no-store'); s.setHeader('permissions-policy', 'unload=self'); return s.end(page + '<script>addEventListener("unload", () => {});</script>'); }
   s.end(page);
 }).listen(${AUX_PORT}, '127.0.0.1')`], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // rule nine: the suite's own aux server carries a HOME in the root
 let chrome = null;
@@ -104,6 +112,7 @@ const onMessage = (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); }
   if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.frame.url.startsWith(ORIGIN)) { if (m.params.type === 'BackForwardCacheRestore') restores++; else appLoads++; }
+  if (m.method === 'Page.frameNavigated' && !m.params.frame.parentId && m.params.type === 'BackForwardCacheRestore' && !m.params.frame.url.startsWith(ORIGIN)) auxKept.push({ t: Date.now(), url: m.params.frame.url }); // a page of the other site shown again from the cache (r5133)
   if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
   if (m.method === 'Fetch.requestPaused') {
     const { requestId, request } = m.params, go = () => cdp('Fetch.continueRequest', { requestId }).catch(() => { });
@@ -268,11 +277,11 @@ const chainRoad = async () => {
   const armed = await iframeRoad(prev, 'chain');
   const c = await counts();
   await slowNet([[OLDER(), 3500], [prev, 10000]]);
-  const t0 = Date.now();
+  const t0 = Date.now(), k0 = auxKept.length;
   await browserBack(100); // the exit: late onto the older document (3.5 s), its hop late onto the page before (10 s more)
   await sleep(16000); // never an evaluate while a traversal is pending (it waits for the commit)
   await slowNet([]);
-  return { armed, ...(await after({ t0, ...c })) };
+  return { prevKept: keptSince(k0, prev) ? new URL(prev).pathname : null, armed, ...(await after({ t0, ...c })) };
 };
 /** ⑪ — the older document's HTML held 6 s; 4.1 s into the exit a link to a heading followed with no tap (a timer set
  *  just before the back: a click() — no pointerdown, so no abort). */
@@ -330,10 +339,10 @@ try {
     check(`${C}⑨ the shipped rules: the tap's step DOWN onto the page's own entry ABORTS the suspended go() — the page stays, re-armed (rearm why input-late), the older document never loads`,
       G.tap.armed && G.tap.held >= 1 && G.tap.same && G.tap.st?.vs === 1 && G.tap.loads === 0 && /cancelled rearm:cancelled rearm:input-late\b/.test(G.tap.rows), G.tap);
     // the boot's cost row is its verdict — the capture itself is one per tab per half hour (⑨'s RED road filed one already)
-    check(`${C}⑩ RED (round 4): a chain of slow pages (the older document at 3.5 s, the page before VibeSpace at 10 s) — the older document went on, stayed at its own bound and booted: «a slow exit» FILED (its boot's cost row why slow)`,
-      !!R.chain && R.chain.armed && R.chain.held >= 2 && R.chain.outside && /hop1 hop-stay:cancelled cost:slow\b/.test(R.chain.rows) && R.chain.incidents.every((x) => /a slow exit/.test(x)), R.chain);
-    check(`${C}⑩ the shipped rules: the same chain — the tab outside, the diary tells it (hop 1, hop stay why cancelled, hop slow), NOTHING filed`,
-      G.chain.armed && G.chain.held >= 2 && G.chain.outside && G.chain.incidents.length === 0 && /slow:\d+ hop1 hop-stay:cancelled hop-slow:\d+/.test(G.chain.rows) && !/cost:/.test(G.chain.rows), G.chain);
+    judged(`${C}⑩ RED (round 4): a chain of slow pages (the older document at 3.5 s, the page before VibeSpace at 10 s) — the older document went on, stayed at its own bound and booted: «a slow exit» FILED (its boot's cost row why slow)`,
+      R.chain, !!R.chain && R.chain.armed && R.chain.held >= 2 && R.chain.outside && /hop1 hop-stay:cancelled cost:slow\b/.test(R.chain.rows) && R.chain.incidents.every((x) => /a slow exit/.test(x)), R.chain);
+    judged(`${C}⑩ the shipped rules: the same chain — the tab outside, the diary tells it (hop 1, hop stay why cancelled, hop slow), NOTHING filed`,
+      G.chain, G.chain.armed && G.chain.held >= 2 && G.chain.outside && G.chain.incidents.length === 0 && /slow:\d+ hop1 hop-stay:cancelled hop-slow:\d+/.test(G.chain.rows) && !/cost:/.test(G.chain.rows), G.chain);
     check(`${C}⑪ RED (round 4): a #fragment link followed 4 s into the exit ended the late watch — no slow row, no re-key: the older document booted with no intent and filed NOTHING (the owner's silent load)`,
       !!R.frag && R.frag.armed && R.frag.held >= 1 && R.frag.onApp && R.frag.booted && !/slow:/.test(R.frag.rows) && R.frag.incidents.length === 0, R.frag);
     check(`${C}⑪ the shipped rules: the fragment link aborts nothing and ends no watch — the late commit told (leave slow), the intent re-keyed: the older document goes on, the tab outside, nothing filed`,
@@ -353,7 +362,7 @@ try {
 } catch (err) {
   fail++; console.log('  ✗ the suite threw: ' + (err?.stack || err));
 }
-console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
+console.log(`${fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`}`);
 await quit();
 await sleep(300);
 process.exit(fail ? 1 : 0);
