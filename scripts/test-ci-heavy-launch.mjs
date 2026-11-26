@@ -14,6 +14,10 @@
 // running, or running with another start mark: a reused pid), by those two exact shapes only — never another ref. A leg proves
 // nothing is left after a run, and after a run stopped mid-way (in a scratch repository of its own). KNOWN REMAINDER: the three
 // commits it mints (commit-tree off HEAD~1) stay in the shared repository as unreachable objects: it keeps no automatic collection.
+// HOW THE SWEEP JUDGES A RUN (round wf_a3ba42b9's smalls): its liveness is THIS process namespace's pid table and /proc (a run of the
+// same repository in another pid namespace or on another machine would be judged gone: none shares this checkout today); it asks by
+// process.kill(pid, 0), a PROBE that delivers no signal to anything; a ref with no readable start mark (`na`: /proc unreadable when it
+// was named) and the mark-less legacy form are judged by the pid alone, so a reused pid keeps them until that pid ends (it errs safe).
 //
 // WHY IT WAS IN THE FAST TIER, AND WHY IT NO LONGER IS (B-f4cb, 2026-09-27).
 // It costs a real worktree + build + suite per launch (5.5 s when written,
