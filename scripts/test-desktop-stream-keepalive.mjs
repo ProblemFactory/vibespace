@@ -459,6 +459,8 @@ console.log('\n§D014 a machine\'s whole desktop: fake VNC-auth and ARD-auth ser
     await waitFact(() => x1.got().length >= 34 + SERVER_INIT.length && vncSrv.seen.sockets.length >= nX + 1, 20000, 'CONTROL: the first window never reached its machine');
     const x2 = client('machine-desktop.win-c');
     await waitFact(() => x2.got().length >= 34 + SERVER_INIT.length && vncSrv.seen.sockets.length >= nX + 2, 20000, 'CONTROL: the second window never reached its machine');
+    // the second window's machine socket BY ITS INDEX (nX + 1): a probe of acc0 / accW connecting between the two windows would take that
+    // index — LEFT (the round's should, r5037): a wrong index watches another socket, which tends to read red (its own close), not green
     const s2 = vncSrv.seen.sockets[nX + 1];
     ok('CONTROL: both windows reached the machine, each on its OWN socket (an expiry of either wait above is this red line)', !!s2 && vncSrv.seen.sockets.length >= nX + 2 && x1.got().length >= 34 + SERVER_INIT.length && x2.got().length >= 34 + SERVER_INIT.length);
     if (s2) s2.on('close', () => { s2._vsClosed = true; });

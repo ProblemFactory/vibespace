@@ -1959,6 +1959,15 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
       ok(!!took && b16.blog.some((l) => /viewer v-watch may type now — the display size it sent while refused reaches xpra first/.test(l)), `THE TAKEOVER: its held display-configure reaches xpra first — the display is ${sizeOf(r6.id)}, the pane's own size, the replay named in the log`, b16.blog.filter((l) => /may type now/.test(l)));
       w7.close(); o6.close();
       await k.stop(r6.id);
+      // PLACES OF THE SAME SHAPE LEFT (the flake census r2, r4707 / r5037 — a «never» read after a fixed sleep), each with its guard:
+      //   ~L1625 sleep(1500), then «a Watch viewer's SetDesktopSize never reaches Xvnc» — guarded by its own COUNT: the same ok requires the
+      //     bridge's stats().dropped >= 1, so a product that lost the fence counts nothing and reads red;
+      //   L1937 sleep(500) «a Watch viewer's hello leaves the holder's size alone» and L1946 sleep(800) «after the Watch viewer closes the
+      //     holder's size stands» — they judge xpra keeping an existing client's size (its asynchronous apply), not the fence: the fence is
+      //     judged by count (the three refused packets, dropped - d6 === 3; the held 700x500, dropped > d7) and by the r7 allowlist control;
+      //   L832 / L1181 / L1321 (stop, then a sleep, then «sessionPids empty») — k.stop verifies each pid gone (SIGKILL after a grace);
+      //   L1154 / L1168 / L1308 (adoptAll, then sleep(300)) — adoptAll's teardown verifies each pid gone (the L1135 family, unplaced);
+      //   L1638 / L1644 — 2.5 s before «two ticks re-recorded nothing»: that keeper ticks every 1000 ms (two ticks fall in it)
       // CONTROL: the fence WITHOUT the replay — the pane that watched and took over never gets its own size
       const fromN = '    if (allowInput && !st.oversize) {';
       ok(srcS.split(fromN).length === 2, 'the replay is spelled once (the no-replay control patches exactly it)');
