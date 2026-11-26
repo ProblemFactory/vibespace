@@ -106,7 +106,7 @@ await pageReady(PORT, 'boot');
 await sleep(1500);
 
 // ── THE GESTURE DRIVER (test-chat-paging §4c's: its constants, the view's open, the trim witness and runGestures — copied verbatim, §4h's hooks in it) ──
-const LIST_H = 650;   // THE SECTION's OWN GEOMETRY (主开发 r4847): the list stands 650 px tall on every machine — the hosted runner's own height, below the kit's (706) and the box's — so no leg reads a distance its machine happens to give (test-chat-paging's §4c keeps the owner's 790)
+const LIST_H = 650;   // A CEILING the window is shrunk to (OPEN_HUGE shrinks only a taller list; a shorter one stays and the geometry check names it). THE SECTION's OWN GEOMETRY (主开发 r4847): the list stands 650 px tall on every machine — the hosted runner's own height, below the kit's (706) and the box's — so no leg reads a distance its machine happens to give (test-chat-paging's §4c keeps the owner's 790)
 const CADENCE = { slow: { notches: 1, deltaY: 120, gap: 0, settle: 1500 }, mid: { notches: 6, deltaY: 120, gap: 70, settle: 1500 }, fast: { notches: 4, deltaY: 700, gap: 30, settle: 2000 }, hold: { notches: 40, deltaY: 300, gap: 100, settle: 2400 }, shortHold: { notches: 10, deltaY: 300, gap: 100, settle: 700 }, tail1: { notches: 1, deltaY: 300, gap: 0, settle: 900 }, tail2: { notches: 2, deltaY: 300, gap: 150, settle: 900 }, tail3: { notches: 3, deltaY: 300, gap: 150, settle: 900 } };
 const OPEN_HUGE = (sid, cwd, title) => `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -306,7 +306,7 @@ const NOTCH_BEFORE = `(async () => {
       const seq0 = (v._traceRing || []).length ? v._traceRing[v._traceRing.length - 1].seq : 0, pos = (e) => Math.round(e.getBoundingClientRect().top - list.getBoundingClientRect().top);
       K.ck = ck; K.p0 = pos(K.held); K.q0 = pos(ck);
       requestAnimationFrame(() => {   // the frame of the growth
-        if (!K.held.isConnected || !R.isConnected) { K.why = 'the card read before the notch or the row was detached before the growth'; return; }
+        if (!K.held.isConnected || !R.isConnected) { K.why = 'the card read before the notch or the row was detached before the growth'; K.armed = 0; return; }
         K.dt = Math.round(performance.now() - t0); const h0 = R.offsetHeight;
         const pad = document.createElement('div'); pad.style.height = K.px + 'px'; R.appendChild(pad); K.g = R.offsetHeight - h0;
         requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { K.p1 = K.held.isConnected ? pos(K.held) : null; K.q1 = ck.isConnected ? pos(ck) : null;
@@ -498,8 +498,10 @@ const EDGE_UNTIL = (kind) => `(() => { const R = window.__ral; if (!R) return fa
 // first rebuild ran (the first notch held), the leg takes four rows by identity — A, the card at the top; R2, the row above it; B, the
 // row above R2; R1, the row above B — scrolls B to the top (the watch records it, 400 ms), then scrolls R1 just into view and, IN THAT
 // SAME TASK (before any frame), R1 (newly in view above the line read before that scroll) grows 150 px and R2 (below that line,
-// between B and A) grows 100 px, and the flush a runs pass starts with answers them. A row the leg cannot take, or rows that moved
-// between the scrolls, is a named SKIP read by the leg itself (counted; the leg PARTIAL in that run), never a red and never a green. The card read before the latest notch (B) keeps its place: only R1 moved it. Before this follow the
+// between B and A) grows 100 px, and the flush a runs pass starts with answers them. A row the leg cannot take, or an identity gone
+// between the scrolls (a row detached or drawn again), is a named SKIP read by the leg itself (counted; the leg PARTIAL in that run),
+// never a red and never a green. What the PRODUCT can reach is a RED precondition saying what it met (主开发 r5148): the watch ended
+// before a scroll (its own end reason, from the trace), or B no longer the card at the top after its wait (B's measured move). The card read before the latest notch (B) keeps its place: only R1 moved it. Before this follow the
 // answer read the line from the record (the view's top once the record was old: R1 unanswered, B moved 150; within 150 ms of it,
 // the line from before the PREVIOUS notch: R2 answered too, B moved −100). The control hands the answer the view's top.
 const LINE_PLANTED = (control) => RUNS_PLANTED(control);
@@ -509,16 +511,21 @@ const LINE_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.arm
   const isRow = (el) => { const cl = el && el.classList; return !!cl && !el._isSeekSentinel && cl.contains('chat-msg') && !cl.contains('chat-run-header') && !cl.contains('chat-run-footer') && el.offsetParent !== null && el.offsetHeight >= 8; };
   const above = (el) => { for (let e = el ? el.previousElementSibling : null; e; e = e.previousElementSibling) if (isRow(e)) return e; return null; };
   const skip = (why) => { R.step = -1; R.skip = 1; R.why = why; return true; };
+  const red = (why) => { R.step = -1; R.why = why; return true; };   // reachable by the product: a PRECONDITION NOT MET, red, saying what it met (r5148)
+  const endWhy = () => { const e = (v._traceRing || []).filter((x) => x.tag === 'gapUp:settleEnd').pop(); return e ? String(e.why) : 'no settleEnd in the trace ring'; };
   if (R.step === 0 && !R.natural && now - R.landedAt < 1500) return false;
   if (R.step === 0) { const A = topCard(), r2 = above(A), B = above(r2), r1 = above(B);
     if (!A || !r2 || !B || !r1) return skip('fewer than three rows above the card at the top (' + [r2, B, r1].filter(Boolean).length + ')');
-    if (!v._gapSettle) return skip('the watch had ended before the first scroll');
+    if (!v._gapSettle) return red('the watch had ended before the first scroll (its own end: ' + endWhy() + ')');
     R.L0 = list.scrollTop; R.A = A; R.r2 = r2; R.B = B; R.r1 = r1;
-    list.scrollTop = B.offsetTop + Math.min(8, Math.floor(B.offsetHeight / 2)); R.step = 1; R.at = now; return false; }   // notch 1: B to the top; the watch records it
+    list.scrollTop = B.offsetTop + Math.min(8, Math.floor(B.offsetHeight / 2)); R.bAt = B.offsetTop - list.scrollTop; R.step = 1; R.at = now; return false; }   // notch 1: B to the top; the watch records it
   if (R.step === 1) { if (now - R.at < 400) return false;
     const L1 = list.scrollTop, B = topCard();
-    if (!v._gapSettle) return skip('the watch had ended before the second scroll');
-    if (B !== R.B || above(B) !== R.r1 || above(R.A) !== R.r2 || above(R.r2) !== B) return skip('the rows moved between the two scrolls (the card at the top is ' + (B === R.B ? 'B' : 'another') + ')');
+    const gone = ['A', 'r2', 'B', 'r1'].filter((k) => !R[k].isConnected);
+    if (gone.length) return skip('an identity is gone: ' + gone.join(', ') + ' detached or drawn again between the two scrolls');   // a row re-rendered: the scene is not there to judge
+    if (!v._gapSettle) return red('the watch had ended before the second scroll (its own end: ' + endWhy() + ')');
+    if (B !== R.B) return red('the card B is no longer the card at the top after its wait: it moved ' + Math.round(R.B.offsetTop - L1 - R.bAt) + ' px in the view (the card at the top is ' + (B ? 'another' : 'none') + ')');
+    if (above(B) !== R.r1 || above(R.A) !== R.r2 || above(R.r2) !== B) return skip('a row was drawn between the four rows taken (their order no longer A, R2, B, R1)');
     list.scrollTop = R.r1.offsetTop - 1; const L2 = list.scrollTop;                       // the second notch's scroll: R1 just into view …
     R.lines = [Math.round(R.L0), Math.round(L1), Math.round(L2)];
     if (!(L2 < L1 && R.r1.offsetTop >= L2 && R.r1.offsetTop + R.r1.offsetHeight <= Math.min(L1, B.offsetTop) && R.r2.offsetTop >= B.offsetTop + B.offsetHeight && R.r2.offsetTop + R.r2.offsetHeight <= R.A.offsetTop))
@@ -587,7 +594,7 @@ const WINDOW_UNTIL = (kind) => `(() => { const R = window.__ral; if (!R) return 
     const plant = (g) => { if (!R.control || !g) return; g.line = ${kind === 'after' ? "() => { R.plantReads++; if (!held.isConnected) R.heldGone = 1; return held.offsetTop + R.lineOff; }" : "() => { R.plantReads++; return list.scrollTop; }"}; };
     plant(v._gapSettle);
     const ans = [], tr = v._trace; v._trace = function (tag, d) { if (tag === 'gapUp:settle' && R.step === 2) ans.push(Math.round((d && d.px) || 0)); return tr.apply(this, arguments); };
-    const t0 = performance.now(); list.scrollTop = list.scrollTop - 300; R.step = 1;
+    const t0 = performance.now(); list.scrollTop = list.scrollTop - Math.round(list.clientHeight * 300 / ${LIST_H}); R.step = 1;
     const pad = (el) => { const p = document.createElement('div'); p.style.height = '258px'; el.appendChild(p); };
     let ck = null, row = null, hP = 0, cP = 0;
     const painted = () => {   // THE PAINTED FRAME before the growth: what the person sees, and the rows the scroll brought in
@@ -606,7 +613,7 @@ const WINDOW_UNTIL = (kind) => `(() => { const R = window.__ral; if (!R) return 
       pad(row); R.g = row.offsetHeight - r0;
       requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { const live = held.isConnected && ck.isConnected && !R.heldGone;
         R.heldLive = live; R.hMoved = live ? Math.round(pos(held) - hP) : null; R.tMoved = live ? Math.round(pos(ck) - cP) : null; R.hInFrame = live ? Math.round(pos(held) - h0) : null;
-        R.alive = !!v._gapSettleRO; R.answered = ans.slice(); R.inForce = R.control ? R.plantReads > R.readsAtGrowth : null; R.step = 3; }, 0)));
+        R.alive = !!v._gapSettleRO; R.answered = ans.slice(); R.inForce = R.control ? R.plantReads > R.readsAtGrowth : null; v._trace = tr; R.step = 3; }, 0)));
     };
     ${kind === 'after' ? 'setTimeout(() => requestAnimationFrame(() => setTimeout(painted, 0)), 400);   // well after the window' : 'requestAnimationFrame(() => setTimeout(painted, 0));   // one painted frame after the scroll; the growth in the next frame'}
     return false; }
@@ -738,9 +745,11 @@ const SEARCH_OPEN = `(async () => { ${READ_TOP}
     return { s0, open: off1 == null ? null : Math.round(off1 - off0), closed: off2 == null ? null : Math.round(off2 - off0), ring: ring.slice(0, 8) };
   };
   const watch = await turn();                                                      // the scene: the watch alive
+  watch.aliveAfter = !!v._gapSettleRO;                                             // … and still alive when its turn ended (round we1056578)
   v._stopGapSettle('scene: the browser anchoring alone');                          // the twin: the same page, the same card
+  const twin = { gap: list.querySelectorAll(':scope > .chat-gap-msg').length, headersAbove: [...list.querySelectorAll(':scope > .chat-run-header')].filter((h) => h.offsetTop + h.offsetHeight <= list.scrollTop).length };   // the preconditions read again, named
   const browser = await turn();
-  return { ok: true, ...base, watch, browser };
+  return { ok: true, ...base, watch, twin, browser };
 })()`;
 // the depths: 1, 2 and 3 SLOW notches (120 px) past the scene's own descent — near the slab's end, so the slab stays in the page
 Object.assign(CADENCE, { near1: { notches: 1, deltaY: 120, gap: 0, settle: 900 }, near2: { notches: 2, deltaY: 120, gap: 150, settle: 900 }, near3: { notches: 3, deltaY: 120, gap: 150, settle: 900 } });
@@ -750,7 +759,7 @@ const searchScene = async (tail) => {
   // a slab lands (a short hold up), the person comes back down through it and a little into the registered tail
   const r = await runGestures([['gap-jump', 'jump', 0], ['scene-up', 'up', 'shortHold'], ['scene-down', 'down', 'shortHold'], ['scene-' + tail, 'down', tail]], 'search scene ' + tail);
   if (!r.opened?.ok) return { tail, ok: false, why: 'not opened' };
-  const o = { tail, ...(await evaljs(SEARCH_OPEN)) };
+  const o = { tail, ch: r.opened?.ch ?? null, ...(await evaljs(SEARCH_OPEN)) };
   console.log(`  [search scene ${tail}] ${JSON.stringify(o)}`);
   return o;
 };
@@ -797,7 +806,7 @@ const searchScene = async (tail) => {
   // scroll brought in takes 258 px in the gap between the paint and the frame of the growth; the watch answers both in that frame (516)
   check(`§4h INSIDE THE WINDOW, A LATE SETTLE IN THE GAP BEFORE THE FRAME OF THE GROWTH (r5080): ${wPre(wX, 'coincide')}a row the scroll brought in grew ${wX.after?.g} px ${wX.after?.dt} ms after it and another took 258 px at ${wX.after?.lateAt} ms, before that frame: what the person sees of the card read before the scroll stands (${wX.after?.hMoved} px painted; the watch answered ${JSON.stringify(wX.after?.answered)}; ± ${NOTCH_TOL_PX})`,
     winScene(wX, 'coincide') && Math.abs(wX.after.hMoved) <= NOTCH_TOL_PX, JSON.stringify(wX.after));
-  check(`§4h CONTROL: ${wPre(wX, 'coincide')}the same card read from the starting point of before, inside the frame of the growth ⇒ it reads the late settle as a move (${wX.after?.hInFrame} px; −258 ± ${NOTCH_TOL_PX}, the hosted reading) — the coincidence fell where the hosted run met it`,
+  check(`§4h CONTROL: ${wPre(wX, 'coincide')}the same card read from the starting point of before, inside the frame of the growth ⇒ it reads the late settle as a move (${wX.after?.hInFrame} px; −258 ± ${NOTCH_TOL_PX}, the hosted reading) — the coincidence fell where the hosted run met it; this control rests on the browser's frame order (rAF callbacks before that frame's ResizeObserver delivery: Chrome 157 and 158), a fact of the browser, not of the product`,
     winScene(wX, 'coincide') && Math.abs(wX.after.hInFrame + 258) <= NOTCH_TOL_PX, JSON.stringify(wX.after));
   check(`§4h CONTROL: ${wPre(wXs, 'stopped')}the same coincidence, the watch stopped at the growth (the browser's anchoring kept off) ⇒ nothing answers and the painted card read moves by both growths (${wXs.after?.hMoved} px; more than ${NOTCH_TOL_PX}) — the painted measure can go red`,
     winScene(wXs, 'stopped') && wXs.after.hMoved > NOTCH_TOL_PX, JSON.stringify(wXs.after));
@@ -910,7 +919,7 @@ const searchScene = async (tail) => {
   };
   const ln = await lineHold('the settle answers in the task of a notch, before the watch records it', false), lnc = await lineHold('the settle answers in the task of a notch, before the watch records it, control', true);
   const lnScene = (h) => !!h.after && h.after.landed === 1 && h.after.step === 3 && h.after.alive && h.after.bMoved != null;
-  // a scene the leg's own reads say did not form (a row it could not take, rows moved between the scrolls) is a NAMED SKIP, counted
+  // a scene the leg's own reads say did not form (a row it could not take, an identity gone between the scrolls) is a NAMED SKIP, counted
   // by the gate's skip line, the leg PARTIAL in that run (主开发 r5098) — never a red for a scene that did not form, never a green
   const lnJudge = (h, name, text, ok) => {
     if (h.after?.skip) { console.log(`  ⊘ SKIP §4h ${name}: the scene did not form (${h.after.why}) — the leg ONE READER is PARTIAL in this run`); return; }
