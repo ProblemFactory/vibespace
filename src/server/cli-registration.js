@@ -73,7 +73,7 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
     const a = SR.storeAnswer(read, { valid: isRecord });   // the record of the builds said: THE ANCHOR (test-data-store-census)
     if (hold.start(a) === 'data') seen = prune(isRecord(a.value.seen) ? a.value.seen : {}); }
   const writer = () => W || require('../store-writer.js').storeWriter();   // W: a suite's stand-in
-  const save = () => {
+  function save() {
     if (!hold.writable('a write of the record of the claude builds said')) return;   // HELD: never over a file that could not be read
     const keep = Object.keys(seen).sort(vcmp).slice(-KEEP_BUILDS);
     seen = Object.fromEntries(keep.map((v) => [v, seen[v]]));
@@ -81,7 +81,7 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
     // the latest «seen» is written (a burst of sightings is one write), a failed write said as before
     const body = JSON.stringify({ v: 1, seen }, null, 1) + '\n';
     try { writer().dirty(stateFile, { name: 'cli-registration.write', makeDir: true, produce: () => body, onWritten: (ok, e) => { if (!ok) { log('[cli-registration] could not keep data/cli-registration.json:', (e && e.message) || e); } } }); } catch (e) { log('[cli-registration] could not keep data/cli-registration.json:', (e && e.message) || e); }
-  };
+  }
   let hub = null, inFlight = null;
 
   /** a claude version seen (the hub's CLI, or a conversation's drift card) ⇒ {version, registered, said}; says it ONCE per build */
@@ -134,7 +134,7 @@ function create({ dataDir, rootDir, claudeCmd = null, pinned = SCHEMA_CLI_VERSIO
     }).finally(() => { inFlight = null; });
     return inFlight;
   }
-  /** (suites, a restart's read) the state's last save ON DISK — the writer's own answer */
+  /** SUITE-ONLY (a suite's restart reads after it; in production a stop's exit flush carries a pending save): the state's last save ON DISK — the writer's own answer */
   const landed = () => Promise.resolve(writer().durable(stateFile));
   return { note, noteHub: (v) => note(v, 'hub'), status, draft, held: () => hold.held(), stop: () => hold.stop(), landed };
 }

@@ -771,6 +771,34 @@ console.log('⑤ E2 (a cache, never shared) + the door\'s callers');
 }
 
 // ── ⑥ negative controls ───────────────────────────────────────────────────────────────────────────────────────
+console.log('⑤b B-574d (主开发 r4764): the cache through the STORE WRITER — its seam: the file, the bytes, the name, 0600; a failed landing said, the save answers false, the old file whole');
+{
+  const M2 = mutantCopies('agy-models-door-writer', REPO), DSRC2 = read('src/server/cli-models-door.js');
+  const standIn = () => { const seen = []; return { seen, dirty(f, o) { seen.push({ f, name: o && o.name, o }); },
+    durable(f) { const last = [...seen].reverse().find((x) => x.f === f); if (!last) return Promise.resolve(true);
+      try { last.o.onWritten && last.o.onWritten(false, Object.assign(new Error('EIO: the write refused (placed)'), { code: 'EIO' })); } catch { } return Promise.resolve(false); } }; };
+  const writerLeg = async (D, tag) => {
+    const data = path.join(TMP, `data-writer-${tag}`); fs.mkdirSync(data, { recursive: true });
+    const f = path.join(data, 'cli-models.json'), OLD = JSON.stringify({ schema: 1, harnesses: {} }, null, 1) + '\n'; fs.writeFileSync(f, OLD);
+    fs.rmSync(path.join(BIN, 'calls.log'), { force: true }); writeStub(); T = Date.parse('2026-11-10T12:00:00Z'); setMode('rows');
+    const w = standIn(), { door, logs } = makeDoor(D, data, { writer: w }), A = 'agy-aaaaaaaaaaaa';
+    await ASK(door, 'antigravity', A); await door.pending('antigravity', A);
+    const answer = await door._flush();
+    const mine = w.seen.filter((x) => x.f === f), last = mine.length ? JSON.parse(mine[mine.length - 1].o.produce()) : null;
+    return { mine: mine.length, names: [...new Set(mine.map((x) => x.name))].join(), mode: mine.length ? mine[mine.length - 1].o.mode : null,
+      latest: !!(last && last.schema === 1 && last.harnesses && last.harnesses.antigravity && last.harnesses.antigravity[A]), answer,
+      said: logs.filter((l) => /the cache was not written: EIO/.test(l)).length, whole: fs.readFileSync(f, 'utf8') === OLD };
+  };
+  const g = await writerLeg(DOOR, 'real');
+  ok(`the cache's save goes to the writer by name (${g.names}), 0600, its bytes the LATEST state (the listed account's rows); a failed landing: the save answers false (${g.answer}), the failure SAID (${g.said}), the old file stands whole`,
+    g.mine >= 1 && g.names === 'cli-models.write' && g.mode === 0o600 && g.latest && g.answer === false && g.said >= 1 && g.whole, JSON.stringify(g));
+  const FAILW = "        onWritten: (ok, e) => { if (!ok) log(`[cli-models] the cache was not written:";
+  ok('the writer control\'s line exists', DSRC2.includes(FAILW));
+  const noSay = M2.load('src/server/cli-models-door.js', editAnchor(DSRC2, FAILW, "        onWritten: (ok, e) => { if (false) log(`[cli-models] the cache was not written:", "src/server/cli-models-door.js"), 'writer-fail-cut');
+  const r = await writerLeg(noSay, 'red');
+  ok('RED CONTROL: the failure branch taken out — the failed landing is said by nobody', r.said === 0 && r.answer === false, JSON.stringify(r));
+}
+
 console.log('⑥ negative controls (patched copies outside the tree)');
 {
   const M = mutantCopies('agy-models-door', REPO);

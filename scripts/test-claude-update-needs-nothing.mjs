@@ -23,8 +23,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { lit, writeStandIn, neverSeen } from './claude-catalog-stand-in.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 import { trackedFiles } from './tracked-files.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { execFileSync } from 'node:child_process';
@@ -484,6 +485,35 @@ try {
       if (saved.sw === undefined) delete process.env.VS_NO_REAL_CLI; else process.env.VS_NO_REAL_CLI = saved.sw;
       if (saved.key === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = saved.key;
     }
+  }
+  console.log('§W B-574d (主开发 r4764): the ledger through the STORE WRITER — its seam: the file, the bytes, the name; a failed landing said once, the old file whole');
+  {
+    const CAT_FILE = path.join(ROOT, 'src/server/cli-model-catalog.js');
+    // a stand-in writer: it records each hand-over (file, name, producer) and answers every landing as FAILED (a placed EIO)
+    const standIn = () => { const seen = []; return { seen, dirty(f, o) { seen.push({ f, name: o && o.name, o }); },
+      durable(f) { const last = [...seen].reverse().find((x) => x.f === f); if (!last) return Promise.resolve(true);
+        try { last.o.onWritten && last.o.onWritten(false, Object.assign(new Error('EIO: the write refused (placed)'), { code: 'EIO' })); } catch { } return Promise.resolve(false); } }; };
+    const writerLeg = async (Mod, tag) => {
+      const dW = path.join(dir, 'data-writer-' + tag); fs.mkdirSync(dW, { recursive: true });
+      const fileW = path.join(dW, Mod.LEDGER), OLD = JSON.stringify({ schema: 1, current: null, said: [], binaries: {} });
+      fs.writeFileSync(fileW, OLD);
+      const said = [], w = standIn();
+      Mod._reset(); Mod._writer(w); Mod.boot({ dataDir: dW, event: () => { }, log: (l) => said.push(String(l)) });
+      const led = Mod._load(dW);
+      const a1 = await Mod._saveNow(), a2 = await Mod._saveNow();   // a burst of saves, every landing refused
+      const mine = w.seen.filter((x) => x.f === fileW), bytes = mine.map((x) => x.o.produce());
+      const out = { mine: mine.length, names: [...new Set(mine.map((x) => x.name))].join(), latest: bytes.length > 0 && bytes.every((b) => b === JSON.stringify(led)), a1, a2,
+        said: said.filter((l) => /the ledger could not be written \(EIO\)/.test(l)).length, whole: fs.readFileSync(fileW, 'utf8') === OLD };
+      Mod._writer(null); Mod._reset();
+      return out;
+    };
+    const g = await writerLeg(CAT, 'real');
+    ok(g.mine >= 2 && g.names === 'cli-model-catalog.write' && g.latest && g.a1 === false && g.a2 === false && g.said === 1 && g.whole,
+      `the ledger's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), each hands the LATEST state (the bytes equal the ledger in memory: a burst writes the latest), a failed landing answers false and is SAID ONCE (${g.said}), the old file stands whole`, JSON.stringify(g));
+    const RED = mutantCopies('cunn-writer', ROOT).load('src/server/cli-model-catalog.js', anchored(fs.readFileSync(CAT_FILE, 'utf8'),
+      "      onWritten: (ok, e) => { if (ok) { st.saveSaid = false; return; } if (!st.saveSaid) {", "      onWritten: (ok, e) => { if (ok) { st.saveSaid = false; return; } if (false) {", 'catalog-fail-cut'), 'catalog-fail-cut');
+    const r = await writerLeg(RED, 'red');
+    ok(r.said === 0 && r.a1 === false, 'RED CONTROL: the failure branch taken out — the failed landing is said by nobody', JSON.stringify(r));
   }
 } catch (e) { fail++; console.log('  ✗ the drill threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skip} skipped)` : `\nALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);

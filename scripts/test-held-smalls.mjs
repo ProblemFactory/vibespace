@@ -311,7 +311,7 @@ console.log('④ the model catalog\'s ledger');
     Rel._reset();
     const l = Rel._load(w.dir);
     l.binaries[NEW] = entry(); l.current = NEW;
-    Rel._saveNow();
+    await Rel._saveNow();   // B-574d: the save lands off the loop — the file read once it is ON DISK (its own answer)
     REFUSED.delete(w.file);
     const now = JSON.parse(realSync(w.file, 'utf8'));
     Rel._reset();

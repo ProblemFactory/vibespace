@@ -487,7 +487,7 @@ const DELETION_CALLS = Object.freeze({
   // r5185 (hub-loop-stalls): store-hold.js +1 — the direct door's own temp taken out when its write, its sync or its close failed (only the
   // file that write made; the old file stands) — no keep list; r5185's round +2: a RENAME that fails takes its temp out too (both renames)
   'src/server/browser-kept-note.js': 6,
-  'src/server/browser-trace.js': 6, /* row B-360d (r4522) +2: the index rewrite's OWN temp file removed when the rewrite fails, and at the hub's stop — never a store's file */ 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
+  'src/server/browser-trace.js': 6, /* row B-360d (r4522) +2: the index rewrite's OWN temp file removed when the rewrite fails, and at the hub's stop — never a store's file */ 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3,
   'src/server/cli-self-measure.js': 3, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
   // B-574d «browser-stores» 3/8 (lane nl-migrations): engine-distribution.js +1 — the record's temp removed when its write, sync or close failed (its own temp only)
   // B-574d follow 4 (lane nl-migrations, 主开发 r5221): home-rename.js +1 — the synced replace's own temp removed when its final rename fails

@@ -157,7 +157,8 @@ function saveLedger() {
     const b = st.ledger.binaries;
     const keys = Object.keys(b).sort((x, y) => String((b[y] && b[y].readAt) || '').localeCompare(String((b[x] && b[x].readAt) || '')));
     for (const k of keys.slice(KEEP)) if (k !== st.ledger.current) delete b[k];
-    if (fs.existsSync(st.dataDir)) for (const f of fs.readdirSync(st.dataDir)) if (f.startsWith(LEDGER + '.tmp-')) { try { fs.unlinkSync(path.join(st.dataDir, f)); } catch { } } // an older build's kill between write and rename left one
+    // (no sweep of temps here: the store writer's thread removes the ones another process left — `<file>.tmp-<pid>[-w]`, an older
+    // build's too — at its first write of the file, and never its own write in flight; 主开发 r4764: a sweep here could unlink it)
     prune();
     // B-574d (lane lg-text-legs-3): THE STORE WRITER writes it — off the hub's loop, every byte or nothing, synced (src/store-writer.js); the ledger
     // in memory stays the truth, the latest state is written (a burst of saves is one write); a failed write is said once, as before
@@ -399,11 +400,13 @@ function status() {
 }
 /** tests only: forget the in-process state (the ledger file stays — a «restart»; the subscribers are wiring and stay) */
 function _reset() { if (st.dataDir) { try { writer().flushSync([path.join(st.dataDir, LEDGER)]); } catch { } }   // a suite's RESTART: its pending save lands first, as a real stop's exit flush writes it
-  if (st.hold) { st.hold.stop(); st.hold = null; } st.dataDir = null; st.ledger = null; st.key = null; st.reading = null; st.event = null; st.log = null; st.saveSaid = false; st.pricesBy = new Map(); } // the subscribers stay (module wiring)
+  if (st.hold) { st.hold.stop(); st.hold = null; } st.writer = null; st.dataDir = null; st.ledger = null; st.key = null; st.reading = null; st.event = null; st.log = null; st.saveSaid = false; st.pricesBy = new Map(); } // the subscribers stay (module wiring)
 
 /** tests only: the ledger loaded with no reader fed (no apply, no listener) / a save now (prune + write) */
 function _load(dataDir) { return loadLedger(dataDir); }
+/** SUITE-ONLY seams (no route relies on them: a stop's exit flush carries a pending save) */
 function _saveNow() { saveLedger(); return _landed(); }
 /** (suites) the ledger's last save ON DISK: the writer's own answer, never a fixed wait */
+function _writer(w) { st.writer = w || null; }   // (suites) a stand-in writer: it records the file, the bytes, the name
 function _landed() { return st.dataDir ? Promise.resolve(writer().durable(path.join(st.dataDir, LEDGER))) : Promise.resolve(true); }
-module.exports = { boot, noteBinary, readBinary, onView, view, plans, levelSignalOf, status, apply, LEDGER, READ_TIMEOUT_MS, PLAN_SCAN_MAX, LEVEL_SCAN_MAX, _reset, _load, _saveNow, _landed };
+module.exports = { boot, noteBinary, readBinary, onView, view, plans, levelSignalOf, status, apply, LEDGER, READ_TIMEOUT_MS, PLAN_SCAN_MAX, LEVEL_SCAN_MAX, _reset, _load, _saveNow, _landed, _writer };

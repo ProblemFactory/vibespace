@@ -18,6 +18,8 @@
 //   ⑤ the hosted runner's build (B-9ff2): ci.yml's fast job (part 1) runs the --auto road over the runner's own claude file and
 //      keeps the draft as an artifact — never a run, never a gate; CONTROL: no step, or a step that can fail the job, is RED by name
 import './scratch.mjs';
+import { anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -350,6 +352,33 @@ console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s 
         old.status === 0 && old.installed === 'install -g @anthropic-ai/claude-code@', old);
     } finally { try { fs.rmSync(stubAt, { recursive: true, force: true }); } catch { } }
   }
+}
+
+console.log('⑥ B-574d (主开发 r4764): the state through the STORE WRITER — its seam: the file, the bytes, the name; a failed landing said, the old file whole');
+{
+  const REG_FILE = path.join(REPO, 'src/server/cli-registration.js');
+  const standIn = () => { const seen = []; return { seen, dirty(f, o) { seen.push({ f, name: o && o.name, o }); },
+    durable(f) { const last = [...seen].reverse().find((x) => x.f === f); if (!last) return Promise.resolve(true);
+      try { last.o.onWritten && last.o.onWritten(false, Object.assign(new Error('EIO: the write refused (placed)'), { code: 'EIO' })); } catch { } return Promise.resolve(false); } }; };
+  const writerLeg = async (Mod, tag) => {
+    const dW = path.join(tmp, 'data-writer-' + tag); fs.mkdirSync(dW, { recursive: true });
+    const fileW = path.join(dW, 'cli-registration.json'), OLD = JSON.stringify({ v: 1, seen: {} }, null, 1) + '\n';
+    fs.writeFileSync(fileW, OLD);
+    const said = [], w = standIn();
+    const r = Mod.create({ dataDir: dW, rootDir: REPO, pinned: R.SCHEMA_CLI_VERSIONS, log: (...a) => said.push(a.join(' ')), event: () => { }, writer: w });
+    r.note('2.1.501 (Claude Code)', 'hub'); r.note('2.1.501', 'conversation');   // a burst: two changes, two hand-overs
+    const landed = await r.landed();
+    const mine = w.seen.filter((x) => x.f === fileW), last = mine.length ? JSON.parse(mine[mine.length - 1].o.produce()) : null;
+    return { mine: mine.length, names: [...new Set(mine.map((x) => x.name))].join(), latest: !!(last && last.seen && last.seen['2.1.501'] && last.seen['2.1.501'].sources.join() === 'hub,conversation'),
+      landed, said: said.filter((l) => /could not keep data\/cli-registration\.json/.test(l)).length, whole: fs.readFileSync(fileW, 'utf8') === OLD };
+  };
+  const g = await writerLeg(REG, 'real');
+  ok(`the registry's saves go to the writer by name (${g.names}, ${g.mine} hand-overs), the last one the LATEST state (both sources), a failed landing answers false (${g.landed}) and is SAID (${g.said}), the old file stands whole`,
+    g.mine === 2 && g.names === 'cli-registration.write' && g.latest && g.landed === false && g.said === 1 && g.whole, JSON.stringify(g));
+  const RED = mutantCopies('cli-reg-writer', REPO).load('src/server/cli-registration.js', anchored(fs.readFileSync(REG_FILE, 'utf8'),
+    "onWritten: (ok, e) => { if (!ok) { log('[cli-registration] could not keep data/cli-registration.json:'", "onWritten: (ok, e) => { if (false) { log('[cli-registration] could not keep data/cli-registration.json:'", 'reg-fail-cut'), 'reg-fail-cut');
+  const r = await writerLeg(RED, 'red');
+  ok('RED CONTROL: the failure branch taken out — the failed landing is said by nobody', r.said === 0 && r.landed === false, JSON.stringify(r));
 }
 
 console.log(fail ? `\n✗ (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
