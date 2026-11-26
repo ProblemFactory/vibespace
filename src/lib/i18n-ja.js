@@ -7577,7 +7577,7 @@ export default {
   "{n} could not be pinned: {why} — try again.": "{n} 件を固定できませんでした: {why} — もう一度お試しください。",
   "{n} could not be changed: {why} — try again.": "{n} 件を変更できませんでした: {why} — もう一度お試しください。",
   "its record could not be saved": "記録を保存できませんでした",
-  "it ended meanwhile": "その間に終了しました",
+  "{n} ended or left the pool meanwhile — nothing was changed for them.": "{n} 件はその間に終了したかプールを離れました — それらには何も変更していません。",
   "A press on this pool is still running — its answer comes when every conversation is done.": "このプールへの操作はまだ実行中です — すべての会話が終わると結果をお知らせします。",
   "its quota is not back yet": "クォータがまだ戻っていません",
   "it refused them a moment ago": "少し前にこれらの会話を拒否しました",

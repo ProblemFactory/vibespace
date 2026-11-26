@@ -113,6 +113,10 @@ console.log('B-2083 unit B — THE MEMBER ROW\'s ONE PRESS «Move every conversa
   }
   ok(sayOf(M, null, tEn) === '44 move there now.', 'a member that bills nothing past its quota: no money sentence', sayOf(M, null, tEn));
   ok(M.pinAllConfirmWords({ ...P0, now: 1, unread: 2 }, tEn, { poolName: 'Team', memberName: 'Member U' }).message.includes('2 stay: their member could not be read — pin each by itself.'), 'a conversation whose member cannot be read is said apart (r5294 should)');
+  const endedSaid = M.pinAllWords({ ok: true, now: 4, restart: 0, waits: {}, ended: 1, refused: {} }, tEn, { poolName: 'Team', memberName: 'Member U' });
+  ok(endedSaid.type === undefined && endedSaid.text.includes('1 ended or left the pool meanwhile — nothing was changed for them.') && !/try again/.test(endedSaid.text)
+    && M.pinClearWords({ ok: true, cleared: 2, ended: 1, refused: {} }, tZh, { poolName: 'Team', memberName: 'Member U' }).text.includes('1 个在此期间已结束或离开了这个池——没有对它们做任何更改。'),
+    'a conversation that ended (or left the pool) while the press ran is said apart — no «try again», not an error (r5333 should)', endedSaid);
   ok(M.pinAllWords({ ok: false, code: 'press_running', error: 'x' }, tEn).text === 'A press on this pool is still running — its answer comes when every conversation is done.'
     && M.pinClearWords({ ok: false, code: 'press_running', error: 'x' }, tZh).text === '这个池的一次操作仍在进行——所有对话处理完后会给出结果。', 'a second press while one runs: refused in the page\'s words (en, zh)');
   {

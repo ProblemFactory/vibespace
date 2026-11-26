@@ -50,7 +50,8 @@ function world(Mod, { hot = true, readingOf = null } = {}) {
   const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
   const nowS = Math.floor(Date.now() / 1000), wk = nowS + 3 * 86400;
   const reading = (five) => J({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: five, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: wk } });
-  const own = { [A]: reading(0.2), [B]: reading(0.1), [C]: reading(1.0) };
+  // B's record STATES a refusal of overage (the vendor's «rejected»): the one positive fact that it bills nothing past its quota (r5333)
+  const own = { [A]: reading(0.2), [B]: J({ ...JSON.parse(reading(0.1)), overage: { inUse: false, status: 'rejected', asOf: Date.now() } }), [C]: reading(1.0) };
   for (const [id, who] of [[A, 'A'], [B, 'B'], [C, 'C']]) { const txt = readingOf ? readingOf(who, own[id], nowS) : own[id]; if (txt != null) fs.writeFileSync(path.join(cacheDir, id + '.json'), txt); }
   const sessions = new Map(), notices = [];
   const eng = Mod.create({
@@ -96,7 +97,7 @@ else {
   const facts0 = w1.poolFacts(), nPlan = w1.notices.length;
   const plan = quiet(() => w1.eng.pinAllPlan(w1.P, w1.B));
   ok(plan.ok === true && counts(plan) === J({ now: 3, restart: 1, waits: {}, here: 1, provider: 0, remote: 1, unread: 0, elsewhere: 1 }) && plan.pays === null,
-    'THE PLAN (nothing written): 3 move now (warm, running, re-pinned), 1 at its next restart (a follower), 1 already here, 1 on another machine, 1 of them pinned elsewhere; B bills nothing past its quota (pays null)', plan);
+    'THE PLAN (nothing written): 3 move now (warm, running, re-pinned), 1 at its next restart (a follower), 1 already here, 1 on another machine, 1 of them pinned elsewhere; B bills nothing past its quota — its record states overage refused (pays null)', plan);
   ok(['s-warm', 's-run', 's-follower', 's-else'].every((sid) => w1.recOf(sid) === null) && w1.notices.length === nPlan, 'the plan wrote nothing and said nothing', w1.notices.slice(nPlan));
   const n0 = w1.notices.length;
   const r = await quietA(() => w1.eng.pinAll(w1.P, w1.B, { by: 'user' }));
@@ -165,14 +166,23 @@ console.log('§8 THE MONEY, SAID BEFORE THE ACT (r5294 MUST 1) — the target me
   const inUse = (who, txt, nowS) => (who !== 'B' ? txt : J({ ...JSON.parse(txt), overage: { inUse: true, asOf: Date.now(), resetsAt: nowS + 86400 } }));
   const credits = (who, txt) => (who !== 'B' ? txt : J({ ...JSON.parse(txt), overage: { inUse: false, status: 'allowed', asOf: Date.now() } }));
   const none = (who, txt) => (who !== 'B' ? txt : null);
-  for (const [state, readingOf] of [['overage', inUse], ['credits', credits], ['unknown', none]]) {
+  // r5333: a reading that SAYS NOTHING of overage is ignorance, never «bills nothing» — no record at all; in use false with no
+  // status (the measured shape of the 14 h credits incident: the vendor leaves the status out of about a third of its events)
+  const noRecord = (who, txt) => (who !== 'B' ? txt : J((({ overage, ...rest }) => rest)(JSON.parse(txt))));
+  const silent = (who, txt) => (who !== 'B' ? txt : J({ ...JSON.parse(txt), overage: { inUse: false, asOf: Date.now() } }));
+  const STATES = [['overage', inUse, 'paid overage in use now'], ['credits', credits, 'usage credits past its quota'], ['unknown', none, 'not known yet: no reading'],
+    ['unknown', noRecord, 'not known yet: a reading with no overage record'], ['unknown', silent, 'not known yet: in use false and no status — the 14 h shape']];
+  for (const [state, readingOf, said] of STATES) {
     const w = world(engMod, { readingOf }); if (!w) break;
     w.mk('m-1'); w.mk('m-2', { agoMs: 30e3 });
     const plan = quiet(() => w.eng.pinAllPlan(w.P, w.B));
     const r = await quietA(() => w.eng.pinAll(w.P, w.B, { by: 'user' }));
     ok(plan.ok === true && plan.pays === state && plan.now === 2 && r.ok === true && r.pays === state && r.now === 2 && ['m-1', 'm-2'].every((sid) => (w.sessions.get(sid)._poolPin || {}).memberId === w.B),
-      `«${state}»: the plan says B's paying state (${state === 'overage' ? 'paid overage in use now' : state === 'credits' ? 'usage credits past its quota' : 'not known yet: no reading'}) — and the press still pins (the person may)`, { plan: { pays: plan.pays, now: plan.now }, press: { pays: r.pays, now: r.now } });
+      `«${state}»: the plan says B's paying state (${said}) — and the press still pins (the person may)`, { plan: { pays: plan.pays, now: plan.now }, press: { pays: r.pays, now: r.now } });
   }
+  const OLD = copyOf('silence-is-none', "  return mode === 'disabled' ? null : 'unknown';\n", "  return null;\n");
+  const mo = world(OLD, { readingOf: silent });
+  if (mo) { mo.mk('m-1'); ok(quiet(() => mo.eng.pinAllPlan(mo.P, mo.B)).pays === null, 'RED: the old rule (a reading that says nothing of overage read as «bills nothing») — the 14 h shape\'s plan is silent'); }
   const PAYS = copyOf('pays-blind', "  const out = { ok: true, member: memberId, pays: pinAllPaysOf(memberId), ...pinAllTally() };\n  for (const [sid, s] of activeSessions) {",
     "  const out = { ok: true, member: memberId, pays: null, ...pinAllTally() };\n  for (const [sid, s] of activeSessions) {");
   const mp = world(PAYS, { readingOf: credits });
@@ -246,12 +256,17 @@ console.log('§10 THE LOOP\'s LAW (r5294 MUST 3) — one pin a turn of the loop;
   if (w) {
     for (const sid of SIDS) w.mk(sid);
     const first = quietA(() => w.eng.pinAll(w.P, w.B, { by: 'user' }));
+    w.sessions.delete('l-5');   // it ends while the press runs (the press took its list at the start)
     const second = await quietA(() => w.eng.pinAll(w.P, w.C, { by: 'user' }));
     const clear = await quietA(() => w.eng.clearPinsTo(w.P, w.B, { by: 'user' }));
     const done = await first;
-    const after = await quietA(() => w.eng.clearPinsTo(w.P, w.B, { by: 'user' }));
-    ok(second.ok === false && second.code === 'press_running' && second.status === 409 && clear.ok === false && clear.code === 'press_running' && done.ok === true && done.now === SIDS.length && after.ok === true && after.cleared === SIDS.length,
-      'a second press (and a «Back to automatic») while one runs is refused by name (press_running, 409); the first answers when all are done; then the clear runs', { second: second.code, clear: clear.code, first: done.now, after: after.cleared });
+    const afterP = quietA(() => w.eng.clearPinsTo(w.P, w.B, { by: 'user' }));
+    quiet(() => w.eng.setConversationPin('l-3', w.C, { by: 'user' }));   // another page pins l-3 to C while «Back to automatic» runs
+    const after = await afterP;
+    ok(second.ok === false && second.code === 'press_running' && second.status === 409 && clear.ok === false && clear.code === 'press_running' && done.ok === true && done.now === SIDS.length - 1 && done.ended === 1 && Object.keys(done.refused).length === 0,
+      'a second press (and a «Back to automatic») while one runs is refused by name (press_running, 409); the first answers when all are done — the one that ended meanwhile counted apart (ended 1), never a refusal', { second: second.code, clear: clear.code, first: { now: done.now, ended: done.ended, refused: done.refused } });
+    ok(after.ok === true && after.cleared === SIDS.length - 2 && (w.sessions.get('l-3')._poolPin || {}).memberId === w.C,
+      '«Back to automatic» reads each pin AFTER its turn of the loop: the pin another page made to C meanwhile is the person\'s newest act and stays (r5333)', { cleared: after.cleared, l3: (w.sessions.get('l-3')._poolPin || {}).memberId === w.C });
   }
 }
 

@@ -8953,16 +8953,20 @@ function pinAllRoadOf(poolId, a, sid, s, memberId, now) {
   const hotNow = !!a.hot && caps.hotSwitch === 'verified' && !!caps.planC && hasOwnPoolLink(poolId, sid);
   return { kind: hotNow || onNow === memberId ? 'now' : 'restart', elsewhere };
 }
-const pinAllTally = () => ({ now: 0, restart: 0, waits: {}, here: 0, provider: 0, remote: 0, unread: 0, elsewhere: 0, refused: {} });
+const pinAllTally = () => ({ now: 0, restart: 0, waits: {}, here: 0, provider: 0, remote: 0, unread: 0, elsewhere: 0, ended: 0, refused: {} });
 /** r5294 MUST 1 — THE MONEY, SAID BEFORE THE ACT: the target member's paying facts, read by the readers the writer hands the pin's
  *  verdict (payingIds = overageInUseIds, creditsIds = creditsMemberIds), on the target itself → 'overage' (paid overage in use now) ·
- *  'credits' (its org bills usage credits past the quota) · 'unknown' (no reading yet: a pin then serves) · null (none of them) */
+ *  'credits' (its org bills usage credits past the quota) · null ONLY on a positive fact: the vendor stated overage is refused for it
+ *  (overageState mode 'disabled') · 'unknown' for every other state — no reading yet, or a reading that says nothing of overage
+ *  (no record; in use false with no status; an undated claim): ignorance is never «bills nothing» (r5333 — the 14 h credits shape) */
 function pinAllPaysOf(memberId) {
   const one = [{ id: memberId }];
   if ((overageInUseIds(one) || new Set()).has(memberId)) return 'overage';
   if ((creditsMemberIds(one) || new Set()).has(memberId)) return 'credits';
   let raw = null; try { raw = readRawUsageCache(memberId); } catch { raw = null; }
-  return raw ? null : 'unknown';
+  if (!raw) return 'unknown';
+  let mode = 'unknown'; try { mode = overageState(raw).mode; } catch { mode = 'unknown'; }
+  return mode === 'disabled' ? null : 'unknown';
 }
 // r5294 MUST 3 — THE LOOP'S LAW: each pin is a synchronous record on data/ (the person's own act: it stays synchronous), so a press
 // gives the loop back between conversations — ONE pin a turn of the loop, the answer when all are done — and a second press on the
@@ -9004,7 +9008,7 @@ async function pinAll(poolId, memberId, { by = 'user', now = Date.now() } = {}) 
       if (i) await pinAllLoopTurn();
       const [sid, was] = list[i];
       const s = activeSessions.get(sid);
-      if (!s || s !== was || s._accountId !== poolId) { out.refused.ended = (out.refused.ended || 0) + 1; continue; }   // it ended (or moved) while the press ran
+      if (!s || s !== was || s._accountId !== poolId) { out.ended++; continue; }   // it ended (or left the pool) while the press ran: said apart, nothing to retry (r5333)
       const road = pinAllRoadOf(poolId, a, sid, s, memberId, now);
       if (road.kind === 'here' || road.kind === 'provider' || road.kind === 'remote' || road.kind === 'unread') { out[road.kind]++; continue; }
       const r = setConversationPin(sid, memberId, { by, now, quiet: true });
@@ -9012,7 +9016,7 @@ async function pinAll(poolId, memberId, { by = 'user', now = Date.now() } = {}) 
       pinned++;
       if (road.elsewhere) out.elsewhere++;
       if (road.kind === 'waits') out.waits[road.why] = (out.waits[road.why] || 0) + 1;
-      else if (road.kind === 'now' && !r.placed) { const w = r.reason || 'pin-member-unknown'; out.waits[w] = (out.waits[w] || 0) + 1; }   // the writer could not place it now: it waits, by the writer's own why
+      else if (road.kind === 'now' && !r.placed) { if (r.reason === 'applies-at-restart') out.restart++; else { const w = r.reason || 'pin-member-unknown'; out.waits[w] = (out.waits[w] || 0) + 1; } }   // the writer could not place it now: at the restart (its cold road, r5333), or it waits by the writer's own why
       else out[road.kind]++;
     }
     if (pinned) {
@@ -9031,16 +9035,17 @@ async function clearPinsTo(poolId, memberId, { by = 'user', now = Date.now() } =
   _pinAllRunning.add(poolId);
   try {
     const a = accounts.get(poolId);
-    let cleared = 0; const refused = {};
+    let cleared = 0, ended = 0; const refused = {};
     const list = [...activeSessions].filter(([, x]) => x && x._accountId === poolId);
     let turns = 0;
     for (const [sid, was] of list) {
       const s = activeSessions.get(sid);
-      if (!s || s !== was || s._accountId !== poolId) continue;
+      if (!s || s !== was || s._accountId !== poolId || !poolPinOf(s, poolId)) continue;   // nothing pinned: nothing to clear, no turn spent
+      if (turns++) await pinAllLoopTurn();
+      if (activeSessions.get(sid) !== s || s._accountId !== poolId) { ended++; continue; }
+      // r5333 (should): the pin read AFTER the turn — one another page made meanwhile is the person's newest act, never cleared here
       const pin = poolPinOf(s, poolId);
       if (!pin || pin.memberId !== memberId) continue;
-      if (turns++) await pinAllLoopTurn();
-      if (activeSessions.get(sid) !== s) { refused.ended = (refused.ended || 0) + 1; continue; }
       const r = setConversationPin(sid, null, { by, now, quiet: true });
       if (r && r.ok) cleared++; else { const c = (r && r.code) || 'refused'; refused[c] = (refused[c] || 0) + 1; }
     }
@@ -9048,7 +9053,7 @@ async function clearPinsTo(poolId, memberId, { by = 'user', now = Date.now() } =
       const params = { pool: a.name || poolId, n: cleared, member: nameOf(memberId) };
       serverNotice(`pool-pin-clear-${poolId}-${memberId}-${now}`, `Pool "${params.pool}": ${cleared} conversation(s) pinned to ${params.member} are placed automatically again.`, { level: 1, i18n: { key: PIN_ALL_KEYS.cleared, params } });
     }
-    return { ok: true, member: memberId, cleared, refused };
+    return { ok: true, member: memberId, cleared, ended, refused };
   } finally { _pinAllRunning.delete(poolId); }
 }
 // ── THE OWNER'S DECISION (2026-09-28, "全B"): A REMOVED MEMBER WITH NOBODY TO TAKE OVER STOPS AND WAITS ──

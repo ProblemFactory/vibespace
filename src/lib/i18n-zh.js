@@ -7578,7 +7578,7 @@ export default {
   "{n} could not be pinned: {why} — try again.": "{n} 个未能固定：{why}——请重试。",
   "{n} could not be changed: {why} — try again.": "{n} 个未能更改：{why}——请重试。",
   "its record could not be saved": "它的记录无法保存",
-  "it ended meanwhile": "它在此期间已结束",
+  "{n} ended or left the pool meanwhile — nothing was changed for them.": "{n} 个在此期间已结束或离开了这个池——没有对它们做任何更改。",
   "A press on this pool is still running — its answer comes when every conversation is done.": "这个池的一次操作仍在进行——所有对话处理完后会给出结果。",
   "its quota is not back yet": "额度还没有恢复",
   "it refused them a moment ago": "它刚刚拒绝了这些对话",

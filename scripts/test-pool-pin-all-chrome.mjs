@@ -220,8 +220,8 @@ try {
   await waitFor(`!!(${DLG(W.title('Member B'))})`);
   const cB = await confirmOf(W.title('Member B'));
   await shot('3-confirm-b-en.png');
-  ok(!!cB && cB.shown === true && cB.hint.includes('5 move there now.') && cB.hint.includes('1 of them were pinned to another member — «Back to automatic» will not bring that pin back.') && cB.hint.includes('1 already pinned here.') && cB.ok === 'Pin them here',
-    '§3 the confirm: 5 move there now · 1 was pinned to another member (said apart) · 1 already here; its button «Pin them here»', cB);
+  ok(!!cB && cB.shown === true && cB.hint.startsWith('It is not known yet whether Member B bills past its quota — these conversations may be billed there.') && cB.hint.includes('5 move there now.') && cB.hint.includes('1 of them were pinned to another member — «Back to automatic» will not bring that pin back.') && cB.hint.includes('1 already pinned here.') && cB.ok === 'Pin them here',
+    '§3 the confirm: the money FIRST (B\'s reading says nothing of overage: not known yet) · 5 move there now · 1 was pinned to another member (said apart) · 1 already here; its button «Pin them here»', cB);
   await clickEl(`(${DLG(W.title('Member B'))}).querySelector('.btn-create')`, 'Pin them here');
   const toast3 = await waitToast('5 conversation(s) of “Team” pinned to Member B.');
   await shot('3-pinned-b-en.png');
