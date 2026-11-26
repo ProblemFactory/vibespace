@@ -1168,7 +1168,7 @@ await section('⑧ folder made', async () => {
   // answer is held until after the door ran): answered to its asker, never KEPT — the next ask at the same placed instant asks the disk
   // again and names the folder. RED: the collector without that guard (its landing keeps the rows of before)
   const FLY = path.join(HOME, 'work', 'made-in-flight'); fs.mkdirSync(FLY, { recursive: true });
-  const NOGUARD = withDC(DS, mutantCopies('dir-complete-folder-made-guard', REPO).load('src/dir-collect.js', anchored(read('src/dir-collect.js'), "        if ((madeGen.get(a) || 0) !== g0) return d;", '        if (false) return d;', 'test-dir-complete ⑧ a listing out at the door is kept'), 'no-guard'));
+  const NOGUARD = withDC(DS, mutantCopies('dir-complete-folder-made-guard', REPO).load('src/dir-collect.js', anchored(read('src/dir-collect.js'), "        const moved = (madeGen.get(a) || 0) !== g0;", '        const moved = false;', 'test-dir-complete ⑧ a listing out at the door is kept'), 'no-guard'));
   const flight = async (D2, name) => {
     let gateOpen = null, readNow = null; const gate = new Promise((r) => { gateOpen = r; }), read0 = new Promise((r) => { readNow = r; });
     let hold = true, sentFly = 0;
@@ -1192,6 +1192,67 @@ await section('⑧ folder made', async () => {
     fr.sent === 2 && fr.again.includes('made-while-out'), fr);
   ok(`⑧ RED CONTROL (no guard at the landing): the old call's rows are kept — the next ask answered from them (${frRed.sent} call), the folder missing`,
     frRed.sent === 1 && !frRed.again.includes('made-while-out-red'), frRed);
+  // r5046 (the round's should): NO LATER ASK JOINS a listing begun before the door — an ask made after it, while the old call is still
+  // out (held), gets the NEW rows from a call of its own. RED: the door without that rule (the old call stays joinable)
+  const NOJOIN = withDC(DS, mutantCopies('dir-complete-folder-made-join', REPO).load('src/dir-collect.js', anchored(read('src/dir-collect.js'), "      for (const k of [`list::${d}`, `list:f:${d}`]) { const e = sent.get(k); if (e && e.hungAt == null) sent.delete(k); }", '      // (the door: an old listing stays joinable)', 'test-dir-complete ⑧ a later ask joins the old listing'), 'no-join-rule'));
+  const joinFlight = async (D2, name) => {
+    const JF = path.join(HOME, 'work', `made-join-${name}`); fs.mkdirSync(JF, { recursive: true });
+    let gateOpen = null, readNow = null; const gate = new Promise((r) => { gateOpen = r; }), read0 = new Promise((r) => { readNow = r; });
+    let hold = true, sentJ = 0;
+    const d = D2.create({ home: HOME, repoDir: REPO, now: () => 4.5e12, call: async (op, p2) => {
+      const mine = op === 'dirSlice' && (p2.dirs || []).some((x) => x.path === JF);
+      if (mine) sentJ++;
+      const r = (await runOp(op, p2)).result;
+      if (mine && hold) { hold = false; readNow(); await gate; }
+      return r;
+    } });
+    const text = `~/work/made-join-${name}/`, kidsOf = (r) => (((r && r.listing && r.listing.dirs) || {})[`~/work/made-join-${name}`] || {}).kids || [];
+    const p1 = d.slice({ text, bases: [] });
+    await read0;
+    const old = d._caches.sent.get('list::' + JF);   // the held listing's own entry
+    fs.mkdirSync(path.join(JF, 'kid')); d.folderMade(path.join(JF, 'kid'));
+    const sig = new AbortController().signal;
+    const p2 = d.slice({ text, bases: [], signal: sig, budgetMs: 5000 });   // AFTER the door, the old call still out (a budget past the wait)
+    // the gate opens once the later ask has JOINED the old listing (a fact: its ask on the old call's list) — opened at once, the later
+    // ask came after the old call had ended and could join nothing; its OWN call waits for the old one's slot, so it is not waited for
+    // (bounded: 300 ms — the red's join shows within milliseconds)
+    const joined = () => !!(old && old.ask && old.ask.asks.some((a) => a.signal === sig));
+    const tw = Date.now(); while (!(sentJ >= 2 || joined()) && Date.now() - tw < 300) await new Promise((r) => setImmediate(r));
+    const reached = sentJ >= 2 ? 'its own call' : joined() ? 'joined the old call' : 'did not join it';
+    gateOpen(); await p1;
+    return { later: kidsOf(await p2), sent: sentJ, reached };
+  };
+  const jn = await joinFlight(DS, 'real'), jnRed = await joinFlight(NOJOIN, 'red');
+  ok(`⑧ r5046: an ask made after the door while the old listing was still out sent a call of its own (${jn.sent} calls) and got the new rows (${jn.later.join(' ')})`, jn.sent === 2 && jn.later.includes('kid'), jn);
+  ok(`⑧ RED CONTROL (the door without the join rule): the later ask ${jnRed.reached} (${jnRed.sent} call) — the rows of before (${jnRed.later.join(' ') || 'none'})`, jnRed.reached === 'joined the old call' && jnRed.sent === 1 && !jnRed.later.includes('kid'), jnRed);
+  // r5046 (THE ROUND's MUST): the HOME's listing out with its mtime KNOWN comes back «same» (no kids), and a folder made two levels
+  // under the home moves the home's count, not its mtime: the kept entry's kids are the answer — the own-checkout exclusion never
+  // shrinks. RED: the line's order (the guard before «same»: the answer handed on with NO kids, the exclusion kept a minute short)
+  const LINEORDER = withDC(DS, mutantCopies('dir-complete-folder-made-same', REPO).load('src/dir-collect.js', anchored(read('src/dir-collect.js'), "        if (d.same) { if (!base) return null; if (!moved) listCache.set(a, { at: now(), entry: base.entry }); return base.entry; }\n        if (moved) return d;\n", "        if (moved) return d;\n        if (d.same) { if (!base) return null; if (!moved) listCache.set(a, { at: now(), entry: base.entry }); return base.entry; }\n", 'test-dir-complete ⑧ the line\'s order: the guard before «same»'), 'line-order'));
+  const homeFlight = async (D2, name) => {
+    let ck = 5e12, gateOpen = null, readNow = null, hold = false;
+    const gate = new Promise((r) => { gateOpen = r; }), read0 = new Promise((r) => { readNow = r; });
+    const d = D2.create({ home: HOME, repoDir: REPO, now: () => ck, call: async (op, p2) => {
+      const mine = op === 'dirSlice' && (p2.dirs || []).some((x) => x.path === HOME);
+      const r = (await runOp(op, p2)).result;
+      if (mine && hold) { hold = false; readNow(!!((((r && r.dirs) || [])[0]) || {}).same); await gate; }
+      return r;
+    } });
+    const old = Math.floor(Date.now() / 1000) - 3600; fs.utimesSync(HOME, old, old);   // the home's mtime well behind: never a racy listing
+    const own = path.join(HOME, 'vibespace');
+    const before = await d.selfWhole(5000);
+    ck += 61e3;   // past the exclusion's minute (and the listing's 2 s): the next self() lists the home again, its mtime known
+    hold = true;
+    const p1 = d.self();
+    const same = await read0;
+    fs.mkdirSync(path.join(HOME, 'work', name)); d.folderMade(path.join(HOME, 'work', name));   // two levels under: the home's mtime holds
+    gateOpen();
+    const after = await p1;
+    return { same, before: ((before && before.v && before.v.roots) || []).includes(own), after: ((after && after.roots) || []).includes(own) };
+  };
+  const hs = await homeFlight(DS, 'made-deep'), hsRed = await homeFlight(LINEORDER, 'made-deep-red');
+  ok(`⑧ r5046 (the must): the HOME's listing out with its mtime known answered «same» (${hs.same}) while a folder was made two levels under it — the kept entry's kids are the answer, the own-checkout exclusion HOLDS (before ${hs.before}, after ${hs.after})`, hs.same && hs.before && hs.after, hs);
+  ok(`⑧ RED CONTROL (the line's order: the guard before «same»): the answer handed on with NO kids — the exclusion SHRINKS (after ${hsRed.after})`, hsRed.same && hsRed.before && !hsRed.after, hsRed);
 });
 
 CUR = 'the table';   // r2332 (2): every row of the table met ONE section call, none off it, no leg outside a section
