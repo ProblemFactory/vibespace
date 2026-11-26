@@ -153,7 +153,7 @@ ok(/app\.post\('\/api\/held-lists\/read-again', async \(req, res\) => \{\n {2}if
 // r3212 MUST 2 + small: EVERY bridged row hands a lift signal, and every name it asks is a method its production object carries
 const OLDER = (() => { const i = WIRE.indexOf('  older: ['), j = WIRE.indexOf('\n  ],\n});', i); return i < 0 || j < 0 ? [] : WIRE.slice(i, j).split(/\n    \{ key: '/).slice(1).map((b) => ({ key: b.slice(0, b.indexOf("'")), body: b })); })();
 const liftless = (rows) => rows.filter((r) => !/\bonLift: \(fn(?:, again)?\) =>/.test(r.body)).map((r) => r.key);
-ok(OLDER.length === 2 && liftless(OLDER).length === 0,   // 2b: the paired machines are on the helper (no bridged row)
+ok(OLDER.length === 3 && liftless(OLDER).length === 0,   // 2b: the paired machines are on the helper (no bridged row); B-574d (主开发 r5143): + the auto-cli pacing state's row (lazy, facts and one lift)
    `every bridged row (${OLDER.map((r) => r.key).join(', ')}) hands a lift signal`, liftless(OLDER));
 ok(liftless([...OLDER, { key: 'frobs', body: "frobs', facts: () => null, readAgain: () => frobs.readAgain() }" }]).includes('frobs'), 'CONTROL: a bridged row without a lift signal is RED by name');
 const METHODS = { 'user-todos': ['src/user-todos.js', ['unreadState', 'readAgain', 'whenRead']], 'task-groups': ['src/task-groups.js', ['unreadState', 'readAgain', 'onLift']] };   // 2b: hosts — on the helper, listed by its own row
