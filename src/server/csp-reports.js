@@ -174,8 +174,8 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
       // THE LINES FIRST — each file read, rewritten and renamed in one synchronous step (no append falls between); a line
       // is re-judged once its file is renamed. B-574d (lane nl-journals): its temp written, SYNCED, closed, THEN renamed (src/fd-close.js
       // renameSynced) — a power cut never leaves the name over no bytes after the notice it filed was closed; a sync that fails is a
-      // failed rewrite (the temp removed, the old lines stand, the notice stays — the next boot tries again). r4828: NO TEMP LEFT on any
-      // road (the door keeps its temp on a failed rename: removed here). THE BOUND of this synchronous rewrite on the loop: ONCE A
+      // failed rewrite (the temp removed, the old lines stand, the notice stays — the next boot tries again). No temp is left on any
+      // road (the door removes it, r4938). THE BOUND of this synchronous rewrite on the loop: ONCE A
       // PROCESS (`rejudging` is set once and never reset), over at most two files (the lines and their .1), only on a hub that met the bug
       const raws = new Set(hits.map((h) => h.raw)), landed = new Set(), at = new Date(now()).toISOString();
       for (const f of [rotated, file]) {
@@ -183,7 +183,7 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
         if (t == null) continue;
         const was = t.split('\n'), out = was.map((l) => { if (!raws.has(l)) return l; const { noticed: _n, ...r } = JSON.parse(l); return JSON.stringify({ ...r, kind: C.KIND_SANITIZER, rejudged: at }); });
         if (out.every((l, i) => l === was[i])) continue;
-        try { FC.renameSynced(f + '.rejudge', f, out.join('\n'), { mode: 0o600, where: '[csp] the re-judged report lines', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; log.warn?.(w); } } }); for (const l of was) if (raws.has(l)) landed.add(l); } catch (e) { try { fs.unlinkSync(f + '.rejudge'); } catch { /* the door removed it, or it was never made */ } log.warn?.(`[csp] data/${FILE} was not re-judged — ${e && e.code || e && e.message} (its notice stays; the next boot tries again)`); }
+        try { FC.renameSynced(f + '.rejudge', f, out.join('\n'), { mode: 0o600, where: '[csp] the re-judged report lines', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; log.warn?.(w); } } }); for (const l of was) if (raws.has(l)) landed.add(l); } catch (e) { log.warn?.(`[csp] data/${FILE} was not re-judged — ${e && e.code || e && e.message} (its notice stays; the next boot tries again)`); }
       }
       load();
       const done = hits.filter((h) => landed.has(h.raw));

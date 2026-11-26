@@ -77,7 +77,7 @@ const rowOk = (r) => !!r && r.type === 'system' && r.subtype === 'session_writes
 function writeAtomic(file, text, say = null) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.tmp';
-  try { FC.renameSynced(tmp, file, text, { where: '[writes-lost] the kept warnings', say }); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; }
+  FC.renameSynced(tmp, file, text, { where: '[writes-lost] the kept warnings', say });   // the door removes its temp on every failed road (r4938) and throws
 }
 /** B-574d (主开发 r4761, the third shape): THE RECORD'S OWN WRITE, OFF THE LOOP — its temp (never the exit's) opened, written, SYNCED,
  *  closed, then renamed, each step on the promises road. The door's laws: a sync, a close or a rename that fails is a FAILED WRITE —

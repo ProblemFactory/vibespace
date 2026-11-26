@@ -597,6 +597,15 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
     const g = fresh(D6, 'full.json'), ws0 = fs.writeSync; let threw = null; fs.writeSync = () => { throw errOf('ENOSPC'); };
     try { FCm.renameSynced(g + '.tmp', g, 'x', { where: 'full' }); } catch (e) { threw = e.code; } finally { fs.writeSync = ws0; }
     ok(!r.threw && r.asked.length === 1 && !s.length && fs.readFileSync(f, 'utf8') === 'xyz' && threw === 'ENOSPC' && fs.readFileSync(g, 'utf8') === OLD && !fs.existsSync(g + '.tmp'), '⑥ renameSynced: a healthy sync asked ONCE, nothing said, landed; a failed WRITE throws, the old record stands, the temp gone', { asked: r.asked, said: s, threw }); }
+  // (d) r4938 — THE FINAL RENAME REFUSED (a placed EXDEV / EIO on the temp's rename): a failed write too — the rename's OWN error reaches
+  // the caller, the temp removed, the old record byte for byte. RED: the door's line as it was (a bare renameSync) — the temp left behind
+  const renameRefused = (mod, f, code) => { const rn = fs.renameSync; fs.renameSync = function (a, b, ...x) { if (String(a) === f + '.tmp') throw errOf(code); return rn.call(this, a, b, ...x); };
+    try { let threw = null; try { mod.renameSynced(f + '.tmp', f, 'new bytes', { where: 'a stand-in record' }); } catch (e) { threw = (e && e.code) || String(e); } return { threw, file: fs.readFileSync(f, 'utf8'), tmpLeft: fs.existsSync(f + '.tmp') }; } finally { fs.renameSync = rn; } };
+  const rr = {}; for (const code of ['EXDEV', 'EIO']) rr[code] = renameRefused(FCm, fresh(D6, `r-${code}.json`), code);
+  ok(Object.entries(rr).every(([code, x]) => x.threw === code && x.file === OLD && !x.tmpLeft), '⑥ r4938 renameSynced: a RENAME that fails (EXDEV, EIO) is a FAILED WRITE — the rename\'s own error thrown to the caller, the temp REMOVED, the old record byte for byte', rr);
+  { const FCr = mutantCopies('fdc-rename-temp', REPO).load('src/fd-close.js', anchored(fs.readFileSync(path.join(REPO, 'src/fd-close.js'), 'utf8'), '  try { fs.renameSync(tmp, final); } catch (e) { try { fs.unlinkSync(tmp); } catch { /* gone already */ } throw e; }\n', '  fs.renameSync(tmp, final);\n', 'the door as it was'), 'rename-temp-kept');   // stale-pins: kept (the door's line as it was — this red control's own text)
+    const red = renameRefused(FCr, fresh(D6, 'r-red.json'), 'EIO');
+    ok(red.threw === 'EIO' && red.tmpLeft === true, 'RED ⑥ r4938: the door\'s line as it was (a bare renameSync) — a refused rename leaves its temp behind', red); }
   // ONE SPELLING: each wrapper's fallback, built from its own text
   const FB6 = /const renameSynced = FC && FC\.renameSynced \? FC\.renameSynced : (\(tmp, final, bytes, \{ mode, where, say(?:, sync = true)? \} = \{\}\) => \{[^\n]*\});/;   // r4563: the sync a named choice (bf8355a8a's form had none)
   const fbOf = (text) => { const m = FB6.exec(text || ''); return m ? new Function('fs', 'closeWritten', `return ${m[1]};`)(fs, FCm.closeWritten) : null; };   // eslint-disable-line no-new-func
@@ -607,9 +616,10 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
     const g = fresh(D6, `s-${path.basename(f)}.json`), n = fresh(D6, `s2-${path.basename(f)}.json`), s = [];
     const a = placed6(() => fb(g + '.tmp', g, 'new bytes', { where: 'a stand-in record', say: (l) => s.push(l) }), { sync: 'EIO' });
     const b = placed6(() => fb(n + '.tmp', n, 'new bytes', { where: 'a stand-in record', say: (l) => s.push(l) }), { sync: 'EINVAL' });
-    spell6[f] = a.threw === 'EIO' && fs.readFileSync(g, 'utf8') === OLD && !fs.existsSync(g + '.tmp') && !b.threw && fs.readFileSync(n, 'utf8') === 'new bytes' && J(s) === J([FCm.syncUnsupportedWords('a stand-in record', 'EINVAL')]) ? 'same' : J({ a: a.threw, b: b.threw, said: s });
+    const c = renameRefused({ renameSynced: fb }, fresh(D6, `s3-${path.basename(f)}.json`), 'EIO');   // r4938: a refused rename — the error thrown, the temp removed, the old record whole, as the door
+    spell6[f] = a.threw === 'EIO' && fs.readFileSync(g, 'utf8') === OLD && !fs.existsSync(g + '.tmp') && !b.threw && fs.readFileSync(n, 'utf8') === 'new bytes' && J(s) === J([FCm.syncUnsupportedWords('a stand-in record', 'EINVAL')]) && c.threw === 'EIO' && c.file === OLD && !c.tmpLeft ? 'same' : J({ a: a.threw, b: b.threw, c, said: s });
   }
-  ok(Object.values(spell6).length === 5 && Object.values(spell6).every((v) => v === 'same'), '⑥ ONE SPELLING: the five wrappers\' fallbacks (job, chat, codex, acp, agy), built from their own text — a failed sync a failed write (the old record stands), a sync not done said in the helper\'s EXACT words and landed', spell6);
+  ok(Object.values(spell6).length === 5 && Object.values(spell6).every((v) => v === 'same'), '⑥ ONE SPELLING: the five wrappers\' fallbacks (job, chat, codex, acp, agy), built from their own text — a failed sync a failed write (the old record stands), a sync not done said in the helper\'s EXACT words and landed, a refused rename thrown with its temp removed (r4938)', spell6);
   // EACH RECORD, from its wrapper's own code, over a GOOD OLDER record: its sync FAILED (EIO) — the old record byte for byte, the temps gone,
   // the caller's OWN road taken (as a failed writeFileSync was at the release); a sync NOT DONE (EINVAL) — said once in that wrapper's sink,
   // landed. RED: bf8355a8a's spelling (in a copy) — the failed sync said, the temp renamed over the good record anyway

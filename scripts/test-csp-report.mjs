@@ -555,7 +555,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       ok(Object.keys(was[0]).join() === 'at,directive,blocked,source,line,column,document,disposition,noticed', 'the old judge\'s line has the fields 2.369.361\'s shipped sink wrote, in its order (r3: measured on 5055b9ad6\'s own sink + store)', Object.keys(was[0]));
       store.stop(); // its debounced write flushed: what a hub on .361 left in data/
       const homes = {};
-      for (const n of ['mutant', 'null', 'throw', 'mutnull', 'stuck', 'synced', 'syncfail', 'nosync', 'release', 'renfail', 'renkept', 'bound', 'boundfail', 'boundred']) { homes[n] = path.join(ROOT, 'upgrade-' + n); fs.cpSync(UH, homes[n], { recursive: true }); }
+      for (const n of ['mutant', 'null', 'throw', 'mutnull', 'stuck', 'synced', 'syncfail', 'nosync', 'release', 'renfail', 'bound', 'boundfail', 'boundred']) { homes[n] = path.join(ROOT, 'upgrade-' + n); fs.cpSync(UH, homes[n], { recursive: true }); }
       // THE BOOT AS server.js DOES IT (r3 — nothing else starts the re-judge): server.js's OWN sink line (⑤), verbatim, its
       // For-you store made after it as server.js's top-level `const userTodos` is (the getter reads it at the boot's next
       // tick), NO rejudge() call; the one thing added: publicDir = this suite's build (the fast tier runs no npm run build)
@@ -673,16 +673,12 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const s4 = await tracedRe(homes.release, bootRe(REL, homes.release));
       ok(s4.r.lines === 1 && !/sync/.test(s4.calls) && /rename/.test(s4.calls), 'RED B-574d the release\'s rewrite: renamed over the lines with NO sync of its temp — a power cut can leave the name over no bytes after the notice closed', { calls: s4.calls, r: s4.r });
       await s4.H.close();
-      // r4828: a RENAME that fails leaves NO temp (the door keeps its temp then; the re-judge removes it) — and THE BOUND: one rewrite a process
+      // r4828: a RENAME that fails leaves NO temp (the door removes it, r4938 — its red is the door's, in test-fd-close-census ⑥) — and THE BOUND: one rewrite a process
       const FR = path.join(homes.renfail, 'data', SINK.FILE), beforeR = fs.readFileSync(FR, 'utf8');
       const s5 = await tracedRe(homes.renfail, bootRe(SINK, homes.renfail), { rename: 'EIO' });
       ok(s5.r.lines === 0 && s5.r.closed === 0 && s5.calls === 'open sync close rename' && fs.readFileSync(FR, 'utf8') === beforeR && !fs.existsSync(FR + '.rejudge') && openOf(s5.H.store) === 1 && s5.H.told.some((x) => /was not re-judged — EIO/.test(x)),
         'r4828 a RENAME that fails (a placed EIO) is a failed rewrite with NO temp left: the old lines whole, its notice open, said', { calls: s5.calls, r: s5.r, told: s5.H.told });
       await s5.H.close();
-      const RK = load(path.join(REPO, 'src/server/csp-reports.js'), editAnchor(srcK, "try { fs.unlinkSync(f + '.rejudge'); } catch { /* the door removed it, or it was never made */ } ", '', 'src/server/csp-reports.js'));
-      const s6 = await tracedRe(homes.renkept, bootRe(RK, homes.renkept), { rename: 'EIO' });
-      ok(fs.existsSync(path.join(homes.renkept, 'data', SINK.FILE + '.rejudge')), 'RED r4828: the failed rewrite without its temp removal leaves the .rejudge temp behind (the door keeps it on a failed rename)', { calls: s6.calls });
-      await s6.H.close();
       const boundOf = (mod, home) => async () => { const H = await lateBoot(mod, home, (st) => st); const r = await H.sink.rejudge(), again = await H.sink.rejudge(); const posted = (await post(H, PROBE)).status; const third = await H.sink.rejudge(); return { H, r, posted, same: again === r && third === r }; };
       const s7 = await tracedRe(homes.bound, boundOf(SINK, homes.bound));
       ok(s7.r.lines === 1 && s7.same && s7.posted === 204 && s7.calls === 'open sync close rename', 'r4828 THE BOUND of the re-judge\'s synchronous rewrite on the hub\'s loop: ONCE A PROCESS — a second ask and a report\'s ask after it answer the same run; ONE rewrite (at most two files; only a hub that met the bug)', { calls: s7.calls, r: s7.r, same: s7.same });

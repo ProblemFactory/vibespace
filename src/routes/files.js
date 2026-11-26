@@ -1208,9 +1208,9 @@ function writeExtractJournal(j) {
   // Never over a held journal (nothing written over a file that could not be read).
   if (!journalHold || !journalHold.writable('a mark of the extraction journal')) return;
   const f = EXTRACT_JOURNAL_AT.file;
-  // r4828: NO TEMP LEFT on any road — the door removes its temp on a failed write, sync or close but keeps it on a failed rename
+  // NO TEMP LEFT on any road: the door removes its temp on a failed write, sync, close or rename (r4938)
   try { FCJ.renameSynced(f + '.tmp', f, JSON.stringify(j), { where: '[extract] the extraction journal', say: (w) => { if (!journalNoSyncSaid) { journalNoSyncSaid = true; console.warn(w); } } }); }
-  catch (e) { try { fs.unlinkSync(f + '.tmp'); } catch { /* the door removed it, or it was never made */ } console.warn(`[extract] the extraction journal could not be written (${(e && e.code) || (e && e.message) || e})`); return false; }
+  catch (e) { console.warn(`[extract] the extraction journal could not be written (${(e && e.code) || (e && e.message) || e})`); return false; }
   extractJournal = j;
   return true;
 }

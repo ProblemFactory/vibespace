@@ -55,7 +55,7 @@ function syncUnsupportedLands(e, where, say) {
 /** B-bcb8 unit B (主开发 r4367; r4474's law): A RECORD THE HUB READS TAKES ITS NAME ONLY AFTER ONE SYNC OF ITS TEMP — the job wrapper's
  *  pid / exit / bound records, the conversation wrappers' meta sidecars and the chat wrapper's handed records (after a power cut or a full
  *  disk the hub read a record with its name and no bytes); the two BUFFERS (chat, codex) pass `sync: false` (r4563 / r4578). `bytes` written to `tmp` (its mode), synced ONCE, closed, renamed to `final`.
- *  A sync that FAILS — or a close that fails after the write (a deferred write error) — is a FAILED WRITE: the temp is removed, the
+ *  A sync that FAILS — or a close that fails after the write (a deferred write error), or the final RENAME (r4938) — is a FAILED WRITE: the temp is removed, the
  *  error THROWN as writeFileSync's was, the OLD record stands; each caller's own try is unchanged. ONLY a sync the file system does not
  *  do at all (SYNC_UNSUPPORTED) is SAID once (the site's name, the code — no path) and the record still takes its name. WHAT is written
  *  and WHEN are the caller's. THE SYNC IS THE CALLER'S NAMED CHOICE (r4563: «a buffer is not a durable record»): `sync: false` asks
@@ -72,7 +72,9 @@ function renameSynced(tmp, final, bytes, { mode, where, say, sync = true } = {})
   try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there — a failed write
   fd = null;
   if (failed) { try { fs.unlinkSync(tmp); } catch { /* gone already */ } throw failed; }
-  fs.renameSync(tmp, final);
+  // r4938: a RENAME that fails is a failed write too — the temp removed (as on a failed write, sync or close), the OLD file standing,
+  // the rename's own error thrown to the caller (the one door's cure; never each caller's)
+  try { fs.renameSync(tmp, final); } catch (e) { try { fs.unlinkSync(tmp); } catch { /* gone already */ } throw e; }
 }
 
 module.exports = { closeWritten, closeWrittenHandle, closeFailedWords, renameSynced, syncUnsupportedWords, SYNC_UNSUPPORTED, syncUnsupportedLands };

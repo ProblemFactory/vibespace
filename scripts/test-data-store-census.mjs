@@ -466,12 +466,12 @@ const DELETION_CALLS = Object.freeze({
   'src/app-secrets.js': 1, 'src/app-serve.js': 8, 'src/app-system-serve.js': 1, 'src/browser-facts.js': 1,
   'src/browser-serve.js': 4, 'src/channel-outbox-files.js': 1, 'src/channel-store.js': 9, 'src/claude-oat-probe.js': 8,
   'src/design-fs.js': 1, 'src/desktop-display.js': 1, 'src/desktop-mic.js': 3, 'src/desktop-serve.js': 7,
-  'src/exit-proxy.js': 2, 'src/fd-close.js': 1, 'src/fixture-ledger-purge.js': 1, 'src/gmail-sync.js': 1, 'src/harness-config.js': 2,   // fd-close (B-bcb8 unit B, r4474): renameSynced removes ITS OWN temp after a failed write — no store's remover
+  'src/exit-proxy.js': 2, 'src/fd-close.js': 2,   /* r4938 (lane nl-journals): + the temp removed on a failed rename */ 'src/fixture-ledger-purge.js': 1, 'src/gmail-sync.js': 1, 'src/harness-config.js': 2,   // fd-close (B-bcb8 unit B, r4474): renameSynced removes ITS OWN temp after a failed write — no store's remover
   'src/harnesses/antigravity.js': 3, 'src/harnesses/claude-home.js': 1, 'src/harnesses/codex.js': 1, 'src/host-keys.js': 1,
   'src/hosts.js': 9, 'src/interface/main.js': 2, 'src/job-logs-sweep-worker.js': 11, 'src/jobs.js': 4,   // hosts.js +1 (B-323e's remainder, lane nl-starts): the bundle stage's late removal past the tar's bound — a temp folder, no store   // jobs.js +1 (B-91aa's remainder, r4591): a FAILED START's own spec, removed off the loop — no store's remover
   'src/kept-copies.js': 2, 'src/machine-probes.js': 2, 'src/mounts.js': 5, 'src/node-runtime.js': 3,
   'src/opencode-serve.js': 2, 'src/opslog.js': 1, 'src/owner-mark.js': 5, 'src/plugins/frp.js': 7,
-  'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 18,   /* r4828 (lane nl-journals): + the extraction journal's temp removed on a failed write */
+  'src/plugins/tailscale.js': 3, 'src/pool-pin-record.js': 3, 'src/reading-repair.js': 4, 'src/routes/files.js': 17,   /* r4938 (lane nl-journals): the extraction journal's own temp removal goes — the door removes its temp on a failed rename too */
   'src/routes/persistence.js': 6, 'src/routes/window-targets.js': 1, 'src/safe-fs-worker.js': 7, 'src/search-index-worker.js': 1,
   'src/secret-box.js': 1, 'src/secret-file.js': 4, 'src/server/agent-tool-generators.js': 2,
   'src/server/apps-ops-door.js': 2, 'src/server/automation-engine.js': 1, 'src/server/boot-restore.js': 9, 'src/server/browser-attach-launch.js': 1,
@@ -486,7 +486,7 @@ const DELETION_CALLS = Object.freeze({
   // file that write made; the old file stands) — no keep list; r5185's round +2: a RENAME that fails takes its temp out too (both renames)
   'src/server/browser-kept-note.js': 6,
   'src/server/browser-trace.js': 6, /* row B-360d (r4522) +2: the index rewrite's OWN temp file removed when the rewrite fails, and at the hub's stop — never a store's file */ 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
-  'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/csp-reports.js': 1 /* r4828: the re-judge's temp removed on a failed rewrite */, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
+  'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
   // B-574d «browser-stores» 3/8 (lane nl-migrations): engine-distribution.js +1 — the record's temp removed when its write, sync or close failed (its own temp only)
   // B-574d follow 4 (lane nl-migrations, 主开发 r5221): home-rename.js +1 — the synced replace's own temp removed when its final rename fails
   'src/server/engine-distribution.js': 16, 'src/server/handed-sweep.js': 1, 'src/server/home-rename.js': 3, 'src/server/hook-root-watch.js': 1, 'src/server/host-tokens.js': 3,
@@ -496,7 +496,7 @@ const DELETION_CALLS = Object.freeze({
   'src/server/published-pages.js': 8, 'src/server/rewind-keep-worker.js': 7, 'src/server/rewind-kept-door.js': 2, 'src/server/sealed-json.js': 1,
   'src/server/session-stdout.js': 5, 'src/server/spend-guard.js': 3, 'src/server/sync-fs-witness-worker.js': 2, 'src/server/usage-index-retire.js': 1,
   'src/server/usage-pool-engine.js': 2, 'src/server/vault-engine.js': 7, 'src/server/vault-run-door.js': 6, 'src/server/vault-totp.js': 1,
-  'src/server/window-targets-engine.js': 1, 'src/server/wrapper-files.js': 6, 'src/server/writes-lost.js': 3,   /* B-574d (lane nl-journals): + the off-loop write's temp removed on a failed write; + the exit's removal of a write's temp still in flight */ 'src/signin-witness-worker.js': 2,
+  'src/server/window-targets-engine.js': 1, 'src/server/wrapper-files.js': 6, 'src/server/writes-lost.js': 2,   /* B-574d (lane nl-journals): + the off-loop write's temp removed on a failed write; + the exit's removal of a write's temp still in flight */ 'src/signin-witness-worker.js': 2,
   'src/signin-witness.js': 2, 'src/spawn/ssh.js': 1, 'src/ssh-key.js': 1, 'src/store-hold.js': 6,
   'src/store-read-hold.js': 6, 'src/store-writer-worker.js': 6, 'src/store-writer.js': 2, 'src/task-groups.js': 2,
   'src/transcript-service.js': 3, 'src/usage-cache-write.js': 1, 'src/usage-hold-road.js': 1, 'src/usage-ledger-dedup.js': 4,
