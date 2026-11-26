@@ -3234,6 +3234,7 @@ export default {
   "Enter sends on touch devices": "触屏设备上回车直接发送",
   "On phones and tablets the keyboard’s enter key inserts a newline by default (soft keyboards have no Shift+Enter, so this is the only way to type one) and messages are sent with the send button. Turn on to make enter send instead.": "手机/平板上键盘的回车键默认插入换行（软键盘没有 Shift+回车，这是唯一的换行方式），消息用发送按钮发出。开启后回车改为直接发送。",
   "Still attaching — waiting for the hub to answer. Your message waits here and can be sent once it is back.": "仍在接入——正在等待服务器应答。你的消息会留在这里，接入后即可发送。",
+  "Still attaching — the hub is still working on this window. Your message waits here and can be sent once it is back.": "仍在接入——服务器仍在处理此窗口。你的消息会留在这里，接入后即可发送。",
   "Still attaching — the hub has not answered for 15 minutes. Reloading the tab asks again; your message waits here.": "仍在接入——服务器已 15 分钟未应答。刷新页面会重新请求；你的消息仍留在这里。",
   "The server is degraded — its main thread is saturated ({lag}ms median lag). Everything will feel slow; sessions are NOT dead.": "服务器处于劣化状态——主线程饱和（中位延迟 {lag}ms）。一切都会变慢，但会话并没有死。",
   "The CLI prefers a configured apiKeyHelper over the machine’s own OAuth login. Picking a NAMED subscription account below bypasses the helper for that session (the helper is neutralized at spawn); this CLI-login entry keeps billing via the helper.": "CLI 优先使用机器上配置的 apiKeyHelper 而非该机器自身的 OAuth 登录。在下方选择一个具名订阅账号即可绕过 helper（启动时按会话中和）；本条\"CLI 登录\"则继续经 helper 按 API 计费。",

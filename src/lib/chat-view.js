@@ -247,6 +247,7 @@ const TRIM_KEEP_VIEWPORTS = 1;
 // r4686: the hold sends NO attach of its own (an acked attach is always answered or its socket closes); after the release's own
 // 15-minute bound (the ladder waited that long on fresh acks) its bar says what a person can do — words only, no control
 const ATTACH_HOLD_LONG_MS = 15 * 60000;
+const ATTACH_ACK_FRESH_MS = 30000;   // B-a26e (r4875): an acknowledgement this recent means the hub is working on the attach (it re-acks every 10 s while it does)
 // THE ATTACH's ID, ONE RISING COUNT FOR THE WHOLE PAGE (r4686, the read of 4c2a64f15): two views of one session, or a window opened
 // again while its predecessor's attach is still in the hub's waits, never share or interleave ids; the hub keeps the newest
 let attachIdSeq = 0;
@@ -1424,7 +1425,7 @@ class ChatView {
         // re-attach, resuming by seq. The explicit form of inc-msp3klen's class.
         this._onLagged(msg);
       } else if (msg.type === 'attach-ack' && msg.sessionId === sessionId) {
-        if (msg.attachId == null || this._liveAttachId == null || msg.attachId >= this._liveAttachId) this._lastAttachAckAt = Date.now(); // proof-of-life: server got our attach and is processing (r4686: never an older attach's)
+        if (msg.attachId == null || this._liveAttachId == null || msg.attachId >= this._liveAttachId) { this._lastAttachAckAt = Date.now(); if (this._attachHold) this._attachHoldWords(); } // proof-of-life: server got our attach and is processing (r4686: never an older attach's)
       } else if (msg.type === 'attached' && msg.sessionId === sessionId && msg.attachId != null && this._liveAttachId != null && msg.attachId < this._liveAttachId) {
         try { this._trace?.('attach:late', { id: msg.attachId, live: this._liveAttachId }); } catch { }   // r4686: a LATE answer of an attach this window gave up on — dropped by its own id, never applied over a newer one
       } else if (msg.type === 'attached' && msg.sessionId === sessionId) {
@@ -7701,13 +7702,14 @@ class ChatView {
    *  attach's own answer — it sends no attach of its own (r4686: an acked attach is always answered or its socket closes; a re-send
    *  would be a whole duplicate for the hub that is already slow). A retry comes only after a reconnect (the hub lost the ask with
    *  the socket): in the reconnect queue's pass, its slot jittered, under the page's cap of attaches in flight. 15 minutes after the
-   *  ask that began it (`askedAt`, the cycle whose ladder ended: 主开发 r4857 — a hub that acked and went quiet, or kept acking for
-   *  15 minutes, is not made to wait 15 more) the bar's words say a Reload asks again (words only); a new cycle does not restart it (r4708). Ended by its attach landing (`_clearAttachHold` in the cycle's handler), by
+   *  ask that began it (`askedAt`, the cycle whose ladder ended: 主开发 r4857) or the hub's last acknowledgement, whichever is later
+   *  (r4875: while the hub keeps acknowledging, the bar says it is still working), the bar's words say a Reload asks again (words
+   *  only); a new cycle does not restart it (r4708) — `_attachHoldWords`. Ended by its attach landing (`_clearAttachHold` in the cycle's handler), by
    *  the server's explicit words (`_setReadOnly`), or by dispose; a late answer of an attach it gave up on is dropped by its id. */
   _holdAttach(frame, gen, off = null, askedAt = 0) {
     if (this._disposed || this._readOnly) { try { off?.(); } catch { } return; }
-    const H = this._attachHold || (this._attachHold = { line: null, timer: 0, off: null });
-    H.frame = frame; H.gen = gen;
+    const H = this._attachHold || (this._attachHold = { line: null, timer: 0, off: null, askedAt: 0 });
+    H.frame = frame; H.gen = gen; if (!H.askedAt) H.askedAt = askedAt || Date.now();   // the ask that began it (a new cycle keeps it, r4708)
     if (off) { if (H.off && H.off !== off) { try { H.off(); } catch { } } H.off = off; }   // one armed handler a hold: an older cycle's is unhooked
     if (this._chatInput) this._chatInput.setDisconnected(true, 'attaching');   // r4529 (a): a press of Send says the hold's own words
     if (!H.line || H.line.parentNode !== this._container) {
@@ -7723,12 +7725,33 @@ class ChatView {
       H.line = bar;
     }
     try { this._trace?.('attach:hold', {}); } catch { }
-    // r4686: NO ASK — the hold waits for its attach's own answer; after the bound, the bar says what a person can do (words only)
-    if (!H.timer) H.timer = setTimeout(() => {   // armed once a hold (r4708): a reconnect's new cycle never pushes the 15-minute words away
-      if (this._attachHold !== H || this._disposed || this._readOnly) return;
-      if (H.note) H.note.textContent = t('Still attaching — the hub has not answered for 15 minutes. Reloading the tab asks again; your message waits here.');
-      try { this._trace?.('attach:holdLong', {}); } catch { }
-    }, Math.max(0, ATTACH_HOLD_LONG_MS - (askedAt ? Date.now() - askedAt : 0)));   // from the unanswered ask (r4857)
+    // r4686: NO ASK — the hold waits for its attach's own answer; the bar's words follow the hub's last sign of life (r4875)
+    this._attachHoldWords();
+  }
+
+  /** B-a26e (主开发 r4875): THE BAR's WORDS WHILE HELD follow the hub's last sign of life. An acknowledgement of the live attach
+   *  within ATTACH_ACK_FRESH_MS (the hub re-acks every 10 s while it reads or rebuilds for it) ⇒ «still working»; none ⇒ «waiting
+   *  for the hub to answer»; no answer and no acknowledgement for ATTACH_HOLD_LONG_MS since the ask or the last acknowledgement ⇒
+   *  the Reload words (words only) — never while the hub is still working. ONE timer a hold, re-armed for the next change; an
+   *  acknowledgement while held decides again at once (the permanent handler). */
+  _attachHoldWords(longDue = false) {
+    const H = this._attachHold;
+    if (!H || this._disposed || this._readOnly) return;
+    const ackAt = this._lastAttachAckAt || 0, ack = ackAt >= (H.askedAt || 0) ? ackAt : 0;   // only THIS hold's attach's acknowledgement: one stamped before its ask is an earlier attach's, long answered (its own heavy read, 11-26)
+    const now = Date.now(), life = Math.max(H.askedAt || 0, ack);
+    const working = !!ack && now - ack < ATTACH_ACK_FRESH_MS, longLeft = ATTACH_HOLD_LONG_MS - (now - life);
+    const long = longDue || longLeft <= 0;   // longDue: the long bound's own timer fired — no acknowledgement came since it was armed (each one re-arms it)
+    const words = long ? t('Still attaching — the hub has not answered for 15 minutes. Reloading the tab asks again; your message waits here.')
+      : working ? t('Still attaching — the hub is still working on this window. Your message waits here and can be sent once it is back.')
+        : t('Still attaching — waiting for the hub to answer. Your message waits here and can be sent once it is back.');
+    if (H.note && H.note.textContent !== words) H.note.textContent = words;
+    if (long && !H.long) { H.long = true; try { this._trace?.('attach:holdLong', {}); } catch { } }
+    clearTimeout(H.timer); H.timer = 0;
+    if (long) return;   // the Reload words stay until an acknowledgement or the answer
+    // the next change: a fresh acknowledgement goes stale (decide again), or the long bound passes with none — its timer is trusted, never
+    // re-read against the clock (its own heavy read, 11-26: a re-check against Date.now re-armed for ever under the suite's short clock)
+    H.timer = working ? setTimeout(() => { if (this._attachHold === H) this._attachHoldWords(); }, ATTACH_ACK_FRESH_MS - (now - ack))
+      : setTimeout(() => { if (this._attachHold === H) this._attachHoldWords(true); }, longLeft);
   }
 
   _clearAttachHold() {
