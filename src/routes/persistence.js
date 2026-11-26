@@ -17,6 +17,12 @@ const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-
 const { namedTwinIn } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window r3): the point that still names a nameless window's conversation
 const { noteDupsLeft } = require('../lib/desktop-record.js'); // PURE (r4 K, inc-mw1ogdno-5jny): a desktop's dedup trace never names a window its record lists
 const SH = require('../store-hold.js'); // B-225b (lane lg-store-writes): a store that could not be read has NO VALUE — its one read, hold and write
+// r5185 (lane hub-loop-stalls, row B-574d): A MACHINE CALLER's CONFIG CALL — a bearer (an agent's, a job's, an automation's sign-in) on
+// the plugins' old config door: its settings write keeps the release's write, UNSYNCED (the coordinator's ruling: a sync on the loop is
+// for a person's press, the start or a save the code bounds rare; nothing bounds how often a machine calls that door). The door runs
+// its call inside this scope (router.asMachineCall); every other settings write — a person's press, a timed raise's return, a
+// migration — is synced before its name moves (src/store-hold.js write)
+const MACHINE_CALL = new (require('async_hooks').AsyncLocalStorage)();
 const UO = require('../user-state-ops.js'); // PURE (lane sidebar-echo-order, inc-mwbn2xp8-ks0b): user state by item, in the server's order (stateRev within a life, stateEpoch)
 const { normalizeCustomThemes } = require('../custom-theme-normalize.js'); // PURE (lane cache-warmth-ramp r3): a value a theme derivation superseded is dropped at the store's ONE writer
 const { personOnlyDoor } = require('./account-tails.js');   // B-ee0a: the no-vault export of credentials asks the person verdict first
@@ -1834,7 +1840,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const back = RETIRED_SETTING_KEYS.filter((k) => Object.hasOwn(data, k) && !(prev && Object.hasOwn(prev, k)));
     if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }
     _settingsCache = data;
-    try { settingsHold.write(data); }   // the hold's ONE write: the pid temp, then the rename (NOT THERE ⇒ created exclusively)
+    try { settingsHold.write(data, undefined, { sync: MACHINE_CALL.getStore() !== true }); }   // the hold's ONE write: the pid temp, SYNCED (r5185: unless a machine caller's config call), then the rename (NOT THERE ⇒ created exclusively)
     catch (e) { if (e && e.code === 'store_appeared') settingsAgain('a file appeared where the start found none'); throw e; }
     const spend = spendOf(data);
     broadcast({ type: 'settings-updated', settings: data, ...(spend ? { spend } : {}) });
@@ -1870,6 +1876,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
   router.settingsHeld = () => { if (!_settingsRead) { try { readSettings(); } catch { /* the hold says it */ } } return settingsHold.held(); };   // (asked before any read: the START read first — never «no hold» for settings never read, MUST 1)
   /** lane browser-propose: a SERVER act that writes a setting the user approved — the PATCH route's own merge through the ONE writer (atomic file, `settings-updated` broadcast to every client). */
+  /** r5185: run `fn` as a MACHINE CALLER's config call (its settings write unsynced, the ruling above) → fn's own answer */
+  router.asMachineCall = (fn) => MACHINE_CALL.run(true, fn);
   router.patchSettings = (patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('patchSettings: expected an object');
     const merged = { ...readSettings(), ...patch };

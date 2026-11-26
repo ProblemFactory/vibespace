@@ -102,7 +102,7 @@ console.log('② what is NOT fenced: other rows, and spending rows carried verba
   const b4 = await send(H, 'PATCH', '/api/settings', { [BUD]: 2.5 }, page);
   ok(b4.status === 200 && H.read()[BUD] === 2.5, 'f4: the owner\'s page changes it');
   const wiring = read('src/server/mounts-plugins-wiring.js');
-  ok(/app\.post\('\/api\/plugins\/:id\/config', \(req, res\) => \{[\s\S]{0,900}ownerPageWhy\(req\)[\s\S]{0,1600}code: 'spend_row_owner_only'[\s\S]{0,400}try \{ res\.json\(plugins\.setConfig\(req\.params\.id, b\)\); \}/.test(wiring),
+  ok(/app\.post\('\/api\/plugins\/:id\/config', \(req, res\) => \{[\s\S]{0,900}ownerPageWhy\(req\)[\s\S]{0,1600}code: 'spend_row_owner_only'[\s\S]{0,700}const call = \(\) => plugins\.setConfig\(req\.params\.id, b\);\n  try \{ res\.json\(require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) && typeof persistenceRouter\.asMachineCall === 'function' \? persistenceRouter\.asMachineCall\(call\) : call\(\)\); \}/.test(wiring),   // r5185: the plugin's write runs in the machine scope for a bearer (its settings write unsynced)
     'f4: the old /api/plugins/llm/config door asks the SAME verdict before the plugin writes its budget (the plugin\'s own rename and migration write through the store — server acts, ④)');
   const x = await send(H, 'PATCH', '/api/settings', { [DAY]: 5 }, { Origin: 'http://elsewhere.example', 'Sec-Fetch-Site': 'cross-site' });
   ok(x.status === 403 && H.read()[DAY] === 801, 'a page of ANOTHER site is not the owner\'s page (the router\'s own verdict; the auth layer refuses it before, too)', { status: x.status, body: x.body.slice(0, 160) });
@@ -128,7 +128,7 @@ console.log('④ EVERY WRITER of the settings file — a grep-derived census, pr
 {
   const ROWS = [
     { file: 'src/routes/persistence.js', re: /^const SETTINGS_FILE = path\.join\(dataDir, 'settings\.json'\);/, road: 'the settings file itself (data/settings.json)', spend: 'only through the roads below' },
-    { file: 'src/routes/persistence.js', re: /^try \{ settingsHold\.write\(data\); \}/, road: 'THE ONE WRITER (writeSettings: atomic write + the settings-updated broadcast)', spend: 'only as its callers allow' },
+    { file: 'src/routes/persistence.js', re: /^try \{ settingsHold\.write\(data, undefined, \{ sync: MACHINE_CALL\.getStore\(\) !== true \}\); \}/, road: 'THE ONE WRITER (writeSettings: atomic write — its temp synced, r5185, unless a machine caller\'s config call — + the settings-updated broadcast)', spend: 'only as its callers allow' },
     { file: 'src/plugins.js', fn: '_writeSettings', re: /this\._settings\.patch\(out\);/, road: 'the plugin manager\'s row writer (its keys = PS.rowPath of PLUGIN_SETTINGS rows; an unknown key throws)', spend: 'the judge\'s budget row only: through the owner\'s page (/api/settings) or the old /config door — both ask ownerPageWhy' },
     { file: 'src/plugins.js', fn: 'migrateConfigToSettings', re: /this\._settings\.patch\(patch\);/, road: 'the plugin manager\'s one-time config → settings move (a boot migration)', spend: 'a server act: moves the stored config as it was — no request' },
     { file: 'src/plugins.js', fn: 'renamePlugin', re: /this\._settings\.patch\(patch\);/, road: 'the plugin manager\'s rename (llm-plugin-rename: plugin.<from>.* → plugin.<to>.*)', spend: 'a server act: carries the stored rows over — no request' },

@@ -1320,4 +1320,141 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
   }
 }
 
+// ── §10 r5185 (lane hub-loop-stalls, row B-574d — THE SETTINGS DOOR's SYNC, the coordinator's ruling r5185) ── the store hold's
+// direct write door (src/store-hold.js write: EVERY write of the settings store — it has no store writer) SYNCS its temp once
+// before the name moves: a person's press and the rare roads (a store's first, exclusive create; the start read's own rewrite; the
+// ladder's retry). ONE road keeps the release's unsynced write: a MACHINE caller's config call (a bearer on POST
+// /api/plugins/:id/config — that route cut VERBATIM from src/server/mounts-plugins-wiring.js). A failed sync is a FAILED WRITE
+// (thrown by its code, the temp removed, the old file stands); a sync the file system does not do at all is said ONCE and the
+// name moves. Over the REAL persistence router in scratch data folders; the file calls WITNESSED in order by a tap on the scene's
+// own folder (a sync's failure PLACED there — never a real storage made to fail). REDs (anchored, in a copy): the release's
+// unsynced door; the route without its machine scope.
+console.log('§10 r5185 the settings door syncs a person\'s save before its name moves; a failed sync is a failed write; a machine caller\'s config call makes no sync');
+{
+  const PREL = 'src/routes/persistence.js', SHREL = 'src/store-hold.js', SHSRC = read(SHREL), SHP = require.resolve(path.join(REPO, SHREL));
+  const root10 = scratchDir('store-held-page-r5185'); roots.push(root10);
+  let n10 = 0;
+  const OLD = JSON.stringify({ 'r5185.kept': 'the old bytes' }, null, 2);
+  const dir10 = (bytes) => { const d = path.join(root10, String(++n10)); fs.mkdirSync(d, { recursive: true }); if (bytes !== undefined) fs.writeFileSync(path.join(d, 'settings.json'), bytes); return d; };
+  /** the REAL persistence router, a fresh copy of the module over `dir` (the store hold in its require cache: the real one, or a
+   *  copy a RED places there) */
+  const hub10 = (dir) => {
+    for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k];
+    const P = require(path.join(REPO, PREL));
+    const words = [];
+    const client = { readyState: 1, send: (j) => { try { words.push(JSON.parse(j)); } catch { } } };
+    P.setup({ writer: landingWriter(), dataDir: dir, wss: { clients: new Set([client]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+    const handler = (method, p) => P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]).route.stack[0].handle;
+    const call = async (method, p, { headers = {}, body = {} } = {}) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; }, set() { return res; }, setHeader() { } }; await handler(method, p)({ body, query: {}, params: {}, headers }, res, () => { status = 500; }); return { status, body: o }; };
+    return { R: P.router, words, call };
+  };
+  /** the file calls under `dir`, in order, by file name; `fail.sync`: a code every sync of a file there throws (PLACED) */
+  const tap = (dir) => {
+    const ev = [], fds = new Map(), saved = {}, fail = { sync: null };
+    const mine = (p) => typeof p === 'string' && p.startsWith(dir + path.sep);
+    const wrap = (k, f) => { saved[k] = fs[k]; fs[k] = f(saved[k]); };
+    wrap('openSync', (o) => function (p, ...a) { const fd = o.call(this, p, ...a); if (mine(p)) { fds.set(fd, path.basename(p)); ev.push(`open ${path.basename(p)}`); } return fd; });
+    wrap('writeSync', (o) => function (fd, ...a) { const n = o.call(this, fd, ...a); if (fds.has(fd)) ev.push(`write ${fds.get(fd)}`); return n; });
+    wrap('fsyncSync', (o) => function (fd, ...a) { if (fds.has(fd)) { ev.push(`sync ${fds.get(fd)}`); if (fail.sync) throw Object.assign(new Error(`${fail.sync}: a sync PLACED to fail (§10)`), { code: fail.sync, syscall: 'fsync' }); } return o.call(this, fd, ...a); });
+    wrap('closeSync', (o) => function (fd, ...a) { if (fds.has(fd)) { ev.push(`close ${fds.get(fd)}`); fds.delete(fd); } return o.call(this, fd, ...a); });
+    wrap('renameSync', (o) => function (a, b, ...r) { if (mine(a)) ev.push(`rename ${path.basename(a)} ${path.basename(b)}`); return o.call(this, a, b, ...r); });
+    wrap('linkSync', (o) => function (a, b, ...r) { if (mine(a)) ev.push(`link ${path.basename(a)} ${path.basename(b)}`); return o.call(this, a, b, ...r); });
+    wrap('writeFileSync', (o) => function (p, ...a) { if (mine(p)) ev.push(`writeFile ${path.basename(p)}`); return o.call(this, p, ...a); });
+    wrap('unlinkSync', (o) => function (p, ...a) { if (mine(p)) ev.push(`unlink ${path.basename(p)}`); return o.call(this, p, ...a); });
+    return { ev, fail, off: () => { for (const [k, f] of Object.entries(saved)) fs[k] = f; } };
+  };
+  /** run `fn` with the folder's calls tapped (`sync`: the placed failure) → { ev: the settings file's calls, r: fn's answer, thrown } */
+  const tapped = async (dir, fn, sync = null) => {
+    const t = tap(dir); t.fail.sync = sync;
+    let r, thrown = null;
+    try { r = await fn(); } catch (e) { thrown = e; } finally { t.off(); }
+    return { ev: t.ev.filter((e) => / settings\.json/.test(e)), r, thrown };
+  };
+  const TMP = `settings.json.${process.pid}.tmp`;
+  const syncs = (ev) => ev.filter((e) => e.startsWith('sync ')).length;
+  /** the order the law asks: the temp written whole, SYNCED once, closed, THEN its name moves (`move`: rename, or link at a first create) */
+  const syncedBefore = (ev, move) => { const s = ev.indexOf(`sync ${TMP}`), c = ev.indexOf(`close ${TMP}`), m = ev.findIndex((e) => e.startsWith(`${move} ${TMP} settings.json`)); return syncs(ev) === 1 && s > ev.lastIndexOf(`write ${TMP}`) && ev.lastIndexOf(`write ${TMP}`) > ev.indexOf(`open ${TMP}`) && ev.indexOf(`open ${TMP}`) >= 0 && c > s && m > c; };
+  const unsyncedMoves = (ev) => syncs(ev) === 0 && ev.some((e) => e.startsWith(`rename ${TMP} settings.json`));
+  const onDisk = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'settings.json'), 'utf8')); } catch { return null; } };
+  const tmpLeft = (d) => fs.readdirSync(d).filter((f) => f.endsWith('.tmp'));
+  const PERSON = { 'sec-fetch-site': 'same-origin' };
+  const press = (H, row) => () => H.call('patch', '/api/settings', { headers: PERSON, body: { 'r5185.row': row } });
+
+  // (a) A PERSON's PRESS over a file the start read: synced before the rename; (b) A FIRST CREATE (the store read NOT THERE: the
+  // exclusive link): synced before the link
+  const dA = dir10(OLD), A = hub10(dA);
+  await A.call('get', '/api/settings');
+  const a = await tapped(dA, press(A, 'a person'));
+  const dB = dir10(), B = hub10(dB);
+  await B.call('get', '/api/settings');
+  const b = await tapped(dB, press(B, 'the first'));
+  ok(!a.thrown && a.r.status === 200 && a.r.body && a.r.body.success === true && syncedBefore(a.ev, 'rename') && onDisk(dA)?.['r5185.row'] === 'a person' && onDisk(dA)?.['r5185.kept'] === 'the old bytes' && tmpLeft(dA).length === 0
+    && !b.thrown && b.r.status === 200 && syncedBefore(b.ev, 'link') && onDisk(dB)?.['r5185.row'] === 'the first' && tmpLeft(dB).length === 0,
+    'r5185 (a) a PERSON\'s save (PATCH /api/settings): its temp written whole, SYNCED once, closed, THEN renamed over settings.json — the new row and the old ones on disk, no temp left; (b) a FIRST create (no settings.json at the start): synced before its exclusive link', J({ a: a.ev, b: b.ev, ta: a.thrown && a.thrown.message, tb: b.thrown && b.thrown.message }));
+
+  // (c) A MACHINE CALLER's CONFIG CALL (router.asMachineCall): no sync — at once, and across an await (the scope rides the call);
+  // the person's next press is synced again (the scope never outlives its call)
+  const c = await tapped(dA, async () => { A.R.asMachineCall(() => A.R.patchSettings({ 'r5185.row': 'a machine' })); await A.R.asMachineCall(async () => { await settle(2); A.R.patchSettings({ 'r5185.late': 'after an await' }); }); });
+  const c2 = await tapped(dA, press(A, 'a person again'));
+  ok(!c.thrown && syncs(c.ev) === 0 && c.ev.filter((e) => e.startsWith(`rename ${TMP} settings.json`)).length === 2 && onDisk(dA)?.['r5185.late'] === 'after an await' && !c2.thrown && syncedBefore(c2.ev, 'rename') && onDisk(dA)?.['r5185.row'] === 'a person again',
+    'r5185 (c) a MACHINE caller\'s config call (persistence\'s asMachineCall) keeps the release\'s write: NO sync, twice (one across an await — the scope rides the call), both landed; the person\'s next save is synced again (the scope never outlives its call)', J({ c: c.ev, c2: c2.ev, t: c.thrown && c.thrown.message }));
+
+  // (d) THE ROUTE (POST /api/plugins/:id/config, cut VERBATIM from src/server/mounts-plugins-wiring.js; the plugin manager a stand-in
+  // whose setConfig ends where the real one does — the router's patchSettings, through the plugin's own settings rows): a BEARER
+  // (src/write-origin.js pressBearer) makes no sync; a person's press on the plugin's own page syncs. RED: the route without its scope
+  const WIR = read('src/server/mounts-plugins-wiring.js'), HEAD = "app.post('/api/plugins/:id/config', ";
+  const r0 = WIR.indexOf(HEAD), r1 = r0 < 0 ? -1 : WIR.indexOf('\n});\n', r0);
+  const ROUTE = r0 >= 0 && r1 > r0 ? WIR.slice(r0 + HEAD.length, r1 + 2) : '';
+  const wireRequire = createRequire(path.join(REPO, 'src/server/mounts-plugins-wiring.js'));
+  const routeOf = (text, H) => new Function('require', 'plugins', 'persistenceRouter', `return (${text});`)(wireRequire, { setConfig: (id, patch) => { H.R.patchSettings({ [`plugin.${id}.r5185`]: patch.r5185 }); return { ok: true }; } }, H.R);
+  const post = (fn, headers, v) => () => { let status = 200, o = null; const res = { status(x) { status = x; return res; }, json(x) { o = x; return res; } }; fn({ params: { id: 'frp' }, body: { r5185: v }, headers }, res); return { status, body: o }; };
+  const BEARER = { authorization: 'Bearer vsst_r5185-a-job' };
+  const ROUTE_SCOPE = "res.json(require('../write-origin.js').pressBearer(req.headers) && typeof persistenceRouter.asMachineCall === 'function' ? persistenceRouter.asMachineCall(call) : call())";
+  ok(ROUTE.startsWith('(req, res) => {') && ROUTE.endsWith('}') && ROUTE.split(ROUTE_SCOPE).length === 2 && WIR.split('asMachineCall(').length === 2, 'control setup: the config route is cut whole from src/server/mounts-plugins-wiring.js, its machine scope found once (the file\'s one asMachineCall)', ROUTE.slice(0, 120));
+  const route = routeOf(ROUTE, A);
+  const dM = await tapped(dA, post(route, BEARER, 'a bearer'));
+  const dP = await tapped(dA, post(route, PERSON, 'a press'));
+  ok(!dM.thrown && dM.r.status === 200 && unsyncedMoves(dM.ev) && onDisk(dA)?.['plugin.frp.r5185'] === 'a press' && !dP.thrown && dP.r.status === 200 && syncedBefore(dP.ev, 'rename'),
+    'r5185 (d) POST /api/plugins/:id/config (the route as written): a BEARER\'s config call lands UNSYNCED (the one road the ruling leaves); a person\'s press on the plugin\'s own page is synced before its rename', J({ bearer: dM.ev, person: dP.ev, t: (dM.thrown || dP.thrown || {}).message }));
+  const routeX = routeOf(anchored(ROUTE, ROUTE_SCOPE, 'res.json(call() /* MUTANT: no machine scope */)', 'r5185-no-scope'), A);
+  const dX = await tapped(dA, post(routeX, BEARER, 'a bearer, unscoped'));
+  ok(!dX.thrown && syncs(dX.ev) === 1 && !unsyncedMoves(dX.ev), 'CONTROL (the route without its machine scope, in a copy): a bearer\'s config call is synced like a press — red', J(dX.ev));
+
+  // (e) A FAILED SYNC IS A FAILED WRITE: the press throws by its code, nothing renamed, the temp removed, the old bytes stand, no page
+  // told the change; (f) A SYNC THIS FILE SYSTEM DOES NOT DO (EINVAL): the write lands, said ONCE for the store (two writes)
+  const dE = dir10(OLD), E = hub10(dE);
+  await E.call('get', '/api/settings');
+  const e = await tapped(dE, press(E, 'never landed'), 'EIO');
+  ok(!!e.thrown && e.thrown.code === 'EIO' && e.thrown.syscall === 'fsync' && e.ev.includes(`sync ${TMP}`) && !e.ev.some((x) => /^(rename|link) /.test(x)) && e.ev.includes(`unlink ${TMP}`) && tmpLeft(dE).length === 0
+    && fs.readFileSync(path.join(dE, 'settings.json'), 'utf8') === OLD && !E.words.some((w) => w.type === 'settings-updated'),
+    'r5185 (e) a sync that FAILS (EIO, placed) is a FAILED WRITE: the save throws by its code, nothing renamed, the temp removed, settings.json\'s old bytes stand, no page told a change', J({ ev: e.ev, t: e.thrown && { code: e.thrown.code, syscall: e.thrown.syscall }, left: tmpLeft(dE) }));
+  const dF = dir10(OLD), F = hub10(dF);
+  await F.call('get', '/api/settings');
+  const warned = [], W0 = console.warn;
+  let f1, f2;
+  console.warn = (...x) => { const s = x.map(String).join(' '); if (/does not do a sync/.test(s)) warned.push(s); else W0(...x); };
+  try { f1 = await tapped(dF, press(F, 'unsynced one'), 'EINVAL'); f2 = await tapped(dF, press(F, 'unsynced two'), 'EINVAL'); } finally { console.warn = W0; }
+  ok(!f1.thrown && !f2.thrown && [f1, f2].every((x) => x.ev.indexOf(`sync ${TMP}`) >= 0 && x.ev.findIndex((y) => y.startsWith(`rename ${TMP} settings.json`)) > x.ev.indexOf(`sync ${TMP}`)) && onDisk(dF)?.['r5185.row'] === 'unsynced two'
+    && warned.length === 1 && /settings\.json: its file system does not do a sync \(EINVAL\)/.test(warned[0]),
+    'r5185 (f) a sync the file system does not do (EINVAL — src/fd-close.js SYNC_UNSUPPORTED): both writes land, said ONCE for the store, by the hub\'s one sentence', J({ warned, f1: f1 && f1.ev, t: ((f1 && f1.thrown) || (f2 && f2.thrown) || {}).message }));
+
+  // RED: THE RELEASE's DOOR (the store hold, in a copy placed in its require cache): a person's save renames an UNSYNCED temp
+  const DOOR_A = /^ {4}let fd = fs\.openSync\(tmp, 'w'\), failed = null;\n[\s\S]*?^ {4}if \(failed\) \{[^\n]*\n/m;
+  const holdX = M.load(SHREL, anchored(SHSRC, DOOR_A, "    for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });   /* MUTANT: the release's door, unsynced */\n", 'r5185-release-door'), 'r5185-release-door');
+  const savedHold = require.cache[SHP];
+  let x;
+  try {
+    require.cache[SHP] = { id: SHP, filename: SHP, loaded: true, exports: holdX, children: [], paths: [] };
+    const dX2 = dir10(OLD), X = hub10(dX2);
+    await X.call('get', '/api/settings');
+    x = await tapped(dX2, press(X, 'the release'));
+  } finally { if (savedHold) require.cache[SHP] = savedHold; else delete require.cache[SHP]; for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; }
+  ok(!!x && !x.thrown && syncs(x.ev) === 0 && x.ev.some((y) => y.startsWith(`rename ${TMP} settings.json`)) && !syncedBefore(x.ev, 'rename'), 'CONTROL (the release\'s door, the store hold in a copy): a person\'s save renames an UNSYNCED temp over settings.json — red', J(x && x.ev));
+  // the one road, by text: the settings store's ONE write asks its sync by the scope, and no other write of the hold passes a choice
+  const PSRC10 = read(PREL);
+  ok(PSRC10.split('settingsHold.write(').length === 2 && PSRC10.includes("settingsHold.write(data, undefined, { sync: MACHINE_CALL.getStore() !== true });") && PSRC10.split('{ sync: ').length === 2
+    && /function write\(next, bytes, \{ sync = true \} = \{\}\)/.test(SHSRC) && SHSRC.split('write(next, bytes)').length === 2 && SHSRC.split('write(made[0], made[1])').length === 2,
+    'r5185 the one road, by text: the settings store\'s ONE write asks for its sync by the machine scope; the hold\'s door syncs by DEFAULT, and its own roads (the ladder\'s retry, the flush) pass no choice');
+}
+
 report();
