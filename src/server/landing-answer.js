@@ -14,7 +14,7 @@ const LANDING_BOUND_MS = 10000;
 function notLanded(r) {
   if (!r || typeof r !== 'object') return null;
   if (Array.isArray(r)) { const w = r.map(notLanded).filter(Boolean); return w.length ? w.join('; ') : null; }
-  if (r.skipped) return r.refused ? String(r.refused.line || r.refused.why || 'refused on this server') : r.settingsHeld ? 'the settings are held' : 'skipped';
+  if (r.skipped) return r.refused ? String(r.refused.line || r.refused.why || 'refused on this server') : r.settingsHeld ? 'the settings are held' : r.optOutUnread && r.error ? String(r.error) : 'skipped';   // B-f276 (s1126): an unread opt-out mark says why
   if (r.error) return String(r.error);
   if (r.ok === false) return String(r.why || 'not applied');
   if (r.landing && r.landing.ok === false) return String(r.landing.why || 'not applied');

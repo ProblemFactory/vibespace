@@ -444,7 +444,7 @@ const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
   ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery, rootFactsNow, onRootLanded, // B-1425: the root facts a caller that can wait awaits
-  agentHooksStatus, HOOK_OPTOUT_FILE,
+  agentHooksStatus, optOutMarkNow, // B-f276 (s1126): the opt-out mark by the store-read law — 'opted-out' | 'not' | { unread } (was an existsSync)
 } = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev), applyThisMachine: (o) => harnessConfig.applyThisMachine(o), homeRead: (fn, ms, opts) => harnessConfig.homeRead(fn, ms, opts) }); // B-ddf3 u2 line 1: this machine's hooks through the shipped helper
 // ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
 // THE typed accessors over the descriptor-declared tables (harnessSetting /
@@ -454,7 +454,7 @@ const {
 // install/prelude/dial sites in hosts.js and ws-create.js).
 const harnessConfig = require('./src/server/harness-config-sync.js').create({
   serverSetting: (...a) => serverSetting(...a), harnesses: require('./src/harnesses'), adapterRegistry, activeSessions, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,
-  log: (...a) => console.log(...a), warn: (...a) => console.warn(...a), helperPath: path.join(__dirname, 'data', 'bin', 'vibespace-hook-register.mjs'), hooksWanted: () => integrationEnabled() && !fs.existsSync(HOOK_OPTOUT_FILE), // B-ddf3 u2 line 1: THIS machine served by the shipped helper through the starter (no in-process write)
+  log: (...a) => console.log(...a), warn: (...a) => console.warn(...a), helperPath: path.join(__dirname, 'data', 'bin', 'vibespace-hook-register.mjs'), hooksWanted: () => integrationEnabled() && optOutMarkNow() === 'not', // B-ddf3 u2 line 1: THIS machine served by the shipped helper through the starter (no in-process write)
 }); require('./src/server/conversation-ops.js').provide({ keepEnded, endFactsBefore }); // lane end-obeys-verdict: TERMINATE SAYS WHO — the ended record, written around the kill body
 const { harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64 } = harnessConfig;
 // Generic operator-visible notice channel (2.226.0, user directive "不要静默
@@ -485,7 +485,7 @@ function serverNotice(key, text, { level = 1, i18n = null } = {}) { // i18n = {k
 // hook config and pick it up after restart/compaction; the notice says so.
 async function checkAgentHookHealth() {
   try {
-    if (!hookRootWatch.probeMayRun() || !integrationEnabled() || fs.existsSync(HOOK_OPTOUT_FILE)) return; // verify r2 ①: an unjudgeable root arms the backoff re-judge, never a silent return
+    if (!hookRootWatch.probeMayRun() || !integrationEnabled() || optOutMarkNow() !== 'not') return; // verify r2 ①: an unjudgeable root arms the backoff re-judge, never a silent return
     const scriptMissing = !fs.existsSync(HOOK_CMD);
     if (scriptMissing) { try { createHookHelper(); } catch {} }
     const st = await agentHooksStatus();   // r2345: read off the loop, through the runner's guard — an unread file is no verdict (skipped below)
