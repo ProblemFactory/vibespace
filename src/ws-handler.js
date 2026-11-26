@@ -1586,7 +1586,11 @@ function registerWsHandler(wss, ctx) {
           // exists" and flip every window read-only while all sessions were
           // alive. This tiny synchronous ack tells the client the server is
           // alive and processing, so it WAITS instead of declaring death.
-          try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId })); } catch {} try { require('./server/local-index.js').note('attach', data.sessionId); } catch {} // lane human-cli: the person's index notes the attach
+          // r4686: THE ATTACH's OWN ID (the page's `attachId`), echoed on its ack and its answer; the newest one this socket asked for a
+          // session is kept, so an older attach still in its waits steps aside and never re-registers the socket over the newer one
+          const attachId = data.attachId != null ? data.attachId : null;
+          if (attachId != null) (ws.__attachLatest || (ws.__attachLatest = new Map())).set(data.sessionId, attachId);
+          try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, ...(attachId != null ? { attachId } : {}) })); } catch {} try { require('./server/local-index.js').note('attach', data.sessionId); } catch {} // lane human-cli: the person's index notes the attach
           // Virtual subagent session: sub-{parentToolUseId} or sub-agent-{agentId}
           if (data.sessionId?.startsWith('sub-')) {
             const subId = data.sessionId;
@@ -1709,12 +1713,13 @@ function registerWsHandler(wss, ctx) {
               // lane resume-all-paced L3 P1 on THIS rule (every wait of an attach here, never between the join and the verdict): a
               // RE-ATTACH (the history loaded) reads its codex history off the loop now, acked while it waits; the attach below keeps
               // this reader. A first attach reads after its harness's warm (below — a missing rollout is written there first)
-              if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, wanted: () => ws.readyState === WS_OPEN && activeSessions.get(data.sessionId) === s0, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } }); }
+              if (s0._historyLoaded) { reSm = createSessionMessages(s0, data.sessionId); await readOffLoop(reSm, { label: data.sessionId, wanted: () => ws.readyState === WS_OPEN && activeSessions.get(data.sessionId) === s0, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true, ...(attachId != null ? { attachId } : {}) })); } catch { } } }); }
               const left = activeSessions.get(data.sessionId) !== s0 || ws.readyState === 2 || ws.readyState === 3;   // replaced / ended, or the socket closing
               if (left && s0.clients.get(ws)?.pending) s0.clients.delete(ws);
               if (ws.readyState === 2 || ws.readyState === 3) break;   // closing / closed during the waits: nothing to attach to
             }
           }
+          if (attachId != null && ws.__attachLatest && ws.__attachLatest.get(data.sessionId) !== attachId) break;   // r4686: a newer attach of this session on this socket owns it
           const session = activeSessions.get(data.sessionId);   // read AFTER the warm: one that ended meanwhile is gone
           if (session && session._metaUnread) { ws.send(JSON.stringify({ type: 'error', sessionId: data.sessionId, code: 'session-meta-unread', message: `${session._metaUnread.sock}: its record could not be read when the hub started — it keeps running and is not opened here; it opens after the next start once its record reads (Stop ends it)` })); break; }   // r3245 (1): refused BY NAME, never attached
           if (session) {
@@ -1771,7 +1776,7 @@ function registerWsHandler(wss, ctx) {
                 // window late in it went silent after its first ack; `queued` until the rebuild starts converting (session._rebuildProgress)
                 const progressTimer = setInterval(() => {
                   const p = session._rebuildProgress;
-                  try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: p ? { done: p.done, total: p.total } : null, queued: !p })); } catch { }
+                  try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: p ? { done: p.done, total: p.total } : null, queued: !p, ...(attachId != null ? { attachId } : {}) })); } catch { }
                 }, ATTACH_ACK_MS);
                 try {
                   try { const warm = harnessOf(session.backend || 'claude').store?.warmTranscript; if (warm) await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session, attach: true, bulk: bulkRead }); } catch {} // lane agy-harness-fixes: + the session (agy reads its account's transcript); attach: an ATTACH waits the live bound for agy's cards, never the history page's (the agy chain's cure)
@@ -1797,7 +1802,7 @@ function registerWsHandler(wss, ctx) {
               // history is loaded, but this reader is a fresh one and its chat status below would parse the whole rollout ON THE LOOP
               // (master's storm frame, one open conversation after another). It reads off the loop first, acked while it waits; a reader
               // that has read already (the first attach above) answers at once.
-              if (sm !== reSm) await readOffLoop(sm, { label: data.sessionId, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true })); } catch { } } });
+              if (sm !== reSm) await readOffLoop(sm, { label: data.sessionId, ack: () => { try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: null, queued: true, ...(attachId != null ? { attachId } : {}) })); } catch { } } });
               // Recover goal state from wrapper meta (populated by thread/goal/get on startup)
               if (!session._goal) {
                 const wMeta = sm.wrapperMeta?.() || {};
@@ -1937,7 +1942,7 @@ function registerWsHandler(wss, ctx) {
               // unloaded). r2743 (3) as r2873 (a) meant it: the final word («not found») is never said of a conversation this hub started
               // FRESH (asked before its file is written: it keeps «not known yet» and the re-ask); a restored or resumed one is told —
               // the reader's one rule (finalWordFor). A VIEW carries it too
-              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', ...require('./codex-session-store.js').finalWordFor(sm, session), historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
+              const livePayload = { type: 'attached', sessionId: data.sessionId, ...(attachId != null ? { attachId } : {}), name: session.name, cwd: session.cwd, mode: 'chat', ...require('./codex-session-store.js').finalWordFor(sm, session), historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
                 totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), pendingPermissions: pendingPerms,
                 // The input queue as the normalizer knows it (the wrapper's
                 // queue_changed replays through the buffer on a rebuild) —
@@ -2027,7 +2032,7 @@ function registerWsHandler(wss, ctx) {
                 } catch (e) { console.log(`[${data.sessionId}] queue resync not sent: ${e.message}`); }
               }
             } else {
-              ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
+              ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, ...(attachId != null ? { attachId } : {}), name: session.name, cwd: session.cwd, buffer: session.buffer || '' }));
               if (ws.readyState === WS_OPEN) BULK.replied(session);   // B-cd4b r1093, THE DOOR: a terminal's attach replied its history (the buffer)
               // A Ctrl+G edit still in flight (helper script blocking on its
               // signal file, claude on "Save and close editor to continue…")
@@ -2093,7 +2098,7 @@ function registerWsHandler(wss, ctx) {
             await require('./transcript-service.js').gatedRead({ host: data.host || null, conv: backendSessionId }, () => convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId }), { artifacts: artifactDeriveOpts({ backend: data.backend || 'claude', cwd: data.cwd || '' }) })); // lane artifacts-model: its deliverable cards, derived at the read // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)
             try { if (typeof mm.endLateAllows === 'function') mm.endLateAllows(false); } catch { }   // B-9ff2's remainder (r1296 (2)): a STOPPED conversation's waiting late Allows — the agent never said
             if (sm.notLoaded) _viewWaiters.note(SSH.getHistorySessionId({ backendSessionId, claudeSessionId: data.claudeSessionId || backendSessionId }), ws, data.sessionId);   // r1461 (2): this view waits on it — told at its readable
-            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
+            ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, ...(attachId != null ? { attachId } : {}), name: data.name || '', cwd: data.cwd || '', mode: 'chat',
               messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, ...(sm.notFound ? { historyNotFound: true } : {}), historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null, notKnownYet: sm.notLoadedNotKnown || false }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
             if (ws.readyState === WS_OPEN && !sm.notLoaded) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId && (s.host || null) === (data.host || null)) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
           } else {

@@ -225,31 +225,31 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     ok('every view attached exactly once (no double send from the queue)', [vis, ...Object.values(hid)].every((v) => attachesOf(v).length === 1) && q.size === 0);
   }
   {
-    // B-a26e (主开发 r3506): THE ATTACH HOLD's SLOW ASK RIDES THE QUEUE BY `join` — a slot AFTER the armed ones, cancelling none
-    // (a new pass would cancel every armed slot: held windows asking at different moments would starve each other); one slot a
-    // view; its slot asks ONCE (`_runQueuedReattach('slow')` sends the held frame — never a new ladder); a later reconnect pass
-    // supersedes it like any slot
+    // B-a26e (主开发 r3506 / r4686): A HELD WINDOW's RETRY AFTER A RECONNECT RIDES THE QUEUE BY `join` — a slot after the armed ones,
+    // cancelling none; one slot a view; its slot runs ONE new cycle (`_runQueuedReattach('slow')` → `_reattach`, a new attach id on
+    // the new socket — never a re-send of the old frame); a later reconnect pass supersedes it like any slot. Jitter off here
+    // (`random` = 0) so the slots are the exact ones; the storm leg below judges the jitter and the cap
     let now = 0; const timers = []; const deferred = [];
     const setTimer = (fn, ms) => { const h = { fn, due: now + ms, live: true }; timers.push(h); return h; };
     const clearTimer = (h) => { if (h) h.live = false; };
     const advance = (ms) => { const end = now + ms; for (;;) { const nx = timers.filter((h) => h.live && h.due <= end).sort((a, b) => a.due - b.due)[0]; if (!nx) break; now = nx.due; nx.live = false; nx.fn(); } now = end; };
     const drain = () => { while (deferred.length) deferred.shift()(); };
-    const q = createReconnectQueue({ setTimer, clearTimer, defer: (fn) => deferred.push(fn), rankOf: () => [0, 0] });
-    ok('B-a26e: the queue has join (the attach hold\'s slow ask)', typeof q.join === 'function');
+    const q = createReconnectQueue({ setTimer, clearTimer, defer: (fn) => deferred.push(fn), rankOf: () => [0, 0], random: () => 0 });
+    ok('B-a26e: the queue has join (a held window\'s paced retry)', typeof q.join === 'function');
     const sent = [];
     const fakeWs = { connected: true, send(m) { sent.push({ ...m, at: now }); }, onGlobal() { }, offGlobal() { } };
     const mk = (name) => { const v = mkView(); Object.assign(v, { name, sessionId: 'sid-' + name, ws: fakeWs, app: { _reconnectQueue: q }, _readOnly: false, _disconnected: false, _normEpoch: 'e1',
       _chatInput: { disabled: null, setDisconnected(on) { this.disabled = on; } }, _hideTyping() { }, _renderers: { appendSystem() { } } }); return v; };
     const attachesOf = (v) => sent.filter((m) => m.type === 'attach' && m.sessionId === v.sessionId);
     const a = mk('a'), b = mk('b'), held = mk('held'), held2 = mk('held2');
-    for (const v of [held, held2]) v._attachHold = { frame: { type: 'attach', sessionId: v.sessionId, slab: 'floor' }, line: null, timer: 0 };
+    for (const v of [held, held2]) { v._attachHold = { frame: { type: 'attach', sessionId: v.sessionId, slab: 'floor' }, line: null, timer: 0 }; v._reattach = function () { this.ws.send({ type: 'attach', sessionId: this.sessionId, cycle: true }); }; }   // the new cycle's send, counted (its ladder is chat-view's)
     a.setHidden('tab', true); b.setHidden('tab', true);
     reconnectOf(a); reconnectOf(b); drain();             // a pass: two armed slots (1500, 1750)
     if (typeof q.join === 'function') { q.join(held); q.join(held2); q.join(held); }   // two slow asks, one of them twice
     ok('B-a26e: a join cancels no armed slot and takes the next ones (4 waiting: the pass\'s two, then the two joined; a view joined twice holds one slot)', q.size === 4, q.snapshot && q.snapshot());
     advance(10000);
     ok('B-a26e: the pass\'s views attach in their slots, untouched by the joins', attachesOf(a).length === 1 && attachesOf(b).length === 1 && attachesOf(a)[0].at === 1500 && attachesOf(b)[0].at === 1750, sent);
-    ok('B-a26e: each joined view asks ONCE, in the slots after them (2000, 2250 ms) — the held frame, never a new ladder', attachesOf(held).length === 1 && attachesOf(held2).length === 1 && attachesOf(held)[0].at === 2000 && attachesOf(held2)[0].at === 2250 && held._reattachGen === undefined, sent);
+    ok('B-a26e: each joined view runs ONE new cycle, in the slots after them (2000, 2250 ms) — never a re-send of the held frame (r4686)', attachesOf(held).length === 1 && attachesOf(held2).length === 1 && attachesOf(held)[0].cycle === true && attachesOf(held)[0].at === 2000 && attachesOf(held2)[0].at === 2250 && held._reattachGen === undefined, sent);
     if (typeof q.join === 'function') q.join(held);
     reconnectOf(a); drain();                               // a new pass supersedes every slot, the joined one too
     advance(10000);
@@ -258,6 +258,31 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     if (typeof q.join === 'function') q.join(held);
     advance(10000);
     ok('B-a26e: a joined slot of a view whose socket is down asks nothing (hold 1)', attachesOf(held).length === 1, sent);
+  }
+  {
+    // B-a26e (主开发 r4686): THE STORM — a hundred held windows after ONE reconnect. Their retries are JITTERED (never one tick) and
+    // the page never has more than the cap of attaches in flight (the socket's own count, here a stand-in: an attach counts until
+    // its answer, 3 s later). CONTROL: the same scene with no cap and no jitter (the unit's tip before r4686) piles them up.
+    const storm = ({ cap, jitterMs }) => {
+      let now = 0; const timers = []; const deferred = [];
+      const setTimer = (fn, ms) => { const h = { fn, due: now + ms, live: true }; timers.push(h); return h; };
+      const clearTimer = (h) => { if (h) h.live = false; };
+      const advance = (ms) => { const end = now + ms; for (;;) { const nx = timers.filter((h) => h.live && h.due <= end).sort((a, b) => a.due - b.due)[0]; if (!nx) break; now = nx.due; nx.live = false; nx.fn(); } now = end; };
+      let seed = 42; const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+      let inFlight = 0, maxInFlight = 0; const fires = [];
+      const q = createReconnectQueue({ setTimer, clearTimer, defer: (fn) => deferred.push(fn), rankOf: () => [0, 0], inFlight: () => inFlight, random, ...(cap != null ? { cap } : {}), ...(jitterMs != null ? { jitterMs } : {}) });
+      const views = Array.from({ length: 100 }, (_, i) => ({ name: 'held' + i, _runQueuedReattach() { inFlight++; maxInFlight = Math.max(maxInFlight, inFlight); fires.push(now); setTimer(() => { inFlight--; }, 3000); } }));
+      for (const v of views) q.join(v);
+      advance(600000);
+      const perTick = new Map(); for (const f of fires) perTick.set(f, (perTick.get(f) || 0) + 1);
+      return { fires: fires.length, maxInFlight, maxPerTick: Math.max(...perTick.values()), last: Math.max(...fires) };
+    };
+    let RQ = {}; try { RQ = await import(path.join(REPO, 'src/lib/reconnect-queue.js')); } catch { }
+    const CAP = RQ.JOIN_CAP;
+    const s = storm({});
+    ok(`B-a26e (r4686): a hundred held windows after one reconnect all retry (${s.fires}), never more than the page's cap in flight (${s.maxInFlight} ≤ ${CAP}) and never ${CAP + 1} in one tick (at most ${s.maxPerTick}); the last within ${Math.round(s.last / 1000)} s`, typeof CAP === 'number' && s.fires === 100 && s.maxInFlight <= CAP && s.maxPerTick <= CAP, s);
+    const x = storm({ cap: Infinity, jitterMs: 0 });
+    ok(`B-a26e CONTROL (r4686): with no cap and no jitter (the tip's join) the same storm piles up — ${x.maxInFlight} in flight, ${x.maxPerTick} in one tick — the leg can go red`, x.maxInFlight > (CAP || 4) && x.maxPerTick > (CAP || 4), x);
   }
   {
     // un-hide mid-queue ⇒ attach NOW, slot cancelled; dispose ⇒ dequeued; a second drop ⇒ superseded
@@ -316,10 +341,10 @@ console.log('— reconnect wiring pins');
   ok('the queued view is decided by the DERIVED flag (_suspended), never a fourth flag', /if \(q && this\._suspended && !this\._readOnly && !this\._disposed\) \{/.test(cv));
   ok('_applySuspend(false) takes a queued view and attaches it now', /if \(!on && this\.app\?\._reconnectQueue\?\.take\(this\)\) this\._runQueuedReattach\('unhide'\);/.test(cv));
   ok('dispose cancels the view\'s slot', /this\.app\?\._reconnectQueue\?\.cancel\(this\)/.test(cv));
-  ok('the App owns ONE queue, ranked by _reconnectRank, reset on every drop', /this\._reconnectQueue = createReconnectQueue\(\{ rankOf: \(view\) => this\._reconnectRank\(view\) \}\);/.test(app) && /if \(!connected\) \{ this\._reconnectQueue\.reset\(\); return; \}/.test(app));
+  ok('the App owns ONE queue, ranked by _reconnectRank, its held retries capped by the socket\'s own attaches in flight (r4686), reset on every drop', /this\._reconnectQueue = createReconnectQueue\(\{ rankOf: \(view\) => this\._reconnectRank\(view\), inFlight: \(\) => this\.ws\?\.attachesInFlight\?\.\(\) \?\? 0 \}\);/.test(app) && /if \(!connected\) \{ this\._reconnectQueue\.reset\(\); return; \}/.test(app));
   ok('the queue asks the PURE verdict (reconnectSlot), never re-spells the delays', /import \{ reconnectSlot \} from '\.\/view-visibility\.js';/.test(rq) && !/1500|250\b|6000/.test(rq.replace(/^\/\/.*$/gm, '')));
   ok('the terminal re-attach loop is untouched (still sends attach at once for TerminalSession)', /if \(session instanceof TerminalSession && session\.sessionId\) \{\s*\n\s*this\.ws\.send\(\{ type: 'attach', sessionId: session\.sessionId \}\);/.test(app));
-  ok('the ladder still stamps reattachAt at the SEND inside _reattach (queue time is never server silence)', /const attachFrame = \{ type: 'attach', sessionId: this\.sessionId \};[\s\S]{0,1800}this\.ws\.send\(attachFrame\);[\s\S]{0,1600}const reattachAt = Date\.now\(\);/.test(cv)); // (perf D: the frame may carry sinceSeq — built once, re-sent by the ladder)
+  ok('the ladder still stamps reattachAt at the SEND inside _reattach (queue time is never server silence)', /const attachFrame = \{ type: 'attach', sessionId: this\.sessionId, attachId \};[\s\S]{0,1800}this\.ws\.send\(attachFrame\);[\s\S]{0,1600}const reattachAt = Date\.now\(\);/.test(cv)); // (perf D: the frame may carry sinceSeq — built once, sent once: r4686, the ladder no longer re-sends it)
   ok('ci.mjs runs the reconnect-storm harness (heavy)', /name: 'test-reconnect-storm', tier: 'heavy'/.test(read('scripts/ci.mjs')));
 }
 
