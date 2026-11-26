@@ -7912,7 +7912,12 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!reg.children[handle]) return false;
     delete reg.children[handle];
     for (const l of reg.leases) if (l.browserKey === handle) noteLeftTab(l.profileId, handle); // verify r3: a helper's page stays on a named profile
+    // r5091 (r4973's law: no tick ever sees a browser with no holder and a drop time older than the moment its last holder left): the
+    // one holder removal that stamped nothing. It is reached when releaseJobHandle's detach of a lease THREW (detach stamps itself);
+    // a profile it leaves with no holder starts its idle clock in this same step
+    const leftOn = new Set(reg.leases.filter((l) => l.browserKey === handle).map((l) => l.profileId));
     reg.leases = reg.leases.filter((l) => l.browserKey !== handle);
+    for (const pid of leftOn) { const rec = reg.browsers[pid]; if (rec && B.isLiveBrowser(rec) && !holdersOn(pid).length) rec.lastLeaseDroppedAt = now(); }
     commit();
     for (const p of reg.profiles.filter((x) => isEph(x) && x.owner.id === handle)) retireEphemeral(p.id, 'child handle dropped').catch(() => { });
     return true;

@@ -1258,13 +1258,56 @@ let work, solo, shop;
     await kq.stop(qp.id, { why: 'user' }).catch(() => { }); kq.shutdown?.();
     return { held, during, after };
   };
+  // r5135 LAW 1: a control is judged on the fact that its plant was in force — the held close REACHED inside the end is the window's
+  // witness; a plant never read is a NAMED SKIP (neither ✓ nor ✗), never a judgement
+  const skip = (name, why) => console.log(`  ⚠ SKIP (law 1): ${name} — ${why}: no judgement`);
   const w = await endWindowLeg(K, 'data-endwin');
-  ok(w.held && !w.during.human && w.during.state === 'ready' && !w.during.stopShown && w.after.ended && w.after.state === 'ready' && w.after.stamped, 'past 12 h, a SECOND tick inside the person\'s end (its closes held): the row has left and the browser STAYS — no stop began within the keeper\'s own stop grace; once let go the person ends `left` and the idle clock counts from that end', w);
+  if (!w.held) skip('the second tick inside the person\'s end', 'the first tick never reached the held session close (the window did not form)');
+  else ok(w.held && !w.during.human && w.during.state === 'ready' && !w.during.stopShown && w.after.ended && w.after.state === 'ready' && w.after.stamped, 'past 12 h, a SECOND tick inside the person\'s end (its closes held): the row has left and the browser STAYS — no stop began within the keeper\'s own stop grace; once let go the person ends `left` and the idle clock counts from that end', w);
   const ksrcW = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const EARLY = '    { const left = reg.browsers[h.profileId]; if (left && B.isLiveBrowser(left) && !holdersOn(h.profileId).length) left.lastLeaseDroppedAt = now(); }\n';
   const Kn = M.load('src/server/browser-keeper.js', editAnchor(ksrcW, EARLY, '', 'src/server/browser-keeper.js'), 'no-early-stamp');
   const wn = await endWindowLeg(Kn, 'data-endwin-red');
-  ok(wn.held && (wn.during.stopShown || wn.during.state !== 'ready'), 'CONTROL (r4973): a keeper copy that stamps the idle clock only at the end\'s finish (2200c331f\'s endHuman) — the second tick inside the person\'s end STOPS the browser a whole idle period early: the leg above goes red', wn);
+  if (!wn.held) skip('CONTROL (r4973), the copy without the early stamp', 'the first tick never reached the held session close (the window did not form)');
+  else ok(wn.held && (wn.during.stopShown || wn.during.state !== 'ready'), 'CONTROL (r4973): a keeper copy that stamps the idle clock only at the end\'s finish (2200c331f\'s endHuman) — the second tick inside the person\'s end STOPS the browser a whole idle period early: the leg above goes red', wn);
+}
+
+// r5091: dropChild's lease removal — the one holder removal that stamped nothing, reached when releaseJobHandle's detach of the job's
+// lease THREW (here a PLACED fault: the mediator refuses that revoke). It now starts the idle clock in its step; a tick right after
+// does not stop the browser early. Its RED: a keeper copy without that stamp (52f7d1b33's dropChild) stops it
+{
+  const dropLeg = async (Kmod, dir) => {
+    const OWNER = 'bk-0000d0d1'; let jobH = null, refused = 0;   // refused: LAW 1's witness that the placed fault was READ (the detach reached it)
+    const mediator = new Proxy({ available: () => false, revoke: ({ browserKey } = {}) => { if (browserKey && browserKey === jobH) { refused++; throw new Error('placed: the mediator refuses this revoke'); } } }, { get: (t, key) => (key in t ? t[key] : () => undefined) });
+    let dclock = clock;   // its own clock (the suite's other keepers never see this leg's hour)
+    // its job RUNS until the leg ends it (jobRunning): without it the tick's own evidence rule releases the job's handle first
+    const kd = mkKeeper(Kmod, { dataDir: path.join(ROOT, dir), mediator, now: () => dclock, tickMs: 3600e3, jobRunning: (id) => id === 'jb-drop-0001' });
+    const dp = kd.createProfile({ label: 'Drop' }, { owner: { kind: 'instance', id: null } });
+    jobH = kd.jobHandleFor({ ownerKey: OWNER, jobId: 'jb-drop-0001' });
+    live.add(OWNER); live.add(jobH);
+    try {
+      await kd.attach({ profileId: dp.id, browserKey: jobH, sessionId: null, by: 'user' });
+      const ns = kd.browserOf(dp.id).ns;
+      dclock += 60 * 60000; await kd.tick();   // an hour of the job's lease: it holds the browser
+      const before = { state: kd.browserOf(dp.id).state, leased: kd._reg().leases.some((l) => l.browserKey === jobH) };
+      const c0 = closeAllsOf(ns), t0 = dclock;
+      kd.releaseJob('jb-drop-0001', 'the job ended');   // its detach THROWS (the placed fault); dropChild removes the lease
+      const leaseGone = !kd._reg().leases.some((l) => l.browserKey === jobH);
+      await kd.tick();   // a tick right after: its idle check has its chance
+      const stopShown = await until(() => closeAllsOf(ns) > c0, K.STOP_GRACE_MS);   // a stop it began would show its close-all within the keeper's stop grace
+      return { before, refused, leaseGone, stopShown, state: kd.browserOf(dp.id).state, stamped: kd.browserOf(dp.id).lastLeaseDroppedAt === t0 };
+    } finally { live.delete(OWNER); live.delete(jobH); await kd.stop(dp.id, { why: 'user' }).catch(() => { }); kd.shutdown?.(); }
+  };
+  const skipD = (name) => console.log(`  ⚠ SKIP (law 1): ${name} — the placed fault (the mediator refusing the job's revoke) was never read, so no detach threw and dropChild never removed the lease: no judgement`);
+  const dr = await dropLeg(K, 'data-dropchild');
+  if (!dr.refused) skipD('the job\'s lease that dropChild removes');
+  else ok(dr.refused >= 1 && dr.before.leased && dr.before.state === 'ready' && dr.leaseGone && !dr.stopShown && dr.state === 'ready' && dr.stamped, 'a job\'s lease that dropChild removes (its detach THREW: a placed fault) starts the idle clock in that step — the tick right after does not stop the browser early (no stop within the keeper\'s stop grace)', dr);
+  const ksrcD = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const DROP = '    for (const pid of leftOn) { const rec = reg.browsers[pid]; if (rec && B.isLiveBrowser(rec) && !holdersOn(pid).length) rec.lastLeaseDroppedAt = now(); }\n';
+  const Kd = M.load('src/server/browser-keeper.js', editAnchor(ksrcD, DROP, '', 'src/server/browser-keeper.js'), 'no-drop-stamp');
+  const drn = await dropLeg(Kd, 'data-dropchild-red');
+  if (!drn.refused) skipD('CONTROL (r5091), the copy whose dropChild stamps nothing');
+  else ok(drn.refused >= 1 && drn.leaseGone && (drn.stopShown || drn.state !== 'ready'), 'CONTROL (r5091): a keeper copy whose dropChild stamps nothing (52f7d1b33\'s) — the tick right after STOPS the browser an idle period early: the leg above goes red', drn);
 }
 
 // ═══ ②b the REAL bridge over a fake upstream + ③ the REAL recorder on his relay ═══
