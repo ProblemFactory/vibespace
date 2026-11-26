@@ -799,6 +799,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // B-360d (r4642, must 2 + (2)): THE PURGE's ONE DOOR — the purges asked so far; the asks the bytes being made cover (taken when they
   // are MADE); the asks a LANDED compaction covered. A purge's «done» is true only once bytes made after its ask have landed
   let stampsPurgeAsks = 0, stampsMadeAfter = 0, stampsLandedAfter = 0;
+  let stampsHanded = false;   // r4676: bytes handed to the writer that have no answer yet (landed or failed) — a thread lost in flight never answers
   let stampsSideBytes = (() => { try { return fs.statSync(stampsFile).size; } catch { return -1; } })();   // -1: no side file (its first write once the journal holds a line)
   const stampStats = { writes: 0, healed: 0, lostAtLoad: 0, compactions: 0, slices: 0 };
   let journalFd = null, journalTorn = false, journalSaidAt = 0, journalWas = false;   // journalWas: a journal there at the start (or opened since)
@@ -3273,6 +3274,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const sideTextOf = (lines) => `{"v":1,"fields":${JSON.stringify(STAMP_KEYS)},"stamps":{${lines.length ? `\n${lines.join(',\n')}\n` : ''}}}\n`;
   /** the moment the compaction's bytes are MADE (its first slice, or the one synchronous turn): every key set after it is kept
    *  by the fold (stampsSince — cure r1 C2's rule) */
+  const handed = (text) => { stampsHanded = true; return text; };   // r4676: the bytes go to the writer now — owed an answer
   function stampsMadeNow() { stampsDirty = false; stampsMadeSeq = stampSeq; stampsSince.clear(); stampsCompactNow = false; stampsMadeAfter = stampsPurgeAsks; }
   const stampsPaceOpt = () => (stampsDebounceMs !== undefined ? { debounceMs: stampsDebounceMs } : {});   // a suite may state its own debounce (the hub: the writer's)
   const stampsAsk = () => ({ name: 'channels-stamps.write', produce: produceStamps, ...stampsPaceOpt(), ...firstWrite(stampsFile, stampsWritten) });   // B-f276 1b: a missing side file's first write is the exclusive create, on every road
@@ -3287,7 +3289,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten, ...stampsPaceOpt() });
     // r4642 (2): the writer's answer alone is not the door — a family held between this ask and its turn writes nothing (produce
     // answers null, «equal to the disk») and a write lost with its thread is settled the same way: true only when bytes MADE after
-    // this ask LANDED
+    // this ask LANDED. BOTH gates are needed: a synchronous make during an older write's flight can carry a newer count to that older
+    // landing — only the writer's version gate (a write produced after this ask) keeps it from answering early
     return W().durable(stampsFile).then((ok) => ok !== false && stampsLandedAfter >= ask, () => false);
   }
   /** the whole side file in ONE turn — a synchronous flush only (close, the exit, a suite's flush) */
@@ -3324,20 +3327,23 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (o && o.sync) {   // close, the exit, a suite's flush: the whole file in this turn (a compaction being made is begun again whole)
       if (stampsBuild) { stampsBuild = null; stampsDirty = true; }
       if (!stampsDirty) { stampsCompactOwed = false; return null; }
-      return wholeStamps();
+      return handed(wholeStamps());
     }
-    if (stampsBuild && stampsBuild.ready != null) { const text = stampsBuild.ready; stampsBuild = null; return text; }
+    if (stampsBuild && stampsBuild.ready != null) { const text = stampsBuild.ready; stampsBuild = null; return handed(text); }
     if (stampsBuild) return LATER;   // still being made, a slice a turn
-    if (!stampsDirty) { stampsCompactOwed = false; return null; }
+    // r4676 (r4666: the compaction STAYS owed): bytes HANDED that never got their answer — the writer's thread lost in flight; its
+    // requeue asks again with no onWritten — are made again, never answered «equal to the disk»
+    if (!stampsDirty && !(stampsCompactOwed && stampsHanded)) { stampsCompactOwed = false; return null; }
     if (!stampsCompactOwed) return null;   // the writer asking on its own (a stray dirty): the side file is written ONLY when its compaction is owed (the bound, a failed line)
     stampsMadeNow();
     stampsBuild = { keys: [...stampMap.keys()], i: 0, lines: [], ready: null, inProduce: true };
     stampsBuildSlice();
     if (stampsBuild) stampsBuild.inProduce = false;
-    if (stampsBuild && stampsBuild.ready != null) { const text = stampsBuild.ready; stampsBuild = null; return text; }   // a small map: one slice was the whole
+    if (stampsBuild && stampsBuild.ready != null) { const text = stampsBuild.ready; stampsBuild = null; return handed(text); }   // a small map: one slice was the whole
     return LATER;
   }
   function stampsWritten(ok) {
+    stampsHanded = false;   // r4676: the handed bytes have their answer
     if (!ok) { stampsDirty = true; stampsCompactOwed = true; return; }   // owed: the writer keeps it and retries (its failure said there) — the compaction stays OWED
     stampsLandedAfter = Math.max(stampsLandedAfter, stampsMadeAfter);
     stampsCompactOwed = false;
