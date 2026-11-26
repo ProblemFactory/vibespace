@@ -52,7 +52,7 @@ const bytesOf = (dir, f) => { try { return READ0.call(fs, path.join(dir, f), 'ut
 const S1 = 'aaaaaaaa-1111-4000-8000-000000000071', S2 = 'bbbbbbbb-2222-4000-8000-000000000072';
 const mkRec = (id, extra = {}) => ({ id, label: `App ${id}`, exec: 'x', state: 'ready', display: ':77', pids: { app: 4242, x: null, server: null, wm: null }, starts: {}, backend: 'vnc-display', startedAt: 1, ...extra });
 /** one LIFE: an engine over `dir` (the module `Mod` — the real one, or a RED copy), the session `w-A`, three windows */
-function life(Mod, dir) {
+function life(Mod, dir, opts = {}) {
   const sessions = new Map([['w-A', { agentToken: 'vsst_A', claudeSessionId: S1, backendSessionId: S1, backend: 'claude', name: 'agent A', mode: 'chat' }],
     ['w-B', { agentToken: 'vsst_B', claudeSessionId: S2, backendSessionId: S2, backend: 'claude', name: 'agent B', mode: 'chat' }]]);
   const records = new Map([['da-one', mkRec('da-one')], ['da-two', mkRec('da-two')], ['da-three', mkRec('da-three')]]);
@@ -61,7 +61,7 @@ function life(Mod, dir) {
     launch: async () => { launched.push(1); const rec = mkRec('da-opened'); records.set(rec.id, rec); return rec; }, stop: async (id) => { stopped.push(id); return { ok: true }; },
     relaunch: async (id) => { relaunched.push(id); return { id: id + '-r' }; }, takeoverViewer: (id, viewerId) => { elected.push(id); return { ok: true, viewers: [viewerId] }; },
     registry: () => [{ id: 'gedit', label: 'gedit', exec: 'gedit', args: [], available: true, reason: null }] };
-  const engine = Mod.create({ keeper, dataDir: dir, env: () => ({}), activeSessions: sessions, bins: { xdotool: null, gdbus: null }, procExe: () => null,
+  const engine = Mod.create({ keeper, dataDir: dir, env: () => ({}), activeSessions: sessions, bins: { xdotool: null, gdbus: null }, procExe: () => null, ...(opts.grants ? { grants: opts.grants } : {}),
     log: { warn: (l) => logs.push(String(l)), log() {} }, broadcast: (m) => sent.push(m) });
   return { engine, keeper, sessions, records, sent, logs, launched, stopped, relaunched, elected, facts: engine.factsForToken('vsst_A') };
 }
@@ -81,9 +81,9 @@ function firstLife(dir) {
   return { boot: b, attached: a && a.handle, leases: bytesOf(dir, LEASES), reach: bytesOf(dir, REACH) };
 }
 /** a held life: the engine starts with `file` refused once; its boot is the first read */
-function heldLife(Mod, dir, file) {
+function heldLife(Mod, dir, file, opts = {}) {
   const pr = placeReads(dir, file);
-  const w = life(Mod, dir);
+  const w = life(Mod, dir, opts);
   const boot = w.engine.boot();
   return { ...w, boot, pr };
 }
@@ -195,7 +195,8 @@ console.log('§1b (主开发 r4813) A PERSON\'s REVOKE WHILE THE LEASES ARE HELD
     const rv = tryOf(() => w.engine.revokeReach('da-one', { kind: 'session', id: 'w-A', name: 'agent A' }));
     const lifted = await HOLD.readAgainOf(LEASES);
     const out = { rv: rv.v ? rv.v.revoked : rv, lifted, lease: tryOf(() => w.engine.leaseOf('da-one')).v, gate: w.engine.inputPolicy('da-one', 'v-person'),
-      disk: Object.keys(JSON.parse(bytesOf(dir, LEASES) || '{}').leases || {}), lists: w.sent.filter((m) => m.type === 'window-leases-updated').map((m) => m.leases.map((l) => l.handle).join(',')) };
+      disk: Object.keys(JSON.parse(bytesOf(dir, LEASES) || '{}').leases || {}), lists: w.sent.filter((m) => m.type === 'window-leases-updated').map((m) => m.leases.map((l) => l.handle).join(',')),
+      audit: (bytesOf(dir, 'window-audit.jsonl') || '').split('\n').filter(Boolean).map((x) => { try { return JSON.parse(x); } catch { return {}; } }) };
     w.engine.shutdown();
     return out;
   };
@@ -203,8 +204,37 @@ console.log('§1b (主开发 r4813) A PERSON\'s REVOKE WHILE THE LEASES ARE HELD
   ok(!!(g.rv && g.rv.changed === true && g.rv.leaseDropped === false && g.rv.leaseEndsWhenRead === true), 'THE REVOKE ACTS while the leases are held, and its reply says the holder\'s lease ends as soon as the list can be read (leaseEndsWhenRead)', g.rv);
   ok(!!(g.lifted === true && g.lease === null && g.gate && g.gate.relay === true && !g.disk.includes('da-one') && g.lists.length >= 1 && g.lists.every((x) => !x.split(',').includes('da-one'))),
     'THE LIFT CARRIES IT OUT: the revoked agent\'s restored lease is ended before any list is published — the file drops it and the person\'s input reaches the window', g);
+  ok(!!(g.audit && g.audit.some((a) => a.verb === 'lease-dropped' && a.handle === 'da-one' && a.by === 'held-revoke') && !g.audit.some((a) => a.verb === 'lease-dropped' && a.by === 'user')),
+    'THE LIFT\'s END IS RECORDED as a revoke made while the leases were held (by held-revoke), never as a person\'s act of that moment', g.audit && g.audit.filter((a) => a.verb === 'lease-dropped'));
   const r = await scene(NO_MERGE());
   ok(!!(r.lease && r.lease.sessionId === 'w-A' && r.gate && r.gate.relay === false && r.gate.code === 'watch-mode'), 'RED (the tip before r4813): the lift brings the revoked agent\'s lease back — the person\'s own pane in watch mode behind it', r);
+  // r4826 — THE LAW: the lift ends a restored lease ONLY on a share that WAS READ and says «not reached»; an unread grants list or a row of
+  // unknown shape keeps every lease as it stands. The grants store is the life's own (injected), its file in a folder of its own
+  const GS = require(path.join(REPO, 'src/server/grants-store.js'));
+  const grantsDir = (doc) => { const d = mk(); fs.writeFileSync(path.join(d, 'grants.json'), JSON.stringify(doc)); return d; };
+  const unreadGrants = () => { const d = grantsDir({ v: 1, rows: [], syncVersion: 1 }), f = path.resolve(d, 'grants.json'), realS = fs.readFileSync; let once = 0;
+    fs.readFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p) === f && !once++) throw EIO(); return realS.call(this, p, ...a); };
+    try { return GS.create({ dataDir: d }); } finally { fs.readFileSync = realS; } };
+  const oddGrants = () => GS.create({ dataDir: grantsDir({ v: 1, rows: [{ door: 'window', resource: 'da-one', to: 'a row of another shape' }], syncVersion: 1 }) });
+  const standScene = async (Mod, gs) => {
+    const dir = mk(); firstLife(dir);
+    const w = heldLife(Mod, dir, LEASES, { grants: gs }); w.pr.restore();
+    const lifted = await HOLD.readAgainOf(LEASES);
+    const out = { lifted, readable: gs.health().readable, lease: tryOf(() => w.engine.leaseOf('da-one')).v, disk: Object.keys(JSON.parse(bytesOf(dir, LEASES) || '{}').leases || {}),
+      dropped: (bytesOf(dir, 'window-audit.jsonl') || '').split('\n').filter((x) => x.includes('"lease-dropped"')).length };
+    w.engine.shutdown();
+    return out;
+  };
+  const TIP_MERGE = () => copyOf('tip-merge', ["      if (!g || (gh && (!gh.readable || gh.bad > 0))) return;\n", ''],
+    ["if (!v || v.level === 'exposed' || v.unreadable || v.unknown) continue;", "if (!v || v.level === 'exposed' || v.unreadable) continue;"]);   // stale-pins: kept — the red's own text (the tip's merge)
+  const u = await standScene(ENGINE, unreadGrants());
+  ok(!!(u.lifted === true && u.readable === false && u.lease && u.lease.sessionId === 'w-A' && u.disk.includes('da-one') && u.dropped === 0), 'THE GRANTS LIST UNREAD at the lift: every restored lease stands (da-one kept, in the file, nothing ended)', u);
+  const o = await standScene(ENGINE, oddGrants());
+  ok(!!(o.lifted === true && o.readable === true && o.lease && o.lease.sessionId === 'w-A' && o.disk.includes('da-one') && o.dropped === 0), 'A SHARE ROW OF UNKNOWN SHAPE at the lift: its lease stands', o);
+  const ru = await standScene(TIP_MERGE(), unreadGrants());
+  ok(!!(ru.lease === null && !ru.disk.includes('da-one') && ru.dropped >= 1), 'RED (the tip\'s merge): the unread grants list read as «not reached» — the restored lease ended', ru);
+  const ro = await standScene(TIP_MERGE(), oddGrants());
+  ok(!!(ro.lease === null && !ro.disk.includes('da-one') && ro.dropped >= 1), 'RED (the tip\'s merge): a row of unknown shape read as «not reached» — the restored lease ended', ro);
 }
 
 console.log('§1c a lease row with one odd field is dropped AT THE READ (that row only), the window-reach file\'s wrong shape is torn (kept aside)');
@@ -217,7 +247,7 @@ console.log('§1c a lease row with one odd field is dropped AT THE READ (that ro
   ok(!!(b.v && !b.v.held && views.v === 'da-one' && fs.readdirSync(dir).every((n) => !n.startsWith(LEASES + '.corrupt-')) && w.logs.some((l) => /1 row\(s\) that are no plain record were skipped/.test(l))),
     'ONE ODD ROW: that row skipped and said, every other lease loads (da-one), nothing put aside', { b, views, logs: w.logs });
   w.engine.shutdown();
-  const ROW = copyOf('odd-row-thrown', ['      if (![l.handle, l.sessionId, l.since, l.origin].every(plain)) { odd++; continue; }\n', '']);
+  const ROW = copyOf('odd-row-thrown', ['      if (![l.handle, l.sessionId, l.since, l.origin, l.browserKey].every(plain)) { odd++; continue; }\n', '']);
   const w2 = life(ROW, dir); const b2 = tryOf(() => w2.engine.boot());
   ok(!!(b2.code === undefined && /Cannot convert object to primitive value/.test(b2.message || '') && heldRows(LEASES).length === 0), 'RED: without the row check the odd row throws out of the start — nothing held, the read lost', b2);
   w2.engine.shutdown();
