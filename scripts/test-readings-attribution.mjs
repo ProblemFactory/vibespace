@@ -1936,7 +1936,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     {
       const w = mkIncidentWorld();
       const preFix = path.join(w.root, 'vibespace-usage.prefix-both');
-      fs.writeFileSync(preFix, clockFirst(shipped).replace(GUARD_ASK, GUARD_OFF), { mode: 0o755 });
+      fs.writeFileSync(preFix, editAnchor(clockFirst(shipped), GUARD_ASK, GUARD_OFF, "data/bin/vibespace-usage"), { mode: 0o755 });
       playPooled(preFix, w, { pct: 96, sevenDayReset: w.WIN[w.LINK], slotFp: 'differs', slotAtMinutesAgo: 30, repointMinutesAgo: 30, ages: [w.LINK, w.SPARE, w.FISH] });
       ok('§15 NEGATIVE CONTROL: the PRE-FIX statusline files the previous member\'s 96 % on the low-usage one and the pool makes its SECOND false switch — one ordinary render of an idle terminal',
         Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.96) < 1e-9 && w.am.poolCurrent(w.P) === w.FISH,
