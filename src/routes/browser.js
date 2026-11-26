@@ -2195,17 +2195,19 @@ router.post('/api/agent/browser/audit', async (req, res) => {
       const t = profileId && can ? dialogTargetFor(k, f, profileId) : { ok: false, code: can ? 'not-found' : 'no_scrub' };
       if (!t.ok) {
         const why = t.code === 'not_attached' ? 'not_attached' : t.code === 'no_scrub' ? 'no_scrub' : 'not-found';
-        const said = why === 'not_attached' ? 'this conversation no longer holds that browser: its lease ended while the command ran' : why === 'no_scrub' ? 'this hub has no output scrub' : 'no browser of this conversation by that name';
+        // r4795: the lease ends mid-command only by a DETACH — the conversation's own, or the person's in VibeSpace (the UI's detach, «Only
+        // <other chat>», a pin moved); a takeover alone keeps it. Said as that, never «attach it again»
+        const said = why === 'not_attached' ? 'this conversation no longer holds that browser: it was detached while the command ran (by this conversation, or by the person in VibeSpace)' : why === 'no_scrub' ? 'this hub has no output scrub' : 'no browser of this conversation by that name';
         const sz = (x) => (typeof x === 'string' ? Buffer.byteLength(x, 'utf8') : 0);
-        return res.status(409).json({ error: `the hub could not check this command's output for vault values (${said})`, code: 'scrub_unchecked', why, sizes: { out: sz(req.body.output.out), err: sz(req.body.output.err) } });
+        return res.status(409).json({ error: `the hub could not check this command's output for vault values (${said})`, code: 'scrub_unchecked', why, sizes: { out: sz(req.body.output.out), err: sz(req.body.output.err) }, ...(interrupted ? { interrupted } : {}) });
       }
       // row B-360d (主开发 r4523): a half past the on-loop figure is scrubbed off the loop and AWAITED; a refusal answers by name (a code
       // and the sizes, never a value or a piece of the output) — the CLI then refuses [login_fill_live] and prints nothing
       if (t.ok) {
         const sc = await ctx.dialogs.scrubOutput(t, req.body.output);
         // line 1051's follow (r4754 (2)): a half past the text cap (an older CLI's 16 MiB) is refused by name, never handed to the worker
-        if (sc && sc.refused && sc.tooLarge) return res.status(413).json({ error: `this command's output is larger than the hub's vault scrub takes at once (${sc.cap} bytes a half)`, code: 'scrub_too_large', cap: sc.cap, sizes: sc.sizes || null });
-        if (sc && sc.refused) return res.status(503).json({ error: `the browser output could not be scrubbed off the hub's loop (${sc.refused})`, code: 'scrub_refused', why: String(sc.refused), ...(sc.over ? { workBound: true } : {}), sizes: sc.sizes || null });
+        if (sc && sc.refused && sc.tooLarge) return res.status(413).json({ error: `this command's output is larger than the hub's vault scrub takes at once (${sc.cap} bytes a half)`, code: 'scrub_too_large', cap: sc.cap, sizes: sc.sizes || null, ...(interrupted ? { interrupted } : {}) });
+        if (sc && sc.refused) return res.status(503).json({ error: `the browser output could not be scrubbed off the hub's loop (${sc.refused})`, code: 'scrub_refused', why: String(sc.refused), ...(sc.over ? { workBound: true } : {}), sizes: sc.sizes || null, ...(interrupted ? { interrupted } : {}) });   // r4795: an interruption rides every refusal
         scrubChecked = !!(sc && typeof sc.out === 'string' && typeof sc.err === 'string');   // the positive word: checked, nothing raw left
         if (scrubChecked && sc.changed) scrubbed = { out: sc.out, err: sc.err };
       }

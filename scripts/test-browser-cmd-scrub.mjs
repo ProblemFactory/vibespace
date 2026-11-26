@@ -240,7 +240,7 @@ for (const HALF of [Number((/textMax: (\d+) \* 1024 \* 1024/.exec(SRC_BD) || [])
   console.log(`  · PRINTED, never judged: the route's parse of a ${(body.length / 1048576).toFixed(1)} MiB body (two ${HM} MiB halves) took ${parseMs.toFixed(1)} ms on the main thread; the post of ONE ${HM} MiB half to a worker took ${postMs.toFixed(1)} ms (a structured clone on the main thread)`);
   // line 1051's follow (the round's three left out): the size passes, the RECEIVE of the worker's 16 MiB answer on the loop (the
   // structured clone's other half, read synchronously off a port), the compares, and the answer's stringify
-  const t2 = performance.now(); let n = 0; for (let i = 0; i < 3; i++) n += Buffer.byteLength(parsed.output.out, 'utf8'); const lenMs = performance.now() - t2;
+  const t2 = performance.now(); let n = 0; for (const x of [parsed.output.out, parsed.output.err]) n += Buffer.byteLength(x, 'utf8'); const lenMs = performance.now() - t2;   // scrubOutput's ONE size pass a half
   const { MessageChannel, receiveMessageOnPort } = require('worker_threads');
   const ch = new MessageChannel(); const answer = 'z' + parsed.output.out.slice(1);   // a 16 MiB answer that differs from its input
   ch.port1.postMessage({ type: 'done', seq: 1, r: { out: answer } });
@@ -249,14 +249,14 @@ for (const HALF of [Number((/textMax: (\d+) \* 1024 \* 1024/.exec(SRC_BD) || [])
   const sameCopy = Buffer.from(same, 'utf8').toString('utf8');
   const t4 = performance.now(); const ne1 = got.message.r.out !== parsed.output.out; const ne2 = sameCopy !== parsed.output.err; const cmpMs = performance.now() - t4;
   const t5 = performance.now(); const sent = JSON.stringify({ ok: true, scrubChecked: true, scrubbed: { out: got.message.r.out, err: parsed.output.err } }); const strMs = performance.now() - t5;
-  console.log(`  · PRINTED, never judged (line 1051's follow): the size passes, three over one ${HM} MiB half (${n} bytes), took ${lenMs.toFixed(1)} ms; the receive of the worker's ${HM} MiB answer on the loop took ${recvMs.toFixed(1)} ms; the two compares (an answer that changed, one that did not) took ${cmpMs.toFixed(1)} ms (${ne1}/${ne2}); the stringify of an answer with two ${HM} MiB halves (${(sent.length / 1048576).toFixed(1)} MiB) took ${strMs.toFixed(1)} ms — the last as at the release`);
+  console.log(`  · PRINTED, never judged (line 1051's follow): the size pass, once a half over both ${HM} MiB halves (${n} bytes), took ${lenMs.toFixed(1)} ms; the receive of the worker's ${HM} MiB answer on the loop took ${recvMs.toFixed(1)} ms; the two compares (an answer that changed, one that did not) took ${cmpMs.toFixed(1)} ms (${ne1}/${ne2}); the stringify of an answer with two ${HM} MiB halves (${(sent.length / 1048576).toFixed(1)} MiB) took ${strMs.toFixed(1)} ms — the last as at the release`);
 }
 
 console.log('(h) THE TEXT CAP AND THE FRAMES BEHIND A TEXT — a half past the cap never reaches the worker; frames queued behind a text job inside the bound are answered, none withheld');
 {
   const CAP = Number((/textMax: (\d+) \* 1024 \* 1024/.exec(SRC_BD) || [])[1]) * 1048576;
   const over = { out: textOf(CAP + 1), err: '' };
-  const leg1 = async (mod) => { const d = mk(mod, { floorMs: 0 }, { scrubWorkerFile: STALL }); const a = await Promise.race([d.scrubOutput(T, over), sleep(1500).then(() => ({ hung: true }))]); const f = d.scrubWorkerFacts(PID); done(d); return { a, live: f.live, n: f.refused }; };
+  const leg1 = async (mod) => { const d = mk(mod, { floorMs: 0 }, { scrubWorkerFile: STALL }); const a = await Promise.race([d.scrubOutput(T, over), sleep(200).then(() => ({ hung: true }))]); const f = d.scrubWorkerFacts(PID); done(d); return { a, live: f.live, n: f.refused }; };
   const real = await leg1(BD);
   ok(real.a && real.a.refused && real.a.tooLarge === true && real.a.cap === CAP && real.a.sizes && real.a.sizes.out === CAP + 1 && !('out' in real.a) && real.live === false && real.n === 1,
     `(h) a half ONE BYTE past the cap (${CAP} bytes): refused by name («${real.a && real.a.refused}»), its sizes, no worker started for it, one count`, real);
@@ -271,15 +271,15 @@ console.log('(h) THE TEXT CAP AND THE FRAMES BEHIND A TEXT — a half past the c
   const holdFile = (ms) => { const f = path.join(DIR, `hold-worker-${ms}.cjs`); fs.writeFileSync(f, fs.readFileSync(HOLD, 'utf8').replace('HOLD_MS', String(ms))); return f; };
   const FRAME = JSON.stringify({ id: 7, result: { value: 'f'.repeat(80 * 1024) + ' ' + VALUE }, sessionId: 'S7' });
   const leg2 = async (holdMs) => {
-    const d = mk(BD, { boundMs: 600, floorMs: 0 }, { scrubWorkerFile: holdFile(holdMs) });
+    const d = mk(BD, { boundMs: 300, floorMs: 0 }, { scrubWorkerFile: holdFile(holdMs) });
     const pt = d.scrubOutput(T, { out: textOf(100 * 1024), err: '' });
     const r = d.scrubCdpFrameAsync(PID, FRAME); const pf = typeof r === 'string' ? Promise.resolve({ out: r }) : r;
     const [t, f] = await Promise.all([pt, pf]); const facts = d.scrubWorkerFacts(PID); done(d);
     return { text: t.refused ? 'refused' : (carries(t.out) ? 'RAW' : 'scrubbed'), frame: f && f.withheld ? 'withheld' : (f && typeof f.out === 'string' ? (f.out.includes(VALUE) ? 'RAW' : 'scrubbed') : 'none'), live: facts.live, withheld: facts.withheld };
   };
-  const inside = await leg2(300), past = await leg2(1000);
+  const inside = await leg2(150), past = await leg2(500);
   ok(inside.text === 'scrubbed' && inside.frame === 'scrubbed' && inside.live === true && inside.withheld === 0 && past.frame === 'withheld' && past.text === 'refused',
-    `(h) a text job held 300 ms inside a 600 ms bound: the frame queued behind it ${inside.frame}, the worker kept (${inside.live}), ${inside.withheld} withheld; held 1000 ms, past the bound (the old cap's case): the frame behind it ${past.frame}, the command ${past.text}`, { inside, past });
+    `(h) a text job held 150 ms inside a 300 ms bound: the frame queued behind it ${inside.frame}, the worker kept (${inside.live}), ${inside.withheld} withheld; held 500 ms, past the bound (the old cap's case): the frame behind it ${past.frame}, the command ${past.text}`, { inside, past });
 }
 
 console.log('(i) THE REAL CLI against a stand-in hub — nothing of the output printed on any answer but the hub\'s word that it checked it');
@@ -308,7 +308,7 @@ console.log('(i) THE REAL CLI against a stand-in hub — nothing of the output p
   const CASES = [
     ['the worker did not answer (503 scrub_refused)', (send) => send(503, { error: 'refused', code: 'scrub_refused', why: 'no answer within 10000 ms', sizes: SIZES }), /the hub's scrub worker did not answer \(no answer within 10000 ms\); nothing was printed\. Run the command again in a moment/],
     ['the work bound (503 scrub_refused, workBound)', (send) => send(503, { error: 'refused', code: 'scrub_refused', why: 'the scrub passed its work bound (scrub_work_bound)', workBound: true, sizes: SIZES }), /holds more work for the hub's vault scrub than its bound allows \(scrub_work_bound\); running it again cannot help; nothing was printed\. Read less at once/],
-    ['the lease ended (409 scrub_unchecked)', (send) => send(409, { error: 'unchecked', code: 'scrub_unchecked', why: 'not_attached', sizes: SIZES }), /could not check this command's output for vault values \(this conversation no longer holds that browser: its lease ended while the command ran\); nothing was printed\. Attach it again/],
+    ['the lease ended (409 scrub_unchecked)', (send) => send(409, { error: 'unchecked', code: 'scrub_unchecked', why: 'not_attached', sizes: SIZES }), /could not check this command's output for vault values \(this conversation no longer holds that browser: it was detached while the command ran \(by this conversation, or by the person in VibeSpace\)\); nothing was printed\. See what this conversation holds now \(vibespace-browser status\) before you run it again/],
     ['a 200 with no word', (send) => send(200, { ok: true }), /did not say this command's output was checked for vault values [^\n]*nothing was printed\. Run the command again/],
     ['a 200 whose body cannot be read', (send) => send(200, '<html>not json</html>'), /did not say this command's output was checked for vault values [^\n]*nothing was printed/],
     ['the hub says the output is past its cap (413 scrub_too_large)', (send) => send(413, { error: 'too large', code: 'scrub_too_large', cap: 4 * 1048576, sizes: SIZES }), /is larger than the hub's vault scrub takes at once \(4 MiB a half\); nothing was printed\. Read less at once/],
@@ -319,6 +319,13 @@ console.log('(i) THE REAL CLI against a stand-in hub — nothing of the output p
   const bigPosted = audits.pop();
   ok(big.code === 1 && !big.printed && /\(out 4\.0 MiB, err 0 KiB\) is larger than the hub's vault scrub takes at once \(4 MiB a half\); nothing was printed\. Read less at once/.test(big.e) && bigPosted === false,
     `(i) an output past the cap (4 MiB + 10 bytes): the CLI refuses it BEFORE posting it (posted: ${bigPosted}), exit ${big.code}, «${(big.e.split('\n').find((l) => /refused/.test(l)) || '').trim()}»`, { code: big.code, e: big.e.slice(0, 600) });
+  // r4795: a command the person's takeover interrupted, whose output the worker could not answer: the interruption's own sentence FIRST,
+  // then the refusal; nothing of the output
+  const INT = { code: 'browser_interrupted', error: 'The user took over your window of this browser — your operation was interrupted. Wait for the handback, then run it again.', takenAt: Date.now(), input: 'user', aborted: true, mediated: true };
+  const both = await run(CLI, (send) => send(503, { error: 'refused', code: 'scrub_refused', why: 'no answer within 10000 ms', sizes: SIZES, interrupted: INT }));
+  audits.pop();
+  const iInt = both.e.indexOf('[browser_interrupted]'), iRef = both.e.indexOf('vibespace-browser: refused');
+  ok(both.code === 1 && !both.printed && iInt >= 0 && iRef > iInt, `(i) INTERRUPTED AND REFUSED: the takeover's sentence first (at ${iInt}), the refusal after it (at ${iRef}), exit ${both.code}, nothing of the output printed`, { code: both.code, e: both.e.slice(0, 800) });
   const ctlClean = await run(CLI, (send) => send(200, { ok: true, scrubChecked: true }));
   const ctlScrubbed = await run(CLI, (send) => send(200, { ok: true, scrubChecked: true, scrubbed: { out: 'SCRUBBED-COPY\n', err: '' } }));
   const posted = audits.length === CASES.length + 2 && audits.every(Boolean);
@@ -345,7 +352,11 @@ console.log('(j) THE ROUTE — the word when it checked, 409 scrub_unchecked by 
     leasesFor: () => (held ? [{ profileId: PID, browserKey: KEY, sessionId: SID }] : []),
     statusFor: () => ({ ephemeral: null, leases: held ? [{ profileId: PID, browserKey: KEY, sessionId: SID }] : [] }),
     clock: () => Date.now(),
+    // r4795: a person's takeover PAUSES the lease and keeps it (src/server/browser-keeper.js takeover: the input side goes to the person);
+    // the audit asks whether it caught the command (`since`) — a stand-in of that answer
+    interruptionFor: ({ since = 0 } = {}) => (taken && since > 0 ? { code: 'browser_interrupted', error: 'The user took over your window of this browser — your operation was interrupted. Wait for the handback, then run it again.', takenAt: Date.now(), input: 'user', aborted: true, mediated: true } : null),
   };
+  let taken = false;
   const sessions = new Map([[SID, { agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', name: 'cmd scrub', cwd: DIR, backendSessionId: 'conv-cmd-scrub' }]]);
   // the dialogs the route reads: the REAL scrubOutput (a mk() world); the watch's fact a stand-in (no page here)
   const dialogsOf = (d) => ({ scrubOutput: (t, raw) => d.scrubOutput(t, raw), factFor: () => ({ watched: false }), noteOutcome() { } });
@@ -359,11 +370,13 @@ console.log('(j) THE ROUTE — the word when it checked, 409 scrub_unchecked by 
   held = false; const rLease = await post(w, { profile: PID, verb: 'snapshot', ok: true, output: small });
   held = true; const rNone = await post(w, { profile: 'bp-no-such', verb: 'snapshot', ok: true, output: small });
   const rNoOut = await post(w, { profile: PID, verb: 'click', ok: true });
+  taken = true; const rTaken = await post(w, { profile: PID, verb: 'snapshot', ok: true, since: Date.now() - 1000, output: small }); taken = false;
   const CAP = Number((/textMax: (\d+) \* 1024 \* 1024/.exec(SRC_BD) || [])[1]) * 1048576;
   const tooBig = { out: textOf(CAP + 1), err: '' }; const rBig = await post(w, { profile: PID, verb: 'snapshot', ok: true, output: tooBig });
   await new Promise((r) => w.srv.close(r)); done(d);
   const dS = mk(BD, { boundMs: 250, floorMs: 0 }, { scrubWorkerFile: STALL }); const wS = await world(Rt, dS);
   const rStall = await post(wS, { profile: PID, verb: 'snapshot', ok: true, output: big });
+  taken = true; const rStallTaken = await post(wS, { profile: PID, verb: 'snapshot', ok: true, since: Date.now() - 1000, output: big }); taken = false;
   await new Promise((r) => wS.srv.close(r)); done(dS);
   const dO = mk(BD, { floorMs: 0 }, { scrubWorkerFile: OVER }); const wO = await world(Rt, dO);
   const rOver = await post(wO, { profile: PID, verb: 'snapshot', ok: true, output: big });
@@ -377,12 +390,14 @@ console.log('(j) THE ROUTE — the word when it checked, 409 scrub_unchecked by 
     `(j) COULD NOT CHECK: the lease ended between the resolve and the audit — 409 scrub_unchecked «${rLease.json && rLease.json.error}»; no browser of the conversation by that name — 409 «${rNone.json && rNone.json.why}»; the sizes, never a value`, { rLease: rLease.json, rNone: rNone.json });
   ok(rStall.status === 503 && rStall.json.code === 'scrub_refused' && !rStall.json.workBound && sameSizes(rStall.json.sizes, big) && rOver.status === 503 && rOver.json.workBound === true && noValue,
     `(j) THE WORKER COULD NOT ANSWER: silent past its bound — 503 scrub_refused «${rStall.json && rStall.json.why}»; over its work bound — 503 with workBound; the sizes, never a value`, { rStall: rStall.json, rOver: rOver.json });
+  ok(rTaken.status === 200 && rTaken.json.scrubChecked === true && rTaken.json.interrupted && rTaken.json.interrupted.code === 'browser_interrupted' && rStallTaken.status === 503 && rStallTaken.json.code === 'scrub_refused' && rStallTaken.json.interrupted && !carries(rTaken.text) && !carries(rStallTaken.text),
+    `(j) A TAKEOVER KEEPS THE LEASE: the output is checked (200 scrubChecked) and the interruption rides the answer; with the worker silent, the 503 carries the interruption too (the CLI says it first, (i))`, { rTaken: rTaken.json && { scrubChecked: rTaken.json.scrubChecked, interrupted: !!rTaken.json.interrupted }, rStallTaken: rStallTaken.json && { code: rStallTaken.json.code, interrupted: !!rStallTaken.json.interrupted } });
   ok(rBig.status === 413 && rBig.json && rBig.json.code === 'scrub_too_large' && rBig.json.cap === CAP && sameSizes(rBig.json.sizes, tooBig) && !carries(rBig.text), `(j) A HALF PAST THE CAP (an older CLI copy posts up to 16 MiB): 413 scrub_too_large «${rBig.json && rBig.json.error}», the cap and the sizes`, rBig.json);
   const RTGUARD = MUT.load('src/routes/browser.js', anchored(SRC_RT, "      if (!t.ok) {\n        const why = t.code === 'not_attached'", "      if (false) {\n        const why = t.code === 'not_attached'", 'test-browser-cmd-scrub (j) no could-not-check answer'), 'route-no-guard');
   const dG = mk(BD); const wG = await world(RTGUARD, dG);
   held = false; const rG = await post(wG, { profile: PID, verb: 'snapshot', ok: true, output: small }); held = true;
   await new Promise((r) => wG.srv.close(r)); done(dG);
-  ok(rG.status === 200 && rG.json && rG.json.scrubChecked === true, `RED CONTROL: without its could-not-check answer the route says «checked» (HTTP ${rG.status}, scrubChecked ${rG.json && rG.json.scrubChecked}) for an output it never checked`, rG.json);
+  ok(rG.status === 200 && rG.json && rG.json.ok === true && !('scrubChecked' in rG.json) && !('scrubbed' in rG.json), `RED CONTROL: without its could-not-check answer the route answers the lease's end as the release did — HTTP ${rG.status} with no word (an older CLI copy printed its own raw copy on that answer)`, rG.json);
   Rt.setup({ keeper: null, activeSessions: new Map(), dialogs: null, tasksForSession: () => [] });
 }
 
