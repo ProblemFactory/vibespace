@@ -4881,6 +4881,11 @@ THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coo
   line: its one read (server.js's index route, `const ground = …groundOf(req.headers.cookie)` — test-auth), its one write (src/lib/themes.js
   through cookieFor — test-user-state-echo, test-record-clear-census H1); src/launch-ground.js and src/launch-image.js are the interface's
   files in the loop census.
+  THE WORDS FOLLOW THE GROUND (r4681): the ground reaches every client with the cookie (a desktop too), so over a LIGHT one (WCAG's
+  crossing, luminance > 0.179) withGround marks the loading screen data-ground="light" and darkens its text and track, and
+  src/lib/boot-splash.js draws the stuck-start line and its Reload button in launch-ground.js ON_LIGHT — every built-in theme's ground
+  at 4.5:1 or more (test-viewport-class ⑤e reads them from style.css). A theme whose ground is no plain colour (hsl(), a name,
+  color-mix()) writes the CLEARING cookie (groundCookie): the next launch falls back to today's dark, never the previous theme's.
 - THE COLUMN ON THE LEFT (主开发 r4481, the owner asked where the outer display's bar was). The outer display held landscape reads
   678×445, the insets left 84 · right 0 · bottom 34, the regular class: the system's column is on the LEFT there and draws nothing in it.
   Before, the column stood EMPTY beside our trailing bar on the right (56 wide): 140 of 678 points gone, the conversation 538. THE LAW:
@@ -4892,6 +4897,11 @@ THE SIMULATOR's FAULTS (主开发 r4463, the owner's simulator driven by the coo
   Chrome (RED: the release's verdict, the owner's picture); test-viewport-class ⑤g pins the block. A compact class with a column on
   the left was never read (the outer display held portrait has it on the right; an iPhone has no upside-down portrait): the compact
   rules keep the right one. UNPROVEN on the device until the simulator's picture.
+- THE LIST BESIDE THE COLUMN (r4681 MUST, the full round of line 1062): the fixed #main-wrapper (the top band's cure) is its own stacking
+  context, so the column's layer counts only inside it; on the outer display the conversations list (outside the wrapper, the phone's
+  full-width overlay) covered every global door while it was open. The list now stops where the column begins (compact + a side column:
+  its width less the column's) — never a layer number on the wrapper. test-duo-layout ④b opens it and hits each button. The fixed wrapper
+  reaches EVERY iPhone's and iPad's home-screen copy (navigator.standalone), not the Duo alone.
 - THE WHITE BEFORE THE PAGE (about 3 s at a cold launch) comes before the page begins (the document's answer ends at 10 ms, the first paint
   at 18 ms). Nothing in the page reaches it. THE LAUNCH IMAGE (B-78db (B), 主开发 r4481 — the owner: can the launch's white be removed
   altogether): the coordinator read the runtime — a home-screen copy takes a startup image and a landscape one from the page's

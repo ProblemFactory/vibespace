@@ -900,9 +900,9 @@ const STORAGE = {
 const STORAGE_CLASSES = new Set(['pref', 'ids', 'owner', 'ref', 'plugin', 'telemetry', 'marker']);
 // THE LAUNCH GROUND's ONE COOKIE (B-78db, 主开发 r4467): a colour or nothing by src/launch-ground.js's one strict rule — never an act,
 // a record's words, an id or a theme's name; declared by its exact statement in src/lib/themes.js, its writer imported from
-// launch-ground.js. Any other cookie write, in that file or another, stays red
-const GROUND_COOKIE = "try { const c = cookieFor(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); if (c) document.cookie = c; }";
-const groundCookieOnly = (rel, text) => rel === 'src/lib/themes.js' && text.split('document.cookie').length === 2 && text.split(GROUND_COOKIE).length === 2 && /^import \{ cookieFor \} from '\.\.\/launch-ground\.js';/m.test(text);
+// launch-ground.js (its ground, or the clearing cookie — r4681 required 3). Any other cookie write, in that file or another, stays red
+const GROUND_COOKIE = "try { document.cookie = groundCookie(getComputedStyle(document.documentElement).getPropertyValue('--bg-root')); }";
+const groundCookieOnly = (rel, text) => rel === 'src/lib/themes.js' && text.split('document.cookie').length === 2 && text.split(GROUND_COOKIE).length === 2 && /^import \{ groundCookie \} from '\.\.\/launch-ground\.js';/m.test(text);
 const storageWrites = (srcs) => {
   const rows = [], other = [];
   for (const [rel, text] of srcs) {
@@ -929,8 +929,8 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
   ok(otherWrites.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot (the phone\'s back sentinel {vs: 1} and the launch ground\'s one colour cookie aside)', otherWrites);
   { const T = read('src/lib/themes.js');
     ok(groundCookieOnly('src/lib/themes.js', T) && !groundCookieOnly('src/lib/themes.js', T + "\ndocument.cookie = 'theme=' + name;") && !groundCookieOnly('src/lib/sidebar.js', T)
-      && !groundCookieOnly('src/lib/themes.js', T.replace(GROUND_COOKIE, GROUND_COOKIE.replace('cookieFor(', 'String('))),
-      'H1 the launch ground\'s cookie is ONE statement in src/lib/themes.js through launch-ground.js\'s cookieFor (a colour or nothing) — CONTROL: a second cookie there, the same statement in another file, or a value not cookieFor\'s is red'); }
+      && !groundCookieOnly('src/lib/themes.js', T.replace(GROUND_COOKIE, GROUND_COOKIE.replace('groundCookie(', 'String('))),
+      'H1 the launch ground\'s cookie is ONE statement in src/lib/themes.js through launch-ground.js\'s groundCookie (a colour, or the clearing cookie) — CONTROL: a second cookie there, the same statement in another file, or a value not groundCookie\'s is red'); }
   ok(!sentinelOnly('src/lib/mobile-back.js', "const push = () => history.pushState({ vs: 1, id: rec.id }, '');\nhistory.replaceState(null, '');") && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState({ vs: 1 }, '', '/s/' + id);")
     && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');\nhistory.replaceState(null, '');")
     && !sentinelOnly('src/lib/other.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');")

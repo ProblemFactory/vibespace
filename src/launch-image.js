@@ -11,7 +11,7 @@
 // tells them apart). After a theme change the copy keeps the image it took: the launch shows the OLD colour for that moment, until the
 // copy is added again. A colour's alpha is not drawn (an image is opaque; every built-in theme's ground is opaque).
 const zlib = require('zlib');
-const { DARK, cleanGround } = require('./launch-ground.js');
+const { DARK, cleanGround, rgbOf } = require('./launch-ground.js');   // rgbOf: the colour's channels, one reader with the launch ground
 
 /** THE SCREENS a home-screen copy launches on — device points, the pixel ratio, what has it (Apple's published iPhone screens; the Duo
  *  from the simulator's probe, int359/duo-probe/readings.jsonl: screen 466×678, devicePixelRatio 3 on both displays). Each gives a
@@ -36,13 +36,6 @@ const ORIENTS = Object.freeze(['portrait', 'landscape']);
 const pixelsOf = (s, o) => (o === 'portrait' ? { W: s.w * s.r, H: s.h * s.r } : { W: s.h * s.r, H: s.w * s.r });
 /** THE SIZES the route answers — every other is a 404 */
 const SIZES = Object.freeze([...new Set(SCREENS.flatMap((s) => ORIENTS.map((o) => { const { W, H } = pixelsOf(s, o); return `${W}x${H}`; })))]);
-
-/** a colour (launch-ground.js's one strict rule; anything else = today's dark) → [r, g, b] */
-function rgbOf(colour) {
-  const g = cleanGround(colour) || DARK;
-  if (g[0] === '#') { let h = g.slice(1); if (h.length <= 4) h = [...h].map((c) => c + c).join(''); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); }
-  return g.match(/\d+/g).slice(0, 3).map(Number);   // rgb() / rgba(): its three channels (the rule bounds each to 0–255)
-}
 
 const CRC_TABLE = (() => { const t = new Int32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c; } return t; })();
 function crc32(buf) { let c = -1; for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8); return (c ^ -1) >>> 0; }

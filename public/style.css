@@ -10387,6 +10387,12 @@ html[data-vc="compact"][data-sidecol] .window.window-active > .window-titlebar .
 html[data-vc="compact"][data-sidecol]:is(:has(#mobile-nav-viewer-close.on), :not([data-onshow="chat"]):has(#mobile-nav-more.on)) .window.window-active > .window-titlebar { padding-right: 60px; }
 html[data-vc="compact"][data-sidecol]:has(#mobile-nav-viewer-close.on):not([data-onshow="chat"]):has(#mobile-nav-more.on) .window.window-active > .window-titlebar { padding-right: 104px; }
 html[data-vc="compact"][data-sidecol] .mobile-win-switcher { right: max(56px, env(safe-area-inset-right, 0px)) !important; } /* the switcher from the head: the conversation's width, the column clear */
+/* THE CONVERSATIONS LIST BESIDE THE COLUMN (r4681 MUST — the full round of line 1062): the home-screen copy's #main-wrapper is FIXED
+   (the top band's cure), so it is its own stacking context and the column's layer (95000) counts only inside it; the list, outside the
+   wrapper (the phone's full-width overlay at 90000), covered every global door while it was open, and the system's column showed its
+   empty padding. The list now STOPS where the column begins: nothing has to cover the column. Never a layer number on the wrapper
+   (that would lift the whole page over the list). test-duo-layout ④b opens the list and hits each of the column's buttons */
+html[data-vc="compact"][data-sidecol] .sidebar { width: calc(100vw / var(--ui-scale, 1) - max(56px, env(safe-area-inset-right, 0px))) !important; max-width: none; padding-right: 0; }
 
 /* ── THE FOUR EDGES, EVERY iPHONE SHAPE (B-78db slice 2 — the audit of the 32 rules that pin an element to a screen edge; the
    verdicts in docs/kb-features.md «The system's edges»). Cover is set for EVERY home-screen copy (side-column.js), so a notched

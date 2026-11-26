@@ -7,6 +7,11 @@
 import { t } from './i18n.js';
 import { track } from './telemetry-client.js';
 import { ladderConfig, ladderJson, reasonOf, waitServerReady } from './boot-ladder.js';
+import { ON_LIGHT } from '../launch-ground.js';
+
+// THE WORDS FOLLOW THE LAUNCH GROUND (B-78db, r4681 required 2): over a LIGHT remembered ground the index route marks the loading screen
+// data-ground="light" (src/launch-ground.js withGround) — the line and the Reload button were drawn for the dark ground
+const onLight = (s) => !!s && !!s.dataset && s.dataset.ground === 'light';
 
 const splash = () => document.getElementById('loading-screen');
 export function splashLine(text) {
@@ -17,7 +22,7 @@ export function splashLine(text) {
     el = document.createElement('div');
     el.className = 'boot-line';
     el.setAttribute('role', 'status');
-    el.style.cssText = 'font-size:12px;color:#94a3b8;max-width:min(520px,90vw);text-align:center;line-height:1.5;padding:0 12px';
+    el.style.cssText = `font-size:12px;color:${onLight(s) ? ON_LIGHT.line : '#94a3b8'};max-width:min(520px,90vw);text-align:center;line-height:1.5;padding:0 12px`;
     s.appendChild(el);
   }
   el.textContent = text;
@@ -37,7 +42,7 @@ export function splashGiveUp({ url, tries, fail }) {
   b.type = 'button';
   b.className = 'boot-reload';
   b.textContent = t('Reload now');
-  b.style.cssText = 'font:inherit;font-size:13px;padding:6px 16px;border-radius:6px;border:1px solid #2dd4bf;background:transparent;color:#5eead4;cursor:pointer';
+  b.style.cssText = `font:inherit;font-size:13px;padding:6px 16px;border-radius:6px;border:1px solid ${onLight(s) ? ON_LIGHT.accent : '#2dd4bf'};background:transparent;color:${onLight(s) ? ON_LIGHT.accent : '#5eead4'};cursor:pointer`;
   b.onclick = () => location.reload();
   s.appendChild(b);
 }
