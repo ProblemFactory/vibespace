@@ -62,7 +62,7 @@ function scanProc(mountpoint, { procDir = '/proc', perProc = FD_READS_PER_PROC, 
 function childScan(mountpoint) {
   return Promise.resolve().then(() => require('./child-starter').childStarter().run(process.execPath, [__filename, '--suspects', mountpoint], { timeoutMs: SCAN_TIMEOUT_MS, maxBuffer: SCAN_MAX_BUFFER, capture: true, envAdd: {} })).then((r) => {
     const why = !r ? 'no answer' : r.unknown ? 'the starter gave no answer' : r.timedOut ? `no answer in ${SCAN_TIMEOUT_MS} ms` : r.overflow ? `the table passed ${SCAN_MAX_BUFFER} bytes`
-      : r.started === false ? `not started (${r.error || 'unknown'})` : r.code !== 0 ? `exit ${r.code}` : null;
+      : r.started === false ? `not started (${r.error || 'unknown'})` : r.code == null ? `ended by ${r.signal || 'a signal'}` : r.code !== 0 ? `exit ${r.code}` : null;   // a signal is said as one (its reader: never «exit null»)
     if (why) throw new Error(why);
     return JSON.parse(String(r.stdout || ''));   // a table that does not parse throws as well: «not read»
   });
