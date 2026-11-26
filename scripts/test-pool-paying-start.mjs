@@ -8,6 +8,9 @@
 // keeps the release's answer. RED: 17f782574's chooser in a copy (a hint ⇒ no placing; no family ⇒ the default before any decision).
 // B-6a92's line «stays on the pool's default … held on another account's weekly instant» is said only for a start that STAYS: asked
 // after the decision, since a start with no family on a held default that PAYS is placed too. RED: the line asked before it, in a copy.
+// THE PIN ROAD (主开发 r5067): a start PINNED to a member that cannot serve (its weekly cap spent, lapsed, its sign-in dead, gone from
+// the pool) is placed by the same law — every kind lands on the ordinary member; a pin that CAN serve is honoured, a paying one too.
+// RED: 8a1ade3b7's pin block (the pinned placement asked on its own), in a copy. THE CENSUS: every return of the chooser, named.
 // Every account and token is made up; the world is a temp folder; nothing is spawned.
 import { scratchDir, anchored } from './scratch.mjs';   // FIRST of the lib imports (B-ba47): the suite runs on a temp home of its own
 import fs from 'node:fs';
@@ -33,21 +36,28 @@ const reading = ({ u5 = 0.1, u7 = 0.4, fable = null, paying = false } = {}) => (
   ...(paying ? { overage: { inUse: true, asOf: NOW - 60e3, status: 'allowed' } } : {}),
 });
 
+// the PINNED member X's scene: its reading by kind (lapsed: a serve record after its reading; signed out: no credentials file; outside:
+// signed in, healthy, not a member of the pool — a member since removed)
+const PIN_READ = { spent: { u5: 0.1, u7: 0.99 }, lapsed: { u5: 0.1, u7: 0.4 }, 'signed-out': { u5: 0.1, u7: 0.4 }, outside: { u5: 0.1, u7: 0.4 }, 'serves-paying': { paying: true, u5: 0.1, u7: 0.4 } };
 // THE WORLD: the real AccountManager and the real pool engine over a temp data folder; the default D and one other member O. `held`:
 // D HELD by B-6a92's same-instant check (scripts/test-reading-truth.mjs's recipe): D and Z, an account outside the pool, on ONE weekly
 // instant to the second, neither proven; the engine's boot repair holds them
-function world(engMod, { d, o, held = false }) {
+function world(engMod, { d, o, held = false, pinned = null }) {
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
   const root = scratchDir('pool-paying-start'), dataDir = path.join(root, 'data'), cacheDir = path.join(dataDir, 'usage-cache');
   const am = new AccountManager({ dataDir });
   const id = {};
-  for (const tag of (held ? ['D', 'O', 'Z'] : ['D', 'O'])) { id[tag] = am.createSubscription({ name: 'acct-' + tag.toLowerCase() }).id; fs.writeFileSync(path.join(am.subDir(id[tag]), '.credentials.json'), CREDS(id[tag]), { mode: 0o600 }); }
-  const P = am.createPool({ name: 'pool-start', members: [id.D, id.O] }).id;
+  for (const tag of ['D', 'O', ...(held ? ['Z'] : []), ...(pinned ? ['X'] : [])]) { id[tag] = am.createSubscription({ name: 'acct-' + tag.toLowerCase() }).id; if (!(tag === 'X' && pinned === 'signed-out')) fs.writeFileSync(path.join(am.subDir(id[tag]), '.credentials.json'), CREDS(id[tag]), { mode: 0o600 }); }
+  const P = am.createPool({ name: 'pool-start', members: [id.D, id.O, ...(pinned && pinned !== 'outside' ? [id.X] : [])] }).id;
   am.setPoolTarget(P, id.D); am.updatePool(P, { auto: true, hot: true });
   fs.mkdirSync(cacheDir, { recursive: true });
   fs.writeFileSync(path.join(cacheDir, id.D + '.json'), JSON.stringify(reading(d)));
   fs.writeFileSync(path.join(cacheDir, id.O + '.json'), JSON.stringify(reading(o)));
+  if (pinned) {
+    fs.writeFileSync(path.join(cacheDir, id.X + '.json'), JSON.stringify(reading(PIN_READ[pinned])));
+    if (pinned === 'lapsed') am.setServeState(id.X, { state: 'lapsed', since: NOW - H, why: 'made-up lapse words', lastFail: NOW });
+  }
   if (held) {
     const INST = S + 4 * 86400 + 7 * 3600 + 17;
     for (const k of [id.D, id.Z]) {
@@ -117,11 +127,49 @@ const PAYING_D = { paying: true, u5: 0.1, u7: 0.4 };
   try { early = anchored(engSrc, 'if (!(d && d.to) && !fam && !staleDefault && heldForPool(cur) && ', 'if (!fam && !staleDefault && heldForPool(cur) && ', 'the held line asked before the decision'); } catch (e) { ck('RED CONTROL built (the held line asked before the decision)', false, String(e && e.message).slice(0, 200)); }   // stale-pins: kept (the RED's text IS 85bc67492's condition)
   if (early) { const red = await heldStart(M.load(ENG_REL, early, 'held-early'), PAYING_D); ck(`RED (the line asked before the decision): the start placed off the paying held default is told it stays (→ ${red.to}, said: ${red.said})`, red.to === 'O' && red.said, red); }
 }
+let pinTip = null;   // 8a1ade3b7's pin block in a copy (scene 5 builds it; the census reads it)
+{ // 5. THE PIN ROAD (主开发 r5067): a resumed conversation PINNED to a member that cannot serve, beside a paying default and the ordinary
+  // member «low» (scene 1's): every kind of start lands on the ordinary member — a pin that cannot serve is no pin for the placing
+  const PINS = [['whose weekly cap is spent', 'spent'], ['that has lapsed', 'lapsed'], ['whose sign-in is dead', 'signed-out'], ['gone from the pool', 'outside']];
+  const pinStarts = async (engMod, kind) => { const out = []; for (const [n, opts] of STARTS) { const w = world(engMod, { d: PAYING_D, o: { u5: 0.89, u7: 0.4 }, pinned: kind }); const r = await quiet(() => w.eng.poolChooserForModel(w.P, { ...opts, pin: w.id.X })); out.push([n.split(' (')[0], w.tagOf(r)]); } return out; };
+  const say = (got) => got.map(([n, t]) => `${n} → ${t}`).join('; ');
+  for (const [n, kind] of PINS) { const got = await pinStarts(ENG, kind); ck(`every kind of start PINNED to a member ${n} lands on the ordinary member that can serve now, never the paying default (${say(got)})`, got.every(([, t]) => t === 'O'), got); }
+  const kept = await pinStarts(ENG, 'serves-paying');
+  ck(`CONTROL: a pin that CAN serve is honoured whatever it costs — a pin to a member that pays, every kind of start (${say(kept)})`, kept.every(([, t]) => t === 'X'), kept);
+  // RED: 8a1ade3b7's pin block — the pinned placement asked on its own (its automatic rules carry no start's mark), in a copy
+  try { pinTip = anchored(engSrc, "      const dp = require('../account-pool-auto.js').decideStart({ family: fam, hinted, baseReadCache: base, pin, currentId: cur,", '      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur,', "8a1ade3b7's pin block"); } catch (e) { ck('RED CONTROL built (8a1ade3b7\'s pin block)', false, String(e && e.message).slice(0, 200)); }   // stale-pins: kept (the RED's text IS 8a1ade3b7's pin call)
+  if (pinTip) {
+    const pinEng = M.load(ENG_REL, pinTip, 'pin-tip'), red = [];
+    for (const [n, kind] of PINS) for (const [s, t] of await pinStarts(pinEng, kind)) red.push([`${kind}: ${s}`, t]);
+    ck(`RED (8a1ade3b7's pin block): every start pinned to a member that cannot serve lands on the PAYING default (${say(red)})`, red.every(([, t]) => t === 'D'), red);
+  }
+}
 { // THE CHOOSER CALLS THE ONE ENTRY: its decision is decideStart's, with the start's family, its hint and the bare reading; no
   // decidePoolSwitch of its own and no `placing: !hinted` beside it — the leg's start kinds and the chooser cannot part again
   const body = (t) => { const i = t.indexOf('\nfunction poolChooserForModel('); const j = t.indexOf('\nfunction ', i + 10); return i < 0 ? '' : t.slice(i, j < 0 ? undefined : j); };
-  const wired = (t) => { const b = body(t); return /const chooseNow = \(\) => decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(b) && !/decidePoolSwitch\(/.test(b) && !/placing: !hinted/.test(b) && /if \(!d && !fam && !staleDefault\) return cur;/.test(b); };   // stale-pins: kept (the RED's text IS 17f782574's chooser)
-  ck('the chooser asks the one entry (decideStart) with the start\'s family, its hint and the bare reading — no decision of its own', wired(engSrc));
+  // THE CENSUS (主开发 r5067): EVERY return of the chooser, in its order, named — a new one breaks it until it is named here
+  const RETURNS = [
+    ['return null;', 'not a pooled account'],
+    ['return rec;', "the create's question: the record a move onto a fallback left (no placement)"],
+    ['return null;', "the store's peek: nothing to peek at"],
+    ['return to && /^pv-/.test(String(to)) && memberCanServe(poolId, to, null, null, Date.now(), hinted ? null : fam) ? to : null;', "the store's peek: the fallback provider the conversation was moved to, when it can serve"],
+    ['return to;', 'the cold move lands: the member a cross-provider move already chose, while it can serve'],
+    ['return pin;', 'the pin road (decideStart): a pin that can serve, honoured'],
+    ['return dp.to;', "the pin road (decideStart): the pinned placement's target"],
+    ['return memberServeLapsed(cur) ? fallbackDefaultTarget(poolId, cur) : cur;', 'the pin road (decideStart) named no target: the default, never a lapsed one'],
+    ['return null;', 'the move back fails closed: no family, or a lapsed default'],
+    ['return fallbackDefaultTarget(poolId, cur);', 'the lapsed-default guard, before the entry'],
+    ['return cur;', "the entry's null: no family on a default that does not pay (the release)"],
+    ['return null;', 'the move back: a proving pick is no place to come back to'],
+    ['return placed && !claimDecided(placed, () => { const b = chooseNow();', "the move back: decideStart's target, unless a claim decided it"],
+    ['return (b && b.to) || cur;', "the move back's counterfactual: decideStart over the bare door"],
+    ['return (b && b.to) || cur;', "the spawn's counterfactual: decideStart over the bare door"],
+    ['return (d && d.to) || (staleDefault ? ((d && d.holdTo) || fallbackDefaultTarget(poolId, cur) || null) : cur);', "the entry's decision (decideStart)"],
+    ['return null;', 'the chooser failed: the default target'],
+  ];
+  const wired = (t) => { const b = body(t); const rets = [...b.matchAll(/\breturn\b[^;\n]*;?/g)].map((m) => m[0]); return JSON.stringify(rets) === JSON.stringify(RETURNS.map(([x]) => x)) && (b.match(/decideStart\(\{/g) || []).length === 2 && /const dp = require\('\.\.\/account-pool-auto\.js'\)\.decideStart\(\{ family: fam, hinted, baseReadCache: base, pin, currentId: cur,/.test(b) && /const chooseNow = \(\) => decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(b) && !/decidePoolSwitch\(|decidePinnedPlacement\(/.test(b) && !/placing: !hinted/.test(b) && /if \(!d && !fam && !staleDefault\) return cur;/.test(b); };   // stale-pins: kept (the RED's text IS 17f782574's chooser)
+  ck(`THE CENSUS: every return of the chooser is named (${RETURNS.length}), and every decision it returns is decideStart's (two calls: the pin road and the entry), no decidePoolSwitch or decidePinnedPlacement of its own`, wired(engSrc));
+  if (pinTip) ck('RED: 8a1ade3b7\'s pin block breaks the census (the pinned placement asked on its own)', !wired(pinTip));
   // RED: 17f782574's chooser — a hint ⇒ no placing, no family ⇒ the default before any decision (built from THIS tree's lines: a tree
   // without them cannot build it, and says so)
   let tip = null;

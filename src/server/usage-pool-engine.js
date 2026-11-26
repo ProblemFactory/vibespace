@@ -1007,10 +1007,12 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     if (resumeOf && !forDefault) { const to = crossCarryFor(poolId, resumeOf); if (to) { if (memberCanServe(poolId, to, null, null, Date.now(), hinted ? null : fam)) return to; dropCrossCarry(poolId, resumeOf, to); } }   // judged under THIS conversation's family (round wk9ee639n's must: another family's spent scoped cap is no «cannot serve»)
     // THE CONVERSATION'S PIN (2026-09-28): a resumed pinned conversation starts on its pin when
     // the pin can serve (the owner's choice, explicit — no warm or settle bar at a spawn); a pin
-    // that cannot serve starts it where the automatic rules would (the pin kept on the session)
+    // that cannot serve starts it where the automatic rules would (the pin kept on the session).
+    // THE START's ONE ENTRY asks it too (B-87fd (1), 主开发 r5067): on a PAYING default those automatic rules carry the start's mark
+    // (the placing law; a guess fail closed) — a pin that cannot serve is no pin for the placing
     if (pin) {
       const pm = healthyPoolMembers(poolId);
-      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm), payingIds: overageInUseIds(pm) });
+      const dp = require('../account-pool-auto.js').decideStart({ family: fam, hinted, baseReadCache: base, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm), payingIds: overageInUseIds(pm) });
       // (q-053 P0b) a pin of ANOTHER provider is never where a spawn starts: its model is the request's, the pin's provider
       // would serve it under another id — it applies through the conversation's cold switch (the pin kept), so the spawn
       // is placed by the automatic rules below

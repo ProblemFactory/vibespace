@@ -551,7 +551,8 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
     warmCalls.some((c) => /cacheFactsOf\(s2, now\)/.test(c)) && warmCalls.some((c) => /cacheFactsOf\(s, now\)/.test(c)) && warmCalls.length >= 3 && warmCalls.every((c) => /\.\.\.cacheFactsOf\(/.test(c)), JSON.stringify(warmCalls));
   ck('WIRING PIN: a warm-cache refusal is journalled through the throttled noteWarmHold at both sites',
     (eng.match(/reason === 'warm-cache'\) \{ noteWarmHold\(/g) || []).length === 2);
-  ck('WIRING PIN: the hot bootstrap / placement site stays warm-less (no conversation yet)', calls.filter((c) => !/proactive:/.test(c)).every((c) => !/warm/.test(c)) && calls.filter((c) => !/proactive:/.test(c)).length === 1);
+  // B-87fd (1) r5067: the start asks decideStart at TWO sites — the pin road and the entry — both warm-less (a start has no conversation yet)
+  ck('WIRING PIN: the hot bootstrap / placement sites stay warm-less (no conversation yet): the pin road and the entry, both decideStart', calls.filter((c) => !/proactive:/.test(c)).every((c) => !/warm/.test(c) && /^decideStart\(\{ family: fam, hinted, /.test(c)) && calls.filter((c) => !/proactive:/.test(c)).length === 2, JSON.stringify(calls.filter((c) => !/proactive:/.test(c)).map((c) => c.slice(0, 90))));
 }
 
 
