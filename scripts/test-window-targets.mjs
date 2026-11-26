@@ -783,7 +783,8 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(stale && stale.code === 'ref_unknown', 'a ref not in the last snapshot ⇒ ref_unknown');
     // injection through the engine: refused without a backend, allowed with one
     // P9b: the lease PERSISTS — a second engine over the SAME data dir is a restart and session 1 still holds da-one
-    { const again = ENGINE.create({ keeper, dataDir: dir, env: () => base, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, log: { warn() { } } });
+    { ENGINE.landedIn(dir);   // B-574d browser-stores: the writes on disk before the restart reads them
+      const again = ENGINE.create({ keeper, dataDir: dir, env: () => base, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, log: { warn() { } } });
       const l = again.leaseOf('da-one');
       ok(l && l.sessionId === 's1' && l.origin === 'vibespace' && l.input === 'agent', 'a new engine over the same data dir still says session 1 holds da-one (persisted lease, input side fresh = agent)');
       ok((await err(() => again.attach('da-one', f2))).code === 'window_leased', 'and refuses session 2 exactly as before the restart'); }
@@ -1177,6 +1178,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(carried && carried.mode === 'pixels' && carried.rows.length === 1 && carried.rows[0].principal.id === 'conv-a' && aud5().some((l) => l.verb === 'reach-carried' && l.from === 'da-rel1' && l.handle === 'da-rel2'), 'a relaunched window KEEPS its share: the record follows `replacedBy` to the successor (mode and rows), audited reach-carried');
     records.set('da-rel3', mk('da-rel3', { label: 'Gone' })); e5.grantReach('da-rel3', { kind: 'session', id: 's1' }); records.set('da-rel3', { ...records.get('da-rel3'), state: 'exited' });
     const rc = e5.reconcile({ graceMs: 60000 });
+    e5.storesLanded();   // B-574d browser-stores: the pruned share on disk before the file is read
     ok(rc.pruned >= 1 && !JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel3'] && JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel2'], 'a share lives as long as its window: reconcile prunes the ended one (the carried one stays)');
     for (const id of ['da-rel1', 'da-rel2', 'da-rel3']) records.delete(id);
     // LANE E VERIFY (2026-09-25, the verifier's minor — a reach leak across an await) + VERIFY R2 (2026-09-25, M1 / L4 /
