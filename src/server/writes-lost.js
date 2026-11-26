@@ -112,7 +112,7 @@ function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.
   const sayNoSync = (w) => { if (!noSyncSaid) { noSyncSaid = true; log(w); } };   // B-574d: a file system that does no sync — the record lands, said once
   const merged = (a, b) => { const seen = new Set(), out = []; for (const r of [...a, ...b]) if (!seen.has(r.uuid)) { seen.add(r.uuid); out.push(r); } return out.sort((x, y) => Date.parse(x.timestamp) - Date.parse(y.timestamp)).slice(-MAX_PER_CONVERSATION); };
   function arm() {
-    if (timer || !dirty || !(retryMs > 0)) return;
+    if (stopped || timer || !dirty || !(retryMs > 0)) return;   // r4828: a stopped store arms no timer on ANY road (a refused read at the stop too)
     timer = setTimeout(() => { timer = null; flush(); }, retryMs);
     if (timer.unref) timer.unref();
   }
@@ -170,6 +170,7 @@ function create({ dataDir, log = (...a) => console.warn(...a), now = () => Date.
     }, (e) => {
       writing = null;
       dirty = true;
+      if (stopped) return false;   // r4828: the store stopped meanwhile — its exit wrote the rows itself: no retry timer outlives it, nothing said
       if (!writeFailing) log(`[writes-lost] the warning could not reach ${file} (${(e && e.code) || (e && e.message) || e}) — held in memory, retrying`);
       writeFailing = true;
       arm();
