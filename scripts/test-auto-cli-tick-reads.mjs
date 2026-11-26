@@ -304,6 +304,9 @@ async function measureTick0(shape, { slowUs = 0, pre = false, due = false } = {}
       USAGE_CACHE_DIR: w.cacheDir, usageIdentityGroupsCached: () => w.eng.usageIdentityGroupsCached(), usageEstimator: { estimateFor: () => null },
       projectionRereadFor: w.eng.projectionRereadFor, projectionBillingIndex: w.eng.projectionBillingIndex, lastMemberReadAt: (id) => (id === dueId ? T4 - DUE_AGO : T4),
       usage: { refreshViaCliPanel: async (k) => { refreshed.push(k); return false; } }, onMemberReadingFresh() { }, dataDir: path.join(w.root, 'loop'), log() { }, warn() { },
+      // B-574d: the pacing state goes through the store writer — its OWN main-thread cost (a first touch's temp sweep) is the writer's census's
+      // (test-store-writer), not this tick's reads of the mount: a stand-in that lands at once keeps the count the PICK's
+      storeWriter: { dirty() { }, durable() { return Promise.resolve(true); } },
       now: () => T4, rand: () => 0.5,   // B-403e: what §3 hands the tick — a count no clock or die can move
     });
     // B-360d: the folders' sign-in facts read and their push sent BEFORE the measured tick — the tick then confirms nothing new and

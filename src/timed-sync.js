@@ -122,6 +122,7 @@ const STORES = Object.freeze({
   'remote-jsonl-meta.write': row('write', 'remote-jsonl/<host>/<transcript>.meta', 'src/hosts.js', ['_landCacheMeta']),   // B-0248 unit 4: its record (the .meta), after the bytes it names
   // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-hold-road.js
   // `_holdIO` says one that waits, at the time); r4–r7 timed its appends here (`_holdWrite`, `_dropCompact`)
+  'auto-cli-state.write': row('write', 'auto-cli-state', 'src/server/auto-cli-loop.js', ['saveState']),   // B-574d (主开发 r4732): the /usage pacing state, through the store writer — the spawn waits on its stamp's landing
   'cli-model-catalog.write': row('write', 'cli-model-catalog', 'src/server/cli-model-catalog.js', ['saveLedger']),   // B-574d (lane lg-text-legs-3): the model catalog's ledger, through the store writer
   'cli-models.write': row('write', 'cli-models', 'src/server/cli-models-door.js', ['save']),   // B-574d: the CLI models cache (0600), through the store writer — its answer the landing
   'cli-registration.write': row('write', 'cli-registration', 'src/server/cli-registration.js', ['save']),   // B-574d: the unregistered builds seen, through the store writer

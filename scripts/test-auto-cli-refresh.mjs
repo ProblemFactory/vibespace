@@ -87,7 +87,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   const boot = strip(fs.readFileSync(new URL('../server.js', import.meta.url), 'utf8'));
   ok(/require\('\.\/src\/server\/auto-cli-loop\.js'\)\.createAutoCliLoop\(\{[^\n]*projectionRereadFor, projectionBillingIndex, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path\.join\(__dirname, 'data'\) \}\)\.start\(\);/.test(boot), 'WIRING PIN: server.js starts the ONE auto-cli loop with the engine\'s projection (+ its once-per-tick billing index, prod-stall-202), the attempt clock, the rung and the data dir');
   ok(/const pj = d\.projectionRereadFor\(a\.id, now, billingIndex\(\)\)[^\n]*\n[\s\S]{0,40}?list\.push\(\{[^\n]*projCrossInMs: pj \? pj\.inMs : null, estBurnPtPerMin: pj \? pj\.burnPtPerMin : 0/.test(srv), 'WIRING PIN: the auto-cli loop hands projectionRereadFor\'s crossing + burn to decideCliRefresh');
-  ok(/const picks = decideCliRefresh\(list, now,[^\n]*\n\s*for \(const key of picks\) \{\n[^\n]*\n\s*attempts\.set\(key, now\);\n\s*saveState\(d\.dataDir, st, warn\);[^\n]*\n\s*let ok = false; try \{ ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\);/.test(srv), 'WIRING PIN: a pick is spent on usage.refreshViaCliPanel — the same rung, behind the same attempt clock, stamped on disk BEFORE the spawn (quota r3)');
+  ok(/const picks = decideCliRefresh\(list, now,[^\n]*\n\s*for \(const key of picks\) \{\n[^\n]*\n\s*attempts\.set\(key, now\);\n(?:\s*\/\/[^\n]*\n)*\s*if \(\(await saveState\(d\.dataDir, st, warn, d\.storeWriter, landingMs\)\) !== true\) \{\n[^\n]*\n[^\n]*\n\s*continue;\n\s*\}\n\s*stampUnlanded = false;\n\s*let ok = false; try \{ ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\);/.test(srv), 'WIRING PIN: a pick is spent on usage.refreshViaCliPanel — the same rung, behind the same attempt clock, stamped on disk BEFORE the spawn (quota r3)');
   ok(/if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \} catch/.test(srv), 'WIRING PIN: the fresh reading takes the new-member wake — the pool re-decides on the READING (its own try, after the bookkeeping — quota r3)');
   // THE PROJECTION'S OWN MEMORY (quota r1, the B-f69c ③ verifier): a crossing
   // is bought ONE reading. The floor was never the drift rung's limiter (it
@@ -163,13 +163,15 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   };
   const NO_BUCKET = patched('pool-no-bucket.js', REAL_POOL, [["if (!projectionBucketBought(a, now) && !(Number.isFinite(bought)", "if (!(Number.isFinite(bought)"]]);
   const NO_AGE = patched('pool-no-age.js', REAL_POOL, [["cross <= projWindowMs && age >= floorMs && cross <", "cross <= projWindowMs && cross <"]]);
-  const NO_PERSIST = patched('loop-no-persist.js', REAL_LOOP, [["  const st = loadState(d.dataDir, now0, warn);", "  const st = { attempts: new Map(), fails: new Map(), projReads: new Map() };"], ["        saveState(d.dataDir, st, warn); // the attempt reaches disk", "        // "], ["        saveState(d.dataDir, st, warn); // the backoff", "        // "]]);
+  const NO_PERSIST = patched('loop-no-persist.js', REAL_LOOP, [["  const st = loadState(d.dataDir, now0, warn);", "  const st = { attempts: new Map(), fails: new Map(), projReads: new Map() };"], ["        if ((await saveState(d.dataDir, st, warn, d.storeWriter)) !== true) {", "        if (false) {"], ["        saveState(d.dataDir, st, warn, d.storeWriter); // the backoff", "        // "]]);
   // quota r3 controls: the rule without the projection WINDOW (the read spent as far from the line as the floor allows);
   // the loop without the future-stamp clamp; without the pre-spawn save; with the r2 order (the wake unguarded, before the
   // bookkeeping); without the identity-group memory
   const NO_WINDOW = patched('pool-no-window.js', REAL_POOL, [["cross > 0 && cross <= projWindowMs && age >= floorMs", "cross > 0 && age >= floorMs"]]);
   const NO_CLAMP = patched('loop-no-clamp.js', REAL_LOOP, [["function clampStamps(st, now) {\n  let n = 0;", "function clampStamps(st, now) {\n  return 0; let n = 0;"]]);
-  const NO_PRESAVE = patched('loop-no-presave.js', REAL_LOOP, [["        saveState(d.dataDir, st, warn); // the attempt reaches disk", "        // "]]);
+  const NO_PRESAVE = patched('loop-no-presave.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter)) !== true) {", "        if (false) {"]]);
+  // B-574d: the loop that SAVES the stamp but does not WAIT for its landing (the spawn over a stamp not on disk)
+  const NO_WAIT = patched('loop-no-wait.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter)) !== true) {", "        saveState(d.dataDir, st, warn, d.storeWriter); if (false) {"]]);
   const R2_ORDER = patched('loop-r2-order.js', REAL_LOOP, [["        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1);\n", "        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1); if (ok) d.onMemberReadingFresh(key, 'auto-cli refresh');\n"], ["        if (ok) { try { d.onMemberReadingFresh(key, 'auto-cli refresh'); }", "        if (false) { try { }"]]);
   const NO_GROUP = patched('loop-no-group.js', REAL_LOOP, [["mem = [a.id, ...g.accountIds.filter((x) => x !== a.id)];", "mem = [a.id];"]]);
   const loopFor = (poolFile) => poolFile === REAL_POOL ? REAL_LOOP : patched('loop-' + path.basename(poolFile), REAL_LOOP, [], { 'account-pool-auto.js': poolFile });
@@ -182,7 +184,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     while (t <= end) { out.push({ t, cost, fam }); t += poisson ? -Math.log(1 - rnd()) * everyMs : everyMs; }
     return out;
   };
-  const makeWorld = ({ members, sessions, loopFile = REAL_LOOP, poolFile = REAL_POOL, seed = 1, stateFile = null, wakeThrows = false, groups = null }) => {
+  const makeWorld = ({ members, sessions, loopFile = REAL_LOOP, poolFile = REAL_POOL, seed = 1, stateFile = null, wakeThrows = false, groups = null, storeWriter = null, landingMs = 200 }) => {
     const pool = require(poolFile), { createAutoCliLoop } = require(loopFile);
     const dir = path.join(scratchDir, 'w' + (++dirN)), cacheDir = path.join(dir, 'usage-cache'), dataDir = path.join(dir, 'data');
     fs.mkdirSync(cacheDir, { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
@@ -214,16 +216,28 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
       return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(Math.max(0, ...Object.values(burn).map((v) => (Number(v) || 0) * 100)) * 100) / 100 };
     };
     const spawns = [], logs = [];
+    // B-574d: the loop's store writer, a stand-in — durable() writes the produced bytes at once (the release's synchronous timing, so every
+    // leg reads the file as before) and answers true; `refuse` (placed) answers false with nothing written
+    // `later`: the landing comes a turn after the call (the real writer's latency, placed); `hang`: it never comes (a lost thread, a hung mount)
+    const writer = { refuse: false, later: false, hang: false, pending: new Map(), landed: [],
+      dirty(file, o) { this.pending.set(file, o); },
+      durable(file) { const o = this.pending.get(file); this.pending.delete(file); if (!o) return Promise.resolve(true);
+        if (this.hang) return new Promise(() => { });
+        if (this.refuse) { try { o.onWritten && o.onWritten(false, Object.assign(new Error('EIO: the write refused (placed)'), { code: 'EIO' })); } catch { } return Promise.resolve(false); }
+        const land = () => { fs.writeFileSync(file, o.produce()); this.landed.push({ t: T, file }); try { o.onWritten && o.onWritten(true, null); } catch { } return true; };
+        return this.later ? new Promise((r) => setImmediate(() => r(land()))) : Promise.resolve(land()); } };
+    /** what the spawn stand-in reads AT ITS START: this ask's stamp on disk (r4732 (2): the direct proof) */
+    const stampOnDisk = (key) => { try { const j = JSON.parse(fs.readFileSync(path.join(dataDir, 'auto-cli-state.json'), 'utf8')); return !!(j.attempts && j.attempts[key] === T); } catch { return false; } };
     let mode = 'ok'; // 'ok' | 'hang' (the process dies mid-spawn) | 'lie' (answers true, writes nothing) | 'fail'
     if (stateFile != null) fs.writeFileSync(path.join(dataDir, 'auto-cli-state.json'), typeof stateFile === 'string' ? stateFile : JSON.stringify(stateFile));
     const deps = {
       now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {},
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
       accounts: (() => { const l = () => ({ accounts: members.map((m) => ({ id: m.id, type: 'subscription', loggedIn: true, pooled: false, backend: 'claude' })) }); return { list: l, decisionList: l, signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }; })(),   // B-360d: the tick reads the decision road
-      autoCliReady: () => true, usageEstimator, projectionRereadFor, lastMemberReadAt: () => 0,
+      autoCliReady: () => true, usageEstimator, projectionRereadFor, lastMemberReadAt: () => 0, storeWriter: storeWriter || writer, stampLandingMs: landingMs,
       // an org-merged identity (the engine's usageIdentityGroups): the freshest cache file of the group wins for every id
       usageIdentityGroupsCached: () => (groups ? new Map(groups.map((ids, i) => [`org-${i}`, { accountIds: ids, cache: ids.map((id) => readCache(id)).filter(Boolean).sort((a, b) => (b.fetchedAt || 0) - (a.fetchedAt || 0))[0] || null }])) : []),
-      usage: { refreshViaCliPanel(key) { spawns.push({ t: T, key, mode }); if (mode === 'hang') return new Promise(() => {}); if (mode === 'lie') return Promise.resolve(true); if (mode === 'fail') return Promise.resolve(false); writeCache(byId.get(key), T); return Promise.resolve(true); } },
+      usage: { refreshViaCliPanel(key) { spawns.push({ t: T, key, mode, stampOnDisk: stampOnDisk(key) }); if (mode === 'hang') return new Promise(() => {}); if (mode === 'lie') return Promise.resolve(true); if (mode === 'fail') return Promise.resolve(false); writeCache(byId.get(key), T); return Promise.resolve(true); } },
       onMemberReadingFresh: () => { if (wakeThrows) throw new Error('wake threw'); }, log: (l) => logs.push(l), warn: (l) => logs.push('WARN ' + l),
     };
     let loop = createAutoCliLoop(deps);
@@ -231,7 +245,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const why = () => logs.map((l) => (/^\[auto-cli\] quota refresh (\S+): ok \(([\w-]+);(?:[^;]*; (\S+) crosses its \S+ line in ~(\d+) min)?/.exec(l) || [])).filter((x) => x.length).map((x) => ({ key: x[1], why: x[2], label: x[3], inMin: x[4] == null ? null : Number(x[4]) }));
     const lineAt = (id, key = 'fiveHour', line = 5) => { const m = byId.get(id); for (let t = T0; t <= T0 + 600 * MIN; t += MIN) if ((1 - truthOf(m, key, t)) * 100 < line) return (t - T0) / MIN; return null; };
     return {
-      spawns, logs, dataDir, writeCache, byId, deps, lineAt, readCache, setMode(x) { mode = x; },
+      spawns, logs, dataDir, writeCache, byId, deps, lineAt, readCache, writer, setMode(x) { mode = x; },
       state() { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'auto-cli-state.json'), 'utf8')); } catch { return null; } },
       get now() { return T; }, advance(ms) { T += ms; },
       async tick() { await loop.tick(); },
@@ -383,6 +397,79 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     ok(r.hung === r.before + 1 && r.after === r.hung && r.disk && r.disk.attempts && r.disk.attempts.m1 > 0, '③ a restart 30 s into a hung spawn does NOT spawn again — the attempt stamp was on disk before the spawn (red on quota r2: re-spawned inside the floor)', r);
     const c = await midSpawn(NO_PRESAVE);
     ok(c.after === c.hung + 1, '③ NEGATIVE CONTROL (patched copy that saves only after the spawn): the restart re-spawns inside the floor', c);
+  }
+  // B-574d (lane lg-text-legs-3, 主开发 r4732 — the ruling's seven conditions): the stamp goes through the STORE WRITER and the spawn WAITS for
+  // the landing of THIS ask's bytes. Every fault PLACED (a refused write, a landing a turn later, a landing that never comes, a gated thread)
+  {
+    const S = [{ on: 'm1', model: 'claude-opus-5-5' }];
+    // (2) THE DIRECT PROOF: the spawn stand-in reads the state file AT ITS START and finds THIS ask's stamp — the landing a turn later
+    //     (placed); RED: the stamp saved, its landing not waited for — the spawn starts before its stamp is on disk
+    const direct = async (loopFile) => { const w = makeWorld({ members: [slowMember()], sessions: S, loopFile }); w.writer.later = true; await run(w, 60); return w.spawns; };
+    const d0 = await direct(REAL_LOOP);
+    ok(d0.length >= 1 && d0.every((x) => x.stampOnDisk), `(2) every spawn stand-in, at its start, reads THIS ask's stamp on disk (${d0.map((x) => x.stampOnDisk).join(', ')}) — the landing came a turn after the call`, d0);
+    const d1 = await direct(NO_WAIT);
+    ok(d1.length >= 1 && d1.some((x) => !x.stampOnDisk), `(2) RED CONTROL (the landing not waited for): a spawn starts with its stamp NOT on disk (${d1.map((x) => x.stampOnDisk).join(', ')})`, d1);
+    // (4) NOTHING ABOUT WHEN OR HOW OFTEN CHANGES: several ticks of failed landings (placed) ask nothing and say it once; the FIRST tick whose
+    //     stamp lands asks exactly once — the ask the release would have made, never an extra one
+    const w4 = makeWorld({ members: [slowMember()], sessions: S }); w4.writer.refuse = true;
+    await run(w4, 30); const during = w4.spawns.length, said4 = w4.logs.filter((l) => /its attempt stamp did not reach the disk/.test(l)).length;
+    w4.writer.refuse = false; await run(w4, 3);
+    ok(during === 0 && said4 === 1 && w4.spawns.length === 1 && w4.spawns[0].stampOnDisk && w4.state() && w4.state().attempts.m1 === w4.spawns[0].t,
+      `(4) 30 ticks of failed landings: no ask (${during}), said ONCE (${said4}); then a landing: exactly ONE ask (${w4.spawns.length}), its stamp on disk at its start`, { during, said4, spawns: w4.spawns });
+    const c4 = makeWorld({ members: [slowMember()], sessions: S, loopFile: NO_WAIT }); c4.writer.refuse = true; await run(c4, 30);
+    ok(c4.spawns.length >= 1, `(4) RED CONTROL (the landing not waited for): it asks over stamps that never reached the disk (${c4.spawns.length} in 30 ticks)`);
+    // (3) THE WAIT IS BOUNDED AND ENDS THE TICK: a landing that never comes (placed: a lost thread, a hung mount) is a FAILED landing past the
+    //     named bound — no spawn, said once, the tick's own one-at-a-time mark released (every tick returns; no second spawn beside a waiting one)
+    const w3 = makeWorld({ members: [slowMember()], sessions: S, landingMs: 40 }); w3.writer.hang = true;
+    const t3 = Date.now(); for (let i = 1; i <= 5; i++) { w3.advance(MIN); await w3.tick(); } const took = Date.now() - t3;
+    const said3 = w3.logs.filter((l) => /its attempt stamp did not reach the disk/.test(l)).length;
+    w3.writer.hang = false; w3.advance(MIN); await w3.tick();
+    ok(require(REAL_LOOP).STAMP_LANDING_MS === 30e3 && w3.spawns.length === 1 && said3 === 1 && took < 5 * 40 + 2000, `(3) a landing that NEVER comes: each of 5 ticks ends past its bound (${took} ms in all), no spawn, said once (${said3}); the next landing asks once (${w3.spawns.length}) — the bound STAMP_LANDING_MS = 30 s`, { took, said3, spawns: w3.spawns.length });
+    // (1) THE LANDING OF THESE BYTES, by the REAL store writer: an EARLIER write of the same file in flight on the writer's thread (gated) lands
+    //     while the stamp's write is still held — the spawn stand-in is NOT started; it starts when the stamp's own write lands, and reads it
+    const GATED = path.join(scratchDir, 'gated-writer.cjs'), gates = fs.mkdtempSync(path.join(scratchDir, 'gates-'));
+    fs.writeFileSync(GATED, `'use strict';
+const { parentPort, workerData } = require('worker_threads');
+const fs = require('fs');
+const { writeJob } = require(${JSON.stringify(require.resolve('../src/store-writer-worker.js'))});
+const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuffer(4));
+const GATES = ${JSON.stringify(gates)}; let n = 0;
+parentPort.on('message', (m) => {
+  if (!m || (m.ev !== 'write' && m.ev !== 'unlink')) return;
+  Atomics.store(S, 0, m.id);
+  const t0 = process.hrtime.bigint(); let err = null;
+  if (m.ev === 'write') { n++; fs.writeFileSync(GATES + '/held-' + n, ''); while (!fs.existsSync(GATES + '/go-' + n)) Atomics.wait(Z, 0, 0, 5); }   // each write marks itself HELD, then waits for ITS gate (placed), on THIS thread
+  if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; }
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  Atomics.store(S, 2, err ? 2 : 1); Atomics.add(S, 1, 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
+  parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
+});
+`);
+    const SWM = require('../src/store-writer.js'), RW = SWM.create({ log: { warn() { } }, workerPath: GATED });
+    // r4340 law 1: every wait below is ON ITS FACT, its expiry said by a named HARNESS line
+    const until = async (label, fn, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 5)); } const r = !!(await fn()); if (!r) console.log(`  · HARNESS: «${label}» never reached its fact within ${ms} ms`); return r; };
+    const open = (n) => fs.writeFileSync(path.join(gates, 'go-' + n), ''), held = (n) => fs.existsSync(path.join(gates, 'held-' + n));
+    const w1 = makeWorld({ members: [slowMember()], sessions: S, storeWriter: RW, landingMs: 20e3 });
+    const fp = path.join(w1.dataDir, 'auto-cli-state.json'), readFp = () => { try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; } };
+    let stampHanded = false; const realDirty = RW.dirty.bind(RW);
+    RW.dirty = (f, o) => { if (f === fp && o && typeof o.produce === 'function' && /"m1"/.test(String(o.produce()))) stampHanded = true; return realDirty(f, o); };
+    // write 1: an EARLIER state of the same file, handed to the thread (asked durable, so it goes now) and HELD at gate 1
+    RW.dirty(fp, { name: 'auto-cli-state.write', makeDir: true, produce: () => JSON.stringify({ v: 1, attempts: {}, fails: {}, projReads: {}, said: {} }) });
+    const p1 = RW.durable(fp, { timeoutMs: 20e3 });
+    const oneHeld = await until('write 1 held on the writer\'s thread', () => held(1));
+    // the ticks run until one picks m1: its stamp is handed to the writer while write 1 is still in flight
+    let tickDone = false;
+    const ticks = (async () => { for (let i = 0; i < 60 && !w1.spawns.length; i++) { w1.advance(MIN); await w1.tick(); } tickDone = true; })();
+    const handed = await until('the stamp handed to the writer', () => stampHanded);
+    open(1);
+    const oneLanded = (await p1) === true && await until('write 1 on disk', () => { const j = readFp(); return !!j && !('m1' in (j.attempts || {})); });
+    const twoHeld = await until('the stamp\'s write held on the thread', () => held(2));
+    const spawnedEarly = w1.spawns.length;   // write 1 landed, the stamp's write held: the spawn must NOT have started
+    for (let n = 2; n <= 12; n++) open(n);   // the stamp's write, then any later one (the after-write) — let through
+    await ticks;
+    ok(oneHeld && handed && oneLanded && twoHeld && spawnedEarly === 0 && w1.spawns.length >= 1 && w1.spawns[0].stampOnDisk,
+      `(1) the REAL writer: an earlier write of the file LANDED while the stamp's write was held at its gate — the spawn NOT started (${spawnedEarly}); it started once THAT write landed, and read its stamp (${w1.spawns[0] && w1.spawns[0].stampOnDisk})`, { oneHeld, handed, oneLanded, twoHeld, spawnedEarly, spawns: w1.spawns, tickDone });
+    RW.stop();
   }
   // THE BOOKKEEPING PRECEDES THE WAKE (quota r3): an engine wake that throws used to skip the bucket memory and the
   // state write, so the projection was re-bought every floor for as long as the wake kept throwing
@@ -562,6 +649,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     ];
     const calls = [], logs = [], verdicts = {};
     const deps = {
+      storeWriter: { pending: new Map(), dirty(f, o) { this.pending.set(f, o); }, durable(f) { const o = this.pending.get(f); this.pending.delete(f); if (o) fs.writeFileSync(f, o.produce()); return Promise.resolve(true); } },   // B-574d: each save lands at once (the release's timing)
       now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {},
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
       accounts: { list: () => ({ accounts: rows }), decisionList: () => ({ accounts: rows }), signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }, autoCliReady: () => true, usageIdentityGroupsCached: () => [],

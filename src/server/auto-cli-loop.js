@@ -27,8 +27,11 @@
 // spawn (the attempt stamp — quota r3: a restart while `claude -p /usage` is
 // in flight must see it, and under KillMode=process the orphaned probe still
 // spends its vendor call) and again after it (the backoff and the bought
-// bucket) — at most two small writes per 60 s tick, so there is nothing to
-// flush on SIGTERM that is not already on disk. A missing file starts empty
+// bucket) — at most two small writes per 60 s tick. B-574d: THE STORE WRITER
+// writes it (off the hub's loop, every byte or nothing, synced), and the spawn
+// WAITS for the stamp's landing (durable): a stamp not on disk is no ask — this
+// tick spawns nothing, said once — so «on disk before the ask» stays true; the
+// writer's exit flush carries the after-write at a stop. A missing file starts empty
 // silently (first boot). AN UNREADABLE ONE IS «UNKNOWN: WAIT THE LONGEST»,
 // NEVER «NO BACKOFF» (the ban-safety law, 主开发 r3003 / r3019): a file that is
 // there and could not be read — a failed read, bytes that do not parse, not an
@@ -85,6 +88,7 @@ const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, prob
 
 const STATE_FILE = 'auto-cli-state.json';
 const ATTEMPT_KEEP_MS = 24 * 3600e3; // an attempt older than a day paces nothing (the longest backoff is 5 min × 2^6 = 5.3 h)
+const STAMP_LANDING_MS = 30e3;   // B-574d (主开发 r4732 3): the stamp's landing waited for at most this long — past it a FAILED landing (no spawn, said once), never a tick held for ever
 const UNKNOWN_WAIT_MS = 5 * 60e3 * Math.pow(2, 6); // a state that could not be read: every unasked account waits the longest backoff (the ban-safety law)
 const CLOCK_SKEW_MS = 60e3; // a stamp further in the future than this is a clock that stepped back, not a race
 
@@ -125,15 +129,24 @@ function loadState(dataDir, now, warn = () => {}) {
   }
   return st;
 }
-function saveState(dataDir, st, warn) {
-  if (st.unknownAt != null) return;   // never over a state file that could not be read, while its wait runs (the ban-safety law)
+function saveState(dataDir, st, warn, W = null, boundMs = STAMP_LANDING_MS) {
+  if (st.unknownAt != null) return Promise.resolve(true);   // never over a state file that could not be read, while its wait runs (the ban-safety law) — nothing owed, as before
+  if (!dataDir) return Promise.resolve(true);   // a loop with no data folder (an embedding's) keeps no state file: nothing to land, as at the release
+  const fp = path.join(dataDir, STATE_FILE);
+  const doc = { v: 1, attempts: Object.fromEntries(st.attempts), fails: Object.fromEntries([...st.fails].filter(([, n]) => n > 0)), projReads: Object.fromEntries(st.projReads), said: Object.fromEntries(st.said || []) };
+  const body = JSON.stringify(doc);
+  // B-574d (lane lg-text-legs-3): THE STORE WRITER writes it (src/store-writer.js) — the answer is its LANDING (true / false); a failed write is
+  // said loud, and the in-memory state still paces this process
   try {
-    const fp = path.join(dataDir, STATE_FILE);
-    fs.mkdirSync(dataDir, { recursive: true });
-    const doc = { v: 1, attempts: Object.fromEntries(st.attempts), fails: Object.fromEntries([...st.fails].filter(([, n]) => n > 0)), projReads: Object.fromEntries(st.projReads), said: Object.fromEntries(st.said || []) };
-    fs.writeFileSync(fp + '.tmp', JSON.stringify(doc));
-    fs.renameSync(fp + '.tmp', fp);
-  } catch (e) { warn(`[auto-cli] pacing state write failed: ${e.message}`); } // loud; the in-memory state still paces this process
+    const w = W || require('../store-writer.js').storeWriter();
+    w.dirty(fp, { name: 'auto-cli-state.write', makeDir: true, produce: () => body, onWritten: (ok, e) => { if (!ok) warn(`[auto-cli] pacing state write failed: ${(e && (e.code || e.message)) || e}`); } });
+    // the landing of THESE bytes: the writer's durable() waits for the version this dirty() made (its waiter is keyed by s.version
+    // at the call; an earlier write of the same file landing settles only its own, lower version — src/store-writer.js durable /
+    // settled), bounded twice: the writer's own timeout and a timer here (a lost thread, a hung mount: false past the bound)
+    let timer = null;
+    const bound = new Promise((resolve) => { timer = setTimeout(() => resolve(false), boundMs); if (timer.unref) timer.unref(); });
+    return Promise.race([Promise.resolve(w.durable(fp, { timeoutMs: boundMs })), bound]).then((ok) => { clearTimeout(timer); return ok === true; }, () => { clearTimeout(timer); return false; });
+  } catch (e) { warn(`[auto-cli] pacing state write failed: ${e.message}`); return Promise.resolve(false); }
 }
 /** The last crossing INSTANT any bucket of this account bought (the r1
  *  instant band — the secondary guard across buckets). */
@@ -153,6 +166,9 @@ function lastBoughtInstant(reads) {
  *   now/rand/log/warn/metric injectable for the suites.
  */
 function createAutoCliLoop(d) {
+  const landingMs = Number.isFinite(d.stampLandingMs) ? d.stampLandingMs : STAMP_LANDING_MS;   // a suite's short bound; the real one otherwise
+  let stampUnlanded = false;
+  let owed = [];   // r4732 (5): saves of this tick that are not the stamp's — awaited before the tick ends   // B-574d: «a stamp did not land» said once until one lands
   const now0 = (d.now || Date.now)();
   const clock = d.now || Date.now, rand = d.rand || Math.random;
   const log = d.log || ((l) => console.log(l)), warn = d.warn || ((l) => console.warn(l));
@@ -171,7 +187,7 @@ function createAutoCliLoop(d) {
     const sk = `${a.id}|${el}`;
     if (booked || stamped || !(now - (said.get(sk) || 0) < NOT_PROBED_SAY_MS)) {
       said.set(sk, now);
-      saveState(d.dataDir, st, warn);
+      owed.push(saveState(d.dataDir, st, warn, d.storeWriter, landingMs));
       log(`[auto-cli] quota refresh ${a.id}: not probed — ${notProbedWords(el, a)}${booked ? ` (${booked} failed attempt${booked === 1 ? '' : 's'} booked before this cleared)` : ''}`);
     }
     return true;
@@ -252,7 +268,14 @@ function createAutoCliLoop(d) {
       for (const key of picks) {
         const it = list.find((x) => x.key === key), why = cliRefreshWhy(it && { ...it, lastAttemptAt: 0 }, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs }); // the pick's own reason (the attempt floor already passed)
         attempts.set(key, now);
-        saveState(d.dataDir, st, warn); // the attempt reaches disk BEFORE the spawn (quota r3: a restart mid-spawn must see it)
+        // the attempt reaches disk BEFORE the spawn (quota r3: a restart mid-spawn must see it) — B-574d: the spawn WAITS for the stamp's
+        // landing (the store writer's own answer); a stamp NOT on disk is NO ASK: the attempt given back, this pick skipped, said once
+        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) {
+          if (attemptWas.get(key) == null) attempts.delete(key); else attempts.set(key, attemptWas.get(key));
+          if (!stampUnlanded) { stampUnlanded = true; warn(`[auto-cli] quota refresh ${key}: not asked — its attempt stamp did not reach the disk (the ban-safety law: never an ask a restart could not see); asked again when a stamp lands`); }
+          continue;
+        }
+        stampUnlanded = false;
         // B-5279: the door's refusals (refresh-off / -no-reader / -held) give the attempt back below — only when the row turns off or the settings become held inside a tick (the loop runs only in auto-cli): never a more frequent read
         let ok = false; try { ok = !!(await d.usage.refreshViaCliPanel(key)); } catch { ok = false; }
         // B-360d: the door read the sign-in again NOW and could not — nothing was asked: no failure booked, the attempt given back
@@ -273,13 +296,21 @@ function createAutoCliLoop(d) {
         if (ok && it && it.pj && (why === 'projection' || (Number(it.pj.inMs) > 0 && Number(it.pj.inMs) <= PROJECTION_WINDOW_MS))) {
           for (const k of (it.mem || [key])) projReads.set(k, projectionReadsAfter(projReads.get(k), it.pj, now));
         }
-        saveState(d.dataDir, st, warn); // the backoff and the bought buckets outlive a restart (quota r2)
+        // the backoff and the bought buckets outlive a restart (quota r2) — AWAITED before the next pick and before the tick ends (r4732 (5)):
+        // a kill of the hub inside the writer's latency loses this ask's backoff step and bought bucket; the stamp, already on disk, still
+        // paces the next start by the attempt floor (the release's own window: its synchronous write right after the ask)
+        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) warn(`[auto-cli] quota refresh ${key}: its backoff and bought bucket did NOT reach the disk — a restart now would lose them (the stamp on disk still paces the next ask)`);
         if (ok) { try { d.onMemberReadingFresh(key, 'auto-cli refresh'); } catch (e) { warn(`[auto-cli] reading wake failed for ${key}: ${e.message}`); } } // the THIRD producer of a fresh reading takes the SAME edge (2026-09-08: its 02:31:43 success changed nothing) — AFTER the bookkeeping (quota r3)
         log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (${why || '?'}; ${it?.drift == null ? (it?.rolled ? 'no drift control — the reading\'s window already reset' : 'no drift control') : `drift ${Math.round(it.drift)}pt`}${it?.pj ? `; ${it.pj.label} crosses its ${it.pj.line}% line in ~${Math.max(1, Math.round(it.pj.inMs / 60e3))} min at ${it.pj.pctPerMin}%/min` : ''})${failWhy ? ` — ${failWhy}` : ''}`);
         (d.metric || global.__vsMetric)?.('auto-cli-refresh-ms', 0);
       }
     } catch (e) { warn('[auto-cli] tick failed: ' + e.message); }
-    finally { ticking = false; }
+    finally {
+      // r4732 (5): the tick's other saves (a «not probed» row's) land before the tick ends — a promise wait, nothing on the loop
+      const mine = owed; owed = [];
+      try { const got = await Promise.all(mine); if (got.some((ok) => ok !== true)) warn('[auto-cli] a pacing state write did NOT reach the disk this tick — a restart now would lose it'); } catch { }
+      ticking = false;
+    }
   }
   // the group's merged memory: per bucket, the latest purchase any id of the identity made
   function mergedReads(ids) {
@@ -300,4 +331,4 @@ function createAutoCliLoop(d) {
   };
 }
 
-module.exports = { createAutoCliLoop, loadState, saveState, clampStamps, lastBoughtInstant, STATE_FILE, UNKNOWN_WAIT_MS, projectionBucketBought };
+module.exports = { createAutoCliLoop, loadState, saveState, clampStamps, lastBoughtInstant, STATE_FILE, UNKNOWN_WAIT_MS, STAMP_LANDING_MS, projectionBucketBought };
