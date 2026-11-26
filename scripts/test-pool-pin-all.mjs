@@ -156,7 +156,7 @@ console.log('§4 THE RED COPIES — each law, its fault placed in a copy of the 
 console.log('§5 THE PERSON\'s PRESS — the tree\'s one verdict, asked first by both routes');
 {
   const { personVerdict } = require(path.join(REPO, 'src/routes/vault.js'));
-  const page = { host: '127.0.0.1:3456', 'sec-fetch-site': 'same-origin' };
+  const page = { host: 'hub.test', 'sec-fetch-site': 'same-origin' };   // the page's own same-origin ask (no fixed port: §81)
   const req = (auth, extra = {}) => ({ headers: { ...page, ...(auth ? { authorization: 'Bearer ' + auth } : {}) }, body: {}, query: {}, socket: {}, ...extra });
   const tok = (p) => [p, 'x'.repeat(24)].join('');   // built at run time: no token-shaped literal in the tree
   const v = { person: personVerdict(req(null)), agent: personVerdict(req(tok('vsst_'))), job: personVerdict(req(tok('jbt_'))), key: personVerdict(req(tok('vsak_'))), body: personVerdict(req(null, { body: { token: tok('vsst_') } })) };

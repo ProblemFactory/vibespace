@@ -1773,7 +1773,7 @@ export function installManageAgents(App, ctx = {}) {
           ${st.all ? '' : `<input type="checkbox" class="pool-mem-cb" data-id="${escHtml(r.id)}" ${r.checked ? 'checked' : ''} aria-label="${escHtml(r.name)}">`}
           <span class="pool-prio-place">${escHtml(w.place)}</span>
           <span class="pool-prio-name">${escHtml(w.name)}${r.sub ? ` <span class="pool-mem-sub">${escHtml(r.sub)}</span>` : ''}<br><span class="pool-mem-sub pool-prio-state" data-state="${escHtml(r.state?.code || '')}">${escHtml(w.state)}${w.note ? ' · ' + escHtml(w.note) : ''}</span></span>
-          ${r.actions.length ? `<button class="agent-btn pool-prio-menu" data-id="${escHtml(r.id)}" title="${escHtml(t('Order'))}" aria-label="${escHtml(t('Order'))}">⋯</button>` : ''}
+          ${r.actions.length ? `<button class="agent-btn pool-prio-menu" data-id="${escHtml(r.id)}" title="${escHtml(t('More actions'))}" aria-label="${escHtml(t('More actions'))}">⋯</button>` : ''}
         </div>`; }).join('')}
         ${subs.length ? '' : `<div class="empty-hint">${escHtml(t('No subscription accounts yet'))}</div>`}</div>
       ${fallbackSectionHtml({ codex, cross: st.cross, picked: st.fb, choices: fbChoices, unread: fbUnread, damaged: fbDamaged }, t, escHtml)}
