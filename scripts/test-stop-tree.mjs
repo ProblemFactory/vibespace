@@ -468,7 +468,7 @@ const svcScene = async (Mod, tag) => {
   const ss = await S.press('start-stop', { settle: true });
   ok(ss.answer && ss.answer.pending === true && ss.flagAfter === undefined && ss.ended && ss.state === 'down' && ss.newRuns === 0, 'B-cac2: a STOP pressed after the remembered start clears it — the service ends DOWN, no new run (the CLI\'s «stopped» is true)', ss);
   await S.end();
-  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), PEND = '    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {';
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), PEND = '    if ((job._termAt || job._stopForce || (this._unreadStops && this._unreadStops.has(run0))) && this._runLive(job, run0)) {';   // the stamp unit (r5238 law 6): a way-out Stop's forward remembers a start too
   ok(JSRC.split(PEND).length === 2, 'B-cac2 control setup: the remembered start is one line in jobs.js (the plant the control cuts) — the anchor of the control is in the source');
   const MJ9 = mutantCopies('stop-tree-cac2', ROOT);
   const R = await svcScene(MJ9.load('src/jobs.js', editAnchor(JSRC, PEND, '    if (false /* MUTANT: the release — a start during a stop is «already running» */) {', "src/jobs.js"), 'release'), 'job-start-during-stop-mut');

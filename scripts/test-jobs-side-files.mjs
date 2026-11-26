@@ -400,7 +400,12 @@ const censusRed = (files, needles, rows, except = {}) => { const by = countLines
 // ⑧ THE STAMP UNIT (B-f276, lane bl-proposals, 主开发 r5015 / r5074) ───────────────────────────────────────────────────────────────
 console.log('⑧ a run\'s process record (pid.json) that cannot be read is «may still run», never «dead»');
 const TipStampBoot = cut("    if (sa.state === 'unknown') return;\n", '', 'the boot reads an unknown process record as no stamp (the tip)');
-const TipStop = cut("    { const sa = this._runLive(job, run) ? this._stampAnswer(job) : null; if (sa && sa.state === 'unknown') return this._stopUnread(job, run, sa); }\n", '', 'a stop with no way out of an unknown record (the tip)');
+const TipStop = cut("    if (sa && sa.state === 'unknown') return this._stopUnread(job, run, sa);\n", '', 'a stop with no way out of an unknown record (the tip)');
+// r5238 LAW 6 (the hotfix of 2.369.420): the two orders of a Stop's road this unit owns, each red as the unit first built it
+const TipOrder = cut(`    this._stopDoubt(job, run, { afterForward: endIt }).then(endIt, (e) => { this.d.log(\`[jobs] \${job.id}: the stop of what its run left failed:\`, e && e.message); endIt(); });\n`,
+  `    endIt(); this._stopDoubt(job, run).catch((e) => this.d.log(\`[jobs] \${job.id}: the stop of what its run left failed:\`, e && e.message));\n`, 'the way out records its end before its forward (the unit as first built)');
+const TipPending = cut('    if ((job._termAt || job._stopForce || (this._unreadStops && this._unreadStops.has(run0))) && this._runLive(job, run0)) {', '    if ((job._termAt || job._stopForce) && this._runLive(job, run0)) {', 'a start during the way out answers «already running» (the unit as first built)');   // stale-pins: kept — the replacement is the unit as first built (the red copy)
+const TipTwice = cut(": force ? this._killGroup(job, 'SIGKILL') : this._termRun(job, run, sa); // round 7", ": force ? this._killGroup(job, 'SIGKILL') : this._termRun(job, run); // round 7", 'a stop that reads the record again before its signal (the unit as first built)');   // stale-pins: kept — the replacement is the unit as first built (the red copy)
 const TipFire = cut("        if (sa.state === 'unknown') { this._fireSkipUnread(job, child, sa); return; }\n", '', 'a cron fire beside an unknown run (the tip)');
 const TipRm = cut("    if (unknown && !orphan && !stop) return { error:", "    if (false) return { error:", 'a removal of a run whose record is unknown (the tip)');
 {
@@ -442,7 +447,7 @@ const TipRm = cut("    if (unknown && !orphan && !stop) return { error:", "    i
     const j = jm.jobs.get(w.id), run = j.runs[j.runs.length - 1];
     refused.add(w.pidF);
     const s = jm.stop(j);
-    await until(() => !!run.doubtOver || !run.endedAt, 'the doubt\'s own stop ended (or no stop began)');
+    await until(() => !(jm._unreadStops && jm._unreadStops.has(run)) && (!run.endedAt || !!run.doubtOver), 'the way-out Stop\'s forward made and its end recorded (or no such stop began)');
     const st = jm.start(j);
     refused.delete(w.pidF);
     const out = { s, ended: !!run.endedAt, cause: run.cause || null, doubtOver: !!run.doubtOver, start: st, asked: asked.slice(), hit: hitsOf(w.pidF) };
@@ -452,6 +457,71 @@ const TipRm = cut("    if (unknown && !orphan && !stop) return { error:", "    i
   judged(b8.hit > 0, !!(b8.s && b8.s.ok && /could not be read/.test(String(b8.s.words)) && /nothing was signalled from that record/.test(String(b8.s.words)) && b8.ended && b8.cause === 'interrupted' && b8.doubtOver && !(b8.start && b8.start.error)),
     '⑧ (b) THE WAY OUT: a person\'s Stop of a live run whose record cannot be read ENDS it on purpose (nothing signalled from the record; the doubt\'s own stop ends its doubt) — a Start then goes on', b8);
   judged(b8r.hit > 0, !!(!b8r.ended && b8r.start && /is already running/.test(String(b8r.start.error))), 'RED — the tip\'s stop (a copy): the run never ends and every Start says «already running» — the person is WEDGED', b8r);
+  // (b2) r5238 LAW 6 — THE FORWARD FIRST: the way out signals what carries the job's mark, THEN records, says and saves the run's end.
+  // The plant: a made-up process (a fresh stand-in) the walk names as carrying the mark; the hub test placed (this suite's process is
+  // no hub: B-2c5c's own suites judge that test). The witness: the signal reached it — what the run's record and the journal said THEN
+  const forwardFirst = async (JM) => {
+    const w = setup8('stamp-order', ALIVE()), { jm, logs } = engine(JM, w.dir);
+    jm._spawn = () => { }; jm._startAfter = () => Promise.resolve();
+    jm.init(); quiet(jm);
+    const j = jm.jobs.get(w.id), run = j.runs[j.runs.length - 1];
+    const mk = liveKid(), id = { pid: mk.pid, starttime: PI.starttimeOf(mk.pid), bootId: PI.bootIdOf() };
+    let walked = 0; jm._walkMarked = async () => { walked++; return Object.assign([id], { scan: {} }); }; jm._hubTest = () => () => false;
+    const said = () => logs.filter((l) => l.includes('stopped by its owner while its process record could not be read')).length;
+    const seen = [], realSig = PI.signalIdentity;
+    PI.signalIdentity = function (who, sig, ...r) { if (who && Number(who.pid) === mk.pid) seen.push({ sig, ended: !!run.endedAt, said: said() }); return realSig.call(this, who, sig, ...r); };
+    refused.add(w.pidF);
+    let s = null;
+    try { s = jm.stop(j); await until(() => seen.length > 0 && !(jm._unreadStops && jm._unreadStops.has(run)), 'the marked process signalled and the forward made', 3000); }
+    finally { PI.signalIdentity = realSig; refused.delete(w.pidF); }
+    const out = { s, walked, seen: seen.slice(), ended: !!run.endedAt, said: said(), hit: hitsOf(w.pidF) };
+    end(jm); return out;
+  };
+  const o8 = await forwardFirst(JobManager), o8r = await forwardFirst(TipOrder);
+  judged(o8.hit > 0 && o8.walked > 0 && o8.seen.length > 0, !!(o8.s && o8.s.ok && o8.seen[0].sig === 'SIGTERM' && !o8.seen[0].ended && o8.seen[0].said === 0 && o8.ended && o8.said === 1),
+    '⑧ (b2) r5238 law 6: the way out SIGNALS what carries the job\'s mark first — at the signal the run is not yet ended and nothing is said; its end is recorded and said ONCE after', o8);
+  judged(o8r.hit > 0 && o8r.walked > 0 && o8r.seen.length > 0, !!(o8r.seen[0].ended && o8r.seen[0].said === 1), 'RED — the way out as first built (a copy): the run\'s end recorded and said BEFORE the signal', o8r);
+  // (b3) r5238 LAW 6 — A STOP's ROAD READS THE RECORD NO MORE THAN BEFORE THE UNIT: the way-out question's one read is the answer the
+  // signal takes (the ordinary road of a live run with a readable record). The plant: a fresh stand-in as the live wrapper; the witness:
+  // the read counter of its pid.json inside the Stop
+  const stopReads = async (JM) => {
+    const mk = liveKid(), live = () => ({ pid: mk.pid, starttime: PI.starttimeOf(mk.pid), bootId: PI.bootIdOf() });
+    const w = setup8('stamp-reads', live()), { jm } = engine(JM, w.dir);
+    jm._spawn = () => { }; jm._startAfter = () => Promise.resolve();
+    jm.init(); quiet(jm);
+    const j = jm.jobs.get(w.id), run = j.runs[j.runs.length - 1];
+    const before = asked.get(w.pidF) || 0, s = jm.stop(j), reads = (asked.get(w.pidF) || 0) - before;
+    const out = { s: s && { ok: s.ok, hadProc: s.hadProc }, live: !run.endedAt, reads };
+    end(jm); return out;
+  };
+  const r8 = await stopReads(JobManager), r8r = await stopReads(TipTwice);
+  judged(r8r.reads > 0 && r8.reads > 0, !!(r8.s && r8.s.ok && r8.s.hadProc && r8.reads === r8r.reads - 1),
+    '⑧ (b3) r5238 law 6: a live job\'s Stop reads its process record ONE time fewer than the unit as first built — the way-out question\'s read is the one the signal takes', { now: r8, first: r8r });
+  judged(r8r.reads > 0, !!(r8r.reads === r8.reads + 1), 'RED — the unit as first built (a copy): the Stop reads the record once more before its signal', r8r);
+  // (b4) A START PRESSED WHILE THE WAY OUT's FORWARD RUNS is remembered and done once the run has ended (B-cac2's road, as during a
+  // stop's grace) — never «already running». The plant: the walk HELD (a placed hold, opened by the leg); the witness: the walk was asked
+  const startDuring = async (JM) => {
+    const w = setup8('stamp-start', ALIVE()), { jm, logs } = engine(JM, w.dir);
+    jm._spawn = () => { }; jm._startAfter = () => Promise.resolve();
+    jm.init(); quiet(jm);
+    const j = jm.jobs.get(w.id), run = j.runs[j.runs.length - 1];
+    let open = () => { }, walked = 0; const gate = new Promise((r) => { open = r; });
+    jm._walkMarked = async () => { walked++; await gate; return Object.assign([], { scan: {} }); }; jm._hubTest = () => () => false;
+    refused.add(w.pidF);
+    let st = null, endedAtPress = null;
+    try {
+      jm.stop(j); await until(() => walked > 0, 'the way out reached its walk', 2000);
+      endedAtPress = !!run.endedAt; st = jm.start(j); open();
+      await until(() => !!run.endedAt, 'the way-out Stop\'s end recorded', 3000);
+      if (st && st.pending) await until(() => logs.some((l) => l.includes('the start asked during its stop')), 'the remembered start done', 2000);
+    } finally { open(); refused.delete(w.pidF); }
+    const out = { walked, endedAtPress, st, ended: !!run.endedAt, done: logs.filter((l) => l.includes('the start asked during its stop')), hit: hitsOf(w.pidF) };
+    end(jm); return out;
+  };
+  const p8 = await startDuring(JobManager), p8r = await startDuring(TipPending);
+  judged(p8.hit > 0 && p8.walked > 0, !!(p8.endedAtPress === false && p8.st && p8.st.ok && p8.st.pending && /still stopping/.test(String(p8.st.words)) && p8.ended && p8.done.length === 1 && /started$/.test(p8.done[0])),
+    '⑧ (b4) a Start pressed while the way out\'s forward runs is REMEMBERED («still stopping») and done once the run has ended — never «already running»', p8);
+  judged(p8r.hit > 0 && p8r.walked > 0, !!(p8r.st && /is already running/.test(String(p8r.st.error)) && p8r.done.length === 0), 'RED — the unit as first built (a copy): that Start answers «already running» and nothing starts after', p8r);
   // (c) A CRON's ONE-RUN-AT-A-TIME FIRE beside its child whose record cannot be read
   const fire = async (JM) => {
     const cron = { id: 'jb-c1c2c3c4', kind: 'cron', name: 'made-up schedule', state: 'scheduled', desiredUp: true, schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['true'] } } }, owner: {}, access: ACC, runs: [], createdAt: T8 };
@@ -521,6 +591,6 @@ console.log('⑨ r5074: the single take-back, a deleted entry\'s stops, the end 
   for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 2, label: 'side-files smalls ' })) ok(r.pass, r.name, r.detail);
 }
 for (const r of copiesCensus(MJD.files, MJD.dir, ROOT, { minCopies: 1, label: 'side-files door ' })) ok(r.pass, r.name, r.detail);
-for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 8, label: 'side-files ' })) ok(r.pass, r.name, r.detail);
+for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 11, label: 'side-files ' })) ok(r.pass, r.name, r.detail);
 if (skipped) { console.log(counts.fail ? `\n${counts.fail} FAILED (${counts.pass} passed; ${skipped} SKIPPED: named above)` : `\n${counts.pass} passed, ${skipped} SKIPPED: the plants named above were never read — not ALL PASS`); process.exit(counts.fail ? 1 : 0); }
 report();
