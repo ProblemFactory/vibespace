@@ -4425,10 +4425,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const [, S2] = await eScene(HR, 'e5-real', ['EIO', null], { between: { 2: NOHM } });
     ok(S2.out.length === 1 && S2.layouts.includes('/home/userN/proj') && doneOf(S2.mark), 'B-574d follow (e5) the HOME marker lost after the first start: the owed data marker names the old user — layouts.json cured, marked done', { out: S2.out, mark: S2.mark });
     // their REDs (anchored copies): the listing without its file rule; the retry without ONLY; the owed marker named by nobody
-    const LIST = "  try { for (const e of fs.readdirSync(metaDir, { withFileTypes: true })) if (e.isFile() && e.name.endsWith('.json')) stores.push({ f: path.join(metaDir, e.name), key: 'session-meta/' + e.name }); } catch { }\n";
-    const [BM1] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, LIST, "  try { for (const n of fs.readdirSync(metaDir)) stores.push({ f: path.join(metaDir, n), key: 'session-meta/' + n }); } catch { }   // MUTANT: every name a store\n", 'the metas\' file rule'), 'metas-any-name'), 'e1-red', [null], { pre: PREB });
+    const LIST = "  try { for (const e of fs.readdirSync(metaDir, { withFileTypes: true })) if (e.isFile() && e.name.endsWith('.json')) stores.push({ f: path.join(metaDir, e.name), key: 'session-meta/' + e.name }); }\n";
+    const [BM1] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, LIST, "  try { for (const n of fs.readdirSync(metaDir)) stores.push({ f: path.join(metaDir, n), key: 'session-meta/' + n }); }   // MUTANT: every name a store\n", 'the metas\' file rule'), 'metas-any-name'), 'e1-red', [null], { pre: PREB });
     ok(BM1.twice > 0 || !doneOf(BM1.mark), 'B-574d follow RED (anchored copy: every name in session-meta a store): the earlier backup is rewritten (a backup of a backup) or the folder makes the rewrite owed — (e1) goes red', { twice: BM1.twice, mark: BM1.mark });
-    const ONLY = '    if (only && !only.has(key)) continue;\n';
+    const ONLY = "    if (only && !only.has(key) && !(only.has('session-meta/') && key.startsWith('session-meta/'))) continue;   // a listing owed: every meta\n";
     const [, RM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, ONLY, '', 'the retry\'s owed stores only'), 'retry-all'), 'e4-red', ['EIO', null], { between: { 2: NEWP } });
     ok(!RM2.mounts.includes('/home/olduser/paired'), 'B-574d follow RED (anchored copy: the retry tries every store): the path recorded after the first start is rewritten — (e4) goes red', RM2.mounts);
     const OWEDSRC = '    for (const o of owedOldUsers(dataDir, user, homeGone)) oldUsers.add(o);   // B-574d follow: an owed rewrite names its old user too\n';
@@ -4443,6 +4443,106 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const CARRY = '        const judgedOld = Math.max(!homeDone ? judged : judgedOf(hm), prior ? prior.judgedOld : 0);\n';
     const [, GM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, CARRY, '        const judgedOld = !homeDone ? judged : judgedOf(hm);   // MUTANT: the verdict not carried\n', 'the carried verdict'), 'verdict-dropped'), 'g-red', ['EIO', null], { move: 'partial' });
     ok(GM2.layouts === LAY0 && !doneOf(GM2.mark), 'B-574d follow RED (anchored copy: the earlier start\'s verdict not carried): on a move that is not whole the owed store is never cured (layouts.json keeps /home/olduser)', { mark: GM2.mark, layouts: GM2.layouts });
+    // (i)–(v) 主开发 r4981 and its own read: a LISTING or a STAT that fails for any cause but «not there» is OWED for that start, never read as
+    // absent — on a retry the metas are listed only when one is owed, and a failed listing owes exactly those; a data marker that CANNOT BE
+    // READ is not done and is never written over (the data half waits for a start that can read it), one whose bytes DO NOT PARSE runs the
+    // whole rewrite; never «kept» over a marker that could not be read. Each by a PLACED refusal of the read call (that one path; a stat
+    // refused to existsSync too), each with its RED (the release's lines, or the follow's first form)
+    const refusing = (fn, tail, code) => {
+      const real = fs[fn], realEx = fs.existsSync;
+      fs[fn] = function (p, ...a) { if (String(p).endsWith(tail)) throw Object.assign(new Error(`${code}: a placed refusal of the read`), { code }); return real.call(this, p, ...a); };
+      if (fn === 'statSync') fs.existsSync = function (p) { if (String(p).endsWith(tail)) return false; return realEx.call(this, p); };   // one stat: both roads see it
+      return () => { fs[fn] = real; fs.existsSync = realEx; };
+    };
+    const rScene = async (Mod, tag, codes, reads, { between = null, later = 1, tail = path.sep + 'layouts.json.tmp' } = {}) => {
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), d = path.join(root, 'data'), meta = path.join(d, 'session-meta');
+      fs.mkdirSync(meta, { recursive: true }); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0); fs.writeFileSync(path.join(d, 'layouts.json'), LAY0); fs.writeFileSync(path.join(meta, 'cw-1.json'), META0);
+      // the projdirs: named and judged at the first start; later starts find them moved (named by the markers only; judged `later`)
+      let k = 0; const hk = { staleUsers: () => (k > 1 ? [] : ['olduser']), moveUser: () => (k > 1 ? 0 : 1), leftAfterMove: () => ({ failed: 0, judged: k > 1 ? later : 1 }) };
+      const out = [];
+      for (const code of codes) {
+        k++;
+        if (between && between[k]) between[k](d, home);
+        const warned = [], undo = reads[k] ? refusing(...reads[k]) : null;
+        let r;
+        try { r = await placed(tail, code, async () => { const o = Mod.migrateHomeRename({ dataDir: d, metaDir: meta, home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, homeGone: () => true, throwaway: () => false }); await o.written; return o; }); }
+        finally { if (undo) undo(); }
+        out.push({ out: r.out, warned, mounts: fs.readFileSync(path.join(d, 'mounts.json'), 'utf8'), layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), meta: fs.readFileSync(path.join(meta, 'cw-1.json'), 'utf8'), mark: markOf(d), markText: (() => { try { return fs.readFileSync(path.join(d, NAME), 'utf8'); } catch { return null; } })(), homeMark: fs.existsSync(path.join(home, '.vibespace', NAME)), homeJudged: (() => { try { return JSON.parse(fs.readFileSync(path.join(home, '.vibespace', NAME), 'utf8')).judgedOld; } catch { return null; } })() });
+      }
+      return out;
+    };
+    const LISTR = { 1: ['readdirSync', path.sep + 'session-meta', 'EIO'] }, STATR = { 1: ['statSync', path.sep + 'layouts.json', 'EACCES'] }, MARKR = { 2: ['readFileSync', path.sep + 'data' + path.sep + NAME, 'EIO'] };
+    const UNREAD = 'the data marker of /home/olduser could not be read (EIO: tried again at the next start) — not taken as done';
+    const [I1, I2] = await rScene(HR, 'i-real', [null, null], LISTR);
+    ok(!doneOf(I1.mark) && JSON.stringify(I1.mark.owed) === '["session-meta/"]' && I1.meta === META0 && I1.layouts.includes('/home/userN/proj') && I1.warned.length === 1 && I1.warned[0].includes('session-meta (its listing) (EIO')
+      && doneOf(I2.mark) && I2.meta.includes('/home/userN/proj'),
+      'B-574d follow 2 (i) the session metas\' LISTING refused (EIO) on a whole rewrite: OWED (key session-meta/), never «no metas» — said once; the next start lists again, rewrites the meta and marks done', { first: [I1.mark, I1.warned], second: [I2.mark, I2.meta] });
+    const [S1, S2b] = await rScene(HR, 'ii-real', [null, null], STATR);
+    ok(!doneOf(S1.mark) && JSON.stringify(S1.mark.owed) === '["layouts.json"]' && S1.layouts === LAY0 && S1.warned.length === 1 && S1.warned[0].includes('layouts.json (EACCES')
+      && doneOf(S2b.mark) && S2b.layouts.includes('/home/userN/proj'),
+      'B-574d follow 2 (ii) a store\'s STAT refused (EACCES): that store\'s failure, OWED — never skipped as absent; the next start rewrites it and marks done', { first: [S1.mark, S1.warned], second: S2b.mark });
+    const [, U2, U3] = await rScene(HR, 'iii-real', ['EIO', null, null], MARKR);
+    ok(!doneOf(U2.mark) && JSON.stringify(U2.mark.owed) === '["layouts.json"]' && U2.layouts === LAY0 && U2.warned.length === 1 && U2.warned[0].includes(UNREAD) && U3.layouts.includes('/home/userN/proj') && doneOf(U3.mark),
+      'B-574d follow 2 (iii) the data marker\'s READ refused (EIO): not taken as done and never written over — said ONCE, the data half waits; the next start that can read it cures the owed store and marks done', { second: [U2.mark, U2.warned], third: U3.mark });
+    const [, P2] = await rScene(HR, 'iiib-real', ['EIO', null], {}, { between: { 2: (d) => fs.writeFileSync(path.join(d, NAME), '{') } });
+    ok(P2.warned.length === 1 && P2.warned[0].includes('does not parse') && P2.layouts.includes('/home/userN/proj') && doneOf(P2.mark),
+      'B-574d follow 2 (iii) a data marker whose bytes do not parse is NOT done either: said once, the whole rewrite runs (a torn marker keeps no owed list; layouts.json cured), marked done', { second: [P2.mark, P2.warned] });
+    // (iv) its own read (F1): a retry that owes NO meta lists no metas — a refused listing there owes nothing, and a /home/<old> path recorded
+    // into a meta since the first start stays as recorded
+    const PAIRED = (d) => fs.writeFileSync(path.join(d, 'session-meta', 'cw-1.json'), JSON.stringify({ cwd: '/home/userN/proj', paired: '/home/olduser/paired' }));
+    const [, V2] = await rScene(HR, 'iv-real', ['EIO', null], { 2: LISTR[1] }, { between: { 2: PAIRED } });
+    ok(doneOf(V2.mark) && V2.layouts.includes('/home/userN/proj') && V2.meta.includes('/home/olduser/paired') && V2.warned.length === 0,
+      'B-574d follow 2 (iv) a retry that owes no meta: the metas are not listed (the refused listing never met), the owed store cured, marked done — the meta\'s path recorded since stays as recorded', { second: [V2.mark, V2.meta] });
+    // (v) its own read (F2, F3): the HOME marker lost and the data marker unreadable at the next start, the folders long moved (judged 0): the
+    // UNREADABLE marker names its old user (said once), the move half re-marks the HOME, and the data half WAITS — never a «kept» over it; the
+    // start after, the marker readable, cures the owed store on its own carried verdict
+    const LOSE = (d, home) => fs.rmSync(path.join(home, '.vibespace', NAME), { force: true });
+    const [, W2, W3] = await rScene(HR, 'v-real', ['EIO', null, null], MARKR, { between: { 2: LOSE }, later: 0 });
+    ok(W2.warned.length === 1 && W2.warned[0].includes(UNREAD) && !W2.homeMark && !doneOf(W2.mark) && JSON.stringify(W2.mark.owed) === '["layouts.json"]' && W3.layouts.includes('/home/userN/proj') && doneOf(W3.mark) && !W3.mark.kept && W3.homeJudged === 1,
+      'B-574d follow 2 (v) the HOME marker lost, the data marker unreadable, the folders long moved: the unreadable marker names its old user (said once); the owed marker NEVER written over with «kept», and the HOME marker WAITS with it (no lost verdict written); the next start cures the store on the carried verdict and writes the HOME marker with it (judged 1)', { second: [W2.warned, W2.mark, W2.homeMark], third: [W3.mark, W3.homeJudged] });
+    // (vi) the second read (R2, R3): a TORN marker and no verdict surviving (the HOME marker lost, the folders long moved): nothing rewritten
+    // and NOTHING written over it (never «kept») — said once, with what a person can do; RED below: «kept» allowed alone
+    const TORNLOSE = (d, home) => { LOSE(d, home); fs.writeFileSync(path.join(d, NAME), '{'); };
+    const [, T2] = await rScene(HR, 'vi-real', ['EIO', null], {}, { between: { 2: TORNLOSE }, later: 0 });
+    ok(T2.markText === '{' && T2.warned.length === 1 && T2.warned[0].includes('does not parse (its bytes do not parse: move it aside or restore it)') && T2.warned[0].includes('no verdict survives it') && T2.layouts === LAY0,
+      'B-574d follow 2 (vi) a TORN marker with no verdict surviving: nothing rewritten, the torn marker never written over (no «kept»), said ONCE with what a person can do', { second: [T2.markText, T2.warned] });
+    // (vii) the second read (R4): a retry that owes ONE meta (its write refused at the first start) with the listing refused: it re-owes
+    // EXACTLY that meta, never the wildcard; the next start lists, rewrites it and marks done
+    const [, X2, X3] = await rScene(HR, 'vii-real', ['EIO', null, null], { 2: LISTR[1] }, { tail: path.sep + 'cw-1.json.tmp' });
+    ok(JSON.stringify(X2.mark.owed) === '["session-meta/cw-1.json"]' && X2.warned.length === 1 && X2.warned[0].includes('cw-1.json (its folder\'s listing) (EIO') && doneOf(X3.mark) && X3.meta.includes('/home/userN/proj'),
+      'B-574d follow 2 (vii) a retry owing ONE meta, its listing refused: re-owes exactly session-meta/cw-1.json (never the wildcard), said once; the next start rewrites it and marks done', { second: [X2.mark, X2.warned], third: X3.mark });
+    // their REDs (anchored copies: the release's lines, or the follow's first form)
+    const LISTC = HRT.slice(HRT.indexOf('  catch (e) {\n    const code = (e && e.code) || \'error\';\n'), HRT.indexOf('  }\n  }\n  const only = retry && retry.only;') + 4);
+    const [IM1] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, LISTC, '  catch { }   // MUTANT: the release\'s empty catch\n', 'the listing owed'), 'listing-swallowed'), 'i-red', [null], LISTR);
+    ok(doneOf(IM1.mark) && IM1.meta === META0, 'B-574d follow 2 RED (anchored copy: the release\'s empty catch): the start marks DONE while the meta keeps /home/olduser — (i) goes red', IM1.mark);
+    const STATC = "      try { fs.statSync(f); } catch (e) { if (e && e.code === 'ENOENT') continue; throw e; }";
+    const [SM1] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, STATC, '      if (!fs.existsSync(f)) continue;', 'the stat owed'), 'stat-absent'), 'ii-red', [null], STATR);   // stale-pins: kept — the RED copy puts the release's existsSync back on purpose
+    ok(doneOf(SM1.mark) && SM1.layouts === LAY0, 'B-574d follow 2 RED (anchored copy: the release\'s existsSync): the refused stat reads as absent — marked DONE, layouts.json keeps /home/olduser — (ii) goes red', SM1.mark);
+    const READC = "  let text; try { text = fs.readFileSync(dm, 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? { done: false, owed: null } : { done: false, owed: null, unreadable: (e && e.code) || 'error' }; }\n";
+    const [, UM2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, READC, "  let text; try { text = fs.readFileSync(dm, 'utf8'); } catch (e) { return { done: !(e && e.code === 'ENOENT'), owed: null }; }   // MUTANT: unread is done\n", 'the unread marker owed'), 'unread-done'), 'iii-red', ['EIO', null], MARKR);   // stale-pins: kept — the RED copy puts the release's answer back on purpose
+    ok(UM2.out.length === 0 && UM2.warned.length === 0, 'B-574d follow 2 RED (anchored copy: an unreadable marker read as done): the start takes the rename as done and says NOTHING — (iii)\'s «said once, not done» goes red', { second: [UM2.out, UM2.warned] });
+    const PARSEC = "  let j = null; try { j = JSON.parse(text); } catch { return { done: false, owed: null, unreadable: 'unparsable' }; }\n";
+    const [, PM2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, PARSEC, "  let j = null; try { j = JSON.parse(text); } catch { return { done: true, owed: null }; }   // MUTANT: torn is done\n", 'the torn marker owed'), 'torn-done'), 'iiib-red', ['EIO', null], {}, { between: { 2: (d) => fs.writeFileSync(path.join(d, NAME), '{') } });
+    ok(PM2.layouts === LAY0 && PM2.out.length === 0, 'B-574d follow 2 RED (anchored copy: a marker that does not parse read as done): the start runs nothing — (iii) goes red', { out: PM2.out });
+    const GUARD = '  if (!onlyMetas || onlyMetas.length) {\n', WIDE = "(onlyMetas && !onlyMetas.includes('session-meta/') ? onlyMetas : ['session-meta/'])";
+    const [, VM2, VM3] = await rScene(M574.load('src/server/home-rename.js', anchored(anchored(HRT, GUARD, '  if (true) {   // MUTANT: always listed\n', 'the retry lists only owed metas'), WIDE, "['session-meta/']", 'the owed metas only'), 'retry-widens'), 'iv-red', ['EIO', null, null], { 2: LISTR[1] }, { between: { 2: PAIRED } });
+    ok(!doneOf(VM2.mark) && VM3.meta.includes('/home/userN/paired'), 'B-574d follow 2 RED (anchored copy: the follow\'s first form — the listing on every retry, its failure the wildcard): the retry owes every meta and rewrites the path recorded since — (iv) goes red', { second: VM2.mark, third: VM3.meta });
+    const SKIP = '      if (!dataDone && !unread) {\n', KEPT = '        } else if (judgedOld > 0 || (marked && !dmState.unreadable)) mark =';
+    const [, WM2, WM3] = await rScene(M574.load('src/server/home-rename.js', anchored(anchored(anchored(HRT, SKIP, '      if (!dataDone) {   // MUTANT: the data half runs over an unread marker\n', 'the data half waits'), KEPT, '        } else if (judgedOld > 0 || marked) mark =', 'never kept over an unread marker'), '          if (!unread) {\n', '          if (true) {   // MUTANT: the HOME marker written over an unread verdict\n', 'the HOME marker waits'), 'kept-over-unread'), 'v-red', ['EIO', null, null], MARKR, { between: { 2: LOSE }, later: 0 });   // stale-pins: kept — the RED copy puts the first form's lines back on purpose
+    ok(doneOf(WM2.mark) && WM2.mark.kept === true && WM3.layouts === LAY0, 'B-574d follow 2 RED (anchored copy: the follow\'s first form whole — the data half run over an unread marker, «kept» allowed, the HOME marker written over it): a false «kept» at the second start, layouts.json keeps /home/olduser for good — (v) goes red', { second: WM2.mark, third: WM3.layouts });
+    const [, SK2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, SKIP, '      if (!dataDone) {   // MUTANT: the data half runs over an unread marker\n', 'the data half waits'), 'skip-alone'), 'iii-red2', ['EIO', null], MARKR);   // stale-pins: kept — the RED copy puts the first form's line back on purpose
+    ok(doneOf(SK2.mark) && SK2.layouts.includes('/home/userN/proj') && SK2.mark.owed === undefined, 'B-574d follow 2 RED (anchored copy: the data half run over an unread marker, alone): the unread owed list is dropped and the whole rewrite runs over it — (iii)\'s «waits» goes red', { second: SK2.mark });
+    const [, KE2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, KEPT, '        } else if (judgedOld > 0 || marked) mark =', 'never kept over an unread marker'), 'kept-alone'), 'vi-red', ['EIO', null], {}, { between: { 2: TORNLOSE }, later: 0 });   // stale-pins: kept — the RED copy puts the first form's line back on purpose
+    ok(KE2.mark && KE2.mark.kept === true, 'B-574d follow 2 RED (anchored copy: «kept» allowed over a torn marker, alone): a false «kept» is written over it — (vi) goes red', { second: KE2.markText });
+    const [, XW2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, WIDE, "['session-meta/']", 'the owed metas only'), 'wide-alone'), 'vii-red', ['EIO', null], { 2: LISTR[1] }, { tail: path.sep + 'cw-1.json.tmp' });
+    ok(JSON.stringify(XW2.mark.owed) === '["session-meta/"]', 'B-574d follow 2 RED (anchored copy: a failed listing re-owes the wildcard, alone): the retry widens to every meta — (vii) goes red', XW2.mark);
+    const HOMEWAIT = '          if (!unread) {\n';
+    const [, HW2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, HOMEWAIT, '          if (true) {   // MUTANT: the HOME marker written over an unread verdict\n', 'the HOME marker waits'), 'home-over-unread'), 'v-red3', ['EIO', null], MARKR, { between: { 2: LOSE }, later: 0 });
+    ok(HW2.homeMark && HW2.homeJudged === 0, 'B-574d follow 2 RED (anchored copy: the HOME marker written while the data marker is unread): it is written with a LOST verdict (judged 0) — (v) goes red', { home: [HW2.homeMark, HW2.homeJudged] });
+    const NAMES = 'return !!st.owed || !!st.unreadable;';
+    const [, NM2] = await rScene(M574.load('src/server/home-rename.js', anchored(HRT, NAMES, 'return !!st.owed;', 'an unread marker names its old user'), 'unread-unnamed'), 'v-red2', ['EIO', null], MARKR, { between: { 2: LOSE }, later: 0 });
+    ok(NM2.warned.length === 0 && NM2.out.length === 0, 'B-574d follow 2 RED (anchored copy: an unreadable marker names nobody): with the HOME marker lost the start says nothing at all — (v)\'s «said once» goes red', { second: NM2.warned });
     // RED: each home-rename helper back to the bare write + rename
     const REW = "      renameSynced(f + '.tmp', f, fixed, { where: `[migrate] ${path.basename(f)}`, say: (l) => log.warn(l) });";
     const HSYNC = "    try { await fh.sync(); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { log.warn(syncUnsupportedWords('[migrate] home rename: the tries', e.code)); } catch { /* a sink that throws says nothing more */ } }\n";

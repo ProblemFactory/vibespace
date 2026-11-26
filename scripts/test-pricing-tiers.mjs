@@ -521,7 +521,7 @@ try {
         'the row is the provider account\'s own': UW.includes('(w.tiers || (w.tiers = {}))[m.key] = Object.fromEntries(rec.inputs.map(([fk, el]) => [fk, Number(el.value)]));'),
         'a bad rate is refused on the page': UW.includes("if (rec.bad) { showToast(t('Add a price for {model}: «{value}» is not a rate"),
         'the CSV column only when unknown': src('src/lib/usage-cost-words.js').includes('const anyUnknown = unpricedOf((d && d.totals) || {}) !== null;') && src('src/lib/usage-cost-words.js').includes("'estCost', ...(anyUnknown ? ['unpricedTokens'] : [])") && UW.includes('  const lines = usageCsvLines(d, t);'),   // the lines moved into the PURE module (r3145 unit 2's round: usageCsvLines)   // stale-pins: kept (re-pointed: the CSV lines live in src/lib/usage-cost-words.js, read there)
-        'the route says which rate': src('src/server/account-usage-routes.js').includes('res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) });'),
+        'the route says which rate': src('src/server/account-usage-routes.js').includes("require('../usage-history.js').pricesSaveAnswer(e)") && src('src/usage-history.js').includes('  : { status: 400, body: { error: e && e.message, ...(e && e.code ? { code: e.code } : {}) } });'),   // B-574d (r5013 (b)): the route answers through pricesSaveAnswer (a disk refusal 500, a refused rate 400 with its code)
         'a half row is refused': UW.includes("if (typed && typed < rec.inputs.length) { showToast(t('Add a price for {model}: enter all five rates"),
         'a row pricing another unpriced model is refused': UW.includes("const orphan = typed ? rec.also.filter("),
         'the five rates or nothing': UW.includes('if (w && typed.length === rec.inputs.length && !rec.bad) '),

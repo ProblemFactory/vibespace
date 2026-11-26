@@ -393,6 +393,23 @@ console.log('④ RED CONTROL');
   m7._compile(anchored(USRC, PURE, '    this._withCatalog(next);   // MUTANT: the report before the write\n', 'the pure merge before the write'), file7);
   const RT = scene(m7.exports, 'save-refused-told');
   ok(RT.threw === 'EIO' && !RT.untold, 'RED CONTROL (anchored copy: the table merged WITH its report before the write): the refused save tells the catalog a table that never landed — ⑥ goes red', RT);
+  // (主开发 r5013 (b)) THE ANSWER: a save the disk refused at its temp's open (a real fs error: its syscall, its path in the message) answers 500
+  // with words that carry NO path of the server; a refused rate stays 400 with its code. RED: the release's answer (400, the message whole)
+  {
+    const d = dirOf('save-answer'); plant(d); const uh = make(d);
+    const o = fs.openSync; let err = null;
+    fs.openSync = function (p, ...a) { if (String(p).endsWith(path.sep + 'pricing.json.tmp')) throw Object.assign(new Error(`EIO: i/o error, open '${p}'`), { code: 'EIO', syscall: 'open', path: String(p) }); return o.call(fs, p, ...a); };
+    try { uh.setPricing({ accounts: { 'made-up-key-8': { discount: 0.8 } } }); } catch (e) { err = e; } finally { fs.openSync = o; }
+    let rateErr = null; try { uh.setPricing({ tiers: { opus: { input: -1 } } }); } catch (e) { rateErr = e; }
+    const A = UH.pricesSaveAnswer(err), B = UH.pricesSaveAnswer(rateErr);
+    ok(!!err && A.status === 500 && A.body.code === 'prices_not_saved' && /EIO/.test(A.body.error) && !A.body.error.includes(d) && !A.body.error.includes('/') && B.status === 400 && B.body.code === (rateErr && rateErr.code),
+      '⑥ B-574d (r5013 (b)): a prices save the DISK refused answers as the server\'s failure (500, prices_not_saved) and its words carry no path of the server; a refused rate stays the client\'s (400, its code)', { A, B: B.status });
+    const file8 = path.join(REPO, 'src/usage-history.js'), m8 = new Module(file8, null); m8.filename = file8; m8.paths = Module._nodeModulePaths(path.dirname(file8));
+    m8._compile(anchored(USRC, 'module.exports.pricesSaveAnswer = (e) => (e && e.syscall\n', 'module.exports.pricesSaveAnswer = (e) => (false   // MUTANT: the release\'s answer — every refusal the client\'s, the message whole\n', 'the disk\'s refusal the server\'s'), file8);
+    const R5 = m8.exports.pricesSaveAnswer(err);
+    ok(R5.status === 400 && String(R5.body.error).includes(d), 'RED CONTROL (anchored copy: the release\'s answer — every refusal the client\'s): a disk\'s refusal answers 400 with the server\'s path in its words — ⑥\'s answer goes red', R5.status);
+    stopOf(uh);
+  }
 }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`} — ${((Date.now() - T0) / 1000).toFixed(1)} s`);
 process.exit(fail ? 1 : 0);

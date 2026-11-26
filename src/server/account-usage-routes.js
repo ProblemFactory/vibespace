@@ -308,7 +308,7 @@ app.get('/api/usage-stats/pricing', (req, res) => { if (pricesHeldRefused(res)) 
 app.post('/api/usage-stats/pricing', (req, res) => {
   if (pricesHeldRefused(res)) return;
   try { usageHistory.setPricing(req.body || {}); res.json({ success: true, pricing: usageHistory.pricingView ? usageHistory.pricingView() : usageHistory.pricingTable() }); }
-  catch (e) { res.status(400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // B-d578 P1-b follow: a refused rate says which (code rate-invalid)
+  catch (e) { const a = require('../usage-history.js').pricesSaveAnswer(e); res.status(a.status).json(a.body); }   // B-d578 P1-b follow: a refused rate says which (code rate-invalid); B-574d (r5013 (b)): a disk's refusal is the server's (500), no path
 });
 // B-ba7d: the accounts list carries NO key tail (the owner's decision 2026-11-18); the person's read of the tails is POST
 // /api/accounts/tails (src/routes/account-tails.js — behind the person verdict)

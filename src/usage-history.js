@@ -2771,6 +2771,11 @@ function holdRoadInstall() {
 module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt, REMEDY_STATES, ackOf };
 module.exports.setCatalogPricing = setCatalogPricing; // lane cli-update-needs-nothing: the installed Claude Code's price layer
 module.exports.onPriceDisagreements = onPriceDisagreements;
+/** B-574d (主开发 r5013 (b)): the prices save's answer — a save the DISK refused (an fs error: its syscall) is the SERVER's failure (500), its
+ *  words carry no path of the server; a refused rate stays the client's (400, its code). PURE: the route answers with it */
+module.exports.pricesSaveAnswer = (e) => (e && e.syscall
+  ? { status: 500, body: { error: `the prices could not be saved — the disk refused the write (${e.code || 'error'}); nothing changed`, code: 'prices_not_saved' } }
+  : { status: 400, body: { error: e && e.message, ...(e && e.code ? { code: e.code } : {}) } });
 module.exports.SHIPPED_PRICES_CHECKED = SHIPPED_PRICES_CHECKED;
 // the module-level names the hold road (src/usage-hold-road.js) reads — internal, for that file only
 module.exports.holdRoadScope = { timedSync, WARM_SLICE_BYTES, REMEDY_STATES, ackOf, LIVE };

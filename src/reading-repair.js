@@ -1377,6 +1377,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   const archived = [];
   // 2.369.422 hotfix (主开发 r5407 / r5410): NO ROW IS SKIPPED BECAUSE ITS PHASE IS ANOTHER ACCOUNT'S INSTANT — the vendor states a
   // weekly reset on the hour, so two honest accounts share one; the repair seeds, restamps and confirms as it did at 2.369.418
+  let threw = false;
   try {
   for (const key of ids) {
     const apiwinPath = path.join(cacheDir, apiWindowSidecarName(key));
@@ -1496,8 +1497,11 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     if (row.readmitted) archived.push({ migration: id, at: now, store: 'usage-cache', key, action: 'readmitted', count: row.readmitted, newest: cands[cands.length - 1].at,
       reason: `${row.readmitted} slot-verified rate-limit reading(s) of the last ${Math.round(readmitMs / 3600e3)} h, archived by the guard against a sidecar that was not this account's, written back — their window is ${nameOf(key)}'s API-derived window ${windowFingerprint(apiWindow)}` });
   }
-  } catch (e) { if (e && typeof e === 'object') e.report = report; throw e; }   // B-574d (F6): the pass's report so far rides the error (what landed)
-  finally { _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived); }   // B-574d (F5): what was moved is archived even when a later write throws
+  } catch (e) { threw = true; if (e && typeof e === 'object') e.report = report; throw e; }   // B-574d (F6): the pass's report so far rides the error (what landed)
+  finally {   // B-574d (F5): what was moved is archived even when a later write throws; (主开发 r5013 (a)) the append's own failure never replaces the pass's error and report
+    try { _appendArchive(archiveDir, 'readings-foreign-usage-cache.ndjson', archived); }
+    catch (ae) { if (!threw) throw ae; console.warn(`[usage-repair] the archive of what the failed pass moved could not be appended (${(ae && ae.code) || 'error'})`); }
+  }
   report.ms = Date.now() - t0;
   return report;
 }
