@@ -177,7 +177,7 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
     const t = now(), k = known.get(p);
     if (k && t - k.at < LIST_FRESH_MS) return Promise.resolve({ ok: k.stat });
     const sk = skippedFor(p, t, o.press); if (sk && sk.skipped) return Promise.resolve(sk);
-    return once('stat:' + p, cn, p, () => call('pathStat', { path: p }, IDLE_ONLY).then((r) => { const st = r && r.stat; if (st && !st.err) noteKnown(p, st); return st; }), { ...o, entrance: true, through: sk && sk.through });
+    return once('stat:' + p, cn, p, () => { const g0 = madeGen.get(p) || 0; return call('pathStat', { path: p }, IDLE_ONLY).then((r) => { const st = r && r.stat; if (st && !st.err && (madeGen.get(p) || 0) === g0) noteKnown(p, st); return st; }); }, { ...o, entrance: true, through: sk && sk.through });   // r5046: a stat out at a folder-made door keeps nothing
   }
   /* THE DESCENT: every level above `p` (to `p` itself when `self`) answered «a folder» — else where it stopped and why */
   async function descend(p, cn, o, self) {
@@ -216,14 +216,15 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
     // (r2178 (1): kept the full PROBE_LATE_MS only when it cannot heal by itself — a link loop, a name too long, a permission; a passing
     // error (EIO, ESTALE while a mount comes up, the pool's memory of a hang) keeps a listing's own short time, LIST_FRESH_MS)
     const keepErr = (err) => { const msg = String((err && (err.message || err.code)) || err || 'failed').slice(0, 200), code = (err && err.code) || msg.split(/[:\s]/)[0]; keepFact({ errored: true, exists: false, err: msg }, LASTING_ERR.test(code) ? 0 : LIST_FRESH_MS); };
-    once('stat:' + p, 'facts', p, () => call('pathStat', { path: p, facts: true }, IDLE_ONLY).then((x) => {
+    once('stat:' + p, 'facts', p, () => { const g0 = madeGen.get(p) || 0; return call('pathStat', { path: p, facts: true }, IDLE_ONLY).then((x) => {   // r5046: the count read at its SEND
       const st = x && x.stat;
+      if ((madeGen.get(p) || 0) !== g0) return st;   // a facts call out at a folder-made door: handed on, nothing kept
       if (st && st.facts && !st.err) {
         keepFact(st); noteKnown(p, st);
         if (path.dirname(p) === home) { const h = listCache.get(home); selfFacts.set(p, { at: now(), pkg: st.pkg || null, homeAt: h ? h.entry.mtime : null }); if (selfFacts.size > 2000) for (const k of [...selfFacts.keys()].slice(0, 500)) selfFacts.delete(k); } // S2: the self fact, beside the home's time (capped like the other maps)
       } else if (st && st.err) keepErr(st.err);
       return st;
-    }, (err) => { if (!(err && (err.safeFsTimeout || poolBusy(err)))) keepErr(err); throw err; }), { entrance: true, born: t });
+    }, (err) => { if (!(err && (err.safeFsTimeout || poolBusy(err)))) keepErr(err); throw err; }); }, { entrance: true, born: t });
     return true;
   }
   /* a listing's kids WITH their kept facts (the page's shape: kids [{ name, git, link? }]): a folder kid's git; a symlink kid by its own
@@ -290,8 +291,12 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
       return call('dirSlice', { path: a, dirs: [{ path: a, known: base && !base.entry.racy ? base.entry.mtime : undefined }], files }, IDLE_ONLY).then((r) => {
         const d = ((r && r.dirs) || [])[0] || null;
         if (!d) return null;
-        if ((madeGen.get(a) || 0) !== g0) return d;   // r4927: a folder was made in it while this call was out — answered to its asker, never KEPT
-        if (d.same) { if (!base) return null; listCache.set(a, { at: now(), entry: base.entry }); return base.entry; }
+        // r4927 / r5046: a folder was made in it while this call was out — the answer is handed on, never KEPT. «same» is resolved FIRST
+        // (the kept entry's kids are the answer: a folder made deeper moves this folder's count, not its mtime), so an answer handed on
+        // is always a whole listing — never a row with no kids (the home's own-checkout exclusion never shrinks)
+        const moved = (madeGen.get(a) || 0) !== g0;
+        if (d.same) { if (!base) return null; if (!moved) listCache.set(a, { at: now(), entry: base.entry }); return base.entry; }
+        if (moved) return d;
         if (d.exists && d.isDir !== false && Array.isArray(d.kids)) listCache.set(a, { at: now(), entry: d });
         else listCache.delete(a);
         if (listCache.size > 2000) for (const k of [...listCache.keys()].slice(0, 500)) listCache.delete(k);
@@ -307,12 +312,12 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
   }
   function probeOne(a, o) {
     return once('probe:' + a, 'rows', a, () => {
-      const at = now();
+      const at = now(), g0 = madeGen.get(a) || 0;   // r5046: a probe out at a folder-made door lands nothing
       return call('dirSlice', { path: a, dirs: [], probes: [a] }, IDLE_ONLY).then((r) => {
         const f = ((r && r.probes) || [])[0] || null, t2 = now();
         if (f && !f.err) {
           const cur = landed.get(a);
-          if (!cur || cur.sentAt <= at) landed.set(a, { at: t2, sentAt: at, late: t2 - at >= o.budget, fact: f });   // never over a newer fact
+          if ((!cur || cur.sentAt <= at) && (madeGen.get(a) || 0) === g0) landed.set(a, { at: t2, sentAt: at, late: t2 - at >= o.budget, fact: f });   // never over a newer fact
           if (landed.size > 2000) for (const k of [...landed.keys()].slice(0, 500)) landed.delete(k);
         }
         return f;
@@ -542,14 +547,15 @@ function create({ call, home = os.homedir(), roots: ownRoots = [], walkSkip = []
     if (!s || !path.isAbsolute(s)) return 0;
     const a = path.resolve(s);
     let n = 0;
+    if (madeGen.size > 4000) madeGen.clear();   // (r5046: BEFORE the bump — a clear after it would wipe the counts just raised)
     for (const m of [known, landed, kidFacts]) if (m.delete(a)) n++;
+    for (const k of [`stat:${a}`, `probe:${a}`]) { const e = sent.get(k); if (e && e.hungAt == null) sent.delete(k); }   // r5046: a stat / probe of the made path out: no later ask joins it
     for (let d = a; ; d = path.dirname(d)) {
       if (listCache.delete(d)) n++;
       madeGen.set(d, (madeGen.get(d) || 0) + 1);   // a listing of it already OUT lands answered, never kept
       for (const k of [`list::${d}`, `list:f:${d}`]) { const e = sent.get(k); if (e && e.hungAt == null) sent.delete(k); }   // …and no new ask joins it (a hung call's mark stays: one dead path, one call)
       if (path.dirname(d) === d) break;
     }
-    if (madeGen.size > 4000) madeGen.clear();
     return n;
   }
   return { collect, self, selfWhole, folderMade, stats: () => ({ noIdle: { ...busy } }), _caches: { listCache, indexCache, known, landed, kidFacts, sent }, _counters: C };

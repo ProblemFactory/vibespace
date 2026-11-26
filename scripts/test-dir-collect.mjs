@@ -399,9 +399,10 @@ console.log('⑪ A FOLDER MADE ON THE MACHINE IS IN ITS PARENT\'S NEXT LISTING (
   const keptMs = Date.now() - t0;
   const mk = await dm.fsMkdir(path.join(PARENT, 'made-by-the-agent'), { by: 'human:owner' }).then((r) => r, (e) => ({ error: e.message }));
   const again = await dm.dirCollect(P.wire, { timeoutMs: 8000 });
-  const inside = keptMs < DC.LIST_FRESH_MS;
+  const againMs = Date.now() - t0;   // r5046: the third read inside the window too — past it the kept listing would have aged out anyway
+  const inside = keptMs < DC.LIST_FRESH_MS, againInside = againMs < DC.LIST_FRESH_MS;
   ok(!!(inside && !kidsOf(first).length && !kidsOf(kept).includes('behind-its-back')), `⑪ CONTROL: the agent KEEPS a listing — a folder made on its disk behind its back is not in the parent's listing ${keptMs} ms later (inside its ${DC.LIST_FRESH_MS} ms)`, { keptMs, first: kidsOf(first), kept: kidsOf(kept) });
-  ok(!!(mk && !mk.error && kidsOf(again).includes('made-by-the-agent') && kidsOf(again).includes('behind-its-back')), `⑪ r4927: a folder made by the agent's own fs op drops its kept listing — the parent's next listing names it (${kidsOf(again).join(' ')})`, { mk, again: kidsOf(again) });
+  ok(!!(againInside && mk && !mk.error && kidsOf(again).includes('made-by-the-agent') && kidsOf(again).includes('behind-its-back')), `⑪ r4927: a folder made by the agent's own fs op drops its kept listing — the parent's next listing, ${againMs} ms after the first (inside its ${DC.LIST_FRESH_MS} ms: the kept listing still stood), names it (${kidsOf(again).join(' ')})`, { mk, againMs, again: kidsOf(again) });
 }
 
 POOL.close();
