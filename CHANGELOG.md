@@ -7,6 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - Settings → Claude has an entry label for chat conversations: off (the CLI's own label, the default), «vibespace», or a name you type.
 
+### Changed
+- If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
+
 ### Fixed
 - After a sudden power cut, VibeSpace no longer loses its record of an archive extraction cut short, or the warning that Claude could not save its work.
 - If VibeSpace cannot read its record of notices already given (hooks, HTTPS, sign-in reminders, new Claude Code builds), it no longer repeats them.
@@ -18,6 +21,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace cannot read an older mounts list while upgrading it, it keeps it and reads it again; those mounts are no longer lost.
 - A notice about a folder that stopped answering now says when it could not read who uses the folder, instead of saying that no process has a file open there.
 - After a restart, when the check of which of two windows of one conversation is still running fails, VibeSpace keeps both open instead of closing the older one.
+- Removing an account from a Codex pool now moves the pool to a member that is signed in, instead of leaving it on the removed account.
 
 ## 2.369.422 — 2026-11-27
 
