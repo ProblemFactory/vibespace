@@ -860,8 +860,11 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
     await sd.index.durable();
     const rd = REL.createChannelStore({ dir: dirD, log: quiet });
     const ans = async (x, A) => { try { const r = await x.search(A, 'note', { limit: 100 }); return r.results.map((h) => h.convId).join(); } catch (e) { return 'refused: ' + e.message; } };
-    const fb0d = sd.searchStats().fallback;
-    const got = { main: await ans(sd, 'pd'), fallback: await ans(sd, 'pf') };
+    const fb0d = sd.searchStats().fallback, po0 = sd.searchStats().passedOver;
+    const got = { main: await ans(sd, 'pd') };
+    got.passedMain = sd.searchStats().passedOver - po0;
+    got.fallback = await ans(sd, 'pf');
+    got.passedFallback = sd.searchStats().passedOver - po0 - got.passedMain;
     got.fallbacks = sd.searchStats().fallback - fb0d;
     got.relMain = await ans(rd, 'pd'); got.relFallback = await ans(rd, 'pf');
     ok(got.main.split(',').sort().join() === 'd1,d2' && got.fallback.split(',').sort().join() === [CJK8, 'f1'].sort().join() && got.fallbacks === 1 && /^refused: channel-store: unsafe id segment /.test(got.relMain) && /^refused: channel-store: unsafe id segment /.test(got.relFallback), 'a damaged ROW whose id safeSeg refuses is passed over on EVERY road — the main road with its odd rows (pd: d1, d2) and the fallback (pf, counted once) answer; the release\'s pass refused the account\'s whole search (a named difference, damaged rows only)', JSON.stringify(got));
@@ -869,6 +872,16 @@ console.log('§H B-360d found holder 3: the search reads its logs\' own rows, ne
     const tg = { main: await ans(ts, 'pd'), fallback: await ans(ts, 'pf') };
     ts.close(); sd.close(); rd.close();
     ok(/^refused/.test(tg.main) && /^refused/.test(tg.fallback), 'RED: a copy whose row roads throw on such an id (the fallback and the odd rows before this follow) refuses both searches — the leg above would go red', JSON.stringify(tg));
+    // 主开发 r4966 (holder 3's follow's should): each row a road passes over is COUNTED (searchStats.passedOver) — why the release's error went away
+    ok(got.passedMain === 1 && got.passedFallback === 1, `each row passed over is COUNTED in the search's own stats: the main road's damaged ODD row (${got.passedMain}) and the fallback's damaged row (${got.passedFallback}); the main road never meets a row with no log (it reads the account's files), so such a row costs it nothing and is not counted there`, JSON.stringify(got));
+    const cs = require(MUTE.write(STORE, anchored(SRC(STORE), 'searchStats.passedOver++', 'void 0', 'b360d-h3-uncounted', { count: 2 }), 'uncounted')).createChannelStore({ dir: dirD, log: quiet });
+    const c0 = cs.searchStats(), cm = await ans(cs, 'pd'), cf = await ans(cs, 'pf'), c1 = cs.searchStats(), cu = c1.passedOver - c0.passedOver;
+    cs.close();
+    // law 1 (主开发 r5135): THE WITNESS that the plant was read — the copy ran the roads it sits on: its answers are the cure's (the main road
+    // through its odd rows' pass, the fallback through its pass over the account's rows) and its fallback ran once; else a NAMED SKIP
+    const read = cm === got.main && cf === got.fallback && c1.fallback - c0.fallback === 1;
+    if (!read) console.log(`  SKIP the uncounted copy's red — its plant was never read (answers ${cm === got.main} / ${cf === got.fallback}, fallbacks ${c1.fallback - c0.fallback})`);
+    else ok(cu === 0, `RED (its plant read: the copy answered as the cure and ran the fallback once): a copy that does not count passes the same rows over in silence (${cu} counted) — the leg above would go red`, String(cu));
   }
   // (3) A GENERATED STORE against the release copy (the round's should: many accounts, equal times, keys removed and born again, ids with
   //     several readings, a fallback past SEG_IDS_MAX and one by two ids escaping to one name, an account of more than LOG_STEP files).
