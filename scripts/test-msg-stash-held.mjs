@@ -575,4 +575,18 @@ console.log('§11 主开发 r5164 (2), a silence of the release: the start\'s re
   else ok(!rx.said && rx.durable === true, '§11 RED CONTROL (the release\'s empty catch): nothing said, the health reads «durable» over a write that failed', rx);
 }
 
+console.log('§12 主开发 r5164 (2), a silence of the release: the stash\'s health while the list is HELD says «not durable» (it read only the last write\'s error)');
+{
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+  const healthRun = (Mod) => { const { D, seen } = heldStart(Mod); const h0 = D.stashHealth(); D.stashFor(CC, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'kept in memory while held' }); return { seen, held: !!D.stashHeld(), h0, h1: D.stashHealth() }; };
+  const h = healthRun(CD);
+  if (!(h.seen === 1 && h.held)) console.log(`  SKIP §12: the placed read refusal never held the list (${JSON.stringify(h)})`);
+  else ok(h.h0.durable === false && h.h0.held === true && h.h1.durable === false && /could not be read/.test(h.h1.error || ''), '§12 HELD: the health reads «not durable» (held, its words) at the start and after an entry is kept in memory', h);
+  const OLD = '  const stashHealth = () => ({ durable: !lastWriteError, error: lastWriteError ? lastWriteError.message : null, since: lastWriteError ? lastWriteError.at : null });\n';   // stale-pins: kept (the release's text — this red control's own)
+  const i0 = SRC.indexOf('  const stashHealth = () => {'), i1 = SRC.indexOf('\n', i0) + 1;
+  const hx = healthRun(M.load('src/server/conversation-deliver.js', anchored(SRC, SRC.slice(i0, i1), OLD, 'the release\'s health: the last error only'), 'health-old'));
+  if (!(hx.seen === 1 && hx.held)) console.log(`  SKIP §12 RED: the placed read refusal never held the list (${JSON.stringify(hx)})`);
+  else ok(hx.h1.durable === true, '§12 RED CONTROL (the release\'s health): «durable» while nothing is written', hx);
+}
+
 report();
