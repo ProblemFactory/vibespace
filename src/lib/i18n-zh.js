@@ -5639,7 +5639,7 @@ export default {
   "{n} items from this agent": "来自这个 agent 的 {n} 条待办",
   "Inbox for this session": "这个会话的收件箱",
   "Could not update {n} items: {why}": "无法更新 {n} 条：{why}",
-  "Login expiry": "登录到期",
+  "Accounts and sign-ins": "账号与登录",
   "Account pool": "账号池",
   "Notices by source": "按来源筛选通知",
   "Show all notices": "显示全部通知",

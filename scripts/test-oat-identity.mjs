@@ -298,6 +298,11 @@ const markWith = (id, sevenDay) => { let v = null; for (let i = 0; i < K; i++) v
   ok(items[0].action && items[0].action.type === 'oat-token-check' && items[0].action.accountId === S && !!D0 && D0.opens === 'oat' && D0.verb === 'Long-lived token…',
     '…its DOOR: «Long-lived token…», opening THAT account\'s long-lived token dialog (the payload names the row by its id, never words)', { action: items[0].action, door: D0 });
   ok(!/Second|Work Max/.test(W0) && !ROAD.test(W0), '…its words name no account (neither «Second» nor «Work Max») and describe no road (no «Manage Agents», no arrow, no ⋯)', W0);
+  // r4654 (the coordinator's picture): the item is the hub's own — its key names no conversation, so no reply is drawn on it
+  const IR = require(path.join(REPO, 'src/inbox-reply.js')), rv = IR.replyVerdict({ item: items[0], session: null });
+  const IRr = compileAs('src/inbox-reply.js', read('src/inbox-reply.js').replace(", 'webui:oat-identity']", ']')), rvr = IRr.replyVerdict({ item: items[0], session: null });
+  ok(rv.code === 'no_session', '…NO reply is drawn on it: its key (webui:oat-identity) names no conversation — «Not from an agent session»', rv);
+  ok(rvr.code === 'no_live_session' && /conversation has ended/.test(rvr.why), 'RED CONTROL (r4654): the key not among the server keys (in a copy) — the item reads «This conversation has ended — sending reopens it …»', rvr);
   ok(logs.some((l) => /Second: its long-lived token belongs to another account \(Work Max\).*the token is kept.*the pool places nothing new/.test(l)) && js.some((j) => j.outcome === 'post-check-mismatch' && j.accountId === S && j.run === K), '…said in the journal and the probe log');
   orch.onReading(S, reading(S, OWN)); orch.onReading(S, reading(S, FOREIGN));
   orch = mkOrch(); orch.attach();

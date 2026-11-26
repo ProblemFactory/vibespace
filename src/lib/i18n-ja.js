@@ -5638,7 +5638,7 @@ export default {
   "{n} items from this agent": "このエージェントからの項目 {n} 件",
   "Inbox for this session": "このセッションの受信箱",
   "Could not update {n} items: {why}": "{n} 件を更新できませんでした：{why}",
-  "Login expiry": "ログイン期限",
+  "Accounts and sign-ins": "アカウントとサインイン",
   "Account pool": "アカウントプール",
   "Notices by source": "通知を発信元で絞り込む",
   "Show all notices": "すべての通知を表示",
