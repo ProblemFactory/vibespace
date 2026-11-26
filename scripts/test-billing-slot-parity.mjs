@@ -242,6 +242,7 @@ export const ROWS = Object.freeze([
   ['sessionAuth@server.js', 'server.js', 'activeSessionsPayload', 'routes', 1],
   ['sessionAuth@src/routes/sessions.js', 'src/routes/sessions.js', 'setup', 'routes', 1],
   ['setConversationPin', 'src/server/account-usage-routes.js', '(module)', 'routes', 1],
+  ['setConversationPin', 'src/server/account-usage-routes.js', 'pinRoad', 'routes', 1],   // B-2083 unit A: the pin road handed to the automation verb conversations.pin
   ['spendGuard.authorizeBatch', 'server.js', 'authorizeSpendBatch', 'pile', 1],
   ['spendGuard.authorize', 'server.js', 'authorizeSpend', 'pile', 2],
   ['spendGuard.authorize', 'src/server/delivery-wake.js', 'startOne', 'spend', 1],   // piece 7: the guard's probe before a delivery starts (hold: false)
@@ -602,6 +603,7 @@ export const CONSUMERS = Object.freeze({
   "openConversation": {"file": "src/server/conversation-ops.js", "fields": ["identity"], "why": "an automation's open asks the guard; a refusal returns the verdict itself, echoing its identity to the opener's words"},
   "pathBudgetVerdict": {"file": "src/server/channels-engine.js", "fields": [], "why": "Returns {ok, used, lim, why}; accountOfSession's answer appears only as words inside the refusal sentence (display)."},
   "pickLiveProbeSession": {"file": "src/server/usage-pool-engine.js", "fields": null, "why": "Picks a live session to probe through; liveQuotaKeyFor only matches sessions to the target's identity group; callers re-resolve its key.", "gap": "Returns a live session object (the whole mutable session record), not an answer object; no fixed field carries the resolver's answer."},
+  "pinRoad": {"file": "src/server/account-usage-routes.js", "fields": null, "why": "B-2083 unit A: the pin route's own two calls (setConversationPin, then the session list's broadcast) handed to the automation verb conversations.pin; its answer reaches src/server/conversation-ops.js pinConversation and the verb's reply (`member`, `current` told to the calling agent), never a spend, a reading's file name or a spawn's account.", "gap": "Returns the road itself (a closure handed through conversation-ops' provide as `pin`), not an answer object; the answer's fields are read only in the verb's reply."},
   "poolAlternativeFor": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns a boolean (can the pool move this conversation now); the current member is only the decision's input."},
   "previewBatch": {"file": "src/server/spend-guard.js", "fields": ["refusedSlots", "overageBilled"], "why": "Previews a bulk resume: identityFor groups items by slot; refusedSlots/overageBilled name accounts for the dialog and plan skips, no charge."},
   "probeUsageForAccountKey": {"file": "src/server/usage-pool-engine.js", "fields": ["target"], "why": "resolveUsageKey only selects which live session to ask; the detail's target is the window guard's write target from guardReadingTarget."},

@@ -42,6 +42,10 @@ const USAGE = [
   '                 harness_unread, goal_active, timer_marked, queue_kept, queue_unknown, goal_unknown, line_full; a start that failed: resume_failed;',
   '                 the background tasks it had started ended with its process and are not restarted)',
   '  vibespace-api conversations propose <target>[,<target>…] --why "…"     propose ending them to the person: ONE For-you card (your next proposal ADDS to it; a conversation named again is redrawn); the person terminates or keeps them; you read the answer at your next turn',
+  '  vibespace-api conversations pin <target> (--member <id> | --automatic)   pin it to one member of its own pool, or place it automatically again',
+  '                (the person\'s pin road: refused by name: not_pooled, remote_session, not_member, no_session, pin_not_saved; and paid_member — a member',
+  '                 billing usage credits or paid overage, or whose paying state is unknown: a key never moves a conversation onto money; nothing',
+  '                 starts a turn; the pin holds while the conversation lives and across a hub restart — a person\'s resume follows that person\'s page)',
   '  vibespace-api groups invite <g-…|group name> <target>    into an agent group you are in (no wake)',
   '  vibespace-api list [--json] [--key <name|id>]   every conversation and browser the key reaches, sorted by memory: what runs in',
   '                each, whether it may be ended (busy + why), its desktop and its link; a fact the hub cannot know prints',
@@ -107,6 +111,7 @@ const TYPED = {
   'groups invite': { verb: 'groups.invite', pos: ['group', 'target'], flags: [] },
   // lane login-request-card (majordomo piece 3b): ONE positional — the targets, comma-separated (the verb splits them)
   'conversations propose': { verb: 'conversations.propose', pos: ['targets'], flags: ['why'], need: ['why'] },
+  'conversations pin': { verb: 'conversations.pin', pos: ['target'], flags: ['member'], bool: ['automatic'] },   // B-2083 unit A: --member <id> or --automatic (the verb refuses both / neither by name)
   'browsers stop': { verb: 'browsers.stop', pos: ['id'], flags: [], bool: ['close-tabs'] }, // lane browsers-stop (majordomo piece 6): --close-tabs accepts the tab loss BEFORE
 };
 function typed(argv) {

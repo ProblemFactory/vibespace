@@ -137,6 +137,33 @@ function argsOf(raw, spec) {
   for (const [k, fn] of Object.entries(spec)) { const r = fn(a[k]); if (!r.ok) return r; if (r.value != null) out[k] = r.value; }
   return { ok: true, args: out };
 }
+/** B-2083 unit A: conversations.pin's arguments — the target, and exactly ONE of `member` (a pool member's id) or `automatic` (yes:
+ *  the pin cleared, placed automatically again). Both, neither or an unknown field ⇒ bad_args by name. */
+function pinArgs(raw) {
+  const v = argsOf(raw, { target: (x) => idArg(x, 'target'), member: (x) => idArg(x, 'member', { optional: true }), automatic: (x) => boolArg(x, 'automatic') });
+  if (!v.ok) return v;
+  if (v.args.member && v.args.automatic) return bad('name ONE of member <id> or automatic, not both');
+  return v.args.member || v.args.automatic ? v : bad('member <id> or automatic is required');
+}
+/**
+ * B-2083 unit A — THE MONEY LAW of conversations.pin (主开发 r5180): a key never moves a conversation onto MONEY; only a person's
+ * own press can. `overage` = THE spend guard's ONE reader's answer for the member (src/server/spend-guard.js overageFor →
+ * src/spend-authorizer.js overageState, `unread` when its reading cannot be told). FAIL CLOSED: only a reading that STATES paid
+ * usage is off for the member's organisation (`mode: 'disabled'`) lets the pin through; paid overage in use (`inUse`), usage
+ * credits enabled (`allowed`: past its limit it bills pay-per-use), nothing stated (`unknown` — a member with no overage record,
+ * a Codex member today), a reading that cannot be told (`unread`) or no reading at all ⇒ paid_member, by name.
+ * → { ok: true } | { ok: false, code: 'paid_member', why }.
+ */
+function pinMoneyVerdict(overage, member = '') {
+  const o = overage && typeof overage === 'object' ? overage : null;
+  const why = !o ? 'its usage reading is not available'
+    : o.unread ? 'its usage reading cannot be told right now'
+      : o.mode === 'inUse' ? 'it is billing paid overage'
+        : o.mode === 'allowed' ? 'its organisation has usage credits enabled: past its limit it bills pay-per-use'
+          : o.mode === 'disabled' ? null
+            : 'its usage reading does not say whether it bills paid usage';
+  return why ? { ok: false, code: 'paid_member', why: `${clean(member, 120) || 'that member'}: ${why} — a key never moves a conversation onto money; only a person's own press can pin it there` } : { ok: true };
+}
 
 /** THE CLOSED TABLE — the verbs a key may carry (the first five = what the dispatcher needs, design q-046 §2). `label` is an
  *  English t() key (the window words it); `args` validates a call's arguments → {ok, args} | {ok:false, code:'bad_args', why}. */
@@ -189,6 +216,12 @@ const SCOPES = Object.freeze([
     args: (a) => argsOf(a, { targets: (v) => idListArg(v, 'targets', { max: 20 }), why: (v) => textArg(v, 'why', { max: 200 }) }) }),
   // lane browsers-stop (majordomo piece 6): stop ONE running browser by the id conversations.list printed, through the keeper's
   // own stop — refused while anybody uses it (src/browser-profiles.js stopVerdict); a conversation's own browser keeps its tabs
+  // B-2083 unit A (主开发 r5167 / r5180): set or clear a conversation's POOL PIN through the person's pin road's ONE writer
+  // (src/server/usage-pool-engine.js setConversationPin, handed over by its owner beside the pin route); refused by name where that
+  // road refuses, and — a law — a member that bills usage credits or paid overage, or whose paying state is unknown (paid_member,
+  // pinMoneyVerdict). A pin starts no turn (not billed). DARK: no key holds it until the owner ticks it on that key by hand
+  Object.freeze({ verb: 'conversations.pin', layer: 'act', billed: false, label: 'Pin a conversation to a pool member', // ui-words: a t() key — the Vault window words it (zh / ja rows)
+    args: pinArgs }),
   Object.freeze({ verb: 'browsers.stop', layer: 'act', billed: false, label: 'Stop a browser', // ui-words: a t() key — the Vault window words it (zh / ja rows)
     args: (a) => argsOf(a, { id: (v) => idArg(v, 'id'), closeTabs: (v) => boolArg(v, 'closeTabs') }) }),
   // lane feedback-handled-verb: the owner's «Mark handled» on an agent's feedback report, naming the release that shipped
@@ -233,6 +266,10 @@ const CODES = Object.freeze({
   // lane key-grant-everyone r2: the caller's Task Groups could not be read while a grant's Task Group (in `to` or «除了»)
   // decides — never judged as «in no Task Group» (that admitted a conversation left out of All agents); call again
   groups_unreadable: 409,
+  // B-2083 unit A (conversations.pin): the pin road's own refusals, by its names — the conversation bills no pool · runs on another
+  // machine · the member is not in its pool · it ended between the reach and the pin · the pin's record could not be written
+  // (nothing changed) — and the money law: a member that bills usage credits or paid overage, or whose paying state is unknown
+  not_pooled: 400, remote_session: 400, not_member: 400, no_session: 404, pin_not_saved: 503, paid_member: 403,
   // the manager design's piece 6 (browsers.stop, round wztkervx5 (b)): the browser registry could not be read just now — the keeper refuses
   // by name while it is held (as the browser routes answer it: 503); nothing was stopped, call again
   store_unread: 503,
@@ -793,7 +830,7 @@ const maintainerNote = (verb, args) => (verb === 'feedback.handled' && args && R
 function argsSummary(verb, args) {
   const a = args && typeof args === 'object' ? args : {};
   const out = {};
-  for (const k of ['target', 'task', 'group', 'backend', 'mode', 'model', 'effort', 'permission', 'pool', 'id', 'version', 'force', 'resolveAsks', 'reach']) if (a[k] != null) out[k] = clean(a[k], 200);   // a feedback note is a text body: never kept; `reach`: an owner's key.grant / key.reach line (lane key-instance-scope)
+  for (const k of ['target', 'task', 'group', 'backend', 'mode', 'model', 'effort', 'permission', 'pool', 'id', 'version', 'force', 'resolveAsks', 'reach', 'member', 'automatic']) if (a[k] != null) out[k] = clean(a[k], 200);   // member / automatic: conversations.pin (B-2083 unit A) — ids only, as the pool's own rows name them   // a feedback note is a text body: never kept; `reach`: an owner's key.grant / key.reach line (lane key-instance-scope)
   if (a.name != null) out.name = clean(a.name, 80);
   if (verb === 'conversations.open' && a.cwd != null) out.cwd = clean(a.cwd, 200);
   return out;
@@ -806,7 +843,7 @@ function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok 
 
 module.exports = {
   KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, EVERYONE_SUBJECT, MODES, REACHES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
-  SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, viaRank, isSubject, callerSubjects, openedOf, reachVerdict,
+  SCOPES, VERBS, scopeOf, CODES, pinMoneyVerdict, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, viaRank, isSubject, callerSubjects, openedOf, reachVerdict,
   subjectOfRow, reachOfRow, useRowOf, reachRowOf, useRowForSubject, reachRowFor,   // lane grants-unify
   useVerdict, pickKey, mintPlan, scopesPlan, editPlan, scopesChangeWords, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
   LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, ALL_PATHS, allPaths, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,

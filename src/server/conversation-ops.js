@@ -406,7 +406,19 @@ function opsOver(getDeps) {
   /** the deferred-save census (lane lg-store-writes): a bind's store AS IT IS NOW on disk — the task store's own bounded wait; a store
    *  without one (a suite's stand-in) answers true. → Promise<boolean> */
   function bindLanded() { const tasks = D().tasks; return tasks && typeof tasks.persisted === 'function' ? Promise.resolve(tasks.persisted()).then((v) => v !== false, () => false) : Promise.resolve(true); }
-  return { conversationStatus, openConversation, renameConversation, bindConversation, bindLanded, settleBirthGroups, endConversation, inviteToGroup, tasksUnread };
+  /** B-2083 unit A: THE POOL PIN — the person's pin road as its owner hands it over (src/server/account-usage-routes.js `pin`: the ONE
+   *  writer, engine.setConversationPin, then the session list's broadcast — the route's own two calls); `guard(memberId)` is asked
+   *  for a member of the conversation's own pool before anything is written. Not handed over yet ⇒ not_ready by name. */
+  function pinConversation(webuiId, memberId, { by, guard = null } = {}) {
+    const fn = D().pin;
+    return typeof fn === 'function' ? fn(webuiId, memberId, { by, guard }) : refusal('not_ready', 'the pool engine has not handed over its pin writer yet — try again in a moment');
+  }
+  /** conversations.pin's money fact: THE spend guard's ONE reader of a member's paid usage (overageFor) — null when none is wired. */
+  function memberOverage(memberId) {
+    const g = D().spendGuard;
+    try { return g && typeof g.overageFor === 'function' ? g.overageFor(memberId) : null; } catch { return null; }
+  }
+  return { conversationStatus, openConversation, renameConversation, bindConversation, bindLanded, settleBirthGroups, endConversation, inviteToGroup, tasksUnread, pinConversation, memberOverage };
 }
 const sharedOps = opsOver(() => shared);
 /** ws-handler's own instance: its parts first, the provided ones (the task store, the spend guard…) behind them. */
@@ -445,6 +457,8 @@ function beltRow(r) {
     ...(Array.isArray(r.background) ? { background: r.background.map((t) => ({ ...t, description: piece(t && t.description, 200) })) } : {}) };
 }
 const OPEN_ID_WAIT_MS = 20 * 1000;     // a claude CLI reports its conversation id within seconds of the spawn
+/** B-2083 unit A (主开发 r5180): how long a key's pin holds, said in conversations.pin's own reply (and the kb's API page). */
+const PIN_HOLDS = 'while the conversation lives and across a hub restart; a person\'s resume after it ends follows the pin saved by that person\'s own page';
 const BUSY_TURNS = ['running', 'waiting'];   // turn-facts' non-idle states: mid-turn, or paused on the user (requires_action)
 function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null, ops = null, waitMs = OPEN_ID_WAIT_MS, sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   archive = null, nameLanded = null, asksOf = () => [], resolveAsks = () => ({ changed: [], unknown: [] }), turnOf = () => 'idle', deadOf = () => null, listFacts = null,
@@ -688,6 +702,22 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       const r = await q.result;
       if (!r || !r.ok) return { ok: false, code: 'resume_failed', why: `${(r && r.why) || 'the create gave no reason'} — a person can resume it from its window`, noticeName: label };
       return { ok: true, sessionId: r.sessionId, ...(r.already ? { already: true } : {}), ...base };
+    },
+    // B-2083 unit A (主开发 r5167 / r5180): set or clear the target's POOL PIN through the person's pin road's ONE writer (the `pin` its
+    // owner hands over — pinConversation). A member of the target's own pool is judged first by the MONEY LAW (PURE pinMoneyVerdict
+    // over THE spend guard's reader): paid overage, usage credits, a paying state unknown or unread ⇒ paid_member, nothing written; any
+    // other refusal is the writer's own, by its name (not_pooled · remote_session · not_member · no_session · pin_not_saved).
+    // «automatic» clears the pin (no member: the pool's own placement decides again, no money judged here). Nothing starts a turn.
+    // The reply says how long the pin holds (PIN_HOLDS): the page's own resume carrier is the page's to write.
+    'conversations.pin': (args, ctx) => {
+      const t = reached(args.target, ctx);
+      if (!t.ok) return t;
+      const label = t.s.name || args.target || null;
+      const member = args.automatic ? null : args.member;
+      const guard = (id) => require('../automation-keys.js').pinMoneyVerdict(O().memberOverage(id), id);
+      const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}`, guard });
+      if (!r || !r.ok) return { ok: false, code: (r && r.code) || 'failed', why: (r && (r.why || r.error)) || 'the pin was not changed', noticeName: label };
+      return { ok: true, target: idOf(t.s) || t.id, member: (r.pinned && r.pinned.memberId) || null, placed: !!r.placed, reason: r.reason || null, ...(r.code ? { note: r.code } : {}), current: r.current || null, holds: PIN_HOLDS };
     },
     // lane login-request-card (majordomo piece 3b): an agent PROPOSES ending conversations it can see — ONE For-you card per proposer
     // (src/server/end-proposals.js); a target outside the key's reach is refused by name, nothing filed; nothing ends here
