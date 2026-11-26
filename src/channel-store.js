@@ -2797,9 +2797,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // writer's own unlink: a read meanwhile answers null (never the dropped memo), and a new memo replaces the tombstone
   const memoHeld = new Map();   // file → the memo object the writer owes (or wrote) · null = dropped
   const memoBytes = (file) => () => { const v = memoHeld.get(file); return v ? JSON.stringify(v, RUNTIME_KEYS, 1) : null; };
+  // B-f276 family (主开发 r3183 / r3188: THE TWO MEMOS ARE DERIVED — lost, the next vendor answer rebuilds them and nothing of the
+  // person's is lost; lane bl-loop-a, slice s1126, r4781): a MISSING memo is none (the first answer writes it); an UNREADABLE or TORN
+  // one is none too — the next remembered answer writes a fresh memo, as the ruling allows — but SAID, once a file, with its code
+  const memoSaid = new Set();
+  const memoSay = (file, why) => { if (memoSaid.has(file)) return; memoSaid.add(file); warn(`[channels] ${path.basename(path.dirname(file))}/${path.basename(file)} could not be read (${why}) — a derived memo: read as none, the next answer writes it again`); };
   function memoRead(file) {
     if (memoHeld.has(file)) return memoHeld.get(file);
-    try { return JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { return null; }
+    let text;
+    try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { if (!e || e.code !== 'ENOENT') memoSay(file, (e && e.code) || 'unreadable'); return null; }
+    try { return JSON.parse(text); } catch { memoSay(file, 'torn'); return null; }
   }
   const memoForget = (file) => { memoHeld.set(file, null); try { W().forget(file); } catch { } };   // before the unlink
   function searchMemoRead(adapterId) {
