@@ -5530,7 +5530,7 @@ await section(async () => {
     'test-codex-0153.mjs': ['home'],
     'test-codex-p2-client.mjs': ['dir'],
     'test-codex-p2-wrapper.mjs': ['dir'],
-    'test-codex-pool.mjs': ['root', 'arDir', 'dir', 'd'],
+    'test-codex-pool.mjs': ['root', 'arDir', 'dir'],   // 'd' ended (B-e381's homes: e381Tmp removes them at exit)
     'test-fable-cap-pool-storm.mjs': ['root', 'tmp'],
     'test-harness-contract.mjs': ['dir'],
     'test-hot-switch-incident.mjs': ['root', 'tmp'],
