@@ -27,8 +27,9 @@
  *    saw — `M.examplesForInput` (the digests, ≤ 60) + the block — through PURE `RL.buildLearnInput`, and answers the
  *    normalized PROPOSAL + the card's table; nothing is written here (the card's Save goes through the settings door);
  *  · THE FACTS (lane decision-attention-facts): each record carries a facts line FIRST (PURE `M.attentionFacts` — counts,
- *    kinds, ages, never a name) from the engine's `facts()` — built ONCE per scan (a drain from the first queued row
- *    until the queue is empty and nothing flies: the duplicate-inbox map is O(rows), never per row) — and the tail's
+ *    kinds, ages, never a name) from the engine's `facts()` — taken ONCE per scan (a drain from the first queued row
+ *    until the queue is empty and nothing flies), each row's read at its call after the facts are current (B-0f37: the
+ *    duplicate-inbox map is kept current by the index's touch hook, built once in slices after a start) — and the tail's
  *    own flags (an @ of the owner: the at-you rule's `FO.atYouOf` / `FO.mentionsSelf`; a reply to the owner's
  *    message; the newest mail's `automated` level). The facts are input, NOT memo material: they move with every read,
  *    so a row is judged again on a new message, never on a new read. The body is what the reader has not read
@@ -179,10 +180,23 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
       judgeOne(v).catch((e) => log.warn?.(`[decision] attention: ${e && e.message}`)).finally(() => { inFlight--; flying.delete(key); drain(); if (!queue.size && !inFlight) scanFacts = null; });
     }
   }
-  /** The engine's facts of THIS scan — built at its first call (the duplicate-inbox map is O(rows)), dropped when it ends. */
-  function rowFacts(v) {
+  /** The engine's facts of THIS scan — taken at its first call, dropped when it ends; B-0f37 (lane bl-loop-a, 主开发 r5035): the
+   *  engine's view reads the index AT THE CALL (its duplicate-inbox map kept current by the index's touch hook) — a row a later
+   *  poll queued is judged with the facts of its own moment, never the scan's first. */
+  function scanOf() {
     if (!scanFacts) { try { scanFacts = facts() || (() => ({})); } catch { scanFacts = () => ({}); } stats.scans++; }
-    try { return scanFacts(v) || {}; } catch { return {}; }
+    return scanFacts;
+  }
+  function rowFacts(v) {
+    const f = scanOf();
+    try { return f(v) || {}; } catch { return {}; }
+  }
+  /** B-0f37: the facts CURRENT before a row is read — the engine's map may be landing (built in slices after a start, walked
+   *  again after a whole-map touch): a provider with `ready()` is awaited; one without answers at once */
+  function factsReady() {
+    const f = scanOf();
+    if (typeof f.ready !== 'function') return null;
+    try { return Promise.resolve(f.ready()).catch(() => false); } catch { return null; }
   }
   /** The row's facts line: the scan's facts `c` + the tail's own flags (an @ of the owner, a reply to them, the newest
    *  mail's `automated` level) — never a name. */
@@ -194,6 +208,8 @@ function create({ dataDir, decision = null, serverSetting = () => undefined, now
     return { line: M.attentionFacts(v, ctx), ctx };
   }
   async function judgeOne(queued) {
+    // B-0f37: the facts current FIRST (a wait, never a paid call), then the row and its facts read in one synchronous run
+    { const w = factsReady(); if (w) await w; }
     // THE ROW AS IT IS NOW, asked again right before the call: a row queued by an earlier read may since have been
     // handed to an agent, answered by the owner or labeled (the census caught a hand-over landing between the two)
     const v = typeof viewNow === 'function' ? viewNow(queued.key) : queued;

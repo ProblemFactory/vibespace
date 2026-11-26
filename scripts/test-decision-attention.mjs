@@ -365,8 +365,12 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
   //     leg's digest — nothing is queued before it, so every row is judged in ONE scan over the whole index (the facts lines read)
   //   · THE EARLY WORLD (the sighting's road, every run): the vendor holds every call while `holdAll` stands; the leg waits on the
   //     FACT that the chat pass's four rows are queued and its first calls sit on the hold; the hold opens after the leg's digest.
-  //     Its scan began before the mail passes landed, so its facts lines are not read here (the scan's facts are the index's at its
-  //     first call — said to 主开发 as a product find); its COUNT is read, and the release's count base, red.
+  //     Its scan began before the mail passes landed: B-0f37 (lane bl-loop-a, 主开发 r5024 / r5035, the find of this section) — the
+  //     rows the mail passes queued meanwhile are judged with the facts of THEIR OWN moment (the engine's duplicate-inbox map kept
+  //     current by the index's touch hook, built once at the first row's need), so its facts lines ARE read: the two notices carry
+  //     «the same message reached 2 of the reader's inboxes»; REDS: the map kept from its first build (the release's scan facts:
+  //     the notices without it) and a map walked again at every touch (built more than once). Its COUNT is read, and the release's
+  //     count base, red.
   // WHICH ROW MAY BE ASKED TWICE, AND WHY: only Ops room — the mark moves its read line, so its facts truly change between two asks.
   // In both worlds it is asked ONCE, after the mark (the content world asks nothing before it; the early world holds the three chat
   // rows ahead of it, and the drain asks a row as it is now): each world's exact count is 7 asks, 7 calls, each row once.
@@ -417,6 +421,25 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
     const E = await factsWorld(ENG, 'facts-early', { early: true });
     ok(E.placed && exactOnce(E.T, E.mine) && asksExact(E.asks), `THE COUNT, EXACT over the EARLY world (the sighting's road, placed): ${TITLES10.length} asks, ${TITLES10.length} calls, each row once — the chat pass's three rows judged on the drain's own kick (held), Ops room behind them, asked once after the mark (${E.mine.length} calls; asks ${JSON.stringify(E.asks)})`, E.T.counts);
     ok(E.afterBase < TITLES10.length, `RED (the release's count base, after the passes and the mark, in the early world): it counts ${E.afterBase} of the world's ${E.mine.length} calls — the held chat calls are outside it, EVERY run`, { afterBase: E.afterBase, all: E.mine.length });
+    // B-0f37: THE LATE ROWS — queued by the mail passes while the scan was HELD — judged with the facts of their own moment
+    const late = (W) => { const n = TITLES10.filter((t) => /Action Required/.test(t)).map((t) => W.T.last(t)).filter(Boolean); return { n, two: n.length === 2 && n.every((g) => (factsOf(g) || '').includes('kind: an email thread') && (factsOf(g) || '').includes('the same message reached 2 of the reader\'s inboxes')), lines: n.map((g) => factsOf(g)) }; };
+    const EL = late(E), est = E.eng.attentionFacts.stats();
+    ok(E.placed && EL.two && (factsOf(E.T.last('Re: licensing')) || '').includes('kind: an email thread'), `B-0f37 THE LATE ROWS of the early world: the two notices the mail passes queued while the scan was held are judged WITH «the same message reached 2 of the reader's inboxes», as email threads (${EL.lines.join(' | ')})`, EL.lines);
+    ok(est.builds === 1 && est.walks === 1 && est.kept && est.applied > 0 && E.eng.attention.status().scans === 1, `B-0f37: the duplicate-inbox map built ONCE (at the first row's need, before the mail passes) and kept current by ${est.applied} row touch(es), never walked again; the scan took its facts once (scans ${E.eng.attention.status().scans})`, est);
+    const MB = mutantCopies('decision-attention-b0f37', REPO);
+    const ESRC0 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+    const HOOK = "      if (job) apply(job.m, k);\n      if (served) apply(served, k);\n";
+    const WHOLE = "      if (key === null || key === undefined) { if (job) job.again = true; if (served) stale = true; return; }\n";
+    ok(ESRC0.split(HOOK).length === 2 && ESRC0.split(WHOLE).length === 2, 'control setup: the map\'s touch hook (a row\'s work, a whole touch) is present once');
+    // RED: the release's kept facts — the map kept from its first build, never touched (the scan's first moment)
+    const Kept = await factsWorld(MB.load('src/server/channels-engine.js', editAnchor(ESRC0, HOOK, "      /* RED: the map kept from its first build — the release's scan facts */\n", 'src/server/channels-engine.js'), 'kept-facts'), 'facts-kept', { early: true });
+    const KL = late(Kept);
+    ok(Kept.placed && KL.n.length === 2 && !KL.two && KL.lines.every((l) => !(l || '').includes('reached 2')), `RED (the release's kept facts: the map from the scan's first moment, in a copy): the late notices are judged WITHOUT «the same message reached 2 of the reader's inboxes» (${KL.lines.join(' | ')})`, KL.lines);
+    // RED: a map walked again at EVERY touch (the rebuild the cure must not be — on a hub of mostly mail rows, a walk of them all per poll)
+    const Every = await factsWorld(MB.load('src/server/channels-engine.js', editAnchor(ESRC0, WHOLE, "      { if (job) job.again = true; if (served) stale = true; if (key === null || key === undefined) return; }   /* RED: every touch walks it again */\n", 'src/server/channels-engine.js'), 'every-touch'), 'facts-every', { early: true });
+    const evs = Every.eng.attentionFacts.stats();
+    ok(Every.placed && late(Every).two && evs.builds > 1, `RED (a copy that walks the map again at every touch): the facts are right but it is BUILT ${evs.builds} times in this world — the leg above (once) is red on it`, evs);
+    for (const x of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 2, label: 'B-0f37 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   }
   const notices = TITLES10.filter((t) => /Action Required/.test(t)).map((t) => T.last(t)).filter(Boolean);
   ok(/^addressed: no mention of the reader; kind: a group; .*20 messages since the reader last read, 3\d min ago$/.test(F['Ops room']), '"Ops room": no mention, a group, 20 messages since the read line (markRead at line 9)', F['Ops room'] || missingLine(T));
@@ -435,6 +458,19 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
   if (judged7) ok(leaked.length === 0, 'CENSUS: no facts line names a person, an account, an id, an address or a title (16 needles over 7 lines)', leaked);
   else NOT_READ('no facts line names a person, an account, an id, an address or a title');
   ok(eng.attention.status().scans === 1, `the scan's facts (the duplicate-inbox map over the live index) were built ONCE for the 7 rows (${eng.attention.status().scans})`);
+  // B-0f37: the content world's map — built once at the first row's need; a ROW's touch is one row's work (no build); a WHOLE-map
+  // touch walks it again once, at the next row's need
+  {
+    const s0 = eng.attentionFacts.stats();
+    await eng.store.index.update(() => { Object.assign(eng.store.index.entry('mail1', 'q1'), { unread: 3 }); });
+    await eng.attentionFacts.ready();
+    const s1 = eng.attentionFacts.stats();
+    await eng.store.index.update((x) => { void Object.keys(x.conversations).length; });   // the update reaches ix.conversations: a whole-map touch
+    const kept2 = eng.attentionFacts.stats().kept;
+    await eng.attentionFacts.ready();
+    const s2 = eng.attentionFacts.stats();
+    ok(s0.builds === 1 && s0.kept && s1.builds === 1 && s1.applied === s0.applied + 1 && !kept2 && s2.builds === 2 && s2.kept, `B-0f37: the content world's map was built once; a row's touch is ONE row's work (builds ${s1.builds}, applied ${s0.applied} → ${s1.applied}); a whole-map touch makes it stale and the next need walks it again ONCE (builds ${s2.builds})`, { s0, s1, s2 });
+  }
   ok(mine.length > 0 && mine.every((g) => g.body.questions.length === 8 && String(g.body.input).includes('Rubric v2 — ') && !String(g.body.input).includes(M.RUBRIC.clauses[0].instructions)), 'with the person\'s block: 8 questions; the [rubric] part is one line — no question\'s instructions ride twice');
   const journal = fs.readFileSync(path.join(dataDir, 'decision-journal.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.use === 'attention' && r.outcome === 'ok');
   ok(journal.length === 7 && journal.every((r) => r.p === 0.22 && r.rubric === 2), 'each journal line carries p (needs_now, 2 decimals) and rubric 2 — the next quality check needs no memo join', journal.map((r) => r.p));
