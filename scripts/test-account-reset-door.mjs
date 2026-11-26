@@ -652,6 +652,39 @@ const LEGS = {
     const ok2 = !/Nothing is sent to Anthropic/.test(cw.message) && /refresh/.test(cw.message);
     return { ok: ok1 && ok2, detail: rows.map((r) => `${r.state || 'no check'}: door ${r.door} (server ${r.server}; the pool's sentence ${r.relogin ? 'says re-login' : 'names none'})`).join(' · ') + ` · the claim's dialog «${cw.message.slice(0, 120)}»` };
   },
+  // B-9a24 U1 (主开发 r4778 / r5330): THE PRESS's ONE TEST SAID — every sentence of the claim's answer `test`, with its zh and ja; the
+  // mark's own sentence first; never an account's name; no `test` ⇒ the release's sentence unchanged
+  async 'test-words'(T) {
+    let m; try { m = await esm(T, 'src/lib/account-wall-words.js'); } catch { return { ok: false, detail: 'no account-wall-words' }; }
+    if (typeof m.claimTestWords !== 'function') return { ok: false, detail: 'no claimTestWords' };
+    const seen = new Set(); const t = (k, p) => { seen.add(k); return String(k).replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : `{${n}}`)); };
+    const when = (ms) => `T${ms}`;
+    const W = (test) => m.claimTestWords(test, { t, when });
+    const rows = {
+      tried1: W({ code: 'tried', n: 1 }), tried12: W({ code: 'tried', n: 12 }), out: W({ code: 'out', at: 1000, until: 601000 }),
+      recent1: W({ code: 'recent', n: 1 }), recent3: W({ code: 'recent', n: 3 }), cap1: W({ code: 'cap', n: 1, cap: 'Fable' }), cap4: W({ code: 'cap', n: 4, cap: 'Fable' }),
+      nobody0: W({ code: 'nobody', m: 0 }), nobody1: W({ code: 'nobody', m: 1 }), nobody5: W({ code: 'nobody', m: 5 }), other: W({ code: 'other-limit' }),
+      restoring: W({ code: 'restoring' }), refusedServe: W({ code: 'refused', why: 'identity-cannot-serve' }), refusedSpend: W({ code: 'refused', why: 'spend-control-reached' }),
+      refusedOverage: W({ code: 'refused', why: 'overage-in-use' }), refusedUnknown: W({ code: 'refused', why: 'identity-unknown' }), refusedOther: W({ code: 'refused', why: 'ledger-held-elsewhere' }),
+      notPressed: W({ code: 'not-pressed' }), none: W(null), junk: W({ code: 'nope' }),
+    };
+    const ok1 = rows.tried1 === 'The stopped conversation waiting on it is being tried now.' && /^One of 12 stopped conversations is being tried on it now;/.test(rows.tried12)
+      && rows.out === 'A continue on this account was recorded at T1000 and has not answered. If nothing has started by T601000, mark it again.'
+      && /^The stopped conversation could not be tried now/.test(rows.recent1) && /^None of the 3 stopped/.test(rows.recent3) && /^The conversation was stopped by the Fable limit/.test(rows.cap1) && /^4 conversations were stopped by the Fable limit/.test(rows.cap4)
+      && rows.nobody0 === 'No stopped conversation is waiting on this account right now.' && /one it stopped is parked on another account/.test(rows.nobody1) && /; 5 it stopped are parked on other accounts/.test(rows.nobody5)
+      && /^Nothing was sent: another limit/.test(rows.other) && /still restoring/.test(rows.restoring) && /sign-in cannot serve/.test(rows.refusedServe) && /spend control/.test(rows.refusedSpend)
+      && /paid overage/.test(rows.refusedOverage) && /could not be told/.test(rows.refusedUnknown) && /could not be authorized right now/.test(rows.refusedOther) && /only inside your press/.test(rows.notPressed) && rows.none === '' && rows.junk === '';
+    // the answer's toast: the mark first, then the test; an error type for a refusal / nothing sent; no test ⇒ the release's text; no name
+    const a1 = m.claimAnsweredWords({ ok: true, test: { code: 'tried', n: 12 } }, { t, what: 'the 5-hour window', name: 'acct-secret' });
+    const a2 = m.claimAnsweredWords({ ok: true, test: { code: 'not-pressed' } }, { t, what: 'the 5-hour window', name: 'acct-secret' });
+    const a3 = m.claimAnsweredWords({ ok: true }, { t, what: 'the 5-hour window', name: 'acct-secret' });
+    const ok2 = /^Marked the 5-hour window as reset — unconfirmed\. One of 12 stopped/.test(a1.text) && a1.type === null && a2.type === 'error' && /Nothing was sent/.test(a2.text)
+      && a3.text === 'Marked the 5-hour window as reset — unconfirmed until its next reading' && ![a1, a2, a3, ...Object.values(rows).map((x) => ({ text: x }))].some((x) => /acct-secret/.test(x.text));
+    // every key said has its zh and ja
+    let zh = {}, ja = {}; try { zh = (await esm(T, 'src/lib/i18n-zh.js')).default || {}; ja = (await esm(T, 'src/lib/i18n-ja.js')).default || {}; } catch { }
+    const missing = [...seen].filter((k) => !(k in zh) || !(k in ja));
+    return { ok: ok1 && ok2 && missing.length === 0 && seen.size >= 20, detail: `${Object.keys(rows).length} cases, ${seen.size} keys said${missing.length ? ` — no zh/ja for ${missing.map((k) => `«${k.slice(0, 40)}»`).join(', ')}` : ', each with zh and ja'} · toast «${a1.text.slice(0, 80)}»` };
+  },
   // ── ROUND 4 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
   // MUST — THE STAMP TRAVELS WITH THE REFUSAL: a rejection mirrored onto the identity TWIN (the capture's sibling loop) is a
   // mark there too — the twin's next real reading is no reset, a claim on the twin is contradicted; both directions
