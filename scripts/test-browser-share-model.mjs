@@ -2336,7 +2336,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
       ok(noWitness !== ksrcI, '④j control setup: the legacy witness is where the control cuts');
       const c11 = await runR7(M.load('src/server/browser-keeper.js', noWitness, 'no-legacy-witness'), 'ctl11', ['S59']);
       ok(c11.S59a.err === 'profile_locked' && c11.S59a.left === 3 && c11.S59aEph.err === 'profile_locked' && c11.S59b.err === null, '④j CONTROL 11: a keeper without the legacy lock witness refuses userW\'s named AND ephemeral kept directories on the upgrade-is-the-roll path (the Update-first order still works by the file\'s writer) — S59a / S59a-eph catch it', { a: c11.S59a.err, e: c11.S59aEph.err, b: c11.S59b.err }); }
-    { const noLedger = editAnchor(ksrcI, "fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId,", "if (false) fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId, /* CONTROL: no ledger */", "src/server/browser-keeper.js");
+    { const noLedger = editAnchor(ksrcI, "led.owed.push(JSON.stringify({ at: now(), boot: bootId,", "if (false) led.owed.push(JSON.stringify({ at: now(), boot: bootId, /* CONTROL: no ledger */", "src/server/browser-keeper.js");
       ok(noLedger !== ksrcI, '④j control setup: the ledger write is where the control cuts');
       const c12 = await runR7(M.load('src/server/browser-keeper.js', noLedger, 'no-ledger'), 'ctl12', ['S60']);
       ok(c12.S60.journalLines === 1 && c12.S60.ledgerNamedAll === false, '④j CONTROL 12: a keeper without the ledger says the storm once and names three — the other 37 pruned paths are nowhere — S60 catches it', c12.S60); }
@@ -2459,7 +2459,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
         const chrome = await deadPidI(); const j = readReg8(DATA); const rec = j.browsers[pD.id]; const cdp = rec.cdpUrl; delete j.host; delete j.dirHosts; delete rec.host; delete rec.hosts; rec.state = 'stopped'; rec.browser = null; rec.endedAt = Date.now(); writeReg8(DATA, j);
         try { fs.unlinkSync(path.join(D7, MK8)); } catch { } { const ep = B.cdpEndpointOf(cdp); fs.writeFileSync(path.join(D7, 'DevToolsActivePort'), `${ep.port}\n${ep.path}\n`); } plantI(D7, PREV, chrome);
         const C7 = path.join(parent, 's77-C'); fs.cpSync(D7, C7, { recursive: true, verbatimSymlinks: true }); const tmp = D7 + '.restore'; fs.cpSync(D7, tmp, { recursive: true, verbatimSymlinks: true, preserveTimestamps: true }); fs.rmSync(D7, { recursive: true, force: true }); fs.renameSync(tmp, D7);
-        kk = mkE8(DATA, liveS); await kk.boot(); const w = ledger8(DATA).filter((x) => x.kind === 'legacy-lock-witness'); const pD2 = kk.list().profiles.find((x) => x.id === pD.id);
+        kk = mkE8(DATA, liveS); await kk.boot(); if (kk._ledgerLanded) kk._ledgerLanded(); const w = ledger8(DATA).filter((x) => x.kind === 'legacy-lock-witness'); const pD2 = kk.list().profiles.find((x) => x.id === pD.id);
         out.S77 = { witnessed: w.length, form: w.length ? w[0].form : null, ownPathOnly: w.every((x) => x.dir === D7) };
         out.S77b = await actI(kk, pD2, attachI(kk, pD2)); unplantI(D7); await stopI(kk, pD2);
         const pC = kk.adoptDirectory({ label: 'C', dir: C7 }).profile; out.S77c = await actI(kk, pC, attachI(kk, pC)); unplantI(C7); await stopI(kk, pC); kk.shutdown(); await sleepI(150); killLaunches(); }
@@ -2545,6 +2545,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
           if (res && res.expect && res.err !== 'launch_failed') { const got = res.err ? 'refused' : 'launch'; if (got !== res.expect) bad(step, ev, `I5 the oracle disagrees with the door (${res.lineage}; expected ${res.expect}, product ${got})`, { dir: res.dir, lock: res.lock, err: res.err }); }
           for (const d of made) if (!deleted.has(d) && !exists(d) && d !== D) bad(step, ev, 'I6 a path disappeared', { d });
           if (!exists(D) && !deleted.has(D) && !forgottenTo) bad(step, ev, 'I6 the original directory vanished');
+          if (kk && kk._ledgerLanded) kk._ledgerLanded();   // B-574d browser-stores 6/8: the ledger's lines on disk before the invariants read them
           let ledger = []; try { ledger = fs.readFileSync(path.join(DATA, 'browser-lineage-journal.ndjson'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return { kind: 'UNPARSABLE', raw: l }; } }); } catch { ledger = []; }
           for (const l of ledger) { if (l.kind === 'UNPARSABLE') { bad(step, ev, 'I7 an unparsable ledger line', l); continue; } for (const f of ['dir', 'from', 'to', 'original', 'keptAs']) if (f in l && l[f] !== null && !(typeof l[f] === 'string' && l[f].startsWith('/'))) bad(step, ev, 'I7 a ledger field that is not an absolute path', { line: l }); }
         }

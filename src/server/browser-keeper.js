@@ -2847,20 +2847,59 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   /** The per-boot ledger of what happened to a directory's lineage (one JSON line each, `boot` = this process): a ring of LEDGER_MAX
    *  bytes — past it the older half goes (whole lines). Never throws, never awaited. */
   let ledgerTailChecked = false; // verify r8 (T2 ⑤): a tail torn by a crash mid-append is terminated once per boot, before this boot's first line
+  // B-574d «browser-stores» 6/8 (lane nl-migrations, 主开发 r5101): THE LEDGER ON ONE FILE LANE OF THE STORE WRITER — its lines were
+  // appended on the hub's loop and its trim (past LEDGER_MAX: the older half goes, whole lines) read the whole file and wrote it back by
+  // an unsynced temp and rename. Now every line is handed to the writer as an APPEND (rank 0; synced, truncated back on a failure) and
+  // the trim as a REWRITE of the file from its own bytes (the byte range it keeps, then the owed lines) — both on the file's ONE lane,
+  // in order: a trim keeps every line appended before it (the range is taken at its turn, against the bytes on disk then) and an
+  // append made after it lands after it, so a trim never drops a line newer than the ones it kept; a kill before the rewrite's rename
+  // leaves the untrimmed file, whole. The line starts of the bytes an earlier start left are read ONCE, off the loop; until then no
+  // trim runs (the ring may pass its bound for that while). Never throws, never awaited.
+  const led = { owed: [], onDisk: 0, starts: null, early: [], writing: null, failSaid: false, reading: false };   // early: this process's line starts landed before the earlier bytes were indexed
+  const ledgerFile = () => path.join(dataDir, LINEAGE_LEDGER);
+  const writerOfLedger = () => require('../store-writer.js').storeWriter();
+  function ledgerStartsOf(buf, upTo) { const out = [0]; for (let i = 0; i < upTo; i++) if (buf[i] === 0x0a && i + 1 < upTo) out.push(i + 1); return out; }
+  function produceLedger(o) {
+    if (!led.owed.length) return null;
+    const pieces = led.owed; led.owed = [];
+    const at = led.onDisk, text = pieces.join(''), starts = [];
+    let off = at; for (const p of pieces) { starts.push(off + (p.startsWith('\n') ? 1 : 0)); off += Buffer.byteLength(p); }
+    const total = at + Buffer.byteLength(text);
+    if (Array.isArray(led.starts) && total > LEDGER_MAX && !(o && o.sync)) {   // a synchronous flush (the exit) never rewrites: the next write trims
+      const cutAt = total - (LEDGER_MAX >> 1), from = led.starts.find((x) => x >= cutAt && x < at);
+      const keep = from === undefined ? at : from;   // no line on disk past the cut: the whole older part goes, the owed lines kept
+      led.writing = { rewrite: true, at, keep, text, starts };
+      return { rewrite: { ranges: keep < at ? Float64Array.of(keep, at) : new Float64Array(0), size: at }, then: text, as: 'browser-lineage-ledger.write' };
+    }
+    led.writing = { rewrite: false, at, text, starts };
+    return { append: text };
+  }
+  function ledgerWritten(ok, e) {
+    const w = led.writing; led.writing = null;
+    if (!w) return;
+    if (!ok) { if (!led.failSaid) { led.failSaid = true; try { log.warn?.(`[browser] the lineage ledger could not be written (${(e && (e.code || e.message)) || 'an error'}) — those lines are lost (the journal's stand); the file stays whole`); } catch { } } return; }
+    if (!w.rewrite) { (Array.isArray(led.starts) ? led.starts : led.early).push(...w.starts); led.onDisk = w.at + Buffer.byteLength(w.text); return; }
+    const shift = w.keep;
+    if (Array.isArray(led.starts)) led.starts = led.starts.filter((x) => x >= w.keep && x < w.at).map((x) => x - shift).concat(w.starts.map((x) => x - shift));
+    led.onDisk = (w.at - w.keep) + Buffer.byteLength(w.text);
+  }
   function lineageLedger(kind, fields = {}) {
     try {
-      fs.mkdirSync(dataDir, { recursive: true });
-      const f = path.join(dataDir, LINEAGE_LEDGER);
+      const f = ledgerFile();
       if (!ledgerTailChecked) {
         ledgerTailChecked = true;
-        let torn = false; try { const size = fs.statSync(f).size; if (size > 0) { const fd = fs.openSync(f, 'r'); try { const b = Buffer.alloc(1); fs.readSync(fd, b, 0, 1, size - 1); torn = b[0] !== 0x0a; } finally { fs.closeSync(fd); } } } catch { torn = false; }
-        if (torn) fs.appendFileSync(f, '\n' + JSON.stringify({ at: now(), boot: bootId, host: os.hostname(), kind: 'torn-tail-terminated' }) + '\n', { mode: 0o600 });
+        let torn = false, size = 0; try { size = fs.statSync(f).size; if (size > 0) { const fd = fs.openSync(f, 'r'); try { const b = Buffer.alloc(1); fs.readSync(fd, b, 0, 1, size - 1); torn = b[0] !== 0x0a; } finally { fs.closeSync(fd); } } } catch { torn = false; size = 0; }
+        led.onDisk = size;
+        if (torn) led.owed.push('\n' + JSON.stringify({ at: now(), boot: bootId, host: os.hostname(), kind: 'torn-tail-terminated' }) + '\n');
+        if (size === 0) led.starts = [];
+        else if (!led.reading) { led.reading = true; fs.promises.readFile(f).then((buf) => { led.starts = ledgerStartsOf(buf, Math.min(buf.length, size)).filter((x) => x < size).concat(led.early); led.early = []; }, () => { led.starts = null; }); }   // off the loop, once (with the starts landed meanwhile)
       }
-      fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId, host: os.hostname(), kind, ...fields }) + '\n', { mode: 0o600 });
-      let size = 0; try { size = fs.statSync(f).size; } catch { size = 0; }
-      if (size > LEDGER_MAX) { const txt = fs.readFileSync(f, 'utf8'); const cut = txt.indexOf('\n', txt.length - (LEDGER_MAX >> 1)); const tail = cut >= 0 ? txt.slice(cut + 1) : ''; const tmp = f + '.tmp'; fs.writeFileSync(tmp, tail, { mode: 0o600 }); fs.renameSync(tmp, f); }
+      led.owed.push(JSON.stringify({ at: now(), boot: bootId, host: os.hostname(), kind, ...fields }) + '\n');
+      writerOfLedger().dirty(f, { name: 'browser-lineage-ledger.write', rank: 0, mode: 0o600, makeDir: true, produce: produceLedger, onWritten: ledgerWritten });
     } catch { /* a ledger that cannot be written never fails the launch; the journal line stands */ }
   }
+  /** a suite's read of the ledger: its owed lines ON DISK now (the writer's bounded wait) */
+  function ledgerLanded() { try { const W = writerOfLedger(), f = ledgerFile(); if (!W.pending(f)) return true; const r = W.flushSync([f]); return !r.deferred && !r.left.some((x) => x.file === f); } catch { return false; } }
   const saidLineage = new Set(); // (why|key) said once per boot in the journal; the ledger has every ask
   /** THE lineage read of a directory: the PURE verdict over the registry with this keeper's fs facts; a refusal is said once per
    *  boot per (cause, directory) in the journal and every time in the ledger; a find by token is in the ledger. */
@@ -9233,7 +9272,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   function stopTimer() { if (timer) clearInterval(timer); timer = null; }
   /** Timers only — the browsers SURVIVE a VibeSpace exit by design (adopted next boot). */
-  function shutdown() { try { offCapLift(); } catch { } try { tqHold.stop(); } catch { /* r3261: the requests' read again ends with the keeper */ } detachGrants(); if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } }
+  function shutdown() { try { offCapLift(); } catch { } try { tqHold.stop(); } catch { /* r3261: the requests' read again ends with the keeper */ } detachGrants(); if (heldReg && owedPins.size) log.warn?.(`[browser] ${owedPins.size} conversation pin(s) owed to ${STORE_FILE}'s read are not judged in this process (${[...owedPins.keys()].slice(0, 8).join(', ')}) — a conversation restored at the next start owes its pin again; one that is not restored then starts from its own pin or the defaults`); heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; } stopTimer(); if (cliTimer) { clearInterval(cliTimer); cliTimer = null; } if (cliNoteTimer) { clearTimeout(cliNoteTimer); cliNoteTimer = null; } disk.stop(); try { bf.stop?.(); } catch { /* B-0b8c: the version ladder's rung is this keeper's to end */ } if (dirty || sweepDirty) { sweepDirty = false; save(); } installs.shutdown(); /* keeper-sweep-yields K1: what the walk deferred (sweepDirty) is written at the stop too */ /* lane chrome-builds-download: an in-process download ends with its keeper (the marker stays: the next keeper judges it) — lane dc-browser-installs: the running row's own shutdown */ try { keptStore()?.shutdown?.(); } catch { /* lane browser-resume: the kept store's throttled tab list is flushed with its feeder */ } try { mediator?.shutdown?.(); } catch { /* P6: the proxy is this keeper's to end */ } try { const ents = [...egressProxies.values()]; egressProxies.clear(); for (const e of ents) e.px.close().catch(() => {}); } catch { /* the egress proxies are this keeper's to end (r2: a surviving browser's port is re-bound by the next keeper's adoption) */ } try { ledgerLanded(); } catch { /* B-574d browser-stores 6/8: the lineage ledger's owed lines land with its keeper (the writer's bound) */ } }
   const ensureTimer = () => { if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length || inputs.size || pending.size || humans.size) startTimer(); };
   const attachTimed = async (a) => { const r = await attach(a); ensureTimer(); return r; };
 
@@ -9765,6 +9804,8 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     floorFacts, checkFloorNow, // B-0b8c (lane browser-probe-transient): the facts API + the For-you notice's Check again
     detachGrants, // lane lg-store-writes, the moved2 cure 2: a keeper that ends (a migration's private one) answers no grant change
     whenLanded, // lane lg-store-writes, the moved2 cure 2: a reply / a login fill waits (bounded) for the registry as it is now
+    _ledgerLanded: ledgerLanded, // B-574d browser-stores 6/8: a suite's read of the lineage ledger after an act (its lines on disk)
+    _lineageLedger: lineageLedger, _ledgerDurable: () => writerOfLedger().durable(ledgerFile()), // 6/8: a suite's lines, and the writer's own landing (its thread: a trim may run)
     landNow, // lane lg-store-writes U5b: a migration's PRIVATE keeper (the legacy adopt) lands its write before the next migration reads the file
     lineageKeyOf, moveDirLineage, // verify r8 (T2 ②): the product's own move of a directory (a Forget) carries its lineage
 

@@ -19,7 +19,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -292,6 +292,39 @@ console.log('§9 patched copies — each red');
   ok(tw.bad.some((b) => /two samples in one minute/.test(b)), `RED: a copy that samples two profiles in one minute fails the walk (${tw.bad.filter((b) => /one minute/.test(b)).length} violations)`);
   const cc = childCensus(run.replace("{ timeout: timeoutMs, killSignal: 'SIGKILL', ", '{ '));
   ok(cc.bad.length === 1, 'RED: a du child without its timeout / kill fails the census');
+}
+
+
+// ── B-574d «browser-stores» 6/8 (lane nl-migrations, 主开发 r5101): THE LINEAGE LEDGER ON ONE FILE LANE OF THE STORE WRITER — appends and
+// the trim (a rewrite of its own bytes: the newer half, whole lines) in order: past its bound many times over, every line it keeps is
+// whole and the kept lines are the NEWEST, with no gap (a trim never drops a line newer than the ones it kept); an earlier start's
+// file is indexed off the loop and trimmed on its line boundaries. RED (anchored copy): a trim that drops the lines owed at its turn
+console.log('B-574d browser-stores 6/8: the lineage ledger on the store writer\'s lane');
+{
+  const ledScene = async (Kmod, tag, { pre = null } = {}) => {
+    const S6 = path.join(SCR, `bs6-${tag}`), HOME6 = path.join(S6, 'home'), D6 = path.join(S6, 'data'); fs.mkdirSync(HOME6, { recursive: true }); fs.mkdirSync(D6, { recursive: true });
+    const LF = path.join(D6, 'browser-lineage-journal.ndjson'); if (pre) pre(LF);
+    const k6 = Kmod.create({ dataDir: D6, homeDir: HOME6, env: () => ({ PATH: '/usr/bin:/bin', HOME: HOME6 }), broadcast: () => { }, serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: quiet, userTodos: fakeTodos(), now: () => Date.now(), taskInfo: () => null, hostKnown: () => false });
+    const pad = 'x'.repeat(900);
+    for (let i = 0; i < 1500; i++) { k6._lineageLedger('bs6', { n: i, pad }); if (i % 150 === 149) await k6._ledgerDurable(); }   // bursts landed by the writer's thread: its trims run there
+    await k6._ledgerDurable(); await new Promise((r) => setTimeout(r, 30)); await k6._ledgerDurable();
+    const txt = fs.readFileSync(LF, 'utf8'), rows = txt.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+    const ns = rows.filter((x) => x && x.kind === 'bs6').map((x) => x.n), olds = rows.filter((x) => x && x.kind === 'old').map((x) => x.n);
+    try { k6.shutdown(); } catch { }
+    return { size: Buffer.byteLength(txt), torn: rows.filter((x) => x === null).length, first: ns[0], last: ns[ns.length - 1], kept: ns.length, gapless: ns.every((v, i) => i === 0 || v === ns[i - 1] + 1), olds: olds.length, oldsGapless: olds.every((v, i) => i === 0 || v === olds[i - 1] + 1), whole: txt.endsWith('\n') };
+  };
+  const L6 = await ledScene(K, 'real');
+  ok(L6.torn === 0 && L6.whole && L6.last === 1499 && L6.first > 0 && L6.gapless && L6.size < (1 << 20) + 200 * 1024,
+    `B-574d browser-stores 6/8: 1500 lines of ~1 KB (past the 1 MiB ring many times) — the file stays bounded (${L6.size} bytes), every line whole, the kept ones the NEWEST (${L6.first}…${L6.last}) with no gap: no trim dropped a line newer than the ones it kept`);
+  const OLD = (LF) => { const lines = []; for (let i = 0; i < 1300; i++) lines.push(JSON.stringify({ at: 1, boot: 'earlier', kind: 'old', n: i, pad: 'y'.repeat(900) })); fs.writeFileSync(LF, lines.join('\n') + '\n'); };
+  const L6o = await ledScene(K, 'earlier', { pre: OLD });
+  ok(L6o.torn === 0 && L6o.whole && L6o.last === 1499 && L6o.oldsGapless && L6o.gapless, `…an earlier start's 1.3 MB file (its line starts read once, off the loop): trimmed on its own line boundaries — no torn line, the old lines kept (${L6o.olds}) gapless before the new ones`);
+  const KS6 = read('src/server/browser-keeper.js'), THEN = "then: text, as: 'browser-lineage-ledger.write' };";
+  if (KS6.split(THEN).length === 2) {
+    const M6 = mutantCopies('bdisk-bs6', REPO);
+    const L6x = await ledScene(M6.load('src/server/browser-keeper.js', anchored(KS6, THEN, "then: '', as: 'browser-lineage-ledger.write' };   /* RED: the lines owed at the trim dropped */", 'the trim keeps the owed lines'), 'bs6-then-dropped'), 'red');
+    ok(!L6x.gapless || L6x.last !== 1499, 'RED (a copy whose trim drops the lines owed at its turn): a gap in the kept lines (or the newest lost) — 6/8 goes red', L6x);
+  } else ok(false, 'RED control: the trim\'s owed lines are spelled once in the keeper');
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? `, ${fail} failed` : ''})`);
