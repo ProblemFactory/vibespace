@@ -41,6 +41,9 @@ const TEXT_USER_SPACE = i18nKey('VibeSpace keeps its own records in {folder}, wh
 const WHY = i18nKey('VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.');
 const INSTALL = i18nKey('The records are the data folder of VibeSpace\'s own folder, {install}.');
 const VIEW = i18nKey('The folder reaches that drive through a {view} view.');
+// r5244 (the coordinator's word): a VIEW over a file system that is not a network one — the user-space program IS the view
+// ({type} = fuse.bindfs, never the shown «ext4», which would read as the drive a program serves); the shown file system is said here
+const VIEW_LOCAL = i18nKey('The folder is a {view} view of a {shows} file system: the program that serves the view is what can stop answering.');
 
 /** THE VERDICT (PURE): where the data folder lives, from the mount table and a landing walk over LOCAL components only.
  *  → { state: 'local', folder, install } | { state: 'remote', folder, install, mount, type, view, kind: 'network'|'user-space' }
@@ -54,23 +57,29 @@ function verdictOf({ dataDir, rootDir = null, mountinfo = null, lstat = null, re
   const at = land && land.blocked ? land.blocked.at : land && land.path ? land.path : folder;
   const m = LI.netMountOf(at, mountinfo);   // THE ONE VERDICT (the sync-fs witness's own question for this folder)
   if (!m) return { state: 'local', folder, install };
-  // a passthrough VIEW (fuse.bindfs) is told by what it shows (src/mount-path-class.js rootsOf: the row's `shows`)
-  let view = null, type = m.fstype;
+  // a passthrough VIEW (fuse.bindfs) is told by what it shows (src/mount-path-class.js rootsOf: the row's `shows`): over a NETWORK
+  // file system the drive is that one (its type named, the view said); over anything else the user-space drive IS the view (r5244:
+  // its type stays fuse.bindfs, what it shows said beside)
+  let view = null, shows = null, type = m.fstype;
   if (MPC.VIEW_FSTYPE.test(m.fstype)) {
     view = m.fstype;
     let row = null;
     try { row = MPC.rootsOf({ mounts: MPC.parseMountinfo(mountinfo), rootDir: install, dataDir: folder }).find((r) => r.root === path.resolve(m.target)) || null; } catch { row = null; }
-    if (row && row.shows && typeof row.shows.fstype === 'string' && row.shows.fstype) type = row.shows.fstype;
+    if (row && row.shows && typeof row.shows.fstype === 'string' && row.shows.fstype) shows = row.shows.fstype;
+    if (shows && NETWORK_FSTYPE.test(shows)) type = shows;
   }
-  return { state: 'remote', folder, install, mount: m.target, type, view: view && view !== type ? view : null, kind: NETWORK_FSTYPE.test(type) ? 'network' : 'user-space' };
+  return { state: 'remote', folder, install, mount: m.target, type, view, shows, kind: NETWORK_FSTYPE.test(type) ? 'network' : 'user-space' };
 }
+
+/** a view's own line (PURE): through a view to a network drive, or a view over another file system (r5244) — [] for no view */
+const viewLinesOf = (v) => (!v || !v.view ? [] : v.kind === 'network' ? [{ key: VIEW, params: { view: v.view } }] : v.shows ? [{ key: VIEW_LOCAL, params: { view: v.view, shows: v.shows } }] : []);
 
 /** The item's words (PURE) for a remote verdict: {text, detail, i18n}. Folder, install, kind, type — never the source. */
 function wordsOf(v) {
   const key = v.kind === 'network' ? TEXT_NETWORK : TEXT_USER_SPACE;
   const fill = (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => String(p[n]));
   const params = { folder: v.folder, type: v.type };
-  const lines = [{ key: WHY }, { key: INSTALL, params: { install: v.install } }, ...(v.view ? [{ key: VIEW, params: { view: v.view } }] : [])];
+  const lines = [{ key: WHY }, { key: INSTALL, params: { install: v.install } }, ...viewLinesOf(v)];
   return { text: fill(key, params), detail: lines.map((l) => fill(l.key, l.params || {})).join('\n'), i18n: { text: { key, params }, detail: lines } };
 }
 
@@ -93,27 +102,37 @@ function create({ dataDir, rootDir = null, getUserTodos = () => null, readMounti
       return typeof t === 'string' ? t : null;
     } finally { clearTimeout(to); }
   };
-  /** say it (once) or settle it, by the verdict — For you held unread: at its read */
+  /** say it (once) or settle it, by the verdict — For you held unread: at its read. Never throws (the round's should: a store that
+   *  throws is a journal line, never an unhandled rejection) */
   function tell(v) {
+    try { tellOnce(v); } catch (e) { log(`[data-folder] the notice could not be told: ${(e && e.message) || e}`); }
+  }
+  /** an open notice of ANOTHER key (an earlier start's folder on another drive, or now local) is over → how many settled */
+  function settleOthers(t, keep) {
+    let n = 0;
+    for (const i of (typeof t.forSession === 'function' ? t.forSession([ITEM_KEY]) : []) || []) {
+      if (!i || i.status !== 'open' || (keep && i.itemKey === keep)) continue;
+      try { t.setStatus(i.id, 'done', 'agent'); n++; } catch (e) { log(`[data-folder] the notice ${i.id} was not resolved: ${(e && e.message) || e}`); }
+    }
+    return n;
+  }
+  function tellOnce(v) {
     const t = todos();
     if (!t || typeof t.add !== 'function') return;
     if (typeof t.isHeldUnread === 'function' && t.isHeldUnread()) { if (typeof t.whenRead === 'function') t.whenRead(() => tell(v), 'the data folder notice'); return; }
     if (v.state === 'remote') {
       const key = itemKeyOf(v);
+      settleOthers(t, key);   // the round's should: a folder now on ANOTHER drive — the earlier drive's open notice is over
       if (typeof t.filedEver === 'function' && t.filedEver(ITEM_KEY, key)) return;   // SAID ONCE: open, resolved, dismissed or cleared
       const w = wordsOf(v);
       try { t.add(ITEM_KEY, { origin: 'server', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Storage', text: w.text, detail: w.detail, i18n: w.i18n, facts: { dataFolder: v.folder, fstype: v.type, kind: v.kind }, itemKey: key }); }
       catch (e) { log(`[data-folder] the notice was not filed: ${(e && e.message) || e}`); }
       return;
     }
-    if (v.state === 'local') {   // the folder is on a local disk now: an open notice of an earlier start is over
-      for (const i of (typeof t.forSession === 'function' ? t.forSession([ITEM_KEY]) : []) || []) {
-        if (!i || i.status !== 'open') continue;
-        try { t.setStatus(i.id, 'done', 'agent'); } catch (e) { log(`[data-folder] the notice ${i.id} was not resolved: ${(e && e.message) || e}`); }
-      }
-    }
+    if (v.state === 'local') settleOthers(t, null);   // the folder is on a local disk now: an open notice of an earlier start is over
   }
-  /** ONE judgment: the table, the verdict (kept for the Settings fact) → the verdict | null */
+  /** ONE judgment: the table, the verdict (kept for the Settings fact) → the verdict | null. (A Settings read before the start's
+   *  look judges once, and the look judges again: two reads of /proc, never of the folder — the look's verdict is the fresh one) */
   function judge() {
     if (looking) return looking;
     looking = (async () => {
@@ -135,7 +154,7 @@ function create({ dataDir, rootDir = null, getUserTodos = () => null, readMounti
   /** the start's look, LOOK_MS after the listen (an unref'd timer: it never holds the start, nor the exit) */
   function arm() {
     if (timer) return;
-    timer = setTimeout(() => { timer = null; look(); }, lookMs);
+    timer = setTimeout(() => { timer = null; look().catch((e) => log(`[data-folder] the look failed: ${(e && e.message) || e}`)); }, lookMs);
     timer.unref?.();
   }
   /** the Settings fact (the same verdict): {state, folder, install, mount?, type?, view?, kind?} — never the source */
@@ -149,4 +168,4 @@ function create({ dataDir, rootDir = null, getUserTodos = () => null, readMounti
   return { arm, look, judge, status, stop: () => { if (timer) clearTimeout(timer); timer = null; } };
 }
 
-module.exports = { create, verdictOf, wordsOf, itemKeyOf, ITEM_KEY, LOOK_MS, NETWORK_FSTYPE, TEXT_NETWORK, TEXT_USER_SPACE, WHY, INSTALL, VIEW };
+module.exports = { create, verdictOf, wordsOf, viewLinesOf, itemKeyOf, ITEM_KEY, LOOK_MS, NETWORK_FSTYPE, TEXT_NETWORK, TEXT_USER_SPACE, WHY, INSTALL, VIEW, VIEW_LOCAL };

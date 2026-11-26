@@ -550,8 +550,8 @@ class SettingsUI {
     if (schema.fact === 'browser-engine') this._renderEngineFact(info, row, path); // lane engine-plugin: where the default engine comes from + the engines here
     if (schema.fact === 'attention-today') this._renderAttentionToday(info);
     if (schema.fact === 'entry-label') this._renderEntryLabelFact(info, row, path);   // 主开发 r4483: what the stored value makes the next chat start pass
-    if (schema.fact === 'kept-files') this._renderKeptFiles(info);
-    if (schema.fact === 'data-folder') this._renderDataFolderFact(info);   // B-8797 (lane hub-loop-stalls, r5195): where VibeSpace's own records live — WORDS, no press   // lane chat-attachments-persist: what the dropped files take, and the orphans' Remove door
+    if (schema.fact === 'kept-files') this._renderKeptFiles(info);   // lane chat-attachments-persist: what the dropped files take, and the orphans' Remove door
+    if (schema.fact === 'data-folder') this._renderDataFolderFact(info);   // B-8797 (lane hub-loop-stalls, r5195): where VibeSpace's own records live — WORDS, no press
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
     if (schema.fact === 'https-address') { row.classList.add('has-wide-fact'); this._renderHttpsFact(row); } // the full row's width (a phone's label column is too narrow for an address)
@@ -708,8 +708,11 @@ class SettingsUI {
     const say = (v) => {
       if (!v || typeof v !== 'object' || typeof v.folder !== 'string') return t('Could not read where VibeSpace keeps its own records');
       if (v.state === 'local') return t('VibeSpace keeps its own records in {folder}, on this computer\'s own disk', { folder: v.folder });
-      if (v.state === 'remote' && v.kind === 'network') return `${t('VibeSpace keeps its own records in {folder}, which is on a network drive ({type}): if that drive stops answering, VibeSpace stops answering with it', { folder: v.folder, type: String(v.type || '') })}. ${t('VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.')}`;
-      if (v.state === 'remote') return `${t('VibeSpace keeps its own records in {folder}, which is on a drive served by a program in user space ({type}): if that program or its connection stops answering, VibeSpace stops answering with it', { folder: v.folder, type: String(v.type || '') })}. ${t('VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.')}`;
+      // r5244: a VIEW is said here too (the notice's own line): through a view to a network drive, or a view over another file system
+      const view = v.view && v.kind === 'network' ? ` ${t('The folder reaches that drive through a {view} view.', { view: String(v.view) })}` : v.view && v.shows ? ` ${t('The folder is a {view} view of a {shows} file system: the program that serves the view is what can stop answering.', { view: String(v.view), shows: String(v.shows) })}` : '';
+      if (v.state === 'remote' && v.kind === 'network') return `${t('VibeSpace keeps its own records in {folder}, which is on a network drive ({type}): if that drive stops answering, VibeSpace stops answering with it', { folder: v.folder, type: String(v.type || '') })}. ${t('VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.')}${view}`;
+      if (v.state === 'remote') return `${t('VibeSpace keeps its own records in {folder}, which is on a drive served by a program in user space ({type}): if that program or its connection stops answering, VibeSpace stops answering with it', { folder: v.folder, type: String(v.type || '') })}. ${t('VibeSpace reads and writes these records all the time, so a slow or lost connection to that drive holds the whole hub.')}${view}`;
+      if (v.why === 'a symlink loop') return t('Where VibeSpace keeps its own records ({folder}) is not known: the folder\'s path loops on its own links', { folder: v.folder });   // (the round's should: a loop is no unread table)
       return t('Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read', { folder: v.folder });
     };
     fetchJson('/api/data-folder').then((v) => { line.textContent = say(v); }).catch(() => { line.textContent = say(null); });

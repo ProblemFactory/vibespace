@@ -15971,4 +15971,6 @@ export default {
   "VibeSpace keeps its own records in {folder}, on this computer's own disk": "VibeSpace 把自己的记录保存在 {folder}，位于这台电脑自己的磁盘上",
   "Could not read where VibeSpace keeps its own records": "读不出 VibeSpace 把自己的记录保存在哪里",
   "Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read": "不知道 VibeSpace 的记录（{folder}）位于哪里：无法读取挂载表",
+  "The folder is a {view} view of a {shows} file system: the program that serves the view is what can stop answering.": "该文件夹是一个 {shows} 文件系统的 {view} 视图：可能停止响应的，是提供这个视图的程序。",   // B-8797 follow (lane hub-loop-stalls, r5244): a view over a local file system; a looping path
+  "Where VibeSpace keeps its own records ({folder}) is not known: the folder's path loops on its own links": "不知道 VibeSpace 的记录（{folder}）位于哪里：该文件夹的路径在自己的链接上绕圈",
 };

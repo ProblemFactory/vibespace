@@ -44,6 +44,8 @@ const RCLONE = table([['/', 'ext4', '/dev/sda1'], ['/mnt/r', 'fuse.rclone', `${A
 const SSHFS = table([['/', 'ext4', '/dev/sda1'], ['/mnt/s', 'fuse.sshfs', `${ACCT}@host.example:/srv`]]);
 const NFS = table([['/', 'ext4', '/dev/sda1'], ['/srv/nfs', 'nfs4', `filer.example:/export/${ACCT}`]]);
 const VIEW = table([['/', 'ext4', '/dev/sda1'], ['/nfs', 'nfs4', `filer.example:/${ACCT}`], ['/home/u/ws', 'fuse.bindfs', '/nfs/ws']]);
+const VIEW_EXT4 = table([['/', 'ext4', '/dev/sda1'], ['/data', 'ext4', '/dev/sdb1'], ['/home/u/ws', 'fuse.bindfs', '/data/ws']]);   // r5244: a view over a LOCAL disk
+const RESERVED = table([['/', 'ext4', '/dev/sda1'], ['/mnt/r', 'fuse.sshfs', `${ACCT}@host.example:/srv`]]);   // the folder's mount now served by another program
 /** a landing walk's stub: `links` (a symlink → its target); every path it is ASKED about is recorded */
 const walker = (links = {}) => { const asked = []; return { asked, lstat: (p) => { asked.push(p); return { symlink: Object.prototype.hasOwnProperty.call(links, p) }; }, readlink: (p) => links[p] }; };
 const v = (dataDir, mountinfo, links = {}, rootDir = null) => { const w = walker(links); return { ...DFN.verdictOf({ dataDir, rootDir, mountinfo, lstat: w.lstat, readlink: w.readlink }), asked: w.asked }; };
@@ -59,7 +61,14 @@ console.log('① the verdict (PURE): local / user space / network / a view by wh
   ok(ss.state === 'remote' && ss.kind === 'user-space' && ss.type === 'fuse.sshfs' && nf.state === 'remote' && nf.kind === 'network' && nf.type === 'nfs4' && !nf.asked.some((p) => p.startsWith('/srv/nfs')), 'fuse.sshfs ⇒ user space; nfs4 ⇒ a network drive (the walk never touches it)', { ss, nf });
   ok(vw.state === 'remote' && vw.kind === 'network' && vw.type === 'nfs4' && vw.view === 'fuse.bindfs' && vw.mount === '/home/u/ws', 'a bindfs VIEW is told by what it shows: over nfs4 ⇒ a network drive, the view named', vw);
   ok(ln.state === 'remote' && ln.type === 'fuse.rclone' && ln.folder === '/opt/vs/data' && ln.asked.includes('/opt/vs/data') && !ln.asked.some((p) => p.startsWith('/mnt/r')), 'a SYMLINKED folder lands where it points (an rclone mount) — named by its own path; the walk never touches the mount', ln);
-  ok(loop.state === 'unknown' && none.state === 'unknown', 'a symlink loop, or no mount table ⇒ unknown (nothing is said)', { loop, none });
+  ok(loop.state === 'unknown' && none.state === 'unknown' && loop.why === 'a symlink loop' && none.why === 'no mount table', 'a symlink loop, or no mount table ⇒ unknown (nothing is said), each by its own why', { loop, none });
+  const ve = v('/home/u/ws/vs/data', VIEW_EXT4), vew = DFN.wordsOf(ve);
+  ok(ve.state === 'remote' && ve.kind === 'user-space' && ve.type === 'fuse.bindfs' && ve.view === 'fuse.bindfs' && ve.shows === 'ext4' && vew.text.includes('(fuse.bindfs)') && !vew.text.includes('(ext4)')
+    && vew.i18n.detail.some((l) => l.key === DFN.VIEW_LOCAL && l.params.shows === 'ext4' && l.params.view === 'fuse.bindfs'),
+    'r5244: a bindfs view over a LOCAL disk — the user-space drive IS the view: its type stays fuse.bindfs (never «ext4» as the drive a program serves), what it shows said in its own line', { ve, text: vew.text });
+  const VX = M.load(REL, anchored(SRC, "    if (shows && NETWORK_FSTYPE.test(shows)) type = shows;\n", "    if (shows) type = shows;   /* MUTANT: the shown type for any view */\n", 'b8797-shown-type'), 'b8797-shown-type');
+  const vx = VX.wordsOf(VX.verdictOf({ dataDir: '/home/u/ws/vs/data', mountinfo: VIEW_EXT4, lstat: walker().lstat, readlink: walker().readlink }));
+  ok(vx.text.includes('(ext4)'), 'CONTROL (the shown type for any view, in a copy — the line as taken): «a drive served by a program in user space (ext4)» — red', vx.text);
   ok(SRC.split('LI.netMountOf(').length === 2 && SRC.split('LI.landedPathOf(').length === 2 && /require\('\.\.\/local-index\.js'\)\.netMountOf\(path\.resolve\(dataDir\), mi\)/.test(read('src/server/sync-fs-witness.js')),
     'THE ONE VERDICT: the look names the mount by src/local-index.js netMountOf — the sync-fs witness\'s own question for the same folder (its refresh)');
 }
@@ -114,13 +123,27 @@ console.log('③ the notice: one item; a second start, a dismissed item, a clear
   ok(items(SX).some((i) => i.status === 'open'), 'CONTROL (the said-once question cut, in a copy): the next start reopens the item the person dismissed — red', items(SX).map((i) => i.status));
 }
 
+{
+  // the round's should: the folder's drive is now served by ANOTHER program (a new key) — the earlier drive's open notice is over
+  const S = storeOf();
+  await noticeOf(DFN, { store: S, mountinfo: RCLONE }).look();
+  await noticeOf(DFN, { store: S, mountinfo: RESERVED }).look();
+  const by = Object.fromEntries(items(S).map((i) => [i.itemKey, i.status]));
+  const X = cut("      settleOthers(t, key);   // the round's should: a folder now on ANOTHER drive — the earlier drive's open notice is over\n", "      /* MUTANT: the earlier drive's notice kept */\n", 'b8797-keep-other');
+  const SX = storeOf();
+  await noticeOf(DFN, { store: SX, mountinfo: RCLONE }).look();
+  await noticeOf(X, { store: SX, mountinfo: RESERVED }).look();
+  ok(by['data-folder:/mnt/r:fuse.rclone'] === 'done' && by['data-folder:/mnt/r:fuse.sshfs'] === 'open' && items(S).length === 2, 'the folder now on another drive: its notice is filed and the EARLIER drive\'s open notice is resolved — never two open notices for one folder', by);
+  ok(items(SX).filter((i) => i.status === 'open').length === 2, 'CONTROL (the earlier drive\'s notice kept, in a copy — the line as taken): two open notices for one folder — red');
+}
+
 console.log('④ back on a local disk: the open item is resolved');
 {
   const S = storeOf();
   await noticeOf(DFN, { store: S, mountinfo: RCLONE }).look();
   await noticeOf(DFN, { store: S, mountinfo: LOCAL }).look();
   const st = items(S).map((i) => i.status);
-  const X = cut("    if (v.state === 'local') {   // the folder is on a local disk now: an open notice of an earlier start is over\n", "    if (false) {   /* MUTANT: no settle */\n", 'b8797-no-settle');
+  const X = cut("    if (v.state === 'local') settleOthers(t, null);   // the folder is on a local disk now: an open notice of an earlier start is over\n", "    /* MUTANT: no settle */\n", 'b8797-no-settle');
   const SX = storeOf();
   await noticeOf(DFN, { store: SX, mountinfo: RCLONE }).look();
   await noticeOf(X, { store: SX, mountinfo: LOCAL }).look();
@@ -164,6 +187,16 @@ console.log('⑥ the look never holds the start: arm() at once on an unref\'d ti
   ok(raced === 'still waiting', 'CONTROL (the bound cut, in a copy): the look waits on the table for good — red', raced);
 }
 
+{
+  // the round's should: a store that THROWS (its held question) — a journal line, never an unhandled rejection
+  const throwing = { add() { }, isHeldUnread() { throw new Error('a store that throws'); }, forSession() { return []; } };
+  const logs = [], r = await noticeOf(DFN, { store: throwing, mountinfo: RCLONE, logs }).look().then((x) => (x ? x.state : 'none'), () => 'rejected');
+  const X = cut("    try { tellOnce(v); } catch (e) { log(`[data-folder] the notice could not be told: ${(e && e.message) || e}`); }\n", "    tellOnce(v);   /* MUTANT: unguarded */\n", 'b8797-unguarded');
+  const rx = await noticeOf(X, { store: throwing, mountinfo: RCLONE }).look().then(() => 'resolved', () => 'rejected');
+  ok(r === 'remote' && logs.some((l) => /could not be told: a store that throws/.test(l)), 'a store that throws: the look still ends (its verdict), the failure a journal line', { r, logs });
+  ok(rx === 'rejected', 'CONTROL (the telling unguarded, in a copy): the look rejects — an unhandled rejection from the timer — red', rx);
+}
+
 console.log('⑦ the Settings fact: GET /api/data-folder answers the verdict (no source) and files nothing; the row is words');
 {
   const S = storeOf();
@@ -178,13 +211,15 @@ console.log('⑦ the Settings fact: GET /api/data-folder answers the verdict (no
   const f0 = UI.indexOf('  _renderDataFolderFact(info) {'), body2 = f0 < 0 ? '' : UI.slice(f0, UI.indexOf('\n  }\n', f0));
   ok(/fact: 'data-folder'/.test(row) && UI.includes("if (schema.fact === 'data-folder') this._renderDataFolderFact(info);") && body2.includes("fetchJson('/api/data-folder')") && !/button|addEventListener|onclick/i.test(body2),
     'the Settings row «Never let the server wait on a storage mount» draws the fact as WORDS: its renderer reads GET /api/data-folder and has no press (no button, no listener)');
+  ok(body2.includes("t('The folder reaches that drive through a {view} view.'") && body2.includes("t('The folder is a {view} view of a {shows} file system: the program that serves the view is what can stop answering.'") && body2.includes("v.why === 'a symlink loop'"),
+    'r5244: the Settings line says the VIEW too (to a network drive, or over another file system), and a looping path by its own words');
   ok(SCH.split('data-folder').length === 2 && row.includes('data-folder'), 'no setting silences the notice: the schema\'s ONE mention is the guard row\'s fact');
 }
 
 console.log('⑧ the words\' tables and the wiring');
 {
   const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), UI = read('src/lib/settings-ui.js'), SJ = read('server.js');
-  const keys = [DFN.TEXT_NETWORK, DFN.TEXT_USER_SPACE, DFN.WHY, DFN.INSTALL, DFN.VIEW, "VibeSpace keeps its own records in {folder}, on this computer's own disk", 'Could not read where VibeSpace keeps its own records', 'Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read'];
+  const keys = [DFN.TEXT_NETWORK, DFN.TEXT_USER_SPACE, DFN.WHY, DFN.INSTALL, DFN.VIEW, "VibeSpace keeps its own records in {folder}, on this computer's own disk", 'Could not read where VibeSpace keeps its own records', 'Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read', DFN.VIEW_LOCAL, "Where VibeSpace keeps its own records ({folder}) is not known: the folder's path loops on its own links"];
   const row = (T, k) => T.includes(`  ${J(k)}: `);
   ok(keys.every((k) => row(ZH, k) && row(JA, k)), 'every sentence has its zh and ja row', keys.filter((k) => !row(ZH, k) || !row(JA, k)));
   ok([DFN.TEXT_NETWORK, DFN.TEXT_USER_SPACE, DFN.WHY].every((k) => !k.includes("'") && UI.includes(`t('${k}'`)), 'the Settings fact says the notice\'s OWN sentences (one translation each)');

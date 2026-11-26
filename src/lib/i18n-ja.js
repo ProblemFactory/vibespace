@@ -15970,4 +15970,6 @@ export default {
   "VibeSpace keeps its own records in {folder}, on this computer's own disk": "VibeSpace は自身の記録を {folder} に保存しています（このコンピューター自身のディスク上）",
   "Could not read where VibeSpace keeps its own records": "VibeSpace が自身の記録をどこに保存しているか読み取れませんでした",
   "Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read": "VibeSpace の記録（{folder}）がどこにあるか分かりません：マウント表を読み取れませんでした",
+  "The folder is a {view} view of a {shows} file system: the program that serves the view is what can stop answering.": "このフォルダは {shows} ファイルシステムの {view} ビューです：応答しなくなるおそれがあるのは、そのビューを提供しているプログラムです。",   // B-8797 follow (lane hub-loop-stalls, r5244): a view over a local file system; a looping path
+  "Where VibeSpace keeps its own records ({folder}) is not known: the folder's path loops on its own links": "VibeSpace の記録（{folder}）がどこにあるか分かりません：フォルダのパスが自身のリンクで循環しています",
 };
