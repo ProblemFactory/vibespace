@@ -65,7 +65,11 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
     const file = fileOf(id);
     await ensureDir();
     // 主开发 r4625 (the MUST): a sealed file the record says nothing of is KEPT — an id whose file is already on disk is never written over
-    if (await fsp.lstat(file).then(() => true, () => false)) throw err('file_id_taken', 'a sealed file of that id is already kept');
+    // 主开发 r5114 (THE MUST): the placement is EXCLUSIVE — only «not there» (ENOENT) is absent; any other answer of the look REFUSES (a
+    // kept file at the counter is never written over by the rename below; the store's one queue puts no writer between the look and it)
+    let there = true;
+    try { await fsp.lstat(file); } catch (e) { if (!(e && e.code === 'ENOENT')) throw err('file_look_failed', `the place of a sealed file could not be looked at (${(e && e.code) || 'error'}) — nothing was written`); there = false; }
+    if (there) throw err('file_id_taken', 'a sealed file of that id is already kept');
     const iv = crypto.randomBytes(12);
     const c = crypto.createCipheriv('aes-256-gcm', key, iv);
     c.setAAD(Buffer.from(String(id), 'latin1'));
@@ -164,7 +168,7 @@ function create({ dataDir, opMs = OP_MS, log = console, randomId = () => crypto.
   }
   /** One name of the sweep: asked again at its own turn (an entry may have been written, or the record gone, meanwhile), then shredded. */
   async function sweepOne(name, m, tm, isLive, isDropped, at) {
-    let st = null; try { st = await fsp.lstat(path.join(DIR, name)); } catch { return false; }
+    let st = null; try { st = await fsp.lstat(path.join(DIR, name)); } catch (e) { return e && e.code === 'ENOENT' ? 'absent' : false; }   // r5114: the walk's own «not there» is absent, never owed
     if (tm) { if (isLive(tm[1])) return false; const pid = Number(tm[2]); if (pid !== process.pid && pidAlive(pid) && at - st.mtimeMs < 60_000) return false; }
     if (m && (isLive(m[1]) || !isDropped(m[1]))) return false;
     return shredPath(path.join(DIR, name));

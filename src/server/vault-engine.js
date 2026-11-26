@@ -217,7 +217,9 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   // the new file. A broken or missing counter mints from one past the highest id the record names or lists AND past every file on
   // disk the start met (and past every id this process minted); a write never goes over a file already there (file_id_taken: the
   // mint steps past it). A record restored from an older copy carries a lower counter, but every id on its list is below it and
-  // every file minted after the copy is on disk — so no id is ever minted twice
+  // every file minted after the copy and still on disk is met by the start — so an id the record in force names or lists, or a file
+  // the start met, is never minted again. LEFT (named in the line, 主开发 r5114): an older copy put back, a put, then a NEWER copy put
+  // back whose list names the id that put took — that start shreds the put's file (three acts of a person in a row)
   const idNum = (id) => (VF.ID_RE.test(String(id)) ? parseInt(String(id), 16) : -1);
   const idOf = (n) => n.toString(16).padStart(10, '0');
   let diskTop = -1, seqMinted = -1;
@@ -265,7 +267,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     return r;
   };
   if (record) track(sweepAtStart().catch(() => null));
-  const shredLater = (id) => { track(files.shred(id).then((g) => { if (g === true || g === 'absent') confirmedGone.add(String(id)); }, () => false)); };   // a failed shred of a DROPPED file: the next start's sweep takes it (the record names it dropped); of a put's own unrecorded file: it is kept and said
+  const shredLater = (id) => { track(files.shred(id).then((g) => { if ((g === true || g === 'absent') && droppedOf(record).includes(String(id))) confirmedGone.add(String(id)); }, () => false)); };   // r5114: only a LISTED id is remembered (a put's own failed file is never on the list)   // a failed shred of a DROPPED file: the next start's sweep takes it (the record names it dropped); of a put's own unrecorded file: it is kept and said
   /** → a promise that resolves once the boot sweep and every shred in flight have ended. */
   const filesSettled = async () => { while (pendingFiles.size) await Promise.all([...pendingFiles]); };
 
@@ -595,7 +597,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
         filesInFlight.delete(id); diskTop = Math.max(diskTop, idNum(id)); id = mintFileId(); filesInFlight.add(id);
       }
     }
-    } catch (e) { key.fill(0); if (!(e && e.code === 'file_id_taken')) shredLater(id); return e && (e.code === 'files_stuck' || e.code === 'file_id_taken') ? { ok: false, code: 'file_not_stored', words: VF.WORDS.file_not_stored } : { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }   // round 4: a stuck store (vault-files' bound) is said as a put that did not happen
+    } catch (e) { key.fill(0); return e && (e.code === 'files_stuck' || e.code === 'file_id_taken' || e.code === 'file_look_failed') ? { ok: false, code: 'file_not_stored', words: VF.WORDS.file_not_stored } : { ok: false, code: `key-unreadable:${KF.errnoOf(e)}` }; }   // round 4: a stuck store (vault-files' bound) is said as a put that did not happen
     if (expect && expect.sha256 != null && String(expect.sha256).toLowerCase() !== sha256) { key.fill(0); shredLater(id); return { ok: false, code: 'bytes_bad', words: VF.WORDS.bytes_bad }; }
     // the write awaited: a lock (its epoch moved — a lock then an unlock too), or a TEXT entry of this name, may have landed meanwhile
     if (state() !== 'unlocked' || epoch !== ep0) { key.fill(0); shredLater(id); blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: state() === 'unlocked' ? KF.VAULT_LOCKED : lockedCode() }; }
