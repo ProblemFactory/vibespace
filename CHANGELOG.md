@@ -12,6 +12,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - If VibeSpace cannot read its record of notices already given (hooks, HTTPS, sign-in reminders, new Claude Code builds), it no longer repeats them.
 - A conversation's window no longer turns read-only when the server is slow to reconnect it; it says it is still attaching and keeps your typed message.
 - VibeSpace no longer pauses while it trims the browser action history every hour, and the Sweep now button says how many profiles it could not sweep.
+- An Antigravity account's own settings, with the rules you allowed there, are no longer replaced by this computer's copy when VibeSpace briefly cannot read them.
+- If VibeSpace cannot read that you removed its hooks from your CLIs, it no longer puts them back; Install and Remove say so when they cannot save your choice.
 
 ## 2.369.422 — 2026-11-27
 
