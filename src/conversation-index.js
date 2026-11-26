@@ -30,10 +30,6 @@ class ConversationIndex {
     this._state = { v: 1, conv: {} };
     try { this._state = JSON.parse(fs.readFileSync(this.file, 'utf-8')) || this._state; } catch { }
     if (!this._state.conv) this._state.conv = {};
-    this._dirty = false;
-    this._timer = null;
-    this._lastJson = null;
-    process.on('exit', () => { try { this._flush(); } catch { } });
   }
 
   /** Record that `hostId` claims conversation `sid`. src: 'discovery'|'fetch'. */
@@ -75,30 +71,23 @@ class ConversationIndex {
 
   lookup(sid) { return this._state.conv[sid] || null; }
 
+  /** B-574d (lane bl-jobs, slice «session-and-job-records»; the family's ruling (a)): a record written at a CADENCE takes THE STORE
+   *  WRITER — paced as the release's own timer (1.5 s), off the hub's loop, atomic and synced on the writer's thread; the process's
+   *  exit is the writer's own bounded exit flush (the release flushed here, synchronously, at 'exit'). Its bytes are made on the
+   *  writer's turn (the newest state, the bound applied), never at each claim */
   _schedule() {
-    this._dirty = true;
-    if (this._timer) return;
-    this._timer = setTimeout(() => { this._timer = null; this._flush(); }, 1500);
-    if (this._timer.unref) this._timer.unref();
+    try { require('./store-writer.js').storeWriter().dirty(this.file, { name: 'conversation-index.write', debounceMs: 1500, produce: () => this._bytes() }); } catch { }
   }
 
-  _flush() {
-    if (!this._dirty) return;
-    this._dirty = false;
-    try {
-      const ids = Object.keys(this._state.conv);
-      if (ids.length > MAX_CONVS) {
-        const newest = (c) => Math.max(0, ...Object.values(c.hosts || {}).map((h) => h.lastSeen || 0));
-        ids.sort((x, y) => newest(this._state.conv[y]) - newest(this._state.conv[x]));
-        for (const drop of ids.slice(MAX_CONVS)) delete this._state.conv[drop];
-      }
-      const json = JSON.stringify(this._state);
-      if (json === this._lastJson) return;
-      this._lastJson = json;
-      const tmp = this.file + '.tmp';
-      fs.writeFileSync(tmp, json);
-      fs.renameSync(tmp, this.file);
-    } catch { }
+  /** the index's bytes: the newest MAX_CONVS conversations (by their freshest claim) */
+  _bytes() {
+    const ids = Object.keys(this._state.conv);
+    if (ids.length > MAX_CONVS) {
+      const newest = (c) => Math.max(0, ...Object.values(c.hosts || {}).map((h) => h.lastSeen || 0));
+      ids.sort((x, y) => newest(this._state.conv[y]) - newest(this._state.conv[x]));
+      for (const drop of ids.slice(MAX_CONVS)) delete this._state.conv[drop];
+    }
+    return JSON.stringify(this._state);
   }
 }
 
