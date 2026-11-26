@@ -61,8 +61,48 @@ const homeMarkerOf = (home, old, user) => path.join(home, '.vibespace', markerNa
 /** The data/ half's marker (the recorded-path rewrite). */
 const dataMarkerOf = (dataDir, old, user) => path.join(dataDir, markerName(old, user));
 
-/** Prefix-rewrite every recorded string path /home/<old>/… in the small JSON stores of `dataDir` (+ the session metas). */
-function rewriteStores(dataDir, metaDir, old, user, log) {
+/** B-574d follow (主开发 r4897): what a person can do about a store the rewrite could not rewrite, by its failure's code. NONE of them
+ *  fails by its NATURE — a refused read, bytes that do not parse, a refused write or sync each mends by a hand (its permissions, the
+ *  folder in its name moved, the bytes restored, space freed) or by the store's owner — so an owed store is tried at every start. */
+function ownedHint(code) {
+  if (code === 'unparsable') return 'its bytes do not parse: move it aside or restore it';
+  if (code === 'EACCES' || code === 'EPERM') return 'its permissions refuse the hub: let the hub\'s user read and write it';
+  if (code === 'EISDIR') return 'a folder has its name: move the folder';
+  if (code === 'ENOSPC' || code === 'EDQUOT') return 'the disk is full: free some space';
+  if (code === 'EROFS') return 'its folder is read-only: make it writable';
+  return 'tried again at the next start';
+}
+/** B-574d follow (the second read, R-A): the data marker's bytes now MEAN something (owed or done), so it takes its name only after one
+ *  sync of its temp (src/fd-close.js renameSynced): never torn by a power cut into «done». A write that fails is said and is no failure
+ *  of the start (the other old users go on): the next start finds the marker as it was and runs the rewrite again. */
+function writeDataMarker(dm, mark, log) {
+  try { renameSynced(dm + '.tmp', dm, JSON.stringify(mark), { where: '[migrate] home rename: the data marker', say: (l) => log.warn(l) }); }
+  catch (e) { log.warn(`[migrate] home rename: the data marker could not be written (${(e && e.code) || 'error'}) — the rewrite runs again at the next start`); }
+}
+/** B-574d follow (the second read, R-B): the old users an OWED data marker of this data/ names — a source beside the hooks and the HOME
+ *  markers: a whole move whose HOME marker never landed still owes its rewrite, while no hook names its old user any more (moved). */
+function owedOldUsers(dataDir, user, homeGone = homeGoneOnDisk) {
+  let names = [];
+  try { names = fs.readdirSync(dataDir); } catch { return []; }
+  const head = '.home-migrated-', tail = `-to-${user}`;
+  return names.filter((n) => n.startsWith(head) && n.endsWith(tail)).map((n) => [n, n.slice(head.length, n.length - tail.length)])
+    .filter(([n, o]) => OLD_RE.test(o) && o !== user && homeGone(o) && !!dataMarkerState(path.join(dataDir, n)).owed).map(([, o]) => o);
+}
+/** B-574d follow (主开发 r4866): the data half's marker as a start reads it — absent; DONE (any marker the release wrote, a «kept» or
+ *  bytes that do not parse: the marker's existence meant «done» before this follow, kept so); or a rewrite an earlier start still
+ *  OWES: `owed` the stores it could not rewrite (by key), `judgedOld` that start's verdict. THE LAW (主开发 r4897): the marker never
+ *  says done while a store is owed — no count of tries is kept. */
+function dataMarkerState(dm) {
+  let text; try { text = fs.readFileSync(dm, 'utf8'); } catch (e) { return { done: !(e && e.code === 'ENOENT'), owed: null }; }
+  let j = null; try { j = JSON.parse(text); } catch { return { done: true, owed: null }; }
+  if (!j || !Array.isArray(j.owed)) return { done: true, owed: null };
+  return { done: false, owed: j.owed.map(String), judgedOld: Number(j.judgedOld) || 0 };
+}
+
+/** Prefix-rewrite every recorded string path /home/<old>/… in the small JSON stores of `dataDir` (+ the session metas).
+ *  `retry` (B-574d follow): { failed: [] } collects the stores whose rewrite failed ({ key, name, code } — said by the caller, once
+ *  a start), `only` (a Set of keys) tries ONLY those an earlier start could not rewrite — the others hold what was recorded since. */
+function rewriteStores(dataDir, metaDir, old, user, log, retry = null) {
   const rewrite = (v) => (typeof v === 'string' && v.includes(`/home/${old}/`))
     ? v.split(`/home/${old}/`).join(`/home/${user}/`)
     : (typeof v === 'string' && v === `/home/${old}`) ? `/home/${user}` : v;
@@ -71,10 +111,14 @@ function rewriteStores(dataDir, metaDir, old, user, log) {
     if (x && typeof x === 'object') { for (const k of Object.keys(x)) x[k] = walk(x[k]); return x; }
     return rewrite(x);
   };
-  const stores = ['mounts.json', 'layouts.json', 'task-groups.json', 'machine-mounts.json'].map((f) => path.join(dataDir, f));
-  try { for (const f of fs.readdirSync(metaDir)) stores.push(path.join(metaDir, f)); } catch { }
+  const stores = ['mounts.json', 'layouts.json', 'task-groups.json', 'machine-mounts.json'].map((n) => ({ f: path.join(dataDir, n), key: n }));
+  // a session meta is a store: a <key>.json FILE — its own backup (*.pre-home-migrate), a temp, a set-aside copy or a folder is not (a
+  // rewrite never rewrites its backups; a folder there never makes the rewrite owed for ever)
+  try { for (const e of fs.readdirSync(metaDir, { withFileTypes: true })) if (e.isFile() && e.name.endsWith('.json')) stores.push({ f: path.join(metaDir, e.name), key: 'session-meta/' + e.name }); } catch { }
+  const only = retry && retry.only;
   let rewrote = 0;
-  for (const f of stores) {
+  for (const { f, key } of stores) {
+    if (only && !only.has(key)) continue;
     try {
       if (!fs.existsSync(f)) continue;
       const raw = fs.readFileSync(f, 'utf-8');
@@ -83,7 +127,7 @@ function rewriteStores(dataDir, metaDir, old, user, log) {
       fs.writeFileSync(f + '.pre-home-migrate', raw); // one-shot backup beside it
       renameSynced(f + '.tmp', f, fixed, { where: `[migrate] ${path.basename(f)}`, say: (l) => log.warn(l) });   // B-574d: synced before it takes the name; a failed sync is this store's failed rewrite (said below, not counted)
       rewrote++;
-    } catch (e) { log.warn(`[migrate] ${path.basename(f)}: ${e.message}`); }
+    } catch (e) { if (retry) retry.failed.push({ key, name: path.basename(f), code: (e && e.code) || (e instanceof SyntaxError ? 'unparsable' : 'error') }); else log.warn(`[migrate] ${path.basename(f)}: ${e.message}`); }
   }
   return rewrote;
 }
@@ -104,12 +148,13 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
     const user = path.basename(home);
     const hrs = (hooks || require('../harnesses').list().map((h) => h.store && h.store.homeRename)).filter((hr) => hr && typeof hr.staleUsers === 'function');
     const oldUsers = new Set([...hrs.flatMap((hr) => hr.staleUsers(home, user, { homeGone })), ...markedOldUsers(home, user, homeGone)]);
+    for (const o of owedOldUsers(dataDir, user, homeGone)) oldUsers.add(o);   // B-574d follow: an owed rewrite names its old user too
     for (const old of oldUsers) {
       const hm = homeMarkerOf(home, old, user), dm = dataMarkerOf(dataDir, old, user);
-      const homeDone = fs.existsSync(hm), dataDone = fs.existsSync(dm);
+      const homeDone = fs.existsSync(hm), dmState = dataMarkerState(dm), dataDone = dmState.done;
       if (homeDone && dataDone) continue;
       log.log(`[migrate] home rename detected: /home/${old} → ${home} — ${[!homeDone && 'projdirs', !dataDone && 'recorded paths'].filter(Boolean).join(' + ')}`);
-      let moved = 0, rewrote = 0;
+      let moved = 0, rewrote = 0, notMarked = 0;
       let whole = true, sameName = 0, undecided = 0, judged = 0, marked = homeDone;
       if (!homeDone) {
         for (const hr of hrs) {
@@ -141,7 +186,7 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
             .catch((e) => log.warn(`[migrate] home rename: the tries could not be written (${e.message}) — tried again at the next start`)));
         } else {
           if (gaveUp) log.warn(`[migrate] home rename: a project folder of /home/${old} could not be moved in ${MOVE_TRIES} starts — it stays under the old name; marked, not tried again`);
-          const mark = JSON.stringify({ at: Date.now(), moved, judgedOld: judged, ...(sameName ? { sameName } : {}), ...(undecided ? { undecided } : {}), ...(gaveUp ? { gaveUp: true } : {}) });
+          const mark = JSON.stringify({ at: Date.now(), moved, judgedOld: Math.max(judged, dmState.owed ? dmState.judgedOld : 0), ...(sameName ? { sameName } : {}), ...(undecided ? { undecided } : {}), ...(gaveUp ? { gaveUp: true } : {}) });
           writes.push(fs.promises.unlink(tf).catch(() => { }));   // cure 3: the tries go once the move is marked
           marked = true;
           writes.push(fs.promises.mkdir(path.dirname(hm), { recursive: true, mode: 0o700 }).then(() => fs.promises.writeFile(hm, mark))
@@ -154,16 +199,31 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
         // person john.smith, no /home/john here) rewrites nothing: a paired machine's own /home/john/… path stays
         // …and while the move is not marked and nothing was judged old yet (a transcript unreadable this start), the data half
         // waits for a later start — it is never marked «kept» on a verdict still owed
-        const judgedOld = !homeDone ? judged : judgedOf(hm);
-        if (judgedOld > 0) rewrote = rewriteStores(dataDir, metaDir, old, user, log);
+        // B-574d follow (主开发 r4866): a rewrite an earlier start OWES carries its verdict (the folders it judged old: a later start that
+        // finds them moved judges none) and tries ONLY the stores it could not rewrite
+        const prior = dmState.owed ? dmState : null;
+        const judgedOld = Math.max(!homeDone ? judged : judgedOf(hm), prior ? prior.judgedOld : 0);
+        const retry = { failed: [], only: prior ? new Set(prior.owed) : null };
+        if (judgedOld > 0) rewrote = rewriteStores(dataDir, metaDir, old, user, log, retry);
         else if (marked) log.log(`[migrate] home rename: no folder of /home/${old} was judged an old project — its recorded paths stay as they are`);
-        if (judgedOld > 0 || marked) fs.writeFileSync(dm, JSON.stringify({ at: Date.now(), rewrote, ...(judgedOld > 0 ? {} : { kept: true }) }));
+        // …and a store whose rewrite FAILED (a read, a parse, a write, a sync) WITHHOLDS «done»: the marker says the rewrite OWED (the stores
+        // by key, the verdict); every start tries them again — safe to repeat (a backup beside each, a rewritten store holds no /home/<old>)
+        // — and says it ONCE a start, every owed store in that one line with what a person can do. THE LAW (主开发 r4897): the marker never
+        // says done while a store is owed; no count of tries is kept
+        let mark = null;
+        if (retry.failed.length) {
+          const keys = retry.failed.map((x) => x.key), named = retry.failed.slice(0, 5).map((x) => `${x.name} (${x.code}: ${ownedHint(x.code)})`).join('; ') + (keys.length > 5 ? `; and ${keys.length - 5} more` : '');
+          notMarked = keys.length;
+          log.warn(`[migrate] home rename: ${keys.length} store(s) could not be rewritten — ${named} — they keep their /home/${old} paths until then; not marked done, tried again at the next start`);
+          mark = { at: Date.now(), owed: keys, judgedOld };
+        } else if (judgedOld > 0 || marked) mark = { at: Date.now(), rewrote, ...(judgedOld > 0 ? {} : { kept: true }) };
+        if (mark) writeDataMarker(dm, mark, log);
       }
-      log.log(`[migrate] home rename done: ${moved} projdirs, ${rewrote} stores rewritten (backups *.pre-home-migrate)`);
-      out.push({ old, user, moved, rewrote, home: !homeDone, data: !dataDone, whole, ...(sameName ? { sameName } : {}), ...(undecided ? { undecided } : {}) });
+      log.log(`[migrate] home rename ${notMarked ? `ran (${notMarked} store(s) owed)` : 'done'}: ${moved} projdirs, ${rewrote} stores rewritten (backups *.pre-home-migrate)`);
+      out.push({ old, user, moved, rewrote, home: !homeDone, data: !dataDone, whole, ...(notMarked ? { notMarked } : {}), ...(sameName ? { sameName } : {}), ...(undecided ? { undecided } : {}) });
     }
   } catch (e) { log.warn('[migrate] home-rename check failed:', e.message); }
   return Object.assign(out, { written: Promise.all(writes) });
 }
 
-module.exports = { migrateHomeRename, homeMarkerOf, dataMarkerOf, rewriteStores, markedOldUsers, homeGoneOnDisk, MOVE_TRIES };
+module.exports = { migrateHomeRename, homeMarkerOf, dataMarkerOf, owedOldUsers, rewriteStores, markedOldUsers, homeGoneOnDisk, MOVE_TRIES };

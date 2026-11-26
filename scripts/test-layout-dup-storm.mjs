@@ -356,7 +356,7 @@ await section('§2b r4 K — THE TRACE IS A FACT ABOUT THE RECORD (the real pers
   const counts = Object.fromEntries(Object.keys(ROWS).map((f) => [f, (src(f).match(/\bwriteLayouts\(/g) || []).length - (f === 'src/routes/persistence.js' ? 1 : 0)]));
   ok(Object.entries(ROWS).every(([f, [n]]) => counts[f] === n), `§2b census: every writeLayouts( call is a row (a new writer is RED until it is one) — ${J(counts)}`, ROWS);
   const strays = ['src/server/incident-wiring.js', 'src/server/migrations.js', 'src/server/boot-restore.js'].filter((f) => fs.existsSync(path.join(REPO, f)) && /layouts\.json/.test(src(f)) && /writeFileSync|writeJsonAtomic|renameSync/.test(src(f).split('\n').filter((l) => /layouts/.test(l)).join('\n')));
-  ok(!strays.length && /v\.split\(`\/home\/\$\{old\}\/`\)\.join\(`\/home\/\$\{user\}\/`\)/.test(HR) && /\['mounts\.json', 'layouts\.json', 'task-groups\.json', 'machine-mounts\.json'\]\.map\(\(f\) => path\.join\(dataDir, f\)\)/.test(HR),
+  ok(!strays.length && /v\.split\(`\/home\/\$\{old\}\/`\)\.join\(`\/home\/\$\{user\}\/`\)/.test(HR) && /\['mounts\.json', 'layouts\.json', 'task-groups\.json', 'machine-mounts\.json'\]\.map\(\(n\) => \(\{ f: path\.join\(dataDir, n\), key: n \}\)\)/.test(HR),
     '§2b census: the one other writer of layouts.json is the HOME RENAME (src/server/home-rename.js rewriteStores — /home/<old>/ → /home/<user>/ inside string values) — it rewrites paths only, never a window id or the windows a record lists, so it cannot make a record list a traced id', strays);
 });
 

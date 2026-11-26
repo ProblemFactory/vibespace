@@ -21,6 +21,9 @@ const { renameSynced } = require('../fd-close.js'); // B-574d (lane nl-migration
  *  removed, the old file standing — the migration is NOT recorded and runs again at the next start, never «applied» over bytes that
  *  may not be on disk (after a power cut such a store came back empty or torn, and was then held as damaged). Only a file system
  *  that does no sync at all lets the bytes take their name, said once in the journal (the file's name and the code, no path).
+ *  A failed RENAME (the last step) throws too, and leaves its temp beside the store as the bare rename did (dropWarmthDerived
+ *  removes its own): a fixed «<store>.tmp» is written again by the next run's open, a «<store>.<pid>.tmp» (eight of the sites)
+ *  stays beside its store until someone removes it — litter, never read as the store.
  *  `mode` as writeFileSync's (undefined: 0o666 under the umask). */
 function replaceSynced(tmp, file, text, mode) {
   renameSynced(tmp, file, text, { mode, where: `[migrate] ${path.basename(file)}`, say: (line) => console.warn(line) });
