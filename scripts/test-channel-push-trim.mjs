@@ -169,7 +169,7 @@ async function doorLeg(SM, tag) {
 {
   const r = await doorLeg(CS, 'door');
   ok(r.logs === 1 && r.under === 0 && r.same && r.past === 6 && r.left === 'v6,v7,v8,v9', `③ under both bounds nothing is rewritten (the log byte for byte: ${r.same}); past the count bound (4 of 10) the six oldest go (${r.past} removed, left ${r.left}), as trim drops them`, r);
-  const HAND = '    if (placesOf(adapterId, convId).size || lines.some((l) => recAt(l) < cutoff)) return trim(adapterId, convId, { days, maxRecords, floorDays });';
+  const HAND = '    if (placesOf(adapterId, convId).size || lines.some((l) => recAtKept(l) < cutoff)) return trim(adapterId, convId, { days, maxRecords, floorDays });';   // B-f276 s1126: the ask reads recAtKept (a line that does not parse asks no trim)
   await redOf(SSRC, HAND, async () => {
     const rn = await doorLeg(M.load('src/channel-store.js', anchored(SSRC, HAND, '', 'a door that never hands the rewrite to trim'), 'no-handoff'), 'door-red');
     ok(rn.past === 0 && rn.left.split(',').length === 10, `③ RED CONTROL: a door that never hands the rewrite to trim — past the count bound nothing dropped (${rn.left.split(',').length} left) — the leg above would go red`, rn);
