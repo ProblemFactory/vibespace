@@ -131,6 +131,15 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   const holder = (file) => LANES.find((l) => (l.inflight && l.inflight.name === file) || l.parked.some((j) => j.s.file === file)) || null;
   const inflightOf = (file) => { const l = LANES.find((x) => x.inflight && x.inflight.name === file); return l ? l.inflight : null; };
   const say = (line) => { try { log.warn?.(line); } catch { } };
+  /** 主开发 r5002 / r5010: a store's write whose SYNC its file system does not do at all LANDED (the thread's answer, its cells, or the
+   *  main thread's own road) — SAID ONCE for this writer's whole life (both lanes, a restarted thread, the main-thread road), in the hub
+   *  door's one spelling (src/fd-close.js syncUnsupportedWords): the store's name and the code, no path */
+  let noSyncSaid = false;
+  const noSyncSeen = (s, code) => {
+    if (!code || noSyncSaid) return;
+    noSyncSaid = true;
+    say(`[store-write] ${require('./fd-close.js').syncUnsupportedWords(s ? s.name : 'a store', code)} (said once: every later write of this writer whose sync is refused so lands the same way)`);
+  };
   const W = () => require('./store-writer-worker.js');   // writeJob (the main thread's own road uses the SAME code)
 
   function startWorker(l) {
@@ -355,6 +364,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function onMessage(l, m) {
     if (m && m.ev === 'memory') return;   // the census's answer (src/worker-memory.js)
     if (m && m.ev === 'written' && m.own && m.file) { const s0 = stores.get(m.file); if (s0) s0.own = m.own; }   // B-f276 1c: also a write the shared cells settled
+    if (m && m.ev === 'written' && m.noSync && !m.err) noSyncSeen(m.file ? stores.get(m.file) : null, m.noSync);   // r5010: also a write the shared cells settled
     if (!m || !l.inflight || m.id !== l.inflight.id) return;
     if (m.ev === 'unlinked') { const f = l.inflight; l.inflight = null; const s0 = stores.get(f.name); if (s0 && s0.forgotten) stores.delete(f.name); schedule(); return; }
     if (m.ev !== 'written') return;
@@ -547,6 +557,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     try {
       const r = W().writeJob({ file: s.file, tmp, parts: p.parts, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, append: p.append, exclusive: !!s.exclusive, ownOnly: !!s.ownOnly, own: s.own || null }, fs);
       if (r && r.own) s.own = r.own;   // B-f276 1c: the numbers of the file this own-only store made
+      if (r && r.noSync) noSyncSeen(s, r.noSync);   // r5010: its sync the file system does not do — landed, said once
       finish(s, null, now() - t0, p.size, since, true, p.append);
       return true;
     } catch (e) { if (e && e.own) s.own = e.own; if (!p.append) { try { fs.unlinkSync(tmp); } catch { } } fail(s, since, e); return false; }   // r2593 (2): a FIRST own-only append that made the file and then failed hands its numbers to the store's cell here too
@@ -582,6 +593,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const s = stores.get(f.name);
     if (f.unlink) { if (s && s.forgotten) stores.delete(f.name); return true; }
     if (s) { const o = jobOwn(l); if (o) s.own = o; }   // the file its store made, known BEFORE the job's answer is read: the next write of it (the other lane, in this call) is not refused as not its own
+    if (s && Atomics.load(S, 2) !== 2 && Atomics.load(S, 3) > 0) noSyncSeen(s, jobErrorCode(l));   // r5010: a LANDED job's no-sync code rides the same cells
     if (s) finish(s, Atomics.load(S, 2) === 2 ? { code: jobErrorCode(l) } : null, now() - f.startedAt, f.size, f.since, false, f.append, waitedBy, f.as);
     if (s && s.forgotten && !f.append && Atomics.load(S, 2) !== 2) postUnlink(l, s);   // forgotten while it flew: gone again — on the thread
     return true;
