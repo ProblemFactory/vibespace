@@ -1195,7 +1195,7 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const dCut = (a, b, tag) => {
     const n = dsrc.split(a).length - 1;
     if (n !== 1) { ok(false, `control ${tag.replace(/^hole-/, '')}: its anchor ${JSON.stringify(a).slice(0, 100)} found ${n} times in src/server/browser-dialogs.js, one meant — no copy made`); gone.push(tag.replace(/^hole-/, '')); return null; }
-    return MUT.load('src/server/browser-dialogs.js', dsrc.replace(a, () => b), tag);
+    return MUT.load('src/server/browser-dialogs.js', editAnchor(dsrc, a, () => b, "src/server/browser-dialogs.js"), tag);
   };
   const reds = [];
   { const m = dCut("${r.error}`); held(w, tid, d); }", '${r.error}`); }', 'hole-2.6'); const r = m && await failedAccept(m); if (r && r.via !== 'event' && r.notices === 0) reds.push('2.6'); }

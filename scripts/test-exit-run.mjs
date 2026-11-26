@@ -1399,7 +1399,7 @@ await section('§8b the routes + the CLI: pull / push end to end, a refusal befo
 await section('§8c controls (patched copies of exit-proxy.js)', async () => {
   const M8 = mutantCopies('exo8', REPO);
   const src = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-  const load = (tag, from, to) => { const m = src.replace(from, to); ok(m !== src, `(${tag}) the patch applies`); return M8.load('src/exit-proxy.js', m, tag).ExitProxyManager; };
+  const load = (tag, from, to) => { const m = editAnchor(src, from, to, "src/exit-proxy.js"); ok(m !== src, `(${tag}) the patch applies`); return M8.load('src/exit-proxy.js', m, tag).ExitProxyManager; };
   // (x1) the per-window hash compare removed ⇒ the corrupted pull lands
   const X1 = load('nohash', "if (r.sha256) { if (r.sha256 !== wh.digest('hex')) throw", "if (false) { if (r.sha256 !== wh.digest('hex')) throw");
   const w1 = xworld({ Mgr: X1, hooks: { corrupt: 1 } }); w1.files.set('/srv/c.bin', { data: crypto8.randomBytes(MiB8) });
@@ -1662,7 +1662,7 @@ await section('§9b lane win-run-hide-console: the console\'s code page is asked
   // CONTROLS (patched copies of src/exit-shell.js, never src/)
   const MB = mutantCopies('exo9b', REPO);
   const xs = fs.readFileSync(path.join(REPO, 'src/exit-shell.js'), 'utf8');
-  const mut = (from, to, tag) => { const t = xs.replace(from, to); ok(t !== xs, `(${tag}) the patch applies`); return MB.load('src/exit-shell.js', t, tag); };
+  const mut = (from, to, tag) => { const t = editAnchor(xs, from, to, "src/exit-shell.js"); ok(t !== xs, `(${tag}) the patch applies`); return MB.load('src/exit-shell.js', t, tag); };
   const redsOf = async (X) => (await askerLegs(X)).filter(([c]) => !c).map(([, n]) => n);
   const w3 = await redsOf(mut('inFlight = null; if (cp) known = cp;', 'if (cp) known = cp;', 'cachenull'));
   ok(w3.some((n) => /^run 2 asks AGAIN/.test(n)), `CONTROL (w3): an asker that CACHES the null (the pre-lane rule — one attempt decides for ever): run 2 stays utf-8-fallback (${w3.length} rows red)`, w3);

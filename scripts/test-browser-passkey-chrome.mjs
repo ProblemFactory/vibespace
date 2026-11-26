@@ -556,7 +556,7 @@ async function kernelLegs(Dm, tag) {
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const control = async (name, from, to, red) => {
     if (!dsrc.includes(from)) return ok(false, `CONTROL ${name}: the anchor moved`, from);
-    const Km = await kernelLegs(MUTK.load('src/server/browser-dialogs.js', dsrc.replace(from, to), name.replace(/\W+/g, '-')), name.replace(/\W+/g, '-'));
+    const Km = await kernelLegs(MUTK.load('src/server/browser-dialogs.js', editAnchor(dsrc, from, to, "src/server/browser-dialogs.js"), name.replace(/\W+/g, '-')), name.replace(/\W+/g, '-'));
     return ok(red(Km), `CONTROL ${name} ⇒ its leg is RED`, Km);
   };
   await control('uv always true', 'const f = PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === \'human\', userVerification: q.userVerification });', 'const f = { ...PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === \'human\', userVerification: q.userVerification }), uv: true };', (Km) => Km.K2sig && !Km.K2uv);

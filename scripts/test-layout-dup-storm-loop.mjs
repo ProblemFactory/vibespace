@@ -1223,7 +1223,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   // shows whole, N the live-session set alone (4ad07d751's `alive`)
   {
     const DSRC5 = read('src/lib/desktop-manager.js'), LSRC5 = read('src/lib/session-lifecycle.js'), WSRC5 = read('src/ws-handler.js');
-    const dm5 = (find, repl, tag) => { ok(DSRC5.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC5.split(find).join(repl), tag, { esm: true })).href).then((m) => m.DesktopManager); };
+    const dm5 = (find, repl, tag) => { ok(DSRC5.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC5, find, repl, "src/lib/desktop-manager.js", 'join'), tag, { esm: true })).href).then((m) => m.DesktopManager); };
     const DMo = await dm5('    if (!census.shows.size) return out;', '    return out;', 'r5-o-attempt'); // copiesOf answers nothing (r9: its one census)
     const fO = await r5Legs({ DM: DMo, install: install0, quiet: true, legs: ['O1', 'O3a', 'O5'] });
     ok(fO.some((n) => /r5 O1: A COPY THIS PAGE CANNOT BUILD IS A GHOST/.test(n)) && fO.some((n) => /r5 O3 \(merge at 0 ms\)/.test(n)) && fO.some((n) => /r5 O5: AN OPEN OF A WINDOW THAT STANDS/.test(n)), `mutant r5-O-build-attempt-until-save (4ad07d751's ghostsOf: only _kept / _carried): A's group taken apart by B's re-send (q1), the merge refused (q3), v-t's group still pending at the open (qR2) — RED (${fO.length}: ${fO.map((n) => n.slice(0, 22)).join(' | ')})`);
@@ -1234,7 +1234,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     const DMw = (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(editAnchor(editAnchor(DSRC5, kif, r4k, "src/lib/desktop-manager.js"), wl, '    if (this._activeId !== desk || !wm.windows.has(id) || !!this.app.layoutManager?.pendingChainOf?.(id)) {', "src/lib/desktop-manager.js"), wb, "      const b = this._activeId !== desk || wm.windows.has(id) ? { s: 'coming' } : this._buildState(id, desk);", "src/lib/desktop-manager.js"), 'r5-o-waits', { esm: true })).href)).DesktopManager;
     const lf = '        if (!replay) this.desktopManager?.keepInFront?.(winId);';
     ok(LSRC5.includes(lf), 'mutant r5-O-reveal-waits-for-group: the patched line exists in session-lifecycle.js');
-    const installW = await loadLifecycle(LSRC5.replace(lf, '        if (!replay && this.desktopManager?.keepInFront?.(winId)) return true;'));
+    const installW = await loadLifecycle(editAnchor(LSRC5, lf, '        if (!replay && this.desktopManager?.keepInFront?.(winId)) return true;', "src/lib/session-lifecycle.js"));
     const fW5 = await r5Legs({ DM: DMw, install: installW, quiet: true, legs: ['O6'] });
     ok(fW5.some((n) => /r5 O6: …a reveal never waits for a group/.test(n)), `mutant r5-O-reveal-waits-for-group (4ad07d751's revealWhenFormed for a window that stands): the open of win-v-s reveals nothing while its group waits 8 s for a member (qR) — RED (${fW5.length})`);
     const DMa = await dm5('    this._relisted(desktopId, state);\n', '', 'r5-o-ask-again');
@@ -1306,7 +1306,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
   // armed (L4); 8bde36a5c's restore road — the copy restored AND the machine door's act + switch — and the copy restored alone
   {
     const DSRC8 = read('src/lib/desktop-manager.js'), LSRC8 = read('src/lib/session-lifecycle.js');
-    const dm8 = async (find, repl, tag) => { ok(DSRC8.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', DSRC8.replace(find, repl), tag, { esm: true })).href)).DesktopManager; };
+    const dm8 = async (find, repl, tag) => { ok(DSRC8.includes(find), `mutant ${tag}: the patched line exists in desktop-manager.js`); return (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', editAnchor(DSRC8, find, repl, "src/lib/desktop-manager.js"), tag, { esm: true })).href)).DesktopManager; };
     const heads = (f) => f.map((n) => n.slice(0, 16)).join(' | ');
     const land = "    if (this._restoring) { this._pendingSwitch = desktopId; return; }\n    this._revealing = null; // a switch lands: a reveal's own switch is spent — once (r8); queued, it stays the reveal's until its drain lands\n";
     const DMe = await dm8(land, "    this._revealing = null;\n    if (this._restoring) { this._pendingSwitch = desktopId; return; }\n", 'r8-r1-clear-early');
@@ -1320,7 +1320,7 @@ await section('§6 MUTANTS — each fix removed turns its own legs RED', async (
     ok(fC.some((n) => n.startsWith('§13 r8 BS:')), `mutant r8-R2-restore-copy ALONE (the visit restores S's copy; its door now only raises): BS RED by the restore (${fC.length})`);
     const door = "    if (!replay) this.desktopManager?.keepInFront?.(w.id); // a person's open: it stands — revealed now, in front of a group still forming around it (r5 O)\n    this.wm.revealWindow(w.id, { replay });\n";
     ok(LSRC8.includes(door), 'mutant r8-R2: the patched lines exist in session-lifecycle.js');
-    const fB = await r8Legs({ DM: DMc, install: await loadLifecycle(LSRC8.replace(door, '    this.desktopManager?.keepInFront?.(w.id);\n    this.wm.revealWindow(w.id);\n')), quiet: true, legs: ['BS', 'BSR'] });
+    const fB = await r8Legs({ DM: DMc, install: await loadLifecycle(editAnchor(LSRC8, door, '    this.desktopManager?.keepInFront?.(w.id);\n    this.wm.revealWindow(w.id);\n', "src/lib/session-lifecycle.js")), quiet: true, legs: ['BS', 'BSR'] });
     ok(fB.some((n) => n.startsWith('§13 r8 BS:')) && fB.some((n) => n.startsWith('§13 r8 BSR:')), `mutant r8-R2 (8bde36a5c's road whole: the copy restored, and the machine door's act and switch): sent back to X, the reveal in flight retired unsaid — BS and BSR RED (${fB.length}: ${heads(fB)})`);
     // r9: 65a28cd29's copy verdict — the server id alone (sessionOf)
     const imp9 = "import { duplicatesOf, refusalKey, namesOf, doorSessionOf } from './desktop-record.js';";

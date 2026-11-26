@@ -241,7 +241,7 @@ console.log('— ⑧ THE FORM\'S ROWS, BYTE FOR BYTE: the shared renderers draw 
   const quoted = (names) => names.map((n) => tt('“{name}”', { name: n })).join(', ');
   const base = require(path.join(REPO, 'scripts/fixtures/may-use/form-rows-2.369.407.cjs'))(esc, tt, quoted);
   const src = fs.readFileSync(path.join(REPO, 'src/lib/may-use-rows.js'), 'utf8');
-  const body = editAnchor(src.replace(/^import [^\n]*\n/gm, ''), /^export (const|function) /gm, '$1 ', "src/lib/may-use-rows.js");
+  const body = editAnchor(editAnchor(src, /^import [^\n]*\n/gm, '', "src/lib/may-use-rows.js"), /^export (const|function) /gm, '$1 ', "src/lib/may-use-rows.js");
   ok(!/^import |^export /m.test(body), '⑧ (the module read as plain functions)');
   const now = new Function('escHtml', 't', body + '\nreturn { doorBtn, provRow, accLine, grantedAccountHtml, tickAccountHtml };')(esc, tt);
   const RES = [
