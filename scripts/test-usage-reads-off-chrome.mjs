@@ -15,11 +15,16 @@
 //      (accounts.onDemandQuotaRefresh) drawn with its stored value, Off; held ⇒ the Settings window says the settings cannot be
 //      read (the page's own held words, no row drawn: the hub's copy could not be read, nothing is offered to change)
 //   RED CONTROLS: the bar built without its door (the click's door line taken out, anchored) ⇒ a press opens nothing — ③ red;
-//   the bar without the mark's own row (its _arranged line taken out) ⇒ at 390 px its words are cut — ② red.
+//   THE CURE TAKEN OUT — the bar without the mark's own row (its _arranged line) AND chat.css without the mark's whole-words block
+//   (anchored) ⇒ at 390 px its words are cut again, the first pictures' shape — ② red. (Each half alone keeps the words whole: the
+//   first reading of this leg took the _arranged line out alone and the block still held them — the red takes out both.)
 // PICTURES: USAGE_READS_OFF_PNG_DIR (default: the scratch dir) readsoff-<off|held>-<lang>-<width>.png (the strip) and
 // …-pressed.png (the strip and what opened below it); each is ALSO printed into the suite's output as base64 lines
 // («PICTURE <name> <i>/<n> <chunk>»), so they come back wherever the whole output is kept (the test machine's heavy part).
 // No hub, no network, no sign-in, no vendor program: a stub app around the real modules; every other /api read answers {}.
+// 主开发 r5135: LAW 1 — each red control is judged on a WITNESS that the page read its plant (a counter the planted text bumps; the
+// stylesheet's plant read off the computed style); a plant never read is a NAMED SKIP, never a red, never a green. LAW 2 — the mark
+// is measured PAINTED (after two animation frames). LAW 3 — the run names its Chrome (Browser.getVersion).
 // SKIPs with evidence without chrome. Scratch: the suite's own scratch root only.
 import './scratch.mjs';   // FIRST (§113): the persistence routers below write data dirs — the re-home comes before any of this suite's code
 import fs from 'node:fs';
@@ -31,7 +36,9 @@ import { checker } from './lib/check.mjs';   // THE ONE assertion helper (B-1747
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const { ok, report } = checker();
+const { ok, report, counts } = checker();
+let skipped = 0;
+const skip = (m) => { skipped++; console.log(`  ⚠ SKIP: ${m}`); };   // r5135 law 1: a plant never read — counted in the closing line
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -121,24 +128,35 @@ window.opened = () => {
     value: sel ? sel.value : null, shown: sel && sel.selectedOptions[0] ? sel.selectedOptions[0].textContent.trim() : (ctl ? ctl.textContent.replace(/\\s+/g, ' ').trim() : ''),
     held: heldP ? heldP.textContent.trim() : '', search: search ? search.value : null };
 };
+// LAW 2: a position is read PAINTED — after two animation frames (the frame's hand-over), never inside a frame a late settle may land in
+window.painted = () => new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(() => res(true))));
+// LAW 1's witnesses: the planted texts' counters, and the stylesheet's plant read off the mark's computed style
+window.plants = () => { const chip = window.sb && window.sb.element.querySelector('[data-chip="readsoff"]'), w = chip && chip.querySelector('.chat-status-words');
+  return { noDoor: window.__vsPlantNoDoor || 0, ownRow: window.__vsPlantOwnRow || 0, flexBasis: chip ? getComputedStyle(chip).flexBasis : null, whiteSpace: w ? getComputedStyle(w).whiteSpace : null }; };
 window.__ready = true;`;
 const build = (name, plugins = []) => esbuild.build({ stdin: { contents: entry, resolveDir: REPO, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(ROOT, name + '.js'), loader: { '.css': 'empty' }, logLevel: 'error', plugins });
 await build('page');
 // THE RED COPY: the bar without its door — the click's door line taken out (anchored: the line exists once, or this throws)
-const noDoor = { name: 'no-door', setup(b) { b.onLoad({ filter: /chat-status-bar\.js$/ }, () => ({ contents: anchored(BAR_SRC, DOOR_LINE, '    const roDoor = null;   // RED CONTROL: the bar without its door\n', 'the bar without its door'), loader: 'js', resolveDir: path.dirname(BAR) })); } };
+const noDoor = { name: 'no-door', setup(b) { b.onLoad({ filter: /chat-status-bar\.js$/ }, () => ({ contents: anchored(BAR_SRC, DOOR_LINE, '    const roDoor = null; window.__vsPlantNoDoor = (window.__vsPlantNoDoor || 0) + 1;   // RED CONTROL: the bar without its door (the counter: its witness)\n', 'the bar without its door'), loader: 'js', resolveDir: path.dirname(BAR) })); } };
 await build('nodoor', [noDoor]);
 const OWN_ROW_LINE = "    if (!one) { const iRo = ordered.findIndex((c) => c.key === 'readsoff'); if (iRo >= 0) { const [ro] = ordered.splice(iRo, 1); ordered.unshift(ro, mark('row-break-readsoff', 'chat-status-rowbreak')); } }\n";
-const noOwnRow = { name: 'no-own-row', setup(b) { b.onLoad({ filter: /chat-status-bar\.js$/ }, () => ({ contents: anchored(BAR_SRC, OWN_ROW_LINE, '', 'the bar without the mark\'s own row'), loader: 'js', resolveDir: path.dirname(BAR) })); } };
+const noOwnRow = { name: 'no-own-row', setup(b) { b.onLoad({ filter: /chat-status-bar\.js$/ }, () => ({ contents: anchored(BAR_SRC, OWN_ROW_LINE, '    window.__vsPlantOwnRow = (window.__vsPlantOwnRow || 0) + 1;   // RED CONTROL: the mark\'s own row taken out (the counter: its witness)\n', 'the bar without the mark\'s own row'), loader: 'js', resolveDir: path.dirname(BAR) })); } };
 await build('noownrow', [noOwnRow]);
 
 // ── the page servers: one per reason (its GET /api/settings = that hub's router), the bundles, the real stylesheets ──
 const express = require(path.join(REPO, 'node_modules/express'));
 const CSS0 = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8'), CSS1 = fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8');
+// the red copy's stylesheet: chat.css without the mark's whole-words block (its three rules, anchored — each exists once or this throws)
+const WHOLE_RULES = ['.chat-status-bar > .chat-status-readsoff.chat-status-readsoff[data-chip] { flex: 0 0 auto; max-width: 100%; overflow: visible; }\n',
+  '.chat-status-bar.chat-status-two-rows > .chat-status-readsoff.chat-status-readsoff[data-chip] { flex: 1 1 100%; justify-content: flex-start; }\n',
+  '.chat-status-bar > .chat-status-readsoff.chat-status-readsoff[data-chip] > span.chat-status-words { white-space: normal; overflow: visible; text-overflow: clip; min-width: 0; flex: 0 1 auto; }\n'];
+const CSS1_PRE = WHOLE_RULES.reduce((css, rule, i) => anchored(css, rule, '', `the mark's whole-words rule ${i + 1}`), CSS1);
 const servers = [];
 async function pageServer(reason) {
   const web = express();
   web.get('/s0.css', (req, res) => res.type('css').send(CSS0));
   web.get('/s1.css', (req, res) => res.type('css').send(CSS1));
+  web.get('/s1-pre.css', (req, res) => res.type('css').send(CSS1_PRE));
   web.get('/:b.js', (req, res) => (/^(page|nodoor|noownrow)$/.test(req.params.b) ? res.type('js').send(fs.readFileSync(path.join(ROOT, req.params.b + '.js'))) : res.status(404).end()));
   web.get('/api/settings', GET_SETTINGS[reason]);
   web.all(/^\/api\//, (req, res) => res.json({}));   // every other read of the page: nothing known (hides nothing)
@@ -147,7 +165,7 @@ async function pageServer(reason) {
     const winW = Number(req.query.ww) || 760, winH = Number(req.query.wh) || 600, bundle = ['nodoor', 'noownrow'].includes(req.query.b) ? req.query.b : 'page';
     res.type('html').send(`<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <script>try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}</script>
-<link rel="stylesheet" href="/s0.css"><link rel="stylesheet" href="/s1.css">
+<link rel="stylesheet" href="/s0.css"><link rel="stylesheet" href="/s1${req.query.css === 'pre' ? '-pre' : ''}.css">
 <style>body{margin:0;background:var(--bg-root)} #stage{padding:${pad}px;width:${w + 2 * pad}px;box-sizing:border-box} #win{margin-top:12px;background:var(--bg-window);width:${winW}px;height:${winH}px;overflow:hidden;position:relative}</style>
 </head><body><div id="stage"><div class="chat-view" style="display:block;position:relative;height:auto"><div id="host" style="position:relative"></div></div><div id="win" hidden></div></div><script src="/${bundle}.js"></script></body></html>`);
   });
@@ -178,13 +196,14 @@ cdp.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) 
 const send = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); cdp.send(JSON.stringify({ id, method, params })); });
 const ev = async (js) => { const r = await send('Runtime.evaluate', { expression: js, awaitPromise: true, returnByValue: true }); if (r.result && r.result.exceptionDetails) return { threw: String(r.result.exceptionDetails.exception?.description || r.result.exceptionDetails.text || '?').slice(0, 400) }; return r.result && r.result.result ? r.result.result.value : undefined; };
 await send('Runtime.enable'); await send('Page.enable');
+{ const v = await send('Browser.getVersion'); console.log(`  the browser of this reading (r5135 law 3): ${(v.result && v.result.product) || '?'}`); }
 await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: every chrome suite pre-sets vs-onboarded (this page is not the app, but the rule is a census)
 // THE WAIT IS ON THE FACT, bounded; its expiry is a NAMED line, never a quiet false
 const until = async (js, what, ms = 6000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await ev(js); if (v === true) return true; await sleep(50); } console.log(`    (the wait for ${what} ran out after ${ms} ms)`); return false; };
 /** one page: the reason's hub, the language, the size; booted (the settings read, the bar drawn) */
-async function open(reason, lang, S, bundle = 'page') {
+async function open(reason, lang, S, bundle = 'page', css = '') {
   await send('Emulation.setDeviceMetricsOverride', { width: S.vw, height: S.vh, deviceScaleFactor: S.dsf, mobile: S.phone });
-  await send('Page.navigate', { url: `http://127.0.0.1:${PORTS[reason]}/?lang=${lang}&w=${S.w}&ww=${S.winW}&wh=${S.winH}${S.phone ? '&phone=1' : ''}&b=${bundle}` });
+  await send('Page.navigate', { url: `http://127.0.0.1:${PORTS[reason]}/?lang=${lang}&w=${S.w}&ww=${S.winW}&wh=${S.winH}${S.phone ? '&phone=1' : ''}&b=${bundle}${css ? '&css=' + css : ''}` });
   if (!(await until('window.__ready === true && document.readyState === "complete"', `the page (${reason} ${lang} ${S.w})`))) return false;
   const b = await ev(`window.boot(${J(reason)}, ${S.w})`);
   if (b !== true) { console.log('    the page did not boot:', J(b)); return false; }
@@ -211,7 +230,7 @@ try {
         const at = `${R.tag} ${lang} ${S.w} px`;
         if (!ok(await open(R.code, lang, S), `${at}: the page booted (the real bar, the real Settings window and settings store, the real stylesheets; the hub's settings read through the real router)`)) continue;
         const want = await ev(`[T(${J(WORDS[R.code][0])}), T(${J(WORDS[R.code][1])})]`);
-        const m = await ev('window.mark()');
+        const m = await ev('window.painted().then(() => window.mark())');
         ok(!!m && m.chip && m.shown && m.words === want[0] && m.title === want[1] && m.door && m.innerDoor && (lang === 'en' || want[0] !== WORDS[R.code][0]),
           `① ${at}: the mark is drawn in the language's words for its reason («${m && m.words}»), the long sentence its title, its whole face the door`, { m, want });
         ok(!!m && m.inBar && m.barInHost && !m.more && !m.folded && m.wordsWhole && (!m.twoRows || m.ownRow), `② ${at}: the mark inside the bar, the bar inside the frame, nothing behind «⋯», its words shown WHOLE${m && m.twoRows ? ' on a row of its own' : ''}`, m);
@@ -235,18 +254,23 @@ try {
   // RED CONTROL — the bar without its door: a press on the same mark opens nothing; the real bar (above) opened it
   const S = SIZES[0];
   if (await open('refresh-off', 'en', S, 'nodoor')) {
-    const m = await ev('window.mark()');
-    const landed = !!m && !!m.mid && (await press(MARK));
+    const m = await ev('window.painted().then(() => window.mark())');
+    const landed = !!m && !!m.mid && (await press(MARK));   // (the red control's mark, measured painted below its press)
     await sleep(800);
     const o = await ev('window.opened()');
-    ok(landed && !!m && m.chip && !o.open && !o.row, 'RED CONTROL: the bar built without its door (the click\'s door line taken out) — a press that LANDED on the same mark opens nothing, so ③ goes red', { m: m && m.words, landed, o });
+    const pl = await ev('window.plants()');
+    if (!(pl && pl.noDoor >= 1)) skip(`RED CONTROL (the bar without its door): its plant was never read (the click did not pass the planted line: ${J(pl)}) — not judged`);
+    else ok(landed && !!m && m.chip && !o.open && !o.row, 'RED CONTROL: the bar built without its door (the click\'s door line taken out; witness: the click passed the planted line) — a press that LANDED on the same mark opens nothing, so ③ goes red', { m: m && m.words, landed, o, pl });
   } else ok(false, 'the red control\'s page booted');
-  // RED CONTROL — the bar without the mark's own row (its _arranged line taken out): at 390 px its words are cut again
-  if (await open('refresh-off', 'en', SIZES[1], 'noownrow')) {
-    const m = await ev('window.mark()');
-    ok(!!m && m.chip && m.twoRows && (!m.wordsWhole || !m.ownRow), 'RED CONTROL: the bar without the mark\'s own row (its _arranged line taken out) — at 390 px the words are cut or share a row, so ② goes red', m);
+  // RED CONTROL — THE CURE TAKEN OUT (the bar without the mark's own row AND chat.css without its whole-words block): at 390 px its
+  // words are cut again, as in the first pictures
+  if (await open('refresh-off', 'en', SIZES[1], 'noownrow', 'pre')) {
+    const m = await ev('window.painted().then(() => window.mark())'), pl = await ev('window.plants()');
+    if (!(pl && pl.ownRow >= 1 && pl.flexBasis !== '100%' && pl.whiteSpace === 'nowrap')) skip(`RED CONTROL (the cure taken out): its plant was not in force (the planted _arranged line passed ${pl && pl.ownRow} times; the mark's flex-basis ${pl && pl.flexBasis}, its words' white-space ${pl && pl.whiteSpace}) — not judged`);
+    else ok(!!m && m.chip && m.twoRows && !m.wordsWhole, 'RED CONTROL: the cure taken out (the bar without the mark\'s own row AND chat.css without its whole-words block) — at 390 px the words are cut again, so ② goes red (witness: the planted _arranged line passed, the mark drawn on the release\'s rules)', { m, pl });
   } else ok(false, 'the own-row red control\'s page booted');
   ok(pageErrors.length === 0, `no page error on the way (${pageErrors.length})`, pageErrors.slice(0, 3));
   console.log(`  pictures: ${PNG_DIR} (${pictures.length} PNGs)`);
 } finally { try { cdp.close(); } catch { } await done(); }
+if (skipped) { console.log(counts.fail ? `\n${counts.fail} FAILED (${counts.pass} passed, ${skipped} SKIPPED)` : `\n${counts.pass} passed, ${skipped} SKIPPED (named above) — not ALL PASS`); process.exit(counts.fail ? 1 : 0); }
 report();

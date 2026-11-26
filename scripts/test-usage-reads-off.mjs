@@ -41,6 +41,9 @@ const ok = (c, msg, detail) => {
   if (typeof msg !== 'string' || msg.length === 0) throw new TypeError(`ok(cond, name): the name is a ${typeof msg} — the arguments are swapped`);
   if (c === true) { pass++; console.log(`  ✓ ${msg}`); } else { fail++; console.log(`  ✗ ${msg}${detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 700) : ''}`); }
 };
+// r5135 law 1: a control whose plant was never read is a NAMED SKIP — counted and said in the closing line, never a red, never a green
+let skipped = 0;
+const skip = (m) => { skipped++; console.log(`  ⚠ SKIP: ${m}`); };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const ROW = 'accounts.onDemandQuotaRefresh';
 const UR = require(path.join(REPO, 'src/usage-routes.js'));
@@ -326,29 +329,43 @@ console.log('— ④ THE WIRING');
   ok(/\{ value: 'off', label: t\('Off \(never contact Anthropic\)'\) \}/.test(S), 'the row\'s meaning and its words in Settings stay as they are (no default, meaning or sentence changes)');
 }
 
-console.log('— ⑤ RED CONTROLS');
+console.log('— ⑤ RED CONTROLS (主开发 r5135 law 1: each judged on a WITNESS that the product read its plant — a counter the planted text itself bumps; a plant never read is a NAMED SKIP, never a red, never a green)');
+// the witness: every planted text carries this line (or this expression) — the product passing the plant bumps its counter
+const PLANT = (n) => `globalThis.__vsPlant${n} = (globalThis.__vsPlant${n} || 0) + 1;`;
+const plantRead = (n) => globalThis['__vsPlant' + n] || 0;
+const plantReset = (n) => { globalThis['__vsPlant' + n] = 0; };
+/** the roads under a plant: each road's world driven, its plant's witness read; a road whose plant was never read is named, not judged */
+async function roadsUnder(usage, n, worldOf, what0) {
+  const started = [], unread = [];
+  for (const [what, drive] of ROADS) {
+    const w = worldOf(usage); if (!w) continue;
+    plantReset(n);
+    const q = quiet(); try { await drive(w); await until(() => w.starts() >= 1 || plantRead(n) >= 1, `${what} to read its plant (${what0})`, 4000); await until(() => w.starts() >= 1, `${what} to start (${what0})`, 4000); } finally { q.done(); }
+    if (!plantRead(n)) unread.push(what); else if (w.starts() >= 1) started.push(what);
+    stopTimers(w);
+  }
+  return { started, unread };
+}
 {
   const M = mutantCopies('usage-reads-off', REPO);
   const US = read('src/usage-routes.js');
-  const noFence = anchored(anchored(US, "  const no = panelDoorRefusal(setting);\n  if (no) { setImmediate(() => done(no, '', '')); return null; }\n", '', 'the door without its fence'),
-    "  { const no = panelDoorRefusal(serverSetting); if (no) { panelSays(key, { at: Date.now(), outcome: 'not-probed', code: no.code, identityVerified: false, why: no.message, rung: 'panel' }); return false; } }\n", '', 'the read without its ask');
+  const noFence = anchored(anchored(US, "  const no = panelDoorRefusal(setting);\n  if (no) { setImmediate(() => done(no, '', '')); return null; }\n", `  ${PLANT('R1')}   // RED CONTROL: the door without its fence\n`, 'the door without its fence'),
+    "  { const no = panelDoorRefusal(serverSetting); if (no) { panelSays(key, { at: Date.now(), outcome: 'not-probed', code: no.code, identityVerified: false, why: no.message, rung: 'panel' }); return false; } }\n", `  ${PLANT('R1')}   // RED CONTROL: the read without its ask\n`, 'the read without its ask');
   const R1 = M.load('src/usage-routes.js', noFence, 'no-fence');
-  const started = [];
-  for (const [what, drive, settled] of ROADS) {
-    const w = world({ row: 'off', usage: R1 }); if (!w) continue;
-    const q = quiet(); try { const x = await drive(w); await until(() => w.starts() >= 1, `${what} to start (the control)`, 4000); void x; } finally { q.done(); }
-    if (w.starts() >= 1) started.push(what);
-    stopTimers(w);
-  }
-  ok(started.length === ROADS.length, `RED: the door without the fence starts the program under Off on EVERY road (${started.length}/${ROADS.length}) — ③'s 0-starts legs go red`, started);
+  const r1 = await roadsUnder(R1, 'R1', (usage) => world({ row: 'off', usage }), 'the no-fence control');
+  for (const what of r1.unread) skip(`RED CONTROL (the door without the fence) on ${what}: its plant was never read — not judged`);
+  const judged1 = ROADS.length - r1.unread.length;
+  if (judged1) ok(r1.started.length === judged1, `RED: the door without the fence starts the program under Off on every road whose plant was read (${r1.started.length}/${judged1}; witness: the planted text passed) — ③'s 0-starts legs go red`, r1);
   const booked = anchored(US, "  { const no = panelDoorRefusal(serverSetting); if (no) { panelSays(key, { at: Date.now(), outcome: 'not-probed', code: no.code, identityVerified: false, why: no.message, rung: 'panel' }); return false; } }\n",
-    "  { const no = panelDoorRefusal(serverSetting); if (no) { try { app.locals.noteMemberServeFailure?.(key, { message: no.message }); } catch { } panelSays(key, { at: Date.now(), outcome: 'spawn-failed', code: 'exit', identityVerified: false, why: no.message, rung: 'panel' }); return false; } }\n", 'a refusal booked as a failure');
+    `  { const no = panelDoorRefusal(serverSetting); if (no) { ${PLANT('R2')} try { app.locals.noteMemberServeFailure?.(key, { message: no.message }); } catch { } panelSays(key, { at: Date.now(), outcome: 'spawn-failed', code: 'exit', identityVerified: false, why: no.message, rung: 'panel' }); return false; } }\n`, 'a refusal booked as a failure');
   const R2 = M.load('src/usage-routes.js', booked, 'booked');
   const w = world({ row: 'off', usage: R2 });
   if (w) {
+    plantReset('R2');
     const q = quiet(); await w.u.refreshViaCliPanel(w.M); q.done();
     const b = bookingsOf(w, w.M);
-    ok(!nothingBooked(b) && b.serveFails === 1 && w.starts() === 0, 'RED: a refusal booked as a failure (a serve failure + a spawn-failed verdict) ⇒ ②\'s nothing-booked leg goes red', b);
+    if (!plantRead('R2')) skip('RED CONTROL (a refusal booked as a failure): its plant was never read — not judged');
+    else ok(!nothingBooked(b) && b.serveFails === 1 && w.starts() === 0, 'RED: a refusal booked as a failure (a serve failure + a spawn-failed verdict; witness: the planted branch ran) ⇒ ②\'s nothing-booked leg goes red', b);
     stopTimers(w);
   }
 }
@@ -357,27 +374,31 @@ console.log('— ⑤ RED CONTROLS');
   // r4932 M1's red: the recorder without the door's codes in its early return books the account's failed-probe note
   const M = mutantCopies('usage-reads-off-m1', REPO);
   const US = read('src/usage-routes.js');
-  const R3 = M.load('src/usage-routes.js', anchored(US, " || DOOR_CODES.includes(v.code)) return v;", ") return v;", 'the recorder without the door codes'), 'recorder');
+  const R3 = M.load('src/usage-routes.js', anchored(US, " || DOOR_CODES.includes(v.code)) return v;", ` || (${PLANT('R3').slice(0, -1)}, false)) return v;`, 'the recorder without the door codes'), 'recorder');
   const w = world({ row: 'off', usage: R3 });
-  if (w) { const q = quiet(); await w.u.refreshViaCliPanel(w.M); q.done(); const b = bookingsOf(w, w.M); ok(!nothingBooked(b) && b.probeNote && b.probeNote.ok === false && w.starts() === 0, 'RED: the recorder without the door\'s codes ⇒ the account\'s failed-probe note is booked («Last probe failed») — ②\'s leg goes red (M1)', b); stopTimers(w); }
-  // r4932 M2's red: the door reading the held view's value (no held check) starts the program while the settings are held
-  const R4 = M.load('src/usage-routes.js', anchored(US, "  if (held) return Object.assign(new Error('the settings could not be read — nothing was started'), { code: PANEL_HELD, refusedByRow: true });\n", '', 'the door without its held check'), 'no-held');
-  const started = [];
-  for (const [what, drive] of ROADS) {
-    const wh = world({ held: true, usage: R4 }); if (!wh) continue;
-    const q = quiet(); try { await drive(wh); await until(() => wh.starts() >= 1, `${what} to start (the held control)`, 4000); } finally { q.done(); }
-    if (wh.starts() >= 1) started.push(what);
-    stopTimers(wh);
+  if (w) {
+    plantReset('R3');
+    const q = quiet(); await w.u.refreshViaCliPanel(w.M); q.done(); const b = bookingsOf(w, w.M);
+    if (!plantRead('R3')) skip('RED CONTROL (the recorder without the door\'s codes): its plant was never read — not judged');
+    else ok(!nothingBooked(b) && b.probeNote && b.probeNote.ok === false && w.starts() === 0, 'RED: the recorder without the door\'s codes (witness: the recorder reached the planted place) ⇒ the account\'s failed-probe note is booked («Last probe failed») — ②\'s leg goes red (M1)', b);
+    stopTimers(w);
   }
-  ok(started.length === ROADS.length, `RED: the door reading the held view's «manual» starts the program while held on EVERY road (${started.length}/${ROADS.length}) — ③b's legs go red (M2)`, started);
+  // r4932 M2's red: the door reading the held view's value (no held check) starts the program while the settings are held
+  const R4 = M.load('src/usage-routes.js', anchored(US, "  if (held) return Object.assign(new Error('the settings could not be read — nothing was started'), { code: PANEL_HELD, refusedByRow: true });\n", `  ${PLANT('R4')}   // RED CONTROL: the door without its held check\n`, 'the door without its held check'), 'no-held');
+  const r4 = await roadsUnder(R4, 'R4', (usage) => world({ held: true, usage }), 'the held control');
+  for (const what of r4.unread) skip(`RED CONTROL (the door without its held check) on ${what}: its plant was never read — not judged`);
+  const judged4 = ROADS.length - r4.unread.length;
+  if (judged4) ok(r4.started.length === judged4, `RED: the door reading the held view's «manual» starts the program while held on every road whose plant was read (${r4.started.length}/${judged4}) — ③b's legs go red (M2)`, r4);
   const RR = realRouter('red'), wr = world({ setting: RR.serverSetting, usage: R4 });
   if (wr) {
     const s = wr.mkSession('s-real-red');
+    plantReset('R4');
     const q = quiet(); try { wr.eng._scheduleWallProbe(s, wr.P, null, 0); await until(() => wr.starts() >= 1, 'the ladder to start (the real-router control)', 4000); } finally { q.done(); }
-    ok(wr.starts() >= 1 && RR.held(), 'RED: through the REAL router, the door reading the held view\'s value (no held check) starts the program while the settings are held — ③c\'s 0-starts leg goes red', { starts: wr.starts(), held: RR.held() });
+    if (!plantRead('R4')) skip('RED CONTROL (the real router, no held check): its plant was never read — not judged');
+    else ok(wr.starts() >= 1 && RR.held(), 'RED: through the REAL router, the door reading the held view\'s value (no held check; witness: the door passed the planted place) starts the program while the settings are held — ③c\'s 0-starts leg goes red', { starts: wr.starts(), held: RR.held(), read: plantRead('R4') });
     stopTimers(wr);
   }
 }
 
-console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
+console.log(fail ? `${fail} FAILED (${pass} passed${skipped ? `, ${skipped} SKIPPED` : ''})` : skipped ? `${pass} passed, ${skipped} SKIPPED (named above) — not ALL PASS` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
