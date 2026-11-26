@@ -503,7 +503,7 @@ function keepTomb(tombPath, text, id) {
   let said = false;
   W.dirty(tombPath, { name: 'exit-tomb.write', debounceMs: 0, produce: () => text,
     onWritten: (ok, err) => {
-      if (ok) { try { W.forget(tombPath); } catch { } return; }   // landed: the writer keeps no entry for it
+      if (ok) { try { if (W.owed(tombPath) === null) W.forget(tombPath); } catch { } return; }   // landed, nothing newer owed: the writer keeps no entry for it
       if (!said) { said = true; console.warn(`[session] exit tomb meta for ${id} not written yet (${(err && (err.code || err.message)) || 'a failed write'}) — kept in memory, the store writer retries it`); }
     } });
 }
