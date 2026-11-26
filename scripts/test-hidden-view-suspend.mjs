@@ -321,10 +321,11 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     // r5118: ONE MUTANT a words leg — each a copy of chat-view with ONE anchored line put back to the form its leg reds
     const CV_SRC = read('src/lib/chat-view.js'), WORDS_MUT = {}, wordsMutErr = [];
     for (const [k, anchor, to] of [
-      ['a3', '    const now = Date.now(), life = Math.max(H.askedAt || 0, ack);', '    const now = Date.now(), life = H.askedAt || 0;'],   // the clock from the ask only (follow 6's form)
+      ['a3', '    const now = Date.now(), life = Math.max(H.askedAt || 0, holdAck);', '    const now = Date.now(), life = H.askedAt || 0;'],   // the clock from the ask only (follow 6's form)
       ['a4', 'ack = ackAt >= Math.max(H.askedAt || 0, H.cycleAt || 0) ? ackAt : 0;', 'ack = ackAt;'],   // any acknowledgement counts (an earlier attach's too)
       ['a5', 'this._attachHoldWords(true); }, longLeft);', 'this._attachHoldWords(); }, longLeft);'],   // the long timer re-reads the clock
       ['a6', ' this._attachHold.cycleAt = Date.now(); this._attachHoldWords(); }', ' }'],   // the new ask decides nothing
+      ['a7', 'life = Math.max(H.askedAt || 0, holdAck);', 'life = Math.max(H.askedAt || 0, ack);'],   // r5160: the long clock fed from the filtered acknowledgement   // stale-pins: kept (the cured form planted back as a7's RED CONTROL)
     ]) { try { ({ ChatView: WORDS_MUT[k] } = await import(mutantCopies('hold-words-' + k, REPO).write('src/lib/chat-view.js', anchored(CV_SRC, anchor, to, 'words-' + k), 'words-' + k, { esm: true }))); } catch (e) { wordsMutErr.push(k + ': ' + String((e && e.message) || e).slice(0, 160)); } }
     const clock = { now: 1.8e12, timers: [] };
     const real = { st: globalThis.setTimeout, ct: globalThis.clearTimeout, now: Date.now, doc: globalThis.document };
@@ -397,6 +398,30 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
         tick(5000); v7._reattach(true); X.r1 = v7._attachHold?.note?.textContent;
         tick(100); v7._lastAttachAckAt = Date.now(); v7._attachHoldWords?.(); X.r2 = v7._attachHold?.note?.textContent;
         try { v7._clearAttachHold(); v7._cycleOff?.(); } catch { }
+        const noWs = { send() { }, onGlobal() { }, offGlobal() { } };
+        // (a7) r5160 THE MUST: an ask 15 minutes old, acknowledged until the reconnect — after it «waiting», NEVER the Reload words;
+        // the Reload words 15 minutes after the LAST acknowledgement (the long clock counts any acknowledgement of this hold)
+        const v8 = mkv('sid-ack-then-drop', { ws: noWs });
+        v8._lastAttachAckAt = Date.now();
+        v8._holdAttach({ type: 'attach', sessionId: 'sid-ack-then-drop' }, 1, null, Date.now() - 15 * 60000);
+        for (let k = 0; k < 6; k++) { tick(10000); v8._lastAttachAckAt = Date.now(); v8._attachHoldWords?.(); }   // a minute more of acks
+        tick(2000); v8._reattach(true); X.d0 = v8._attachHold?.note?.textContent;   // the socket dropped and came back: the new ask, 2 s after the last ack
+        tick(15 * 60000 - 3000); X.d1 = v8._attachHold?.note?.textContent;   // 1 s before 15 minutes after the last ack
+        tick(2000); X.d2 = v8._attachHold?.note?.textContent;
+        try { v8._clearAttachHold(); v8._cycleOff?.(); } catch { }
+        // (a8) r5160's small: the new attach acknowledged in the very millisecond of its ask counts as this ask's («still working»)
+        const v9 = mkv('sid-same-ms', { ws: noWs });
+        v9._holdAttach({ type: 'attach', sessionId: 'sid-same-ms' }, 1, null, Date.now() - 1000);
+        tick(5000); v9._reattach(true); v9._lastAttachAckAt = Date.now(); v9._attachHoldWords?.(); X.m0 = v9._attachHold?.note?.textContent;
+        try { v9._clearAttachHold(); v9._cycleOff?.(); } catch { }
+        // (a9) r5160's small: a link FLAPPING every two minutes with no answer and no acknowledgement still reaches the Reload words
+        // 15 minutes after the FIRST ask (a reconnect never restarts that clock)
+        const v10 = mkv('sid-flap', { ws: noWs });
+        v10._holdAttach({ type: 'attach', sessionId: 'sid-flap' }, 1, null, Date.now());
+        for (let k = 0; k < 7; k++) { tick(120000); v10._reattach(true); }   // 14 minutes of reconnects
+        tick(59000); X.f0 = v10._attachHold?.note?.textContent;   // 1 s before 15 minutes after the first ask
+        tick(2000); X.f1 = v10._attachHold?.note?.textContent;
+        try { v10._clearAttachHold(); v10._cycleOff?.(); } catch { }
         return X;
       };
       R.wl = wordsLegs(ChatView);
@@ -452,9 +477,15 @@ console.log('— ChatView reconnect: displayed now, suspended by slot (fake ws +
     const a4ok = (x) => !!x && WAIT.test(x.o0 || '') && WAIT.test(x.o1 || '') && LONG.test(x.o2 || '');
     const a5ok = (x) => !!x && LONG.test(x.s1 || '') && WORK.test(x.s2 || '');
     const a6ok = (x) => !!x && WORK.test(x.r0 || '') && WAIT.test(x.r1 || '') && WORK.test(x.r2 || '');
+    const a7ok = (x) => !!x && WAIT.test(x.d0 || '') && WAIT.test(x.d1 || '') && LONG.test(x.d2 || '');
+    const a8ok = (x) => !!x && WORK.test(x.m0 || '');
+    const a9ok = (x) => !!x && WAIT.test(x.f0 || '') && LONG.test(x.f1 || '');
+    ok('B-a26e (r5160, THE MUST): an ask 15 minutes old, acknowledged until a reconnect — after it «waiting», NEVER the Reload words; the Reload words 15 minutes after the LAST acknowledgement (the long clock counts any acknowledgement of this hold, on any socket)', a7ok(R.wl), R.wl && { d0: R.wl.d0, d1: R.wl.d1, d2: R.wl.d2 });
+    ok('B-a26e (r5160): the new attach acknowledged in the very millisecond of its ask counts as this ask\'s («still working»)', a8ok(R.wl), R.wl && R.wl.m0);
+    ok('B-a26e (r5160): a link flapping every two minutes with no answer and no acknowledgement reaches the Reload words 15 minutes after the FIRST ask, not before (a reconnect never restarts that clock)', a9ok(R.wl), R.wl && { f0: R.wl.f0, f1: R.wl.f1 });
     ok('B-a26e (r4875): while the hub keeps ACKNOWLEDGING the bar says it is still working (at the hold, and through ten minutes of acks); its acks stopped: «waiting» after 31 s, the Reload words 15 minutes after the last ack and not before', a3ok(R.wl), R.wl);
     ok('B-a26e (r5118): a RECONNECT while held — the dropped socket\'s last acknowledgement is not the new ask\'s: «waiting» at once, «still working» again at the new attach\'s acknowledgement', a6ok(R.wl), R.wl && { r0: R.wl.r0, r1: R.wl.r1, r2: R.wl.r2 });
-    ok(`B-a26e RED CONTROLS (r5118: each words leg's red RUN, one mutant of chat-view a leg): the clock from the ask only — a3 red (${!a3ok(R.wm.a3)}); any acknowledgement counts — a4 red (${!a4ok(R.wm.a4)}); the long timer re-reads the clock — a5 red (${!a5ok(R.wm.a5)}); the new ask decides nothing — a6 red (${!a6ok(R.wm.a6)}); each mutant leaves the other legs green`, wordsMutErr.length === 0 && Object.keys(R.wm).length === 4 && !a3ok(R.wm.a3) && a4ok(R.wm.a3) && a5ok(R.wm.a3) && !a4ok(R.wm.a4) && a3ok(R.wm.a4) && a5ok(R.wm.a4) && !a5ok(R.wm.a5) && a3ok(R.wm.a5) && a4ok(R.wm.a5) && !a6ok(R.wm.a6) && a3ok(R.wm.a6) && a4ok(R.wm.a6) && a5ok(R.wm.a6), wordsMutErr.join(' | ') || R.wm);
+    ok(`B-a26e RED CONTROLS (r5118: each words leg's red RUN, one mutant of chat-view a leg): the clock from the ask only — a3 red (${!a3ok(R.wm.a3)}); any acknowledgement counts — a4 red (${!a4ok(R.wm.a4)}); the long timer re-reads the clock — a5 red (${!a5ok(R.wm.a5)}); the new ask decides nothing — a6 red (${!a6ok(R.wm.a6)}); the long clock fed from the filtered acknowledgement — a7 red (${!a7ok(R.wm.a7)}); each mutant leaves the other legs green`, wordsMutErr.length === 0 && Object.keys(R.wm).length === 5 && !a7ok(R.wm.a7) && a3ok(R.wm.a7) && a4ok(R.wm.a7) && a5ok(R.wm.a7) && a6ok(R.wm.a7) && !a3ok(R.wm.a3) && a4ok(R.wm.a3) && a5ok(R.wm.a3) && !a4ok(R.wm.a4) && a3ok(R.wm.a4) && a5ok(R.wm.a4) && !a5ok(R.wm.a5) && a3ok(R.wm.a5) && a4ok(R.wm.a5) && !a6ok(R.wm.a6) && a3ok(R.wm.a6) && a4ok(R.wm.a6) && a5ok(R.wm.a6), wordsMutErr.join(' | ') || R.wm);
     ok('B-a26e (its own heavy read at 28800d6f7): under a short clock the long bound\'s timer is the fact — the Reload words when it fires, «still working» again at a later acknowledgement', a5ok(R.wl), R.wl && { s1: R.wl.s1, s2: R.wl.s2 });
     ok('B-a26e: an acknowledgement from BEFORE the hold\'s ask (an earlier, answered attach) is no sign of life for it — «waiting» at the hold, the Reload words 15 minutes after the ask and not before', a4ok(R.wl), R.wl && { o0: R.wl.o0, o1: R.wl.o1, o2: R.wl.o2 });
     ok('B-a26e (r4857): the 15-minute words run from the ASK that began the hold (asked 10 minutes before: Reload 5 minutes on, not 15)', /^Still attaching — waiting for the hub to answer/.test(R.asked1 || '') && /has not answered for 15 minutes/.test(R.asked2 || ''), { asked1: R.asked1, asked2: R.asked2 });

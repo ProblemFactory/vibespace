@@ -7737,8 +7737,12 @@ class ChatView {
   _attachHoldWords(longDue = false) {
     const H = this._attachHold;
     if (!H || this._disposed || this._readOnly) return;
-    const ackAt = this._lastAttachAckAt || 0, ack = ackAt >= Math.max(H.askedAt || 0, H.cycleAt || 0) ? ackAt : 0;   // only THIS hold's attach's acknowledgement: one stamped before its ask is an earlier attach's, long answered (its own heavy read, 11-26)
-    const now = Date.now(), life = Math.max(H.askedAt || 0, ack);
+    // TWO RULES, TWO CLOCKS (主开发 r5160): «still working» counts only an acknowledgement at or after the LATEST ask (a dropped
+    // socket's last one is not the new ask's); the 15-minute clock counts ANY acknowledgement of THIS hold, on any socket (at or after
+    // its first ask) — an earlier attach's, from before the hold, counts for neither
+    const ackAt = this._lastAttachAckAt || 0, ack = ackAt >= Math.max(H.askedAt || 0, H.cycleAt || 0) ? ackAt : 0;
+    const holdAck = ackAt >= (H.askedAt || 0) ? ackAt : 0;   // only THIS hold's attach's acknowledgement: one stamped before its ask is an earlier attach's, long answered (its own heavy read, 11-26)
+    const now = Date.now(), life = Math.max(H.askedAt || 0, holdAck);
     const working = !!ack && now - ack < ATTACH_ACK_FRESH_MS, longLeft = ATTACH_HOLD_LONG_MS - (now - life);
     const long = longDue || longLeft <= 0;   // longDue: the long bound's own timer fired — no acknowledgement came since it was armed (each one re-arms it)
     const words = long ? t('Still attaching — the hub has not answered for 15 minutes. Reloading the tab asks again; your message waits here.')
