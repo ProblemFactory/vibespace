@@ -361,10 +361,11 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         const S = sceneE(P2, tag, false);
         S.call('get', '/api/layouts');
         const next = JSON.parse(JSON.stringify(LAY)); next.desktops.d1.autoSave.windows = [{ winId: 'w1' }];   // a SHAPE change (a window gone)
-        const renames = [], temps = [], rn = fs.renameSync, wf = fs.writeFileSync;
+        const renames = [], temps = [], rn = fs.renameSync, wf = fs.writeFileSync, op = fs.openSync;
         fs.renameSync = function (a, b) { renames.push(path.basename(String(b))); return rn.call(this, a, b); };
         fs.writeFileSync = function (f, ...x) { if (String(f).endsWith('.tmp')) temps.push(path.basename(String(f))); return wf.call(this, f, ...x); };
-        try { S.P.router.writeLayouts(next); S.P.router.flushLayouts(); } finally { fs.renameSync = rn; fs.writeFileSync = wf; }
+        fs.openSync = function (f, ...x) { if (String(f).endsWith('.tmp')) temps.push(path.basename(String(f))); return op.call(this, f, ...x); };   // r5185: the store hold's direct door OPENS its temp (one descriptor, synced)
+        try { S.P.router.writeLayouts(next); S.P.router.flushLayouts(); } finally { fs.renameSync = rn; fs.writeFileSync = wf; fs.openSync = op; }
         return { renames, temps };
       };
       const o = order(freshP(), 'order');
@@ -711,7 +712,8 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
       // (B-0248 (a): the flush answers by callback — at once on the writer's contract at the call)
       const flushed = (R, o = {}) => { let got; R.flushLayouts(o, (ok) => { got = ok; }); return got; };
-      const refusing = async (fn) => { const wf = fs.writeFileSync; fs.writeFileSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw refusedWrite(); return wf.call(this, f, ...a); }; try { return await fn(); } finally { fs.writeFileSync = wf; } };
+      // (r5185: the store hold's direct door OPENS its temp — one descriptor, synced — so the refusal is placed at the open too)
+      const refusing = async (fn) => { const wf = fs.writeFileSync, op = fs.openSync; fs.writeFileSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw refusedWrite(); return wf.call(this, f, ...a); }; fs.openSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw refusedWrite(); return op.call(this, f, ...a); }; try { return await fn(); } finally { fs.writeFileSync = wf; fs.openSync = op; } };
       const tick = () => new Promise((r) => setImmediate(() => setImmediate(r)));
       const lay = (spec) => ({ current: null, autoSave: null, saved: {}, customGrids: [], desktops: Object.fromEntries(Object.entries(spec).map(([k, ws]) => [k, { autoSave: { windows: ws.map((w) => ({ winId: w })) } }])), desktopMeta: Object.keys(spec).map((k) => ({ id: k, name: k.toUpperCase() })) });
       const sceneM = async (P, tag) => {
@@ -1532,10 +1534,11 @@ console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom
       const R = P0.router;
       R.readLayouts();
       R.writeLayouts(JSON.parse(J(L0)));
-      const wf = fs.writeFileSync;
+      const wf = fs.writeFileSync, op = fs.openSync;
       fs.writeFileSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw Object.assign(new Error('EIO: a stand-in refused write'), { code: 'EIO' }); return wf.call(this, f, ...a); };
+      fs.openSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw Object.assign(new Error('EIO: a stand-in refused write'), { code: 'EIO' }); return op.call(this, f, ...a); };   // r5185: the door opens its temp
       let landed = null;
-      try { R.flushLayouts({ press: true }, (ok) => { landed = ok; }); } finally { fs.writeFileSync = wf; }
+      try { R.flushLayouts({ press: true }, (ok) => { landed = ok; }); } finally { fs.writeFileSync = wf; fs.openSync = op; }
       const held = call(R, 'get', '/api/stores/held');
       return { landed, unsaved: (held.body && held.body.unsaved || []).map((u) => u.file), said: sent.filter((x) => x.type === 'store-unsaved').map((x) => x.file) };
     };

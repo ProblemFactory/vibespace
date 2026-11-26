@@ -32,6 +32,7 @@
 const fs = require('fs');
 const path = require('path');
 const SR = require('./store-read.js');
+const FDC = require('./fd-close.js');   // r5185: the hub's one set of «this file system does not do a sync» codes and their words
 
 const NO_LINK = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV']);   // a link the FILESYSTEM refuses (not a file there)
 const SILENT_RUNGS_MS = Object.freeze([1000, 2000, 4000, 8000]);   // ≈15 s of quick, silent reads again
@@ -65,6 +66,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   if (!file) throw new Error('store-hold: file is required');
   /** the store writer (B-0248 (c)) — a function (the process's writer, made at the first use) or the writer itself; null: at the call */
   const W = () => (typeof writer === 'function' ? writer() : writer);
+  let unsyncSaid = false;   // r5185: a file system that does not do a sync is said ONCE a store
   let value;                 // the document (undefined: none — held, or not read yet)
   let text = null;           // the bytes the value was read from, until the caller takes them once (takeText: its normalizer compares)
   let held = null;           // { kind, code, why, since, rung }
@@ -143,14 +145,32 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   /** THE ONE WRITE (R1, R10): refuses a store with no value BY NAME; whole bytes, a pid temp name, then the rename — or, for a store
    *  that read `missing`, an EXCLUSIVE create (R6: a file found there is read and adopted, the change refused by name). `bytes`: the
    *  text, or its PARTS in order (a large store's text is never joined — the conversation list's state and its facts), else the
-   *  value's JSON. → true */
-  function write(next, bytes) {
+   *  value's JSON. `sync` (r5185): the temp SYNCED before its name moves — the default; false ONLY for a machine caller's config call.
+   *  → true */
+  function write(next, bytes, { sync = true } = {}) {
     if (!started) throw unreadError(file, NOT_READ(), 'this change');
     if (held) throw unreadError(file, held, 'this change');
     const parts = Array.isArray(bytes) ? bytes : [typeof bytes === 'string' ? bytes : JSON.stringify(next, null, 2)];
     const tmp = `${file}.${process.pid}.tmp`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });
+    // r5185 (lane hub-loop-stalls, row B-574d — THE DIRECT DOOR's SYNC): the temp written WHOLE, then SYNCED ONCE before its name
+    // moves (a person's press, the start, a rare road: a store's first create, the ladder's retry, a start read's own rewrite). A sync
+    // that FAILS, or a close that fails after the writes (a network folder's deferred write error), is a FAILED WRITE: the temp
+    // removed, thrown — the OLD file stands. A sync the file system does not do at all (src/fd-close.js SYNC_UNSUPPORTED) is said
+    // once and the name moves (the hub's one set). `sync: false` — ONLY a machine caller's config call (a bearer on the plugins' old
+    // config door, the coordinator's ruling r5185: a sync on the loop is for a person's press, the start or a rare save) — asks
+    // none; its writes and its close are still judged
+    let fd = fs.openSync(tmp, 'w'), failed = null;
+    try {
+      for (const part of parts) {
+        const b = Buffer.isBuffer(part) ? part : Buffer.from(String(part));
+        for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; }
+      }
+      if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!FDC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; if (!unsyncSaid) { unsyncSaid = true; log.warn?.(`[store-hold] ${FDC.syncUnsupportedWords(path.basename(file), e.code)}`); } } }
+    } catch (e) { failed = e; }
+    try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }   // a close that fails after the writes: its bytes may not be there
+    fd = null;
+    if (failed) { try { fs.unlinkSync(tmp); } catch { /* gone already */ } throw failed; }
     if (missing) {
       /** a file arrived where the read found none (a late mount): READ and ADOPTED, never written over — this change refused by name */
       const appeared = () => {

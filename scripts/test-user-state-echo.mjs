@@ -1313,6 +1313,9 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
     hearing(p, w, held);
     let full = true;
     fs.writeFileSync = function (f, ...a) { if (full && String(f).startsWith(w.dataDir) && /user-state\.json\.(\d+\.)?tmp$/.test(String(f))) { const e = new Error('ENOSPC: no space left on device, write'); e.code = 'ENOSPC'; throw e; } return realWrite.call(this, f, ...a); };
+    // r5185: the store hold's direct door OPENS its temp (src/store-hold.js write: one descriptor, synced) — the same refusal there
+    const realOpen = fs.openSync;
+    fs.openSync = function (f, ...a) { if (full && String(f).startsWith(w.dataDir) && /user-state\.json\.(\d+\.)?tmp$/.test(String(f))) { const e = new Error('ENOSPC: no space left on device, open'); e.code = 'ENOSPC'; throw e; } return realOpen.call(this, f, ...a); };
     let r503 = null;
     try {
       p.toggleArchive(w.sessions[1]);
@@ -1321,7 +1324,7 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
       const cap = (w.H.ops || w.H.patch);
       r503 = w.call(cap, { batches: [{ batch: 'pgprobe001:1', ops: [{ key: 'starredSessions', item: 'claude:probe', value: true }] }] });   // while full: said by name
       await w.run(w.now() + 120000);
-    } finally { fs.writeFileSync = realWrite; }
+    } finally { fs.writeFileSync = realWrite; fs.openSync = realOpen; }
     restartWorld(w);
     if (!leave) { w.disconnect(p); w.connect(p); p._fetchUserState(); await w.run(w.now() + 60000); }
     cells.push({ outage, leave, onDisk: held(), falseSaved: !noFalseSaved(p), saved: (p.__said || []).filter((x) => /^Saved/.test(x.text)).length, answer: r503 && r503.status, named: r503 && /ENOSPC/.test(String(r503.body && r503.body.error)) });
@@ -1609,6 +1612,9 @@ const DAY_MS = 86400000;
     realWrite(file, JSON.stringify({ stateVersion: 2, starredSessions: [], archivedSessions: archived, archivedFolders: [], customNames: {}, sessionModes: {}, sessionConfigs: {}, sessionGroups: {}, groupFolders: {}, batches: [{ batch: 'x:1', ops: [] }], [UO.REV_KEY]: 9 }, null, 2));
     let refuse = true;
     fs.writeFileSync = function (f, ...a) { if (refuse && String(f).startsWith(w.dataDir)) { const e = new Error(how === 'full disk' ? 'ENOSPC: no space left on device' : 'EROFS: read-only file system'); e.code = how === 'full disk' ? 'ENOSPC' : 'EROFS'; throw e; } return realWrite.call(this, f, ...a); };
+    // r5185: the store hold's direct door OPENS its temp (the start read's own rewrite) — refused there too
+    const realOpen = fs.openSync;
+    fs.openSync = function (f, ...a) { if (refuse && String(f).startsWith(w.dataDir) && /\.tmp$/.test(String(f))) { const e = new Error(how === 'full disk' ? 'ENOSPC: no space left on device' : 'EROFS: read-only file system'); e.code = how === 'full disk' ? 'ENOSPC' : 'EROFS'; throw e; } return realOpen.call(this, f, ...a); };
     let served;
     try {
       const P2 = freshPersistence();
@@ -1617,7 +1623,7 @@ const DAY_MS = 86400000;
       served = w.call(w.H.get).body;
       refuse = false;   // the disk frees: the next write
       w.call(w.H.ops, { batches: [{ batch: 'pgafterboot:1', age: 0, ops: [{ key: 'starredSessions', item: 'claude:s', value: true }] }] });
-    } finally { fs.writeFileSync = realWrite; }
+    } finally { fs.writeFileSync = realWrite; fs.openSync = realOpen; }
     const after = JSON.parse(fs.readFileSync(file, 'utf8'));
     rows.push({ how, served: (served.archivedSessions || []).length, afterWrite: (after.archivedSessions || []).length, junk: 'batches' in after });
   }

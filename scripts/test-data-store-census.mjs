@@ -481,6 +481,8 @@ const DELETION_CALLS = Object.freeze({
   // that folder); browser-kept-note.js 5 — the temps of the note's and of a session config's write, a note taken back past its bound (only the
   // file that write put there: its inode), and a crash's leftover temp reaped at the folder's next write (r3961); r4094 +1 — that take-back when
   // the temp's inode could not be read (only a note still holding this write's own three fields) — none keeps a list
+  // r5185 (hub-loop-stalls): store-hold.js +1 — the direct door's own temp taken out when its write, its sync or its close failed (only the
+  // file that write made; the old file stands) — no keep list
   'src/server/browser-kept-note.js': 6,
   'src/server/browser-trace.js': 6, /* row B-360d (r4522) +2: the index rewrite's OWN temp file removed when the rewrite fails, and at the hub's stop — never a store's file */ 'src/server/chat-attachments.js': 4, 'src/server/claude-signin.js': 3, 'src/server/cli-model-catalog.js': 1,
   'src/server/cli-models-door.js': 1, 'src/server/cli-self-measure.js': 3, 'src/server/csp-reports.js': 1 /* r4828: the re-judge's temp removed on a failed rewrite */, 'src/server/dial-pairing.js': 1, 'src/server/dropline-oauth.js': 1,
@@ -492,7 +494,7 @@ const DELETION_CALLS = Object.freeze({
   'src/server/session-stdout.js': 5, 'src/server/spend-guard.js': 3, 'src/server/sync-fs-witness-worker.js': 2, 'src/server/usage-index-retire.js': 1,
   'src/server/usage-pool-engine.js': 2, 'src/server/vault-engine.js': 7, 'src/server/vault-run-door.js': 6, 'src/server/vault-totp.js': 1,
   'src/server/window-targets-engine.js': 1, 'src/server/wrapper-files.js': 6, 'src/server/writes-lost.js': 3,   /* B-574d (lane nl-journals): + the off-loop write's temp removed on a failed write; + the exit's removal of a write's temp still in flight */ 'src/signin-witness-worker.js': 2,
-  'src/signin-witness.js': 2, 'src/spawn/ssh.js': 1, 'src/ssh-key.js': 1, 'src/store-hold.js': 3,
+  'src/signin-witness.js': 2, 'src/spawn/ssh.js': 1, 'src/ssh-key.js': 1, 'src/store-hold.js': 4,
   'src/store-read-hold.js': 6, 'src/store-writer-worker.js': 6, 'src/store-writer.js': 2, 'src/task-groups.js': 2,
   'src/transcript-service.js': 3, 'src/usage-cache-write.js': 1, 'src/usage-hold-road.js': 1, 'src/usage-ledger-dedup.js': 4,
   'src/user-todos.js': 1, 'src/vnc.js': 1, 'src/webdav.js': 6, 'src/ws-create.js': 2,

@@ -881,7 +881,10 @@ app.post('/api/plugins/:id/config', (req, res) => {
   if (why && asked !== null && asked !== (cur === undefined ? require('../plugin-settings.js').PLUGIN_SETTINGS.llm.rows.find((r) => r.key === 'dailyBudgetUsd').default : Number(cur))) {
     return res.status(403).json({ error: `plugin.llm.dailyBudgetUsd: the judge's daily dollar cap changes only by the owner's press on the owner's own page (Settings › Spending — vibespace://settings/plugin.llm.dailyBudgetUsd); ${why === 'bearer' ? 'a request carrying a bearer token' : 'a request with no mark of the owner\'s page'} cannot change it; nothing was written. Ask the owner with vibespace-ask and give that link`, code: 'spend_row_owner_only', why, rows: ['plugin.llm.dailyBudgetUsd'], door: 'vibespace://settings/plugin.llm.dailyBudgetUsd' });
   }
-  try { res.json(plugins.setConfig(req.params.id, b)); } catch (e) { res.status(400).json({ error: e.message }); }
+  // r5185 (lane hub-loop-stalls): a MACHINE caller (a bearer — the tree's one verdict, src/write-origin.js pressBearer) keeps the
+  // release's unsynced settings write; a PERSON's press on a plugin's own page syncs it (src/routes/persistence.js asMachineCall)
+  const call = () => plugins.setConfig(req.params.id, b);
+  try { res.json(require('../write-origin.js').pressBearer(req.headers) && typeof persistenceRouter.asMachineCall === 'function' ? persistenceRouter.asMachineCall(call) : call()); } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // "we already offered this plugin" — the first-use dialog is asked ONCE per
 // instance (owner: "Not now" is remembered), so the flag is INSTANCE state
