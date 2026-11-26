@@ -20,6 +20,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A list of port forwards that cannot be read is no longer emptied by the next change; the Ports panel says so and nothing is lost.
 - An agent's service no longer takes over or removes a port forward you made by hand on its port; its card says why it is not published.
 - A publish setting that cannot be read no longer loses the published address; Publish and Unpublish wait until it reads.
+- When a page in an agent browser's live view stops drawing, a line under the view now says why and what to do, instead of a still picture with no word.
 
 ## 2.369.419 — 2026-11-25
 
