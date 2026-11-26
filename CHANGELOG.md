@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a sudden power cut, VibeSpace no longer loses its record of an archive extraction cut short, or the warning that Claude could not save its work.
 - If VibeSpace cannot read its record of notices already given (hooks, HTTPS, sign-in reminders, new Claude Code builds), it no longer repeats them.
 - A conversation's window no longer turns read-only when the server is slow to reconnect it; it says it is still attaching and keeps your typed message.
+- VibeSpace no longer pauses while it trims the browser action history every hour, and the Sweep now button says how many profiles it could not sweep.
 
 ## 2.369.421 — 2026-11-26
 
