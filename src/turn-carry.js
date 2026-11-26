@@ -15,6 +15,8 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const SR = require('./store-read.js');   // B-f276 (lane bl-scratch, slice hub-own-ledgers): the store-read law's answer of one read…
+const HOLD = require('./store-read-hold.js');   // …and the family's hold: an unread table is HELD, never started empty and written over
 
 /** THE CENSUS (law 2): every rider of the hook injection that advances a mark when it is composed — the mark, and what a
  *  dropped injection lost before this lane. scripts/test-seen-marks.mjs reds on a state write in the two hook routes that
@@ -92,37 +94,54 @@ function createOutstanding(dir = null, { log = (...a) => console.log(...a), now 
     const keep = Object.entries(t).filter(([k, r]) => k && isRow(r) && Number(r.at) >= cut).sort((a, b) => Number(b[1].at) - Number(a[1].at)).slice(0, OUTSTANDING_MAX_ROWS);
     return Object.fromEntries(keep);
   };
-  let rows = {};
+  let rows = {}, hold = null, big = null;   // big: a file past the size bound — never read, never written over in this run
+  const saidHeld = new Set();   // the keys whose restart line this run SAID while held: at the lift the file never brings them back
+  const isTable = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+  /** the file's rows: at the start, the table; at a LIFT (the file read at last), beside the rows THIS process marked while it was
+   *  held — this run's row stays as it is, and every key the file holds is «from before» (a previous process left it outstanding:
+   *  its restart line is said at its next answer), except a key whose line this run already said (its read's S3) */
+  const loadRows = (v, lifted = false) => {
+    const fileRows = bound(v), had = Object.keys(v).length, kept = Object.keys(fileRows).length;
+    if (kept < had) sayOnce('bound', `held ${had} row(s) — ${had - kept} past its bound (${OUTSTANDING_MAX_AGE_MS / 3600000} h, the newest ${OUTSTANDING_MAX_ROWS}) left at the load; a restart line is said only for the ${kept} kept`);
+    if (!lifted) { rows = fileRows; return; }
+    for (const [k, r] of Object.entries(fileRows)) { if (saidHeld.has(k)) continue; if (!(k in rows)) rows[k] = r; before.add(k); }
+    saidHeld.clear();
+    rows = bound(rows); save();
+  };
   if (file) {
     // A LOAD READS WHAT THIS PROCESS STILL OWES: a table made again in the same process (a suite's new hub on the same data
     // dir) lands the write the last one handed the writer BEFORE it reads the file — a hub's boot owes nothing (no wait)
     try { if (W().pending(file)) W().flushSync([file]); } catch { }
-    let raw = null, fd = null;
+    // B-f276 (lane bl-scratch, slice hub-own-ledgers): THE STORE-READ LAW. The release STARTED EMPTY on a read that failed, a file
+    // that did not parse or held no table, and save() wrote the empty table over it (the restart line lost for every conversation
+    // it held). Now the family's hold answers the start's one read: unreadable ⇒ HELD (save writes nothing, a mark stays in memory,
+    // read again off the loop until it reads); torn ⇒ held while its bytes are kept aside OFF the loop, then it starts empty; read
+    // at last ⇒ its rows join those marked meanwhile (loadRows). A file past the size bound is never read (a 56 MB plant held the
+    // loop 1.2 s parsing) and NEVER WRITTEN OVER in this run: it is not this writer's (it keeps the file near 170 KB), so the restart
+    // line is not kept until a person moves it away — said once, by its size
+    hold = HOLD.create({ file, valid: isTable, code: 'turn_carry_unread', aside: (m) => file + '.corrupt-' + m,
+      words: (h) => `the record of the conversations a restart interrupted could not be read (${h && h.code}) — it is read again by itself, and nothing is written over it meanwhile`,
+      log: (l) => { try { log(`[inject] the outstanding-deliveries file: ${l}`); } catch { } }, onLift: (v) => loadRows(isTable(v) ? v : {}, true) });
+    let read = null, fd = null;
     try {
       fd = fs.openSync(file, 'r');
       const size = fs.fstatSync(fd).size;   // the size FIRST: a file past the bound is never read, let alone parsed
-      if (size > OUTSTANDING_MAX_BYTES) sayOnce('size', `is ${size} B, beyond its ${OUTSTANDING_MAX_BYTES} B bound (this writer keeps it near 170 KB) — not read; started empty; the restart line cannot be said for what it held`);
-      else raw = fs.readFileSync(fd, 'utf8');
-    } catch (e) { if (e && e.code !== 'ENOENT') sayOnce('read', `could not be read (${e.code || e.message}) — started empty; the restart line cannot be said for what it held`); }
+      if (size > OUTSTANDING_MAX_BYTES) big = size;
+      else read = { text: fs.readFileSync(fd, 'utf8') };
+    } catch (e) { read = { error: e }; }
     finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
-    if (raw != null) {
-      let v; try { v = JSON.parse(raw); } catch { v = undefined; sayOnce('parse', 'is not JSON — started empty; the restart line cannot be said for what it held'); }
-      if (v !== undefined) {
-        if (v && typeof v === 'object' && !Array.isArray(v)) {
-          rows = bound(v);
-          const held = Object.keys(v).length, kept = Object.keys(rows).length;
-          if (kept < held) sayOnce('bound', `held ${held} row(s) — ${held - kept} past its bound (${OUTSTANDING_MAX_AGE_MS / 3600000} h, the newest ${OUTSTANDING_MAX_ROWS}) left at the load; a restart line is said only for the ${kept} kept`);
-        } else sayOnce('shape', `holds ${Array.isArray(v) ? 'an array' : v === null ? 'null' : 'a ' + typeof v}, not a table of rows — started empty; the restart line cannot be said for what it held`);
-      }
-    }
+    if (big != null) sayOnce('size', `is ${big} B, beyond its ${OUTSTANDING_MAX_BYTES} B bound (this writer keeps it near 170 KB) — not read, and nothing is written over it in this run: the restart line is not kept until it is moved away`);
+    else { const a = SR.storeAnswer(read, { valid: isTable }); if (hold.start(a) === 'data') loadRows(a.value); }
   }
   const before = new Set(Object.keys(rows));   // what previous processes left outstanding
+  const touch = (k) => { if (k && hold && hold.held()) saidHeld.add(k); };
   const unsaved = (e) => sayOnce('write', `could not be written (${(e && (e.code || e.message)) || e}) — a restart before a confirm will not be said for the conversations it should hold`);
   /** the table handed to the writer: its bytes are the rows as they are when the write is due (a burst is one write); a
    *  write that failed is SAID once (the writer keeps it owed and retries) and never thrown. The planted fault (a suite's)
    *  is taken at the change and fails that write once. → true (the change is held; its file follows) */
   function save({ act = false } = {}) {
     if (!file) return true;
+    if (big != null || (hold && !hold.writable('a write of the outstanding deliveries'))) return true;   // HELD: the change stays in memory, never over an unread file
     let planted = FAULT.at === 'write';
     try {
       rows = bound(rows);
@@ -140,10 +159,15 @@ function createOutstanding(dir = null, { log = (...a) => console.log(...a), now 
     /** retire the row only if it is still the one `at` wrote (a newer delivery may have marked it since) */
     clearIf(key, at) { if (!key || !rows[key] || (at != null && Number(rows[key].at) !== Number(at))) return; delete rows[key]; before.delete(key); save(); },
     clear(key) { if (!key || !(key in rows)) return; delete rows[key]; before.delete(key); save(); },
-    said(key) { if (before.delete(key)) { delete rows[key]; save(); } },
+    said(key) { touch(key); if (before.delete(key)) { delete rows[key]; save(); } },
     /** the conversation's key changed (its id arrived): its row follows it */
     rekey(from, to) { if (!from || !to || from === to || !rows[from]) return; rows[to] = rows[from]; delete rows[from]; if (before.delete(from)) before.add(to); save(); },
     size: () => Object.keys(rows).length,
+    /** B-f276 (lane bl-scratch): the table's hold — null when it was read; else { file, code, since } (a file past the size bound:
+     *  code «past its bound», for this run); its words; a read again off the loop (→ true when it lifted) */
+    held: () => (big != null ? { file: path.basename(file), code: 'past its bound', since: null } : hold ? hold.held() : null),
+    heldWords: () => (big != null ? `the record of the conversations a restart interrupted is ${big} B, past its ${OUTSTANDING_MAX_BYTES} B bound — not read, and nothing is written over it in this run` : hold ? hold.words() : null),
+    readAgain: () => (hold ? hold.again() : Promise.resolve(false)),
   };
 }
 const MEMORY_OUTSTANDING = createOutstanding(null);
