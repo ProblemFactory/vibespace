@@ -57,6 +57,7 @@ const STORES = Object.freeze({
   'browser-bindings.write': row('write', 'browser-env/bindings.json', 'src/server/browser-bindings.js', ['handWrite']),   // 1/8: which conversation holds which browser key (memory-authoritative)
   'window-targets.write': row('write', 'window-leases.json + window-reach.json', 'src/server/window-targets-engine.js', ['writeWindowStore']),   // 5/8: the window leases and share modes
   'browser-lineage-ledger.write': row('write', 'the browser lineage ledger (ndjson)', 'src/server/browser-keeper.js', ['lineageLedger']),   // 6/8: the lineage ledger's appends and its trim, one file lane
+  'browser-env-cwd.write': row('write', 'browser-env/<key>.cwd', 'src/server/browser-env.js', ['writeCwdSidecar']),   // 7/8: a C rung's cwd record
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)

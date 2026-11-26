@@ -303,5 +303,28 @@ console.log('— ⑤ which HOME each child sees: the daemon the keeper\'s, the C
   ok(/PASSWD_PRELOAD/.test(verbs) && /os\.userInfo = \(o\) => \(\{ \.\.\.real\(o\), homedir: /.test(verbs), '⑤ the ONE way a suite redirects the CLI\'s account home is test-browser-verbs\' passwd preload (os.userInfo faked onto the scratch HOME) — a suite without it reaches the real passwd home read-only');
 }
 
+// ── B-574d «browser-stores» 7/8 (lane nl-migrations, 主开发 r5101 / r5128 (b)): the generated configs are DERIVED — their read-side check
+// at the conversation's start: the file read back as an object after its write, or written again ONCE (a write that tore heals at
+// once), said once by name when it still does not read (the browser falls back as before). RED (anchored copy): one write, no second
+console.log('— B-574d browser-stores 7/8: a generated config read back, or written again once');
+{
+  const readBack = (BEmod, tag, tornWrites) => {
+    const d = fs.mkdtempSync(path.join(ROOT, `bs7-${tag}-`)), h = path.join(d, 'home'); fs.mkdirSync(path.join(h, '.agent-browser'), { recursive: true });
+    const lines = []; let n = 0;
+    const writeJson = (f, o) => { n++; if (n <= tornWrites) fs.writeFileSync(f, '{ torn'); else fs.writeFileSync(f, JSON.stringify(o, null, 2)); };   // the first `tornWrites` writes land torn
+    const be = BEmod.create({ dataDir: path.join(d, 'data'), homeDir: h, serverSetting: () => undefined, log: { log() {}, warn: (l) => lines.push(String(l)), error() {} }, env: {}, socketDirBase: path.join(d, 'sock'), facts: { floor: async () => ({ state: 'ok' }) }, writeJson });
+    const r = be.envFor({ browserKey: 'bk-0000b7b7', integrationOn: true });
+    const cfg = (r.pairs || []).find((p) => String(p).startsWith('AGENT_BROWSER_CONFIG='));
+    return { variant: r.variant, named: !!cfg, writes: n, said: lines.filter((l) => l.includes('does not read back after two writes')).length };
+  };
+  const R1 = readBack(BE, 'once', 1), R2 = readBack(BE, 'always', 99);
+  ok(R1.variant === 'D' && R1.named && R1.writes === 2 && R1.said === 0, 'B-574d browser-stores 7/8: a generated config whose write tore ONCE is written again at once — the conversation keeps rung D, its config named, nothing said', R1);
+  ok(R2.variant === 'C' && !R2.named && R2.said === 1, '…one that still does not read after the second write falls back as before (rung C, never named) and is SAID once by name', R2);
+  const esrc7 = fs.readFileSync(path.join(REPO, 'src/server/browser-env.js'), 'utf8');
+  const BE1 = mutantCopies('bs7-env', REPO).load('src/server/browser-env.js', editAnchor(esrc7, '    for (let i = 0; i < 2; i++) {\n      writeJson(p, obj);\n', '    for (let i = 0; i < 1; i++) {\n      writeJson(p, obj);\n', 'src/server/browser-env.js'), 'bs7-one-write');
+  const R1x = readBack(BE1, 'red', 1);
+  ok(R1x.variant === 'C', 'RED (anchored copy: one write, no second): the config that tore once drops the conversation to rung C — 7/8 goes red', R1x);
+}
+
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass}${fail ? ` passed, ${fail} failed` : ''})`);
 process.exit(fail ? 1 : 0);

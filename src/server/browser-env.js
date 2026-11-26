@@ -318,8 +318,33 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
    *  pin there needs that the link cannot carry. `{cwd: <abs>|null}`, 0600. */
   const cwdPathFor = (key) => path.join(ENV_DIR, key + '.cwd');
   const scratchDirFor = (key) => path.join(PROFILE_DIR, key);
+  // B-574d «browser-stores» 7/8 (lane nl-migrations, 主开发 r5101 / r5128 (b)): the generated driver configs are DERIVED — built again
+  // from the person's config and the profile at each conversation's start (its spawn, its first browser use) — so they keep their
+  // synchronous temp and rename (no sync at an agent's cadence, no child behind the writer's queue), and their read-side check is AT
+  // THAT START: the file read back as an object after its write, or written again once, said once by name when it still does not read
+  // (the conversation falls back as before). A torn one comes only from a power cut, after which the conversation's next start writes
+  // it again. The C rung's .cwd sidecar is a RECORD (read only at a later pin): it goes to the store writer, read back from memory.
+  const unreadBackSaid = new Set();
+  function writeReadBack(p, obj) {
+    for (let i = 0; i < 2; i++) {
+      writeJson(p, obj);
+      let back = null; try { back = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { back = null; }
+      if (back && typeof back === 'object') return back;
+    }
+    const n = path.basename(p);
+    if (!unreadBackSaid.has(n)) { unreadBackSaid.add(n); try { log.warn?.(`[browser] the generated browser config ${n} does not read back after two writes — this conversation's browser falls back as before; its next start writes it again`); } catch { } }
+    throw new Error('read-back was not an object (written twice)');
+  }
+  const CWD_MEMO = new Map();   // key → the sidecar's bytes this process handed
+  function writeCwdSidecar(key, obj) {
+    const f = cwdPathFor(key), text = JSON.stringify(obj, null, 2);
+    CWD_MEMO.set(key, text);
+    const W = require('../store-writer.js').storeWriter();
+    W.dirty(f, { name: 'browser-env-cwd.write', rank: 0, mode: 0o600, makeDir: true, produce: () => CWD_MEMO.get(key) || text });
+    W.durable(f).catch(() => { });
+  }
   const readCwdSidecar = (key) => {
-    try { const r = JSON.parse(fs.readFileSync(cwdPathFor(key), 'utf8')); return r && typeof r === 'object' ? { cwd: typeof r.cwd === 'string' ? r.cwd : null } : null; }
+    try { const m = CWD_MEMO.get(key); const r = JSON.parse(m != null ? m : fs.readFileSync(cwdPathFor(key), 'utf8')); return r && typeof r === 'object' ? { cwd: typeof r.cwd === 'string' ? r.cwd : null } : null; }
     catch { return null; }
   };
 
@@ -460,9 +485,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       // browser-stderr-pipe's defence in depth (Chrome's logging off: QUIET_LOG_ARGS) never reached this spawn file. The
       // composer above ends every launch's args with THE LAUNCH TAIL (B.launchTail: the switches — a user's own logging
       // switch wins — then the mark, last), so this file carries them, and so does a helper's copy (childConfigFor)
-      writeJson(p, cfg);
-      const back = JSON.parse(fs.readFileSync(p, 'utf8'));
-      if (!back || typeof back !== 'object') throw new Error('read-back was not an object');
+      writeReadBack(p, cfg);   // 7/8: read back, or written again once, said once by name
       cfgPath = p;
     } catch (e) { reasons[0] = `generated config unusable: ${e && e.message}`; }
     // (C) — our own scratch directory, named by the browser key, under data/,
@@ -479,7 +502,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         // no config, so a later pin must ask the CLI's two files as they stand
         // THEN, and the project file lives HERE. Written before `profDir` is
         // claimed: a rung whose record failed is a rung that was not delivered.
-        writeJson(cwdPathFor(key), { cwd: typeof cwd === 'string' && cwd && path.isAbsolute(cwd) ? cwd : null });
+        writeCwdSidecar(key, { cwd: typeof cwd === 'string' && cwd && path.isAbsolute(cwd) ? cwd : null });   // 7/8: a record, on the store writer
         profDir = link;
       } catch (e) { reasons[1] = `per-session profile directory unusable: ${e && e.message}`; }
     } else if (!cfgPath) {
@@ -863,9 +886,8 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     try {
       ensureDirs();
       const p = configPathFor(childKey);
-      writeJson(p, out);
-      const back = JSON.parse(fs.readFileSync(p, 'utf8'));
-      if (!back || typeof back !== 'object' || B.configNamesProfile(back)) throw new Error('read-back names a profile');
+      const back = writeReadBack(p, out);   // 7/8: read back, or written again once
+      if (B.configNamesProfile(back)) throw new Error('read-back names a profile');
       return { path: p, namesProfile, why: null };
     } catch (e) { return { path: null, namesProfile, why: `child config unusable: ${e && e.message}` }; }
   }
