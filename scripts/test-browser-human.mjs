@@ -1193,8 +1193,9 @@ let work, solo, shop;
   await kh.browse(hp.id);
   const HH = HM.humanKeyFor(hp.id);
   kh.humanTake({ key: HH, viewerId: 42 }); kh.humanRelease({ key: HH, viewerId: 42 });
-  // r4665: the keep leg's RED — a third twin of the same copy (it BEGINS a stop where the keep leg expects none): the keep leg's witness,
-  // counted from before the tick, FIRES — the leg goes red by the witness, not by the browser's state alone
+  // r4665: the keep leg's WITNESS, shown to fire — a third twin of the same copy, whose idle stop BEGINS at this 2 h step: the witness
+  // the keep leg reads (closeAllsOf over the browser's own ns, counted from before the tick, within K.STOP_GRACE_MS) fires when a stop
+  // begins, which is what a copy that stops inside the keep would need for the keep leg to go red (the keep leg is not run over a copy)
   const kw = mkKeeper(Kc, { dataDir: path.join(ROOT, 'data-xw') });
   const wp = kw.createProfile({ label: 'XW' }, { owner: { kind: 'instance', id: null } });
   await kw.browse(wp.id);
@@ -1203,8 +1204,9 @@ let work, solo, shop;
   const nsW = kw.browserOf(wp.id).ns, cW = closeAllsOf(nsW);
   clock += 2 * 3600e3; await kx.tick(); await kh.tick(); await kw.tick();
   const wShown = await until(() => closeAllsOf(nsW) > cW, K.STOP_GRACE_MS);
-  ok(wShown, 'ITS RED (r4665): a copy that begins a stop where the keep leg expects none — the keep leg\'s witness (the close-all the stop makes first) FIRES within the keeper\'s own stop grace: the keep leg goes red by the witness', { wShown, state: kw.browserOf(wp.id).state });
-  await until(() => kw.browserOf(wp.id).state === 'stopped', 20000);
+  ok(wShown, 'ITS RED (r4665): a copy whose idle stop begins — the witness the keep leg reads (the close-all the stop makes first, counted from before the tick) FIRES within the keeper\'s own stop grace', { wShown, state: kw.browserOf(wp.id).state });
+  const stoppedW = await until(() => kw.browserOf(wp.id).state === 'stopped', 20000);   // a cleanup no verdict reads: its expiry is said
+  if (!stoppedW) markTimedOut(kw.browserOf(wp.id).state, 20000, 'cleanup: the witness twin\'s idle stop landing');
   // the wait is ON THE FACT the control judges: the idle stop landed (a generous bound; its expiry is said by THE ONE MARK)
   const stoppedX = await until(() => kx.browserOf(xp.id).state === 'stopped', 20000);
   const readX = stoppedX ? kx.browserOf(xp.id).state : markTimedOut(kx.browserOf(xp.id).state, 20000, 'CONTROL: the idle stop of the copy whose clock reads the leases only');

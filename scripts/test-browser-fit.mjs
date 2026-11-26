@@ -906,6 +906,9 @@ console.log('— ⑥ verify r1 (continuation): late mirrors, a size the page did
     // r4665 (law 2): «untraced» is a never-read — read once the TAP HAS the agent's pair (the bridge hands every upstream record to
     // its taps as it arrives: a trace of it would be that hand-over), never after a fixed 300 ms
     const agentPairTapped = await until(() => got.some((m) => m.type === 'result' && m.action === 'viewport' && m.data && m.data.width === 800), 3000);
+    // the follow (the r4665 round's should): «ONE viewer-fit» is a never-read too — a bridge that re-fits over the agent's choice would
+    // do it at its OWN debounce (FIT.FIT_DEBOUNCE_MS) after the agent's frame, plus the set's round trip: read only once that window passed
+    await sleep(FIT.FIT_DEBOUNCE_MS + 450);
     const traced = got.filter((m) => m.type === 'command' && T_.isTracedCommand(m));
     const entry = traced[0] ? T_.entryFor({ id: 'tr-000000000001', at: 1, command: traced[0], result: got.find((m) => m.type === 'result' && m.id === traced[0].id) || null, position: T_.positionOf({ kind: T_.classifyAction(traced[0].action), params: traced[0].params }) }) : null;
     const out = { agentPairTapped, traced: traced.map((m) => [m.action, m.params]), ownRaw: got.filter((m) => m.action === 'viewport' && m.params && m.params.width === 700).length, viewerSaw: A.msgs.filter((m) => m.type === 'command' && (m.action === 'viewer-fit' || (m.action === 'viewport' && m.params && m.params.width === 700))).length, entry: entry && { kind: entry.kind, text: entry.text, ok: entry.ok, label: T_.timelineLabel(entry), pos: T_.positionText(entry.position) } };
