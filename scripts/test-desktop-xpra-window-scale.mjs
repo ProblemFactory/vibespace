@@ -480,10 +480,25 @@ try {
       //   153: ✕ −23, □ −63, ─ −102 (40 px apart — the lane-D measurement)
       //   154: ✕ −20, □ −52, ─ −84 (32 px apart — measured 2026-09-29 on 154.0.8037.57: google-chrome under Xvfb, a 900×620
       //        window, custom_chrome_frame seeded like the keeper's; the ink columns' centres −20.5 / −52.5 / −84.5)
-      const CAPTIONS = { 153: { close: 23, max: 63, min: 102 }, 154: { close: 20, max: 52, min: 84 } };
+      //   158: ✕ −20, □ −52, ─ −84 (the same as 154 — MEASURED 2026-11-26 on 158.0.8127.36 by this suite's own print on the first test
+      //        machine, the kit's heavy road, run 0f08fb3f4-20261126050619-box, both tries: the ink runs right to left at −20 / −52 / −84,
+      //        10 px wide each; 主开发 r4769, lane bl-windows)
+      const CAPTIONS = { 153: { close: 23, max: 63, min: 102 }, 154: { close: 20, max: 52, min: 84 }, 158: { close: 20, max: 52, min: 84 } };
       let chromeMajor = null;
       try { chromeMajor = Number((/(\d+)\./.exec(execFileSync(String(CHROME15.path || CHROME15.exec).split(/\s+/)[0], ['--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1]) || null; } catch { chromeMajor = null; }
       const cap = CAPTIONS[chromeMajor] || null;
+      // a major with NO measured row (主开发 r4769): the MEASUREMENT is printed — the ink columns of Chrome's own caption in the
+      // pane's top-right corner (rows 8..32 around y 20; ink = a pixel far from the clip's most frequent colour, the caption bar's own), each run's centre
+      // from the pane's right edge in CSS px — and the check below still fails by name: the row is added from this print
+      if (!cap) {
+        let version = null; try { version = String(execFileSync(String(CHROME15.path || CHROME15.exec).split(/\s+/)[0], ['--version'], { encoding: 'utf8', timeout: 10000 })).trim(); } catch { }
+        try {
+          const s = await P.evalJs(S15(o.id)), W0 = 180;
+          const shot = await P.cdp('Page.captureScreenshot', { format: 'png', clip: { x: s.pane.x + s.pane.w - W0, y: s.pane.y + 8, width: W0, height: 24, scale: 1 } });
+          const m = await P.evalJs(`(async () => { const img = new Image(); img.src = 'data:image/png;base64,' + ${JSON.stringify(shot.data)}; await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const d = x.getImageData(0, 0, c.width, c.height).data; const W = c.width, H = c.height, k = W / ${W0}; const hist = new Map(); for (let q = 0; q < d.length; q += 4) { const kk = (d[q] >> 3) + ',' + (d[q + 1] >> 3) + ',' + (d[q + 2] >> 3); hist.set(kk, (hist.get(kk) || 0) + 1); } const top = [...hist.entries()].sort((u, v) => v[1] - u[1])[0][0].split(',').map((v) => Number(v) * 8 + 4); const bg = top; const ink = []; for (let xx = 0; xx < W; xx++) { let n = 0; for (let yy = 0; yy < H; yy++) { const q = (yy * W + xx) * 4; if (Math.abs(d[q] - bg[0]) + Math.abs(d[q + 1] - bg[1]) + Math.abs(d[q + 2] - bg[2]) > 60) n++; } ink.push(n); } const runs = []; let st = -1; for (let xx = 0; xx <= W; xx++) { const on = xx < W && ink[xx] > 0; if (on && st < 0) st = xx; if (!on && st >= 0) { runs.push({ fromRight: +(${W0} - (st + xx) / 2 / k).toFixed(1), width: +((xx - st) / k).toFixed(1), rows: Math.max(...ink.slice(st, xx)) }); st = -1; } } return { scale: k, bg, share: +(([...hist.values()].sort((u, v) => v - u)[0]) / (W * H)).toFixed(2), runs: runs.reverse().slice(0, 12) }; })()`);
+          console.log(`  · §16 (4) MEASURE: ${version || 'Chrome ' + chromeMajor} — the ink runs of its own caption from the pane's right edge (centre, width, ink rows), right to left: ${JSON.stringify(m)}`);
+        } catch (e) { console.log(`  · §16 (4) MEASURE: ${version || 'Chrome ' + chromeMajor} — the measurement failed: ${e && e.message}`); }
+      }
       check(`§16 (4): Chrome ${chromeMajor}'s caption layout is a MEASURED row (${cap ? `✕ −${cap.close}, □ −${cap.max}, ─ −${cap.min}` : 'none — measure the ─ □ ✕ centres of this Chrome and add its row'})`, !!cap, { chromeMajor, exec: CHROME15.exec, path: CHROME15.path });
       if (!cap) throw new Error(`no measured caption layout for Chrome ${chromeMajor}`);
       const clickPane = async (fromRight, y) => { const s = await P.evalJs(S15(o.id)); await trustedClickAt(P, s.pane.x + s.pane.w - fromRight, s.pane.y + y); };

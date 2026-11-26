@@ -592,6 +592,9 @@ async function laneE() {
       const CTL_WHY = {
         153: [{ re: CLOSED, when: 'a closed tree (153 registers with or without an a11y env)' }],
         154: [{ re: ABSENT, when: 'not on the bus (no a11y env in the launch — the scrubbed child)' }, { re: CLOSED, when: 'a closed 4-node tree (an a11y env reached the launch)' }],
+        // 158 (158.0.8127.36, the first test machine's Chrome since 2026-11-25): OBSERVED 2026-11-26 in the candidate of 2.369.420's
+        // desktop read, the scrubbed child — «mode: auto → pixels — no accessibility tree — pixel mode» (主开发 r4769, lane bl-windows)
+        158: [{ re: ABSENT, when: 'not on the bus (no a11y env in the launch — the scrubbed child; observed on 158.0.8127.36)' }],
       };
       let chromeMajor = null; try { chromeMajor = Number((/(\d+)\./.exec(execFileSync(chromeBin, [...CHROME_QUIET, ...CHROME_STORE, '--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1]) || null; } catch { chromeMajor = null; }
       const rows = CTL_WHY[chromeMajor] || [];
