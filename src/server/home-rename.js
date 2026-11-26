@@ -40,10 +40,12 @@ async function replaceSyncedAsync(tmp, final, text, log, what = 'the tries') {  
 // follow 3 (its reads): a held HOME marker's one safe hand — moved aside (torn, or a folder, a file or a link in its name), the next start
 // judges the move again over folders already moved (none old) and writes «kept»
 const HOME_KEEP = 'restore it from a backup — never move it aside (the move would be judged again over folders already moved)';
-// follow 4 (r5221): a marker torn by an older release's plain write has no backup — the one hand a person can use: the marker is
-// written only AFTER the move ran, so a count above zero in it is true enough to have this data folder's old-home paths rewritten
-const HOME_TORN = `${HOME_KEEP}; with no backup: if this HOME's old project folders now stand under the new name (~/.claude/projects/-home-<new>-…), write {"judgedOld":1} into it — the next start rewrites this data folder's paths of the old home; if none of them was moved, write {"judgedOld":0} — this data folder keeps its paths`;
-const homeHint = (code) => (code === 'unparsable' ? `its bytes do not parse: ${HOME_TORN}` : code === 'no-record' ? `its bytes are no marker record (no count in them): ${HOME_TORN}` : code === 'EISDIR' || code === 'ENOTDIR' || code === 'ELOOP' ? `something else stands in its name: ${HOME_KEEP}` : ownedHint(code));
+// follow 4 (r5221) + follow 5 (r5258 and its read): a marker torn by an older release's plain write has no backup — the hands a person can
+// use, by the evidence the move itself judged by: the transcripts' recorded cwd (a folder's NAME cannot separate a whole move from a
+// judged-none one when the old name is a prefix of the new); the files named as the tree builds them; the backups the rewrite keeps;
+// the way back from each wrong record
+const homeTorn = (old, hm, dm, projects) => `${HOME_KEEP}; with no backup, ask the transcripts (a SIGN, not the hub's own judgement: a folder the hub could not judge counts here too, a conversation the CLI has since cleaned up does not, and an error of the grep is no answer): if grep -lF -e '"cwd":"/home/${old}/' -e '"cwd":"/home/${old}"' ${projects}/*/*.jsonl prints a file, write {"judgedOld":1} into ${hm} — the next start rewrites this data folder's paths of the old home (each store keeps its original beside it as <store>.pre-home-migrate); if it prints nothing, write {"judgedOld":0} into it — this data folder keeps its paths. The marker speaks for EVERY data folder over this HOME (each with its own data marker and backups). A wrong 0 is undone by writing 1 into ${hm} and removing ${dm}; a wrong 1 only with the hub STOPPED (its stop writes its memory back): put each <store>.pre-home-migrate written since that start (by its time — an older one is another rename's) back over its store, in this data folder and its session-meta, remove ${dm}, write {"judgedOld":0} into ${hm}, then start it — what was written since is lost`;
+const homeHint = (code, who = null) => { const torn = who ? homeTorn(who.old, who.hm, who.dm, who.projects) : HOME_KEEP; return code === 'unparsable' ? `its bytes do not parse: ${torn}` : code === 'no-record' ? `its bytes are no marker record (no count of 0 or more in them): ${torn}` : code === 'EISDIR' || code === 'ENOTDIR' || code === 'ELOOP' ? `something else stands in its name: ${HOME_KEEP}` : ownedHint(code); };
 const OLD_RE = /^[a-z][a-z0-9]*$/;   // an old user as claude-home's staleUsers reads it (-home-<old>-…)
 // B-8033 cure 2: the starts a folder that cannot move is tried, then the move is marked (said once). A try counts once per
 // TRY_GAP_MS — a restart loop during a short outage spends one, never all three
@@ -56,8 +58,9 @@ const MOVE_TRIES = 3, TRY_GAP_MS = 10 * 60e3;
 function homeMarkerState(hm) {
   let text; try { text = fs.readFileSync(hm, 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? { exists: false, judged: 0 } : { exists: true, judged: 0, unreadable: (e && e.code) || 'error' }; }
   let j = null; try { j = JSON.parse(text); } catch { return { exists: true, judged: 0, unreadable: 'unparsable' }; }
-  if (!j || typeof j !== 'object' || Array.isArray(j) || (!Number.isFinite(j.judgedOld) && !Number.isFinite(j.moved))) return { exists: true, judged: 0, unreadable: 'no-record' };   // follow 4 (r5221): bytes that are no marker record (null, a number, a count that is no number — every release's marker carries a finite count) are no verdict either
-  return { exists: true, judged: j && Number.isFinite(j.judgedOld) ? j.judgedOld : Number(j && j.moved) || 0 };
+  const has = (f) => Object.prototype.hasOwnProperty.call(j || {}, f), countOk = (n) => Number.isInteger(n) && n >= 0;   // follow 5 (r5258): a count is a whole number, 0 or more
+  if (!j || typeof j !== 'object' || Array.isArray(j) || (has('judgedOld') ? !countOk(j.judgedOld) : !countOk(j.moved))) return { exists: true, judged: 0, unreadable: 'no-record' };   // follow 4 (r5221): bytes that are no marker record (null, a number, a count that is no number — every release's marker carries a finite count) are no verdict either
+  return { exists: true, judged: has('judgedOld') ? j.judgedOld : j.moved };   // the verdict, or (a marker from before the count) what it moved
 }
 /** Is /home/<old> gone? — the check claude-home's staleUsers asks too (B-8033 cure: both sources of an old user agree). */
 // R6 (主开发 r5068): only «not there» is gone — a stat refused for any other cause is NOT gone, so the old user is not acted on at this start
@@ -200,7 +203,7 @@ function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null
       // verdict of its own (the second read: the owed stores are retried on it, never «kept» — judgedOld > 0)
       const ownVerdict = !!dmState.owed && dmState.judgedOld > 0;
       const unread = dmUnread || (!!hmState.unreadable && !ownVerdict);
-      if (hmState.unreadable && !dataDone) log.warn(`[migrate] home rename: the HOME marker of /home/${old} could not be read (${hmState.unreadable}: ${homeHint(hmState.unreadable)}) — not taken as judged; ${unread ? 'its recorded paths wait for a start that can read it' : 'the owed rewrite runs on its own verdict'}`);
+      if (hmState.unreadable && !dataDone) log.warn(`[migrate] home rename: the HOME marker of /home/${old} could not be read (${hmState.unreadable}: ${homeHint(hmState.unreadable, unread && !dmUnread ? { old, hm, dm, projects: path.join(home, '.claude', 'projects') } : null)}) — not taken as judged; ${unread ? 'its recorded paths wait for a start that can read it' : 'the owed rewrite runs on its own verdict'}`);
       if (dmUnread) log.warn(`[migrate] home rename: the data marker of /home/${old} could not be read (${dmState.unreadable}: ${ownedHint(dmState.unreadable)}) — not taken as done; its recorded paths wait for a start that can read it`);
       if (homeDone && dataDone) continue;
       log.log(`[migrate] home rename detected: /home/${old} → ${home} — ${[!homeDone && 'projdirs', !dataDone && 'recorded paths'].filter(Boolean).join(' + ')}`);

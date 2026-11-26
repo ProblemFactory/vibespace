@@ -4590,7 +4590,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         try { r = Mod.migrateHomeRename({ dataDir: d, metaDir: meta, home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, ...(st.diskGone ? {} : { homeGone: () => true }), throwaway: () => false }); await r.written; }
         finally { fs.readFileSync = rf0; if (undo) undo(); }
         let homeNow = null; try { homeNow = fs.statSync(hm).isFile() ? fs.readFileSync(hm, 'utf8') : '<not a file>'; } catch { homeNow = null; }   // follow 4: a folder in its name is read as such, never thrown
-        out.push({ out: r, warned, reads, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d), home: homeNow });
+        out.push({ out: r, warned, reads, layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'), mark: markOf(d), home: homeNow, backups: [d, meta].flatMap((x) => { try { return fs.readdirSync(x); } catch { return []; } }).filter((n) => n.endsWith('.pre-home-migrate')).length });
       }
       return out;
     };
@@ -4764,7 +4764,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // (xix) a TORN HOME marker and an OWED data marker with its own verdict (judged 1): the owed store is retried on it — cured, done
     const OWN1 = JSON.stringify({ at: 1, owed: ['layouts.json'], judgedOld: 1 });
     const [Y1] = await kScene(HR, 'xix-real', [{ home: TORNH, dm: OWN1 }]);
-    ok(Y1.layouts.includes('/home/userN/proj') && doneOf(Y1.mark) && !Y1.mark.kept && Y1.home === TORNH && Y1.warned.some((l) => l.includes('— not taken as judged; the owed rewrite runs on its own verdict')),
+    ok(Y1.layouts.includes('/home/userN/proj') && doneOf(Y1.mark) && !Y1.mark.kept && Y1.home === TORNH && Y1.warned.some((l) => l.includes('— not taken as judged; the owed rewrite runs on its own verdict')) && !Y1.warned.some((l) => l.includes('write {"judgedOld":')),   // follow 5: no hands on the own-verdict road
       'B-574d follow 3 (xix) a held HOME marker beside an OWED rewrite that carries its own verdict: the owed store retried on it — cured, marked done (never «kept»), the HOME marker never written over, said', { mark: Y1.mark, warned: Y1.warned });
     const [YR1] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, HELD, "      const unread = dmUnread || !!hmState.unreadable;   // MUTANT: follow 3's first form — a held HOME marker holds an owed rewrite too\n", 'an owed verdict runs past a held HOME marker'), 'owed-held-too'), 'xix-red', [{ home: TORNH, dm: OWN1 }]);
     ok(YR1.layouts === LAY0 && !doneOf(YR1.mark), 'B-574d follow 3 RED (anchored copy: a held HOME marker holds the owed rewrite too): layouts.json never retried, for good — (xix) goes red', { mark: YR1.mark });
@@ -4894,7 +4894,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // (xxx) a FOLDER in the HOME marker's name: held, with the words of that case; (xxxi) bytes that are no marker record (null; a count
     // that is no number): held; (xxxii) a torn HOME marker's words give the hands a person can use, and the hand works at the next start.
     // Each judged on the product's own reads of the marker in that step (kScene's `reads` — never the leg's read after it)
-    const HDIR = { homeDir: true }, HNULL = 'null', HQUOTED = '{"judgedOld":"1"}', HAND = '{"judgedOld":1}';
+    const HDIR = { homeDir: true }, HNULL = 'null', HQUOTED = '{"judgedOld":"1"}', HNEG = '{"judgedOld":-1}', HAND = '{"judgedOld":1}', HAND0 = '{"judgedOld":0}';
     const [FD] = await kScene(HR, 'xxx-real', [HDIR]);
     if (!FD.reads) skipF4('follow 4 (xxx)', 'the HOME marker was never read');
     else ok(FD.layouts === LAY0 && FD.mark === null && FD.warned.length === 1 && FD.warned[0].includes('could not be read (EISDIR: something else stands in its name: restore it from a backup — never move it aside'), 'B-574d follow 4 (xxx) a FOLDER in the HOME marker\'s name: HELD (nothing rewritten, no data marker), said with that case\'s words', { mark: FD.mark, warned: FD.warned });
@@ -4902,23 +4902,34 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const [FDx] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, EIS, '', 'the HOME marker\'s other-thing words'), 'f4-eisdir-words'), 'xxx-red', [HDIR]);
       if (!FDx.reads) skipF4('follow 4 (xxx) RED', 'the copy never read the HOME marker');
       else ok(FDx.warned.length === 1 && !FDx.warned[0].includes('something else stands in its name'), 'RED (anchored copy: no words for something else in its name): the folder is said as a refused read — (xxx) goes red', { warned: FDx.warned }); }
-    const [NU] = await kScene(HR, 'xxxi-null', [{ home: HNULL }]), [NQ] = await kScene(HR, 'xxxi-quoted', [{ home: HQUOTED }]);
-    if (!NU.reads || !NQ.reads) skipF4('follow 4 (xxxi)', 'the HOME marker was never read');
-    else ok([NU, NQ].every((x) => x.layouts === LAY0 && x.mark === null && x.warned.length === 1 && x.warned[0].includes('could not be read (no-record: its bytes are no marker record')), 'B-574d follow 4 (xxxi) a HOME marker whose bytes are NO marker record — `null`, or a count that is no number ({"judgedOld":"1"}) — HELD like torn bytes: never «judged none» (no «kept»)', { null: NU.warned, quoted: NQ.warned });
-    { const NOBJ = "  if (!j || typeof j !== 'object' || Array.isArray(j) || (!Number.isFinite(j.judgedOld) && !Number.isFinite(j.moved))) return { exists: true, judged: 0, unreadable: 'no-record' };";
+    const [NU] = await kScene(HR, 'xxxi-null', [{ home: HNULL }]), [NQ] = await kScene(HR, 'xxxi-quoted', [{ home: HQUOTED }]), [NN] = await kScene(HR, 'xxxi-neg', [{ home: HNEG }]);   // follow 5 (r5258): a count below 0 is no record either
+    if (!NU.reads || !NQ.reads || !NN.reads) skipF4('follow 4 (xxxi)', 'the HOME marker was never read');
+    else ok([NU, NQ, NN].every((x) => x.layouts === LAY0 && x.mark === null && x.warned.length === 1 && x.warned[0].includes('could not be read (no-record: its bytes are no marker record')), 'B-574d follow 4 (xxxi) a HOME marker whose bytes are NO marker record — `null`, a count that is no number ({"judgedOld":"1"}), a count below 0 ({"judgedOld":-1}, follow 5) — HELD like torn bytes: never «judged none» (no «kept»)', { null: NU.warned, quoted: NQ.warned, negative: NN.warned });
+    { const NOBJ = "  if (!j || typeof j !== 'object' || Array.isArray(j) || (has('judgedOld') ? !countOk(j.judgedOld) : !countOk(j.moved))) return { exists: true, judged: 0, unreadable: 'no-record' };";
       const MN = M574.load('src/server/home-rename.js', anchored(HRT, NOBJ, '  /* RED: a non-record read as a verdict */', 'a non-record is no verdict'), 'f4-null-marker');
-      const [NUx] = await kScene(MN, 'xxxi-red-null', [{ home: HNULL }]), [NQx] = await kScene(MN, 'xxxi-red-quoted', [{ home: HQUOTED }]);
-      if (!NUx.reads || !NQx.reads) skipF4('follow 4 (xxxi) RED', 'the copy never read the HOME marker');
-      else ok(!!NUx.mark && !!NUx.mark.kept && !!NQx.mark && !!NQx.mark.kept, 'RED (anchored copy: a non-record read as a verdict): judged none — the data half writes «kept» for both — (xxxi) goes red', { null: NUx.mark, quoted: NQx.mark }); }
+      const [NUx] = await kScene(MN, 'xxxi-red-null', [{ home: HNULL }]), [NQx] = await kScene(MN, 'xxxi-red-quoted', [{ home: HQUOTED }]), [NNx] = await kScene(MN, 'xxxi-red-neg', [{ home: HNEG }]);
+      if (!NUx.reads || !NQx.reads || !NNx.reads) skipF4('follow 4 (xxxi) RED', 'the copy never read the HOME marker');
+      else { const held = (x) => x.mark === null && x.warned.some((l) => l.includes('no-record')); ok(!held(NUx) && !held(NQx) && !held(NNx), 'RED (anchored copy: a non-record read as a verdict): neither is HELD any more (one throws out of the start, the other is read as a count) — (xxxi) goes red', { null: [NUx.mark, NUx.warned], quoted: [NQx.mark, NQx.warned], negative: [NNx.mark, NNx.warned] }); } }
     const [T1, T2] = await kScene(HR, 'xxxii-real', [{ home: TORNH }, { home: HAND }]);
+    const T1HM = path.join(base, 'xxxii-real', 'home', 'userN', '.vibespace', NAME), T1DM = path.join(base, 'xxxii-real', 'data', NAME), T1PJ = path.join(base, 'xxxii-real', 'home', 'userN', '.claude', 'projects');   // the files the words must name, as kScene builds them
     if (!T1.reads) skipF4('follow 4 (xxxii)', 'the HOME marker was never read');
-    else ok(T1.mark === null && T1.warned.length === 1 && T1.warned[0].includes('with no backup: if this HOME\'s old project folders now stand under the new name') && T1.warned[0].includes('write {"judgedOld":1} into it') && T1.warned[0].includes('write {"judgedOld":0}')
+    else ok(T1.mark === null && T1.warned.length === 1 && T1.warned[0].includes('ask the transcripts (a SIGN, not the hub\'s own judgement') && T1.warned[0].includes('an error of the grep is no answer') && T1.warned[0].includes('The marker speaks for EVERY data folder over this HOME') && T1.warned[0].includes(`grep -lF -e '"cwd":"/home/olduser/' -e '"cwd":"/home/olduser"' ${T1PJ}/*/*.jsonl prints a file`) && T1.warned[0].includes('write {"judgedOld":1} into ' + T1HM) && T1.warned[0].includes('<store>.pre-home-migrate') && T1.warned[0].includes('if it prints nothing, write {"judgedOld":0} into it')
+      && T1.warned[0].includes('A wrong 0 is undone by writing 1 into ' + T1HM + ' and removing ' + T1DM) && T1.warned[0].includes('a wrong 1 only with the hub STOPPED') && T1.warned[0].includes('written since that start') && T1.warned[0].includes('remove ' + T1DM + ', write {"judgedOld":0} into ' + T1HM + ', then start it')
       && T2.reads > 0 && T2.layouts.includes('/home/userN/proj') && doneOf(T2.mark) && !T2.mark.kept,
-      'B-574d follow 4 (xxxii) a TORN HOME marker (an older release\'s plain write) is held with the hands a person can use — {"judgedOld":1} when its old folders stand under the new name, {"judgedOld":0} when none moved — and the first cures this data folder at the next start (done, never «kept»)', { first: T1.warned, second: T2.mark });
-    { const TORNW = "const homeHint = (code) => (code === 'unparsable' ? `its bytes do not parse: ${HOME_TORN}` :";
-      const [T1x] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, TORNW, "const homeHint = (code) => (code === 'unparsable' ? `its bytes do not parse: ${HOME_KEEP}` :   /* RED: follow 3's words */", 'the torn marker\'s hand'), 'f4-torn-words'), 'xxxii-red', [{ home: TORNH }]);
+      'B-574d follow 4/5 (xxxii) a TORN HOME marker (an older release\'s plain write) is held with the hands a person can use, by the transcripts\' recorded cwd (the evidence the move judged by) — {"judgedOld":1} into the marker (its path named) when a conversation of the old home is there, the backups named; {"judgedOld":0} when none is; the way back from each wrong one — and the first cures this data folder at the next start (done, never «kept»)', { first: T1.warned, second: T2.mark });
+    { const TORNW = "const homeHint = (code, who = null) => { const torn = who ? homeTorn(who.old, who.hm, who.dm, who.projects) : HOME_KEEP;";
+      const [T1x] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, TORNW, "const homeHint = (code, who = null) => { const torn = HOME_KEEP;   /* RED: follow 3's words */", 'the torn marker\'s hand'), 'f4-torn-words'), 'xxxii-red', [{ home: TORNH }]);
       if (!T1x.reads) skipF4('follow 4 (xxxii) RED', 'the copy never read the HOME marker');
       else ok(T1x.warned.length === 1 && !T1x.warned[0].includes('write {"judgedOld":'), 'RED (anchored copy: follow 3\'s words — a backup nobody has): no hand — (xxxii) goes red', { warned: T1x.warned }); }
+    // (xxxiv) follow 5 (r5258): the SECOND hand driven to the next start — {"judgedOld":0} written into a torn marker: the data half is
+    // marked «kept», data/'s stores byte-identical, no backup written; RED (anchored copy: a count of 0 read as no record): held for good
+    const [Z1, Z2] = await kScene(HR, 'xxxiv-real', [{ home: TORNH }, { home: HAND0 }]);
+    if (!Z1.reads || !Z2.reads) skipF4('follow 5 (xxxiv)', 'the HOME marker was never read');
+    else ok(Z1.mark === null && Z2.layouts === LAY0 && !!Z2.mark && !!Z2.mark.kept && Z2.backups === 0 && Z2.warned.length === 0, 'B-574d follow 5 (xxxiv) the SECOND hand ({"judgedOld":0} into the torn marker) at the next start: the data half marked «kept» — layouts.json byte-identical, no backup written, nothing said', { first: Z1.mark, second: Z2.mark, backups: Z2.backups, warned: Z2.warned });
+    { const ZERO = "countOk = (n) => Number.isInteger(n) && n >= 0;";
+      const [, Z2x] = await kScene(M574.load('src/server/home-rename.js', anchored(HRT, ZERO, "countOk = (n) => Number.isInteger(n) && n > 0;   /* RED: a count of 0 read as no record */", 'a count of 0 is a verdict'), 'f5-zero-none'), 'xxxiv-red', [{ home: TORNH }, { home: HAND0 }]);
+      if (!Z2x.reads) skipF4('follow 5 (xxxiv) RED', 'the copy never read the HOME marker');
+      else ok(Z2x.mark === null, 'RED (anchored copy: a count of 0 read as no record): the second hand holds the data half for good — (xxxiv) goes red', { mark: Z2x.mark }); }
     // (xxxiii) the HOME marker's final rename REFUSED: the temp does not stay behind
     const renameRefused = async (fn) => { const P = fs.promises, r0 = P.rename; let hits = 0; P.rename = async function (a, b) { if (String(a).endsWith(HMT)) { hits++; throw Object.assign(new Error('EIO: a placed refusal of the rename'), { code: 'EIO' }); } return r0.call(this, a, b); }; try { return { r: await fn(), hits }; } finally { P.rename = r0; } };
     const RR = await renameRefused(() => hrScene(HR, 'xxxiii-real', 'no-such-tail', null)), RRh = hmOf(RR.r);
