@@ -3318,7 +3318,9 @@ class JobManager {
     const mem = M.memoryMbOf(job, this._memoryCtx()); // the record's, until the wrapper says the bound it proved (_adoptBound)
     const hub = M.memoryMbOf(job, this._memoryCtx({ hub: true })); // the spec's: the rlimit / none rungs live inside the hub's own cgroup
     this._jobToken(job);   // lane lg-store-writes U4 (the move's hunt, F): the call credential minted BEFORE the intent's save, so its hash rides the write the spawn waits for
-    job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb, memoryAskedMb: mem.askedMb !== undefined ? mem.askedMb : mem.mb, ...(mem.cap ? { memoryCap: mem.cap } : {}) }); // round 3: both numbers (asked, effective), and the instance's cap when it lowered the bound
+    // r4767 (B-91aa's follow): THE «ASKED» MARK IS ON DISK BEFORE THE STARTER IS ASKED — set here, in the run the intent's own synchronous save
+    // carries (every road: a press, a create, a supervised restart, an update's re-run, a schedule's child, a boot's replay)
+    job.runs.push({ startedAt: runTs, trigger, ask: vj ? 'direct' : 'asked', log: path.join(ctl, 'current.log'), memoryMb: mem.mb, memoryAskedMb: mem.askedMb !== undefined ? mem.askedMb : mem.mb, ...(mem.cap ? { memoryCap: mem.cap } : {}) }); // round 3: both numbers (asked, effective), and the instance's cap when it lowered the bound
     this._save();
     // A CHILD THE DISK DOES NOT HOLD IS NEVER STARTED (lane lg-store-writes, the U4/U5 cure — 主开发's as-if-must): the run's
     // intent waits for jobs.json ALONE (the notifications follow on the writer); a write that did not land inside the
@@ -3413,7 +3415,7 @@ class JobManager {
     child.unref();
     if (vj) this._handValues(child, job, vj, frame, job.runs[job.runs.length - 1]);
     try { this._starter().noteDirect(); } catch { }   // B-91aa's remainder (r4591 (A)): a vault job's start on the hub's own road — COUNTED (the hourly line's vault-direct-starts)
-    job.runs[job.runs.length - 1].ask = 'direct';   // …and its run is THIS engine's start: the bounded look judges it too
+    job.runs[job.runs.length - 1].ask = 'direct';   // …set at the run's push already (r4767); its run is THIS engine's start: the bounded look judges it too
     job.state = 'up';
     job.proc = { pid: child.pid };
     this._touch(job);
@@ -3431,7 +3433,7 @@ class JobManager {
    *  (startAnswer). */
   _askStart(job, argv, specPath, trigger) {
     const run = job.runs[job.runs.length - 1];
-    run.ask = 'asked';
+    run.ask = 'asked';   // set at the run's push already (r4767: on disk with the intent) — said again for the road's reader
     let p;
     try { p = this._starter().run(argv[0], argv.slice(1), { detach: { job: true, quiet: true }, wholeEnv: true, env: wrapperEnv(job.id), timeoutMs: this.d.startAnswerMs || JOB_START_ANSWER_MS }); }
     catch (e) { p = Promise.resolve({ started: false, error: (e && e.message) || String(e) }); }
