@@ -142,10 +142,10 @@ function callerView(c) {
  * after: a failed write throws, and nobody ever saw a token that is not on disk.
  */
 const STORES = new Map();
-function callersStore(dir, { secrets, now = Date.now } = {}) {
+function callersStore(dir, { secrets, now = Date.now, writer = null } = {}) {
   const file = path.join(dir, CALLERS_FILE);
   const have = STORES.get(file);
-  if (have) { if (secrets) have.secrets = secrets; return have; }
+  if (have) { if (secrets) have.secrets = secrets; if (writer) have.writer = writer; return have; }
   const bus = new EventEmitter(); bus.setMaxListeners(0);
   let doc = null;
   // B-f276's family (r3145): callers.json HOLDS on a failed read — every read below throws the hold's refusal (no road hears «no
@@ -164,7 +164,7 @@ function callersStore(dir, { secrets, now = Date.now } = {}) {
   const save = (next) => { if (!hold.writable('a webhook callers change')) throw hold.refusal('this change'); writeJsonAtomic(file, next); doc = next; };
   const clone = () => JSON.parse(JSON.stringify(load()));
   const S = {
-    secrets: secrets || null, bus, file, dir,
+    secrets: secrets || null, bus, file, dir, writer: writer || null,   // writer: the reply queues' store writer (B-574d) — the process's unless a suite hands one
     /** the hold's facts {file, code, since} while callers.json could not be read — null when it reads (asked after the first read) */
     held() { if (!doc) { try { load(); } catch { /* held: the facts below */ } } return hold.held(); },
     /** the words a person reads while held (null: not held) — no path, caller, token or hash */
@@ -309,28 +309,37 @@ function deliveryVerdict(d) {
 
 // ── THE POLL QUEUE: data/channels/webhook/replies/<slug>/<callerId>.ndjson (≤ 200 lines, ≤ 7 days) ─────────────────
 function queueFile(dir, slug, id) { return path.join(dir, 'replies', slug, `${id}.ndjson`); }
-function queueRead(dir, slug, id, t) {
+// B-574d slice «channels-small-stores» (lane nl-journals, 主开发 r4939): a poll-mode caller's reply queue goes through THE STORE WRITER —
+// the APPEND's own read takes the writer's OWED bytes first (it builds on an append not landed yet: its seq continues), then the file.
+// THE CALLER'S POLL hands out LANDED lines only (the file): a caller's cursor never moves past a line a dying hub could still lose — a
+// restart would number the next reply with that same seq and the cursor would hide it (the slice's own adversarial read). A long-poll is
+// woken at the LANDING (onWritten), so a wake finds the reply. THE TAKE (r4939): a poll removes nothing it hands over — its cursor and the
+// 7-day age decide what it sees — kept exactly as the release did: no new duplicate, no new loss
+const writerOf = (S) => (S && S.writer) || require('../store-writer.js').storeWriter();
+function queueText(S, f) { const W = writerOf(S), owed = W && typeof W.owed === 'function' ? W.owed(f) : null; return owed != null ? owed : fs.readFileSync(f, 'utf-8'); }
+function queueRead(S, slug, id, t, { landed = false } = {}) {
   let lines = [];
-  try { lines = fs.readFileSync(queueFile(dir, slug, id), 'utf-8').split('\n').filter(Boolean); } catch { return []; }
+  try { const f = queueFile(S.dir, slug, id); lines = (landed ? fs.readFileSync(f, 'utf-8') : queueText(S, f)).split('\n').filter(Boolean); } catch { return []; }
   const out = [];
   for (const l of lines) { try { const x = JSON.parse(l); if (x && Number.isInteger(x.seq) && t - Number(x.at) <= POLL_TTL_MS) out.push(x); } catch { } }
   return out;
 }
 function queueAppend(S, slug, id, item, t) {
-  const all = queueRead(S.dir, slug, id, t);
-  let raw = 0; try { raw = fs.readFileSync(queueFile(S.dir, slug, id), 'utf-8').split('\n').filter(Boolean).length; } catch { }
+  const all = queueRead(S, slug, id, t);
+  let raw = 0; try { raw = queueText(S, queueFile(S.dir, slug, id)).split('\n').filter(Boolean).length; } catch { }
   const seq = (all.length ? all[all.length - 1].seq : 0) + 1;
   all.push({ seq, at: t, ...item });
   const keep = all.slice(-POLL_MAX);
   const dropped = (raw - (all.length - 1)) + (all.length - keep.length);
   const f = queueFile(S.dir, slug, id);
   fs.mkdirSync(path.dirname(f), { recursive: true, mode: 0o700 });
-  const tmp = `${f}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, keep.map((x) => JSON.stringify(x)).join('\n') + '\n', { mode: 0o600 });
-  fs.renameSync(tmp, f);
+  // B-574d: handed to THE STORE WRITER (its thread writes, syncs and renames the queue, 0600) — readable at once by the poll (the owed
+  // bytes), its sender answered once it LANDED (`landed`, off the loop — whoever sends: an agent's reply or a person's, nothing waits on
+  // the loop); a landing that fails is said by the writer and the reply stays queued in it, written again
+  const text = keep.map((x) => JSON.stringify(x)).join('\n') + '\n', W = writerOf(S);
+  W.dirty(f, { name: 'webhook-replies.write', mode: 0o600, produce: () => text, onWritten: (ok) => { if (ok) { try { S.bus.emit('reply', { slug, id }); } catch { /* a listener's */ } } } });   // the long-poll woken at the LANDING
   if (dropped > 0) S.notePollDropped(slug, id, dropped);
-  S.bus.emit('reply', { slug, id });
-  return seq;
+  return { seq, landed: (opts) => Promise.resolve(W.durable(f, opts)).catch(() => false) };
 }
 /** The caller's OWN cursor: `<seq base36>.<hmac(key, seq)[:12]>` — forged or another caller's ⇒ null. */
 function cursorOf(key, seq) { return `${seq.toString(36)}.${hmacHex(key, `cursor:${seq}`).slice(0, 12)}`; }
@@ -346,7 +355,7 @@ function pollAnswer(S, slug, c, cur, t) {
   const key = S.keyOf(c);
   const since = cursorSeq(key, cur);
   if (since === null) return null;
-  const items = queueRead(S.dir, slug, c.id, t).filter((x) => x.seq > since).slice(0, 50);
+  const items = queueRead(S, slug, c.id, t, { landed: true }).filter((x) => x.seq > since).slice(0, 50);   // LANDED lines only (B-574d)
   const last = items.length ? items[items.length - 1].seq : since;
   return { ok: true, replies: items.map((x) => ({ replyId: x.replyId, inReplyTo: x.inReplyTo || null, at: x.at, from: { name: x.replyName }, text: x.text })), cursor: cursorOf(key, last), dropped: Number(c.pollDropped) || 0 };
 }
@@ -355,7 +364,7 @@ function create(record = {}, deps = {}) {
   const clock = typeof deps.now === 'function' ? deps.now : () => Date.now();
   const log = deps.log || console;
   const dir = typeof deps.ownDir === 'string' && deps.ownDir ? deps.ownDir : null;
-  const S = dir ? callersStore(dir, { secrets: deps.secrets || null, now: clock }) : null;
+  const S = dir ? callersStore(dir, { secrets: deps.secrets || null, now: clock, writer: deps.writer || null }) : null;
   const setting = typeof deps.setting === 'function' ? deps.setting : () => undefined;
   const findRecord = typeof deps.findRecord === 'function' ? deps.findRecord : () => null;
   const fetchFence = typeof deps.fenceFetch === 'function' ? deps.fenceFetch : EF.fenceFetch;
@@ -365,13 +374,14 @@ function create(record = {}, deps = {}) {
   const need = () => { if (!S) throw new ChannelError('send-not-available', 'the webhook adapter has no data directory', { retryable: false, detail: { why: 'no-store' } }); if (S.held()) throw heldError(); return S; };
   const refusal = (r) => new ChannelError(r.code === 'bad-proposal' ? 'send-not-available' : r.code, r.error, { retryable: false, detail: { why: r.why, named: true, callers: (r.callers || []).map((c) => ({ id: c.id, name: c.name, delivery: c.delivery })) } });
 
-  async function deliverTo(convId, c, { text, replyId, inReplyTo }) {
+  async function deliverTo(convId, c, { text, replyId, inReplyTo, budgetMs = null }) {
     const st = need();
     const p = st.path(convId) || { replyName: REPLY_NAME_DEFAULT };
     const t = clock();
     if (c.delivery.mode === 'poll') {
-      queueAppend(st, convId, c.id, { replyId, inReplyTo, replyName: p.replyName, text }, t);
-      return { ok: true, vendorMessageId: replyId, at: t, sentAs: 'user', lane: 'poll' };
+      // B-574d: answered once the queue LANDED — the wait bounded by the send's own budget when it has one (an agent's waiting command)
+      const onDisk = await queueAppend(st, convId, c.id, { replyId, inReplyTo, replyName: p.replyName, text }, t).landed(Number(budgetMs) > 0 ? { timeoutMs: Math.max(1, Math.floor(Number(budgetMs))) } : undefined);
+      return { ok: true, vendorMessageId: replyId, at: t, sentAs: 'user', lane: 'poll', ...(onDisk ? {} : { notOnDisk: true }) };
     }
     if (c.delivery.mode !== 'reply-url') return { ok: false, code: 'send-not-available', retryable: false, detail: { why: 'delivery-none', reason: `${c.name} (${c.id}) takes no replies (its delivery is none)` } };
     // lane webhook-l3-cli-pair: a PEER (another VibeSpace) is called AS this side's caller on ITS path — the canonical payload,
@@ -440,7 +450,7 @@ function create(record = {}, deps = {}) {
       return { ...base, notifies: r.callers.map((c) => c.name), recipients: r.callers.map((c) => c.id), skipped: r.skipped.map((c) => c.id) };
     },
     /** THE SEND — the caller is RE-READ now (revoked ⇒ not-found; rotated ⇒ its new key signs). */
-    async send(convId, { text, idemKey, envelope = null } = {}) {
+    async send(convId, { text, idemKey, envelope = null, budgetMs = null } = {}) {
       // r3145: held — the send waits (retryable, the hold's words), never «no longer a caller» of a caller the unread list holds
       // r3223 (2): nothing re-sends a refused reply (the outbox keeps it failed), so its reason says so plainly — never as if it will go
       if (S && S.held()) return { ok: false, code: 'transport', retryable: true, detail: { why: 'callers-unread', reason: NOT_SENT_WHILE_HELD } };
@@ -454,7 +464,7 @@ function create(record = {}, deps = {}) {
       const replyId = `${c.id}:${hmacHex(st.keyOf(c) || c.id, `reply:${String(idemKey || clock())}`).slice(0, 16)}`;
       let inReplyTo = null;
       if (envelope && envelope.inReplyTo) { const key = st.keyOf(c); const anchor = findRecord(convId, envelope.inReplyTo); if (key && anchor && anchor.id) inReplyTo = hmacHex(key, anchor.id).slice(0, 16); }
-      return deliverTo(convId, c, { text: String(text == null ? '' : text), replyId, inReplyTo });
+      return deliverTo(convId, c, { text: String(text == null ? '' : text), replyId, inReplyTo, budgetMs });
     },
     /** A composed message (no anchor): `to` = [callerId], `convId` = the path. */
     async compose({ convId, to, text, idemKey } = {}) {

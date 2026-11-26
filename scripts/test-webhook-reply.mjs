@@ -7,7 +7,8 @@
 // at send time. Fast, PURE + the adapter over a scratch callers file. Run: node scripts/test-webhook-reply.mjs
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const RP = require('../src/webhook-reply.js');
 const WH = require('../src/channels/webhook.js');
@@ -70,6 +71,42 @@ try {
   let err3 = null; try { await ad.prepareSend('ci', { text: 'x', recipients: b.caller.id }); } catch (e) { err3 = e; }
   ok(err3 && err3.detail.why === 'delivery-none', 'compose --caller <a none caller> ⇒ refused by name');
   ok((await ad.reconcile()).unknown === true, 'reconcile ⇒ {unknown: true} (no caller-side lookup; a person re-sends)');
+  // B-574d (lane nl-journals, 主开发 r4939): A POLL CALLER'S REPLY QUEUE THROUGH THE STORE WRITER — the append HANDS the queue file under its
+  // row (0600), nothing written on the hub's loop; the poll hands out LANDED lines only (a cursor never moves past a line a dying hub could
+  // lose); the send is answered only once the queue LANDED (held here); a landing that fails answers ok with notOnDisk (the reply stays
+  // queued in the writer — no second copy). REDs (a copy): the release's append (written on the loop); a poll that hands out OWED lines
+  const queueScene = async (Mod, name) => {
+    const qd = scratch('webhook-reply-' + name), sec = secrets;
+    let release, owed = new Map(); const gate = new Promise((r) => { release = r; }), calls = [];
+    const w = { dirty(file, o) { calls.push({ file, name: o.name, mode: o.mode, wakes: typeof o.onWritten === 'function' }); owed.set(file, o.produce()); }, owed: (f) => (owed.has(f) ? owed.get(f) : null), durable: async (f) => { const ok2 = await gate; if (ok2) owed.delete(f); return ok2; }, pending: () => false, forget() { } };
+    const qs = Mod.callersStore(qd, { secrets: sec, writer: w }); qs.putPath('ci', { title: 'CI' });
+    const al = qs.register('ci', { name: 'alpha', auth: 'hmac', delivery: { mode: 'poll' } });
+    const qa = Mod.create({ id: 'webhook' }, { ownDir: qd, secrets: sec, writer: w, findRecord: () => null });
+    const o = { writeFileSync: fs.writeFileSync, renameSync: fs.renameSync }, loop = [];
+    const qf = (n) => String(n).includes(require('node:path').join('replies', 'ci'));
+    fs.writeFileSync = function (p0, ...x) { if (qf(p0)) loop.push('write'); return o.writeFileSync.call(this, p0, ...x); };
+    fs.renameSync = function (a0, b0, ...x) { if (qf(b0)) loop.push('rename'); return o.renameSync.call(this, a0, b0, ...x); };
+    let answered = false, sent, before;
+    try {
+      const p = qa.send('ci', { text: 'queued', idemKey: 'q-1', envelope: { to: al.caller.id } }).then((r) => { answered = true; return r; });
+      await new Promise((r) => setImmediate(r)); await new Promise((r) => setImmediate(r));
+      before = { answered, poll: (Mod.pollAnswer(qs, 'ci', qs.caller('ci', al.caller.id), '', Date.now()) || { replies: [] }).replies.map((x) => x.text) };
+      release(false); sent = await p;
+    } finally { Object.assign(fs, o); }
+    return { calls, loop: loop.join(' '), before, sent: { ok: sent && sent.ok, notOnDisk: sent && sent.notOnDisk } };
+  };
+  const qr = await queueScene(WH, 'real');
+  ok(qr.calls.length === 1 && qr.calls[0].name === 'webhook-replies.write' && qr.calls[0].mode === 0o600 && qr.loop === '', 'B-574d the reply is HANDED to the store writer under its row (0600) — nothing written on the hub\'s loop', qr);
+  ok(qr.before.answered === false && J(qr.before.poll) === J([]) && qr.calls[0].wakes === true, 'B-574d …the caller\'s poll hands out LANDED lines only (a reply still owed is not handed — its cursor can never pass a line a dying hub could lose), the long-poll is woken at the landing, and the send is NOT answered until it', qr.before);
+  ok(qr.sent.ok === true && qr.sent.notOnDisk === true, 'B-574d …a landing that fails answers ok with notOnDisk — the reply stays queued in the writer (no second copy, none lost while the hub lives)', qr.sent);
+  const WSRC = fs.readFileSync(new URL('../src/channels/webhook.js', import.meta.url), 'utf8');
+  const MW = mutantCopies('webhook-reply-queue', new URL('..', import.meta.url).pathname);
+  const owedPoll = MW.load('src/channels/webhook.js', anchored(WSRC, "  const items = queueRead(S, slug, c.id, t, { landed: true }).filter((x) => x.seq > since).slice(0, 50);", "  const items = queueRead(S, slug, c.id, t).filter((x) => x.seq > since).slice(0, 50);", 'a poll that hands out owed lines'), 'owed-poll');
+  const r1 = await queueScene(owedPoll, 'red-owed-poll');
+  ok(J(r1.before.poll) === J(['queued']), 'RED B-574d a poll that hands out OWED lines: the caller is handed a reply that has not landed — its cursor passes a line a dying hub could lose', r1.before);
+  const relApp = MW.load('src/channels/webhook.js', anchored(WSRC, "  W.dirty(f, { name: 'webhook-replies.write', mode: 0o600, produce: () => text, onWritten: (ok) => { if (ok) { try { S.bus.emit('reply', { slug, id }); } catch { /* a listener's */ } } } });", "  { const tmp = `${f}.tmp-${process.pid}`; fs.writeFileSync(tmp, text, { mode: 0o600 }); fs.renameSync(tmp, f); S.bus.emit('reply', { slug, id }); }", 'the release append'), 'release-append');
+  const r2 = await queueScene(relApp, 'red-append');
+  ok(/write/.test(r2.loop) && /rename/.test(r2.loop) && r2.calls.length === 0, 'RED B-574d the release\'s append: the queue written and renamed ON the hub\'s loop, nothing handed to the writer', { loop: r2.loop, calls: r2.calls.length });
 } catch (e) { fail++; console.error('  ✗ threw:', e.stack || e.message); }
 finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}`);
