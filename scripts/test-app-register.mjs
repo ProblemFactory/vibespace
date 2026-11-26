@@ -9,6 +9,7 @@
 // exec = ONE For-you item, Accept records it with its variants; a witnessed Flatpak recorded directly; sudo / pkexec ⇒ needs_root on
 // every path; remove = a proposal whose Accept runs the registered recipe (a PATH stub) and the row leaves; the witness drops covered rows.
 import './scratch.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // after the scratch harness (its import order)
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
@@ -25,6 +26,12 @@ const M = require(path.join(ROOT, 'src/desktop-apps.js'));
 let fails = 0, n = 0;
 const ok = (c, msg) => { n++; if (!c) { fails++; console.log(`  ✗ ${msg}`); } };
 const eq = (a, b, msg) => ok(JSON.stringify(a) === JSON.stringify(b), `${msg}: ${JSON.stringify(a)} ≠ ${JSON.stringify(b)}`);
+/** r5094 (unit C): this process's own children that carry HOME `home` (read from /proc: the kernel's child list, each one's environ)
+ *  — waited until none is left, by their exit; the expiry a named line (the leg after it judges what is left) */
+const kidsWithHome = (home) => { let pids = []; try { pids = fs.readFileSync(`/proc/${process.pid}/task/${process.pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean); } catch { return []; }
+  return pids.filter((k) => { try { return fs.readFileSync(`/proc/${k}/environ`, 'latin1').split('\0').includes('HOME=' + home); } catch { return false; } }); };
+const kidsEnded = async (home, ms) => { const t0 = Date.now(); let left = kidsWithHome(home); while (left.length && Date.now() - t0 < ms) { await new Promise((r) => setTimeout(r, 25)); left = kidsWithHome(home); }
+  if (left.length) markTimedOut(left, ms, `children with HOME ${home} still alive`); return left; };
 const sec = (s) => console.log(s);
 /** int255: an IN-MEMORY mutant of a repo module, compiled beside the real file (relative requires resolve; nothing on disk changes);
  *  `pairs` = [from, to] — a dead anchor throws, so a control can never pass vacuously. */
@@ -391,8 +398,31 @@ sec('⑩ rel254-verify-fixes: the OWNER routes over the real router (adopt-prefi
   const appsN = ASn.create({ home: h, stateDir: s, env: () => envR, log: { log() { }, warn() { } }, runner: run, witnessDirs: { system: path.join(t10, 'nosys'), flatpakSystem: path.join(t10, 'nofp') }, engineIds: () => [] });
   const fn = await ASn.runAppOp(appsN, 'app-forget', { entryId: 'capp', home: true });
   ok(fn.ok && fn.forgot === 'capp' && fs.existsSync(path.join(aiDir, 'root/AppRun')) && !(await hasCapp()), `CONTROL N1: without the gate the AppImage's record goes and its dir is orphaned — the pin above is red there (${JSON.stringify(fn).slice(0, 120)})`);
-  srv.close();
+  // THE END WAITS FOR WHAT THE SECTION ITSELF STARTED (主开发 r5094, the r3209 retally's unit C — 3 UTC crashes at the current file:
+  // «ENOTEMPTY» removing this folder). The placement probe (scratch 3f37fd2af, never lined) named the writer: CONTROL N2's launch door (a
+  // copy without its F4 gate) goes on to the machine's facts, whose `xpra --version` (desktop-display xpraVersion, its own 5 s bound)
+  // runs with THIS section's HOME and, still alive at the end, writes ~/.config/xpra/xpra.conf into the folder being removed. So the
+  // server is closed by its callback, and every child of this process carrying this section's HOME has ENDED — by their exit, bounded at
+  // twice that probe's own bound, a named line on expiry — before the folder is removed: never a sleep, never a retried removal
+  await new Promise((r) => srv.close(() => r()));
+  const left10 = await kidsEnded(h, 2 * 5000);
+  ok(left10.length === 0, `⑩'s end: every child this section started (its HOME) ended before its folder is removed — still alive: ${JSON.stringify(left10)}`);
   fs.rmSync(t10, { recursive: true, force: true });
+  // PLACED (r5094, unit C — the find made red at will): a stand-in for that late child, a writer of the section's own that holds a moment
+  // inside itself and then writes into its HOME: the OLD end (the removal at once) finds the folder BACK after it lands; the end above
+  // (its own children ended first) leaves nothing
+  const placedEnd = async (wait) => {
+    const tp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-app-register-p-')), hp = path.join(tp, 'home'); fs.mkdirSync(hp);
+    const w = require('child_process').spawn('sh', ['-c', 'sleep 0.4; mkdir -p "$HOME/.config/xpra" && : > "$HOME/.config/xpra/xpra.conf"'], { env: { PATH: '/usr/bin:/bin', HOME: hp }, stdio: 'ignore' });
+    const exited = new Promise((r) => w.once('exit', r));
+    if (wait) await kidsEnded(hp, 2 * 5000);
+    fs.rmSync(tp, { recursive: true, force: true });
+    await exited;   // the writer's own end, by its exit (its write landed, or it found nothing to write into)
+    const back = fs.existsSync(tp); fs.rmSync(tp, { recursive: true, force: true });
+    return back;
+  };
+  const oldBack = await placedEnd(false), newBack = await placedEnd(true);
+  ok(oldBack === true && newBack === false, `PLACED ⑩'s end: a late writer of the section's own (a held moment, then its HOME): the old end (the removal at once) finds the folder BACK after it lands (${oldBack}); the end that waits for its own children leaves nothing (${!newBack})`);
 }
 
 console.log(fails ? `\n${fails}/${n} FAILED` : `\nall ${n} passed`);
