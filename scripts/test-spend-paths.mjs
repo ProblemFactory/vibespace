@@ -6329,10 +6329,12 @@ console.log('\n§15 r3285: the item on the REAL For-you store, the press through
     unknown.every((r) => r.code === 404 && r.body && r.body.code === 'not_found' && /no account/.test(r.body.error || '')) && fs.readdirSync(dir2).length === 0, JSON.stringify(unknown.map((r) => [r.code, r.body && r.body.code])));
   const seed = () => { fs.writeFileSync(f2, JSON.stringify(reading())); for (const n of fs.readdirSync(dir2)) if (n !== P + '.json') fs.rmSync(path.join(dir2, n), { force: true }); return fs.readFileSync(f2); };
   const failAt = (step, fn) => {   // step 'tmp' | 'aside' | 'place': the one call that fails
-    const realW = fs.writeFileSync, realR = fs.renameSync;
+    const realW = fs.writeFileSync, realR = fs.renameSync, realO = fs.openSync;
     fs.writeFileSync = function (p0, ...a) { if (step === 'tmp' && String(p0) === f2 + '.tmp') throw Object.assign(new Error('a placed refusal'), { code: 'ENOSPC' }); return realW.call(this, p0, ...a); };
+    // B-574d (r5075 (B)): the stub is made through the device's door (src/agentd/durable-file.js writeDurable: its own temp `<file>.tmp.<pid>.tmp`, opened exclusive) — the same refusal placed at that open
+    fs.openSync = function (p0, ...a) { if (step === 'tmp' && String(p0).startsWith(f2 + '.tmp.')) throw Object.assign(new Error('a placed refusal'), { code: 'ENOSPC' }); return realO.call(this, p0, ...a); };
     fs.renameSync = function (from, to, ...a) { if (step === 'aside' && String(from) === f2 && String(to).includes('.unreadable-')) throw Object.assign(new Error('a placed refusal'), { code: 'EBUSY' }); if (step === 'place' && String(from) === f2 + '.tmp') throw Object.assign(new Error('a placed refusal'), { code: 'EXDEV' }); return realR.call(this, from, to, ...a); };
-    try { return fn(); } finally { fs.writeFileSync = realW; fs.renameSync = realR; }
+    try { return fn(); } finally { fs.writeFileSync = realW; fs.renameSync = realR; fs.openSync = realO; }
   };
   const outcomes = {};
   for (const step of ['tmp', 'aside', 'place']) {

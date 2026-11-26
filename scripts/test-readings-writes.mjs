@@ -27,6 +27,12 @@
 //          leg (r5124): the release's form passes it too (its caller's own catch removed the temp), so it has no red
 //      HR5 (r5124) the door's every step goes through the road's own queue: _holdIO sees the open, write, sync, close and rename of
 //          the set file. RED: the call without its `step` (the door's default) — the road's queue sees none of them
+//   SA the person's SET-ASIDE of a reading file that cannot be read (src/usage-cache-write.js setAsideReading — a device bundle
+//      input: through the DEVICE's own door, src/agentd/durable-file.js writeDurable, r5075 (B)):
+//      SA1 as it should: the torn file kept aside, the stub that starts again in its place
+//      SA2 a sync of the stub's temp refused (EIO placed): the door's record law — said once, the stub still lands
+//      SA3 a close of the stub's temp that fails (EIO placed): nothing is moved — the torn file stands, no aside, no temp
+//      RED: the release's stub (an anchored copy) asks no sync of it and moves the file aside
 // Run: node scripts/test-readings-writes.mjs
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -220,6 +226,43 @@ console.log('HR the usage hold road\'s set file: replaced synced, off the loop, 
   try { red5 = await holdScene(asModule(HR_REL, anchored(srcOf(HR_REL), HR_STEP, '', 'hr-step')).UsageHoldRoad.prototype, null, 'queue-red', 'compact', false, []); } catch (e) { why5 = e.message; }
   console.log(`    RED queue: ${JSON.stringify(red5 ? { queued: red5.queued, rewritten: !red5.oldKept } : why5)}`);
   ok(!!red5 && red5.queued === 0 && !red5.oldKept, 'HR5 RED CONTROL: the call without its step (the door\'s default) — the set is rewritten and the road\'s queue sees none of its calls', red5 ? { queued: red5.queued } : why5);
+}
+
+
+// ── SA: the person's set-aside of a reading, through the device's own door ──────────────────────────────────────────────────
+const UC_REL = 'src/usage-cache-write.js';
+const UC_TIP = "  try { DFILE.writeDurable({ fs, file: file + '.tmp', data: JSON.stringify(stub), what: `${accountWord(k)}: its reading file that starts again`, log: (l) => { try { console.warn(`[usage-write] ${l}`); } catch { } } }); } catch (e) {";
+const UC_RELEASE = "  try { fs.writeFileSync(file + '.tmp', JSON.stringify(stub)); } catch (e) {";   // stale-pins: kept — the release's text: the red control's replacement, never an anchor
+const TORN = '{"limits": [{"scope": "five_hour", "use';
+function asideScene(M, place, tag) {
+  const d = world('aside-' + tag), key = 'acct-sa-' + worldN, f = M.cacheFileFor(d, key);
+  fs.writeFileSync(f, TORN);
+  const p = place ? placeFd((x) => x.startsWith(f + '.tmp'), place.at) : null;
+  const w0 = console.warn, said = []; console.warn = (...a) => said.push(a.join(' '));
+  let r;
+  try { r = M.setAsideReading({ cacheDir: d, key, now: 1700000000000 }); } finally { if (p) p.restore(); console.warn = w0; }
+  const names = fs.readdirSync(d);
+  const now = bytes(f) || '';
+  return { ok: !!(r && r.ok), state: r && r.state, why: r && r.why, stubInPlace: /startedAgain/.test(now), tornStands: now === TORN, asides: names.filter((n) => n.includes('.unreadable-')).length, temps: names.filter((n) => n.includes('.tmp')).length, asked: p ? p.asked.length : null, said };
+}
+console.log('SA the person\'s set-aside of a reading: its stub through the device\'s own door');
+{
+  const UC = require(path.join(REPO, UC_REL));
+  const g = asideScene(UC, null, 'ok');
+  console.log('    facts: ' + JSON.stringify(g));
+  ok(g.ok && g.state === 'pass' && g.stubInPlace && g.asides === 1 && g.temps === 0, 'SA1 the set-aside as it should: the torn file kept beside itself, the stub that starts again in its place, no temp', g);
+  const s = asideScene(UC, { at: 'sync' }, 'sync');
+  console.log('    sync: ' + JSON.stringify(s));
+  ok(s.ok && s.stubInPlace && s.asked === 1 && s.temps === 0 && s.said.some((l) => /\[usage-write\] .*its reading file that starts again: its write could not be synced to disk \(EIO\) — it is put in place anyway/.test(l)),
+    'SA2 a sync of the stub\'s temp REFUSED (EIO placed): the door\'s record law — said once, and the stub still lands', s);
+  const c = asideScene(UC, { at: 'close' }, 'close');
+  console.log('    close: ' + JSON.stringify(c));
+  ok(!c.ok && /the new file could not be made \(EIO\) — nothing was moved/.test(c.why || '') && c.tornStands && c.asides === 0 && c.temps === 0,
+    'SA3 a close of the stub\'s temp that FAILS (EIO placed): nothing is moved — the torn file stands, no aside, no temp, the press told why', c);
+  let red = null, why = null;
+  try { red = asideScene(asModule(UC_REL, anchored(srcOf(UC_REL), UC_TIP, UC_RELEASE, 'sa-release')), { at: 'sync' }, 'red'); } catch (e) { why = e.message; }
+  console.log('    RED: ' + JSON.stringify(red || why));
+  ok(!!red && red.asked === 0 && red.ok && red.asides === 1, 'SA RED CONTROL: the release\'s stub asks no sync of it and moves the file aside under the same placed refusal', red || why);
 }
 
 report();

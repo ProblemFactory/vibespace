@@ -60,6 +60,7 @@ const fs = require('fs');
 const path = require('path');
 const quotaModel = require('./quota-model.js');
 const SR = require('./store-read.js');   // r3136: the store-read law's one answer (data / missing / unreadable / corrupt)
+const DFILE = require('./agentd/durable-file.js');   // B-574d «usage-readings» (主开发 r5075 (B)): THE device's one door — the person's set-aside's stub is a RECORD (the device bundles this module)
 
 /** THE cache filename rule, in ONE place. Every producer spelled this inline;
  *  a key that sanitises differently in two places is two different accounts. */
@@ -631,7 +632,11 @@ function setAsideReading({ cacheDir, key, backend = null, now = Date.now() }) {
   const stub = { startedAgain: { at: owedAts.length ? Math.min(...owedAts) : now, setAside: path.basename(aside), enumerated: false, overage: false, spendControl: false, resetCredits: false }, ...(backend ? { backend: String(backend) } : {}) };
   // the new file is made FIRST (beside), then the old one moved aside, then the new one put in place: never a moment with no file
   // but the last rename's (a failure there puts the old one back)
-  try { fs.writeFileSync(file + '.tmp', JSON.stringify(stub)); } catch (e) { return { ok: false, why: `the new file could not be made (${(e && e.code) || (e && e.message) || e}) — nothing was moved` }; }
+  // B-574d «usage-readings» (主开发 r5075 (B)): a person's own act, rare — DURABLE. The stub that starts again is made beside the file
+  // through THE DEVICE's OWN DOOR (src/agentd/durable-file.js writeDurable — this module is a device bundle input, so never the hub's
+  // src/fd-close.js): its own temp written, synced ONCE, closed, then renamed to its beside name. The door's record law, as taken: a
+  // refused sync is said once and the stub still lands; a failed write, close or rename leaves no temp and NOTHING is moved.
+  try { DFILE.writeDurable({ fs, file: file + '.tmp', data: JSON.stringify(stub), what: `${accountWord(k)}: its reading file that starts again`, log: (l) => { try { console.warn(`[usage-write] ${l}`); } catch { } } }); } catch (e) { return { ok: false, why: `the new file could not be made (${(e && e.code) || (e && e.message) || e}) — nothing was moved` }; }
   try { fs.renameSync(file, aside); } catch (e) { try { fs.unlinkSync(file + '.tmp'); } catch { } return { ok: false, why: `the file could not be set aside (${(e && e.code) || (e && e.message) || e}) — nothing was moved` }; }
   try { fs.renameSync(file + '.tmp', file); } catch (e) {
     const code = (e && e.code) || (e && e.message) || e;
