@@ -27,7 +27,8 @@
 //     armed by the +2 s sweep for every restored session);
 //   · FC2 adopts the id its init names.
 // NEGATIVE CONTROL: the same run on a second scratch copy whose boot-restore
-// feeds the dedup EVERY meta with an id (the pre-fix loop) — the parent is
+// feeds the dedup EVERY meta with an id (the pre-fix loop) AND decides a pair
+// the release's way (the newer always wins — B-b2d3 step 2) — the parent is
 // retired. (The chat-capture and preamble controls are deterministic
 // patched-copy legs in test-fork-groups.)
 import fs from 'node:fs';
@@ -96,12 +97,12 @@ function makeTree(name, patch = null) {
   for (const f of ['src', 'public', 'server.js', 'package.json']) execFileSync('cp', ['-r', path.join(REPO, f), path.join(wt, f)]);
   execFileSync('cp', ['-r', path.join(REPO, 'data', 'bin'), path.join(wt, 'data', 'bin')]);
   fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
-  if (patch) {
-    const f = path.join(wt, patch.file);
+  for (const p of patch ? [].concat(patch) : []) {   // one patch or several (B-b2d3 step 2: the control needs two)
+    const f = path.join(wt, p.file);
     const src = fs.readFileSync(f, 'utf8');
-    const out = src.replace(patch.from, patch.to);
-    ok(out !== src, `control copy: the patch applied to ${patch.file}`);
-    fs.writeFileSync(f, out);
+    const n = src.split(p.from).length - 1;
+    ok(n === 1, `control copy: the patch's anchor is in ${p.file} exactly once (${n})`);
+    fs.writeFileSync(f, src.replace(p.from, p.to));
   }
   return wt;
 }
@@ -216,7 +217,11 @@ console.log('① the fixed tree: a SIGKILL-restart beside three pending forks');
 
 console.log('② NEGATIVE CONTROL: the pre-fix dedup (every meta with an id is a claim)');
 {
-  const wt = makeTree('wt-control', { file: 'src/server/boot-restore.js', from: '    if (ownsItsId(m)) dedupMetas.push({ sockFile, m });\n', to: '    if (m && m.claudeSessionId) dedupMetas.push({ sockFile, m });\n' });
+  // B-b2d3 step 2 (主开发 r5028): since a pair is decided by each socket's own program, a LIVING parent is kept even beside a fork that
+  // wrongly counts as its duplicate — so the defect is reproduced by BOTH halves of the release: the pre-fix loop AND its decision
+  // (the newer always won: the live-conversation scan answered «nobody» for every claude)
+  const wt = makeTree('wt-control', [{ file: 'src/server/boot-restore.js', from: '    if (ownsItsId(m)) dedupMetas.push({ sockFile, m });\n', to: '    if (m && m.claudeSessionId) dedupMetas.push({ sockFile, m });\n' },
+    { file: 'src/server/boot-restore.js', from: "  const dead = rows.filter((r) => r.program === 'dead');\n", to: '  const dead = rows;   // the release: the newer always won\n' }]);
   const r = await scenario('control', wt);
   ok(r.retired && r.socketsGone.length > 0 && (!r.aAlive || !r.bAlive), 'control: a parent is retired as the "stale duplicate" of its own pending fork (its socket unlinked, its CLI SIGTERMed) — the reproduced defect', JSON.stringify({ retired: r.retired, gone: r.socketsGone, aAlive: r.aAlive, bAlive: r.bAlive }));
 }

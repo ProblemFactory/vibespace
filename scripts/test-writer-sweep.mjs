@@ -1039,7 +1039,10 @@ if (fs.existsSync('/proc/self')) {
 // one copy and not the other is the twin-drift class, so pin the wiring.
 {
   const boot = fs.readFileSync(new URL('../src/server/boot-restore.js', import.meta.url), 'utf8');
-  ok(/require\('\.\.\/writer-sweep\.js'\)/.test(boot) && /fdScanShellFns\(\)/.test(boot), 'boot-restore builds its live-conversation probe from THE shared fd scan');
+  // B-b2d3 step 2 (主开发 r5028 / r5032, lane nl-starts): the restore NO LONGER ASKS this scan — it cannot see a living claude (which
+  // appends and closes its transcript), so a duplicate pair is decided by each socket's own program (its wrapper's side file) instead;
+  // the scan's ONE implementation stays the writer sweep's. Pinned the other way: no copy of it, no call of it, in the restore
+  ok(!/fdScanShellFns|vs_fd_scan/.test(boot.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n')), 'boot-restore asks NO fd scan (B-b2d3 step 2) — neither the shared one nor a copy of it');
   ok(!/for p in \/proc\/\[0-9\]\*\/fd\/\*/.test(boot), 'boot-restore no longer forks a readlink per FD (405,735 forks against its own 6s timeout)');
   // THE RATIONALE IS PART OF THE FIX (r2, defect 3). r1 justified the chunking
   // with "the old fd-level glob overflows ARG_MAX" — wrong: that glob was
@@ -1054,13 +1057,13 @@ if (fs.existsSync('/proc/self')) {
   const wrongArgMax = /glob (also )?(already )?overflows ARG_MAX|glob .{0,40}ALREADY overflows ARG_MAX/;
   ok(![wsrc, boot, kbFile, kbBug].some((t) => wrongArgMax.test(t)),
     'the WRONG ARG_MAX rationale (a shell for-loop overflowing ARG_MAX) is gone from the code AND from both kb twins');
-  ok(/never reach(ed|es) execve/.test(wsrc) && /never reach(ed|es) execve/.test(boot),
-    'both copies state the real reason instead: the for-loop glob never reached execve (its problem was the per-FD forks)');
+  ok(/never reach(ed|es) execve/.test(wsrc),
+    'the scan states the real reason instead: the for-loop glob never reached execve (its problem was the per-FD forks) — the restore holds no copy of it since B-b2d3 step 2');
   ok(/EXECS `ls`/.test(wsrc) && /ARG_MAX/.test(wsrc),
     'and the chunking is justified where it actually applies — `vs_fd_chunk` execs `ls`, so ITS argv is the one ARG_MAX bounds');
   ok(!/Both codex legs kill only `\*codex\*` cmdlines/.test(kbFile),
     'kb: the retired "both codex legs kill only *codex* cmdlines" claim is gone (identity is the EXECUTABLE since B-3185)');
-  ok(/console\.warn\('\[boot-restore\] live-conversation fd scan failed/.test(boot), 'a failed probe SAYS SO instead of silently degrading to "nobody is live"');
+  ok(!/live-conversation fd scan failed/.test(boot), 'the restore\'s «fd scan failed» line left with its scan (B-b2d3 step 2: no pair waits on it)');   // stale-pins: kept (the line's absence, on purpose)
   const fns = fdScanShellFns();
   ok(fns.includes('vs_fd_scan') && fns.includes('vs_fd_pids') && fns.includes('/proc/self/fd'),
     'the shared scan exports both entry points and keeps the >1-operand guarantee `ls -l` needs for its headers');

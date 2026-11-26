@@ -93,7 +93,8 @@ export const ROWS = [
   ['src/plugins/tailscale.js', "try { process.kill(pid, 'SIGTERM'); }", 'scan', 'tsOurDaemonPid\\(\\)', 'its tailscaled (looked up now)', 4],
   ['src/port-forward.js', "process.kill(pid, 'SIGTERM');", 'scan', "readlinkSync\\(`/proc/\\$\\{pid\\}/cwd`\\)", 'an orphan the owner named (cwd (deleted), read now)', 8],
   ['src/routes/sessions.js', "process.kill(pid, 'SIGTERM');", 'scan', 'isCliProcess\\(pid', 'a CLI the owner named (cmdline read in the same request)', 8],
-  ['src/server/boot-restore.js', "if (pid > 1 && pid !== process.pid) { try { process.kill(pid, 'SIGTERM')", 'scan', "pgrep', \\['-f', socketPath\\]", 'a duplicate dtach (pgrep, same pass)', 4],
+  // B-b2d3 step 2 (主开发 r5028 / r5032, lane nl-starts): the duplicate retire's row of kind `scan` (a `pgrep -f <socket path>`, SIGTERM to every
+  // pid it named) LEFT WITH THE SEARCH — the retire now signals only its held records through proc-identity's signalIdentity (its own row)
   ['src/server/boot-restore.js', '[ -n "$P" ] && kill -0 "$P" 2>/dev/null || exit 4', 'probe', 'a remote liveness read', 'nothing'],
   ['src/server/bridge-watch.js', 'kill = (pid, sig) => process.kill(pid, sig)', 'scan', 'procRoot', 'listOrphans: cmdline+stat read in the same pass', 2],
   ['src/server/browser-cli-install.js', "process.kill(-child.pid, 'SIGTERM')", 'handle', '-child.pid', 'its own installer'],

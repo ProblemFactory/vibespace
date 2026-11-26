@@ -21,7 +21,6 @@ const { list: harnessList } = require('../harnesses');
 const { capsOf } = require('../backend-caps.js'); // PURE: caps.streamProtocol (the apiKeySource field lives in a stream-json init record)
 const { spawnGroupIds } = require('../new-session-spec.js'); // PURE (lane new-session-form): meta `taskIds` (else an older meta's `taskId`) → the spawned-into list
 const { pickCodexThreadCandidate } = require('../ws-handler');
-const { fdScanShellFns } = require('../writer-sweep.js');
 const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, restoredForkSource, ownsItsId, addressableId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
 const { readPpid } = require('../cli-identity');
 const { restoreMarks } = require('../seen-marks.js'); // PURE (B-86d3, lane hook-seen-marks): the hook injection's seen marks come back with the session
@@ -146,7 +145,7 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession, broadcastActiveSessions,
-  refreshWebuiPids, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, step = (name, fn) => fn(), agentEnv }) {
+  refreshWebuiPids, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, step = (name, fn) => fn(), agentEnv, retireWaitMs = 5000 }) {   // retireWaitMs: the duplicate retire's bound for the kernel's word (B-b2d3 step 2; a suite's seam)
   const hosts = mk(getHosts);
   const dialBridge = mk(getDialBridge);
   const exitProxyRef = mk(getExitProxy); // B-92a4: a session the re-probe un-adopts ends its exit pairs + waiting asks like any ended one
@@ -292,14 +291,49 @@ function armRestoredCapture(id, s) {
 // the gate): what is still open at the cap — or ran out both bounds — is `unanswered` (sockFile → the open question),
 // named by the boot trace's restore-probes span (probeFacts). A non-answer is never evidence (the keeper law).
 const PROBE_CAP_MS = 25000;
-const dedupIdsOf = (metas) => [...new Set(metas.map(({ m }) => m.claudeSessionId).filter((s) => /^[\w-]+$/.test(s || '')))];
-const fdScanScript = (ids) => `${fdScanShellFns()}\nvs_fd_scan '/(${ids.join('|')})[.]jsonl' | cut -f2`;
-const liveConvosOf = (ids, out) => { const held = out.split('\n'), live = new Set(); for (const id of ids) if (held.some((t) => t.includes(`/${id}.jsonl`))) live.add(id); return live; };
-const sameIds = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+// B-b2d3 STEP 2 (主开发 r5028 / r5032, lane nl-starts): A LOCAL DUPLICATE PAIR IS DECIDED BY EACH SOCKET'S OWN PROGRAM — its wrapper's
+// CLI child, read from the wrapper's side file — never by the live-conversation fd scan (it cannot see a living claude, which appends
+// and closes; it is no longer asked, and its seconds at a start went with it). programOf(id, socketPath) → 'alive' | 'dead' | 'unknown':
+//  · a wrapper that keeps its CLI's BIRTH (chat-wrapper: childPid + childStart + childBoot) — proc-identity's tokenVerdict: `same` =
+//    alive; gone / pid-recycled / zombie = dead; anything else = unknown;
+//  · a wrapper that keeps a NUMBER with no birth (pty-wrapper, acp-wrapper, agy-wrapper, codex-chat-wrapper): no /proc/<childPid> =
+//    dead; a number still there = unknown (it is never signalled); no /proc on this machine = unknown;
+//  · no side file, an unreadable one, no child number = unknown.
+const PIB = require('../proc-identity.js');
+async function programOf(id, socketPath) {
+  if (!id) return 'unknown';
+  let w = null;
+  try { w = JSON.parse(await fs.promises.readFile(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')); } catch { return 'unknown'; }
+  const pid = Number(w && w.childPid);
+  if (!Number.isInteger(pid) || pid <= 1) return 'unknown';
+  if (typeof w.childStart === 'string' && w.childStart) {
+    const v = PIB.tokenVerdict(pid, w.childStart, typeof w.childBoot === 'string' ? w.childBoot : '');
+    if (v === 'same') return 'alive';
+    if (v === 'pid-recycled' || v === 'zombie') return 'dead';   // a birth READ that is not its own; a zombie
+    if (v === 'gone') return (await procGone(pid)) ? 'dead' : 'unknown';   // its reader's find: a /proc read that failed (EMFILE…) also reads «gone» — only the kernel's ENOENT is
+    return 'unknown';
+  }
+  if (!PIB.hasProc()) return 'unknown';
+  return (await procGone(pid)) ? 'dead' : 'unknown';
+}
+/** the kernel's own word that a number names no process: /proc/<pid> answers ENOENT — any other failure proves nothing */
+async function procGone(pid) { try { await fs.promises.access('/proc/' + pid); return false; } catch (e) { return !!e && e.code === 'ENOENT'; } }
+/** a held program proven GONE: its birth read and not its own (recycled), a zombie, or no such process by the kernel's word */
+async function heldGone(ident) { const v = PIB.judge(ident).verdict; if (v === 'same') return false; if (v === 'pid-recycled' || v === 'zombie') return true; if (v === 'gone') return procGone(ident.pid); return false; }
+/** L3: of a LOCAL pair (rows: {sockFile, createdAt, program}), every member PROVEN DEAD retires — unless all are, then all but the
+ *  newest (the release's rule). → { retire: Set, kept: rows } — two or more kept = a pair a person sees as two cards (said). */
+function pairDecision(rows) {
+  const dead = rows.filter((r) => r.program === 'dead');
+  if (dead.length === rows.length) { const newest = rows.reduce((a, b) => ((b.createdAt || 0) > (a.createdAt || 0) ? b : a)); return { retire: new Set(rows.filter((r) => r !== newest).map((r) => r.sockFile)), kept: [newest] }; }
+  return { retire: new Set(dead.map((r) => r.sockFile)), kept: rows.filter((r) => r.program !== 'dead') };
+}
+/** the pair's sentence in Diagnostics: the two cards as a person sees them — their names on the list, never a path */
+const pairsSaid = new Set();   // a pair is said ONCE per hub process (its reader's find: an unproven pair was never said by its names)
+const pairWords = (kept) => `two cards of one conversation: ${kept.map((r) => `«${r.name || 'a conversation'}»`).join(' and ')} — both kept: each one's program runs or is not proven ended, and none is ended because of a pair; end the one you meant`;
 const dedupKey = (m) => `${m.backend || 'claude'}:${m.host || 'local'}:${m.claudeSessionId}`; // dedupWebuiSockets' own key
 const runChildP = (bin, args, ms) => require('./tls.js').runChild(bin, args, ms);
 // B-323e's remainder (lane nl-starts): THE RE-PROBE'S questions (the ladder below is a TIMER of the hub's — and the duplicate retire's
-// pgrep it reaches) ride the hub's starter (src/server/child-starter.js), never a fork of the hub: the same program, args, bound and
+// fuser of the loser's own socket it reaches) ride the hub's starter (src/server/child-starter.js), never a fork of the hub: the same program, args, bound and
 // runChild's 4 MiB; the hub's PATH of the moment rides the request (runChild's child inherited it; none set ⇒ the starter's own). The
 // boot's own questions (before the listen) keep runChild — a start's. ON THIS ROAD THE ONLY ANSWER IS THE PROGRAM'S OWN CLEAN END WITH
 // ITS OWN NUMBER (主开发 r4793): the starter's silence, the bound, a start error, an output past the buffer, a run that rejects, an end
@@ -319,9 +353,8 @@ const starterP = (bin, args, ms) => {
     .then((r) => r, (e) => ({ rejected: String((e && e.message) || e) || 'rejected' }))
     .then((raw) => {
       const r = { ...starterRead(raw), ms: Date.now() - t0 };
-      // said once: a rung's no answer (noAnswer); the fd scan's anything but its own clean zero (B-b2d3) — in its own words
-      if (bin === 'sh' && !fdScanClean(r)) { if (!starterSaid.has('sh')) { starterSaid.add('sh'); console.warn(`[child] the live-conversation fd scan did not end in its own clean zero (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}${String(r.err || '').trim() && r.code !== 'TIMEOUT' ? `: ${String(r.err).trim().split('\n')[0].slice(0, 160)}` : ''}) — its duplicate pair stays undecided, never a kill`); } }
-      else if (bin !== 'sh' && noAnswer(r)) { const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin); if (!starterSaid.has(key)) { starterSaid.add(key); console.warn(`[child] ${key}: no answer through the hub's starter (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}) — no answer, never a kill`); } }
+      // said once: a rung's no answer (noAnswer)
+      if (noAnswer(r)) { const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin); if (!starterSaid.has(key)) { starterSaid.add(key); console.warn(`[child] ${key}: no answer through the hub's starter (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}) — no answer, never a kill`); } }
       return r;
     });
 };
@@ -331,35 +364,30 @@ const starterP = (bin, args, ms) => {
 // process or file table), a signal ended it, its output passed the buffer, or the tool's own fault (pgrep 2 / 3) — the release read
 // all but the first two as «nobody owns it» and a LIVE socket could be retired
 const noAnswer = (r) => !(r.code === 0 || r.code === 1);
-// B-b2d3: the fd scan's OWN clean end — exit 0 and NOTHING its shell said (its chunks silence ls; a fork that failed inside it —
-// EAGAIN at a full process table — is said only by the shell, and the pipeline's 0 is cut's, not the scan's)
-const fdScanClean = (r) => !!r && r.code === 0 && !String(r.err || '').trim();
 const ownedP = async (sp, rung2, ask = () => { }, own = new Set(), run = runChildP) => { ask('fuser'); const r = await run('fuser', [sp], 2000); if (r.code === 0) return r.out.trim().length > 0; if (!rung2) return noAnswer(r) ? null : false; ask('pgrep'); const g = await run('pgrep', ['-f', sp], 2000); return noAnswer(g) ? null : g.code === 0 && g.out.split('\n').some((x) => x.trim() && !own.has(Number(x))); };
 let probed = null, probing = null;
 function probeSockets() {
   if (probing) return probing;
   const capMs = Number(process.env.VIBESPACE_PROBE_CAP_MS) || PROBE_CAP_MS;
-  const out = { dedupIds: [], liveConvos: null, fdScanError: null, alive: new Map(), remoteAlive: new Map(), unanswered: new Map(), capMs, capped: false };
+  const out = { alive: new Map(), remoteAlive: new Map(), programs: new Map(), unanswered: new Map(), capMs, capped: false };
   const asking = new Map(); // sockFile → the question in flight
   let closed = false; // the cap (or the end): a late answer writes nothing, a queued question is never asked
   probing = (async () => {
     let sockets = []; try { sockets = fs.readdirSync(SOCKETS_DIR).filter(f => f.startsWith('cw-')); } catch { }
     const metas = [];
     for (const sockFile of sockets) { let m; try { m = readSessionMeta(sockFile); } catch { continue; } if (ownsItsId(m)) metas.push({ sockFile, m }); }
-    out.dedupIds = dedupIdsOf(metas);
     const answer = (map, key, v) => { if (!closed) map.set(key, v); };
     const asks = sockets.map((sockFile) => async () => answer(out.alive, sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), true, (q) => { if (closed) throw new Error('past the cap'); asking.set(sockFile, q); })));
     for (const { sockFile, m } of metas) if (m.host) asks.push(async () => answer(out.remoteAlive, sockFile, await ownedP(path.join(SOCKETS_DIR, sockFile), false)));
-    if (out.dedupIds.length) asks.unshift(async () => { const r = await runChildP('sh', ['-c', fdScanScript(out.dedupIds)], 20000); if (closed || r.code === 'TIMEOUT') return; if (fdScanClean(r)) out.liveConvos = liveConvosOf(out.dedupIds, r.out); else out.fdScanError = r.code === 0 ? `exit 0, but its shell said: ${String(r.err).trim().split('\n')[0]}` : (r.err.split('\n')[0] || String(r.code)); });
+    // B-b2d3 step 2: each member of a LOCAL duplicate pair — its program read from its wrapper's side file (programOf), first in line
+    const pairs = new Map(); for (const { sockFile, m } of metas) if (!m.host && m.claudeSessionId) { const k = dedupKey(m); if (!pairs.has(k)) pairs.set(k, []); pairs.get(k).push({ sockFile, m }); }
+    for (const g of pairs.values()) if (g.length > 1) for (const { sockFile, m } of g) asks.unshift(async () => answer(out.programs, sockFile, await programOf(m.webuiSessionId, path.join(SOCKETS_DIR, sockFile))));
     const drain = async () => { for (let a; !closed && (a = asks.shift());) { try { await a(); } catch { } } };
     let cap = null;
     await Promise.race([Promise.all([drain(), drain(), drain(), drain()]), new Promise((r) => { cap = setTimeout(() => { out.capped = true; r(); }, capMs); })]);
     clearTimeout(cap); closed = true;
     for (const sockFile of sockets) if (out.alive.get(sockFile) == null) out.unanswered.set(sockFile, asking.get(sockFile) || 'not asked');
-    if (out.dedupIds.length && !out.liveConvos) { // the conversations the fd scan did not cover — no answer, or (B-b2d3) an answer that was not its own clean zero: only a duplicate's matter (a lone socket is never retired by the dedup)
-      const n = new Map(); for (const { m } of metas) n.set(dedupKey(m), (n.get(dedupKey(m)) || 0) + 1);
-      for (const { sockFile, m } of metas) if (!m.host && n.get(dedupKey(m)) > 1 && !out.unanswered.has(sockFile)) out.unanswered.set(sockFile, 'fd-scan');
-    }
+    for (const g of pairs.values()) if (g.length > 1) for (const { sockFile } of g) if (!out.programs.has(sockFile) && !out.unanswered.has(sockFile)) out.unanswered.set(sockFile, 'program');   // not read by the cap: unknown (kept)
     probed = out;
     return out;
   })().catch(() => { closed = true; probed = out; return out; }); // never rejects: server.js listens after it whatever happened (what it did not answer is adopted probe-pending)
@@ -646,19 +674,66 @@ function locateOrDrop(sockFile, file, meta, id) {
     return false;
   })();
 }
-/** A stale duplicate of a conversation another socket owns: SIGTERM its dtach session (claude, if any, is the older/losing
- *  writer — the pids from a pgrep CHILD, never a sync ask) and clean socket + buffer + meta. */
-function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = runChildP) {   // run: the re-probe hands its starter's runner
+/** A stale duplicate of a conversation another socket owns — B-b2d3 step 2 (主开发 r5028 / r5032, lane nl-starts): NOTHING IS SIGNALLED BY
+ *  A PATTERN, AND THE SOCKET LEAVES LAST (L1, L2). The release SIGTERMed every pid a `pgrep -f <socket path>` named (the hub's own attach,
+ *  a person's own `dtach -a`, any tool naming the path) and removed the socket before its answer. Now, in this order:
+ *   (a) its HELD programs: the socket's own master — `fuser <that socket>`, the kernel's answer for THAT one file (its listener; an
+ *       attach to it is not in that answer), each pid's birth read at once — and its wrapper, by the side file's pid + pidStart where
+ *       the wrapper keeps one (a number with no birth is never signalled); the hub's own attach of an adopted loser by its own pty handle;
+ *   (b) SIGTERM each still proven that very process (proc-identity signalIdentity reads its birth again right before the signal) — the
+ *       WRAPPER first, the master only once the wrapper is gone (a dtach master removes its own socket as it ends);
+ *   (c) the kernel's word that each is gone (a recycled birth, a zombie, or ENOENT — a read that failed proves nothing), waited for at
+ *       most RETIRE_WAIT_MS; a wrapper's number with no birth is watched for its end, never signalled;
+ *   (d) ONLY THEN the socket, the wrapper's files and the meta (today's order).
+ *  A program still there past the bound, or holders that cannot be read or proven (no /proc), LEAVE EVERYTHING AS IT IS — said once, no
+ *  second, stronger signal on this road; the next start judges again. → Promise<{ retired, why? }> */
+const RETIRE_WAIT_MS = Number(retireWaitMs) > 0 ? Number(retireWaitMs) : 5000;
+const RETIRE_POLL_MS = Math.min(100, Math.max(10, Math.round(RETIRE_WAIT_MS / 20)));   // 100 ms in the hub (its 5 s bound); a suite's shorter bound reads the kernel more often
+const retireSaid = new Set();
+async function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = runChildP, adopted = null) {   // run: the re-probe hands its starter's runner; adopted: the re-probe's own (already unadopted) session of it
   console.log(`  ⤫ Duplicate of ${claudeSessionId} — retiring stale ${sockFile}`);
-  run('pgrep', ['-f', socketPath], 2000).then((r) => {
-    for (const p of r.code === 0 ? r.out.split('\n') : []) {
-      const pid = Number(p.trim());
-      if (pid > 1 && pid !== process.pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }
+  const leave = (why) => { if (!retireSaid.has(sockFile)) { retireSaid.add(sockFile); console.warn(`[boot-restore] ${sockFile}: not retired — ${why}; the socket and its files left as they are (no stronger signal on this road; the next start judges again)`); } return { retired: false, why }; };
+  // (c) the kernel's word, waited for at most the bound — a number with no birth is WATCHED (proved gone), never signalled
+  const waitGone = async (held, watched = []) => {
+    const left = async () => { const out = []; for (const h of held) if (!(await heldGone(h.ident))) out.push(h.what); for (const w of watched) if (!(await procGone(w.pid))) out.push(w.what); return out; };
+    let l = await left();
+    for (const t0 = Date.now(); l.length && Date.now() - t0 < RETIRE_WAIT_MS;) { await new Promise((r) => setTimeout(r, RETIRE_POLL_MS)); l = await left(); }
+    return l;
+  };
+  try {
+    if (!PIB.hasProc()) return leave('no /proc here: its programs cannot be proven');
+    // (a) its held records: the wrapper (pid + birth where it keeps one; else its number, to watch) and the socket's own master
+    let w = null; try { w = JSON.parse(await fs.promises.readFile(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')); } catch { }
+    const wrapper = [], watched = [];
+    if (w && Number(w.pid) > 1 && Number(w.pid) !== process.pid) {
+      if (typeof w.pidStart === 'string' && w.pidStart) { if (PIB.tokenVerdict(Number(w.pid), w.pidStart, typeof w.pidBoot === 'string' ? w.pidBoot : '') === 'same') wrapper.push({ what: `its wrapper (pid ${w.pid})`, ident: PIB.identityFromToken(Number(w.pid), w.pidStart, w.pidBoot) }); }
+      else watched.push({ what: `its wrapper (pid ${w.pid}, a number with no birth)`, pid: Number(w.pid) });
     }
-  }, () => { });
-  try { fs.unlinkSync(socketPath); } catch {}
-  require('./wrapper-files.js').removeWrapperFiles(BUFFERS_DIR, id); // THE ONE LIST (lane human-cli r5): round 4 left this path's .receipts to the 7-day sweep
-  deleteSessionMeta(sockFile);
+    const f = await run('fuser', [socketPath], 2000);
+    const masters = [];
+    if (f && f.code === 0) {
+      for (const t of String(f.out).match(/\d+/g) || []) {
+        const pid = Number(t); if (!(pid > 1) || pid === process.pid || wrapper.some((x) => x.ident.pid === pid)) continue;
+        const ident = PIB.identityOf(pid);
+        if (ident) masters.push({ what: `its socket's master (pid ${pid})`, ident });
+        else if (!(await procGone(pid))) return leave(`its socket's holder ${pid} could not be proven (its birth not read)`);
+      }
+    } else if (!(f && f.code === 1)) return leave(`who holds its socket was not answered (${f ? f.code : 'no answer'})`);   // exit 1 = nobody holds it
+    if (adopted && adopted.pty) { try { adopted.pty.kill(); } catch { } }   // the hub's own attach of it: by its own handle (its session already unadopted)
+    // (b) THE WRAPPER FIRST, the master after it is gone: a dtach master removes its own socket as it ends (its reader's find), so a
+    // wrapper that outlives the bound must leave the master, and so the socket, as they are
+    for (const h of wrapper) PIB.signalIdentity(h.ident, 'SIGTERM', { what: h.what });
+    let left = await waitGone(wrapper);
+    if (left.length) return leave(`${left.join(', ')} still there ${RETIRE_WAIT_MS / 1000} s after its signal`);
+    for (const h of masters) PIB.signalIdentity(h.ident, 'SIGTERM', { what: h.what });
+    left = await waitGone(masters, watched);
+    if (left.length) return leave(`${left.join(', ')} still there ${RETIRE_WAIT_MS / 1000} s after its signal`);
+    // (d) only now the socket, the wrapper's files and the meta
+    try { fs.unlinkSync(socketPath); } catch {}
+    require('./wrapper-files.js').removeWrapperFiles(BUFFERS_DIR, id); // THE ONE LIST (lane human-cli r5): round 4 left this path's .receipts to the 7-day sweep
+    deleteSessionMeta(sockFile);
+    return { retired: true };
+  } catch (e) { return leave(`its retire failed: ${(e && e.message) || e}`); }
 }
 
 // THE RE-PROBE (B-92a4): restoreSessions adopts a socket with no answer ALIVE — never retired, never dedup-killed, never
@@ -707,18 +782,24 @@ async function reprobePass() {
   for (const [key, members] of [...pendingGroups]) { // 2. which duplicate wins — once every pending member's socket answered
     const rows = members.map((sockFile) => { let m = null; try { m = readSessionMeta(sockFile); } catch { } return { sockFile, m, p: pendingProbes.get(sockFile) }; }).filter((r) => r.m && ownsItsId(r.m));
     if (rows.some((r) => r.p && r.p.q.has('alive'))) continue;
-    let live = new Set(), known = true;
-    const ids = dedupIdsOf(rows.filter((r) => !r.m.host));
-    if (ids.length) { const r = await starterP('sh', ['-c', fdScanScript(ids)], 20000); if (fdScanClean(r)) live = liveConvosOf(ids, r.out); else known = false; }   // B-b2d3: anything but its own clean zero is no answer — the pair waits for the next pass
-    const remote = new Map();
-    for (const r of rows) if (r.m.host) { const v = await ownedP(path.join(SOCKETS_DIR, r.sockFile), false, undefined, undefined, starterP); if (v == null) known = false; remote.set(r.sockFile, v); }
-    if (!known) continue;
-    pendingGroups.delete(key);
-    const { retire } = dedupWebuiSockets(rows.map(({ sockFile, m }) => ({ sockFile, backend: m.backend || 'claude', host: m.host || 'local', claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0, claudeAlive: m.host ? !!remote.get(sockFile) : live.has(m.claudeSessionId) })));
-    for (const r of rows) {
+    let retire = new Set(), kept = [], undecided = false;
+    if (rows.some((r) => r.m.host)) {   // L4: two local transports of ONE remote program — the release's rule (their transports' fuser), ended by L1 / L2 only
+      const remote = new Map(); let known = true;
+      for (const r of rows) { const v = await ownedP(path.join(SOCKETS_DIR, r.sockFile), false, undefined, undefined, starterP); if (v == null) known = false; remote.set(r.sockFile, v); }
+      if (!known) continue;
+      ({ retire } = dedupWebuiSockets(rows.map(({ sockFile, m }) => ({ sockFile, backend: m.backend || 'claude', host: m.host || 'local', claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0, claudeAlive: !!remote.get(sockFile) }))));
+    } else {   // L3: each member's program, read again
+      const prog = await Promise.all(rows.map(async ({ sockFile, m }) => ({ sockFile, createdAt: m.createdAt || 0, name: m.name || '', program: await programOf(m.webuiSessionId, path.join(SOCKETS_DIR, sockFile)) })));
+      ({ retire, kept } = pairDecision(prog));
+      undecided = kept.length > 1 && kept.some((x) => x.program === 'unknown');   // not proven: the kept ones asked again at the cadence; the proven dead ones go now
+    }
+    if (undecided) pendingGroups.set(key, kept.map((x) => x.sockFile));
+    else pendingGroups.delete(key);
+    if (kept.length > 1 && !pairsSaid.has(key)) { pairsSaid.add(key); say(pairWords(kept)); }   // kept as a pair (both alive, or one not proven): said once, never again
+    for (const r of rows) {   // ONE retire road for both (a decided pair's losers, an undecided pair's proven-dead members)
       if (!r.p) continue;
-      r.p.q.delete('dedup');
-      if (retire.has(r.sockFile)) { retireDuplicate(r.sockFile, r.p.socketPath, r.p.id, r.m.claudeSessionId, starterP); unadopt(r.p.id, r.p.session); pendingProbes.delete(r.sockFile); tally.duplicate.push(r.sockFile); }
+      if (!undecided) r.p.q.delete('dedup');
+      if (retire.has(r.sockFile)) { unadopt(r.p.id, r.p.session); pendingProbes.delete(r.sockFile); const done = await retireDuplicate(r.sockFile, r.p.socketPath, r.p.id, r.m.claudeSessionId, starterP, r.p.session); if (done.retired) tally.duplicate.push(r.sockFile); }
     }
   }
   for (const [sockFile, p] of [...pendingProbes]) { if (p.q.size) tally.open.push(sockFile); else { pendingProbes.delete(sockFile); tally.alive.push(sockFile); } }
@@ -796,7 +877,7 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt, regTurns = null }) {
 function restoreSessions() {
   ensureDir(SOCKETS_DIR);
   ensureDir(BUFFERS_DIR);
-  const P = probed || { dedupIds: [], liveConvos: null, fdScanError: null, alive: new Map(), remoteAlive: new Map(), unanswered: new Map() }; probed = null; probing = null; // the probes answer THIS restore only (none ran: every socket is unanswered)
+  const P = probed || { alive: new Map(), remoteAlive: new Map(), programs: new Map(), unanswered: new Map() }; probed = null; probing = null; // the probes answer THIS restore only (none ran: every socket is unanswered)
   const sockets = fs.readdirSync(SOCKETS_DIR).filter(f => f.startsWith('cw-'));
   if (!sockets.length) return;
 
@@ -835,46 +916,14 @@ function restoreSessions() {
     let m; try { m = readSessionMeta(sockFile); } catch { continue; }
     if (ownsItsId(m)) dedupMetas.push({ sockFile, m });
   }
-  // ONE /proc pass: which conversations have a live claude holding their JSONL?
-  // (a lingering dtach husk whose claude crashed has a DEAD conversation and
-  // must lose to a live one).
-  //
-  // B-3185: this used to fork a `readlink` PER FD — 405,735 of them on the dev
-  // box, ~6.4 minutes — so it ALWAYS blew its own 6s timeout, and the catch
-  // turned that into a silent empty set. (The forks were the ONLY problem: its
-  // fd-level glob fed a SHELL for-loop, which expands in the shell's own memory
-  // and never reaches execve, so ARG_MAX never applied — r1 said it did, which
-  // was wrong. ARG_MAX bounds the batched scan's `ls` argv instead, which is
-  // why THAT is chunked.) It now runs THE batched fd scan the writer sweep uses
-  // — 3.0s at 3678 processes — and a failure SAYS SO.
-  //
-  // HONEST LIMIT, measured on the installed CLI (2.1.226, native binary): a
-  // live claude does NOT keep its transcript open — it appends and closes, and
-  // a machine-wide scan found ZERO processes holding any
-  // ~/.claude/projects/**.jsonl. So this answers "nobody" for current claude
-  // however fast it runs; it only sees a holder that really exists. The CLI's
-  // OWN registry (~/.claude/sessions/<pid>.json, sessionId + pid + procStart)
-  // is the accurate liveness source — deliberately NOT swapped in here,
-  // because retiring is destructive (SIGTERM + unlink the dtach socket) and
-  // changing which socket boot destroys is its own decision, not a rider on a
-  // performance fix. Backlog: give claudeAlive the registry, keyed with the
-  // procStart counter-capture so pid reuse cannot fake it.
-  let liveConvos = new Set(), convosUnknown = false;
-  const dedupIds = dedupIdsOf(dedupMetas);
-  if (dedupIds.length && sameIds(P.dedupIds, dedupIds) && P.liveConvos) liveConvos = P.liveConvos;
-  else if (dedupIds.length) {
-    // B-b2d3 (主开发 r5000, lane nl-starts): a scan that did not END CLEANLY WITH ITS OWN ZERO (a start error, an output past its
-    // buffer, a signal, a non-zero exit) is no answer either — its duplicates wait for the re-probe, UNDECIDED, as a timeout's do;
-    // the release degraded it to «nobody is live» and the newer socket won (its older one's process SIGTERMed). Still said.
-    if (P.fdScanError && sameIds(P.dedupIds, dedupIds)) console.warn('[boot-restore] live-conversation fd scan failed:', P.fdScanError);
-    convosUnknown = true;
-  }
-  // B-92a4: the scan gave NO answer for these conversations (its bound or the cap ran out, or a socket appeared since) — never asked here; their duplicates wait for the re-probe
-  // REMOTE sockets: the /proc scan can't see a claude running ON THE HOST, so
-  // claudeAlive was unconditionally false and duplicate sockets of one remote
-  // conversation could retire the wrong one (audit 2.192.0/B-82ea). Substitute
-  // the LOCAL transport liveness (dtach socket has an owner = the ssh/agentd
-  // pipe survived the restart) — the same signal the adoption loop uses below.
+  // B-b2d3 STEP 2 (主开发 r5028 / r5032): a LOCAL pair is decided by each socket's own PROGRAM (programOf, read by the probe — P.programs;
+  // one it did not read is unknown), never by the live-conversation fd scan (THE HONEST LIMIT measured it: a live claude appends and
+  // closes its transcript, so the scan answered «nobody» for every pair and the OLDER socket's living program was ended). L3: a member
+  // proven dead retires; all dead — the newest is kept; every other pair keeps BOTH, said once as a pair (two cards of one
+  // conversation), nothing signalled; one not proven waits for the re-probe. The accurate «which of two living programs writes it» (the
+  // CLI's own registry) is not asked: no ending depends on it (L5).
+  // REMOTE pairs (L4, audit 2.192.0/B-82ea): the /proc view cannot see a claude ON THE HOST — the LOCAL transport's liveness decides
+  // (its dtach socket has an owner = the ssh / agentd pipe survived the restart), as before; the older transport is ended by L1 / L2.
   const remoteSockAlive = new Set();
   const remoteUnknown = new Set();
   for (const { sockFile, m } of dedupMetas) {
@@ -882,17 +931,26 @@ function restoreSessions() {
     const v = P.remoteAlive.get(sockFile);
     if (v === true) remoteSockAlive.add(sockFile); else if (v == null) remoteUnknown.add(sockFile); // B-92a4: no answer ⇒ the re-probe asks
   }
-  // B-92a4: a duplicate set whose liveness has no answer (local: the fd scan; remote: a member's fuser) is UNDECIDED —
-  // none of its sockets is retired now; each is adopted probe-pending and the re-probe re-runs this dedup once it answers.
+  // B-92a4: a duplicate set whose liveness has no answer (a remote member's fuser; a local member's program not proven) is UNDECIDED —
+  // none of it retires now but a member proven dead; the rest is adopted probe-pending and the re-probe decides it again.
   const groupOf = new Map();
   for (const { sockFile, m } of dedupMetas) { const k = dedupKey(m); if (!groupOf.has(k)) groupOf.set(k, []); groupOf.get(k).push(sockFile); }
-  const undecided = new Set();
-  for (const { sockFile, m } of dedupMetas) if (groupOf.get(dedupKey(m)).length > 1 && (m.host ? remoteUnknown.has(sockFile) : convosUnknown)) undecided.add(dedupKey(m));
-  const { retire: retireSockets } = dedupWebuiSockets(dedupMetas.filter(({ m }) => !undecided.has(dedupKey(m))).map(({ sockFile, m }) => ({
+  const undecided = new Set(), keptPairs = [], localRetire = new Set();
+  for (const [k, members] of groupOf) {
+    const rows = members.map((sf) => dedupMetas.find((x) => x.sockFile === sf)).filter(Boolean);
+    if (rows.length < 2 || rows.some((r) => r.m.host) || !rows[0].m.claudeSessionId) continue;   // R5: a harness with no id here is never a pair (unchanged)
+    const d = pairDecision(rows.map(({ sockFile, m }) => ({ sockFile, createdAt: m.createdAt || 0, name: m.name || '', program: P.programs.get(sockFile) || 'unknown' })));
+    for (const sf of d.retire) localRetire.add(sf);
+    if (d.kept.length > 1) { if (d.kept.some((x) => x.program === 'unknown')) undecided.add(k); keptPairs.push([k, d.kept]); }
+  }
+  for (const { sockFile, m } of dedupMetas) if (m.host && groupOf.get(dedupKey(m)).length > 1 && remoteUnknown.has(sockFile)) undecided.add(dedupKey(m));
+  const { retire: remoteRetire } = dedupWebuiSockets(dedupMetas.filter(({ m }) => m.host && !undecided.has(dedupKey(m))).map(({ sockFile, m }) => ({
     sockFile, backend: m.backend || 'claude', host: m.host || 'local',
     claudeSessionId: m.claudeSessionId, createdAt: m.createdAt || 0,
-    claudeAlive: m.host ? remoteSockAlive.has(sockFile) : liveConvos.has(m.claudeSessionId),
+    claudeAlive: remoteSockAlive.has(sockFile),
   })));
+  const retireSockets = new Set([...remoteRetire, ...localRetire]);
+  for (const [k, kept] of keptPairs) if (!pairsSaid.has(k)) { pairsSaid.add(k); say(pairWords(kept)); }   // two cards a person ends one of — said once (an unproven pair is asked again, never said again)
 
   const attachQueue = [], tRestore = performance.now();   // B-cd4b: every survivor in the live set at once, its attach queued
   const regTurns = { n: 0, longest: 0 };   // B-cd4b unit 3: the registration's turns (said in the restore's line)
@@ -936,8 +994,8 @@ function restoreSessions() {
     // cards); retire the husk so it can't double-write the JSONL (retireDuplicate).
     // B-92a4: never on a non-answer — an undecided set, or an unanswered socket the dedup would retire, waits probe-pending.
     const dk = ownsItsId(meta) ? dedupKey(meta) : null;
-    if (dk && (undecided.has(dk) || (open.size && retireSockets.has(sockFile)))) { open.add('dedup'); pendingGroups.set(dk, groupOf.get(dk) || [sockFile]); }
-    else if (retireSockets.has(sockFile)) { retireDuplicate(sockFile, socketPath, id, meta.claudeSessionId); yield; continue; }   // counted, as a dead socket's retire
+    if (dk && ((undecided.has(dk) && !retireSockets.has(sockFile)) || (open.size && retireSockets.has(sockFile)))) { open.add('dedup'); pendingGroups.set(dk, (groupOf.get(dk) || [sockFile]).filter((sf) => !retireSockets.has(sf) || P.unanswered.has(sf))); }   // one list for every member (its reader's find: each member wrote its own)
+    else if (retireSockets.has(sockFile)) { retireDuplicate(sockFile, socketPath, id, meta.claudeSessionId); yield; continue; }   // B-b2d3 step 2: its own ordered road (L1, L2), not awaited by the restore   // counted, as a dead socket's retire
 
     // Detect mode and streaming state from wrapper metadata
     let sessionMode = meta.mode || 'terminal';
