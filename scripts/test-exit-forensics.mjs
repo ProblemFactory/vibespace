@@ -192,6 +192,10 @@ function makeEngine(modPath) {
   });
 }
 const realEng = makeEngine(path.join(REPO, 'src/server/session-stdout.js'));
+// B-574d (lane bl-jobs): the exit tomb's .meta.json is THE STORE WRITER's job (one a teardown, never a write on the loop) — a
+// teardown below lands it through the writer's synchronous flush before a leg reads it (a file with no job: nothing to do)
+const SWX = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+const landTomb = (id) => { try { SWX.flushSync([path.join(TOMBS, id + '.meta.json')]); } catch { } };
 /** Tear a session down through the real onExit; returns its "[session] exited" line. */
 function teardown(eng, id, { socketPath = null, cleanupOnExit = true } = {}) {
   let exitCb = null;
@@ -203,6 +207,7 @@ function teardown(eng, id, { socketPath = null, cleanupOnExit = true } = {}) {
   const mine = [];
   console.log = (...a) => { const s = a.join(' '); if (s.includes('[session] exited')) mine.push(s); else orig(...a); };
   try { exitCb({ exitCode: 0 }); } finally { console.log = orig; }
+  landTomb(id);
   lines.push(...mine);
   return mine.join('\n');
 }
@@ -553,6 +558,7 @@ async function teardownAsync(eng, id, { socketPath = null, cleanupOnExit = true,
   const mine = [];
   console.log = (...a) => { const s = a.join(' '); if (s.includes('[session] exited') && s.includes(id + ' ')) mine.push(s); else orig(...a); };
   try { exitCb({ exitCode: 0 }); await waitFor(() => mine.length > 0, waitMs); } finally { console.log = orig; }
+  landTomb(id);
   lines.push(...mine);
   return mine.join('\n');
 }
@@ -1030,7 +1036,7 @@ function tombTeardown(eng, id, metaObj) {
       'control (no-buf): a copy with both back inside the .buf try FAILS both no-.buf assertions (no tomb, no sweep)');
     for (const f of pair) { try { fs.unlinkSync(f); } catch { } }
   }
-  const noTomb = editAnchor(stdoutSrc, 'fs.writeFileSync(tmp, JSON.stringify(tomb)); fs.renameSync(tmp, tombPath);', '', "src/server/session-stdout.js");
+  const noTomb = editAnchor(stdoutSrc, 'keepTomb(path.join(tombDir, `${id}.meta.json`), JSON.stringify(tomb), id);', '', "src/server/session-stdout.js");
   ok(noTomb !== stdoutSrc, 'control (tomb): the patch applies');
   tombTeardown(makeEngine(M.write('src/server/session-stdout.js', noTomb, 'notomb')), 'sess-xf-tomb-ctl', { pid: 44, childExitCode: 0 });
   ok(!fs.existsSync(path.join(TOMBS, 'sess-xf-tomb-ctl.meta.json')), 'control (tomb): a copy without the meta tomb write FAILS the tomb assertion');

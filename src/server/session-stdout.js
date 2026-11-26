@@ -417,8 +417,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchU
       try {
         const tomb = { ...(wrapperMeta && typeof wrapperMeta === 'object' ? wrapperMeta : (settle.torn ? { metaUnreadable: true } : { metaMissing: true })),
           exitedAt: Date.now(), socketFate: facts.socketFate, wrapperFate: facts.wrapperFate, settleMs: settle.waitedMs };
-        const tombPath = path.join(tombDir, `${id}.meta.json`), tmp = tombPath + '.tmp-' + process.pid;
-        fs.writeFileSync(tmp, JSON.stringify(tomb)); fs.renameSync(tmp, tombPath); // atomic: tmp + rename
+        keepTomb(path.join(tombDir, `${id}.meta.json`), JSON.stringify(tomb), id);   // B-574d: THE STORE WRITER (below) — never a write on the loop at a mass stop
       } catch (e) { console.warn(`[session] exit tomb meta for ${id} not written: ${e.message}`); }
       // opportunistic sweep: tombs (.tail AND .meta.json) older than 7 days
       try {
@@ -493,6 +492,21 @@ function knownOnDisk(dir, fp) {
   return knownMeta.has(fp);
 }
 const storeWriter = () => require('../store-writer.js').storeWriter();
+/** B-574d (lane bl-jobs, slice «session-and-job-records»; the family's ruling (b)): THE EXIT TOMB's record is made ONCE at a
+ *  conversation's END — by every real teardown (a person's close or kill, an agent's end, a crash); at worst a MASS STOP, N tombs in
+ *  one turn of the loop. By that rate it takes THE STORE WRITER: one job each (no debounce), atomic and SYNCED on the writer's thread,
+ *  forgotten once it lands — never a write on the hub's loop (the release wrote it there, unsynced). Nothing reads it right after:
+ *  the forensics read it later by name, the 7-day sweep by its age. A write that fails is SAID ONCE for its conversation and stays
+ *  the writer's (kept in memory, retried at the writer's pace, as every store's) until it lands */
+function keepTomb(tombPath, text, id) {
+  const W = storeWriter();
+  let said = false;
+  W.dirty(tombPath, { name: 'exit-tomb.write', debounceMs: 0, produce: () => text,
+    onWritten: (ok, err) => {
+      if (ok) { try { W.forget(tombPath); } catch { } return; }   // landed: the writer keeps no entry for it
+      if (!said) { said = true; console.warn(`[session] exit tomb meta for ${id} not written yet (${(err && (err.code || err.message)) || 'a failed write'}) — kept in memory, the store writer retries it`); }
+    } });
+}
 // r3137 (lane bl-chat-c — SESSION-META UNDER THE STORE-READ LAW): a record whose read FAILED or whose bytes do NOT PARSE is UNREAD
 // (src/server/session-meta-verdict.js) — never the empty record «not there» (ENOENT) is. NOTHING is written over it: a writer's
 // change WAITS (its fields kept for that record, the newest per field) and is saved MERGED over the record the moment it reads; the
