@@ -141,7 +141,7 @@ try {
   // ③c's boots (B-323e's remainder, lane nl-starts): the tip, a copy on the release's re-probe runner, a copy with the release's
   // «no answer» rule — every fuser hangs (the default mode) and the fd scan's cut hangs: each settles at the cap beside the rest, all
   // probe-pending (the duplicate pair undecided)
-  const SP_HEAD = "const starterP = (bin, args, ms) => require('./tls.js').runViaStarter(", SP_TAIL = '\n  return r;\n});\n';
+  const SP_HEAD = 'const starterP = (bin, args, ms) => {\n  const t0 = Date.now();', SP_TAIL = '\n      return r;\n    });\n};\n';
   const spAt = brSrc.indexOf(SP_HEAD), spEnd = spAt >= 0 ? brSrc.indexOf(SP_TAIL, spAt) : -1;
   const SP_BLOCK = spAt >= 0 && spEnd > spAt ? brSrc.slice(spAt, spEnd + SP_TAIL.length) : SP_HEAD;   // not found ⇒ the anchor below fails by name
   const OLDROAD = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, SP_BLOCK, 'const starterP = runChildP;\n', 'src/server/boot-restore.js'), 'reprobe-old-road'));
@@ -153,6 +153,9 @@ try {
     C3[k].boot = X.api.probeSockets();
   }
   { const X = instance(OLDNA, dataDir('reprobe-na')); C3.na = { X, gone: X.add(71) }; C3.na.boot = X.api.probeSockets(); }
+  // r4793: the tip da7320225 read the starter through src/server/tls.js runViaStarter's table, where three no-replies read as 1
+  const TIPREAD = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, SP_BLOCK, "const starterP = (bin, args, ms) => require('./tls.js').runViaStarter(bin, args, ms);\n", 'src/server/boot-restore.js'), 'reprobe-tip-read'));
+  { const X = instance(TIPREAD, dataDir('reprobe-tip')); C3.tip = { X, over: X.add(61), rej: X.add(62), noexit: X.add(63) }; C3.tip.boot = X.api.probeSockets(); }
 
   console.log('① runChild answers at its own timer');
   {
@@ -249,8 +252,8 @@ try {
   console.log('③c B-323e\'s remainder (lane nl-starts): THE RE-PROBE RIDES THE HUB\'S STARTER — every question it asks, none from this process; no reply is never a kill, and said; RED the release\'s runner, the release\'s «no answer»');
   {
     const CS = require(path.join(REPO, 'src/server/child-starter.js')), real = CS.childStarter();
-    const rec = []; let mute = null;   // mute(cmd) → the answer a starter gives instead of running it (null: the real starter runs it)
-    CS.setChildStarter({ run: (cmd, args, o) => { rec.push({ cmd: path.basename(String(cmd)), args, o }); return mute ? Promise.resolve(mute(path.basename(String(cmd)))) : real.run(cmd, args, o); }, stats: () => real.stats(), closePipe: () => real.closePipe() });
+    const rec = []; let mute = null;   // mute(cmd, args) → the answer a starter gives instead of running it (a throw: a run that rejects; null: the real starter runs it)
+    CS.setChildStarter({ run: (cmd, args, o) => { rec.push({ cmd: path.basename(String(cmd)), args, o }); return mute ? Promise.resolve().then(() => mute(path.basename(String(cmd)), args)) : real.run(cmd, args, o); }, stats: () => real.stats(), closePipe: () => real.closePipe() });
     const CPm = require('child_process'), realCpSpawn = CPm.ChildProcess.prototype.spawn, direct = [];
     CPm.ChildProcess.prototype.spawn = function (o) { direct.push(path.basename(String((o && o.file) || ''))); return realCpSpawn.call(this, o); };   // every async start of this process (spawn / execFile) passes here
     const tools = (l) => l.filter((b) => b === 'fuser' || b === 'pgrep' || b === 'sh').sort().join(' ');
@@ -258,22 +261,43 @@ try {
     const pend = (c) => [...c.X.api.probePending()].map(([f, q]) => q.join()).sort().join(' ');
     const line = (c) => String(c.X.notes.filter((l) => String(l).startsWith('re-probe ')).at(-1) || '').replace(/^re-probe \d\/5/, 're-probe k/5');
     try {
-      for (const c of [C3.mine, C3.old, C3.na]) { await c.boot; await logged(async () => c.X.api.restoreSessions()); }
-      ok(pend(C3.mine) === 'alive alive alive,dedup alive,dedup' && pend(C3.old) === pend(C3.mine) && pend(C3.na) === 'alive', `the boot's questions got no answer: every socket adopted probe-pending, the pair undecided (${pend(C3.mine)})`);
+      for (const c of [C3.mine, C3.old, C3.na, C3.tip]) { await c.boot; await logged(async () => c.X.api.restoreSessions()); }
+      ok(pend(C3.mine) === 'alive alive alive,dedup alive,dedup' && pend(C3.old) === pend(C3.mine) && pend(C3.na) === 'alive' && pend(C3.tip) === 'alive alive alive', `the boot's questions got no answer: every socket adopted probe-pending, the pair undecided (${pend(C3.mine)})`);
       const M3 = C3.mine, socks = [M3.up, M3.gone, M3.dOld, M3.dNew];
       mode(M3.up.sock, 'alive'); mode(M3.gone.sock, 'dead'); mode(M3.dOld.sock, 'alive'); mode(M3.dNew.sock, 'alive'); mode('cut', 'real');
-      // (a) NO REPLY — three kinds: the starter's silence, a start that failed (EAGAIN: a full process table), the tool's own fault (pgrep 3)
+      // (a) NO REPLY IS NEVER EVIDENCE (主开发 r4793: on this road the only answer is the program's own clean end with its own number).
+      // The FIRST pass mixes four kinds by socket — the starter's silence, an EAGAIN start, an output past the buffer, a run that rejects —
+      // so each kind's words are read; then a pass of each other kind — an end with neither a number nor a signal, a signal, fuser's none
+      // then pgrep's own fault (3) — and one with NO PATH in the hub's env (none sent: the starter's own)
       const s0 = signals.length, d0 = direct.length;
+      const KIND_OF = { [M3.up.sock]: 'silence', [M3.gone.sock]: 'EAGAIN', [M3.dOld.sock]: 'overflow', [M3.dNew.sock]: 'reject' };
+      const sockOf = (args) => path.basename(String((args || []).find((x) => typeof x === 'string' && x.startsWith('/')) || ''));
+      const kindAnswer = (kind, cmd) => {
+        if (kind === 'reject') throw new Error('the leg: a run that rejects');
+        return kind === 'silence' ? { unknown: true, why: 'the leg' } : kind === 'EAGAIN' ? { started: false, code: null, error: 'EAGAIN' }
+          : kind === 'overflow' ? { started: true, overflow: true, code: 0, signal: null, stdout: '', stderr: '' } : kind === 'no-exit' ? { started: true, code: null, signal: null, stdout: '', stderr: '' }
+          : kind === 'signal' ? { started: true, code: null, signal: 'SIGKILL', stdout: '', stderr: '' } : { started: true, code: cmd === 'fuser' ? 1 : 3, stdout: '', stderr: '' };
+      };
       const noReply = [];
-      for (const [kind, m] of [['silence', () => ({ unknown: true, why: 'the leg' })], ['EAGAIN', () => ({ started: false, code: null, error: 'EAGAIN' })], ['fuser none, pgrep 3', (cmd) => ({ started: true, code: cmd === 'fuser' ? 1 : 3, stdout: '', stderr: '' })]]) {
-        mute = m; const t = await logged(async () => M3.X.api.reprobePending()); mute = null;
-        noReply.push({ kind, t: t.r, said: t.lines.filter((l) => l.startsWith('[child] ') && l.includes("through the hub's starter")) });
+      for (const [kind, m] of [['four kinds by socket', (cmd, args) => kindAnswer(KIND_OF[sockOf(args)], cmd)], ['no exit, no signal', (cmd) => kindAnswer('no-exit', cmd)], ['a signal', (cmd) => kindAnswer('signal', cmd)],
+        ['fuser none, pgrep 3', (cmd) => kindAnswer('pgrep3', cmd)], ['no PATH in the hub', (cmd) => kindAnswer('silence', cmd)]]) {
+        const P0 = process.env.PATH, q = rec.length; if (kind === 'no PATH in the hub') delete process.env.PATH;
+        mute = m; let t; try { t = await logged(async () => M3.X.api.reprobePending()); } finally { mute = null; process.env.PATH = P0; }
+        noReply.push({ kind, t: t.r, asked: rec.slice(q), said: t.lines.filter((l) => l.startsWith('[child] ') && l.includes("through the hub's starter")) });
       }
-      ok(noReply.every((x) => x.t.open.length === 4 && !x.t.alive.length && !x.t.dead.length && !x.t.duplicate.length) && signals.length === s0 && socks.every((x) => fs.existsSync(x.sockPath) && fs.existsSync(x.meta)) && direct.length === d0,
-        `NO REPLY is never evidence — ${noReply.map((x) => x.kind).join(' / ')}: each pass leaves all four pending, nothing retired, nothing signalled, nothing started here`, noReply.map((x) => ({ kind: x.kind, t: x.t })));
-      const said = noReply[0].said;
-      ok(said.length === 8 && socks.every((x) => said.some((l) => l.startsWith(`[child] fuser ${x.sock}: no answer through the hub's starter (none in 2000 ms)`)) && said.some((l) => l.startsWith(`[child] pgrep ${x.sock}: `)))
-        && !noReply[1].said.length && !noReply[2].said.length, `…and SAID, once per (program, socket) — ${said.length} lines on the first pass, none again: ${said[0]}`, noReply.map((x) => x.said));
+      ok(noReply.every((x) => x.t.open.length === 4 && !x.t.alive.length && !x.t.dead.length && !x.t.duplicate.length && x.asked.length === 8) && signals.length === s0 && socks.every((x) => fs.existsSync(x.sockPath) && fs.existsSync(x.meta)) && direct.length === d0,
+        `NO REPLY is never evidence — ${noReply.map((x) => x.kind).join(' / ')}: each pass asks its eight, leaves all four pending, retires nothing, signals nothing, starts nothing here`, noReply.map((x) => ({ kind: x.kind, t: x.t, asked: x.asked.length })));
+      const said = noReply[0].said, WORD = { silence: 'none in 2000 ms', EAGAIN: 'EAGAIN', overflow: 'OVERFLOW', reject: 'REJECTED' };
+      ok(said.length === 8 && socks.every((x) => ['fuser', 'pgrep'].every((p) => said.some((l) => l.startsWith(`[child] ${p} ${x.sock}: no answer through the hub's starter (${WORD[KIND_OF[x.sock]]}) — no answer, never a kill`))))
+        && noReply.slice(1).every((x) => !x.said.length), `…and SAID by its kind, once per (program, socket) — ${said.length} lines on the first pass (silence / EAGAIN / OVERFLOW / REJECTED), none again`, noReply.map((x) => x.said));
+      ok(noReply[4].asked.every((x) => !('envAdd' in x.o)) && noReply[0].asked.every((x) => x.o.envAdd && x.o.envAdd.PATH === process.env.PATH), 'no PATH in the hub\'s env ⇒ no PATH sent (the starter\'s own) — never an empty one', noReply[4].asked.map((x) => x.o));
+      // (f) RED (r4793): the tip da7320225's reading — through runViaStarter's table — reads an output past the buffer, a run that rejects
+      // and an end with neither a number nor a signal as exit 1, «nobody owns it»: three live sockets retired as dead
+      const TIP3 = C3.tip, TIPKIND = { [TIP3.over.sock]: 'overflow', [TIP3.rej.sock]: 'reject', [TIP3.noexit.sock]: 'no-exit' };
+      mute = (cmd, args) => kindAnswer(TIPKIND[sockOf(args)], cmd);
+      let tipT; try { tipT = await logged(async () => TIP3.X.api.reprobePending()); } finally { mute = null; }
+      ok(tipT.r.dead.slice().sort().join() === [TIP3.over.sock, TIP3.rej.sock, TIP3.noexit.sock].sort().join() && ![TIP3.over, TIP3.rej, TIP3.noexit].some((x) => fs.existsSync(x.sockPath)),
+        `RED: the tip's reading through runViaStarter's table — an output past the buffer, a run that rejects, an end with no number and no signal each read as «nobody owns it»: ${tipT.r.dead.length} sockets retired as dead`, tipT.r);
       // (b) THE STARTER ANSWERS — every question asked of it, none started from this process; their bounds, buffer and PATH as runChild's
       const v = husk(), q0 = rec.length, d1 = direct.length;
       const b = await logged(async () => M3.X.api.reprobePending());

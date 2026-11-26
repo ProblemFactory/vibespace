@@ -282,17 +282,29 @@ const dedupKey = (m) => `${m.backend || 'claude'}:${m.host || 'local'}:${m.claud
 const runChildP = (bin, args, ms) => require('./tls.js').runChild(bin, args, ms);
 // B-323e's remainder (lane nl-starts): THE RE-PROBE'S questions (the ladder below is a TIMER of the hub's — and the duplicate retire's
 // pgrep it reaches) ride the hub's starter (src/server/child-starter.js), never a fork of the hub: the same program, args, bound and
-// buffer, runChild's answer ({code, out, err}: the starter's «no answer» reads TIMEOUT — no answer, never a kill); the hub's PATH of the
-// moment rides the request (runChild's child inherited it; none set ⇒ the starter's own). The boot's own questions (before the listen)
-// keep runChild — a start's. A question that got NO answer (a rung's: noAnswer, below; the fd scan's: no exit code — the starter's
-// silence, the bound, a start error) is SAID
-// once per (program, socket) — runChild's own rule for its bound (its reader's find: the duplicate retire's pgrep with no answer left a
-// husk running and nothing in the journal)
+// runChild's 4 MiB; the hub's PATH of the moment rides the request (runChild's child inherited it; none set ⇒ the starter's own). The
+// boot's own questions (before the listen) keep runChild — a start's. ON THIS ROAD THE ONLY ANSWER IS THE PROGRAM'S OWN CLEAN END WITH
+// ITS OWN NUMBER (主开发 r4793): the starter's silence, the bound, a start error, an output past the buffer, a run that rejects, an end
+// with neither a number nor a signal, a signal — each is NO REPLY, a code that is no number (starterRead, from the starter's own
+// result; src/server/tls.js runViaStarter's table reads three of them as 1, for its own user — the certificate pass — unchanged). A
+// question that got no reply is SAID once per (program, socket) — runChild's own rule for its bound (the read of da7320225: the
+// duplicate retire's pgrep with no answer had left a husk running and nothing in the journal)
+function starterRead(r) {
+  if (r && r.started !== false && !r.unknown && !r.timedOut && !r.overflow && !r.rejected && Number.isInteger(r.code)) return { code: r.code, out: String(r.stdout || ''), err: String(r.stderr || '') };
+  const code = !r || r.unknown || r.timedOut ? 'TIMEOUT' : r.rejected ? 'REJECTED' : r.started === false ? String(r.error || 'NOT-STARTED') : r.overflow ? 'OVERFLOW' : r.signal ? String(r.signal) : 'NO-EXIT';
+  return { code, out: '', err: code === 'TIMEOUT' ? 'timeout' : String((r && (r.stderr || r.error || r.rejected)) || code) };
+}
 const starterSaid = new Set();
-const starterP = (bin, args, ms) => require('./tls.js').runViaStarter(bin, args, ms, { ...(process.env.PATH != null ? { envAdd: { PATH: process.env.PATH } } : {}), maxBuffer: 4 * 1024 * 1024 }).then((r) => {
-  if (r && ((bin === 'fuser' || bin === 'pgrep') ? noAnswer(r) : typeof r.code !== 'number')) { const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin); if (!starterSaid.has(key)) { starterSaid.add(key); console.warn(`[child] ${key}: no answer through the hub's starter (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}) — no answer, never a kill`); } }
-  return r;
-});
+const starterP = (bin, args, ms) => {
+  const t0 = Date.now();
+  return Promise.resolve().then(() => require('./child-starter').childStarter().run(bin, args, { timeoutMs: ms, capture: true, maxBuffer: 4 * 1024 * 1024, ...(process.env.PATH != null ? { envAdd: { PATH: process.env.PATH } } : {}) }))
+    .then((r) => r, (e) => ({ rejected: String((e && e.message) || e) || 'rejected' }))
+    .then((raw) => {
+      const r = { ...starterRead(raw), ms: Date.now() - t0 };
+      if (typeof r.code !== 'number' || ((bin === 'fuser' || bin === 'pgrep') && noAnswer(r))) { const p = (args || []).find((a) => typeof a === 'string' && a.startsWith('/')), key = p ? `${bin} ${path.basename(p)}` : String(bin); if (!starterSaid.has(key)) { starterSaid.add(key); console.warn(`[child] ${key}: no answer through the hub's starter (${r.code === 'TIMEOUT' ? `none in ${ms} ms` : r.code}) — no answer, never a kill`); } }
+      return r;
+    });
+};
 // the restore's two liveness rungs, as children: fuser (an owner ⇒ alive), else pgrep -f (a command line naming the socket — never one of `own`, this server's own `dtach -a` attach clients) ⇒ true / false, or null = NO ANSWER
 // AN ANSWER IS THE TOOL'S OWN EXIT 0 OR 1 (found / none — fuser's and pgrep's). Anything else is NO answer, never «dead» (B-323e's
 // remainder, its reader's find, lane nl-starts): its bound ran out, the tool is missing, its start failed (EAGAIN / EMFILE at a full

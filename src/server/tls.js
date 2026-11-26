@@ -96,11 +96,10 @@ function runChild(bin, args, timeout) {
 /** B-323e (lane bl-keys-misc, 主开发 r1351 (6)): THE PASS'S CHILDREN ride the hub's starter (src/server/child-starter.js) — the
  *  hourly `tailscale status` / `tailscale cert` never fork the hub on its timer. runChild's answer: {code: 0 | n | 'ENOENT' |
  *  'TIMEOUT', out, err, ms}; the starter's «no answer» reads TIMEOUT (it did not answer in time). The boot's liveness probes
- *  (src/server/boot-restore.js) keep runChild — a start's, named in the start census; its RE-PROBE ladder (a timer) rides this one
- *  (B-323e's remainder, lane nl-starts), handing the names it sets (`envAdd`: the hub's PATH of the moment) and runChild's buffer. */
-function runViaStarter(bin, args, timeout, { envAdd = null, maxBuffer = 1024 * 1024 } = {}) {
+ *  (src/server/boot-restore.js) keep runChild — a start's, named in the start census. */
+function runViaStarter(bin, args, timeout) {
   const t0 = Date.now();
-  return Promise.resolve().then(() => require('./child-starter').childStarter().run(bin, args, { timeoutMs: timeout, capture: true, maxBuffer, ...(envAdd ? { envAdd } : {}) })).then((r) => {
+  return Promise.resolve().then(() => require('./child-starter').childStarter().run(bin, args, { timeoutMs: timeout, capture: true, maxBuffer: 1024 * 1024 })).then((r) => {
     const code = !r || r.unknown || r.timedOut ? 'TIMEOUT' : r.started === false ? (r.error === 'ENOENT' ? 'ENOENT' : (r.error || 1)) : r.overflow ? 1 : r.code === 0 ? 0 : (r.code != null ? r.code : (r.signal || 1));
     return { code, out: String((r && r.stdout) || ''), err: String((r && (r.stderr || r.error)) || (code === 'TIMEOUT' ? 'timeout' : '')), ms: Date.now() - t0 };
   }, (e) => ({ code: 1, out: '', err: String((e && e.message) || e), ms: Date.now() - t0 }));
