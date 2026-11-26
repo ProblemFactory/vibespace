@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs, CHROME_QUIET, stillPresser } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -228,14 +228,33 @@ try {
   await D.ev(view(SID_RED));
   await until(() => D.ev(`(() => { const f = ${barFacts(SID_RED)}; return f && !f.account && f.btns.length ? f : null; })()`), 30000);
   await until(() => tagWin(SID_RED), 5000, 100);
-  // hosted run 45584145109 (主开发 r4209): the control's ONE press is SHOWN to land before its 30 s wait — the element under the press
-  // point is the tagged window's own Resume button, and the press recorded a create for SID_RED; a press that did not land is the
-  // HARNESS's, said by its own name apart from the control's verdict (which then has nothing to judge, and the suite stays red)
   const RSEL = `.vs-rad-${SID_RED.slice(-4)} .chat-resume-btn`;
-  const aim = await D.ev(`(() => { const e = document.querySelector(${JSON.stringify(RSEL)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2, at = document.elementFromPoint(x, y); return { x, y, under: at ? (at.closest(${JSON.stringify(RSEL)}) ? 'the button' : String(at.className || at.tagName || '?').slice(0, 60)) : null }; })()`);
-  const pressed = !!aim && aim.under === 'the button' ? await pressIn(SID_RED, '.chat-resume-btn') : false;
-  const went = pressed ? await until(() => D.ev(`(() => { const c = window.__creates.find((x) => x.resumeId === ${JSON.stringify(SID_RED)}); return c ? { reqId: c.reqId, creates: window.__creates.length } : null; })()`), 15000, 100) : null;
-  if (!went) check('HARNESS (the RED control\'s press, not its verdict): the press point is the tagged window\'s own Resume button and the press recorded a create', false, { aim, pressed, creates: await D.ev('window.__creates.length') });
+  // B-1217 (主开发 r5173, lane lg-remote-hardening): the release mirror's re-run (runner image ubuntu24 20261116.376) read the HARNESS line
+  // of this control red once and green on its retry — the aim saw the button under its point, the press went out, no create came. The
+  // release's press read its point AGAIN with no look at what stood there, and nothing said whether the click reached the button (hosted
+  // run 45584145109, r4209, had added the aim). Now the press goes through THE STILL DOOR (scratch.mjs stillPresser, B-8b8c): it WAITS ON
+  // THE FACT — the tagged window's own Resume button, the same rect on two looks, no running mover, that element under its centre —
+  // presses THERE, and its LANDING is the WITNESS (the pointerdown and the click on that very element). The control is judged only on a
+  // press that landed; two presses that never land are a NAMED SKIP, never a red and never a green (r5135 law 1). PLACED first (red at will): a stand-in raised over the button between the
+  // release's aim and its press, for one press — the release's routine presses the stand-in and records no create.
+  const stillPress = stillPresser({ evalJs: D.ev, cdp: (m, prm) => D.S(m, prm) });
+  // (PLACED) the release's routine — its aim, then a stand-in over the button (gone after the one press on it), then its press
+  const aim0 = await D.ev(`(() => { const e = document.querySelector(${JSON.stringify(RSEL)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2, at = document.elementFromPoint(x, y); return { x, y, under: at ? (at.closest(${JSON.stringify(RSEL)}) ? 'the button' : String(at.className || at.tagName || '?').slice(0, 60)) : null }; })()`);
+  const placed = await D.ev(`(() => { const e = document.querySelector(${JSON.stringify(RSEL)}); if (!e) return false; const q = e.getBoundingClientRect(); const c = document.createElement('div'); c.className = 'vs-rad-cover';
+    c.style.cssText = 'position:fixed;left:' + (q.left - 8) + 'px;top:' + (q.top - 8) + 'px;width:' + (q.width + 16) + 'px;height:' + (q.height + 16) + 'px;z-index:2147483647;background:transparent';
+    window.__radCoverHits = 0; c.addEventListener('mousedown', () => { window.__radCoverHits++; }, true); c.addEventListener('mouseup', () => setTimeout(() => c.remove(), 0), true);
+    document.body.appendChild(c); return true; })()`);
+  const pressed0 = !!aim0 && aim0.under === 'the button' && placed === true ? await pressIn(SID_RED, '.chat-resume-btn') : false;
+  await sleep(1500);
+  const missed = await D.ev(`({ hits: window.__radCoverHits || 0, creates: window.__creates.filter((x) => x.resumeId === ${JSON.stringify(SID_RED)}).length, cover: !!document.querySelector('.vs-rad-cover') })`);
+  if (!pressed0 || !missed || missed.hits !== 1) console.log(`  ○ SKIPPED — the placed stand-in over the Resume button was not read by the release's press (its plant not in force), so the miss is not judged: ${JSON.stringify({ aim0, placed, pressed0, missed })}`);
+  else check('PLACED (red at will): a stand-in raised over the Resume button between the release\'s aim and its press — the release\'s routine presses the stand-in and records NO create (the mirror\'s HARNESS line, made at will)', missed.creates === 0 && !missed.cover, { aim0, missed });
+  // (THE CURE) through THE still door: the fact waited on, the press at the button's still centre, its landing witnessed on that very element
+  let aim = null, clicked = false, tries = 0;
+  while (tries < 2 && !clicked) { tries++; clicked = await stillPress(RSEL, { timeoutMs: 10000 }); const L = stillPress.last; aim = L && L.look ? { x: L.look.x, y: L.look.y, under: L.look.hits ? 'the button' : L.look.under, verdict: L.verdict, landed: L.landed } : null; }
+  const went = clicked ? await until(() => D.ev(`(() => { const c = window.__creates.find((x) => x.resumeId === ${JSON.stringify(SID_RED)}); return c ? { reqId: c.reqId, creates: window.__creates.length } : null; })()`), 15000, 100) : null;
+  if (!clicked) console.log(`  ○ SKIPPED — the RED control's scene did not form: ${tries} press(es) at the tagged window's own Resume button never landed on it (the door's landing witness), so its verdict is not judged: ${JSON.stringify({ aim, tries })}`);
+  else if (!went) check('RED control: the press landed on the tagged window\'s own Resume button (the door\'s witness) — with no verdict the page sends the create', false, { aim, tries, creates: await D.ev('window.__creates.length') });
   else {
     const red = await until(() => D.ev(`(() => { const t = window.__toastTexts().find((x) => /Account error/.test(x)); return t ? { toast: t, creates: window.__creates.length } : null; })()`), 30000, 200);
     await sleep(4000); // longer than the press's bounded re-read: a page with no verdict never draws the refusal
