@@ -172,6 +172,10 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   const NO_PRESAVE = patched('loop-no-presave.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) {", "        if (false) {"]]);
   // B-574d: the loop that SAVES the stamp but does not WAIT for its landing (the spawn over a stamp not on disk)
   const NO_WAIT = patched('loop-no-wait.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) {", "        saveState(d.dataDir, st, warn, d.storeWriter, landingMs); if (false) {"]]);
+  // 主开发 r4786: the loop whose wait has only the WRITER's answer (its own bound cut) — a landing that never comes holds the tick for ever
+  const NO_BOUND = patched('loop-no-bound.js', REAL_LOOP, [["    return Promise.race([Promise.resolve(w.durable(fp, { timeoutMs: boundMs })), bound]).then(", "    return Promise.resolve(w.durable(fp, { timeoutMs: boundMs })).then("]]);
+  // 主开发 r4786: the save's failed-write line without its latch (said at every failed save)
+  const NO_WLATCH = patched('loop-no-wlatch.js', REAL_LOOP, [["onWritten: (ok, e) => { if (ok) { st.writeFailSaid = false; return; } if (!st.writeFailSaid) {", "onWritten: (ok, e) => { if (ok) { st.writeFailSaid = false; return; } if (true) {"]]);
   const R2_ORDER = patched('loop-r2-order.js', REAL_LOOP, [["        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1);\n", "        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1); if (ok) d.onMemberReadingFresh(key, 'auto-cli refresh');\n"], ["        if (ok) { try { d.onMemberReadingFresh(key, 'auto-cli refresh'); }", "        if (false) { try { }"]]);
   const NO_GROUP = patched('loop-no-group.js', REAL_LOOP, [["mem = [a.id, ...g.accountIds.filter((x) => x !== a.id)];", "mem = [a.id];"]]);
   const loopFor = (poolFile) => poolFile === REAL_POOL ? REAL_LOOP : patched('loop-' + path.basename(poolFile), REAL_LOOP, [], { 'account-pool-auto.js': poolFile });
@@ -393,6 +397,8 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
       w.setMode('ok'); w.advance(30e3); w.restart(); await w.tick(); // restart 30 s later
       return { before, hung, after: w.spawns.length, disk: w.state() };
     };
+    // (the stand-in writer lands at once here, so this leg cannot tell a missing WAIT from a present one: its red is NO_PRESAVE, no stamp save
+    //  at all; leg (2) below — the landing a turn later, red NO_WAIT — carries the wait: the two legs together are the proof)
     const r = await midSpawn(REAL_LOOP);
     ok(r.hung === r.before + 1 && r.after === r.hung && r.disk && r.disk.attempts && r.disk.attempts.m1 > 0, '③ a restart 30 s into a hung spawn does NOT spawn again — the attempt stamp was on disk before the spawn (red on quota r2: re-spawned inside the floor)', r);
     const c = await midSpawn(NO_PRESAVE);
@@ -411,20 +417,37 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     ok(d1.length >= 1 && d1.some((x) => !x.stampOnDisk), `(2) RED CONTROL (the landing not waited for): a spawn starts with its stamp NOT on disk (${d1.map((x) => x.stampOnDisk).join(', ')})`, d1);
     // (4) NOTHING ABOUT WHEN OR HOW OFTEN CHANGES: several ticks of failed landings (placed) ask nothing and say it once; the FIRST tick whose
     //     stamp lands asks exactly once — the ask the release would have made, never an extra one
-    const w4 = makeWorld({ members: [slowMember()], sessions: S }); w4.writer.refuse = true;
+    // the member DUE at every tick (its reading three hours old) until a read lands — so the first tick whose stamp lands is the one that asks
+    const dueNow = (w) => w.writeCache(w.byId.get('m1'), w.now - 3 * 3600e3);
+    const w4 = makeWorld({ members: [slowMember()], sessions: S }); dueNow(w4); w4.writer.refuse = true;
     await run(w4, 30); const during = w4.spawns.length, said4 = w4.logs.filter((l) => /its attempt stamp did not reach the disk/.test(l)).length;
+    const wsaid4 = w4.logs.filter((l) => /pacing state write failed/.test(l)).length;   // r4786: the save's own failed-write line, latched too
     w4.writer.refuse = false; await run(w4, 3);
-    ok(during === 0 && said4 === 1 && w4.spawns.length === 1 && w4.spawns[0].stampOnDisk && w4.state() && w4.state().attempts.m1 === w4.spawns[0].t,
-      `(4) 30 ticks of failed landings: no ask (${during}), said ONCE (${said4}); then a landing: exactly ONE ask (${w4.spawns.length}), its stamp on disk at its start`, { during, said4, spawns: w4.spawns });
-    const c4 = makeWorld({ members: [slowMember()], sessions: S, loopFile: NO_WAIT }); c4.writer.refuse = true; await run(c4, 30);
+    ok(during === 0 && said4 === 1 && wsaid4 === 1 && w4.spawns.length === 1 && w4.spawns[0].stampOnDisk && w4.state() && w4.state().attempts.m1 === w4.spawns[0].t,
+      `(4) 30 ticks of failed landings: no ask (${during}), said ONCE (${said4}), the failed write said ONCE (${wsaid4}); then a landing: exactly ONE ask (${w4.spawns.length}), its stamp on disk at its start`, { during, said4, wsaid4, spawns: w4.spawns });
+    const l4 = makeWorld({ members: [slowMember()], sessions: S, loopFile: NO_WLATCH }); dueNow(l4); l4.writer.refuse = true; await run(l4, 30);
+    const lsaid4 = l4.logs.filter((l) => /pacing state write failed/.test(l)).length;
+    ok(lsaid4 > 1 && l4.spawns.length === 0, `(4) RED CONTROL (the failed write's latch cut): the failed write said at every failed save (${lsaid4} lines in 30 ticks)`, { lsaid4 });
+    const c4 = makeWorld({ members: [slowMember()], sessions: S, loopFile: NO_WAIT }); dueNow(c4); c4.writer.refuse = true; await run(c4, 30);
     ok(c4.spawns.length >= 1, `(4) RED CONTROL (the landing not waited for): it asks over stamps that never reached the disk (${c4.spawns.length} in 30 ticks)`);
     // (3) THE WAIT IS BOUNDED AND ENDS THE TICK: a landing that never comes (placed: a lost thread, a hung mount) is a FAILED landing past the
     //     named bound — no spawn, said once, the tick's own one-at-a-time mark released (every tick returns; no second spawn beside a waiting one)
-    const w3 = makeWorld({ members: [slowMember()], sessions: S, landingMs: 40 }); w3.writer.hang = true;
-    const t3 = Date.now(); for (let i = 1; i <= 5; i++) { w3.advance(MIN); await w3.tick(); } const took = Date.now() - t3;
+    // 主开发 r4786 (the round's must, SEEN at 270e6171f: the process ended here, «unsettled top-level await»): the loop's own bound is an
+    //     unref'd timer (it holds no process open) and the hung landing holds no handle — each tick is awaited under a REF'D HARNESS timer
+    //     of the suite's own: it holds the process open across the wait, and names the tick if the loop's bound never ends it
+    const heldTick = async (p, label, ms) => { let h = null; const cut = new Promise((r) => { h = setTimeout(() => r(`HARNESS: ${label} did not return in ${ms} ms — the loop's bound never ended it`), ms); });
+      try { return await Promise.race([p.then(() => null, (e) => `${label} threw: ${(e && e.message) || e}`), cut]); } finally { clearTimeout(h); } };
+    const hungTicks = async (loopFile, ms) => { const w = makeWorld({ members: [slowMember()], sessions: S, landingMs: 40, loopFile }); dueNow(w); w.writer.hang = true;
+      let harness = null;
+      for (let i = 1; i <= 5 && !harness; i++) { w.advance(MIN); harness = await heldTick(w.tick(), `(3) tick ${i}`, ms); }
+      return { w, harness }; };
+    const { w: w3, harness: h3 } = await hungTicks(REAL_LOOP, 10e3);
+    if (h3) console.error('  ' + h3);
     const said3 = w3.logs.filter((l) => /its attempt stamp did not reach the disk/.test(l)).length;
     w3.writer.hang = false; w3.advance(MIN); await w3.tick();
-    ok(require(REAL_LOOP).STAMP_LANDING_MS === 30e3 && w3.spawns.length === 1 && said3 === 1, `(3) a landing that NEVER comes: each of 5 ticks RETURNED past its bound (${took} ms in all — a fact here, not a timing claim), no spawn, said once (${said3}); the next landing asks once (${w3.spawns.length}) — the bound STAMP_LANDING_MS = 30 s`, { took, said3, spawns: w3.spawns.length });
+    ok(!h3 && require(REAL_LOOP).STAMP_LANDING_MS === 30e3 && w3.spawns.length === 1 && said3 === 1, `(3) a landing that NEVER comes: each of 5 ticks RETURNED past its bound (under the suite's harness timer, never by the wall clock), no spawn, said once (${said3}); the next landing asks once (${w3.spawns.length}) — the bound STAMP_LANDING_MS = 30 s`, { said3, spawns: w3.spawns.length });
+    const c3 = await hungTicks(NO_BOUND, 1500);
+    ok(!!c3.harness && /did not return/.test(c3.harness) && c3.w.spawns.length === 0, `(3) RED CONTROL (the loop's own bound cut: only the writer's answer ends the wait): a landing that never comes holds the tick — ${c3.harness}`, { harness: c3.harness });
     // (1) THE LANDING OF THESE BYTES, by the REAL store writer: an EARLIER write of the same file in flight on the writer's thread (gated) lands
     //     while the stamp's write is still held — the spawn stand-in is NOT started; it starts when the stamp's own write lands, and reads it
     const GATED = path.join(scratchDir, 'gated-writer.cjs'), gates = fs.mkdtempSync(path.join(scratchDir, 'gates-'));
@@ -447,7 +470,8 @@ parentPort.on('message', (m) => {
 `);
     const SWM = require('../src/store-writer.js'), RW = SWM.create({ log: { warn() { } }, workerPath: GATED });
     // r4340 law 1: every wait below is ON ITS FACT, its expiry said by a named HARNESS line
-    const until = async (label, fn, ms = 5000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 5)); } const r = !!(await fn()); if (!r) console.log(`  · HARNESS: «${label}» never reached its fact within ${ms} ms`); return r; };
+    // a wait on the FACT, bounded by a count of looks (no wall clock in this suite: scripts/wall-clock-census.mjs reads its names)
+    const until = async (label, fn, looks = 1000) => { for (let i = 0; i < looks; i++) { if (await fn()) return true; await new Promise((r) => setTimeout(r, 5)); } const r = !!(await fn()); if (!r) console.log(`  · HARNESS: «${label}» never reached its fact in ${looks} looks, 5 ms apart`); return r; };
     const open = (n) => fs.writeFileSync(path.join(gates, 'go-' + n), ''), held = (n) => fs.existsSync(path.join(gates, 'held-' + n));
     const w1 = makeWorld({ members: [slowMember()], sessions: S, storeWriter: RW, landingMs: 20e3 });
     const fp = path.join(w1.dataDir, 'auto-cli-state.json'), readFp = () => { try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch { return null; } };

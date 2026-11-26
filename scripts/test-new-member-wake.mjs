@@ -604,7 +604,7 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
 
   const srv = read('src/server/auto-cli-loop.js');
   ok('the auto-cli loop — the THIRD producer, whose successful read at 02:31:43 changed nothing — takes the same edge, and only on success',
-    /ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\)[\s\S]{0,2000}?if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \}/.test(srv)   /* B-360d: + the sign-in-unknown give-back between them (no failure, the attempt given back) */ && /createAutoCliLoop\(\{[^\n]*usage, onMemberReadingFresh,/.test(read('server.js')));
+    /ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\)[\s\S]{0,2800}?if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \}/.test(srv)   /* B-360d: + the sign-in-unknown give-back between them (no failure, the attempt given back); B-574d (主开发 r4732 (5)): + the after-write awaited before the wake, its landing said once (1887 → 2590 chars) */ && /createAutoCliLoop\(\{[^\n]*usage, onMemberReadingFresh,/.test(read('server.js')));
   ok('…and the edge is NOT buried inside refreshViaCliPanel, where the pre-fire spend gate also calls it (a gate that fires conversations as a side effect of asking a question is not a gate)',
     !/onMemberReadingFresh/.test(read('src/usage-routes.js').split('async function refreshViaCliPanel')[1].split('\n}\n')[0]));
 

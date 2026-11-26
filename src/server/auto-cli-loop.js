@@ -140,7 +140,9 @@ function saveState(dataDir, st, warn, W = null, boundMs = STAMP_LANDING_MS) {
   // said loud, and the in-memory state still paces this process
   try {
     const w = W || require('../store-writer.js').storeWriter();
-    w.dirty(fp, { name: 'auto-cli-state.write', makeDir: true, produce: () => body, onWritten: (ok, e) => { if (!ok) warn(`[auto-cli] pacing state write failed: ${(e && (e.code || e.message)) || e}`); } });
+    // 主开发 r4786: a failed write is said ONCE until a write lands (a dead mount fails every save of every tick); st.writeFailSaid lives in
+    // memory only (the doc above names every field written)
+    w.dirty(fp, { name: 'auto-cli-state.write', makeDir: true, produce: () => body, onWritten: (ok, e) => { if (ok) { st.writeFailSaid = false; return; } if (!st.writeFailSaid) { st.writeFailSaid = true; warn(`[auto-cli] pacing state write failed: ${(e && (e.code || e.message)) || e} — said once until a write lands`); } } });
     // the landing of THESE bytes: the writer's durable() waits for the version this dirty() made (its waiter is keyed by s.version
     // at the call; an earlier write of the same file landing settles only its own, lower version — src/store-writer.js durable /
     // settled), bounded twice: the writer's own timeout and a timer here (a lost thread, a hung mount: false past the bound) — the
@@ -148,7 +150,7 @@ function saveState(dataDir, st, warn, W = null, boundMs = STAMP_LANDING_MS) {
     let timer = null;
     const bound = new Promise((resolve) => { timer = setTimeout(() => resolve(false), boundMs); if (timer.unref) timer.unref(); });
     return Promise.race([Promise.resolve(w.durable(fp, { timeoutMs: boundMs })), bound]).then((ok) => { clearTimeout(timer); return ok === true; }, () => { clearTimeout(timer); return false; });
-  } catch (e) { warn(`[auto-cli] pacing state write failed: ${e.message}`); return Promise.resolve(false); }
+  } catch (e) { if (!st.writeFailSaid) { st.writeFailSaid = true; warn(`[auto-cli] pacing state write failed: ${e.message} — said once until a write lands`); } return Promise.resolve(false); }
 }
 /** The last crossing INSTANT any bucket of this account bought (the r1
  *  instant band — the secondary guard across buckets). */
