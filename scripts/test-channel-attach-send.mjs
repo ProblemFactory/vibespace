@@ -194,6 +194,15 @@ async function engineLegs(R, tag = '') {
   await R.eng.approve(p2.id, { shown: P.shownDigest(view(R.eng, p2.id) || p2) });
   const q2 = R.eng.store.outbox.snapshot().proposals[p2.id];
   r.push(['V1: a file rewritten after the card ⇒ failed `attachment-changed`, ZERO adapter calls', q2.state === 'failed' && q2.failure && q2.failure.code === 'attachment-changed' && R.S.W.sent.length === before && /not the file that was approved/.test(q2.reason || ''), JSON.stringify([q2.state, q2.reason])]);
+  // B-574d (lane nl-journals, 主开发 r4939): THE FOLDER IS GUARDED, not synced — a staged file TORN after the commit (a power cut inside its
+  // write: its bytes cut short) refuses the send BY NAME (the send re-reads and re-hashes every file) and sends nothing partial
+  const pr3 = await R.eng.propose(null, 'acc', C, { text: 'take three', attachments: [att('shot.png', PNG)] });
+  const p3 = pr3.proposal;
+  fs.truncateSync(path.join(R.filesDir, p3.id, '0'), Math.floor(PNG.length / 2));
+  const before3 = R.S.W.sent.length;
+  await R.eng.approve(p3.id, { shown: P.shownDigest(view(R.eng, p3.id) || p3) });
+  const q3 = R.eng.store.outbox.snapshot().proposals[p3.id];
+  r.push(['T1 (B-574d): a staged file TORN after the commit (cut short) ⇒ failed `attachment-changed` BY NAME, ZERO adapter calls — nothing partial leaves', q3.state === 'failed' && q3.failure && q3.failure.code === 'attachment-changed' && R.S.W.sent.length === before3 && /not the file that was approved/.test(JSON.stringify(q3.failure)), JSON.stringify(q3.failure || {}).slice(0, 200)]);
   // refusals write nothing
   const disk0 = R.onDisk().join();
   const r11 = await R.eng.propose(null, 'acc', C, { text: 'many', attachments: Array.from({ length: 11 }, (_, i) => att(`f${i}.txt`, Buffer.from('x'))) });
@@ -411,6 +420,7 @@ function engCopy(tag, from, to) { if (!ENGSRC.includes(from)) throw new Error(`c
   const Rv = await rig('ctl-noverify', { engineMod: engCopy('no-verify', 'const fv = !targetWhy && stored.length ? await OF.verify(store.dir, p.id, stored) : null;', 'const fv = null;') });
   const legs = (await engineLegs(Rv, 'C ')).legs;
   ok(legRed(legs, /V1:/), 'control: an engine that does not re-hash at the send sends a rewritten file (V1 red)');
+  ok(legRed(legs, /T1 \(B-574d\)/), 'control (B-574d): an engine that does not re-hash at the send sends a TORN file\'s partial bytes (T1 red)');
   Rv.server.close();
   const Rr = await rig('ctl-noremove', { engineMod: engCopy('no-remove', "if (verdict.ok && OF.UNSENT_ENDS.includes(to)) { try { OF.remove(store.dir, id); }", 'if (false) { try { OF.remove(store.dir, id); }') });
   const E = await engineLegs(Rr, 'C ');
