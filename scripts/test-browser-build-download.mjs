@@ -115,6 +115,11 @@ const listed = (v) => BB.listBuilds({ homeDir: HOME }).builds.some((b) => b.vers
 // the file's landing (the writer's bounded flush of that one file)
 const landedFile = (f) => { try { const W = require('../src/store-writer.js').storeWriter(); if (W.pending(f)) W.flushSync([f]); } catch { /* read as it is */ } return f; };
 const marker = () => { try { return JSON.parse(fs.readFileSync(landedFile(path.join(DATA, 'browser-tools', 'install-running.json')), 'utf8')); } catch { return null; } };
+// a leg's «no marker» waits for the marker to be GONE (a bounded wait on that one fact): free() forgets the marker while its last
+// write may still be in flight; that write lands and the writer then unlinks it (src/store-writer.js forget), so a read between the
+// two meets the file for a moment. A marker that truly stays still reads red at the bound (placed at will, B-574d browser-stores
+// follow 1: with the forget none of 30 in-flight markers stayed once the writer settled; without it all 30 did).
+const markerGone = () => until(() => !marker());
 let kk = mkKeeper(DATA);
 const done = async (k = kk) => { await until(() => !k.chromeBuildFacts().install.running); return k.chromeBuildFacts().install; };
 
@@ -166,6 +171,7 @@ const STABLE = LKG0.channels.Stable.version;
   ok(r.started && r.host === CBR.fileHost && f0.install.running && f0.install.version === STABLE && m0 && m0.kind === 'chrome-build' && m0.version === STABLE && m0.bytes === MODES.get(STABLE).zip.length,
     'the POST: the slot taken (the facts say it), THE marker names a `chrome-build` of that version and its length', { r, f0: f0.install, m0 });
   const i = await done();
+  await markerGone();
   const w = JSON.parse(fs.readFileSync(path.join(BROWSERS, `chrome-${STABLE}`, BB.WITNESS_FILE), 'utf8'));
   ok(i.done === STABLE && !i.failed && listed(STABLE) && w.version === STABLE && w.url === `https://${CBR.fileHost}${zipUrl(STABLE)}` && w.bytes === MODES.get(STABLE).zip.length && w.etag && leftovers(STABLE).length === 0 && !marker(),
     'done: the build is listed (chrome-<v>/chrome runnable), its witness inside names the version, url, length and etag; no .part, no .unpack, no marker', { i, w, left: leftovers(STABLE) });
@@ -186,6 +192,7 @@ for (const [v, mode, code] of [[LKG0.channels.Beta.version, 'badetag', 'build_ch
   plant(v, mode);
   await kk.installChromeBuild({ version: v });
   const i = await done();
+  await markerGone();
   ok(i.failed && i.version === v && (code ? i.code === code : !!i.code) && /^(fetch|check): /.test(i.error) && !listed(v) && leftovers(v).length === 0 && spyCalls(v).length === 0 && !marker(),
     `${mode}: refused by name (${i.code}: ${String(i.error).slice(0, 90)}) — nothing kept, nothing listed, unzip never ran`, i);
 }
@@ -278,6 +285,7 @@ console.log('— ⑦ a restart mid-download: in the fetch ⇒ failed cleanly; in
   kk = mkKeeper(DATA);
   const i = await done();
   await sleep(300);
+  await markerGone();
   ok(i.failed && /restarted during the download \(step fetch\)/.test(i.error) && leftovers(v).length === 0 && !listed(v) && !marker() && kk._reattached() === 'ended',
     'VibeSpace restarted while the bytes came in: the new keeper judges the marker at once — failed by name, the partial removed, the slot free', { i, left: leftovers(v) });
   const v2 = '151.0.7922.77';
@@ -291,6 +299,7 @@ console.log('— ⑦ a restart mid-download: in the fetch ⇒ failed cleanly; in
   const f1 = kk.chromeBuildFacts().install;
   fs.rmSync(SLOW, { force: true });
   const i2 = await done();
+  await markerGone();
   ok(m && Number.isInteger(m.pid) && m.files === 2 && f1.running && f1.step === 'unpack' && f1.version === v2 && kk._reattached() === 'running' && i2.done === v2 && listed(v2) && fs.existsSync(path.join(plan(v2).targetDir, BB.WITNESS_FILE)) && leftovers(v2).length === 0 && !marker(),
     'VibeSpace restarted while unzip ran: the marker named the unzip (pid + files); the new keeper RE-ATTACHED (the slot busy, said "unpacking"), then verified, witnessed and landed it', { m, f1, i2 });
 }

@@ -243,7 +243,7 @@ function create(ctx, slot) {
     const run = ++cbState.run;
     Object.assign(installState, { running: true, kind: ROW.id, startedAt: now(), finishedAt: null, exitCode: null, spec: `chrome@${v}`, pid: null, error: null, step: 'fetch', refused: [] });
     Object.assign(cbState, { version: v, url: null, bytes: 0, total: null, etag: null, code: null, abort: new AbortController() });
-    const free = () => { if (run !== cbState.run) return; cbState.abort = null; Object.assign(installState, { running: false, finishedAt: now(), exitCode: null, error: null, step: null, pid: null, kind: null }); try { fs.rmSync(installMarker(), { force: true }); } catch { /* none */ } };
+    const free = () => { if (run !== cbState.run) return; cbState.abort = null; Object.assign(installState, { running: false, finishedAt: now(), exitCode: null, error: null, step: null, pid: null, kind: null }); try { if (recDoors.forget) recDoors.forget(installMarker()); fs.rmSync(installMarker(), { force: true }); } catch { /* none */ } };   // browser-stores follow 1 (the round's should): every removal of the marker forgets its owed write first
     let url, head, total, sum;
     try {
       url = await urlOfVersion(v);

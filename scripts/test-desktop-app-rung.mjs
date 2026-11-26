@@ -793,27 +793,389 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
 // (anchored copy): the share act answered without waiting for its landing — the failed landing answered as saved
 console.log('B-574d browser-stores 5/8: the window stores on the store writer');
 {
-  const shareScene = async (ENGm, sub) => {
+  // the legs a run asks (browser-stores follow 1, its reads: each run does only what it judges — a failed write's retry backoff is 1 s,
+  // 2 s…, so each scene's planted write fails at its FIRST try; a file whose writer state is «failed» answers at once): 'revoke', 'quiet'
+  // and 'other' (each judged on its own window); every other leg runs in a scene of its own (an owed drop of a hold makes every later
+  // act on that window owe it too — the product's own word, so a hold leg never shares a scene with a mode leg on its window)
+  const HOOK = Symbol.for('vibespace:window targets:handed');   // the engine's record of a file (suites only)
+  const shareScene = async (ENGm, sub, legs = ['revoke', 'quiet', 'other']) => {
     const { W } = await engineChecks(ENGm, sub);
-    const reachFile = W.engine.reachFile, leaseNow = !!W.engine.leaseOf('da-1');
+    const reachFile = W.engine.reachFile, leaseFile = path.join(path.dirname(reachFile), 'window-leases.json'), leaseNow = !!W.engine.leaseOf('da-1');
     W.engine.storesLanded();
-    const act = (fn) => new Promise((resolve) => W.engine.shareAct(fn, (err, o) => resolve(err ? { err: (err && err.code) || 'threw' } : o)));
-    const out = await act(() => W.engine.setShareMode('da-1', 'pixels'));
-    let disk = null; try { disk = JSON.parse(fs.readFileSync(reachFile, 'utf8')).windows['da-1'].mode; } catch { disk = null; }   // read right after the answer: landed
-    fs.rmSync(reachFile, { force: true }); fs.mkdirSync(reachFile);   // the file's name taken by a folder: its next landing fails
-    const o2 = await act(() => W.engine.setShareMode('da-1', 'tree')); const refused = o2 && o2.notOnDisk === true ? 'notOnDisk' : o2 && o2.err ? o2.err : null;
-    const st = require('../src/store-writer.js').storeWriter().stats().find((x) => x.file === reachFile);
-    const planted = !!(st && st.failures > 0);   // 主开发 r5135 law 1: the plant's witness — the writer's write of that file failed
-    fs.rmSync(reachFile, { recursive: true, force: true });   // the writer retries over the freed name
-    return { planted, leaseNow, mode: out && out.mode, disk, refused };
+    // an act's answer, and whether it came inside shareAct's own turn (`sync`: the failed-state road)
+    const actNow = (fn) => { let got = null; const p = new Promise((resolve) => W.engine.shareAct(fn, (err, o) => { got = err ? { err: (err && err.code) || 'threw' } : o; resolve(got); })); return { sync: got !== null, p }; };
+    const act = (fn) => actNow(fn).p;
+    const W8 = require('../src/store-writer.js').storeWriter(), failedOf = (f) => !!((W8.stats().find((x) => x.file === f) || {}).failures > 0);
+    const said = (o) => (o && o.notOnDisk === true ? (o.code || 'no code') : o && o.err ? o.err : 'plain');
+    const triedReach = async () => { if (!failedOf(reachFile)) await W8.whenDurable([reachFile], { timeoutMs: 8000 }); };   // the writer's own try of the planted file
+    const { origin: _o, by: _b, browser: _br, ...plainRec } = W.records.get('da-1');
+    const appWin = (id) => W.records.set(id, { ...plainRec, id, appId: 'gedit', label: 'gedit', exec: 'gedit', url: null, state: 'ready' });   // a plain app's window
+    // a Scale ▸ relaunch as the keeper leaves it: the successor live, the old record exited with replacedBy
+    const relaunchOf = (from) => { W.records.set(`${from}-r`, { ...W.records.get(from), id: `${from}-r`, state: 'ready' }); W.records.set(from, { ...W.records.get(from), state: 'exited', replacedBy: `${from}-r` }); };
+    const relaunch = () => relaunchOf('da-1');
+    const modeOfR = (id = 'da-1-r') => { try { return W.engine.reachOf(id).mode || null; } catch { return null; } };
+    const PB = { kind: 'session', id: 'claude:' + SESS_B.claudeSessionId };
+    const bAttach = async (id) => {   // B shared on window `id` and attached there while window-leases.json cannot land: its hold never lands
+      appWin(id); await act(() => W.engine.grantReach(id, PB, { by: 'user' }));
+      let attached = false; try { W.engine.attach(id, W.fB); attached = !!W.engine.leaseOf(id); } catch { attached = false; }
+      const tried = await W8.whenDurable([leaseFile], { timeoutMs: 8000 });   // that attach's OWN write tried
+      return { attached, failed: tried === false && failedOf(leaseFile) };
+    };
+    const res = { leaseNow };
+    const LEASE_LEGS = ['lease', 'unheld', 'lflight', 'lcarry', 'stale', 'gain', 'gainfl', 'swap'];
+    const rowsAt = (id) => { try { return (W.engine.reachOf(id) || {}).rows || []; } catch { return []; } };   // a window's share rows (none: a named miss, never a throw)
+    if (legs.some((x) => LEASE_LEGS.includes(x))) {
+      let PA = null;
+      if (legs.includes('swap')) {   // before the plant: A shared on a plain window and holding it — LANDED
+        PA = (rowsAt('da-1').find((x) => x.by === 'self-open') || {}).principal || null;
+        appWin('da-8'); if (PA) await act(() => W.engine.grantReach('da-8', PA, { by: 'user' })); await act(() => W.engine.grantReach('da-8', PB, { by: 'user' }));
+        try { W.engine.attach('da-8', W.fA); } catch { /* judged below: no A hold, no scene */ }
+        const hl = W.engine[HOOK]('lease');   // the plant's witness (its read): A's hold IS on disk — the landing answered and the landed record names A
+        res.landedA = W.engine.storesLanded() === true && /\|w-A$/.test(String(((hl && hl.landedMeta) || {})['da-8']));
+      }
+      fs.rmSync(leaseFile, { force: true }); fs.mkdirSync(leaseFile);   // window-leases.json's name taken by a folder
+      if (legs.includes('lease')) {   // follow 1: a revoke that DROPS a lease (the opener's own row) that LANDED, while window-leases.json cannot land
+        const selfRow = rowsAt('da-1').find((x) => x.by === 'self-open');
+        const o5 = selfRow ? await act(() => W.engine.revokeReach('da-1', selfRow.principal)) : { err: 'no self-open row' };
+        if (!failedOf(leaseFile)) await W8.whenDurable([leaseFile], { timeoutMs: 8000 });   // the witness needs the writer's own try of that file (a copy that waits for nothing answered before it)
+        res.leaseRevoke = { planted: failedOf(leaseFile), dropped: !!(o5 && o5.revoked && o5.revoked.leaseDropped), said: said(o5) };
+      }
+      if (legs.includes('unheld')) {   // follow 1 (its read): a hold that NEVER landed — the revoke that drops it answers plain: a restart cannot bring it back
+        const b = await bAttach('da-3'); const ou = await act(() => W.engine.revokeReach('da-3', PB));
+        res.unheld = { ...b, dropped: !!(ou && ou.revoked && ou.revoked.leaseDropped), said: said(ou) };
+      }
+      if (legs.includes('lflight')) {   // follow 1 (its read): that hold never landed, but a write carrying it is IN FLIGHT (staged on the engine's own record) — the revoke waits: that write may land it
+        const b = await bAttach('da-6'); const hk = W.engine[HOOK]('lease'); const staged = !!(hk && hk.landedMeta && b.attached);
+        if (staged) { hk.inFlight = true; hk.flightMeta = { ...hk.landedMeta, 'da-6': 'staged|B' }; }
+        const of2 = await act(() => W.engine.revokeReach('da-6', PB));
+        res.lflight = { ...b, staged, dropped: !!(of2 && of2.revoked && of2.revoked.leaseDropped), said: said(of2) };
+      }
+      if (legs.includes('lcarry')) {   // follow 1 (its read): the agent browser relaunched; the reconcile carries its LANDED lease along replacedBy (that write fails) — a revoke on the successor that drops it waits: a restart carries the landed lease again
+        relaunch(); W.engine.reconcile({ graceMs: 0 });
+        const carried = !!W.engine.leaseOf('da-1-r'), tried = await W8.whenDurable([leaseFile], { timeoutMs: 8000 });
+        const selfRow = rowsAt('da-1-r').find((x) => x.by === 'self-open');
+        const oc = selfRow ? await act(() => W.engine.revokeReach('da-1-r', selfRow.principal)) : { err: 'no self-open row' };
+        res.lcarry = { carried, failed: tried === false && failedOf(leaseFile), dropped: !!(oc && oc.revoked && oc.revoked.leaseDropped), said: said(oc) };
+      }
+      if (legs.includes('gain')) {   // follow 1 (its read): B's hold on da-3 NEVER landed (memory names B, the disk nobody); the person changes da-3's mode — no hold on disk to give back: the lease side answers plain
+        const b = await bAttach('da-3'); const og2 = await act(() => W.engine.setShareMode('da-3', 'pixels'));
+        res.gain = { ...b, held: !!W.engine.leaseOf('da-3'), said: said(og2) };
+      }
+      if (legs.includes('gainfl')) {   // follow 1 (its read): that gain, while a write IN FLIGHT names nobody for the window (staged on the engine's own record) — still plain: no write the disk may take names another conversation
+        const b = await bAttach('da-3'); const hk = W.engine[HOOK]('lease'); const staged = !!(hk && hk.landedMeta && b.attached);
+        if (staged) { const fm = { ...hk.landedMeta }; delete fm['da-3']; hk.inFlight = true; hk.flightMeta = fm; }   // (the landed record never named da-3: the flight names nobody for it)
+        const og3 = await act(() => W.engine.setShareMode('da-3', 'pixels'));
+        res.gainfl = { ...b, staged, held: !!W.engine.leaseOf('da-3'), said: said(og3) };
+      }
+      if (legs.includes('swap')) {   // follow 1 (its read): the disk names A, memory names B (A detached, then B attached, neither landed) — a mode change answers the hold's code: a restart gives the window to A
+        const heldA = !!(W.engine.leaseOf('da-8') && W.engine.leaseOf('da-8').sessionId === 'w-A');
+        let detached = false; try { W.engine.detach('da-8', W.fA); detached = !W.engine.leaseOf('da-8'); } catch { detached = false; }
+        const tried = await W8.whenDurable([leaseFile], { timeoutMs: 8000 });
+        let heldB = false; try { W.engine.attach('da-8', W.fB); heldB = !!(W.engine.leaseOf('da-8') && W.engine.leaseOf('da-8').sessionId === 'w-B'); } catch { heldB = false; }
+        const ow = await act(() => W.engine.setShareMode('da-8', 'pixels'));
+        res.swap = { heldA, detached, heldB, failed: tried === false && failedOf(leaseFile), said: said(ow) };
+      }
+      if (legs.includes('stale')) {   // follow 1 (its read): A DETACHES while window-leases.json cannot land (the disk still names A); the person's revoke of A then drops nothing — it still waits: a restart gives A the window back
+        let detached = false; try { W.engine.detach('da-1', W.fA); detached = !W.engine.leaseOf('da-1'); } catch { detached = false; }
+        const tried = await W8.whenDurable([leaseFile], { timeoutMs: 8000 });
+        const selfRow = rowsAt('da-1').find((x) => x.by === 'self-open');
+        const os = selfRow ? await act(() => W.engine.revokeReach('da-1', selfRow.principal)) : { err: 'no self-open row' };
+        res.stale = { detached, failed: tried === false && failedOf(leaseFile), dropped: !!(os && os.revoked && os.revoked.leaseDropped), said: said(os) };
+      }
+      fs.rmSync(leaseFile, { recursive: true, force: true });
+    }
+    if (legs.some((x) => !LEASE_LEGS.includes(x))) {
+      const out = await act(() => W.engine.setShareMode('da-1', 'pixels'));
+      let disk = null; try { disk = JSON.parse(fs.readFileSync(reachFile, 'utf8')).windows['da-1'].mode; } catch { disk = null; }   // read right after the answer: landed
+      const granted = await act(() => W.engine.grantReach('da-1', PB, { by: 'user' }));   // follow 1: a share to revoke
+      Object.assign(res, { mode: out && out.mode, disk, granted: said(granted) === 'plain' });
+      if (legs.includes('bare')) { appWin('da-4'); await act(() => W.engine.setShareMode('da-4', 'pixels')); }   // a MODE-ONLY share (no rows), landed
+      await W8.whenDurable([reachFile], { timeoutMs: 8000 });   // its read: the grant's own write (handed, never waited) lands before the plant — nothing owed when the legs begin
+      fs.rmSync(reachFile, { force: true }); fs.mkdirSync(reachFile);   // the file's name taken by a folder: its next landing fails
+      if (legs.includes('both')) {   // follow 1: a revoke that DROPS a hold while a mode asked in the same turn is owed too
+        fs.rmSync(leaseFile, { force: true }); fs.mkdirSync(leaseFile);
+        const selfRow = rowsAt('da-1').find((x) => x.by === 'self-open');
+        const pm = act(() => W.engine.setShareMode('da-1', 'tree'));
+        const ob = selfRow ? await act(() => W.engine.revokeReach('da-1', selfRow.principal)) : { err: 'no self-open row' };
+        await pm;
+        if (!failedOf(leaseFile)) await W8.whenDurable([leaseFile], { timeoutMs: 8000 });
+        res.both = { leasePlanted: failedOf(leaseFile), dropped: !!(ob && ob.revoked && ob.revoked.leaseDropped), said: said(ob) };
+        fs.rmSync(leaseFile, { recursive: true, force: true });
+      }
+      if (legs.includes('flight')) {   // follow 1 (its read): a write IN FLIGHT carrying another mode for da-1 (staged on the engine's own record of it) — a grant whose mode the last landed bytes hold still waits
+        const h = W.engine[HOOK]('reach'); res.flightStaged = !!(h && h.landedMeta);
+        if (h) { h.inFlight = true; h.flightMeta = { ...(h.landedMeta || {}), 'da-1': 'tree' }; }
+        const of = await act(() => W.engine.grantReach('da-1', PB, { by: 'user' })); res.flight = said(of);
+      }
+      if (legs.includes('lost')) {   // follow 1 (its read): that write never answered (its thread lost: its rename may have landed) — the mode the bytes before it held, asked again, waits too
+        await triedReach();
+        const ol = await act(() => W.engine.setShareMode('da-1', 'pixels')); res.lost = said(ol);
+      }
+      if (legs.includes('lostkeep')) {   // …while a window whose fact is the same in both possible disks (none) stays known: a grant there answers plain
+        appWin('da-5'); const ok5 = await act(() => W.engine.grantReach('da-5', PB, { by: 'user' })); res.lostkeep = said(ok5);
+      }
+      if (legs.includes('revoke')) { const o3 = await act(() => W.engine.revokeReach('da-1', PB)); res.revoked = said(o3); }   // follow 1: a REVOKE as the DELETE route asks it — no hold dropped, its window's mode on disk
+      if (legs.includes('quiet')) {   // follow 1 (its read): once that write FAILED, an act that moves no mode still answers plain — the old file holds the mode
+        if (!legs.includes('revoke')) await act(() => W.engine.revokeReach('da-1', PB));   // something handed after the plant, so its write is tried
+        await triedReach(); res.quietPlanted = failedOf(reachFile);
+        const oq = await act(() => W.engine.grantReach('da-1', PB, { by: 'user' })); res.quiet = said(oq);
+      }
+      if (legs.includes('other')) {   // follow 1 (its read): ANOTHER window's mode write fails — a grant on da-1 (its own mode on disk) answers plain
+        appWin('da-2');
+        const oo = await act(() => W.engine.setShareMode('da-2', 'pixels')); await triedReach();
+        const og = await act(() => W.engine.grantReach('da-1', PB, { by: 'user' }));
+        res.other = { planted: failedOf(reachFile), da2: said(oo), da1: said(og) };
+      }
+      if (legs.includes('base')) {   // 5/8's mode change (its own write's FIRST try answers it); then (follow 1) the SAME mode asked again once that write failed
+        const o2 = await act(() => W.engine.setShareMode('da-1', 'tree'));
+        res.refused = o2 && o2.notOnDisk === true ? 'notOnDisk' : o2 && o2.err ? o2.err : null;
+        await triedReach(); res.basePlanted = failedOf(reachFile);
+        const a2 = actNow(() => W.engine.setShareMode('da-1', 'tree')); res.againSync = a2.sync;
+        res.again = a2.sync ? said(await a2.p) : 'waited';   // a copy that waits for the retry is not awaited (its answer comes up to 60 s later)
+      }
+      if (legs.includes('getcarry')) {   // follow 1: the Share dialog READS the relaunched window (its read carries the share, handed, waited by nobody; its write fails), then the person grants
+        relaunch(); W.engine.reachOf('da-1-r'); await W8.whenDurable([reachFile], { timeoutMs: 8000 });   // the carry's OWN write tried
+        const o6 = await act(() => W.engine.grantReach('da-1-r', PB, { by: 'user' })); res.getCarried = { said: said(o6), mode: modeOfR() };
+      }
+      if (legs.includes('carry')) {   // follow 1: a grant on a relaunched window carries the share and its mode along replacedBy INSIDE the act
+        relaunch(); const o4 = await act(() => W.engine.grantReach('da-1-r', PB, { by: 'user' })); res.carried = { said: said(o4), mode: modeOfR() };
+      }
+      if (legs.includes('bare')) {   // follow 1 (its read): that MODE-ONLY share carried to a relaunched window by the dialog's read (its write fails), then set to Auto there — a restart would carry the old mode again
+        relaunchOf('da-4'); W.engine.reachOf('da-4-r'); await W8.whenDurable([reachFile], { timeoutMs: 8000 });
+        const ob2 = await act(() => W.engine.setShareMode('da-4-r', 'auto')); res.bare = { said: said(ob2), rows: W.engine.reachOf('da-4-r').rows.length };
+      }
+      await triedReach();   // a copy that answered before the writer's try: the witness waits for that try
+      res.planted = failedOf(reachFile);   // 主开发 r5135 law 1: the plant's witness — the writer's write of that file failed
+      fs.rmSync(reachFile, { recursive: true, force: true });   // the writer retries over the freed name
+    }
+    return res;
+  };
+  // follow 1 (its read): a START reads what the disk holds — a second engine (a fresh copy of the module: its own record of the files)
+  // over the folder the first one wrote. 'reach': window-reach.json holds da-1 in pixels; then the file cannot land, and a grant on da-1
+  // answers plain. 'lease': window-leases.json holds A's hold on da-1; then that file cannot land, B attaches to another window and the
+  // revoke that drops B's hold (never landed) answers plain
+  const seedScene = async (ENGm, sub, kind = 'reach') => {
+    const { W } = await engineChecks(ENGINE, sub);
+    await new Promise((resolve) => W.engine.shareAct(() => W.engine.setShareMode('da-1', 'pixels'), resolve));
+    W.engine.storesLanded();
+    const reachFile = W.engine.reachFile, leaseFile = path.join(path.dirname(reachFile), 'window-leases.json'), W8 = require('../src/store-writer.js').storeWriter(), failedOf = (f) => !!((W8.stats().find((x) => x.file === f) || {}).failures > 0);
+    const E2 = ENGm.create({ keeper: W.keeper, dataDir: path.join(W.dir, 'data'), env: () => ({}), activeSessions: W.sessions, broadcast: () => { }, bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null });
+    const PB = { kind: 'session', id: 'claude:' + SESS_B.claudeSessionId }, file = kind === 'lease' ? leaseFile : reachFile;
+    let read = null; try { read = kind === 'lease' ? (E2.leaseOf('da-1') || {}).sessionId || null : E2.reachOf('da-1').mode; } catch { read = null; }   // its start's read of the file
+    fs.rmSync(file, { force: true }); fs.mkdirSync(file);
+    const said = (o) => (o && o.notOnDisk === true ? (o.code || 'no code') : o && o.err ? o.err : 'plain');
+    const act2 = (fn) => new Promise((resolve) => E2.shareAct(fn, (err, x) => resolve(err ? { err: (err && err.code) || 'threw' } : x)));
+    let o, attached = null, readHold = null;
+    if (kind === 'lease') {
+      const { origin: _o, by: _b, browser: _br, ...plainRec } = W.records.get('da-1');
+      W.records.set('da-7', { ...plainRec, id: 'da-7', appId: 'gedit', label: 'gedit', exec: 'gedit', url: null, state: 'ready' });
+      await act2(() => E2.grantReach('da-7', PB, { by: 'user' }));
+      try { E2.attach('da-7', E2.factsForToken('vsst_B')); attached = !!E2.leaseOf('da-7'); } catch { attached = false; }
+      await W8.whenDurable([leaseFile], { timeoutMs: 8000 });
+      o = await act2(() => E2.revokeReach('da-7', PB));
+      // …and the hold it READ: A's on da-1 — the revoke of A's own row there drops it, and waits (the disk names A)
+      const selfRow = ((() => { try { return (E2.reachOf('da-1') || {}).rows || []; } catch { return []; } })()).find((x) => x.by === 'self-open');
+      readHold = selfRow ? await act2(() => E2.revokeReach('da-1', selfRow.principal)) : { err: 'no self-open row' };
+    } else o = await act2(() => E2.grantReach('da-1', PB, { by: 'user' }));
+    if (!failedOf(file)) await W8.whenDurable([file], { timeoutMs: 8000 });
+    const planted = failedOf(file); fs.rmSync(file, { recursive: true, force: true });
+    return { read, attached, planted, said: said(o), readHold: readHold ? said(readHold) : null };
   };
   const skip5 = (name, why) => console.log(`  SKIP ${name}: ${why} — its plant was never read (主开发 r5135 law 1): not judged`);
-  const S5 = await shareScene(ENGINE, 'bs5-real');
-  if (!S5.planted) skip5('5/8', 'the folder in window-reach.json\'s name: the writer\'s write of it never failed'); else ok(S5.leaseNow && S5.mode === 'pixels' && S5.disk === 'pixels' && S5.refused === 'notOnDisk',
-    'B-574d browser-stores 5/8: an agent\'s open and attach are handed (the lease in memory at once); a person\'s share act answers AFTER its landing (the file holds the mode when the answer comes), and a landing that FAILS answers notOnDisk — the act is in effect, never a false «refused»', S5);
-  const src5 = read(ENGINE_REL), WAITS = '      respond(null, ok === true ? out : { ...out, notOnDisk: true });\n';
-  const S5x = await shareScene(MUT.load(ENGINE_REL, editAnchor(src5, WAITS, '      respond(null, out);   // MUTANT: the landing not read\n', ENGINE_REL), 'bs5-unread'), 'bs5-red');
+  const NEVER = 'the folder in window-reach.json\'s name: the writer\'s write of it never failed';
+  const NEVERL = 'the folder in window-leases.json\'s name: the writer\'s write of it never failed';
+  const SB = await shareScene(ENGINE, 'bs5-real', ['base']);
+  if (!SB.planted) skip5('5/8', NEVER); else ok(SB.leaseNow && SB.mode === 'pixels' && SB.disk === 'pixels' && SB.refused === 'notOnDisk',
+    'B-574d browser-stores 5/8: an agent\'s open and attach are handed (the lease in memory at once); a person\'s share act answers AFTER its landing (the file holds the mode when the answer comes), and a landing that FAILS answers notOnDisk — the act is in effect, never a false «refused»', SB);
+  const src5 = read(ENGINE_REL), WAITS = "      respond(null, !missed.size ? out : { ...out, notOnDisk: true, code: missed.size > 1 ? 'share-not-on-disk' : missed.has(leaseFile) ? 'share-hold-not-on-disk' : 'share-mode-not-on-disk' });\n";
+  const red = async (anchor, mutant, tag, legs) => shareScene(MUT.load(ENGINE_REL, editAnchor(src5, anchor, mutant, ENGINE_REL), tag), `${tag}-red`, legs);
+  const S5x = await red(WAITS, '      respond(null, out);   // MUTANT: the landing not read\n', 'bs5-unread', ['base']);
   if (!S5x.planted) skip5('5/8 RED', 'the copy\'s write of window-reach.json never failed'); else ok(S5x.refused === null, 'RED (anchored copy: the share act answered as saved whatever its landing): the failed landing is answered as on disk — 5/8 goes red', S5x);
+  // browser-stores follow 1 (主开发 r5241 and the round's reads): an act waits for a file only where the disk does not hold what memory
+  // holds for its OWN window (each file's last LANDED bytes, by window; what a restart carries along replacedBy) — and a miss answers
+  // notOnDisk with a code naming which (the page: in effect; the mode may be lost / a conversation that held the window before may hold
+  // it again / both). Each judged on the writer's failed write of its file; each with its RED
+  if (!SB.basePlanted) skip5('follow 1 (the mode asked again)', NEVER);
+  else ok(SB.again === 'share-mode-not-on-disk' && SB.againSync, 'B-574d browser-stores follow 1: the SAME mode asked again once its own write failed answers the mode\'s code (the disk holds the old mode — never «saved» from memory alone), at once: a file whose writer state is «failed» is not waited for', { again: SB.again, sync: SB.againSync });
+  const S5 = await shareScene(ENGINE, 'bsf1-real'), SL = await shareScene(ENGINE, 'bsf1-lease-real', ['lease']);
+  if (!SL.leaseRevoke.planted) skip5('follow 1 (the dropped hold)', NEVERL);
+  else ok(SL.leaseRevoke.dropped && SL.leaseRevoke.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1: a revoke that DROPS a hold that landed, while window-leases.json cannot land, answers notOnDisk with the hold\'s code (in effect; a conversation that held the window before may hold it again after a restart)', SL.leaseRevoke);
+  if (!S5.planted) skip5('follow 1 (the mode file)', NEVER);
+  else ok(S5.granted && S5.revoked === 'plain', 'B-574d browser-stores follow 1: a revoke that drops no hold, its window\'s mode on disk, answers at once while window-reach.json cannot land — nothing it did lives in that file (its record is the grants store\'s)', { revoked: S5.revoked });
+  if (!S5.quietPlanted) skip5('follow 1 (after a failed write)', NEVER);
+  else ok(S5.quiet === 'plain', 'B-574d browser-stores follow 1 (its read): once a write of window-reach.json FAILED, a grant that moves no mode still answers plain — the old file holds its window\'s mode (never «that mode may be lost» for every act while the storage fails)', { quiet: S5.quiet });
+  if (!(S5.other && S5.other.planted)) skip5('follow 1 (another window\'s write)', NEVER);
+  else ok(S5.other.da2 === 'share-mode-not-on-disk' && S5.other.da1 === 'plain', 'B-574d browser-stores follow 1 (its read): ANOTHER window\'s mode write failed (said for that window) — a grant on this window, its own mode on disk, answers plain (the words speak of the act\'s window)', S5.other);
+  const S15 = await shareScene(ENGINE, 'bsf1-unheld-real', ['unheld']);
+  if (!(S15.unheld && S15.unheld.failed && S15.unheld.attached)) skip5('follow 1 (a hold that never landed)', 'the attach took no lease, or its own write of window-leases.json did not fail');
+  else ok(S15.unheld.dropped && S15.unheld.said === 'plain', 'B-574d browser-stores follow 1 (its read): a revoke that drops a hold which NEVER landed answers plain — a restart cannot bring it back (the words speak of the act\'s window)', S15.unheld);
+  const S16 = await shareScene(ENGINE, 'bsf1-lflight-real', ['lflight']);
+  if (!(S16.lflight && S16.lflight.failed && S16.lflight.staged)) skip5('follow 1 (a hold in flight)', 'the attach took no lease, its write did not fail, or the engine\'s record was not there to stage');
+  else ok(S16.lflight.dropped && S16.lflight.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): a hold that never landed but rides a write IN FLIGHT — the revoke that drops it waits (that write may land it): the hold\'s code while window-leases.json cannot land', S16.lflight);
+  const S17 = await shareScene(ENGINE, 'bsf1-lcarry-real', ['lcarry']);
+  if (!(S17.lcarry && S17.lcarry.failed && S17.lcarry.carried)) skip5('follow 1 (a hold carried along replacedBy)', 'the reconcile carried no lease, or its write of window-leases.json did not fail');
+  else ok(S17.lcarry.dropped && S17.lcarry.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): an agent browser relaunched — the reconcile carries its LANDED lease to the successor (that write fails); the revoke there that drops it answers the hold\'s code: a restart carries the landed lease again', S17.lcarry);
+  const S11 = await shareScene(ENGINE, 'bsf1-getcarry-real', ['getcarry']);
+  if (!S11.planted) skip5('follow 1 (the dialog\'s carry)', NEVER);
+  else ok(S11.getCarried && S11.getCarried.said === 'share-mode-not-on-disk' && S11.getCarried.mode === 'pixels', 'B-574d browser-stores follow 1: the Share dialog\'s read carries a relaunched window\'s mode (its write failed, waited by nobody); the grant that follows waits for it — the mode\'s code while it cannot land (a restart before it lands loses the mode)', S11.getCarried);
+  const S9 = await shareScene(ENGINE, 'bsf1-carry-real', ['carry']);
+  if (!S9.planted) skip5('follow 1 (the mode carried inside the act)', NEVER);
+  else ok(S9.carried && S9.carried.said === 'share-mode-not-on-disk' && S9.carried.mode === 'pixels', 'B-574d browser-stores follow 1: a grant that CARRIES a relaunched window\'s mode inside the act waits for window-reach.json — the mode\'s code while it cannot land', S9.carried);
+  const S14 = await shareScene(ENGINE, 'bsf1-bare-real', ['bare']);
+  if (!S14.planted) skip5('follow 1 (a mode-only share carried)', NEVER);
+  else ok(S14.bare && S14.bare.rows === 0 && S14.bare.said === 'share-mode-not-on-disk', 'B-574d browser-stores follow 1 (its read): a MODE-ONLY share carried to a relaunched window (its write failed), then set to Auto there, answers the mode\'s code — with no rows of its own, a restart carries the old mode to it again', S14.bare);
+  const S10 = await shareScene(ENGINE, 'bsf1-both-real', ['both']);
+  if (!S10.planted || !(S10.both && S10.both.leasePlanted)) skip5('follow 1 (the hold and the mode both owed)', 'the folders in the two files\' names: the writer\'s writes of them never both failed');
+  else ok(S10.both.dropped && S10.both.said === 'share-not-on-disk', 'B-574d browser-stores follow 1: a revoke that drops a hold while the mode file is owed too answers notOnDisk with the code for both (the mode may be lost AND a conversation that held the window before may hold it again)', S10.both);
+  const S12 = await shareScene(ENGINE, 'bsf1-flight-real', ['flight', 'lost', 'lostkeep']);
+  if (!S12.planted || !S12.flightStaged) skip5('follow 1 (a write in flight / one never answered)', 'the engine\'s record of window-reach.json was not there to stage, or its write never failed');
+  else ok(S12.flight === 'share-mode-not-on-disk' && S12.lost === 'share-mode-not-on-disk' && S12.lostkeep === 'plain', 'B-574d browser-stores follow 1 (its read): a write in flight carrying another mode makes a grant wait (the mode\'s code while it cannot land); once that write never answered (its thread lost), the window whose mode differs between the two possible disks waits too, and a window the same in both answers plain', { flight: S12.flight, lost: S12.lost, lostkeep: S12.lostkeep });
+  const FRESH = MUT.load(ENGINE_REL, src5, 'bsf1-fresh', { same: true });   // a deliberate unpatched copy: the module's own fresh record of the files
+  const S13 = await seedScene(FRESH, 'bsf1-seed-real');
+  if (!S13.planted) skip5('follow 1 (a start\'s read)', NEVER);
+  else ok(S13.read === 'pixels' && S13.said === 'plain', 'B-574d browser-stores follow 1 (its read): a START reads what the disk holds — a grant there, its window\'s mode as read, answers plain while window-reach.json cannot land', S13);
+  const S18 = await seedScene(FRESH, 'bsf1-seedl-real', 'lease');
+  if (!S18.planted || !S18.attached) skip5('follow 1 (a start\'s read of the holds)', 'the second engine\'s attach took no lease, or its write of window-leases.json never failed');
+  else ok(S18.read && S18.said === 'plain' && S18.readHold === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): a START reads the holds the disk holds — the revoke of a hold that never landed there answers plain, and the revoke that drops the hold it READ (A\'s) answers the hold\'s code, while window-leases.json cannot land', S18);
+  const S20 = await shareScene(ENGINE, 'bsf1-gain-real', ['gain']);
+  if (!(S20.gain && S20.gain.attached && S20.gain.failed)) skip5('follow 1 (a hold memory has, the disk not)', 'the attach took no lease, or its own write of window-leases.json did not fail');
+  else ok(S20.gain.held && S20.gain.said === 'plain', 'B-574d browser-stores follow 1 (its read): B\'s hold NEVER landed (memory names B, the disk nobody) — a mode change on that window answers plain: no conversation the disk names could hold it after a restart', S20.gain);
+  const S21 = await shareScene(ENGINE, 'bsf1-gainfl-real', ['gainfl']);
+  if (!(S21.gainfl && S21.gainfl.attached && S21.gainfl.failed && S21.gainfl.staged)) skip5('follow 1 (a gain while a write in flight names nobody)', 'the attach took no lease, its write did not fail, or the engine\'s record was not there to stage');
+  else ok(S21.gainfl.held && S21.gainfl.said === 'plain', 'B-574d browser-stores follow 1 (its read): B\'s unlanded hold while a write in flight names nobody for the window — the mode change still answers plain on the lease side (neither disk the writer may leave names another conversation)', S21.gainfl);
+  const S22 = await shareScene(ENGINE, 'bsf1-swap-real', ['swap']);
+  if (!(S22.landedA && S22.swap && S22.swap.heldA && S22.swap.detached && S22.swap.heldB && S22.swap.failed)) skip5('follow 1 (the disk names A, memory B)', 'A\'s hold did not land before the plant, the detach or B\'s attach did not take, or the write did not fail');
+  else ok(S22.swap.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): the disk names A while memory names B — a mode change answers the hold\'s code: a restart gives the window to A, a conversation that held it before', S22.swap);
+  const S19 = await shareScene(ENGINE, 'bsf1-stale-real', ['stale']);
+  if (!(S19.stale && S19.stale.detached && S19.stale.failed)) skip5('follow 1 (a drop not landed)', 'the detach did not drop the lease, or its write of window-leases.json did not fail');
+  else ok(!S19.stale.dropped && S19.stale.said === 'share-hold-not-on-disk', 'B-574d browser-stores follow 1 (its read): A DETACHED while window-leases.json could not land — the person\'s revoke of A drops nothing, yet answers the hold\'s code: the disk still names A, and a restart gives A the window back', S19.stale);
+  { const UT = read('src/lib/utils.js');
+    ok(/if \(body\.code === 'share-hold-not-on-disk' \|\| body\.code === 'share-mode-not-on-disk' \|\| body\.code === 'share-not-on-disk'\) \{ try \{ showToast\(body\.code === 'share-hold-not-on-disk' \? t\('This change is in effect, but the window[^\n]*holder is not on disk yet[^\n]*held the window before may hold it again \(until its next step, if the window is no longer shared with it\)[^\n]*: body\.code === 'share-mode-not-on-disk' \? t\('This change is in effect, but the window[^\n]*mode \(how the agent sees it\) is not on disk yet[^\n]*that mode may be lost[^\n]*: t\('This change is in effect, but the window[^\n]*mode \(how the agent sees it\) and its holder are not on disk yet[^\n]*\} catch \{ \} return true; \}/.test(UT),
+      'browser-stores follow 1: sayNotOnDisk says each share code in its own words (in effect; a conversation that held the window before may hold it again — until its next step, if no longer shared / the mode may be lost / both), then returns'); }
+  { const CODE = WAITS;
+    const S1x = await red(CODE, "      respond(null, !missed.size ? out : { ...out, notOnDisk: true, code: 'share-mode-not-on-disk' });   // MUTANT: every miss said as the mode's\n", 'bsf1-modecode', ['lease']);
+    if (!S1x.leaseRevoke.planted) skip5('follow 1 RED (the hold\'s words)', 'the copy\'s write of window-leases.json never failed');
+    else ok(S1x.leaseRevoke.said === 'share-mode-not-on-disk', 'RED (anchored copy: every miss said as the mode\'s): the dropped hold is said «that mode may be lost» — follow 1 goes red', S1x.leaseRevoke);
+    const Sbx = await red(CODE, "      respond(null, !missed.size ? out : { ...out, notOnDisk: true, code: missed.has(leaseFile) ? 'share-hold-not-on-disk' : 'share-mode-not-on-disk' });   // MUTANT: both said as one\n", 'bsf1-bothcode', ['both']);
+    if (!Sbx.planted || !(Sbx.both && Sbx.both.leasePlanted)) skip5('follow 1 RED (both owed)', 'the copy\'s writes of the two files never both failed');
+    else ok(Sbx.both.said === 'share-hold-not-on-disk', 'RED (anchored copy: both said as one): the owed mode left unsaid beside the hold — follow 1 goes red', Sbx.both);
+    const LEASEW = '    const files = [...(reachOwed ? [reachFile] : []), ...(leaseOwed ? [leaseFile] : [])];';
+    const S3x = await red(LEASEW, '    const files = [...(reachOwed ? [reachFile] : [])];   // MUTANT: a dropped lease waits for nothing', 'bsf1-lease-unwaited', ['lease']);
+    if (!S3x.leaseRevoke.planted) skip5('follow 1 RED (the dropped lease)', 'the copy\'s write of window-leases.json never failed');
+    else ok(S3x.leaseRevoke.dropped && S3x.leaseRevoke.said === 'plain', 'RED (anchored copy: a dropped lease waits for nothing): the revoke is answered as on disk while its lease file is owed — follow 1 goes red', S3x.leaseRevoke);
+    const LOWED = '    const leaseOwed = (handedCount(leaseFile) !== nL || owedNow(leaseFile)) && !(handle && holdsLease(handle));   // also an EARLIER drop not landed (a detach, the tick\'s)';
+    const Sux = await red(LOWED, '    const leaseOwed = handedCount(leaseFile) !== nL;   // MUTANT: the whole lease file waited', 'bsf1-lease-whole', ['unheld']);
+    if (!(Sux.unheld && Sux.unheld.failed && Sux.unheld.attached)) skip5('follow 1 RED (a hold that never landed)', 'the copy\'s attach took no lease, or its write of window-leases.json never failed');
+    else ok(Sux.unheld.said === 'share-hold-not-on-disk', 'RED (anchored copy: the whole lease file waited): the revoke of a hold that never landed is told it may come back — follow 1 goes red', Sux.unheld);
+    const LFLIGHT = '    return !other(diskLeaseIn(r.landedMeta, h)) && !(r.inFlight && other(diskLeaseIn(r.flightMeta, h)));';
+    const Slfx = await red(LFLIGHT, '    return !other(diskLeaseIn(r.landedMeta, h));   // MUTANT: a lease write in flight not read', 'bsf1-lflight', ['lflight']);
+    if (!(Slfx.lflight && Slfx.lflight.failed && Slfx.lflight.staged)) skip5('follow 1 RED (a hold in flight)', 'the copy\'s attach took no lease, its write did not fail, or its record was not there to stage');
+    else ok(Slfx.lflight.said === 'plain', 'RED (anchored copy: a lease write in flight not read): the revoke is answered «saved» while a write carrying the hold may land it — follow 1 goes red', Slfx.lflight);
+    const LPRED = "    if (hr && hr.origin === AGENT_BROWSER_ORIGIN) for (const k of Object.keys(o)) if (k !== h && (o[k] === '?' || String(o[k]).startsWith(`${AGENT_BROWSER_ORIGIN}|`)) && successorOf(k) === h) return o[k];\n";
+    const Slcx = await red(LPRED, '    // MUTANT: no predecessor\'s lease read\n', 'bsf1-lpred', ['lcarry']);
+    if (!(Slcx.lcarry && Slcx.lcarry.failed && Slcx.lcarry.carried)) skip5('follow 1 RED (a hold carried along replacedBy)', 'the copy\'s reconcile carried no lease, or its write did not fail');
+    else ok(Slcx.lcarry.said === 'plain', 'RED (anchored copy: no predecessor\'s lease read): the revoke on the successor is answered «saved» though a restart carries the landed lease to it again — follow 1 goes red', Slcx.lcarry);
+    // the mode file's roads, each with its RED (an anchored copy of the one line that decides it)
+    const OWED = '    const reachOwed = handedCount(reachFile) !== nR && !(handle && holdsMode(handle));';
+    const S6x = await red(OWED, '    const reachOwed = handedCount(reachFile) !== nR;   // MUTANT: every handed mode file waited', 'bsf1-every', ['revoke', 'quiet']);
+    if (!S6x.planted || !S6x.quietPlanted) skip5('follow 1 RED (the acts that moved no mode)', 'the copy\'s write of window-reach.json never failed');
+    else ok(S6x.revoked === 'share-mode-not-on-disk' && S6x.quiet === 'share-mode-not-on-disk', 'RED (anchored copy: every handed mode file waited, as at e292d0301): the revoke and the grant that moved no mode are told «that mode may be lost» — follow 1 goes red', { revoked: S6x.revoked, quiet: S6x.quiet });
+    const Swx = await red(OWED, '    const reachOwed = handedCount(reachFile) !== nR && JSON.stringify(modesOf()) !== JSON.stringify(((HANDED.get(reachFile) || {}).landedMeta) || null);   // MUTANT: the whole file compared', 'bsf1-whole', ['other']);
+    if (!(Swx.other && Swx.other.planted)) skip5('follow 1 RED (another window\'s write)', 'the copy\'s write of window-reach.json never failed');
+    else ok(Swx.other.da1 === 'share-mode-not-on-disk', 'RED (anchored copy: the whole file\'s modes compared): a grant on this window is told its mode may be lost for another window\'s write — follow 1 goes red', Swx.other);
+    const LANDED = '    onWritten: (ok) => { const x = HANDED.get(file); if (!x) return; if (ok === true) x.landedMeta = x.flightMeta; x.inFlight = false; } });';
+    const HANDEDM = '    onWritten: (ok) => { const x = HANDED.get(file); if (!x) return; x.landedMeta = x.flightMeta; x.inFlight = false; } });   // MUTANT: the bytes HANDED read as landed';
+    const S7x = await red(LANDED, HANDEDM, 'bsf1-handed', ['base']), S7y = await red(LANDED, HANDEDM, 'bsf1-handed2', ['getcarry']);
+    if (!S7x.basePlanted || !S7y.planted) skip5('follow 1 RED (the failed write read as landed)', 'the copy\'s write of window-reach.json never failed');
+    else ok(S7x.again === 'plain' && S7y.getCarried && S7y.getCarried.said === 'plain', 'RED (anchored copy: the bytes handed read as landed, whatever the landing): the mode asked again and the grant after the dialog\'s carry are answered «saved» while the disk holds the old mode — follow 1 goes red', { again: S7x.again, getCarried: S7y.getCarried });
+    const SHORT = "      try { const nd = writerOf().whyNotDurable(f); if (nd && nd.why === 'failed') { asked = true; one(f, false); continue; } writerOf().durable(f, { timeoutMs: shareWaitMs || undefined, answer: (ok) => { asked = true; one(f, ok); } }); } catch { if (!asked) one(f, false); }";
+    const Sax = await red(SHORT, "      try { writerOf().durable(f, { timeoutMs: shareWaitMs || undefined, answer: (ok) => { asked = true; one(f, ok); } }); } catch { if (!asked) one(f, false); }   // MUTANT: a failed file waited for its retry", 'bsf1-short', ['base']);
+    if (!Sax.basePlanted) skip5('follow 1 RED (the failed-state road)', 'the copy\'s write of window-reach.json never failed');
+    else ok(!Sax.againSync, 'RED (anchored copy: a failed file waited for its retry): the mode asked again is answered only at the retry (up to 60 s later) — follow 1 goes red', { again: Sax.again, sync: Sax.againSync });
+    const PRED = '    if (!rowsOf(h).length) for (const k of Object.keys(o)) if (k !== h && successorOf(k) === h) return o[k];\n';
+    const Spx = await red(PRED, '    // MUTANT: no predecessor read for a window with no rows\n', 'bsf1-pred', ['bare']);
+    if (!Spx.planted) skip5('follow 1 RED (a mode-only share carried)', 'the copy\'s write of window-reach.json never failed');
+    else ok(Spx.bare && Spx.bare.said === 'plain', 'RED (anchored copy: no predecessor read): Auto on the relaunched window is answered «saved» though a restart carries the old mode to it again — follow 1 goes red', Spx.bare);
+    const FLIGHT = '  function holdsMode(h) { const r = HANDED.get(reachFile); if (!r) return false; const m = modeOf(h), d = diskModeIn(r.landedMeta, h); return d === m && !(r.inFlight && diskModeIn(r.flightMeta, h) !== m); }';
+    const Sfx = await red(FLIGHT, '  function holdsMode(h) { const r = HANDED.get(reachFile); if (!r) return false; const m = modeOf(h), d = diskModeIn(r.landedMeta, h); return d === m; }   // MUTANT: a write in flight not read', 'bsf1-flight', ['flight', 'lost', 'lostkeep']);
+    if (!Sfx.planted || !Sfx.flightStaged) skip5('follow 1 RED (a write in flight)', 'the copy\'s record was not there to stage, or its write never failed');
+    else ok(Sfx.flight === 'plain', 'RED (anchored copy: a write in flight not read): the grant is answered «saved» while a write carrying another mode may land over it — follow 1 goes red', { flight: Sfx.flight });
+    const LOST = "produce: () => { const x = HANDED.get(file); if (x.inFlight) x.landedMeta = eitherOf(x.landedMeta, x.flightMeta); x.inFlight = true; x.flightMeta = x.meta; return x.text; },";
+    const Slx = await red(LOST, "produce: () => { const x = HANDED.get(file); x.inFlight = true; x.flightMeta = x.meta; return x.text; },   // MUTANT: a write never answered forgotten", 'bsf1-lost', ['flight', 'lost', 'lostkeep']);
+    if (!Slx.planted || !Slx.flightStaged) skip5('follow 1 RED (a write never answered)', 'the copy\'s record was not there to stage, or its write never failed');
+    else ok(Slx.lost === 'plain', 'RED (anchored copy: a write never answered forgotten): the mode the bytes before it held is answered «saved» though the lost write may have landed — follow 1 goes red', { lost: Slx.lost });
+    const Smx = await red(LOST, "produce: () => { const x = HANDED.get(file); if (x.inFlight) x.landedMeta = null; x.inFlight = true; x.flightMeta = x.meta; return x.text; },   // MUTANT: a write never answered makes every window unknown", 'bsf1-lostall', ['flight', 'lost', 'lostkeep']);
+    if (!Smx.planted || !Smx.flightStaged) skip5('follow 1 RED (every window unknown)', 'the copy\'s record was not there to stage, or its write never failed');
+    else ok(Smx.lostkeep === 'share-mode-not-on-disk', 'RED (anchored copy: a write never answered makes every window unknown): a window the same in both possible disks is told its mode may be lost — follow 1 goes red', { lostkeep: Smx.lostkeep });
+    const SEED = "    seedLanded(reachFile, modesOf());   // browser-stores follow 1: a GOOD read (the start's, or a lift's) is what the disk holds\n";
+    const Ssx = await seedScene(MUT.load(ENGINE_REL, editAnchor(src5, SEED, '    // MUTANT: a start reads nothing of what the disk holds\n', ENGINE_REL), 'bsf1-noseed'), 'bsf1-red-seed');
+    if (!Ssx.planted) skip5('follow 1 RED (a start\'s read)', 'the copy\'s write of window-reach.json never failed');
+    else ok(Ssx.said === 'share-mode-not-on-disk', 'RED (anchored copy: a start reads nothing of what the disk holds): the grant after a start is told its mode may be lost while the disk holds it — follow 1 goes red', Ssx);
+    const SEEDL = "    seedLanded(leaseFile, holdersOf());   // browser-stores follow 1: a GOOD read (the start's, or a lift's: nothing was written while held) is what the disk holds\n";
+    const Sslx = await seedScene(MUT.load(ENGINE_REL, editAnchor(src5, SEEDL, '    // MUTANT: a start reads nothing of the holds the disk holds\n', ENGINE_REL), 'bsf1-noseedl'), 'bsf1-red-seedl', 'lease');
+    if (!Sslx.planted || !Sslx.attached) skip5('follow 1 RED (a start\'s read of the holds)', 'the copy\'s attach took no lease, or its write of window-leases.json never failed');
+    else ok(Sslx.said === 'share-hold-not-on-disk', 'RED (anchored copy: a start reads nothing of the holds): the revoke of a hold that never landed is told it may come back — follow 1 goes red', Sslx);
+    const Sscx = await seedScene(MUT.load(ENGINE_REL, editAnchor(src5, SEEDL, '    seedLanded(leaseFile, {});   // MUTANT: a start seeds no hold of what it read\n', ENGINE_REL), 'bsf1-emptyseedl'), 'bsf1-red-emptyseedl', 'lease');
+    if (!Sscx.planted || !Sscx.attached) skip5('follow 1 RED (what a start read of the holds)', 'the copy\'s attach took no lease, or its write of window-leases.json never failed');
+    else ok(Sscx.readHold === 'plain', 'RED (anchored copy: a start seeds no hold of what it read): the revoke that drops A\'s read hold is answered «saved» though the disk names A — follow 1 goes red', Sscx);
+    const Sgx = await red(LFLIGHT, '    return diskLeaseIn(r.landedMeta, h) === want && !(r.inFlight && diskLeaseIn(r.flightMeta, h) !== want);   // MUTANT: any difference owed (a gain too)', 'bsf1-gain', ['gain']);   // stale-pins: kept — the red's own text (the previous cut's rule)
+    if (!(Sgx.gain && Sgx.gain.attached && Sgx.gain.failed)) skip5('follow 1 RED (a hold memory has, the disk not)', 'the copy\'s attach took no lease, or its write did not fail');
+    else ok(Sgx.gain.said === 'share-hold-not-on-disk', 'RED (anchored copy: any difference owed, a gain too): the mode change is told a conversation may hold the window again though the disk names nobody — follow 1 goes red', Sgx.gain);
+    const Sgfx = await red(LFLIGHT, '    return !other(diskLeaseIn(r.landedMeta, h)) && !(r.inFlight && diskLeaseIn(r.flightMeta, h) !== want);   // MUTANT: the flight half of a gain owed', 'bsf1-gainfl', ['gainfl']);
+    if (!(Sgfx.gainfl && Sgfx.gainfl.attached && Sgfx.gainfl.failed && Sgfx.gainfl.staged)) skip5('follow 1 RED (a gain while a write in flight names nobody)', 'the copy\'s attach took no lease, its write did not fail, or its record was not there to stage');
+    else ok(Sgfx.gainfl.said === 'share-hold-not-on-disk', 'RED (anchored copy: the flight half of a gain owed): the mode change is told a conversation may hold the window again though no disk names one — follow 1 goes red', Sgfx.gainfl);
+    const OTHER = "    const other = (d) => d !== undefined && d !== want;   // the disk may give the window to a conversation memory does not name ('?': not known)";
+    const Sswx = await red(OTHER, "    const other = (d) => want === undefined && d !== undefined && d !== want;   // MUTANT: a window memory holds is never owed", 'bsf1-swap', ['swap']);
+    if (!(Sswx.landedA && Sswx.swap && Sswx.swap.heldA && Sswx.swap.detached && Sswx.swap.heldB && Sswx.swap.failed)) skip5('follow 1 RED (the disk names A, memory B)', 'the copy\'s scene did not form (A\'s hold not landed before the plant, or the acts did not take)');
+    else ok(Sswx.swap.said === 'plain', 'RED (anchored copy: a window memory holds is never owed): the mode change is answered «saved» though a restart gives the window to A — follow 1 goes red', Sswx.swap);
+    const PENDL = '    const leaseOwed = (handedCount(leaseFile) !== nL || owedNow(leaseFile)) && !(handle && holdsLease(handle));   // also an EARLIER drop not landed (a detach, the tick\'s)';
+    const Sstx = await red(PENDL, '    const leaseOwed = handedCount(leaseFile) !== nL && !(handle && holdsLease(handle));   // MUTANT: only a drop this act made', 'bsf1-stale', ['stale']);
+    if (!(Sstx.stale && Sstx.stale.detached && Sstx.stale.failed)) skip5('follow 1 RED (a drop not landed)', 'the copy\'s detach did not drop the lease, or its write did not fail');
+    else ok(Sstx.stale.said === 'plain', 'RED (anchored copy: only a drop this act made): the revoke of A after its unlanded detach is answered «saved» though the disk still names A — follow 1 goes red', Sstx.stale); }
+  { // follow 1 (its round's small 1): the per-window record rests on produce() being called ONCE per write the writer posts — nothing
+    // peeks window-leases.json / window-reach.json through the store writer's owed() (it calls produce too): none in the window engine,
+    // none elsewhere naming them
+    const srcFiles = [], walk = (d) => { for (const n of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, n.name); if (n.isDirectory()) walk(r); else if (/\.(c?js|mjs)$/.test(n.name)) srcFiles.push(r); } };
+    walk('src'); srcFiles.push('server.js');
+    const peeks = (text) => [...String(text).matchAll(/\.owed\(([^)]*)\)/g)].map((m) => m[1]);   // text-only: an alias of the file's name, a destructured owed or a walk of stats() is a reader's to catch
+    const bad = [];
+    for (const f of srcFiles) { const hits = peeks(read(f)).filter((a) => f === ENGINE_REL || /window-leases|window-reach|leaseFile|reachFile/.test(a)); if (hits.length) bad.push(`${f}: ${hits.join(', ')}`); }
+    ok(bad.length === 0 && srcFiles.length > 50, `browser-stores follow 1: nothing peeks the two window files through the store writer's owed() (${srcFiles.length} files of src/ and server.js read)`, bad);
+    ok(peeks('const x = W.owed(leaseFile);').filter((a) => /leaseFile/.test(a)).length === 1, 'RED (a planted peek, W.owed(leaseFile)): the census sees it');
+  }
+  // follow 1 (its round's small 3): a write that simply NEVER ANSWERS — the process's store writer STOPPED (the LAST scenes of this suite:
+  // nothing writes after them) and a small bound handed to the engine's waits (shareWaitMs, passed to the writer's durable()): a person's
+  // act is answered AT the bound, in its own words. RED (an anchored copy that passes no bound): no answer within the leg's cap
+  {
+    const neverScene = async (ENGm, sub, waitMs) => {
+      const { W } = await engineChecks(ENGINE, sub);
+      const landed = W.engine.storesLanded() === true;   // the witness: A's hold LANDED before the writer stops
+      const { origin: _o, by: _b, browser: _br, ...plainRec } = W.records.get('da-1');
+      W.records.set('da-9', { ...plainRec, id: 'da-9', appId: 'gedit', label: 'gedit', exec: 'gedit', url: null, state: 'ready' });
+      const E2 = ENGm.create({ keeper: W.keeper, dataDir: path.join(W.dir, 'data'), env: () => ({}), activeSessions: W.sessions, broadcast: () => { }, bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null, ...(waitMs ? { shareWaitMs: waitMs } : {}) });
+      const held = !!E2.leaseOf('da-1'), selfRow = ((() => { try { return (E2.reachOf('da-1') || {}).rows || []; } catch { return []; } })()).find((x) => x.by === 'self-open');
+      return { E2, held: held && landed, selfRow };
+    };
+    const timed = (E, fn, capMs) => new Promise((resolve) => {
+      const t0 = Date.now(); let done = false;
+      const cap = setTimeout(() => { if (!done) { done = true; resolve({ said: 'no answer', ms: Date.now() - t0 }); } }, capMs);
+      E.shareAct(fn, (err, o) => { if (done) return; done = true; clearTimeout(cap); resolve({ said: err ? ((err && err.code) || 'threw') : (o && o.notOnDisk === true ? (o.code || 'no code') : 'plain'), ms: Date.now() - t0 }); });
+    });
+    const BOUND = "writerOf().durable(f, { timeoutMs: shareWaitMs || undefined, answer:";
+    const real = await neverScene(ENGINE, 'bsf1-never-real', 300);
+    const redS = await neverScene(MUT.load(ENGINE_REL, editAnchor(src5, BOUND, 'writerOf().durable(f, { answer:', ENGINE_REL), 'bsf1-never'), 'bsf1-never-red', 300);
+    require('../src/store-writer.js').storeWriter().stop();   // from here the process's writer writes NOTHING: every write handed never answers
+    const [rv, md, rr] = await Promise.all([   // the three at once: one bound's wait, the RED's cap at three bounds
+      real.selfRow ? timed(real.E2, () => real.E2.revokeReach('da-1', real.selfRow.principal), 3000) : { said: 'no self-open row', ms: 0 },
+      timed(real.E2, () => real.E2.setShareMode('da-9', 'tree'), 3000),
+      redS.selfRow ? timed(redS.E2, () => redS.E2.revokeReach('da-1', redS.selfRow.principal), 900) : { said: 'no self-open row', ms: 0 }]);
+    if (!real.held || !redS.held) skip5('follow 1 (a write that never answers)', 'the scene\'s second engine read no LANDED hold of A');
+    else {
+      ok(rv.said === 'share-hold-not-on-disk' && rv.ms >= 250 && md.said === 'share-mode-not-on-disk' && md.ms >= 250,   // an answer at all is before timed()'s cap ('no answer' past it): no literal upper bound
+        'B-574d browser-stores follow 1 (its round\'s small 3): a write that NEVER answers (the writer stopped) — the revoke that drops a landed hold and a mode change are each answered AT the bound handed to the writer, in their own words (the hold\'s, the mode\'s)', { revoke: rv, mode: md });
+      ok(rr.said === 'no answer', 'RED (anchored copy: no bound handed to the writer): the revoke waits on the writer\'s own 60 s — no answer within the leg\'s 0.9 s cap', rr);
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

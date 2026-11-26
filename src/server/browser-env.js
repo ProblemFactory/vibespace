@@ -502,8 +502,10 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
         repointPoolSymlink(link, target);
         // The session's own directory, beside the link (r4): this rung replaces
         // no config, so a later pin must ask the CLI's two files as they stand
-        // THEN, and the project file lives HERE. Written before `profDir` is
-        // claimed: a rung whose record failed is a rung that was not delivered.
+        // THEN, and the project file lives HERE. Handed to the store writer before
+        // `profDir` is claimed (B-574d browser-stores 7/8): a record that does not land
+        // no longer stops the rung — this process reads it from memory; after a restart
+        // before it landed the pin finds no record and refuses by name (a new session pins it).
         writeCwdSidecar(key, { cwd: typeof cwd === 'string' && cwd && path.isAbsolute(cwd) ? cwd : null });   // 7/8: a record, on the store writer
         profDir = link;
       } catch (e) { reasons[1] = `per-session profile directory unusable: ${e && e.message}`; }

@@ -1022,7 +1022,7 @@ function reachGate(req, res) {
   }
   return engine;
 }
-// B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): a person's share act answers AFTER its window-reach.json landed — the
+// B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): a person's share act answers AFTER the files that hold it landed — the
 // ONE wait (the engine's shareAct, on the writer's answer road — also at the hub's stop): one that did not land answers notOnDisk
 // (in effect, not yet on disk; the writer keeps writing it); an engine without it answers as before
 function landedAnswer(res, engine, fn) {

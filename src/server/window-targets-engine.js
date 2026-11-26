@@ -177,19 +177,37 @@ const MODE_PROBE_BUDGET = 400;
 // B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): the window stores (window-leases.json, window-reach.json) on the
 // STORE WRITER — memory is their truth already (the leases and reach Maps; the files are read only at a start): each change hands
 // the file's latest bytes to the writer (off the loop, whole, synced; an act, rank 0 — a burst is one write). An agent's attach,
-// detach, open and end are handed, never awaited; a PERSON's share act answers after its landing (shareAct). file → {text, n, landing}
+// detach, open and end are handed, never awaited; a PERSON's share act answers after its landing (shareAct). file → {text, n, landing,
+// meta, inFlight, flightMeta, landedMeta} (follow 1: each file's per-window facts — the modes, the leases' holders — handed, in
+// flight and last landed; '?' = a window whose landed fact is not known)
 const HANDED = new Map();
 const writerOf = () => require('../store-writer.js').storeWriter();
-function writeWindowStore(file, obj) {   // (its read: named off the synchronous helper's name — it is the store writer's)
+function writeWindowStore(file, obj, meta = null) {   // (its read: named off the synchronous helper's name — it is the store writer's)
   const h = HANDED.get(file) || { text: '', n: 0, landing: Promise.resolve(true) };
-  h.text = JSON.stringify(obj, null, 2); h.n++;
+  h.text = JSON.stringify(obj, null, 2); h.n++; h.meta = meta;
   HANDED.set(file, h);
   const W = writerOf();
-  W.dirty(file, { name: 'window-targets.write', rank: 0, mode: 0o600, makeDir: true, produce: () => HANDED.get(file).text });
+  // browser-stores follow 1: `meta` (the file's per-window facts) of the bytes IN FLIGHT and of the last bytes that LANDED — set at the
+  // writer's own landing (onWritten), a retry nobody waits for included; a write that never answered (its thread lost — its rename may
+  // have landed) leaves a window whose fact differs between it and what landed before UNKNOWN ('?') until the next landing.
+  // THE RECORD RESTS ON THE PRODUCER BEING CALLED EXACTLY ONCE FOR EACH WRITE THE WRITER POSTS (its step, its flushSync): nothing may
+  // peek these two files through the writer's owed() — it calls produce() too, and would mark windows unknown or wrong
+  // (test-desktop-app-rung pins it: no owed() names them)
+  W.dirty(file, { name: 'window-targets.write', rank: 0, mode: 0o600, makeDir: true, produce: () => { const x = HANDED.get(file); if (x.inFlight) x.landedMeta = eitherOf(x.landedMeta, x.flightMeta); x.inFlight = true; x.flightMeta = x.meta; return x.text; },
+    onWritten: (ok) => { const x = HANDED.get(file); if (!x) return; if (ok === true) x.landedMeta = x.flightMeta; x.inFlight = false; } });
   h.landing = W.durable(file).then((ok) => ok === true, () => false);
   return h.landing;
 }
 const handedCount = (file) => (HANDED.get(file) || { n: 0 }).n;
+/** browser-stores follow 1: the disk after a write whose outcome is lost is one of two — per window, a fact the same in both is known,
+ *  any other is '?' (no record of either: nothing known) */
+function eitherOf(a, b) {
+  if (!a || !b) return null;
+  const o = {}, has = (x, k) => Object.prototype.hasOwnProperty.call(x, k);
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { const x = has(a, k) ? a[k] : undefined, y = has(b, k) ? b[k] : undefined; if (x === y) { if (x !== undefined) o[k] = x; } else o[k] = '?'; }
+  return o;
+}
+function seedLanded(file, m) { try { if (writerOf().pending(file)) return; } catch { return; } const h = HANDED.get(file) || { text: '', n: 0, landing: Promise.resolve(true) }; h.landedMeta = m; h.inFlight = false; HANDED.set(file, h); }
 /** the window files' owed writes ON DISK now (a named, bounded wait of the writer — a suite's read of a file after an act) */
 function storesLandedNow(files) { try { const W = writerOf(); const owed = files.filter((f) => W.pending(f)); if (!owed.length) return true; const r = W.flushSync(owed); return !r.deferred && !r.left.some((x) => owed.includes(x.file)); } catch { return false; } }
 
@@ -205,7 +223,7 @@ function storesLandedNow(files) { try { const W = writerOf(); const owed = files
  *   grants         — lane grants-unify: THE grants store (or a getter; absent ⇒ the instance's installed one) — a window's
  *                    share ROWS live there (door `window`), its share MODE stays in data/window-reach.json
  */
-function create({ keeper, dataDir, env, activeSessions, log = console, now = Date.now, wt = WT, bins = null, python = 'python3', helper = undefined, serverSetting = () => undefined, broadcast = null, userEnv = () => process.env, selfPid = process.pid,
+function create({ keeper, dataDir, env, activeSessions, log = console, now = Date.now, wt = WT, bins = null, python = 'python3', helper = undefined, serverSetting = () => undefined, broadcast = null, userEnv = () => process.env, selfPid = process.pid, shareWaitMs = null,
   // takeover r2 (T6): the running app process's own executable — the name a wrapper the human typed execs
   // INTO (x-www-browser → chrome). One readlink; injectable for the suite; null = no evidence
   procExe = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return null; } },
@@ -266,7 +284,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const LEASES_UNREAD = 'window_leases_unread', REACH_UNREAD = 'window_reach_unread';
   const leaseHold = HOLD.create({ file: leaseFile, valid: leasesShape, code: 'window_leases_unread', aside: (m) => leaseFile + '.corrupt-' + m,
     words: (h) => `the record of which agent holds which window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and the agents' window verbs wait until it reads`,
-    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) { applyLeases(v); endUnreachedRestored(); } liftPass(); publish(); if (leases.size || openerLost.size) ensureTimer(); } });
+    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) { applyLeases(v); endUnreachedRestored(); } else seedLanded(leaseFile, holdersOf()); liftPass(); publish(); if (leases.size || openerLost.size) ensureTimer(); } });
   /** THE LIFT's MERGE (主开发 r4813, its law r4826): a person's act that takes access AWAY (a revoke, an Except, «this group only») is
    *  honoured while the leases are held, its lease end OWED; when they read again a restored lease is ended ONLY on a share that WAS READ
    *  and says «this holder is not reached» — the share modes held, the grants list unread (its health), a record or row of a shape the
@@ -295,7 +313,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   const reachHold = HOLD.create({ file: reachFile, valid: reachShape, code: 'window_reach_unread', aside: (m) => reachFile + '.corrupt-' + m,
     words: (h) => `the share mode of each window could not be read (${h && h.code}) — VibeSpace reads it again by itself every few minutes. Nothing was lost or changed: nothing is written over it, and no agent reaches a window and no share changes until it reads`,
-    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) applyReach(v); liftPass(); publishReach(); if (shareHandles().length) ensureTimer(); } });
+    log: (l) => log.warn?.(`[window] ${l}`), onLift: (v) => { if (v) applyReach(v); else seedLanded(reachFile, modesOf()); liftPass(); publishReach(); if (shareHandles().length) ensureTimer(); } });
   /** a lift does what the start's boot did with the records it now has: the real-desktop switch, then the reconcile (a lease on a window
    *  that is gone, a share of one) — as the tick would within TICK_MS (the cure round: never broadcast what the tick then drops) */
   function liftPass() { try { enforceConsent(); reconcile(); } catch (e) { log.warn?.(`[window] the pass after a lift failed: ${e && e.message}`); } }
@@ -306,6 +324,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       loaded = true;
       let read; try { read = { text: fs.readFileSync(leaseFile, 'utf8') }; } catch (error) { read = { error }; }
       const a = SR.storeAnswer(read, { valid: leasesShape }); if (leaseHold.start(a) === 'data') applyLeases(a.value);
+      if (read.error && read.error.code === 'ENOENT') seedLanded(leaseFile, holdersOf());   // browser-stores follow 1 (its round's small 4): what a start read is what the disk holds — a GOOD read (here, or a lift's) or a missing file; a read that failed seeds nothing
     }
     const e = heldError(leaseHold, LEASES_UNREAD); if (e) throw e;   // HELD: every reader and writer of the leases is refused by name
   }
@@ -323,6 +342,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       leases.set(String(l.handle), { handle: String(l.handle), sessionId: String(l.sessionId), browserKey: l.browserKey || null, since: Number(l.since) || 0, origin: leaseOriginOf(l.origin), refs: null, snapshotAt: null, carrierLostAt: null, mode: null });
     }
     if (odd) log.warn?.(`[window] ${LEASE_FILE}: ${odd} row(s) that are no plain record were skipped at the read (a hand-made file?) — the other leases load`);
+    seedLanded(leaseFile, holdersOf());   // browser-stores follow 1: a GOOD read (the start's, or a lift's: nothing was written while held) is what the disk holds
   }
   /** a background pass's question (the reconcile, the kill path, the boot, the stream's gate): are the leases held? — their one read
    *  made first; never throws for the hold */
@@ -333,7 +353,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const out = {};
       for (const [h, l] of leases) out[h] = { handle: h, sessionId: l.sessionId, browserKey: l.browserKey || null, since: l.since, origin: l.origin || ORIGIN };
       const agentEnds = {}; for (const [h, p] of openerLost) agentEnds[h] = { at: p.at, told: !!p.told, why: p.why || 'opener-ended' };
-      writeWindowStore(leaseFile, { v: 1, savedAt: now(), leases: out, ...(openerLost.size ? { agentEnds } : {}) });
+      writeWindowStore(leaseFile, { v: 1, savedAt: now(), leases: out, ...(openerLost.size ? { agentEnds } : {}) }, holdersOf());
     } catch (e) { log.warn?.(`[window] ${LEASE_FILE} not written: ${e.message}`); }
   }
   function publish() { if (!broadcast || leaseHold.held()) return; try { broadcast({ type: 'window-leases-updated', leases: allViews() }); } catch (e) { log.warn?.(`[window] broadcast failed: ${e.message}`); } }
@@ -360,12 +380,14 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       reachLoaded = true;
       let read; try { read = { text: fs.readFileSync(reachFile, 'utf8') }; } catch (error) { read = { error }; }
       const a = SR.storeAnswer(read, { valid: reachShape }); if (reachHold.start(a) === 'data') applyReach(a.value);
+      if (read.error && read.error.code === 'ENOENT') seedLanded(reachFile, modesOf());   // browser-stores follow 1 (its round's small 4): what a start read is what the disk holds — a GOOD read (here, or a lift's) or a missing file; a read that failed seeds nothing
     }
     const e = heldError(reachHold, REACH_UNREAD); if (e) throw e;   // HELD: every reader and writer of the share modes is refused by name
   }
   /** a good read's share modes → memory, ADDED (a lift never replaces a mode set since — none can be: every share change waited) */
   function applyReach(j) {
     for (const [h, r] of Object.entries((j && j.windows) || {})) if (!reach.has(String(h))) reach.set(String(h), r && typeof r === 'object' && !Array.isArray(r) ? { ...r } : {});
+    seedLanded(reachFile, modesOf());   // browser-stores follow 1: a GOOD read (the start's, or a lift's) is what the disk holds
   }
   /** …the same question for the share modes (the reconcile's prune, the boot) */
   const reachHeld = () => { if (reachLoaded) return !!reachHold.held(); try { loadReach(); return false; } catch (e) { if (e && e.code === REACH_UNREAD) return true; throw e; } };
@@ -418,7 +440,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     try {
       const out = {};
       for (const [h, r] of reach) out[h] = r;
-      writeWindowStore(reachFile, { v: 1, savedAt: now(), windows: out });
+      writeWindowStore(reachFile, { v: 1, savedAt: now(), windows: out }, modesOf());
     } catch (e) { log.warn?.(`[window] ${REACH_FILE} not written: ${e.message}`); }
   }
   /** The last id of a Scale ▸ relaunch chain starting at `id` (null when nothing replaced it). */
@@ -633,19 +655,71 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return { x: m.x, y: m.y, coords: 'window' };
   }
 
+  // browser-stores follow 1 (主开发 r5241 and the round's reads): a share act waits for a file only where the disk does not hold what
+  // memory now holds for the act's OWN window (each file's per-window record: its last LANDED bytes — a retry nobody waits for
+  // included, seeded by a start's read — with no write in flight carrying another fact): window-leases.json when the window's hold on
+  // disk may give the window to a conversation memory does not name (a lease the act dropped that landed, one an EARLIER drop has
+  // not landed yet — a detach, the tick's — or an agent browser's predecessor's that a restart carries along replacedBy: a restart
+  // before the drop lands brings it back; one that never landed cannot, and a hold memory has that the disk lacks is no one's to give
+  // back); window-reach.json when
+  // its mode on disk is not memory's (a mode set, a mode asked again while an earlier write of it did not land, a relaunched window's
+  // share carried along replacedBy with a mode other than auto — inside the act, or by the Share dialog's read or the tick before
+  // it; with no rows of its own, the disk's mode for it is its predecessor's: a restart carries that share again). Another window's
+  // owed write is that window's. A grant's, a revoke's, an except's, «仅本组»'s meaning is the grants store's row, on disk before the
+  // act returns; the writer still writes the files. A file whose writer state is «failed» (a failure no landing has followed yet)
+  // answers at once (its retry is no answer to wait for). A file that did not land answers notOnDisk with a code that names which
+  // (the page's words for each: the change is in effect; a restart before the landing may lose the mode — share-mode-not-on-disk —
+  // or give the window to a conversation that held it before, until its next step if it is no longer shared — share-hold-not-on-disk —
+  // or both: share-not-on-disk)
+  function modesOf() { const o = {}; for (const h of reach.keys()) { const m = modeOf(h); if (m !== 'auto') o[h] = m; } return o; }
+  function holdersOf() { const o = {}; for (const [h, l] of leases) o[h] = `${l.origin || ORIGIN}|${l.sessionId}`; return o; }   // the origin as save() writes it
+  // what the DISK holds for a window's mode: its own landed entry; with none and no rows of its own, a predecessor's landed entry along
+  // replacedBy (a restart carries that share again); '?' = not known
+  function diskModeIn(o, h) {
+    if (!o) return '?';
+    if (Object.prototype.hasOwnProperty.call(o, h)) return o[h];
+    if (!rowsOf(h).length) for (const k of Object.keys(o)) if (k !== h && successorOf(k) === h) return o[k];
+    return 'auto';
+  }
+  function holdsMode(h) { const r = HANDED.get(reachFile); if (!r) return false; const m = modeOf(h), d = diskModeIn(r.landedMeta, h); return d === m && !(r.inFlight && diskModeIn(r.flightMeta, h) !== m); }
+  // what the disk holds for a window's hold: its own landed holder; with none, an agent browser's predecessor's landed agent-browser
+  // lease along replacedBy (a restart's reconcile carries that lease again); none = none; '?' = not known
+  function diskLeaseIn(o, h) {
+    if (!o) return '?';
+    if (Object.prototype.hasOwnProperty.call(o, h)) return o[h];
+    const hr = keeper.get(String(h));
+    if (hr && hr.origin === AGENT_BROWSER_ORIGIN) for (const k of Object.keys(o)) if (k !== h && (o[k] === '?' || String(o[k]).startsWith(`${AGENT_BROWSER_ORIGIN}|`)) && successorOf(k) === h) return o[k];
+    return undefined;
+  }
+  const owedNow = (f) => { try { return writerOf().pending(f); } catch { return true; } };
+  function holdsLease(h) {
+    const r = HANDED.get(leaseFile); if (!r || !r.landedMeta) return false;
+    const l = leases.get(h), want = l ? `${l.origin || ORIGIN}|${l.sessionId}` : undefined;
+    const other = (d) => d !== undefined && d !== want;   // the disk may give the window to a conversation memory does not name ('?': not known)
+    return !other(diskLeaseIn(r.landedMeta, h)) && !(r.inFlight && other(diskLeaseIn(r.flightMeta, h)));
+  }
   /** B-574d «browser-stores» 5/8 (主开发 r5101): A PERSON'S SHARE ACT ANSWERS AFTER ITS LANDING — `fn` (a share verb: the mode, a grant,
-   *  a revoke, an except, «仅本组») runs, then `respond(err, out)` comes when the window-reach.json it handed LANDED — on the writer's
-   *  synchronous answer road (durable's `answer`: also while the hub stops, the exit's flush). Its read: the act is IN EFFECT before
-   *  that (the grants store's rows on disk, the mode live, the lease dropped by a revoke) — so a landing that failed is never a false
-   *  «refused, nothing changed»: the answer carries notOnDisk (the tree's words for it, as the jobs' and tasks' answers), said. */
+   *  a revoke, an except, «仅本组») runs, then `respond(err, out)` comes when the files that hold what it did LANDED (follow 1, above) — on
+   *  the writer's synchronous answer road (durable's `answer`: also while the hub stops, the exit's flush). Its read: the act is IN EFFECT
+   *  before that (the grants store's rows on disk, the mode live, the lease dropped by a revoke) — so a landing that failed is never a
+   *  false «refused, nothing changed»: the answer carries notOnDisk (the tree's words for it, as the jobs' and tasks' answers), said. */
   function shareAct(fn, respond) {
-    const n0 = handedCount(reachFile);
+    const nR = handedCount(reachFile), nL = handedCount(leaseFile);
     let out; try { out = fn(); } catch (e) { return respond(e); }
-    if (handedCount(reachFile) === n0) return respond(null, out);   // the act changed no window's mode: nothing to wait for
-    writerOf().durable(reachFile, { answer: (ok) => {
-      if (ok !== true) { try { log.warn?.(`[window] ${REACH_FILE} is not on disk yet — the share act is in effect; the store writer keeps writing it`); } catch { } }
-      respond(null, ok === true ? out : { ...out, notOnDisk: true });
-    } });
+    const handle = out && out.handle != null ? String(out.handle) : null;   // every share verb answers its window's view
+    const reachOwed = handedCount(reachFile) !== nR && !(handle && holdsMode(handle));
+    const leaseOwed = (handedCount(leaseFile) !== nL || owedNow(leaseFile)) && !(handle && holdsLease(handle));   // also an EARLIER drop not landed (a detach, the tick's)
+    const files = [...(reachOwed ? [reachFile] : []), ...(leaseOwed ? [leaseFile] : [])];
+    if (!files.length) return respond(null, out);   // nothing handed: nothing to wait for
+    const missed = new Set(); let left = files.length;
+    const one = (f, ok) => { if (ok !== true) missed.add(f); if (--left > 0) return;
+      if (missed.size) { try { log.warn?.(`[window] ${[...missed].map((x) => path.basename(x)).join(' + ')} not on disk yet — the share act is in effect; the store writer keeps writing it`); } catch { } }
+      respond(null, !missed.size ? out : { ...out, notOnDisk: true, code: missed.size > 1 ? 'share-not-on-disk' : missed.has(leaseFile) ? 'share-hold-not-on-disk' : 'share-mode-not-on-disk' });
+    };
+    for (const f of files) {   // each file's own answer, on the writer's synchronous road; one in its failure backoff at once
+      let asked = false;
+      try { const nd = writerOf().whyNotDurable(f); if (nd && nd.why === 'failed') { asked = true; one(f, false); continue; } writerOf().durable(f, { timeoutMs: shareWaitMs || undefined, answer: (ok) => { asked = true; one(f, ok); } }); } catch { if (!asked) one(f, false); }
+    }
   }
 
   // ── records ──
@@ -1992,7 +2066,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   return { factsForToken, mayUseFor, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act: actKept, screenshot, watch,
     // lane E: reach + the share mode (the user's side)
-    reachOf, reachViews, grantReach, revokeReach, setReachOnly, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal, shareAct, storesLanded: () => storesLandedNow([leaseFile, reachFile]),   // 5/8
+    reachOf, reachViews, grantReach, revokeReach, setReachOnly, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal, shareAct, [Symbol.for('vibespace:window targets:handed')]: (which) => HANDED.get(which === 'lease' ? leaseFile : reachFile), storesLanded: () => storesLandedNow([leaseFile, reachFile]),   // 5/8 (+ follow 1, suites only — a Symbol key: a file's record, the writer's states staged on it)
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
     leases: () => allViews(), auditFile: path.join(dataDir, AUDIT_FILE), leaseFile, ORIGIN, storesReadable,
     // P10: the other class
