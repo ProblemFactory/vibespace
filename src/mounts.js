@@ -1203,7 +1203,8 @@ class MountManager {
       const row = parentType ? PROVIDERS.rowOf(parentType) : rowFor(this, m);
       const said = parentType ? row.updateChild?.(m, patch, setIf, this) : row.update?.(m, patch, setIf, this);
       // a sync worker's scope change answers 'reseed': its state file goes (the folder is the dedup index)
-      if (said === 'reseed' && row.syncStateFile) { try { fs.rmSync(path.join(this.pathOf(m), row.syncStateFile), { force: true }); } catch { } }
+      // B-574d (lane nl-journals): the Gmail cursor is the store writer's — forgotten there FIRST, so an owed write never brings the old cursor back
+      if (said === 'reseed' && row.syncStateFile) { const sf = path.join(this.pathOf(m), row.syncStateFile); try { require('./store-writer.js').storeWriter().forget(sf); } catch { } try { fs.rmSync(sf, { force: true }); } catch { } }
     }
     this._save({ now: true, why: 'a storage edited' });
     this._notify();

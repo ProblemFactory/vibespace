@@ -413,5 +413,35 @@ console.log('§12a rank 12a — a boot with the update switch on (no NO_AUTO_UPD
   ok('§12a …and the update road still pulls, installs, builds and THEN restarts (scripts/update.sh), so nothing is lost by the boot not pulling', /git pull --ff-only/.test(US) && /npm install --no-audit --no-fund/.test(US) && /npm run build/.test(US) && US.indexOf('npm run build') < US.indexOf('systemctl --user restart vibespace'));
 }
 
+{ // B-574d (lane nl-journals, 主开发 r4939): THE POLL'S CURSOR THROUGH THE STORE WRITER — a pass whose cursor did not move hands NOTHING; one
+  // that moved hands ONE write under its row (nothing written on the hub's loop); the next pass reads the writer's OWED bytes (the file on
+  // disk may still say the old cursor). REDs (one instance's method swapped): the release's every-pass write; the file-alone read
+  const { GmailSync } = require(path.join(REPO, 'src/gmail-sync.js'));
+  const cursorScene = async (name, swap = null) => {
+    const MD = path.join(tmp, 'mail-cursor-' + name); fs.mkdirSync(MD, { recursive: true });
+    const SF = path.join(MD, '.vibespace-gmail-state.json'); fs.writeFileSync(SF, JSON.stringify({ historyId: '100', email: 'stand-in@example.invalid' }));
+    const calls = []; let owed = null;
+    const rec = { dirty(file, o) { const b = o.produce(); calls.push({ file, name: o.name, bytes: b }); if (file === SF) owed = b; }, durable: async () => true, owed: (f) => (f === SF ? owed : null), pending: () => false, forget() { } };
+    let hid = '100';
+    const gs = new GmailSync({ storeWriter: rec }); gs._api = async () => ({ history: [], historyId: hid });
+    if (swap) swap(gs, rec);
+    const w = { cfg: { id: 'cur-' + name, dir: MD, pollSeconds: 300 }, tok: {}, email: 'stand-in@example.invalid', stopped: false, timer: null };
+    const o = { writeFileSync: fs.writeFileSync, renameSync: fs.renameSync }, loop = [];
+    fs.writeFileSync = function (p0, ...a) { if (String(p0).startsWith(SF)) loop.push('write'); return o.writeFileSync.call(this, p0, ...a); };
+    fs.renameSync = function (a0, b0, ...a) { if (String(b0) === SF) loop.push('rename'); return o.renameSync.call(this, a0, b0, ...a); };
+    let a, b, c;
+    try { await gs._syncOnce(w); a = calls.length; hid = '101'; await gs._syncOnce(w); b = calls.length; await gs._syncOnce(w); c = calls.length; } finally { Object.assign(fs, o); }
+    return { a, b, c, name: calls[0] && calls[0].name, moved: !!calls[0] && JSON.parse(calls[0].bytes).historyId === '101', onDisk: JSON.parse(fs.readFileSync(SF, 'utf8')).historyId, loop: loop.join(' ') };
+  };
+  const g = await cursorScene('real');
+  ok('B-574d a Gmail pass whose cursor did NOT move (100 → 100, only its lastSyncAt) hands nothing — no write when nothing changed', g.a === 0, g);
+  ok('B-574d …a pass that moved it (100 → 101) hands ONE write under its row (gmail-state.write), nothing written on the hub\'s loop', g.b === 1 && g.name === 'gmail-state.write' && g.moved && g.loop === '', g);
+  ok('B-574d …and the next pass reads the writer\'s OWED bytes (the file on disk still says 100): its cursor 101 is no move — nothing handed again', g.c === 1 && g.onDisk === '100', g);
+  const r1 = await cursorScene('red-every', (gs, rec) => { gs._saveState = function (w, state) { rec.dirty(this._statePath(w), { name: 'gmail-state.write', produce: () => JSON.stringify(state) }); return Promise.resolve(true); }; });
+  ok('RED B-574d a save that hands every pass (the release wrote at every pass, lastSyncAt alone): the unmoved cursor is written', r1.a === 1, r1);
+  const r2 = await cursorScene('red-file', (gs) => { gs._readState = function (w) { return JSON.parse(fs.readFileSync(this._statePath(w), 'utf-8')); }; });
+  ok('RED B-574d the file-alone read: the next pass takes the stale cursor from disk and writes 101 AGAIN', r2.c === 2, r2);
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

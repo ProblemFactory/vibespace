@@ -68,8 +68,12 @@ function signInClient(map, rt) {
   return v ? v.client : null;
 }
 
+// B-574d (lane nl-journals, 主开发 r4939): the cursor's KEY — every field but lastSyncAt (nobody reads it from the file: the page shows the
+// watcher's own): a pass whose key did not move writes nothing
+const cursorKey = (st) => { const { lastSyncAt, ...c } = st || {}; void lastSyncAt; return JSON.stringify(c); };
 class GmailSync {
-  constructor({ presets, onProgress, onClientProven } = {}) {
+  constructor({ presets, onProgress, onClientProven, storeWriter = null } = {}) {
+    this._storeWriter = storeWriter;   // B-574d: the cursor's writer — the process's store writer unless a suite hands one
     this._presets = presets || (() => []);
     this._onProgress = onProgress || (() => { });
     this._onClientProven = onClientProven || (() => { });   // B-e40d: a refresh that worked proves its client (MountManager adopts it)
@@ -320,7 +324,8 @@ class GmailSync {
   async _syncOnce(w) {
     fs.mkdirSync(w.cfg.dir, { recursive: true });
     let state = {};
-    try { state = JSON.parse(fs.readFileSync(this._statePath(w), 'utf-8')); } catch { }
+    try { state = this._readState(w); } catch { }
+    w._savedCursor = cursorKey(state);   // B-574d: what the writer holds now — a pass that moves nothing writes nothing
     const seen = await this._seenIds(w); // the folder, read now (async; a walk that did not finish throws — rank 16)
     w.count = seen.size;
 
@@ -389,7 +394,7 @@ class GmailSync {
           }
           state.seedTotal = tot != null ? Math.min(tot, want) : 0; // 0 = unknown
         }
-        this._saveState(w, state);
+        await this._saveState(w, state);
       }
       // CROSS-RESTART CURSOR = a DATE, not a pageToken. Gmail's messages.list
       // pageToken is only stable within one run — new mail arriving between
@@ -422,14 +427,14 @@ class GmailSync {
         if (oldestMs !== Infinity) state.seedOldestMs = oldestMs; // CHECKPOINT: date cursor
         state.seedFetched = fetched;
         state.lastSyncAt = Date.now();
-        this._saveState(w, state);
+        await this._saveState(w, state);
         if (!msgs.length) break;
       } while (pageToken && fetched < want);
       // seed complete → switch to incremental from the seed-start historyId
       state.historyId = state.seedHistoryId;
       delete state.seedOldestMs; delete state.seedPageToken; delete state.seedFetched; delete state.seedHistoryId; delete state.seedTotal;
       state.lastSyncAt = Date.now();
-      this._saveState(w, state);
+      await this._saveState(w, state);
       this._progress(w, null);
       return;
     }
@@ -447,13 +452,23 @@ class GmailSync {
 
     state.historyId = newHistoryId;
     state.lastSyncAt = Date.now();
-    this._saveState(w, state);
+    await this._saveState(w, state);
   }
 
+  _writer() { return this._storeWriter || require('./store-writer.js').storeWriter(); }
+  /** B-574d: the cursor as the store writer knows it — its OWED bytes (a write not landed yet) first, then the file */
+  _readState(w) { const fp = this._statePath(w), W = this._writer(), owed = W && typeof W.owed === 'function' ? W.owed(fp) : null; return JSON.parse(owed != null ? owed : fs.readFileSync(fp, 'utf-8')); }
+  /** B-574d slice «channels-small-stores» (lane nl-journals, 主开发 r4939): THE POLL'S CURSOR THROUGH THE STORE WRITER — its thread writes,
+   *  syncs and renames it off the hub's loop. NOTHING is handed when the cursor did not move (`cursorKey`). The pass WAITS for the landing
+   *  (off the loop, the writer's own bound) before it is done — so a person who empties the folder after a pass never gets the old cursor
+   *  written back into it, as with the release's write at the call. → a promise of the landing (false: not on disk; kept owed, retried) */
   _saveState(w, state) {
-    const fp = this._statePath(w);
-    fs.writeFileSync(fp + '.tmp', JSON.stringify(state));
-    fs.renameSync(fp + '.tmp', fp);
+    const key = cursorKey(state);
+    if (w._savedCursor === key) return Promise.resolve(true);
+    w._savedCursor = key;
+    const fp = this._statePath(w), bytes = JSON.stringify(state), W = this._writer();
+    W.dirty(fp, { name: 'gmail-state.write', produce: () => bytes });
+    return Promise.resolve(W.durable(fp)).catch(() => false);
   }
 
   // _writeMessage, but a GONE message (404) is skipped instead of failing the

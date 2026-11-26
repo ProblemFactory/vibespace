@@ -75,7 +75,10 @@ fs.writeFileSync(tmpMod, src);
 const { GmailSync } = require(tmpMod);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gmail-'));
-const gs = new GmailSync({ presets: () => [{ key: 't', label: 'T', clientId: 'c', clientSecret: 's' }] });
+// B-574d (lane nl-journals): the cursor goes through the store writer — this suite loads a COPY of the module from the temp folder, where
+// its lazy require('./store-writer.js') cannot resolve: it is handed the process's writer (the pass awaits each landing, so the state
+// file is on disk when a pass ends, as before)
+const gs = new GmailSync({ presets: () => [{ key: 't', label: 'T', clientId: 'c', clientSecret: 's' }], storeWriter: require('../src/store-writer.js').storeWriter() });
 const cfg = {
   id: 'mnt-test', dir,
   token: JSON.stringify({ refresh_token: 'r', access_token: 'a', expiry: Date.now() + 3600e3 }),
