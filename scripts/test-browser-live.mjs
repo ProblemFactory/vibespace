@@ -1051,6 +1051,7 @@ const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMES
 if (process.argv[2] === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (!st) { process.stderr.write('fake agent-browser: FAKE_AB_STATE is not set\\n'); process.exit(1); }
 const f = path.join(st, ns + '.json');
+const writeState = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // the fake's state by a temp file of its own process and a rename: no verb's read meets a torn file when two of its processes run at once (lane bl-loop-b, 主开发 r5152)
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
@@ -1059,7 +1060,7 @@ const [a, b] = argv;
 const ports = JSON.parse(fs.readFileSync(path.join(st, 'ports.json'), 'utf8'));
 if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
-if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'pids'), c.pid + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
+if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid }; writeState(s); fs.appendFileSync(path.join(st, 'pids'), c.pid + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
 if (a === 'get' && b === 'cdp-url') { out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:${DEAD_CDP}/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'stream' && b === 'status') { fs.appendFileSync(path.join(st, 'stream.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, profile: process.env.AGENT_BROWSER_PROFILE || null }) + '\\n'); const port = ports[ns] || null; if (!port) { out({ success: false, data: null, error: 'fake: no stream for ' + ns }); process.exit(1); } out({ success: true, data: { connected: true, enabled: true, port, screencasting: false } }); process.exit(0); }
 if (a === 'stream' && b === 'enable') { out({ success: false, data: null, error: 'Streaming is already enabled for this session' }); process.exit(1); }

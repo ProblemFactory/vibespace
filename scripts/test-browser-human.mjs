@@ -314,6 +314,7 @@ const fs = require('fs'), path = require('path'), { spawn } = require('child_pro
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default'; const sess = process.env.AGENT_BROWSER_SESSION || ns;
 const prof = process.env.AGENT_BROWSER_PROFILE || null, cdp = process.env.AGENT_BROWSER_CDP || null;
 const f = path.join(st, ns + '__' + sess + '.json');
+const writeState = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // the fake's state by a temp file of its own process and a rename: no verb's read meets a torn file when two of its processes run at once (lane bl-loop-b, 主开发 r5152)
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
@@ -324,10 +325,10 @@ const [a, b] = argv;
 const daemon = (by) => {
   let s = read(); if (s && alive(s.pid)) return s;
   const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); log('daemons.log', { pid: c.pid });
-  if (cdp) { s = { pid: c.pid, cdp, tabs: 0 }; fs.writeFileSync(f, JSON.stringify(s)); log('connects.log', { ns, sess, cdp, by }); return s; }
+  if (cdp) { s = { pid: c.pid, cdp, tabs: 0 }; writeState(s); log('connects.log', { ns, sess, cdp, by }); return s; }
   const lock = prof ? path.join(prof, 'SingletonLock.fake') : null;
   if (lock) { let h = null; try { h = Number(fs.readFileSync(lock, 'utf8')); } catch { } if (h && alive(h)) { try { process.kill(c.pid, 'SIGKILL'); } catch { } log('refused.log', { ns, sess, by, prof }); return { refused: 'Chrome exited early (exit code: 21) ... SingletonLock: File exists (17)' }; } }
-  s = { pid: c.pid, profile: prof, tabs: 0 }; fs.writeFileSync(f, JSON.stringify(s)); if (lock) fs.writeFileSync(lock, String(c.pid));
+  s = { pid: c.pid, profile: prof, tabs: 0 }; writeState(s); if (lock) fs.writeFileSync(lock, String(c.pid));
   log('launches.log', { ns, sess, by, profile: prof, pid: c.pid });
   return s;
 };
@@ -340,7 +341,7 @@ if (a === 'close') { out({ success: true, data: { closed: 1 } }); process.exit(0
 if (a === 'stream' && b === 'status') { const s = daemon('stream status'); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); } out({ success: true, data: { enabled: true, connected: true, port: 21000 + (sess.length * 7) % 900, screencasting: false } }); process.exit(0); }
 const s = daemon(a); if (s.refused) { out({ success: false, error: s.refused }); process.exit(1); }
 if (a === 'tab' && b === 'new' && fs.existsSync(path.join(st, 'fail-tabnew-' + sess))) { out({ success: false, error: 'fake: tab new refused' }); process.exit(1); }
-if (a === 'tab' && b === 'new') { const n = (s.tabs || 0) + 1; s.tabs = n; fs.writeFileSync(f, JSON.stringify(s)); out({ success: true, data: { tabId: 't' + n, targetId: ('ab' + String(n).padStart(4, '0')).padEnd(32, 'c').toUpperCase(), label: null } }); process.exit(0); }
+if (a === 'tab' && b === 'new') { const n = (s.tabs || 0) + 1; s.tabs = n; writeState(s); out({ success: true, data: { tabId: 't' + n, targetId: ('ab' + String(n).padStart(4, '0')).padEnd(32, 'c').toUpperCase(), label: null } }); process.exit(0); }
 if (process.env.FAKE_AB_FAIL_OPEN && a === 'open') { out({ success: false, error: 'fake: navigation refused' }); process.exit(1); }
 out({ success: true, data: { ok: true } }); process.exit(0);
 `, { mode: 0o755 });

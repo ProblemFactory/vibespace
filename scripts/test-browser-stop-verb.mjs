@@ -64,7 +64,7 @@ if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && ali
 // lane B: the fake keeps TABS (the measured 0.38.1 shapes: open / tab new answer the tab's targetId, a tab new makes
 // the new tab the active one, a CDP target id is a tab ref) and logs every command it ran (the suite reads the sequence)
 const tid = () => Array.from({ length: 32 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('');
-const write = (s) => fs.writeFileSync(f, JSON.stringify(s));
+const write = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // by a temp file of its own process and a rename: no verb's read meets a torn file (lane bl-loop-b, 主开发 r5152)
 fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ ns, argv: argv.filter((x) => x !== '--json') }) + '\\n');
 const failUrl = process.env.FAKE_AB_FAIL_URL || '';
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, config: process.env.AGENT_BROWSER_CONFIG || null, n: 1, tabs: [{ tabId: 't1', targetId: tid(), url: 'about:blank', label: null, active: true }] }; write(s); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, pid: s.pid, config: s.config }) + '\\n'); }

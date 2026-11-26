@@ -387,6 +387,7 @@ fs.writeFileSync(path.join(BIN, 'agent-browser'), `#!${process.execPath}
 const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default'; const sess = process.env.AGENT_BROWSER_SESSION || ns;
 const f = path.join(st, (ns + '__' + sess).replace(/[^\\w.-]/g, '_') + '.json');
+const writeState = (s) => { const t = f + '.' + process.pid + '.tmp'; fs.writeFileSync(t, JSON.stringify(s)); fs.renameSync(t, f); };   // the fake's state by a temp file of its own process and a rename: no verb's read meets a torn file when two of its processes run at once (lane bl-loop-b, 主开发 r5152)
 const read = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
@@ -415,7 +416,7 @@ function launch(by) {
   if (headed && plat === 'wayland' && !wok) { out({ success: false, error: 'Chrome exited early (exit code: 1) without writing DevToolsActivePort\\nChrome stderr:\\n  ERROR:ui/ozone/platform/wayland/host/wayland_connection.cc:206] Failed to connect to Wayland display: No such file or directory (2)\\n  ERROR:ui/aura/env.cc:246] The platform failed to initialize.  Exiting.' }); process.exit(1); }
   if (headed && plat === 'x11' && !ownXvfb) { out({ success: false, error: 'Chrome exited early (exit code: 1)\\n  ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:257] Missing X server or $DISPLAY' }); process.exit(1); }
   const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref();
-  const s = { pid: c.pid, view }; fs.writeFileSync(f, JSON.stringify(s)); logTo('pids.log', { pid: c.pid });
+  const s = { pid: c.pid, view }; writeState(s); logTo('pids.log', { pid: c.pid });
   return s;
 }
 function ensure(by) {
