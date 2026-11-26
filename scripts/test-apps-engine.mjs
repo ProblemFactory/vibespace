@@ -431,7 +431,7 @@ console.log('§8 i18n — every sentence the new files word has its zh + ja entr
   const { execFileSync } = require('child_process');
   const { gitEnvFrom } = await import('./git-env.mjs');
   let added = '';
-  try { const base = execFileSync('git', ['-C', repo, 'merge-base', 'HEAD', 'master'], { encoding: 'utf8', env: gitEnvFrom(process.env) }).trim(); added = execFileSync('git', ['-C', repo, 'diff', base, '--', ...TOUCHED], { encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 }).split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).join('\n'); } catch { added = ''; }
+  try { const base = execFileSync('git', ['-C', repo, 'merge-base', 'HEAD', 'master'], { encoding: 'utf8', env: gitEnvFrom(process.env) }).trim(); added = execFileSync('git', ['-C', repo, 'diff', base, '--', ...TOUCHED], { encoding: 'utf8', env: gitEnvFrom(process.env), maxBuffer: 64 * 1024 * 1024 }).split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++')).join('\n'); } catch (e) { added = ''; console.log(`  ⊘ SKIP: the i18n census reads NO added line of the ${TOUCHED.length} touched files — git found no merge base with master here (${String((e && (e.stderr || e.message)) || e).trim().split('\n')[0].slice(0, 120)}); the new files are still read (r5051 (b))`); }
   const tRe = /\b(?:t|tr|i18nKey)\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
   const keys = new Set();
   const take = (src) => { for (const m of src.matchAll(tRe)) keys.add(JSON.parse('"' + (m[1] !== undefined ? m[1] : m[2]).replace(/\\'/g, "'").replace(/"/g, '\\"') + '"')); };

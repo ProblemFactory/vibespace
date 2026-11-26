@@ -4139,6 +4139,7 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
     ok('§B-6c55 (a) a RESUMED process (no pick; its spawn commanded claude-fable-5[1m]): Unlock then Lock keeps the 1M ask from what the spawn commanded', rs._lockedContext === '1m', JSON.stringify({ c: rs._lockedContext }));
     const base = caseOf(baseOf('src/ws-handler.js'));
     if (base) { const hb = hubOf(base), db = hb.add('db', { _servedModel: 'claude-fable-5' }); hb.send('db', { lock: true, lockModel: 'claude-fable-5' }); ok('§B-6c55 RED CONTROL: the release b06f36e90\'s case kept no context — the Lock on a fable[1m] conversation saved claude-fable-5 alone', db._lockedModel === 'claude-fable-5' && !db._lockedContext && !('lockedContext' in (hb.meta['cw-db'] || {}))); }
+    else console.log('  ⊘ SKIP: §B-6c55 RED CONTROL — the release b06f36e90\'s ws-handler.js (its set-model case) is not in this checkout (r5051 (b))');
   }
   // the engine's REAL repin (its own text): the 1M ask rides the /model it sends
   {
@@ -4167,6 +4168,7 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
     ok('§B-6c55 the turn-end repin after a fallback commands target + [1m] when the fact stands (claude-fable-5[1m]), the target alone without it, and nothing when the target is served', JSON.stringify(live.writes) === JSON.stringify(['claude-fable-5[1m]', 'claude-fable-5']), JSON.stringify(live.writes));
     const relEng = baseOf('src/server/usage-pool-engine.js');
     if (relEng) { const rel = make(relEng); rel.repin({ _lockedModel: 'claude-fable-5', _lockedContext: '1m', _servedModel: 'claude-opus-5-5' }); ok('§B-6c55 RED CONTROL: the release\'s repin sent /model claude-fable-5 — the 1M ask dropped at every repin', JSON.stringify(rel.writes) === JSON.stringify(['claude-fable-5']), JSON.stringify(rel.writes)); }
+    else console.log('  ⊘ SKIP: §B-6c55 RED CONTROL of the repin — the release b06f36e90\'s usage-pool-engine.js is not in this checkout (r5051 (b))');
     // (b) the pool's request model reads the TARGET byte for byte as on the release (sessionModelFor over the same shapes)
     const sm = (src) => { const { fn } = engOf(src); return new Function(fn('function modelsMatch(a, b) {') + '\n' + fn('function servedDefinesModel(s) {') + '\n' + fn('function sessionModelFor(s) {') + '\nreturn sessionModelFor;')(); };
     const shapes = [
@@ -4181,7 +4183,7 @@ console.log('\n§B-6c55 a lock keeps the person\'s 1M ask beside its target; the
       ok('§B-6c55 (b) the pool\'s request model (sessionModelFor) answers byte for byte what the release answers over the same locked sessions with the fact — the TARGET, never target + [1m]', JSON.stringify(got) === JSON.stringify(want) && got[0] === 'claude-fable-5', JSON.stringify({ got, want }));
       const planted = sm(relEng.replace('&& !(s._servedViaFallback?.to && modelsMatch(s._lockedModel, s._servedViaFallback.to))) return s._lockedModel;', "&& !(s._servedViaFallback?.to && modelsMatch(s._lockedModel, s._servedViaFallback.to))) return s._lockedModel + (s._lockedContext ? '[1m]' : '');"));
       ok('§B-6c55 (b) RED CONTROL: a request model that read the commanded form (target + [1m]) differs from the release — the leg above can go red', JSON.stringify(shapes.map((x) => planted(x))) !== JSON.stringify(want));
-    }
+    } else console.log('  ⊘ SKIP: §B-6c55 (b)\'s byte-for-byte read against the release b06f36e90 — its usage-pool-engine.js is not in this checkout (r5051 (b))');
     const sw = require(path.join(REPO, 'src/server/stream-wall.js'));
     const fr = sw.lockFrame(shapes[0], 'x');
     ok('§B-6c55 (b) the chip\'s field is the target: the lock frame\'s lockedModel = claude-fable-5 (the fact rides beside it as lockedContext)', fr.data.lockedModel === 'claude-fable-5' && fr.data.lockedContext === '1m' && sw.ownModelOf(shapes[0]) === 'claude-fable-5', JSON.stringify(fr.data));

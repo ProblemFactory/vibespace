@@ -1277,7 +1277,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
         diffs.length === 0, JSON.stringify(diffs));
       ok('…and the comparison is not vacuous: master\'s copy really answers these', masterAr.continueNoticeFor(SHAPES[0]).text.length > 0);
     } else {
-      ok('· SKIP (git could not read master:src/server/auto-resume.js — ' + (gitErr || '?') + ')', true);
+      console.log('  · SKIP (git could not read master:src/server/auto-resume.js — ' + (gitErr || '?') + ')');   // r5051 (a): the gate's SKIP line, never a ✓
     }
   }
 }

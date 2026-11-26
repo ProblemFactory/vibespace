@@ -86,12 +86,14 @@ const makeLegacy = MUTSB.load('src/mounts.js', LEGACY_SRC, 'legacy-enc');
     // HEAD may already carry the fix; the PARENT of a commit that touched
     // mounts.js is where the inline cipher last lived. Walk back until the
     // inline `_key()` is found (bounded).
-    for (const ref of ['HEAD', 'HEAD~1', 'HEAD~2', 'HEAD~3']) {
+    // r5051 (d): HEAD~1..3 stopped holding the inline cipher long ago (the cross-check was dead even on a full clone); the base is PINNED
+    // at 699b7d9eb — the newest commit of src/mounts.js that still carries the inline `_key()` (2026-09-03)
+    for (const ref of ['HEAD', '699b7d9eb']) {
       let s; try { s = execFileSync('git', ['show', `${ref}:src/mounts.js`], { cwd: REPO, env: gitEnvFrom(process.env), encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 }); } catch (e) { why = e.message; break; }
       if (/_key\(\) \{\n    try \{ return Buffer\.from\(fs\.readFileSync\(this\._keyFile/.test(s)) { shipped = s; break; }
     }
   } catch (e) { why = e.message; }
-  if (!shipped) console.log(`  … SKIP git cross-check of the embedded pre-fix bytes (${why || 'no ancestor within 3 commits still carries the inline cipher'})`);
+  if (!shipped) console.log(`  … SKIP git cross-check of the embedded pre-fix bytes (${why || 'the pinned 699b7d9eb is in this checkout but carries no inline cipher'})`);
   else {
     const pick = (name) => { const m = shipped.match(new RegExp(`  ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}`)); return m ? m[0] : ''; };
     const norm = (s) => s.replace(/^\s+/gm, '').replace(/\s+$/gm, '');

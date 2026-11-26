@@ -1180,11 +1180,14 @@ setInterval(() => {
   {
     const { execFileSync } = await import('node:child_process');
     let before = '';
-    try { before = execFileSync('git', ['-C', REPO, 'show', 'master:data/bin/codex-chat-wrapper.js'], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); } catch (e) { before = ''; }
+    // r5051 (d): master has routed userMessage since 2e6465e78, so the control was dead even on a full clone; the base is PINNED at
+    // f239082fc — the wrapper's last commit before that fix (2026-09-07)
+    const PRE_FIX_WRAPPER = 'f239082fc';
+    try { before = execFileSync('git', ['-C', REPO, 'show', `${PRE_FIX_WRAPPER}:data/bin/codex-chat-wrapper.js`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }); } catch (e) { before = ''; }
     if (!before) {
-      console.log('  SKIP: `git show master:data/bin/codex-chat-wrapper.js` produced nothing — the pre-fix control did not run');
+      console.log(`  SKIP: \`git show ${PRE_FIX_WRAPPER}:data/bin/codex-chat-wrapper.js\` produced nothing (a depth-1 clone) — the pre-fix control did not run`);
     } else if (/type === 'userMessage'/.test(before)) {
-      console.log('  SKIP: master already routes item/completed userMessage — this control has served its purpose (it can only fail once)');
+      ok(false, `CONTROL lost its fault: the pinned pre-fix wrapper (${PRE_FIX_WRAPPER}) already routes item/completed userMessage`);
     } else {
       const cd = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cxp2-prefix-'));
       const cw = path.join(cd, 'codex-chat-wrapper.js');
