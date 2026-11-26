@@ -210,11 +210,12 @@ class MachineMounts {
       const la = SR.storeAnswer(read, { valid: STORE_SHAPE });   // a legacy store's answer
       if (la.state === 'missing') return null; // nothing to do
       if (la.state === 'unreadable') { this._legacyHeld(file, map, la); return -2; }   // HELD (said by the helper: held and read again)
-      if (la.state !== 'data') { this.log(`legacy store unreadable — kept in place (fix or remove it, then delete machine-mounts.json to re-migrate): ${file}: ${(la.error && la.error.message) || la.why}`); return -1; }
+      // r5127: torn bytes at a start are OWED too (the mark below) — a repaired file is read at the next start; no word advises deleting the list
+      if (la.state !== 'data') { this.log(`legacy store ${path.basename(file)} did not parse (${la.why}) — kept in place under its own name (fix it or remove it: the next start reads it again, the list keeps it owed): ${file}`); return -1; }
       // its gate (test-hosts-held-census's lookup control): a record whose LOOKUP throws (the machines answering by a throw) is no crash
       // of the start — the store stays in place under its name and OWED (-3: read, its records not judged now); the next start tries again
       try { return this._ingestLegacy(file, la.value, map, { judged: this._judgedOf(file) }).length; }
-      catch (e) { this.log(`${path.basename(file)}: its records could not be judged now (${(e && (e.code || e.message)) || e}) — kept in place, owed to the next start`); return -3; }
+      catch (e) { this.log(`${path.basename(file)}: its records could not be judged now (${(e && (e.code || e.name)) || 'an error'}) — kept in place, owed to the next start`); return -3; }   // r5127: the code or the error's name only (a message can carry a path)
     };
     const nPush = ingest(hmF, (m) => ({ ...m, dir: 'push' }));
     const nPull = ingest(dvF, (m) => ({
@@ -227,6 +228,7 @@ class MachineMounts {
     }));
     if (nPush === -2 || nPull === -2) this._state.legacyOwed = true;   // OWED (r4985): the next start ingests it again (the mark _loadAnswer reads)
     if (nPush === -3 || nPull === -3) this._state.legacyOwed = true;   // a lookup that threw: owed too (its gate)
+    if (nPush === -1 || nPull === -1) this._state.legacyOwed = true;   // r5127: torn bytes owed too — a repaired file is read at the next start
     if (nPush === null && nPull === null) return;
     try {
       const t = this._file + '.tmp';
@@ -259,7 +261,8 @@ class MachineMounts {
       else if (!meets.every((m) => same(r, m))) passed.push(r);
     }
     this._state.mounts.push(...added);
-    if (passed.length) this.log(`${path.basename(file)}: ${passed.length} legacy mount record(s) passed over — a mount the list already holds has the same id or mount point (that newer one is kept): ${passed.map((r) => r.mountpoint || r.id).join(', ')}`);
+    // r5127 MUST 2: by its store and a COUNT — no mount point (a path on a paired machine or a hub folder), no host, no account
+    if (passed.length) this.log(`${path.basename(file)}: ${passed.length} legacy mount record(s) passed over — a mount the list already holds has the same id or mount point (that newer one is kept)`);
     return added;
   }
   /** the records of `file` a lift already judged (its read, MUST 2) — a Set of their keys, or null */
@@ -284,9 +287,15 @@ class MachineMounts {
   _legacyLifted(file, map, value, { setAside = null } = {}) {
     // its read (SHOULD 3): torn at a read again, the list already keeps the store OWED — fixing the file is enough; never «delete the list»
     if (!value) { this.log(setAside ? `legacy store unreadable — kept in place under its own name (fix it or remove it: the next start reads it again, the list keeps it owed): ${file}: torn bytes (a copy kept aside as ${path.basename(setAside)})` : `${path.basename(file)} is gone — nothing of it to ingest`); return; }
-    const added = this._ingestLegacy(file, value, map);
-    // its read (MUST 2): what this lift JUDGED is saved with the mark — the next start skips it (a mount the person removes since stays removed)
-    this._state.legacyHandled = { ...(this._state.legacyHandled || {}), [path.basename(file)]: (Array.isArray(value.mounts) ? value.mounts : []).map(map).map(legacyKey) };
+    // r5127 MUST 1: an EARLIER lift's judgment (the store held a second time, across a start) is handed to this ingest, and the list saved is
+    // the UNION of the earlier names and this lift's — a mount removed after a lift stays removed on every road, nothing said twice
+    const earlier = this._judgedOf(file);
+    let added;
+    try {
+      added = this._ingestLegacy(file, value, map, { judged: earlier });
+      // its read (MUST 2): what this lift JUDGED is saved with the mark — the next start skips it (a mount the person removes since stays removed)
+      this._state.legacyHandled = { ...(this._state.legacyHandled || {}), [path.basename(file)]: [...new Set([...(earlier || []), ...(Array.isArray(value.mounts) ? value.mounts : []).map(map).map(legacyKey)])] };
+    } catch (e) { this.log(`${path.basename(file)}: its records could not be judged at the lift (${(e && (e.code || e.name)) || 'an error'}) — kept in place, owed to the next start`); return; }   // r5127: the store stays owed (the mark saved at its start)
     this._state.legacyOwed = true;
     this._save();
     this.log(`${path.basename(file)} read again: ${added.length} legacy mount record(s) listed now — the file keeps its name until a start saves the list`);
