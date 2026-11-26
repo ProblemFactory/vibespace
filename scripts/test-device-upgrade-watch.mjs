@@ -198,29 +198,63 @@ console.log('— B-f276 (主开发 r4718): device-upgrades.json UNDER THE STORE-
   /** a held life: the same folder, its read refused once */
   const heldLife = (Mod, a, lines = []) => { const pr = placeReads(a.file); let w = null; try { w = Mod.create({ userTodos: a.todos, dataDir: a.dir, log: (l) => lines.push(l), tickMs: 0 }); } finally { pr.restore(); } return { w, lines, seen: pr.seen.n }; };
   const events = (w) => { const r1 = w.stuck({ ...S, to: '2.369.203' }); const m1 = w.matched({ hostKey: 'host-dial-HB1', version: '2.369.201' });   // a NEWER version gave up; the old one landed
-    w.begun({ hostKey: 'host-dial-HB3', machine: 'HB3', to: '2.369.201' }); w.answered({ hostKey: 'host-dial-HB2' }); w.sweep(); return { r1, m1 }; };
+    w.begun({ hostKey: 'host-dial-HB3', machine: 'HB3', to: '2.369.201' }); w.answered({ hostKey: 'host-dial-HB2' }); w.sweep();
+    const f1 = w.refused({ hostKey: 'host-dial-HB4', machine: 'HB4', from: '2.369.199', to: '2.369.201', code: 'bad-signature' });   // r4775's page: a refusal met while held is OWED too
+    return { r1, m1, f1 }; };
   const alerted = [];
-  const heldLife2 = (Mod, L, lines = []) => { const pr = placeReads(L.file); let w = null; try { w = Mod.create({ userTodos: L.todos, dataDir: L.dir, log: (l) => lines.push(l), tickMs: 0, alerts: { file: (kind, f) => alerted.push([kind, f.hostKey]) } }); } finally { pr.restore(); } return { w, lines, seen: pr.seen.n }; };
+  const heldLife2 = (Mod, L, lines = []) => { const pr = placeReads(L.file), bc = { n: 0, row: undefined }; let w = null;
+    try { w = Mod.create({ userTodos: L.todos, dataDir: L.dir, log: (l) => lines.push(l), tickMs: 0, bcast: () => { bc.n++; bc.row = w && w.rowOf('host-dial-HB1'); }, alerts: { file: (kind, f) => alerted.push([kind, f.hostKey]) } }); } finally { pr.restore(); }
+    return { w, lines, seen: pr.seen.n, bc }; };
   const a = lifeOne();
   const h = heldLife2(DW, a); const e = events(h.w);
-  ok(h.seen === 1 && !!h.w.held() && e.r1 && e.r1.held === true && e.m1 === false && a.open().length === 1 && a.open()[0].id === a.itemId && fs.readFileSync(a.file, 'utf8') === a.bytes
+  ok(h.seen === 1 && !!h.w.held() && e.r1 && e.r1.held === true && e.m1 === false && e.f1 && e.f1.held === true && a.open().length === 1 && a.open()[0].id === a.itemId && fs.readFileSync(a.file, 'utf8') === a.bytes
     && h.lines.filter((l) => /waits — the record of the machines' agent updates could not be read \(EIO\)/.test(l)).length === 1 && JSON.stringify(h.w.rowOf('host-dial-HB1')) === JSON.stringify({ held: 'EIO' }),
     'HELD (a placed EIO of the read): every update event changes NOTHING now — the item filed before stays the one open item, the bytes on disk byte for byte after every writer was asked, said once; the row reader answers «held» by name', { open: a.open().map((i) => i.text), row: h.w.rowOf('host-dial-HB1') });
   ok(alerted.length === 1 && alerted[0][0] === 'upgrade-pushed' && alerted[0][1] === 'host-dial-HB3', 'HELD: a push that began files its URGENT alert AT ONCE (its own store, device-alerts) — only its deadline waits for this record', alerted);
   ok(/could not be read/.test(h.w.heldWords() || ''), `HELD: its words name what waits («${h.w.heldWords()}»)`);
   const lifted = await h.w.readAgain();
   const g = h.w.gone();
-  ok(lifted === true && !h.w.held() && a.open().length === 0 && !g['host-dial-HB2'] && g['host-dial-HB3'] && g['host-dial-HB3'].pending === true && !h.w.ledger()['host-dial-HB1'] && alerted.length === 1
-    && h.lines.some((l) => /the record reads again — 4 event\(s\) that came while it could not be read judged now/.test(l)),
-    'LIFTED: the events that came while held are OWED and judged in their order — the newer give-up superseded the old item and the landed update resolved it (no item left open), the device that answered has no deadline left, the push that began has its deadline (its alert not filed twice)', { open: a.open().length, gone: Object.keys(g), lines: h.lines.filter((l) => /reads again/.test(l)) });
+  ok(lifted === true && !h.w.held() && a.open().length === 1 && /^HB4 REFUSED an agent update \(2\.369\.199 → 2\.369\.201\)/.test(a.open()[0].text) && a.open()[0].urgency === 'urgent' && !g['host-dial-HB2'] && g['host-dial-HB3'] && g['host-dial-HB3'].pending === true && !h.w.ledger()['host-dial-HB1'] && alerted.length === 1
+    && h.lines.some((l) => /the record reads again — 5 event\(s\) that came while it could not be read judged now/.test(l)),
+    'LIFTED: the events that came while held are OWED and judged in their order — the newer give-up superseded the old item and the landed update resolved it, the refusal filed its URGENT item (the one item open), the device that answered has no deadline left, the push that began has its deadline (its alert not filed twice)', { open: a.open().length, gone: Object.keys(g), lines: h.lines.filter((l) => /reads again/.test(l)) });
   h.w.stop();
   // RED: a copy that DROPS the owed events (the lift judges nothing that came meanwhile) — the landed update's item stays open for good
   // and the re-dialed device keeps its deadline (it would be told «stopped answering»)
   const OSRC = fs.readFileSync(path.join(REPO, 'src/server/device-upgrade-watch.js'), 'utf8');
-  const Drop = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, 'heldSaid = false; heldUntil = now(); replayOwed(); } });', 'heldSaid = false; heldUntil = now(); } });', 'src/server/device-upgrade-watch.js'), 'owed-dropped');
+  const Drop = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, 'heldUntil = now(); replayOwed(); try { bcast(); }', 'heldUntil = now(); try { bcast(); }', 'src/server/device-upgrade-watch.js'), 'owed-dropped');
   const d = lifeOne(); const dh = heldLife2(Drop, d); events(dh.w); await dh.w.readAgain();
   ok(d.open().length === 1 && dh.w.gone()['host-dial-HB2'] && dh.w.gone()['host-dial-HB2'].pending === true, 'RED: a copy that drops what came during the hold — the landed update\'s item stays open, the device that answered keeps its deadline', { open: d.open().length });
   dh.w.stop();
+  // RED (r4775's page, lens three): a copy that skips a refusal met during the hold WITHOUT owing it — its urgent item never filed
+  const NoR = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, "heldNow('a refused update', () => refused(arguments[0]))", "heldNow('a refused update')", 'src/server/device-upgrade-watch.js'), 'refused-unowed');
+  const rr = lifeOne(); const rrh = heldLife2(NoR, rr); events(rrh.w); await rrh.w.readAgain();
+  ok(!rr.open().some((i) => /^HB4 REFUSED/.test(i.text)), 'RED: a copy that skips a refusal met during the hold without owing it — the refusal\'s urgent item is never filed (the LIFTED leg above would go red)', rr.open().map((i) => i.text));
+  rrh.w.stop();
+  // r4775 (主开发's should): THE LIFT BROADCASTS after the owed events — while held every row answers «held» (its «update failed» line
+  // off an open machines list); a lift that owes nothing would leave the list so until some later change
+  const q = lifeOne(); const qh = heldLife2(DW, q); const q0 = qh.bc.n; await qh.w.readAgain();
+  ok(q0 === 0 && qh.bc.n === 1 && !!qh.bc.row && qh.bc.row.to === '2.369.201' && qh.bc.row.lost === 'commands',
+    'LIFTED with nothing owed: the lift BROADCASTS once, and at that broadcast the row reads the record again (from → to, what no longer works) — an open machines list gets its «update failed» line back at once', qh.bc);
+  qh.w.stop();
+  const NoB = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, 'replayOwed(); try { bcast(); } catch { } } });', 'replayOwed(); } });', 'src/server/device-upgrade-watch.js'), 'lift-silent');   // stale-pins: kept (the red copy's own text)
+  const qb = lifeOne(); const qbh = heldLife2(NoB, qb); await qbh.w.readAgain();
+  ok(qbh.bc.n === 0, 'RED: a copy whose lift does not broadcast — a lift that owes nothing tells no open page (each row stays without its line)', qbh.bc);
+  qbh.w.stop();
+  // r4775's page (lens three): THE SILENCE COUNTS FROM THE LIFT — a deadline armed before a hold longer than goneAfterMs is not judged
+  // on the hold's minutes (a fake clock): the first sweep after the lift files nothing; RED: a copy whose lift leaves the silence's start
+  const silence = async (Mod) => { let clock = 2_000_000; const GA = 5 * 60e3, dir = fs.mkdtempSync(path.join(SCR, 'hu-'));
+    const todos = new UserTodoManager({ dataDir: dir, now: () => clock });
+    const mk = (M) => M.create({ userTodos: todos, dataDir: dir, log: () => { }, now: () => clock, tickMs: 0, goneAfterMs: GA });
+    const w0 = mk(DW); w0.begun({ hostKey: 'host-dial-HC1', machine: 'HC1', from: '2.369.199', to: '2.369.201' }); w0.stop();
+    clock += 60e3; const pr = placeReads(path.join(dir, 'device-upgrades.json')); let w = null; try { w = mk(Mod); } finally { pr.restore(); }
+    const held = !!w.held(); clock += GA + 60e3; await w.readAgain(); clock += 1000; const swept = w.sweep();
+    const open = todos._state.items.filter((t) => t.status === 'open' && t.sessionKey === 'machines').length, g = w.gone()['host-dial-HC1']; w.stop();
+    return { held, swept, open, pending: !!(g && g.pending) }; };
+  const s1 = await silence(DW);
+  ok(s1.held && s1.swept === false && s1.open === 0 && s1.pending, 'LIFTED after a hold longer than the deadline: the first sweep files nothing — the device\'s silence counts from the lift, its deadline still armed', s1);
+  const NoU = MH.load('src/server/device-upgrade-watch.js', editAnchor(OSRC, 'heldSaid = false; heldUntil = now(); replayOwed();', 'heldSaid = false; replayOwed();', 'src/server/device-upgrade-watch.js'), 'silence-from-start');
+  const s2 = await silence(NoU);
+  ok(s2.swept === true && s2.open === 1, 'RED: a copy whose lift leaves the silence\'s start — the first sweep after the lift tells the person a device stopped answering, on the hold\'s minutes', s2);
   // TORN: kept aside ONCE (byte for byte), the ledger then empty — the same stuck update re-filed is the SAME item in For you (its words)
   const t0 = lifeOne(); const TORN = t0.bytes.slice(0, 30); fs.writeFileSync(t0.file, TORN);
   const tw = DW.create({ userTodos: t0.todos, dataDir: t0.dir, log: () => { }, tickMs: 0 });

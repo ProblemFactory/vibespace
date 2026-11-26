@@ -352,6 +352,18 @@ console.log('— B-f276 (主开发 r4718): dial-health.json UNDER THE STORE-READ
   const rec = h.w._ledger()[`host-dial-Macbook|${DH.SECOND}`];
   ok(lifted === true && !h.w.held() && !!rec && rec.itemId === L1.itemId, 'LIFTED at the next good read: the ledger back as it was — the episode\'s item id kept (its retract works again)', { lifted, rec: rec && rec.itemId });
   h.w.stop();
+  // r4775's page (lens three): ONE PASS AT THE LIFT — a machine whose second agent knocks during the hold is judged right at the lift, not
+  // at the next tick (a hosts stand-in that lists it); RED: a copy whose lift does not pass
+  const liftPass = async (Mod) => { const Wd = world(Mod); const file = path.join(Wd.dir, 'dial-health.json'); fs.writeFileSync(file, JSON.stringify({ version: 1, hosts: {} }));
+    const hostsStub = { list: () => [{ ...macHost(Wd), online: true }] };
+    const pr = placeReads(file); let w = null; try { w = Mod.create({ userTodos: Wd.todos, dataDir: Wd.dir, log: () => { }, now: Wd.now, hosts: hostsStub, tickMs: 0 }); } finally { pr.restore(); }
+    const held = !!w.held(); Wd.tick(30e3); const atHold = Wd.open().length; await w.readAgain(); const n = Wd.open().length; w.stop(); return { held, atHold, n }; };
+  const lp = await liftPass(HW);
+  ok(lp.held && lp.atHold === 0 && lp.n === 1, 'LIFTED: ONE pass at the lift — a machine whose second agent knocks during the hold is told right after the read (its item filed), not at the next tick', lp);
+  const LSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-health-watch.js'), 'utf8');
+  const NoPass = MH.load('src/server/dial-health-watch.js', editAnchor(LSRC, ' try { sweep(); } catch (e) { log(`[dial-health] the pass at the lift failed: ${e.message}`); } } });', ' } });', 'src/server/dial-health-watch.js'), 'lift-no-pass');
+  const lr = await liftPass(NoPass);
+  ok(lr.n === 0, 'RED: a copy whose lift does not pass — the knocking machine is not told until the next tick', lr);
   // THE PASS's GUARD (the adversarial read: pinned only by its line before): a DISMISSED item is not reopened while the record is unread —
   // over an empty ledger a pass would file again, and For you's add matches by words across statuses (it reopens a dismissed item)
   const runDismissed = async (Mod) => { const L = lifeOne(Mod); L.Wd.todos.setStatus(L.itemId, 'dismissed', 'user'); const hd = heldLife(L); L.Wd.tick(30e3); hd.w.observe(macHost(L.Wd), { connected: true }); const st = L.Wd.todos.get(L.itemId).status; hd.w.stop(); return st; };
