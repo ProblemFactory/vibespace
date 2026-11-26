@@ -24,6 +24,10 @@
 const fs = require('fs');
 const path = require('path');
 const MR = require('./migration-reads.js'); // MG1 (r2929): strict only inside a migration's run (every other reader keeps its answer)
+const FC = require('./fd-close.js');   // B-574d (r5072): the trim's synced replace — the tree's one door (this module is no device bundle input)
+const _saidTrim = new Set();
+/** the trim's own words, said ONCE a run each (a trim that fails is tried again at the next record: said once, never a line a record) */
+const sayTrim = (line) => { if (_saidTrim.has(line)) return; _saidTrim.add(line); try { console.warn(`[slots] ${line}`); } catch { } };
 
 const MAX_LINES = 20000;      // ≈2.4MB at ~120B/line; a busy pool writes a few hundred a day
 const DEDUP_MS = 60000;       // an identical consecutive (session → to) inside a minute is one fact
@@ -305,10 +309,24 @@ class SlotTransitions {
       // OVERWROTE the first — an archive that silently loses what it was
       // created to preserve is worse than no archive.
       const out = path.join(this.archiveDir, `slot-transitions-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.jsonl`);
-      fs.appendFileSync(out, lines.slice(0, cut).join('\n') + '\n');
-      fs.writeFileSync(this.file + '.tmp', lines.slice(cut).join('\n') + '\n');
-      fs.renameSync(this.file + '.tmp', this.file);
-    } catch { }
+      // B-574d «usage-readings» (主开发 r5072, lane lg-group-parents): THE TRIM IS SYNCED ON BOTH SIDES, the archive first. The half it
+      // cuts is appended to the day's shard and SYNCED there before the live file loses it (a power cut must never leave the live
+      // file trimmed while the archive lacks the half it keeps); then the kept half replaces the live file through the tree's one door
+      // (src/fd-close.js renameSynced: synced before its name). A failed write, sync or close on either side is a failed trim: nothing
+      // is cut (the live file keeps every line; a half already appended is appended again by the next trim — a line twice in the
+      // archive, never a line lost), said once. Synchronous by the rate rule (主开发 r4957): a save the code bounds to a rare event
+      // (past MAX_LINES). Only a file system with no sync at all lands, said once.
+      const half = Buffer.from(lines.slice(0, cut).join('\n') + '\n');
+      const fd = fs.openSync(out, 'a');
+      let failed = null;
+      try {
+        for (let o = 0; o < half.length;) { const n = fs.writeSync(fd, half, o, half.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; }
+        try { fs.fsyncSync(fd); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; sayTrim(FC.syncUnsupportedWords('the slot ledger\'s archive', e.code)); }
+      } catch (e) { failed = e; }
+      try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; }   // a close that fails after the write: its bytes may not be there — a failed write
+      if (failed) throw failed;
+      FC.renameSynced(this.file + '.tmp', this.file, lines.slice(cut).join('\n') + '\n', { where: 'slot-transitions.jsonl', say: sayTrim });
+    } catch (e) { sayTrim(`the slot ledger's trim did not happen (${(e && e.code) || (e && e.message) || e}) — the live file keeps every line; the next record tries again`); }
     st.lines = null;   // …and its count is learned again
     this._st.rows = null; this._st.gen++;   // a trim (whole or failed half-way) moved rows between files: the next read reads them
   }
