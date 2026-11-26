@@ -1106,7 +1106,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const keys87 = ['Codex ⟳ on {account}: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read', 'Codex ⟳: VibeSpace cannot tell which account the running Codex conversation uses, so nothing was read'];
       const has = (f) => { const m = new Map([...dictEntries(read(f))].map((e) => [e.key, e.value])); return keys87.every((k) => m.has(k)); };
       ok('B-87fd …both sentences carry zh and ja', has('src/lib/i18n-zh.js') && has('src/lib/i18n-ja.js')); }
-    const preNamed = patchedEngine('unknownUnnamed', [["  if (!s && key) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) return { ok: false, code: 'holder_unknown',", "  if (false) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) return { ok: false, code: 'holder_unknown',"]]);
+    const preNamed = patchedEngine('unknownUnnamed', [["  if (!s && key) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) { const hw = {};", "  if (false) { let u = null; try { u = unknownHolderOn(String(key)); } catch { u = null; } if (u) { const hw = {};"]]);   // B-f276 r5188: the branch now reads its cause first (the ledger's words when it is the ledger)
     ok('B-87fd NEGATIVE CONTROL (the key road\'s reason): the patch hit the product source', !!preNamed);
     if (preNamed) {
       const wq2 = world({ mode: 'off', held: 'unknown', engineModule: preNamed });
@@ -1167,7 +1167,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     quietly(() => wk.reading(wk.s1, 88));
     ok('B-87fd …a STAMPED holder\'s reading still lands on its member (A, 88 %)', Math.round(wk.cacheOf(wk.A)?.sevenDay?.usedPercent) === 88, JSON.stringify(wk.cacheOf(wk.A)?.sevenDay));
     const pre = patchedEngine('unknownFiled', [
-      ["  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session, huw)) { saidUnknownHolderReading(session, 'codex:' + source, huw.why); return { key: null, snap, archived: true, why: 'holder-unknown' }; }\n", ''],
+      ["  if (unknownHolder && source !== 'limit-banner') { saidUnknownHolderReading(session, 'codex:' + source, huw.why); return { key: null, snap, archived: true, why: 'holder-unknown' }; }\n", ''],   // B-f276 r5188: the gate's one call now reads into `unknownHolder` (the ledger-held refusal's line beside it)
     ]);
     ok('B-87fd NEGATIVE CONTROL: the patch hit the product source (the codex writer\'s refusal — the one reading road of a non-hot holder)', !!pre);
     if (pre) {

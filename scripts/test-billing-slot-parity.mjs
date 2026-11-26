@@ -131,7 +131,7 @@ export const ROWS = Object.freeze([
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'handleResetCreditResult', 'spend', 1],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'onResetCreditSentRecord', 'spend', 1],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'pickLiveProbeSession', 'readings', 1],
-  ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 2],
+  ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'recordCodexQuotaSignal', 'readings', 3],   // B-f276 r5188: + the held codex wall's own signal (keyed as the release's road keys it; its ring mark is not made)
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'refreshCodexForPerson', 'readings', 1],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'resetCreditCarriers', 'spend', 1],
   ['liveQuotaKeyFor', 'src/server/usage-pool-engine.js', 'unknownHolderOn', 'readings', 1],   // B-87fd follow: the conversation a key's carrier skipped (its held member unknown) — named, never read

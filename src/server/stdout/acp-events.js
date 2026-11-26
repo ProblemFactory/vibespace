@@ -18,7 +18,7 @@ const DTACH_CLEAR_PREAMBLE = /^(?:\x1b\[H|\x1b\[[0-3]?J)+/;
 function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
   // sessionModelFor: the session's OWN model (lane agy-wall-signal r2 — the wall's group; server.js's literal must carry
   // every name destructured here: test-fable-cap-pool-storm §10)
-  const { noteTurnEnd, sessionModelFor, noteTurnRunning, recordIsLate } = engine;   // noteTurnRunning + recordIsLate: lane auto-resume-bulk
+  const { noteTurnEnd, sessionModelFor, noteTurnRunning, noteTurnStart, recordIsLate } = engine;   // noteTurnRunning + recordIsLate: lane auto-resume-bulk; noteTurnStart: B-f276 r5188
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
     let lineBuf = '';
     // lane queued-is-not-woke round 2: a (re)attach of a session whose wrapper holds frames of ours ASKS it for its queue
@@ -128,6 +128,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             if (Array.isArray(msg.models) && msg.models.length) { try { noteHarnessModels?.(session.backend, msg.models); } catch {} }
           } else if (msg.kind === 'prompt_start') {
             session._isStreaming = true; newLabel = 'thinking...'; try { if (!recordIsLate?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts })) noteTurnRunning?.(session); } catch { }   /* U1 cure 2: the ACP / agy wrappers stamp a record `ts` (ISO) — the lateness rule reads `timestamp`; judged by its OWN stamp here, the shared reader untouched */ // lane auto-resume-bulk: a prompt that starts a turn ends the stop — never a backlog's
+            try { if (!recordIsLate?.(session, msg.timestamp ? msg : { ...msg, timestamp: msg.ts })) noteTurnStart?.(session); } catch { }   // B-f276 (主开发 r5188 (1)): the turn's start ends the turn before's held mark — judged by the record's own stamp, never a backlog's
             // lane queued-is-not-woke (law 1): the turn's start is a fact the ladder says («running since») and the edge a queued
             // frame waits for — PROPERTY ACCESS on the lazy ref, never a call
             session._turnOpenedAt = Date.now();   // not _turnStartedAt (turn-state's request-out instant, its two writers only)
