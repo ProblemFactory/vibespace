@@ -174,11 +174,25 @@ const MODE_PROBE_MS = 3000;
 const MODE_PROBE_YOUNG_MS = 20000;
 const MODE_PROBE_BUDGET = 400;
 
+// B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): the window stores (window-leases.json, window-reach.json) on the
+// STORE WRITER — memory is their truth already (the leases and reach Maps; the files are read only at a start): each change hands
+// the file's latest bytes to the writer (off the loop, whole, synced; an act, rank 0 — a burst is one write). An agent's attach,
+// detach, open and end are handed, never awaited; a PERSON's share act answers after its landing (shareAct). file → {text, n, landing}
+const HANDED = new Map();
+const writerOf = () => require('../store-writer.js').storeWriter();
 function writeJsonAtomic(file, obj) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, file);
+  const h = HANDED.get(file) || { text: '', n: 0, landing: Promise.resolve(true) };
+  h.text = JSON.stringify(obj, null, 2); h.n++;
+  HANDED.set(file, h);
+  const W = writerOf();
+  W.dirty(file, { name: 'window-targets.write', rank: 0, mode: 0o600, makeDir: true, produce: () => HANDED.get(file).text });
+  h.landing = W.durable(file).then((ok) => ok === true, () => false);
+  return h.landing;
 }
+const handedCount = (file) => (HANDED.get(file) || { n: 0 }).n;
+const landingOf = (file) => (HANDED.get(file) || { landing: Promise.resolve(true) }).landing;
+/** the window files' owed writes ON DISK now (a named, bounded wait of the writer — a suite's read of a file after an act) */
+function storesLandedNow(files) { try { const W = writerOf(); const owed = files.filter((f) => W.pending(f)); if (!owed.length) return true; const r = W.flushSync(owed); return !r.deferred && !r.left.some((x) => owed.includes(x.file)); } catch { return false; } }
 
 /**
  * create({ keeper, dataDir, env, activeSessions, log, now, wt, bins, serverSetting, broadcast })
@@ -620,6 +634,17 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const m = R.mapPoint(px.plan, at, geo.ok ? { rootW: geo.w, rootH: geo.h } : {});
     if (!m.ok) { audit({ ...who, verb, by: 'point', at, ok: false, code: m.code }); throw namedError(m.code, m.why, { plan: { w: px.plan.w, h: px.plan.h } }); }
     return { x: m.x, y: m.y, coords: 'window' };
+  }
+
+  /** B-574d «browser-stores» 5/8 (主开发 r5101): A PERSON'S SHARE ACT ANSWERS AFTER ITS LANDING — `fn` (a share verb: the mode, a grant,
+   *  a revoke, an except, «仅本组») runs; when it handed window-reach.json to the writer, that landing is waited for, and one that did
+   *  not land is the act's REFUSAL (not_saved, said). The share's rows themselves are the grants store's, on disk before it returns. */
+  async function shareAct(fn) {
+    const n0 = handedCount(reachFile);
+    const out = fn();
+    if (handedCount(reachFile) === n0) return out;   // the act changed no window's mode: nothing to wait for
+    if ((await landingOf(reachFile)) !== true) { try { log.warn?.(`[window] ${REACH_FILE} could not be written — the person's share act is refused (not_saved)`); } catch { } throw namedError('not_saved', 'the window\'s share mode could not be saved (its file could not be written) — nothing changed on disk; try again'); }
+    return out;
   }
 
   // ── records ──
@@ -1966,11 +1991,13 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   return { factsForToken, mayUseFor, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act: actKept, screenshot, watch,
     // lane E: reach + the share mode (the user's side)
-    reachOf, reachViews, grantReach, revokeReach, setReachOnly, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
+    reachOf, reachViews, grantReach, revokeReach, setReachOnly, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal, shareAct, storesLanded: () => storesLandedNow([leaseFile, reachFile]),   // 5/8
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
     leases: () => allViews(), auditFile: path.join(dataDir, AUDIT_FILE), leaseFile, ORIGIN, storesReadable,
     // P10: the other class
     desktopEnabled, enforceConsent, dropDesktopLeases, liveDesktop: (h) => liveDesktop(h, { trustPid: leases.has(String(h || '')) }), desktopLeases: () => allViews().filter((v) => v.origin === 'desktop'), DESKTOP_SETTING: DESK.SETTING_KEY };
 }
 
-module.exports = { create, AGENT_BROWSER_ORIGIN, AGENT_BROWSER_CAP, AUDIT_FILE, SHOT_DIR, LEASE_FILE, REACH_FILE, LEASE_DROP_GRACE_MS, TICK_MS, ORIGIN, MODE_PROBE_MS };
+/** a data folder's window stores ON DISK now (5/8: a suite's restart over the same folder — the next engine reads the files) */
+const landedIn = (dataDir) => storesLandedNow([path.join(dataDir, LEASE_FILE), path.join(dataDir, REACH_FILE)]);
+module.exports = { create, AGENT_BROWSER_ORIGIN, AGENT_BROWSER_CAP, AUDIT_FILE, SHOT_DIR, LEASE_FILE, REACH_FILE, LEASE_DROP_GRACE_MS, TICK_MS, ORIGIN, MODE_PROBE_MS, landedIn };

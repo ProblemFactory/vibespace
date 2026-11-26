@@ -150,6 +150,7 @@ const ENGINE = require(path.join(REPO, ENGINE_REL));
   ok(held === 'not_exposed' || held === 'window_leased', `another conversation cannot take it (one window, one holder; not shared) — ${held}`);
   const att = W.engine.attach('da-1', W.fA);
   ok(att.resumed === true && !att.browser && !att.browserNote, 'the opener re-attaches; the answer never calls it the user\'s browser', att);
+  W.engine.storesLanded();   // B-574d browser-stores 5/8: the lease handed to the store writer, on disk once it landed
   const lf = JSON.parse(fs.readFileSync(path.join(W.dir, 'data', ENGINE.LEASE_FILE), 'utf8'));
   ok(lf.leases['da-1'] && lf.leases['da-1'].origin === 'agent-browser', 'the persisted lease keeps origin agent-browser', lf.leases['da-1']);
   const W2e = ENGINE.create({ keeper: W.keeper, dataDir: path.join(W.dir, 'data'), env: () => ({}), activeSessions: W.sessions, broadcast: () => { }, bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null });
@@ -397,6 +398,7 @@ async function restartChecks(ENG, sub) {
   W.engine.reconcile({ graceMs: ENG.LEASE_DROP_GRACE_MS }); clock.t += ENG.LEASE_DROP_GRACE_MS + 1; W.engine.reconcile({ graceMs: ENG.LEASE_DROP_GRACE_MS });
   const toldBefore = W.sent.filter((m) => m.type === 'desktop-app-ending').length;
   clock.t += 30_000;
+  W.engine.storesLanded();   // B-574d browser-stores 5/8: the first engine's writes on disk before the restart reads them
   const E2 = ENG.create({ keeper: W.keeper, dataDir: path.join(W.dir, 'data'), env: () => ({}), activeSessions: W.sessions, broadcast: () => { }, bins: { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: () => null, now: () => clock.t });
   E2.boot();
   await new Promise((rr) => setTimeout(rr, 10));
@@ -783,6 +785,31 @@ console.log('⑨ B-4be3: the subtree read, the whole-text read, the hidden-text 
   { const C = plantH('        if not same_node(expect, rrole, rname):', '        if False:', 'nostale', ['stale']); ok(C.stale.ok, 'CONTROL (no root check): a subtree whose node moved is read as if it were the one named — the ref_stale leg can fail', C.stale.ok ? 'read' : C.stale.code); }
   { const C = plantH('            cut.add("deadline")\n', '            cut.add("budget")\n', 'deadline-as-budget', ['dl']); ok(C.dl.ok && C.dl.truncated === true && J(C.dl.truncatedBy) === J(['budget']), 'CONTROL (the deadline\'s cut said as the budget\'s, in a copy — the release\'s summary): a busy machine\'s snapshot is told it hit the node budget — the leg above is red on it', C.dl.truncatedBy); }
   { const C = plantH('HIDDEN_TEXT_ROLES = ("password text",)', 'HIDDEN_TEXT_ROLES = ()', 'nohide', ['whole', 'hid', 'rd']); ok(J(C.whole).includes(SECRET) && C.hid.ok && J(C.hid).includes(SECRET) && J(C.rd).includes(SECRET), 'CONTROL (no hidden-text rule — r1179\'s find): the snapshot, the text verb AND the read verb hand the password field\'s value out'); }
+}
+
+// ── B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): THE WINDOW STORES ON THE STORE WRITER — an agent's act (the open,
+// the attach) is handed, never awaited: in memory at once, on disk once landed; a PERSON's share act (the mode) answers AFTER its
+// window-reach.json landed, and a landing that fails is the act's REFUSAL (not_saved). RED (anchored copy): the share act answered
+// without waiting for its landing — the refused landing answered as saved
+console.log('B-574d browser-stores 5/8: the window stores on the store writer');
+{
+  const shareScene = async (ENGm, sub) => {
+    const { W } = await engineChecks(ENGm, sub);
+    const reachFile = W.engine.reachFile, leaseNow = !!W.engine.leaseOf('da-1');
+    W.engine.storesLanded();
+    const out = await W.engine.shareAct(() => W.engine.setShareMode('da-1', 'pixels'));
+    let disk = null; try { disk = JSON.parse(fs.readFileSync(reachFile, 'utf8')).windows['da-1'].mode; } catch { disk = null; }   // read right after the answer: landed
+    fs.rmSync(reachFile, { force: true }); fs.mkdirSync(reachFile);   // the file's name taken by a folder: its next landing fails
+    let refused = null; try { await W.engine.shareAct(() => W.engine.setShareMode('da-1', 'tree')); } catch (e) { refused = (e && e.code) || 'threw'; }
+    fs.rmSync(reachFile, { recursive: true, force: true });   // the writer retries over the freed name
+    return { leaseNow, mode: out && out.mode, disk, refused };
+  };
+  const S5 = await shareScene(ENGINE, 'bs5-real');
+  ok(S5.leaseNow && S5.mode === 'pixels' && S5.disk === 'pixels' && S5.refused === 'not_saved',
+    'B-574d browser-stores 5/8: an agent\'s open and attach are handed (the lease in memory at once); a person\'s share act answers AFTER its landing (the file holds the mode when the answer comes), and a landing that FAILS is the act\'s refusal (not_saved)', S5);
+  const src5 = read(ENGINE_REL), WAITS = "    if ((await landingOf(reachFile)) !== true) {";
+  const S5x = await shareScene(MUT.load(ENGINE_REL, editAnchor(src5, WAITS, '    if (false) {', ENGINE_REL), 'bs5-unwaited'), 'bs5-red');
+  ok(S5x.refused === null, 'RED (anchored copy: the share act answered without waiting for its landing): the refused landing is answered as saved — 5/8 goes red', S5x);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

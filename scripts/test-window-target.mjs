@@ -183,7 +183,7 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   for (const h of ['da-one', 'da-two']) for (const sid of ['s1', 's2']) e1.grantReach(h, { kind: 'session', id: sid });
   const a1 = e1.attach('da-one', f1);
   ok(a1.lease.origin === 'vibespace' && a1.lease.input === 'agent' && a1.lease.sessionName === 'alpha' && a1.lease.orphaned === false, 'a lease view carries origin (§6.6\'s class marker), input, the holder\'s name, orphaned');
-  ok(fs.existsSync(e1.leaseFile) && JSON.parse(fs.readFileSync(e1.leaseFile, 'utf8')).leases['da-one'].sessionId === 's1', 'the lease is written to data/window-leases.json at once');
+  ok(e1.storesLanded() && fs.existsSync(e1.leaseFile) && JSON.parse(fs.readFileSync(e1.leaseFile, 'utf8')).leases['da-one'].sessionId === 's1', 'the lease is written to data/window-leases.json (handed to the store writer at once, on disk once it landed — B-574d browser-stores)');
   ok(bcasts.length >= 1 && bcasts[bcasts.length - 1].type === 'window-leases-updated' && bcasts[bcasts.length - 1].leases[0].handle === 'da-one', 'window-leases-updated is broadcast with the views');
   const e2 = mkEngine();
   ok(e2.leaseOf('da-one').sessionId === 's1' && e2.leaseOf('da-one').input === 'agent', 'a second engine over the same data dir (a restart) still says s1 holds da-one — with a FRESH input side (a restart is a handback by construction)');
@@ -768,6 +768,7 @@ async function section3() {
         rfb.ws.close();
       }
       // a RESTART: a new engine over the same data dir + keeper still holds the lease; the CLI snapshots without re-attaching
+      ENGINE.landedIn(dataDir);   // B-574d browser-stores: the first engine's writes on disk before the next one reads them (a restart)
       const engine2 = ENGINE.create({ keeper, dataDir, env: () => ({ ...base }), activeSessions: sessions, log: { log() { }, warn() { } } });
       const boot = engine2.boot();
       ok(boot.leases === 1 && engine2.leaseOf(handle).sessionId === 's1' && engine2.leaseOf(handle).input === 'agent', 'a new engine over the same data dir (a restart) boots with the lease kept and the input side fresh');

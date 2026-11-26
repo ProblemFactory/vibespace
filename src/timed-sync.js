@@ -55,6 +55,7 @@ const STORES = Object.freeze({
   'browser-kept.write': row('write', 'browser-kept', 'src/server/browser-kept.js', ['owe']),   // B-0248 unit 2 (lane bl-loop-b, 主开发 r4232): the kept browsers' list, through the store writer (every act and the tabs' 30 s; nothing written while held)
   // B-574d «browser-stores» (lane nl-migrations, 主开发 r5101): the browser stores through the store writer, each by its hand-off's name
   'browser-bindings.write': row('write', 'browser-env/bindings.json', 'src/server/browser-bindings.js', ['handWrite']),   // 1/8: which conversation holds which browser key (memory-authoritative)
+  'window-targets.write': row('write', 'window-leases.json + window-reach.json', 'src/server/window-targets-engine.js', ['writeWindowStore']),   // 5/8: the window leases and share modes
   'channels-index.write': row('write', 'channels/index', 'src/channel-store.js', ['markDirty', 'flush']),   // through the store writer (lane hub-loop-stalls commit 2)
   'channels-index.read': row('read', 'channels/index', 'src/channel-store.js'),
   'channels-acts.write': row('write', 'channels/index-acts', 'src/channel-store.js', ['actOf', 'indexWritten']),   // a person's acts' journal, through the store writer (lane hub-loop-stalls commit 2)

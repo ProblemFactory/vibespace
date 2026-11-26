@@ -1022,31 +1022,36 @@ function reachGate(req, res) {
   }
   return engine;
 }
+// B-574d «browser-stores» 5/8 (lane nl-migrations, 主开发 r5101): a person's share act answers AFTER its window-reach.json landed — the
+// ONE await and its refusal (the engine's shareAct: a write that did not land is not_saved); an engine without it answers as before
+async function landedAnswer(res, engine, fn) {
+  try { res.json(typeof engine.shareAct === 'function' ? await engine.shareAct(fn) : fn()); } catch (e) { fail(res, e); }
+}
 router.get('/api/desktop/apps/:id/reach', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
   try { res.json(engine.reachOf(req.params.id)); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/reach', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
-  try { res.json(engine.grantReach(req.params.id, req.body && req.body.principal, { by: 'user' })); } catch (e) { fail(res, e); }
+  landedAnswer(res, engine, () => engine.grantReach(req.params.id, req.body && req.body.principal, { by: 'user' }));
 });
 router.delete('/api/desktop/apps/:id/reach', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
-  try { res.json(engine.revokeReach(req.params.id, req.body && req.body.principal)); } catch (e) { fail(res, e); }
+  landedAnswer(res, engine, () => engine.revokeReach(req.params.id, req.body && req.body.principal));
 });
 // lane grants-unify — «除了»: the members left OUT of the window's shared Task Groups / All agents (the whole list)
 router.put('/api/desktop/apps/:id/reach/except', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
-  try { res.json(engine.setReachExcept(req.params.id, req.body && req.body.except, req.body && req.body.removeExcept)); } catch (e) { fail(res, e); }   // lane held-except-doors: + the ✕ named
+  landedAnswer(res, engine, () => engine.setReachExcept(req.params.id, req.body && req.body.except, req.body && req.body.removeExcept));   // lane held-except-doors: + the ✕ named
 });
 // the chain's cure (C, U5c): the «仅本组» switch of one shared Task Group (the Share dialog's chip)
 router.put('/api/desktop/apps/:id/reach/only', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
-  try { res.json(engine.setReachOnly(req.params.id, req.body && req.body.principal, req.body ? req.body.only : undefined)); } catch (e) { fail(res, e); }   // its read: no flag in the body is no switch (refused), never «off»
+  landedAnswer(res, engine, () => engine.setReachOnly(req.params.id, req.body && req.body.principal, req.body ? req.body.only : undefined));   // its read: no flag in the body is no switch (refused), never «off»
 });
 router.put('/api/desktop/apps/:id/reach/mode', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
-  try { res.json(engine.setShareMode(req.params.id, req.body && req.body.mode)); } catch (e) { fail(res, e); }
+  landedAnswer(res, engine, () => engine.setShareMode(req.params.id, req.body && req.body.mode));
 });
 router.post('/api/desktop/apps/:id/reach/request', async (req, res) => {
   if (pressBearer(req.headers)) return fail(res, { code: 'agent_forbidden', message: PRESS_IS_USERS });
