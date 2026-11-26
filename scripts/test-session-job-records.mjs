@@ -17,6 +17,9 @@
 //   ③ AN END'S RECORD (keepEnded): a Terminate's record is ON DISK when keepEnded answers, written by the writer (no write of it from
 //      this thread, its async forms counted too); RED the release's write ⇒ 2 from this thread. A PLACED FAILED RECORD answers null,
 //      SAID («kept nothing»), lists no stopped row and leaves no writer entry; RED its road cut ⇒ a row listed with nothing on disk
+//   ④ THE CONVERSATION INDEX (src/conversation-index.js, ruling (a): a cadence): A DISCOVERY'S BURST of claims makes ONE writer job
+//      (owed, paced — the writer's exit flush writes what is owed at a stop) and NO write on the loop; no exit listener of its own;
+//      the index whole after the landing; RED a write on the loop at a claim (the release's temp and rename) ⇒ 2 a claim
 // FAST, in-process: the real engine module over scratch roots, the real store writer (its own thread).
 import './scratch.mjs';
 import fs from 'node:fs';
@@ -235,6 +238,30 @@ async function ended(modPath, tag, { place = false } = {}) {
   ok(!fail.answered && fail.said === 1 && fail.rows === 0 && fail.left === 0, '③ a PLACED FAILED RECORD (a folder where it goes): keepEnded answers null, SAID «kept nothing», no stopped row listed, no writer entry left (no retry of a record it said it did not keep)', fail);
   const cut = await ended(M.write(BR_REL, anchored(BRTXT, '  if (!landed) { try { storeWriter().forget(file); } catch { }', '  if (false) { try { storeWriter().forget(file); } catch { }', 'red-end-unsaid'), 'end-unsaid'), 'end-fail-red', { place: true });
   ok(cut.answered && cut.rows === 1 && !cut.onDisk, 'RED (the failed landing\'s road cut) ⇒ a stopped row listed with nothing on disk', cut);
+}
+
+console.log('— ④ the conversation index: the store writer, paced; nothing on the loop —');
+const CI_REL = 'src/conversation-index.js';
+const CITXT = fs.readFileSync(path.join(ROOT, CI_REL), 'utf8');
+async function burst(modPath, tag, n = 200) {
+  const dir = path.join(D, tag); fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'conversation-index.json'), ex0 = process.listenerCount('exit');
+  const ix = new (require(modPath).ConversationIndex)({ dataDir: dir });
+  const i0 = touched.length;
+  for (let i = 0; i < n; i++) ix.note(`c-${tag}-${i}`, 'local', { cwd: '/srv/u', backend: 'claude', src: 'discovery' });   // ONE turn: a discovery's burst
+  const owed = SW.stats().filter((s) => s.file === file && s.dirty).length;
+  await sleep(20);
+  SW.flushSync([file]);   // its landing now (the pace is 1.5 s — the writer's own; a stop's exit flush writes it the same way)
+  let st = null; try { st = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { }
+  return { n, onLoop: onLoopSince(i0, dir, /conversation-index/), owed, whole: st && st.conv ? Object.keys(st.conv).length : -1, exitListeners: process.listenerCount('exit') - ex0 };
+}
+{
+  const real = await burst(path.join(ROOT, CI_REL), 'conv-index');
+  ok(real.onLoop === 0 && real.owed === 1 && real.exitListeners === 0, `④ A DISCOVERY'S BURST (${real.n} claims in one turn): ONE job of the store writer owed (paced), ${real.onLoop} writes on the loop, no exit listener of its own`, real);
+  ok(real.whole === real.n, '④ …the index is whole on disk after the landing (every claim in it)', real);
+  const SCHED = "    try { require('./store-writer.js').storeWriter().dirty(this.file, { name: 'conversation-index.write', debounceMs: 1500, produce: () => this._bytes() }); } catch { }";
+  const red = await burst(M.write(CI_REL, anchored(CITXT, SCHED, "    const tmp = this.file + '.tmp'; fs.writeFileSync(tmp, this._bytes()); fs.renameSync(tmp, this.file);", 'red-index-on-loop'), 'index-on-loop'), 'conv-index-red', 20);
+  ok(red.onLoop === 2 * red.n && red.owed === 0, `RED (a write on the loop at a claim: its temp and rename, as the release's flush wrote) ⇒ ${red.onLoop} writes on the loop for ${red.n} claims, no job`, red);
 }
 
 report();
