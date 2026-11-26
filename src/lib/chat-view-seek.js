@@ -10,14 +10,15 @@ import { metric } from './telemetry-client.js';
 // SLAB's ROWS SETTLE ABOVE THE READER after the insert (+418, +258 px), and the browser's own scroll anchoring answered SOME
 // of them: ONE AUTHORITY for the slab's settle — the list opts out of the browser's anchoring (`overflow-anchor: none`, as the
 // channel list does for good, B-59ff) and a ResizeObserver over every row answers each size change of a row wholly above the
-// READING LINE (the line read before the latest scroll burst, for GAP_SETTLE_RECENT_MS) by the same delta on scrollTop, in layout px
+// READING LINE (the line read before the latest scroll burst, for GAP_SETTLE_RECENT_MS — and past it while a row that burst brought
+// into view still owes its first real measure, B-bc22) by the same delta on scrollTop, in layout px
 // at every zoom: a size answer only, so a person's own scroll or jump is never fought. Every other mover answers its own
 // change and hands the rest to the watch (r2922's census: _watchGapSettle). Bounded: the slab leaves the DOM, a jump or a
 // teleport, a newer slab, the view's dispose, or the first scroll or settle after this ceiling from the insert (read in a
 // frame and in the observer's callback: no timer) — the batch that finds it past is still answered, then the browser's
 // anchoring is back.
 const GAP_SETTLE_CEIL_MS = 8000;
-const GAP_SETTLE_RECENT_MS = 150;   // the line read before the latest scroll burst still holds this long after it
+const GAP_SETTLE_RECENT_MS = 150;   // the line read before the latest scroll burst still holds this long after it (the floor: B-bc22 holds it longer by facts)
 const GAP_SETTLE_BURST_MS = 50;   // scroll moves this close together are one burst (a notch and a write it caused)
 
 /**
@@ -243,6 +244,26 @@ export function installChatSeek(ChatView) {
     const seedLine = reader && reader.el && reader.el.isConnected ? reader.el.offsetTop - reader.top : null;
     const fr = { at: list.scrollTop, before: seedLine != null ? Math.max(list.scrollTop, seedLine) : list.scrollTop, moved: -Infinity, raf: 0, seed: reader && reader.el ? reader.el : null };
     let rebaseQueued = false, stW = 0;   // a stamped write not yet re-seeded (`wrote` → `rebase`, below)
+    // THE RULE BESIDE THE CLOCK (B-bc22, 主开发 r5206 — r4599's law with facts for the clock: «while the rows that notch brought in
+    // take their real height»). A row the LATEST burst up brought into view (between the view's top and the line read before it) may
+    // still OWE its first real measure: a picture not loaded yet (an <img> not complete: its load OR its error is the fact, with its
+    // natural size), or the row still skipped by the browser (content-visibility: auto — none of its children reads visible through
+    // checkVisibility's contentVisibilityAuto; the fact is the row's contentvisibilityautostatechange). While such a row owes, the
+    // line read before that burst holds past GAP_SETTLE_RECENT_MS, so its late real height is answered for the card read before
+    // the burst. A row owes until its fact came AND its next measure was answered (or two frames passed with none). Only the latest
+    // burst's rows hold (a new burst replaces the set: an older burst's row lies below the card read now, and its growth pushes
+    // only what is below it). Bounded by the watch's own life: a fact that never comes (a request that never ends) holds no longer,
+    // and that end writes nothing (the browser's anchoring is back, as when the clock ran out). A browser whose checkVisibility
+    // lacks contentVisibilityAuto reads a skipped row as laid out (the clock, as before); a picture's state is read in every browser.
+    const owed = new Set();
+    const owes = (el) => {
+      if (!el.isConnected) return false;
+      const kids = el.children;
+      if (kids.length && typeof kids[0].checkVisibility === 'function') { let seen = false; for (const k of kids) if (k.checkVisibility({ contentVisibilityAuto: true })) { seen = true; break; } if (!seen) return true; }
+      for (const img of el.getElementsByTagName('img')) if (!img.complete && !img.closest('details:not([open])')) return true;
+      return false;
+    };
+    const noteOwed = (lo, hi) => { for (const el of list.children) { if (el._isSeekSentinel) continue; const top = el.offsetTop; if (top >= hi && el.offsetHeight > 0) break; if (el.offsetHeight > 0 && top + el.offsetHeight > lo && owes(el)) owed.add(el); } };
     // THE LINE AS THE FRAME WOULD RECORD IT (line 960's follow, 主开发 r4397 (2) / (3)) — the ONE reading of this record, for
     // every reader of the line (the answer below, the card a rebuild keeps): the record as the frame would leave it if it ran
     // NOW. A move the frame has not recorded yet — a rebuild's pass or an answer in the same animation frame as a notch, ordered
@@ -256,8 +277,15 @@ export function installChatSeek(ChatView) {
       return { st, at, before, moved };
     };
     // …and the same reading KEPT (the frame's own act; a writer of the list records first, so no move goes unrecorded)
-    const record = () => { const f = asFrame(); fr.at = f.at; fr.before = f.before; fr.moved = f.moved; if (rebaseQueued) stW = f.st; return f; };
-    const lineOf = (f) => (f.moved === -Infinity || performance.now() - f.moved <= GAP_SETTLE_RECENT_MS ? Math.max(f.st, f.before) : f.st);
+    const record = () => {
+      const was = fr.moved, f = asFrame(); fr.at = f.at; fr.before = f.before; fr.moved = f.moved; if (rebaseQueued) stW = f.st;
+      if (f.moved !== was) {   // a move recorded: its burst's rows that owe a first real measure (B-bc22); a new burst replaces the set
+        if (was === -Infinity || f.moved - was > GAP_SETTLE_BURST_MS) owed.clear();
+        if (f.before > f.st) noteOwed(f.st, f.before);
+      }
+      return f;
+    };
+    const lineOf = (f) => (f.moved === -Infinity || performance.now() - f.moved <= GAP_SETTLE_RECENT_MS || (f.before > f.st && H.owing()) ? Math.max(f.st, f.before) : f.st);
     const frame = () => {
       fr.raf = 0;
       record();
@@ -277,8 +305,13 @@ export function installChatSeek(ChatView) {
         if (oldTop + c.was <= line) d += c.h - c.was;   // wholly above the reading line: it moved everything read below it
         before += c.h - c.was;
       }
-      if (d) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; fr.before += d; if (rebaseQueued) stW = list.scrollTop; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st) }); }
+      if (d) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; fr.before += d; if (rebaseQueued) stW = list.scrollTop; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st), owed: owed.size }); }
+      for (const c of changed) if (owed.has(c.el) && !owes(c.el)) owed.delete(c.el);   // its fact came and this measure answered it (B-bc22)
     };
+    // a row's fact (a picture's load or error; the browser laying a skipped row out): it is paid once its next measure was answered —
+    // by answer() above, or two frames later if its size did not change (B-bc22)
+    const onFact = (e) => { let r = e.target; while (r && r.parentNode !== list) r = r.parentNode; if (!r || !owed.has(r)) return; requestAnimationFrame(() => requestAnimationFrame(() => { if (owed.has(r) && !owes(r)) owed.delete(r); })); };
+    for (const type of ['load', 'error', 'contentvisibilityautostatechange']) list.addEventListener(type, onFact, true);
     const ro = new ResizeObserver((entries) => {
       const late = this._disposed || performance.now() - t0 > GAP_SETTLE_CEIL_MS, changed = [];
       for (const e of entries) {
@@ -313,7 +346,8 @@ export function installChatSeek(ChatView) {
       },
       wrote: (by) => { if (by === 'gapUp:settle' || rebaseQueued) return; rebaseQueued = true; stW = list.scrollTop; queueMicrotask(rebase); },   // (stamped BEFORE its write)
       swap: (oldEl, newEl) => { const w = last.get(oldEl); if (w !== undefined) last.set(newEl, w); ro.observe(newEl); },
-      nav: () => { fr.before = fr.at = list.scrollTop; fr.moved = -Infinity; fr.seed = null; },
+      nav: () => { fr.before = fr.at = list.scrollTop; fr.moved = -Infinity; fr.seed = null; owed.clear(); },
+      owing: () => { for (const el of owed) if (el.isConnected) return true; return false; },   // a row the latest burst brought in still owes (B-bc22)
       // THE CARD BEING READ, for a runs rebuild while the slab settles (B-3e8b's remainder, 主开发 r3822 — measured: 267 ms after
       // a landing the rebuild put ITS anchor, the topmost element, back, and the card being read moved 27 px): the slab's own
       // reader card until the person scrolls again; then, as this watch's law reads it, the card read before the latest notch up
@@ -329,7 +363,7 @@ export function installChatSeek(ChatView) {
     };
     const mo = typeof MutationObserver === 'function' ? new MutationObserver((recs) => { for (const r of recs) { for (const n of r.addedNodes) if (n.nodeType === 1) ro.observe(n); for (const n of r.removedNodes) if (n.nodeType === 1 && !n.isConnected) ro.unobserve(n); } }) : null;
     this._gapSettleRO = ro; this._gapSettleMO = mo;
-    this._gapSettleOff = () => { list.removeEventListener('scroll', onScroll); if (fr.raf) cancelAnimationFrame(fr.raf); };
+    this._gapSettleOff = () => { list.removeEventListener('scroll', onScroll); for (const type of ['load', 'error', 'contentvisibilityautostatechange']) list.removeEventListener(type, onFact, true); owed.clear(); if (fr.raf) cancelAnimationFrame(fr.raf); };
     list.style.overflowAnchor = 'none';   // ONE authority while the slab settles (B-59ff's property, for the slab's life only)
     for (const el of list.children) { if (el._isSeekSentinel) continue; last.set(el, el.offsetHeight); ro.observe(el); }
     mo?.observe(list, { childList: true });
