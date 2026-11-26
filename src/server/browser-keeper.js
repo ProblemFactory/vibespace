@@ -6685,6 +6685,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!h) return null;
     const r = HM.HUMAN_END_REASONS.includes(reason) ? reason : 'released';
     humans.delete(h.profileId);
+    // r4973 (THE LAW: no tick ever sees a browser with no holder and a drop time older than the moment its last holder left): the
+    // idle clock is stamped in the SAME synchronous step as the person's row leaves. The awaited tab read and CLI closes below gave a
+    // tick in between a holderless browser with the drop time of before the browsing: its idle check stopped it a whole period early. The
+    // stamp at the end's finish (below) stays: the later one wins, so the period still counts from the end's finish
+    { const left = reg.browsers[h.profileId]; if (left && B.isLiveBrowser(left) && !holdersOn(h.profileId).length) left.lastLeaseDroppedAt = now(); }
     watchers.delete(inputKey(h.key, h.profileId));
     driveEnded(h.profileId); // verify r5 ②: his row ended (Close / Quit / the keep ran out) while he drove ⇒ the refused holders are told
     const p = profile(h.profileId);

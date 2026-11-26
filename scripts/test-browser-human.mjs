@@ -860,7 +860,15 @@ let work, solo, shop;
   ok(!stopShown11 && k.humanOf(solo.id) && k.browserOf(solo.id).state === 'ready', '11 h away: the person is still kept and the browser has NOT idled out (15 min idle — the person\'s holder row counts): no stop began within the keeper\'s own stop grace', { state: k.browserOf(solo.id).state, stopShown11 });
   const c1 = cmdsOf('vs-' + HS).length;
   clock += 3600e3 + 1000; await k.tick();
-  ok(!k.humanOf(solo.id) && k.browserOf(solo.id).state === 'ready' && cmdsOf('vs-' + HS).slice(c1).includes('close') && leaseEvents.some((e) => e.kind === 'human-end' && e.key === HS && e.reason === 'left'), 'past 12 h: he ends `left` (his tab closes), the browser stays one more idle period');
+  // r4973 (A): the person's end may land in the keeper's OWN tick (TICK_MS, on the real clock) rather than this one, so «await k.tick()»
+  // is no fact: the clauses are read once THIS person's human-end (left) is sent (after the closes and the idle clock's stamp), with a
+  // named expiry. «The browser stays» is read after a second tick has had its chance, and the stamp is read as the fact that it stays
+  // one more period (its idle clock started at the person's end)
+  const ended12 = await until(() => leaseEvents.some((e) => e.kind === 'human-end' && e.key === HS && e.reason === 'left'), 10000);
+  if (!ended12) markTimedOut(false, 10000, 'the person\'s human-end (left) past 12 h');
+  const t12 = clock; await k.tick();   // the second tick's chance at the same instant
+  const r12 = { human: !!k.humanOf(solo.id), state: k.browserOf(solo.id).state, closes: cmdsOf('vs-' + HS).slice(c1), ended: ended12, stamp: k.browserOf(solo.id).lastLeaseDroppedAt, at: t12 };
+  ok(!r12.human && r12.state === 'ready' && r12.closes.includes('close') && r12.ended && r12.stamp === t12, 'past 12 h: the person ends `left` (their tab closes), the browser stays one more idle period', r12);
   clock += 16 * 60000; await k.tick();
   // r4596 (should): the idle stop the tick STARTS lands after the CLI's close-all and the pid's end — waited for (its own fact), never 50 ms
   if (!(await until(() => k.browserOf(solo.id).state === 'stopped', 20000))) markTimedOut(k.browserOf(solo.id).state, 20000, 'the Solo browser\'s idle stop');
@@ -1216,6 +1224,47 @@ let work, solo, shop;
   const landed = await until(() => kh.browserOf(hp.id).state === 'stopped', 20000);
   const readH = landed ? kh.browserOf(hp.id).state : markTimedOut(kh.browserOf(hp.id).state, 20000, 'PLACED: the held twin\'s idle stop after its hold was let go');
   ok(oldRead !== 'stopped' && readH === 'stopped', `PLACED (law 3): the twin's idle stop held at its close-all — the old fixed 50 ms wait reads its browser «${oldRead}» (the control would go red with nothing wrong); the wait on the fact reads it stopped once the hold is let go`, { oldRead, readH });
+}
+
+// r4973 (B), THE PLACED FORM — the person's end with its awaited closes HELD while a SECOND tick runs inside it (the stand-in for the
+// keeper's own 5 s tick, TICK_MS, falling in that window). At 2200c331f endHuman let the person's row go, awaited the tabs' read and
+// every CLI close, and only then stamped the idle clock: that second tick's idle check saw a browser with no holder and the drop time
+// of before the person's browsing, and stopped it a whole idle period early. THE LAW: no tick ever sees a browser with no holder and a
+// drop time older than the moment its last holder left (the stamp in the same step the row leaves). Its RED: a copy without that stamp
+{
+  const endWindowLeg = async (Kmod, dir) => {
+    const base = F.createBrowserRuntime({ env });
+    let reachedClose = false, release = null; const gate = new Promise((r) => { release = r; });
+    const runtime = { ...base, exec: async (ns, argv, o) => { if (argv.length === 1 && argv[0] === 'close' && !reachedClose) { reachedClose = true; await gate; } return base.exec(ns, argv, o); } };
+    let qclock = clock;   // its own clock: the suite's other keepers never see this leg's 12 h
+    const kq = mkKeeper(Kmod, { dataDir: path.join(ROOT, dir), runtime, now: () => qclock, tickMs: 3600e3 });   // its own 5 s tick stands down: the leg PLACES the second tick
+    const ev = []; kq.onLease((e) => { ev.push(e); return null; });
+    const qp = kq.createProfile({ label: 'Window' }, { owner: { kind: 'instance', id: null } });
+    await kq.browse(qp.id);
+    const HQ = HM.humanKeyFor(qp.id);
+    kq.humanTake({ key: HQ, viewerId: 44 }); kq.humanRelease({ key: HQ, viewerId: 44, cause: 'viewer-left' });
+    const nsQ = kq.browserOf(qp.id).ns, cQ = closeAllsOf(nsQ);
+    qclock += 12 * 3600e3 + 1000;
+    const first = kq.tick();   // it ends the person `left`: the row leaves, then the person's session close is HELD
+    const held = await until(() => reachedClose, 10000);
+    if (!held) markTimedOut(false, 10000, 'the first tick reaching the held session close');
+    await kq.tick();   // the SECOND tick, inside the first's end: its idle check has its chance
+    const stopShown = await until(() => closeAllsOf(nsQ) > cQ, K.STOP_GRACE_MS);   // a stop it began would show its close-all within the keeper's own stop grace
+    const during = { state: kq.browserOf(qp.id).state, human: !!kq.humanOf(qp.id), stopShown };
+    release(); await first;
+    const ended = await until(() => ev.some((e) => e.kind === 'human-end' && e.key === HQ && e.reason === 'left'), 10000);
+    if (!ended) markTimedOut(false, 10000, 'the person\'s human-end (left) once the close is let go');
+    const after = { state: kq.browserOf(qp.id).state, ended, stamped: kq.browserOf(qp.id).lastLeaseDroppedAt === qclock };
+    await kq.stop(qp.id, { why: 'user' }).catch(() => { }); kq.shutdown?.();
+    return { held, during, after };
+  };
+  const w = await endWindowLeg(K, 'data-endwin');
+  ok(w.held && !w.during.human && w.during.state === 'ready' && !w.during.stopShown && w.after.ended && w.after.state === 'ready' && w.after.stamped, 'past 12 h, a SECOND tick inside the person\'s end (its closes held): the row has left and the browser STAYS — no stop began within the keeper\'s own stop grace; once let go the person ends `left` and the idle clock counts from that end', w);
+  const ksrcW = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const EARLY = '    { const left = reg.browsers[h.profileId]; if (left && B.isLiveBrowser(left) && !holdersOn(h.profileId).length) left.lastLeaseDroppedAt = now(); }\n';
+  const Kn = M.load('src/server/browser-keeper.js', editAnchor(ksrcW, EARLY, '', 'src/server/browser-keeper.js'), 'no-early-stamp');
+  const wn = await endWindowLeg(Kn, 'data-endwin-red');
+  ok(wn.held && (wn.during.stopShown || wn.during.state !== 'ready'), 'CONTROL (r4973): a keeper copy that stamps the idle clock only at the end\'s finish (2200c331f\'s endHuman) — the second tick inside the person\'s end STOPS the browser a whole idle period early: the leg above goes red', wn);
 }
 
 // ═══ ②b the REAL bridge over a fake upstream + ③ the REAL recorder on his relay ═══
