@@ -16,6 +16,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A message you held behind a long running turn now keeps its bubble and its queue row when the page is opened again before it runs.
 - On a paired machine, OpenCode now starts below that machine's agent, as its other conversations do, when VibeSpace's lower CPU priority is on.
 - On a paired machine with many installed apps, the app launcher's list and its running apps load again: overlong lists are shortened, not failed.
+- A list of port forwards that cannot be read is no longer emptied by the next change; the Ports panel says so and nothing is lost.
+- An agent's service no longer takes over or removes a port forward you made by hand on its port; its card says why it is not published.
+- A publish setting that cannot be read no longer loses the published address; Publish and Unpublish wait until it reads.
 
 ## 2.369.419 — 2026-11-25
 
