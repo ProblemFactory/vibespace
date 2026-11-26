@@ -3997,10 +3997,11 @@ async function probeQuotaForKey(target, { session = null, timeoutMs = 20000, fre
   if (rung === 'cli-usage') {
     const probe = getQuotaProbe?.();
     if (!probe) return { ok: false, rung, backend, reason: 'cli-usage probe not wired' };
+    const t0 = Date.now();
     const ok = await Promise.resolve(probe(target)).catch(() => false);
-    // B-5279: a read the door refused by the row («Off (never contact Anthropic)») is NO answer and NO failure — said by its code,
-    // asked of the door itself (usage-routes refreshViaCliPanel.refusal): its callers stop asking and book nothing
-    if (!ok) { let no = null; try { no = typeof probe.refusal === 'function' ? probe.refusal() : null; } catch { no = null; } if (no) return { ok: false, rung, backend, reason: no.message, refused: no.code }; }
+    // B-5279: a read the door refused (the row off, the settings held) is NO answer and NO failure — said by its code, read from
+    // the READ'S OWN verdict for this ask (usage-routes refreshViaCliPanel.refusal): its callers stop asking and book nothing
+    if (!ok) { let no = null; try { no = typeof probe.refusal === 'function' ? probe.refusal(target, t0) : null; } catch { no = null; } if (no) return { ok: false, rung, backend, reason: no.message, refused: no.code }; }
     return { ok: !!ok, rung, backend, reason: ok ? null : 'cli panel did not answer' };
   }
   if (liveReadSource(backend)) {

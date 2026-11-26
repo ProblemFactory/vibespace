@@ -62,10 +62,19 @@ const PANEL_PROBE_ARGS = Object.freeze(['-p', '/usage', '--strict-mcp-config']);
 // nothing against the account. The row's MEANING is unchanged (a value that cannot be read is the default, manual, as the
 // route has always read it); a door handed NO reader refuses (fail closed: a new caller cannot start the program unasked).
 const PANEL_OFF = 'refresh-off';
-const PANEL_NO_READER = 'refresh-unread';
+const PANEL_NO_READER = 'refresh-no-reader';
+// WHILE THE SETTINGS ARE HELD (主开发 r4932, M2): a settings.json the start could not read hands every reader a frozen view
+// (src/routes/persistence.js — its marker Symbol.for('vibespace.settings-held')); the person's stored choice, which nobody can read
+// then, may be Off — so the door refuses EVERY start, a person's press included: a contact made against a stored Off cannot be taken
+// back, a refused press can be pressed again once the settings read. By its own code and words; no caller tells the door who it is
+const PANEL_HELD = 'refresh-held';
+const DOOR_CODES = Object.freeze([PANEL_OFF, PANEL_NO_READER, PANEL_HELD]);
+const SETTINGS_HELD = Symbol.for('vibespace.settings-held');
 const CLAUDE_READS_ROW = require('./harnesses/claude-quota.js').readsRow;
 function panelDoorRefusal(setting) {
   if (typeof setting !== 'function') return Object.assign(new Error('the usage-refresh row could not be asked — nothing was started'), { code: PANEL_NO_READER, refusedByRow: true });
+  let held = null; try { held = setting(SETTINGS_HELD) || null; } catch { held = null; }
+  if (held) return Object.assign(new Error('the settings could not be read — nothing was started'), { code: PANEL_HELD, refusedByRow: true });
   let mode = 'manual'; try { mode = setting(CLAUDE_READS_ROW) || 'manual'; } catch { mode = 'manual'; }
   return mode === 'off' ? Object.assign(new Error('Claude usage refresh is off in Settings (never contact Anthropic) — nothing was started'), { code: PANEL_OFF, refusedByRow: true }) : null;
 }
@@ -718,7 +727,7 @@ const _panelVerdict = {};            // key → the last probe's {at, outcome, i
 // the row says why already), a removed account has no record, and `__global__` is no account.
 function panelSays(key, v) {
   _panelVerdict[key] = v;
-  if (key === '__global__' || !v || v.code === 'login' || v.code === 'unprobeable' || v.code === 'sign-in-unknown') return v; // the door's refusal is no failed probe either (acceptance r2; B-360d: a sign-in not read asked nothing)
+  if (key === '__global__' || !v || v.code === 'login' || v.code === 'unprobeable' || v.code === 'sign-in-unknown' || DOOR_CODES.includes(v.code)) return v;   // B-5279 (r4932 M1): + the door's refusals — nothing was asked // the door's refusal is no failed probe either (acceptance r2; B-360d: a sign-in not read asked nothing)
   try {
     if (v.outcome === 'written') accounts.noteProbe?.(key, null);
     else accounts.noteProbe?.(key, { at: v.at, ok: false, why: probeWhyText(v.why) || v.outcome });
@@ -889,7 +898,7 @@ async function refreshViaCliPanel(key) {
       probeRec.argv = [bin, ...PANEL_PROBE_ARGS];
       const t0 = Date.now();
       spawnPanelProbe(bin, { root: probeConfigDir, env, setting: serverSetting }, (err, stdout, stderr) => {
-        if (err && err.refusedByRow) { probeRec.refused = err.code; return resolve(null); }   // the row turned off after the read's own ask (B-5279)
+        if (err && err.refusedByRow) { probeRec.refused = err.code; probeRec.refusedWhy = err.message; return resolve(null); }   // the row turned off (or the settings became held) after the read's own ask (B-5279)
         probeRec.ms = Date.now() - t0;
         probeRec.exitCode = err ? (typeof err.code === 'number' ? err.code : (err.killed ? 'killed' : String(err.code || err.signal || 'error'))) : 0;
         probeRec.rawStdout = stdout == null ? '' : String(stdout);
@@ -903,7 +912,7 @@ async function refreshViaCliPanel(key) {
       });
     } catch (e) { probeRec.why = 'spawn threw: ' + (e && e.message); resolve(null); }
   });
-  if (probeRec.refused) { panelSays(key, { at: Date.now(), outcome: 'not-probed', code: probeRec.refused, identityVerified: false, why: 'Claude usage refresh is off in Settings — nothing was started', rung: 'panel' }); return false; }   // B-5279: nothing booked
+  if (probeRec.refused) { panelSays(key, { at: Date.now(), outcome: 'not-probed', code: probeRec.refused, identityVerified: false, why: probeRec.refusedWhy || 'nothing was started', rung: 'panel' }); return false; }   // B-5279: nothing booked
   if (!(cliPanel && (cliPanel.fiveHour || cliPanel.sevenDay))) {
     // A LAPSED SUBSCRIPTION answers this probe with the CLI's lapse sentence (2026-10-08): handed to the engine, whose
     // harness census decides — a lapse opens the episode or only moves `lastFail`; any other answer changes nothing
@@ -1169,6 +1178,9 @@ app.post('/api/usage/refresh', async (req, res) => {
   let odMode = 'manual';
   try { odMode = serverSetting('accounts.onDemandQuotaRefresh') || 'manual'; } catch {}
   if (odMode === 'off') return res.status(403).json({ error: 'on-demand quota refresh is disabled in Settings' });
+  // B-5279 (r4932 M2): while the settings are held, the press is refused by the DOOR's own verdict and words — before the token ladder
+  // and the remote roads below, which call the vendor themselves: no contact against a stored Off nobody can read
+  { const no = panelDoorRefusal(serverSetting); if (no) return res.status(503).json({ error: no.message, code: no.code }); }
   // Remote host (2.127.0): read the host's own login token over ssh
   // (READ-ONLY — never refreshed) and do the same single human-gated call.
   if (req.body?.host && hosts) {
@@ -1985,10 +1997,11 @@ function usageAnswer(req, res) {
 }
 
 
-  // B-5279: the read's callers (the pool engine's probe) learn the door's refusal by asking the door — never a second rule
-  refreshViaCliPanel.refusal = () => panelDoorRefusal(serverSetting);
+  // B-5279: the read's callers (the pool engine's probe) learn the door's refusal from the READ'S OWN VERDICT — the one this read
+  // recorded at or after `since` (r4932: one fact, never a second read of the row)
+  refreshViaCliPanel.refusal = (key, since = 0) => { const v = _panelVerdict[key]; return v && v.outcome === 'not-probed' && DOOR_CODES.includes(v.code) && (Number(v.at) || 0) >= since ? { code: v.code, message: String(v.why || '') } : null; };
   return { refreshViaCliPanel, panelVerdictFor, getOAuthToken, usagePollingEnabled, refreshRateLimit, reloadRateLimitCache, ingestPassiveUsage, summarizeCodexRateLimit, summarizeCodexRateLimits };
 }
 
 module.exports = { setupUsage, parseCliUsageText, normalizeCodexRateLimit, PANEL_PROBE_ARGS, spawnPanelProbe, getOAuthToken };   // getOAuthToken: the machine login's kept read (r2575's legs, scripts/test-cli-usage-parse)
-Object.assign(module.exports, { panelDoorRefusal, PANEL_OFF, PANEL_NO_READER });   // B-5279: the fence's verdict and its two codes (the mint's wiring, the suites)
+Object.assign(module.exports, { panelDoorRefusal, PANEL_OFF, PANEL_NO_READER, PANEL_HELD });   // B-5279: the fence's verdict and its two codes (the mint's wiring, the suites)

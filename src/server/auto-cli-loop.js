@@ -253,12 +253,13 @@ function createAutoCliLoop(d) {
         const it = list.find((x) => x.key === key), why = cliRefreshWhy(it && { ...it, lastAttemptAt: 0 }, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs }); // the pick's own reason (the attempt floor already passed)
         attempts.set(key, now);
         saveState(d.dataDir, st, warn); // the attempt reaches disk BEFORE the spawn (quota r3: a restart mid-spawn must see it)
+        // B-5279: the door's refusals (refresh-off / -no-reader / -held) give the attempt back below — only when the row turns off or the settings become held inside a tick (the loop runs only in auto-cli): never a more frequent read
         let ok = false; try { ok = !!(await d.usage.refreshViaCliPanel(key)); } catch { ok = false; }
         // B-360d: the door read the sign-in again NOW and could not — nothing was asked: no failure booked, the attempt given back
         // (in memory: the next save carries it — a restart before it keeps the stamped attempt, which only paces the next try)
         if (!ok) {
           let pv0 = null; try { pv0 = d.usage.panelVerdictFor?.(key); } catch { }
-          if (pv0 && pv0.at >= now && /^(sign-in-unknown|refresh-off|refresh-unread)$/.test(pv0.code)) { if (attemptWas.get(key) == null) attempts.delete(key); else attempts.set(key, attemptWas.get(key)); continue; }
+          if (pv0 && pv0.at >= now && /^(sign-in-unknown|refresh-off|refresh-no-reader|refresh-held)$/.test(pv0.code)) { if (attemptWas.get(key) == null) attempts.delete(key); else attempts.set(key, attemptWas.get(key)); continue; }
         }
         // A FAILED PROBE NAMES ITS REASON (lane auto-cli-oat-unprobeable): the probe door's verdict for THIS attempt (stamped
         // after this tick's clock) — its class and the CLI's first line, scrubbed there (probeWhyText again here: the ONE

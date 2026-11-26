@@ -678,6 +678,7 @@ console.log('§14 the settings\' faces: the server reads schema keys only, the d
     'src/server/mounts-plugins-wiring.js: setting': { why: 'the vault paste door and the browser engines', walk: [['src/server/vault-paste-door.js', 'setting', 0], ['src/server/browser-engines.js', 'setting', 0]] },
     'src/server/task-groups-wiring.js: getSetting': { why: 'the task groups', walk: [['src/task-groups.js', '_getSetting', 0]] },
     'src/server/account-usage-routes.js: setting': { why: 'the CLI usage door', walk: [['src/server/cli-usage-door.js', 'setting', 0]] },
+    'src/usage-routes.js: setting': { why: "the panel door's fence (B-5279: spawnPanelProbe → panelDoorRefusal — the Claude reads row and the hold's marker)", walk: [['src/usage-routes.js', 'setting', 0]] },
     'src/server/channels-engine.js: setting': { why: "a vendor adapter's deps (the webhook reads its private-URL switch)", walk: [['src/channels/webhook.js', 'setting', 0]] },
     'src/server/harness-config-sync.js: valueOf': { why: "the harness config plan's own reads (the derived harness rows)", walk: [['src/server/harness-config-sync.js', 'valueOf', 0]] },
   });
@@ -710,6 +711,8 @@ console.log('§14 the settings\' faces: the server reads schema keys only, the d
     "src/server/harness-config-sync.js: serverSetting(Symbol.for('vibespace.settings-held'))": [1, "no key: the settings hold's marker"],
     'src/server/owner-facts.js: read(k)': [1, "the tray's arrangement rows (src/tray-words.js TRAY_SETTING_KEYS)"],
     'src/server/spend-guard.js: serverSetting(SETTINGS_HELD)': [1, "no key: the settings hold's marker"],
+    'src/usage-routes.js: setting(SETTINGS_HELD)': [1, "no key: the settings hold's marker (B-5279: the panel door refuses every start while held)"],
+    'src/usage-routes.js: setting(CLAUDE_READS_ROW)': [1, "the Claude descriptor's own reads row (src/harnesses/claude-quota.js readsRow — the panel door's fence, B-5279)"],
     'src/server/window-targets-engine.js: readSetting(k)': [1, "the window engine's one helper setting(k, d, safe) hands its key to the memo's read (B-50e7: the takeover's clock and the desktop switch, the last value known while the settings are held)"],
     "src/server/window-targets-engine.js: serverSetting(Symbol.for('vibespace.settings-held'))": [1, "no key: the settings hold's marker (B-50e7)"],
     'server.js: serverSetting(...a)': [8, "the reader handed to a module as a dependency (a pass-through: the module's own reads are walked by name)"],

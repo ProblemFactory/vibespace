@@ -5715,6 +5715,8 @@ export default {
   "Auto-continue: off": "自动继续：关",
   "Usage reads are off": "用量读取已关闭",   // B-5279
   "Usage reads are off, so this conversation continues when you resume it — press to open the setting.": "用量读取已关闭，所以这个对话要等你继续它时才会继续——点按打开这项设置。",   // B-5279
+  "Settings could not be read": "无法读取设置",   // B-5279
+  "The settings could not be read, so usage is not read and this conversation continues when you resume it — press to open Settings.": "无法读取设置，所以不读取用量，这个对话要等你继续它时才会继续——点按打开设置。",   // B-5279
   "Turn auto-continue on": "开启自动继续",
   "Turn auto-continue off": "取消自动继续",
   // lane auto-resume-bulk (.349): WHY a session stopped (the card's mark, the filter) + the two bulk acts + the batch's cost (src/stopped-by.js, src/bulk-resume-cost.js, src/lib/bulk-resume.js)

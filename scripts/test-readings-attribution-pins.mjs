@@ -396,7 +396,8 @@ const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test
     // mirror-263 §19: the mint's second look made the spawn shared and each caller brought its own env + cwd — the isolation left the site
     const om = read('src/server/oat-mint.js');
     ok('§19 ⓪ …ONE spawn site owns the isolation: spawnPanelProbe derives the config dir AND the empty cwd from the root its caller proves; no caller sets CLAUDE_CONFIG_DIR or a cwd for it (the panel refresher and the token mint\'s probe rung pass a root)',
-      /function spawnPanelProbe\(bin, \{ root, env: identityEnv, setting \}, done\)/.test(spawnBody)   // B-5279: + the usage-refresh row's reader (the fence) && /const probeCwd = probeCwdOf\(probeConfigDir\);/.test(spawnBody) && /fs\.mkdirSync\(probeCwd, /.test(spawnBody)
+      // B-5279 (r4932): the door's signature carries the usage-refresh row's reader (the fence); every clause of this line is tested
+      /function spawnPanelProbe\(bin, \{ root, env: identityEnv, setting \}, done\)/.test(spawnBody) && /const probeCwd = probeCwdOf\(probeConfigDir\);/.test(spawnBody) && /fs\.mkdirSync\(probeCwd, /.test(spawnBody)
       && !/env\.CLAUDE_CONFIG_DIR/.test(body) && /probePanel\(\{ root: configOf\(m\.dir\), env: /.test(om) && !/probePanel\(\{[^\n]*cwd:/.test(om) && /spawnOnce\(\{ root, env \}/.test(om));
     ok('§19 ⓪ …the measurement that justifies it is recorded beside the code (the CLI version and which file each env var moves)', /2\.1\.274/.test(ur) && /CLAUDE_CONFIG_DIR \|\| \$HOME/.test(ur));
     ok('§19 ⓪ …and the identity gate runs BEFORE the write and returns false on a refusal', body.indexOf('if (idv.refused) {') > 0 && body.indexOf('if (idv.refused) {') < body.indexOf('usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged') && /if \(idv\.refused\) \{[\s\S]{0,1600}?return false;/.test(body));

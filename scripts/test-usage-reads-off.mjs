@@ -6,7 +6,7 @@
 // The program is a STAND-IN (a shell script that counts its starts — never a vendor program, never a vendor call); every road's
 // ask of the read is counted too, so a road that never reached the read can never pass as «no start».
 //   ① THE DOOR: off refuses by name (refresh-off), no start; manual / auto-cli / nothing stored / a reader that throws start it
-//      once (the row's meaning unchanged); a door handed no reader refuses (refresh-unread) — fail closed.
+//      once (the row's meaning unchanged); a door handed no reader refuses (refresh-no-reader) — fail closed.
 //   ② THE READ under Off: no start, NOT PROBED with the door's code, and NONE of the bookings the release makes on a failed read —
 //      a serve failure against the account, a failed-probe verdict (spawn-failed / no-buckets-parsed / login-needed, the «re-login»
 //      word), a probe-log line.
@@ -16,8 +16,11 @@
 //      is the one a read that did not answer gives. On: each starts the program ONCE, never more.
 //   ④ THE WIRING: the mint's door with the row's reader; auto-resume's status carries the word only while stopped and unarmed;
 //      the chip and its door; the strip's row; the door census's row.
+//   ③b WHILE THE SETTINGS ARE HELD (主开发 r4932 M2): the held view (its marker + the strict «manual») — every road, a direct press and
+//      the person's ⟳ route: refused BY NAME (refresh-held), 0 starts, nothing booked; the ladder's word names THAT reason.
 //   ⑤ RED CONTROLS (scripts/mutant-copy.mjs, anchored edits): the door without the fence starts the program under Off on every
-//      road; a refusal booked as a failure makes ②'s booking leg red.
+//      road; a refusal booked as a failure makes ②'s booking leg red; the recorder without the door's codes books the account's
+//      failed-probe note (r4932 M1); the door reading the held view's value starts the program while held (M2).
 // Run: node scripts/test-usage-reads-off.mjs
 import './scratch.mjs';   // FIRST (§113 THE ROW): the worlds below write homes and data dirs — the re-home comes before any of this suite's code
 import fs from 'node:fs';
@@ -59,7 +62,8 @@ const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id
 /** ONE WORLD: the real accounts store (a pool of one member), the REAL engine, the REAL usage routes with the stand-in program on
  *  CLAUDE_CMD, the read wired as the engine's probe (counted asks); `row` = the usage-refresh row's value; `cache` = the member's
  *  reading; `usage` = a usage-routes module (a red control's copy); `probe` = another probe in place of the read */
-function world({ row, cache = 'unknown-reset', usage = UR, probe = null } = {}) {
+const SETTINGS_HELD = Symbol.for('vibespace.settings-held');
+function world({ row, cache = 'unknown-reset', usage = UR, probe = null, held = false } = {}) {
   const dir = path.join(ROOT, 'w' + (++seq)); fs.mkdirSync(dir, { recursive: true });
   const dataDir = path.join(dir, 'data');
   const am = new AccountManager({ dataDir });
@@ -76,9 +80,12 @@ function world({ row, cache = 'unknown-reset', usage = UR, probe = null } = {}) 
     : { fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 1 }, sevenDay: { utilization: 1 } };
   fs.writeFileSync(path.join(cacheDir, M + '.json'), JSON.stringify(spent));
   const store = row === undefined ? {} : { [ROW]: row };
-  const serverSetting = (k) => store[k];
+  // the HELD view as src/routes/persistence.js hands it: its marker answers, the row reads the strict side (src/settings-held-strict.js)
+  const strict = require(path.join(REPO, 'src/settings-held-strict.js'));
+  const serverSetting = (k) => (held ? (k === SETTINGS_HELD ? { code: 'settings-unreadable' } : (k === ROW ? strict.STRICT_WHILE_HELD[ROW].strict : store[k])) : store[k]);
   const sessions = new Map(), arms = [], statusAsks = [], asks = [], serveFails = [];
-  const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+  const routes = {};
+  const app = { get() { }, post(p, ...h) { routes[p] = h[h.length - 1]; }, put() { }, delete() { }, use() { }, locals: {} };
   const autoResume = {
     armIfEnabled: (sid, s, until2, why) => arms.push({ sid, until: until2, why }), noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { },
     statusFor: () => null, enabledFor: () => true, fireNow() { }, armedIds: () => arms.map((a) => a.sid), refreshStatus: (id) => statusAsks.push(id),
@@ -109,7 +116,8 @@ function world({ row, cache = 'unknown-reset', usage = UR, probe = null } = {}) 
     return s;
   };
   const probeLog = path.join(dataDir, 'usage-probe-log.ndjson');
-  return { dir, dataDir, am, eng, u, M, P, sessions, arms, statusAsks, asks, serveFails, starts: prog.starts, mkSession, probeLog, setRow: (v) => { if (v === undefined) delete store[ROW]; else store[ROW] = v; } };
+  const press = (key) => new Promise((resolve) => { const res = { code: 200, status(c) { this.code = c; return this; }, json(b) { resolve({ code: this.code, body: b }); return this; } }; Promise.resolve(routes['/api/usage/refresh']({ headers: {}, body: { account: key } }, res)).catch((e) => resolve({ code: 'threw', body: String(e && e.message) })); });
+  return { dir, dataDir, am, eng, u, M, P, sessions, arms, statusAsks, asks, serveFails, starts: prog.starts, mkSession, probeLog, press, setRow: (v) => { if (v === undefined) delete store[ROW]; else store[ROW] = v; } };
 }
 const stopTimers = (w) => { for (const s of w.sessions.values()) { try { clearTimeout(s._wallProbeTimer); } catch { } s._wallProbeTimer = null; } const p = w.eng._resetCreditPending; if (p && typeof p.forEach === 'function') { p.forEach((x) => { try { clearTimeout(x.timer); } catch { } }); p.clear?.(); } };
 
@@ -121,12 +129,14 @@ console.log('— ① THE DOOR (spawnPanelProbe): off refuses by name, before the
   const off = await run((k) => (k === ROW ? 'off' : undefined));
   ok(!!off.err && off.err.code === 'refresh-off' && off.err.refusedByRow === true && off.child === null && prog.starts() === 0 && /off in Settings/.test(off.err.message), 'off: refused BY NAME (refresh-off), no child, the stand-in never started', { code: off.err && off.err.code, starts: prog.starts() });
   const none = await run(undefined);
-  ok(!!none.err && none.err.code === 'refresh-unread' && prog.starts() === 0, 'a door handed NO reader refuses (refresh-unread) — fail closed: a new caller cannot start the program unasked');
+  ok(!!none.err && none.err.code === 'refresh-no-reader' && prog.starts() === 0, 'a door handed NO reader refuses (refresh-no-reader) — fail closed: a new caller cannot start the program unasked');
   let n = 0;
   for (const [what, setting] of [['manual', (k) => (k === ROW ? 'manual' : undefined)], ['auto-cli', (k) => (k === ROW ? 'auto-cli' : undefined)], ['nothing stored (the default)', () => undefined], ['a reader that throws (unreadable = the default, as the route reads it)', () => { throw new Error('unreadable'); }]]) {
     const r = await run(setting); n++;
     ok(!r.err && /Current session/.test(r.stdout) && prog.starts() === n, `${what}: the program starts ONCE (the row's meaning unchanged)`, { err: r.err && r.err.code, starts: prog.starts() });
   }
+  const heldR = await run((k) => (k === SETTINGS_HELD ? { code: 'settings-unreadable' } : (k === ROW ? 'manual' : undefined)));
+  ok(!!heldR.err && heldR.err.code === 'refresh-held' && /settings could not be read/.test(heldR.err.message) && prog.starts() === n, 'WHILE THE SETTINGS ARE HELD the door refuses BY NAME (refresh-held) — even though the held view reads «manual» (r4932 M2)', { code: heldR.err && heldR.err.code, starts: prog.starts() });
   ok(UR.panelDoorRefusal((k) => (k === ROW ? 'off' : undefined)).code === UR.PANEL_OFF && UR.panelDoorRefusal(() => 'manual') === null && UR.panelDoorRefusal(null).code === UR.PANEL_NO_READER
     && require(path.join(REPO, 'src/harnesses/claude-quota.js')).readsRow === ROW, 'panelDoorRefusal reads the Claude descriptor\'s own row (quota.readsRow), its two codes exported');
   const O = require(path.join(REPO, 'src/server/oat-mint.js'));
@@ -136,9 +146,9 @@ console.log('— ① THE DOOR (spawnPanelProbe): off refuses by name, before the
 }
 
 console.log('— ② THE READ under Off: no start, NOT PROBED, nothing booked');
-const BOOKINGS = ['a serve failure against the account (noteMemberServeFailure)', 'a failed-probe verdict (spawn-failed / no-buckets-parsed / login-needed — the «re-login» word)', 'a probe-log line'];
-const bookingsOf = (w, key) => { const pv = w.u.panelVerdictFor ? w.u.panelVerdictFor(key) : null; return { serveFails: w.serveFails.length, verdict: pv ? { outcome: pv.outcome, code: pv.code, why: String(pv.why || '') } : null, probeLog: fs.existsSync(w.probeLog) ? fs.readFileSync(w.probeLog, 'utf8').split('\n').filter(Boolean).length : 0 }; };
-const nothingBooked = (b) => b.serveFails === 0 && !!b.verdict && b.verdict.outcome === 'not-probed' && b.verdict.code === 'refresh-off' && !/login/i.test(b.verdict.why) && b.probeLog === 0;
+const BOOKINGS = ['a serve failure against the account (noteMemberServeFailure)', 'a failed-probe verdict (spawn-failed / no-buckets-parsed / login-needed — the «re-login» word)', 'the account\'s failed-probe note (accounts.noteProbe — «Last probe failed» in Manage agents)', 'a probe-log line'];
+const bookingsOf = (w, key) => { const pv = w.u.panelVerdictFor ? w.u.panelVerdictFor(key) : null; return { serveFails: w.serveFails.length, probeNote: w.am.probeOf(key) || null, verdict: pv ? { outcome: pv.outcome, code: pv.code, why: String(pv.why || '') } : null, probeLog: fs.existsSync(w.probeLog) ? fs.readFileSync(w.probeLog, 'utf8').split('\n').filter(Boolean).length : 0 }; };
+const nothingBooked = (b, code = 'refresh-off') => b.serveFails === 0 && b.probeNote === null && !!b.verdict && b.verdict.outcome === 'not-probed' && b.verdict.code === code && !/login/i.test(b.verdict.why) && b.probeLog === 0;
 {
   const w = world({ row: 'off' });
   if (!w) ok(false, 'pools are supported on this machine (the worlds need one)');
@@ -172,7 +182,7 @@ for (const [what, drive, settled] of ROADS) {
   const q = quiet(); let x = null; try { x = await drive(w); await until(() => settled(w, x), `${what} to settle`); await new Promise((r) => setTimeout(r, 120)); } finally { q.done(); }
   offOutcomes[what] = { w, x };
   ok(w.asks.length >= 1 && w.starts() === 0, `Off — ${what}: the road ASKS the read (${w.asks.length}) and the program starts 0 times`, { asks: w.asks.length, starts: w.starts() });
-  ok(w.serveFails.length === 0, `Off — ${what}: no serve failure booked against the account`, w.serveFails);
+  ok(w.serveFails.length === 0 && (w.am.probeOf(w.M) || null) === null, `Off — ${what}: nothing booked against the account (no serve failure, no failed-probe note)`, { serveFails: w.serveFails, note: w.am.probeOf(w.M) });
   stopTimers(w);
 }
 {
@@ -223,17 +233,42 @@ for (const [what, drive, settled] of ROADS) {
   stopTimers(w);
 }
 
+console.log('— ③b WHILE THE SETTINGS ARE HELD: every road and a press refused by name, 0 starts, nothing booked');
+for (const [what, drive, settled] of ROADS) {
+  const w = world({ held: true });
+  if (!w) continue;
+  const q = quiet(); let x = null; try { x = await drive(w); await until(() => settled(w, x), `${what} (held) to settle`); await new Promise((r) => setTimeout(r, 120)); } finally { q.done(); }
+  const b = bookingsOf(w, w.M);
+  ok(w.asks.length >= 1 && w.starts() === 0 && b.serveFails === 0 && b.probeNote === null, `held — ${what}: asks the read, 0 starts, nothing booked`, { asks: w.asks.length, starts: w.starts(), b });
+  if (what.startsWith('the wall ladder')) ok(!!x.s._readsOffWall && x.s._readsOffWall.code === 'refresh-held', 'held — the ladder\'s word names the TRUE reason: the settings could not be read (refresh-held)', x.s._readsOffWall);
+  stopTimers(w);
+}
+{
+  const w = world({ held: true });
+  if (w) {
+    const q = quiet(); const r = await w.u.refreshViaCliPanel(w.M); const pr = await w.press(w.M); q.done();
+    ok(r === false && w.starts() === 0 && nothingBooked(bookingsOf(w, w.M), 'refresh-held'), 'held — a direct press of the read: refused by name (refresh-held), 0 starts, nothing booked', bookingsOf(w, w.M));
+    ok(pr.code === 503 && pr.body && pr.body.code === 'refresh-held' && /settings could not be read/.test(String(pr.body.error)) && w.starts() === 0,
+      'held — the person\'s ⟳ route refuses by the DOOR\'s own code and words before its token ladder and remote roads (no contact against a stored Off nobody can read)', pr);
+    stopTimers(w);
+  }
+  const wo = world({ row: 'off' });
+  if (wo) { const q = quiet(); const pr = await wo.press(wo.M); q.done(); ok(pr.code === 403 && /disabled in Settings/.test(String(pr.body && pr.body.error)) && wo.starts() === 0, 'Off — the ⟳ route answers its release 403, as ever, and starts nothing', pr); stopTimers(wo); }
+  const strict = require(path.join(REPO, 'src/settings-held-strict.js')).STRICT_WHILE_HELD[ROW];
+  ok(strict.strict === 'manual' && /a person's press included/.test(strict.why) && !/still reads/.test(strict.why), 'the held view\'s sentence for the row says what is now true (no read, a person\'s press included) — its strict value unchanged', strict);
+}
+
 console.log('— ④ THE WIRING');
 {
   const AU = read('src/server/account-usage-routes.js'), AR = read('src/server/auto-resume.js'), CSB = read('src/lib/chat-status-bar.js'), ST = read('src/lib/strip-table.js'), UN = read('src/ui-needs.js');
   ok(/usageRoutesMod\.spawnPanelProbe\(claudeBin\(\), \{ \.\.\.o, setting: serverSetting \}, done\)/.test(AU), 'the mint\'s identity proof passes the door WITH the row\'s reader (the mint asks the person when it refuses)');
-  ok(/\.\.\.\(!a && session && session\._readsOffWall && \(normalizeStoppedBy\(session\._stoppedBy\) \|\| \{\}\)\.kind === 'quota' \? \{ readsOff: true \} : \{\}\),/.test(AR), 'auto-resume\'s status carries the word only while nothing is armed and the conversation stands stopped by a limit');
-  ok(/if \(a\.readsOff && !a\.armed\) chip\('readsoff', /.test(CSB) && /const roDoor = e\.target\.closest\('\[data-reads-off-door\]'\);\n\s*if \(roDoor\) \{ e\.stopPropagation\(\); const d = settingsDoor\(this\._app, 'accounts\.onDemandQuotaRefresh'\); if \(d\) d\.run\(\); return; \}/.test(CSB),
+  ok(/\.\.\.\(!a && session && session\._readsOffWall && \(normalizeStoppedBy\(session\._stoppedBy\) \|\| \{\}\)\.kind === 'quota' \? \{ readsOff: session\._readsOffWall\.code \|\| 'refresh-off' \} : \{\}\),/.test(AR), 'auto-resume\'s status carries the door\'s code only while nothing is armed and the conversation stands stopped by a limit');
+  ok(/if \(a\.readsOff && !a\.armed\) \{ const held = a\.readsOff === 'refresh-held'; chip\('readsoff', /.test(CSB) && /\{ attrs: \{ 'data-reads-off-door': '1' \} \}\); \}/.test(CSB) && /const roDoor = e\.target\.closest\('\[data-reads-off-door\]'\);\n\s*if \(roDoor\) \{ e\.stopPropagation\(\); const d = settingsDoor\(this\._app, 'accounts\.onDemandQuotaRefresh'\); if \(d\) d\.run\(\); return; \}/.test(CSB),
     'the conversation\'s own status bar says it beside the wall\'s chip, and its press opens the setting\'s row (need-line settingsDoor)');
   ok(/row\('readsoff', 'I', 'row1', 31, \{ exists: true \}\)/.test(ST) && /id: 'usage-reads-off-wait'/.test(UN), 'the strip places the mark (row 1, while it exists) and the door census claims its two sentences');
   const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
-  const keys = ['Usage reads are off', 'Usage reads are off, so this conversation continues when you resume it — press to open the setting.'];
-  ok(keys.every((k) => ZH.includes('  ' + JSON.stringify(k) + ': ') && JA.includes('  ' + JSON.stringify(k) + ': ')), 'zh and ja hold the two sentences');
+  const keys = ['Usage reads are off', 'Usage reads are off, so this conversation continues when you resume it — press to open the setting.', 'Settings could not be read', 'The settings could not be read, so usage is not read and this conversation continues when you resume it — press to open Settings.'];
+  ok(keys.every((k) => ZH.includes('  ' + JSON.stringify(k) + ': ') && JA.includes('  ' + JSON.stringify(k) + ': ')), 'zh and ja hold the four sentences (off, held)');
   const S = read('src/lib/settings-schema.js');
   ok(/\{ value: 'off', label: t\('Off \(never contact Anthropic\)'\) \}/.test(S), 'the row\'s meaning and its words in Settings stay as they are (no default, meaning or sentence changes)');
 }
@@ -263,6 +298,25 @@ console.log('— ⑤ RED CONTROLS');
     ok(!nothingBooked(b) && b.serveFails === 1 && w.starts() === 0, 'RED: a refusal booked as a failure (a serve failure + a spawn-failed verdict) ⇒ ②\'s nothing-booked leg goes red', b);
     stopTimers(w);
   }
+}
+
+{
+  // r4932 M1's red: the recorder without the door's codes in its early return books the account's failed-probe note
+  const M = mutantCopies('usage-reads-off-m1', REPO);
+  const US = read('src/usage-routes.js');
+  const R3 = M.load('src/usage-routes.js', anchored(US, " || DOOR_CODES.includes(v.code)) return v;", ") return v;", 'the recorder without the door codes'), 'recorder');
+  const w = world({ row: 'off', usage: R3 });
+  if (w) { const q = quiet(); await w.u.refreshViaCliPanel(w.M); q.done(); const b = bookingsOf(w, w.M); ok(!nothingBooked(b) && b.probeNote && b.probeNote.ok === false && w.starts() === 0, 'RED: the recorder without the door\'s codes ⇒ the account\'s failed-probe note is booked («Last probe failed») — ②\'s leg goes red (M1)', b); stopTimers(w); }
+  // r4932 M2's red: the door reading the held view's value (no held check) starts the program while the settings are held
+  const R4 = M.load('src/usage-routes.js', anchored(US, "  if (held) return Object.assign(new Error('the settings could not be read — nothing was started'), { code: PANEL_HELD, refusedByRow: true });\n", '', 'the door without its held check'), 'no-held');
+  const started = [];
+  for (const [what, drive] of ROADS) {
+    const wh = world({ held: true, usage: R4 }); if (!wh) continue;
+    const q = quiet(); try { await drive(wh); await until(() => wh.starts() >= 1, `${what} to start (the held control)`, 4000); } finally { q.done(); }
+    if (wh.starts() >= 1) started.push(what);
+    stopTimers(wh);
+  }
+  ok(started.length === ROADS.length, `RED: the door reading the held view's «manual» starts the program while held on EVERY road (${started.length}/${ROADS.length}) — ③b's legs go red (M2)`, started);
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
