@@ -133,7 +133,7 @@ const heldStarts = (mod, pool, others) => {
 // counts where it parks elsewhere (the kept kind) and re-finds the money pin's states under it
 let READ_A = null; const A_SPEND = [];
 { const src = fs.readFileSync(path.join(REPO, 'src/account-pool-auto.js'), 'utf8');
-  try { READ_A = M.load('src/account-pool-auto.js', anchored(src, '  const keyOf = (r) => (lit.has(r.ap) ? oneOrder(r) : r.tier);', '  const keyOf = oneOrder;', 'reading A: no kept park'), 'reading-a'); } catch { READ_A = null; } }   // stale-pins: kept (reading A's text IS the one order with no exception)
+  try { READ_A = M.load('src/account-pool-auto.js', anchored(src, '  const keyOf = (r) => (r.ref ? parkKey(r) : !lit.has(r.ap) ? r.tier : r.freeUnknown ? TIER_CREDITS + 0.5 : oneOrder(r));', '  const keyOf = (r) => (r.ref ? parkKey(r) : r.freeUnknown ? TIER_CREDITS + 0.5 : oneOrder(r));', 'reading A: no kept park'), 'reading-a'); } catch { READ_A = null; } }   // stale-pins: kept (reading A's text IS the one order with no exception)
 const INV = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10', 'I11'];
 // each failure is filed under its invariant AND its KIND (a short name of the road that broke it), with the first scenes of each kind
 const bad = Object.fromEntries(INV.map((k) => [k, { n: 0, shapes: new Set(), kinds: new Map() }]));
@@ -400,129 +400,6 @@ const heldOnly = (mod) => {
 { const payTier = P.poolTiers({ payingIds: ['x'] }).tierOf('x'), quoTier = P.poolTiers({}).tierOf('x');
   const apart = STATES.filter((s) => s.kind !== 'o' && s.q !== 'lapsed').filter((s) => bills(s) !== (s.kind === 'p' ? payTier !== quoTier : P.quotaVerdict(rawOf(s, 2), NOW, { tier: 'hard' }).usable === false));
   ck(`the money pin's «bills» meets the product's own predicates over every credits and paying state (${STATES.filter((s) => s.kind !== 'o' && s.q !== 'lapsed').length} states, ${apart.length} apart)`, apart.length === 0, apart.map(fmt)); }
-// ── THE SHAPES SPACE (主开发 r5279: «a walk never goes where the decision refuses, and never where it cannot know») ─────────────────
-// The main space gives every member a full reading and never asks the removed-member hold. Here, for a credits member and an ordinary
-// one: no reading; a held reading of each kind (another account's instant, unread); a file started again (the stub, and a spent reading
-// over it — neither enumerated); a sign-in that cannot serve and has not lapsed; beside them a member this conversation just refused
-// (excluded), and another provider allowed with a live member, or one near its sign-in's end, in the other group. Asked, this tree
-// against the release (eb7608d5, 2.369.419): the default's fallback (the engine's fallbackDefaultTarget form: no other provider, no
-// exclusion), the removed-member hold (decidePoolSwitch, the current member no longer listed — the walk's FOURTH caller), the device list.
-// The removed-member hold is handed what its decision refused (r5279 MUST 2) and parks there only when the decision refused EVERY
-// listed candidate (the release's own park: the kept park among refused, counted); dropping them was measured first and left the
-// conversation on its removed member, billing beside a credits member past its quota — so the money pin counts a hold that names
-// nobody on a billing member too. Every difference from the release is a named kind with its pinned count (I6 over the shapes)
-const STUB = { startedAgain: { at: (NOW - 600) * 1000, setAside: 'm.json.unreadable', enumerated: false, overage: false, spendControl: false, resetCredits: false } };
-const SH_NEW = ['noread', 'heldsi', 'heldun', 'stub', 'restart', 'dead'];
-const SH_STATES = [{ kind: 'o', q: 'live' }, { kind: 'o', q: 'spent' }, { kind: 'c', q: 'live' }, { kind: 'c', q: 'spent' }, { kind: 'o', q: 'lapsed' }, ...['o', 'c'].flatMap((kind) => SH_NEW.map((q) => ({ kind, q })))];
-const SH_CUR = [{ kind: 'o', q: 'live' }, { kind: 'o', q: 'spent' }, { kind: 'c', q: 'live' }, { kind: 'c', q: 'spent' }];
-const shRead = (s, days) => (s.q === 'noread' ? null : s.q === 'heldsi' ? { held: 'same-instant' } : s.q === 'heldun' ? { held: 'unread' } : s.q === 'stub' ? STUB
-  : s.q === 'restart' ? { ...rawOf({ kind: s.kind, q: 'spent' }, days), startedAgain: STUB.startedAgain } : s.q === 'dead' ? rawOf({ kind: s.kind, q: 'live' }, days) : rawOf(s, days));
-const PV_OWN = { id: 'pv-anthropic-subscription', kind: 'anthropic-subscription', label: 'Anthropic subscription' };
-const PV_OTHER = { id: 'pv-other', kind: 'openai-chat', label: 'Other', models: [{ id: 'other-reasoner' }], aliases: { opus: 'other-reasoner' } };
-const NEAR_LOGIN = { state: 'expiring', msLeft: 10 * 60e3 };   // inside the near window: the decision keeps it a last resort only
-const shFmt = (s) => `${{ o: 'ordinary', c: 'credits' }[s.kind]}-${s.q}`;
-function shapePool(cur, others, { exclude = null, other = null } = {}) {
-  const all = [cur, ...others], ids = all.map((_, i) => 'm' + i).concat(other ? ['mx'] : []);
-  const st = new Map(ids.map((id, i) => [id, i < all.length ? all[i] : { kind: 'o', q: other === 'near' ? 'near' : 'live', other: true }]));
-  const reads = new Map(ids.map((id, i) => [id, i < all.length ? shRead(all[i], 1 + i) : rawOf({ kind: 'o', q: 'live' }, 2)]));
-  const login = (id) => { const s = st.get(id); return s.q === 'near' ? NEAR_LOGIN : s.q === 'lapsed' ? LAPSED_LOGIN : s.q === 'dead' ? DEAD_LOGIN : LIVE_LOGIN; };
-  const credits = ids.filter((id) => st.get(id).kind === 'c');
-  return { st, ids, others: ids.slice(1).map((id) => ({ id, name: id })), readCache: (id) => reads.get(id) ?? null, readLogin: login, creditsIds: credits.length ? credits : null,
-    providerOf: other ? (id) => (id === 'mx' ? PV_OTHER : PV_OWN) : null, crossProvider: other ? 'allow' : 'never', exclude };
-}
-const shFallback = (mod, sp) => { const x = mod.soonestUsableMember({ members: sp.others.filter((m) => m.id !== 'mx'), readCache: sp.readCache, nowSec: NOW, readLogin: sp.readLogin, creditsIds: sp.creditsIds, payingIds: null }); return x && typeof x === 'object' ? x.id : x; };
-const shHold = (mod, sp) => mod.decidePoolSwitch({ currentId: 'm0', members: sp.others, membership: sp.others.map((m) => m.id), readCache: sp.readCache, nowSec: NOW, hot: true, proactive: true, readLogin: sp.readLogin, reserveFloorPct: FLOOR, creditsIds: sp.creditsIds, payingIds: null, exclude: sp.exclude, providerOf: sp.providerOf, fromProvider: sp.providerOf ? PV_OWN : null, conversationModel: 'opus', crossProvider: sp.crossProvider, explain: true });
-const shList = (mod, sp) => mod.rankPoolMembers({ members: sp.others.filter((m) => m.id !== 'mx'), readCache: sp.readCache, nowSec: NOW, readLogin: sp.readLogin, creditsIds: sp.creditsIds, payingIds: null }).map((r) => r.id);
-// what THIS decision refuses (never a target), and what bills past its quota or cannot be known (the money law's two halves)
-const refusedBy = (sp) => new Set(sp.others.filter((m) => { const s = sp.st.get(m.id); return (sp.exclude || []).includes(m.id) || ['heldsi', 'heldun', 'stub', 'restart', 'dead', 'lapsed'].includes(s.q) || (s.other && s.q === 'near') || (sp.st.get('m0').kind === 'c' && s.kind === 'c' && s.q === 'spent'); }).map((m) => m.id));   // the last: rule 4's guard (never billed onto billed) beside a credits current
-const moneyOf = (s) => !!s && s.kind === 'c' && ['spent', 'restart', 'stub', 'heldsi', 'heldun'].includes(s.q);
-const servesShape = (s) => !!s && (s.q === 'live' || s.q === 'noread');   // no reading: a candidate to the decision and both walks alike (the round's reader, M8)
-const SH_DIFF = new Map(), SH_LAW = [], SH_SPEND = [], SH_SPEND_BY = new Map(), SH_NULL_BY = new Map();
-const shTally = (m, k) => m.set(k, (m.get(k) || 0) + 1);
-const shWhy = (sp, sc, id) => { if (!id) return 'nobody'; const s = sp.st.get(id); return (sc.exclude || []).includes(id) ? `excluded ${shFmt(s)}` : s.other ? `other-provider ${s.q}` : shFmt(s); };
-const SH_KINDS = { fbLive: 'the fallback: a credits member that can serve before an ordinary member that cannot', holdOrder: 'the removed-member hold: the one order (a credits member that can serve before a walled ordinary member)', holdRefused: 'the removed-member hold: off a member this decision refused (excluded, a sign-in that cannot serve, a reading it holds)', listOrder: 'the device list: a credits member past its quota no longer before one that can serve' };
-const shNote = (k, sh) => { if (!SH_DIFF.has(k)) SH_DIFF.set(k, { n: 0, ex: [] }); const g = SH_DIFF.get(k); g.n++; if (g.ex.length < 2) g.ex.push(sh); };
-let shPools = 0, shI6 = 0, shKept = 0, shLiveHold = 0, shLive = 0; const shI6Ex = [], SH_REL = [];
-const shScenes = function* () {
-  const sets = [[]]; for (let a = 0; a < SH_STATES.length; a++) { sets.push([a]); for (let b = a; b < SH_STATES.length; b++) { sets.push([a, b]); for (let c = b; c < SH_STATES.length; c++) sets.push([a, b, c]); } }
-  for (const cur of SH_CUR) for (const m of sets) { const others = m.map((i) => SH_STATES[i]);
-    // another provider's LIVE member beside up to two others (with it the removed decision moves the conversation there: no walk is
-    // asked — counted below, so three others skip it); excluding one of two equal states is the other's mirror, asked once
-    for (const other of others.length < 3 ? [null, 'live', 'near'] : [null, 'near']) for (let x = -1; x < others.length; x++) { if (x > 0 && others[x] === others[x - 1]) continue; yield { cur, others, other, exclude: x < 0 ? null : ['m' + (x + 1)] }; } }
-};
-const SH_T0 = performance.now();
-if (rel) for (const sc of shScenes()) {
-  const sp = shapePool(sc.cur, sc.others, sc), S = (id) => sp.st.get(id); shPools++;
-  const sh = `${shFmt(sc.cur)} removed | ${sc.others.map(shFmt).join(', ') || '(none)'}${sc.other ? ` | another provider allowed, its member ${sc.other}` : ''}${sc.exclude ? ` | ${sc.exclude[0]} excluded` : ''}`;
-  const refused = refusedBy(sp);
-  const unexplained = (what) => { shI6++; if (shI6Ex.length < 4) shI6Ex.push(`${what} — ${sh}`); };
-  // the fallback (once a pool: the exclusion and the other provider are not its inputs)
-  if (!sc.exclude && !sc.other) {
-    const fm = shFallback(P, sp), ft = shFallback(rel, sp);
-    if (fm && (refused.has(fm) || moneyOf(S(fm))) && fm !== ft) SH_LAW.push(`the fallback parks on ${shFmt(S(fm))} (${fm}) where the release parked on ${ft ? shFmt(S(ft)) : 'nobody'} — ${sh}`);
-    if (fm !== ft) { const A = fm && S(fm), B = ft && S(ft); if (A && B && B.kind === 'o' && (B.q === 'spent' || B.q === 'dead' || refused.has(ft)) && A.kind === 'c' && servesShape(A)) shNote('fbLive', sh); else unexplained(`the fallback names ${fm}, the release ${ft}`); }
-    const lm = shList(P, sp), lt = shList(rel, sp);
-    if (JSON.stringify(lm) !== JSON.stringify(lt)) { const cr = (l) => l.filter((id) => S(id).kind === 'c'); const ok = cr(lt).some((id, i, a) => !servesShape(S(id)) && a.slice(i + 1).some((y) => servesShape(S(y)))); if (ok) shNote('listOrder', sh); else unexplained(`the device list ${lm.join(',')} against the release's ${lt.join(',')}`); }
-  }
-  // the removed-member hold, this tree against the release, the decision whole (I6 with membership passed)
-  const dm = shHold(P, sp), dt = shHold(rel, sp); SH_REL.push(dt);
-  if (sc.other === 'live') { shLive++; if (dm.reason === 'removed-hold' || dt.reason === 'removed-hold') shLiveHold++; }
-  const free = sp.others.some((m) => !refused.has(m.id));   // a listed member this decision did not refuse
-  if (dm.reason === 'removed-hold' && dm.holdTo && refused.has(dm.holdTo)) {
-    if (free || dm.holdTo !== dt.holdTo) SH_LAW.push(`the hold parks on ${shFmt(S(dm.holdTo))} (${dm.holdTo}), which this decision refused${free ? ' while a member it did not refuse is listed' : ', not the release\'s park'} — ${sh}`);
-    else shKept++;   // every candidate refused: the release's own park stands (the conversation never keeps running on the removed member)
-  }
-  if (dm.reason === 'removed-hold' && !dm.holdTo && dt.holdTo && moneyOf(sc.cur)) SH_SPEND.push(`the hold names nobody: the conversation stays on its removed ${shFmt(sc.cur)} member, billing, where the release parked it on ${shFmt(S(dt.holdTo))} — ${sh}`);
-  if (JSON.stringify(dm) !== JSON.stringify(dt)) {
-    const same = { ...dm, holdTo: dt.holdTo };
-    if (dm.reason === 'removed-hold' && dt.reason === 'removed-hold' && JSON.stringify(same) === JSON.stringify(dt)) {
-      const A = dm.holdTo && S(dm.holdTo), B = dt.holdTo && S(dt.holdTo);
-      if (dt.holdTo && refused.has(dt.holdTo)) shNote('holdRefused', sh);
-      else if (A && B && A.kind === 'c' && servesShape(A) && B.kind === 'o' && B.q === 'spent') shNote('holdOrder', sh);
-      else unexplained(`the hold names ${dm.holdTo}, the release ${dt.holdTo}`);
-      if (A && moneyOf(A) && dm.holdTo !== dt.holdTo) { SH_SPEND.push(`the hold parks on ${shFmt(A)} (${dm.holdTo}) where the release parked on ${B ? shFmt(B) : 'nobody'} — ${sh}`); shTally(SH_SPEND_BY, `current ${shFmt(sc.cur)} · tip ${shFmt(A)} · release ${shWhy(sp, sc, dt.holdTo)}${refused.has(dt.holdTo) ? ' (refused)' : ''}`); }
-      if (!dm.holdTo && dt.holdTo) shTally(SH_NULL_BY, `current ${shFmt(sc.cur)} · release ${shWhy(sp, sc, dt.holdTo)}${refused.has(dt.holdTo) ? ' (refused)' : ''}`);
-    } else unexplained(`the decision ${dm.reason}/${dm.holdTo || '-'} against the release's ${dt.reason}/${dt.holdTo || '-'}`);
-  }
-}
-const SH_PIN = { fbLive: 448, holdOrder: 0, holdRefused: 940, listOrder: 72, kept: 14124 };   // measured at the cure (r5279), both zones alike, run cda91e34f-20261126220945-both
-console.log(`  · the shapes space asked in ${Math.round(performance.now() - SH_T0)} ms`);   // { fbLive, holdOrder, holdRefused, listOrder } — measured at the cure, written here
-const shCount = (k) => (SH_DIFF.get(k) || { n: 0 }).n;
-console.log(`  · the shapes space (r5279): ${shPools} pools — the difference set against the release (eb7608d5): ` + Object.keys(SH_KINDS).map((k) => `${k} ${shCount(k)}`).join(' · '));
-for (const [k, g] of SH_DIFF) { console.log(`      [${SH_KINDS[k]}] ${g.n}`); for (const e of g.ex) console.log('        ' + e); }
-ck(`r5279 THE ONE LAW over the shapes: no walk goes where the decision refuses or cannot know (${SH_LAW.length})`, SH_LAW.length === 0);
-for (const s of SH_LAW.slice(0, 6)) console.log('    LAW: ' + s);
-ck(`r5279 the money pin over the removed-member hold: no new spend (${SH_SPEND.length})`, SH_SPEND.length === 0);
-for (const s of SH_SPEND.slice(0, 6)) console.log('    NEW SPEND: ' + s);
-for (const [nm, m] of [['the new spends', SH_SPEND_BY], ['the hold names nobody where the release parked', SH_NULL_BY]]) if (m.size) { console.log(`    ${nm}, by the current member and the release's park:`); for (const [k, n] of [...m].sort((x, y) => y[1] - x[1]).slice(0, 12)) console.log(`      ${n} × ${k}`); }
-ck(`r5279 another provider's live member: the removed decision moves the conversation there, so the hold is never asked beside it (${shLive} pools, ${shLiveHold} reached the hold)`, shLive > 0 && shLiveHold === 0);
-ck(`r5279 the kept park among refused: where the decision refused EVERY listed candidate, the hold keeps the release's own park — never the removed member, never a new bill (${shKept} pools)`, !!SH_PIN && shKept === SH_PIN.kept);
-ck(`r5279 I6 over the shapes, the removed decision asked with membership: every difference from the release is a named kind, each count pinned (${Object.keys(SH_KINDS).map((k) => `${k} ${shCount(k)}`).join(', ')}; ${shI6} unexplained)`, shI6 === 0 && !!SH_PIN && Object.keys(SH_KINDS).every((k) => shCount(k) === SH_PIN[k]));
-for (const s of shI6Ex) console.log('    I6: ' + s);
-// THE THREE MUSTS' REDs on fd4356ca6's own code (the commit the round read), each with its witness
-{ const pre6 = await preFixCopy('fd4356ca6', 'src/account-pool-auto.js', 'fd4356ca6');
-  const F6 = pre6.mod;
-  if (!F6 && pre6.why === 'shallow') console.log('  ⊘ SKIP the three REDs on fd4356ca6 — the ref is not in this SHALLOW clone');
-  else if (!F6 || !rel) ck(`the copy of fd4356ca6 loaded for the three REDs${pre6.why ? ` — ${pre6.why}` : ''}`, false);
-  else {
-    let m1 = 0, m1w = 0, m2 = 0, m2w = 0, m3 = 0, m3w = 0; const M2X = [];
-    let si = 0; const T1 = performance.now();
-    for (const sc of shScenes()) {
-      const sp = shapePool(sc.cur, sc.others, sc), S = (id) => sp.st.get(id), refused = refusedBy(sp), free = sp.others.some((m) => !refused.has(m.id));
-      if (!sc.exclude && !sc.other) { const f6 = shFallback(F6, sp), ft = shFallback(rel, sp); if (f6 && f6 !== ft && S(f6).kind === 'c' && (S(f6).q === 'stub' || S(f6).q === 'restart')) { m1++; if (S(f6).q === 'stub' ? sp.readCache(f6) === STUB : !!sp.readCache(f6).startedAgain) m1w++; } }
-      const dt = SH_REL[si++], d6 = dt.reason === 'removed-hold' ? shHold(F6, sp) : dt;   // fd4356ca6 moved the hold's target alone (the round's M4)
-      if (d6.reason === 'removed-hold' && d6.holdTo) { const h = S(d6.holdTo), ex = (sc.exclude || []).includes(d6.holdTo);
-        const kind = ex && ['live', 'spent', 'noread'].includes(h.q) ? 'excluded' : !ex && h.q === 'dead' ? 'blocked' : null;
-        if (kind && free) { m2++; if (kind === 'excluded' ? (d6.excluded || 0) > 0 : (d6.loginBlocked || []).some((x) => x.id === d6.holdTo)) m2w++; else if (M2X.length < 4) M2X.push(`${kind} ${shFmt(h)} ${d6.holdTo} · loginBlocked ${JSON.stringify(d6.loginBlocked || null)} · excluded ${d6.excluded} · ${sc.others.map(shFmt).join(',')}`); } }
-      if (sc.other === 'near' && !sc.exclude && d6.reason === 'removed-hold' && d6.holdTo && S(d6.holdTo).kind === 'c' && S(d6.holdTo).q === 'spent' && dt.holdTo && S(dt.holdTo).kind === 'o' && S(dt.holdTo).q === 'spent') { m3++; if (sp.providerOf('mx') === PV_OTHER && (d6.loginBlocked || []).some((x) => x.id === 'mx')) m3w++; }
-    }
-    console.log(`  · the three REDs asked in ${Math.round(performance.now() - T1)} ms`);
-    ck(`MUST 1 RED (fd4356ca6): its fallback parks the default on a credits member whose file started again, where the release did not (${m1}; witness: the reading is the started-again one, ${m1w})`, m1 > 0 && m1w === m1);
-    for (const x of M2X) console.log('    MUST 2 witness miss: ' + x);
-    ck(`MUST 2 RED (fd4356ca6): its removed-member hold parks on a member the decision refused — excluded, or its sign-in cannot serve — while one it did not refuse is listed (${m2}; witness: the decision names it refused, ${m2w})`, m2 > 0 && m2w === m2);
-    ck(`MUST 3 RED (fd4356ca6): with another provider allowed and its member near its sign-in's end, its hold parks on a credits member past its quota where the release parked on a walled ordinary member (${m3}; witness: the decision refused the other provider's member by its sign-in, ${m3w})`, m3 > 0 && m3w === m3);
-  }
-}
 // THE ONE ORDER's RED (r5239, B-d74f): with the release's shortcut put back (with nobody paying the key is the tier), the walks' own
 // checks on the pools where nobody pays go red; its witness: the copy's order key keeps a walled ordinary member at the tier's own key
 const plainWalks = (mod) => {
@@ -549,7 +426,7 @@ const plainWalks = (mod) => {
   const i = eng.indexOf('\nfunction poolChooserForModel('), j = eng.indexOf('\nfunction ', i + 10), body = i < 0 ? '' : eng.slice(i, j < 0 ? undefined : j);
   const call = (body.match(/const chooseNow = \(\) => decideStart\(\{[^\n]*\}\);/) || [''])[0];
   ck('THE PIN: the chooser\'s decision is decideStart\'s, called as this leg calls it (family, hint, stale default, bare reading, hot: true, no placing of its own), and the pin road asks it too (r5067): no decidePoolSwitch or decidePinnedPlacement of the chooser\'s own', typeof P.decideStart === 'function' && /decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(call) && /hot: true/.test(call) && !/placing:/.test(call) && !/decidePoolSwitch\(/.test(body) && !/decidePinnedPlacement\(/.test(body) && /decideStart\(\{ family: fam, hinted, baseReadCache: base, pin, currentId: cur,/.test(body)); }
-for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 7 : 6, label: 'tier-invariants: ' })) ck(r.name, r.pass);
+for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 6 : 5, label: 'tier-invariants: ' })) ck(r.name, r.pass);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

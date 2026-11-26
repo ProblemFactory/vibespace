@@ -1421,9 +1421,18 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     // reaches here), stay rows — a lone candidate is still the park — but neither is ever «can serve now»: the walk never goes where the
     // decision refuses or cannot know
     const li = readLogin ? (readLogin(m.id) || { state: 'unknown' }) : null;
-    rows.push({ id: m.id, at, tier: tiers.tierOf(m.id), rank: rank ? rank(m.id) : 0, i, ap, unknown: restartedUnknown(rd) || !!(li && !loginUsable(li)), ref: !!(refusedSet && refusedSet.has(m.id)) });
+    const tier = tiers.tierOf(m.id), signDead = !!(li && !loginUsable(li));
+    // r5331 (MUST B): WHAT A ROW COSTS decides where a row that cannot be read stands. A credits or paying member whose caps cannot be
+    // told (the decision's own held predicate: the stub, a spent reading over it) may be past its quota: never «can serve now», keyed as
+    // one past its quota. An ordinary member that cannot be read, and any member whose sign-in cannot serve, bills nothing: never «can
+    // serve now», but before every row that bills — the release's park stands against a bill (a lane's change never newly parks the
+    // default on a billing member, r5252). No reading at all is what the decision takes it for (a candidate: its dead test needs one)
+    const costUnknown = tier !== TIER_QUOTA && !signDead && restartedUnknown(rd);
+    const freeUnknown = !costUnknown && at === 0 && (signDead || restartedUnknown(rd));
+    const costs = !signDead && (tier === TIER_PAYING || (tier === TIER_CREDITS && (costUnknown || at !== 0)));
+    rows.push({ id: m.id, at, tier, rank: rank ? rank(m.id) : 0, i, ap, costUnknown, freeUnknown, costs, ref: !!(refusedSet && refusedSet.has(m.id)) });
   });
-  for (const r of rows) r.live = r.at === 0 && !r.unknown && !r.ref;   // r5279: what the decision holds or refuses is never «can serve now» — the kept park then stands
+  for (const r of rows) r.live = r.at === 0 && !r.costUnknown && !r.freeUnknown && !r.ref;   // r5279: what the decision holds or refuses is never «can serve now» — the kept park then stands
   // READING B (主开发 r5252, row B-d74f): where nobody pays and NO candidate can serve now — no ordinary member, no usage-credits member
   // with quota left — the fallback keeps the RELEASE's park, byte for byte: a walled ordinary member before a credits member billing past
   // its quota. The fallback's pick is the pool's DEFAULT, where every later conversation starts: a default on the wall heals by itself at
@@ -1432,11 +1441,18 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
   // never turns the release's park off for the group the pick comes from
   const lit = new Set(rows.filter((r) => !r.ref && (r.live || r.tier === TIER_PAYING)).map((r) => r.ap));
   const oneOrder = tiers.orderOf(rows);
-  const keyOf = (r) => (lit.has(r.ap) ? oneOrder(r) : r.tier);
-  // r5279 MUST 2: `refused` = what the CALLER's decision refused (the removed-member hold hands its exclusions, its sign-in blocks, its
-  // held members and its billed-onto-billed guard): such a row comes after every row it did not refuse — the walk never goes there
-  // while a member it did not refuse is listed; with every candidate refused the release's own park stands (主开发 r5279 + the stop page)
-  rows.sort((x, y) => (x.ref === y.ref ? 0 : x.ref ? 1 : -1) || (x.ap - y.ap) || (keyOf(x) - keyOf(y)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
+  // the refused rows (the hold, r5331): among themselves the release's own park, as the walk keyed every row before B-d74f — the one
+  // order where any row pays (a reading that says usable counted «can serve now»), else the tier
+  const anyPaying = rows.some((r) => r.tier === TIER_PAYING);
+  const parkKey = (r) => (!anyPaying ? r.tier : r.at === 0 ? r.tier : r.tier === TIER_QUOTA ? TIER_PAYING + 3 : r.tier + 2);
+  const keyOf = (r) => (r.ref ? parkKey(r) : !lit.has(r.ap) ? r.tier : r.freeUnknown ? TIER_CREDITS + 0.5 : oneOrder(r));
+  // r5279 MUST 2 / r5331 MUST A: `refused` = what the CALLER's decision refused (the removed-member hold hands its exclusions, its sign-in
+  // blocks, its held members and its billed-onto-billed guard). INSIDE each provider group (the group first, as the release sorts: the
+  // walk never leaves the conversation's provider because its own members were refused), a refused row comes after every row it did not
+  // refuse that bills nothing, and before one that bills: the walk never goes where the decision refused while a member it did not refuse
+  // is listed and free, and never onto a bill to avoid a refused member — then the release's own park stands
+  const shelf = (r) => (!refusedSet || !refusedSet.size ? 0 : r.ref ? 1 : r.costs ? 2 : 0);
+  rows.sort((x, y) => (x.ap - y.ap) || (shelf(x) - shelf(y)) || (keyOf(x) - keyOf(y)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
   return rows.length ? rows[0].id : null;
 }
 

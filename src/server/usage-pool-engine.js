@@ -962,9 +962,19 @@ function overageMemberIds(members, paying) {
     return paying !== undefined ? paying : overageInUseIds(members);
   } catch { return null; }
 }
-/** B-d74f (the round's should, wf_c3250651): a WALK's tier sets from ONE raw read — the paying set, and with the setting on the
- *  setting's set handed from it (the same set: overageMemberIds), never read a second time on the main loop → {creditsIds, payingIds, overageIds} */
-function walkTierSets(members) { const paying = overageInUseIds(members); return { creditsIds: creditsMemberIds(members), payingIds: paying, overageIds: overageMemberIds(members, paying) }; }
+/** B-d74f (the rounds' shoulds, wf_c3250651 / wf_a94a6868): a WALK's three tier sets from ONE raw read of each member — the credits
+ *  members (creditsMemberIds' fact), the members billing paid overage (overageInUseIds' fact) and, with the setting on, the setting's
+ *  set handed from the latter (the same set: overageMemberIds); never read a second time on the main loop → {creditsIds, payingIds, overageIds} */
+function walkTierSets(members) {
+  let creditsIds = null, payingIds = null;
+  try {
+    const c = new Set(), p = new Set();
+    for (const m of members || []) { const o = overageState(readRawUsageCache(m.id)); if (o.mode === 'allowed') c.add(m.id); if (o.inUse === 'yes') p.add(m.id); }
+    creditsIds = c.size ? c : null; payingIds = p.size ? p : null;
+  } catch { creditsIds = null; payingIds = null; }
+  const sets = { creditsIds, payingIds, overageIds: overageMemberIds(members, payingIds) };
+  return sets;
+}
 // USAGE CREDITS (B-ad05, ALWAYS on — it is a ranking, not a bar): members
 // whose org has extra usage ENABLED and not in use (`overageState().mode ===
 // 'allowed'`). Past 100 % such a member keeps serving on pay-per-use billing
