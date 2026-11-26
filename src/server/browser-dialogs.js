@@ -437,6 +437,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const open = [...w.open.values()];
     for (const rec of w.surf.values()) { surfaceAskDone(w, rec); if (!open.includes(rec)) open.push(rec); } w.surf.clear(); // lane browser-surfaces: a NOTED one is in the live view's bar too
     w.open.clear();
+    if (watches.get(w.profileId) === w && keeper && typeof keeper.tabWatchReset === 'function') { try { keeper.tabWatchReset(w.profileId); } catch { /* the keeper's own */ } } // r4808: the CURRENT socket's end ended its kernel leases — every watch of the profile is told «stills» now, not at the next open
     if (watches.get(w.profileId) === w) watches.delete(w.profileId);
     const canStashReconnect = !disposed
       && why !== 'the browser stopped'
