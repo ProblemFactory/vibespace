@@ -3507,11 +3507,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(S.hk2.calls.length === 1 && S.c.length === 1 && S.c[0].home === true && S.c[0].data === false && S.projC === '-home-userN-left' && mountOf(S.dC) === '/home/olduser/proj' && fs.existsSync(path.join(S.home2, '.vibespace', NAME)),
       'an install migrated before the split (a data/ marker only, a projdir left behind): the move runs — a merge — and writes the HOME marker; no second rewrite', { calls: S.hk2.calls, c: S.c, proj: S.projC });
     const SRC = fs.readFileSync(path.join(REPO_ROOT, HRS), 'utf8');
-    const ONE = 'const homeDone = fs.existsSync(hm), dataDone = fs.existsSync(dm);';
+    const ONE = 'const homeDone = fs.existsSync(hm), dmState = dataMarkerState(dm), dataDone = dmState.done;';   // B-574d follow: the data marker read for its state
     const MARKED = 'const oldUsers = new Set([...hrs.flatMap((hr) => hr.staleUsers(home, user, { homeGone })), ...markedOldUsers(home, user, homeGone)]);';
     ok(SRC.split(ONE).length === 2 && SRC.split(MARKED).length === 2, 'ANCHOR: the two markers read once, the old users from the hooks AND the markers — each spelled once');
     const MH = mutantCopies('home-rename', REPO_ROOT);
-    const M1 = await scenes(MH.load(HRS, SRC.replace(ONE, 'const dataDone = fs.existsSync(dm), homeDone = dataDone;'), 'one-marker'), 'm1');
+    const M1 = await scenes(MH.load(HRS, SRC.replace(ONE, 'const dmState = dataMarkerState(dm), dataDone = dmState.done, homeDone = dataDone;'), 'one-marker'), 'm1');
     ok(M1.hk.calls.length === 2, 'MUTANT RED: one marker in data/ for both halves (the release\'s) ⇒ the second install moves the HOME\'s projdirs again', M1.hk.calls);
     const M2 = await scenes(MH.load(HRS, SRC.replace(MARKED, 'const oldUsers = new Set(hrs.flatMap((hr) => hr.staleUsers(home, user, { homeGone })));'), 'no-markers'), 'm2');
     ok(!M2.b.length && mountOf(M2.dB) === '/home/olduser/proj', 'MUTANT RED: old users from the projdirs alone ⇒ the second install finds none — its stores keep /home/<old>', { b: M2.b, mountB: mountOf(M2.dB) });
@@ -3664,9 +3664,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const JS = await judgedScene(require('../' + HRS), 'real');
     ok(JS.a === '/home/olduser/proj' && JS.b === '/home/olduser/proj' && JS.marker, 'B-8033 cure 3: no folder judged «old» ⇒ NO rewrite — a paired machine\'s /home/olduser/proj stays, for the first install and a second one over the same HOME (the marker\'s judged count)', JS);
-    const JG = 'if (judgedOld > 0) rewrote = rewriteStores(dataDir, metaDir, old, user, log);';
+    const JG = 'if (judgedOld > 0) rewrote = rewriteStores(dataDir, metaDir, old, user, log, retry);';   // B-574d follow: the call hands its retry
     ok(SRC.split(JG).length === 2, 'ANCHOR: the judged gate, spelled once');
-    const JM = await judgedScene(MH.load(HRS, SRC.replace(JG, 'if (true) rewrote = rewriteStores(dataDir, metaDir, old, user, log);'), 'rewrite-ungated'), 'm11');
+    const JM = await judgedScene(MH.load(HRS, SRC.replace(JG, 'if (true) rewrote = rewriteStores(dataDir, metaDir, old, user, log, retry);'), 'rewrite-ungated'), 'm11');
     ok(JM.a === '/home/olduser.x/proj', 'MUTANT RED: the rewrite for an old user named by a folder name alone ⇒ the paired machine\'s path is rewritten', JM);
     // cure 3 (C): A TRANSCRIPT THAT CANNOT BE READ is a FAILED move — not marked, tried again at the next start (a directory named
     // *.jsonl: open succeeds, read fails EISDIR — on every machine, root included)
@@ -4181,12 +4181,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // the placed answer: a sync of a temp whose path ends in `tail` answers `code` (null: the real sync); the events of THAT temp
     // (open, sync, rename) in their order; console's lines kept (said), the suite's own ✓ lines untouched (no ok() inside)
     const placed = async (tail, code, fn, closeCode = null) => {
-      const P = fs.promises, open0 = fs.openSync, sync0 = fs.fsyncSync, rename0 = fs.renameSync, popen0 = P.open, prename0 = P.rename;
+      const P = fs.promises, open0 = fs.openSync, sync0 = fs.fsyncSync, rename0 = fs.renameSync, close0 = fs.closeSync, popen0 = P.open, prename0 = P.rename;
       const probe = await P.open(path.join(REPO_ROOT, 'package.json'), 'r'), FHP = Object.getPrototypeOf(probe); await probe.close();
       const fsync0 = FHP.sync, fds = new Set(), handles = new WeakSet(), events = [], said = [], warn0 = console.warn, log0 = console.log;
       const answer = () => { events.push('sync'); if (code) throw Object.assign(new Error(`${code}: a placed answer of the sync`), { code }); };
       fs.openSync = function (p, ...a) { const fd = open0.call(this, p, ...a); if (String(p).endsWith(tail)) { fds.add(fd); events.push('open'); } return fd; };
       fs.fsyncSync = function (fd) { if (fds.has(fd)) answer(); return sync0.call(this, fd); };
+      fs.closeSync = function (fd) { fds.delete(fd); return close0.call(this, fd); };   // a number is FORGOTTEN at its close: the next open may get it again
       fs.renameSync = function (a, b) { if (String(a).endsWith(tail)) events.push('rename'); return rename0.call(this, a, b); };
       // a FileHandle's close() is its OWN field (not the prototype's): the close's placed answer goes on the handle the temp opened —
       // closed for real first, so nothing leaks
@@ -4197,7 +4198,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       FHP.sync = async function () { if (handles.has(this)) answer(); return fsync0.call(this); };
       console.warn = (...a) => { said.push(a.map(String).join(' ')); }; console.log = () => { };
       try { return { out: await fn(), events, said }; }
-      finally { fs.openSync = open0; fs.fsyncSync = sync0; fs.renameSync = rename0; P.open = popen0; P.rename = prename0; FHP.sync = fsync0; console.warn = warn0; console.log = log0; }
+      finally { fs.openSync = open0; fs.fsyncSync = sync0; fs.renameSync = rename0; fs.closeSync = close0; P.open = popen0; P.rename = prename0; FHP.sync = fsync0; console.warn = warn0; console.log = log0; }
     };
     const noSyncLines = (said, code) => said.filter((l) => l.includes(`does not do a sync (${code})`));
     const ledgerOf = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf8')).applied || {}; } catch { return {}; } };
@@ -4235,6 +4236,28 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       'B-574d (b) the file road\'s pid temp: a sync that FAILS (EIO) leaves desktop-apps.json byte-identical, its mode kept, no temp, the migration NOT recorded', { status: b1.status, recorded: b1.recorded, mode: b1.mode.toString(8), tmpLeft: b1.tmpLeft, events: b1.events });
     ok(b3.status === 'ran' && b3.recorded && b3.stamped && b3.mode === 0o600 && b3.events === 'open,sync,rename',
       'B-574d (b) the real sync on the file road: stamped, the mode kept (0600), synced before the rename', { status: b3.status, mode: b3.mode.toString(8), events: b3.events });
+    // (f) the round's should: a TWO-STORE migration failing HALFWAY — 2026-08-archive-dormant-task-plans writes its archive, then the
+    // store; the store's sync refused (EIO) after the archive landed: not recorded; the next start runs it again — the archive MERGES with
+    // what it held (an earlier run's t0 stays: a merge, never an overwrite; t1's plans never doubled), the store reshaped once, recorded.
+    // RED (anchored copy): the archive written from this run's plans alone (prev dropped) — t0 is lost
+    {
+      const ID_F = '2026-08-archive-dormant-task-plans', TG0 = JSON.stringify({ tasks: { t1: { name: 'one', plan: [{ step: 'a' }, { step: 'b' }] }, t2: { name: 'two' } } }, null, 2);
+      const fScene = async (mod, tag) => {
+        const root = path.join(base, tag), d = path.join(root, 'data'), arch = path.join(d, 'archive', 'task-plans-legacy.json');
+        fs.mkdirSync(path.dirname(arch), { recursive: true }); fs.writeFileSync(path.join(d, 'task-groups.json'), TG0); fs.writeFileSync(arch, JSON.stringify({ t0: [{ step: 'z' }] }));
+        const runF = (code) => placed(path.sep + 'task-groups.json.tmp', code, () => mod.create({ rootDir: root, homeDir: home0, serverNotice: () => { } }).runLocalMigrations({ only: [ID_F] }).find((x) => x.id === ID_F));
+        const f1 = await runF('EIO'), arch1 = JSON.parse(fs.readFileSync(arch, 'utf8')), tg1 = fs.readFileSync(path.join(d, 'task-groups.json'), 'utf8'), rec1 = !!ledgerOf(d)[ID_F];
+        const f2 = await runF(null), arch2 = JSON.parse(fs.readFileSync(arch, 'utf8')), tg2 = JSON.parse(fs.readFileSync(path.join(d, 'task-groups.json'), 'utf8'));
+        return { f1: f1.out && f1.out.status, ev1: f1.events.join(), rec1, tg1, arch1, f2: f2.out && f2.out.status, rec2: !!ledgerOf(d)[ID_F], arch2, tg2 };
+      };
+      const F1 = await fScene({ create }, 'f-half');
+      ok(F1.f1 === 'failed' && !F1.rec1 && F1.tg1 === TG0 && F1.ev1 === 'open,sync' && Object.keys(F1.arch1).sort().join() === 't0,t1'
+        && F1.f2 === 'ran' && F1.rec2 && Object.keys(F1.arch2).sort().join() === 't0,t1' && F1.arch2.t0.length === 1 && F1.arch2.t1.length === 2 && !('plan' in F1.tg2.tasks.t1) && F1.tg2.tasks.t2.name === 'two',
+        'B-574d follow (f) a two-store migration failing HALFWAY (its archive landed, the store\'s sync refused): not recorded, the store as it was; the next start MERGES the archive (an earlier run\'s t0 kept, t1\'s two plans never doubled), reshapes the store once, records it',
+        { first: [F1.f1, F1.rec1, F1.ev1], archive: F1.arch2, store: F1.tg2 });
+      const FM = await fScene(M574.load('src/server/migrations.js', anchored(MIG, 'JSON.stringify({ ...prev, ...archived }, null, 2)', 'JSON.stringify({ ...archived }, null, 2)', 'the archive\'s merge'), 'archive-overwrite'), 'f-red');
+      ok(FM.f2 === 'ran' && !('t0' in FM.arch2), 'B-574d follow RED (anchored copy: the archive from this run\'s plans alone): the earlier t0 is lost — (f) goes red on an overwrite', FM.arch2);
+    }
     // RED: the helper back to the bare temp + rename (the release's road) — the EIO scenes read «applied»
     const HELP = "  renameSynced(tmp, file, text, { mode, where: `[migrate] ${path.basename(file)}`, say: (line) => console.warn(line) });\n";
     const bare = M574.load('src/server/migrations.js', anchored(MIG, HELP, "  fs.writeFileSync(tmp, text, mode === undefined ? undefined : { mode }); fs.renameSync(tmp, file);   // MUTANT: the bare temp + rename\n", 'the migrations\' synced replace'), 'bare-replace');
@@ -4255,7 +4278,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     };
     const HR = require('../src/server/home-rename.js');
     const c1 = await hrScene(HR, 'c-eio', 'mounts.json.tmp', 'EIO');
-    ok(c1.out.length === 1 && c1.out[0].rewrote === 0 && c1.mounts === MOUNTS0 && !c1.tmpLeft && c1.events === 'open,sync' && c1.warned.some((l) => l.startsWith('[migrate] mounts.json: EIO')),
+    ok(c1.out.length === 1 && c1.out[0].rewrote === 0 && c1.mounts === MOUNTS0 && !c1.tmpLeft && c1.events === 'open,sync' && c1.warned.length === 1 && c1.warned[0].includes('could not be rewritten — mounts.json (EIO: tried again at the next start)'),
       'B-574d (c) the recorded-path rewrite: a sync that FAILS (EIO) is that store\'s failed rewrite — mounts.json byte-identical, no temp, said, not counted as rewritten', { out: c1.out, events: c1.events, warned: c1.warned });
     const c2 = await hrScene(HR, 'c-einval', 'mounts.json.tmp', 'EINVAL'), nc2 = noSyncLines(c2.warned, 'EINVAL');
     ok(c2.out[0].rewrote === 1 && c2.mounts.includes('/home/userN/proj') && nc2.length === 1 && nc2[0].startsWith('[migrate] mounts.json: ') && !nc2[0].includes(c2.root),
@@ -4274,6 +4297,97 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       'B-574d (d) a file system with NO sync (EINVAL): the tries take their name (2), ONE line says so, no path', { tries: d2.tries, said: nd2 });
     const d3 = await hrScene(HR, 'd-real', NAME + '.tries.tmp', null, { failedMove: true, tries0: TRIES0 });
     ok(d3.tries && JSON.parse(d3.tries).tries === 2 && d3.events === 'open,sync,rename', 'B-574d (d) the real sync: the tries\' temp synced before its rename', { tries: d3.tries, events: d3.events });
+    // (e)–(h) 主开发 r4866 + the follow's own adversarial read: a store whose rewrite FAILED withholds «done» — the data marker says the
+    // rewrite OWED (the stores, the verdict, the tries); the next start tries ONLY those stores, cures them, then marks done; said once a
+    // start, with what a person can do; a session meta's own backup is never rewritten; a move that is not whole carries the first start's
+    // verdict; THE LAW (主开发 r4897): the marker NEVER says done while a store is owed (no count). Each start is migrateHomeRename itself
+    // over a placed refusal; the clock is the leg's
+    const LAY0 = JSON.stringify({ l: { cwd: '/home/olduser/proj' } }), META0 = JSON.stringify({ cwd: '/home/olduser/proj', id: 'cw-1' });
+    const markOf = (d) => { try { return JSON.parse(fs.readFileSync(path.join(d, NAME), 'utf8')); } catch { return null; } };
+    const doneOf = (m) => !!m && !Array.isArray(m.owed);
+    const eScene = async (Mod, tag, codes, { move = 'whole', layouts = LAY0, between = null, pre = null } = {}) => {
+      const root = path.join(base, tag), home = path.join(root, 'home', 'userN'), d = path.join(root, 'data'), meta = path.join(d, 'session-meta');
+      fs.mkdirSync(meta, { recursive: true }); fs.mkdirSync(path.join(home, '.vibespace'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'mounts.json'), MOUNTS0); fs.writeFileSync(path.join(d, 'layouts.json'), layouts); fs.writeFileSync(path.join(meta, 'cw-1.json'), META0);
+      if (pre) pre(d, meta);
+      let k = 0, t = 1795000000000;
+      // the projdirs: a WHOLE move names the old user only at its first start (then only the HOME marker does — markedOldUsers); a move
+      // that is NOT whole keeps naming it, and judges its folder old only at the first start (the later ones find it moved)
+      const hk = { staleUsers: () => (move === 'whole' && k > 1 ? [] : ['olduser']), moveUser: () => 1, leftAfterMove: () => (move === 'whole' ? { failed: 0, judged: 1 } : { failed: 1, judged: k === 1 ? 1 : 0 }) };
+      const out = [];
+      for (const code of codes) {
+        k++; t += 11 * 60e3;   // each start past the move's try gap
+        if (between && between[k]) between[k](d, home);   // a hand between two starts
+        const warned = [];
+        const r = await placed(path.sep + 'layouts.json.tmp', code, async () => { const o = Mod.migrateHomeRename({ dataDir: d, metaDir: meta, home, hooks: [hk], log: { log() { }, warn: (...a) => warned.push(a.map(String).join(' ')) }, homeGone: () => true, throwaway: () => false, now: () => t }); await o.written; return o; });
+        out.push({ out: r.out, warned, failSaid: warned.filter((l) => l.includes('could not be rewritten')).length, mounts: fs.readFileSync(path.join(d, 'mounts.json'), 'utf8'), layouts: fs.readFileSync(path.join(d, 'layouts.json'), 'utf8'),
+          meta: fs.readFileSync(path.join(meta, 'cw-1.json'), 'utf8'), metaBackup: fs.existsSync(path.join(meta, 'cw-1.json.pre-home-migrate')) ? fs.readFileSync(path.join(meta, 'cw-1.json.pre-home-migrate'), 'utf8') : null,
+          twice: fs.readdirSync(meta).filter((n) => n.includes('.pre-home-migrate.pre-home-migrate')).length, mark: markOf(d), dir: d });
+      }
+      return out;
+    };
+    const [E1, E2, E3] = await eScene(HR, 'e-real', ['EIO', null, null]);
+    ok(E1.out.length === 1 && E1.out[0].rewrote === 2 && E1.out[0].notMarked === 1 && E1.mounts.includes('/home/userN/proj') && E1.meta.includes('/home/userN/proj') && E1.layouts === LAY0
+      && !doneOf(E1.mark) && JSON.stringify(E1.mark.owed) === '["layouts.json"]' && E1.mark.judgedOld === 1 && !('tries' in E1.mark) && E1.warned.length === 1 && E1.failSaid === 1 && E1.warned[0].includes('layouts.json (EIO: tried again at the next start)'),
+      'B-574d follow (e) ONE store\'s rewrite refused (layouts.json\'s sync, EIO), the others landing: the marker says the rewrite OWED (layouts.json, the verdict; no count) — not done; ONE line this start, naming it and what can be done', { out: E1.out, mark: E1.mark, warned: E1.warned });
+    ok(E2.out.length === 1 && E2.out[0].home === false && E2.out[0].data === true && E2.out[0].rewrote === 1 && !E2.out[0].notMarked && E2.layouts.includes('/home/userN/proj') && doneOf(E2.mark) && E2.warned.length === 0
+      && E2.metaBackup === META0 && E2.twice === 0 && E2.meta === E1.meta,
+      'B-574d follow (e) …the NEXT start (the old user named by the HOME marker only) tries ONLY layouts.json: cured, then the marker DONE; the session meta rewritten at the first start is left as it is and its backup is never rewritten (no backup of a backup)', { out: E2.out, mark: E2.mark, backup: E2.metaBackup, twice: E2.twice });
+    ok(E3.out.length === 0, 'B-574d follow (e) …and the start after it runs nothing (both halves done)', E3.out);
+    // (g) the follow's adversarial read R2: a move that is NOT whole — the later starts judge no folder old (it moved): the first start's
+    // verdict carries in the owed marker, so the owed store is still cured
+    const [G1, G2] = await eScene(HR, 'g-real', ['EIO', null], { move: 'partial' });
+    ok(!doneOf(G1.mark) && G1.mark.judgedOld === 1 && G2.out.length === 1 && G2.out[0].home === true && G2.layouts.includes('/home/userN/proj') && doneOf(G2.mark) && !G2.mark.kept,
+      'B-574d follow (g) a move that is not whole: the second start judges no folder old, yet the owed rewrite runs on the first start\'s verdict — layouts.json cured, marked done (never «kept»)', { first: G1.mark, second: [G2.out, G2.mark] });
+    // (h) THE LAW (主开发 r4897): a store refused at EVERY start stays OWED — never marked done, tried and said once at each start —
+    // and the start that finds it healed cures it and marks done
+    const H = await eScene(HR, 'h-real', ['EIO', 'EIO', 'EIO', 'EIO', null]);
+    ok(H.slice(0, 4).every((x) => !doneOf(x.mark) && JSON.stringify(x.mark.owed) === '["layouts.json"]' && x.warned.length === 1 && x.failSaid === 1 && x.layouts === LAY0) && H.slice(1, 4).every((x) => x.out.length === 1 && x.out[0].rewrote === 0)
+      && H[4].layouts.includes('/home/userN/proj') && doneOf(H[4].mark) && H[4].warned.length === 0,
+      'B-574d follow (h) a store refused at every start (four of them): OWED after each — never marked done, one line each start, tried each start — and the fifth start, the store healed, cures it and marks done', { marks: H.map((x) => x.mark), said: H.map((x) => x.failSaid) });
+    // (h2) a failure no start can mend by itself — bytes that do not parse: the line says what a person can do; once the store is
+    // restored by hand between two starts, the next start cures it (none of the rewrite's failures is a failure by nature)
+    const H2 = await eScene(HR, 'h2-real', [null, null], { layouts: '{ "l": { "cwd": "/home/olduser/proj"', between: { 2: (d) => fs.writeFileSync(path.join(d, 'layouts.json'), LAY0) } });
+    ok(!doneOf(H2[0].mark) && H2[0].warned.length === 1 && H2[0].warned[0].includes('layouts.json (unparsable: its bytes do not parse: move it aside or restore it)') && H2[1].layouts.includes('/home/userN/proj') && doneOf(H2[1].mark),
+      'B-574d follow (h2) a store whose bytes do not parse: owed, the line tells a person to move it aside or restore it; restored by hand, the next start cures it and marks done', { first: [H2[0].mark, H2[0].warned], second: [H2[1].mark, H2[1].layouts] });
+    // (e1) the second read (R1, R-J): a session meta is a <key>.json FILE — a backup an earlier run left (holding /home/<old>), a folder
+    // named like a meta and a set-aside copy are passed by: the first start rewrites the stores and marks done, the backup byte-identical
+    const PREB = (d, meta) => { fs.writeFileSync(path.join(meta, 'cw-0.json.pre-home-migrate'), META0); fs.mkdirSync(path.join(meta, 'sub.json')); fs.writeFileSync(path.join(meta, 'cw-2.json.corrupt-1'), META0); };
+    const bk0 = (x) => fs.readFileSync(path.join(x.dir, 'session-meta', 'cw-0.json.pre-home-migrate'), 'utf8');
+    const [B1] = await eScene(HR, 'e1-real', [null], { pre: PREB });
+    ok(B1.out.length === 1 && B1.out[0].rewrote === 3 && doneOf(B1.mark) && B1.twice === 0 && bk0(B1) === META0 && B1.warned.length === 0,
+      'B-574d follow (e1) an earlier backup holding /home/olduser, a folder named sub.json and a set-aside copy in session-meta are NOT stores: three stores rewritten, marked done, the backup byte-identical, nothing owed', { out: B1.out, mark: B1.mark, warned: B1.warned });
+    // (e4) the second read (R4, R-C): a retry tries ONLY the owed stores — a /home/<old> path recorded into a store that is not owed
+    // between two starts (a paired machine of the old name) stays as recorded
+    const NEWP = (d) => fs.writeFileSync(path.join(d, 'mounts.json'), JSON.stringify({ m: [{ path: '/home/userN/proj' }, { path: '/home/olduser/paired' }] }));
+    const [, R2] = await eScene(HR, 'e4-real', ['EIO', null], { between: { 2: NEWP } });
+    ok(R2.layouts.includes('/home/userN/proj') && R2.mounts.includes('/home/olduser/paired') && doneOf(R2.mark) && R2.out[0].rewrote === 1,
+      'B-574d follow (e4) the retry rewrites ONLY the owed layouts.json: the /home/olduser path recorded into mounts.json after the first start stays as recorded', { mounts: R2.mounts, mark: R2.mark });
+    // (e5) the second read (R-B): a whole move whose HOME marker never landed — no hook names the old user any more (its folders moved)
+    // and no HOME marker does: the OWED data marker names it, so the owed store is still cured (and the HOME marker written, carrying the
+    // first start's verdict)
+    const NOHM = (d, home) => fs.rmSync(path.join(home, '.vibespace', NAME), { force: true });
+    const [, S2] = await eScene(HR, 'e5-real', ['EIO', null], { between: { 2: NOHM } });
+    ok(S2.out.length === 1 && S2.layouts.includes('/home/userN/proj') && doneOf(S2.mark), 'B-574d follow (e5) the HOME marker lost after the first start: the owed data marker names the old user — layouts.json cured, marked done', { out: S2.out, mark: S2.mark });
+    // their REDs (anchored copies): the listing without its file rule; the retry without ONLY; the owed marker named by nobody
+    const LIST = "  try { for (const e of fs.readdirSync(metaDir, { withFileTypes: true })) if (e.isFile() && e.name.endsWith('.json')) stores.push({ f: path.join(metaDir, e.name), key: 'session-meta/' + e.name }); } catch { }\n";
+    const [BM1] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, LIST, "  try { for (const n of fs.readdirSync(metaDir)) stores.push({ f: path.join(metaDir, n), key: 'session-meta/' + n }); } catch { }   // MUTANT: every name a store\n", 'the metas\' file rule'), 'metas-any-name'), 'e1-red', [null], { pre: PREB });
+    ok(BM1.twice > 0 || !doneOf(BM1.mark), 'B-574d follow RED (anchored copy: every name in session-meta a store): the earlier backup is rewritten (a backup of a backup) or the folder makes the rewrite owed — (e1) goes red', { twice: BM1.twice, mark: BM1.mark });
+    const ONLY = '    if (only && !only.has(key)) continue;\n';
+    const [, RM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, ONLY, '', 'the retry\'s owed stores only'), 'retry-all'), 'e4-red', ['EIO', null], { between: { 2: NEWP } });
+    ok(!RM2.mounts.includes('/home/olduser/paired'), 'B-574d follow RED (anchored copy: the retry tries every store): the path recorded after the first start is rewritten — (e4) goes red', RM2.mounts);
+    const OWEDSRC = '    for (const o of owedOldUsers(dataDir, user, homeGone)) oldUsers.add(o);   // B-574d follow: an owed rewrite names its old user too\n';
+    const [, SM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, OWEDSRC, '', 'the owed marker as a source'), 'owed-unnamed'), 'e5-red', ['EIO', null], { between: { 2: NOHM } });
+    ok(SM2.out.length === 0 && SM2.layouts === LAY0 && !doneOf(SM2.mark), 'B-574d follow RED (anchored copy: the owed marker names no old user): with the HOME marker lost the owed store is never tried — (e5) goes red', { out: SM2.out, layouts: SM2.layouts });
+    // RED (anchored copies): the tip 93829d26a's line (the marker written whatever failed); the verdict NOT carried (the R2 road); no bound
+    const MARK = '        if (mark) writeDataMarker(dm, mark, log);\n';
+    const E_OLD = "        if (mark) writeDataMarker(dm, (judgedOld > 0 || marked) ? { at: Date.now(), rewrote, ...(judgedOld > 0 ? {} : { kept: true }) } : mark, log);   // MUTANT: the tip 93829d26a's line — done whatever failed\n";
+    const [EM1, EM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, MARK, E_OLD, 'the owed marker'), 'marker-regardless'), 'e-red', ['EIO', null]);   // stale-pins: kept — the RED copy puts the tip 93829d26a's marker back on purpose
+    ok(doneOf(EM1.mark) && EM2.out.length === 0 && EM2.layouts === LAY0,
+      'B-574d follow RED (anchored copy: the tip 93829d26a\'s marker — done whatever failed): marked done at the first start, layouts.json keeps /home/olduser for good (the next start runs nothing)', { first: EM1.mark, second: [EM2.out, EM2.layouts] });
+    const CARRY = '        const judgedOld = Math.max(!homeDone ? judged : judgedOf(hm), prior ? prior.judgedOld : 0);\n';
+    const [, GM2] = await eScene(M574.load('src/server/home-rename.js', anchored(HRT, CARRY, '        const judgedOld = !homeDone ? judged : judgedOf(hm);   // MUTANT: the verdict not carried\n', 'the carried verdict'), 'verdict-dropped'), 'g-red', ['EIO', null], { move: 'partial' });
+    ok(GM2.layouts === LAY0 && !doneOf(GM2.mark), 'B-574d follow RED (anchored copy: the earlier start\'s verdict not carried): on a move that is not whole the owed store is never cured (layouts.json keeps /home/olduser)', { mark: GM2.mark, layouts: GM2.layouts });
     // RED: each home-rename helper back to the bare write + rename
     const REW = "      renameSynced(f + '.tmp', f, fixed, { where: `[migrate] ${path.basename(f)}`, say: (l) => log.warn(l) });";
     const HSYNC = "    try { await fh.sync(); } catch (e) { if (!SYNC_UNSUPPORTED.has(e && e.code)) throw e; try { log.warn(syncUnsupportedWords('[migrate] home rename: the tries', e.code)); } catch { /* a sink that throws says nothing more */ } }\n";
