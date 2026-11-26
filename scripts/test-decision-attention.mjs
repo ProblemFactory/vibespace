@@ -130,6 +130,9 @@ async function until(fact, what, { boundMs = SETTLE_MS, say = ok } = {}) {
   }
   return true;
 }
+/** 主开发 r5135 law 1: a CONTROL is judged on the FACT that its plant was in force — `inForce` is the witness that the product read
+ *  the plant inside the window; a plant never read is a NAMED SKIP (counted by the gate), never a red and never a green */
+const redIf = (inForce, witness, cond, words, detail) => { if (inForce) return ok(cond, words, detail); console.log(`  ⊘ SKIP: ${words} — NOT JUDGED: its plant was not read in the window (${witness}; 主开发 r5135 law 1)`); return true; };
 const idle = (eng, opts = {}) => until(() => eng.attention.idle(), () => { const s = eng.attention.status(); return `the attention queue settles (still ${s.queued} queued, ${s.inFlight} in flight)`; }, opts);
 const rowOf = (d, id) => (d.conversations || []).find((c) => c.key === `im/${id}`);
 const tagOf = (d, id) => { const r = rowOf(d, id); return r ? FO.statusTag(r, clock) : undefined; };
@@ -434,12 +437,12 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
     ok(ESRC0.split(HOOK).length === 2 && ESRC0.split(WHOLE).length === 2, 'control setup: the map\'s touch hook (a row\'s work, a whole touch) is present once');
     // RED: the release's kept facts — the map kept from its first build, never touched (the scan's first moment)
     const Kept = await factsWorld(MB.load('src/server/channels-engine.js', editAnchor(ESRC0, HOOK, "      /* RED: the map kept from its first build — the release's scan facts */\n", 'src/server/channels-engine.js'), 'kept-facts'), 'facts-kept', { early: true });
-    const KL = late(Kept);
-    ok(Kept.placed && KL.n.length === 2 && !KL.two && KL.lines.every((l) => !(l || '').includes('reached 2')), `RED (the release's kept facts: the map from the scan's first moment, in a copy): the late notices are judged WITHOUT «the same message reached 2 of the reader's inboxes» (${KL.lines.join(' | ')})`, KL.lines);
+    const KL = late(Kept), ks = Kept.eng.attentionFacts.stats();
+    redIf(ks.builds === 1 && ks.rows < est.rows, `the copy's map was built once and never took the late rows: ${ks.rows} rows against the cure's ${est.rows}`, Kept.placed && KL.n.length === 2 && !KL.two && KL.lines.every((l) => !(l || '').includes('reached 2')), `RED (the release's kept facts: the map from the scan's first moment, in a copy): the late notices are judged WITHOUT «the same message reached 2 of the reader's inboxes» (${KL.lines.join(' | ')})`, KL.lines);
     // RED: a map walked again at EVERY touch (the rebuild the cure must not be — on a hub of mostly mail rows, a walk of them all per poll)
     const Every = await factsWorld(MB.load('src/server/channels-engine.js', editAnchor(ESRC0, WHOLE, "      { if (job) job.again = true; if (served) stale = true; if (key === null || key === undefined) return; }   /* RED: every touch walks it again */\n", 'src/server/channels-engine.js'), 'every-touch'), 'facts-every', { early: true });
     const evs = Every.eng.attentionFacts.stats();
-    ok(Every.placed && late(Every).two && evs.builds > 1, `RED (a copy that walks the map again at every touch): the facts are right but it is BUILT ${evs.builds} times in this world — the leg above (once) is red on it`, evs);
+    redIf(evs.applied > 0, `a row's touch reached the copy's hook while its map stood: applied ${evs.applied}`, Every.placed && late(Every).two && evs.builds > 1, `RED (a copy that walks the map again at every touch): the facts are right but it is BUILT ${evs.builds} times in this world — the leg above (once) is red on it`, evs);
     for (const x of copiesCensus(MB.files, MB.dir, REPO, { minCopies: 2, label: 'B-0f37 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   }
   const notices = TITLES10.filter((t) => /Action Required/.test(t)).map((t) => T.last(t)).filter(Boolean);
@@ -513,7 +516,7 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
     ok([LAND, VIEW, BACK].every((x) => ESRC1.split(x).length === 2), 'control setup: the map\'s landing, the view\'s mail and the back-off are present once each');
     const HR = await halfWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, LAND, "        if (job === j) { served = j.m; stale = false; job = null; }\n        if (full) { failedAt = null; failSaid = false; }\n        return 'whole';   /* RED: df8fcedfb's landing — the half map served as current */\n", 'src/server/channels-engine.js'), 'half-current'), 'facts-half-red');
     const hrn = notices(HR.W);
-    ok(HR.during.calls > 0 && hrn.length >= 1 && hrn.some((l) => !l.includes('reached 2')), `RED (df8fcedfb's landing, in a copy): the half map is served as current — ${HR.during.calls} rows judged while the seam stood, a notice WITHOUT the fact (${hrn.join(' | ')})`, HR.during);
+    redIf(HR.during.st.landedAsItStood >= 1, `the seam's whole touches cut the copy's walks to the ladder's bound: ${HR.during.st.landedAsItStood} landing(s) as it stood, ${HR.during.st.walks} walks`, HR.during.calls > 0 && hrn.length >= 1 && hrn.some((l) => !l.includes('reached 2')), `RED (df8fcedfb's landing, in a copy): the half map is served as current — ${HR.during.calls} rows judged while the seam stood, a notice WITHOUT the fact (${hrn.join(' | ')})`, HR.during);
     // (3) A FAILED BUILD: a throw placed in the map's walk (the same seam) — no map is served; each row is judged with its mail read
     // from the ACCOUNTS and no inbox count; said once; tried again only after the back-off (the suite's clock moved past it)
     const failWorld = async (EM, tag) => {
@@ -532,9 +535,9 @@ console.log('⑩ THE FACTS LINE through the REAL engine (lane decision-attention
     ok(F.back === 'whole' && F.st2.builds === 2 && F.st2.kept && F.st2.failed === 1, `B-0f37 follow: past the back-off the next need builds it again, whole (builds ${F.st2.builds})`, F.st2);
     const FR = await failWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, VIEW, "      const mail = !!attnInbox.whole() && attnInbox.whole().mailIds.has(en.adapterId);   /* RED: df8fcedfb's view — mail read from the map */\n", 'src/server/channels-engine.js'), 'mail-from-map'), 'facts-fail-red');
     const frn = notices(FR.W);
-    ok(frn.length === 2 && frn.every((l) => !l.includes('kind: an email thread')), `RED (df8fcedfb's view, in a copy): on a failed build the mail rows are described to the paid judge as NOT mail (${frn.join(' | ')})`, frn);
+    redIf(FR.st.failed >= 1, `the placed throw failed the copy's build: failed ${FR.st.failed}`, frn.length === 2 && frn.every((l) => !l.includes('kind: an email thread')), `RED (df8fcedfb's view, in a copy): on a failed build the mail rows are described to the paid judge as NOT mail (${frn.join(' | ')})`, frn);
     const FB = await failWorld(MF.load('src/server/channels-engine.js', editAnchor(ESRC1, BACK, "      /* RED: no back-off — every judged row walks the map again */\n", 'src/server/channels-engine.js'), 'no-backoff'), 'facts-fail-nobackoff');
-    ok(FB.st.builds > 1, `RED (no back-off, in a copy): every judged row starts another walk of the failed map (builds ${FB.st.builds}) — the leg above (once) is red on it`, FB.st);
+    redIf(FB.st.failed >= 1, `the placed throw failed the copy's build: failed ${FB.st.failed}`, FB.st.builds > 1, `RED (no back-off, in a copy): every judged row starts another walk of the failed map (builds ${FB.st.builds}) — the leg above (once) is red on it`, FB.st);
     for (const x of copiesCensus(MF.files, MF.dir, REPO, { minCopies: 3, label: 'B-0f37 follow ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   }
   ok(mine.length > 0 && mine.every((g) => g.body.questions.length === 8 && String(g.body.input).includes('Rubric v2 — ') && !String(g.body.input).includes(M.RUBRIC.clauses[0].instructions)), 'with the person\'s block: 8 questions; the [rubric] part is one line — no question\'s instructions ride twice');

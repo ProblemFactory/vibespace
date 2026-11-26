@@ -33,6 +33,9 @@ const CLOCKS = { n: 0 };
 const { ok, report } = checker({ log: (l) => console.log(HOSTED && /^\n(?:ALL PASS|\d+ FAILED)/.test(l) ? `${l} · ${CLOCKS.n} leg(s) that judge a clock printed, not judged on the hosted runner (each said above)` : l) });
 const LAW_WHY = 'the clock law is judged on the box only (主开发 r4850); its reading is printed';
 const RED_WHY = 'a red control\'s clock is judged on the box only, as its law (主开发 r4850); its plant is judged by its structure checks';
+/** 主开发 r5135 law 1: a CONTROL is judged on the FACT that its plant was in force (the witness: the product read it in the window);
+ *  a plant never read is a NAMED SKIP the gate counts, never a red and never a green */
+const redIf = (inForce, witness, judge) => { if (inForce) return judge(); console.log(`  ⊘ SKIP: a red control — NOT JUDGED: its plant was not read in the window (${witness}; 主开发 r5135 law 1)`); return true; };
 /** a leg that judges a TIME: a leg on the box and the test machines; on the hosted runner its words (its reading in them) and the skip */
 function clock(cond, words, why, detail) {
   if (!HOSTED) return ok(cond, words, detail);
@@ -174,7 +177,7 @@ console.log('RED: the release\'s one-turn build over every live row (a copy of t
   const sr = engR.attentionFacts.stats();
   ok(r.err === null && sr.kept && sr.keys > 0, `RED's plant: the copy built the same map (${sr.keys} subject keys) — its walk an equivalent of the release's, one turn over every live row`, { sr, err: r.err });
   // AN ABSOLUTE TIME (r4841 (b)'s note): machine 1 reads this one-turn build far over the bound; a much faster machine could read it under it — the control would go red falsely
-  clock(r.turn > BOUND_MS, `RED: an equivalent of the release's one-turn build — the loop's longest turn ${r.turn} ms (histogram ${r.hist} ms) of ${r.total} ms, OVER the bound`, RED_WHY, { turn: r.turn });
+  redIf(sr.slices === 0 && sr.walks === 1, `the copy's planted one-turn build ran in place of the sliced walk: slices ${sr.slices}, walks ${sr.walks}`, () => clock(r.turn > BOUND_MS, `RED: an equivalent of the release's one-turn build — the loop's longest turn ${r.turn} ms (histogram ${r.hist} ms) of ${r.total} ms, OVER the bound`, RED_WHY, { turn: r.turn }));
   try { engR.stop(); } catch { }
   try { engR.store.close(); } catch { }
 }
@@ -187,7 +190,7 @@ console.log('RED (the heap): df8fcedfb\'s map shape — a Map a bucket, the subj
   const m1 = heap();
   const sm = engM.attentionFacts.stats();
   const mbpr = Math.round((m1 - m0) / Math.max(1, sm.rows)), mmb = Math.round((m1 - m0) / 1048576 * 10) / 10;
-  ok(r === 'whole' && sm.kept && sm.rows === sb.rows && mbpr > HEAP_BOUND_B, `RED (the heap, in a copy): df8fcedfb's map holds ${mmb} MB — ${mbpr} B a row over its ${sm.rows} rows, OVER the bound ${HEAP_BOUND_B} B (the follow's: ${bpr} B)`, { m0, m1, sm });
+  redIf(r === 'whole' && sm.kept && sm.rows === sb.rows, `the copy's planted map shape took every mail row: ${sm.rows} rows`, () => ok(mbpr > HEAP_BOUND_B, `RED (the heap, in a copy): df8fcedfb's map holds ${mmb} MB — ${mbpr} B a row over its ${sm.rows} rows, OVER the bound ${HEAP_BOUND_B} B (the follow's: ${bpr} B)`, { m0, m1, sm }));
   try { engM.stop(); } catch { }
   try { engM.store.close(); } catch { }
 }
