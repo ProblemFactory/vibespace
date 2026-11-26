@@ -395,7 +395,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     try { ws = new WebSocketImpl(w.url, { perMessageDeflate: false, handshakeTimeout: connectTimeoutMs, maxPayload: 16 * 1024 * 1024 }); } catch (e) { w.state = 'down'; w.ready(); say('connect:' + w.profileId, `${w.profileId}: the watch could not connect — ${e && e.message}`); return; }
     w.ws = ws;
     ws.on('open', async () => {
-      w.state = 'open'; w.openedAt = now(); w.fencesRearmed = false;
+      w.state = 'open'; w.openedAt = now(); w.fencesRearmed = false; w.tabWatched = new Set(); // r4689: a new socket holds no kernel lease (the old one's ended with it)
       // lane browser-passkey: a HEADED browser's passkey window is on this computer's desktop (the banner says so) — the browser's own word
       call(w, 'Browser.getVersion').then((v) => { const ua = v && v.result ? String(v.result.userAgent || '') : ''; w.headed = ua ? !/HeadlessChrome/.test(ua) : null; }).catch(() => { /* unknown */ });
       await probeKernel(w); // lane browser-surfaces: ONE source per browser — known before the first tab is tracked
@@ -1113,7 +1113,22 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** Every tab of the browser FROZEN (measured: the only act that stops an Xvfb window drawing — IDLE_PAINT_PROOF). The tabs
    *  in front are remembered: a frozen page is hidden, and only its tab strip shows it again (thawPaint). */
-  async function freezePaint(profileId) {
+  /** 主开发 r4689 / r4691: the kernel's command on THIS watch's own browser connection (src/browser-engines.js TAB_WATCH_COMMAND,
+   *  `{targetId, watch}`), bounded by the watch's call bound, judged by ENGN.tabWatchAnswer → {ok, watching, activeCount} | {ok:false,
+   *  code}. The tabs it watches are kept here (`w.tabWatched`) so the freeze never puts one frozen; the kernel ends every lease when
+   *  this socket disconnects (a restart of VibeSpace, a watch that went down), so nothing here outlives it. Only the keeper asks
+   *  (and only for a browser whose launch had the word stated AND measured). */
+  async function setTabWatch(profileId, targetId, watch) {
+    const w = watches.get(String(profileId || ''));
+    const tid = String(targetId || '').toUpperCase();
+    if (!w || w.state !== 'open' || !/^[0-9A-F]{32}$/.test(tid)) return { ok: false, code: 'tab_watch_unavailable' };
+    const ENGN = require('../browser-engines.js');
+    const a = ENGN.tabWatchAnswer(await settle(call(w, ENGN.TAB_WATCH_COMMAND, { targetId: tid, watch: !!watch }, null, callTimeoutMs)));
+    if (!w.tabWatched) w.tabWatched = new Set();
+    if (a.ok && a.watching) w.tabWatched.add(tid); else w.tabWatched.delete(tid);
+    return a;
+  }
+  async function freezePaint(profileId, { stillIdle = null } = {}) {
     const w = watches.get(String(profileId || ''));
     if (!w || w.state !== 'open' || w.paint === 'frozen' || w.thawing || w.open.size) return { ok: false };
     // rows B-98f5 / B-bcf8: a browser whose flip tab a driver would take is never frozen — nothing could show its pages again safely.
@@ -1126,7 +1141,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   async function freezeNow(w) {
     if (!w.flipChecked) { const tc = now(); if (!(await flipCheck(w))) return { ok: false, why: 'flip_tab_taken' }; if (w.state !== 'open' || w.paint === 'frozen' || w.thawing || w.open.size || (w.lastVerbAt || 0) >= tc) return { ok: false }; }
-    const tabs = [...w.targets.values()].filter((e) => e.sid);
+    // r4689: a tab the kernel draws for a viewer is never put frozen (its lease keeps it painting; the kernel's own law)
+    const tabs = [...w.targets.entries()].filter(([tid, e]) => e.sid && !(w.tabWatched && w.tabWatched.has(String(tid).toUpperCase()))).map(([, e]) => e);
     const fronts = []; const t0 = now(); let unread = 0;
     // r4095 (2): the visibility reads at once, each its own 1 s bound (as the window reads below): a tab that never replies costs the
     // pass about a second, never a second per tab (the keeper's tick awaits its sweep)
@@ -1142,6 +1158,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // (cure 4: the reads at once — each its own 1 s cap, so the freeze waits at most ~1 s for them, never a second per front)
     const wins = new Map(); (await Promise.all(fronts.map((tid) => windowOfTarget(w, tid)))).forEach((win, i) => wins.set(fronts[i], win));
     if (w.thawing || (w.lastVerbAt || 0) >= t0) return { ok: false }; // a verb arrived while the fronts were read
+    if (typeof stillIdle === 'function' && !stillIdle()) return { ok: false, why: 'viewer' }; // r4689: a viewer arrived while the fronts were read (it may be watching a tab)
     // r2: a front another conversation has not shown again since the last freeze stays owed to it (it is hidden now, not visible)
     const owed = [...(w.hiddenFronts || [])].filter((tid) => w.targets.has(tid));
     w.frontWin = new Map([...[...(w.frontWin || new Map())].filter(([tid]) => owed.includes(tid)), ...wins]);
@@ -5950,6 +5967,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     answerPasskey, passkeyRegister, passkeyList, passkeyForget, passkeyPolicy, passkeySwitch, dropPasskeys, passkeyCounts, passkeyCards, // lane passkey-ui: + the counts // int258: + the chat cards a rebuild draws // lane passkey-store-core: the store, its cards, its grants
     passkeysHeld: () => { if (pks) pkRead(); return pkHeldFacts(); }, _passkeyHold: pkStoreHold, // r3261: the store's hold, asked by the keeper (a profile's removal) and the digest; the suite's read again
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
+    setTabWatch, // 主开发 r4689: the kernel draws a watched tab that is not in front (asked only by the keeper, only where stated AND measured)
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     retryOwedShows, // r4176 (b): the idle-paint thaw's failed shows tried again — the keeper's sweep asks it while a viewer watches
     stillTabs, recheckLeft, // B-bcf8 (r4256): the tabs whose picture is still, by code (the keeper's digest carries them) / a left tab come forward

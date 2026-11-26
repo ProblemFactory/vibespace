@@ -243,6 +243,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   openWindow: openWindowFn = null, closeTarget: closeTargetFn = null, openTabInWindow: openInWindowFn = null, windowOf: windowOfFn = null, openTabByActivate: activateFn = null, // verify r2 T1: rung 2 of a later tab (browser-viewport.openTabByActivate)
   markSayMs = null, // B-e674 follow (r694 (4)): how long a keeper create may stay in flight before ONE journal line says so (KEEPER_MAKE_SAY_MS; a gate's fast clock)
   firstEntryIs: firstEntryFn = null, // row B-0e4a: does a restored page's FIRST history entry carry the lease's mark — `(cdpUrl, targetId, expected) → true|false|null` (browser-viewport.firstEntryIs); injectable for the gate
+  watchTarget: watchTargetFn = null, // 主开发 r4689: the screencast of a watched tab — `(cdpUrl, targetId, hooks) → {ok, close}` (browser-viewport.watchTarget); injectable for the gate (the order: the kernel's watch ON before it)
   visibilityOf: visibilityOfFn = null, // B-e674 unit 1: is a named tab visible — `(cdpUrl, targetId) → {ok, visibility}` (browser-viewport.visibilityOf); injectable for the gate
   // lane engine-plugin (design-custom-browser-plugin §1): THE ENGINE REGISTRY (src/server/browser-engines.js, or a getter) — a
   // profile whose `browser` is {kind:'plugin', id} runs that engine's kernel (its probe + launch options asked at each launch,
@@ -1928,10 +1929,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // B-9584 U2a: what the start SAYS — the engine's echo of what the browser really got (none ⇒ «not confirmed», never «applied»)
     // and every choice it could not follow (U1's `unfollowed`); nothing for a profile that sets nothing
     const environment = p.environment ? { applied: lo.launch.applied || null, confirmed: !!lo.launch.applied, unfollowed: envR.unfollowed } : null;
-    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, label: engine.label || null, geolocationIsolated: engine.geolocationIsolated === true }, ...(environment ? { environment } : {}) };   // B-9584 r3946: + the launch's own probe fact (recordedChoice records it)
+    // 主开发 r4689 / r4691: A WATCHED TAB DRAWS WHILE NOT IN FRONT — only where the engine STATES the word (its manifest, the loader's
+    // one ask) AND its probe MEASURED it, both at THIS launch; the record keeps the one boolean (recordedChoice), never a name
+    const tabWatch = engine.tabWatch === true && typeof engs().statesTabWatch === 'function' && engs().statesTabWatch(c.id) === true;
+    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, egress, engine: { id: c.id, version: v.version, ...(tabWatch ? { tabWatch: true } : {}), label: engine.label || null, geolocationIsolated: engine.geolocationIsolated === true }, ...(environment ? { environment } : {}) };   // B-9584 r3946: + the launch's own probe fact (recordedChoice records it)
   }
   /** What a launch RECORDS it was asked to run (`rec.browserChoice`): the choice, + an engine's version (the probe's fact). */
-  const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version, geolocationIsolated: be.engine.geolocationIsolated === true } : {}) } : { kind: 'default' });   // B-9584 r3795: what the launched program's probe said of its place (what RUNS)
+  const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version, geolocationIsolated: be.engine.geolocationIsolated === true } : {}), ...(be && be.engine && be.engine.tabWatch === true ? { tabWatch: true } : {}) } : { kind: 'default' });   // B-9584 r3795: what the launched program's probe said of its place (what RUNS) // r4689: + the launch's tabWatch (states AND measures)
   /** ONE mark + ONE For-you item per (profile, choice) until it is resolved (the build is back, or the user picks another). */
   function noteBuildMissing(p, c, v, engine = null) {
     const what = c.kind === 'build' ? c.version : c.kind === 'plugin' ? c.id : c.path;
@@ -6741,7 +6745,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       const vw = viewersOf(p);
       const v = BIdle.idlePaintVerdict({ enabled, viewers: vw.n, lastViewerAt: vw.at, lastVerbAt: f.lastVerbAt, now: t, busy: f.busy, frozen: f.frozen });
       try {
-        if (v.act === 'freeze') { const r = await paintWatch.freezePaint(rec.profileId); if (r && r.ok) log.info?.(`[browser] ${rec.profileId}: nobody watches or drives it for ${Math.round(BIdle.IDLE_PAINT_MS / 1000)} s — its ${r.tabs} tab(s) stop drawing until the next verb or viewer`); }
+        if (v.act === 'freeze') { const r = await paintWatch.freezePaint(rec.profileId, { stillIdle: () => viewersOf(p).n === 0 }); /* r4689: the viewer count asked again right before the frozen call */ if (r && r.ok) log.info?.(`[browser] ${rec.profileId}: nobody watches or drives it for ${Math.round(BIdle.IDLE_PAINT_MS / 1000)} s — its ${r.tabs} tab(s) stop drawing until the next verb or viewer`); }
         else if (v.act === 'thaw') await paintWatch.thawPaint(rec.profileId);
         else if (vw.n > 0 && f.owedShows > 0 && !f.busy && typeof paintWatch.retryOwedShows === 'function') { const pid = rec.profileId, pr = paintWatch.retryOwedShows(pid); if (pr && typeof pr.catch === 'function') pr.catch((e) => log.warn?.(`[browser] ${pid}: idle paint retry of a failed show failed: ${e && e.message}`)); } // r4176 (b) / r4186 (1): a viewer watching a front whose show failed — tried again, never while a verb runs or a dialog is open (busy), never awaited by the tick
         if (vw.n > 0 && !f.busy && !f.frozen && typeof paintWatch.recheckLeft === 'function') { const pid = rec.profileId; Promise.resolve(paintWatch.recheckLeft(pid)).then((r) => { if (r && r.cleared) pushPaintIfMoved(); }, (e) => log.warn?.(`[browser] ${pid}: the still-picture recheck failed: ${e && e.message}`)); } // B-bcf8 (r4256): a left tab come forward while a viewer watches — reads only, its own statement (the chain above is untouched), never awaited by the tick
@@ -9564,7 +9568,54 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     ensureLoaded();
     if (!target || !target.ok || !TBS.TARGET_ID_RE.test(String(targetId || ''))) return { ok: false, code: 'no_tab', error: 'no tab' }; // live-watch-polish G5: the code the client words
     const VP = require('./browser-viewport.js');
-    return withCdpUrl(target, (url) => VP.watchTarget(url, String(targetId).toUpperCase(), { ...hooks, firstFrameMs: WIN.WATCH_FIRST_FRAME_MS, pollMs: WIN.WATCH_POLL_MS }));
+    const id = String(targetId).toUpperCase();
+    // 主开发 r4689 / r4691: on a browser whose engine stated AND measured tabWatch at its launch, the kernel's command ON BEFORE the
+    // screencast starts (a never-shown tab gets its bounds then), OFF when this watch ends; every other browser: null, today's road
+    const kw = await tabWatchOn(target, id);
+    let r;
+    const watchTarget = typeof watchTargetFn === 'function' ? watchTargetFn : VP.watchTarget;
+    try { r = await withCdpUrl(target, (url) => watchTarget(url, id, { ...hooks, firstFrameMs: WIN.WATCH_FIRST_FRAME_MS, pollMs: WIN.WATCH_POLL_MS })); }
+    catch (e) { if (kw && kw.on) tabWatchOff(target, id); throw e; }
+    if (!kw) return r;
+    if (!r || !r.ok) { if (kw.on) tabWatchOff(target, id); return r; }
+    let closed = false;
+    const close0 = r.close;
+    return { ...r, tabWatch: kw.on ? { live: true } : { live: false, code: kw.code, ...(kw.code === 'too_many_watched_tabs' ? { limit: kw.limit || ENG.TAB_WATCH_LIMIT } : {}) },
+      close: () => { if (closed) return; closed = true; try { if (typeof close0 === 'function') close0(); } finally { if (kw.on) tabWatchOff(target, id); } } };
+  }
+  /** r4689: the watched tabs of each browser, COUNTED — two viewers of one tab hold it until both leave (`profileId|TARGET` → n). In
+   *  memory only: a hub restart keeps none, and the kernel ends every lease when the page watch's socket that took it disconnects. */
+  const tabWatchCounts = new Map();
+  const profileOfTarget = (target) => {
+    if (!target) return null;
+    if (target.profileId) return String(target.profileId);
+    const bk = target.browserKey || String(target.ns || target.sessionName || '').replace(/^vs-/, '');
+    const e = bk ? ephemeralFor(bk) : null;
+    return e && e.profileId ? String(e.profileId) : null;
+  };
+  /** → null (not this browser's road: no tabWatch at its launch, no page watch) | {on:true} | {on:false, code, limit?} — bounded (the page
+   *  watch's own call bound), never on the loop's hot path, said once in the journal when the kernel refuses (a code and a count only). */
+  async function tabWatchOn(target, id) {
+    const pid = profileOfTarget(target);
+    const rec = pid ? reg.browsers[pid] : null;
+    if (!rec || !rec.browserChoice || rec.browserChoice.tabWatch !== true || !paintWatch || typeof paintWatch.setTabWatch !== 'function') return null;
+    const k = `${pid}|${id}`;
+    if ((tabWatchCounts.get(k) || 0) > 0) { tabWatchCounts.set(k, tabWatchCounts.get(k) + 1); return { on: true }; }   // another viewer holds it ON
+    let a = null;
+    try { a = await paintWatch.setTabWatch(pid, id, true); } catch { a = null; }
+    if (a && a.ok && a.watching === true) { tabWatchCounts.set(k, (tabWatchCounts.get(k) || 0) + 1); return { on: true }; }
+    const code = (a && a.code) || 'tab_watch_failed';
+    log.log?.(`[browser] ${pid}: a viewer's watched tab is not drawn by its kernel (${code}${a && a.activeCount != null ? `, ${a.activeCount} watched` : ''}) — it stays a still every half second`);
+    return { on: false, code, limit: a && a.limit ? a.limit : null };
+  }
+  function tabWatchOff(target, id) {
+    const pid = profileOfTarget(target);
+    if (!pid) return;
+    const k = `${pid}|${id}`;
+    const n = tabWatchCounts.get(k) || 0;
+    if (n > 1) { tabWatchCounts.set(k, n - 1); return; }
+    tabWatchCounts.delete(k);
+    Promise.resolve().then(() => (paintWatch && typeof paintWatch.setTabWatch === 'function' ? paintWatch.setTabWatch(pid, id, false) : null)).catch(() => { /* the kernel ends it with the socket anyway */ });
   }
 
   const api = {
