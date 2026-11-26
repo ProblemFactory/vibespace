@@ -106,7 +106,7 @@ await pageReady(PORT, 'boot');
 await sleep(1500);
 
 // ── THE GESTURE DRIVER (test-chat-paging §4c's: its constants, the view's open, the trim witness and runGestures — copied verbatim, §4h's hooks in it) ──
-const LIST_H = 790;
+const LIST_H = 650;   // THE SECTION's OWN GEOMETRY (主开发 r4847): the list stands 650 px tall on every machine — the hosted runner's own height, below the kit's (706) and the box's — so no leg reads a distance its machine happens to give (test-chat-paging's §4c keeps the owner's 790)
 const CADENCE = { slow: { notches: 1, deltaY: 120, gap: 0, settle: 1500 }, mid: { notches: 6, deltaY: 120, gap: 70, settle: 1500 }, fast: { notches: 4, deltaY: 700, gap: 30, settle: 2000 }, hold: { notches: 40, deltaY: 300, gap: 100, settle: 2400 }, shortHold: { notches: 10, deltaY: 300, gap: 100, settle: 700 }, tail1: { notches: 1, deltaY: 300, gap: 0, settle: 900 }, tail2: { notches: 2, deltaY: 300, gap: 150, settle: 900 }, tail3: { notches: 3, deltaY: 300, gap: 150, settle: 900 } };
 const OPEN_HUGE = (sid, cwd, title) => `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -432,7 +432,7 @@ const RACE_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.arm
   const v = window.__v, list = v._messageList, now = performance.now();
   const topCard = () => { const st = list.scrollTop; for (const el of list.children) { const cl = el.classList; if (el._isSeekSentinel || !cl || !cl.contains('chat-msg') || cl.contains('chat-run-header') || cl.contains('chat-run-footer')) continue; if (el.offsetHeight > 0 && el.offsetTop + el.offsetHeight > st) return el; } return null; };
   if (R.step === 0 && !R.natural && now - R.landedAt < 1500) return false;
-  if (R.step === 0) { R.A = topCard(); list.scrollTop = list.scrollTop - 200; R.step = 1; R.at = now; return false; }
+  if (R.step === 0) { R.A = topCard(); list.scrollTop = list.scrollTop - Math.round(list.clientHeight / 4); R.step = 1; R.at = now; return false; }   // a quarter of the list (r4847: distances from the list's own height)
   if (R.step === 1) { if (now - R.at < 200) return false;
     const B = topCard(), A = R.A;
     if (!A || !B || A === B || !(B.compareDocumentPosition(A) & Node.DOCUMENT_POSITION_FOLLOWING)) { R.step = -1; return true; }   // no scene (named by the leg)
@@ -440,7 +440,7 @@ const RACE_UNTIL = `(() => { const R = window.__ral; if (!R) return false; R.arm
     R.B = B; R.step = 2; R.at = now; return false; }
   if (R.step === 2) { if (now - R.at < 150) return false;
     const lt = list.getBoundingClientRect().top;
-    list.scrollTop = list.scrollTop - 200;                       // the second notch's scroll …
+    list.scrollTop = list.scrollTop - Math.round(list.clientHeight / 4);   // the second notch's scroll …
     const mid = R.B.getBoundingClientRect().top - lt;
     if (R.control && v._gapSettle) { const A = R.A; v._gapSettle.card = () => A; R.aReadable = v._readCardInView(A, list.scrollTop, list.scrollTop + list.clientHeight); }   // the control: the card from before the previous notch (judged only where the product would read it)
     R.forcing = 1; v._updateRuns(); R.forcing = 0;               // … and a rebuild in the same task, before the watch's frame
@@ -610,7 +610,7 @@ const firstHoldOn = async (label, blind, after, cadence = 'hold') => {
   const out = { label, row, law, dev: row && row.after.topDev != null ? Math.round(row.after.topDev + row.wheelPx) : null, slabs: n('gapUp:done'), carries: n('wheelCarry', 'gapUp:carry'),
     reader: ring.filter((e) => e.tag === 'gapUp:reader').map((e) => [e.px, e.rest]), settle: ring.filter((e) => e.tag === 'gapUp:settle').map((e) => e.px), less: ring.filter((e) => e.tag === 'wheelCarry' && e.less).map((e) => [e.px, e.less]) };
   console.log(`  [first hold ${label}] per notch: ${law.why || `carried + landing ${law.carried} px (${law.L + 1} notch(es)), then the worst notch or settle ${law.worst} px, ${law.lost} read(s) lost; settles ${JSON.stringify(law.labels)}; ${law.unquiet} read(s) not quiet in 3 s (the longest wait ${law.maxWait} ms)`}; notches ${JSON.stringify(law.extras || [])}; settles ${JSON.stringify(law.settles || [])}`);
-  out.after = afterOut; out.zoom = zoomNow;
+  out.after = afterOut; out.zoom = zoomNow; out.ch = r.opened?.ch ?? null;
   if (afterOut) console.log(`  [first hold ${label}] after the hold: ${JSON.stringify(afterOut)}`);
   console.log(`  [first hold ${label}] the original card ${out.dev} px past the wheel at the end (rows growing below the reading line count there); slabs ${out.slabs}, carried landings ${out.carries} ${JSON.stringify(out.less)}; (1') ${JSON.stringify(out.reader)}; (2) answered ${JSON.stringify(out.settle)}`);
   return out;
@@ -665,37 +665,54 @@ const CARRY_SAME_TASK = (blind) => `(async () => { ${READ_TOP}
   await paint(); await new Promise((r) => setTimeout(r, 300)); await paint();
   return { ok: true, alive: true, moved: Math.round((top.getBoundingClientRect().top - lt()) - off0), carry: Math.round(60 * (v._listZoom?.() || 1)) };
 })()`;
-const SEARCH_OPEN = (stopFirst) => `(async () => { ${READ_TOP}
+// THE SEARCH SCENE, ONE PAGE (主开发 r4843 — the hosted proof a7607418e read the scene at 0 of 3 depths on all four tries: the twin page
+// stood elsewhere (30356 against 30133, another kind of card at the reading line), 2 px apart (the scrollTops had to be equal), or the
+// scene page dropped its slab before the press (the window left message 0 on the 650 px list); on the kit the scene held only by its
+// re-read). THE TWIN IS THE SAME PAGE: the scene reads search open and closed WITH the watch, then stops the watch and reads it again
+// in the browser's own world — the same card, from where the first turn left it: comparable by construction. THE SCENE's THREE
+// PRECONDITIONS are read right before the press (the watch alive, the slab in the page, a run header folded above the reading line),
+// each named when it fails; the never-clause is judged only where they held
+const SEARCH_OPEN = `(async () => { ${READ_TOP}
   const v = window.__v; await paint();
-  if (${stopFirst ? 1 : 0}) v._stopGapSettle('scene: the browser anchoring alone');   // the comparison: the same scene in the browser's own world
   const st = list.scrollTop, top = topCard();
   if (!top || !v._search || !v._search._bar) return { ok: false, why: 'no card or no search bar' };
+  const alive = !!v._gapSettleRO, gap = list.querySelectorAll(':scope > .chat-gap-msg').length;
   const headersAbove = [...list.querySelectorAll(':scope > .chat-run-header')].filter((h) => h.offsetTop + h.offsetHeight <= st).length;
-  const off0 = top.getBoundingClientRect().top - lt(), alive = !!v._gapSettleRO, gap = list.querySelectorAll(':scope > .chat-gap-msg').length;
-  const seq0 = (v._traceRing || []).length ? v._traceRing[v._traceRing.length - 1].seq : 0, st0 = Math.round(list.scrollTop);
-  v._search.open();
-  await new Promise((r) => setTimeout(r, 600)); await paint();
-  const off1 = top.isConnected ? top.getBoundingClientRect().top - lt() : null;
-  v._search._bar.classList.add('hidden'); v._search._clearSearch();
-  await new Promise((r) => setTimeout(r, 600)); await paint();
-  const off2 = top.isConnected ? top.getBoundingClientRect().top - lt() : null;
-  const ring = (v._traceRing || []).filter((e) => e.seq > seq0 && /^(runsRestore|gapUp:|anchor|wheelCarry|stableHeights|extend|trim)/.test(e.tag)).map((e) => e.tag + JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !['tag', 'seq', 't'].includes(k)))).slice(0, 90));
-  return { ok: true, alive, gap, headersAbove, open: off1 == null ? null : Math.round(off1 - off0), closed: off2 == null ? null : Math.round(off2 - off0), st0, ws: v._windowStart, we: v._windowEnd, card: (top.className || '').replace(/chat-/g, '').slice(0, 40), ring: ring.slice(0, 12) };
+  const base = { alive, gap, headersAbove, st0: Math.round(st), ws: v._windowStart, we: v._windowEnd, card: (top.className || '').replace(/chat-/g, '').slice(0, 40) };
+  if (!alive || !gap || !headersAbove) return { ok: false, why: 'the scene did not hold: ' + [!alive && 'the watch had ended', !gap && 'the slab had been dropped', !headersAbove && 'no run header folded above the reading line'].filter(Boolean).join(', '), ...base };
+  const turn = async () => {
+    const off0 = top.getBoundingClientRect().top - lt(), s0 = Math.round(list.scrollTop);
+    const seq0 = (v._traceRing || []).length ? v._traceRing[v._traceRing.length - 1].seq : 0;
+    v._search.open();
+    await new Promise((r) => setTimeout(r, 600)); await paint();
+    const off1 = top.isConnected ? top.getBoundingClientRect().top - lt() : null;
+    v._search._bar.classList.add('hidden'); v._search._clearSearch();
+    await new Promise((r) => setTimeout(r, 600)); await paint();
+    const off2 = top.isConnected ? top.getBoundingClientRect().top - lt() : null;
+    const ring = (v._traceRing || []).filter((e) => e.seq > seq0 && /^(runsRestore|gapUp:|anchor|wheelCarry|stableHeights|extend|trim)/.test(e.tag)).map((e) => e.tag + JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !['tag', 'seq', 't'].includes(k)))).slice(0, 90));
+    return { s0, open: off1 == null ? null : Math.round(off1 - off0), closed: off2 == null ? null : Math.round(off2 - off0), ring: ring.slice(0, 8) };
+  };
+  const watch = await turn();                                                      // the scene: the watch alive
+  v._stopGapSettle('scene: the browser anchoring alone');                          // the twin: the same page, the same card
+  const browser = await turn();
+  return { ok: true, ...base, watch, browser };
 })()`;
-const searchScene = async (tail, stopFirst = false) => {
-  if (!(await pageReady(PORT, 'search scene ' + tail))) return { tail, why: 'no page' };
+// the depths: 1, 2 and 3 SLOW notches (120 px) past the scene's own descent — near the slab's end, so the slab stays in the page
+Object.assign(CADENCE, { near1: { notches: 1, deltaY: 120, gap: 0, settle: 900 }, near2: { notches: 2, deltaY: 120, gap: 150, settle: 900 }, near3: { notches: 3, deltaY: 120, gap: 150, settle: 900 } });
+const searchScene = async (tail) => {
+  if (!(await pageReady(PORT, 'search scene ' + tail))) return { tail, ok: false, why: 'no page' };
   await sleep(1500);
-  // a slab lands (a short hold up), the person comes back down through it and a little into the registered tail (the tail
-  // extends below; not so far that the window leaves message 0 and the slab is dropped)
+  // a slab lands (a short hold up), the person comes back down through it and a little into the registered tail
   const r = await runGestures([['gap-jump', 'jump', 0], ['scene-up', 'up', 'shortHold'], ['scene-down', 'down', 'shortHold'], ['scene-' + tail, 'down', tail]], 'search scene ' + tail);
-  if (!r.opened?.ok) return { tail, why: 'not opened' };
-  const o = { tail, browserAlone: stopFirst, ...(await evaljs(SEARCH_OPEN(stopFirst))) };
-  console.log(`  [search scene ${tail}${stopFirst ? ', the browser alone' : ''}] ${JSON.stringify(o)}`);
+  if (!r.opened?.ok) return { tail, ok: false, why: 'not opened' };
+  const o = { tail, ...(await evaljs(SEARCH_OPEN)) };
+  console.log(`  [search scene ${tail}] ${JSON.stringify(o)}`);
   return o;
 };
 {
   console.log(`§4h the first hold up into unloaded history, per notch: the card at the reading line moves exactly each notch (± ${NOTCH_TOL_PX} px), the carried ones exactly once at the landing (a fresh page); a control a part`);
   const fix = await firstHold('fix');
+  check(`§4h THE SECTION's OWN GEOMETRY (r4847): the list stands ${LIST_H} px tall (it stood ${fix.ch} px) — every distance of the section read at one height on every machine`, fix.ch === LIST_H, JSON.stringify({ ch: fix.ch }));
   check(`§4h the fresh page's first hold reached the seek gap (a slab landed: gapUp:done) and its notches at scrollTop 0 were carried into it (≥ 1 carried landing, at most one a slab: ${fix.carries} over ${fix.slabs})`, fix.slabs >= 1 && fix.carries >= 1 && fix.carries <= fix.slabs, JSON.stringify({ slabs: fix.slabs, carries: fix.carries }));
   check(`§4h THE CARD AT THE READING LINE STAYS WHERE IT IS WHEN HISTORY ARRIVES OR SETTLES ABOVE IT: every notch moved the card read before it exactly its ${CADENCE.hold.deltaY} px, and every settle after a notch left standing what the person had on the screen before it (inside the product's window) or the card at the top (after it) — worst ${fix.law.worst} px, settles ${JSON.stringify(fix.law.labels)} — the carried notches exactly once at the landing (${fix.law.carried} px over ${fix.law.L + 1})`, fix.law.ok, JSON.stringify(fix.law));
   check(`§4h the hold's end inside ①'s slack (${JUMP_SLACK_VIEWPORTS} viewports): the original card ${fix.dev} px past the wheel`, !!fix.row && !fix.row.verdict.reasons.length, fix.row ? fix.row.verdict.reasons.join('; ') : 'no row');
@@ -745,34 +762,27 @@ const searchScene = async (tail, stopFirst = false) => {
     const lawZ = !!z.law && !z.law.why && !z.law.lost && Math.abs(z.law.worst) <= NOTCH_TOL_PX && Math.abs(z.law.carried - leftover) <= NOTCH_TOL_PX;
     check(`§4h ${label.toUpperCase()} (the zooms ${JSON.stringify(z.zoom)}): a slab landed and every notch moved the card at the reading line exactly its own distance (${z.law.notch} px on screen; worst ${z.law.worst} px), the carried notches exactly once (${z.law.carried} px; the range's own leftover ${Math.round(leftover)} px)`, z.slabs >= 1 && lawZ && !!z.zoom && (z.zoom[0] !== 1 || z.zoom[1] !== 1), JSON.stringify({ zoom: z.zoom, law: z.law, rest, landed, leftover: Math.round(leftover) }));
   }
-  // MUST 2 (a): search opens while the watch lives, tail runs folded above the reading line
-  // each depth twice: with the watch (the scene) and with the watch stopped just before the press (the browser's own world,
-  // printed beside it): «exactly once» = the watch adds nothing to what the runs pass and the browser do there
-  // A depth is COMPARABLE when both pages stood alike before the press (the same scrollTop, the same kind of card at the reading
-  // line, the slab in both); there «exactly once» = the card moves as in the browser's own world (the runs pass's own restore
-  // can move it there: measured 314 px at one depth in both worlds — the release's, not the watch's) — never by the watch's
-  // second answer (at the first cure: −4 337 px, or off the page)
-  const alike = (x, y) => !!x && !!y && x.ok && x.alive && x.gap > 0 && x.headersAbove > 0 && y.ok && y.gap > 0 && y.st0 === x.st0 && y.card === x.card;
-  // EACH DEPTH IS READ AGAIN (both pages) WHILE THE TWO DID NOT STAND ALIKE, at most SEARCH_TRIES times (r3638; the find of
-  // row 764's gates: on the kit under load, and twice on the hosted runner, a twin stood 84–110 px off with a system row at
-  // the reading line, or one of the two dropped its slab at tail3 — every distance still 0 / 0; three depths, none comparable).
-  // The bar is unchanged: ≥ 1 comparable depth and «exactly once» at each; none after the tries is said BY NAME, red.
-  const SEARCH_TRIES = 3, scenes = [], alone = [], tries = [], everyPage = [];
-  for (const tail of ['tail1', 'tail2', 'tail3']) {
-    let x = null, y = null, k = 0;
-    while (k < SEARCH_TRIES) { k++; x = await searchScene(tail); y = await searchScene(tail, true); everyPage.push(x, y); if (alike(x, y)) break; }
-    scenes.push(x); alone.push(y); tries.push(k);
+  // MUST 2 (a): search opens while the watch lives, tail runs folded above the reading line — each depth ONE page: «exactly once» = the
+  // card at the reading line moves with the watch as it moves in the browser's own world on the same page (the runs pass's own restore
+  // can move it in both: measured 314 px at one depth, the release's — never the watch's second answer: −4 337 px at the first cure).
+  // A depth is read again (a fresh page) only when its scene did not hold, at most SEARCH_TRIES times, each miss named
+  const SEARCH_TRIES = 3, scenes = [], tries = [];
+  for (const tail of ['near1', 'near2', 'near3']) {
+    let x = null, k = 0;
+    while (k < SEARCH_TRIES) { k++; x = await searchScene(tail); if (x.ok) break; }
+    scenes.push(x); tries.push(k);
   }
-  const held = scenes.map((x, i) => [x, alone[i]]).filter(([x, y]) => alike(x, y));
-  const once = ([x, y]) => x.open != null && y.open != null && Math.abs(x.open - y.open) <= NOTCH_TOL_PX && x.closed != null && y.closed != null && Math.abs(x.closed - y.closed) <= NOTCH_TOL_PX;
-  check(`§4h ONE AUTHORITY, SEARCH OPENS: ${held.length ? '' : 'PRECONDITION NOT MET (no depth stood alike in both worlds in ' + SEARCH_TRIES + ' tries each) — '}at ${held.length} of ${scenes.length} depths (tries ${tries.join(' / ')}) the scene held (the watch alive, the slab in the page, run headers folded above the reading line) beside a twin page in the browser's own world, and the card at the reading line moved exactly as there (open / closed — the watch: ${held.map(([x]) => x.open + ' / ' + x.closed).join(', ') || '-'}; the browser alone: ${held.map(([, y]) => y.open + ' / ' + y.closed).join(', ') || '-'} px; ± ${NOTCH_TOL_PX})`, held.length >= 1 && held.every(once), JSON.stringify({ scenes, alone }));
+  const held = scenes.filter((x) => x && x.ok);
+  const once = (x) => x.watch.open != null && x.browser.open != null && Math.abs(x.watch.open - x.browser.open) <= NOTCH_TOL_PX && x.watch.closed != null && x.browser.closed != null && Math.abs(x.watch.closed - x.browser.closed) <= NOTCH_TOL_PX;
+  const missed = scenes.filter((x) => !x || !x.ok).map((x) => (x ? x.tail + ': ' + x.why : '?'));
+  check(`§4h ONE AUTHORITY, SEARCH OPENS: ${missed.length ? 'PRECONDITION NOT MET at ' + missed.length + ' of ' + scenes.length + ' depths in ' + SEARCH_TRIES + ' tries (' + missed.join('; ') + ') — ' : ''}at ${held.length} of ${scenes.length} depths (tries ${tries.join(' / ')}) the scene held (the watch alive, the slab in the page, run headers folded above the reading line) and the card at the reading line moved with the watch exactly as in the browser's own world on the same page (open / closed — the watch: ${held.map((x) => x.watch.open + ' / ' + x.watch.closed).join(', ') || '-'}; the browser alone: ${held.map((x) => x.browser.open + ' / ' + x.browser.closed).join(', ') || '-'} px; ± ${NOTCH_TOL_PX})`, held.length === scenes.length && held.every(once), JSON.stringify(scenes));   // every depth it names (r4847 (2)): the scene made by construction holds at each, or the depth is a named failing line
   // B-3e8b's search unit (主开发 r3257): THE RUNS PASS's OWN PUT-BACK keeps the card at the reading line when search UNFOLDS
   // the runs above it and when it FOLDS them again — by distance, in both worlds (at 11f016e6c: 314 / 314 px one notch into
   // the tail, the same with the watch stopped: the search bar above the list shifted every row's offsetTop by its height,
   // so the pass anchored on a card already out of sight)
-  const stays = (x) => x.open != null && Math.abs(x.open) <= NOTCH_TOL_PX && x.closed != null && Math.abs(x.closed) <= NOTCH_TOL_PX;
-  const kept = everyPage.filter((x) => x && x.ok && x.gap > 0 && x.headersAbove > 0);   // every page read, the re-read ones too
-  check(`§4h SEARCH OPENS AND CLOSES WITH RUNS FOLDED ABOVE THE READING LINE: the card at the reading line stays where it was — on open and on close, with the watch and in the browser's own world (${kept.length} scenes: ${kept.map((x) => x.tail + (x.browserAlone ? '·alone' : '') + ' ' + x.open + ' / ' + x.closed).join(', ')} px; ± ${NOTCH_TOL_PX})`, kept.length >= 2 && kept.every(stays), JSON.stringify(kept));
+  const stays = (r) => r.open != null && Math.abs(r.open) <= NOTCH_TOL_PX && r.closed != null && Math.abs(r.closed) <= NOTCH_TOL_PX;
+  const turns = held.flatMap((x) => [{ tail: x.tail, world: 'watch', ...x.watch }, { tail: x.tail, world: 'alone', ...x.browser }]);
+  check(`§4h SEARCH OPENS AND CLOSES WITH RUNS FOLDED ABOVE THE READING LINE: the card at the reading line stays where it was — on open and on close, with the watch and in the browser's own world (${turns.length} turns: ${turns.map((r) => r.tail + (r.world === 'alone' ? '·alone' : '') + ' ' + r.open + ' / ' + r.closed).join(', ')} px; ± ${NOTCH_TOL_PX})`, turns.length >= 2 && turns.every(stays), JSON.stringify(turns));
   // (c): a carry in the task of a pending change, and its control (the watch's flush blinded for that carry)
   const ct = await firstHold('a carry with a pending change', null, { after: CARRY_SAME_TASK(false) }), cc = await firstHold('a carry with a pending change, control', null, { after: CARRY_SAME_TASK(true) });
   check(`§4h ONE AUTHORITY, A CARRY IN THE TASK OF A PENDING CHANGE: ${ct.after?.ok && cc.after?.ok ? '' : 'PRECONDITION NOT MET (' + (ct.after?.why || cc.after?.why || 'no page') + ') — '}a row above the reading line grew 150 px and a ${ct.after?.carry} px carry landed in the same task — the card at the reading line moved exactly the carry (${ct.after?.moved} px; ± ${NOTCH_TOL_PX}); CONTROL, the watch's flush blinded for that carry: it moved ${cc.after?.moved} px (the growth answered by no one)`, !!ct.after?.ok && Math.abs(ct.after.moved - ct.after.carry) <= NOTCH_TOL_PX && !!cc.after?.ok && Math.abs(cc.after.moved - cc.after.carry) > NOTCH_TOL_PX, JSON.stringify({ leg: ct.after, control: cc.after }));
