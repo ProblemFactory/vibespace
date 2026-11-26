@@ -84,6 +84,15 @@ const until = async (fn, ms = 3000) => { const t0 = Date.now(); while (!fn() && 
 // pending, and the lift's copy is synced); the bound is generous, and its expiry is a NAMED failed line, never a parse of the torn fixture
 const LIFT_MS = 20000;
 const liftedOrSaid = async (s, what) => { const up = await lifted(s, LIFT_MS); if (!up) ok(false, `the torn start never lifted (${what}) — waited ${LIFT_MS} ms on its lift`, { held: s._hold.held() }); return up; };
+// B-3dbd (r4792 find 2, lane bl-chat-b): A RED CONTROL's «NEVER» IS READ PAST THE PRODUCT's OWN CONSTANT. The helper's scenes give
+// their store a read bound of SCENE_READ_MS (readMs, 30 ms); a control whose copy cut the let-go, the late answer's judge or the second
+// look's bound reads «not let go / the hold stands / nothing is said» at ten times that bound (NEVER_MS) — its copy cannot act at any
+// later time, so its verdict never moves with load — and never by the 1.5 s and 3 s waits a GREEN leg needs on a loaded machine (the
+// suite read 7.3 s alone against its 0.6 s row: three red controls waited those out, about 6 s). The GREEN legs wait on their own facts
+// under a generous bound (FACT_MS) whose expiry is a NAMED line, never a silent read.
+const SCENE_READ_MS = 30, NEVER_MS = 10 * SCENE_READ_MS, FACT_MS = 20000;
+const untilSaid = async (fn, what, ms = FACT_MS) => { const up = await until(fn, ms); if (!up) ok(false, `the scene waited ${ms} ms for ${what} — it never came (a harness line, never the leg's verdict)`); return up; };
+const tryWithin = (p, ms) => Promise.race([p, new Promise((r) => { const t = setTimeout(() => r('not let go'), ms); t.unref?.(); })]);
 const lifted = async (s, ms = 3000) => { const t0 = Date.now(); while (s._hold.held() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 20)); return !s._hold.held(); };
 
 try {
@@ -346,32 +355,34 @@ try {
     const HSRC2 = fs.readFileSync(path.join(REPO, 'src/store-read-hold.js'), 'utf8');
     const RACE = "    const first = await Promise.race([p, new Promise((r) => { tm = setTimeout(() => r(SLOW), ms); tm.unref?.(); })]);\n";
     ok(HSRC2.split(RACE).length === 2, 'control setup: the read\'s bound is found once in the helper');
-    const boundScene = async (Mod, tag) => {
+    const boundScene = async (Mod, tag, { neverLetGo = false, neverLift = false } = {}) => {   // r4792: which «never» this control reads
       const d = dirOf(tag), f = path.join(d, 'c.json'), body = '{"rows": [2]}'; fs.writeFileSync(f, body);
       const rf = fs.promises.readFile, said = []; let reads = 0, release = null, h = null, out = null;
       fs.promises.readFile = function (p, ...a) { if (String(p) === f) { reads++; if (!release) return new Promise((res) => { release = () => res(Buffer.from(body)); }); } return rf.call(fs.promises, p, ...a); };
       const keep = setInterval(() => { }, 1000);   // the helper's bound timer is unref'd (the hub's own loop keeps it): the scene keeps the loop up while a read hangs
       try {
-        h = Mod.create({ file: f, code: 'c', aside: (m) => f + '.corrupt-' + m, words: (x) => (x.waiting ? 'a read waits' : 'read again soon'), log: (m) => said.push(m), readMs: () => 30 });
+        h = Mod.create({ file: f, code: 'c', aside: (m) => f + '.corrupt-' + m, words: (x) => (x.waiting ? 'a read waits' : 'read again soon'), log: (m) => said.push(m), readMs: () => SCENE_READ_MS });
         h.start({ state: 'unreadable', code: 'EIO', why: 'the read failed' });
-        // (the leg's own bound on the try: the red's try never returns while the read hangs)
-        const first = await Promise.race([h.again(), new Promise((r) => { const t = setTimeout(() => r('not let go'), 1500); t.unref?.(); })]);
+        // the try is let go at the bound (the green's fact, waited generously); the control whose copy cut the let-go reads «not let go»
+        // past ten bounds (its try never returns while the read hangs, at any time)
+        const first = await tryWithin(h.again(), neverLetGo ? NEVER_MS : FACT_MS);
+        if (!neverLetGo && first === 'not let go') ok(false, `the scene waited ${FACT_MS} ms for the try's let-go — it never came (a harness line)`);
         const facts = h.held(), words = h.words();
-        const second = await Promise.race([h.again(), new Promise((r) => { const t = setTimeout(() => r('not let go'), 1500); t.unref?.(); })]);
+        const second = await tryWithin(h.again(), FACT_MS);   // (a try that meets the hung read answers at once, in every copy)
         const during = reads;
         if (release) release();
-        const up = await until(() => !h.held());
+        const up = neverLift ? await until(() => !h.held(), NEVER_MS) : await untilSaid(() => !h.held(), 'the hold\'s lift after the late answer');
         out = { first, second, during, waiting: !!(facts && facts.waiting), words, saidOnce: said.filter((l) => /a read again has not answered in 0\.03 s/.test(l)).length, up };
       } finally { fs.promises.readFile = rf; clearInterval(keep); if (h) h.stop(); }
       return out;
     };
     const bd = await boundScene(H, 'bound');
     ok(!!bd && bd.first === false && bd.waiting && bd.words === 'a read waits' && bd.second === false && bd.during === 1 && bd.saidOnce === 1 && bd.up, 'a read past its bound is let go as the try\'s own (the try answers false), SAID once, carried in the hold\'s facts (`waiting`: the words say a read waits); no second read starts while it hangs; its late answer lifts the hold', bd);
-    const bdx = await boundScene(mutant('src/store-read-hold.js', [[RACE, '    const first = await p;\n']]), 'bound-ctl');
+    const bdx = await boundScene(mutant('src/store-read-hold.js', [[RACE, '    const first = await p;\n']]), 'bound-ctl', { neverLetGo: true });
     ok(!!bdx && bdx.first === 'not let go' && !bdx.waiting && bdx.saidOnce === 0, 'RED CONTROL — the bound cut (in a copy): the try waits on the hung read, and nothing says it', bdx);
     const LATEJ = '    p.then((late) => judge(late)).catch(onErr);\n';
     ok(HSRC2.split(LATEJ).length === 2, 'control setup: the let-go read\'s late answer is judged on one line (found once)');
-    const bdy = await boundScene(mutant('src/store-read-hold.js', [[LATEJ, '']]), 'bound-late-ctl');
+    const bdy = await boundScene(mutant('src/store-read-hold.js', [[LATEJ, '']]), 'bound-late-ctl', { neverLift: true });
     ok(!!bdy && bdy.first === false && !bdy.up, 'RED CONTROL — the late answer not judged (in a copy): the storage answers after the bound and the hold stands', bdy);
   }
   {
@@ -484,25 +495,27 @@ try {
     const st0 = await startScene('start-torn-whole', null), st1 = await startScene('start-torn-whole-empty', Buffer.alloc(0));
     ok(!st0.mid.held && st0.mid.copies === 0 && st0.rows === '1,2' && st1.mid.held && st1.mid.copies === 0 && st1.rows === '1,2', 'r4039 (c): a FIRST read at a start that answered torn bytes of a whole file lifts with its records (the start reads the file again); a placed empty answer there is a failed read, held, then the records', { st0, st1 });
     // r4039 (a): THE SECOND LOOK HAS THE FIRST READ'S BOUND: a stat that hangs there is said (the waiting fact, the same line), then used
-    const lookScene = async (Mod, tag) => {
+    const lookScene = async (Mod, tag, { neverSaid = false } = {}) => {   // r4792: the control reads «nothing is said» past ten bounds
       const d = dirOf(tag), f = path.join(d, 'l.json'); fs.writeFileSync(f, '{"rows": [');
       const st = fs.promises.stat, said = []; let release = null, h = null, value = 'unset';
       fs.promises.stat = function (p, ...a) { if (String(p) === f && !release) return new Promise((res, rej) => { release = () => st.call(fs.promises, p, ...a).then(res, rej); }); return st.call(fs.promises, p, ...a); };
       const keep = setInterval(() => { }, 1000);
       try {
-        h = Mod.create({ file: f, code: 'l', aside: (m) => f + '.corrupt-' + m, words: (x) => (x.waiting ? 'a read waits' : 'l'), log: (m) => said.push(m), onLift: (v) => { value = v; }, readMs: () => 30 });
+        h = Mod.create({ file: f, code: 'l', aside: (m) => f + '.corrupt-' + m, words: (x) => (x.waiting ? 'a read waits' : 'l'), log: (m) => said.push(m), onLift: (v) => { value = v; }, readMs: () => SCENE_READ_MS });
         h.start({ state: 'unreadable', code: 'EIO', why: 'placed' });
         const p = h.again();
-        await until(() => !!release && !!(h.held() && h.held().waiting), 1500);
+        await untilSaid(() => !!release, 'the second look\'s start (its stat asked)');   // the look has begun, in both copies (a fact)
+        if (neverSaid) await until(() => !!(h.held() && h.held().waiting), NEVER_MS);   // the control: «nothing said», read past ten bounds
+        else await untilSaid(() => !!(h.held() && h.held().waiting), 'the second look\'s waiting fact');
         const during = { waiting: !!(h.held() && h.held().waiting), words: h.words(), saidOnce: said.filter((l) => /a read again has not answered in 0\.03 s/.test(l)).length };
         if (release) release();
-        await p; await until(() => !h.held(), 2000);
+        await p; await untilSaid(() => !h.held(), 'the lift after the look answered');
         return { during, lifted: !h.held(), copies: fs.readdirSync(d).filter((x) => x.startsWith('l.json.corrupt-')).length };
       } finally { fs.promises.stat = st; clearInterval(keep); if (h) h.stop(); }
     };
     const lk = await lookScene(H, 'look-bound');
     const LOOKRACE = "        let fileBytes = await Promise.race([look, new Promise((r) => { tmL = setTimeout(() => r(SLOW), lookMs); tmL.unref?.(); })]);\n";
-    const lkx = await lookScene(mutant('src/store-read-hold.js', [[LOOKRACE, '        let fileBytes = await look;\n']]), 'look-bound-ctl');
+    const lkx = await lookScene(mutant('src/store-read-hold.js', [[LOOKRACE, '        let fileBytes = await look;\n']]), 'look-bound-ctl', { neverSaid: true });
     ok(lk.during.waiting && lk.during.words === 'a read waits' && lk.during.saidOnce === 1 && lk.lifted && lk.copies === 1, 'r4039 (a): a second look that hangs past the bound is SAID — the waiting fact (the words say a read waits) and the first read\'s own line, once — and its answer is used when it comes', lk);
     ok(!lkx.during.waiting && lkx.during.saidOnce === 0, 'RED CONTROL — the second look with no bound (in a copy): it hangs and nothing says it', lkx);
     ok(!zeroX.afterAnswer.held && zeroX.afterAnswer.copies === 1 && zeroX.afterAnswer.copyBytes === '' && !shortX.afterAnswer.held && shortX.afterAnswer.copyBytes === '{"rows": [', 'RED CONTROL — the release\'s verdict on ONE read (in a copy): the zero-byte answer lifts the whole file EMPTY with a copy of nothing, the short read lifts it with a copy of its half — the next save would write over every record', { zeroX, shortX });
