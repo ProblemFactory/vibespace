@@ -666,10 +666,10 @@ app.post('/api/sysinfo/signal', async (req, res) => {
 app.get('/api/sysinfo/history', (req, res) => {
   const ranges = { '1h': 3600e3, '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3 };
   const ms = ranges[String(req.query.range || '24h')] || ranges['24h'];
-  res.json({ points: sysinfo.history(ms), rangeMs: ms, cpus: require('os').cpus().length });
+  res.json({ points: sysinfo.history(ms), rangeMs: ms, cpus: require('os').cpus().length, held: sysinfo.historyHeld() });   // r4991: the panel says a held history in the chart's place
 });
 sysinfo.startWatch({
-  dataDir: path.join(__dirname, 'data'), writer: require('./src/store-writer.js').storeWriter(), onSample: (mem) => memoryPressure.onSample(mem), // lane browser-resource-care (B-afeb): the memory-pressure episode (src/server/memory-pressure-watch.js); B-0248 unit 5 (lane bl-loop-b): the history's writer is the hub's, handed here (src/sysinfo.js is in the device agent's bundle and requires none)
+  dataDir: path.join(__dirname, 'data'), hold: require('./src/store-read-hold.js'), /* B-f276 (r4991): the history's read held, handed in as the writer */ writer: require('./src/store-writer.js').storeWriter(), onSample: (mem) => memoryPressure.onSample(mem), // lane browser-resource-care (B-afeb): the memory-pressure episode (src/server/memory-pressure-watch.js); B-0248 unit 5 (lane bl-loop-b): the history's writer is the hub's, handed here (src/sysinfo.js is in the device agent's bundle and requires none)
   broadcast: (msg) => { const json = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }); },
 });
 

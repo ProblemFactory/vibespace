@@ -172,7 +172,7 @@ const CALLERS = { 'src/server/decision-engine.js': ['decision-memo.json', 'decis
   'src/server/voice-teach-engine.js': ['voice-suggestions.json'], 'src/server/cli-unmeasured-notice.js': ['cli-unmeasured-notice.json'], 'src/server/ops-routes.js': ['maintenance.json'], 'src/server/cli-model-catalog.js': ['cli-model-catalog.json'], // r3333 unit 3
   'src/server/published-pages.js': ['published-pages.json'], 'src/server/setting-holds.js': ['setting-holds.json'], 'src/server/vault-use-grants.js': ['vault-use-marks.json'], 'src/session-status.js': ['session-status.json'],
   // r3314: the units picked into the hotfix's trial after the chain
-  'src/channels/webhook.js': ['callers.json', 'pair-pending.json'], 'src/server/vault-totp.js': ['vault-grants.json'], 'src/usage-reset-claim.js': ['usage-reset-claims.json'],
+  'src/channels/webhook.js': ['callers.json', 'pair-pending.json'], 'src/sysinfo.js': ['sysinfo-history.json'] /* nl-paired (r4991): its hold HANDED IN (HANDED below) */, 'src/server/vault-totp.js': ['vault-grants.json'], 'src/usage-reset-claim.js': ['usage-reset-claims.json'],
   'src/server/vault-run-door.js': ['vault-grant-ends.json'],   // r3377: lg-vault-env's grant ends
   'src/server/window-targets-engine.js': ['window-leases.json', 'window-reach.json'],   // lg-recovery (B-f276 slice window-targets, 主开发 r4720): the agents' window holds and the windows' share modes
   'src/server/agent-listener.js': ['agent-door.json'],   // r3333 unit 1: the agent door's record (its port)
@@ -199,12 +199,17 @@ const CALLERS = { 'src/server/decision-engine.js': ['decision-memo.json', 'decis
 // no store through it: it needs no row and no plain name (hosts.js, jobs.js, machine-mounts.js ask it for their OLDER holds' copies, which
 // the notice bridges by their own doors). A file in the map is never let off this way (its rows would go dead unseen), and an asker that
 // ALSO creates a hold is a caller like any other (red by name until mapped).
-function heldStoreFiles(files, map = CALLERS) {
+// nl-paired (B-f276 slice resource-history, 主开发 r4991 (a)): a hold the hub's start HANDS IN — a module the device agent bundles requires
+// nothing of the hub's, so it holds no require of the helper — named here with the parameter its hold rides: the census still counts its
+// creates and names its stores (src/sysinfo.js: startWatch's `hold`, handed by server.js)
+const HANDED = Object.freeze({ 'src/sysinfo.js': 'hold' });
+function heldStoreFiles(files, map = CALLERS, handed = HANDED) {
   const out = new Map();
   out.askers = [];
   for (const [f, src] of files) {
-    if (!/require\(['"][./]*store-read-hold\.js['"]\)/.test(src) || /held-lists\.js$/.test(f)) continue;
-    const bound = /\bconst (\w+) = require\(['"][./]*store-read-hold\.js['"]\)/.exec(src);
+    const via = Object.prototype.hasOwnProperty.call(handed, f) ? handed[f] : null;
+    if ((!via && !/require\(['"][./]*store-read-hold\.js['"]\)/.test(src)) || /held-lists\.js$/.test(f)) continue;
+    const bound = via ? [null, via] : /\bconst (\w+) = require\(['"][./]*store-read-hold\.js['"]\)/.exec(src);
     const creates = (bound ? (src.match(new RegExp(`\\b${bound[1]}\\.create\\(`, 'g')) || []).length : 0) + (src.match(/require\(['"][./]*store-read-hold\.js['"]\)\.create\(/g) || []).length;   // bound by a name, or called inline
     const destructured = /\bconst \{[^}]*\bcreate\b[^}]*\} = require\(['"][./]*store-read-hold\.js['"]\)/.test(src);
     if (!creates && !destructured && !Object.prototype.hasOwnProperty.call(map, f)) { out.askers.push(f); continue; }   // r3354: it only asks
@@ -230,6 +235,9 @@ ok(unnamed(unmapped).some((x) => x.startsWith('src/frobs.js: a caller of the hel
 const second = new Map(SRC_ALL); second.set('src/mounts.js', second.get('src/mounts.js') + "\nconst h2 = HOLD.create({ file: path.join(dir, 'frobs.json'), code: 'frobs_unread' });\n");
 ok(unnamed(heldStoreFiles(second)).some((x) => x.startsWith('src/mounts.js: 2 hold(s) of the helper but 1 in the census')), 'CONTROL: a SECOND store held in an already-mapped file (src/mounts.js) is RED by name — never unnamed with every leg green', unnamed(heldStoreFiles(second)));
 
+const noHanded = (({ 'src/sysinfo.js': _, ...rest }) => rest)(CALLERS);
+ok(STORES.has('src/sysinfo.js') && STORES.get('src/sysinfo.js').creates === 1 && !heldStoreFiles(SRC_ALL, CALLERS, {}).has('src/sysinfo.js') && unnamed(heldStoreFiles(SRC_ALL, noHanded)).some((x) => x.startsWith('src/sysinfo.js: a caller of the helper with no store')),
+  'r4991: a hold HANDED IN by the hub\'s start (src/sysinfo.js) is seen by the census (its one create, its store named); CONTROLS: the HANDED row cut, the census is blind to it; its CALLERS row cut, it is RED by name', { seen: STORES.get('src/sysinfo.js') });
 const shaped = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS]]), { ...CALLERS, 'src/frobs.js': { sites: 1, stores: ['frob-7.json'] } });
 ok(unnamed(shaped).some((x) => x.startsWith('frob-7.json (src/frobs.js)')), 'CONTROL (r3314): a store made per thing from one create site, its name unknown to the notice, is RED by name', unnamed(shaped));
 const shapedSites = heldStoreFiles(new Map([...SRC_ALL, ['src/frobs.js', FROBS + FROBS.split('\n')[1] + '\n']]), { ...CALLERS, 'src/frobs.js': { sites: 1, stores: ['cw-1-1700000000000.json'] } });

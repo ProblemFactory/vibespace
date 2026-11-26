@@ -31,8 +31,10 @@
 //   ⑤ the slot ledger's count is THE FILE's (every instance shares it): two instances writing one file past the bound trim it, no
 //     row lost. RED: an instance with a count of its own — the other's appends unseen, the trim missed (the file past the bound).
 //   ⑥ the history at the hub's STOP: the real startWatch handed the hub's writer, its stop asks persistHistory, and the writer's exit
-//     writes the owed rings (the process's writer — this leg runs last); server.js hands the writer to startWatch and asks persistHistory
+//     writes the owed rings (the process's writer — the last leg on it: ⑦ below asks only stub writers); server.js hands the writer to startWatch and asks persistHistory
 //     before the writer's last exitFlush (its text). REDS (of the two pins): the writer not handed; the ask moved after the exitFlush.
+//   ⑦ B-f276 slice resource-history (r4991): the history's read under the store-read law — held (nothing written over the file), the
+//     lift's merge (by time, a shared sample once), torn bytes kept aside once, no hold handed in (one owed flag); REDs in copies.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -380,6 +382,91 @@ console.log('⑥ the history at the hub\'s STOP: the real startWatch handed the 
   ok(owed && !!last && last.m === 777, '⑥ THE STOP: the watch\'s stop asked the save of its handed writer, owed at the exit, and the writer\'s exitFlush wrote the rings (the newest sample on disk)', { owed, last });
   ok(handed(SV) && order(SV), '⑥ server.js hands the hub\'s writer to startWatch, and its shutdown asks persistHistory before the writer\'s last exitFlush', { handed: handed(SV), order: order(SV) });
   ok(!handed(unhanded) && !order(swapped), '⑥ RED controls (of the two pins: the writer not handed; the ask moved after the last exitFlush): each pin fails (red)');
+}
+
+// ── ⑦ B-f276 slice resource-history (lane nl-paired, 主开发 r4991): THE HISTORY'S READ UNDER THE STORE-READ LAW ──────────────
+// The release read a failed read or torn bytes as EMPTY rings and the next persist wrote that over the file. Now the read answers to
+// a HOLD the hub's start hands in (startWatch's `hold`, as the writer — the module is in the device agent's bundle; the law's answer is
+// the PURE src/store-read.js, already in that bundle).
+// Each scene a FRESH copy of src/sysinfo.js (its rings are the module's). A PLACED EIO of the read call (never a mode or a mount).
+console.log('⑦ the history\'s read under the store-read law: held (nothing written over the file), the lift\'s merge, torn bytes kept aside once, no hold handed in');
+{
+  const HOLDm = require(path.join(REPO, 'src/store-read-hold.js'));
+  let nCopy = 0;
+  const fresh = (text = SI_SRC, tag = 'si') => M.load(SI_REL, text, `${tag}-${++nCopy}`, { same: text === SI_SRC });
+  const placeRead = (file, code, fn) => { const r0 = fs.readFileSync; fs.readFileSync = function (p, ...a) { if (String(p) === file) throw Object.assign(new Error(`${code}: a placed read refusal`), { code }); return r0.call(this, p, ...a); }; try { return fn(); } finally { fs.readFileSync = r0; } };
+  const at = (t, fn) => { const n0 = Date.now; Date.now = () => t; try { return fn(); } finally { Date.now = n0; } };
+  const stubWriter = () => { const asked = []; return { asked, dirty: (f, o) => asked.push({ f, bytes: o.produce() }) }; };
+  const T = Date.now() - 3600e3;   // an hour ago: inside the fine ring's 24 h (history(range) serves the COARSE ring past 24 h)
+  const FINE = 24 * 3600e3;
+  const F0 = JSON.stringify({ fine: [{ t: T - 2000, m: 1 }, { t: T - 1000, m: 2 }, { t: T, m: 3 }], coarse: [{ t: T - 3600e3, m: 9 }] });
+  // HELD, then LIFTED: (a) nothing written over the file while held, (b) the merge's count and order, the first write holds both
+  const heldScene = async (Mod) => {
+    const dir = dirOf('hist-held'), file = path.join(dir, 'sysinfo-history.json'); fs.writeFileSync(file, F0);
+    const said = [];
+    placeRead(file, 'EIO', () => Mod.loadHistory(dir, { hold: HOLDm, log: (l) => said.push(String(l)) }));
+    const heldAt = Mod.historyHeld();
+    at(T, () => Mod.recordSample({ used: 500, limit: 1024 }, 0.5)); at(T + 1000, () => Mod.recordSample({ used: 600, limit: 1024 }, 0.6));
+    const inMemory = Mod.history(FINE).length;
+    const wh = stubWriter(); Mod.persistHistory(wh);
+    const bytesHeld = fs.readFileSync(file, 'utf8') === F0;
+    const lifted = await Mod.historyReadAgain();
+    const fine = Mod.history(FINE).map((x) => `${x.t - T}:${x.m}`);
+    const wl = stubWriter(); Mod.persistHistory(wl);
+    let written = null; try { written = wl.asked[0] && JSON.parse(wl.asked[0].bytes); } catch { written = null; }
+    return { held: heldAt && heldAt.code, inMemory, persistedWhileHeld: wh.asked.length, bytesHeld, lifted, fine: fine.join(' '), after: Mod.historyHeld(),
+      firstWrite: written ? { fine: written.fine.map((x) => `${x.t - T}:${x.m}`).join(' '), coarse: written.coarse.length } : null };
+  };
+  const h = await heldScene(fresh());
+  ok(h.held === 'sysinfo_history_unread' && h.inMemory === 2 && h.persistedWhileHeld === 0 && h.bytesHeld,
+    '⑦ (a) a history whose read FAILED (EIO, placed) is HELD: the samples are taken in memory (the chart shows them) and a persist writes NOTHING over the file — its bytes byte for byte', h);
+  ok(h.lifted === true && h.after === null && h.fine === '-2000:1 -1000:2 0:500 1000:600' && !!h.firstWrite && h.firstWrite.fine === '-2000:1 -1000:2 0:500 1000:600' && h.firstWrite.coarse === 2,
+    '⑦ (b) THE LIFT\'S MERGE: the file\'s rings come back UNDER the samples taken meanwhile — by time, four points in order, the sample present in both (its t) kept ONCE (the one in memory), and the first write after the lift holds both rings', h);
+  const xg = await heldScene(fresh(anchored(SI_SRC, "  if (_histUnread || (_histHold && !_histHold.writable('a write of the CPU and memory history'))) return;\n", '', 'si-no-hold-check'), 'no-hold-check'));
+  ok(xg.persistedWhileHeld === 1, `⑦ RED control (the persist without its hold check, in a copy): a held history's persist hands its rings to the writer — written over the file (${xg.persistedWhileHeld}) (red)`, xg);
+  const xm = await heldScene(fresh(anchored(SI_SRC, "  if (d && HIST_SHAPE(d)) { _hist.fine = mergeRing(d.fine, _hist.fine, FINE_MAX); _hist.coarse = mergeRing(d.coarse, _hist.coarse, COARSE_MAX); }\n", "  if (d && HIST_SHAPE(d)) takeRings(d);   // MUTANT: the file's rings over the samples taken meanwhile\n", 'si-no-merge'), 'no-merge'));
+  ok(xm.lifted === true && xm.fine === '-2000:1 -1000:2 0:3', `⑦ RED control (the lift without the merge, in a copy): the file's rings take the place of the samples taken meanwhile — ${xm.fine} (red)`, xm);
+  // (c) TORN: kept aside ONCE, byte for byte, as sysinfo-history.json.corrupt-<ms>; the same bytes again make no second copy; other torn bytes
+  // take a name of their own, never one over the first
+  const tornScene = async (dir, bytes) => {
+    const file = path.join(dir, 'sysinfo-history.json'); fs.writeFileSync(file, bytes);
+    const Mod = fresh(SI_SRC, 'torn');
+    Mod.loadHistory(dir, { hold: HOLDm, log: () => { } });
+    const lifted = await until(() => !Mod.historyHeld(), 3000);
+    const copies = fs.readdirSync(dir).filter((n) => n.startsWith('sysinfo-history.json.corrupt-')).sort();
+    return { lifted, copies, bytesOf: (n) => fs.readFileSync(path.join(dir, n), 'utf8') };
+  };
+  const tdir = dirOf('hist-torn');
+  const t1 = await tornScene(tdir, '{"fine": [ torn'), t2 = await tornScene(tdir, '{"fine": [ torn'), t3 = await tornScene(tdir, 'other torn bytes');
+  const nameOk = (n) => /^sysinfo-history\.json\.corrupt-\d+(-\d+)?$/.test(n);
+  ok(t1.lifted && t1.copies.length === 1 && nameOk(t1.copies[0]) && t1.bytesOf(t1.copies[0]) === '{"fine": [ torn' && t2.lifted && JSON.stringify(t2.copies) === JSON.stringify(t1.copies)
+    && t3.lifted && t3.copies.length === 2 && t3.copies.includes(t1.copies[0]) && t3.bytesOf(t1.copies[0]) === '{"fine": [ torn' && t3.copies.every(nameOk),
+    `⑦ (c) TORN bytes are kept aside ONCE, byte for byte, as sysinfo-history.json.corrupt-<ms> (${t1.copies[0]}); the same bytes torn again make no second copy; other torn bytes take a name of their own, the first copy untouched`, { t1: t1.copies, t2: t2.copies, t3: t3.copies });
+  // NO HOLD HANDED IN (a suite, a caller of tomorrow): a failed read never lets a persist write over the file in that run — one owed flag, said once
+  const noHoldScene = (Mod) => {
+    const dir = dirOf('hist-nohold'), file = path.join(dir, 'sysinfo-history.json'); fs.writeFileSync(file, F0);
+    const said = [];
+    placeRead(file, 'EIO', () => Mod.loadHistory(dir, { log: (l) => said.push(String(l)) }));
+    Mod.recordSample({ used: 700, limit: 1024 }, 0.7);
+    const w = stubWriter(); Mod.persistHistory(w); Mod.persistHistory(w);
+    return { asked: w.asked.length, bytes: fs.readFileSync(file, 'utf8') === F0, said: said.filter((l) => /could not be read \(EIO\) — nothing is written over it in this run/.test(l)).length, held: Mod.historyHeld() };
+  };
+  const nh = noHoldScene(fresh());
+  ok(nh.asked === 0 && nh.bytes && nh.said === 1 && nh.held === null, '⑦ (a) NO HOLD HANDED IN: a failed read (EIO, placed) still never lets a persist write over the file in that run — one owed flag, said once (never the release\'s silent empty start)', nh);
+  const xo = noHoldScene(fresh(anchored(SI_SRC, "  _histUnread = String(a.code || 'unreadable').slice(0, 40);\n", "  _histUnread = null;   // MUTANT: the release's silent empty start\n", 'si-no-owed'), 'no-owed'));
+  ok(xo.asked === 1, `⑦ RED control (no owed flag, in a copy): the empty-started rings are handed to the writer over a file that could not be read (${xo.asked}) (red)`, xo);
+  // a history that reads: as at the release (loaded, then written as before)
+  { const Mod = fresh(); const dir = dirOf('hist-data'), file = path.join(dir, 'sysinfo-history.json');
+    const F1 = JSON.parse(F0); F1.fine.push({ t: null, m: 4 }, null); fs.writeFileSync(file, JSON.stringify(F1));   // a point with no time (and a null) is no point
+    Mod.loadHistory(dir, { hold: HOLDm, log: () => { } }); const n = Mod.history(FINE).length; at(T + 5000, () => Mod.recordSample({ used: 1, limit: 2 }, 0.1)); const w = stubWriter(); Mod.persistHistory(w);
+    ok(n === 3 && Mod.historyHeld() === null && w.asked.length === 1, '⑦ a history that READS loads as at the release (its three points — a point with no time dropped at the start, as at a lift) and the persist hands it to the writer', { n, asked: w.asked.length }); }
+  // the panel and the hub's start: the held words in the chart's own place (en, zh, ja); the hold handed in; the route answers it
+  const RAIL = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-rail.js'), 'utf8'), SVR = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const HW = "The CPU and memory history could not be read just now — VibeSpace reads it again by itself; nothing in it was lost or changed. The charts show what was measured since this start.";
+  ok(RAIL.includes("const heldNote = d?.held ? `<div class=\"empty-hint empty-hint-inline\">${escHtml(tr('The CPU and memory history could not be read just now") && RAIL.includes('if (note) note.innerHTML = heldNote;')
+    && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => fs.readFileSync(path.join(REPO, f), 'utf8').includes(JSON.stringify(HW) + ':'))
+    && SVR.includes("dataDir: path.join(__dirname, 'data'), hold: require('./src/store-read-hold.js'), ") && SVR.includes('held: sysinfo.historyHeld()'),
+    '⑦ (d) THE PANEL: a held history is said in the chart\'s own place beside its points (sidebar-rail\'s .sys-hist-note; en, zh, ja — no tray item, no toast); server.js hands the hold in and the history route answers `held`');
 }
 
 report();
