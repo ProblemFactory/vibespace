@@ -2404,7 +2404,7 @@ console.log('⑮ the synced rename\'s hub callers, by name');
     // records of its paired machines another process reads at once — each judged by the rate rule (r4758) on the code at its site
     'src/agentd/client.js': [1, 'DeviceManager._writeLocalProof — the upgrade proof of the hub\'s OWN daemon, written right before that daemon\'s upgrade (a hello whose daemon version differs: at most three tries a version, the upgrade ledger\'s); that daemon reads it at once — a save the code bounds to a rare event'],
     'src/host-keys.js': [1, 'writePinFile — a machine\'s or a jump host\'s ssh host-key pin: a person\'s act (a pin, an unpin, an import) and the start\'s heal (only a file whose text differs); ssh reads it at the next connection'],
-    'src/server/host-tokens.js': [2, 'writeIdentity — this hub\'s own key: its first mint\'s temp (once in a data folder\'s life, before a vault) and the person\'s renew on a file system with no sync (replaceShredding\'s fallback) — a once-only start and a person\'s act'],
+    'src/server/host-tokens.js': [3, 'writeIdentity — this hub\'s own key: its first mint\'s temp (once in a data folder\'s life, before a vault), the person\'s renew on a file system with no sync (replaceShredding\'s fallback), and (r4982) a key file that is no key healed by ONE mint on that same fallback — a mint that cannot land is remembered for the process — a once-only start and a person\'s act'],
   };
   // a USE of the door = every reference to it in the code but its import binding: a call, `.call` / `.apply`, a member (X.renameSynced,
   // X['renameSynced']), an alias (`{ renameSynced: rs }`, `const rs = X.renameSynced`) and its uses, the door handed on as a value

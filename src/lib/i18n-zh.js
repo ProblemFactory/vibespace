@@ -8177,6 +8177,7 @@ export default {
   "{machine} pins the key of the hub it was set up with, and this hub did not prove it. Something may be posing as this hub to it, or it was set up from another hub. If you set it up from this hub, let it pin this hub's key again (Remote → {machine} → Host key… → Let it pin this hub's key).": "{machine} 钉住的是它设置时那个 hub 的密钥，而这个 hub 没有证明它。可能有东西在冒充这个 hub，或者它是从另一个 hub 设置的。如果它是从这个 hub 设置的，就让它重新钉住这个 hub 的密钥（远程 → {machine} → 主机密钥… → 让它钉住这个 hub 的密钥）。",
   "Make a new hub key": "生成新的 hub 密钥",
   "Make a new hub key?": "要生成新的 hub 密钥吗？",
+  "A new hub key could not be written — this hub's key was not changed. Try again.": "新的 hub 密钥没能写入——这个 hub 的密钥没有被改动。请再试一次。",
   "Every machine that pinned the old key refuses this hub until it is paired again.": "每一台钉住旧密钥的机器都会拒绝这个 hub，直到重新配对。",
   "A new hub key was made — pair each machine again": "已生成新的 hub 密钥——请重新配对每台机器",
   "Its agent did not prove the device key VibeSpace pinned — this hub's link to its agent is refused until you pair it again or forget the key (Host key…).": "它的代理没有证明 VibeSpace 钉住的设备密钥——在你重新配对或忘记这把密钥（主机密钥…）之前，这个 hub 与它的代理之间的连接会被拒绝。",

@@ -65,6 +65,7 @@ function hostKeyErrorWords(h, e) { // lane lg-remote-hardening (unit 2; renamed 
   if (e && e.code === 'host-key-via-config') return tr('{name} takes its address or port from this hub\'s ssh configuration, so its key cannot be named from the record — check the key it shows now.', { name });
   if (e && e.code === 'host-key-known-too-big') return tr('This hub\'s known_hosts file is over 4 MiB, so it is not read for a pin — check the key {name} shows now.', { name });
   if (e && e.code === 'host-key-known-unreadable') return tr('This hub\'s known_hosts file could not be read — check the key {name} shows now.', { name });
+  if (e && e.code === 'hub_key_renew_failed') return tr('A new hub key could not be written — this hub\'s key was not changed. Try again.');   // B-574d (lane nl-paired, 主开发 r4982): a failed renew says the key stands
   if (!e || e.code !== 'host-key-changed') return (e && e.message) || '';
   const b = e.body && typeof e.body === 'object' ? e.body : {};
   const fp = typeof b.fp === 'string' && b.fp ? b.fp : '?';

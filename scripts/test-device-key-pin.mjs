@@ -639,36 +639,46 @@ console.log('— ⑦ D3 half b: THE HUB PROVES ITS KEY (主开发\'s ruling 2026
   }
   const id2 = ht.renewIdentity();
   ok(MA.isPub(id2.publicKey) && id2.publicKey !== id1.publicKey && ht.identity().publicKey === id2.publicKey, '… a new key is the person\'s act (renewIdentity)');
-  // B-574d (lane nl-paired, 主开发 r4752): THE KEY'S BYTES ARE ON DISK BEFORE ITS NAME (before the vault is set up). The renew is the
+  // B-574d (lane nl-paired, 主开发 r4752 / r4982): THE KEY'S BYTES ARE ON DISK BEFORE ITS NAME (before the vault is set up). The renew is the
   // secret family's replace (src/secret-file.js replaceShredding: synced, renamed, the RETIRED key's bytes overwritten in place); the
-  // first mint's temp is synced (src/fd-close.js renameSynced) before its link. A sync REFUSED (placed: fs.fsyncSync throws EIO) is a
-  // FAILED WRITE: a first mint throws, leaves no key and no temp, and is said ONCE a run; a renew throws and the old key stands byte for
-  // byte. A file system with NO sync at all (EINVAL) lands on both roads, said — the renew is the one way out of hub_identity_lost.
-  // REDs (copies): the release's unsynced roads (the refusal never met, the retired bytes kept); the renew without its no-sync road.
+  // first mint's temp is synced (src/fd-close.js renameSynced) before its link, then its folder. A sync REFUSED (placed: fs.fsyncSync
+  // throws EIO) is a FAILED WRITE: a first mint throws, leaves no key and no temp, is said ONCE and REMEMBERED for the life of the PROCESS
+  // by its key file (r4982 + its read's must: the hub builds two HostTokens — the memory is the module's): no later hello of either reads
+  // or writes again; a renew answers hub_key_renew_failed — «this hub's key was not changed» — and the old key stands byte for byte. A
+  // file system with NO sync at all (EINVAL) lands on both roads, said. A key file that is NO KEY (empty, NUL bytes) with no machine
+  // pinning it is healed by ONE mint through the secret family's replace (ten hellos: four syncs in all — the temp, the heal's temp, its folder,
+  // the retired inode overwritten); with a pin it is lost BY NAME; under a set-up vault its empty file is no key and the vault mints once,
+  // and a vault mint that cannot land is remembered as the door's is. A restart is a fresh copy of the module (a new process: a new memory).
+  // REDs (copies): the release's unsynced roads; the renew with no no-sync road; a copy without the folder's sync; f62eb0041's first mint
+  // (every hello syncs twice, never a key); a copy without the memory (every hello tries again); the memory per INSTANCE (the second
+  // instance tries again); the key judged by its text alone (a pinned NUL file is an unnamed crypto error); the vault's malformed adopt
+  // thrown (every hello refused); the renew without its answer.
   {
-    const placedSync = (code, fn) => { const s0 = fs.fsyncSync; let n = 0; fs.fsyncSync = function () { n++; throw Object.assign(new Error(`${code}: a placed sync refusal`), { code }); }; try { return { r: fn(), n }; } catch (e) { return { threw: (e && e.code) || String(e), n }; } finally { fs.fsyncSync = s0; } };
-    const keyScene = (H, tag) => {
+    const HTS = read('src/server/host-tokens.js');
+    const copyOf = (text, tag) => mutantCopies('hub-key-' + tag, REPO).load('src/server/host-tokens.js', text, tag, { same: text === HTS });
+    const placedSync = (code, fn) => { const s0 = fs.fsyncSync; let n = 0; fs.fsyncSync = function () { n++; throw Object.assign(new Error(`${code}: a placed sync refusal`), { code }); }; try { return { r: fn(), n }; } catch (e) { return { threw: (e && e.code) || String(e), msg: String((e && e.message) || ''), n }; } finally { fs.fsyncSync = s0; } };
+    const mk = (H, d, said, pins = []) => H.create({ dataDir: d, anyHubPin: () => pins, log: { log() { }, warn: (l) => said.push(String(l)) } });
+    const keyScene = (H, tag, text) => {
       const d = path.join(tmp, 'ht-sync-' + tag); fs.mkdirSync(d, { recursive: true });
-      const said = [];
-      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn: (l) => said.push(String(l)) } });
+      const said = [], h = mk(H, d, said);
       const ad = path.join(d, 'agentd'), k = path.join(ad, 'hub-identity.pem');
       const others = () => fs.readdirSync(ad).filter((f) => f !== 'hub-identity.pem').length;
       const first = placedSync('EIO', () => h.identity()), again = placedSync('EIO', () => h.identity());
       const firstKey = fs.existsSync(k), firstLeft = others();
       const mintSaid = said.filter((l) => /^\[hub-key\] this hub's own key could not be written \(EIO\)/.test(l)).length;
-      const made = h.identity(), old = fs.readFileSync(k, 'utf8');
+      const h2 = mk(copyOf(text, tag + '-restart'), d, said);   // a restart: a new process (a fresh copy of the module) tries the mint again
+      const made = h2.identity(), old = fs.readFileSync(k, 'utf8');
       const oldFd = fs.openSync(k, 'r');   // the inode the renew retires, opened before it
-      const renew = placedSync('EIO', () => h.renewIdentity());
+      const renew = placedSync('EIO', () => h2.renewIdentity());
       const kept = fs.readFileSync(k, 'utf8') === old;
-      const id3 = h.renewIdentity();
+      const id3 = h2.renewIdentity();
       const retired = Buffer.alloc(Buffer.byteLength(old)); fs.readSync(oldFd, retired, 0, retired.length, 0); fs.closeSync(oldFd);
-      return { first: first.threw || 'landed', again: again.threw || 'landed', firstN: first.n, firstKey, firstLeft, mintSaid, renew: renew.threw || 'landed', renewN: renew.n, kept,
-        renewed: id3.publicKey !== made.publicKey && fs.readFileSync(k, 'utf8') !== old && h.identity().publicKey === id3.publicKey, shredded: retired.toString('utf8') !== old, left: others() };
+      return { first: first.threw || 'landed', firstN: first.n, again: again.threw || 'landed', againN: again.n, firstKey, firstLeft, mintSaid, renew: renew.threw || 'landed', renewMsg: renew.msg || '', renewN: renew.n, kept,
+        renewed: id3.publicKey !== made.publicKey && fs.readFileSync(k, 'utf8') !== old && h2.identity().publicKey === id3.publicKey, shredded: retired.toString('utf8') !== old, left: others() };
     };
     const noSyncScene = (H, tag) => {
       const d = path.join(tmp, 'ht-nosync-' + tag); fs.mkdirSync(d, { recursive: true });
-      const said = [];
-      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn: (l) => said.push(String(l)) } });
+      const said = [], h = mk(H, d, said);
       const k = path.join(d, 'agentd', 'hub-identity.pem');
       const first = placedSync('EINVAL', () => h.identity());
       const before = fs.existsSync(k) ? fs.readFileSync(k, 'utf8') : null;
@@ -678,33 +688,128 @@ console.log('— ⑦ D3 half b: THE HUB PROVES ITS KEY (主开发\'s ruling 2026
         saidMint: said.filter((l) => /^\[hub-key\] this hub's key \(its first mint\): its file system does not do a sync \(EINVAL\)/.test(l)).length,
         saidRenew: said.filter((l) => /^\[hub-key\] this hub's key \(its renew\): its file system does not do a sync \(EINVAL\)/.test(l)).length };
     };
-    const r = keyScene(HT, 'real'), u = noSyncScene(HT, 'real');
-    ok(r.first === 'EIO' && r.again === 'EIO' && r.firstN === 1 && !r.firstKey && r.firstLeft === 0 && r.mintSaid === 1 && r.renew === 'EIO' && r.renewN === 1 && r.kept && r.renewed && r.shredded && r.left === 0,
-      'B-574d: this hub\'s key is SYNCED before its name — a first mint under a refused sync (EIO, placed) leaves no key and no temp and is said ONCE a run; a renew under one throws and the old key stands; the renew that lands overwrites the RETIRED key\'s bytes in place', r);
+    // ten hellos (identity() is what each hello and each hub-key read asks), counting every sync and every read of the key file
+    const tenHellos = (H, tag, { bytes = null, refuse = null, pins = [] } = {}) => {
+      const d = path.join(tmp, 'ht-hellos-' + tag), ad = path.join(d, 'agentd'), k = path.join(ad, 'hub-identity.pem'); fs.mkdirSync(ad, { recursive: true });
+      if (bytes !== null) fs.writeFileSync(k, bytes, { mode: 0o600 });
+      const said = [], h = mk(H, d, said, pins);
+      const s0 = fs.fsyncSync, r0 = fs.readFileSync; let syncs = 0, reads = 0;
+      fs.fsyncSync = function (...a) { syncs++; if (refuse) throw Object.assign(new Error(`${refuse}: a placed sync refusal`), { code: refuse }); return s0.apply(this, a); };
+      fs.readFileSync = function (f, ...a) { if (String(f) === k) reads++; return r0.call(this, f, ...a); };
+      const got = [];
+      try { for (let i = 0; i < 10; i++) { try { got.push(h.identity().publicKey); } catch (e) { got.push('threw ' + ((e && e.code) || 'error')); } } } finally { fs.fsyncSync = s0; fs.readFileSync = r0; }
+      const onDisk = fs.existsSync(k) ? fs.readFileSync(k, 'utf8') : '';
+      return { syncs, reads, got0: got[0], same: got.every((x) => x === got[0]), pub: MA.isPub(got[0]), keyOnDisk: /PRIVATE KEY/.test(onDisk),
+        healedSaid: said.filter((l) => /^\[hub-key\] this hub's own key file was empty or not a key/.test(l)).length, failSaid: said.filter((l) => /^\[hub-key\] this hub's own key could not be written \(EIO\)/.test(l)).length };
+    };
+    // TWO HostTokens over one data folder (the hub's dial road and ssh road): a refused first mint of one is the other's memory too
+    const twoScene = (H, tag) => {
+      const d = path.join(tmp, 'ht-two-' + tag), ad = path.join(d, 'agentd'), k = path.join(ad, 'hub-identity.pem'); fs.mkdirSync(ad, { recursive: true });
+      const said = [], hA = mk(H, d, said), hB = mk(H, d, said);
+      const s0 = fs.fsyncSync, r0 = fs.readFileSync; let syncs = 0, reads = 0, refuse = true;
+      fs.fsyncSync = function (...a) { syncs++; if (refuse) throw Object.assign(new Error('EIO: a placed sync refusal'), { code: 'EIO' }); return s0.apply(this, a); };
+      fs.readFileSync = function (f, ...a) { if (String(f) === k) reads++; return r0.call(this, f, ...a); };
+      let a1 = null, b1 = null, atB = null, renewed = null, b2 = null;
+      try {
+        try { hA.identity(); a1 = 'landed'; } catch (e) { a1 = (e && e.code) || 'error'; }
+        try { hB.identity(); b1 = 'landed'; } catch (e) { b1 = (e && e.code) || 'error'; }
+        atB = { syncs, reads };
+        refuse = false;
+        renewed = hA.renewIdentity().publicKey;   // the person's renew through ONE of them ends the memory for both
+        try { b2 = hB.identity().publicKey; } catch (e) { b2 = 'threw ' + ((e && e.code) || 'error'); }   // a copy whose memory is per instance keeps refusing here
+      } finally { fs.fsyncSync = s0; fs.readFileSync = r0; }
+      return { a1, b1, atB, said: said.filter((l) => /^\[hub-key\] this hub's own key could not be written \(EIO\)/.test(l)).length, same: !!renewed && renewed === b2 };
+    };
+    // a set-up vault over an EMPTY key file left from before it: the adopt answers key-malformed — no key: the vault mints ONE
+    const vaultEmpty = async (H, tag) => {
+      const VE = require('../src/server/vault-engine.js');
+      const vd = path.join(tmp, 'ht-vault-empty-' + tag); fs.mkdirSync(path.join(vd, 'agentd'), { recursive: true });
+      fs.writeFileSync(path.join(vd, 'agentd', 'hub-identity.pem'), '', { mode: 0o600 });
+      const ve = VE.create({ dataDir: vd, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { }, error() { } }, idleTimer: false });
+      const su = await ve.setup('correct horse battery staple', {});
+      const h = mk(H, vd, []);
+      const got = []; for (let i = 0; i < 10; i++) { try { got.push(h.identity().publicKey); } catch (e) { got.push('threw ' + ((e && e.code) || 'error')); } }
+      try { ve.close(); } catch { }
+      return { setup: !!(su && su.ok), got0: got[0], same: got.every((x) => x === got[0]), pub: MA.isPub(got[0]) };
+    };
+    // its second read's should: a set-up vault whose record cannot be written (its put refused, placed on the registered provider): the
+    // vault's first mint is said ONCE and remembered — ten hellos ask ONE put; a renew that lands ends it
+    const vaultRefused = async (H, tag) => {
+      const VE = require('../src/server/vault-engine.js'), SBm = require('../src/secret-box.js');
+      const vd = path.join(tmp, 'ht-vault-refused-' + tag); fs.mkdirSync(path.join(vd, 'agentd'), { recursive: true });
+      fs.writeFileSync(path.join(vd, 'agentd', 'hub-identity.pem'), '', { mode: 0o600 });
+      const ve = VE.create({ dataDir: vd, kdf: { N: 1024, r: 8, p: 1 }, log: { log() { }, warn() { }, error() { } }, idleTimer: false });
+      const su = await ve.setup('correct horse battery staple', {});
+      const prov = SBm.vaultForDir(vd), put0 = prov && prov.secretPut;
+      let puts = 0, refuse = true;
+      if (prov) prov.secretPut = (...a) => { puts++; return refuse ? { ok: false, code: 'key-unwritable:EIO' } : put0(...a); };
+      const said = [], h = mk(H, vd, said);
+      const got = []; for (let i = 0; i < 10; i++) { try { got.push(h.identity().publicKey); } catch (e) { got.push('threw ' + ((e && e.code) || 'error')); } }
+      const atTen = puts; refuse = false;
+      let renewed = null; try { renewed = h.renewIdentity().publicKey; } catch (e) { renewed = 'threw ' + ((e && e.code) || 'error'); }
+      let after = null; try { after = h.identity().publicKey; } catch (e) { after = 'threw ' + ((e && e.code) || 'error'); }
+      if (prov) prov.secretPut = put0;
+      try { ve.close(); } catch { }
+      return { setup: !!(su && su.ok), puts: atTen, got0: got[0], same: got.every((x) => x === got[0]), said: said.filter((l) => /^\[hub-key\] this hub's own key could not be sealed into the vault \(key-unwritable:EIO\)/.test(l)).length, ended: MA.isPub(renewed) && renewed === after };
+    };
+    const NUL = Buffer.alloc(64);   // a torn write of another shape: the name on bytes that are no key
+    const r = keyScene(HT, 'real', HTS), u = noSyncScene(HT, 'real');
+    ok(r.first === 'EIO' && r.firstN === 1 && r.again === 'EIO' && r.againN === 0 && !r.firstKey && r.firstLeft === 0 && r.mintSaid === 1 && r.renew === 'hub_key_renew_failed' && /this hub's key was not changed/.test(r.renewMsg) && r.renewN === 1 && r.kept && r.renewed && r.shredded && r.left === 0,
+      'B-574d: this hub\'s key is SYNCED before its name — a first mint under a refused sync (EIO, placed) leaves no key and no temp, is said ONCE and not tried again (no sync the second time); a renew under one answers «this hub\'s key was not changed» (hub_key_renew_failed) and the old key stands; the renew that lands overwrites the RETIRED key\'s bytes in place', r);
     ok(u.first === 'landed' && u.minted && u.renew === 'landed' && u.renewed && u.saidMint === 1 && u.saidRenew === 1,
       'B-574d: a file system with NO sync at all (EINVAL, placed) — the first mint AND the renew land, each said once (the renew is the one way out of hub_identity_lost)', u);
-    const HTS = read('src/server/host-tokens.js');
-    const XH = mutantCopies('hub-key-unsynced', REPO).load('src/server/host-tokens.js', anchored(HTS, "      if (replace) {\n        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n        return pem;\n      }\n      try { FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say }); }\n      catch (e) { if (!mintFailSaid) { mintFailSaid = true; say(`this hub's own key could not be written (${(e && e.code) || 'error'}) \u2014 no machine can pin it until it is; it is tried again at the next link`); } throw e; }\n", "      fs.writeFileSync(tmp, pem, { mode: 0o600 });   // MUTANT: the release's unsynced roads\n      if (replace) { fs.renameSync(tmp, f); return pem; }\n", 'hub-key-unsynced'), 'hub-key-unsynced');
-    const x = keyScene(XH, 'red');
-    ok(x.first === 'landed' && x.firstKey && x.renew === 'landed' && x.renewN === 0 && !x.kept && !x.shredded, 'CONTROL (the release\'s unsynced roads, in a copy): the key\'s temp is never synced — the placed refusal is not met there and the new key takes its name (only the folder\'s best-effort sync meets it), the retired key\'s bytes stay in its inode — red', x);
+    const e10 = tenHellos(HT, 'empty-real', { bytes: '' }), n10 = tenHellos(HT, 'nul-real', { bytes: NUL }), p10 = tenHellos(HT, 'nul-pinned-real', { bytes: NUL, pins: ['studio-mac'] }), f10 = tenHellos(HT, 'fail-real', { refuse: 'EIO' });
+    ok(e10.syncs === 4 && e10.same && e10.pub && e10.keyOnDisk && e10.healedSaid === 1,
+      `r4982: an EMPTY key file with no machine pinning it is HEALED by ONE mint — ten hellos, ${e10.syncs} syncs in all (the temp; the secret family's replace: its temp, its folder, the retired inode), one key every hello, said once`, e10);
+    ok(n10.syncs === 4 && n10.same && n10.pub && n10.keyOnDisk && n10.healedSaid === 1 && p10.syncs === 0 && p10.got0 === 'threw hub_identity_lost' && p10.same,
+      `r4982 (its read): a key file of bytes that are NO KEY (NULs) is no key — with no pin healed by ONE mint (${n10.syncs} syncs over ten hellos); with a machine pinning it, hub_identity_lost BY NAME every hello, nothing written (${p10.syncs} syncs)`, { n10, p10 });
+    ok(f10.syncs === 1 && f10.reads === 1 && f10.got0 === 'threw EIO' && f10.same && f10.failSaid === 1,
+      `r4982: a first mint that cannot land is said ONCE and remembered — ten hellos, ${f10.syncs} sync and ${f10.reads} read of the key file in all`, f10);
+    const two = twoScene(HT, 'real');
+    ok(two.a1 === 'EIO' && two.b1 === 'EIO' && two.atB.syncs === 1 && two.atB.reads === 1 && two.said === 1 && two.same,
+      'r4982 (its read\'s must): TWO HostTokens over one folder share the memory — the second never reads or tries the mint again (1 sync, 1 read in all, said once); the renew through one ends it for both (the same key)', two);
+    const ve1 = await vaultEmpty(HT, 'real');
+    ok(ve1.setup && ve1.pub && ve1.same, 'r4982 (its read): under a set-up vault an EMPTY key file from before it is no key (its adopt answers key-malformed) — the vault mints ONE key, the same every hello', ve1);
+    const vr1 = await vaultRefused(HT, 'real');
+    ok(vr1.setup && vr1.puts === 1 && vr1.got0 === 'threw key-unwritable:EIO' && vr1.same && vr1.said === 1 && vr1.ended,
+      `r4982 (its second read): a vault mint that cannot land is said ONCE and remembered — ten hellos ask ${vr1.puts} put in all; the renew that lands ends it`, vr1);
+    const XH = copyOf(anchored(HTS, "      if (replace) {\n        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n        return pem;\n      }\n      const prior = MINT_FAILED.get(mintKey(st)); if (prior) throw prior;   // r4982: never tried again in this process\n      try {\n        FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say });\n        let linked = false;\n        try { fs.linkSync(tmp, f); linked = true; } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }\n        try { fs.unlinkSync(tmp); } catch { }\n        if (linked) { syncFolderOf(f); return pem; }\n        const onDisk = fs.readFileSync(f, 'utf8');\n        if (usable(onDisk)) return onDisk;   // another hub process's key (two on one first boot): the one on disk is kept\n        // r4982: A KEY FILE THAT IS NO KEY \u2014 empty, or bytes that are no key (zero bytes, NULs, a cut PEM) \u2014 and, identity() counted the pins\n        // first, no machine pins it: HEALED by ONE mint through the SECRET FAMILY's replace (its read's should: a cut PEM can hold a private\n        // key's bytes \u2014 the retired inode is overwritten; the temp synced, renamed, its folder synced); on a file system with no sync at all\n        // through the door, said; said once. KNOWN LIMIT: two hub processes healing the same file at once \u2014 the last rename wins\n        try { replaceShredding(f, pem); } catch (e2) { if (!FC.SYNC_UNSUPPORTED.has(e2 && e2.code)) throw e2; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (a key file that is no key, healed)\", say }); }\n        say('this hub\\'s own key file was empty or not a key and no machine pins it \u2014 a new key was written over it once');\n        return pem;\n      } catch (e) {\n        const k = mintKey(st);\n        if (!MINT_FAILED.has(k)) { MINT_FAILED.set(k, e); say(`this hub's own key could not be written (${(e && e.code) || 'error'}) \u2014 no machine can pin it until it is; it is not tried again until the hub starts again`); }\n        throw e;\n      }\n", "      fs.writeFileSync(tmp, pem, { mode: 0o600 });   // MUTANT: the release's unsynced roads\n      if (replace) { fs.renameSync(tmp, f); return pem; }\n      try { fs.linkSync(tmp, f); } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }\n      try { fs.unlinkSync(tmp); } catch { }\n      return fs.readFileSync(f, 'utf8');\n", 'hub-key-unsynced'), 'unsynced');
+    const x = keyScene(XH, 'red', anchored(HTS, "      if (replace) {\n        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n        return pem;\n      }\n      const prior = MINT_FAILED.get(mintKey(st)); if (prior) throw prior;   // r4982: never tried again in this process\n      try {\n        FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say });\n        let linked = false;\n        try { fs.linkSync(tmp, f); linked = true; } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }\n        try { fs.unlinkSync(tmp); } catch { }\n        if (linked) { syncFolderOf(f); return pem; }\n        const onDisk = fs.readFileSync(f, 'utf8');\n        if (usable(onDisk)) return onDisk;   // another hub process's key (two on one first boot): the one on disk is kept\n        // r4982: A KEY FILE THAT IS NO KEY \u2014 empty, or bytes that are no key (zero bytes, NULs, a cut PEM) \u2014 and, identity() counted the pins\n        // first, no machine pins it: HEALED by ONE mint through the SECRET FAMILY's replace (its read's should: a cut PEM can hold a private\n        // key's bytes \u2014 the retired inode is overwritten; the temp synced, renamed, its folder synced); on a file system with no sync at all\n        // through the door, said; said once. KNOWN LIMIT: two hub processes healing the same file at once \u2014 the last rename wins\n        try { replaceShredding(f, pem); } catch (e2) { if (!FC.SYNC_UNSUPPORTED.has(e2 && e2.code)) throw e2; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (a key file that is no key, healed)\", say }); }\n        say('this hub\\'s own key file was empty or not a key and no machine pins it \u2014 a new key was written over it once');\n        return pem;\n      } catch (e) {\n        const k = mintKey(st);\n        if (!MINT_FAILED.has(k)) { MINT_FAILED.set(k, e); say(`this hub's own key could not be written (${(e && e.code) || 'error'}) \u2014 no machine can pin it until it is; it is not tried again until the hub starts again`); }\n        throw e;\n      }\n", "      fs.writeFileSync(tmp, pem, { mode: 0o600 });   // MUTANT: the release's unsynced roads\n      if (replace) { fs.renameSync(tmp, f); return pem; }\n      try { fs.linkSync(tmp, f); } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }\n      try { fs.unlinkSync(tmp); } catch { }\n      return fs.readFileSync(f, 'utf8');\n", 'hub-key-unsynced-restart'));
+    ok(x.first === 'landed' && x.firstKey && x.renew === 'landed' && x.renewN === 0 && !x.kept && !x.shredded, 'CONTROL (the release\'s unsynced roads, in a copy): the key\'s temp is never synced — the placed refusal is not met and the new key takes its name, the retired key\'s bytes stay in its inode — red', x);
+    const XN = copyOf(anchored(HTS, "        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n", "        replaceShredding(f, pem);   // MUTANT: no road on a file system with no sync\n", 'hub-key-renew-no-road'), 'renew-no-road');
+    const xn = noSyncScene(XN, 'red');
+    ok(xn.renew === 'hub_key_renew_failed' && !xn.renewed && xn.saidRenew === 0, 'CONTROL (the renew with no road for a file system with no sync, in a copy): the renew fails (EINVAL) and the key is never renewed — red', xn);
     // the early round's should (主开发 r4797): the first mint's NAME is synced too — after the key's own sync, its FOLDER (best effort).
-    // RED: a copy without the folder's sync (the key's bytes synced, the link's name left to the file system's next commit).
     const dirSyncScene = (H, tag) => {
       const d = path.join(tmp, 'ht-dirsync-' + tag); fs.mkdirSync(d, { recursive: true });
-      const h = H.create({ dataDir: d, anyHubPin: () => [], log: { log() { }, warn() { } } });
+      const h = mk(H, d, []);
       const s0 = fs.fsyncSync, kinds = [];
-      fs.fsyncSync = function (fd, ...a) { let k = '?'; try { k = fs.fstatSync(fd).isDirectory() ? 'folder' : 'file'; } catch { k = '?'; } kinds.push(k); return s0.call(this, fd, ...a); };
+      fs.fsyncSync = function (fd, ...a) { let kd = '?'; try { kd = fs.fstatSync(fd).isDirectory() ? 'folder' : 'file'; } catch { kd = '?'; } kinds.push(kd); return s0.call(this, fd, ...a); };
       try { h.identity(); } finally { fs.fsyncSync = s0; }
       return kinds.join(',');
     };
     const ds = dirSyncScene(HT, 'real');
     ok(ds === 'file,folder', `B-574d: a first mint syncs the key's bytes, then its FOLDER after the link (best effort) — the syncs in order: ${ds}`);
-    const XD = mutantCopies('hub-key-no-folder-sync', REPO).load('src/server/host-tokens.js', anchored(HTS, '      syncFolderOf(f);\n', '      /* MUTANT: the folder not synced */\n', 'hub-key-no-folder-sync'), 'hub-key-no-folder-sync');
-    const xd = dirSyncScene(XD, 'red');
+    const xd = dirSyncScene(copyOf(anchored(HTS, "        if (linked) { syncFolderOf(f); return pem; }\n", "        if (linked) return pem;   /* MUTANT: the folder not synced */\n", 'hub-key-no-folder-sync'), 'no-folder-sync'), 'red');
     ok(xd === 'file', `CONTROL (a copy without the folder's sync): only the key's bytes are synced, the link's name is not — red (${xd})`);
-    const XN = mutantCopies('hub-key-renew-no-road', REPO).load('src/server/host-tokens.js', anchored(HTS, "        try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: \"this hub's key (its renew)\", say }); }\n", "        replaceShredding(f, pem);   // MUTANT: no road on a file system with no sync\n", 'hub-key-renew-no-road'), 'hub-key-renew-no-road');
-    const xn = noSyncScene(XN, 'red');
-    ok(xn.renew === 'EINVAL' && !xn.renewed && xn.saidRenew === 0, 'CONTROL (the renew with no road for a file system with no sync, in a copy): the renew throws EINVAL and the key is never renewed — red', xn);
+    const xt = tenHellos(copyOf(anchored(HTS, "      const prior = MINT_FAILED.get(mintKey(st)); if (prior) throw prior;   // r4982: never tried again in this process\n", "      FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: \"this hub's key (its first mint)\", say });   // MUTANT: f62eb0041's first mint (no heal, no memory)\n      try { fs.linkSync(tmp, f); } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }\n      try { fs.unlinkSync(tmp); } catch { }\n      syncFolderOf(f);\n      return fs.readFileSync(f, 'utf8');\n", 'hub-key-tip-mint'), 'tip-mint'), 'empty-red', { bytes: '' });
+    ok(xt.syncs === 20 && !xt.keyOnDisk && !xt.pub, `CONTROL (f62eb0041's first mint, in a copy): over the EMPTY key file every hello mints again — ten hellos, ${xt.syncs} syncs (a file and a folder each) and never a key — red`, xt);
+    const xm = tenHellos(copyOf(anchored(anchored(HTS, "    const st = MINT_FAILED.size ? stateOf() : null, failed = st && st !== 'locked' ? MINT_FAILED.get(mintKey(st)) : null;   // (its own look only while a failure is remembered)\n    if (failed) throw failed;   // r4982: a first mint that could not land \u2014 no read, no write again\n", '', 'hub-key-no-memory-1'), "      const prior = MINT_FAILED.get(mintKey(st)); if (prior) throw prior;   // r4982: never tried again in this process\n", '', 'hub-key-no-memory-2'), 'no-memory'), 'fail-red', { refuse: 'EIO' });
+    ok(xm.syncs === 10 && xm.reads === 10 && xm.failSaid === 1, `CONTROL (a copy without the memory): every hello reads and tries the mint again — ten hellos, ${xm.syncs} syncs and ${xm.reads} reads — red`, xm);
+    const xp = twoScene(copyOf(anchored(HTS, "  const mintKey = (st) => (st === 'not_set_up' ? 'file:' : 'vault:') + path.resolve(identityFile());   // its read's should: the VAULT's mint is remembered too\n", "  const mintKey = (() => { const own = {}; return () => own; })();   // MUTANT: one memory per INSTANCE\n", 'hub-key-per-instance'), 'per-instance'), 'red');
+    ok(xp.b1 === 'EIO' && xp.atB.syncs === 2 && xp.atB.reads === 2 && xp.said === 2, 'CONTROL (the memory per INSTANCE, in a copy): the second HostTokens reads and tries the mint again, and says it again — red', xp);
+    const xu = tenHellos(copyOf(anchored(HTS, "    const id = usable(readIdentity());\n    if (id) return id;   // r4982: a key file that is NO KEY (empty, or not a key) is no key \u2014 with a pin: lost, by name; with none: healed once\n", "    const pem = readIdentity();   // MUTANT: the key judged by its text alone\n    if (pem && pem.trim()) return asIdentity(pem);\n", 'hub-key-text-alone'), 'text-alone'), 'nul-pinned-red', { bytes: NUL, pins: ['studio-mac'] });
+    ok(xu.got0 !== 'threw hub_identity_lost' && /^threw /.test(xu.got0), `CONTROL (the key judged by its text alone, in a copy): a pinned NUL key file is never named — every hello an unnamed refusal (${xu.got0}) — red`, xu);
+    const xv = await vaultEmpty(copyOf(anchored(HTS, "    if (!r.ok && adopted && r.code === 'key-malformed') return null;   // r4982's read: an EMPTY key file left from before the vault is no key \u2014 the vault mints one, once (its entry answers from then on)\n", '', 'hub-key-adopt-thrown'), 'adopt-thrown'), 'red');
+    ok(xv.got0 === 'threw key-malformed' && xv.same && !xv.pub, 'CONTROL (the vault\'s malformed adopt thrown, in a copy): every hello is refused key-malformed and no key is ever made — red', xv);
+    const xvr = await vaultRefused(copyOf(anchored(HTS, "      if (!replace && !MINT_FAILED.has(vk)) { MINT_FAILED.set(vk, e); log.warn?.(`[hub-key] this hub's own key could not be sealed into the vault (${put.code}) \u2014 no machine can pin it until it is; it is not tried again until the hub starts again`); }\n", "      log.warn?.(`[hub-key] this hub's own key could not be sealed into the vault (${put.code}) — MUTANT: said, never remembered`);\n", 'hub-key-vault-no-memory'), 'vault-no-memory'), 'red');
+    ok(xvr.puts === 10 && xvr.said === 10, `CONTROL (the vault's mint never remembered, in a copy): every hello asks the vault again — ten hellos, ${xvr.puts} puts and ${xvr.said} lines — red`, xvr);
+    const xrText = anchored(HTS, "    try { writeIdentity(fresh, { replace: true }); }\n    catch (e) { if (e && e.code === 'vault_locked') throw e; throw Object.assign(new Error(`a new hub key could not be written (${(e && e.code) || 'error'}) \u2014 this hub's key was not changed; the renew can be tried again`), { code: 'hub_key_renew_failed', cause: (e && e.code) || null }); }\n", "    writeIdentity(fresh, { replace: true });   // MUTANT: the release's answer (the file system's error alone)\n", 'hub-key-renew-mute');
+    const xr = keyScene(copyOf(xrText, 'renew-mute'), 'renew-red', xrText);
+    ok(xr.renew === 'EIO' && !/not changed/.test(xr.renewMsg), 'CONTROL (the renew without its answer, in a copy): a failed renew answers the file system\'s error alone, never that the key was not changed — red', xr);
+    const SMJ = read('src/lib/sidebar-mounts.js'), KEYW = "A new hub key could not be written — this hub's key was not changed. Try again.";
+    ok(SMJ.includes("if (e && e.code === 'hub_key_renew_failed') return tr('A new hub key could not be written — this hub\\'s key was not changed. Try again.')") && ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes(JSON.stringify(KEYW) + ':')),
+      'r4982: the page words a failed renew by its code — «this hub\'s key was not changed» — in English, zh and ja (never the hub\'s raw error)');
   }
   // ②b THE VAULT ROAD (the reader's must 1): a LAWFUL entry — the pre-vault key ADOPTED into the vault (the same key: the machines
   // that pinned it keep working), read back from it, a locked vault ⇒ vault_locked

@@ -30,6 +30,11 @@ const HOLD = require('../store-read-hold.js');     // … and its HOLD when the 
 const TOKEN_PARSE = (t) => String(t).trim();
 const TOKEN_SHAPE = (v) => typeof v === 'string' && /^[\x21-\x7e]{16,512}$/.test(v);   // one printable word (a minted token: its prefix + hex)
 const FILE_RE = /^host-([\w.-]+)\.token$/;
+// B-574d (lane nl-paired, 主开发 r4982 + its own read's must): A FIRST MINT THAT CANNOT LAND is said ONCE and remembered for the life of
+// the hub PROCESS, by its key file — the hub builds TWO HostTokens over one data folder (server.js's, for the dial road, and
+// mounts-plugins-wiring's, for the ssh road and the renew), so the memory is the module's, never an instance's: no hello and no read of
+// either tries it again. Only a renew that LANDS ends it; a restart starts afresh.
+const MINT_FAILED = new Map();   // '<road>:' + path.resolve(<the key file>) → the error of its first mint that could not land (road: the file before the vault, or the vault)
 const CFG_RE = /^session-.+\.json$/;
 const entryOf = (hostId) => 'host:' + hostId;
 
@@ -144,7 +149,9 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   // a LAWFUL vault name (the engine's SECRET_RE): the `host:` family is the device links' own — `host:hub-identity` can be no
   // machine's id (those are host-<hex> / dial-<device>)
   const IDENTITY_ENTRY = 'host:hub-identity';
-  let mintFailSaid = false;   // B-574d (lane nl-paired): a first mint that could not be written, said once a run
+  // r4982: the memory of a first mint that could not land is the MODULE's (MINT_FAILED), by this key file — every hello would otherwise pay
+  // the key file's sync (and its folder's) on the hub's loop at the reconnect cadence
+  const mintKey = (st) => (st === 'not_set_up' ? 'file:' : 'vault:') + path.resolve(identityFile());   // its read's should: the VAULT's mint is remembered too
   /** B-574d (lane nl-paired, the early round's should): a linked name on disk too — its folder synced, BEST EFFORT (not every platform
    *  opens or syncs a folder); the descriptor closed once through the tree's one close and forgotten in that statement */
   function syncFolderOf(file) {
@@ -159,8 +166,9 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
     if (st === 'not_set_up') { try { return fs.readFileSync(identityFile(), 'utf8'); } catch { return null; } }
     const v = SB.vaultForDir(dataDir);
     if (st !== 'unlocked' || !v) throw identityLocked();
-    let r = v.secretGet(IDENTITY_ENTRY);
-    if (r.ok && !r.value && fs.existsSync(identityFile())) r = v.secretAdopt(IDENTITY_ENTRY, identityFile());
+    let r = v.secretGet(IDENTITY_ENTRY), adopted = false;
+    if (r.ok && !r.value && fs.existsSync(identityFile())) { r = v.secretAdopt(IDENTITY_ENTRY, identityFile()); adopted = true; }
+    if (!r.ok && adopted && r.code === 'key-malformed') return null;   // r4982's read: an EMPTY key file left from before the vault is no key — the vault mints one, once (its entry answers from then on)
     if (!r.ok) { if (r.code === KF.VAULT_LOCKED) throw identityLocked(); throw Object.assign(new Error(`this hub's own key could not be read from the vault (${r.code})`), { code: r.code }); }
     if (!r.value) return null;
     const pem = r.value.toString('utf8'); r.value.fill(0); return pem;
@@ -173,8 +181,10 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
    *  (src/secret-file.js replaceShredding: the temp synced, renamed, its folder synced, the RETIRED key's bytes overwritten in place;
    *  never through a link); the first mint's temp is written through the tree's one synced replace (src/fd-close.js renameSynced, into
    *  the temp's own name) BEFORE it is linked in. Both stay synchronous: a person's act or the first pairing, read back at once. A sync
-   *  or close that FAILS is a failed write thrown to the caller (the old key stands, the temp removed), and a first mint's failure is said
-   *  once a run (its callers go on without a key). ONLY a file system that does no sync at all (src/fd-close.js SYNC_UNSUPPORTED) lands,
+   *  or close that FAILS is a failed write thrown to the caller (the old key stands, the temp removed); a first mint's failure is said ONCE
+   *  and remembered for the life of the process (r4982: no hello and no read tries it again; its callers go on without a key), and a
+   *  failed renew answers that this hub's key was not changed. A key file that is NO KEY (empty, or bytes that are no key) with no machine
+   *  pinning it is healed by ONE mint (r4982); before the vault is set up through the door, after it into the vault. ONLY a file system that does no sync at all (src/fd-close.js SYNC_UNSUPPORTED) lands,
    *  said: the first mint through the door; the renew, which the secret family's replace refuses there, through the door too (the renew
    *  is the ONE way out of hub_identity_lost — it must land; there the retired key's bytes are not overwritten, as at the release).
    *  The first mint's NAME (its link) is synced too: its folder, best effort, as the secret family's replace syncs its own (the early
@@ -188,24 +198,52 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
         try { replaceShredding(f, pem); } catch (e) { if (!FC.SYNC_UNSUPPORTED.has(e && e.code)) throw e; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: "this hub's key (its renew)", say }); }
         return pem;
       }
-      try { FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: "this hub's key (its first mint)", say }); }
-      catch (e) { if (!mintFailSaid) { mintFailSaid = true; say(`this hub's own key could not be written (${(e && e.code) || 'error'}) — no machine can pin it until it is; it is tried again at the next link`); } throw e; }
-      try { fs.linkSync(tmp, f); } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }
-      try { fs.unlinkSync(tmp); } catch { }
-      syncFolderOf(f);
-      return fs.readFileSync(f, 'utf8');
+      const prior = MINT_FAILED.get(mintKey(st)); if (prior) throw prior;   // r4982: never tried again in this process
+      try {
+        FC.renameSynced(tmp + '.w', tmp, pem, { mode: 0o600, where: "this hub's key (its first mint)", say });
+        let linked = false;
+        try { fs.linkSync(tmp, f); linked = true; } catch (e) { if (!e || e.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { } throw e; } }
+        try { fs.unlinkSync(tmp); } catch { }
+        if (linked) { syncFolderOf(f); return pem; }
+        const onDisk = fs.readFileSync(f, 'utf8');
+        if (usable(onDisk)) return onDisk;   // another hub process's key (two on one first boot): the one on disk is kept
+        // r4982: A KEY FILE THAT IS NO KEY — empty, or bytes that are no key (zero bytes, NULs, a cut PEM) — and, identity() counted the pins
+        // first, no machine pins it: HEALED by ONE mint through the SECRET FAMILY's replace (its read's should: a cut PEM can hold a private
+        // key's bytes — the retired inode is overwritten; the temp synced, renamed, its folder synced); on a file system with no sync at all
+        // through the door, said; said once. KNOWN LIMIT: two hub processes healing the same file at once — the last rename wins
+        try { replaceShredding(f, pem); } catch (e2) { if (!FC.SYNC_UNSUPPORTED.has(e2 && e2.code)) throw e2; FC.renameSynced(tmp, f, pem, { mode: 0o600, where: "this hub's key (a key file that is no key, healed)", say }); }
+        say('this hub\'s own key file was empty or not a key and no machine pins it — a new key was written over it once');
+        return pem;
+      } catch (e) {
+        const k = mintKey(st);
+        if (!MINT_FAILED.has(k)) { MINT_FAILED.set(k, e); say(`this hub's own key could not be written (${(e && e.code) || 'error'}) — no machine can pin it until it is; it is not tried again until the hub starts again`); }
+        throw e;
+      }
     }
     const v = SB.vaultForDir(dataDir);
     if (st !== 'unlocked' || !v) throw identityLocked();
+    // its read's should: THE VAULT's FIRST MINT that cannot land is remembered as the door's is — said once, never tried again by a hello
+    // (each try would rewrite the vault's record); the renew and a locked vault are not remembered
+    const vk = mintKey(st);
+    if (!replace) { const prior = MINT_FAILED.get(vk); if (prior) throw prior; }
     const put = v.secretPut(IDENTITY_ENTRY, pem);
-    if (!put.ok) throw put.code === KF.VAULT_LOCKED ? identityLocked() : Object.assign(new Error(`this hub's own key could not be sealed into the vault (${put.code})`), { code: put.code });
+    if (!put.ok) {
+      if (put.code === KF.VAULT_LOCKED) throw identityLocked();
+      const e = Object.assign(new Error(`this hub's own key could not be sealed into the vault (${put.code})`), { code: put.code });
+      if (!replace && !MINT_FAILED.has(vk)) { MINT_FAILED.set(vk, e); log.warn?.(`[hub-key] this hub's own key could not be sealed into the vault (${put.code}) — no machine can pin it until it is; it is not tried again until the hub starts again`); }
+      throw e;
+    }
     return pem;
   }
   const asIdentity = (pem) => ({ privateKeyPem: pem, publicKey: require('../mutual-auth.js').publicKeyOf(pem, { crypto: require('crypto') }) });
+  /** r4982 (its read): a key file's text → its identity, or null when it is NO KEY — empty, or bytes that do not parse as this hub's key */
+  const usable = (pem) => { if (typeof pem !== 'string' || !pem.trim()) return null; try { const id = asIdentity(pem); return require('../mutual-auth.js').isPub(id.publicKey) ? id : null; } catch { return null; } };
   /** → { privateKeyPem, publicKey } — throws vault_locked / hub_identity_lost by name */
   function identity() {
-    const pem = readIdentity();
-    if (pem) return asIdentity(pem);
+    const st = MINT_FAILED.size ? stateOf() : null, failed = st && st !== 'locked' ? MINT_FAILED.get(mintKey(st)) : null;   // (its own look only while a failure is remembered)
+    if (failed) throw failed;   // r4982: a first mint that could not land — no read, no write again
+    const id = usable(readIdentity());
+    if (id) return id;   // r4982: a key file that is NO KEY (empty, or not a key) is no key — with a pin: lost, by name; with none: healed once
     // every pin that exists is counted (must B): `anyHubPin` answers the pinning machines' names (or a boolean, for an older caller)
     let pins = []; try { const v = anyHubPin(); pins = Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : v ? [''] : []; } catch { pins = ['']; }
     if (pins.length) {
@@ -230,7 +268,11 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
   /** THE PERSON'S ACT (law 3): a new hub key — every machine that pinned the old one refuses this hub until it pairs again. */
   function renewIdentity() {
     const fresh = require('../mutual-auth.js').generateKeyPair({ crypto: require('crypto') }).privateKeyPem;
-    writeIdentity(fresh, { replace: true });
+    // r4982: a renew that cannot land answers that THIS HUB'S KEY WAS NOT CHANGED (the old one, or its loss, stands as it was: the temp is
+    // removed before any rename) — by its code, the page's own words (src/lib/sidebar-mounts.js); a locked vault keeps its own refusal
+    try { writeIdentity(fresh, { replace: true }); }
+    catch (e) { if (e && e.code === 'vault_locked') throw e; throw Object.assign(new Error(`a new hub key could not be written (${(e && e.code) || 'error'}) — this hub's key was not changed; the renew can be tried again`), { code: 'hub_key_renew_failed', cause: (e && e.code) || null }); }
+    MINT_FAILED.delete(mintKey('not_set_up')); MINT_FAILED.delete(mintKey('unlocked'));   // the person's new key landed: a remembered failed first mint (either road) ends with it
     log.log?.('[hub-key] a new hub key was made by the person — every machine pairs again');
     return asIdentity(fresh);
   }

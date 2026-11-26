@@ -8176,6 +8176,7 @@ export default {
   "{machine} pins the key of the hub it was set up with, and this hub did not prove it. Something may be posing as this hub to it, or it was set up from another hub. If you set it up from this hub, let it pin this hub's key again (Remote → {machine} → Host key… → Let it pin this hub's key).": "{machine} は設定したときの hub の鍵を固定していますが、この hub はそれを証明しませんでした。何かがこの hub になりすましているか、別の hub から設定された可能性があります。この hub から設定したのなら、この hub の鍵を固定し直させてください（リモート → {machine} → ホストキー… → この hub の鍵を固定させる）。",
   "Make a new hub key": "新しい hub キーを作成",
   "Make a new hub key?": "新しい hub キーを作成しますか？",
+  "A new hub key could not be written — this hub's key was not changed. Try again.": "新しい hub キーを書き込めませんでした。この hub の鍵は変更されていません。もう一度お試しください。",
   "Every machine that pinned the old key refuses this hub until it is paired again.": "古い鍵を固定したマシンは、再ペアリングするまでこの hub を拒否します。",
   "A new hub key was made — pair each machine again": "新しい hub キーを作成しました。各マシンを再ペアリングしてください",
   "Its agent did not prove the device key VibeSpace pinned — this hub's link to its agent is refused until you pair it again or forget the key (Host key…).": "エージェントが VibeSpace の固定したデバイスキーを証明しませんでした。再ペアリングするか鍵を忘れる（ホストキー…）まで、このハブとそのエージェントの接続は拒否されます。",
