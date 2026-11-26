@@ -311,6 +311,7 @@
   "test-picture-path-nagle": 25248,
   "test-plugin-consent-chrome": 12143,
   "test-plugin-git-clone": 1692,
+  "test-pool-pin-all-chrome": 4390,
   "test-popover-frame-close": 29214,
   "test-port-forward": 1552,
   "test-profile-blindness-chip": 16885,
