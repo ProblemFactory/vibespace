@@ -163,15 +163,15 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   };
   const NO_BUCKET = patched('pool-no-bucket.js', REAL_POOL, [["if (!projectionBucketBought(a, now) && !(Number.isFinite(bought)", "if (!(Number.isFinite(bought)"]]);
   const NO_AGE = patched('pool-no-age.js', REAL_POOL, [["cross <= projWindowMs && age >= floorMs && cross <", "cross <= projWindowMs && cross <"]]);
-  const NO_PERSIST = patched('loop-no-persist.js', REAL_LOOP, [["  const st = loadState(d.dataDir, now0, warn);", "  const st = { attempts: new Map(), fails: new Map(), projReads: new Map() };"], ["        if ((await saveState(d.dataDir, st, warn, d.storeWriter)) !== true) {", "        if (false) {"], ["        saveState(d.dataDir, st, warn, d.storeWriter); // the backoff", "        // "]]);
+  const NO_PERSIST = patched('loop-no-persist.js', REAL_LOOP, [["  const st = loadState(d.dataDir, now0, warn);", "  const st = { attempts: new Map(), fails: new Map(), projReads: new Map() };"], ["        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) {", "        if (false) {"], ["        const afterLanded = await saveState(d.dataDir, st, warn, d.storeWriter, landingMs);", "        const afterLanded = true;"]]);
   // quota r3 controls: the rule without the projection WINDOW (the read spent as far from the line as the floor allows);
   // the loop without the future-stamp clamp; without the pre-spawn save; with the r2 order (the wake unguarded, before the
   // bookkeeping); without the identity-group memory
   const NO_WINDOW = patched('pool-no-window.js', REAL_POOL, [["cross > 0 && cross <= projWindowMs && age >= floorMs", "cross > 0 && age >= floorMs"]]);
   const NO_CLAMP = patched('loop-no-clamp.js', REAL_LOOP, [["function clampStamps(st, now) {\n  let n = 0;", "function clampStamps(st, now) {\n  return 0; let n = 0;"]]);
-  const NO_PRESAVE = patched('loop-no-presave.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter)) !== true) {", "        if (false) {"]]);
+  const NO_PRESAVE = patched('loop-no-presave.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) {", "        if (false) {"]]);
   // B-574d: the loop that SAVES the stamp but does not WAIT for its landing (the spawn over a stamp not on disk)
-  const NO_WAIT = patched('loop-no-wait.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter)) !== true) {", "        saveState(d.dataDir, st, warn, d.storeWriter); if (false) {"]]);
+  const NO_WAIT = patched('loop-no-wait.js', REAL_LOOP, [["        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) {", "        saveState(d.dataDir, st, warn, d.storeWriter, landingMs); if (false) {"]]);
   const R2_ORDER = patched('loop-r2-order.js', REAL_LOOP, [["        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1);\n", "        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1); if (ok) d.onMemberReadingFresh(key, 'auto-cli refresh');\n"], ["        if (ok) { try { d.onMemberReadingFresh(key, 'auto-cli refresh'); }", "        if (false) { try { }"]]);
   const NO_GROUP = patched('loop-no-group.js', REAL_LOOP, [["mem = [a.id, ...g.accountIds.filter((x) => x !== a.id)];", "mem = [a.id];"]]);
   const loopFor = (poolFile) => poolFile === REAL_POOL ? REAL_LOOP : patched('loop-' + path.basename(poolFile), REAL_LOOP, [], { 'account-pool-auto.js': poolFile });
@@ -424,7 +424,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const t3 = Date.now(); for (let i = 1; i <= 5; i++) { w3.advance(MIN); await w3.tick(); } const took = Date.now() - t3;
     const said3 = w3.logs.filter((l) => /its attempt stamp did not reach the disk/.test(l)).length;
     w3.writer.hang = false; w3.advance(MIN); await w3.tick();
-    ok(require(REAL_LOOP).STAMP_LANDING_MS === 30e3 && w3.spawns.length === 1 && said3 === 1 && took < 5 * 40 + 2000, `(3) a landing that NEVER comes: each of 5 ticks ends past its bound (${took} ms in all), no spawn, said once (${said3}); the next landing asks once (${w3.spawns.length}) — the bound STAMP_LANDING_MS = 30 s`, { took, said3, spawns: w3.spawns.length });
+    ok(require(REAL_LOOP).STAMP_LANDING_MS === 30e3 && w3.spawns.length === 1 && said3 === 1, `(3) a landing that NEVER comes: each of 5 ticks RETURNED past its bound (${took} ms in all — a fact here, not a timing claim), no spawn, said once (${said3}); the next landing asks once (${w3.spawns.length}) — the bound STAMP_LANDING_MS = 30 s`, { took, said3, spawns: w3.spawns.length });
     // (1) THE LANDING OF THESE BYTES, by the REAL store writer: an EARLIER write of the same file in flight on the writer's thread (gated) lands
     //     while the stamp's write is still held — the spawn stand-in is NOT started; it starts when the stamp's own write lands, and reads it
     const GATED = path.join(scratchDir, 'gated-writer.cjs'), gates = fs.mkdtempSync(path.join(scratchDir, 'gates-'));

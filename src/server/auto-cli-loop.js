@@ -130,8 +130,9 @@ function loadState(dataDir, now, warn = () => {}) {
   return st;
 }
 function saveState(dataDir, st, warn, W = null, boundMs = STAMP_LANDING_MS) {
+  // r4732 (6a): while the unknown wait runs NO candidate is picked (the tick's `if (st.unknownAt != null) continue`), so no spawn waits on this
   if (st.unknownAt != null) return Promise.resolve(true);   // never over a state file that could not be read, while its wait runs (the ban-safety law) — nothing owed, as before
-  if (!dataDir) return Promise.resolve(true);   // a loop with no data folder (an embedding's) keeps no state file: nothing to land, as at the release
+  if (!dataDir) return Promise.resolve(true);   // r4732 (6b): a loop with no data folder (an embedding's; production always has one) keeps no state file: nothing to land — the release warned at each write
   const fp = path.join(dataDir, STATE_FILE);
   const doc = { v: 1, attempts: Object.fromEntries(st.attempts), fails: Object.fromEntries([...st.fails].filter(([, n]) => n > 0)), projReads: Object.fromEntries(st.projReads), said: Object.fromEntries(st.said || []) };
   const body = JSON.stringify(doc);
@@ -142,7 +143,8 @@ function saveState(dataDir, st, warn, W = null, boundMs = STAMP_LANDING_MS) {
     w.dirty(fp, { name: 'auto-cli-state.write', makeDir: true, produce: () => body, onWritten: (ok, e) => { if (!ok) warn(`[auto-cli] pacing state write failed: ${(e && (e.code || e.message)) || e}`); } });
     // the landing of THESE bytes: the writer's durable() waits for the version this dirty() made (its waiter is keyed by s.version
     // at the call; an earlier write of the same file landing settles only its own, lower version — src/store-writer.js durable /
-    // settled), bounded twice: the writer's own timeout and a timer here (a lost thread, a hung mount: false past the bound)
+    // settled), bounded twice: the writer's own timeout and a timer here (a lost thread, a hung mount: false past the bound) — the
+    // loop's timer is the ONLY guard against a writer that never answers at all, so it stays beside the writer's own
     let timer = null;
     const bound = new Promise((resolve) => { timer = setTimeout(() => resolve(false), boundMs); if (timer.unref) timer.unref(); });
     return Promise.race([Promise.resolve(w.durable(fp, { timeoutMs: boundMs })), bound]).then((ok) => { clearTimeout(timer); return ok === true; }, () => { clearTimeout(timer); return false; });
@@ -167,8 +169,9 @@ function lastBoughtInstant(reads) {
  */
 function createAutoCliLoop(d) {
   const landingMs = Number.isFinite(d.stampLandingMs) ? d.stampLandingMs : STAMP_LANDING_MS;   // a suite's short bound; the real one otherwise
-  let stampUnlanded = false;
-  let owed = [];   // r4732 (5): saves of this tick that are not the stamp's — awaited before the tick ends   // B-574d: «a stamp did not land» said once until one lands
+  let stampUnlanded = false;   // B-574d: «a stamp did not land» said once until one lands
+  let afterUnlanded = false;   // r4764: «an after-write did not land» said once until one lands (the same latch)
+  let owed = [];   // r4732 (5): saves of this tick that are not the stamp's — awaited before the tick ends
   const now0 = (d.now || Date.now)();
   const clock = d.now || Date.now, rand = d.rand || Math.random;
   const log = d.log || ((l) => console.log(l)), warn = d.warn || ((l) => console.warn(l));
@@ -299,7 +302,8 @@ function createAutoCliLoop(d) {
         // the backoff and the bought buckets outlive a restart (quota r2) — AWAITED before the next pick and before the tick ends (r4732 (5)):
         // a kill of the hub inside the writer's latency loses this ask's backoff step and bought bucket; the stamp, already on disk, still
         // paces the next start by the attempt floor (the release's own window: its synchronous write right after the ask)
-        if ((await saveState(d.dataDir, st, warn, d.storeWriter, landingMs)) !== true) warn(`[auto-cli] quota refresh ${key}: its backoff and bought bucket did NOT reach the disk — a restart now would lose them (the stamp on disk still paces the next ask)`);
+        const afterLanded = await saveState(d.dataDir, st, warn, d.storeWriter, landingMs);
+        if (afterLanded !== true) { if (!afterUnlanded) { afterUnlanded = true; warn(`[auto-cli] quota refresh ${key}: its backoff and bought bucket did NOT reach the disk — a restart now would lose them (the stamp on disk still paces the next ask); said once until one lands`); } } else afterUnlanded = false;
         if (ok) { try { d.onMemberReadingFresh(key, 'auto-cli refresh'); } catch (e) { warn(`[auto-cli] reading wake failed for ${key}: ${e.message}`); } } // the THIRD producer of a fresh reading takes the SAME edge (2026-09-08: its 02:31:43 success changed nothing) — AFTER the bookkeeping (quota r3)
         log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (${why || '?'}; ${it?.drift == null ? (it?.rolled ? 'no drift control — the reading\'s window already reset' : 'no drift control') : `drift ${Math.round(it.drift)}pt`}${it?.pj ? `; ${it.pj.label} crosses its ${it.pj.line}% line in ~${Math.max(1, Math.round(it.pj.inMs / 60e3))} min at ${it.pj.pctPerMin}%/min` : ''})${failWhy ? ` — ${failWhy}` : ''}`);
         (d.metric || global.__vsMetric)?.('auto-cli-refresh-ms', 0);
