@@ -130,6 +130,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - Claude differs from the release ONLY on a failed heal (the release wiped the folder whatever happened and answered nothing: failRun's red).
 - Legs: test-codex-pool «B-e381» and «B-e381 (2)» (stand-in homes, made-up sign-in files; each red the release's or the first unit's writer planted in a copy); test-oat-materialize pins _memberSignIn beside ensureSessionPoolLink.
 
+### bl-machines-a — B-8703's picture finds (主开发 r4654, the coordinator's picture of line 1036's door, look-1036)
+- 1. THE GROUP HEAD «Login expiry» — the release's, for every item of the `login` origin: three producers file under it (src/server/login-expiry-watch.js a sign-in's expiry, src/accounts.js the accounts list that cannot be read, src/server/oat-identity.js a long-lived token that bills another account). One line: the head reads «Accounts and sign-ins» (src/inbox-origin.js; zh 账号与登录, ja アカウントとサインイン); the pins of test-user-todos-layout and test-inbox-reply-ui follow.
+- 2. THE REPLY ICON — this item's own: its key `webui:oat-identity` spells a conversation's shape (a colon) and names none, so the reply verdict read it as an ended conversation («This conversation has ended — sending reopens it …»). One line: the key is among src/inbox-reply.js SERVER_KEYS (as `accounts` is) — «Not from an agent session», no reply drawn. Leg + RED (the key cut, in a copy) in test-oat-identity.
+- 3. THE DETAIL FOLD's sizes — the release's, for every item with a detail (src/lib/user-todos-row.js `ut-detail-exp`): its summary is at the row's body size by a ruling (public/style.css: «at the row's body size, not 9 px»), the text 10 px with no right padding; not changed here (every item's detail would move).
+- 4. THE UNDRAWN SECOND DOOR — the release's: `ut-go ut-go-door` is the folded row's trailing door, drawn on a touch screen only (public/style.css `.ut-go { display: none }`, shown in the touch-scale block), for every item that declares a door; no leftover of the first form.
+
 ## 2.369.422 — 2026-11-27
 
 ### 2.369.422: the hotfix of 2.369.421
