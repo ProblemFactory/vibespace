@@ -1841,7 +1841,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }
     _settingsCache = data;
     try { settingsHold.write(data, undefined, { sync: MACHINE_CALL.getStore() !== true }); }   // the hold's ONE write: the pid temp, SYNCED (r5185: unless a machine caller's config call), then the rename (NOT THERE ⇒ created exclusively)
-    catch (e) { if (e && e.code === 'store_appeared') settingsAgain('a file appeared where the start found none'); throw e; }
+    catch (e) {
+      // r5185 ALSO (lane hub-loop-stalls): a write that FAILED leaves the hub's settings as the file holds them — the refused change
+      // is never served as in force, nor carried onto the disk by the next save of another row (the person was told it failed)
+      _settingsCache = prev;
+      if (e && e.code === 'store_appeared') settingsAgain('a file appeared where the start found none');
+      throw e;
+    }
     const spend = spendOf(data);
     broadcast({ type: 'settings-updated', settings: data, ...(spend ? { spend } : {}) });
     // Server-side change hook (2.190.0): the ONLY settings key with a server

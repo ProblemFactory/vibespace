@@ -1337,10 +1337,10 @@ console.log('§10 r5185 the settings door syncs a person\'s save before its name
   const OLD = JSON.stringify({ 'r5185.kept': 'the old bytes' }, null, 2);
   const dir10 = (bytes) => { const d = path.join(root10, String(++n10)); fs.mkdirSync(d, { recursive: true }); if (bytes !== undefined) fs.writeFileSync(path.join(d, 'settings.json'), bytes); return d; };
   /** the REAL persistence router, a fresh copy of the module over `dir` (the store hold in its require cache: the real one, or a
-   *  copy a RED places there) */
-  const hub10 = (dir) => {
+   *  copy a RED places there); `src`: the router's own text, in a copy (a RED) */
+  const hub10 = (dir, src = null) => {
     for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k];
-    const P = require(path.join(REPO, PREL));
+    const P = src ? M.load(PREL, src, `r5185-router-${n10}`) : require(path.join(REPO, PREL));
     const words = [];
     const client = { readyState: 1, send: (j) => { try { words.push(JSON.parse(j)); } catch { } } };
     P.setup({ writer: landingWriter(), dataDir: dir, wss: { clients: new Set([client]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
@@ -1428,6 +1428,24 @@ console.log('§10 r5185 the settings door syncs a person\'s save before its name
   ok(!!e.thrown && e.thrown.code === 'EIO' && e.thrown.syscall === 'fsync' && e.ev.includes(`sync ${TMP}`) && !e.ev.some((x) => /^(rename|link) /.test(x)) && e.ev.includes(`unlink ${TMP}`) && tmpLeft(dE).length === 0
     && fs.readFileSync(path.join(dE, 'settings.json'), 'utf8') === OLD && !E.words.some((w) => w.type === 'settings-updated'),
     'r5185 (e) a sync that FAILS (EIO, placed) is a FAILED WRITE: the save throws by its code, nothing renamed, the temp removed, settings.json\'s old bytes stand, no page told a change', J({ ev: e.ev, t: e.thrown && { code: e.thrown.code, syscall: e.thrown.syscall }, left: tmpLeft(dE) }));
+  // ALSO (r5185, the neighbour in the same writer): the failed save leaves the hub's settings AS THE FILE HOLDS THEM — the GET
+  // answers the old rows, and the next save of ANOTHER row never carries the refused change onto the disk. RED: the cache kept
+  const failedThenSaved = async (H, d) => {
+    const g = await H.call('get', '/api/settings');
+    const n = await tapped(d, () => H.call('patch', '/api/settings', { headers: PERSON, body: { 'r5185.other': 'another row' } }));
+    return { getRow: g.body && g.body['r5185.row'], getKept: g.body && g.body['r5185.kept'], disk: onDisk(d), saved: !n.thrown && n.r.status === 200 };
+  };
+  const eAfter = await failedThenSaved(E, dE);
+  ok(eAfter.getRow === undefined && eAfter.getKept === 'the old bytes' && eAfter.saved && eAfter.disk?.['r5185.other'] === 'another row' && !('r5185.row' in (eAfter.disk || {})),
+    'r5185 ALSO a FAILED save leaves the hub\'s settings as the file holds them: the GET answers the old rows, and the next save of another row lands WITHOUT the refused change', J(eAfter));
+  const KEEP_A = '      _settingsCache = prev;\n';
+  const PSRC_K = read(PREL);
+  ok(PSRC_K.split(KEEP_A).length === 2, 'control setup: the failed write\'s restore is found once in src/routes/persistence.js');
+  const dK = dir10(OLD), K = hub10(dK, anchored(PSRC_K, KEEP_A, '      /* MUTANT: the refused change kept in the cache */\n', 'r5185-cache-kept'));
+  await K.call('get', '/api/settings');
+  const k1 = await tapped(dK, press(K, 'never landed'), 'EIO');
+  const kAfter = await failedThenSaved(K, dK);
+  ok(!!k1.thrown && kAfter.getRow === 'never landed' && kAfter.disk?.['r5185.row'] === 'never landed', 'CONTROL (the cache kept, in a copy — the release): the refused change is answered as in force and carried onto the disk by the next save — red', J(kAfter));
   const dF = dir10(OLD), F = hub10(dF);
   await F.call('get', '/api/settings');
   const warned = [], W0 = console.warn;
