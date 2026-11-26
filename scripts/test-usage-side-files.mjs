@@ -83,7 +83,7 @@ const idsOf = (f) => { landed(f); return JSON.parse(fs.readFileSync(f, 'utf8')).
     env4.noteModelSeen('claude-w-1'); env4.noteModelSeen('claude-w-2');
     const owedNow = SWR.storeWriter().owed(F4);
     ok(JSON.stringify(idsOf(F4)) === '["claude-w-1","claude-w-2"]' && !fs.readdirSync(path.dirname(F4)).some((n) => n.endsWith('.tmp')), 'THE HUB\'s WRITE IS THE STORE WRITER\'s (r5060 (b)): two sightings in a row — the second read what the first still OWED — land as one whole list, no temp beside it', { owed: owedNow != null, ids: idsOf(F4) });
-    const INPLACE = M.load('src/server/cli-env.js', anchored(CE_SRC, "  try { modelsWriter().dirty(modelsFile(), { name: 'models.write', exclusive, onWritten: refused, produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }\n", "  try { fs.writeFileSync(modelsFile(), JSON.stringify(list)); return true; } catch { return false; }\n", 'the release write in place'), 'models-inplace-write');
+    const INPLACE = M.load('src/server/cli-env.js', anchored(CE_SRC, "  try { w.dirty(file, { name: 'models.write', exclusive: excl, onWritten: answered, produce: () => JSON.stringify(_modelsList) }); return true; } catch { return false; }\n", "  try { fs.writeFileSync(file, JSON.stringify(list)); return true; } catch { return false; }\n", 'the release write in place'), 'models-inplace-write');
     const R5 = mk('hub-inplace'), F5 = modelsOf(R5), env5 = envOf(INPLACE, R5);
     env5.noteModelSeen('claude-w-1');
     const hw5 = halfWrites(F5); try { env5.noteModelSeen('claude-w-2'); } finally { hw5.restore(); }
@@ -103,12 +103,79 @@ const idsOf = (f) => { landed(f); return JSON.parse(fs.readFileSync(f, 'utf8')).
     ok(fs.readFileSync(F6).equals(hb), 'A LIST READ MISSING IS WRITTEN EXCLUSIVELY (r5110): the hook\'s list that appeared meanwhile is kept as it is (byte for byte), never written over', fs.readFileSync(F6, 'utf8').slice(0, 80));
     await until(() => { said(() => env6.noteModelSeen('claude-e-1')); try { return idsOf(F6).includes('claude-e-1'); } catch { return false; } }, 'the refused id learned again at a later sighting');
     ok(JSON.stringify(idsOf(F6)) === '["claude-hook-1","claude-e-1"]', '…and the refused id is learned again at its next sighting, merged into the list that appeared', idsOf(F6));
-    const NOEX = M.load('src/server/cli-env.js', anchored(CE_SRC, "name: 'models.write', exclusive, onWritten: refused,", "name: 'models.write', onWritten: refused,", 'the follow write, not exclusive'), 'models-not-exclusive');
+    const NOEX = M.load('src/server/cli-env.js', anchored(CE_SRC, "name: 'models.write', exclusive: excl, onWritten: answered,", "name: 'models.write', onWritten: answered,", 'the follow write, not exclusive'), 'models-not-exclusive');
     const R7 = mk('hub-noexcl'), F7 = modelsOf(R7), env7 = envOf(NOEX, R7);
     said(() => env7.noteModelSeen('claude-e-1'));
     fs.writeFileSync(F7, HOOKS);
     said(() => landed(F7));
     ok(JSON.stringify(JSON.parse(fs.readFileSync(F7, 'utf8')).map((m) => m.id)) === '["claude-e-1"]', 'CONTROL (the follow\'s write, not exclusive, run): it lands over the hook\'s list — the hook\'s id gone', fs.readFileSync(F7, 'utf8').slice(0, 80));
+  }
+  // (r5157) THE EXCLUSIVE MARK IS STICKY from a «missing» read until the first landing: TWO sightings before the first write lands (the
+  // second reads the hub's own owed list as «data»), the hook's list appears meanwhile — kept; both ids learned again and merged. Its RED:
+  // the small's mark judged per read (the second sighting turns it off: the write lands over the hook's list)
+  {
+    const HOOKS2 = JSON.stringify([{ id: 'claude-hook-1', label: 'Hook 1' }]);
+    const sticky = async (Mod, tag) => {
+      const R = mk(tag), F = modelsOf(R), env = envOf(Mod, R);
+      said(() => { env.noteModelSeen('claude-s-1'); env.noteModelSeen('claude-s-2'); });   // both inside the wait: the second reads what the first owes
+      fs.writeFileSync(F, HOOKS2);   // the hook's list appears before the hub's first write lands
+      const hb = fs.readFileSync(F); said(() => landed(F));
+      return { F, env, kept: fs.readFileSync(F).equals(hb) };
+    };
+    const s = await sticky(CE, 'hub-sticky');
+    ok(s.kept, 'THE MARK IS STICKY (r5157): two sightings before the first write lands — the second read the hub\'s own owed list — and the hook\'s list that appeared is kept, byte for byte', fs.readFileSync(s.F, 'utf8').slice(0, 80));
+    await until(() => { said(() => { s.env.noteModelSeen('claude-s-1'); s.env.noteModelSeen('claude-s-2'); }); try { const ids = idsOf(s.F); return ids.includes('claude-s-1') && ids.includes('claude-s-2'); } catch { return false; } }, 'both refused ids learned again at later sightings');
+    ok(JSON.stringify(idsOf(s.F)) === '["claude-hook-1","claude-s-1","claude-s-2"]', '…and both ids are learned again, merged into the list that appeared', idsOf(s.F));
+    const PERREAD = M.load('src/server/cli-env.js', anchored(CE_SRC, '  const excl = _modelsExclusive;\n', '  const excl = exclusive;\n', 'the small mark per read'), 'models-mark-per-read');
+    const sr = await sticky(PERREAD, 'hub-sticky-red');
+    ok(!sr.kept && JSON.stringify(JSON.parse(fs.readFileSync(sr.F, 'utf8')).map((m) => m.id)) === '["claude-s-1","claude-s-2"]', 'CONTROL (the small\'s mark judged per read, run): the second sighting turns the door off and the first write lands over the hook\'s list — the hook\'s id gone', fs.readFileSync(sr.F, 'utf8').slice(0, 80));
+    // (the read's should) THE MARK OUTLIVES A FAILURE THAT IS NOT «appeared»: the first exclusive write fails EACCES (the usage-cache
+    // folder made read-only — placed; the writer names the failure: its witness), the hook's list appears, a second sighting reads the
+    // hub's own owed list as data — the retry is STILL exclusive: the hook's list kept. Its RED: the mark dropped at any failure. A
+    // machine that lets a write through a read-only folder (root) cannot place it: a named SKIP, never a green
+    const failedFirst = async (Mod, tag) => {
+      const R = mk(tag), F = modelsOf(R), D = path.dirname(F), env = envOf(Mod, R);
+      said(() => env.noteModelSeen('claude-f-1'));   // read missing: the write owed, exclusive
+      let placed = false, why = null;
+      fs.chmodSync(D, 0o500);
+      try {
+        try { fs.writeFileSync(path.join(D, '.probe'), 'x'); fs.unlinkSync(path.join(D, '.probe')); } catch (e) { placed = !!e && e.code === 'EACCES'; }
+        said(() => landed(F));
+        why = SWR.storeWriter().whyNotDurable(F);
+      } finally { fs.chmodSync(D, 0o700); }
+      fs.writeFileSync(F, HOOKS2); const hb = fs.readFileSync(F);   // the hook's list appears before the retry lands
+      said(() => env.noteModelSeen('claude-f-2')); said(() => landed(F));   // the second sighting reads the owed list: the retry
+      return { placed, why, kept: fs.readFileSync(F).equals(hb) };
+    };
+    const ff = await failedFirst(CE, 'hub-failed-first');
+    if (!ff.placed) console.log('  ⊘ SKIP the mark outlives a failure that is not «appeared»: this machine let a write through a read-only folder (root) — the EACCES cannot be placed here');
+    else {
+      ok(!!ff.why && ff.why.code === 'EACCES' && ff.kept, 'THE MARK OUTLIVES A FAILURE THAT IS NOT «appeared» (the read\'s should): the first exclusive write failed EACCES (named by the writer), the hook\'s list appeared, the second sighting read the owed list — the retry stayed exclusive and the hook\'s list is kept', ff);
+      const ANYFAIL = M.load('src/server/cli-env.js', anchored(CE_SRC, '    if (ok) { _modelsExclusive = false; return; }', '    _modelsExclusive = false; if (ok) return;', 'the mark dropped at any failure'), 'models-mark-any-failure');
+      const fr = await failedFirst(ANYFAIL, 'hub-failed-first-red');
+      ok(fr.placed && !!fr.why && fr.why.code === 'EACCES' && !fr.kept, 'CONTROL (the mark dropped at any failure, run): the first write failed EACCES (named by the writer), and the retry — no longer exclusive — lands over the hook\'s list', fr);
+    }
+    // A REFUSAL WHOSE FILE IS LATER REMOVED: the next «missing» read clears the writer's «appeared» and writes again — EXCLUSIVELY (a hook's
+    // list that appears before THAT write lands is kept too). Its RED: «appeared» left standing — every later write dropped, the writer
+    // naming why. Each plant has its witness (law 1): the first write met the hook's file (kept byte for byte); a FRESH id each round,
+    // so every sighting after the removal asks a write of its own
+    const removed = async (Mod, tag) => {
+      const R = mk(tag), F = modelsOf(R), env = envOf(Mod, R);
+      said(() => env.noteModelSeen('claude-r-1')); fs.writeFileSync(F, HOOKS2); const hb = fs.readFileSync(F); said(() => landed(F));   // refused: the hook's file appeared
+      const metHook = fs.readFileSync(F).equals(hb);
+      fs.unlinkSync(F);   // then that file is removed (a person clears the cache)
+      for (const id of ['claude-r-2', 'claude-r-3', 'claude-r-4']) { said(() => env.noteModelSeen(id)); said(() => landed(F)); }
+      const why = SWR.storeWriter().whyNotDurable(F), there = fs.existsSync(F), ids = there ? idsOf(F) : null;
+      let keptAgain = null;   // removed once more: a «missing» read, and the hook's list appears before that write lands — kept (exclusive)
+      if (there) { fs.unlinkSync(F); said(() => env.noteModelSeen('claude-r-5')); fs.writeFileSync(F, HOOKS2); const hb2 = fs.readFileSync(F); said(() => landed(F)); keptAgain = fs.readFileSync(F).equals(hb2); }
+      return { metHook, there, ids, why, keptAgain };
+    };
+    const rm = await removed(CE, 'hub-appeared-removed');
+    ok(rm.metHook && rm.there && ['claude-r-2', 'claude-r-3', 'claude-r-4'].every((id) => rm.ids.includes(id)) && !rm.ids.includes('claude-hook-1') && rm.keptAgain === true,
+      'A REFUSAL WHOSE FILE IS LATER REMOVED (the round\'s should): the first write met the hook\'s file and kept it; after its removal the next «missing» read clears the writer\'s «appeared» and three fresh ids are written; removed again, the hook\'s list that appears before the next write lands is kept — that write is exclusive', rm);
+    const NOCLEAR = M.load('src/server/cli-env.js', anchored(CE_SRC, "  if (exclusive && _modelsAppeared) { try { w.dirty(file, { exclusive: false }); _modelsAppeared = false; } catch { /* «appeared» stands: the writer drops this write */ } }", '', 'appeared left standing'), 'models-appeared-standing');
+    const rr = await removed(NOCLEAR, 'hub-appeared-removed-red');
+    ok(rr.metHook && !rr.there && !!rr.why && rr.why.code === 'EEXIST', 'CONTROL (the writer\'s «appeared» left standing, run): the first write met the hook\'s file (kept); after its removal three fresh ids each ask a write and every one is dropped — the writer names why (its file appeared: EEXIST), no list written', rr);
   }
   // THE TIP's read (the RED): a failed or torn read read as an empty list
   const TIP = M.load('src/server/cli-env.js', anchored(CE_SRC, '    const a = SR.storeAnswer(read, { valid: Array.isArray });\n', "    const a = (() => { try { const v = JSON.parse(read.text); return { state: 'data', value: Array.isArray(v) ? v : [] }; } catch { return { state: 'data', value: [] }; } })();\n", 'the tip read'), 'models-tip-read');
