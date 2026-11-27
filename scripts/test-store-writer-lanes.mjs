@@ -308,6 +308,7 @@ parentPort.on('message', (m) => {
     // reason its buffers are never written into after the hand-over (a store's chunks REPLACED, never written into); a new
     // caller of byRef( without its row is red by name. A producer that cannot promise it hands a plain list (copied, as before).
     const BYREF_PRODUCERS = [   // [file, why]
+      ['src/channel-store.js', 'B-360d found holder 1 (lane bl-loop-b): produceIndex hands the index\'s parts — the layout\'s chunk buffers, with the top and the separators assemble() makes fresh each write — and none is written into after the hand-over: serializeChunk is the ONE place a chunk\'s buffer is made, and it REPLACES it (c.buf = Buffer.from(…)), never writes into it; no Buffer-writing call touches a part (test-channel-index-burst ① censuses the store\'s text for it, a planted writer its red)'],
       ['src/hosts.js', 'B-0248 unit 4 (lane bl-loop-b): _landCacheWhole hands a remote transcript\'s fetched buffer — the fetch\'s own, never written into after the hand-over (its copy goes to disk, the buffer is dropped)'],
     ];
     const { trackedFiles } = await import('./tracked-files.mjs');
