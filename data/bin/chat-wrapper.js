@@ -569,12 +569,20 @@ function persistNow() {
 // the handed records' synced write is owed (handedDue) and made at the batch's end — after the interrupt went to the CLI and before any
 // line of the batch is said, so «on disk before it is said» and «the name only after one sync» both stand; a person's Stop no longer
 // waits for a disk's sync (placed: the Stop's fsync held, the tool's result carried the handed frame to the model before the Stop)
-let batchDepth = 0, batchOut = [], durableDue = false, handedAfterStop = false, handedDue = false;
+let batchDepth = 0, batchOut = [], durableDue = false, handedAfterStop = false, handedDue = false, stopOwed = [];
+// law 6 (r5357, the stop-first follow): the OTHER file calls a Stop's road makes — the drop's own log line (a stat and an append), the
+// unlink of the dropped frames' kept files, a receipt the Stop line asked for — are OWED (stopOwed) the same way: made at the batch's
+// end, after the interrupt went to the CLI and before any line of the batch is said; outside a Stop's road each is made at once
+const owedOnStop = (f) => { if (handedAfterStop) stopOwed.push(f); else f(); };
 function say(line) { if (batchDepth) batchOut.push(line); else { if (JOURNAL) JOURNAL.flush(); try { process.stdout.write(line + '\n'); } catch {} } }   // B-cd4b: on disk (the journal's append) before it is said
 function beginBatch() { batchDepth++; }
 function endBatch() {
   if (--batchDepth > 0) return;
-  if (handedDue) { handedDue = false; writeRecords(); }   // r5172: the Stop's owed handed records, after its interrupt, before a line is said
+  // r5172 / law 6: WHAT A STOP's ROAD OWES THE DISK, after its interrupt, before a line is said — EACH IN ITS OWN GUARD: a throw never skips
+  // the rest, the durable write or the saying, and the records' mark (handedDue: the Stop's drop set it, or a taken-back Send again on its
+  // road) is cleared only once its write RETURNED, so a throw keeps it owed for the next batch's end. A write that fails is said as before
+  if (handedDue) { let wrote = false; try { writeRecords(); wrote = true; } catch (e) { log(`handed records: the owed write threw (${(e && e.message) || e}) — still owed, the next batch's end writes it`); } if (wrote) handedDue = false; }
+  for (const f of stopOwed.splice(0)) { try { f(); } catch (e) { log(`a Stop's owed file call threw (${(e && e.message) || e})`); } }
   if (durableDue) { durableDue = false; trimBuffer(); persistNow(); }
   if (JOURNAL) JOURNAL.flush();   // B-cd4b: the input's said lines in the file (ONE append) before any of them is said
   const out = batchOut; batchOut = [];
@@ -881,7 +889,8 @@ function settleCopy(msgId) {
   const c = msgId && copies.get(msgId);
   if (!c || c.settled) return;
   c.settled = true;
-  KC.dropFiles(KEPT_DIR, KC.namesToDrop(c.line, [...copies.values()].filter((x) => !x.settled).map((x) => x.line)));
+  const names = KC.namesToDrop(c.line, [...copies.values()].filter((x) => !x.settled).map((x) => x.line));
+  owedOnStop(() => KC.dropFiles(KEPT_DIR, names));   // law 6: on a Stop's road the unlink is owed to the batch's end
 }
 const settleCopies = (ids) => { for (const id of ids || []) settleCopy(id); };
 /** THE WITNESS (acceptance r4): the uuid a person's mid-turn frame carries to the CLI — the CLI keeps it as the uuid of its
@@ -1167,7 +1176,8 @@ function dropHeldForStop() {
     });
   }
   if (dropped.length) publishQueue();
-  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}); handed: ${keptIds.length} kept (${riding.length} of them riding a tool result), ${landedIds.length} landed${live ? ' — the Stop window is open' : ''}`);
+  const dropWords = `interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}); handed: ${keptIds.length} kept (${riding.length} of them riding a tool result), ${landedIds.length} landed${live ? ' — the Stop window is open' : ''}`;
+  owedOnStop(() => log(dropWords));   // law 6: the drop's own log line (a stat and an append) is owed to the batch's end
   saySettle();
 }
 /** THE STOP THAT CAME LATE (B-28b1 — the same row as B-1c04; the coordinator's ruling 2026-11-18: «TELL, DO NOT PRETEND»). The
@@ -1754,9 +1764,9 @@ for (const sig of Object.keys(WRAPPER_SIGNO)) process.on(sig, () => onWrapperSig
 const looksLikeFrame = (line) => line[0] === '{' || line.endsWith('}') || /"[\w-]+"\s*:/.test(line);
 /** The ack: the pipe is alive (the server's broken-pty detector) AND, for a frame, WHICH frame — `msg_id` = its
  *  webui_msg_id / request_id. A frame that asked for a receipt gets the same record in its receipts file. */
-function ackLine(id, receipt) {
+function ackLine(id, receipt, stop = false) {
   const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(id ? { msg_id: String(id) } : {}) };
-  if (receipt) writeReceipt(ack);
+  if (receipt) { if (stop) stopOwed.push(() => writeReceipt(ack)); else writeReceipt(ack); }   // law 6: a Stop line's receipt is owed to the batch's end
   say(JSON.stringify(ack));
 }
 function nackTorn(line) {
@@ -1795,7 +1805,7 @@ try {
       if (parsed.type === 'webui_fence') { if (JOURNAL) sayFence(parsed.id); continue; }   // B-cd4b: a restoring hub's fence — never acked, never the CLI's
       const receipt = parsed.webui_receipt === true;
       if (receipt) { delete parsed.webui_receipt; line = JSON.stringify(parsed); }
-      ackLine(parsed.webui_msg_id || parsed.request_id || null, receipt);
+      ackLine(parsed.webui_msg_id || parsed.request_id || null, receipt, parsed.type === 'control_request' && !!parsed.request && parsed.request.subtype === 'interrupt');
       try {
         // Permission answers (control_response) exist ONLY on this stdin path —
         // the buffer file tees child STDOUT, so without recording them here a
@@ -1834,7 +1844,6 @@ try {
           handedAfterStop = true;
           try { dropHeldForStop(); } finally { handedAfterStop = false; }
           sendChild(line);
-          if (!batchDepth && handedDue) { handedDue = false; writeRecords(); }   // (outside a batch: written at once, after the interrupt)
           continue;
         }
         // Handle goal commands from WebUI

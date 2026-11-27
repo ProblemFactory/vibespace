@@ -725,7 +725,7 @@ console.log('⑥ a record takes its name after ONE sync — a failed sync is a F
   {
     const t = FILES['data/bin/chat-wrapper.js'] || '';
     const parts = [t.split('\n').find((l) => l.startsWith('const DURABLE_RECORDS = new Set([')), fnText(t, 'function persistBuffer() {'), fnText(t, 'function persistNow() {'),
-      t.split('\n').find((l) => l.startsWith('let batchDepth = 0, batchOut = [], durableDue = false, handedAfterStop = false, handedDue = false;')), fnText(t, 'function say(line) {'), fnText(t, 'function beginBatch() {'),
+      t.split('\n').find((l) => l.startsWith('let batchDepth = 0, batchOut = [], durableDue = false, handedAfterStop = false, handedDue = false, stopOwed = [];')), fnText(t, 'function say(line) {'), fnText(t, 'function beginBatch() {'),
       fnText(t, 'function endBatch() {'), fnText(t, 'function durable() {'), fnText(t, 'function record(type, fields = {}) {')];
     let ord = 'its code or its anchor is gone';
     if (parts.every(Boolean) && fbOf(t)) {

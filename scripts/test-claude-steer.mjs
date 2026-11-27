@@ -600,13 +600,15 @@ await guard('§8 (B-fcd6) once this CLI has named a frame, a follow-up init with
     && w.includes("    if (stopping && (msg.type === 'user' || msg.type === 'attachment')) noteWindowRecord(msg);") && /function startChild\(\) \{\n  reconnectTimer = null;\n  if \(!OFFSET_MODE\) initNamesSeen = false;/.test(w),
     'the wiring: every init feeds the witness; the follow-up branch (inside the Stop window, before the owed-turn branch) calls noteFollowUpNames(msg), the ONE writer of namesSaid');
 });
-// ── §8b THE STOP REACHES THE CLI FIRST (主开发 r5172; test-claude-steer-chrome §A ③'s hosted red, rows B-1217 / B-28b1) ──
-// The release's wrapper wrote the handed records (renamed after an fsync) INSIDE the Stop's drop, BEFORE the interrupt went on to
-// the CLI: every Stop waited for a disk's sync. PLACED: the wrapper's first fsync after the Stop is HELD by a preload until THIS RUN
-// releases it (never a clock) — its mark names the file it held: the WITNESS that the hold was in force (r5135 law 1). The run
-// releases on the first of two facts: the CLI READ the interrupt (the stand-in's own capture of its stdin), or the tool's turn went
-// on without it and its result CARRIED the handed frame to the model (the stand-in's record) — the B-28b1 law's red.
-console.log('§8b the Stop reaches the CLI before the handed records\' sync: the REAL chat-wrapper over the stand-in CLI, that sync HELD');
+// ── §8b THE STOP REACHES THE CLI FIRST (主开发 r5172; test-claude-steer-chrome §A ③'s hosted red, rows B-1217 / B-28b1) — and
+// law 6 (r5357): NOTHING BETWEEN A PERSON's STOP AND ITS INTERRUPT WAITS ON A DISK. 2.369.420's wrapper wrote the handed records
+// (renamed after an fsync) inside the Stop's drop, before the interrupt went on; the drop also logged its own line (a stat and an
+// append), unlinked the dropped frames' kept files, and a Stop line that asked a receipt had it written first. PLACED, each: the
+// wrapper's FIRST such call after the run arms the hold waits until THIS RUN releases it (never a clock) — the hold's mark names the
+// file it held: the WITNESS that the hold was in force (r5135 law 1). The run releases on the first of two facts: the CLI READ the
+// interrupt (the stand-in's own capture of its stdin), or the tool's turn went on without it and its result CARRIED the handed frame
+// to the model (the stand-in's record) — the B-28b1 law's red. Each call's RED CONTROL is a copy with that call where it stood.
+console.log('§8b the Stop reaches the CLI before any of its road\'s file calls: the REAL chat-wrapper over the stand-in CLI, each call HELD');
 await guard('§8b', async () => {
   const { spawn } = await import('node:child_process');
   const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
@@ -617,69 +619,205 @@ await guard('§8b', async () => {
   process.on('exit', () => { for (const d of own) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });   // this run's folders
   const holdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-hold-'));
   process.on('exit', () => { try { fs.rmSync(holdDir, { recursive: true, force: true }); } catch { } });   // the hold's folder is the run's own
-  const HOLD = path.join(holdDir, 'hold-sync.cjs');
+  const HOLD = path.join(holdDir, 'hold-call.cjs');
+  // THE HOLD: SYNC_HOLD_KIND names the one call it takes — 'handed' (the fsync of a handed records file), 'droplog' (an append to the
+  // wrapper's log of the Stop drop's own line), 'kept' (an unlink inside the kept-files folder, <buf>.img), 'receipt' (a write of the
+  // receipts file)
   fs.writeFileSync(HOLD, [
     "'use strict';",
-    "const fs = require('fs'), E = process.env, ARM = E.SYNC_HOLD_ARM || '', MARK = E.SYNC_HOLD_MARK || '', REL = E.SYNC_HOLD_RELEASE || '';",
+    "const fs = require('fs'), path = require('path'), E = process.env, ARM = E.SYNC_HOLD_ARM || '', MARK = E.SYNC_HOLD_MARK || '', REL = E.SYNC_HOLD_RELEASE || '', KIND = E.SYNC_HOLD_KIND || 'handed';",
     "const paths = new Map(), open = fs.openSync;",
     "fs.openSync = function (p, ...a) { const fd = open.call(fs, p, ...a); try { paths.set(fd, String(p)); } catch (e) { } return fd; };",
-    "const realSync = fs.fsyncSync; let done = false;",
-    "fs.fsyncSync = function (fd) {",
-    "  if (!done && ARM && fs.existsSync(ARM) && /[\\\\/]handed[\\\\/]/.test(paths.get(fd) || '')) {   // only the handed records' sync: a meta timer's passes",
-    "    done = true;",
-    "    try { fs.writeFileSync(MARK, JSON.stringify({ file: paths.get(fd) || null })); } catch (e) { }",
-    "    const sab = new Int32Array(new SharedArrayBuffer(4)), end = Date.now() + 30000;   // the run releases it; 30 s only names a run that never did",
-    "    while (!fs.existsSync(REL) && Date.now() < end) Atomics.wait(sab, 0, 0, 10);",
-    "  }",
-    "  return realSync.call(fs, fd);",
+    "let done = false;",
+    "const hold = (file) => {",
+    "  done = true;",
+    "  try { fs.writeFileSync(MARK, JSON.stringify({ file: String(file || '') })); } catch (e) { }",
+    "  const sab = new Int32Array(new SharedArrayBuffer(4)), end = Date.now() + 30000;   // the run releases it; 30 s only names a run that never did",
+    "  while (!fs.existsSync(REL) && Date.now() < end) Atomics.wait(sab, 0, 0, 10);",
     "};",
+    "const armed = () => !done && ARM && fs.existsSync(ARM);",
+    "const realSync = fs.fsyncSync, realAppend = fs.appendFileSync, realUnlink = fs.unlinkSync, realWrite = fs.writeFileSync;",
+    "fs.fsyncSync = function (fd) { if (KIND === 'handed' && armed() && /[\\\\/]handed[\\\\/]/.test(paths.get(fd) || '')) hold(paths.get(fd)); return realSync.call(fs, fd); };",
+    "fs.appendFileSync = function (f, data, ...a) { if (KIND === 'droplog' && armed() && /chat-wrapper\\.log$/.test(String(f)) && /interrupt: dropped/.test(String(data))) hold(f); return realAppend.call(fs, f, data, ...a); };",
+    "fs.unlinkSync = function (f, ...a) { if (KIND === 'kept' && armed() && /\\.img$/.test(path.dirname(String(f)))) hold(f); return realUnlink.call(fs, f, ...a); };",
+    "fs.writeFileSync = function (f, ...a) { if (KIND === 'receipt' && armed() && /\\.receipts$/.test(String(f))) hold(f); return realWrite.call(fs, f, ...a); };",
   ].join('\n') + '\n');
-  const scene = async (wrapperPath, tag) => {
+  const start = (wrapperPath, tag, env = {}) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-' + tag + '-')); own.push(dir);
-    const dlv = path.join(dir, 'delivered.jsonl'), cap = path.join(dir, 'cli-stdin.jsonl'), arm = path.join(dir, 'arm'), mark = path.join(dir, 'held'), rel = path.join(dir, 'release');
+    const f = { dir, dlv: path.join(dir, 'delivered.jsonl'), cap: path.join(dir, 'cli-stdin.jsonl'), arm: path.join(dir, 'arm'), mark: path.join(dir, 'held'), rel: path.join(dir, 'release'), log: path.join(dir, 'chat-wrapper.log') };
     const w = spawn(process.execPath, ['-r', HOLD, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN],
-      { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: dlv, STUB_CAPTURE: cap, STAND_IN_LONG_MS: '1500', VIBESPACE_SKIP_AGENT_HOOKS: '1', SYNC_HOLD_ARM: arm, SYNC_HOLD_MARK: mark, SYNC_HOLD_RELEASE: rel } });
+      { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_DELIVERED: f.dlv, STUB_CAPTURE: f.cap, STAND_IN_LONG_MS: '1500', VIBESPACE_SKIP_AGENT_HOOKS: '1', SYNC_HOLD_ARM: f.arm, SYNC_HOLD_MARK: f.mark, SYNC_HOLD_RELEASE: f.rel, ...env } });
     const recs = []; let lb = '';
     w.stdout.setEncoding('utf8');
     w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
     const out = { missed: null };
     const step = async (name, fn, ms = 30000) => { if (out.missed) return false; const got = await until(fn, ms); if (!got) out.missed = name; return got; };
-    const interruptIn = () => fs.existsSync(cap) && fs.readFileSync(cap, 'utf8').split('\n').some((l) => /"subtype":"interrupt"/.test(l));
+    const interrupts = () => (fs.existsSync(f.cap) ? fs.readFileSync(f.cap, 'utf8').split('\n').filter((l) => /"subtype":"interrupt"/.test(l)).length : 0);
+    const logText = () => { try { return fs.readFileSync(f.log, 'utf8'); } catch { return ''; } };
+    const heldFile = () => { try { return JSON.parse(fs.readFileSync(f.mark, 'utf8')).file; } catch { return null; } };
+    return { w, f, recs, out, step, interrupts, logText, heldFile };
+  };
+  // THE FIRST STOP's ROAD: a tool turn, a frame handed while it runs (and, for 'kept', a long frame HELD in the queue: its kept file
+  // goes when the Stop drops it), then the Stop (for 'receipt' a Stop line that asks a receipt), the chosen call held
+  const scene = async (wrapperPath, tag, kind) => {
+    const S = start(wrapperPath, tag, { SYNC_HOLD_KIND: kind }), { w, f, recs, out, step } = S;
     try {
-      await step('the wrapper wrote its session file', () => fs.existsSync(path.join(dir, 's.json')));
+      await step('the wrapper wrote its session file', () => fs.existsSync(path.join(f.dir, 's.json')));
       w.stdin.write(ad.formatChatInput('TOOL-A LONG- run a slow command', 'm-a').stdinPayload + '\n');
       await step('the tool_use record', () => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
       w.stdin.write(ad.formatChatInput('MARK-B handed while the tool runs', 'm-b', { steer: true }).stdinPayload + '\n');
       await step('the handover (handed)', () => recs.some((r) => r.type === 'input_handover' && r.state === 'handed'));
-      const d0 = lines(dlv).length, n0 = recs.length;
-      fs.writeFileSync(arm, 'armed');   // the hold takes the FIRST fsync from here on: the Stop's own write
-      w.stdin.write(ad.formatInterrupt() + '\n');
-      if (await step('the hold reached (the wrapper inside the Stop\'s sync)', () => fs.existsSync(mark), 15000)) {
-        try { out.heldFile = JSON.parse(fs.readFileSync(mark, 'utf8')).file; } catch { out.heldFile = null; }
-        const carried = () => lines(dlv).slice(d0).some((x) => x.how === 'tool_result' || x.how === 'request');
-        if (!(await until(() => interruptIn() || carried(), 10000))) out.missed = out.missed || 'neither the CLI\'s read of the interrupt nor a carried frame within 10 s of the hold';
-        out.interruptWhileHeld = interruptIn(); out.carriedWhileHeld = carried();
-        fs.writeFileSync(rel, 'go');
+      if (kind === 'kept') {
+        w.stdin.write(ad.formatChatInput('MARK-C held in the queue ' + 'x'.repeat(9000), 'm-c').stdinPayload + '\n');   // past the kept bound (8 KiB): a file of its own
+        await step('the held frame\'s kept file', () => fs.existsSync(path.join(f.dir, 's.img')) && fs.readdirSync(path.join(f.dir, 's.img')).length > 0, 15000);
+      }
+      const d0 = lines(f.dlv).length, n0 = recs.length;
+      fs.writeFileSync(f.arm, 'armed');   // the hold takes the FIRST such call from here on: the Stop's own
+      const stopLine = kind === 'receipt' ? JSON.stringify({ ...JSON.parse(ad.formatInterrupt()), webui_receipt: true }) : ad.formatInterrupt();
+      w.stdin.write(stopLine + '\n');
+      if (await step('the hold reached (the wrapper inside the call)', () => fs.existsSync(f.mark), 15000)) {
+        out.heldFile = S.heldFile();
+        const carried = () => lines(f.dlv).slice(d0).some((x) => x.how === 'tool_result' || x.how === 'request');
+        if (!(await until(() => S.interrupts() > 0 || carried(), 10000))) out.missed = out.missed || 'neither the CLI\'s read of the interrupt nor a carried frame within 10 s of the hold';
+        out.interruptWhileHeld = S.interrupts() > 0; out.carriedWhileHeld = carried();
+        fs.writeFileSync(f.rel, 'go');
       }
       await step('the CLI\'s answer to the interrupt, said', () => recs.slice(n0).some((r) => r.type === 'control_response'), 15000);
-      await step('the handed records on disk after the release', () => fs.existsSync(path.join(dir, 'handed')) && fs.readdirSync(path.join(dir, 'handed')).some((f) => f.endsWith('.json')), 15000);
-      out.carried = lines(dlv).slice(d0).filter((x) => x.how === 'tool_result' || x.how === 'request').map((x) => x.how + ':' + String(x.text || '').slice(0, 12));
+      out.carried = lines(f.dlv).slice(d0).filter((x) => x.how === 'tool_result' || x.how === 'request').map((x) => x.how + ':' + String(x.text || '').slice(0, 12));
+      if (kind === 'kept') out.keptLeft = fs.readdirSync(path.join(f.dir, 's.img')).length;   // the owed unlink was MADE, after the forward
+      if (kind === 'receipt') out.receipt = fs.existsSync(path.join(f.dir, 's.receipts')) && /_stdin_ack/.test(fs.readFileSync(path.join(f.dir, 's.receipts'), 'utf8'));
+      if (kind === 'droplog') out.dropLine = /interrupt: dropped/.test(S.logText());
     } finally { try { w.kill('SIGKILL'); } catch { } }   // the wrapper this run started (its stand-in child ends with its stdin)
     return out;
   };
-  // RED CONTROL: the release's order, in a copy — the drop and its synced write before the interrupt goes on
+  // THE RED COPIES: each call where 2.369.420 had it, in a copy — the drop and its records' write before the forward ('handed'); the
+  // drop's own log line inside the drop; the kept files' unlink inside the drop; the Stop's receipt before the drop
   const cwSrc = read('data/bin/chat-wrapper.js');
   const FIRST = "          handedAfterStop = true;\n          try { dropHeldForStop(); } finally { handedAfterStop = false; }\n          sendChild(line);\n";
-  ok(cwSrc.split(FIRST).length === 2, '§8b ANCHOR: the Stop\'s branch — the drop in memory, then the interrupt to the CLI — spelled once (a missing anchor builds no control: RED by name)');
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-ctl-')); own.push(d);
-  fs.mkdirSync(path.join(d, 'data', 'bin'), { recursive: true });
-  fs.symlinkSync(path.join(REPO, 'src'), path.join(d, 'src'));
-  fs.writeFileSync(path.join(d, 'data', 'bin', 'chat-wrapper.js'), anchored(cwSrc, FIRST, "          dropHeldForStop();\n          if (handedDue) { handedDue = false; writeRecords(); }\n          sendChild(line);\n", 'the Stop\'s branch'));
-  const cur = await scene(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip');
-  const red = await scene(path.join(d, 'data', 'bin', 'chat-wrapper.js'), 'release-order');
-  ok(!cur.missed && /[\\/]handed[\\/]/.test(String(cur.heldFile || '')), '§8b WITNESS: the hold was in force on the Stop\'s own write — the handed records\' sync, the file it held named', cur);
-  ok(!cur.missed && cur.interruptWhileHeld === true && cur.carriedWhileHeld === false && cur.carried.length === 0, '§8b THE STOP REACHES THE CLI FIRST: with the handed records\' sync held, the CLI read the interrupt — and no tool result or request carried the handed frame to the model', cur);
-  ok(!red.missed && /[\\/]handed[\\/]/.test(String(red.heldFile || '')) && red.interruptWhileHeld === false && red.carriedWhileHeld === true, '§8b RED CONTROL (the release\'s order, in a copy): with the same sync held the interrupt does NOT reach the CLI, and the tool\'s result carries the handed frame to the model before the Stop — the hosted red, placed', red);
+  const LOGL = "  owedOnStop(() => log(dropWords));", KEPTL = "  owedOnStop(() => KC.dropFiles(KEPT_DIR, names));", RCPT = "if (stop) stopOwed.push(() => writeReceipt(ack)); else writeReceipt(ack);";
+  ok([FIRST, LOGL, KEPTL, RCPT].every((a) => cwSrc.split(a).length === 2), '§8b ANCHORS: the Stop\'s branch, the drop\'s owed log line, the owed unlink, the owed receipt — each spelled once (a missing anchor builds no control: RED by name)');
+  const copyOf = (tag, src) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-ctl-' + tag + '-')); own.push(d);
+    fs.mkdirSync(path.join(d, 'data', 'bin'), { recursive: true });
+    fs.symlinkSync(path.join(REPO, 'src'), path.join(d, 'src'));
+    fs.writeFileSync(path.join(d, 'data', 'bin', 'chat-wrapper.js'), src);
+    return path.join(d, 'data', 'bin', 'chat-wrapper.js');
+  };
+  const RED = {
+    handed: copyOf('handed', anchored(cwSrc, FIRST, "          dropHeldForStop();\n          if (handedDue) { handedDue = false; writeRecords(); }\n          sendChild(line);\n", 'the Stop\'s branch')),
+    droplog: copyOf('droplog', anchored(cwSrc, LOGL, '  log(dropWords);', 'the drop\'s log line')),
+    kept: copyOf('kept', anchored(cwSrc, KEPTL, '  KC.dropFiles(KEPT_DIR, names);', 'the kept files\' unlink')),
+    receipt: copyOf('receipt', anchored(cwSrc, RCPT, 'writeReceipt(ack);', 'the Stop\'s receipt')),
+  };
+  const FILE = { handed: /[\\/]handed[\\/]/, droplog: /chat-wrapper\.log$/, kept: /\.img[\\/]/, receipt: /\.receipts$/ };
+  const WORDS = { handed: 'the handed records\' sync', droplog: 'the drop\'s own log line', kept: 'the dropped frame\'s kept file\'s unlink', receipt: 'the receipt the Stop line asked for' };
+  // THE SCENES RUN AT ONCE (each its own wrapper, stand-in, folder and hold — they share nothing but the clock they never read): the
+  // section's time is its longest scene's, not their sum
+  const KINDS = ['handed', 'droplog', 'kept', 'receipt'];
+  const firstRoad = Promise.all(KINDS.flatMap((kind) => [scene(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip-' + kind, kind), scene(RED[kind], 'release-' + kind, kind)]));
+  firstRoad.catch(() => { });   // handled where it is awaited (below): never an unhandled rejection while the second road runs
+  const judgeFirst = (runs) => { for (const [i, kind] of KINDS.entries()) {
+    const cur = runs[2 * i], red = runs[2 * i + 1];
+    ok(!cur.missed && FILE[kind].test(String(cur.heldFile || '')), `§8b WITNESS (${kind}): the hold was in force on the Stop's own call — ${WORDS[kind]}, the file it held named`, cur);
+    ok(!cur.missed && cur.interruptWhileHeld === true && cur.carriedWhileHeld === false && cur.carried.length === 0
+      && (kind !== 'kept' || cur.keptLeft === 0) && (kind !== 'receipt' || cur.receipt === true) && (kind !== 'droplog' || cur.dropLine === true),
+      `§8b THE STOP REACHES THE CLI FIRST (${kind}): with ${WORDS[kind]} held, the CLI read the interrupt and nothing carried the handed frame to the model — and the owed call was MADE after it`, cur);
+    ok(!red.missed && FILE[kind].test(String(red.heldFile || '')) && red.interruptWhileHeld === false && red.carriedWhileHeld === true,
+      `§8b RED CONTROL (${kind}: ${WORDS[kind]} where 2.369.420 had it, in a copy): held there, the interrupt does NOT reach the CLI and the tool's result carries the handed frame to the model before the Stop`, red);
+  } };
+  // THE SECOND STOP's ROAD (holdSecondStop): a Stop pressed while the window is open and the CLI's turn has ended — the follow-up's
+  // prompt hook runs (STAND_IN_PROMPT_HOOK_MS) — is HELD, and goes to the CLI on the follow-up's init. Its drop runs under the same rule:
+  // with the hold on its own drop line (the first after the arm), the wrapper's log ALREADY says the Stop is held when the hold is
+  // reached (that line is the held road's own, written after the drop) — the drop's line came at the batch's end. Released, the held
+  // Stop reaches the CLI on the follow-up's init. RED: a copy whose second road drops outside the rule — its line inside the drop.
+  const SECOND = "  handedAfterStop = true;   // r5172: the second Stop's road the same — its records' synced write is owed to the batch's end\n  try { dropHeldForStop(); } finally { handedAfterStop = false; }\n  stopping.heldInterrupt = line;\n";
+  ok(cwSrc.split(SECOND).length === 2, '§8b ANCHOR: the second Stop\'s drop under the rule, spelled once');
+  const RED2 = copyOf('second', anchored(cwSrc, SECOND, "  dropHeldForStop();\n  stopping.heldInterrupt = line;\n", 'the second Stop\'s drop'));
+  const second = async (wrapperPath, tag) => {
+    const S = start(wrapperPath, tag, { SYNC_HOLD_KIND: 'droplog', STAND_IN_PROMPT_HOOK_MS: '1500', CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1' }), { w, f, recs, out, step } = S;
+    try {
+      await step('the wrapper wrote its session file', () => fs.existsSync(path.join(f.dir, 's.json')));
+      w.stdin.write(ad.formatChatInput('TOOL-A LONG- run a slow command', 'm-a').stdinPayload + '\n');
+      await step('the tool_use record', () => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
+      w.stdin.write(ad.formatChatInput('MARK-B handed while the tool runs', 'm-b', { steer: true }).stdinPayload + '\n');
+      await step('the handover (handed)', () => recs.some((r) => r.type === 'input_handover' && r.state === 'handed'));
+      const nStop = recs.length;
+      w.stdin.write(ad.formatInterrupt() + '\n');   // the FIRST Stop: free
+      // the first turn's interrupted RESULT: the window is open and the CLI's turn has ended; the follow-up's prompt hook (1.5 s) runs
+      // before its init — the second Stop's road (the wrapper says no hook record: it is the CLI's own phase)
+      await step('the first turn\'s interrupted result (the window open, the CLI\'s turn ended)', () => recs.slice(nStop).some((r) => r.type === 'result'), 15000);
+      fs.writeFileSync(f.arm, 'armed');
+      w.stdin.write(ad.formatInterrupt() + '\n');   // the SECOND Stop, inside the window
+      if (await step('the hold reached (the second Stop\'s drop line)', () => fs.existsSync(f.mark), 15000)) {
+        out.heldFile = S.heldFile();
+        out.heldSaidFirst = /a second Stop inside the window: held/.test(S.logText());
+        fs.writeFileSync(f.rel, 'go');
+      }
+      await step('the held Stop delivered to the CLI (its second interrupt read)', () => S.interrupts() >= 2, 15000);
+      out.interrupts = S.interrupts();
+      out.heldRoad = /a second Stop inside the window: held/.test(S.logText());   // the second Stop took the held road
+    } finally { try { w.kill('SIGKILL'); } catch { } }
+    return out;
+  };
+  const [runs, [cur2, red2]] = await Promise.all([firstRoad, Promise.all([second(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip-second'), second(RED2, 'release-second')])]);
+  judgeFirst(runs);
+  ok(!cur2.missed && /chat-wrapper\.log$/.test(String(cur2.heldFile || '')) && cur2.heldRoad === true && cur2.heldSaidFirst === true && cur2.interrupts >= 2,
+    '§8b THE SECOND STOP\'s ROAD: held in the window (its own words said first), its drop line made at the batch\'s end, and the held Stop reaches the CLI on the follow-up\'s init', cur2);
+  ok(!red2.missed && /chat-wrapper\.log$/.test(String(red2.heldFile || '')) && red2.heldRoad === true && red2.heldSaidFirst === false,
+    '§8b RED CONTROL (the second Stop\'s drop outside the rule, in a copy): its drop line is written INSIDE the drop — the hold is reached before the held road said anything', red2);
+});
+// ── §8c THE OWED MARK OUTLIVES A THROW (主开发 r5357 (2): the owed records write, made safe against a throw, carries a mark ANOTHER
+// road set — a taken-back Send again on the Stop's road (B-5a4d unit 3's endTakenBack, 8dad62d3e) sets the SAME handedDue). PURE: the
+// wrapper's own batch state line, owedOnStop, say, beginBatch and endBatch, lifted by text and run with a records write that THROWS
+// once (placed; the log line naming the placed throw is its witness). RED CONTROLS, each a copy through anchored(): the release's
+// clear-before-write line (the throw leaves the batch, the mark is gone, the records are never written again) and the owed calls'
+// loop without its guard (one throw skips the next owed call for good).
+console.log('§8c a Stop\'s owed records write that throws keeps its mark owed; the batch\'s other owed calls and its lines still go');
+await guard('§8c', async () => {
+  const src = read('data/bin/chat-wrapper.js');
+  const fnText = (text, header) => { const i = text.indexOf(header); if (i < 0) return null; const eol = text.indexOf('\n', i), line = text.slice(i, eol); if ((line.match(/\{/g) || []).length === (line.match(/\}/g) || []).length) return line; const j = text.indexOf('\n}\n', i); return j > i ? text.slice(i, j + 2) : null; };
+  const lift = (s) => {
+    const parts = [s.split('\n').find((l) => l.startsWith('let batchDepth = 0, batchOut = [],')), s.split('\n').find((l) => l.startsWith('const owedOnStop = ')),
+      fnText(s, 'function say(line) {'), fnText(s, 'function beginBatch() {'), fnText(s, 'function endBatch() {')];
+    if (!parts.every(Boolean)) throw new Error('a lifted part of the wrapper is gone (its anchor moved)');
+    return new Function('JOURNAL', 'process', 'writeRecords', 'log', 'trimBuffer', 'persistNow',   // eslint-disable-line no-new-func
+      `${parts.join('\n')}\nreturn { beginBatch, endBatch, say, owedOnStop, onStop: (v) => { handedAfterStop = v; }, owe: () => { handedDue = true; }, mark: () => handedDue };`);
+  };
+  const run = (s, owedThrows) => {
+    const ev = []; let writes = 0;
+    const api = lift(s)(null, { stdout: { write: (t) => { ev.push('said ' + t.trim()); return true; } } },
+      () => { writes++; ev.push('write ' + writes); if (writes === 1) throw new Error('placed'); return true; }, (l) => ev.push('log ' + l), () => { }, () => { });
+    const out = { ev };
+    try {
+      api.beginBatch();
+      api.onStop(true);
+      api.owe();   // the mark another road set (endTakenBack on the Stop's road sets handedDue, as the drop's own hand words do)
+      if (owedThrows) api.owedOnStop(() => { throw new Error('placed owed'); });
+      api.owedOnStop(() => ev.push('owed call'));
+      api.onStop(false);
+      api.say('the batch\'s line');
+      api.endBatch();
+    } catch (e) { out.threw = String((e && e.message) || e); }
+    out.markAfterThrow = api.mark();
+    try { api.beginBatch(); api.endBatch(); } catch (e) { out.threw2 = String((e && e.message) || e); }
+    out.markAfterNext = api.mark(); out.writes = writes;
+    return out;
+  };
+  const at = (r, e) => r.ev.indexOf(e), SAID = 'said the batch\'s line';
+  const tip = run(src, false), tip2 = run(src, true);
+  ok(!tip.threw && !tip.threw2 && tip.markAfterThrow === true && tip.markAfterNext === false && tip.writes === 2
+    && tip.ev.some((e) => /^log handed records: the owed write threw \(placed\) — still owed/.test(e))
+    && at(tip, 'owed call') > at(tip, 'write 1') && at(tip, SAID) > at(tip, 'owed call') && tip.ev[tip.ev.length - 1] === 'write 2',
+    '§8c THE MARK OUTLIVES A THROW: the owed records write threw (placed, its log line the witness) — the mark another road set stays owed, the batch\'s owed call runs and its line is said, and the next batch\'s end writes the records', tip);
+  ok(!tip2.threw && tip2.ev.some((e) => /^log a Stop's owed file call threw \(placed owed\)/.test(e)) && at(tip2, 'owed call') > -1 && at(tip2, SAID) > at(tip2, 'owed call'),
+    '§8c ONE OWED CALL THAT THROWS SKIPS NONE: it is logged, the next owed call runs, the batch\'s line is said', tip2);
+  const RED_MARK = anchored(src, /  if \(handedDue\) \{ let wrote = false;[^\n]*\n/, '  if (handedDue) { handedDue = false; writeRecords(); }\n', 'the guarded owed records write');
+  const RED_LOOP = anchored(src, /  for \(const f of stopOwed\.splice\(0\)\) \{ try \{ f\(\); \}[^\n]*\n/, '  for (const f of stopOwed.splice(0)) f();\n', 'the guarded owed calls');
+  const r1 = run(RED_MARK, false), r2 = run(RED_LOOP, true);
+  ok(r1.threw === 'placed' && r1.markAfterThrow === false && r1.writes === 1,
+    '§8c RED CONTROL (the release\'s clear-before-write line, in a copy): the placed throw leaves the batch and the mark is gone — the records are never written again', r1);
+  ok(r2.threw === 'placed owed' && at(r2, 'owed call') === -1,
+    '§8c RED CONTROL (the owed calls without their guard, in a copy): the placed throw skips the next owed call for good', r2);
 });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
