@@ -127,6 +127,26 @@ async function fill(from, to) {
     }
   });
   ix.flush();
+  await bornSwept(from, to);
+}
+// B-360d found holder 1 (lane bl-loop-b): a fill's births leave the store's «unlanded» map by a SLICED SWEEP that starts at their
+// landing (2 000 entries a setImmediate step: 2 001 blocks + 10 001 natives on the meter), so an open measured while it runs counts
+// some of its steps (h2 read 149 231 + k × 12 002 + 400 at 4d78a1334, k = 4 to 6, the open's own growth 400). The fill waits for
+// its births' landing and the sweep's end: facts (ix.landed of its last birth, landedStats().sweeping), polled each millisecond
+// under a counted ceiling, red by name; its witness reads those facts again and names the road that dropped the births (the whole
+// write's sweep, or the journal's sync, which drops them in its own turn: the first fill's births took that road in this cure's first reading)
+const BORN_POLLS_MAX = 60000;
+async function bornSwept(from, to) {
+  const last = `${A}/thr_${(to - 1).toString(16).padStart(12, '0')}`;
+  const s0 = ix.landedStats().sweeps;
+  let polls = 0;
+  for (; !ix.landed(last) || ix.landedStats().sweeping; polls++) {
+    if (polls >= BORN_POLLS_MAX) { ok(false, `harness: the fill's ${to - from} births never landed and swept (${polls} polls of 1 ms)`); return; }
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  const st = ix.landedStats();
+  const road = st.sweeps > s0 ? `by the whole write's sliced sweep, sweeps ${s0} → ${st.sweeps}` : `with no sweep (sweeps ${s0} → ${st.sweeps}): the journal's sync dropped them`;
+  ok(ix.landed(last) && !st.sweeping && st.owed === 0, `fixture: the fill's ${to - from} births landed and no sweep of theirs runs before a measured open (${road}; ${st.owed} owed, ${st.entries} kept, ${polls} polls)`);
 }
 async function open(cid) {
   const w = await eng.watch(A, cid);
