@@ -514,7 +514,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       if (!res.body) throw new Error('B-6a92: the usage route answered no body — every row leg below would read nothing');
       return res.body;
     };
-    return { app, root, am, eng, api, V, O, RV, RO, RX, cacheDir, reading, readingO, bannerV: bannerOf(s), bannerO: bannerOf(sO), ownO: () => readJ(O + '.json'), stampO: () => readJ(readingLag.windowSidecarName(O)), witO: () => readJ(readingLag.apiWindowSidecarName(O)), own: () => readJ(V + '.json'), stamp: () => readJ(readingLag.windowSidecarName(V)), wit: () => readJ(readingLag.apiWindowSidecarName(V)), usage };
+    return { s, sessions, readJ, app, root, am, eng, api, V, O, RV, RO, RX, cacheDir, reading, readingO, bannerV: bannerOf(s), bannerO: bannerOf(sO), ownO: () => readJ(O + '.json'), stampO: () => readJ(readingLag.windowSidecarName(O)), witO: () => readJ(readingLag.apiWindowSidecarName(O)), own: () => readJ(V + '.json'), stamp: () => readJ(readingLag.windowSidecarName(V)), wit: () => readJ(readingLag.apiWindowSidecarName(V)), usage };
   };
   // c2b: SIX readings in a row, every one with Orin's window, on a conversation billed to Vela
   const run6 = async (H) => { for (let i = 0; i < 6; i++) { H.reading(0.81, H.RO); await sleep(3); } };
@@ -1252,6 +1252,127 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     const fileHeld1 = !!(W && (W.wit() || {}).foreign);
     ok('2.369.423 (A) A RELEASE WHOSE WRITE IS REFUSED: the start says so by name, the row is free in memory at once (nothing «unknown», the lazy loader reads no hold from disk), and its next reading\'s ring write drops the hold from the file',
       !!W && said.some((l) => /could not be released at this start/.test(l)) && fileHeld0 && !memHeld && !sideOf(u, W.V) && !fileHeld1, { said: said.filter((l) => /hold/.test(l)), fileHeld0, memHeld, fileHeld1 });
+  // ═══ 2.369.423 (B) (主开发 r5471 / r5534): A RE-FILE IS AN ARCHIVE, NEVER ANOTHER ROW; THE GUARD JUDGES ONE HARNESS ═══
+  // Vela's phase TRULY moves onto the one hour Orin stands on; eight readings on each road. The red is the release's rule planted
+  // back in a copy of this engine (no history needed): the guard over every harness's stamps, a re-file to the window's owner and
+  // the turn re-pinned onto it
+  {
+    console.log('2.369.423 (B) — a reading is filed under the row whose sign-in produced it, or under none; one harness judged');
+    const HB = (Math.floor(Date.now() / 3600e3) + 2 * 24 + 7) * 3600, NB = HB + 3 * 3600;
+    const esrcB = read(ENG);
+    const RELB = [
+      ["  const hk = windowHarnessOf(key);\n  if (!windowStampsWritten(hk)) return key;   // (B) r5534: no guard for a harness whose stamps nothing writes\n", "  const hk = null;\n"],
+      ["windows: establishedWindowsOf(hk), groupOf: windowGroupOf", "windows: establishedWindows(), groupOf: windowGroupOf"],   // stale-pins: kept (the release's table put back in the red)
+      ["  if (d.action === 'refile') d = { ...d, action: 'archive', reason: noRefile ?", "  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: noRefile ?"],
+      ["  const sid = session?._webuiId || session?.claudeSessionId || '-';\n", "  if (d.action === 'refile') return d.key;\n  const sid = session?._webuiId || session?.claudeSessionId || '-';\n"],
+      ["      // (B) r5534: the guard never answers another row — no re-file, so no re-pin of the turn onto another account\n", "      if (target !== key) { key = target; refiled = true; if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names }); try { session._turnReadingSlot = { key, slotOk: !!validateBillingSlot(session?._accountId || null, key).ok, at: Date.now() }; } catch { } }\n"],
+    ];
+    const relSrc = RELB.every(([a]) => esrcB.split(a).length === 2) ? RELB.reduce((t, [a, b]) => t.split(a).join(b), esrcB) : null;
+    const mRelB = relSrc ? require(MUT.write(ENG, relSrc, 'b423-release-refile')) : null;
+    ok('2.369.423 (B) SETUP: the release\'s rule plants back whole (five anchors, each once) — the reds below can fail', !!mRelB);
+    const mkB = (engMod) => { const W = held(engMod, { rv: HB, ro: NB, logins: { V: VELA, O: ORIN }, oStamp: { verifiedBy: 'own-panel' } }); quiet(() => W.eng.repairIdentityAnchors('boot')); return W; };
+    const convB = (W, id, extra = {}) => { const c = { backend: 'claude', mode: 'chat', host: null, _webuiId: id, claudeSessionId: 'cid-' + id, _accountId: W.V, pty: { write() { } }, name: id, ...extra }; W.sessions.set(id, c); return c; };
+    const evB = (W, sess) => (u) => quiet(() => W.eng.recordRateLimitEvent(sess, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: u, resetsAt: NB } }));
+    const filedB = async (W, push, n = 8, base = 0.40) => {
+      const rows = []; let reAt = null;
+      for (let i = 1; i <= n; i++) {
+        const u = Math.round((base + i / 100) * 100) / 100;
+        push(u); await sleep(3);
+        const v = (W.own() || {}).sevenDay || {}, o = (W.ownO() || {}).sevenDay || {};
+        rows.push(v.utilization === u ? 'V' : o.utilization === u ? 'O' : 'a');
+        if (reAt == null && (W.stamp() || {}).sevenDay === NB) reAt = i;
+      }
+      return { rows: rows.join(''), underOrin: rows.filter((x) => x === 'O').length, reAt };
+    };
+    const ROADS_A = {
+      'no pool (the slot\'s reason null)': (W) => evB(W, convB(W, 'b-a2')),
+      'turn-pinned, slot validated': (W) => { const c = convB(W, 'b-a3'); c._turnReadingSlot = { key: W.V, slotOk: true, at: Date.now() }; return evB(W, c); },
+    };
+    for (const [road, mk] of Object.entries(ROADS_A)) {
+      const W = mkB(realEng), r = await filedB(W, mk(W));
+      const Wr = mRelB ? mkB(mRelB) : null, rr = Wr ? await filedB(Wr, mk(Wr)) : null;
+      console.log(`    road (a), ${road}: ${r.rows} (re-anchored at ${r.reAt}); the release: ${rr && rr.rows}`);
+      ok(`2.369.423 (B) ROAD (a), ${road}: Vela's phase moved onto Orin's hour — NONE of eight readings under Orin; the first three archived, Vela re-anchors at the third by its own ring, the rest Vela's (no person's press)`, r.underOrin === 0 && r.reAt === 3 && r.rows === 'aaaVVVVV', r);
+      ok(`2.369.423 (B) RED CONTROL (the release's rule, in a copy), road (a), ${road}: eight of eight filed under Orin — the leg above can fail`, !!rr && rr.underOrin === 8, rr);
+    }
+    {
+      const W = mkB(realEng), c = convB(W, 'b-a4'); c._turnReadingSlot = { key: W.V, slotOk: false, at: Date.now() };
+      const r = await filedB(W, evB(W, c));
+      const r2 = await filedB(W, evB(W, convB(W, 'b-a4v')), 4, 0.60);   // then a conversation of Vela's own with a validated slot
+      const Wr = mRelB ? mkB(mRelB) : null; let rr = null;
+      if (Wr) { const cr = convB(Wr, 'b-a4'); cr._turnReadingSlot = { key: Wr.V, slotOk: false, at: Date.now() }; rr = await filedB(Wr, evB(Wr, cr)); }
+      console.log(`    road (a), a slot NOT validated: ${r.rows}, then a validated one: ${r2.rows} (re-anchored at ${r2.reAt}); the release: ${rr && rr.rows}`);
+      ok('2.369.423 (B) ROAD (a), a slot NOT validated: none under Orin, all archived (no ring candidate), and the row re-anchors at its first validated readings of its own — the release\'s rule for such a slot', r.underOrin === 0 && r.rows === 'aaaaaaaa' && r2.underOrin === 0 && r2.reAt === 3, { r, r2 });
+      ok('2.369.423 (B) RED CONTROL (the release\'s rule, in a copy), an unvalidated slot: eight of eight under Orin', !!rr && rr.underOrin === 8, rr);
+    }
+    // ROAD (b): the ⟳'s first rung asks Vela's live conversation (control:get_usage); its answer names Orin's hour
+    const roadB = async (engMod) => {
+      const W = mkB(engMod), wrote = []; W.s.pty = { write: (x) => wrote.push(x) };
+      const got = [];
+      for (let i = 1; i <= 3; i++) {
+        const u = 0.70 + i / 100, p = W.eng.probeUsageForAccountKey(W.V, { detailed: true });
+        await sleep(3);
+        let id = null; try { id = JSON.parse(String(wrote[wrote.length - 1] || '{}')).request_id; } catch { id = null; }
+        const pend = id && W.eng._vsuPending && W.eng._vsuPending.get(id);
+        if (pend) { clearTimeout(pend.timer); W.eng._vsuPending.delete(id); pend.raw = null; quiet(() => pend.resolve({ sevenDay: { utilization: u, resetsAt: NB }, fiveHour: null })); }
+        await quiet(() => p);
+        const v = (W.own() || {}).sevenDay || {}, o = (W.ownO() || {}).sevenDay || {};
+        got.push(v.utilization === u ? 'V' : o.utilization === u ? 'O' : 'a');
+      }
+      const then = await filedB(W, evB(W, W.s), 4, 0.85);   // 0.86–0.89: no fixture file reads one of them (Orin's own reads 0.81)
+      return { answers: got.join(''), underOrin: got.filter((x) => x === 'O').length + then.underOrin, then: then.rows, reAt: then.reAt };
+    };
+    const b1 = await roadB(realEng), b1r = mRelB ? await roadB(mRelB) : null;
+    console.log(`    road (b): the answers ${b1.answers}, then Vela's own events ${b1.then} (re-anchored at ${b1.reAt}); the release: ${b1r && b1r.answers}`);
+    ok('2.369.423 (B) ROAD (b), control:get_usage: three answers naming Orin\'s hour are archived (none under Orin, none under Vela), and Vela\'s own conversation\'s events re-anchor it at the third', b1.answers === 'aaa' && b1.underOrin === 0 && b1.reAt === 3, b1);
+    ok('2.369.423 (B) RED CONTROL (the release\'s rule, in a copy), road (b): the answers are filed under Orin', !!b1r && /O/.test(b1r.answers), b1r);
+    // ROAD (c) — your scene six: a codex row whose leftover stamp stands on the hour Vela's claude row moved off, its readings on Orin's
+    // hour: a harness whose stamps nothing writes has no guard — every reading filed under the codex row, none elsewhere, none archived
+    const roadC = async (engMod) => {
+      const W = mkB(engMod);
+      const cx = { backend: 'codex', mode: 'chat', host: null, _webuiId: 'b-cx', claudeSessionId: null, _accountId: null, pty: { write() { } }, name: 'cx' };
+      W.sessions.set('b-cx', cx);
+      fs.writeFileSync(path.join(W.cacheDir, '__global_codex__.json'), J({ fetchedAt: Date.now() - 3600e3, source: 'codex', sevenDay: { utilization: 0.1, resetsAt: HB } }));
+      fs.writeFileSync(path.join(W.cacheDir, readingLag.windowSidecarName('__global_codex__')), J({ at: Date.now(), source: 'on-demand', sevenDay: HB }));
+      quiet(() => W.eng.repairIdentityAnchors('hourly'));   // the established-window memo dropped: the guard reads the folder as it is now
+      const arch = path.join(W.root, 'data', 'archive', 'readings-window-mismatch.ndjson');
+      const archN = () => { try { return fs.readFileSync(arch, 'utf8').split('\n').filter((l) => /codex:/.test(l)).length; } catch { return 0; } };
+      const rows = [];
+      for (let i = 1; i <= 8; i++) {
+        const pct = 40 + i;
+        quiet(() => W.eng.recordCodexQuotaSignal(cx, { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 5, window_minutes: 300, resets_at: Math.floor(Date.now() / 1000) + 3600 }, secondary: { used_percent: pct, window_minutes: 10080, resets_at: NB } } }));
+        await sleep(3);
+        const c7 = (W.readJ('__global_codex__.json') || {}).sevenDay || {}, o7 = (W.ownO() || {}).sevenDay || {};
+        const near = (x) => x != null && (Math.abs(Number(x) - pct / 100) < 1e-9 || Number(x) === pct);
+        rows.push(near(c7.utilization) ? 'C' : near(o7.utilization) ? 'O' : 'a');
+      }
+      return { rows: rows.join(''), underOrin: rows.filter((x) => x === 'O').length, archived: archN() };
+    };
+    const c1 = await roadC(realEng), c1r = mRelB ? await roadC(mRelB) : null;
+    console.log(`    road (c), a codex row with a leftover stamp: ${J(c1)}; the release: ${J(c1r)}`);
+    ok('2.369.423 (B) ROAD (c), a codex row with a stamp nothing writes (a leftover), its readings on a claude row\'s hour: all eight filed under the codex row, none under the claude row, none archived — no guard for that harness', c1.rows === 'CCCCCCCC' && c1.underOrin === 0 && c1.archived === 0, c1);
+    ok('2.369.423 (B) RED CONTROL (the release\'s guard over every harness, in a copy), road (c): the codex readings are filed under the claude row', !!c1r && c1r.underOrin >= 1, c1r);
+    // THE STATUSLINE MIRROR (data/bin/vibespace-usage, its own guard): a render of Vela's carrying Orin's hour is refused, never re-filed
+    const tool = read('data/bin/vibespace-usage'), TOOL_LINE = "    if (d.action !== 'write') return;   // (B) r5471 / r5534: a re-file is an ARCHIVE, never another row (the server's guard, the same law)\n";
+    const statusScene = (toolText) => {
+      const dir = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-sl-'))), cdir = path.join(dir, 'usage-cache'); fs.mkdirSync(cdir, { recursive: true });
+      const old = (Date.now() - 3600e3) / 1000;
+      for (const [k, r] of [['sub-vela', HB], ['sub-orin', NB]]) {
+        const f = path.join(cdir, k + '.json'); fs.writeFileSync(f, J({ fetchedAt: Date.now() - 3600e3, source: 'cli-usage', sevenDay: { utilization: 0.2, resetsAt: r } })); fs.utimesSync(f, old, old);
+        fs.writeFileSync(path.join(cdir, readingLag.windowSidecarName(k)), J({ at: Date.now(), source: 'on-demand', sevenDay: r }));
+      }
+      const tp = path.join(dir, 'vibespace-usage'); fs.writeFileSync(tp, toolText);
+      try { execFileSync(process.execPath, [tp], { input: J({ model: { id: 'claude-opus-5' }, rate_limits: { five_hour: { used_percentage: 20, resets_at: Math.floor(Date.now() / 1000) + 3600 }, seven_day: { used_percentage: 47, resets_at: NB } } }), env: { ...process.env, VIBESPACE_USAGE_CACHE: cdir, VIBESPACE_ACCOUNT_KEY: 'sub-vela' }, stdio: ['pipe', 'ignore', 'ignore'] }); } catch { }
+      const u = (k) => ((JSON.parse(fs.readFileSync(path.join(cdir, k + '.json'), 'utf8')).sevenDay || {}).utilization);
+      return { vela: u('sub-vela'), orin: u('sub-orin'), refused: fs.existsSync(path.join(cdir, '.window-refused.ndjson')) };
+    };
+    const TOOL_ARCH = "    const d = d0.action === 'refile' ? { ...d0, action: 'archive', reason: `its window names ${d0.key}'s account, not ${key}'s — never filed under another row (${d0.reason})` } : d0;\n";
+    const relTool = tool.includes(TOOL_LINE) && tool.includes(TOOL_ARCH) ? tool.split(TOOL_ARCH).join("    const d = d0;\n").split(TOOL_LINE).join("    if (d.action === 'archive') return;\n    if (d.action === 'refile') key = d.key;\n") : null;   // stale-pins: kept (the release statusline rule put back in the red)
+    const sl = statusScene(tool), slr = relTool ? statusScene(relTool) : null;   // stale-pins: kept (the release's statusline rule put back in the red)
+    console.log(`    the statusline: ${J(sl)}; the release's: ${J(slr)}`);
+    ok('2.369.423 (B) THE STATUSLINE MIRROR: a render of Vela\'s carrying Orin\'s hour is REFUSED (written down), Orin\'s file untouched and Vela\'s too', sl.orin === 0.2 && sl.vela === 0.2 && sl.refused, sl);
+    ok('2.369.423 (B) RED CONTROL (the release\'s statusline rule, in a copy): the render lands on Orin\'s file', !!slr && slr.orin === 0.47, slr);
+  }
   }}
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass}${typeof globalThis.__rtSkipped === 'number' && globalThis.__rtSkipped ? `, ${globalThis.__rtSkipped} skipped — the release's history is not in this clone` : ''})`);
 process.exit(fail ? 1 : 0);

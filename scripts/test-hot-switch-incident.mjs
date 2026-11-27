@@ -56,6 +56,16 @@ function mutate(rel, tag, replacements) {
   const fp = MUT.write(rel, out, tag, { esm: false });
   return { hit: out !== src, mod: require(fp), file: fp };
 }
+// 2.369.423 (B) (主开发 r5534): the window guard ARCHIVES a reading whose window is another member's — a second, independent
+// protection beside each fix below; every negative control takes its fix out UNDER THE RELEASE's RE-FILE (planted back, said)
+const RELEASE_REFILE = [
+    ["  const hk = windowHarnessOf(key);\n  if (!windowStampsWritten(hk)) return key;   // (B) r5534: no guard for a harness whose stamps nothing writes\n", "  const hk = null;\n"],
+    ["windows: establishedWindowsOf(hk), groupOf: windowGroupOf", "windows: establishedWindows(), groupOf: windowGroupOf"],   // stale-pins: kept (the release table put back in the control)
+    ["  if (d.action === 'refile') d = { ...d, action: 'archive', reason: noRefile ?", "  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: noRefile ?"],
+    ["  const sid = session?._webuiId || session?.claudeSessionId || '-';\n", "  if (d.action === 'refile') return d.key;\n  const sid = session?._webuiId || session?.claudeSessionId || '-';\n"],
+    ["      // (B) r5534: the guard never answers another row — no re-file, so no re-pin of the turn onto another account\n", "      if (target !== key) { key = target; refiled = true; if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names }); try { session._turnReadingSlot = { key, slotOk: !!validateBillingSlot(session?._accountId || null, key).ok, at: Date.now() }; } catch { } }\n"],
+];
+const REL_REFILE_ENG = (() => { const m = mutate('src/server/usage-pool-engine.js', 'release-refile', RELEASE_REFILE); return m.hit ? m.mod : null; })();
 const quiet = () => {
   const o = console.log, w = console.warn; const lines = [];
   console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' '));
@@ -296,10 +306,13 @@ console.log('— §A2 THE INCIDENT: the backlog of a stalled bridge is not taken
   // is credited for turns that ended hours ago. (The Fable half is ALSO refused
   // by §B's rule on its own — two independent protections; the second control
   // reverts both and reproduces the whole incident.)
+  // 2.369.423 (B) (主开发 r5534): the window guard now ARCHIVES a reading whose window is another member's (never re-files it) — a
+  // second, independent protection here; the control takes the gate out UNDER THE RELEASE's RE-FILE (planted back), so it still
+  // shows what the gate alone keeps out
   const mut = mutate('src/server/usage-pool-engine.js', 'nogate', [[
     "  if (!v || v.verdict !== 'late') return run();",
     '  return run(); // PRE-FIX: every record is NOW',
-  ]]);
+  ], ...RELEASE_REFILE]);
   ok('§A2 NEGATIVE CONTROL: the patch hit the engine', mut.hit === true, mut.why || '');
   if (mut.hit) {
     const w2 = mkWorld({ engineModule: mut.mod });
@@ -310,7 +323,7 @@ console.log('— §A2 THE INCIDENT: the backlog of a stalled bridge is not taken
       U.fiveHour.utilization === 0.95, JSON.stringify(U.fiveHour));
     ok('§A2 NEGATIVE CONTROL: …and hours-old turn ends credit the loop breaker', w2.recovered.length >= 1, JSON.stringify(w2.recovered));
   }
-  const both = mutate('src/server/usage-pool-engine.js', 'nogate-norefute', [[
+  const both = mutate('src/server/usage-pool-engine.js', 'nogate-norefute', [...RELEASE_REFILE, [
     "  if (!v || v.verdict !== 'late') return run();",
     '  return run(); // PRE-FIX: every record is NOW',
   ], [
@@ -345,9 +358,9 @@ console.log('— §A3 an UNSTAMPED record at the head of the backlog asks the re
     // …while the SAME reading alone in its chunk (nothing ahead, nothing behind) runs as it always did
     const w3 = mkWorld();
     w3.mkSession('sess-4', 's');
-    play(w3, [chunk(reading(w3, 'u', 0.95))]);
+    play(w3, [chunk(reading(w3, 's', 0.95))]);   // 2.369.423 (B): the link's own member's reading (another member's is archived by the window guard now)
     ok('§A3 …an unstamped record with nothing to judge it by runs as live (a harness that stamps nothing is unchanged)',
-      w3.readCache(w3.id.u).fiveHour.utilization === 0.95, JSON.stringify(w3.readCache(w3.id.u).fiveHour));
+      w3.readCache(w3.id.s).fiveHour.utilization === 0.95, JSON.stringify(w3.readCache(w3.id.s).fiveHour));
   }
   const mut = mutate('src/server/stdout/claude-stream-json.js', 'nopeek', [[
     '    session._peekStamp = () => nextStampIn(lineBuf);',
@@ -360,7 +373,7 @@ console.log('— §A3 an UNSTAMPED record at the head of the backlog asks the re
     const so = reg.hit && mutate('src/server/session-stdout.js', 'nopeek-so', [["require('./stdout/index.js')", `require(${JSON.stringify(reg.file)})`]]);
     ok('§A3 NEGATIVE CONTROL: the copy is wired through the registry and session-stdout', !!(reg.hit && so && so.hit), (reg.why || '') + (so && so.why || ''));
     if (so && so.hit) {
-      const w2 = mkWorld();
+      const w2 = mkWorld({ engineModule: REL_REFILE_ENG });   // the release's re-file (B)
       w2.mkSession('sess-4', 's');
       play(w2, head(w2), { stdoutModule: so.mod });
       ok('§A3 NEGATIVE CONTROL: without the look-ahead the head-of-backlog reading regresses the spent member',
@@ -385,7 +398,7 @@ console.log('— §A4 an unstamped record in the MIDDLE of a backlog inherits th
   ]]);
   ok('§A4 NEGATIVE CONTROL: the patch hit record-lateness', mut.hit === true, mut.why || '');
   if (mut.hit && w) {
-    const eng = mutate('src/server/usage-pool-engine.js', 'noburst-eng', [["require('../record-lateness.js')", `require(${JSON.stringify(mut.file)})`]]);
+    const eng = mutate('src/server/usage-pool-engine.js', 'noburst-eng', [["require('../record-lateness.js')", `require(${JSON.stringify(mut.file)})`], ...RELEASE_REFILE]);
     if (eng.hit) {
       const w2 = mkWorld({ engineModule: eng.mod });
       w2.mkSession('sess-4', 's');
@@ -443,7 +456,7 @@ console.log('— §A6 the DEVICE feed shows every record to the same clock');
   ]]);
   ok('§A6 NEGATIVE CONTROL: the patch hit session-brain', mut.hit === true, mut.why || '');
   if (mut.hit) {
-    const w2 = mkWorld();
+    const w2 = mkWorld({ engineModule: REL_REFILE_ENG });   // the release's re-file (B)
     w2.mkSession('sess-4', 's');
     feed(w2, mut.mod);
     ok('§A6 NEGATIVE CONTROL: without it the device-fed backlog reading regresses the spent member', w2.readCache(w2.id.u).fiveHour.utilization === 0.95, JSON.stringify(w2.readCache(w2.id.u).fiveHour));

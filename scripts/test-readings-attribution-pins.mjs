@@ -339,10 +339,10 @@ const code = (f) => read(f).split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test
       /const win = ev\.status === 'rejected' \? null : readingLag\.windowOf\(ev\.windows \? lanesSnapshot\(ev, \{ named: true \}\) : ev\);/.test(eng)
       && /function lanesSnapshot\(ev, \{ named = false \} = \{\}\) \{\n  const out = \{\};\n  for \(const l of lanesOf\(ev\)\)/.test(read('src/rate-limit-capture.js'))
       && /if \(x\.kind === 'sevenDay'\) out\.sevenDay = r;/.test(read('src/reading-lag.js')), '');
-    ok('§16b …and each cache writer preserves the TARGET\'s own scopedWeekly, read AFTER the guard has chosen the key (so a re-file can never import a stranger\'s bucket)',
+    ok('§16b …and each cache writer preserves the TARGET\'s own scopedWeekly, read AFTER the guard has judged the key (the statusline\'s guard ARCHIVES a foreign render since 2.369.423 (B), never re-files it)',
       (() => {
         const tool = read('data/bin/vibespace-usage');
-        const refile = tool.indexOf("if (d.action === 'refile') key = d.key;");
+        const refile = tool.indexOf("    if (d.action !== 'write') return;   // (B) r5471 / r5534: a re-file is an ARCHIVE, never another row");
         const openFile = tool.indexOf("const f = path.join(CACHE_DIR, key + '.json');", refile);
         const preserve = tool.indexOf('const prevScoped = (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [];', openFile);
         return /if \(\(!parsed\.scopedWeekly \|\| !parsed\.scopedWeekly\.length\) && Array\.isArray\(prev\.scopedWeekly\)/.test(eng)

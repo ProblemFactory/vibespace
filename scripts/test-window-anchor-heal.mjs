@@ -129,7 +129,7 @@ const call = async (w, body) => new Promise((resolve) => {
   w.routes['POST /api/usage/refresh']({ body }, res);
 });
 {
-  const w = mkWorld({ probe: async () => ({ parsed: { fiveHour: { utilization: 0.25 } }, rung: 'control', sessionId: 'sess-1', target: null, identityVerified: false, why: 'window matches no known account — archived', skipped: [] }) });
+  const w = mkWorld({ probe: async () => ({ parsed: { fiveHour: { utilization: 0.25 } }, rung: 'control', sessionId: 'sess-1', target: null, identityVerified: false, why: 'the window is not this account\'s — archived, never filed under another row (B, 主开发 r5534)', skipped: [] }) });
   const r = await call(w, { account: w.id });
   ok('THE TOAST\'S SHAPE: the session answered but the guard ARCHIVED it ⇒ the route does NOT say success-via-session', r.body && r.body.via !== 'session', JSON.stringify(r.body));
   ok('…it falls to the isolated panel and answers via cli-panel', r.body && r.body.success === true && r.body.via === 'cli-panel' && r.body.rung === 'panel', JSON.stringify(r.body));

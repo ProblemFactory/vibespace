@@ -97,7 +97,6 @@ export const ROWS = Object.freeze([
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'demoteWalledAccount', 'readings', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'linkHold', 'readings', 1],
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'scheduleWallProbe', 'readings', 1],
-  ['validateBillingSlot', 'src/server/usage-pool-engine.js', 'recordRateLimitEventNow', 'readings', 1],
   ['wallSlotFor', 'src/server/usage-pool-engine.js', 'noteOatFileGen', 'readings', 1],
   ['wallSlotFor', 'src/server/usage-pool-engine.js', 'wallKeyFor', 'readings', 1],
   ['poolMemberOfSession', 'server.js', 'poolAuth', 'routes', 1],

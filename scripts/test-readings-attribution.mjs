@@ -1607,12 +1607,14 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     // the turn never ends — the pin still says LINK while the credentials are SPARE's
     w.reading(0.44, { resetsAt: w.WIN[w.SPARE] });
     const lines = cap.done();
-    ok('§14 STALE TURN PIN: a reading whose window is the NEW member\'s is filed there, whatever the pin says',
-      Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.44) < 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
+    // 2.369.423 (B) (主开发 r5471 / r5534): A RE-FILE IS AN ARCHIVE, NEVER ANOTHER ROW — the reading whose window is not the pin's is
+    // archived by name, filed under neither member; nothing re-pins the turn by a window (a request known decides, else the pin dies with the turn)
+    ok('§14 STALE TURN PIN ((B): ARCHIVED): a reading whose window is the NEW member\'s is never filed under the pinned member, nor re-filed onto the new one',
+      Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.44) > 1e-9, JSON.stringify(w.readCache(w.SPARE).sevenDay));
     ok('§14 …and the pinned member does not receive it', Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.20) < 1e-9, JSON.stringify(w.readCache(w.LINK).sevenDay));
-    ok('§14 …the re-file is SPOKEN, naming both accounts', lines.some((l) => /window says these numbers are/.test(l) && /re-filed/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
-    ok('§14 …and the pin follows the evidence, so the REST of the turn bills where its requests actually go',
-      w.eng.readingSlotFor(w.session).key === w.SPARE, JSON.stringify(w.eng.readingSlotFor(w.session)));
+    ok('§14 …the archive is SPOKEN, naming the account the window names', lines.some((l) => /refusing to write/.test(l) && /never filed under another row/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
+    ok('§14 …and no window re-pins the turn ((B)): the pin stays the turn\'s own',
+      w.eng.readingSlotFor(w.session).key === w.LINK, JSON.stringify(w.eng.readingSlotFor(w.session)));
   }
 }
 
@@ -1918,8 +1920,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     const NEW_BOUND = "  if (repointAgeMs != null && (!(Number(repointAgeMs) >= 0) || Number(repointAgeMs) > shadowMs)) return { key: newKey, shadowed: false, why: 'shadow-expired', cmpPrev, cmpNew };\n";
     const NO_REPOINT = "  if (!prevKey || !newKey || prevKey === newKey) return { key: newKey, shadowed: false, why: 'no-repoint' };\n";
     const OLD_BOUND = "  if (!(Number(repointAgeMs) >= 0) || Number(repointAgeMs) > shadowMs) return { key: newKey, shadowed: false, why: 'shadow-expired' };\n";
-    const GUARD_ASK = "    const d = decideReadingTarget({ key, readingWindow: windowOf(rl), windows: establishedWindows() });\n";
-    const GUARD_OFF = "    const d = { action: 'write', key, reason: 'pre-fix: this producer had no window guard', matched: [] };\n";
+    const GUARD_ASK = "    const d0 = decideReadingTarget({ key, readingWindow: windowOf(rl), windows: establishedWindows() });\n";   // 2.369.423 (B): the verdict is d0, its archive d
+    const GUARD_OFF = "    const d0 = { action: 'write', key, reason: 'pre-fix: this producer had no window guard', matched: [] };\n";
     const clockFirst = (txt) => editAnchor(editAnchor(txt, NEW_BOUND, '', "the text handed to clockFirst()"), NO_REPOINT, NO_REPOINT + OLD_BOUND, "the text handed to clockFirst()");
     ok('§15 NEGATIVE CONTROL setup: the clock bound, the no-repoint rung and the guard call are each a single line in the shipped tool (every patch below must hit)',
       shipped.split(NEW_BOUND).length === 2 && shipped.split(NO_REPOINT).length === 2 && shipped.split(GUARD_ASK).length === 2, '');
@@ -1990,13 +1992,13 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     {
       const w = mkIncidentWorld();
       renderKeyed(TOOL_PATH, w, w.SPARE, { pct: 96, sevenDayReset: w.WIN[w.LINK] });   // SPARE's key, LINK's WEEK
-      ok('§15 STATUSLINE GUARD: a reading whose weekly window is another member\'s is re-filed there, not written to the key the spawn handed us',
-        Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9 && Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.96) < 1e-9,
+      ok('§15 STATUSLINE GUARD ((B): ARCHIVED): a reading whose weekly window is another member\'s is refused — not written to the key the spawn handed us, nor re-filed onto that member',
+        Math.abs(w.readCache(w.SPARE).sevenDay.utilization - 0.11) < 1e-9 && Math.abs(w.readCache(w.LINK).sevenDay.utilization - 0.96) > 1e-9,
         JSON.stringify([w.readCache(w.SPARE).sevenDay, w.readCache(w.LINK).sevenDay]));
       const readRefused = () => { try { return fs.readFileSync(path.join(w.cacheDir, '.window-refused.ndjson'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
       const refused = readRefused();
-      ok('§15 …and the move is WRITTEN DOWN with its reason, beside the cache and invisible to every `.json` scanner',
-        refused.length === 1 && refused[0].action === 'refile' && refused[0].key === w.SPARE && refused[0].to === w.LINK && /matches exactly one account/.test(refused[0].reason)
+      ok('§15 …and the refusal is WRITTEN DOWN with its reason (an archive naming the account the window names), beside the cache and invisible to every `.json` scanner',
+        refused.length === 1 && refused[0].action === 'archive' && refused[0].key === w.SPARE && refused[0].to === w.LINK && /never filed under another row/.test(refused[0].reason) && /matches exactly one account/.test(refused[0].reason)
         && !'.window-refused.ndjson'.endsWith('.json'), JSON.stringify(refused));
       // …and it is a SAMPLE, not a count: a statusline is a fresh process per
       // render, so it cannot hold the engine's per-verdict memory, and a
@@ -2077,15 +2079,15 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§15 …the sibling received nothing', Math.abs(w.readCache(w.SPARE).fiveHour.utilization - 0.2) < 1e-9, JSON.stringify(w.readCache(w.SPARE).fiveHour));
     ok('§15 …and nothing was archived either (with one sibling matching this was a re-file; with none it would have been a silent DROP of fresh evidence)',
       !fs.existsSync(path.join(w.dataDir, 'archive', 'readings-window-mismatch.ndjson')));
-    ok('§15 …and the guard said nothing about it', !lines.some((l) => /window says these numbers|refusing to write/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
+    ok('§15 …and the guard said nothing about it', !lines.some((l) => /refusing to write|never filed under another row/.test(l)), lines.filter((l) => /\[usage\]/.test(l)).join(' | ').slice(0, 200));
     // the WEEKLY guard is still armed in the very same world (the 5h rung was
     // removed, not the guard) — otherwise this leg would pass on a dead guard
     const w3 = mk5();
     const cap3 = quiet();
     w3.reading(0.66, { resetsAt: w3.W7[w3.SPARE] });       // LINK's slot, SPARE's WEEK
     cap3.done();
-    ok('§15 POSITIVE CONTROL: in the same world a WEEKLY reading that is not the target\'s is still re-filed (only the 5h rung was retired)',
-      Math.abs(w3.readCache(w3.SPARE).sevenDay.utilization - 0.66) < 1e-9 && Math.abs(w3.readCache(w3.LINK).sevenDay.utilization - 0.3) < 1e-9,
+    ok('§15 POSITIVE CONTROL: in the same world a WEEKLY reading that is not the target\'s is still JUDGED (only the 5h rung was retired) — archived since 2.369.423 (B), filed under neither member',
+      Math.abs(w3.readCache(w3.SPARE).sevenDay.utilization - 0.66) > 1e-9 && Math.abs(w3.readCache(w3.LINK).sevenDay.utilization - 0.3) < 1e-9 && fs.existsSync(path.join(w3.dataDir, 'archive', 'readings-window-mismatch.ndjson')),
       JSON.stringify([w3.readCache(w3.LINK).sevenDay, w3.readCache(w3.SPARE).sevenDay]));
   }
 }

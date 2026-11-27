@@ -1519,7 +1519,7 @@ function probeUsageForAccountKey(key, opts = {}) {
         const own = establishedWindows()[key] || null;
         const cmp = own ? readingLag.compareWindows(win, own) : 'unknown';
         const identityVerified = target === key && cmp === 'agree';
-        const why = target !== key ? (target ? `window says these numbers are ${nameOf(target)}'s — written there` : 'window matches no known account — archived')
+        const why = target !== key ? 'the window is not this account\'s — archived, never filed under another row (B, 主开发 r5534)'
           : cmp === 'agree' ? `answered by session ${s._webuiId || '?'}; weekly window matches ${nameOf(key)}'s established window`
           : `answered by session ${s._webuiId || '?'}; no established window to compare against`;
         return detail(parsed, { sessionId: s._webuiId || null, target: target || null, identityVerified, why });
@@ -1956,27 +1956,49 @@ function appendReadingArchive(row) {
     fs.appendFileSync(READING_ARCHIVE, JSON.stringify({ at: Date.now(), store: 'usage-cache', ...row }) + '\n');
   } catch { }
 }
+/** (B) r5534 — THE WINDOW GUARD IS A JUDGE BETWEEN ROWS OF ONE HARNESS, and only for a harness whose stamps something writes.
+ *  A usage key's harness as the guard reads it: a machine login by its declared key (globalKeyOwner), a row by its record, a host
+ *  bucket as the default machine login's form; null = the default harness (the one whose machine login is '__global__') */
+const windowHarnessNorm = (be) => (be && globalUsageKey(be) !== '__global__' ? be : null);
+function windowHarnessOf(key) {
+  const k = String(key || '');
+  const g = globalKeyOwner(k);
+  if (g) return windowHarnessNorm(g);
+  if (k === '__global__' || k.startsWith('host-')) return null;
+  let be = null; try { const a = accounts.get(k); be = a ? (a.backend || null) : null; } catch { be = null; }
+  return windowHarnessNorm(be);
+}
+// whose window stamps something in the tree writes: the default harness (its ring over its rate-limit events, its /usage panel, the
+// identity repair and the renewal re-anchor — all over the OAuth usage accounts) and any harness that declares those accounts
+// (caps.oauthUsage). Codex declares none: it HAS NO GUARD — a stamp found on such a row is not read, its readings are its own
+const windowStampsWritten = (hk) => hk == null || (() => { try { return capsOf(hk).oauthUsage === true; } catch { return false; } })();
+/** the established windows of ONE harness: a reading is never compared with a row of another (two vendors' hours agreeing is a
+ *  clock that agrees) */
+function establishedWindowsOf(hk) {
+  const all = establishedWindows(), out = {};
+  for (const k of Object.keys(all)) if (windowHarnessOf(k) === hk) out[k] = all[k];
+  return out;
+}
 function guardReadingTarget(key, readingWindow, { session = null, what = 'reading', entry = null, noRefile = false, verdictTo = null } = {}) {
+  const hk = windowHarnessOf(key);
+  if (!windowStampsWritten(hk)) return key;   // (B) r5534: no guard for a harness whose stamps nothing writes
   let d;
   try {
-    d = readingLag.decideReadingTarget({ key, readingWindow, windows: establishedWindows(), groupOf: windowGroupOf });
+    d = readingLag.decideReadingTarget({ key, readingWindow, windows: establishedWindowsOf(hk), groupOf: windowGroupOf });
   } catch (e) { console.warn('[usage] window guard failed (writing as asked):', e.message); return key; }
   if (d.action === 'write') return key;   // 2.369.422 hotfix (主开发 r5410): no row is held on a shared instant, so none of its readings is archived for it
   // A READING WHOSE REQUEST IS KNOWN (P1, law 1: «on a mismatch the reading is HELD or ARCHIVED BY NAME, never re-filed by
   // guess onto another account»): the account its request went out on is a fact; a window that says otherwise is a second
   // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
-  if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: `the reading and its request disagree — its window names ${nameOf(d.key)}, its request went out on ${nameOf(key)} (${d.reason})` };
+  // (B) r5471 / r5534 — A RE-FILE IS AN ARCHIVE, NEVER ANOTHER ROW: a reading is filed under the row whose sign-in produced it, or
+  // under none. Its row re-anchors by its own K readings (a validated slot feeds its ring: the archive below carries the verdict there)
+  if (d.action === 'refile') d = { ...d, action: 'archive', reason: noRefile ? `the reading and its request disagree — its window names ${nameOf(d.key)}, its request went out on ${nameOf(key)} (${d.reason})` : `its window names ${nameOf(d.key)}'s account, not ${nameOf(key)}'s — never filed under another row (${d.reason})` };
   const sid = session?._webuiId || session?.claudeSessionId || '-';
   // B-6a92: the verdict handed BACK to the caller that asks for it (`verdictTo`) — the account(s) whose window this reading names
   // travel with it to the slot's ring — and written on the guard's OWN copy of the entry in the archive (the standing repair
   // reads it there). The caller's entry is never touched: two producers hand the very object they then file (r5, a small)
   const verdict = { action: d.action, names: othersOf(key, Array.isArray(d.matched) && d.matched.length ? d.matched : (d.key ? [d.key] : [])).slice(0, 4) };   // r8 rule 1
   if (verdictTo && typeof verdictTo === 'object') { try { verdictTo.verdict = verdict; } catch { } }
-  if (d.action === 'refile') {
-    noteWindowVerdict(sid, key, d.key, () => console.log(`[usage] ${what}: window says these numbers are ${nameOf(d.key)}'s, not ${nameOf(key)}'s — re-filed (${d.reason})`));
-    global.__vsEvent?.('usage-reading-window-refiled', `${key}→${d.key}:${what}`);
-    return d.key;
-  }
   noteWindowVerdict(sid, key, 'archive', () => console.log(`[usage] ${what}: refusing to write ${nameOf(key)} a reading from another window — archived (${d.reason})`));
   global.__vsEvent?.('usage-reading-window-archived', `${key}:${what}`);
   appendReadingArchive({ key, sid, what, reason: d.reason, matched: d.matched, ownWindow: establishedWindows()[key] || null, entry: entry && typeof entry === 'object' && !Array.isArray(entry) ? { ...entry, verdict } : entry });
@@ -4359,15 +4381,7 @@ function recordRateLimitEventNow(session, msg) {
         postCheck();
         return;
       }
-      if (target !== key) {
-        key = target; refiled = true;
-        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names });
-        // the window is better evidence than the pin that produced the wrong
-        // answer, so the REST of the turn follows it too (the 06:10:46Z shape:
-        // a pin held from before three re-points filed one member's fresh
-        // numbers on another for the whole turn)
-        try { session._turnReadingSlot = { key, slotOk: !!validateBillingSlot(session?._accountId || null, key).ok, at: Date.now() }; } catch { }
-      }
+      // (B) r5534: the guard never answers another row — no re-file, so no re-pin of the turn onto another account
       try { session._lastReadingFp = { key, fp }; } catch { }
     }
     // A REJECTION IS WRITTEN THE INSTANT IT ARRIVES, so the attribution rule

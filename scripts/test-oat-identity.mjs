@@ -755,7 +755,7 @@ const hookCensus = (src) => {
   ok(/  session\._turnReadingSlot = null;\n  try \{ noteOatFileGen\(session\); \} catch \{ \}/.test(eng) && /session\._oatFileGen = null; \/\/ lane oat-identity-fix: a backlog's turn end/.test(eng),
     'F1: a live turn end stamps the token file the next turn starts on; a backlog\'s turn end vouches for nothing');
   ok(/if \(moved\) \{ try \{ oatIdentity\.onReanchor\(key, \{ window: stamp, source: 'window-moved', independent: runProducer === 'login' \}\); \} catch \{ \} \}/.test(eng) && /oatIdentity\.onReanchor\(key, \{ window: stamp, source: 'renewal-panel', independent: producer === 'login' \}\)/.test(eng)
-    && (eng.match(/noteApiDerivedWindow\((slotKey|writeKey), witnessEv, session, \{ outcome: '\w+', producer: producer\(\)(, names)? \}\)/g) || []).length === 3,   // B-6a92: the archived and re-filed candidates also carry whose window the guard named
+    && (eng.match(/noteApiDerivedWindow\((slotKey|writeKey), witnessEv, session, \{ outcome: '\w+', producer: producer\(\)(, names)? \}\)/g) || []).length === 2,   // B-6a92: the archived candidate also carries whose window the guard named; 2.369.423 (B): no re-filed one any more (a re-file is an archive)
   'F6 / fix r2 F-A: both re-anchor doors (the K-run\'s "window moved", the renewal panel) tell the check whether the move was the row\'s LOGIN; every witness candidate names who produced it (login · oat:<gen>)');
   const ur = read('src/usage-routes.js');
   ok(/windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, stamp, runProducer\);/.test(eng) && /if \(!windowStamp\.writeWindowStamp\(USAGE_CACHE_DIR, key, stamp, producer\)\) return false;/.test(eng)

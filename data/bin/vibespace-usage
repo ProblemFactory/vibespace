@@ -663,10 +663,11 @@ function writeUsage(p) {
   //    Cost, measured on this instance's usage-cache: one readdir of 13 entries
   //    plus ≤7 sidecar reads totalling 8590 bytes for the whole directory.
   {
-    const d = decideReadingTarget({ key, readingWindow: windowOf(rl), windows: establishedWindows() });
+    const d0 = decideReadingTarget({ key, readingWindow: windowOf(rl), windows: establishedWindows() });
+    // (B): a «refile» verdict is an ARCHIVE — recorded as one, the account its window names kept in `to`
+    const d = d0.action === 'refile' ? { ...d0, action: 'archive', reason: `its window names ${d0.key}'s account, not ${key}'s — never filed under another row (${d0.reason})` } : d0;
     if (d.action !== 'write') noteWindowRefusal(key, d);
-    if (d.action === 'archive') return;
-    if (d.action === 'refile') key = d.key;
+    if (d.action !== 'write') return;   // (B) r5471 / r5534: a re-file is an ARCHIVE, never another row (the server's guard, the same law)
   }
   const f = path.join(CACHE_DIR, key + '.json');
   // Throttle: the statusline re-renders often; one write / 25s per account is
