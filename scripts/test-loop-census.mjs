@@ -44,7 +44,12 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const LC = require(path.join(REPO, 'src/loop-census.js'));
 const LH = require(path.join(REPO, 'src/loop-hold.js'));
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
+// r5455: a check whose plant missed its band is a NAMED, COUNTED non-verdict, never a green
+const skip = (n, why) => { skipped++; console.log(`  ⊘ SKIP ${n} — ${why}`); };
+/** the MAIN thread's own time on the CPU or waiting for one (ms; its schedstat): the only time a census tick can find it
+ *  running — idle in its loop, a tick books «idle» and asks nothing. null where there is no /proc */
+const ssMain = () => { try { const t = fs.readFileSync('/proc/self/task/' + process.pid + '/schedstat', 'utf8').split(' '); return (Number(t[0]) + Number(t[1])) / 1e6; } catch { return null; } };
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 1500) : '')); } };
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-loop-census-'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -319,11 +324,41 @@ try {
   }
   ok(a && a.families.channels >= 5 && faCh.share > 0.5 && fa.shares.every((s) => s === faCh || !(s.share > faCh.share)) && idleTicks >= 5 && a.asks >= 5 && a.askMaxMs > 0 && a.everyMs === 50 && a.viaHelper === 0 && a.deep === 0,
     `(a) a burn inside src/server/channels-burn.js: «channels» books ${a && a.families.channels} of ${fa.busyTicks} busy ticks; the idle half ${idleTicks} idle ticks over ${idleTakes} takes (${idleChannels} more on channels there); ${a && a.asks} asks, their own run ${a && a.askOwnMs.toFixed(2)} ms (largest ${a && a.askMaxMs.toFixed(3)} ms); none through a helper, none deep`, { a, idleTicks, idleChannels, idleTakes });
-  // (a2) the same burn inside a HELPER the channels file calls: booked on channels, counted through a helper
-  for (let i = 0; i < 4; i++) { B.viaHelper(100); await sleep(1); }
-  const a2 = await W.census(), fa2 = LC.censusFold(a2);
-  ok(a2 && a2.families.channels >= 3 && a2.viaHelper >= 3 && a2.viaHelper <= a2.families.channels && (a2.families.outside || 0) <= 1 && fa2.viaHelper?.ticks === a2.viaHelper,
-    `(a2) a burn inside a helper (src/shell-words.js) called by src/server/channels-burn.js: «channels» books ${a2 && a2.families.channels} ticks, ${a2 && a2.viaHelper} of them through the helper (viaHelper), ${(a2 && a2.families.outside) || 0} outside (the test's own frames between burns)`, a2);
+  // (a2) the same burn inside a HELPER the channels file calls: booked on channels, counted through a helper.
+  // r5455 (the placement of its red at load 45, run 10f53ad7b-20261127010837-both): «outside» counts the ticks whose answer stood in
+  // NO owned frame — here the TEST's own frames between the burns (an ask answered there books every tick that waited on it). The
+  // release allowed ONE: a tolerance for frames that run a fraction of a millisecond. A main thread kept on the CPU or off it while
+  // runnable between burns (a loaded box; placed at will below) books its ticks there TRULY. So the leg allows what that time can
+  // hold: one, plus the ticks the main thread's own non-idle time OUTSIDE the burns (its schedstat: on the CPU or waiting for one)
+  // can hold at the census's tightest spacing (0.5 × everyMs). Brief gaps keep the bound at ONE; the law (the helper's ticks booked
+  // on channels, through the helper) is untouched; the stretched band is counted and printed every run
+  const gapsOf = async (stallAt = -1, stallMs = 0) => {
+    const s0 = ssMain(); let inBurns = 0;
+    for (let i = 0; i < 4; i++) { const b0 = ssMain(); B.viaHelper(100); const b1 = ssMain(); if (b0 != null && b1 != null) inBurns += b1 - b0; if (i === stallAt) stall(stallMs); await sleep(1); }
+    const t = await W.census(), s1 = ssMain();
+    const busyMs = s0 != null && s1 != null ? Math.max(0, s1 - s0 - inBurns) : 0;
+    return { t, busyMs, allowed: 1 + Math.floor(busyMs / (0.5 * ((t && t.everyMs) || 50))) };
+  };
+  // the placed stall: native calls ON THE CPU (short pbkdf2Sync — never asleep) for `ms` by the clock, in the TEST's own frames
+  // (an ask is answered between two of them, in this function: outside, as a stretched gap's own)
+  const crypto = require('crypto');
+  const stall = (ms) => { const end = process.hrtime.bigint() + BigInt(Math.round(ms * 1e6)); while (process.hrtime.bigint() < end) crypto.pbkdf2Sync('a', 'b', 2000, 32, 'sha256'); };
+  await W.census();
+  const { t: a2, busyMs: g2, allowed: al2 } = await gapsOf(), fa2 = LC.censusFold(a2), out2 = (a2 && a2.families.outside) || 0;
+  if (out2 > 1) console.log(`  · (a2) THE STRETCHED BAND (r5455): ${out2} ticks outside, the main thread ${g2.toFixed(0)} ms on the CPU or waiting for one between the burns (allowed ${al2})`);
+  ok(a2 && a2.families.channels >= 3 && a2.viaHelper >= 3 && a2.viaHelper <= a2.families.channels && out2 <= al2 && fa2.viaHelper?.ticks === a2.viaHelper,
+    `(a2) a burn inside a helper (src/shell-words.js) called by src/server/channels-burn.js: «channels» books ${a2 && a2.families.channels} ticks, ${a2 && a2.viaHelper} of them through the helper (viaHelper), ${out2} outside (the test's own frames between burns; allowed ${al2}: one, plus what the main thread's own ${g2.toFixed(0)} ms busy between the burns can hold)`, { a2, busyMs: g2, allowed: al2 });
+  // (a2b) r5455 THE STRETCHED GAP, PLACED AT WILL with no load: the same four helper burns with a ~120 ms native call in the test's
+  // own frames after the second one. The RELEASE's bound (outside ≤ 1) is red there by name; the cured bound is not. Witnessed:
+  // the gap's own busy time ≥ 100 ms and ≥ 2 ticks outside, else a named, counted skip
+  await W.census();
+  const { t: a2b, busyMs: g2b, allowed: al2b } = await gapsOf(1, 120), out2b = (a2b && a2b.families.outside) || 0;
+  console.log(`  · (a2b) the placed gap: the main thread ${g2b.toFixed(0)} ms busy between the burns; ${out2b} outside; «channels» ${a2b && a2b.families.channels}, through the helper ${a2b && a2b.viaHelper}`);
+  if (!(g2b >= 100 && out2b >= 2)) skip('(a2b) the stretched gap, placed: the release\'s bound red, the cured bound green', `the plant missed its band: ${g2b.toFixed(0)} ms busy between the burns (≥ 100 wanted), ${out2b} outside (≥ 2 wanted)`);
+  else {
+    ok(!(out2b <= 1), `CONTROL r5455 (the RELEASE's bound, «outside ≤ 1») on a ~120 ms native call in the test's own frames between the helper burns: RED by name — «(a2) … ${out2b} outside (the test's own frames between burns)»`);
+    ok(a2b && a2b.families.channels >= 3 && a2b.viaHelper >= 3 && a2b.viaHelper <= a2b.families.channels && out2b <= al2b, `r5455: the cured bound on that gap — ${out2b} outside ≤ ${al2b} allowed (one, plus what its ${g2b.toFixed(0)} ms can hold); the helper's ticks still booked on channels through the helper`, { a2b, busyMs: g2b, allowed: al2b });
+  }
   // (a3) the burn 40 helper frames deep: the sample's 31 frames hold no owned one — outside, deep (the owner lies beyond)
   for (let i = 0; i < 4; i++) { B.deepBurn(100); await sleep(1); }
   const a3 = await W.census(), fa3 = LC.censusFold(a3);
@@ -429,5 +464,6 @@ console.log('④ the doors');
 }
 
 fs.rmSync(TMP, { recursive: true, force: true });
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+const sk = skipped ? `, ${skipped} skipped` : '';
+console.log(fail ? `\n${fail} FAILED (${pass} passed${sk})` : `\nALL PASS (${pass}${sk})`);
 process.exit(fail ? 1 : 0);
