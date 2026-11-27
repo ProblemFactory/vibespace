@@ -1018,6 +1018,36 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
       'round 17 (item 3): a SEALED gh whose bytes drifted files ONE For-you FYI notice (no decision) — «gh on this machine changed: 2.100.0 → 2.102.0 … runs continue»; a second run after the SAME drift files no second item (base: a log + audit line only, no For-you notice)', { dn0, dn1, dn2, text: dnote && dnote.text });
   }
 
+  // r5367 (lane lg-vault-env): A HELD TOOLS RECORD NEVER REFUSES A RUN, AND NEVER PASSES ONE THAT TODAY IS REFUSED. The record
+  // (data/vault-run-tools.json) read EIO is HELD — its drift note records nothing — and the sealed run answers exactly what it
+  // answers with the record readable: the same ok:own, and the same caller_gone for a caller gone during the hash (a refusal decided
+  // AFTER the drift note). RED: a copy of the door that refuses while the record is held
+  {
+    const tf = path.join(sw.dataDir, 'vault-run-tools.json'), want = path.resolve(tf), o0 = fs.openSync, r0 = fs.readFileSync;
+    const EIOx = () => Object.assign(new Error('EIO: i/o error, placed by the suite'), { code: 'EIO' });
+    const placeEIO = () => { fs.openSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p) === want) throw EIOx(); return o0.call(this, p, ...a); }; fs.readFileSync = function (p, ...a) { if (typeof p === 'string' && path.resolve(p) === want) throw EIOx(); return r0.call(this, p, ...a); }; };
+    const liftEIO = () => { fs.openSync = o0; fs.readFileSync = r0; };
+    const heldRun = async (Mod, { gone = false } = {}) => {
+      const SH = capOf(), ac = new AbortController();
+      const d = sw.mk(Mod, { isRootOwned: REAL, toolDigest: (fd) => { if (gone) ac.abort(); return digestVouch(fd); }, toolSealed: (p, fd) => p === SHIMGH || DOOR.sealedToolReal(p, fd), spawnImpl: SH.spawn, agentEnv: () => ({ ...SUITE_ENV, HOME: SUITE_HOME, PATH: [GHSHIM, '/usr/bin', '/bin'].join(':') }) });
+      const before = fs.existsSync(tf) ? r0.call(fs, tf, 'utf8') : null;
+      placeEIO(); let r, held = null;
+      try { r = await d.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', SHIMGH, 'issue', 'list'], cwd: sw.work, signal: ac.signal }); held = d._toolsHold ? d._toolsHold.held() : null; } finally { liftEIO(); }
+      try { d._toolsHold && d._toolsHold.stop(); } catch { }
+      return { ok: !!r.ok, by: r.by || null, code: r.code || null, spawned: !!SH.get(), heldCode: held && held.code, untouched: (fs.existsSync(tf) ? r0.call(fs, tf, 'utf8') : null) === before };
+    };
+    const rH = await heldRun(DOOR);
+    ok(rH.heldCode === 'EIO' && rH.ok && rH.by === 'own' && rH.spawned && rH.untouched, 'r5367: a sealed gh run while its TOOLS RECORD is held (read EIO) RUNS ok:own, as with the record readable — the record recorded nothing and its file is untouched (a held record never refuses a run)', rH);
+    const rG = await heldRun(DOOR, { gone: true });
+    ok(rG.heldCode === 'EIO' && !rG.ok && rG.code === 'caller_gone' && !rG.spawned && rG.untouched, 'r5367: …and a run refused today stays refused while held: the caller gone during the hash is caller_gone, nothing spawned (a held record never passes a run that today is refused)', rG);
+    const SRCh = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    // the copy GATES right AFTER the drift note (the note's own first read is what starts the hold); its witness: the record was held
+    const GATE = editAnchor(SRCh, '        driftNote(spec.tool, tstat, got, head, toolName);', "        driftNote(spec.tool, tstat, got, head, toolName);\n        if (toolsHold.held()) { closeTool(); return named('tool_not_sealed', { tool: toolName }); }   // a copy that GATES on the held record", 'src/server/vault-run-door.js');
+    const rR = await heldRun(M.load('src/server/vault-run-door.js', GATE, 'tools-held-gates'));
+    if (rR.heldCode !== 'EIO') console.log('  ⊘ SKIP (named): r5367 CONTROL — the tools record was not held in the control\'s run (its plant was not in force): nothing judged');
+    else ok(!rR.ok && rR.code === 'tool_not_sealed', 'r5367 CONTROL (a copy of the door that refuses while the tools record is held, its record held — the witness): the same sealed run is REFUSED — the leg above sees a held record that gates — red', rR);
+  }
+
   // REAL-OWNERSHIP CONTROL (round 14 BLOCKER): the exported sealed predicate on the box's /usr/bin/gh (root-owned) vs a uid-owned
   // fixture — the VERDICT says sealed/unsealed with NO vendor call (gh --version is not a vault verb).
   const SYSGH = '/usr/bin/gh';

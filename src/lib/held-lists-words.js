@@ -45,6 +45,7 @@ const NAMES = Object.freeze({
   'vault-grants.json': i18nKey('who may receive your two-step codes'),
   'usage-reset-claims.json': i18nKey('the reset marks'),
   'vault-grant-ends.json': i18nKey('the list of approvals that ended'),   // lg-vault-env's own plain name (r3377)
+  'vault-run-tools.json': i18nKey('the record of the sealed tools'),   // lg-vault-env's tools record (r5367)
   'people.json': i18nKey('a channel account’s list of people'),   // bl-mail (line 698, 主开发 r3608): a channels account's people memo — one hold an account, each listed by this name
   'agent-door.json': i18nKey('the port remote conversations reach their tools by'),   // r3333 unit 1 (lane lg-group-parents): the agent door's record
   'opencode-serve.json': i18nKey('the record of the OpenCode background service'),   // bl-chat-b's own plain name (r3334 unit 1)

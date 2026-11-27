@@ -6,6 +6,8 @@
 //   (a) vault-use-marks.json — src/server/vault-use-grants.js (the marks held; a row UNDECIDED when its marks are lost)
 //   (c) vault-grants.json — src/server/vault-totp.js (held; a later layout kept aside once; a row it cannot read CARRIED)
 //   (d) vault-grant-ends.json — src/server/vault-run-door.js (held; the ends made meanwhile kept beside it, folded in at the lift)
+//   (e) vault-run-tools.json — src/server/vault-run-door.js (held; the drift record records nothing meanwhile, every sealed run goes on;
+//       the lift resumes from the file's own baselines; test-vault-run-seal drives the sealed runs themselves)
 //   (b) vault.json — src/server/vault-engine.js (a failed read held and read again, said «could not be read»; torn bytes stay damaged)
 // Every value here is made up at run time; no value, no sealed thing is printed.
 import fs from 'node:fs';
@@ -712,6 +714,62 @@ async function main() {
     let v1; try { v1 = w.mk(); } finally { pr.lift(); }
     const u = await v1.unlock(PW);
     ok(!!u && !u.ok, '(b) CONTROL (the release\'s load — never read again in the life): the right password is refused after the disk reads again — red', u && (u.ok ? 'ok' : u.code));
+  }
+
+  console.log('(e) vault-run-tools.json');
+  {
+    // r5363 / r5367: the vault run door's TOOLS RECORD (each sealed tool's first-seen digest: a drift record, never a gate) under the
+    // store-read law. The scenes reach it through the door's two named seams, _driftNote (the sealed run's own call, a made-up stat
+    // and digest) and _toolsHold; test-vault-run-seal drives the sealed runs themselves (a held record neither refuses nor passes one)
+    const M = mutantCopies('vault-side-stores-tools', REPO);
+    const SRCt = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const i0 = SRCt.indexOf('  const toolsLoad = () => {\n'), i1 = SRCt.indexOf('  const toolsSave = () => {');
+    const NEW_LOAD = i0 >= 0 && i1 > i0 ? SRCt.slice(i0, i1) : '(the tools record\'s read is gone)';
+    const OLD_LOAD = "  const toolsLoad = () => { if (toolsCache) return toolsCache; let o = null; try { o = JSON.parse(readBounded(TOOLS_FILE, STORE_MAX).toString('utf8')); } catch { o = null; } toolsCache = (o && o.tools && typeof o.tools === 'object') ? { v: 1, tools: o.tools } : { v: 1, tools: {} }; return toolsCache; };\n";   // the release's read, written back by the red control on purpose — stale-pins: kept
+    const RELEASE = M.load('src/server/vault-run-door.js', anchored(SRCt, NEW_LOAD, OLD_LOAD, 'tools-release-read'), 'tools-release-read');   // the release's read: any failure is «no tools», for the life
+    const TA = '/usr/bin/made-up-tool-a', TB = '/usr/bin/made-up-tool-b';
+    const stOf = (n) => ({ dev: 1, ino: n, size: 100 + n, mtimeMs: 1700000000000 + n });
+    const sha = (c) => c.repeat(64);
+    const rec = (p, n, s) => ({ path: p, dev: 1, ino: n, size: 100 + n, mtime: 1700000000000 + n, sha256: s, version: null, at: Date.now() - 86400e3 });
+    const doorOf = async (Mod, tag) => { const dataDir = freshDir(tag); const e0 = mkEngine(dataDir); await e0.setup(PW); return { dataDir, TF: path.join(dataDir, 'vault-run-tools.json'), door: Mod.create({ dataDir, vault: e0, userTodos: null, sources: {}, log: () => { } }) }; };
+    const unreadScene = async (Mod) => {
+      const { TF, door } = await doorOf(Mod, 'tools-unread');
+      fs.writeFileSync(TF, JSON.stringify({ v: 1, tools: { [TA]: rec(TA, 1, sha('a')), [TB]: rec(TB, 2, sha('b')) } }), { mode: 0o600 });
+      const before = fs.readFileSync(TF, 'utf8');
+      const pr = placeRefusal(TF); let held = null;
+      try { door._driftNote(TB, stOf(2), sha('c'), 'made-up-b'); held = door._toolsHold.held(); } finally { pr.lift(); }
+      const whileHeld = fs.readFileSync(TF, 'utf8');
+      const lifted = held ? await door._toolsHold.again() : null;
+      door._driftNote(TB, stOf(2), sha('c'), 'made-up-b');   // after the lift: the tool's change against the FILE's baseline
+      const after = jsonOr(TF) || {}; const t = after.tools || {};
+      try { door._toolsHold.stop(); } catch { }
+      return { heldCode: held && held.code, keptWhileHeld: whileHeld === before, lifted, aKept: !!(t[TA] && t[TA].sha256 === sha('a')), bDrift: !!(t[TB] && t[TB].sha256 === sha('c') && t[TB].noticedSha === sha('c')) };
+    };
+    { const r = await unreadScene(RUN);
+      ok(r.heldCode === 'EIO' && r.keptWhileHeld === true, '(e) a tools record that could not be read (EIO) at a sealed run\'s drift note is HELD: nothing recorded, the file byte for byte as it was (both tools\' baselines kept)', r);
+      ok(r.lifted === true && r.aKept && r.bDrift, '(e) …read again off the loop, it lifts and recording resumes FROM THE FILE: the changed tool is noticed against its own baseline (first notice), the other tool\'s record kept', r); }
+    { const r = await unreadScene(RELEASE);
+      ok(!(r.keptWhileHeld && r.aKept), '(e) CONTROL (the release\'s read — any failure is «no tools» for the life): the next drift note writes a fresh file over the unread one and the other tool\'s baseline is LOST — red', r); }
+    const TORN = '{"v":1,"tools":{"' + TA + '":{"path":';
+    const tornScene = async (Mod) => {
+      const { dataDir, TF, door } = await doorOf(Mod, 'tools-torn');
+      fs.writeFileSync(TF, TORN, { mode: 0o600 });
+      door._driftNote(TA, stOf(1), sha('a'), 'made-up-a');   // torn bytes: held while their copy is made off the loop
+      const lifted = await until(() => !door._toolsHold.held(), 3000);
+      door._driftNote(TA, stOf(1), sha('a'), 'made-up-a');   // after the lift (empty): the tool's baseline set again
+      const copies = fs.readdirSync(dataDir).filter((n) => n.startsWith('vault-run-tools.json.corrupt-'));
+      const after = jsonOr(TF) || {};
+      try { door._toolsHold.stop(); } catch { }
+      return { lifted, copies: copies.length, copyIsTorn: copies.length === 1 && fs.readFileSync(path.join(dataDir, copies[0]), 'utf8') === TORN, aSet: !!(after.tools && after.tools[TA] && after.tools[TA].sha256 === sha('a')) };
+    };
+    { const r = await tornScene(RUN);
+      ok(r.lifted && r.copyIsTorn && r.aSet, '(e) torn bytes: kept aside ONCE (the copy byte for byte), lifted empty, and the tool\'s baseline is set again at its next drift note', r); }
+    { const r = await tornScene(RELEASE);
+      ok(r.copies === 0, '(e) CONTROL (the release\'s read): the torn bytes are written over with no copy kept — red', r); }
+    { const { TF, door } = await doorOf(RUN, 'tools-missing');
+      door._driftNote(TA, stOf(1), sha('a'), 'made-up-a');
+      const after = jsonOr(TF) || {};
+      ok(!door._toolsHold.held() && !!(after.tools && after.tools[TA] && after.tools[TA].sha256 === sha('a') && !after.tools[TA].noticedSha), '(e) a MISSING record is a first run, as before: the tool\'s baseline is set, no notice', after); }
   }
 }
 

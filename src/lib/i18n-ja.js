@@ -4758,6 +4758,8 @@ export default {
   "a conversation’s saved details": "会話の保存された情報",
   "VibeSpace cannot read the list of approvals that ended right now — nothing was changed. It reads it again by itself; until then the list may miss an approval that ended earlier.": "VibeSpace は今、終了した許可の一覧を読み取れません——何も変更していません。自動で読み直されます。それまでは、前に終了した許可が一覧にない場合があります。",
   "the list of approvals that ended": "終了した許可の一覧",
+  "VibeSpace cannot read its record of the sealed tools right now — nothing was changed, and every run goes on. It reads it again by itself; a tool that changes meanwhile is recorded at its first run after.": "VibeSpace は今、封印されたツールの記録を読み取れません——何も変更していません。実行はすべて続きます。自動で読み直されます。その間に変わったツールは、その後の最初の実行で記録されます。",
+  "the record of the sealed tools": "封印されたツールの記録",
   "the port remote conversations reach their tools by": "リモート会話がツールに届くポート",
   "which plugins are on and trusted": "どのプラグインがオンで信頼済みか",
   "VibeSpace cannot read which plugins are on and trusted right now — nothing was changed and no plugin is lost. Try again in a few minutes (it reads the list again by itself).": "VibeSpace はいま、どのプラグインがオンで信頼済みかを読み込めません — 何も変更されておらず、プラグインも失われていません。数分後にもう一度お試しください（自動でもう一度読み込みます）。",

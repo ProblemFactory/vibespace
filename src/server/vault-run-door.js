@@ -622,8 +622,34 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // or inode differ RECORDS the drift (an audit line + one notice the first time) and RUNS — root changed it. data/vault-run-tools.json.
   const TOOLS_FILE = path.join(dataDir, 'vault-run-tools.json');
   let toolsCache = null;
-  const toolsLoad = () => { if (toolsCache) return toolsCache; let o = null; try { o = JSON.parse(readBounded(TOOLS_FILE, STORE_MAX).toString('utf8')); } catch { o = null; } toolsCache = (o && o.tools && typeof o.tools === 'object') ? { v: 1, tools: o.tools } : { v: 1, tools: {} }; return toolsCache; };
-  const toolsSave = () => { try { writeJsonAtomic(TOOLS_FILE, toolsCache); } catch (e) { log(`data/vault-run-tools.json could not be written (${(e && e.code) || e})`); } };
+  // THE TOOLS RECORD UNDER THE STORE-READ LAW (r5363 / r5367, lane lg-vault-env; the data-store census's WRITTEN OVER row): the release
+  // read ANY failure of this file as «no tools recorded» for the hub's life, and the next sealed run's driftNote wrote a fresh file
+  // over the unread one — every other tool's baseline lost. Now a failed read is HELD (src/store-read-hold.js): nothing is written
+  // over it, it is read again off the loop on the law's ladder, torn bytes are copied aside once and lifted empty. While held the
+  // drift record records NOTHING and every sealed run proceeds exactly as before (the record never gates); at the lift recording
+  // resumes from the file's own baselines. A drift missed while held: a tool's change in that window gets no audit line and no
+  // For-you notice until its next run after the lift (compared then with the file's baseline, never with an empty one)
+  const TOOLS_VALID = (v) => !!v && typeof v === 'object' && !Array.isArray(v) && (v.tools == null || (typeof v.tools === 'object' && !Array.isArray(v.tools)));
+  const toolsOf = (v) => ({ v: 1, tools: v && v.tools && typeof v.tools === 'object' ? v.tools : {} });
+  const toolsHold = HOLD.create({
+    file: TOOLS_FILE, valid: TOOLS_VALID, code: 'vault_run_tools_unread', aside: (m) => `${TOOLS_FILE}.corrupt-${m}`,
+    words: (h) => `vault-run-tools.json in VibeSpace's data folder could not be read (${h.code}); VibeSpace reads it again every few minutes. Nothing is written over it, and every sealed run goes on as before: a tool that changes meanwhile is recorded at its first run after it reads`,
+    log: (m) => log('data/' + m),
+    onLift: (v) => { toolsCache = toolsOf(v); },
+  });
+  /** the record (null while HELD: nothing is recorded, nothing written) — read at its first use in a life, as before */
+  const toolsLoad = () => {
+    if (toolsCache) return toolsCache;
+    if (toolsHold.held()) return null;
+    let read;
+    try { read = { text: readBounded(TOOLS_FILE, STORE_MAX).toString('utf8') }; } catch (e) { read = { error: e }; }
+    const a = SR.storeAnswer(read, { valid: TOOLS_VALID });
+    const st = toolsHold.start(a);
+    if (st === 'data') toolsCache = toolsOf(a.value);
+    else if (st === 'missing') toolsCache = toolsOf(null);
+    return toolsCache;   // null: held (unreadable, or torn bytes while their copy is made)
+  };
+  const toolsSave = () => { if (!toolsHold.writable('a tool drift record')) return; try { writeJsonAtomic(TOOLS_FILE, toolsCache); } catch (e) { log(`data/vault-run-tools.json could not be written (${(e && e.code) || e})`); } };
   // a digest→version LABEL for the drift line ONLY (the lane fixture's seam, named as such — the door NEVER gates on it; an
   // unknown sha RUNS and is labelled by its short sha). The shipped gh row seeds it with the lane's bundled gh.
   const ghVersionOf = (sha) => { try { const r = VR.knownToolOf('gh'); return (r && r.toolSha256 && r.toolSha256 === sha) ? (r.grammarVersion || null) : null; } catch { return null; } };
@@ -650,7 +676,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const driftNote = (toolPath, st, sha, head, toolName) => {
     if (!sha) return;   // couldn't hash — nothing to record; the run still proceeds (the SEAL is the fence)
     try {   // round 16 (MINOR): the store is an audit aid, NEVER a gate — a read/update failure (a bad record, an unwritable file) never fails a sealed gh run
-      const store = toolsLoad(), raw = store.tools[toolPath];
+      const store = toolsLoad(); if (!store) return;   // HELD: nothing recorded this run (the run proceeds — the record never gates)
+      const raw = store.tools[toolPath];
       const prev = (raw && typeof raw === 'object' && typeof raw.sha256 === 'string') ? raw : null;   // round 16 (MINOR): a MALFORMED record (not an object, or a non-string sha256 — a uid-writable store a prior hub or an agent could corrupt) is DISCARDED and rewritten as a fresh baseline; r15 read prev.sha256.slice on a number and THREW, failing EVERY sealed gh run forever
       const rec = { path: toolPath, dev: st ? st.dev : null, ino: st ? st.ino : null, size: st ? st.size : null, mtime: st ? Math.round(st.mtimeMs) : null, sha256: sha, version: ghVersionOf(sha), at: now() };
       if (!prev) { store.tools[toolPath] = rec; toolsSave(); return; }   // first run (or a discarded bad record): establish the baseline, no notice
@@ -3183,7 +3210,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
   return { _storeHeld: () => (storeHeld ? { ...storeHeld } : null), scrubLive: () => scrubLive.size, scrubThreads: () => scrubMade - scrubExited, lastScrubStats: () => lastScrub, _startScrub: startScrub, run, answer, takeBack, saveRow, setRunnable, resumeGrant, forgetEntry, useRowDropped, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
-    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants, _endsHold: endsHold,
+    listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet, _ended: endedGrants, _endsHold: endsHold, _toolsHold: toolsHold, _driftNote: (toolPath, st, sha, toolName = 'gh') => driftNote(toolPath, st, sha, {}, toolName),
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce, _hostPasses: hostPasses };
 }
 
