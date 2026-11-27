@@ -7,6 +7,7 @@
 // against a THROWAWAY VIBESPACE_AGENTD_ROOT — never the real ~/.vibespace.
 // Run: node scripts/test-agentd.mjs
 import './scratch.mjs';
+import { endDaemonsAndWait } from './scratch.mjs';   // r5404: the harness's own end-and-wait
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -104,9 +105,11 @@ console.log('— agentd M0: flock singleton (no double daemon) —');
 }
 
 dmB.stop(); dmC.stop();
-// kill the daemon we spawned
-try { process.kill(pidAfter, 'SIGTERM'); } catch {}
-fs.rmSync(tmp, { recursive: true, force: true });
+// r5404 (lane bl-machines-b — the 2.369.422 hosted proof's red, placed): a daemon must be GONE before its root goes — its SIGTERM
+// handler's last log line re-creates agentd/state/agentd.log under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red's class)
+const end = endDaemonsAndWait(AGENTD_ROOT);
+check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && end.gone && !end.killed, JSON.stringify(end));
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M0 tests passed');
 process.exit(0);

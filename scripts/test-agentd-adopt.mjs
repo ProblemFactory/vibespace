@@ -10,6 +10,7 @@
 // startTime identity + an adopted-child liveness watcher (keeper parity).
 // Run: node scripts/test-agentd-adopt.mjs
 import './scratch.mjs';
+import { endDaemonsAndWait } from './scratch.mjs';   // r5404: the harness's own end-and-wait
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';
@@ -127,8 +128,11 @@ console.log('— legacy meta (no startTime) still adopts via the CLI-name fallba
 }
 
 dm.stop();
-try { process.kill(daemonPid(), 'SIGTERM'); } catch { }
-await sleep(300);
-try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
+// r5404 (lane bl-machines-b — the 2.369.422 hosted proof's red, placed): a daemon must be GONE before its root goes — its SIGTERM
+// handler's last log line re-creates agentd/state/agentd.log under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red's class)
+// (before: a SIGTERM, a fixed 300 ms standing for «gone», and a removal whose error was swallowed)
+const end = endDaemonsAndWait(ROOT);
+check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && end.gone && !end.killed, JSON.stringify(end));
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 console.log(failed ? `\n${failed} FAILED` : '\nagentd adoption test passed');
 process.exit(failed ? 1 : 0);

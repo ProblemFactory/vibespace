@@ -10,6 +10,7 @@
 // Run: node scripts/test-agentd-remote.mjs
 import { createRequire } from 'node:module';
 import './scratch.mjs';   // FIRST (B-ba47 B2): it loads scratch.mjs at run time too (a dynamic import) — the re-home comes before any of its code
+import { endDaemonsAndWait } from './scratch.mjs';   // r5404: the harness's own end-and-wait
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -162,8 +163,11 @@ check('exited session NOT respawned (same pid recorded, exited kept)', meta3.chi
 check('drain includes the sentinel', out3.toString().includes('"_remote_exit"'), '');
 
 dm2.stop(); dm3.stop();
-try { process.kill(daemonPid, 'SIGTERM'); } catch {}
-fs.rmSync(tmp, { recursive: true, force: true });
+// r5404 (lane bl-machines-b — the 2.369.422 hosted proof's red, placed): a daemon must be GONE before its root goes — its SIGTERM
+// handler's last log line re-creates agentd/state/agentd.log under a racing rmSync (ENOTEMPTY, the 2.369.217 runner red's class)
+const end = endDaemonsAndWait(AGENTD_ROOT);
+check('the daemon ends on SIGTERM and is gone before its root is removed', end.pids.length >= 1 && end.gone && !end.killed, JSON.stringify(end));
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M2 remote tests passed');
 process.exit(0);

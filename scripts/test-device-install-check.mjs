@@ -27,7 +27,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, endDaemonsAndWait } from './scratch.mjs';   // r5404: + the harness's own end-and-wait
 import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -51,8 +51,9 @@ const S = scratch('installcheck');
 fs.mkdirSync(S, { recursive: true });
 const pids = [];
 const cleanup = () => {
+  try { endDaemonsAndWait(S); } catch { }   // r5404: every device daemon rooted under the scratch dir ENDED AND GONE before it goes
   for (const p of pids) { try { process.kill(p, 'SIGTERM'); } catch { } }
-  try { fs.rmSync(S, { recursive: true, force: true }); } catch { }
+  try { fs.rmSync(S, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch { }
 };
 process.on('exit', cleanup);
 process.on('SIGINT', () => process.exit(130));
@@ -452,5 +453,6 @@ console.log('a re-pair retires the older installs of the SAME hub, after the new
 
 srv.close(); plain.close();
 for (const d of DP.agentdDialDevices.values()) { try { d.stop(); } catch { } }
+{ const end = endDaemonsAndWait(S); ok(end.gone && !end.killed, `r5404: every device daemon rooted under the scratch dir (${end.pids.length} still running at the end) ends on SIGTERM and is gone before the dir is removed`, end); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
 process.exit(fail ? 1 : 0);

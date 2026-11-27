@@ -12,6 +12,7 @@
 // pid, every scratch dir) run by the process's exit and by a signal (d2ff4026: a probe that threw skipped the kill — both
 // detached daemons kept running).
 import './scratch.mjs';
+import { endDaemonsAndWait } from './scratch.mjs';   // r5404: the harness's own end-and-wait
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';
@@ -40,6 +41,8 @@ const more = []; // …and the scratch dirs it made (tmp + each block's own)
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
+  // r5404: each root's daemons ENDED AND GONE before its folder goes (a SIGTERM'd daemon's last log line re-creates agentd/state)
+  for (const d of [tmp, ...more]) { try { endDaemonsAndWait(path.join(d, 'agentd')); } catch { } }
   for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { } }
   for (const d of [tmp, ...more]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
@@ -155,9 +158,13 @@ try {
   } finally {
     process.env.VIBESPACE_AGENTD_ROOT = was.root; process.env.HOME = was.home;
     try { dm2.stop?.(); } catch { }
-    fs.rmSync(tmp2, { recursive: true, force: true });
+    // r5404: the second daemon is GONE before its root goes (it was still running when this removal was bare)
+    const end2 = endDaemonsAndWait(ROOT2);
+    check(`the second root's daemon(s) (${end2.pids.length} still running) end on SIGTERM and are gone before its root is removed`, end2.gone && !end2.killed, JSON.stringify(end2));
+    fs.rmSync(tmp2, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
+{ const end = endDaemonsAndWait(ROOT); check(`the root's daemon(s) (${end.pids.length} still running) end on SIGTERM and are gone before its root is removed`, end.gone && !end.killed, JSON.stringify(end)); }   // r5404
 cleanup();
 console.log(failed ? `FAIL (${failed})` : `ALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);
