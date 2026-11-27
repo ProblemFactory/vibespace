@@ -29,6 +29,7 @@ import { heldWordsOf, anchorFixedPopup, drawnAnchorRect, api, configureToasts, r
 import { lateFocus } from './late-focus.js'; // B-c87d: a go-to that lands after an await asks THE door (the keyboard stays where the person last put it)
 import { askTails, withTails, credentialDoorWords } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
 import { t, tc, resolveLang } from './i18n.js';
+import { noticeWords, takeOwnNotice } from './notice-words.js'; // a notice in this device's words; this page's own press said by its reply alone (B-2083 unit B, r5539)
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { themeWord, modelOptions } from './value-words.js'; // lane ui-language: a theme key in the reader's words (the walk's window-manager-9)
 import { reportLine, refreshLabel, signInLabel, refusalText, rowsSig, opensFor, notInReport } from './cli-models-words.js'; // PURE (lane agy-models-report): a CLI that reports its own models — the menu's line, its door, the explicit row
@@ -469,8 +470,9 @@ class App {
         // i18n (2026-09-28): a notice that carries {key, params} is worded by THIS device's t(); `text` is the English
         // (+ an optional `then: {key}` sentence after it — the pin notices' "Restarting the conversation to apply it.")
         // a param may be WORDS (`{key, params}` — a row's label): said in this language before the sentence fills (lane setting-doors pick 2)
-        const said = (ps) => Object.fromEntries(Object.entries(ps || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key, v.params || undefined) : v]));
-        showToast(msg.i18n && msg.i18n.key ? t(msg.i18n.key, said(msg.i18n.params)) + (msg.i18n.then && msg.i18n.then.key ? ' ' + t(msg.i18n.then.key, msg.i18n.then.params || {}) : '') : msg.text, { type: msg.level >= 2 ? 'error' : undefined });
+        // (r5539) `then` may be a list (the pool press's parts), and the notice of a press made ON THIS PAGE is said by that press's own
+        // reply alone: its mark (the id the page sent, the notice's key) is taken here, never a timer — src/lib/notice-words.js
+        if (!takeOwnNotice(msg.key)) showToast(noticeWords(msg, t), { type: msg.level >= 2 ? 'error' : undefined });
       }
       if (msg.type === 'sysinfo-alert') {
         // Event-loop degradation (2.235.0): the "everything is slow but CPU

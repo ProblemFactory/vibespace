@@ -7570,7 +7570,7 @@ export default {
   "Move every conversation here now": "立刻把所有对话切到这里",
   "Move every conversation of this pool here now": "把这个池的所有对话立刻移到这里",   // lane lg-recovery B-2083 unit B (主开发 r5166 / r5177): the pool member row's one press
   "Back to automatic ({n} pinned here)": "恢复自动（{n} 个固定在这里）",
-  "Pool \"{pool}\": {n} conversation(s) pinned to {member} by one press — {now} now, {restart} at their next restart, {waits} waiting.": "账号池「{pool}」：一次操作把 {n} 个对话固定到 {member} —— {now} 个立即移过去，{restart} 个在下次重启时，{waits} 个在等待。",
+  "Pool \"{pool}\": {n} conversation(s) pinned to {member} by one press.": "账号池「{pool}」：一次操作把 {n} 个对话固定到 {member}。",
   "{name} is billing paid overage now — these conversations will be billed there.": "{name} 现在正在按量计费超额用量——这些对话将在那里计费。",
   "{name} can bill usage credits past its quota — these conversations will be billed there once its quota is spent.": "{name} 超出额度后会用额外用量（usage credits）按量计费——额度用完后，这些对话将在那里计费。",
   "It is not known yet whether {name} bills past its quota — these conversations may be billed there.": "还不知道 {name} 超出额度后是否计费——这些对话可能会在那里计费。",

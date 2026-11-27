@@ -53,10 +53,10 @@ function world(Mod, { hot = true, readingOf = null } = {}) {
   // B's record STATES a refusal of overage (the vendor's «rejected»): the one positive fact that it bills nothing past its quota (r5333)
   const own = { [A]: reading(0.2), [B]: J({ ...JSON.parse(reading(0.1)), overage: { inUse: false, status: 'rejected', asOf: Date.now() } }), [C]: reading(1.0) };
   for (const [id, who] of [[A, 'A'], [B, 'B'], [C, 'C']]) { const txt = readingOf ? readingOf(who, own[id], nowS) : own[id]; if (txt != null) fs.writeFileSync(path.join(cacheDir, id + '.json'), txt); }
-  const sessions = new Map(), notices = [];
+  const sessions = new Map(), notices = [], noticeKeys = [], noticeI18n = [];
   const eng = Mod.create({
     app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
-    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(String(t)), serverSetting: () => undefined, getAccounts: () => am,
+    wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t, o) => { notices.push(String(t)); noticeKeys.push(String(k)); noticeI18n.push((o && o.i18n) || null); }, serverSetting: () => undefined, getAccounts: () => am,
     getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
     getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
     getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
@@ -75,7 +75,7 @@ function world(Mod, { hot = true, readingOf = null } = {}) {
   const placedOf = (sid) => { try { return am.poolCurrentFor(P, sid); } catch { return null; } };
   const recOf = (sid) => { try { return (PR.read(dataDir, P, 'cw-' + sid) || {}).rec || null; } catch { return null; } };
   const poolFacts = () => { const a = am.get(P) || {}; let cur = null; try { cur = am.poolCurrent(P); } catch { cur = null; } return J({ current: cur, priority: a.priority || null, members: a.members || null, auto: !!a.auto, hot: !!a.hot }); };
-  return { eng, am, A, B, C, P, sessions, notices, writes, mk, placedOf, recOf, poolFacts, dataDir };
+  return { eng, am, A, B, C, P, sessions, notices, noticeKeys, noticeI18n, writes, mk, placedOf, recOf, poolFacts, dataDir };
 }
 const counts = (r) => J({ now: r.now, restart: r.restart, waits: r.waits, here: r.here, provider: r.provider, remote: r.remote, unread: r.unread, elsewhere: r.elsewhere });
 /** §1's world: six conversations in the states the sentence counts */
@@ -108,10 +108,28 @@ else {
   ok(w1.placedOf('s-warm') === w1.B && w1.placedOf('s-run') === w1.B && w1.placedOf('s-else') === w1.B && w1.placedOf('s-follower') !== w1.B,
     'THE PIN\'s OWN ROAD: the warm and the running conversations are re-pointed now (a manual choice is never held by a warm cache); the follower waits for its restart', ['s-warm', 's-run', 's-else', 's-follower'].map((sid) => [sid, w1.placedOf(sid)]));
   ok(w1.writes.length === 0 && w1.sessions.size === 6, 'NOTHING IS CUT: no conversation was written to, killed or removed (the running turn goes on, on its new link)', w1.writes);
-  ok(w1.notices.length - n0 === 1 && /4 conversation\(s\) pinned to Member B by one press — 3 now, 1 at their next restart, 0 waiting\./.test(w1.notices[w1.notices.length - 1]), 'ONE notice for the press (never one a conversation), with the split the toast says (r5294 should)', w1.notices);
+  { const last = w1.notices[w1.notices.length - 1] || '', i18n = w1.noticeI18n[w1.noticeI18n.length - 1] || {};
+    ok(w1.notices.length - n0 === 1 && /^Pool "Team": 4 conversation\(s\) pinned to Member B by one press\. 3 move there now\. 1 move at their next restart \(this pool cannot switch a running conversation in place\)\.$/.test(last) && !/\b0 (move|wait)/.test(last)
+      && Array.isArray(i18n.then) && i18n.then.length === 2 && i18n.then.every((x) => x.params && x.params.n > 0),
+      'ONE notice for the press (never one a conversation), with the split the reply says — ONLY the parts that hold a conversation (no «0 waiting»: r5539 (2)), its parts as the page\'s own sentences', { last, i18n }); }
   ok(w1.poolFacts() === facts0, 'NO DEFAULT CHANGES: the pool\'s default, order, members and mode are as they were', { before: facts0, after: w1.poolFacts() });
   const stranger = quiet(() => w1.eng.pinAllPlan(w1.P, 'sub-not-a-member'));
   ok(stranger.ok === false && stranger.code === 'not_member', 'a member outside the pool is refused by name', stranger);
+}
+
+console.log('§1b THE PRESS\'s OWN MARK (r5539 (1)) — the id the pressing page sent is the notice\'s key');
+{
+  const w = world(engMod);
+  if (w) {
+    w.mk('k-1'); w.mk('k-2');
+    const r = await quietA(() => w.eng.pinAll(w.P, w.B, { by: 'user', press: 'pa' + 'mark42x' }));
+    const bad = world(engMod); bad.mk('k-1');
+    const rb = await quietA(() => bad.eng.pinAll(bad.P, bad.B, { by: 'user', press: 'no spaces allowed' }));
+    const c = await quietA(() => w.eng.clearPinsTo(w.P, w.B, { by: 'user', press: 'pc' + 'mark43y' }));
+    ok(r.noticeKey === 'pool-pin-all-pamark42x' && w.noticeKeys[w.noticeKeys.length - 2] === 'pool-pin-all-pamark42x' && c.noticeKey === 'pool-pin-clear-pcmark43y' && w.noticeKeys[w.noticeKeys.length - 1] === 'pool-pin-clear-pcmark43y'
+      && /^pool-pin-all-pool-/.test(rb.noticeKey || '') && !/no spaces/.test(rb.noticeKey || ''),
+      'the press\'s own mark (the id its page sent) IS the notice\'s key — of the press and of «Back to automatic»; a mark of another shape is not taken (the key falls back to the pool, member and time)', { r: r.noticeKey, c: c.noticeKey, bad: rb.noticeKey });
+  }
 }
 
 console.log('§2 A MEMBER THAT CANNOT SERVE — every pin kept and waiting, said by its why, nothing moved');

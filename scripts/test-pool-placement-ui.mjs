@@ -117,6 +117,34 @@ console.log('B-2083 unit B — THE MEMBER ROW\'s ONE PRESS «Move every conversa
   ok(endedSaid.type === undefined && endedSaid.text.includes('1 ended or left the pool meanwhile — nothing was changed for them.') && !/try again/.test(endedSaid.text)
     && M.pinClearWords({ ok: true, cleared: 2, ended: 1, refused: {} }, tZh, { poolName: 'Team', memberName: 'Member U' }).text.includes('1 个在此期间已结束或离开了这个池——没有对它们做任何更改。'),
     'a conversation that ended (or left the pool) while the press ran is said apart — no «try again», not an error (r5333 should)', endedSaid);
+  // r5539: A NOTICE IN THIS DEVICE's WORDS, and THE PAGE's OWN PRESS said by its reply alone (src/lib/notice-words.js)
+  {
+    const NW = await import('../src/lib/notice-words.js');
+    const fs2 = require('node:fs');
+    const frame = { type: 'server-notice', key: 'pool-pin-all-pamark1', text: 'Pool "Team": 5 conversation(s) pinned to Member B by one press. 5 move there now.', level: 1,
+      i18n: { key: 'Pool "{pool}": {n} conversation(s) pinned to {member} by one press.', params: { pool: 'Team', n: 6, member: 'Member B' },
+        then: [{ key: '{n} move there now.', params: { n: 5 } }, { key: '{n} wait until it can serve them: {why}.', params: { n: 1, why: { key: 'out of quota' } } }] } };
+    ok(NW.noticeWords(frame, tEn) === 'Pool "Team": 6 conversation(s) pinned to Member B by one press. 5 move there now. 1 wait until it can serve them: out of quota.'
+      && NW.noticeWords(frame, tZh) === '账号池「Team」：一次操作把 6 个对话固定到 Member B。 5 个现在就移过去。 1 个等到它能服务时再移：额度用完。',
+      'the pool press\'s notice in the page\'s words: the head, then ONLY its parts (a list of `then` sentences, a why said as words) — en, zh', [NW.noticeWords(frame, tEn), NW.noticeWords(frame, tZh)]);
+    ok(NW.noticeWords({ text: 'plain English', i18n: null }, tZh) === 'plain English' && NW.noticeWords({ text: 'x', i18n: { key: 'it was refused', then: { key: 'Pin them here' } } }, tEn) === 'it was refused Pin them here',
+      'a notice with no key says its English; a single `then` object (the older form) is still one sentence after the head');
+    ok(NW.markOwnNotice('pool-pin-all-pamark1') === true && NW.takeOwnNotice('pool-pin-all-pamark1') === true && NW.takeOwnNotice('pool-pin-all-pamark1') === false && NW.takeOwnNotice('pool-pin-all-other') === false,
+      'THE PRESS\'s OWN MARK: marked before the press, taken ONCE when its notice arrives (that page says the press by its reply); another key is never taken');
+    for (let i = 0; i < 70; i++) NW.markOwnNotice('k' + i);
+    ok(NW.takeOwnNotice('k0') === false && NW.takeOwnNotice('k69') === true && /^pa[a-z0-9]{8,}$/.test(NW.newPressMark('pa')), 'at most 64 marks are kept (the oldest goes); a fresh mark is letters and digits after its prefix');
+    const APP = fs2.readFileSync(path.resolve('src/lib/app.js'), 'utf8'), MAS = fs2.readFileSync(path.resolve('src/lib/manage-agents.js'), 'utf8');
+    ok(APP.includes("if (!takeOwnNotice(msg.key)) showToast(noticeWords(msg, t), { type: msg.level >= 2 ? 'error' : undefined });") && !APP.includes('const said = (ps) =>'),   // stale-pins: kept — an ABSENCE check: the old inline words left app.js for notice-words.js
+      'the hub page\'s one notice door words every notice through noticeWords and skips the notice of its own press (its mark taken)');
+    const pa = MAS.indexOf("const press = newPressMark('pa'); markOwnNotice('pool-pin-all-' + press);"), pf = MAS.indexOf("body: JSON.stringify({ memberId, press })");
+    const ca = MAS.indexOf("const press = newPressMark('pc'); markOwnNotice('pool-pin-clear-' + press);"), cf = MAS.indexOf("body: JSON.stringify({ memberId, clear: true, press })");
+    ok(pa > 0 && pf > pa && ca > 0 && cf > ca, 'the press and «Back to automatic» mark their notice BEFORE they are sent (a notice can arrive before the reply)', { pa, pf, ca, cf });
+    // the engine's plain whys are the page's own (one table in two files, the same keys)
+    const ENG = fs2.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8'), MOD = fs2.readFileSync(path.resolve('src/lib/pool-priority-model.js'), 'utf8');
+    const eng = Object.fromEntries([...ENG.slice(ENG.indexOf('const PIN_WAIT_WHY_KEYS = {'), ENG.indexOf('const pinWaitWhyKey')).matchAll(/'(pin-[a-z-]+)': i18nKey\('([^']+)'\)/g)].map((m) => [m[1], m[2]]));
+    const mod = Object.fromEntries([...MOD.slice(MOD.indexOf('const pinWaitWhy = '), MOD.indexOf('const pinCountParts')).matchAll(/why === '(pin-[a-z-]+)' \? t\(i18nKey\('([^']+)'\)\)/g)].map((m) => [m[1], m[2]]));
+    ok(Object.keys(eng).length === 6 && JSON.stringify(eng) === JSON.stringify(mod), 'the notice\'s plain whys (the engine) and the reply\'s (the page) are ONE table: the same six keys and words', { eng, mod });
+  }
   ok(M.pinAllWords({ ok: false, code: 'press_running', error: 'x' }, tEn).text === 'A press on this pool is still running — its answer comes when every conversation is done.'
     && M.pinClearWords({ ok: false, code: 'press_running', error: 'x' }, tZh).text === '这个池的一次操作仍在进行——所有对话处理完后会给出结果。', 'a second press while one runs: refused in the page\'s words (en, zh)');
   {

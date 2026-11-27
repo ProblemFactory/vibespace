@@ -750,7 +750,8 @@ app.post('/api/accounts/:poolId/pin-all', async (req, res) => {
     if (!pinAllPerson(req, res)) return;
     if (typeof engine.pinAll !== 'function' || typeof engine.clearPinsTo !== 'function') return res.status(503).json({ ok: false, code: 'no_engine', error: 'pool engine unavailable' });
     const poolId = String(req.params.poolId || ''), memberId = String(req.body?.memberId || '');
-    const r = req.body?.clear === true ? await engine.clearPinsTo(poolId, memberId, { by: 'user' }) : await engine.pinAll(poolId, memberId, { by: 'user' });   // one pin a turn of the loop (r5294 MUST 3): the answer when all are done
+    const press = typeof req.body?.press === 'string' ? req.body.press : null;   // r5539: the pressing page's own mark (the notice's key)
+    const r = req.body?.clear === true ? await engine.clearPinsTo(poolId, memberId, { by: 'user', press }) : await engine.pinAll(poolId, memberId, { by: 'user', press });   // one pin a turn of the loop (r5294 MUST 3): the answer when all are done
     if (!r || !r.ok) return res.status((r && r.status) || 400).json({ ok: false, code: (r && r.code) || 'refused', error: (r && r.error) || 'refused' });
     try { broadcastActiveSessions(); } catch { }
     res.json(r);

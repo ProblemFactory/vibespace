@@ -7569,7 +7569,7 @@ export default {
   "Move every conversation here now": "すべての会話を今すぐここへ移す",
   "Move every conversation of this pool here now": "このプールのすべての会話を今すぐここへ移す",   // lane lg-recovery B-2083 unit B (主开发 r5166 / r5177): the pool member row's one press
   "Back to automatic ({n} pinned here)": "自動に戻す（ここに固定 {n} 件）",
-  "Pool \"{pool}\": {n} conversation(s) pinned to {member} by one press — {now} now, {restart} at their next restart, {waits} waiting.": "プール「{pool}」: 1 回の操作で {n} 件の会話を {member} に固定しました — 今すぐ {now} 件、次の再起動時 {restart} 件、待機中 {waits} 件。",
+  "Pool \"{pool}\": {n} conversation(s) pinned to {member} by one press.": "プール「{pool}」: 1 回の操作で {n} 件の会話を {member} に固定しました。",
   "{name} is billing paid overage now — these conversations will be billed there.": "{name} は現在、有料の超過利用で課金中です — これらの会話はそこで課金されます。",
   "{name} can bill usage credits past its quota — these conversations will be billed there once its quota is spent.": "{name} はクォータを超えると追加利用(usage credits)で従量課金されます — クォータを使い切ると、これらの会話はそこで課金されます。",
   "It is not known yet whether {name} bills past its quota — these conversations may be billed there.": "{name} がクォータを超えて課金されるかはまだ分かりません — これらの会話はそこで課金される可能性があります。",

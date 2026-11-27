@@ -50,6 +50,7 @@ import { wallWords, groupWalls, staleLaneAge, markT } from './account-wall-words
 import * as quotaModel from '../quota-model.js'; // PURE: the display verdict every bucket below is drawn by (windowDisplay — lane reset-unproven)
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
+import { markOwnNotice, newPressMark } from './notice-words.js'; // B-2083 unit B (r5539): the press's own mark — the pool's notice of it is for every OTHER page
 import { memberState, seedPriority, movePriority, priorityRows, rowWords, placementWords, gatherCount, gatherConfirmWords, gatherWords, evictedWords, fallbackPressToasts, pinAllConfirmWords, pinAllWords, pinClearWords } from './pool-priority-model.js'; // manual priority (2026-09-28): the Members… dialog's rows, words and moves (PURE)
 import { deviceLocale } from './i18n.js';
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
@@ -1590,13 +1591,15 @@ export function installManageAgents(App, ctx = {}) {
     if (!words.ask) { showToast(words.text, { duration: 8000 }); return; }
     const ok = await showConfirmDialog({ title: words.title, message: words.message, confirmText: words.confirmText });   // ONE options object (the approval census §1b)
     if (!ok) return;
-    const r = await fetchJson(at, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId }) });
+    const press = newPressMark('pa'); markOwnNotice('pool-pin-all-' + press);   // marked BEFORE the press: its notice may come first
+    const r = await fetchJson(at, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId, press }) });
     const said = pinAllWords(r, t, { poolName, memberName });
     showToast(said.text, { type: said.type, duration: 8000 });
   },
   // …and ONE press back: every conversation of the pool pinned to this member is placed automatically again (pins elsewhere untouched)
   async _poolPinClear(poolId, memberId, memberName, poolName) {
-    const r = await fetchJson('/api/accounts/' + encodeURIComponent(poolId) + '/pin-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId, clear: true }) });
+    const press = newPressMark('pc'); markOwnNotice('pool-pin-clear-' + press);
+    const r = await fetchJson('/api/accounts/' + encodeURIComponent(poolId) + '/pin-all', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ memberId, clear: true, press }) });
     const said = pinClearWords(r, t, { poolName, memberName });
     showToast(said.text, { type: said.type, duration: 6000 });
   },

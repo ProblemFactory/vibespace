@@ -8934,9 +8934,30 @@ function gatherPlan(poolId, memberId, now = Date.now()) {
 // stays (a cross pin is a cold move with its own line: pinned one at a time); a remote one stays (a pool is this machine's).
 // Nothing else changes: not the pool's default, order or mode; nothing asks the vendor. Quiet per conversation, ONE notice a press.
 const PIN_ALL_KEYS = {
-  pinned: i18nKey('Pool "{pool}": {n} conversation(s) pinned to {member} by one press — {now} now, {restart} at their next restart, {waits} waiting.'),   // r5294 (should): the split the per-conversation notices told
+  pinned: i18nKey('Pool "{pool}": {n} conversation(s) pinned to {member} by one press.'),
   cleared: i18nKey('Pool "{pool}": {n} conversation(s) pinned to {member} are placed automatically again.'),
+  // r5294 (should) + r5539 (2): the split the per-conversation notices told, said as the reply says it — ONLY the parts that hold a
+  // conversation (a count of zero is not said); each part a sentence of its own, the page's words (`then`, after the head)
+  now: i18nKey('{n} move there now.'),
+  restart: i18nKey('{n} move at their next restart (this pool cannot switch a running conversation in place).'),
+  waits: i18nKey('{n} wait until it can serve them: {why}.'),
 };
+// the plain why of a waiting pin, as the page's own words say it (src/lib/pool-priority-model.js pinWaitWhy — the same keys; pinned
+// equal by scripts/test-pool-placement-ui.mjs)
+const PIN_WAIT_WHY_KEYS = {
+  'pin-exhausted': i18nKey('out of quota'), 'pin-recovering': i18nKey('its quota is not back yet'), 'pin-login-dead': i18nKey('cannot sign in'),
+  'pin-lapsed': i18nKey('subscription inactive'), 'pin-member-excluded': i18nKey('it refused them a moment ago'), 'pin-model-not-served': i18nKey('it does not serve their model'),
+};
+const pinWaitWhyKey = (why) => PIN_WAIT_WHY_KEYS[why] || i18nKey('not usable in the pool right now');
+const pinAllNoticeParts = (out) => [
+  ...(out.now > 0 ? [{ key: PIN_ALL_KEYS.now, params: { n: out.now } }] : []),
+  ...(out.restart > 0 ? [{ key: PIN_ALL_KEYS.restart, params: { n: out.restart } }] : []),
+  ...Object.entries(out.waits || {}).filter(([, n]) => n > 0).map(([why, n]) => ({ key: PIN_ALL_KEYS.waits, params: { n, why: { key: pinWaitWhyKey(why) } } })),
+];
+const fillEn = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p[x] === undefined ? m : (p[x] && typeof p[x] === 'object' && p[x].key ? p[x].key : String(p[x]))));
+// r5539 (1): THE PRESS's OWN MARK — the id the pressing page sends with its press becomes the notice's key, so that page (which marked
+// it before it pressed) says the press by its own reply alone; every other page hears the notice. Never a timer.
+const pressMarkOf = (press) => (typeof press === 'string' && /^[A-Za-z0-9_-]{6,40}$/.test(press) ? press : null);
 /** a conversation of the pool as the press sees it → {kind, why?, elsewhere} — kind: here · now · restart · waits · provider · remote · unread.
  *  THE PLAN's AND THE PRESS's ONE RULE (r5294 MUST 2): pinAll counts each conversation by this same road */
 function pinAllRoadOf(poolId, a, sid, s, memberId, now) {
@@ -8995,7 +9016,7 @@ function pinAllPlan(poolId, memberId, now = Date.now()) {
 }
 /** THE PRESS: the one writer once a conversation (quiet), one a turn of the loop, then ONE notice; answers what was done, counted by
  *  the plan's own road (r5294 MUST 2) — the writer's answer only where it failed */
-async function pinAll(poolId, memberId, { by = 'user', now = Date.now() } = {}) {
+async function pinAll(poolId, memberId, { by = 'user', now = Date.now(), press = null } = {}) {
   const no = pinAllRefusal(poolId, memberId); if (no) return no;
   if (_pinAllRunning.has(poolId)) return pinAllBusy();
   _pinAllRunning.add(poolId);
@@ -9020,22 +9041,24 @@ async function pinAll(poolId, memberId, { by = 'user', now = Date.now() } = {}) 
       else out[road.kind]++;
     }
     if (pinned) {
-      const waiting = Object.values(out.waits).reduce((x, y) => x + y, 0);
-      const params = { pool: a.name || poolId, n: pinned, member: nameOf(memberId), now: out.now, restart: out.restart, waits: waiting };
-      serverNotice(`pool-pin-all-${poolId}-${memberId}-${now}`, `Pool "${params.pool}": ${pinned} conversation(s) pinned to ${params.member} by one press — ${out.now} now, ${out.restart} at their next restart, ${waiting} waiting.`, { level: 1, i18n: { key: PIN_ALL_KEYS.pinned, params } });
+      const params = { pool: a.name || poolId, n: pinned, member: nameOf(memberId) };
+      const then = pinAllNoticeParts(out);
+      const mark = pressMarkOf(press);
+      out.noticeKey = mark ? `pool-pin-all-${mark}` : `pool-pin-all-${poolId}-${memberId}-${now}`;
+      serverNotice(out.noticeKey, [fillEn(PIN_ALL_KEYS.pinned, params), ...then.map((x) => fillEn(x.key, x.params))].join(' '), { level: 1, i18n: { key: PIN_ALL_KEYS.pinned, params, then } });
     }
     return out;
   } finally { _pinAllRunning.delete(poolId); }
 }
 /** ONE PRESS BACK: every conversation of the pool pinned to `memberId` is placed automatically again (the one writer, quiet, one a
  *  turn of the loop) */
-async function clearPinsTo(poolId, memberId, { by = 'user', now = Date.now() } = {}) {
+async function clearPinsTo(poolId, memberId, { by = 'user', now = Date.now(), press = null } = {}) {
   const no = pinAllRefusal(poolId, memberId); if (no) return no;
   if (_pinAllRunning.has(poolId)) return pinAllBusy();
   _pinAllRunning.add(poolId);
   try {
     const a = accounts.get(poolId);
-    let cleared = 0, ended = 0; const refused = {};
+    let cleared = 0, ended = 0, noticeKey = null; const refused = {};
     const list = [...activeSessions].filter(([, x]) => x && x._accountId === poolId);
     let turns = 0;
     for (const [sid, was] of list) {
@@ -9055,9 +9078,11 @@ async function clearPinsTo(poolId, memberId, { by = 'user', now = Date.now() } =
     }
     if (cleared) {
       const params = { pool: a.name || poolId, n: cleared, member: nameOf(memberId) };
-      serverNotice(`pool-pin-clear-${poolId}-${memberId}-${now}`, `Pool "${params.pool}": ${cleared} conversation(s) pinned to ${params.member} are placed automatically again.`, { level: 1, i18n: { key: PIN_ALL_KEYS.cleared, params } });
+      const mark = pressMarkOf(press);
+      noticeKey = mark ? `pool-pin-clear-${mark}` : `pool-pin-clear-${poolId}-${memberId}-${now}`;
+      serverNotice(noticeKey, `Pool "${params.pool}": ${cleared} conversation(s) pinned to ${params.member} are placed automatically again.`, { level: 1, i18n: { key: PIN_ALL_KEYS.cleared, params } });
     }
-    return { ok: true, member: memberId, cleared, ended, refused };
+    return { ok: true, member: memberId, cleared, ended, refused, ...(noticeKey ? { noticeKey } : {}) };
   } finally { _pinAllRunning.delete(poolId); }
 }
 // ── THE OWNER'S DECISION (2026-09-28, "全B"): A REMOVED MEMBER WITH NOBODY TO TAKE OVER STOPS AND WAITS ──

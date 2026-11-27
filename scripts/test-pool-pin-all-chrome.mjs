@@ -13,6 +13,8 @@
 //   §4 «Back to automatic (6 pinned here)» → every pin to B cleared, the toast says so; B's menu has no «Back to automatic» after it
 //   §5 zh: the menu, the confirm and the toast in the page's language — the zh dictionary's own rows
 //   §6 a bearer's read of the plan (an agent's, a job's) is refused by name (human_only) and never reaches the engine; the page's own read answers
+//   §8 (r5539) THE PRESSING PAGE SAYS ITS PRESS ONCE: its own reply toast, never the pool's notice of the same press; a SECOND page
+//      hears that notice (head + only the parts that hold a conversation); §9 its red copy (the press sent unmarked: two toasts)
 //   §7 RED COPY of manage-agents.js (ONE anchored edit: the press falls through to the order move) — judged only on its plant's witness
 //      (the copy's line ran at the press): no plan asked, no confirm shown; without the witness it is a named SKIP, never a red
 // The Chrome's own version is printed first and in the closing lines. PNGs only into $PIN_ALL_PNG_DIR (none kept without it).
@@ -61,9 +63,10 @@ fs.writeFileSync(path.join(cacheDir, A + '.json'), reading(0.2));
 fs.writeFileSync(path.join(cacheDir, B + '.json'), reading(0.1));
 fs.writeFileSync(path.join(cacheDir, C + '.json'), reading(1.0));
 const sessions = new Map(), notices = [], writes = [];
+let NOTICE_WS = null;   // the pages' notice road (r5539): the hub's own frame, to every page connected
 const eng = engMod.create({
   app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: dir, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
-  wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(String(t)), serverSetting: () => undefined, getAccounts: () => am,
+  wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t, o) => { notices.push(String(t)); const f = JSON.stringify({ type: 'server-notice', key: k, text: t, level: (o && o.level) || 1, ...(o && o.i18n && o.i18n.key ? { i18n: o.i18n } : {}) }); if (NOTICE_WS) for (const c of NOTICE_WS.clients) { try { if (c.readyState === 1) c.send(f); } catch { } } }, serverSetting: () => undefined, getAccounts: () => am,
   getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
   getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
   getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
@@ -101,8 +104,14 @@ const MA_SRC = fs.readFileSync(MA_FILE, 'utf8');
 const RED_SRC = anchored(MA_SRC, "            if (ac.act === 'pin-all') { close(); this._poolPinAll(poolId, row.id, row.name, a?.name || ''); return; }   // B-2083 unit B\n",
   "            if (ac.act === 'pin-all') { window.__plantPinAll = (window.__plantPinAll || 0) + 1; }   // RED COPY: the press falls through to the order move\n", 'press falls through');
 const stub = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
+const RED_MARK_SRC = anchored(MA_SRC, "    const press = newPressMark('pa'); markOwnNotice('pool-pin-all-' + press);   // marked BEFORE the press: its notice may come first\n",
+  "    const press = newPressMark('pa'); window.__plantNoMark = (window.__plantNoMark || 0) + 1;   // RED COPY: the press is sent unmarked\n", 'press sent unmarked');
+const redMark = { name: 'red-mark-manage-agents', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]manage-agents\.js$/ }, () => ({ contents: RED_MARK_SRC, loader: 'js', resolveDir: path.join(REPO, 'src/lib') })); } };
 const redCopy = { name: 'red-manage-agents', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]manage-agents\.js$/ }, () => ({ contents: RED_SRC, loader: 'js', resolveDir: path.join(REPO, 'src/lib') })); } };
 const entry = `import { installManageAgents } from './manage-agents.js';
+import { showToast } from './utils.js';
+import { t } from './i18n.js';
+import { noticeWords, takeOwnNotice } from './notice-words.js';
 class App {}
 installManageAgents(App, {});
 const app = new App();
@@ -110,9 +119,14 @@ app.ws = { onGlobal() { return () => { }; } };
 app.sidebar = { _webuiSessions: [] };
 window.rowOf = async (id) => (await (await fetch('/api/accounts')).json()).accounts.find((a) => a.id === id);
 window.openMembers = async (poolId) => { app.sidebar._webuiSessions = await (await fetch('/api/test-sessions')).json(); const r = await window.rowOf(poolId); await app._poolMembersDialog(poolId, r, () => { }); return true; };
+// the page's notice door, as src/lib/app.js holds it (its two calls pinned by test-pool-placement-ui): every notice in this page's words,
+// the notice of this page's own press skipped (its mark taken)
+window.connectNotices = () => new Promise((res) => { const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws'); window.__noticeKeys = [];
+  ws.onopen = () => res(true); ws.onerror = () => res(false);
+  ws.onmessage = (e) => { let msg = null; try { msg = JSON.parse(e.data); } catch { return; } if (msg && msg.type === 'server-notice' && msg.text) { window.__noticeKeys.push(msg.key); if (!takeOwnNotice(msg.key)) showToast(noticeWords(msg, t), { type: msg.level >= 2 ? 'error' : undefined }); } }; });
 window.ready = true;`;
 fs.mkdirSync(path.join(dir, 'www'), { recursive: true });
-for (const [out, plugins] of [['door.js', [stub]], ['door-red.js', [stub, redCopy]]]) {
+for (const [out, plugins] of [['door.js', [stub]], ['door-red.js', [stub, redCopy]], ['door-red-mark.js', [stub, redMark]]]) {
   await esbuild.build({ stdin: { contents: entry, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'pin-all-entry.js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2022', outfile: path.join(dir, 'www', out), logLevel: 'silent', loader: { '.css': 'text' }, plugins });
 }
 ok(fs.readFileSync(path.join(dir, 'www/door-red.js'), 'utf8').includes('__plantPinAll') && !fs.readFileSync(path.join(dir, 'www/door.js'), 'utf8').includes('__plantPinAll'), 'the red copy is in its own bundle only');
@@ -121,11 +135,13 @@ const page = (bundle) => '<!doctype html><html data-theme="dark"><head><meta cha
   + '<script>localStorage.setItem("vibespace.lang", new URLSearchParams(location.search).get("lang") || "en")</' + 'script><script src="/' + bundle + '"></' + 'script></body></html>';
 fs.writeFileSync(path.join(dir, 'www/index.html'), page('door.js'));
 fs.writeFileSync(path.join(dir, 'www/red.html'), page('door-red.js'));
+fs.writeFileSync(path.join(dir, 'www/red-mark.html'), page('door-red-mark.js'));
 app.use(express.static(path.join(dir, 'www')));
 
-let chrome = null, srv = null, sock = null, version = '(not read)', skipped = 0;
+let chrome = null, srv = null, sock = null, sock2 = null, version = '(not read)', skipped = 0;
 try {
   srv = http.createServer(app);
+  NOTICE_WS = new WS.Server({ server: srv, path: '/ws' });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const ORIGIN = 'http://127.0.0.1:' + srv.address().port;
   const CDP_PORT = await freePort();
@@ -143,7 +159,7 @@ try {
   const cdp = (method, params = {}) => race(new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP ' + method);
   const ev = async (e) => { const r = await cdp('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'threw'); return r.result.value; };
   const waitFor = async (e, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(e)) return true; await sleep(60); } return false; };
-  const shot = async (file) => { if (!PNG) return; const s = await cdp('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(PNG, { recursive: true }); fs.writeFileSync(path.join(PNG, file), Buffer.from(s.data, 'base64')); };
+  const shot = async (file) => { if (!PNG) return; await cdp('Page.bringToFront'); const s = await cdp('Page.captureScreenshot', { format: 'png' }); fs.mkdirSync(PNG, { recursive: true }); fs.writeFileSync(path.join(PNG, file), Buffer.from(s.data, 'base64')); };
   version = ((await cdp('Browser.getVersion')) || {}).product || '(no product)';
   console.log('Chrome: ' + version + ' (' + CHROME + ')');
   await cdp('Page.enable'); await cdp('Runtime.enable');
@@ -288,10 +304,66 @@ try {
   if (red.plant !== 1) { skipped++; console.log('  ⊘ SKIP §7 — the copy\'s line never ran at the press (witness ' + J(red) + '): no red judged'); }
   else ok(red.confirm === false && hits.plan === h7.plan && hits.press === h7.press, 'RED (witness: the copy\'s line ran at the press): no plan was asked, no confirm shown — the legs above read the press, not the menu alone', { red, hits });
 
+  console.log('§8 THE PRESSING PAGE SAYS ITS PRESS ONCE (r5539) — its own reply; the pool\'s notice is for every OTHER page');
+  const t8 = Date.now();
+  // a SECOND page: its own tab of the same Chrome, its own devtools socket
+  const t2 = await (await fetch('http://127.0.0.1:' + CDP_PORT + '/json/new?about:blank', { method: 'PUT' })).json();
+  sock2 = new WS(t2.webSocketDebuggerUrl);
+  await race(new Promise((res, rej) => { sock2.on('open', res); sock2.on('error', rej); }), 15000, 'the second page\'s devtools socket');
+  let seq2 = 0; const pend2 = new Map();
+  sock2.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend2.has(m.id)) { pend2.get(m.id)(m); pend2.delete(m.id); } });
+  const cdp2 = (method, params = {}) => race(new Promise((res, rej) => { const id = ++seq2; pend2.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); sock2.send(JSON.stringify({ id, method, params })); }), 30000, 'CDP2 ' + method);
+  const ev2 = async (e) => { const r = await cdp2('Runtime.evaluate', { expression: e, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'threw'); return r.result.value; };
+  const waitFor2 = async (e, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev2(e)) return true; await sleep(60); } return false; };
+  await cdp2('Page.enable'); await cdp2('Runtime.enable');
+  await cdp2('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  await cdp2('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+  const resetPins = () => { for (const sid of SIDS) if (pinOf(sid)) eng.setConversationPin(sid, null, { by: 'user', quiet: true }); earlierPins(); };
+  const pressB = async (tag) => {
+    await cdp('Page.bringToFront');   // the pressing page IN FRONT (the second page opened after it: a tab behind runs its timers slowly)
+    await clickEl(menuBtn(B), 'B ⋯ ' + tag);
+    await waitFor(`!!(${menuItem(W.press)})`);
+    await clickEl(menuItem(W.press), 'the press ' + tag);
+    await waitFor(`!!(${DLG(W.title('Member B'))})`);
+    await clickEl(`(${DLG(W.title('Member B'))}).querySelector('.btn-create')`, 'Pin them here ' + tag);
+  };
+  const toastsOf = (evf) => evf(`[...document.querySelectorAll('.global-toast .global-toast-body')].map((e) => e.textContent || '')`);
+  resetPins();
+  await open('/?lang=en');
+  const c1 = await ev('connectNotices()');
+  await cdp2('Page.navigate', { url: ORIGIN + '/?lang=en' }); await waitFor2('window.ready === true');
+  const c2 = await ev2('connectNotices()');
+  await pressB('(§8)');
+  const reply8 = await waitToast('5 conversation(s) of “Team” pinned to Member B.');
+  const heard2 = await waitFor2(`[...document.querySelectorAll('.global-toast .global-toast-body')].some((e) => (e.textContent || '').startsWith('Pool "Team": 5 conversation(s) pinned to Member B by one press.'))`, 10000);
+  await sleep(800);   // a notice that would come late has had its time (the frame went out before the reply)
+  const t1 = await toastsOf(ev), t2s = await toastsOf(ev2), keys1 = await ev('window.__noticeKeys || []');
+  const n2 = t2s.find((x) => x.startsWith('Pool "Team":')) || '';
+  ok(c1 === true && c2 === true && typeof reply8 === 'string' && keys1.some((k) => /^pool-pin-all-pa/.test(k)) && t1.filter((x) => x.includes('Member B')).length === 1 && !t1.some((x) => x.startsWith('Pool "Team":')),
+    '§8 the witness: the pool\'s notice of the press REACHED the pressing page (its key among the frames it read) — and that page shows ONE toast for its press, its own reply, never the notice', { t1, keys1 });
+  ok(heard2 === true && /^Pool "Team": 5 conversation\(s\) pinned to Member B by one press\. 5 move there now\.$/.test(n2) && !/\b0 (move|wait)/.test(n2),
+    '§8 the SECOND page hears the notice: the head, then only the parts that hold a conversation (no «0 at their next restart, 0 waiting»)', { t2s });
+
+  console.log(`    (§8 took ${Date.now() - t8} ms)`);
+  console.log('§9 RED COPY — the press sent unmarked: the pressing page shows two toasts for one press');
+  const t9 = Date.now();
+  resetPins();
+  await open('/red-mark.html?lang=en');
+  await ev('connectNotices()');
+  await pressB('(§9 red copy)');
+  await waitToast('5 conversation(s) of “Team” pinned to Member B.');
+  await waitFor(`[...document.querySelectorAll('.global-toast .global-toast-body')].some((e) => (e.textContent || '').startsWith('Pool "Team":'))`, 5000);
+  const red9 = await ev(`({ plant: window.__plantNoMark || 0, toasts: [...document.querySelectorAll('.global-toast .global-toast-body')].map((e) => e.textContent || '').filter((x) => x.includes('Member B')) })`);
+  if (red9.plant !== 1) { skipped++; console.log('  ⊘ SKIP §9 — the copy\'s line never ran at the press (witness ' + J(red9) + '): no red judged'); }
+  else ok(red9.toasts.length === 2 && red9.toasts.some((x) => x.startsWith('Pool "Team":')), 'RED (witness: the copy\'s unmarked press ran): the pressing page shows the notice beside its own reply — two toasts for one press', red9);
+
+  console.log(`    (§9 took ${Date.now() - t9} ms)`);
   ok(errors.length === 0, 'no page exceptions', errors);
 } catch (e) { ok(false, 'the run: ' + String((e && e.stack) || e).slice(0, 600)); }
 finally {
   try { sock && sock.close(); } catch { }
+  try { sock2 && sock2.close(); } catch { }
+  try { NOTICE_WS && NOTICE_WS.close(); } catch { }
   try { chrome && chrome.kill('SIGKILL'); } catch { }
   try { srv && srv.close(); } catch { }
   try { am.close(); } catch { }
