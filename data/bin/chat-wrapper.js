@@ -509,13 +509,16 @@ const receiptsFile = bufferFile ? String(bufferFile).replace(/\.buf$/, '') + '.r
 const receiptLines = [];
 var lastReceiptAt = 0;            // var: schedulePersist may run before this line (a record at boot) — undefined reads as «not followed»
 const FOLLOWED_MS = 120000;       // a receipt asked for in the last 2 min = a person's CLI is following this buffer
-function writeReceipt(rec) {
+function writeReceipt(rec, owed = false) {
   if (!receiptsFile) return;
   if (rec.type === '_stdin_ack') lastReceiptAt = Date.now();   // r4: only an ack a frame ASKED for opens the 250 ms window (a person's CLI follows) — a torn line's nack alone never does
   receiptLines.push(JSON.stringify(rec));
   if (receiptLines.length > 50) receiptLines.shift();
-  try { fs.writeFileSync(receiptsFile, receiptLines.join('\n') + '\n'); } catch {}
+  // r5457 (2): a Stop line's receipt takes its stamp and its place in the ring NOW, in the line's order (a record of the same batch arms
+  // the 250 ms window as at the release); only the file's write is owed to the batch's end (law 6)
+  if (owed) stopOwed.push(writeReceiptsFile); else writeReceiptsFile();
 }
+function writeReceiptsFile() { try { fs.writeFileSync(receiptsFile, receiptLines.join('\n') + '\n'); } catch {} }
 /** The ring (keep the last MAX_BUFFER chars, aligned to a line). THE KEPT FILE OUTLIVES THE FRAME IT SERVES (acceptance r6:
  *  a 522 KB output burst trimmed a HELD frame's copy line and its picture 6 s after they were written — a restart in the gap
  *  drew nothing): the copy line of a frame the CLI has not yet witnessed is PINNED (written again at the head), and the ring
@@ -882,6 +885,11 @@ function noteWritten(msgId) {
   rec.handNo = c.handNo;
   replaceCopyLine(msgId, JSON.stringify(rec));
 }
+/** r5457 (1): THE NAMES ARE FIXED AT THE DROP AND FILTERED AGAIN WHEN THE UNLINK RUNS — a kept file that a copy still unsettled names
+ *  at that moment stays. On a Stop's road the unlink waits for the batch's end, and a later line of the same chunk may hold a frame with
+ *  the same picture or long text: its keeper found the file there and wrote nothing, so removing it would leave that copy naming a
+ *  missing file (a placeholder after a restart). Outside a Stop's road the unlink runs at once and the second filter changes nothing. */
+function unnamedNow(names) { if (!names.length) return names; const named = new Set([...copies.values()].filter((x) => !x.settled).flatMap((x) => KC.namesIn(x.line))); return names.filter((n) => !named.has(n)); }
 /** The CLI WITNESSED the frame (its own record of it landed: taken in, its own turn, a follow-up) or it was DROPPED (put
  *  back, removed): its kept files go — a restart then draws the picture from the CLI's own record (claimedContent fills a
  *  gone picture), or the placeholder for a dropped one. A file another pending copy still names stays. */
@@ -890,7 +898,7 @@ function settleCopy(msgId) {
   if (!c || c.settled) return;
   c.settled = true;
   const names = KC.namesToDrop(c.line, [...copies.values()].filter((x) => !x.settled).map((x) => x.line));
-  owedOnStop(() => KC.dropFiles(KEPT_DIR, names));   // law 6: on a Stop's road the unlink is owed to the batch's end
+  owedOnStop(() => KC.dropFiles(KEPT_DIR, unnamedNow(names)));   // law 6: on a Stop's road the unlink is owed to the batch's end (filtered again then: r5457 (1))
 }
 const settleCopies = (ids) => { for (const id of ids || []) settleCopy(id); };
 /** THE WITNESS (acceptance r4): the uuid a person's mid-turn frame carries to the CLI — the CLI keeps it as the uuid of its
@@ -1766,7 +1774,7 @@ const looksLikeFrame = (line) => line[0] === '{' || line.endsWith('}') || /"[\w-
  *  webui_msg_id / request_id. A frame that asked for a receipt gets the same record in its receipts file. */
 function ackLine(id, receipt, stop = false) {
   const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(id ? { msg_id: String(id) } : {}) };
-  if (receipt) { if (stop) stopOwed.push(() => writeReceipt(ack)); else writeReceipt(ack); }   // law 6: a Stop line's receipt is owed to the batch's end
+  if (receipt) writeReceipt(ack, stop);   // law 6: a Stop line's receipt file write is owed to the batch's end (its stamp and ring place now, r5457 (2))
   say(JSON.stringify(ack));
 }
 function nackTorn(line) {

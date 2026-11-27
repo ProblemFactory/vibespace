@@ -628,10 +628,11 @@ await guard('§8b', async () => {
     "const fs = require('fs'), path = require('path'), E = process.env, ARM = E.SYNC_HOLD_ARM || '', MARK = E.SYNC_HOLD_MARK || '', REL = E.SYNC_HOLD_RELEASE || '', KIND = E.SYNC_HOLD_KIND || 'handed';",
     "const paths = new Map(), open = fs.openSync;",
     "fs.openSync = function (p, ...a) { const fd = open.call(fs, p, ...a); try { paths.set(fd, String(p)); } catch (e) { } return fd; };",
-    "let done = false;",
+    "let done = false, chunk = false;",
+    "if (E.SYNC_HOLD_CHUNK) { const si = process.stdin, emit = si.emit; si.emit = function (ev, d, ...a) { if (ev === 'data') { const t = String(d); if (t.includes('\"subtype\":\"interrupt\"') && t.includes(E.SYNC_HOLD_CHUNK)) chunk = true; } return emit.call(this, ev, d, ...a); }; }   // the WITNESS: the Stop and the later frame in ONE stdin chunk",
     "const hold = (file) => {",
     "  done = true;",
-    "  try { fs.writeFileSync(MARK, JSON.stringify({ file: String(file || '') })); } catch (e) { }",
+    "  try { fs.writeFileSync(MARK, JSON.stringify({ file: String(file || ''), chunk })); } catch (e) { }",
     "  const sab = new Int32Array(new SharedArrayBuffer(4)), end = Date.now() + 30000;   // the run releases it; 30 s only names a run that never did",
     "  while (!fs.existsSync(REL) && Date.now() < end) Atomics.wait(sab, 0, 0, 10);",
     "};",
@@ -694,7 +695,7 @@ await guard('§8b', async () => {
   // drop's own log line inside the drop; the kept files' unlink inside the drop; the Stop's receipt before the drop
   const cwSrc = read('data/bin/chat-wrapper.js');
   const FIRST = "          handedAfterStop = true;\n          try { dropHeldForStop(); } finally { handedAfterStop = false; }\n          sendChild(line);\n";
-  const LOGL = "  owedOnStop(() => log(dropWords));", KEPTL = "  owedOnStop(() => KC.dropFiles(KEPT_DIR, names));", RCPT = "if (stop) stopOwed.push(() => writeReceipt(ack)); else writeReceipt(ack);";
+  const LOGL = "  owedOnStop(() => log(dropWords));", KEPTL = "  owedOnStop(() => KC.dropFiles(KEPT_DIR, unnamedNow(names)));", RCPT = "if (receipt) writeReceipt(ack, stop);";
   ok([FIRST, LOGL, KEPTL, RCPT].every((a) => cwSrc.split(a).length === 2), '§8b ANCHORS: the Stop\'s branch, the drop\'s owed log line, the owed unlink, the owed receipt — each spelled once (a missing anchor builds no control: RED by name)');
   const copyOf = (tag, src) => {
     const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stop-sync-ctl-' + tag + '-')); own.push(d);
@@ -707,7 +708,7 @@ await guard('§8b', async () => {
     handed: copyOf('handed', anchored(cwSrc, FIRST, "          dropHeldForStop();\n          if (handedDue) { handedDue = false; writeRecords(); }\n          sendChild(line);\n", 'the Stop\'s branch')),
     droplog: copyOf('droplog', anchored(cwSrc, LOGL, '  log(dropWords);', 'the drop\'s log line')),
     kept: copyOf('kept', anchored(cwSrc, KEPTL, '  KC.dropFiles(KEPT_DIR, names);', 'the kept files\' unlink')),
-    receipt: copyOf('receipt', anchored(cwSrc, RCPT, 'writeReceipt(ack);', 'the Stop\'s receipt')),
+    receipt: copyOf('receipt', anchored(cwSrc, RCPT, 'if (receipt) writeReceipt(ack);', 'the Stop\'s receipt')),
   };
   const FILE = { handed: /[\\/]handed[\\/]/, droplog: /chat-wrapper\.log$/, kept: /\.img[\\/]/, receipt: /\.receipts$/ };
   const WORDS = { handed: 'the handed records\' sync', droplog: 'the drop\'s own log line', kept: 'the dropped frame\'s kept file\'s unlink', receipt: 'the receipt the Stop line asked for' };
@@ -725,11 +726,48 @@ await guard('§8b', async () => {
     ok(!red.missed && FILE[kind].test(String(red.heldFile || '')) && red.interruptWhileHeld === false && red.carriedWhileHeld === true,
       `§8b RED CONTROL (${kind}: ${WORDS[kind]} where 2.369.420 had it, in a copy): held there, the interrupt does NOT reach the CLI and the tool's result carries the handed frame to the model before the Stop`, red);
   } };
+  // THE SAME CHUNK (主开发 r5457 (1)): a frame HELD with a picture, then ONE stdin write holding the Stop AND a new held frame with the
+  // SAME picture (under PIPE_BUF: one read, one batch). The Stop's drop owes the first frame's kept file's unlink; the later line's
+  // keeper finds the file there and writes nothing; the owed unlink runs at the batch's end. The hold takes the drop's own log line,
+  // owed AFTER the unlink: there the unlink has run. WITNESS: the preload saw the Stop and the new frame in ONE stdin chunk. RED: a
+  // copy whose owed unlink is not filtered again (60320367c's line) removes the file the new copy names.
+  const PIC = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const picFrame = (text, id) => ad.formatChatInput(JSON.stringify({ type: 'user', message: { role: 'user', content: [PIC, { type: 'text', text }] } }), id).stdinPayload;
+  const sameChunk = async (wrapperPath, tag) => {
+    const later = 'm-c2-' + tag, S = start(wrapperPath, tag, { SYNC_HOLD_KIND: 'droplog', SYNC_HOLD_CHUNK: later }), { w, f, recs, out, step } = S;
+    const img = path.join(f.dir, 's.img');
+    try {
+      await step('the wrapper wrote its session file', () => fs.existsSync(path.join(f.dir, 's.json')));
+      w.stdin.write(ad.formatChatInput('TOOL-A LONG- run a slow command', 'm-a').stdinPayload + '\n');
+      await step('the tool_use record', () => recs.some((r) => r.type === 'assistant' && JSON.stringify(r.message?.content || []).includes('"tool_use"')));
+      w.stdin.write(picFrame('MARK-C held with a picture', 'm-c') + '\n');
+      await step('the held frame\'s kept picture', () => fs.existsSync(img) && fs.readdirSync(img).length > 0, 15000);
+      out.kept = fs.existsSync(img) ? fs.readdirSync(img) : [];
+      fs.writeFileSync(f.arm, 'armed');   // the hold takes the drop's own log line, the first after the arm
+      const both = ad.formatInterrupt() + '\n' + picFrame('MARK-C2 held after the Stop, the same picture', later) + '\n';
+      out.bytes = Buffer.byteLength(both);
+      w.stdin.write(both);   // ONE write under PIPE_BUF (4096 bytes): the pipe hands it over whole
+      if (await step('the hold reached (the drop\'s line, owed after the unlink)', () => fs.existsSync(f.mark), 15000)) {
+        let m = {}; try { m = JSON.parse(fs.readFileSync(f.mark, 'utf8')); } catch { }
+        out.heldFile = m.file || null; out.oneChunk = m.chunk === true;
+        out.standsAtHold = out.kept.length === 1 && fs.existsSync(path.join(img, out.kept[0]));
+        fs.writeFileSync(f.rel, 'go');
+      }
+      await step('the later frame held, said', () => recs.some((r) => r.type === 'queued_input' && r.msg_id === later), 15000);
+    } finally { try { w.kill('SIGKILL'); } catch { } }
+    return out;
+  };
+  const RED3 = copyOf('chunk', anchored(cwSrc, KEPTL, '  owedOnStop(() => KC.dropFiles(KEPT_DIR, names));', 'the owed unlink filtered again'));   // stale-pins: kept — 60320367c's line, the red copy's planted text (not a pin)
+  const chunkRoad = Promise.all([sameChunk(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip-chunk'), sameChunk(RED3, 'unfiltered-chunk')]);
+  chunkRoad.catch(() => { });   // handled where it is awaited (below)
   // THE SECOND STOP's ROAD (holdSecondStop): a Stop pressed while the window is open and the CLI's turn has ended — the follow-up's
   // prompt hook runs (STAND_IN_PROMPT_HOOK_MS) — is HELD, and goes to the CLI on the follow-up's init. Its drop runs under the same rule:
   // with the hold on its own drop line (the first after the arm), the wrapper's log ALREADY says the Stop is held when the hold is
   // reached (that line is the held road's own, written after the drop) — the drop's line came at the batch's end. Released, the held
   // Stop reaches the CLI on the follow-up's init. RED: a copy whose second road drops outside the rule — its line inside the drop.
+  // (r5457 (3)) This leg is NOT «no file call before the held interrupt»: the second road's own log line («a second Stop inside the
+  // window: held») is still made at once, and that is right — that batch forwards no interrupt (it is held, and delivered on the
+  // follow-up's init), so nothing of it stands between a Stop and its forward.
   const SECOND = "  handedAfterStop = true;   // r5172: the second Stop's road the same — its records' synced write is owed to the batch's end\n  try { dropHeldForStop(); } finally { handedAfterStop = false; }\n  stopping.heldInterrupt = line;\n";
   ok(cwSrc.split(SECOND).length === 2, '§8b ANCHOR: the second Stop\'s drop under the rule, spelled once');
   const RED2 = copyOf('second', anchored(cwSrc, SECOND, "  dropHeldForStop();\n  stopping.heldInterrupt = line;\n", 'the second Stop\'s drop'));
@@ -759,8 +797,12 @@ await guard('§8b', async () => {
     } finally { try { w.kill('SIGKILL'); } catch { } }
     return out;
   };
-  const [runs, [cur2, red2]] = await Promise.all([firstRoad, Promise.all([second(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip-second'), second(RED2, 'release-second')])]);
+  const [runs, [cur2, red2], [cur3, red3]] = await Promise.all([firstRoad, Promise.all([second(path.join(REPO, 'data/bin/chat-wrapper.js'), 'tip-second'), second(RED2, 'release-second')]), chunkRoad]);
   judgeFirst(runs);
+  ok(!cur3.missed && cur3.oneChunk === true && /chat-wrapper\.log$/.test(String(cur3.heldFile || '')) && cur3.bytes < 4096 && cur3.standsAtHold === true,
+    '§8b THE SAME CHUNK (r5457 (1)): a Stop and a frame with the same picture in ONE stdin chunk (the preload\'s witness) — at the batch\'s end, after the owed unlink ran, the kept file the new held copy names still stands', cur3);
+  ok(!red3.missed && red3.oneChunk === true && red3.standsAtHold === false,
+    '§8b RED CONTROL (the owed unlink not filtered again, in a copy): the same chunk, and the file the new held copy names is removed', red3);
   ok(!cur2.missed && /chat-wrapper\.log$/.test(String(cur2.heldFile || '')) && cur2.heldRoad === true && cur2.heldSaidFirst === true && cur2.interrupts >= 2,
     '§8b THE SECOND STOP\'s ROAD: held in the window (its own words said first), its drop line made at the batch\'s end, and the held Stop reaches the CLI on the follow-up\'s init', cur2);
   ok(!red2.missed && /chat-wrapper\.log$/.test(String(red2.heldFile || '')) && red2.heldRoad === true && red2.heldSaidFirst === false,
@@ -818,6 +860,34 @@ await guard('§8c', async () => {
     '§8c RED CONTROL (the release\'s clear-before-write line, in a copy): the placed throw leaves the batch and the mark is gone — the records are never written again', r1);
   ok(r2.threw === 'placed owed' && at(r2, 'owed call') === -1,
     '§8c RED CONTROL (the owed calls without their guard, in a copy): the placed throw skips the next owed call for good', r2);
+  // (r5457 (2)) A STOP LINE's RECEIPT TAKES ITS STAMP AND ITS RING PLACE AT THE PUSH; only the file's write is owed. Lifted with
+  // ackLine, writeReceipt and writeReceiptsFile: a Stop line asking a receipt, then a later line of the same batch asking one. RED: a
+  // copy with 60320367c's line (the whole receipt owed: its stamp and ring place wait for the batch's end).
+  const RLINE = 'if (receipt) writeReceipt(ack, stop);';
+  const liftR = (s) => {
+    const parts = [s.split('\n').find((l) => l.startsWith('let batchDepth = 0, batchOut = [],')), s.split('\n').find((l) => l.startsWith('const owedOnStop = ')),
+      fnText(s, 'function say(line) {'), fnText(s, 'function beginBatch() {'), fnText(s, 'function endBatch() {'), fnText(s, 'function writeReceipt(rec, owed = false) {'),
+      fnText(s, 'function writeReceiptsFile() {'), fnText(s, 'function ackLine(id, receipt, stop = false) {')];
+    if (!parts.every(Boolean)) throw new Error('a lifted part of the receipt road is gone (its anchor moved)');
+    return new Function('fs', 'receiptsFile', 'JOURNAL', 'process', 'writeRecords', 'log', 'trimBuffer', 'persistNow',   // eslint-disable-line no-new-func
+      `const receiptLines = []; var lastReceiptAt = 0;\n${parts.join('\n')}\nreturn { beginBatch, endBatch, ackLine, stamp: () => lastReceiptAt, ring: () => receiptLines.map((l) => JSON.parse(l).msg_id) };`);
+  };
+  const runR = (s) => {
+    const files = [], api = liftR(s)({ writeFileSync: (f, t) => files.push(t.trim().split('\n').map((l) => JSON.parse(l).msg_id).join(',')) }, '/r.receipts', null,
+      { stdout: { write: () => true } }, () => true, () => { }, () => { }, () => { });
+    api.beginBatch();
+    api.ackLine('m-stop', true, true);
+    const atStop = { stamp: api.stamp() > 0, ring: api.ring().join(','), files: files.length };
+    api.ackLine('m-next', true, false);
+    const atNext = { ring: api.ring().join(','), files: files.slice() };
+    api.endBatch();
+    return { atStop, atNext, files };
+  };
+  const rt = runR(src), rr = runR(anchored(src, RLINE, 'if (receipt) { if (stop) stopOwed.push(() => writeReceipt(ack)); else writeReceipt(ack); }', 'the receipt pushed whole'));   // stale-pins: kept — 60320367c's line, the red copy's planted text (not a pin)
+  ok(src.split(RLINE).length === 2 && rt.atStop.stamp === true && rt.atStop.ring === 'm-stop' && rt.atStop.files === 0 && rt.atNext.ring === 'm-stop,m-next' && rt.files.length === 2 && rt.files.every((x) => x === 'm-stop,m-next'),
+    '§8c THE RECEIPT AT THE PUSH (r5457 (2)): the Stop line\'s receipt is stamped and placed in the ring at its line (in line order) and its file is not written there; the batch\'s files hold both, in order', rt);
+  ok(rr.atStop.stamp === false && rr.atNext.ring === 'm-next',
+    '§8c RED CONTROL (60320367c\'s line, in a copy): the Stop\'s stamp and ring place wait for the batch\'s end — a later line\'s receipt comes first', rr);
 });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

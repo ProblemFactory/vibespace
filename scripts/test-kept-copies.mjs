@@ -114,7 +114,7 @@ ok(drop.length === 1 && !fs.existsSync(path.join(kd, drop[0])) && fs.existsSync(
 const ring = 'x\n' + p1 + '\n' + 'y\n', still = 'z\n';
 ok(KC.pinnedLines(ring, still, [p1]).join() === p1 && KC.pinnedLines(ring, still + p1 + '\n', [p1]).length === 0, 'the ring\'s pin writes a pending copy the trim cut back at the head (and never twice)');
 const w = read('data/bin/chat-wrapper.js');
-ok(/KC\.pinnedLines\(gone, buffer,/.test(w) && /const names = KC\.namesToDrop\(c\.line,[^\n]*\n\s+owedOnStop\(\(\) => KC\.dropFiles\(KEPT_DIR, names\)\);/.test(w)   /* law 6: on a Stop's road the unlink is owed to the batch's end */ && /settleCopies\(ids\)/.test(w) && /settleCopy\(dropped\.msgId\)/.test(w), 'the wrapper calls them: the trim pins, a settle (witnessed / dropped) drops');
+ok(/KC\.pinnedLines\(gone, buffer,/.test(w) && /const names = KC\.namesToDrop\(c\.line,[^\n]*\n\s+owedOnStop\(\(\) => KC\.dropFiles\(KEPT_DIR, unnamedNow\(names\)\)\);/.test(w)   /* law 6: on a Stop's road the unlink is owed to the batch's end, its names filtered again then (r5457 (1)) */ && /settleCopies\(ids\)/.test(w) && /settleCopy\(dropped\.msgId\)/.test(w), 'the wrapper calls them: the trim pins, a settle (witnessed / dropped) drops');
 
 console.log('⑤b THE CAP: a session\'s kept bytes are bounded — the oldest files go (their copies draw the placeholder)');
 const cd = path.join(dir, 'cap-1.img'); fs.mkdirSync(cd, { recursive: true });
