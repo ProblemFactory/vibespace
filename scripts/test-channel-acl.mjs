@@ -13,7 +13,7 @@
 //      byte-for-byte; the request → For-you item → approve → one grant flow;
 //      a hidden conversation is absent from list/read and answers the same
 //      not-found as a nonexistent id.
-//   §P (B-dfa4 r5450, hold (i)) accessFor reads a conversation's grain only when a row of its own names it: PARITY with the
+//   §P (B-dfa4 r5450, hold (i); its follow r5495) accessFor reads a conversation's grain only when a row of its own names it: PARITY with the
 //      release's whole walk over every kind and asker, the grains read counted; RED: a kind left out of the own-keys set.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -468,6 +468,9 @@ console.log('§P accessFor reads a conversation\'s grain only when a row of its 
     said.push(['All agents', await e0.setAccess('mail', C('c-4'), [{ principal: ALL, authority: 'draft' }])]);
     said.push(['another agent\'s own row', await e0.setAccess('mail2', C('d-5'), [{ principal: AGT2, authority: 'draft' }])]);
     said.push(['the owner\'s reach row (#user)', await e0.setReach('mail', 'c-5', { principal: AGT, level: 'visible' })]);   // a row of its own that holds no ACCESS: in the own-keys set, its grain read, nothing to report
+    said.push(['a request\'s reach row (#request)', await (async () => { const rq = await e0.request(ASKERS[0][1], 'mail', 'c-9', 'to answer the thread'); return rq && rq.ok && rq.request ? e0.decideRequest(rq.request.id, true) : rq; })()]);   // r5495 (2): an approved request: reach, never access
+    said.push(['a rule with a time window', await e0.setScopeAssignment('mail', { kind: 'pattern' }, { principal: AGT2, mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'time-window', from: '09:00', to: '17:00', tzOffsetMinutes: 0 }] }, pattern: { match: 'any', rules: [{ kind: 'kind', value: 'group' }] } })]);   // r5495 (2): a rule (every group chat) whose watch filter is a time window — a pattern selects conversations only (participant / title / from-address / kind)
+    said.push(['an access row a later call loses (c-6)', await e0.setAccess('mail', C('c-6'), [{ principal: AGT, authority: 'draft' }])]);   // r5495 (2): revoked between two calls below
     ix.flush();
     e0.stop();
   }
@@ -491,6 +494,29 @@ console.log('§P accessFor reads a conversation\'s grain only when a row of its 
   ok(neu.calls === ASKERS.length && rel.calls === ASKERS.length && neu.rows === rel.rows && rel.grains === rel.rows && neu.grains < 40 && neu.grains * 20 < rel.grains, `§P THE COUNT: over ${neu.rows} row(s) walked by the ${neu.calls} calls, the release read ${rel.grains} grains (every row), the new road ${neu.grains} — only the conversations a row of their own names`, { neu: { rows: neu.rows, grains: neu.grains }, rel: { rows: rel.rows, grains: rel.grains } });
   const missing = ASKERS.map(([who]) => who).filter((who) => convGrains({ x: red.out[who] }) < convGrains({ x: neu.out[who] }));
   ok(missing.length >= 1, `§P RED CONTROL: the door's own-keys set without the conversations' own access rows — a conversation with access goes MISSING for ${JSON.stringify(missing)} — the parity leg above would be red by name`, missing);
+  // A REVOKE AND A GRANT BETWEEN TWO CALLS ON ONE ENGINE (r5495 (2)): every call above runs on a fresh engine; here one engine answers,
+  // then the grants door is written (c-6's access revoked, c-8's granted), then it answers again. The own-keys set lives on the door's
+  // index with the access rows and is dropped with it at every write: the second answer has lost c-6 and holds c-8 — a line only a
+  // rebuilt set can name. Both roads, the same answers. RED CONTROL: a set kept across calls — c-8's line goes missing, by name.
+  const between = async (E, tag) => {
+    const d = path.join(ROOT, `parity-between-${tag}`);
+    fs.cpSync(base, d, { recursive: true });
+    const e = mkE(E, d);
+    const who = ASKERS[0][1];
+    const titles = (o) => ((o && o.access) || []).filter((x) => x.grain === 'conversation').map((x) => x.title);
+    const first = e.accessFor(who);
+    const w1 = await e.setAccess('mail', { kind: 'conversation', convId: 'c-6' }, []);
+    const w2 = await e.setAccess('mail', { kind: 'conversation', convId: 'c-8' }, [{ principal: AGT, authority: 'draft' }]);
+    const second = e.accessFor(who);
+    e.stop();
+    return { first, second, t1: titles(first), t2: titles(second), writes: [w1, w2].map((w) => !!(w && w.ok)) };
+  };
+  const accKeptPath = MP.write('src/server/channels-access.js', editAnchor(accSrc, '    const own = CG.ownConversationKeys();', '    const own = accessStats.kept || (accessStats.kept = CG.ownConversationKeys());', 'src/server/channels-access.js'), 'kept-set', { name: 'access-kept-set' });
+  const ENGKEPT = MP.load('src/server/channels-engine.js', editAnchor(engSrcP, "require('./channels-access.js')", `require(${JSON.stringify(accKeptPath)})`, 'src/server/channels-engine.js'), 'kept-set-engine');
+  const bn = await between(ENG, 'new'), br = await between(ENGREL, 'release'), bk = await between(ENGKEPT, 'kept');
+  const lostAndGained = (b) => b.writes.every(Boolean) && b.t1.includes('Thread 6') && !b.t1.includes('Thread 8') && !b.t2.includes('Thread 6') && b.t2.includes('Thread 8');
+  ok(lostAndGained(bn) && JSON.stringify(bn.first) === JSON.stringify(br.first) && JSON.stringify(bn.second) === JSON.stringify(br.second), `§P A REVOKE AND A GRANT BETWEEN TWO CALLS ON ONE ENGINE: the first answer holds «Thread 6», the second has LOST it and holds «Thread 8» (granted between the calls: a line only a rebuilt own-keys set names) — both roads equal on both calls`, { new: [bn.t1, bn.t2], release: [br.t1, br.t2], writes: bn.writes });
+  ok(bk.writes.every(Boolean) && !bk.t2.includes('Thread 8'), `§P RED CONTROL: an own-keys set kept across calls — the second answer MISSES «Thread 8» (${JSON.stringify(bk.t2)}) — the leg above would be red by name`, { second: bk.t2 });
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

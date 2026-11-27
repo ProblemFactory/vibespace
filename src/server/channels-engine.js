@@ -3795,7 +3795,7 @@ function create(deps = {}) {
   // read again). A SECOND WHOLE-MAP TOUCH during the slices RESTARTS the walk over a fresh snapshot — the warm-up's own rule,
   // DIGEST_WARM_RESTARTS times — and then the next reader re-sums whole in its turn (said once): old sums never stand for good.
   // Before the first sums (a start) the release's road is unchanged: the warm-up's slices, else a whole re-sum.
-  const rowResumStats = { started: 0, sliced: 0, restarts: 0, gaveUp: 0, slices: 0, maxSliceMs: 0, reread: 0, pushed: 0, rowsRead: 0 };
+  const rowResumStats = { started: 0, sliced: 0, restarts: 0, gaveUp: 0, slices: 0, maxSliceMs: 0, reread: 0, pushed: 0, told: 0, rowsRead: 0 };   // told: the clients told at a give-up or a throw (r5495 (4))
   store.index.onTouch((k) => {
     if (k === null) { rowKept.stale = null; if (rowKept.resum) rowKept.resum.whole = true; }
     else { if (rowKept.stale) rowKept.stale.add(k); if (rowKept.resum) rowKept.resum.touched.add(k); }
@@ -3851,6 +3851,7 @@ function create(deps = {}) {
           if (attempt >= DIGEST_WARM_RESTARTS) {   // the road's own bound: then the next reader re-sums whole (never old sums for good)
             rowResumStats.gaveUp++; rowKept.wholeNext = true;
             log.warn(`[channels] the row facts' re-sum was started again ${attempt} times by whole-map writes — the next read re-sums them whole`);
+            if (!stopped) { rowResumStats.told++; try { notify([], { full: false }); } catch { } }   // B-dfa4 r5495 (4): the clients told ONCE — a screen never keeps the old sums waiting for another write
             return;
           }
           job.whole = false; job.touched = new Set();   // each attempt walks a fresh snapshot
@@ -3859,6 +3860,7 @@ function create(deps = {}) {
           const r = await walkSliced(keys, (k) => { const f = rowFacts(rows[k]); if (f) { rf.set(k, f); addFacts(f, 1, by); } },
             { what: 'row-facts-resum', sliceMs: WALK.sliceMs, onSlice: WALK.onSlice, stats: rowResumStats, alive: () => !stopped && rowKept.resum === job && !job.whole });
           if (!r.done) { if (stopped || rowKept.resum !== job) return; rowResumStats.restarts++; continue; }   // a whole touch: AGAIN
+          if (job.whole) { rowResumStats.restarts++; continue; }   // B-dfa4 r5495 (3): a whole touch between the walk's last slice and this landing: AGAIN, never the pre-touch sums
           // THE LANDING, one turn: the new sums installed (unless a reader re-summed whole meanwhile), the rows touched since the
           // snapshot re-read now by the incremental road, the result pushed once
           if (rowKept.stale === null) {
@@ -3874,6 +3876,7 @@ function create(deps = {}) {
       } catch (e) {
         rowKept.wholeNext = true;   // the next reader re-sums whole: never old sums for good
         log.warn('[channels] the row facts\' re-sum failed:', (e && e.message) || e, '— the next read re-sums them whole');
+        if (!stopped) { rowResumStats.told++; try { notify([], { full: false }); } catch { } }   // B-dfa4 r5495 (4): told once, as at the give-up
       } finally { if (rowKept.resum === job) rowKept.resum = null; }
     })();
     return true;
@@ -5014,6 +5017,7 @@ function create(deps = {}) {
           }
           if (job.finished) return true;   // a reader at the bound finished the rows left and landed them (digestWarmFinish)
           if (!done) { if (stopped || digestWarm !== job) return false; digestWarmStats.restarts++; continue; }   // a whole touch: AGAIN
+          if (job.whole) { digestWarmStats.restarts++; continue; }   // B-dfa4 r5495 (3): a whole touch between the last slice and the landing: AGAIN
           st.land();
           digestWarmStats.sliced++; digestWarmStats.walkMs = Date.now() - w0;
           return true;
