@@ -224,7 +224,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
       if (!best) return null;
       return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(Math.max(0, ...Object.values(burn).map((v) => (Number(v) || 0) * 100)) * 100) / 100 };
     };
-    const spawns = [], logs = [];
+    const spawns = [], logs = [], said = {};
     // B-574d: the loop's store writer, a stand-in — durable() writes the produced bytes at once (the release's synchronous timing, so every
     // leg reads the file as before) and answers true; `refuse` (placed) answers false with nothing written
     // `later`: the landing comes a turn after the call (the real writer's latency, placed); `hang`: it never comes (a lost thread, a hung mount)
@@ -246,7 +246,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
       autoCliReady: () => true, usageEstimator, projectionRereadFor, lastMemberReadAt: () => 0, storeWriter: storeWriter || writer, stampLandingMs: landingMs,
       // an org-merged identity (the engine's usageIdentityGroups): the freshest cache file of the group wins for every id
       usageIdentityGroupsCached: () => (groups ? new Map(groups.map((ids, i) => [`org-${i}`, { accountIds: ids, cache: ids.map((id) => readCache(id)).filter(Boolean).sort((a, b) => (b.fetchedAt || 0) - (a.fetchedAt || 0))[0] || null }])) : []),
-      usage: { refreshViaCliPanel(key) { spawns.push({ t: T, key, mode, stampOnDisk: stampOnDisk(key) }); if (mode === 'hang') return new Promise(() => {}); if (mode === 'lie') return Promise.resolve(true); if (mode === 'fail') return Promise.resolve(false); writeCache(byId.get(key), T); return Promise.resolve(true); } },
+      usage: { refreshViaCliPanel(key) { spawns.push({ t: T, key, mode, stampOnDisk: stampOnDisk(key) }); if (mode === 'hang') return new Promise(() => {}); if (mode === 'lie') return Promise.resolve(true); if (mode === 'fail') return Promise.resolve(false); if (mode === 'door') { said[key] = { at: T, outcome: 'write-refused', code: 'identity', door: 'signed-in-as' }; return Promise.resolve(false); } writeCache(byId.get(key), T); return Promise.resolve(true); }, panelVerdictFor: (key) => said[key] || null },
       onMemberReadingFresh: () => { if (wakeThrows) throw new Error('wake threw'); }, log: (l) => logs.push(l), warn: (l) => logs.push('WARN ' + l),
     };
     let loop = createAutoCliLoop(deps);
@@ -270,6 +270,22 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     ledger: [...ledger({ t0: T0 - 20 * MIN, minutes, everyMs, poisson, seed }), ...(fable ? ledger({ t0: T0, minutes, everyMs: 60e3, fam: 'fable' }) : [])],
   });
   const run = async (w, minutes, each) => { for (let i = 1; i <= minutes; i++) { w.advance(MIN); if (each) each(w, i); await w.tick(); } return w; };
+
+  // r5481 (3) — THE DOOR's IDENTITY REFUSAL ASKS THE VENDOR NO SOONER THAN THE RELEASE DID (§ban-safety: no move changes when or how
+  // often the vendor's program runs). An idle row whose every automatic read the door refuses («signed in as» another known row) is
+  // asked over TWO HOURS of this clock no more often than the release asked it — the release WROTE that read (mode 'ok'), the same
+  // world and seed; red: the loop booking the refusal as a failure (the 10 → 20 → 40 min ladder), in a copy
+  {
+    const idleRow = () => ({ id: 'm1', buckets: { fiveHour: { u0: 0.2, resetsAt: T0 / 1000 + 4 * 3600 }, sevenDay: { u0: 0.3, resetsAt: T0 / 1000 + 5 * 86400 } }, rates: {}, ledger: [] });
+    const asks = async (loopFile, mode, seed) => { const w = makeWorld({ members: [idleRow()], sessions: [], loopFile, seed }); w.setMode(mode); await run(w, 120); return w.spawns.length; };
+    const LADDER = patched('loop-door-as-failure.js', REAL_LOOP, [["        if (doorMark(key, ok, now)) fails.delete(key);   // r5481 (3): no failure\n", ""]]);
+    for (const seed of [5, 11]) {
+      const rel = await asks(REAL_LOOP, 'ok', seed), cure = await asks(REAL_LOOP, 'door', seed), red = await asks(LADDER, 'door', seed);
+      console.log(`    r5481 (3) seed ${seed}: asks in 2 h — the release ${rel}, the door's refusal ${cure}, the failure ladder (red) ${red}`);
+      ok(cure >= 1 && cure <= rel, `r5481 (3) THE DOOR's REFUSAL, seed ${seed}: ${cure} automatic asks in two hours, never more than the release's ${rel} (the idle cadence, never the failure ladder)`);
+      ok(red > rel, `r5481 (3) RED CONTROL, seed ${seed} (the refusal booked as a failure, in a copy): ${red} asks in two hours, more than the release's ${rel} — the leg above can fail`);
+    }
+  }
 
   // ① THE BUCKET, NOT THE INSTANT
   const worlds = [

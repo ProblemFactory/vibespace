@@ -514,7 +514,7 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
       if (!res.body) throw new Error('B-6a92: the usage route answered no body — every row leg below would read nothing');
       return res.body;
     };
-    return { root, am, eng, api, V, O, RV, RO, RX, cacheDir, reading, readingO, bannerV: bannerOf(s), bannerO: bannerOf(sO), ownO: () => readJ(O + '.json'), stampO: () => readJ(readingLag.windowSidecarName(O)), witO: () => readJ(readingLag.apiWindowSidecarName(O)), own: () => readJ(V + '.json'), stamp: () => readJ(readingLag.windowSidecarName(V)), wit: () => readJ(readingLag.apiWindowSidecarName(V)), usage };
+    return { app, root, am, eng, api, V, O, RV, RO, RX, cacheDir, reading, readingO, bannerV: bannerOf(s), bannerO: bannerOf(sO), ownO: () => readJ(O + '.json'), stampO: () => readJ(readingLag.windowSidecarName(O)), witO: () => readJ(readingLag.apiWindowSidecarName(O)), own: () => readJ(V + '.json'), stamp: () => readJ(readingLag.windowSidecarName(V)), wit: () => readJ(readingLag.apiWindowSidecarName(V)), usage };
   };
   // c2b: SIX readings in a row, every one with Orin's window, on a conversation billed to Vela
   const run6 = async (H) => { for (let i = 0; i < 6; i++) { H.reading(0.81, H.RO); await sleep(3); } };
@@ -965,15 +965,29 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const foreignOf = (W, id) => (W.eng.apiDerivedWindow(id, { witness: true }) || {}).foreign || null;
   const poolOf = (W, id) => { try { return W.eng.poolReadCache(null)(id); } catch { return null; } };
   const placed = (r) => !!(r && typeof r === 'object' && !r.held && r.sevenDay && Number.isFinite(r.sevenDay.utilization));
-  // THE RED IS THE RELEASE ITSELF (主开发 r5442's should — no paraphrase): 1a4abf716's own engine, reading-lag and repair, read from git and
-  // loaded as copies (the engine's two requires pointed at the release's two files); every other module is the tree's, which the hotfix
-  // did not touch. A tree without the release's commit says it by name (the reds then fail: they cannot be read)
+  // THE RED IS THE RELEASE ITSELF where the clone holds it (主开发 r5442's should — no paraphrase): 1a4abf716's own engine, reading-lag and
+  // repair, read from git and loaded as copies (the engine's two requires pointed at the release's two files); every other module is the
+  // tree's, which the hotfix did not touch. A SHALLOW CLONE (the hosted runner's: a checkout with no history, 主开发 r5481 (1)) holds no
+  // 1a4abf716: the release-read reds are then a NAMED SKIP the gate counts (as test-billing-pick), and the release's three rules stand in
+  // as small IN-TREE PLANTS in a copy of this tree's engine — so a shallow clone still holds three reds that can fail; the run says which
   const relOf = (f) => { try { return execFileSync('git', ['show', '1a4abf716:' + f], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
   const relRL = relOf('src/reading-lag.js'), relRR = relOf('src/reading-repair.js'), relENG = relOf(ENG);
   const rlRelPath = relRL ? MUT.write('src/reading-lag.js', relRL, 'rel421-reading-lag') : null, rrRelPath = relRR ? MUT.write('src/reading-repair.js', relRR, 'rel421-reading-repair') : null;
   const mRelease = relENG && rlRelPath && rrRelPath ? require(MUT.write(ENG, relENG.split("require('../reading-lag.js')").join(`require(${J(rlRelPath)})`).split("require('../reading-repair.js')").join(`require(${J(rrRelPath)})`), 'rel421-engine')) : null;
-  if (!mRelease) console.log('    ~ the release 1a4abf716 cannot be read from this checkout — the three reds below fail by name');
-  const mStanding = mRelease, mMove = mRelease, mKeep = mRelease;
+  // the release's three rules as the in-tree plants (each in a copy of this tree's engine): the standing check at the start's warm,
+  // the ring's hold at a move, a start that keeps a hold on disk
+  const esrcH = read(ENG);
+  const WARM_END = "  try { _ownWin = null; _ownWinAt = 0; establishedWindows(); } catch { }\n  return keys.size;";
+  const STANDING_PLANT = "  try { _ownWin = null; _ownWinAt = 0; establishedWindows(); } catch { }\n  try { const ws = establishedWindows(); for (const a of Object.keys(ws)) for (const b of Object.keys(ws)) { if (a === b || ownGroupOf(a).has(b) || !(Number(ws[a].sevenDay) > 0) || !(Number(ws[b].sevenDay) > 0) || ws[a].verifiedBy === 'own-panel' || readingLag.weeklyPhase(ws[a].sevenDay) !== readingLag.weeklyPhase(ws[b].sevenDay)) continue; const raw = readApiWitnessFile(a) || {}; const foreign = { names: [b], phase: Number(ws[a].sevenDay), at: Date.now(), n: 0, by: 'same-instant' }; if (usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(a), { ...raw, foreign })) noteHeldWindow(a, foreign); } } catch { }\n  return keys.size;";
+  const MOVE_AT = "      // about whose readings these are (B-6a92 r560's hold here held an honest row until a press — no longer)\n";
+  const MOVE_PLANT = MOVE_AT + "      { const heldBy0 = moved ? othersOf(key, [...new Set(agreeing.flatMap((e) => (Array.isArray(e.names) ? e.names : [])))]) : []; if (heldBy0.length) { next.foreign = { names: heldBy0.slice(0, 4), phase: entry.resetsAt, at: entry.at, n: run }; const ok0 = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next); if (ok0) noteHeldWindow(key, next.foreign); return ok0 ? res : null; } }\n";
+  const WARM_LOOP = "releaseClockHold(k, readApiWitnessFile(k)); noteHeldWindow(k, null);";
+  let skipped = 0;
+  if (!mRelease) { skipped++; globalThis.__rtSkipped = skipped; console.log('  - SKIP the three reds read from the release itself (the release 1a4abf716 is not in this clone\'s history) — its three rules stand in as in-tree plants in a copy of this engine'); }
+  const mStanding = mRelease || (esrcH.includes(WARM_END) ? require(MUT.write(ENG, esrcH.split(WARM_END).join(STANDING_PLANT), 'hot422-standing-check-planted')) : null);
+  const mMove = mRelease || (esrcH.includes(MOVE_AT) ? require(MUT.write(ENG, esrcH.split(MOVE_AT).join(MOVE_PLANT), 'hot422-move-hold-planted')) : null);
+  const mKeep = mRelease || (esrcH.includes(WARM_LOOP) ? require(MUT.write(ENG, esrcH.split(WARM_LOOP).join('const w = readApiWitnessFile(k); noteHeldWindow(k, w && w.foreign);'), 'hot422-start-keeps-holds')) : null);
+  console.log(`    the three reds below read ${mRelease ? 'the release 1a4abf716 itself' : 'the in-tree plants (no release in this clone)'}`);
   console.log('2.369.422 HOTFIX — two honest accounts on ONE WHOLE HOUR of the week: nobody held, every reading filed, the pool places on both');
   // ① THE MEASURED SCENE: two honest rows (each folder its own login), their anchors and their event-precise witnesses on one whole
   // hour, Vela's anchor unproven (a panel's), Orin's proven (its own read) — the owner's shape. Then the start, one reading each
@@ -1045,8 +1059,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const a1 = await pressScene(realEng, { logins: { V: ORIN, O: ORIN }, rowOrg: VELA.org }, { land: true });
   console.log(`    the r6 press, no hold: ${J(a1)}`);
   ok('2.369.423 (A) THE r6 PRESS WITH NO HOLD: Vela (its own organisation on file, its folder signed in as Orin) — refused «signed in as Orin», NOTHING written (its file not the panel\'s 12 %, its stamp not the own read\'s)', a1.v === false && /Vela's sign-in folder is signed in as Orin/.test(a1.why) && a1.ownU !== 0.12 && a1.stamp !== 'own-panel', a1);
-  const WIDEN = "    if (!h) {\n      let others = [];";
-  const mNoWiden = esrc.includes(WIDEN) ? require(MUT.write(ENG, esrc.split(WIDEN).join("    if (!h) { return false;\n      let others = [];"), 'a423-no-widening')) : null;
+  const WIDEN = "    if (!h) {\n      const answer = answeringLogin(idv);";
+  const mNoWiden = esrc.includes(WIDEN) ? require(MUT.write(ENG, esrc.split(WIDEN).join("    if (!h) { return false;\n      const answer = answeringLogin(idv);"), 'a423-no-widening')) : null;
   const a1r = mNoWiden ? await pressScene(mNoWiden, { logins: { V: ORIN, O: ORIN }, rowOrg: VELA.org }, { land: true }) : null;
   ok('2.369.423 (A) RED CONTROL (the door at a held row only, as the hotfix left it, in a copy): the same press WRITES the other login\'s numbers on Vela as verified — the leg above can fail', !!a1r && a1r.v === true && !SIGNED.test(a1r.why), a1r);
   const a2 = await pressScene(realEng, { logins: { V: ORIN, O: ORIN } }, { land: true });   // BOUND 1: no organisation of Vela's own
@@ -1057,6 +1071,59 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   ok('2.369.423 (A) TWO SEATS OF ONE ORGANISATION: Vela\'s own read (its own address) is NEVER refused as Orin\'s', !SIGNED.test(a4.why), a4);
   const a5 = await pressScene(realEng, { logins: { V: GLOBAL, O: ORIN }, withGlobal: true, rowOrg: VELA.org }, { home: GLOBAL });
   ok('2.369.423 (A) THE HUB\'S OWN LOGIN (r7): Vela\'s folder holds the hub\'s login — refused «signed in as» the hub\'s label, nothing written', a5.v === false && SIGNED.test(a5.why), a5);
+  // r5481 — THE TRUE TWIN: both rows the same organisation on file, both folders that login — one account: never refused, written
+  const a6 = await pressScene(realEng, { logins: { V: ORIN, O: ORIN }, rowOrg: ORIN.org, oExtra: { orgUuid: ORIN.org } }, { land: true });
+  ok('2.369.423 (A) A TRUE TWIN (both rows Orin\'s organisation on file, both folders Orin\'s login): NEVER refused by it, the read written', !SIGNED.test(a6.why) && a6.v === true, a6);
+  // r5481 (2) — THE DOOR TOUCHES NO FILE: every synchronous file call made INSIDE the door, counted on the r6 press (refused) and on an
+  // honest press (written) — the release made none there (with no hold it returned at once); the red reads each login from its folder
+  // (dcffa2828's reader: probeLog.loginOfAccount, one file per known account and the home's), in a copy
+  const SYNC = ['readFileSync', 'statSync', 'lstatSync', 'existsSync', 'openSync', 'readdirSync', 'accessSync', 'writeFileSync', 'appendFileSync', 'renameSync', 'mkdirSync', 'readSync'];
+  const doorCalls = async (engMod, opts) => {
+    const W = held(engMod, { ro: roP, cli: binHeld, ...opts });
+    await W.am.signinFactsSettled();
+    await run6(W);
+    const L = W.app.locals, real = L.liftHeldWindow, saved = {};
+    let n = 0, inDoor = false, called = 0;
+    for (const k of SYNC) { saved[k] = fs[k]; fs[k] = function (...a) { if (inDoor) n++; return saved[k].apply(this, a); }; }
+    L.liftHeldWindow = (...a) => { called++; inDoor = true; try { return real(...a); } finally { inDoor = false; } };
+    let r = null;
+    try { r = await hush(() => W.api.refreshViaCliPanel(W.V)); } finally { for (const k of SYNC) fs[k] = saved[k]; L.liftHeldWindow = real; }
+    return { n, called, v: r && r.v, why: wordsOf(W) };
+  };
+  const KEPT = '      const keptLogin = (n) => {\n';
+  const mFileReader = esrc.includes(KEPT) ? require(MUT.write(ENG, esrc.split(KEPT).join('      const keptLogin = (n) => probeLog.loginOfAccount(n, { accounts });\n      const keptLogin0 = (n) => {\n'), 'a423-door-reads-folders')) : null;
+  const R6 = { logins: { V: ORIN, O: ORIN }, rowOrg: VELA.org }, HONEST = { logins: { V: VELA, O: ORIN }, rowOrg: VELA.org, rv: roP };   // honest: Vela's folder its own login, its own window the panel's
+  const c1 = await doorCalls(realEng, R6), c2 = await doorCalls(realEng, HONEST), c1r = mFileReader ? await doorCalls(mFileReader, R6) : null;
+  console.log(`    the door's synchronous file calls: the r6 press ${c1.n}, an honest press ${c2.n}; the folder reader's (red) ${c1r && c1r.n}`);
+  ok('2.369.423 (A) r5481 (2) THE DOOR TOUCHES NO FILE: inside the door, the r6 press (refused) and an honest press (written) make NO synchronous file call — every login it compares is in memory', c1.called >= 1 && c2.called >= 1 && c1.n === 0 && c2.n === 0 && c1.v === false && SIGNED.test(c1.why) && c2.v === true, { c1, c2 });
+  ok('2.369.423 (A) r5481 (2) RED CONTROL (each login read from its folder, as dcffa2828 did, in a copy): the same press makes one synchronous read per known account — the leg above can fail', !!c1r && c1r.n >= 2 && c1r.v === false, c1r);
+  // r5481 (4) — A PERSON's OWN SIGN-IN ON A ROW IS THE ROW's EDIT DOOR. Vela (its own organisation on file, its folder its own login,
+  // signed in through the product: a proven tie) is signed in AGAIN by its own door into Orin's account — the door's landing
+  // (finalizeSubscription: every door outcome that keeps the sign-in in the row ends there) ties the login just made: from that act
+  // Vela IS that account (a twin of Orin), never refused. The same login COPIED into Vela's folder with no such act is refused
+  const CREDS2 = (tag) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + tag, refreshToken: 'r-' + tag, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 29 * 86400e3 + 3600e3, subscriptionType: 'max' } });
+  const putLogin = (W, id, tag, who) => { const d = W.am.subDir(id); fs.writeFileSync(path.join(d, '.credentials.json'), CREDS2(tag), { mode: 0o600 }); fs.writeFileSync(path.join(d, '.claude.json'), J({ oauthAccount: { emailAddress: who.email, organizationUuid: who.org } }), { mode: 0o600 }); };
+  const editDoor = async (engMod, { act }) => {
+    const W = held(engMod, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN }, rowOrg: VELA.org });
+    W.am.finalizeSubscription(W.V);            // Vela's own sign-in through the product (its tie proven)
+    await W.am.signinFactsSettled();
+    if (act) { putLogin(W, W.V, 'vela-again', ORIN); W.am.finalizeSubscription(W.V); }   // the person signs Vela in again — into Orin's account
+    else putLogin(W, W.V, 'orin-copy', ORIN);   // a copied folder: Orin's login put in Vela's folder, no act of the product's sign-in
+    await W.am.signinFactsNow([W.V]);          // the keeper reads the folder as it is NOW (a read that starts after the change)
+    const rec = W.am.identityRecordOf(W.V, { since: 0 }) || {};
+    await run6(W);
+    const r = await hush(() => W.api.refreshViaCliPanel(W.V));
+    const own = W.own() || {};
+    return { tie: rec.tie || null, recOrg: rec.org === ORIN.org ? 'orin' : rec.org ? 'other' : null, v: r.v, why: wordsOf(W), ownU: own.sevenDay ? own.sevenDay.utilization : null };
+  };
+  const e1 = await editDoor(realEng, { act: true }), e2 = await editDoor(realEng, { act: false });
+  console.log(`    the edit door: re-signed ${J(e1)}; copied ${J(e2)}`);
+  ok('2.369.423 (A) r5481 (4) A PERSON\'s OWN SIGN-IN IS THE ROW\'s EDIT DOOR: Vela signed in again by its own door into Orin\'s account (its tie proven, its record Orin\'s) is from that act that account — its read WRITTEN, never refused', e1.tie === 'proven' && e1.recOrg === 'orin' && e1.v === true && !SIGNED.test(e1.why), e1);
+  ok('2.369.423 (A) r5481 (4) …A COPIED FOLDER (Orin\'s login put in Vela\'s folder with no such act: untied, its record names no organisation) is REFUSED «signed in as Orin», nothing written', e2.recOrg === null && e2.v === false && /Vela's sign-in folder is signed in as Orin/.test(e2.why) && e2.ownU !== 0.12, e2);
+  const EDIT1 = "  if (rec && rec.tie === 'proven' && typeof rec.org === 'string' && rec.org) return 'org:' + rec.org.toLowerCase();\n", EDIT2 = "return (r && m.rec.tie === 'proven') ? r : (c || r || null); };";
+  const mNoEdit = esrc.includes(EDIT1) && esrc.includes(EDIT2) ? require(MUT.write(ENG, esrc.split(EDIT1).join('').split(EDIT2).join('return c || r || null; };'), 'a423-no-edit-door')) : null;   // stale-pins: kept (the red puts dcffa2828's rule back)
+  const e1r = mNoEdit ? await editDoor(mNoEdit, { act: true }) : null;
+  ok('2.369.423 (A) r5481 (4) RED CONTROL (the row\'s identity its file\'s alone, as dcffa2828 read it, in a copy): the person\'s own re-sign is refused at every press — the leg above can fail', !!e1r && e1r.v === false && SIGNED.test(e1r.why), e1r);
   // THE CAPTURE's AND THE BANNER's IDENTITY (the door unit's (B) must, r5302 / r5326): a row's file never takes another account's
   // organisation through a sibling's base — judged on the files (no hold any more), each with its red
   const freshV = (W) => { const vf = path.join(W.cacheDir, W.V + '.json'), o = JSON.parse(fs.readFileSync(vf, 'utf8')); fs.writeFileSync(vf, J({ ...o, fetchedAt: Date.now() })); const of = path.join(W.cacheDir, W.O + '.json'), oo = JSON.parse(fs.readFileSync(of, 'utf8')); fs.writeFileSync(of, J({ ...oo, fetchedAt: Date.now() - 3600e3 })); };
@@ -1140,5 +1207,5 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
     ok('2.369.423 (A) A RELEASE WHOSE WRITE IS REFUSED: the start says so by name, the row is free in memory at once (nothing «unknown», the lazy loader reads no hold from disk), and its next reading\'s ring write drops the hold from the file',
       !!W && said.some((l) => /could not be released at this start/.test(l)) && fileHeld0 && !memHeld && !sideOf(u, W.V) && !fileHeld1, { said: said.filter((l) => /hold/.test(l)), fileHeld0, memHeld, fileHeld1 });
   }}
-console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
+console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass}${typeof globalThis.__rtSkipped === 'number' && globalThis.__rtSkipped ? `, ${globalThis.__rtSkipped} skipped — the release's history is not in this clone` : ''})`);
 process.exit(fail ? 1 : 0);

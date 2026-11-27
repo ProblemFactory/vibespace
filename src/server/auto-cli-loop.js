@@ -111,7 +111,7 @@ function clampStamps(st, now) {
   return n;
 }
 function loadState(dataDir, now, warn = () => {}) {
-  const st = { attempts: new Map(), fails: new Map(), projReads: new Map(), said: new Map() };
+  const st = { attempts: new Map(), fails: new Map(), projReads: new Map(), said: new Map(), idRefused: new Map() };
   const fp = path.join(dataDir, STATE_FILE);
   // THE BAN-SAFETY LAW: a file there that could not be read is «unknown» (`unknownAt` = this start) — never «no backoff»
   const unknown = (why) => { st.unknownAt = now; warn(`[auto-cli] pacing state unreadable, unknown: ${why} — every account waits the longest backoff (${Math.round(UNKNOWN_WAIT_MS / 60e3)} min) before its next /usage read`); return st; };
@@ -128,6 +128,7 @@ function fieldsOf(raw, now, warn = () => {}, st = { attempts: new Map(), fails: 
   for (const [k, v] of Object.entries(obj(raw.fails))) if (Number.isFinite(v) && v > 0) st.fails.set(k, v);
   for (const [k, v] of Object.entries(obj(raw.projReads))) st.projReads.set(k, v);
   for (const [k, v] of Object.entries(obj(raw.said))) if (Number.isFinite(v) && now - v < NOT_PROBED_SAY_MS) st.said.set(k, v);
+  for (const [k, v] of Object.entries(obj(raw.idRefused))) if (Number.isFinite(v) && now - v < ATTEMPT_KEEP_MS) st.idRefused.set(k, v);   // r5481 (3)
   const moved = clampStamps(st, now);
   if (moved) warn(`[auto-cli] pacing state held ${moved} stamp(s) in the future (the clock stepped back) — clamped to now`);
   for (const [k, v] of [...st.projReads]) {
@@ -156,7 +157,7 @@ function saveState(dataDir, st, warn, W = null, boundMs = STAMP_LANDING_MS) {
   if (st.unknownAt != null) return Promise.resolve(true);   // never over a state file that could not be read, while its wait runs (the ban-safety law) — nothing owed, as before
   if (!dataDir) return Promise.resolve(true);   // r4732 (6b): a loop with no data folder (an embedding's; production always has one) keeps no state file: nothing to land — the release warned at each write
   const fp = path.join(dataDir, STATE_FILE);
-  const doc = { v: 1, attempts: Object.fromEntries(st.attempts), fails: Object.fromEntries([...st.fails].filter(([, n]) => n > 0)), projReads: Object.fromEntries(st.projReads), said: Object.fromEntries(st.said || []) };
+  const doc = { v: 1, attempts: Object.fromEntries(st.attempts), fails: Object.fromEntries([...st.fails].filter(([, n]) => n > 0)), projReads: Object.fromEntries(st.projReads), said: Object.fromEntries(st.said || []), ...(st.idRefused && st.idRefused.size ? { idRefused: Object.fromEntries(st.idRefused) } : {}) };
   const body = JSON.stringify(doc);
   // B-574d (lane lg-text-legs-3): THE STORE WRITER writes it (src/store-writer.js) — the answer is its LANDING (true / false); a failed write is
   // said loud, and the in-memory state still paces this process
@@ -202,6 +203,20 @@ function createAutoCliLoop(d) {
   const log = d.log || ((l) => console.log(l)), warn = d.warn || ((l) => console.warn(l));
   const st = loadState(d.dataDir, now0, warn);
   if (!st.said) st.said = new Map(); // a state built by hand (a suite's in-memory copy) carries no say-memory
+  if (!st.idRefused) st.idRefused = new Map();
+  // r5481 (3) — THE DOOR's IDENTITY REFUSAL ASKS THE VENDOR NO SOONER THAN THE RELEASE DID (§ban-safety: no move changes when or how
+  // often the vendor's program runs): a read the row's door refused («signed in as» another known row) cannot change until a person
+  // signs the row in again, so it books NO failure (never the failure ladder's 10 → 20 → 40 min) and its row waits the idle cadence,
+  // never less than the release's own longest age (the release WROTE that read and waited its full age); a read that writes ends it
+  const idRefused = st.idRefused;
+  /** → true when this pick's failed read is the door's identity refusal (the row marked); any other outcome ends the mark */
+  const doorMark = (key, ok, now) => {
+    let pv = null;
+    if (!ok) { try { pv = d.usage.panelVerdictFor?.(key); } catch { pv = null; } }
+    const door = !!(pv && pv.at >= now && pv.code === 'identity' && pv.door);
+    if (door) idRefused.set(key, now); else idRefused.delete(key);
+    return door;
+  };
   const { attempts, fails, projReads, said } = st;
   const jitter = 1 + rand() * 0.4; // per-boot 45–63min active-burn cap
   // AN UNPROBEABLE ACCOUNT (lane auto-cli-oat-unprobeable): true ⇒ skipped with no attempt and no failure; what the
@@ -354,6 +369,7 @@ function createAutoCliLoop(d) {
         // back off to hours: the next read after a renewal is the evidence that re-admits it (memberServeLapsed)
         const lapsed = !!(d.memberServeLapsed && d.memberServeLapsed(a.id));
         if (st.unknownAt != null) continue;   // the state unread: «unknown — wait the longest» (the ban-safety law; the tick above ends it)
+        if (idRefused.has(a.id) && now - (attempts.get(a.id) || 0) < Math.max(idleMaxAgeMs, 45 * 60e3 * jitter)) continue;   // r5481 (3)
         if (lapsed ? now - (attempts.get(a.id) || 0) < idleMaxAgeMs : (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6)))) continue;
         let est = null; try { est = raw ? d.usageEstimator.estimateFor(a.id, raw, now) : null; } catch { }
         // B-a5c0: a raw bucket whose window already reset is NO control for the
@@ -391,6 +407,7 @@ function createAutoCliLoop(d) {
         let failWhy = '';
         if (!ok) { try { const pv = d.usage.panelVerdictFor?.(key); if (pv && pv.at >= now && pv.why) failWhy = `${probeWhyText(pv.why)} [${pv.code || pv.outcome || 'failed'}]`; } catch { } }
         fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1);
+        if (doorMark(key, ok, now)) fails.delete(key);   // r5481 (3): no failure
         // a successful read BUYS its bucket's window: a projection read, or ANY read taken while the bucket's crossing is inside
         // the projection window (quota r3 — it is the same number) — never asked again before that window resets. A failed read
         // bought nothing (the failure backoff paces its retry). Written under every id of the identity (quota r3).

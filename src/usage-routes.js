@@ -971,9 +971,9 @@ async function refreshViaCliPanel(key) {
   // the window is stamped there and the numbers below are written as verified; verified on its own window, the hold ends too
   if (idv && !isGlobal && typeof app.locals.liftHeldWindow === 'function') {
     // r8 (主开发 r873): the engine executes ONE PURE VERDICT (reading-lag heldLiftVerdict) — here only its act becomes the answer
-    const lift = app.locals.liftHeldWindow(key, idv);
+    const lift = app.locals.liftHeldWindow(key, idv, { machineLogin: probeRec.machineOrgBefore });   // r5481 (2): the hub's own login as read above — no second read
     if (lift && lift.act === 'lift') idv = { ...idv, refused: false, verified: true, verifiedBy: 'own-panel', why: `${rowLabel(key)}'s own /usage read answered in the weekly window its readings were held on — its own read proves it: stamped there, the hold ended` };
-    else if (lift && lift.act === 'refuse') idv = { ...idv, refused: true, verified: false, why: heldRefusalWords(lift.code, key, lift.names || []) };
+    else if (lift && lift.act === 'refuse') idv = { ...idv, refused: true, verified: false, door: lift.code, why: heldRefusalWords(lift.code, key, lift.names || []) };
   }
   probeRec.identity = { org: idv.org || null, phase: idv.phase || null, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };   // r9: the verdict, never the two identities it compared
   probeRec.identityVerified = idv.verified;
@@ -986,7 +986,7 @@ async function refreshViaCliPanel(key) {
       fs.appendFileSync(READING_ARCHIVE, JSON.stringify({ at: Date.now(), store: 'usage-cache', key, sid: null, what: 'panel-identity', reason: idv.why, matched: idv.matched, ownWindow: idv.apiWindow || null, identity: { org: idv.org, phase: idv.phase }, entry: cliPanel }) + '\n');
     } catch { }
     logProbe('write-refused', { why: idv.why, window: idv.panelWindow });
-    panelSays(key, { at: Date.now(), outcome: 'write-refused', code: 'identity', identityVerified: false, why: idv.why, rung: 'panel' });
+    panelSays(key, { at: Date.now(), outcome: 'write-refused', code: 'identity', identityVerified: false, why: idv.why, rung: 'panel', ...(idv.door ? { door: idv.door } : {}) });   // r5481 (3): the door's refusal named (the automatic read paces it)
     return false;
   }
   if (_panelVerdictSaid.get(key) !== 'ok') { _panelVerdictSaid.set(key, 'ok'); if (_panelVerdictSaid.size > 256) _panelVerdictSaid.delete(_panelVerdictSaid.keys().next().value); }

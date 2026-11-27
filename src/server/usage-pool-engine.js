@@ -356,6 +356,8 @@ function usageIdentityGroups() {
   // of its own whose folder holds another row's login IS that account (BOUND 1: one quota, as the groups say). The pool's grouping
   // (the groups themselves, usageIdentityAccountIds: row B-87fd's) is not changed by it
   Object.defineProperty(groups, 'ownOf', { value: rowOwnOf(judged), enumerable: false });
+  // …and each member's today's key (groupKeyOf over its file, as above): the door's row identity reads it here, no file (r5481 (2))
+  Object.defineProperty(groups, 'keyOf', { value: new Map(members.map((m) => [m.id, m.today])), enumerable: false });
   return groups;
 }
 // Dead-reckoning estimator (B-fcff v2): learned per-identity per-bucket rates
@@ -7520,6 +7522,17 @@ function reanchorLapsedMember(key, idv) {
 /** B-6a92 r8/r9 — THE FACTS the door's ONE PURE VERDICT is judged on: the engine's own builder (heldLiftFactsOf, module level)
  *  over this engine's READERS — the row's identity group, its cache and roster record, and THE ONE READER of a name's login. */
 /** the account ids the RELEASE grouped `key` with (its today's key) — the B-6a92 door's own notion until its unit moves it */
+/** r5481 (4) — THE ROW's OWN IDENTITY ON FILE, from MEMORY (no file read): A PERSON's OWN SIGN-IN ON A ROW IS THE ROW's EDIT DOOR — a
+ *  row whose folder holds the login the product's own sign-in made there (a PROVEN tie, src/accounts.js _noteLoginTie: a copied
+ *  folder is never tied, and an untied record names no organisation) is that login's organisation from that act on; any other row
+ *  its usage file's key as the identity groups read it (groupKeyOf over its file, kept beside the groups: `keyOf`). → 'org:…' |
+ *  'email:…' | null (no identity: an id-only key) */
+function rowIdentityKeyOf(key) {
+  let rec = null; try { rec = accounts.identityRecordOf(key, { since: 0 }); } catch { rec = null; }
+  if (rec && rec.tie === 'proven' && typeof rec.org === 'string' && rec.org) return 'org:' + rec.org.toLowerCase();
+  let k = null; try { const m = usageIdentityGroupsCached().keyOf; k = m ? m.get(key) : null; } catch { k = null; }
+  return typeof k === 'string' && /^(org|email):/.test(k) ? k : null;
+}
 function heldLiftFacts(key, idv, h) {
   let rec = null; try { rec = (accounts.list().accounts || []).find((a) => a && a.id === key) || null; } catch { rec = null; }
   let cache = null; try { cache = usageWrite.readCacheJson(usageWrite.cacheFileFor(USAGE_CACHE_DIR, key)); } catch { cache = null; }
@@ -7533,7 +7546,7 @@ function heldLiftFacts(key, idv, h) {
  *  - own / unhold: the hold ends (the row's own window proven, or only the row's own names were held) — the sidecar without it;
  *  - refuse: the caller refuses with the code's words; none: nothing. Memory follows a write only when it landed.
  *  Nothing here starts a read. → the verdict, or false (no hold) */
-function liftHeldWindow(key, idv) {
+function liftHeldWindow(key, idv, ctx = null) {
   try {
     const h = heldWindowOf(key);
     if (!idv) return false;
@@ -7542,12 +7555,26 @@ function liftHeldWindow(key, idv) {
     // is refused, nothing written, by the release's own words (signed-in-as). A twin of the row's own account (its group), a row
     // with no identity on file (no key) and two seats of one organisation (the reply is the row's own address: proven first) are
     // never refused by it — heldLiftVerdict's own order over every other known account as the names it judges
+    // r5481 (2) — NOTHING SYNCHRONOUS ON THE LOOP AGAINST THE DATA FOLDER: every login it compares is in MEMORY — the other rows'
+    // the keeper's KEPT sign-in facts (accounts.identityRecordOf at any age, read off the loop, as the identity groups read them;
+    // a row not landed names nobody: never refused by it), the hub's own login the read its caller already made (ctx.machineLogin,
+    // the route's own read around the probe), the row's own identity on file rowIdentityKeyOf's (the groups' memo, no file). A
+    // press whose answer carries no other known login's address asks nothing more (the refusal names an account only by it)
     if (!h) {
+      const answer = answeringLogin(idv);
+      const addr = answer && typeof answer.email === 'string' && answer.email.trim() ? answer.email.trim().toLowerCase() : null;
+      if (!addr) return false;
+      const keptLogin = (n) => {
+        if (n === '__global__') { const m = ctx && ctx.machineLogin; return m && (m.email || m.orgUuid) ? { email: m.email || null, orgUuid: m.orgUuid || null } : null; }
+        let r = null; try { r = accounts.identityRecordOf(n, { since: 0 }); } catch { r = null; }
+        return r && (r.address || r.org) ? { email: r.address || null, orgUuid: r.org || null } : null;
+      };
       let others = [];
       try { others = ((accounts.list() || {}).accounts || []).map((a) => a && a.id).filter((id) => typeof id === 'string' && id && id !== key); } catch { others = []; }
       if (key !== '__global__') others.push('__global__');   // the hub's own login (r7): judged like any other — never refused when it is the row's own account
-      if (!others.length) return false;
-      const v = readingLag.heldLiftVerdict(heldLiftFacts(key, idv, { names: others, phase: null, at: 0 }));
+      const names = others.filter((n) => { const l = keptLogin(n); return !!(l && typeof l.email === 'string' && l.email.trim().toLowerCase() === addr); });
+      if (!names.length) return false;
+      const v = readingLag.heldLiftVerdict(heldLiftFactsOf({ key, idv, h: { names, phase: null, at: 0 }, sameAccountIds: rowOwnAccountIds(key), rowKey: rowIdentityKeyOf(key), loginOf: keptLogin }));
       return v && v.act === 'refuse' && v.code === 'signed-in-as' ? v : false;
     }
     const v = readingLag.heldLiftVerdict(heldLiftFacts(key, idv, h));
@@ -10041,7 +10068,9 @@ function groupKeyOf({ accountId = null, cache = null, email = null, ownBe = null
  *  — its group, except the rows whose organisation and its own are both known and differ (a member's organisation: its cache's
  *  `orgUuid`, else its landed record's `org`). → Map(id → [ids]) */
 function rowOwnOf(groups) {
-  const orgOf = (m) => { const c = m && m.cache && m.cache.orgUuid ? String(m.cache.orgUuid).toLowerCase() : null; const r = m && m.rec && m.rec.org ? String(m.rec.org).toLowerCase() : null; return c || r || null; };
+  // r5481 (4): a row whose folder holds the login the product's OWN sign-in made there (a proven tie) is that login's organisation —
+  // a person's own sign-in is the row's edit door; a copied folder (untied: its record names no organisation) keeps the file's
+  const orgOf = (m) => { const c = m && m.cache && m.cache.orgUuid ? String(m.cache.orgUuid).toLowerCase() : null; const r = m && m.rec && m.rec.org ? String(m.rec.org).toLowerCase() : null; return (r && m.rec.tie === 'proven') ? r : (c || r || null); };
   const out = new Map();
   for (const [, ms] of (groups || new Map())) for (const m of ms) { const om = orgOf(m); out.set(m.id, ms.filter((x) => { const ox = orgOf(x); return !(om && ox && om !== ox); }).map((x) => x.id)); }
   return out;
@@ -10238,11 +10267,12 @@ function poolSwitchWords({ pool, target, from, reason, priorityRank = null, hot 
   return switchWords(SWITCH_KEYS.poolAuto, { pool, target, pct }, slots);
 }
 const switchNoticeWords = Object.freeze({ KEYS: SWITCH_KEYS, sessionMove: sessionMoveWords, poolSwitch: poolSwitchWords, lastResort: lastResortClause });
-function heldLiftFactsOf({ key, idv, h, sameAccountIds = null, rowCache = null, rowEmail = null, loginOf = () => null } = {}) {
+function heldLiftFactsOf({ key, idv, h, sameAccountIds = null, rowCache = null, rowEmail = null, loginOf = () => null, rowKey: rowKeyGiven = undefined } = {}) {
   const group = new Set(Array.isArray(sameAccountIds) ? sameAccountIds : [key]);   // the row's own identity group (its ids)
   const asLogin = (l) => (l && (l.orgUuid || l.email) ? { org: l.orgUuid || null, email: l.email || null } : null);
   let rowKey = null;
-  try { const k = groupKeyOf({ accountId: key, cache: rowCache, email: rowEmail || null }); rowKey = /^(org|email):/.test(k) ? k : null; } catch { rowKey = null; }
+  if (rowKeyGiven !== undefined) rowKey = typeof rowKeyGiven === 'string' && /^(org|email):/.test(rowKeyGiven) ? rowKeyGiven : null;   // r5481: the engine's own, from memory
+  else { try { const k = groupKeyOf({ accountId: key, cache: rowCache, email: rowEmail || null }); rowKey = /^(org|email):/.test(k) ? k : null; } catch { rowKey = null; } }
   const held = ((h && h.names) || []).map((n) => ({ name: n, inGroup: group.has(n), login: asLogin((() => { try { return loginOf(n); } catch { return null; } })()) }));
   const pw = (idv && idv.panelWindow) || {};
   const p7 = Number(pw.sevenDay) > 0 ? Number(pw.sevenDay) : null;
