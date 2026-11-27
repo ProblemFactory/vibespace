@@ -13,6 +13,8 @@
 //      byte-for-byte; the request → For-you item → approve → one grant flow;
 //      a hidden conversation is absent from list/read and answers the same
 //      not-found as a nonexistent id.
+//   §P (B-dfa4 r5450, hold (i)) accessFor reads a conversation's grain only when a row of its own names it: PARITY with the
+//      release's whole walk over every kind and asker, the grains read counted; RED: a kind left out of the own-keys set.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -405,6 +407,90 @@ console.log('§3 agent groups: invite reach = msg-acl (widen-only)');
   ok(byOpen.ok && byOpen.added.join() === 'vis', 'reach is judged from the INVITER: open shares vis\'s Task Group and brings it in — the same session alpha could not invite', JSON.stringify(byOpen));
   ok(byOpen.refused.length === 1 && /no delivery ladder/.test(byOpen.refused[0].reason), '…and a wake with no ladder wired is an honest refusal, never a silent drop');
   store.close();
+}
+
+// ═══ §P accessFor DECIDES BY THE ROW's OWN ROWS FIRST — PARITY (B-dfa4, 主开发 r5450, hold (i): 1.1–1.3 s on the owner's hub) ═══
+// The list form of an agent's `vibespace-channels status` read every conversation of every account through its whole grain only
+// to ask whether that grain holds access rows; it now reads a conversation's grain only when the grants door names it in a row of
+// its own. THE LAW IS PARITY: no answer changes for any asker. BOTH ROADS over the same world — the release's whole walk (a closed
+// world of copies: the engine requiring channels-access with the release's line) and the new one — every kind the stack knows: a
+// row of its own (with its watcher), the owner's reach row (#user), a legacy assignment, an account grant, a rule's grant, a Task Group grant with its «除了»
+// member, a plain Task Group grant, All agents, an account no row names the asker on, a disabled account, a directory's single and
+// group rows; askers: the named agent, another member of the group, an agent of no group, an asker that is no agent. The answers are
+// EQUAL row for row; the grains read are COUNTED (the cure's proof is the count, never a clock). RED CONTROL: a kind left out of the
+// door's own-keys set (the conversations' own access rows) — a conversation with access goes missing, RED by name.
+console.log('§P accessFor reads a conversation\'s grain only when a row of its own names it — parity with the release\'s whole walk, every kind, every asker; the grains read counted');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MP = mutantCopies('chan-acl-access-parity', REPO);
+  const engSrcP = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');   // its own name: §2c's engSrc (engineSource) carries two older unanchored controls, which test-suite-files-parse counts by the name a file read assigns
+  const accSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf-8');
+  const grSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-grants.js'), 'utf-8');
+  const GATE = "      for (const en of store.index.rowsOf(rec.id)) { accessStats.rows++; if (en && en.adapterId === rec.id && own.has(en.key)) { accessStats.grains++; const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); } }";
+  const RELEASE = "      for (const en of store.index.rowsOf(rec.id)) { accessStats.rows++; if (en && en.adapterId === rec.id) { accessStats.grains++; const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); } }";
+  // the release's road: the engine requiring a copy of channels-access with the release's line (the whole walk)
+  const accRelPath = MP.write('src/server/channels-access.js', editAnchor(accSrc, GATE, RELEASE, 'src/server/channels-access.js'), 'release-walk', { name: 'access-release-walk' });
+  const ENGREL = MP.load('src/server/channels-engine.js', editAnchor(engSrcP, "require('./channels-access.js')", `require(${JSON.stringify(accRelPath)})`, 'src/server/channels-engine.js'), 'release-walk-engine');
+  // the red control: the door's own-keys set without the conversations' own ACCESS rows (only the owner's and approved requests' rows kept)
+  const OWNKEYS = "    if (!ix.ownKeys) ix.ownKeys = new Set([...ix.rows.keys()].filter((k) => k.startsWith('conversation:')).map((k) => k.slice('conversation:'.length).replace(/#(user|request)$/, '')));";
+  const grRedPath = MP.write('src/server/channels-grants.js', editAnchor(grSrc, OWNKEYS, "    if (!ix.ownKeys) ix.ownKeys = new Set([...ix.rows.keys()].filter((k) => k.startsWith('conversation:') && /#(user|request)$/.test(k)).map((k) => k.slice('conversation:'.length).replace(/#(user|request)$/, '')));", 'src/server/channels-grants.js'), 'own-keys-narrow', { name: 'grants-own-keys-narrow' });
+  const ENGRED = MP.load('src/server/channels-engine.js', editAnchor(engSrcP, "require('./channels-grants.js')", `require(${JSON.stringify(grRedPath)})`, 'src/server/channels-engine.js'), 'own-keys-narrow-engine');
+  const AGT = { kind: 'agent', id: 'agent-1', name: 'Worker' }, AGT2 = { kind: 'agent', id: 'agent-2', name: 'Other' };
+  const GRP = { kind: 'group', id: 'g1', name: 'Ops' }, ALL = { kind: 'everyone', id: '*' };
+  const LIVE = [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }, { cid: 'agent-2', name: 'Other', groups: ['g1'] }, { cid: 'agent-3', name: 'Lone', groups: [] }];
+  const ASKERS = [['the named agent (a member of g1)', { kind: 'agent', id: 'agent-1', name: 'Worker', groups: ['g1'], msgLevelFor: () => 'none' }],
+    ['another member of g1', { kind: 'agent', id: 'agent-2', name: 'Other', groups: ['g1'], msgLevelFor: () => 'none' }],
+    ['an agent of no group', { kind: 'agent', id: 'agent-3', name: 'Lone', groups: [], msgLevelFor: () => 'none' }],
+    ['an asker that is no agent', { kind: 'user', id: 'owner', name: 'Owner', groups: [] }]];
+  const acct = (id, enabled, extra = {}) => ({ id, kind: 'fake-poll', label: id, enabled, options: {}, state: {}, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, ...extra });
+  const mkE = (E, dataDir) => E.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, liveSessions: () => LIVE });
+  const base = path.join(ROOT, 'parity-world');
+  fs.mkdirSync(path.join(base, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(base, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acct('mail', true, { agentDirectory: { groups: true, singles: true } }), acct('mail2', true), acct('mail3', false)] }));
+  const said = [];
+  {
+    const e0 = mkE(ENG, base);
+    const ix = e0.store.index;
+    const T0 = Date.UTC(2026, 10, 27, 12, 0, 0);
+    await ix.update(() => {
+      for (let i = 0; i < 320; i++) Object.assign(ix.entry('mail', `c-${i}`), { title: i % 40 === 0 ? `Rule room ${i}` : `Thread ${i}`, kind: i % 3 === 0 ? 'dm' : 'group', lastAt: T0 - i * 60e3, unread: 0, listedAt: T0 - 86400e3 });
+      for (let i = 0; i < 60; i++) Object.assign(ix.entry('mail2', `d-${i}`), { title: `Other ${i}`, kind: 'group', lastAt: T0 - i * 60e3, unread: 0, listedAt: T0 - 86400e3 });
+      for (let i = 0; i < 20; i++) Object.assign(ix.entry('mail3', `x-${i}`), { title: `Off ${i}`, kind: 'group', lastAt: T0 - i * 60e3, unread: 0, listedAt: T0 - 86400e3 });
+      ix.entry('mail', 'c-7', { create: false }).assignment = { principal: AGT, notify: 'wake', at: T0 };   // a LEGACY assignment (watchers only, never access)
+    });
+    const C = (convId) => ({ kind: 'conversation', convId });
+    said.push(['own row', await e0.setAccess('mail', C('c-1'), [{ principal: AGT, authority: 'draft' }])]);
+    said.push(['own watcher', await e0.setWatchers('mail', C('c-1'), [{ principal: AGT, notify: 'wake' }])]);
+    said.push(['account grant', await e0.setAccess('mail', { kind: 'account' }, [{ principal: AGT2, authority: 'draft' }])]);
+    said.push(['rule grant', await e0.setScopeAssignment('mail', { kind: 'pattern' }, { principal: AGT, mode: 'all', pattern: { match: 'any', rules: [{ kind: 'title', value: 'Rule room' }] } })]);
+    said.push(['group with «除了»', await e0.setAccess('mail', C('c-2'), [{ principal: GRP, authority: 'draft' }], { except: [{ kind: 'conversation', key: 'agent-1' }] })]);
+    said.push(['plain group', await e0.setAccess('mail', C('c-3'), [{ principal: GRP, authority: 'draft' }])]);   // draft: the fake account caps «send» (authority-capped)
+    said.push(['All agents', await e0.setAccess('mail', C('c-4'), [{ principal: ALL, authority: 'draft' }])]);
+    said.push(['another agent\'s own row', await e0.setAccess('mail2', C('d-5'), [{ principal: AGT2, authority: 'draft' }])]);
+    said.push(['the owner\'s reach row (#user)', await e0.setReach('mail', 'c-5', { principal: AGT, level: 'visible' })]);   // a row of its own that holds no ACCESS: in the own-keys set, its grain read, nothing to report
+    ix.flush();
+    e0.stop();
+  }
+  const okWrites = said.filter(([, r]) => r && r.ok).length;
+  const run = (E, tag) => {
+    const d = path.join(ROOT, `parity-${tag}`);
+    fs.cpSync(base, d, { recursive: true });
+    const e = mkE(E, d);
+    const out = {};
+    const s0 = e.accessForStats();
+    for (const [who, ctx] of ASKERS) { try { out[who] = e.accessFor(ctx); } catch (err) { out[who] = { threw: String((err && err.message) || err) }; } }   // a throw is an answer too: compared like any
+    const s1 = e.accessForStats();
+    e.stop();
+    return { out, rows: s1.rows - s0.rows, grains: s1.grains - s0.grains, calls: s1.calls - s0.calls };
+  };
+  const neu = run(ENG, 'new'), rel = run(ENGREL, 'release'), red = run(ENGRED, 'red');
+  const differs = ASKERS.map(([who]) => who).filter((who) => JSON.stringify(neu.out[who]) !== JSON.stringify(rel.out[who]));
+  const convGrains = (o) => Object.values(o).flatMap((a) => (a && a.access) || []).filter((x) => x.grain === 'conversation').length;
+  ok(okWrites === said.length, `§P the world: every kind written through the engine's own doors (${okWrites} of ${said.length})`, JSON.stringify(said.filter(([, r]) => !(r && r.ok)).map(([k, r]) => [k, r && (r.code || r.error)])));
+  ok(differs.length === 0 && convGrains(neu.out) >= 3, `§P PARITY: every asker's answer is EQUAL row for row on both roads (${ASKERS.length} askers; ${convGrains(neu.out)} conversation grain line(s) among them) — the askers whose answers differ: ${JSON.stringify(differs)}`, differs.map((who) => ({ who, new: neu.out[who], release: rel.out[who] })).slice(0, 2).map((x) => JSON.stringify(x).slice(0, 600)).join(' | '));
+  ok(neu.calls === ASKERS.length && rel.calls === ASKERS.length && neu.rows === rel.rows && rel.grains === rel.rows && neu.grains < 40 && neu.grains * 20 < rel.grains, `§P THE COUNT: over ${neu.rows} row(s) walked by the ${neu.calls} calls, the release read ${rel.grains} grains (every row), the new road ${neu.grains} — only the conversations a row of their own names`, { neu: { rows: neu.rows, grains: neu.grains }, rel: { rows: rel.rows, grains: rel.grains } });
+  const missing = ASKERS.map(([who]) => who).filter((who) => convGrains({ x: red.out[who] }) < convGrains({ x: neu.out[who] }));
+  ok(missing.length >= 1, `§P RED CONTROL: the door's own-keys set without the conversations' own access rows — a conversation with access goes MISSING for ${JSON.stringify(missing)} — the parity leg above would be red by name`, missing);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

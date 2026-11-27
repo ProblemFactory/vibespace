@@ -3287,9 +3287,19 @@ function create(engineCtx) {
   /** Every grain naming this agent (itself or one of its groups) on every
    *  account — what `vibespace-channels status` prints: the grain, the
    *  access authority, and the watcher (or none — access only). */
+  // B-dfa4 (主开发 r5450, hold (i): 1.1–1.3 s on the owner's hub): what accessFor READ, counted — the cure's proof is the count
+  const accessStats = { calls: 0, rows: 0, grains: 0 };
   function accessFor(ctx) {
     const out = [];
     const t = now();
+    accessStats.calls++;
+    // B-dfa4 (r5450, hold (i)): A CONVERSATION's GRAIN IS READ ONLY WHEN A ROW OF ITS OWN NAMES IT. The list form of an agent's
+    // `vibespace-channels status` read EVERY conversation of EVERY account through its whole grain (the account's rules matched
+    // twice, every grant above it) only to ask whether that grain holds access rows. A grain's access rows are the grain's own
+    // (overlay: CG.accessOf of the conversation's resource — a legacy assignment lifts watchers only); the rows above it judge
+    // only its watchers. So a conversation no row of the grants door names (its kept own-keys set, read once a call) has no
+    // conversation-grain access to report and its grain is never read; a named one is read as before. PARITY: no answer changes.
+    const own = CG.ownConversationKeys();
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false) continue;
       const label = rec.label || rec.id;
@@ -3306,10 +3316,12 @@ function create(engineCtx) {
       const acct = accountGrainOf(rec.id);
       if (acct) push('account', heldRead(acct));
       for (const pa of patternsOf(rec.id)) push('pattern', heldRead(pa), { patternId: pa.id, rule: F.patternSummary(pa.pattern) });
-      for (const en of store.index.rowsOf(rec.id)) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
+      for (const en of store.index.rowsOf(rec.id)) { accessStats.rows++; if (en && en.adapterId === rec.id && own.has(en.key)) { accessStats.grains++; const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); } }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
     }
     return { ok: true, access: out };
   }
+  /** What accessFor read since the start, counted (B-dfa4 r5450 hold (i): the cure's proof is the count). */
+  function accessForStats() { return { ...accessStats }; }
 
   /**
    * THE HONEST ESTIMATE OVER A SCOPE (§7.3, before saving): the conversations
@@ -3666,7 +3678,7 @@ function create(engineCtx) {
     wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, reachWalkOf, groupsOfSession, inheritedOfSession, liveGroupsOf,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
-    removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
+    removePattern, setAssignment, setScopeAssignment, accessFor, accessForStats, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, healGrainRows, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   };
 }

@@ -10179,7 +10179,7 @@ function create(deps = {}) {
     storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, reachWalkOf, groupsOfSession, inheritedOfSession, liveGroupsOf, convFor,
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
-    setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
+    setAssignment, setScopeAssignment, accessFor, accessForStats, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, healGrainRows, grainActsOwedNow, agentWatchCount, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
@@ -10767,6 +10767,7 @@ function create(deps = {}) {
     setWatchers: ['refused', 'async', 'plain function returning setGrains Promise channels-access.js:2660'],
     removePattern: ['refused', 'async', 'CG.removeRule channels-access.js:2668 then index.update channels-access.js:2670'],
     accessFor: ['refused', 'sync', 'refused while paused (no allow row): accountGrainOf, patternsOf, rowsOf channels-access.js:2730-2752'],
+    accessForStats: ['allow', 'sync', 'what accessFor read, counted (calls, rows, the grains read) — reads no family'],
     migrateGrants: ['refused', 'sync', 'migration: already throws on blocked channels-access.js:2865-2866; a paused object would be RECORDED as success migrations.js:571-575 resolves rep.write undefined'],
     compose: ['refused', 'async', 'vendor composeCaps channels-outbound.js:980 + outbox create :1002 + direct sendNow :1020; def channels-outbound.js:966'],
     searchFor: ['refused', 'async', 'walks an index read channels-access.js:657; with full:true asks the vendor vendorSearch channels-access.js:732; held ⇒ the agent reads «nothing»'],
@@ -10985,7 +10986,7 @@ function create(deps = {}) {
     healSelfAt,   // R3 (§23): the one-shot derivation of the owner's newest message for rows that predate the field
     setScopeAssignment, estimateScope, effectiveFor: (adapterId, convId) => effectiveFor(store.index.peek(`${adapterId}/${convId}`)), migrateAggregated,
     // R4 (2026-09-27): access and notification — two operations, access first; the compose verb; the agent's search
-    setGrain, setAccess, setWatchers, removePattern, accessFor, migrateGrants, compose, searchFor, setAccountPolicy, effectiveForAccount,
+    setGrain, setAccess, setWatchers, removePattern, accessFor, accessForStats, migrateGrants, compose, searchFor, setAccountPolicy, effectiveForAccount,   // accessForStats: B-dfa4 r5450 hold (i) — the rows and the grains accessFor read (test-channel-acl's parity census)
     // lane channel-feed-authority: the scheduler's due rows of one account (the census legs) and the due index's counters
     dueListOf: (adapterId, { all = false, sync = true, turnMax = Infinity } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all, sync, turnMax }) : null; },   // B-dfa4 cut 3: a census reads every due row, built in its turn (sync: false = the tick's reading)
     dueIndexStats: () => ({ ...dueStats, merging: dueMerging.size }),
