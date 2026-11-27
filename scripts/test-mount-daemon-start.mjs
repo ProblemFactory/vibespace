@@ -260,6 +260,9 @@ try {
     mm._adoptable = async () => 0;   // ⑧ reads the re-check after the answer, never the adoption look (each look walks /proc: seconds on a loaded box)
     mm._ensureMountpointDir = async () => null; mm._rcloneFlagsHelp = '--vfs-cache-mode --rc-addr'; mm._countCacheFiles = async () => ({ n: 0, capped: false });   // …nor the connect's side children (the mount point's helper, the help probes, the cache count: each a start on a loaded box)
     mm._startingT = { ...mm._startingT, quickMs: 50 };   // a fresh connect's quick look (⑧c), short
+    const kills = [];   // r5547 (b): every kill walk of the product — what it ANSWERED (the pids it signalled), or what it threw
+    if (typeof mm._killMountDaemon === 'function') { const kill0 = mm._killMountDaemon.bind(mm); mm._killMountDaemon = async (q) => { const k = { at: Date.now() }; kills.push(k); try { const hit = await kill0(q); k.hit = Array.isArray(hit) ? [...hit] : hit; return hit; } catch (e) { k.threw = String((e && (e.code || e.message)) || e); throw e; } finally { k.ms = Date.now() - k.at; } }; }
+    if (typeof mm._endStartedDaemon === 'function') { const end0 = mm._endStartedDaemon.bind(mm); mm._endStartedDaemon = async (q, st, askAt) => { const k = { at: Date.now(), end: true, pid: st && st.pid }; kills.push(k); try { const r = await end0(q, st, askAt); k.said = r; return r; } catch (e) { k.threw = String((e && (e.code || e.message)) || e); throw e; } finally { k.ms = Date.now() - k.at; } }; }   // the other end road (its answered identity): what it said
     if (typeof mm._walk === 'function') { const walk0 = mm._walk.bind(mm); mm._walk = async (o) => { const w = { at: Date.now() }; walks.push(w); try { const x = await walk0(o); w.done = true; w.ids = ((x && x.ids) || []).map((i) => i.pid); return x; } catch (e) { w.done = false; w.partial = ((e && e.partial) || []).map((i) => i.pid); throw e; } finally { w.ms = Date.now() - w.at; } }; }
     const W = { stats: () => S.stats(), run: (cmd, args, o) => {
       if (released) after.push(path.basename(String(cmd)));
@@ -298,11 +301,16 @@ try {
       // apart (a death is for good; one read in the signal's instant is no fact) — OR the product's other road, the next start held for it
       // (a lost answer with no /proc, its mark set); the wait's own end IS the verdict, never a second read; its 30 s ceiling counted and
       // said in the leg's line; a red's daemon lives (nothing ends it): read at once
-      let goneRuns = 0, endBy = null, endMs = null;
-      const goneNow = () => { if (!alive(d0)) goneRuns++; else goneRuns = 0; return goneRuns >= 2; };
-      if (M === MOUNTS && !stranger && d0) { const t0 = Date.now(); const done = await until(() => (goneNow() && !!(endBy = 'gone')) || (!!(mm._lostStart && mm._lostStart.has(mp)) && !!(endBy = 'held')), 30000); if (!done) endBy = 'ceiling'; endMs = Date.now() - t0; }
+      let goneRuns = 0, endBy = null, endMs = null, w0 = Date.now();
+      // r5547 (a) + (c): the daemon the scene holds — its pid and the start it had — and each read of the wait as it came, the first 20:
+      // its state letter and start (field 22), or «no read» with its code; the SAME read the wait judges (gone = no read, or a zombie)
+      const reads = [];
+      const readOf = (pid) => { try { const t = fs.readFileSync(`/proc/${Number(pid)}/stat`, 'utf8'); const f = t.slice(t.lastIndexOf(')') + 2).split(' '); return { state: f[0], start: f[19] }; } catch (e) { return { noRead: (e && e.code) || 'error' }; } };
+      const goneNow = () => { const x = readOf(d0); if (reads.length < 20) reads.push({ t: Date.now() - w0, ...x }); if (x.noRead || x.state === 'Z') goneRuns++; else goneRuns = 0; return goneRuns >= 2; };
+      if (M === MOUNTS && !stranger && d0) { const t0 = Date.now(); w0 = t0; const done = await until(() => (goneNow() && !!(endBy = 'gone')) || (!!(mm._lostStart && mm._lostStart.has(mp)) && !!(endBy = 'held')), 30000); if (!done) endBy = 'ceiling'; endMs = Date.now() - t0; }
       const rec = mm._state.mounts.find((x) => x.id === R.id) || {};
-      return { r, r2, desired: rec.desired, alive: endBy === 'gone' ? false : !!(d0 && alive(d0)), endBy, endMs, starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
+      const finalRead = d0 && endBy !== 'gone' ? readOf(d0) : null;   // the verdict's read when the wait did not end on the death
+      return { r, r2, desired: rec.desired, alive: endBy === 'gone' ? false : !!(d0 && alive(d0)), endBy, endMs, daemon: d0 ? { pid: Number(d0), start: daemonStarts.get(d0) ?? null } : null, kills, reads, finalRead, starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
         lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length, strangerAlive: null, strangerLife: (life = strangerKid ? lifeOf(strangerKid) : null),   // EVERY copy's stranger read the same way, AFTER the settle (r5444: never in the signal's own instant) — the legs await it
         startNever: started.length === 0, notFormed: started.length === 0 ? 'the starter never answered the stand-in daemon\'s start (⑧ THE STARTER reds it)' : startLate ? 'the starter answered the stand-in daemon\'s start only after its 30 s ceiling: the scene\'s order was lost' : notFormed,
         psD: psReads.filter((x) => d0 && x.pid === Number(d0)), psS: psReads.filter((x) => strangerKid && x.pid === strangerKid.pid), walks };
@@ -323,7 +331,7 @@ try {
   const readsOf = (runs) => JSON.stringify(runs.map((x) => ({ psD: x.psD, psS: x.psS, walks: x.walks })));
   const half = (name, runs, why, judge) => {   // one half of a leg: skipped by name on ITS OWN runs' facts only, else judged
     const nf = runs.map((x) => x.notFormed).filter(Boolean), w = nf.length ? `the scene did not form: ${nf.join('; ')}` : why ? `NO READING under load: ${why}` : null;
-    if (!w) return judge();
+    if (!w) { const v = judge(); if (v === false) console.log(`    facts (r5547): ${JSON.stringify(runs.map((x) => ({ daemon: x.daemon, endBy: x.endBy, endMs: x.endMs, kills: x.kills, walks: x.walks, reads: x.reads, finalRead: x.finalRead })))}`); return v; }
     console.log(`  ⊘ SKIP ${name} — ${w} — that half is PARTIAL in this run (its reads: ${readsOf(runs)})`);
   };
   const endWords = (x) => (x.endBy === 'ceiling' ? ` — its end NOT SEEN within the 30 s ceiling (${x.endMs} ms)` : '');   // r5538: the counted ceiling, said in the leg's own line
