@@ -7,10 +7,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - Settings → Claude has an entry label for chat conversations: off (the CLI's own label, the default), «vibespace», or a name you type.
 - If the copy of the sign-in record on a network home folder cannot be updated, For you now says so once, and the notice closes itself once the copy is written.
+- Agents can keep a file in the vault (an SSH key, a certificate, a kubeconfig, up to 1 MB); a command they run gets it as a private file, never its contents.
+- A command can carry vault files of up to 24 KB in all; a larger file stays in the vault and a run that names it is refused, saying why.
 
 ### Changed
 - If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
 - A kept sign-in folder shows in Manage agents with a Clear it button, which deletes it once no pool reads it.
+- A text value an agent stores in the vault holds up to 8192 characters; anything longer is stored as a file.
 
 ### Fixed
 - After a sudden power cut, VibeSpace no longer loses its record of an archive extraction cut short, or the warning that Claude could not save its work.
