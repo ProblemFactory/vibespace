@@ -243,10 +243,10 @@ try {
   // «441077234-00:18:40» — its start a tick past ps's clock); the product's age gate then rightly holds a row it cannot place
   const WRAPPED_ETIME = '441077234-00:18:40';
   const etimeOf = (pid) => { try { return CP.execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 3000 }).trim(); } catch { return null; } };
-  const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false, stranger = false, wrapPs = false } = {}) => {
+  const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false, stranger = false, wrapPs = false, ageNever = false } = {}) => {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R), mp = mm.pathOf(R); let release; const gate = new Promise((r) => { release = r; });
-    const started = [], after = []; let released = false, mountedNow = false, strangerKid = null, noReading = null;
+    const started = [], after = []; let released = false, mountedNow = false, strangerKid = null, notFormed = null, startLate = false;
     // THE SCENE's FACTS (B-3dbd, 主开发 r5363): the starter's first answer awaited as itself; every ps row the PRODUCT reads through its
     // starter (the pid it asked, what came back) and every /proc walk it made (finished, or cut by its own bound) — the legs read them
     let firstAnswered = null; const firstStart = new Promise((x) => { firstAnswered = x; });
@@ -269,8 +269,8 @@ try {
           // r5094 (unit A — 6 reds at the current file, every one at a lower load than the median): the stranger is ANSWERED only once
           // its own ps row reads its TRUE age — answered at its birth, ps's etime wrapped and the product's age gate held it on BOTH
           // copies, so the control could not tell the program check's work from the age gate's. Waited on as its fact; its expiry said
-          const trueAge = await until(() => { const e = etimeOf(strangerKid.pid); return !!e && !/^\d+-/.test(e); }, 10000);
-          if (!trueAge) noReading = `the stranger's ps row never read its true age within 10 s (its last etime ${etimeOf(strangerKid.pid)}): the scene did not form`;
+          const trueAge = ageNever ? false : await until(() => { const e = etimeOf(strangerKid.pid); return !!e && !/^\d+-/.test(e); }, 10000);   // ageNever: the kill law's control — the suite's own wait «ran out»
+          if (!trueAge) notFormed = `the stranger's ps row (the suite's own read) never read its true age within 10 s (its last etime ${etimeOf(strangerKid.pid)})`;
           return { ...r, pid: strangerKid.pid, starttime: null }; } }   // the answered pid a STRANGER's, started inside the window
         return r; });
     } };
@@ -279,8 +279,9 @@ try {
       const conn = mm.mount(R.id);
       // B-3dbd (主开发 r3297): each wait of this scene ends ON ITS FACT, bounded at 30 s (the release gave the start 5 s and the end 2 s,
       // and read what had come: with no /proc the end reads the daemon's identity through a ps child, slower than 2 s on the loaded pod)
-      // the daemon runs, its starter's answer not yet heard: the starter's own first answer, awaited AS ITSELF (30 s, the ceiling's end NO READING)
-      if (await lateOf(firstStart, 30000)) noReading = noReading || 'the starter never answered the stand-in daemon\'s start within 30 s: the scene did not form';
+      // the daemon runs, its starter's answer not yet heard: the starter's own first answer, awaited AS ITSELF (30 s): an answer that comes
+      // only after it is «the scene did not form» (its order lost); one that never comes is the product's own act missing: a red (⑧ THE STARTER)
+      startLate = await lateOf(firstStart, 30000);
       if (mounted) mountedNow = true;                 // …and it mounted meanwhile
       await mm.unmount(R.id);                         // the person's Disconnect, meanwhile
       const conn2 = again ? mm.mount(R.id) : null;    // …then the person's Connect again: it joins the connect in flight
@@ -293,66 +294,100 @@ try {
       const rec = mm._state.mounts.find((x) => x.id === R.id) || {};
       return { r, r2, desired: rec.desired, alive: !!(d0 && alive(d0)), starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
         lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length, strangerAlive: strangerKid ? (M === MOUNTS ? alive(strangerKid.pid) : !(await until(() => !alive(strangerKid.pid), 1000))) : null,   // a red's kill waited on (its read: never read in the signal's own instant)
-        noReading, psD: psReads.filter((x) => d0 && x.pid === Number(d0)), psS: psReads.filter((x) => strangerKid && x.pid === strangerKid.pid), walks };
+        startNever: started.length === 0, notFormed: started.length === 0 ? 'the starter never answered the stand-in daemon\'s start (⑧ THE STARTER reds it)' : startLate ? 'the starter answered the stand-in daemon\'s start only after its 30 s ceiling: the scene\'s order was lost' : notFormed,
+        psD: psReads.filter((x) => d0 && x.pid === Number(d0)), psS: psReads.filter((x) => strangerKid && x.pid === strangerKid.pid), walks };
     } finally { release(); CS.setChildStarter(S); if (strangerKid) { try { strangerKid.kill('SIGKILL'); } catch { } } }
   };
-  // A LEG THE PRODUCT's OWN «CAN'T TELL» DECIDED IS NO READING (主开发 r5363): the scene did not form (a fact of its own never came
-  // within its ceiling), or the product READ the row it judges and got nothing it could place — ps's etime wrapped (a row read within
-  // a tick of its birth) or no answer within its own bound — or its own /proc walk was cut by its bound before it named the daemon.
-  // A road the product never read at all stays JUDGED (a red names it). A counted line, never a red and never a pass.
+  // THE LEGS' THREE ROADS (主开发 r5363 / r5413, the round's must). (1) THE KILL LAW IS JUDGED ALWAYS, outside every skip: a stranger that
+  // died after the product acted is RED whatever the load and whatever else could not be read — its death is a fact, not a timing.
+  // (2) «NO READING» only for a half whose OWN premise the PRODUCT read and could not place, on a RECORDED fact of that read: its own ps
+  // row (etime wrapped — a row read within a tick of its birth; the stand-ins are seconds old, so any day-prefixed etime is that wrap,
+  // never a real day — or no answer within its own bound) or its /proc walk cut by its bound before it named the daemon. (3) A suite's
+  // own wait that ran out before the product read anything is «the scene did not form», its own named line. Each half — the product's
+  // copy, the red control — is gated by ITS OWN runs only: a control's facts never switch off the product's judgement. A road the
+  // product never read at all stays judged. Every skip line carries the reads it stands on.
   const etimeIn = (x) => (x && x.code === 0 ? (x.out.split(/\s+/)[1] || '') : '');
   const readTrue = (reads) => { const x = reads[reads.length - 1]; return !x ? null : x.code === 0 && /^(?:\d+:)?\d+:\d+$/.test(etimeIn(x)); };   // null: never read
   const readWhy = (reads, what) => { const x = reads[reads.length - 1]; return x.code === 0 ? `the product's own ps row of ${what} read etime ${etimeIn(x)} (wrapped: a row read within a tick of its birth)` : `the product's own ps read of ${what} did not answer (${x.unknown ? 'no answer from its starter' : 'code ' + x.code})`; };
   const cut = (x) => x.walks.some((w) => w.done === false) && !x.walks.some((w) => w.done);
-  const judgeOr = (name, runs, judge, extra = []) => { const nr = [...runs.map((x) => x.noReading), ...extra].filter(Boolean); if (!nr.length) return judge(); console.log(`  ⊘ SKIP ${name} — NO READING under load: ${nr.join('; ')} — the leg is PARTIAL in this run`); };
+  const readsOf = (runs) => JSON.stringify(runs.map((x) => ({ psD: x.psD, psS: x.psS, walks: x.walks })));
+  const half = (name, runs, why, judge) => {   // one half of a leg: skipped by name on ITS OWN runs' facts only, else judged
+    const nf = runs.map((x) => x.notFormed).filter(Boolean), w = nf.length ? `the scene did not form: ${nf.join('; ')}` : why ? `NO READING under load: ${why}` : null;
+    if (!w) return judge();
+    console.log(`  ⊘ SKIP ${name} — ${w} — that half is PARTIAL in this run (its reads: ${readsOf(runs)})`);
+  };
+  const killLaw = (runs) => runs.every((x) => x.strangerAlive !== false);   // THE KILL LAW: no stranger signalled — a fact, judged whatever the load
   const dd = await discDuring(MOUNTS, 'disc-during');
   const NORECHECK = MC.load('src/mounts.js', anchored(MSRC, "    if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) {\n      if (st && st.started && st.pid) await this._endStartedDaemon(mp, st, askAt);\n", "    if (false) {\n      if (st && st.started && st.pid) await this._endStartedDaemon(mp, st, askAt);\n", 'B-323e the generation not read again after the start'), 'no-recheck');
   const ddR = await discDuring(NORECHECK, 'disc-during-red');
-  judgeOr('⑧', [dd, ddR], () => ok(dd.r === false && dd.desired === 'unmounted' && !dd.alive && ddR.desired === 'mounted' && ddR.alive,
-    `⑧ a person's Disconnect while the start waits on its starter's answer: the connect ends with nothing wanted again (${dd.desired}) and the daemon that started meanwhile is ended (${!dd.alive}) — RED the generation not read again: wanted again (${ddR.desired}), the daemon left running (${ddR.alive})`, { dd, ddR }));
+  half('⑧ (the product)', [dd], null, () => ok(dd.r === false && dd.desired === 'unmounted' && !dd.alive,
+    `⑧ a person's Disconnect while the start waits on its starter's answer: the connect ends with nothing wanted again (${dd.desired}) and the daemon that started meanwhile is ended (${!dd.alive})`, dd));
+  half('⑧ (its red control)', [ddR], null, () => ok(ddR.desired === 'mounted' && ddR.alive,
+    `⑧ RED the generation not read again: wanted again (${ddR.desired}), the daemon left running (${ddR.alive})`, ddR));
   const dl = await discDuring(MOUNTS, 'disc-lost', { lost: true }), dlN = await discDuring(MOUNTS, 'disc-lost-np', { lost: true, noProc: true });
   const NOLOSTEND = MC.load('src/mounts.js', anchored(MSRC, '      else if (st && st.unknown && !unasked(st)) {', '      else if (false) {', 'B-323e a lost answer not read after a Disconnect'), 'no-lost-end');
   const dlR = await discDuring(NOLOSTEND, 'disc-lost-red', { lost: true }), dlNR = await discDuring(NOLOSTEND, 'disc-lost-np-red', { lost: true, noProc: true });
-  judgeOr('⑧b', [dl, dlN, dlR, dlNR], () => ok(dl.r === false && dl.desired === 'unmounted' && !dl.alive && dlN.desired === 'unmounted' && dlN.lostMark && dlR.alive && !dlNR.lostMark,
-    `⑧b its answer LOST, the person's Disconnect meanwhile: with /proc its walk ends the daemon (${!dl.alive}); with none the next start on that mount point waits for it (${dlN.lostMark}) — RED the lost answer not read there: the daemon left running (${dlR.alive}), nothing held (${!dlNR.lostMark})`, { dl, dlN, dlR, dlNR }), [dl.alive && cut(dl) ? `the product's own /proc walk (its answer lost) was cut by its bound before it named the daemon (${JSON.stringify(dl.walks)})` : null]);
+  half('⑧b (the product)', [dl, dlN], dl.alive && cut(dl) ? `the product's own /proc walk (its answer lost) was cut by its bound before it named the daemon` : null, () => ok(dl.r === false && dl.desired === 'unmounted' && !dl.alive && dlN.desired === 'unmounted' && dlN.lostMark,
+    `⑧b its answer LOST, the person's Disconnect meanwhile: with /proc its walk ends the daemon (${!dl.alive}); with none the next start on that mount point waits for it (${dlN.lostMark})`, { dl, dlN }));
+  half('⑧b (its red control)', [dlR, dlNR], null, () => ok(dlR.alive && !dlNR.lostMark,
+    `⑧b RED the lost answer not read there: the daemon left running (${dlR.alive}), nothing held (${!dlNR.lostMark})`, { dlR, dlNR }));
   const dm = await discDuring(MOUNTS, 'disc-mounted', { mounted: true });
   const NORELEASE = MC.load('src/mounts.js', anchored(MSRC, '      if (this._state.mounts.some((x) => x.id === id) && this.isMounted(m)) await Promise.resolve(this.unmount(id, { internal: true })).catch(() => { });', '', 'B-323e the dead endpoint left'), 'no-release');
   const dmR = await discDuring(NORELEASE, 'disc-mounted-red', { mounted: true });
-  judgeOr('⑧s', [dm, dmR], () => ok(dm.r === false && !dm.alive && dm.desired === 'unmounted' && dm.unmountAsked >= 1 && dmR.unmountAsked === 0,
-    `⑧s it MOUNTED before it was ended: its dead endpoint released by an internal unmount (${dm.unmountAsked} asked), the person's word unchanged (${dm.desired}) — RED that release cut: ${dmR.unmountAsked}`, { dm, dmR }));
+  half('⑧s (the product)', [dm], null, () => ok(dm.r === false && !dm.alive && dm.desired === 'unmounted' && dm.unmountAsked >= 1,
+    `⑧s it MOUNTED before it was ended: its dead endpoint released by an internal unmount (${dm.unmountAsked} asked), the person's word unchanged (${dm.desired})`, dm));
+  half('⑧s (its red control)', [dmR], null, () => ok(dmR.unmountAsked === 0, `⑧s RED that release cut: ${dmR.unmountAsked} asked`, dmR));
   const dc = await discDuring(MOUNTS, 'disc-again', { again: true });
   const NOAGAIN = MC.load('src/mounts.js', anchored(MSRC, "      if (j && (this._connWord?.get(id) || 0) !== w) return j.catch(() => { }).then(() => ((this._word?.get(id) || 0) !== w || !this._state.mounts.some((x) => x.id === id) ? false : this.mount(id)));", '      if (false) return j;', 'B-323e a Connect after the Disconnect read as a join'), 'no-again');   // stale-pins: kept (a red control plants the old road back)
   const dcR = await discDuring(NOAGAIN, 'disc-again-red', { again: true });
-  judgeOr('⑧c', [dc, dcR], () => ok(dc.r === false && dc.desired === 'mounted' && dc.starts === 2 && !dc.alive && dc.second && dcR.r2 === false && dcR.desired === 'unmounted' && dcR.starts === 1,
-    `⑧c Connect → Disconnect → Connect during one start: the last word stands — the first start ended (${!dc.alive}), a connect anew (${dc.starts} starts, the second alive: ${dc.second}, wanted: ${dc.desired}) — RED the join read as before: ${dcR.r2}, ${dcR.desired}, ${dcR.starts} start`, { dc, dcR }));
+  half('⑧c (the product)', [dc], null, () => ok(dc.r === false && dc.desired === 'mounted' && dc.starts === 2 && !dc.alive && dc.second,
+    `⑧c Connect → Disconnect → Connect during one start: the last word stands — the first start ended (${!dc.alive}), a connect anew (${dc.starts} starts, the second alive: ${dc.second}, wanted: ${dc.desired})`, dc));
+  half('⑧c (its red control)', [dcR], null, () => ok(dcR.r2 === false && dcR.desired === 'unmounted' && dcR.starts === 1,
+    `⑧c RED the join read as before: ${dcR.r2}, ${dcR.desired}, ${dcR.starts} start`, dcR));
   // ⑧e its second read (MUST): Connect → Disconnect → Connect → Disconnect during one start — the LAST word stands: no connect anew —
   // RED the person's word not read again before the connect anew (a Disconnect overridden)
   const de = await discDuring(MOUNTS, 'disc-twice', { again: true, twice: true });
   const NOWORD = MC.load('src/mounts.js', anchored(MSRC, "((this._word?.get(id) || 0) !== w || !this._state.mounts.some((x) => x.id === id) ? false : this.mount(id))", '(this.mount(id))', 'B-323e the later Disconnect not read'), 'no-word');
   const deR = await discDuring(NOWORD, 'disc-twice-red', { again: true, twice: true });
-  judgeOr('⑧e', [de, deR], () => ok(de.r2 === false && de.desired === 'unmounted' && de.starts === 1 && !de.alive && deR.desired === 'mounted' && deR.starts === 2,
-    `⑧e Connect → Disconnect → Connect → Disconnect during one start: the last word stands — no connect anew (${de.starts} start, ${de.desired}) — RED the later Disconnect not read: ${deR.starts} starts, ${deR.desired}`, { de, deR }));
+  half('⑧e (the product)', [de], null, () => ok(de.r2 === false && de.desired === 'unmounted' && de.starts === 1 && !de.alive,
+    `⑧e Connect → Disconnect → Connect → Disconnect during one start: the last word stands — no connect anew (${de.starts} start, ${de.desired})`, de));
+  half('⑧e (its red control)', [deR], null, () => ok(deR.desired === 'mounted' && deR.starts === 2, `⑧e RED the later Disconnect not read: ${deR.starts} starts, ${deR.desired}`, deR));
   // ⑧n its second read (SHOULD): with NO /proc the answered daemon is ended by its ps identity, proven ours by a start no earlier than
   // the ask — RED that proof cut (never ended; the next start held for it)
   const dn = await discDuring(MOUNTS, 'disc-np', { noProc: true });
   const NOPS = MC.load('src/mounts.js', anchored(MSRC, "target = ours ? { pid: ident.pid, starttime: null, lstart: row.lstart, bootId: '' } : null;", 'target = null;', 'B-323e no /proc: no end by ps'), 'no-ps');
   const dnR = await discDuring(NOPS, 'disc-np-red', { noProc: true });
-  judgeOr('⑧n', [dn, dnR], () => ok(dn.r === false && dn.desired === 'unmounted' && !dn.alive && !dn.lostMark && dnR.alive && dnR.lostMark,
-    `⑧n with NO /proc the daemon started for a mount disconnected meanwhile is ended by its ps identity (${!dn.alive}), nothing held (${!dn.lostMark}) — RED that proof cut: left running (${dnR.alive}), the next start held for it (${dnR.lostMark})`, { dn, dnR }), [readTrue(dn.psD) === false ? readWhy(dn.psD, 'the daemon') : null]);
+  half('⑧n (the product)', [dn], readTrue(dn.psD) === false ? readWhy(dn.psD, 'the daemon') : null, () => ok(dn.r === false && dn.desired === 'unmounted' && !dn.alive && !dn.lostMark,
+    `⑧n with NO /proc the daemon started for a mount disconnected meanwhile is ended by its ps identity (${!dn.alive}), nothing held (${!dn.lostMark}) — the product's reads: ${JSON.stringify(dn.psD)}`, dn));
+  half('⑧n (its red control)', [dnR], null, () => ok(dnR.alive && dnR.lostMark, `⑧n RED that proof cut: left running (${dnR.alive}), the next start held for it (${dnR.lostMark})`, dnR));
   // ⑧n2 line 385's small follow (主开发 r2259 (1)): the answered pid freed and taken by a STRANGER inside the window (a fresh start, another
   // program): never signalled — the next start held for it, said — RED the program not read (the stranger killed)
   const dnS = await discDuring(MOUNTS, 'disc-np-stranger', { noProc: true, stranger: true });
   const NOPROG = MC.load('src/mounts.js', anchored(MSRC, "const ours = !!row && path.basename(row.comm || '').slice(0, 15) === prog && Number.isFinite(age)", 'const ours = !!row && Number.isFinite(age)', 'B-323e no /proc: the program not read'), 'no-prog');
   const dnSR = await discDuring(NOPROG, 'disc-np-stranger-red', { noProc: true, stranger: true });
-  judgeOr('⑧n2', [dnS, dnSR], () => ok(dnS.r === false && dnS.strangerAlive === true && dnS.lostMark && dnSR.strangerAlive === false,
-    `⑧n2 with NO /proc a pid freed and taken by a STRANGER inside the window (a fresh start, another program) is never signalled (it lives: ${dnS.strangerAlive}); the next start waits (${dnS.lostMark}) — RED the program not read: the stranger killed (${!dnSR.strangerAlive})`, { dnS, dnSR }), [readTrue(dnSR.psS) === false ? `its RED copy: ${readWhy(dnSR.psS, 'the stranger')}` : null]);
   // PLACED ⑧n2 (r5094, unit A — the find made red at will): the stranger's ps row served as the box gives it within a tick of its birth
   // (its etime WRAPPED): the age gate holds it on BOTH copies — the mutant that reads no program too — so the old control could not tell
   // them apart (the reds' road); the scene above answers the stranger only once its row reads its true age
   const dnSw = await discDuring(MOUNTS, 'disc-np-stranger-wrap', { noProc: true, stranger: true, wrapPs: true });
   const dnSRw = await discDuring(NOPROG, 'disc-np-stranger-wrap-red', { noProc: true, stranger: true, wrapPs: true });
-  judgeOr('PLACED ⑧n2', [dnSw, dnSRw], () => ok(dnSw.strangerAlive === true && dnSRw.strangerAlive === true && dnSRw.lostMark,
-    `PLACED ⑧n2: a stranger read within a tick of its birth (ps's etime wrapped to ${WRAPPED_ETIME}) — the age gate holds it on both copies (the mutant too: alive ${dnSRw.strangerAlive}, held ${dnSRw.lostMark}): the old control could not tell them apart — RED with nothing wrong in the product`, { dnSw, dnSRw }));
+  // THE KILL LAW's OWN CONTROL (r5413 (4)): the round's scene placed whole — the suite's own true-age wait «ran out» (the scene did not
+  // form) AND the product's read of the stranger WRAPPED (a premise no half can read) — on a copy that signals any row it read: the
+  // stranger dies, and the kill law reads it RED there, never a skip
+  const KILLER = MC.load('src/mounts.js', anchored(MSRC, "const ours = !!row && path.basename(row.comm || '').slice(0, 15) === prog && Number.isFinite(age) && Math.abs(Date.now() - age * 1000 - askAt) <= 120000;", 'const ours = !!row;', 'B-3dbd a copy that signals any row it read'), 'kill-any');
+  const dnSk = await discDuring(KILLER, 'disc-np-stranger-killer-wrap', { noProc: true, stranger: true, wrapPs: true, ageNever: true });   // both roads at once: the suite's wait «ran out», the product's read wrapped
+  const law = [dnS, dnSw].filter((x) => x.strangerAlive !== null);
+  for (const [n, x] of [['⑧n2', dnS], ['PLACED ⑧n2', dnSw]]) if (x.strangerAlive === null) console.log(`  ⊘ SKIP ${n} the kill law — the scene did not form: no stranger was answered (${x.notFormed || 'no start'})`);
+  if (law.length) ok(killLaw(law), `⑧n2 THE KILL LAW, judged whatever the load: a pid freed and taken by a STRANGER inside the window is never signalled by the product — it lives (${law.map((x) => x.strangerAlive).join(', ')} in ${law.length} run(s), its row read true and read wrapped)`, { dnS, dnSw });
+  half('⑧n2 (the product: the next start held)', [dnS], null, () => ok(dnS.r === false && dnS.lostMark, `⑧n2 with NO /proc a stranger in the window: the next start waits for it (${dnS.lostMark}), the connect ends (${dnS.r})`, dnS));
+  half('⑧n2 (its red control)', [dnSR], readTrue(dnSR.psS) === false ? `its RED copy: ${readWhy(dnSR.psS, 'the stranger')}` : null, () => ok(dnSR.strangerAlive === false,
+    `⑧n2 RED the program not read: the stranger killed (${!dnSR.strangerAlive}) — its reads: ${JSON.stringify(dnSR.psS)}`, dnSR));
+  half('PLACED ⑧n2 (the red copy)', [dnSRw], null, () => ok(dnSRw.strangerAlive === true && dnSRw.lostMark,
+    `PLACED ⑧n2: a stranger read within a tick of its birth (ps's etime wrapped to ${WRAPPED_ETIME}) — the age gate holds it on the mutant that reads no program too (alive ${dnSRw.strangerAlive}, held ${dnSRw.lostMark}): the old control could not tell them apart — RED with nothing wrong in the product`, dnSRw));
+  if (dnSk.strangerAlive === null) console.log(`  ⊘ SKIP ⑧n2 THE KILL LAW's control — the scene did not form: no stranger was answered (${dnSk.notFormed || 'no start'})`);
+  else ok(!killLaw([dnSk]) && readTrue(dnSk.psS) === false && !!dnSk.notFormed, `⑧n2 THE KILL LAW's CONTROL: a copy that signals any row, the suite's own wait «ran out» (${dnSk.notFormed ? 'the scene did not form' : 'it formed'}) and its read of the stranger WRAPPED (${readTrue(dnSk.psS) === false ? readWhy(dnSk.psS, 'the stranger') : 'read true'}) — the stranger died (${!dnSk.strangerAlive}) and the kill law reads it RED, never a skip`, dnSk);
+  // ⑧ THE STARTER: a stand-in daemon start the starter NEVER answered (not even after its 30 s ceiling) is the product's own act missing
+  const all8 = { dd, ddR, dl, dlN, dlR, dlNR, dm, dmR, dc, dcR, de, deR, dn, dnR, dnS, dnSR, dnSw, dnSRw, dnSk };
+  ok(Object.values(all8).every((x) => !x.startNever), `⑧ THE STARTER: every stand-in daemon start of section 8 was answered by the starter (${Object.values(all8).length} starts; one never answered is RED)`, Object.entries(all8).filter(([, x]) => x.startNever).map(([k]) => k));
   // ⑧d its read (MUST 2): ended by the ANSWERED identity alone — the person's Unmount ended it first (its walk's mark) and the kernel gave
   // its pid away (a stranger, this suite's own sleeper): never signalled — RED the record, else the identity read NOW (the stranger killed)
   const stranger = CP.spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((r) => stranger.once('spawn', r));
