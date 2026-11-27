@@ -1119,7 +1119,7 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
       const cands = (members || []).filter((m) => m && m.id !== currentId && (!listed || listed.has(m.id)));
       const refused = new Set([...(excluded || []), ...loginBlocked.map((x) => x.id), ...lapsedBlocked.map((x) => x.id), ...(!creditsOk ? creditsRanked.filter((r) => r.dead).map((r) => r.id) : []), ...(!payingOk ? payingRanked.filter((r) => r.dead).map((r) => r.id) : []), ...cands.filter((m) => isHeld(m.id)).map((m) => m.id)]);
       const holdTo = soonestUsableMember({ members: cands, readCache, nowSec, priority, creditsIds: credits, payingIds: tiers.paying, readLogin, providerOf: provOf, fromProvider: curProv, conversationModel, crossProvider: xMode, refused });
-      return none('removed-hold', { holdTo, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
+      return none('removed-hold', { holdTo, refusedIds: refused.size ? [...refused].sort() : undefined, blockedWhy: why, fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
     }
     return none(why, { fromRemaining: cur.known ? cur.remaining : null, excluded: excludedN || undefined, loginBlocked: loginBlocked.length ? loginBlocked : undefined, ...(why === 'on-credits' ? { onCredits: { id: currentId }, billing: hardDead } : {}), ...barDetail(), ...rosterDetail(), ...bucketDetail(curBr), ...crossDetail() });
   }
@@ -1430,7 +1430,7 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
     const costUnknown = tier !== TIER_QUOTA && !signDead && restartedUnknown(rd);
     const freeUnknown = !costUnknown && at === 0 && (signDead || restartedUnknown(rd));
     const costs = !signDead && (tier === TIER_PAYING || (tier === TIER_CREDITS && (costUnknown || at !== 0)));
-    rows.push({ id: m.id, at, tier, rank: rank ? rank(m.id) : 0, i, ap, costUnknown, freeUnknown, costs, ref: !!(refusedSet && refusedSet.has(m.id)) });
+    rows.push({ id: m.id, at, tier, rank: rank ? rank(m.id) : 0, i, ap, costUnknown, freeUnknown, costs, signDead, unread: restartedUnknown(rd), ref: !!(refusedSet && refusedSet.has(m.id)) });
   });
   for (const r of rows) r.live = r.at === 0 && !r.costUnknown && !r.freeUnknown && !r.ref;   // r5279: what the decision holds or refuses is never «can serve now» — the kept park then stands
   // READING B (主开发 r5252, row B-d74f): where nobody pays and NO candidate can serve now — no ordinary member, no usage-credits member
@@ -1453,6 +1453,15 @@ function soonestUsableMember({ members, readCache, nowSec, priority = null, cred
   // is listed and free, and never onto a bill to avoid a refused member — then the release's own park stands
   const shelf = (r) => (!refusedSet || !refusedSet.size ? 0 : r.ref ? 1 : r.costs ? 2 : 0);
   rows.sort((x, y) => (x.ap - y.ap) || (shelf(x) - shelf(y)) || (keyOf(x) - keyOf(y)) || (x.at === y.at ? 0 : x.at < y.at ? -1 : 1) || (x.rank - y.rank) || (x.i - y.i));
+  // r5441: A MEMBER THAT CANNOT SIGN IN (expired or signed out — the engine's callers hand such members: switchCandidates has no login
+  // pre-filter) IS NEVER WHERE A DEFAULT IS PARKED WHILE A MEMBER OF ITS GROUP THAT BILLS NOTHING CAN SERVE NOW OR WILL HEAL BY ITSELF (a
+  // walled ordinary member, at its reset): it neither serves nor heals without a person. Beside members that bill only, it stays where the
+  // base parked it — a lane's change never newly parks the default on a bill (r5252)
+  if (rows.length && rows[0].signDead) {
+    const g = rows[0].ap;
+    const heals = rows.find((r) => r.ap === g && !r.signDead && !r.ref && !r.costs && !r.unread && (r.live || (r.tier === TIER_QUOTA && r.at !== 0)));
+    if (heals) return heals.id;
+  }
   return rows.length ? rows[0].id : null;
 }
 
