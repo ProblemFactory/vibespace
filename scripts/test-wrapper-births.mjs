@@ -20,8 +20,10 @@
 //      nobody, exit 2 read as nobody, any failure read as gone); the hub's own attach ended AFTER its unadopt (RED: the kill first); the
 //      follow (r5494): leg ①'s reds read from RUNNING copies; computed reds for the silent exit (driven through runChild's road too), the
 //      socket already gone and the unreadable record; the groups-only pass clears what it answered (two REDs); a leave after the first
-//      touch says its card is gone; two
-//      unnamed cards told apart by their harness and start, never a path.
+//      touch says its card is gone; THE MASTERS LAW (r5523, (o)): only the master THIS session started — its wrapper's parent, proven
+//      by the wrapper's birth — is signalled; another hub's master, a holder of a listener left open across exec and the holder behind an
+//      unread parent are left and said (REDs: today's loop; a copy that never proves the parent); two unnamed cards told apart by their
+//      harness and start, never a path.
 // The legs signal only their own children (a grandchild — a wrapper's stand-in CLI — only while its recorded birth reads `same`).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -204,7 +206,7 @@ try {
   {
     const signals = []; process.kill = (pid, sig) => { if (sig !== 0 && sig !== undefined) signals.push([pid, sig]); return realKill(pid, sig); };
     const termsTo = (pid) => signals.filter(([q, s]) => q === pid && s === 'SIGTERM').length;
-    fs.writeFileSync(path.join(ROOT, 'bin', 'fuser'), `#!/bin/sh\nd=${JSON.stringify(ROOT)}\nfor a; do last=$a; done\nm=$(cat "$d/mode-$(basename "$0")-$(basename "$last")" 2>/dev/null || cat "$d/mode-$(basename "$last")" 2>/dev/null || echo dead)\ncase "$m" in\n  alive) cat "$d/alive-pid"; exit 0;;\n  blind) echo "Cannot stat file $last: No such file or directory" >&2; exit 1;;\n  err2) exit 2;;\nesac\nexit 1\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(ROOT, 'bin', 'fuser'), `#!/bin/sh\nd=${JSON.stringify(ROOT)}\nfor a; do last=$a; done\nm=$(cat "$d/mode-$(basename "$0")-$(basename "$last")" 2>/dev/null || cat "$d/mode-$(basename "$last")" 2>/dev/null || echo dead)\ncase "$m" in\n  alive) cat "$d/holders-$(basename "$last")" 2>/dev/null || cat "$d/alive-pid"; exit 0;;\n  blind) echo "Cannot stat file $last: No such file or directory" >&2; exit 1;;\n  err2) exit 2;;\nesac\nexit 1\n`, { mode: 0o755 });
     fs.copyFileSync(path.join(ROOT, 'bin', 'fuser'), path.join(ROOT, 'bin', 'pgrep')); fs.chmodSync(path.join(ROOT, 'bin', 'pgrep'), 0o755);
     const mode = (name, m) => fs.writeFileSync(path.join(ROOT, `mode-${name}`), m);
     const PATH0 = process.env.PATH; process.env.PATH = path.join(ROOT, 'bin') + ':' + PATH0;
@@ -214,6 +216,16 @@ try {
     const freshGone = () => { for (let i = 0; i < 20; i++) { const p = require('node:child_process').spawnSync('true').pid; if (p > 1 && !fs.existsSync('/proc/' + p)) return p; } return 0; };   // a number nothing holds NOW (re-read per leg: a number can be taken again)
     const master = () => { const v = live(); fs.writeFileSync(path.join(ROOT, 'alive-pid'), String(v.pid)); return v; };
     master();   // the fake fuser's alive answer names a process of ours from the first probe on
+    const holders = (sock, pids) => fs.writeFileSync(path.join(ROOT, 'holders-' + sock), pids.join(' ') + '\n');
+    // A SESSION's stand-ins (r5523): `sh` forks the wrapper stand-in and then execs into the master, so the master IS the wrapper's parent —
+    // as a dtach master forks its program. The master is a process this leg spawned and holds (its handle); the wrapper's birth is read
+    // only while the kernel lists it as that master's child. stubborn: the wrapper ignores SIGTERM
+    const session = async ({ stubborn: deaf = false } = {}) => {
+      const m = spawn('sh', ['-c', `${deaf ? '(trap "" TERM; exec sleep 60)' : 'sleep 60'} & exec sleep 61`], { stdio: 'ignore' }); kids.push(m);
+      await until(() => kidsOf(m.pid).length > 0 && /sleep 61/.test((() => { try { return fs.readFileSync(`/proc/${m.pid}/cmdline`, 'utf8').replace(/\0/g, ' '); } catch { return ''; } })()), 3000);
+      const w = kidsOf(m.pid)[0] || 0; holdGrandkid(m, w);
+      return { m, w: { pid: w } };
+    };
     const BRSRC = read('src/server/boot-restore.js');
     const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
     function instance(BRm, d, retireWaitMs = 300) {
@@ -269,7 +281,7 @@ try {
     // (b) A WRAPPER NUMBER WITH NO BIRTH is waited for BEFORE the masters — bounded, off the loop; at its bound NOTHING is signalled, said once
     const wb = stubborn(), mb = master();
     const b1 = pair(BR, { pid: wb.pid, ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
-    await boot(b1);
+    await boot(b1, async () => { mode(`fuser-${b1.o.sock}`, 'dead'); });   // nobody listed: the wait itself is what is read
     await until(() => said(b1.o.sock).length > 0, 4000);
     ok(said(b1.o.sock).length === 1 && /still there 0\.3 s after its program ended — nothing signalled/.test(said(b1.o.sock)[0]) && termsTo(wb.pid) === 0 && termsTo(mb.pid) === 0 && alive(wb.pid) && alive(mb.pid) && fs.existsSync(b1.o.sockPath),
       'a birth-less wrapper of a proven-ended program: WAITED FOR (0.3 s here, 5 s in the hub), never signalled — and its socket\'s master not signalled, the socket in place, said once', said(b1.o.sock));
@@ -278,7 +290,7 @@ try {
     const SIGNAL_WATCHED = copy("    let left = await waitGone([], watched);\n", "    for (const x of watched) process.kill(x.pid, 'SIGTERM');   // RED: the number with no birth signalled\n    let left = await waitGone([], watched);\n", 'signals-watched');
     const wb2 = stubborn(); master();
     const b2 = pair(SIGNAL_WATCHED, { pid: wb2.pid, ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
-    await boot(b2); await until(() => termsTo(wb2.pid) > 0, 3000);
+    await boot(b2, async () => { mode(`fuser-${b2.o.sock}`, 'dead'); }); await until(() => termsTo(wb2.pid) > 0, 3000);
     ok(termsTo(wb2.pid) === 1, 'RED: a copy that signals a number with no birth sends it a SIGTERM — a process the hub cannot prove its own');
     // (c) A WRAPPER BIRTH THAT IS NOT `same` (a birth this machine cannot read): LEFT, nothing signalled
     const wc = live(), mc = master();
@@ -288,20 +300,20 @@ try {
     const STEP2_WRAPPER = copy("        else if (!(v === 'pid-recycled' || v === 'zombie' || (v === 'gone' && (await procGone(Number(w.pid)))))) return leave(`its wrapper (pid ${w.pid}) is neither proven its own nor proven ended (${v})`);\n", '', 'step2-wrapper');
     const mc2 = master();
     const c2 = pair(STEP2_WRAPPER, { pid: live().pid, pidStart: 'pThu Jan  1 00:00:00 2026', pidBoot: PIt.bootToken(), ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
-    await boot(c2); await until(() => !fs.existsSync(c2.o.sockPath), 3000);
-    ok(termsTo(mc2.pid) === 1 && !fs.existsSync(c2.o.sockPath), 'RED: the step-2 reading (a birth not `same` = not held, go on): its master SIGTERMed and its socket removed while that wrapper may live');
+    await boot(c2, async () => { mode(`fuser-${c2.o.sock}`, 'dead'); }); await until(() => !fs.existsSync(c2.o.sockPath), 3000);
+    ok(termsTo(mc2.pid) === 0 && !fs.existsSync(c2.o.sockPath) && !fs.existsSync(c2.o.meta), 'RED: the step-2 reading (a birth not `same` = not held, go on): its socket, files and meta removed while that wrapper may live (the masters law alone keeps an unproven master unsignalled)');
     // (d) THE DECISION READ AGAIN RIGHT BEFORE THE RETIRE TOUCHES ANYTHING: the record names a living child from the retire's own reads
     // (its record read and its recheck) ⇒ LEFT — nothing signalled, the card KEPT and judged again
-    const md = master(), dl = live();
-    const d1 = pair(BR, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
-    const undo1 = reads(d1.o.side, 3, JSON.stringify({ mode: 'terminal', ...childRec(dl) }));
+    const sd = await session(), md = sd.m, dl = live();
+    const d1 = pair(BR, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) }); holders(d1.o.sock, [md.pid]);
+    const undo1 = reads(d1.o.side, 3, JSON.stringify({ mode: 'terminal', ...wrapRec(sd.w), ...childRec(dl) }));
     try { await boot(d1); await until(() => said(d1.o.sock).length > 0, 3000); } finally { undo1(); }
     ok(said(d1.o.sock).length === 1 && /no longer proven ended at the retire \(alive\)/.test(said(d1.o.sock)[0]) && termsTo(md.pid) === 0 && fs.existsSync(d1.o.sockPath) && d1.X.activeSessions.has(d1.o.id) && (d1.X.api.probePending().get(d1.o.sock) || []).includes('dedup'),
       'the decision READ AGAIN right before anything is touched: a program alive by then is LEFT — nothing signalled, its socket in place, its CARD KEPT and judged again, said once', { said: said(d1.o.sock), pending: [...d1.X.api.probePending()] });
     const NO_RECHECK = copy('    if (recheck) {', '    if (false) {', 'no-recheck');
-    const md2 = master(), dl2 = live();
-    const d2 = pair(NO_RECHECK, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
-    const undo2 = reads(d2.o.side, 3, JSON.stringify({ mode: 'terminal', ...childRec(dl2) }));
+    const sd2 = await session(), md2 = sd2.m, dl2 = live();
+    const d2 = pair(NO_RECHECK, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) }); holders(d2.o.sock, [md2.pid]);
+    const undo2 = reads(d2.o.side, 3, JSON.stringify({ mode: 'terminal', ...wrapRec(sd2.w), ...childRec(dl2) }));
     try { await boot(d2); await until(() => termsTo(md2.pid) > 0, 3000); } finally { undo2(); }
     ok(termsTo(md2.pid) === 1, 'RED: a retire that trusts the decision SIGTERMs the master of a program alive by then');
     // (e) FUSER'S EXIT 1 WITH WORDS (it could not see the file), its EXIT 2, AN UNREADABLE HOLDER'S BIRTH: each LEAVES
@@ -315,12 +327,12 @@ try {
     const e3 = pair(ANY_ONE, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
     await boot(e3, fuserAfterProbe(e3, 'blind')); await until(() => !fs.existsSync(e3.o.sockPath), 3000);
     ok(!fs.existsSync(e3.o.sockPath), 'RED: a retire that reads fuser\'s exit 1 WITH words as «nobody» removes a socket whose holders it never saw');
-    const mh = master(), ident0 = PIt.identityOf;
+    const sh = await session(), mh = sh.m, ident0 = PIt.identityOf;
     PIt.identityOf = (pid, o) => (pid === mh.pid ? null : ident0(pid, o));
     try {
-      const h1 = pair(BR, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
+      const h1 = pair(BR, { ...wrapRec(sh.w), ...ended() }, { ...wrapRec(live()), ...childRec(live()) }); holders(h1.o.sock, [mh.pid]);
       await boot(h1); await until(() => said(h1.o.sock).length > 0, 3000);
-      ok(said(h1.o.sock).length === 1 && /its socket's holder \d+ could not be proven \(its birth not read\)/.test(said(h1.o.sock)[0]) && termsTo(mh.pid) === 0 && fs.existsSync(h1.o.sockPath), 'a holder whose birth cannot be read (alive): LEFT, never signalled, said once', said(h1.o.sock));
+      ok(said(h1.o.sock).length === 1 && /its socket is also held by pid \d+ \(sleep\), which this hub cannot prove it started/.test(said(h1.o.sock)[0]) && termsTo(mh.pid) === 0 && termsTo(sh.w.pid) === 0 && fs.existsSync(h1.o.sockPath), 'this session\'s master whose birth cannot be read is no proven master: LEFT, never signalled (nor its wrapper), said once by its number and name', said(h1.o.sock));
     } finally { PIt.identityOf = ident0; }
     // (f) NO /proc ON THIS MACHINE: no program is proven — the pair kept, asked again, nothing signalled (no `ps` asked for a birth)
     const hp0 = PIt.hasProc;
@@ -337,7 +349,7 @@ try {
       ok((f1.X.api.probePending().get(f1.o.sock) || []).includes('dedup') && fs.existsSync(f1.o.sockPath), 'a /proc read that failed by EMFILE (not ENOENT) proves nothing: the number with no birth is NOT ended — the pair kept, asked again', [...f1.X.api.probePending()]);
       const ANY_FAIL = copy("async function pathGone(p) { try { await fs.promises.access(p); return false; } catch (e) { return !!e && e.code === 'ENOENT'; } }", "async function pathGone(p) { try { await fs.promises.access(p); return false; } catch (e) { return true; } }", 'any-failure-gone');
       const f2 = pair(ANY_FAIL, { childPid: g0 }, { ...wrapRec(live()), ...childRec(live()) });
-      master(); await boot(f2); await until(() => !fs.existsSync(f2.o.sockPath), 3000);
+      await boot(f2, async () => { mode(`fuser-${f2.o.sock}`, 'dead'); }); await until(() => !fs.existsSync(f2.o.sockPath), 3000);
       ok(!fs.existsSync(f2.o.sockPath), 'RED: a retire that reads any failed /proc read as «gone» retires the socket of a program it never proved ended');
     } finally { fs.promises.access = access0; }
     // (i) A CHILD PROVEN ENDED BESIDE A WRAPPER THAT HAS A LIVING CHILD (agy's restart: the new child spawned, its record not yet written):
@@ -352,7 +364,7 @@ try {
     const CHILD_ALONE = copy("  return kids ? 'unknown' : 'dead';\n", "  return 'dead';   // RED: the dead child alone decides\n", 'child-alone');
     const wk2 = await withKid(); master();
     const i2 = pair(CHILD_ALONE, { ...wrapRec(wk2), ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
-    await boot(i2); await until(() => termsTo(wk2.pid) > 0, 3000);
+    await boot(i2, async () => { mode(`fuser-${i2.o.sock}`, 'dead'); }); await until(() => termsTo(wk2.pid) > 0, 3000);
     ok(termsTo(wk2.pid) === 1, 'RED: a copy that reads the dead child alone SIGTERMs a wrapper whose program started again');
     // (j) FUSER'S SILENT EXIT 1 = NOBODY holds the socket: no master to signal — retired (and runChild keeps the program's own words apart)
     const j1 = pair(BR, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
@@ -395,14 +407,14 @@ try {
     const ml2 = master();
     const l2 = pair(RELEASE_CATCH, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
     const undoL2 = reads(l2.o.side, 3, () => { const e = new Error('EMFILE: too many open files'); e.code = 'EMFILE'; throw e; }, 3);
-    try { await boot(l2); await until(() => termsTo(ml2.pid) > 0, 3000); } finally { undoL2(); }
-    ok(termsTo(ml2.pid) === 1, 'RED: the release\'s bare catch reads an unreadable record as «no wrapper» and SIGTERMs the master while a wrapper may be unseen');
+    try { await boot(l2, async () => { mode(`fuser-${l2.o.sock}`, 'dead'); }); await until(() => !fs.existsSync(l2.o.sockPath), 3000); } finally { undoL2(); }
+    ok(!fs.existsSync(l2.o.sockPath) && !fs.existsSync(l2.o.meta) && termsTo(ml2.pid) === 0, 'RED: the release\'s bare catch reads an unreadable record as «no wrapper» and goes on: its socket, files and meta removed while a wrapper may be unseen');
     // (m2) THE GROUPS-ONLY PASS CLEARS WHAT IT ANSWERED: after a deferred pair's retire the surviving member is out of the pending list, and the
     // start's «no answer» line names none of the pair. REDs: a pass that keeps what it answered; a line that counts the deferred members
     const n3check = async (BRm) => {
       master();
       const p = pair(BRm, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
-      await boot(p); await until(() => !fs.existsSync(p.o.meta), 3000); await until(() => !p.X.api.probePending().has(p.w.sock), 1000);
+      await boot(p, async () => { mode(`fuser-${p.o.sock}`, 'dead'); }); await until(() => !fs.existsSync(p.o.meta), 3000); await until(() => !p.X.api.probePending().has(p.w.sock), 1000);
       return { pending: p.X.api.probePending().has(p.w.sock), line: p.X.notes.some((l) => /adopted probe-pending — no answer/.test(l)), retired: !fs.existsSync(p.o.meta) };
     };
     const m3 = await n3check(BR);
@@ -414,20 +426,55 @@ try {
     const m5 = await n3check(ASKED_ALL);
     ok(m5.line, 'RED: a start line that counts the deferred members says «no answer» of sockets that were answered', m5);
     // (n) A LEAVE AFTER THE FIRST TOUCH (a wrapper, by its birth, deaf to its SIGTERM): its card is ALREADY gone — said so in Diagnostics, with what stays
-    const lvN = live(), wsN = stubborn(); master();
+    const lvN = live(), sN = await session({ stubborn: true }), wsN = sN.w;
     const n2 = pair(BR, { childPid: lvN.pid }, { ...wrapRec(live()), ...childRec(live()) });   // the older's number still there: undecided at the start
     await boot(n2);
-    fs.writeFileSync(n2.o.side, JSON.stringify({ mode: 'terminal', ...wrapRec(wsN), ...ended() }));   // since: its program ended, its wrapper still there
+    holders(n2.o.sock, [sN.m.pid]); fs.writeFileSync(n2.o.side, JSON.stringify({ mode: 'terminal', ...wrapRec(wsN), ...ended() }));   // since: its program ended, its wrapper still there
     try { lvN.kill('SIGKILL'); } catch { }   // by its handle
     console.log = () => { }; try { await n2.X.api.reprobePending(); } finally { console.log = log0; }
     const nl = n2.X.notes.find((l) => l.includes(`(${n2.o.sock}): not retired — `)) || '';
     ok(/its card is already gone/.test(nl) && /stay until the next start/.test(nl) && !n2.X.activeSessions.has(n2.o.id) && termsTo(wsN.pid) === 1,
       'a leave AFTER the first touch (its wrapper outlived its SIGTERM): Diagnostics says its card is already gone (its program proven ended first) and that the socket and what holds it stay', nl);
+    // (o) THE MASTERS LAW (主开发 r5523): the retire signals ONLY the master this session started — its wrapper's PARENT, read while that
+    // wrapper reads `same` by its recorded birth; every other listed holder is left, said by its number and name. Four scenes and their reds side by side
+    // (eight at once), each on stand-ins the leg spawned and holds; each with its computed red (TODAY: the loop that took every listed holder it could read)
+    const TODAY = copy("        if (own && pid === own.pid) { masters.push({ what: `its socket's master (pid ${pid})`, ident: own }); continue; }\n        if (await procGone(pid)) continue;\n        return leave(`its socket is also held by pid ${pid} (${await commOf(pid)}), which this hub cannot prove it started (only the parent of this session's own wrapper is) — nothing signalled`);\n",
+      "        const ident = PIB.identityOf(pid);   /* RED: today's loop — every listed holder it can read */\n        if (ident) masters.push({ what: `its socket's master (pid ${pid})`, ident });\n        else if (!(await procGone(pid))) return leave(`its socket's holder ${pid} could not be proven (its birth not read)`);\n", 'masters-today');
+    const NO_PROOF = copy("          if (pp > 1 && pp !== process.pid && PIB.tokenVerdict(Number(w.pid), w.pidStart, typeof w.pidBoot === 'string' ? w.pidBoot : '') === 'same') own = PIB.identityOf(pp);\n", "          /* RED: the parent never proven */\n", 'masters-no-proof');
+    const STRANGER = /its socket is also held by pid (\d+) \((\w[\w.-]*)\), which this hub cannot prove it started/;
+    const ppid0 = PIt.ppidOf, noParent = new Set();   // ONE patch for every scene at once: the parent of these wrappers cannot be read
+    const scene = async (BRm, kind) => {
+      const S = await session(), other = kind === 'other-hub' || kind === 'descendant' ? live(kind === 'other-hub' ? 'vs-births-other-hub-master' : 'vs-births-left-open') : null;
+      const p = pair(BRm, { ...wrapRec(S.w), ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
+      holders(p.o.sock, kind === 'own' || kind === 'no-parent' ? [S.m.pid] : kind === 'other-hub' ? [other.pid] : [S.m.pid, other.pid]);
+      if (kind === 'no-parent') noParent.add(S.w.pid);
+      await boot(p); await until(() => !fs.existsSync(p.o.meta) || said(p.o.sock).length > 0, 3000);
+      await sleep(2 * 300);   // THE SETTLE (r5523: «the stranger's life judged … after a settle»): twice this instance's retire bound, so a late signal would have come
+      return { S, other, p, words: said(p.o.sock)[0] || '', retired: !fs.existsSync(p.o.meta), mTerms: termsTo(S.m.pid), wTerms: termsTo(S.w.pid), oTerms: other ? termsTo(other.pid) : 0 };
+    };
+    PIt.ppidOf = (pid, o) => (noParent.has(Number(pid)) ? null : ppid0(pid, o));
+    let o1, o2, o3, o4, r1, r2, r3, r4;
+    try { [o1, o2, o3, o4, r1, r2, r3, r4] = await Promise.all([scene(BR, 'own'), scene(BR, 'other-hub'), scene(BR, 'descendant'), scene(BR, 'no-parent'), scene(NO_PROOF, 'own'), scene(TODAY, 'other-hub'), scene(TODAY, 'descendant'), scene(TODAY, 'no-parent')]); } finally { PIt.ppidOf = ppid0; }
+    ok(o1.retired && o1.wTerms === 1 && o1.mTerms === 1 && !fs.existsSync(o1.p.o.sockPath) && !o1.words,
+      '(o1) this session\'s OWN master — its wrapper\'s parent, proven by the wrapper\'s birth — is ended after its wrapper; the socket, files and meta go', o1.words);
+    const x2 = STRANGER.exec(o2.words);
+    ok(!o2.retired && x2 !== null && Number(x2[1]) === o2.other.pid && x2[2] === 'sleep' && o2.oTerms === 0 && o2.wTerms === 0 && o2.mTerms === 0 && fs.existsSync(o2.p.o.sockPath) && o2.p.X.activeSessions.has(o2.p.o.id),
+      '(o2) ANOTHER HUB\'s MASTER on the same sockets folder is NOT signalled: nothing of the pair touched, the socket left, said once by its number and name, the card kept', o2.words);
+    ok(alive(o2.other.pid), '(o2) …and that stranger still LIVES after the settle (judged on its own, outside every other condition)');
+    const x3 = STRANGER.exec(o3.words);
+    ok(!o3.retired && x3 !== null && Number(x3[1]) === o3.other.pid && o3.oTerms === 0 && o3.mTerms === 0 && o3.wTerms === 0 && alive(o3.other.pid),
+      '(o3) a holder of a listener LEFT OPEN ACROSS exec (a background job of the session, re-parented once its program ended) is NOT signalled — nor the session\'s own master beside it: all left, said', o3.words);
+    ok(!o4.retired && STRANGER.test(o4.words) && o4.mTerms === 0 && o4.wTerms === 0 && fs.existsSync(o4.p.o.sockPath),
+      '(o4) a wrapper whose PARENT cannot be read proves no master: nothing signalled, the socket left, said once', o4.words);
+    ok(!r1.retired && r1.mTerms === 0 && STRANGER.test(r1.words), 'RED (o1): a copy that never proves the parent leaves this session\'s own master too — the green\'s ending is the proof\'s', r1.words);
+    ok(r2.oTerms === 1, 'RED (o2): today\'s loop SIGTERMs another hub\'s live master — any listed holder it can read', { oTerms: r2.oTerms });
+    ok(r3.oTerms === 1, 'RED (o3): today\'s loop SIGTERMs a process holding a listener left open across exec', { oTerms: r3.oTerms });
+    ok(r4.mTerms === 1, 'RED (o4): today\'s loop SIGTERMs a holder although the wrapper\'s parent was never read', { mTerms: r4.mTerms });
     // (g) THE HUB'S OWN ATTACH: on the re-probe's road its session is unadopted FIRST, then its pty ended by its own handle
     const order = (BRm, tag) => async () => {
       const lv = live();
       const g1 = pair(BRm, { childPid: lv.pid }, { ...wrapRec(live()), ...childRec(live()) });   // the older's number still there: undecided at the boot
-      master(); await boot(g1);
+      await boot(g1); mode(`fuser-${g1.o.sock}`, 'dead');   // the older keeps no wrapper birth: nobody listed at its retire (the masters law leaves any holder)
       const steps = [], s = g1.X.activeSessions.get(g1.o.id);
       if (s) s.pty = { kill: () => steps.push(g1.X.activeSessions.get(g1.o.id) === s ? 'killed while adopted' : 'killed after its unadopt') };
       try { lv.kill('SIGKILL'); } catch { }   // by its handle

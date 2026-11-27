@@ -333,6 +333,8 @@ async function childVerdict(w, v) {
 /** the kernel's own word that a path names nothing: ENOENT — any other failure proves nothing (procGone: /proc/<pid>) */
 async function pathGone(p) { try { await fs.promises.access(p); return false; } catch (e) { return !!e && e.code === 'ENOENT'; } }
 async function procGone(pid) { return pathGone('/proc/' + pid); }
+/** A listed holder's program name, for the words of a leave (r5523: «with the holder's number and program name») — never a decision. */
+async function commOf(pid) { try { return String(await fs.promises.readFile(`/proc/${Number(pid)}/comm`, 'utf-8')).trim().slice(0, 40) || 'no name'; } catch { return 'its name not read'; } }
 /** a held program proven GONE: its birth read and not its own (recycled), a zombie, or no such process by the kernel's word */
 async function heldGone(ident) { const v = PIB.judge(ident).verdict; if (v === 'same') return false; if (v === 'pid-recycled' || v === 'zombie') return true; if (v === 'gone') return procGone(ident.pid); return false; }
 /** L3: of a LOCAL pair (rows: {sockFile, createdAt, program}), every member PROVEN DEAD retires — unless all are, then all but the
@@ -702,8 +704,12 @@ function locateOrDrop(sockFile, file, meta, id) {
  *  A PATTERN, AND THE SOCKET LEAVES LAST (L1, L2). The release SIGTERMed every pid a `pgrep -f <socket path>` named (the hub's own attach,
  *  a person's own `dtach -a`, any tool naming the path) and removed the socket before its answer. Now, in this order:
  *   (a) its HELD programs: the socket's own master — `fuser <that socket>`, the kernel's answer for THAT one file (its listener; an
- *       attach to it is not in that answer), each pid's birth read at once — and its wrapper, by the side file's pid + pidStart where
- *       the wrapper keeps one (a number with no birth is never signalled); the hub's own attach of an adopted loser by its own pty handle;
+ *       attach to it is not in that answer) — signalled ONLY when it is the master THIS SESSION started (主开发 r5523): the PARENT of
+ *       the session's own wrapper, read while that wrapper reads `same` by its recorded birth, the master's birth read then; ANY OTHER
+ *       listed holder (another hub's master on a shared sockets folder, a descendant holding a listener left open across exec, the
+ *       master of a wrapper with no birth or an unread parent) LEAVES everything, said with its number and name — and its wrapper, by
+ *       the side file's pid + pidStart where the wrapper keeps one (a number with no birth is never signalled); the hub's own attach of
+ *       an adopted loser by its own pty handle;
  *   (b) SIGTERM each still proven that very process (proc-identity signalIdentity reads its birth again right before the signal) — the
  *       WRAPPER first, the master only once the wrapper is gone (a dtach master removes its own socket as it ends);
  *   (c) the kernel's word that each is gone (a recycled birth, a zombie, or ENOENT — a read that failed proves nothing), waited for at
@@ -746,10 +752,18 @@ async function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = 
     try { w = JSON.parse(await fs.promises.readFile(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')); }
     catch (e) { if (!(e && e.code === 'ENOENT')) return leave(`its record could not be read (${(e && (e.code || e.name)) || 'unreadable'})`); }
     const wrapper = [], watched = [];
+    let own = null;   // the master THIS SESSION started — its wrapper's parent, proven below; no proof = no master signalled
     if (w && Number(w.pid) > 1 && Number(w.pid) !== process.pid) {
       if (typeof w.pidStart === 'string' && w.pidStart) {
         const v = PIB.tokenVerdict(Number(w.pid), w.pidStart, typeof w.pidBoot === 'string' ? w.pidBoot : '');
-        if (v === 'same') wrapper.push({ what: `its wrapper (pid ${w.pid})`, ident: PIB.identityFromToken(Number(w.pid), w.pidStart, w.pidBoot) });
+        if (v === 'same') {
+          wrapper.push({ what: `its wrapper (pid ${w.pid})`, ident: PIB.identityFromToken(Number(w.pid), w.pidStart, w.pidBoot) });
+          // THE MASTER THIS SESSION STARTED (主开发 r5523 — the kill law has no «usually»): a dtach master forks its program, so this
+          // session's master is its wrapper's PARENT — read while that wrapper reads `same` by its recorded birth (judged again after the
+          // read, so the parent is that very process's); the master's own birth read at that moment, judged again at the signal
+          const pp = PIB.ppidOf(Number(w.pid));
+          if (pp > 1 && pp !== process.pid && PIB.tokenVerdict(Number(w.pid), w.pidStart, typeof w.pidBoot === 'string' ? w.pidBoot : '') === 'same') own = PIB.identityOf(pp);
+        }
         // its round's find: a birth that is not `same` proves the wrapper ENDED only as programOf reads it — recycled, a zombie, or the
         // kernel's ENOENT; any other answer (a failed read, unknown) LEAVES everything
         else if (!(v === 'pid-recycled' || v === 'zombie' || (v === 'gone' && (await procGone(Number(w.pid)))))) return leave(`its wrapper (pid ${w.pid}) is neither proven its own nor proven ended (${v})`);
@@ -761,9 +775,10 @@ async function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = 
     if (f && f.code === 0) {
       for (const t of String(f.out).match(/\d+/g) || []) {
         const pid = Number(t); if (!(pid > 1) || pid === process.pid || wrapper.some((x) => x.ident.pid === pid)) continue;
-        const ident = PIB.identityOf(pid);
-        if (ident) masters.push({ what: `its socket's master (pid ${pid})`, ident });
-        else if (!(await procGone(pid))) return leave(`its socket's holder ${pid} could not be proven (its birth not read)`);
+        // ONLY THE MASTER THIS SESSION STARTED is signalled; any other holder still there is NOT — everything is left, said by its number and name
+        if (own && pid === own.pid) { masters.push({ what: `its socket's master (pid ${pid})`, ident: own }); continue; }
+        if (await procGone(pid)) continue;
+        return leave(`its socket is also held by pid ${pid} (${await commOf(pid)}), which this hub cannot prove it started (only the parent of this session's own wrapper is) — nothing signalled`);
       }
     } else if (f && f.code === 1) {
       // exit 1 with nothing SAID = nobody holds it (runChild's `stderr` is the program's own; its `err` falls back to «Command failed»);

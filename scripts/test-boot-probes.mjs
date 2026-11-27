@@ -23,11 +23,11 @@
 //   ③d A PAIR IS DECIDED BY EACH SOCKET'S OWN PROGRAM, NOTHING IS SIGNALLED BY A PATTERN, THE SOCKET LEAVES LAST (B-b2d3 step 2,
 //     主开发 r5028 / r5032): (a) the kernel's answer for one socket's file (the REAL fuser over a real socket of the leg's own) names
 //     its listener, never a person's attach or the hub's own; (b) one proven dead retires by its held records only (its master by the
-//     fuser answer's birth, its wrapper by pid + birth), a person's attach untouched, the socket after both are gone; (b2) the wrapper
+//     fuser answer's birth — the master this session started, its wrapper's parent (r5523) — its wrapper by pid + birth), a person's attach untouched, the socket after both are gone; (b2) the wrapper
 //     first: one that outlives its signal by the bound leaves the master unsignalled and the socket in place; (c) a master past
 //     the bound is LEFT with its socket, one signal only; (d) a second start over that folder meets the dead-socket road; (e) both alive
 //     ⇒ both kept, said once as a pair by their names; (f) both dead ⇒ the newer kept; (g) a number with no birth: still there = kept and
-//     asked again, gone = retired; (h) a pair proven alive at a later pass is decided, said once, never asked again. REDs: the
+//     asked again, gone = its program ended but no master proven: its holder left and said (r5523); (h) a pair proven alive at a later pass is decided, said once, never asked again. REDs: the
 //     release's retire (its pattern SIGTERMs the person's attach; it removes the socket before an answer), its decision (the newer
 //     always wins: a living older one ended), and a retire that signals the wrapper and the master at once (the master ended first).
 //   ④ THE CENSUS: src/server/boot-restore.js holds no sync child (execFileSync / spawnSync / execSync) — a planted one is RED.
@@ -60,11 +60,13 @@ const settledBy = (p, ms) => Promise.race([p.then((v) => ({ v })), sleep(ms).the
 const until = async (fn, ms) => { const end = Date.now() + ms; while (!fn() && Date.now() < end) await sleep(25); return fn(); };
 
 const kids = [];
+const SESS = [];   // [pid, start] of each session's wrapper stand-in (a grandchild, read from its master's children list): swept at exit only while its birth reads the same
 let PIDS = null; // every hanging fake appends its pid: the exit sweep ends what a bound has not — registered BEFORE scratch(), whose own exit hook removes the root (and this file) first otherwise
 process.on('exit', () => {
   let pids = []; try { pids = fs.readFileSync(PIDS, 'utf8').split('\n').map((l) => Number(l.split(' ')[0])).filter((n) => n > 1); } catch { }
   const isOurs = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').startsWith('sleep\u0000'); } catch { return false; } }; // still the fake's sleep (a recorded pid is never trusted blind)
   for (const pid of [...pids, ...kids.map((k) => k.pid)]) if (isOurs(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+  try { for (const [pid, st] of SESS) if (st && PIt.startToken(pid) === st) { try { process.kill(pid, 'SIGKILL'); } catch { } } } catch { }
 });
 const ROOT = scratch('boot-probes');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(path.join(ROOT, 'bin'), { recursive: true });
@@ -79,7 +81,7 @@ mode(null, 'hang');
 process.env.PATH = path.join(ROOT, 'bin') + ':' + process.env.PATH;
 process.env.VIBESPACE_PROBE_CAP_MS = '1500';
 const CAP = 1500;
-const victim = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(victim); // the "dtach husk" a duplicate's retire SIGTERMs (the fake pgrep names it)
+const victim = spawn('sh', ['-c', 'sleep 60 & exec sleep 61'], { stdio: 'ignore' }); kids.push(victim); // the "dtach husk" a duplicate's retire SIGTERMs (the fake pgrep names it) — its wrapper's PARENT (r5523: only that master is signalled)
 fs.writeFileSync(path.join(ROOT, 'alive-pid'), String(victim.pid));
 
 const TLS = require(path.join(REPO, 'src/server/tls.js'));
@@ -127,6 +129,16 @@ function instance(BRm, d, { onAttach = null, retireWaitMs = 1000 } = {}) {   // 
 // B-b2d3 step 2: a pair member's PROGRAM as its wrapper's side file records it — `liveChild()` a sleep of ours with its real birth
 // (alive), `deadChild()` the same number with a birth that is not its own (pid-recycled = proven dead); `programAs(x, rec)` writes it
 const PIt = require(path.join(REPO, 'src/proc-identity.js'));
+const kidsOfP = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).map(Number).filter((n) => n > 1); } catch { return []; } };
+const cmdOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'); } catch { return ''; } };
+// A SESSION's stand-ins (主开发 r5523: the retire signals only the master THIS session started — its wrapper's parent): `sh` forks the wrapper
+// stand-in and execs into the master; the wrapper's birth read only while the kernel lists it as that held master's child
+const wrapperOfMaster = async (m) => { await until(() => kidsOfP(m.pid).length > 0 && cmdOf(m.pid).startsWith('sleep\u000061'), 3000); const w = kidsOfP(m.pid)[0] || 0, st = PIt.startToken(w); SESS.push([w, st]); return { w, rec: { pid: w, pidStart: st, pidBoot: PIt.bootToken() } }; };
+const sessionOf = async ({ deafWrapper = false, deafMaster = false } = {}) => {
+  const m = spawn('sh', ['-c', `${deafWrapper ? '(trap "" TERM; exec sleep 60)' : 'sleep 60'} & ${deafMaster ? 'trap "" TERM; ' : ''}exec sleep 61`], { stdio: 'ignore' }); kids.push(m);
+  const r = await wrapperOfMaster(m); fs.writeFileSync(path.join(ROOT, 'alive-pid'), String(m.pid));   // the fake fuser names this master
+  return { m, ...r };
+};
 const liveChild = () => { const v = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(v); return { childPid: v.pid, childStart: PIt.startToken(v.pid), childBoot: PIt.bootToken(), proc: v }; };
 const deadChild = () => { const v = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(v); return { childPid: v.pid, childStart: 'l1', childBoot: PIt.bootToken(), proc: v }; };
 const PAIR_WORDS = "two cards of one conversation: «claude older» and «claude newer» — both kept: each one's program runs or is not proven ended, and none is ended because of a pair; end the one you meant";   // B-b2d3 step 2: a kept pair's ONE sentence, by its cards' names (word (b))
@@ -222,7 +234,8 @@ try {
     // the fakes answer now: one alive, one dead, one still mute (fuser says nobody, pgrep never answers); the pair's sockets
     // alive, the older's program proven ended by its side file (B-b2d3 step 2) ⇒ it retires
     mode(live.sock, 'alive'); mode(dead.sock, 'dead'); mode(`fuser-${mute.sock}`, 'dead'); mode(dOld.sock, 'alive'); mode(dNew.sock, 'alive');
-    programAs(dOld, deadChild()); programAs(dNew, liveChild());   // B-b2d3 step 2: the older's program proven ended (its birth not its own), the newer's alive
+    const vw = await wrapperOfMaster(victim);   // r5523: the husk's own wrapper on record — its parent proven, the husk is this session's master
+    programAs(dOld, { ...deadChild(), ...vw.rec }); programAs(dNew, liveChild());   // B-b2d3 step 2: the older's program proven ended (its birth not its own), the newer's alive
     const b0 = R.broadcasts.n;
     const r = await logged(async () => R.api.reprobePending());
     const tally = r.r;
@@ -233,7 +246,7 @@ try {
     await until(() => !alive(victim.pid), 2 * TLS.KILL_AFTER_MS);
     ok(!fs.existsSync(dOld.sockPath) && !fs.existsSync(dOld.meta) && !fs.existsSync(dOld.buf) && !R.activeSessions.has(dOld.id) && r.lines.some((l) => l.includes(`⤫ Duplicate of ${cid} — retiring stale ${dOld.sock}`))
       && signals.some(([pid, sig]) => pid === victim.pid && sig === 'SIGTERM') && !alive(victim.pid),
-      'the older duplicate (its program proven ended) ⇒ the boot\'s own duplicate retire: SIGTERM to its socket\'s master — the fuser answer\'s pid, by its birth (the husk is gone) — then socket + buffer + meta', { signals });
+      'the older duplicate (its program proven ended) ⇒ the boot\'s own duplicate retire: SIGTERM to its wrapper, then to its socket\'s master — the fuser answer\'s pid, proven this session\'s by its wrapper\'s parent, by its birth (the husk is gone) — then socket + buffer + meta', { signals });
     await until(() => !fs.existsSync(dOldRcpt), 3000);   // its removal is the wrapper files' own async rm (B-b2d3 step 2: the retire's end now comes before the husk's wait ends)
     ok(!fs.existsSync(dOldRcpt), '…and its <id>.receipts with them (lane human-cli r5: THE ONE LIST of a wrapper\'s files — round 4 left this end path\'s to the 7-day sweep)');
     ok(R.activeSessions.has(live.id) && R.activeSessions.has(dNew.id) && R.activeSessions.has(mute.id) && [live, dNew, mute].every((x) => fs.existsSync(x.sockPath)), 'the alive, the winner and the still-mute session stay adopted, their sockets in place');
@@ -279,7 +292,8 @@ try {
     const CPm = require('child_process'), realCpSpawn = CPm.ChildProcess.prototype.spawn, direct = [];
     CPm.ChildProcess.prototype.spawn = function (o) { direct.push(path.basename(String((o && o.file) || ''))); return realCpSpawn.call(this, o); };   // every async start of this process (spawn / execFile) passes here
     const tools = (l) => l.filter((b) => b === 'fuser' || b === 'pgrep' || b === 'sh').sort().join(' ');
-    const husk = () => { const v = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(v); fs.writeFileSync(path.join(ROOT, 'alive-pid'), String(v.pid)); return v; };   // a duplicate's husk of our own for the fake pgrep to name
+    // a duplicate's husk of our own for the fake fuser / pgrep to name — a SESSION's master (r5523): its wrapper's parent, the wrapper on the older's record
+    const husk = async (x) => { const h = await sessionOf(); programAs(x, h.rec); return h.m; };
     const pend = (c) => [...c.X.api.probePending()].map(([f, q]) => q.join()).sort().join(' ');
     const line = (c) => String(c.X.notes.filter((l) => String(l).startsWith('re-probe ')).at(-1) || '').replace(/^re-probe \d\/5/, 're-probe k/5');
     try {
@@ -322,7 +336,7 @@ try {
       ok(tipT.r.dead.slice().sort().join() === [TIP3.over.sock, TIP3.rej.sock, TIP3.noexit.sock].sort().join() && ![TIP3.over, TIP3.rej, TIP3.noexit].some((x) => fs.existsSync(x.sockPath)),
         `RED: the tip's reading through runViaStarter's table — an output past the buffer, a run that rejects, an end with no number and no signal each read as «nobody owns it»: ${tipT.r.dead.length} sockets retired as dead`, tipT.r);
       // (b) THE STARTER ANSWERS — every question asked of it, none started from this process; their bounds, buffer and PATH as runChild's
-      const v = husk(), q0 = rec.length, d1 = direct.length;
+      const v = await husk(M3.dOld), q0 = rec.length, d1 = direct.length;
       const b = await logged(async () => M3.X.api.reprobePending());
       await until(() => !alive(v.pid), 3000);
       const asked3 = rec.slice(q0);
@@ -331,12 +345,12 @@ try {
         'THE BOUND, THE BUFFER AND THE ENV each hands: fuser / pgrep 2 s, runChild\'s 4 MiB, the hub\'s PATH of the moment and no other name', asked3.map((x) => ({ cmd: x.cmd, o: x.o })));
       ok(b.r.alive.sort().join() === [M3.up.sock, M3.dNew.sock].sort().join() && b.r.dead.join() === M3.gone.sock && b.r.duplicate.join() === M3.dOld.sock && !b.r.open.length
         && !fs.existsSync(M3.gone.sockPath) && !fs.existsSync(M3.dOld.sockPath) && signals.some(([pid, sig]) => pid === v.pid && sig === 'SIGTERM') && !alive(v.pid),
-        `…with the release's answers: alive ${b.r.alive.join(' ')} · dead ${b.r.dead.join(' ')} · the older duplicate retired (its program proven ended), its socket's master SIGTERMed by its birth`, b.r);
+        `…with the release's answers: alive ${b.r.alive.join(' ')} · dead ${b.r.dead.join(' ')} · the older duplicate retired (its program proven ended), its wrapper and then its socket's master — the wrapper's proven parent — SIGTERMed by their births`, b.r);
       // (c) RED: a copy whose re-probe runner is the release's (runChild)
       const O3 = C3.old;
       mode(O3.up.sock, 'alive'); mode(O3.gone.sock, 'dead'); mode(O3.dOld.sock, 'alive'); mode(O3.dNew.sock, 'alive');
       programAs(O3.dOld, deadChild()); programAs(O3.dNew, liveChild());
-      const v2 = husk(), q1 = rec.length, d2 = direct.length;
+      const v2 = await husk(O3.dOld), q1 = rec.length, d2 = direct.length;
       const o = await logged(async () => O3.X.api.reprobePending());
       await until(() => !alive(v2.pid), 3000);
       ok(tools(direct.slice(d2)) === 'fuser fuser fuser fuser fuser pgrep' && rec.length === q1 && o.r.duplicate.join() === O3.dOld.sock && o.r.dead.join() === O3.gone.sock,
@@ -400,8 +414,8 @@ try {
       // after the kernel says both are gone. RED: the release's retire SIGTERMs the person's attach (its pgrep matched the path)
       const personSock = path.join(ROOT, 'b2d3s2-dead', 'sockets', `cw-141-${1760480000000 + 141 * 1000}`);   // the older socket's path (add()'s naming): the command line a `pgrep -f` matches — its round's should: the leg says what it tests
       const person = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e5)', 'vs-person-attach', personSock], { stdio: 'ignore' }); kids.push(person);
-      const m1 = master(), wr = liveChild();
-      const b1 = await boot(BR, 'b2d3s2-dead', (X) => { const p = pairOf(X, 141, deadChild(), liveChild()); programAs(p.older, { pid: wr.childPid, pidStart: wr.childStart, pidBoot: wr.childBoot }); return p; });
+      const s1 = await sessionOf(), m1 = s1.m, wr = { childPid: s1.w };
+      const b1 = await boot(BR, 'b2d3s2-dead', (X) => { const p = pairOf(X, 141, deadChild(), liveChild()); programAs(p.older, s1.rec); return p; });
       await until(() => !fs.existsSync(b1.p.older.sockPath), 6000);
       ok(termsTo(m1.pid) === 1 && termsTo(wr.childPid) === 1 && !alive(m1.pid) && !alive(wr.childPid) && termsTo(person.pid) === 0 && alive(person.pid)
         && !fs.existsSync(b1.p.older.sockPath) && !fs.existsSync(b1.p.older.meta) && !b1.X.activeSessions.has(b1.p.older.id) && b1.X.activeSessions.has(b1.p.newer.id),
@@ -414,23 +428,21 @@ try {
       // master UNSIGNALLED — a dtach master removes its own socket as it ends — and the socket, files and meta in place, said once.
       // RED: a copy that signals the wrapper and the master at once ends the master while the wrapper still runs
       const wrapperOf = () => { const v = spawn('sh', ['-c', 'trap "" TERM; exec sleep 60'], { stdio: 'ignore' }); kids.push(v); return v; };   // a wrapper that does not end on SIGTERM (not on the fake fuser's answer)
-      const sw = wrapperOf(); await sleep(30);
-      const mw = master();
-      const bw = await boot(BR, 'b2d3s2-wrapper-first', (X) => { const p = pairOf(X, 145, deadChild(), liveChild()); programAs(p.older, { pid: sw.pid, pidStart: PIt.startToken(sw.pid), pidBoot: PIt.bootToken() }); return p; }, { retireWaitMs: 300 });
+      const sb = await sessionOf({ deafWrapper: true }), sw = { pid: sb.w }, mw = sb.m;
+      const bw = await boot(BR, 'b2d3s2-wrapper-first', (X) => { const p = pairOf(X, 145, deadChild(), liveChild()); programAs(p.older, sb.rec); return p; }, { retireWaitMs: 300 });
       await until(() => leftSaid(bw.p.older.sock, bw.lines) > 0, 4000);   // the retire's own word that it left everything (past its 0.3 s bound)
       ok(leftSaid(bw.p.older.sock, bw.lines) === 1 && termsTo(sw.pid) === 1 && alive(sw.pid) && termsTo(mw.pid) === 0 && alive(mw.pid) && fs.existsSync(bw.p.older.sockPath) && fs.existsSync(bw.p.older.meta) && fs.existsSync(bw.p.older.buf),
         'THE WRAPPER FIRST: a wrapper still there past the bound leaves its socket\'s master unsignalled and the socket, files and meta in place — one SIGTERM, to the wrapper only, said once', { wrapper: termsTo(sw.pid), master: termsTo(mw.pid), said: warned.filter((l) => l.includes(bw.p.older.sock)) });
-      const sw2 = wrapperOf(); await sleep(30);
-      const mw2 = master();
-      await boot(BOTHNOW, 'b2d3s2-red-both-at-once', (X) => { const p = pairOf(X, 147, deadChild(), liveChild()); programAs(p.older, { pid: sw2.pid, pidStart: PIt.startToken(sw2.pid), pidBoot: PIt.bootToken() }); return p; }, { retireWaitMs: 300 });
+      const sb2 = await sessionOf({ deafWrapper: true }), sw2 = { pid: sb2.w }, mw2 = sb2.m;
+      await boot(BOTHNOW, 'b2d3s2-red-both-at-once', (X) => { const p = pairOf(X, 147, deadChild(), liveChild()); programAs(p.older, sb2.rec); return p; }, { retireWaitMs: 300 });
       await until(() => signals.some(([q]) => q === mw2.pid), 3000);
       ok(termsTo(mw2.pid) === 1 && alive(sw2.pid), `RED: a retire that signals both at once ends the master (${termsTo(mw2.pid)}) while the wrapper still runs`);
-      for (const k of [sw, mw, sw2, mw2]) { try { k.kill('SIGKILL'); } catch { } }
+      for (const k of [mw, mw2]) { try { k.kill('SIGKILL'); } catch { } }   // the masters by their handles; their deaf wrappers by the exit sweep (by birth)
       // (c) THE SOCKET LEAVES LAST, THE BOUND SAID: a master that outlives its SIGTERM by the bound (here 300 ms) is LEFT — its socket,
       // files and meta in place, no second signal, said once; then (d) the hub ended between (the master gone at last, a second start
       // over the same folder) meets the dead-socket road, nothing signalled twice. RED: the release removes the socket before an answer
-      const m2 = stubborn();
-      const c1 = await boot(BR, 'b2d3s2-stubborn', (X) => pairOf(X, 151, deadChild(), liveChild()), { retireWaitMs: 300 });
+      const sc = await sessionOf({ deafMaster: true }), m2 = sc.m;
+      const c1 = await boot(BR, 'b2d3s2-stubborn', (X) => { const p = pairOf(X, 151, deadChild(), liveChild()); programAs(p.older, sc.rec); return p; }, { retireWaitMs: 300 });
       await until(() => leftSaid(c1.p.older.sock, c1.lines) > 0, 4000);   // the retire's own word that it left everything (past its 0.3 s bound)
       ok(leftSaid(c1.p.older.sock, c1.lines) === 1 && termsTo(m2.pid) === 1 && alive(m2.pid) && fs.existsSync(c1.p.older.sockPath) && fs.existsSync(c1.p.older.meta) && fs.existsSync(c1.p.older.buf),
         'THE SOCKET LEAVES LAST: a master still there past the bound (0.3 s here, 5 s in the hub) is LEFT — socket, files and meta in place, ONE SIGTERM, no stronger signal, said once', { terms: termsTo(m2.pid), alive: alive(m2.pid), said: warned.filter((l) => l.includes(c1.p.older.sock)) });
@@ -453,13 +465,13 @@ try {
         && e1.X.notes.filter((l) => l === PAIR_WORDS).length === 1
         && !e1.X.api.probePending().has(e1.p.older.sock),
         'BOTH ALIVE ⇒ BOTH KEPT: two cards of one conversation, said ONCE in Diagnostics by their names (never a path), nothing signalled, nothing left to ask', e1.X.notes);
-      const m4 = master();
-      const e2 = await boot(OLDDEC, 'b2d3s2-red-newer', (X) => pairOf(X, 163, liveChild(), liveChild()));
+      const se = await sessionOf(), m4 = se.m;
+      const e2 = await boot(OLDDEC, 'b2d3s2-red-newer', (X) => { const p = pairOf(X, 163, liveChild(), liveChild()); programAs(p.older, se.rec); return p; });
       await until(() => !fs.existsSync(e2.p.older.sockPath), 6000);
       ok(!e2.X.activeSessions.has(e2.p.older.id) && termsTo(m4.pid) === 1, 'RED: the release\'s decision — the newer always wins: the LIVING older one retired, its master SIGTERMed', e2.lines.filter((l) => /Duplicate/.test(l)));
       // (f) BOTH DEAD ⇒ THE NEWER KEPT (the release's rule)
-      const m5 = master();
-      const f1 = await boot(BR, 'b2d3s2-both-dead', (X) => pairOf(X, 171, deadChild(), deadChild()));
+      const sf = await sessionOf();
+      const f1 = await boot(BR, 'b2d3s2-both-dead', (X) => { const p = pairOf(X, 171, deadChild(), deadChild()); programAs(p.older, sf.rec); return p; });
       await until(() => !fs.existsSync(f1.p.older.sockPath), 6000);
       ok(!fs.existsSync(f1.p.older.sockPath) && fs.existsSync(f1.p.newer.sockPath) && f1.X.activeSessions.has(f1.p.newer.id), 'BOTH PROVEN DEAD ⇒ the newer kept, the older retired (the release\'s rule)', f1.lines.filter((l) => /Duplicate/.test(l)));
       // (g) A WRAPPER THAT KEEPS NO BIRTH (a terminal's pty-wrapper): its child's number still there = NOT PROVEN — the pair is kept and
@@ -471,8 +483,10 @@ try {
       for (const x of [g1.p.older, g1.p.newer]) mode('pgrep-' + x.sock, 'dead');
       const m6 = master();
       const g2 = await boot(BR, 'b2d3s2-no-birth-gone', (X) => pairOf(X, 183, { childPid: gone }, liveChild()));
-      await until(() => !fs.existsSync(g2.p.older.sockPath), 6000);
-      ok(!fs.existsSync(g2.p.older.sockPath) && g2.X.activeSessions.has(g2.p.newer.id), 'A NUMBER WITH NO BIRTH, GONE: proven ended ⇒ retired (its master by its birth)', g2.lines.filter((l) => /Duplicate/.test(l)));
+      await until(() => leftSaid(g2.p.older.sock, g2.lines) > 0, 6000);
+      const g2w = [...g2.lines, ...warned].filter((l) => l.includes(`] ${g2.p.older.sock}: not retired — `));
+      ok(g2w.length === 1 && /its socket is also held by pid \d+ \(sleep\), which this hub cannot prove it started/.test(g2w[0]) && termsTo(m6.pid) === 0 && alive(m6.pid) && fs.existsSync(g2.p.older.sockPath) && g2.X.activeSessions.has(g2.p.newer.id),
+        'A NUMBER WITH NO BIRTH, GONE: its program proven ended — but a record with no wrapper birth proves no master (主开发 r5523): its socket\'s holder LEFT, never signalled, said once by its number and name; the pair waits', g2w);
       // (h) THE RE-PROBE with a pair proven alive at a later pass: decided, said once, never asked again
       const h1 = await boot(BR, 'b2d3s2-later', (X) => pairOf(X, 191, { childPid: liveChild().childPid }, liveChild()));
       const hl = h1.X.notes.length;
