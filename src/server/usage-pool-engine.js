@@ -4187,6 +4187,24 @@ function linkHold(session, scope, model, v, at) {
   const lv = on && on !== v.viaId ? quotaVerdictFor(scope, { model, session, now: at, only: on }) : null;
   return lv && lv.usable === false ? lv : null;
 }
+/** B-9a24 U1 follow (主开发 r5474 (1), r5505 (1)–(3)): A TEST THAT CAN BILL PROVES NOTHING — this press's paying verdict on `key`, by the spend
+ *  authorizer's one reader (overageState; neither guard file changes), asked BEFORE the door (claimPressTest) and AGAIN inside the gate
+ *  after its wait (claimGate). → null (the test may go: overage stated not in use, or the vendor's record says overage is rejected /
+ *  disabled for this account — it cannot bill) | { code, why }: 'overage-in-use' · 'overage-allowed' (extra usage on, not in use yet:
+ *  past the limit a turn is PAID by the vendor's rule) · 'paying-unknown' (the reading unread, the fact not stated again after damaged
+ *  bytes, or no overage state at all). WHO STATES THIS FACT: only a turn's own limit report (src/rate-limit-capture.js, the CLI's
+ *  rate_limit_event: isUsingOverage / overageStatus / overageDisabledReason); a usage read never writes it (the usage answer's money
+ *  figure is `spend`, a different field). A «no» is read at any age (the undated «no» stays: nothing refreshes it at a wall). */
+function pressPayingRefusal(key) {
+  const raw = readRawReading(key);
+  const unread = raw === usageWrite.UNREAD_READING || !raw || (typeof raw === 'object' && (raw.held === 'unread' || (typeof usageWrite.restartUnknowns === 'function' && usageWrite.restartUnknowns(raw).includes('overage'))));
+  const pay = unread ? null : overageState(raw);
+  if (pay && pay.inUse === 'yes') return { code: 'overage-in-use', why: 'the account is billing paid overage now' };
+  if (pay && pay.mode === 'allowed') return { code: 'overage-allowed', why: 'the account pays for usage past its limit (extra usage on, not in use yet)' };
+  if (pay && pay.mode === 'disabled') return null;   // the vendor's own record: overage rejected / disabled here — the account cannot bill a test
+  if (!pay || pay.inUse !== 'no') return { code: 'paying-unknown', why: `whether the account would pay for one cannot be read (${unread ? 'its reading is not read' : `overage ${pay.evidence}`})` };
+  return null;
+}
 /** B-9a24 U1 (主开发 r4778 §1.3, r5330): THE PRESS's GATE — one test of one person's mark. NO pool switch; the shared probe of THAT member
  *  (row B-5279's fence answers a refusal under Off: nothing is started); then that member's OWN verdict with the mark laid on for that one
  *  synchronous call (withClaimDoor: the store's settled view); a veto when the conversation no longer lands on that member. A veto re-arms
@@ -4197,6 +4215,8 @@ async function claimGate(id, session, { scope, model, member }) {
   await gateTurn();
   const lands = (() => { try { const f = fireIdentityFor(session); return f ? f.key : null; } catch { return null; } })();
   if (lands !== member) { console.log(`[auto-resume] ${id}: the press's test is not sent — the conversation no longer lands on the marked account`); return false; }
+  const payAgain = pressPayingRefusal(member);   // r5505 (1): READ AGAIN after the gate's wait — another conversation's limit report may have set it meanwhile
+  if (payAgain) { console.log(`[auto-resume] ${id}: the press's test is not sent — ${payAgain.why}, read again at its gate (a test could be paid for instead of showing a reset)`); return false; }
   const at = Date.now();
   const v = withClaimDoor(member, () => quotaVerdictFor(scope, { model, session, now: at, only: member }));
   if (!v || v.usable !== true) { console.log(`[auto-resume] ${id}: the press's test is not sent — the marked account cannot serve on its reading with the mark laid on (${String((v && v.reason) || 'unknown').slice(0, 200)})`); return false; }
@@ -4232,19 +4252,15 @@ function claimPressTest(key, lanes, { pressed = null } = {}) {
   }
   // ONE TEST AN ACCOUNT WHILE ONE IS IN FLIGHT (r5474 (3)): a conversation landing on `key` whose gate is still out counts as out, beside a
   // continue recorded and not answered (its bound: auto-resume's own FIRE_PENDING_MS)
+  // r5505 (4): a gate still out is said as the CHECK that is running (`checking`), never as «a continue was recorded»
+  const flying = live.filter(([, s]) => s._arFiring && lands(s) === key);
+  if (flying.length) { console.log(`[reset-claim] a person's mark: no second test — a conversation on the account is being checked now (its gate is out)`); return { code: 'checking' }; }
   const pendMs = Number(ar.firePendingMs) || 0;
-  const flying = live.filter(([, s]) => s._arFiring && lands(s) === key).map(([id]) => ({ id, at: now, until: now + pendMs }));
-  const outs = [...flying, ...((() => { try { return ar.firesOutOn?.(key, now) || []; } catch { return []; } })())];
+  const outs = (() => { try { return ar.firesOutOn?.(key, now) || []; } catch { return []; } })();
   if (outs.length) { const o = outs.reduce((x, y) => ((Number(y.at) || 0) > (Number(x.at) || 0) ? y : x)); return { code: 'out', at: Number(o.at) || now, until: Number(o.until) || (Number(o.at) || now) + pendMs }; }
-  // A TEST THAT CAN BILL PROVES NOTHING (r5474 (1)), so it is not sent — before the door, for this press only: none where the account's
-  // paid overage is IN USE (whatever the instance's overage setting), none where its paying state cannot be read (the reading unread, the
-  // overage fact not stated again after damaged bytes, or the record stating no present overage state at all). The spend authorizer's
-  // one reader (overageState) answers; neither guard file changes.
-  const payRaw = readRawReading(key);
-  const payUnread = payRaw === usageWrite.UNREAD_READING || !payRaw || (typeof payRaw === 'object' && (payRaw.held === 'unread' || (typeof usageWrite.restartUnknowns === 'function' && usageWrite.restartUnknowns(payRaw).includes('overage'))));
-  const pay = payUnread ? null : overageState(payRaw);
-  if (pay && pay.inUse === 'yes') { console.log(`[reset-claim] a person's mark: no test — the account is billing paid overage now, so a test would be paid for (it proves no reset)`); return { code: 'overage-in-use' }; }
-  if (!pay || pay.inUse !== 'no') { console.log(`[reset-claim] a person's mark: no test — whether the account would pay for one cannot be read (${payUnread ? 'its reading is not read' : `overage ${pay.evidence}`})`); return { code: 'paying-unknown' }; }
+  // A TEST THAT CAN BILL PROVES NOTHING (r5474 (1), r5505), so it is not sent — before the door, for this press only, and again at its gate
+  const payNo = pressPayingRefusal(key);
+  if (payNo) { console.log(`[reset-claim] a person's mark: no test — ${payNo.why}, so a test could be paid for instead of showing a reset`); return { code: payNo.code }; }
   const v = withClaimDoor(key, () => quotaVerdictFor(key, { now }));
   if (v && v.usable === false) { console.log(`[reset-claim] a person's mark: no test — the account is still spent on another limit with the mark laid on (${String(v.reason || '').slice(0, 160)})`); return { code: 'other-limit' }; }
   const held = [];   // the breaker's own reasons (r5474: a quarantine or the hourly cap says its own reason)
