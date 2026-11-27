@@ -23,6 +23,9 @@
 // THE ROUND's SHOULDS (r4721's round, 主开发 r4916): K3 hands out NO fresh token before it is on disk; K6 an unpaired machine's hold
 //   ends and its torn copies are shredded; K7 the link-token door answers a held token with its own wait (503 link_token_unread, the
 //   machine named, no token) and the token once it reads; I1b a batch forwarded while the id is held carries this life's id
+// 主开发 r5353 (THE VAULT's LAW: no plain copy of a sign-in outlives the moment its live file is removed): K8 a renewal's write HELD in
+//   flight (a stand-in writer thread's stall, its witness that it holds the write), the machine UNPAIRED inside that window, then the
+//   write let go: the file it lands is SHREDDED (RED on the follow's form 53a85686d: it stays). No witness ⇒ a named SKIP, never a verdict
 // Run: node scripts/test-minted-over-held.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -33,7 +36,8 @@ import { mutantCopies } from './mutant-copy.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
+const skip = (m) => { skipped++; console.log('  ⚠ SKIP: ' + m); };   // law 1 (r5135): a plant never in force is a NAMED skip
 const ok = (c, name, extra) => { if (typeof name !== 'string') throw new TypeError('ok(cond, name): the name is not a string'); if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.error('  ✗ ' + name + (extra !== undefined ? ' — ' + JSON.stringify(extra).slice(0, 900) : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // a wait on the FACT a row judges: its bound generous, its expiry a NAMED harness row (red)
@@ -242,5 +246,47 @@ console.log('THE ROUND\'s SHOULDS (r4721\'s round)');
   ok(bodies.length === 1 && bodies[0].instance === mine && mine !== ID_OLD && String(bytesOf(w.file)).trim() === ID_OLD, 'I1b a batch forwarded while the id is held carries this life\'s own id; the file keeps its id', { n: bodies.length, same: bodies[0] && bodies[0].instance === mine });
 }
 
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+{
+  // K8 (主开发 r5353) THE RENEWAL's FILE THAT LANDS AFTER AN UNPAIR IS SHREDDED
+  const SFX = require(path.join(repo, 'scripts/fixtures/store-stand-writer.cjs'));
+  const SWm = require(path.join(repo, 'src/store-writer.js')), realSW = SWm.storeWriter;
+  const ctl = path.join(ROOT, 'k8-ctl'), S = SFX.make(ctl);
+  const HOLD_LINE = "if (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, Number(fs.readFileSync(hold, 'utf8')) || 0);";
+  const stand = realRF.call(fs, S.path, 'utf8');
+  // the stall the leg OWNS: the writer thread holds THIS file's write while its hold file stands, and says it holds (the witness)
+  if (stand.split(HOLD_LINE).length === 2) fs.writeFileSync(S.path, stand.replace(HOLD_LINE, "if (fs.existsSync(hold)) { try { fs.writeFileSync(path.join(CTL, 'reached-' + b), '1'); } catch { } while (fs.existsSync(hold)) Atomics.wait(Z, 0, 0, 5); }"));
+  else ok(false, 'harness: the stand-in writer\'s hold line is not there once (scripts/fixtures/store-stand-writer.cjs moved) — K8 builds no stall');
+  const K_53A = MUT.load('src/server/host-tokens.js', anchored(K_SRC, "          if (renewing.get(hostId) !== tok) { if (ok) shredLanded(hostId, f, tok).catch(() => false); return; }   // r5353: unpaired while its write was in flight\n", "          if (renewing.get(hostId) !== tok) return;\n", 'the follow 53a85686d: a landing after an unpair is left'), 'token-53a');
+  const scene = async (Mod, tag) => {
+    const wr = SWm.create({ workerPath: S.path, log: { log() { }, warn() { }, error() { } } });
+    SWm.storeWriter = () => wr;
+    try {
+      const w = tokWorld(tag, Buffer.from('not a token\n')), base = path.basename(w.file);
+      const hold = path.join(ctl, 'hold-' + base), reached = path.join(ctl, 'reached-' + base);
+      fs.writeFileSync(hold, '1');
+      const k = w.make(Mod), at = said.length;
+      errOf(() => k.tokenFor(w.hostId));   // torn: held, its bytes kept aside, then the renewal — its write HELD in the writer thread
+      let inForce = false;
+      for (const t0 = Date.now(); Date.now() - t0 < 10000 && !inForce; await sleep(10)) inForce = fs.existsSync(reached) && w.mints() === 1;
+      if (!inForce) { try { fs.unlinkSync(hold); } catch { } return { inForce: false }; }
+      k.drop(w.hostId);   // THE UNPAIR, inside the window: the renewal's write in flight
+      const goneAtDrop = !fs.existsSync(w.file);
+      fs.unlinkSync(hold);   // the write lets go: it lands after the unpair
+      await untilFact(() => !wr.pending(w.file), `the held renewal write landed (${tag})`);
+      return { inForce, goneAtDrop, file: w.file, at, base };
+    } finally { SWm.storeWriter = realSW; try { wr.stop(); } catch { } }
+  };
+  const r = await scene(HT, 'k8');
+  if (!r.inForce) skip('K8 the renewal\'s write was never held in flight (no witness from the stand-in writer) — the scene did not form: no verdict');
+  else {
+    await untilFact(() => !fs.existsSync(r.file), 'the landed renewal\'s file shredded');
+    const line = said.slice(r.at).find((l) => /landed after its unpair/.test(l)) || '';
+    ok(r.goneAtDrop && !fs.existsSync(r.file) && /shredded/.test(line) && /Lab machine/.test(line), 'K8 a renewal\'s write held in flight, the machine UNPAIRED inside that window: the file it lands after the unpair is SHREDDED, said by the machine\'s name (never the token)', { goneAtDrop: r.goneAtDrop, left: fs.existsSync(r.file), line: line.slice(0, 120) });
+  }
+  const rr = await scene(K_53A, 'k8-red');
+  if (!rr.inForce) skip('K8 RED: the renewal\'s write was never held in flight on the follow\'s form — no verdict');
+  else ok(rr.goneAtDrop && fs.existsSync(rr.file) && /^vsht_[0-9a-f]{32}$/.test(String(bytesOf(rr.file))), 'K8 RED on the follow\'s form 53a85686d: the same scene leaves the landed renewal\'s token on disk after the unpair (a plain sign-in nobody reads or removes)', { goneAtDrop: rr.goneAtDrop, left: fs.existsSync(rr.file) });
+}
+
+console.log(fail ? `\n${fail} FAILED (${pass} passed)${skipped ? ` · ${skipped} SKIPPED` : ''}` : skipped ? `\n${skipped} SKIPPED — not a pass: what each skip names was not proven (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -93,7 +93,10 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
     log.warn?.(`[host-tokens] the link token of ${machineOf(hostId)} was torn — its bytes are kept aside as ${copyName}; a new one is written: pair the machine again`);
     try {   // THE STORE WRITER's thread writes it (whole, synced, then put in place) — never the hub's loop
       require('../store-writer.js').storeWriter().dirty(f, { name: 'host-token.write', rank: 0, mode: 0o600, makeDir: true, produce: () => (renewing.get(hostId) === tok ? tok : null),   // unpaired meanwhile: nothing written
-        onWritten: (ok, e) => { if (renewing.get(hostId) !== tok) return; if (ok) renewing.delete(hostId); else log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be written (${(e && e.code) || 'error'}) — its link stays refused, the writer tries again`); } });
+        onWritten: (ok, e) => {
+          if (renewing.get(hostId) !== tok) { if (ok) shredLanded(hostId, f, tok).catch(() => false); return; }   // r5353: unpaired while its write was in flight
+          if (ok) renewing.delete(hostId); else log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be written (${(e && e.code) || 'error'}) — its link stays refused, the writer tries again`);
+        } });
     } catch (e) { renewing.delete(hostId); log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} could not be handed to the store writer (${(e && e.code) || 'error'}) — its torn file is read again at the next link`); }
   }
   /** → 'not_set_up' | 'locked' | 'unlocked' — as THIS process sees the dir (no engine over a sealed dir = locked) */
@@ -231,6 +234,17 @@ function create({ dataDir, agentdDir = path.join(dataDir, 'agentd'), mint = () =
     if (out.length) log.log?.(`[vault] ${out.length} device link token file(s) sealed into the vault`);
     shredCopies(() => true).catch(() => 0);   // B-f276 (r4721's round): a torn token's copy is no token beside the vault — overwritten, then unlinked
     return out;
+  }
+  /** 主开发 r5353 — THE VAULT's LAW: no plain copy of a sign-in outlives the moment its live file is removed. A renewal's write still in
+   *  flight when its machine is unpaired LANDS after the unpair removed the rest: that file is SHREDDED (off the loop) — when it still
+   *  holds that renewal's token (a pairing made since keeps its own). Said once, by the machine's name, never the token. */
+  async function shredLanded(hostId, f, tok) {
+    let now = null;
+    try { now = String(await fs.promises.readFile(f, 'utf8')).trim(); } catch { return false; }
+    if (now !== tok) return false;
+    const gone = await shredFile(f).catch(() => false);
+    log.warn?.(`[host-tokens] the new link token of ${machineOf(hostId)} landed after its unpair — ${gone ? 'shredded' : 'it could not be shredded'}`);
+    return gone;
   }
   /** the torn tokens' copies in data/agentd (the helper's `.corrupt-` names) that `which(name)` picks — SHREDDED off the loop (their bytes
    *  overwritten before the unlink: secret material); said once as a count, never a name's value */
