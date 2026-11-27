@@ -6,8 +6,8 @@
 // an ordinary member whose Fable cap is spent (its other buckets fine), a start that NAMED its family (opus) lands on it; a guessed or
 // unknown family is judged FAIL CLOSED (every bucket the guess could mean) and stays on the default. A default that does not pay
 // keeps the release's answer. RED: 17f782574's chooser in a copy (a hint ⇒ no placing; no family ⇒ the default before any decision).
-// B-6a92's line «stays on the pool's default … held on another account's weekly instant» is said only for a start that STAYS: asked
-// after the decision, since a start with no family on a held default that PAYS is placed too. RED: the line asked before it, in a copy.
+// A start on a HELD default that PAYS is placed off it like any start on a paying default (the placing law, fail closed); one that does
+// not pay keeps the release's answer (r5480: the held default is the decision's own held mark — a reading file that started again).
 // THE PIN ROAD (主开发 r5067): a start PINNED to a member that cannot serve (its weekly cap spent, lapsed, its sign-in dead, gone from
 // the pool) is placed by the same law — every kind lands on the ordinary member; a pin that CAN serve is honoured, a paying one too.
 // RED: 8a1ade3b7's pin block (the pinned placement asked on its own), in a copy. THE CENSUS: every return of the chooser, named.
@@ -22,10 +22,8 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ck = (n, c, detail) => { if (typeof c !== 'boolean') throw new TypeError(`ck() was handed a ${typeof c} as its condition: ${n}`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (detail === undefined ? '' : ' — ' + String(typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 600))); } };
-const caught = async (fn) => { const o = console.log, w = console.warn, e = console.error; const lines = []; console.log = (...a) => { lines.push(a.map(String).join(' ')); }; console.warn = () => { }; console.error = () => { }; try { return { r: await fn(), lines }; } finally { console.log = o; console.warn = w; console.error = e; } };
 const quiet = async (fn) => { const o = console.log, w = console.warn, e = console.error; console.log = () => { }; console.warn = () => { }; console.error = () => { }; try { return await fn(); } finally { console.log = o; console.warn = w; console.error = e; } };
 const M = mutantCopies('pool-paying-start', REPO);
-const readingLag = require(path.join(REPO, 'src/reading-lag.js'));
 const NOW = Date.now(), S = Math.floor(NOW / 1000), H = 3600e3;
 const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: ['tok', id].join('-'), refreshToken: ['r', id].join('-'), expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
 // a reading: 5h and 7d utilization, a Fable cap's when given, and the producer's stated overage (paid overage IN USE, dated now)
@@ -40,15 +38,17 @@ const reading = ({ u5 = 0.1, u7 = 0.4, fable = null, paying = false } = {}) => (
 // signed in, healthy, not a member of the pool — a member since removed)
 const PIN_READ = { spent: { u5: 0.1, u7: 0.99 }, lapsed: { u5: 0.1, u7: 0.4 }, 'signed-out': { u5: 0.1, u7: 0.4 }, outside: { u5: 0.1, u7: 0.4 }, 'serves-paying': { paying: true, u5: 0.1, u7: 0.4 } };
 // THE WORLD: the real AccountManager and the real pool engine over a temp data folder; the default D and one other member O. `held`:
-// D HELD by B-6a92's same-instant check (scripts/test-reading-truth.mjs's recipe): D and Z, an account outside the pool, on ONE weekly
-// instant to the second, neither proven; the engine's boot repair holds them
+// D's reading is HELD by the hold that still exists and can carry a reading's facts (r5480): its file STARTED AGAIN and no enumerating
+// reading has stated its caps yet (`startedAgain.enumerated: false`, the decision's own held predicate) — its buckets and its stated
+// overage are there, its numbers unknown. (B-6a92's same-instant hold, two accounts on one weekly instant, is gone with every clock
+// hold in 2.369.422; the UNREAD mark — a file that cannot be read — cannot carry the paying fact, which is read from the same file)
 function world(engMod, { d, o, held = false, pinned = null }) {
   const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
   const root = scratchDir('pool-paying-start'), dataDir = path.join(root, 'data'), cacheDir = path.join(dataDir, 'usage-cache');
   const am = new AccountManager({ dataDir });
   const id = {};
-  for (const tag of ['D', 'O', ...(held ? ['Z'] : []), ...(pinned ? ['X'] : [])]) { id[tag] = am.createSubscription({ name: 'acct-' + tag.toLowerCase() }).id; if (!(tag === 'X' && pinned === 'signed-out')) fs.writeFileSync(path.join(am.subDir(id[tag]), '.credentials.json'), CREDS(id[tag]), { mode: 0o600 }); }
+  for (const tag of ['D', 'O', ...(pinned ? ['X'] : [])]) { id[tag] = am.createSubscription({ name: 'acct-' + tag.toLowerCase() }).id; if (!(tag === 'X' && pinned === 'signed-out')) fs.writeFileSync(path.join(am.subDir(id[tag]), '.credentials.json'), CREDS(id[tag]), { mode: 0o600 }); }
   const P = am.createPool({ name: 'pool-start', members: [id.D, id.O, ...(pinned && pinned !== 'outside' ? [id.X] : [])] }).id;
   am.setPoolTarget(P, id.D); am.updatePool(P, { auto: true, hot: true });
   fs.mkdirSync(cacheDir, { recursive: true });
@@ -58,15 +58,8 @@ function world(engMod, { d, o, held = false, pinned = null }) {
     fs.writeFileSync(path.join(cacheDir, id.X + '.json'), JSON.stringify(reading(PIN_READ[pinned])));
     if (pinned === 'lapsed') am.setServeState(id.X, { state: 'lapsed', since: NOW - H, why: 'made-up lapse words', lastFail: NOW });
   }
-  if (held) {
-    const INST = S + 4 * 86400 + 7 * 3600 + 17;
-    for (const k of [id.D, id.Z]) {
-      fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(k)), JSON.stringify({ sevenDay: INST, fiveHour: null, scoped: {}, at: NOW - 60e3, source: 'api', verifiedAt: NOW - 60e3, verifiedBy: 'rate-limit-events', n: 3, producer: 'login' }));
-      fs.writeFileSync(path.join(cacheDir, readingLag.apiWindowSidecarName(k)), JSON.stringify({ sevenDay: INST, scoped: {}, at: NOW - 60e3, sessionId: null, source: 'rate-limit-events', n: 3, ring: [] }));
-      const r = reading(k === id.D ? d : { u5: 0.2, u7: 0.3 }); r.sevenDay.resetsAt = INST; r.source = 'cli-usage';
-      fs.writeFileSync(path.join(cacheDir, k + '.json'), JSON.stringify(r));
-    }
-  }
+  if (held) { const r = reading(d); r.startedAgain = { at: NOW - 600e3, setAside: 'm.json.unreadable', enumerated: false, overage: false, spendControl: false, resetCredits: false }; fs.writeFileSync(path.join(cacheDir, id.D + '.json'), JSON.stringify(r)); }
+
   const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
   const autoResume = { armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null };
   const eng = engMod.create({
@@ -77,7 +70,6 @@ function world(engMod, { d, o, held = false, pinned = null }) {
     getAutoResume: () => autoResume, getQuotaProbe: () => null, getSessionMetaStore: () => null,
   });
   if (app.locals.usageEstimator) app.locals.usageEstimator.predictVerdict = () => ({ state: 'off', n: 0 });   // the raw readings: no estimate in the way
-  if (held) { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { eng.repairIdentityAnchors('boot'); } finally { console.log = o; console.warn = w; } }   // the boot's warm: the standing check holds D (and Z)
   const tagOf = (x) => Object.keys(id).find((k) => id[k] === x) || x;
   return { eng, P, id, tagOf };
 }
@@ -110,22 +102,18 @@ const PAYING_D = { paying: true, u5: 0.1, u7: 0.4 };
   const got = await startsOn(ENG, scene);
   ck(`a default that does not pay keeps the release's answer for every kind of start (${got.map(([, t]) => t).join(', ')})`, got.every(([, t]) => t === 'D'), got);
 }
-{ // 4. B-6a92's line for a start with no family on a HELD default («stays on the pool's default …, held on another account's weekly
-  // instant … names no model family to choose another member by») is said only when the start STAYS: on a held default that PAYS
-  // such a start is placed off it (fail closed, every bucket), and it is never told it stays
-  const STAYS = /stays on the pool's default .*held on another account's weekly instant/;
-  const heldStart = async (engMod, d, opts = { model: undefined }) => { const w = world(engMod, { d, o: { u5: 0.1, u7: 0.2 }, held: true }); const { r, lines } = await caught(() => w.eng.poolChooserForModel(w.P, opts)); return { to: w.tagOf(r), said: lines.some((l) => STAYS.test(l)) }; };
+{ // 4. A START ON A HELD DEFAULT (r5480: formed by the hold that still exists — D's reading file started again, its caps unknown): one that
+  // PAYS is placed off it like any paying default, for every kind of start (fail closed, every bucket); one that does not pay keeps the
+  // release's answer, a start with no family staying on it. (B-6a92's line «stays on the pool's default …, held on another account's
+  // weekly instant» is gone with the same-instant hold: its condition, heldForPool, can no longer be met — said in the line)
+  const heldStart = async (engMod, d, opts = { model: undefined }) => { const w = world(engMod, { d, o: { u5: 0.1, u7: 0.2 }, held: true }); const r = await quiet(() => w.eng.poolChooserForModel(w.P, opts)); const seen = w.eng.poolReadCache(w.P)(w.id.D); return { to: w.tagOf(r), held: !!(seen && seen.startedAgain && seen.startedAgain.enumerated === false) }; };
   const ctl = await heldStart(ENG, { u5: 0.1, u7: 0.4 });
-  ck(`CONTROL FIRST: a start with no family on a HELD default that does not pay stays on it, and the line says so (→ ${ctl.to}, said: ${ctl.said})`, ctl.to === 'D' && ctl.said, ctl);
+  ck(`CONTROL FIRST (the plant read): the pool's own reader hands D's reading as one that STARTED AGAIN, not enumerated — and a start with no family on that held default, which does not pay, stays on it (→ ${ctl.to}, held ${ctl.held})`, ctl.held && ctl.to === 'D', ctl);
   const got = await heldStart(ENG, PAYING_D);
-  ck(`a start with no family on a held default that PAYS is placed off it, and is never told it stays (→ ${got.to}, said: ${got.said})`, got.to === 'O' && !got.said, got);
+  ck(`a start with no family on a held default that PAYS is placed off it (→ ${got.to}, held ${got.held})`, got.held && got.to === 'O', got);
   // …and every other kind of start too: a held default that pays is judged as one read (the placing law binds every start, r4986)
   const kinds = []; for (const [n, opts] of STARTS.slice(0, 2)) kinds.push([n.split(' (')[0], (await heldStart(ENG, PAYING_D, opts)).to]);
   ck(`a new conversation and a resume on a held default that PAYS are placed off it too (${kinds.map(([n, t]) => `${n} → ${t}`).join('; ')})`, kinds.every(([, t]) => t === 'O'), kinds);
-  // RED: the line asked BEFORE the decision, as 85bc67492 asked it (built from this tree's line: a tree without it cannot build it, and says so)
-  let early = null;
-  try { early = anchored(engSrc, 'if (!(d && d.to) && !fam && !staleDefault && heldForPool(cur) && ', 'if (!fam && !staleDefault && heldForPool(cur) && ', 'the held line asked before the decision'); } catch (e) { ck('RED CONTROL built (the held line asked before the decision)', false, String(e && e.message).slice(0, 200)); }   // stale-pins: kept (the RED's text IS 85bc67492's condition)
-  if (early) { const red = await heldStart(M.load(ENG_REL, early, 'held-early'), PAYING_D); ck(`RED (the line asked before the decision): the start placed off the paying held default is told it stays (→ ${red.to}, said: ${red.said})`, red.to === 'O' && red.said, red); }
 }
 let pinTip = null;   // 8a1ade3b7's pin block in a copy (scene 5 builds it; the census reads it)
 { // 5. THE PIN ROAD (主开发 r5067): a resumed conversation PINNED to a member that cannot serve, beside a paying default and the ordinary
