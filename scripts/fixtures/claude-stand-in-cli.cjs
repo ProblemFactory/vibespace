@@ -48,6 +48,12 @@
 // run_id); at the end task_updated completed, task_notification completed, THEN the set published empty.
 //   $STAND_IN_HELPER_MS  how long a BGAGENT- helper works (default $STAND_IN_LONG_MS) — past a Stop, the session stays
 //                      'running' with no idle (the shape a Stop window must not wait on for ever)
+// THE HOLDS (r5473, test-claude-steer-chrome ⑬'s placement: a scene whose Stop must land INSIDE a window stands on the window's
+// fact, never on a clock the scene can outrun). Each is a FILE; unset: as before.
+//   $STAND_IN_POST_HOLD  set: after a tool result the model answers only once THAT FILE exists (polled every 20 ms; 180 s at most)
+//                      in place of $STAND_IN_POST_MS — a Stop pressed after the tool result finds the turn still running, by fact
+//   $STAND_IN_HELPER_HOLD  set: a BGAGENT- helper works until THAT FILE exists (polled every 20 ms) in place of $STAND_IN_HELPER_MS —
+//                      the helper provably runs through a Stop window; the stand-in still exits when its stdin ends
 // Its records are VERSION-KEYED (lane claude-steer-inject r3): $STAND_IN_CLI_VERSION (default 2.1.312, the build the R0 table was
 // re-measured on 2026-10-27 — the same rows as 2.1.308) names the build in every init, and from 2.1.312 on every `result` carries
 // model_usage_since_last_result (measured on every result of a local stream-json 2.1.312; `{}` = nothing counted — the stand-in bills
@@ -106,6 +112,8 @@ const FOLLOW_ANSWER_MS = process.env.STAND_IN_FOLLOW_ANSWER_MS ? Number(process.
 const FOLLOW_HOLD_N = Number(process.env.STAND_IN_FOLLOW_HOLD_INTERRUPTS || 0);
 const FOLLOW_AGENT_TOKENS = Number(process.env.STAND_IN_FOLLOW_AGENT_TOKENS || 0);
 const RELEASE_FILE = process.env.STAND_IN_RELEASE_FILE || '';   // a LONGER- turn's tool ends when this file exists (the leg's release)
+const POST_HOLD = process.env.STAND_IN_POST_HOLD || '';   // r5473: the model's answer after a tool result waits for this file
+const HELPER_HOLD = process.env.STAND_IN_HELPER_HOLD || '';   // r5473: a BGAGENT- helper works until this file exists
 let holdUntil = '';   // B-28b1: no stdin line is read until the follow-up did this (its init placed it)
 const release = (what) => { if (holdUntil && (holdUntil === what || what === 'end')) { holdUntil = ''; setImmediate(readLines); } };
 let holdInterrupts = 0;   // B-28b1: …nor before this many interrupt lines wait
@@ -229,11 +237,13 @@ function begin(f, { follow = false } = {}) {
   busy = { text, timer: null, follow };
   setState('running');
   if (/BGAGENT-/.test(text) && !helper) {
-    helper = setTimeout(() => {
+    const helperDone = () => {
       helper = null;
       const note = { type: 'user', message: { role: 'user', content: '<task-notification>the background helper finished</task-notification>' } };
       if (busy) queued.push(note); else start(note);
-    }, HELPER_MS);
+    };
+    if (HELPER_HOLD) { const poll = () => { if (fs.existsSync(HELPER_HOLD)) helperDone(); else helper = setTimeout(poll, 20); }; helper = setTimeout(poll, 20); }   // r5473: works until the leg's file
+    else helper = setTimeout(helperDone, HELPER_MS);
   }
   const uuids = INIT_UUIDS ? uuidsOf(f) : [];
   out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION, ...(uuids.length ? { user_message_uuids: uuids } : {}) });
@@ -265,7 +275,12 @@ function begin(f, { follow = false } = {}) {
       const took = [];
       for (let i = 0; i < queued.length && !RIDE_MISS;) { const t = textOf(queued[i]); if (/^\s*\//.test(t)) { i++; continue; } took.push(t); queued.splice(i, 1); }
       for (const t of took) delivered('tool_result', t);
-      busy.timer = setTimeout(() => { say('done after the tool' + (took.length ? ' — took in: ' + took.join(' | ') : '')); end('success'); }, POST_MS);
+      const answer = () => { say('done after the tool' + (took.length ? ' — took in: ' + took.join(' | ') : '')); end('success'); };
+      if (POST_HOLD) {   // r5473: the answer waits for the leg's file (an interrupt ends the turn: end() clears the timer, a stale poll finds another busy)
+        const t0 = Date.now(), b = busy;
+        const poll = () => { if (busy !== b) return; if (fs.existsSync(POST_HOLD) || Date.now() - t0 > 180000) answer(); else b.timer = setTimeout(poll, 20); };
+        busy.timer = setTimeout(poll, 20);
+      } else busy.timer = setTimeout(answer, POST_MS);
     };
     if (RELEASE_FILE && /LONGER-/.test(text)) {
       const t0 = Date.now(), b = busy;   // an interrupt ends the turn (end() clears the timer; a stale poll finds another busy)

@@ -408,8 +408,8 @@ function endTakenBack(ids, via) {
   let changed = false;
   for (const id of ids) { const r = id && HR.get(id); if (r && r.state === 'handed') { HR.set(id, { ...r, state: 'dismissed', settledAt: Date.now(), via }); changed = true; } }
   // r5202 (2.369.421's law 6: nothing between a person's Stop and its interrupt waits on a disk): on the Stop's road (dropHeldForStop runs with
-  // handedAfterStop) the write is OWED — the hotfix's own handedDue, made after the interrupt went to the CLI (at the batch's end, or at once
-  // after the forward outside a batch); the removal's road writes at once
+  // handedAfterStop) the write is OWED — the hotfix's own handedDue, made after the interrupt went to the CLI (at the batch's end); the
+  // removal's road writes at once
   if (changed) { if (handedAfterStop) handedDue = true; else if (!writeRecords()) log(`handed records: ${ids.join(', ')} taken back (${via}) — its record could not be written now (this wrapper carries it: the next records write takes it)`); }
   return changed;
 }

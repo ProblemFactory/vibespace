@@ -313,15 +313,19 @@ async function legSplit(wp) {
 }
 /** ⑪ (r2) the record's truth: Stop after B RODE a tool result (the model reads it in the request Stop cut) ⇒ `landed`. */
 async function legRide(wp) {
-  const h = await boot(wp, 'ride', { toolMs: 600, env: { STAND_IN_POST_MS: '1500' } });
+  // r5473 (⑬'s placement, the same class): the Stop must land after the tool result and BEFORE the model speaks — the model's answer is
+  // HELD by a file the leg never writes (the stand-in's STAND_IN_POST_HOLD), not a 1500 ms clock; the PREMISE is read at the Stop
+  const postHold = path.join(fs.mkdtempSync(path.join(scratchRoot, 'ride-holds-')), 'post');
+  const h = await boot(wp, 'ride', { toolMs: 600, env: { STAND_IN_POST_HOLD: postHold } });
   h.say('TOOL-A run the slow command', 'm-a');
   await until(h.toolUse, 4000);
   h.say('B handed mid tool', 'm-b', { steer: true });
-  await until(() => h.recs.some(isToolResult), 4000);
+  const toolResult = await until(() => h.recs.some(isToolResult), 4000);
   await sleep(200);
+  const premise = { toolResult, results: h.results(), postHeld: !fs.existsSync(postHold) };
   h.stop();
   await sleep(800);
-  const out = { tookIn: h.delivered().filter((d) => d.how === 'tool_result').map((d) => d.text), drops: h.drops(), follows: h.follows(), landedAfter: h.hand('landed').flatMap((r) => r.msg_ids || []) };
+  const out = { premise, tookIn: h.delivered().filter((d) => d.how === 'tool_result').map((d) => d.text), drops: h.drops(), follows: h.follows(), landedAfter: h.hand('landed').flatMap((r) => r.msg_ids || []) };
   await h.kill();
   return out;
 }
@@ -356,17 +360,24 @@ async function legOrigin(wp) {
 /** ⑬ (r2) the Stop window is BOUNDED: a background helper keeps the CLI 'running' past the interrupted result (no idle) —
  *  2 s after that result the window closes with ONE log line and the frame held in it runs. */
 async function legBound(wp) {
-  const h = await boot(wp, 'bound', { toolMs: 600, env: { STAND_IN_POST_MS: '1500', STAND_IN_HELPER_MS: '8000' } });
+  // r5473 (the placement of the 2.369.423 candidate's ⑬ red {cHeld:false, reachedMs:40, boundLines:0}: made AT WILL at the candidate without
+  // unit 3, by either clock of this scene — a Stop after the A turn's own result (no Stop window opens: C is handed over at once), or no
+  // helper at the Stop (its idle settles the window)): the scene stands on FACTS — the model's answer after the tool result and the helper
+  // are each HELD by a file the leg never writes (the stand-in's STAND_IN_POST_HOLD / STAND_IN_HELPER_HOLD; the kill ends the stand-in),
+  // and the PREMISE is read at the Stop. The verdict and the bound (2 s) are unmoved
+  const holds = fs.mkdtempSync(path.join(scratchRoot, 'bound-holds-')), postHold = path.join(holds, 'post'), helperHold = path.join(holds, 'helper');
+  const h = await boot(wp, 'bound', { toolMs: 600, env: { STAND_IN_POST_HOLD: postHold, STAND_IN_HELPER_HOLD: helperHold } });
   h.say('TOOL-A BGAGENT-x run the slow command', 'm-a');
   await until(h.toolUse, 4000);
-  await until(() => h.recs.some(isToolResult), 4000);
+  const toolResult = await until(() => h.recs.some(isToolResult), 4000);
   await sleep(100);
+  const premise = { toolResult, results: h.results(), postHeld: !fs.existsSync(postHold), helperHeld: !fs.existsSync(helperHold) };
   h.stop();
   await sleep(50);
   h.say('C typed after Stop', 'm-c', { steer: true });
   const t0 = Date.now();
   await until(() => h.got().some((f) => f.type === 'user' && S(f).includes('C typed after Stop')), 5000);
-  const out = { cHeld: h.queued('m-c'), reachedMs: Date.now() - t0, boundLines: h.log().split('\n').filter((l) => /bound: the CLI owes nothing and said no idle 2000 ms after its last result \(a background task keeps it running\) — closed the Stop window/.test(l)).length };
+  const out = { premise, cHeld: h.queued('m-c'), reachedMs: Date.now() - t0, boundLines: h.log().split('\n').filter((l) => /bound: the CLI owes nothing and said no idle 2000 ms after its last result \(a background task keeps it running\) — closed the Stop window/.test(l)).length };
   await h.kill();
   return out;
 }
@@ -645,9 +656,11 @@ ok(late0.cHeld && !late0.cHanded && late0.cOwnTurn, '⑩ the Stop window: C stam
 ok(late0.follows === 1 && !late0.answeredB && S(late0.drops?.map((x) => x.keptIds)) === S([['m-b']]), '⑩ …the frame the CLI held at Stop is never answered (its follow-up interrupted), and the ONE record keeps it', late0);
 ok(!lateAfter.cHeld && !lateAfter.cHanded && lateAfter.cOwnTurn && lateAfter.follows === 1 && !lateAfter.answeredB, '⑩ CONTROL: C typed once the stop has SETTLED is a plain send at idle (the window closed — it holds nothing for ever)', lateAfter);
 ok(split.follows === 2 && !split.answered && S(split.drops?.map((x) => x.keptIds)) === S([['m-b1', 'm-b2']]) && split.settled, '⑩ the split shape: the CLI started a follow-up turn PER held frame — EVERY one interrupted on its init (eeece327: the second was answered); one record, kept 2', split);
+ok(!!ride.premise && ride.premise.toolResult && ride.premise.results === 0 && ride.premise.postHeld, '⑪ PREMISE: at the Stop B\'s tool result had come and the model had NOT spoken (its answer HELD by the leg\'s file, 0 results) — a fact, not a clock (a broken premise is said here)', ride.premise || ride);
 ok(S(ride.tookIn) === S(['B handed mid tool']) && S(ride.drops) === S([{ items: [], kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && ride.follows === 0 && S(ride.landedAfter) === S(['m-b']), '⑪ (r4) Stop after B RODE the tool result, before the model spoke: not proven read, so the record KEEPS it (its follow-up would be interrupted) — no follow-up came, so the settle says `landed` afterwards (chip «Steered»)', ride);
 ok(S(ownStop.own) === S(['m-b']) && !ownStop.drops?.length && ownStop.follows === 0, '⑪ Stop while B\'s OWN turn runs a tool: a stopped turn — no record counts B as kept (eeece327: kept 1)', ownStop);
 ok(origin.steerable === false && S(origin.res) === S(['false:not-steerable:origin']), '⑫ a row VibeSpace typed: `steerable: false` on the row (no ⚡) and the wrapper refuses «VibeSpace\'s own message runs between turns» (eeece327: handed it)', origin);
+ok(!!bound.premise && bound.premise.toolResult && bound.premise.results === 0 && bound.premise.postHeld && bound.premise.helperHeld, '⑬ PREMISE: at the Stop the A turn was in its post-tool window (its tool result came, no result yet: the answer HELD by the leg\'s file) and its helper still worked (HELD by the leg\'s file) — facts, not clocks (a broken premise is said here)', bound.premise || bound);
 ok(bound.cHeld && bound.reachedMs >= 1500 && bound.reachedMs < 4000 && bound.boundLines === 1, '⑬ the Stop window is BOUNDED where the CLI owes nothing: no idle came (a helper kept the CLI running) — 2 s after the last result ONE log line says why it closed, and the frame held in it runs', bound);
 // ── ACCEPTANCE r4 ──
 ok(S(race.drops) === S([{ items: [], kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && race.race?.some((x) => x.followInit && x.interruptedSameTick === true) && !race.race?.some((x) => x.answeredAfterStop) && !race.landedAfter?.length, '⑮ RIDING IS NOT LANDED: B reached the CLI just before its tool_result line but missed that request — Stop counts it HELD (kept 1), the follow-up is interrupted in the same tick, nothing is answered (7df30f96: landed 1 and the follow-up answered)', race);
