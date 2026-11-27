@@ -2837,7 +2837,8 @@ export function fastOnlyArgs(argv, suites = SUITES) {
   if (at < 0) return { given: false };
   if (argv.filter(is).length > 1) return { given: true, refusal: 'the switch is given twice' };
   const raw = argv[at] === '--fast-only' ? (argv[at + 1] && !argv[at + 1].startsWith('--') ? argv[at + 1] : '') : argv[at].slice('--fast-only='.length);
-  const MODES = ['heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'check-heavy', 'shard', 'fast-part', 'list-affected', 'census', 'hosts', 'status', 'reap', 'false-rows', 'shard-timings', 'only', 'affected'];
+  const MODES = ['heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'check-heavy', 'shard', 'fast-part', 'list-affected', 'census', 'hosts', 'status', 'reap', 'false-rows', 'shard-timings', 'only', 'affected',
+    'markers'];   // (the U1a round) a markers folder belongs to the heavy verdicts: the set writes no marker, so a folder beside it is refused by name
   const other = MODES.filter((m) => argv.some((a) => a === '--' + m || a.startsWith('--' + m + '=')));
   if (other.length) return { given: true, refusal: `it runs the named fast set alone and does not combine with ${other.map((m) => '--' + m).join(', ')}` };
   const v = fastOnlyNames(raw, suites);
@@ -2846,7 +2847,7 @@ export function fastOnlyArgs(argv, suites = SUITES) {
 /** PURE (U1a): the named set's OWN lines — never a whole tier's («release gate — FAST tier …», «ALL GREEN — fast gate …»,
  *  «release gate is RED»): no reader of a whole tier's line can take them for one, and each names what it ran. */
 export const fastOnlyOpening = ({ names, tierSize, isolate, sha, gapHead = '' }) =>
-  `named fast set — NOT the fast tier: build + ${names.length} suites by name (${names.join(', ')}; the tier holds ${tierSize})${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}${gapHead ? ` · ${gapHead}` : ''}`;
+  `named fast set — the build and ${names.length} suites by name (${names.join(', ')}), never the tier of ${tierSize}${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}${gapHead ? ` · ${gapHead}` : ''}`;
 export const fastOnlyGreen = ({ ran, secs, sha, isolate, gapTail = '', skippedLegs = [] }) =>
   '\nONLY GREEN — the named fast set of ' + ran.length + ' suite(s) passed in ' + secs + 's ' + (isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)')
   + (gapTail ? ' — BUT ' + gapTail : '') + skipCount(skippedLegs) + ' — NOT the fast tier: ' + ran.join(', ');

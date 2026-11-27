@@ -1347,7 +1347,7 @@ console.log('\n§8k the named fast set (--fast-only): refused by name before any
   ok(fallsBack.length === 2 && dropsHeavy.length === 1, `CONTROL: a list that falls back to the whole tier is red by name (${fallsBack.length} of 2), and a heavy name dropped in silence (${dropsHeavy.length} of 1)`);
   // (2) THE DISPATCHER refuses BEFORE anything runs: beside any other mode, the switch twice, the switch with no list
   const A = (...a) => C.fastOnlyArgs(a, SUITES);
-  const combos = [['--fast-only=' + f1, '--heavy'], ['--fast-only=' + f1, '--fast-part=1/2'], ['--fast-only=' + f1, '--only=' + heavyRow.name], ['--fast-only=' + f1, '--fast-only=' + f2], ['--fast-only'], ['--fast-only', '--isolate']];
+  const combos = [['--fast-only=' + f1, '--heavy'], ['--fast-only=' + f1, '--fast-part=1/2'], ['--fast-only=' + f1, '--only=' + heavyRow.name], ['--fast-only=' + f1, '--fast-only=' + f2], ['--fast-only'], ['--fast-only', '--isolate'], ['--fast-only=' + f1, '--markers=/tmp/vs-zz-markers']];
   const missed = combos.filter((a) => !A(...a).refusal);
   ok(!missed.length && A('--isolate').given === false && JSON.stringify(A('--isolate', '--fast-only', `${f1},${f2}`).names) === JSON.stringify([f1, f2]),
     `the dispatcher refuses a named set beside another mode, given twice, or with no list, before anything runs; without it nothing is given${missed.length ? ' — NOT refused: ' + missed.map((a) => a.join(' ')).join(' | ') : ''}`);
@@ -1364,6 +1364,8 @@ console.log('\n§8k the named fast set (--fast-only): refused by name before any
   const WHOLE = [["step A's green", (t) => /^ALL GREEN — fast gate passed in [0-9]+s for /m.test(t)], ["step A's count", (t) => /release gate — FAST tier: build \+ [0-9]+ suites/.test(t)],
     ["the push script's marker check", (t) => String(t).trimStart().startsWith('ALL GREEN — fast gate passed')], ['a red reader', (t) => /release gate is RED/.test(t)]];
   const lines = [green, opening, short, ...red.out.map(([, l]) => l)];
+  ok(!/fast tier: build \+ [0-9]+ suites/i.test(opening) && /^named fast set — the build and 2 suites by name/.test(opening),
+    `the opening holds no run of «fast tier: build + N suites», with or without the release gate's prefix (${opening.slice(0, 80)})`);
   const taken = WHOLE.filter(([, r]) => lines.some((l) => r(l))).map(([k]) => k);
   const setReader = /^ONLY GREEN — the named fast set of [0-9]+ suite\(s\) passed in [0-9]+s for /m;   // the step-A set twin's own reader
   ok(!taken.length && setReader.test(green) && green.trimEnd().endsWith(`— NOT the fast tier: ${f1}, ${f2}`) && red.code === 1 && red.out.some(([k, l]) => k === 'err' && /apart from these reds, 2 fast row\(s\) of the gated commit are not run here — the NAMED fast set is RED \(not the fast tier\)/.test(l))
@@ -1386,6 +1388,12 @@ console.log('\n§8k the named fast set (--fast-only): refused by name before any
     "a named set that ran SHORT is red (exit 1) before the tier's own NO VERDICT paths, and a named set runs ONE suite at a time whatever the lanes' variable says");
   ok(onlyAt > 0 && onlyAt < readingsAt && readingsAt < allGreenAt && /\n\s*return 0;\n\s*\}\n/.test(branch) && !branch.includes('writeGreenMarker') && !changed.length,
     `the named set returns before a whole tier's readings record, its ALL GREEN line and its green marker; the gate's own lines stand byte for byte${changed.length ? ' — CHANGED: ' + changed.join(' | ') : ''}`);
+  // THE SELECTION LINE (the U1a round's must): the one line that narrows the tier to the named set — dropped, the switch would run the
+  // WHOLE tier under the set's own lines. Its anchor is in the gate once; the pin holds it between the part's cut and the plan; its mutant is refused
+  const SELECT = 'if (only) fast = tier.filter((s) => only.includes(s.name));';
+  const selected = (g) => { const at = g.indexOf(SELECT); return g.split(SELECT).length === 2 && at > g.indexOf('if (part) fast = fastPartPlan(') && at < g.indexOf('const plan = scheduleFastLanes(fast'); };
+  ok(gate.split(SELECT).length === 2, gate.split(SELECT).length === 2 ? 'the selection line\'s anchor is in the fast gate once' : 'the anchor of the selection pin is not in the fast gate once — the pin cannot be judged');
+  ok(selected(gate) && !selected(gate.replace(SELECT, '')), 'the fast gate narrows the tier to the named set between the part\'s cut and the plan (its pin), and a gate without that line is refused by the pin (its mutant)');
   ok(JSON.stringify(C.fastClosing({ reds: ['test-a'], env: {} }).out) === JSON.stringify([['err', '\n✗ test-a — release gate is RED, do not push\n']]) && C.fastClosing({ reds: [], env: {} }).code === null,
     "without the switch the fast closing is the tier's own, byte for byte");
 }
