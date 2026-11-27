@@ -339,8 +339,8 @@ async function startWith(signin, mod = require(path.join(REPO, 'src/interface/ma
 {
   const none = await startWith(undefined), rel = await startWith({ file: 'data/auth.json' });
   const open = freshDir(); fs.chmodSync(open, 0o777); const foreign = await startWith({ file: path.join(open, 'auth.json') });
-  ok(!none.up && none.exits[0] === 2 && none.lines.some((l) => /names no sign-in table/.test(l)) && !rel.up && rel.exits[0] === 2 && rel.lines.some((l) => /is not absolute/.test(l)) && !foreign.up && foreign.exits[0] === 2 && foreign.lines.some((l) => /sign-in table's folder .* can be written by other accounts/.test(l)),
-    `no table, a relative path, a folder other accounts can write: each a bad start by name, exit 2 (${[none, rel, foreign].map((x) => x.exits[0]).join(', ')})`, [none.lines, rel.lines, foreign.lines]);
+  ok(!none.up && none.exits[0] === 2 && none.lines.some((l) => /names no sign-in table/.test(l)) && !rel.up && rel.exits[0] === 2 && rel.lines.some((l) => /is not absolute/.test(l)) && !foreign.up && foreign.exits[0] === 2 && foreign.lines.some((l) => /sign-in table's folder .* can be written by every account \(mode 777\) .*chmod o-w/.test(l)),   // B-dc3f (主开发 r5506): the other-write bit's words, its door
+    `no table, a relative path, a folder every account can write: each a bad start by name, exit 2 (${[none, rel, foreign].map((x) => x.exits[0]).join(', ')})`, [none.lines, rel.lines, foreign.lines]);
   fs.chmodSync(open, 0o700);
   const good = freshDir(), g = await startWith({ file: path.join(good, 'auth.json') });
   const gen = freshDir(), made = await startWith({ file: path.join(gen, 'auth.json'), generate: true });

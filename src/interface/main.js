@@ -44,12 +44,68 @@ const { START_WORD, openStart, firstLine, whyText } = require('../start-pipe.js'
  *  `const HOST = process.env.HOST || '0.0.0.0';` — scripts/test-interface-process.mjs ⑥ reads both) */
 const listenAt = (env = {}) => ({ port: Number(env.PORT || 3456), host: env.HOST || '0.0.0.0' });
 
+// B-dc3f (主开发 r5504 / r5506): A FOLDER's GROUP WRITE BIT IS ACCEPTED ONLY WHEN THE GROUP IS PROVABLY THIS ACCOUNT's OWN. On a machine
+// whose file mask is 002 (the distributions that give every account its own private group) the folders a hub makes are 775: the group
+// is the person's own and nobody else can write there. The proof: the folder's group is this process's primary group, the group file
+// lists no member in it but this account, and no account but this one names it as its primary in the account file. The two files are
+// read ONCE, at this process's start, each bounded in size; a read that fails, a file too large, or a group with no line there (the
+// accounts come from elsewhere: LDAP, SSSD) is «cannot be proven», never «private» — the start is refused BY NAME, the command that is
+// its door in the words. The OTHER-write bit is refused as before (anyone could). The words name the folder, the group and HOW MANY
+// other accounts can write — never their names.
+const ACCOUNT_FILES = Object.freeze({ group: '/etc/group', passwd: '/etc/passwd' });
+const ACCOUNT_FILE_MAX = 4 << 20;   // a bigger file is no proof (the read is bounded)
+let accountsSeam = null;   // a suite's: { gid, read(name) → Promise<string> } — the account files' text handed in
+let accountTexts = null;   // the two reads, once a process (a promise; the seam's own when a suite hands one)
+async function readBounded(file, max = ACCOUNT_FILE_MAX) {
+  const h = await fsp.open(file, 'r');
+  let text = null, failed = null;
+  try { const buf = Buffer.alloc(max + 1); const { bytesRead } = await h.read(buf, 0, buf.length, 0); if (bytesRead > max) throw Object.assign(new Error('too large to read whole'), { code: 'EFBIG' }); text = buf.toString('utf8', 0, bytesRead); }
+  catch (e) { failed = e; }
+  await h.close();   // a read handle's failed close REJECTS: the read is then «cannot be proven», as any failed read (never a close under an empty catch)
+  if (failed) throw failed;
+  return text;
+}
+function accountFacts() {
+  if (!accountTexts) {
+    const s = accountsSeam, read = s ? s.read : (name) => readBounded(ACCOUNT_FILES[name]);
+    const one = (name) => Promise.resolve().then(() => read(name)).then((text) => ({ text: String(text) }), (e) => ({ why: `${ACCOUNT_FILES[name]} could not be read: ${(e && e.code) || 'error'}` }));
+    accountTexts = Promise.all([one('group'), one('passwd')]).then(([group, passwd]) => ({ gid: s ? s.gid : (typeof process.getgid === 'function' ? process.getgid() : null), group, passwd }));
+  }
+  return accountTexts;
+}
+/** a suite's seam: the account files' text and this process's primary gid handed in (null: the real files again) */
+function _accounts(seam) { accountsSeam = seam || null; accountTexts = null; }
+/** the folder's group judged → { own: true } | { name, others } (another account can write) | { unproven } (the proof cannot be made) */
+async function groupOf(st, uid) {
+  const f = await accountFacts();
+  if (f.group.why) return { unproven: f.group.why };
+  if (f.passwd.why) return { unproven: f.passwd.why };
+  const rows = (text, n) => text.split('\n').filter((l) => l && l[0] !== '#').map((l) => l.split(':')).filter((r) => r.length >= n);
+  const g = rows(f.group.text, 4).find((r) => Number(r[2]) === st.gid);
+  if (!g) return { unproven: `its group ${st.gid} has no line in ${ACCOUNT_FILES.group} (the accounts come from elsewhere)` };
+  const users = rows(f.passwd.text, 4);
+  const me = users.find((r) => Number(r[2]) === uid);
+  if (!me) return { unproven: `this account (uid ${uid}) has no line in ${ACCOUNT_FILES.passwd}`, name: g[0] };
+  const others = new Set();
+  for (const m of String(g[3] || '').split(',').map((x) => x.trim()).filter(Boolean)) if (m !== me[0]) others.add(m);
+  for (const r of users) if (Number(r[3]) === st.gid && Number(r[2]) !== uid) others.add(r[0]);
+  if (others.size) return { name: g[0], others: others.size };
+  if (f.gid !== null && st.gid !== f.gid) return { unproven: `its group ${g[0]} is not this account's primary group`, name: g[0] };
+  return { own: true };
+}
 /** a folder judged → null (this account's alone) | the words of why not. `what` names it; `uid` = this process's account. */
 async function ownFolderWhy(dir, what, uid = typeof process.getuid === 'function' ? process.getuid() : null) {
   let st; try { st = await fsp.stat(dir); } catch (e) { return `${what} ${dir} cannot be read (${(e && e.code) || 'error'})`; }
   if (!st.isDirectory()) return `${what} ${dir} is no folder`;
   if (uid !== null && st.uid !== uid) return `${what} ${dir} belongs to another account (uid ${st.uid}) — it must be this account's alone`;
-  if (st.mode & 0o022) return `${what} ${dir} can be written by other accounts (mode ${(st.mode & 0o7777).toString(8)}) — it must be this account's alone`;
+  const mode = (st.mode & 0o7777).toString(8);
+  if (st.mode & 0o002) return `${what} ${dir} can be written by every account (mode ${mode}) — it must be this account's alone: chmod o-w ${dir}, then start again`;
+  if (st.mode & 0o020) {
+    const g = uid === null ? { unproven: 'this account has no uid here' } : await groupOf(st, uid);
+    if (g.own) return null;   // the account's own private group: nobody else can write there (r5506)
+    if (g.others) return `${what} ${dir} can be written by its group ${g.name}, which ${g.others} other account${g.others === 1 ? '' : 's'} belong${g.others === 1 ? 's' : ''} to (mode ${mode}) — it must be this account's alone: chmod g-w ${dir}, then start again`;
+    return `${what} ${dir} can be written by its group${g.name ? ` ${g.name}` : ''}, which cannot be proven this account's alone (${g.unproven}) (mode ${mode}) — chmod g-w ${dir}, then start again`;
+  }
   return null;
 }
 /** the link's folder judged → null (this account's alone) | the words of why not. `uid` = this process's account. */
@@ -187,4 +243,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, listenAt, linkFolderWhy, signinWhy, judgeSignin, witnessOf, witnessFor, placesOf };
+module.exports = { main, listenAt, linkFolderWhy, signinWhy, judgeSignin, witnessOf, witnessFor, placesOf, _accounts, _readBounded: readBounded, ACCOUNT_FILES };   // _accounts, _readBounded: a suite's seam and the bounded reader (r5506)

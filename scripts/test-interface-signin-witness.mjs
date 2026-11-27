@@ -48,7 +48,7 @@ const siCut = (from, to, label) => MUT.load('src/interface/signin.js', anchored(
 function install(name) {
   fs.mkdirSync(path.join(ROOT, name), { recursive: true });
   const base = fs.realpathSync(path.join(ROOT, name)), root = path.join(base, 'root'), data = path.join(root, 'data'), home = path.join(base, 'home');   // the real path: the places main.js computes are real
-  fs.mkdirSync(data, { recursive: true }); fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(data, { recursive: true }); fs.chmodSync(data, 0o700); fs.mkdirSync(home, { recursive: true, mode: 0o700 });   // r5506: an EXPLICIT mode (mkdir's own is masked) — no leg inherits the runner's file mask
   return { base, root, data, home, table: path.join(data, 'auth.json'), id: path.join(data, SW.INSTANCE_FILE) };
 }
 const witnessCfg = (it, extra = {}) => ({ folder: it.data, root: it.root, throwaway: false, declared: false, scratch: { home: it.home, varTmp: path.join(it.base, 'vartmp') }, ...extra });   // scratch: the install's own home and var-tmp rung (a suite's seam: no start line sets it)g (never the machine's /var/tmp)
@@ -361,9 +361,9 @@ console.log('⑪ 主开发 r3969 (2): PARITY — the places the piped form compu
   /** three installs: a plain root; the SAME root reached through a link (the table named by the link's path); a data folder that is a link */
   const installs = () => {
     const base = fs.realpathSync(fs.mkdtempSync(path.join(ROOT, 'parity-'))), sc = path.join(base, 'scratch'); fs.mkdirSync(sc);
-    const plain = path.join(base, 'plain'); fs.mkdirSync(path.join(plain, 'data'), { recursive: true });
-    const real = path.join(base, 'real'); fs.mkdirSync(path.join(real, 'data'), { recursive: true }); const via = path.join(base, 'via'); fs.symlinkSync(real, via);
-    const dl = path.join(base, 'dl'), dt = path.join(base, 'data-elsewhere'); fs.mkdirSync(dl); fs.mkdirSync(dt); fs.symlinkSync(dt, path.join(dl, 'data'));
+    const plain = path.join(base, 'plain'); fs.mkdirSync(path.join(plain, 'data'), { recursive: true }); fs.chmodSync(path.join(plain, 'data'), 0o700);   // r5506: explicit modes
+    const real = path.join(base, 'real'); fs.mkdirSync(path.join(real, 'data'), { recursive: true }); fs.chmodSync(path.join(real, 'data'), 0o700); const via = path.join(base, 'via'); fs.symlinkSync(real, via);
+    const dl = path.join(base, 'dl'), dt = path.join(base, 'data-elsewhere'); fs.mkdirSync(dl); fs.mkdirSync(dt); fs.chmodSync(dt, 0o700); fs.symlinkSync(dt, path.join(dl, 'data'));
     return { sc, cases: [['a plain root', plain, path.join(plain, 'data', 'auth.json')], ['a root reached through a link', real, path.join(via, 'data', 'auth.json')], ['a data folder that is a link', dl, path.join(dl, 'data', 'auth.json')]] };
   };
   const compare = async (Mm) => { const { sc, cases } = installs(), out = []; for (const [label, installReal, file] of cases) { const p = await Mm.placesOf(file), q = plainOf(installReal, sc); out.push({ label, same: p.folder === q.folder && p.root === q.root, piped: p, plain: q }); } return out; };
@@ -372,6 +372,56 @@ console.log('⑪ 主开发 r3969 (2): PARITY — the places the piped form compu
   const DRIFT = MUT.load('src/interface/main.js', anchored(MAIN_SRC, '  return { folder: path.join(root, path.basename(folderRaw)), root };', '  return { folder: await fsp.realpath(folderRaw), root };', 'places-drift'), 'main-places-drift');
   const drift = await compare(DRIFT);
   ok(!drift[2].same && drift[0].same, `RED CONTROL: a piped form that also resolves the data folder's own link — the parity leg names the drift (${drift.map((g) => `${g.label}: ${g.same ? 'the same' : 'DIFFER'}`).join('; ')})`, drift[2]);
+}
+
+console.log('⑫ 主开发 r5504 / r5506: THE FOLDER\'s GROUP WRITE BIT — accepted only when the group is PROVABLY this account\'s own; a data folder made as the hub makes it (no mode) reads the same at each file mask');
+{
+  // the account files' text handed in through main.js's seam (_accounts), each read counted — the witness that the plant was read (law 1)
+  const GID = typeof process.getgid === 'function' ? process.getgid() : null;
+  const seam = (group, passwd) => { const s = { reads: 0, gid: GID, read: async (n) => { s.reads++; const v = n === 'group' ? group : passwd; if (v instanceof Error) throw v; return v; } }; return s; };
+  const meLine = `me:x:${UID}:${GID}::/home/me:/bin/sh\n`;
+  let nMask = 0;
+  /** a data folder made as the hub makes it — mkdir with NO mode — under the file mask `mask`, then judged with the seam `s` */
+  const judged = async (mask, s, { Mod = M, chmod = null } = {}) => {
+    const base = fs.realpathSync(fs.mkdtempSync(path.join(ROOT, `mask-${mask.toString(8)}-${++nMask}-`))), data = path.join(base, 'root', 'data');
+    const was = process.umask(mask); try { fs.mkdirSync(data, { recursive: true }); } finally { process.umask(was); }
+    if (chmod !== null) fs.chmodSync(data, chmod);
+    Mod._accounts(s);
+    try { const why = await Mod.signinWhy({ file: path.join(data, 'auth.json'), folder: data }, UID); return { why, mode: (fs.statSync(data).mode & 0o777).toString(8), reads: s.reads }; }
+    finally { Mod._accounts(null); }
+  };
+  if (UID === null || GID === null) ok(true, '(no uid or gid on this platform: the group proof is not judged here)');
+  else {
+    const priv = () => seam(`me:x:${GID}:\n`, meLine);
+    const p2 = await judged(0o002, priv()), p22 = await judged(0o022, priv());
+    ok(p2.mode === '775' && p2.why === null && p2.reads === 2 && p22.mode === '755' && p22.why === null,
+      `the account's OWN private group: the folder made at mask 002 (mode ${p2.mode}) is TAKEN (both account files read: ${p2.reads}), as at mask 022 (mode ${p22.mode}) — the same reading at each mask`, { p2, p22 });
+    const s2 = await judged(0o002, seam(`team:x:${GID}:me,ann,bob\n`, meLine)), s22 = await judged(0o022, seam(`team:x:${GID}:me,ann,bob\n`, meLine));
+    ok(typeof s2.why === 'string' && s2.why.includes('can be written by its group team, which 2 other accounts belong to (mode 775)') && s2.why.includes('chmod g-w ') && !/\bann\b|\bbob\b/.test(s2.why) && !s2.why.includes('other accounts (mode') /* stale-pins: kept — an absence check: the old words are never said */ && s2.reads === 2 && s22.why === null,
+      `a SHARED group (placed: two other members): refused BY NAME — the folder, the group and HOW MANY, never their names, the door in the words; at mask 022 (no group bit) taken: «${s2.why}»`, { s2, s22 });
+    const o2 = await judged(0o002, seam(`me:x:${GID}:\n`, meLine + `ann:x:${UID + 1}:${GID}::/home/ann:/bin/sh\n`));
+    ok(typeof o2.why === 'string' && o2.why.includes('which 1 other account belongs to (mode 775)') && !o2.why.includes('ann'), `another account naming the group as its PRIMARY (placed): refused, one other account counted: «${o2.why}»`, o2);
+    const u2 = await judged(0o002, seam(`other:x:${GID + 1}:\n`, meLine));
+    ok(typeof u2.why === 'string' && u2.why.includes('which cannot be proven this account\'s alone') && u2.why.includes('has no line in /etc/group') && u2.why.includes('chmod g-w'), `the accounts from ELSEWHERE (the group has no line in the file, placed): «cannot be proven», refused by name with its door: «${u2.why}»`, u2);
+    const e2 = await judged(0o002, seam(Object.assign(new Error('EACCES: permission denied (placed)'), { code: 'EACCES' }), meLine));
+    ok(typeof e2.why === 'string' && e2.why.includes('/etc/group could not be read: EACCES') && e2.why.includes('cannot be proven') && e2.reads >= 1, `a group file that cannot be read (placed): never «private» — refused by name: «${e2.why}»`, e2);
+    const w2 = await judged(0o002, priv(), { chmod: 0o777 });
+    ok(typeof w2.why === 'string' && w2.why.includes('can be written by every account (mode 777)') && w2.why.includes('chmod o-w') && w2.reads === 0, `the OTHER-write bit: refused as before, whatever the group (no account file read: ${w2.reads}): «${w2.why}»`, w2);
+    const MAIN = fs.readFileSync(path.join(REPO, 'src/interface/main.js'), 'utf-8');
+    const Cut = MUT.load('src/interface/main.js', anchored(MAIN, "    if (g.own) return null;   // the account's own private group: nobody else can write there (r5506)", '    if (false) return null;', 'private-cut'), 'main-private-cut');
+    const r2 = await judged(0o002, priv(), { Mod: Cut });
+    ok(typeof r2.why === 'string' && r2.reads === 2, `RED CONTROL (made at will: the private group's proof cut — the release's reading): at mask 002 the folder VibeSpace made REFUSES the start, the plant read (${r2.reads}): «${r2.why}»`, r2);
+    // the REAL bounded reader (the account files' own road, which the seam replaces in the legs above): a file under its bound read whole,
+    // one past it refused (EFBIG: «cannot be proven»), a missing one refused; RED: the bound cut — the large file read whole
+    const rb = fs.realpathSync(fs.mkdtempSync(path.join(ROOT, 'bounded-'))), small = path.join(rb, 'small'), big = path.join(rb, 'big');
+    fs.writeFileSync(small, 'me:x:1:\n'); fs.writeFileSync(big, Buffer.alloc(65, 0x61));
+    const rd = async (Mod, f) => { try { return { text: await Mod._readBounded(f, 64) }; } catch (e) { return { code: e && e.code }; } };
+    const b1 = await rd(M, small), b2 = await rd(M, big), b3 = await rd(M, path.join(rb, 'none'));
+    ok(b1.text === 'me:x:1:\n' && b2.code === 'EFBIG' && b3.code === 'ENOENT', `the REAL bounded reader: a file under the bound read whole, one past it refused (${b2.code}), a missing one refused (${b3.code})`, { b1, b2, b3 });
+    const CutB = MUT.load('src/interface/main.js', anchored(MAIN, "if (bytesRead > max) throw Object.assign(new Error('too large to read whole'), { code: 'EFBIG' }); ", '', 'bound-cut'), 'main-bound-cut');
+    const b4 = await rd(CutB, big);
+    ok(typeof b4.text === 'string' && b4.text.length === 65, `RED CONTROL (the bound cut): the file past the bound is read whole (${b4.text && b4.text.length} bytes)`, b4);
+  }
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

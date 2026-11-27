@@ -218,8 +218,9 @@ console.log('— ⑧ THE LINK\'S FOLDER IS THIS ACCOUNT\'S ALONE: a folder other
   const said = (lines) => ({ log: (l) => lines.push(String(l)), error: (l) => lines.push(String(l)) });
   let nf = 0;
   /** main() with its link in a fresh folder of `mode` — a FILE planted at the link's path first, to see it is never touched */
-  async function onFolder(mode, mod = M) {
+  async function onFolder(mode, mod = M, prep = null) {
     const dir = path.join(T, `folder${++nf}`); fs.mkdirSync(dir); fs.chmodSync(dir, mode);
+    if (prep) prep(dir);   // r5506: the account files handed in for THIS folder's group (main.js's seam)
     const link = path.join(dir, 'link.sock'); fs.writeFileSync(link, 'what stood here before');
     const lines = [], exits = [], pipe = new PassThrough();
     const m = mod.main({ pipe, env: { PORT: '0', HOST: '127.0.0.1' }, exit: (c) => exits.push(c), log: said(lines) });
@@ -230,8 +231,20 @@ console.log('— ⑧ THE LINK\'S FOLDER IS THIS ACCOUNT\'S ALONE: a folder other
     fs.chmodSync(dir, 0o700);
     return { mode: mode.toString(8), up, exits, lines, kept };
   }
-  const shut = [await onFolder(0o777), await onFolder(0o770), await onFolder(0o1777)];   // every account; the group; /tmp's own shape
-  ok(shut.every((r) => !r.up && r.exits[0] === 2 && r.kept === 'what stood here before' && r.lines.some((l) => l.includes(`can be written by other accounts (mode ${r.mode})`) && l.includes('it ends'))), `a folder others can write is refused by name, exit 2, before its path is touched: ${shut.map((r) => `${r.mode} → exit ${r.exits[0]}, «${(r.lines[0] || '').slice(0, 70)}…»`).join(' · ')}`, shut);
+  const shut = [await onFolder(0o777), await onFolder(0o1777)];   // every account; /tmp's own shape
+  ok(shut.every((r) => !r.up && r.exits[0] === 2 && r.kept === 'what stood here before' && r.lines.some((l) => l.includes(`can be written by every account (mode ${r.mode})`) && l.includes('chmod o-w') && l.includes('it ends'))), `a folder others can write is refused by name, exit 2, before its path is touched: ${shut.map((r) => `${r.mode} → exit ${r.exits[0]}, «${(r.lines[0] || '').slice(0, 70)}…»`).join(' · ')}`, shut);
+  // 主开发 r5504 / r5506: THE GROUP's write bit — accepted only when the group is provably this account's own (its primary group, no member
+  // in the group file, no other primary in the account file); the account files handed in through main.js's seam, each read counted
+  const UIDp = typeof process.getuid === 'function' ? process.getuid() : null, GIDp = typeof process.getgid === 'function' ? process.getgid() : null;
+  if (UIDp !== null && GIDp !== null) {
+    let reads = 0;
+    const seamFor = (members) => (dir) => { const gid = fs.statSync(dir).gid; M._accounts({ gid, read: async (n) => { reads++; return n === 'group' ? `grp:x:${gid}:${members}\n` : `me:x:${UIDp}:${gid}::/home/me:/bin/sh\n`; } }); };
+    reads = 0; const shared = await onFolder(0o770, M, seamFor('me,ann,bob')); const sharedReads = reads; M._accounts(null);
+    reads = 0; const mine = await onFolder(0o770, M, seamFor('')); const mineReads = reads; M._accounts(null);
+    ok(!shared.up && shared.exits[0] === 2 && shared.kept === 'what stood here before' && shared.lines.some((l) => l.includes('can be written by its group grp, which 2 other accounts belong to (mode 770)') && l.includes('chmod g-w') && !/\bann\b|\bbob\b/.test(l)) && sharedReads === 2
+      && mine.up && mine.exits[0] === 0 && mineReads === 2,
+      `a 770 folder: its group SHARED (placed, two other members) — refused by name, exit 2, the path untouched, the count and the door in the words, no name; the account's OWN private group — it starts (the account files read: ${sharedReads}, ${mineReads})`, { shared: shared.lines[0], mine: mine.up });
+  }
   const own = await onFolder(0o700);
   const other = await M.linkFolderWhy(path.join(T, 'x.sock'), (typeof process.getuid === 'function' ? process.getuid() : 0) + 1);
   ok(own.up && own.exits[0] === 0 && typeof other === 'string' && other.includes('belongs to another account'), `a folder of this account alone (700) starts as before; one another account owns is refused: «${other}»`, { own, other });
