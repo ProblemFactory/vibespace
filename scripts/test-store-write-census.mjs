@@ -2057,7 +2057,11 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
   // record on the writer since 7/8) with its suite stand-in for a sidecar never written (_cwdDrop): a late landing never brings any back
   const FORGET_CALLERS = { 'src/server/boot-restore.js': 3, 'src/mounts.js': 1, 'src/server/browser-env.js': 2, 'src/server/browser-keeper.js': 1, 'src/server/session-stdout.js': 2, 'src/task-groups.js': 1, 'src/usage-history.js': 1 };   // B-574d (lane nl-journals): + mounts.js — the Gmail cursor's OWNER removes its file at a reseed (a scope change), forgotten at the writer first
   const fc = forgetCensus(files);
-  ok(JSON.stringify(fc) === JSON.stringify(FORGET_CALLERS), `⑫ the census: the product calls the writer's forget ONLY where a file's owner removes the file (${Object.entries(fc).map(([f, n]) => `${f} ${n}`).join(', ') || 'none'}) — never as a drop`, fc);
+  // ORDER-FREE (主开发 r5529, lane nl-mounts): both sides sorted by file, then compared — a folder walk's order is the file system's,
+  // never the table's (ordered text read red at train423 with the SAME counts, file for file, only listed in another order)
+  const byFile = (o) => JSON.stringify(Object.entries(o).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  const sameCallers = (a, b) => byFile(a) === byFile(b);
+  ok(sameCallers(fc, FORGET_CALLERS), `⑫ the census: the product calls the writer's forget ONLY where a file's owner removes the file (${Object.entries(fc).map(([f, n]) => `${f} ${n}`).join(', ') || 'none'}) — never as a drop`, fc);
   const UH = files.get('src/usage-history.js') || '';
   const durables = (UH.match(/\.durable\(this\.cursorsFile\)/g) || []).length, caughtOnly = (UH.match(/\.durable\(this\.cursorsFile\)\.catch\(\(\) => \{ \}\)/g) || []).length;
   ok(!/afterLanding\(|\bride\(|whenDurable\(/.test(UH) && durables === caughtOnly, '⑫ …the usage cursors\' drop (settleCursors) is safe by construction: NOTHING rides _cursors.json\'s landing — no step, no wait whose answer is read (its one durable() is only caught) — a step there would run as «landed» over bytes the drop never wrote', { durables, caughtOnly });
@@ -2068,7 +2072,14 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
     '⑫ …B-574d\'s five calls are each of a lawful kind: a record\'s entry released only once its write LANDED with nothing newer owed (keepTomb, keepCopy), a kept copy\'s removal by its owner (unlinkKept: forget, then its unlink), an end\'s record told «kept nothing» (keepEnded)');
   const planted = new Map(files); planted.set('src/server/browser-keeper.js', files.get('src/server/browser-keeper.js') + '\nfunction zzDrop() { const W = writerOf(); W.forget(storeKey); }\n');
   const pc = forgetCensus(planted);
-  ok(pc['src/server/browser-keeper.js'] === FORGET_CALLERS['src/server/browser-keeper.js'] + 1 && JSON.stringify(pc) !== JSON.stringify(FORGET_CALLERS), 'CONTROL (planted in a copy\'s text): a SECOND caller of the writer\'s forget — a drop of the registry\'s owed write — is red by name', pc);
+  ok(pc['src/server/browser-keeper.js'] === FORGET_CALLERS['src/server/browser-keeper.js'] + 1 && !sameCallers(pc, FORGET_CALLERS), 'CONTROL (planted in a copy\'s text): a SECOND caller of the writer\'s forget — a drop of the registry\'s owed write — is red by name', pc);
+  // ⑫'s comparison judged on computed tables (r5529): a count one off in one file, a census file with no row, a row with no census file —
+  // each RED; the very same counts listed in ANOTHER order — the same (the walk's order never decides)
+  const [k0] = Object.keys(FORGET_CALLERS), others = Object.fromEntries(Object.entries(FORGET_CALLERS).slice(1));
+  ok(!sameCallers({ ...FORGET_CALLERS, [k0]: FORGET_CALLERS[k0] + 1 }, FORGET_CALLERS), `CONTROL (computed): a count one off in one file (${k0}) is red`);
+  ok(!sameCallers({ ...FORGET_CALLERS, 'src/zz-made-up-caller.js': 1 }, FORGET_CALLERS), 'CONTROL (computed): a file in the census with no row is red');
+  ok(!sameCallers(others, FORGET_CALLERS), `CONTROL (computed): a row with no file in the census (${k0}) is red`);
+  ok(sameCallers(Object.fromEntries(Object.entries(FORGET_CALLERS).reverse()), FORGET_CALLERS) && JSON.stringify(Object.fromEntries(Object.entries(FORGET_CALLERS).reverse())) !== JSON.stringify(FORGET_CALLERS), '⑫ the same counts listed in another order are the same census (the comparison is order-free; as ordered text they differ)');
 }
 
 // ── ⑬ EVERY REGISTRY SAVE OF THE BROWSER KEEPER HAS ITS SIDE (主开发's round w4izmdrbq, its should 3 — r284's point 3 as a census) ──
