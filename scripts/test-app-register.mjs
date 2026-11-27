@@ -37,6 +37,23 @@ const kidsWithHome = (home) => { let pids = []; try { pids = fs.readFileSync(`/p
   return pids.filter((k) => { try { return fs.readFileSync(`/proc/${k}/environ`, 'latin1').split('\0').includes('HOME=' + home); } catch { return false; } }); };
 const kidsEnded = async (home, ms) => { const t0 = Date.now(); let left = kidsWithHome(home); while (left.length && Date.now() - t0 < ms) { await new Promise((r) => setTimeout(r, 25)); left = kidsWithHome(home); }
   if (left.length) markTimedOut(left, ms, `children with HOME ${home} still alive`); return left; };
+/** 主开发 r5423 (lane nl-journals — the find of r5319's placement, run e0c8cdae7-20261127004053-box): EVERY install and remove through
+ *  runAppOp re-lists the witness IN THE BACKGROUND, unawaited (src/app-serve.js runAppOp), and that listing writes INTO the section's
+ *  folder — <home>/.vibespace/sysroot/bin (the app system's syncShims) and <stateDir>/desktop-apps-witness.json (its temp + rename):
+ *  a section's folder is removed only once every machine half it made is SETTLED by the half's own word (witnessSettled: the running
+ *  listing, or none — and none running a turn later: a forced re-list waits for the running one, then starts its own), under a ceiling
+ *  of four listings' budgets, the expiry a named line → how many halves are still listing (the leg after it judges that) */
+const witnessesSettled = async (halves, ms = 4 * AW.WITNESS_BUDGET_MS) => {
+  const t0 = Date.now(); let busy = [];
+  for (;;) {
+    let t; await Promise.race([Promise.all(halves.map((a) => Promise.resolve(a.witnessSettled()).catch(() => null))), new Promise((r) => { t = setTimeout(r, Math.max(1, ms - (Date.now() - t0))); })]); clearTimeout(t);
+    await new Promise((r) => setImmediate(r));
+    busy = halves.filter((a) => a.witnessView().listing);
+    if (!busy.length || Date.now() - t0 >= ms) break;
+  }
+  if (busy.length) markTimedOut(busy.map((a) => a.witnessView()), ms, 'a machine half still listing its witness');
+  return busy.length;
+};
 const sec = (s) => console.log(s);
 /** int255: an IN-MEMORY mutant of a repo module, compiled beside the real file (relative requires resolve; nothing on disk changes);
  *  `pairs` = [from, to] — a dead anchor throws, so a control can never pass vacuously. */
@@ -192,6 +209,8 @@ const st2 = await apps.status();
 ok(st2.reinstall.length === 1 && st2.reinstall[0].click === 'user' && st2.reinstall[0].words === 'reinstall: flatpak install --user -y flathub org.jaspstats.JASP', `a gone Flatpak = a USER-CLICK reinstall rung (${JSON.stringify(st2.reinstall)})`);
 const rm = await AS.runAppOp(apps, 'app-remove', { entryId: dir.entry.id, home: true });
 ok(rm.ok && !(await apps.readManifest()).manifest.entries.some((e) => e.id === dir.entry.id), 'remove of a registered app without a recipe drops its record');
+const left8 = await witnessesSettled([apps]);
+ok(left8 === 0, `⑧'s end: the background listings its installs and its remove started are settled before its folder is removed (the machine half's own word) — still listing: ${left8}`);
 fs.rmSync(tmp, { recursive: true, force: true });
 
 sec('⑨ the ENGINE over the real machine half (int254): register → For-you proposal → accept → recorded; witnessed ⇒ direct; sudo ⇒ needs_root; remove = a proposal → accept runs the recipe');
@@ -290,6 +309,8 @@ sec('⑨ the ENGINE over the real machine half (int254): register → For-you pr
   ok(fs.existsSync(ranFile) && fs.readFileSync(ranFile, 'utf8') === '--all my tool\n', `Accept ran the registered recipe with its own argv (${fs.existsSync(ranFile) ? JSON.stringify(fs.readFileSync(ranFile, 'utf8')) : 'never ran'})`);
   ok(!(await entries()).some((e) => e.id === 'tool') && !(await apps9.refreshCatalog()).some((r) => r.app === 'tool') && (await entries()).some((e) => e.id === r2.entryId), 'the row left (JASP stays)');
   ok(eng.get(p4.id).state === 'done' && todos.get(it4[0].id).status === 'done', 'the remove proposal is done and its item resolved');
+  const left9 = await witnessesSettled([apps9]);
+  ok(left9 === 0, `⑨'s end: the background listings its engine's installs and remove started are settled before its folder is removed (the machine half's own word) — still listing: ${left9}`);
   fs.rmSync(t9, { recursive: true, force: true });
 }
 
@@ -412,6 +433,8 @@ sec('⑩ rel254-verify-fixes: the OWNER routes over the real router (adopt-prefi
   await new Promise((r) => srv.close(() => r()));
   const left10 = await kidsEnded(h, 2 * 5000);
   ok(left10.length === 0, `⑩'s end: every child this section started (its HOME) ended before its folder is removed — still alive: ${JSON.stringify(left10)}`);
+  const listing10 = await witnessesSettled([appsR, appsRm, appsN]);
+  ok(listing10 === 0, `⑩'s end: the background listings its owner removes started are settled before its folder is removed (each machine half's own word) — still listing: ${listing10}`);
   fs.rmSync(t10, { recursive: true, force: true });
   // PLACED (r5094, unit C — the find made red at will): a stand-in for that late child, a writer of the section's own that holds a moment
   // inside itself and then writes into its HOME: the OLD end (the removal at once) finds the folder BACK after it lands; the end above
