@@ -30,6 +30,16 @@ fs.mkdirSync(ROOT, { recursive: true });
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 
 const { ok, counts } = checker();   // B-119d: THE ONE checker (scripts/lib/check.mjs) — a condition is a boolean, a name a string, else it throws
+/** r5514: an UNAWAITED removal's landing (a consume's unlink that answers before its file is gone) is waited FOR — the fact read every
+ *  10 ms under a COUNTED ceiling, its expiry a red line of its own (never a fixed span: 50 ms read a copy still there under a gate's
+ *  load, on five trees since 11-19) → true when the fact held in time */
+const factWithin = async (fact, what, ms = 3000) => {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) { if (fact()) return true; await new Promise((r) => setTimeout(r, 10)); }
+  if (fact()) return true;
+  ok(false, `harness: ${what} — not seen within ${ms} ms (a counted ceiling, r5514)`);
+  return false;
+};
 
 const CID = 'e2e00000-0000-4000-8000-0000000000a1', CALLER = 'e2e00000-0000-4000-8000-0000000000ee';
 const KEEPS = { sidecarFacts: { background: true, timers: true, lastRecordAt: true } };
@@ -229,7 +239,7 @@ console.log('④ the kept record: who and when; the race; a resume');
   duringKill = async () => { await api.stoppedSessions(); };
   await endSession({ sessionId: 'sess-x' });
   duringKill = null;
-  for (let i = 0; i < 50 && fs.existsSync(path.join(META, 'cw-4-1794880000004.json.stopped')); i++) await new Promise((r) => setTimeout(r, 10));   // the consume's unlink is async: let it land
+  await factWithin(() => !fs.existsSync(path.join(META, 'cw-4-1794880000004.json.stopped')), 'the read during the kill: its consume\'s unlink (not awaited) landed');   // r5514: on the fact, a counted ceiling
   ok(!(await rowOf('e2e00000-0000-4000-8000-0000000000d4')) && !fs.existsSync(path.join(META, 'cw-4-1794880000004.json.stopped')), 'CONTROL a record registered BEFORE the kill is CONSUMED by the read during it (its conversation was still live) — the order above is the cure');
   // a resume consumes it
   active.set('sess-r', session({ backendSessionId: 'e2e00000-0000-4000-8000-0000000000c3', sockName: 'cw-5-1794880000005' }));
@@ -312,7 +322,9 @@ console.log('⑥ THE ONE END RECORD\'s contract (主开发 14:51Z): the one boun
     const planted = typeof Mx.consumeEnded === 'function' ? await Mx.consumeEnded(`claude:${cid}`) : null;   // a create road's consume (only the RED's module has one)
     const atTurn = await inst.consumeKeptOf(s, FAILED);   // its turn FAILED
     live.delete('sess-r');   // the failed resume's process left
-    await new Promise((r) => setTimeout(r, 50));   // a consume's unlink is not awaited (the old leg's wait)
+    // r5514: the PLANTED consume's unlink is not awaited (the stack's piece 3 as it was) — waited FOR (the copy gone) under a counted
+    // ceiling, never a fixed span; the real road holds no removal in flight (a failed turn removes nothing): nothing to wait for
+    if (planted === true) await factWithin(() => !fs.existsSync(file), 'the planted create-road consume: its unlink (not awaited) landed');
     const row = (await inst.stoppedSessions()).find((r) => r.backendSessionId === cid) || null;
     return { before, planted, atTurn, row: row && { stopReason: row.stopReason, endedBy: row.endedBy || null }, file: fs.existsSync(file) };
   };
