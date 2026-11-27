@@ -24,9 +24,15 @@
 //   §1 the premise on raw dtach + node-pty (no server): the leak, the orphan,
 //      the dead attach, the cure's ORDER (attach first, then end the orphan).
 //   §2 a worktree server + a stub claude that streams stamped records, posts
-//      OTel api_request rows and has the server spawn a long-lived job:
-//      SIGKILL mid-stream, restart ⇒ the boot sweep ends the orphan and the
-//      restored session streams within seconds.
+//      OTel api_request rows and has the server start long-lived jobs. FIRST
+//      THE NEW LAW (r5405, since 20080c900): a plain job started through the
+//      hub's starter holds no attach master; the hub killed, its attach client
+//      ends; the restart streams unswept (RED a fork-the-hub copy of
+//      src/jobs.js). THEN the leak as production can still make it — one
+//      placed fault of the hub's starter after the attach, so the replacement
+//      and the job it starts hold the master (its witness first): SIGKILL
+//      mid-stream, restart ⇒ the boot sweep ends the orphan and the restored
+//      session streams within seconds.
 //   §3 the CONTROL: the same restart on a pre-fix copy (no sweep, no watch)
 //      stays DARK while the CLI keeps working.
 //   §4 the WATCH: a stuck client the sweep may not touch (its parent is
@@ -107,6 +113,29 @@ const ptmxIndexes = (pid) => {
   }
   return out;
 };
+// r5387 (the train's first hosted proof at the candidate 4d78a1334 — every §2/§3 line red, the scene never formed): since 20080c900 (line 1069, «a job's start no
+// longer forks the hub») a job's wrapper is a DETACHED start of the hub's STARTER, born at the hub's load — before any attach — so a job
+// holds no attach master and the leak below never forms on that road. The product CAN still leak by its own road: a starter REPLACED
+// after a fault is born AFTER the attach (node-pty's master has no FD_CLOEXEC, premise ①) and its detached starts inherit what it holds
+// (src/server/child-starter-proc.js closes nothing inherited). THE PLANT (r5135 law 1): ONE fault of the server's starter after the
+// attach — its process SIGKILLed; the hub replaces it at its next request (the job's start). Its WITNESS, read before the leak's line:
+// a NEW starter pid, born after the attach, holding the attach's master; a plant never in force is a NAMED SKIP, never a red or a green
+const starterOf = (serverPid) => fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)).map(Number)
+  .find((p) => ppidOf(p) === serverPid && argvOf(p).some((a) => /child-starter-proc\.js$/.test(a))) || null;
+const faultStarter = async (serverPid) => {
+  const s0 = starterOf(serverPid);
+  if (s0) { try { process.kill(s0, 'SIGKILL'); } catch { } await until(() => !alive(s0), 5000); }
+  return s0;
+};
+/** the plant in force: the server's starter now is a NEW one (≠ the one ended) that holds the attach's master `pts` */
+/** r5405: a job's OWN processes — NAMED by the mark every one of them carries (VIBESPACE_JOB_ID=<its id>, the mark the hub's walks
+ *  read), waited for (a ceiling) until at least one shows */
+const markedOf = async (id, ms = 8000) => {
+  const scan = () => fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)).map(Number)
+    .filter((p) => { try { return fs.readFileSync(`/proc/${p}/environ`, 'utf8').split('\0').includes(`VIBESPACE_JOB_ID=${id}`); } catch { return false; } });
+  let out = []; await until(() => (out = scan()).length > 0, ms, 100); return out;
+};
+const plantInForce = (serverPid, killed, pts) => { const s = starterOf(serverPid); return { starter: s, inForce: !!s && s !== killed && pts != null && ptmxIndexes(s).includes(pts) }; };
 const ptsIndexOfStdout = (pid) => { try { const m = /^\/dev\/pts\/(\d+)$/.exec(fs.readlinkSync(`/proc/${pid}/fd/1`)); return m ? Number(m[1]) : null; } catch { return null; } };
 const ttyNrOf = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[4]); } catch { return 0; } };
 /** every attach CLIENT of one socket: `dtach -a <sock>`, or the `dtach -c <sock>` that created the session and stayed
@@ -452,6 +481,10 @@ for (const f of ['src', 'public', 'server.js', 'package.json']) {   // overlay t
 fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const FIXED_SERVER = fs.readFileSync(path.join(wt, 'server.js'), 'utf8');
+// r5405 THE NEW LAW's RED: a copy of src/jobs.js that forks the hub again — the starter's hand-off line cut (the release's road:
+// every job's wrapper a fork of the hub, which inherits the attach's master); the server's own text unchanged
+const FIXED_JOBS = fs.readFileSync(path.join(wt, 'src', 'jobs.js'), 'utf8');
+const FORK_JOBS = editAnchor(FIXED_JOBS, 'if (!vj) { this._askStart(job, argv, specPath, trigger); return; }', '/* red copy: the job forks the hub */', 'src/jobs.js');
 // THE PRE-FIX CONTROL: the same tree without the boot sweep + the watch (the one line that starts both)
 const SWEEP_LINE_RE = /^.*bridgeWatch\.bootSweep\(\); bridgeWatch\.start\(\);.*$/m;
 const CONTROL_SERVER = FIXED_SERVER.replace(SWEEP_LINE_RE, '  /* control: no boot sweep, no dead-bridge watch */');
@@ -511,8 +544,9 @@ const bootEnv = {
 };
 for (const k of Object.keys(bootEnv)) if (/^(VIBESPACE_API|VIBESPACE_SESSION_TOKEN|VIBESPACE_JOB_TOKEN|CLAUDE_WEBUI_|AGENT_BROWSER_)/.test(k)) delete bootEnv[k];
 let journal = '';
-function boot(src = FIXED_SERVER) {
+function boot(src = FIXED_SERVER, jobs = FIXED_JOBS) {
   fs.writeFileSync(path.join(wt, 'server.js'), src);
+  fs.writeFileSync(path.join(wt, 'src', 'jobs.js'), jobs);   // r5405: the red copy of the new law is one boot's own
   const c = spawn(process.execPath, ['server.js'], { cwd: wt, env: bootEnv, stdio: ['ignore', 'pipe', 'pipe'] });
   servers.add(c);
   c.jr = '';
@@ -588,7 +622,7 @@ let SID = null, SOCK = null;
 e2e: {
   setMinutes(3);
   let A = boot(); if (!ok(await ready(A), 'boot A: the post-fix worktree server is Ready', A.jr.slice(-1500))) break e2e;
-  const c1 = await connect();
+  let c1 = await connect();
   c1.ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: PROJ, cols: 120, rows: 30, reqId: 'r1' }));
   const created = await until(() => c1.frames.find((f) => f.type === 'created'), 20000);
   SID = created ? c1.frames.find((f) => f.type === 'created').sessionId : null;
@@ -612,13 +646,44 @@ e2e: {
     }
     return out && /starting/.test(String(out.error || '')) ? markTimedOut(out, 40 * 500, `startHolder ${name} (the jobs engine past «starting»)`) : out;   // a wait that runs out says so (r1372; test-ci-gate §2p)
   };
+  // ── r5405 THE NEW LAW (since 20080c900): a PLAIN job started through the hub's starter holds NO master of the attach — read on
+  // NAMED processes (the starter, found — its birth not assumed; the job's own processes, by its mark), never «nothing seen in a span»;
+  // the hub killed, its attach client ENDS with it (waited on the fact, a ceiling) and the restart streams with no boot-sweep line.
+  // RED: the fork-the-hub copy of src/jobs.js (FORK_JOBS) — its plain job's own processes hold the restarted hub's attach master
+  {
+    const client0 = attachClientsOf(SOCK).find((p) => ppidOf(p) === A.pid), pts0 = client0 ? ptsIndexOfStdout(client0) : null;
+    const st0 = starterOf(A.pid);
+    ok(!!st0 && pts0 != null && !ptmxIndexes(st0).includes(pts0), `THE NEW LAW (r5405): the hub's starter ${st0} (found by its argv; its birth not assumed) holds no master of the attach (tty ${pts0})`);
+    const jp = await startHolder('plain-a');
+    const named = jp && jp.job ? await markedOf(jp.job.id) : [];
+    ok(named.length > 0 && named.every((p) => !ptmxIndexes(p).includes(pts0)), `THE NEW LAW: a PLAIN job started through the starter holds no master of the attach — its own processes, named by its mark (${jp && jp.job && jp.job.id}: ${named.map((p) => `${p} ${commOf(p)}`).join(', ') || 'none found'}), hold none of tty ${pts0}`);
+    const anchor0 = stubN();
+    c1.ws.close(); await stop(A, 'SIGKILL');
+    ok(client0 != null && await until(() => !alive(client0), 10000), `THE NEW LAW: the hub killed, its attach client ${client0} ENDS with it (no orphan; waited on the fact, 10 s ceiling)`);
+    A = boot(FIXED_SERVER, FORK_JOBS);   // the restart, on THE RED COPY (only src/jobs.js differs: a job's start forks the hub again)
+    if (!ok(await ready(A), 'boot A′ (the fork-the-hub copy of src/jobs.js) is Ready', A.jr.slice(-1500))) break e2e;
+    c1 = await connect(); c1.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
+    ok(await until(() => c1.maxRec > anchor0 + 20, 20000) && !/\[bridge\] boot: ended \d+ orphaned/.test(A.jr), `THE NEW LAW: the restart streams with no boot-sweep line — nothing was orphaned (record ${c1.maxRec}, past ${anchor0} read at the kill)`);
+    const clientR = attachClientsOf(SOCK).find((p) => ppidOf(p) === A.pid), ptsR = clientR ? ptsIndexOfStdout(clientR) : null;
+    const jr = await startHolder('plain-red');
+    const namedR = jr && jr.job ? await markedOf(jr.job.id) : [];
+    ok(ptsR != null && namedR.some((p) => ptmxIndexes(p).includes(ptsR)), `RED (the fork-the-hub copy: the starter's hand-off line cut): its plain job's own processes HOLD the attach master (tty ${ptsR}: ${namedR.filter((p) => ptmxIndexes(p).includes(ptsR)).map((p) => `${p} ${commOf(p)}`).join(', ') || 'none'})`);
+    c1.ws.close(); await stop(A, 'SIGTERM');   // a clean stop ends the red hub's own attach (no orphan for the scene below)
+    A = boot(); if (!ok(await ready(A), 'boot A″ (the post-fix server) is Ready', A.jr.slice(-1500))) break e2e;
+    c1 = await connect(); c1.ws.send(JSON.stringify({ type: 'attach', sessionId: SID, cols: 120, rows: 30 }));
+    ok(await until(() => c1.maxRec > stubN() - 200 && c1.maxRec > 0, 20000), `setup: A″ streams the restored session (record ${c1.maxRec})`);
+  }
+  const killedA = await faultStarter(A.pid);   // THE PLANT (r5387): one fault of A's starter after the attach — the job's start replaces it
   const j1 = await startHolder('holder-a');
   ok(j1 && j1.job && j1.job.id, `setup: the server started a long-lived job after the attach (${j1 && j1.job && j1.job.id})`, JSON.stringify(j1).slice(0, 300));
   await sleep(1500);
   const clientA = attachClientsOf(SOCK).find((p) => ppidOf(p) === A.pid);
   const ptsA = clientA ? ptsIndexOfStdout(clientA) : null;
+  const plantA = plantInForce(A.pid, killedA, ptsA);
+  if (!plantA.inForce) { skip(`§2–§4 SCENE NOT FORMED (r5387, law 1): the plant was not in force — A's starter ${killedA || '(none found)'} ended, its replacement ${plantA.starter || '(none)'} ${plantA.starter ? `holds ${JSON.stringify(ptmxIndexes(plantA.starter))}, not the attach's tty ${ptsA}` : 'never started'}`); SID = null; await stop(A, 'SIGTERM'); break e2e; }
+  ok(plantA.inForce, `PLANT IN FORCE (the witness): A's starter ${killedA} ended after the attach; its replacement ${plantA.starter}, born after it, holds the attach master (tty ${ptsA})`);
   const holders = fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)).map(Number).filter((p) => p !== A.pid && ptsA != null && ptmxIndexes(p).includes(ptsA));
-  ok(holders.length > 0, `THE LEAK in the product: the server's attach pty master (tty ${ptsA}) is held by ${holders.length} other process(es) it spawned later (${holders.slice(0, 4).map((p) => `${p} ${commOf(p)}`).join(', ')})`);
+  ok(holders.length > 0, `THE LEAK in the product: the server's attach pty master (tty ${ptsA}) is held by ${holders.length} other process(es) it started after the attach — the starter replaced after a fault, and the job it started (${holders.slice(0, 4).map((p) => `${p} ${commOf(p)}`).join(', ')})`);
   const before = c1.maxRec;
   const BUF = path.join(wt, 'data', 'session-buffers', SID + '.buf');
   // r4456 PLACED (law 1): the stall HELD BACK (the CLI slowed: the orphan's buffers fill ~20× slower) — the OLD 9 s wait then measures
@@ -653,10 +718,14 @@ e2e: {
   // ═══ §3 the CONTROL: the same restart on the pre-fix copy stays dark ═══
   console.log('\n§3 CONTROL — the same restart without the sweep and the watch stays DARK');
   const sEarly3 = stubN();   // r4510: an EARLY anchor (read before the stall, B still live: every record from here to the stall is in the slab)
-  const j2 = await startHolder('holder-b');   // B's own attach master must outlive B too (a job B spawned after its attach)
+  const killedB = await faultStarter(B.pid);   // THE PLANT (r5387), for B as for A: its starter faulted once after its attach
+  const j2 = await startHolder('holder-b');   // B's own attach master must outlive B too (a job B started after its attach)
   ok(j2 && j2.job, 'control setup: server B started its own long-lived job after its attach');
   await sleep(1200);
   const clientB = attachClientsOf(SOCK).find((p) => ppidOf(p) === B.pid);
+  const plantB = plantInForce(B.pid, killedB, clientB ? ptsIndexOfStdout(clientB) : null);
+  if (!plantB.inForce) { skip(`§3–§4 SCENE NOT FORMED (r5387, law 1): the plant was not in force for B — its starter ${killedB || '(none found)'} ended, its replacement ${plantB.starter || '(none)'} holds no master of B's attach`); SID = null; await stop(B, 'SIGTERM'); break e2e; }
+  ok(plantB.inForce, `control PLANT IN FORCE (the witness): B's starter ${killedB} ended after its attach; its replacement ${plantB.starter} holds B's attach master`);
   await stop(B, 'SIGKILL');
   await stallOf(path.join(wt, 'data', 'session-buffers', SID + '.buf'), '§3 (B\'s orphan)');
   const sStall3 = stubN();   // …and the one read after it   // r4456: the control's dark restore needs the stall itself, never a fixed 9 s
