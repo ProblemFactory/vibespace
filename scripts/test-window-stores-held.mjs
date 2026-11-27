@@ -48,11 +48,12 @@ async function waitFor(fact, ms, name) {
 let dirN = 0;
 const mk = () => { const d = path.join(scratch('window-stores-held'), 'd' + (++dirN)); fs.mkdirSync(d, { recursive: true }); return d; };
 const READ0 = fs.readFileSync;   // the suite's OWN reads (a file's bytes, judged) — never counted as the engine's, never refused
-const bytesOf = (dir, f) => { try { return READ0.call(fs, path.join(dir, f), 'utf8'); } catch { return null; } };
+const bytesOf = (dir, f) => { ENGINE.landedIn(dir); try { return READ0.call(fs, path.join(dir, f), 'utf8'); } catch { return null; } };   // the file as the store writer LANDED it (its own door, never a sleep)
 const S1 = 'aaaaaaaa-1111-4000-8000-000000000071', S2 = 'bbbbbbbb-2222-4000-8000-000000000072';
 const mkRec = (id, extra = {}) => ({ id, label: `App ${id}`, exec: 'x', state: 'ready', display: ':77', pids: { app: 4242, x: null, server: null, wm: null }, starts: {}, backend: 'vnc-display', startedAt: 1, ...extra });
 /** one LIFE: an engine over `dir` (the module `Mod` — the real one, or a RED copy), the session `w-A`, three windows */
 function life(Mod, dir, opts = {}) {
+  ENGINE.landedIn(dir);   // a restart in one process: the last life's owed writes land first (the store writer's own door)
   const sessions = new Map([['w-A', { agentToken: 'vsst_A', claudeSessionId: S1, backendSessionId: S1, backend: 'claude', name: 'agent A', mode: 'chat' }],
     ['w-B', { agentToken: 'vsst_B', claudeSessionId: S2, backendSessionId: S2, backend: 'claude', name: 'agent B', mode: 'chat' }]]);
   const records = new Map([['da-one', mkRec('da-one')], ['da-two', mkRec('da-two')], ['da-three', mkRec('da-three')]]);
