@@ -362,7 +362,9 @@ const S1_ROWS = {
   'src/routes/vault.js': [4, 'PAST the vault doors\' gate (app.use over /api/vault and /api/agent/vault: tokenHeldAnswer) answers EVERY jbt_ bearer the hold by name, the lock\'s too since r4994, before any door runs — its four lookups (bearerOf, agentOk, agentPrincipal, runCallerOf) are reached only past it'],
   'src/server/delivery-wake.js': [2, 'HOLD the wake grant (its gate) · PAST a cron parent'],
   'src/server/end-proposals.js': [3, 'HOLD jobOwnerReader answers a held engine BY ITS WORDS (r5074 (2)): an end card\'s press with wake ticks, a wake card\'s filing and a grant\'s change refuse by the hold\'s name, nothing written · VIEW wakeRowsReader (a card drawn while held lists no job rows)'],
-  'src/server/jobs-wiring.js': [4, 'HOLD the detail, seen and acts (their gates) · PAST the create, after its gate'],
+  'src/server/jobs-wiring.js': [5, 'HOLD the detail, seen and acts (their gates) · PAST the create, after its gate · LEFT initAfterListen\'s one boot line of a VibeSpace started inside a job '
+    + '(B-2c5c, met here by 主开发 r5346: line 2250 added it, line 2277 counted the file before it): under a held lock nothing is loaded, so the line names that job in its unknown form '
+    + '(«a job this VibeSpace does not hold now: another VibeSpace\'s, or one it archived») — a wrong reason in one journal line, said once at the boot and not again at the lift; nothing decided, written, started or signalled'],
   'src/server/mounts-plugins-wiring.js': [1, 'VIEW jobName (the browser keeper\'s label; its own rule keeps the handle while the engine cannot say)'],
   'src/server/vault-job-door.js': [8, 'HOLD answer and revokeAll (r5017), the single revoke (r5074 (1): its guard asks the hold before its first lookup) · PAST ask, fileCards (the engine\'s own, never while held) · VIEW refOf (an audit\'s name), rowFacts\'s two (the rows view) · KEPT entryGone (r5074 (1): a deleted entry\'s jobs\' stop OWED while held, done at the lock\'s lift — afterLift)'],
 };
