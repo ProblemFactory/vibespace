@@ -131,16 +131,70 @@ ck('fresh kept rows ask the door nothing', d1.asks === d0.asks);
 const row0 = rows.find((x) => x.id === IDS[0]), prow = rows.find((x) => x.id === POOL);
 ck('a read row: facts {state: read, at}, signed in, its email', row0.facts && row0.facts.state === 'read' && row0.loggedIn === true && row0.email === emailOf(0));
 ck('the pool row: its current member by the kept link, that member\'s email', IDS.includes(prow.current) && prow.email === emailOf(IDS.indexOf(prow.current)) && prow.facts.state === 'read');
-// the bounded re-read of an old row: a store whose stated age is short; the list never waits, the door confirms by stamp
+// the bounded re-read of an old row: a store whose stated age is short; the list never waits, the door confirms by stamp.
+// 主开发 r5417 (the hosted proof's red, placed): THE COUNT WINDOW HOLDS EVERY ASKER — a0 is taken in the SAME continuation as the
+// store's first settle (no timer runs between an await's resumption and the next statement), so the store's own coalesced push
+// (its list on the 100 ms rows-soon timer) is a COUNTED asker of the re-read, never a rival that empties the suite's window; and
+// the age is waited as the FACT the old fixed sleep stood for: no push pending and every kept row older than the stated age
+// (agedOf, a ceiling counted in polls, red by name) — then the list over those old rows in the same continuation
+const dirsOf = (am) => am._state.accounts.map((a) => { try { return am._displayFilesOf(a).dir; } catch { return null; } }).filter(Boolean);
+const agedOf = async (am, ageMs, polls = 2000) => {
+  const dirs = dirsOf(am);
+  for (let n = 0; n < polls; n++) {
+    await am.displaySettled();
+    if (!am._rowsSoon && dirs.length > 0 && dirs.every((d) => am._display.stale(d, ageMs))) return { ok: true, dirs: dirs.length };
+    await sleep(1);
+  }
+  return { ok: false, dirs: dirs.length };
+};
+const judgeAged = async (am, ageMs) => {   // the window opened in the continuation of the store's first settle; the age waited as its fact
+  await am.displaySettled(); const b0 = doorCount();
+  const aged = await agedOf(am, ageMs);
+  if (!aged.ok) ck(`the rows never aged past ${ageMs} ms with no push pending (${aged.dirs} folders, the ceiling of its polls)`, false);
+  syncAsks.stall = true; const r = countSync(() => am.list()); syncAsks.stall = false;
+  await am.displaySettled(); const b1 = doorCount();
+  return { ms: r.ms, asks: r.asks, stats: b1.stat - b0.stat, text: b1.readText - b0.readText };
+};
 const amAge = new AccountManager({ dataDir: DATA, safeFs: door, displayMaxAgeMs: 15 });
-await amAge.displaySettled(); await sleep(25);
-const a0 = doorCount();
-syncAsks.stall = true; const ra = countSync(() => amAge.list()); syncAsks.stall = false;
-await amAge.displaySettled();
-const a1 = doorCount();
-console.log(`    an old row's bounded re-read: the list ${ra.ms.toFixed(1)} ms, ${ra.asks} synchronous asks; behind it ${a1.stat - a0.stat} stats, ${a1.readText - a0.readText} text reads (the stamps unchanged: CONFIRMED)`);
-ck('a list over old rows never waits for the re-read and asks nothing on the loop', ra.asks === 0);
-ck('the re-read behind it CONFIRMS by stamp: stats only, no text read', a1.stat - a0.stat >= 24 && a1.readText === a0.readText);
+const ra = await judgeAged(amAge, 15);
+console.log(`    an old row's bounded re-read: the list ${ra.ms.toFixed(1)} ms, ${ra.asks} synchronous asks; behind it ${ra.stats} stats, ${ra.text} text reads (the stamps unchanged: CONFIRMED)`);
+ck('a list over old rows never waits for the re-read and asks nothing on the loop', ra.asks === 0, `${ra.asks} synchronous asks`);
+ck('the re-read behind it CONFIRMS by stamp: stats only, no text read', ra.stats >= 24 && ra.text === 0, `stats ${ra.stats} (at least 24: 12 sign-in folders × 2 files), text reads ${ra.text} (none), synchronous asks of the list ${ra.asks}`);
+// THE RACE, KEPT AS A SCENE (主开发 r5417, placed at will — never by load): the store's coalesced push IS a second list() (src/
+// accounts.js _notifyRowsSoon: `this._onChange(this.list())`); placed here as that rival list, asked once the kept rows are old,
+// with the count window opening once four of its stats were asked (the door counts a stat at its ask: a fact, not a clock). RED CONTROL — the release's window (opened after the
+// rival, the rival not counted) reads FEWER than 24 stats, and no text read; the cured window (opened before it) counts them all
+const raceStore = () => new AccountManager({ dataDir: DATA, safeFs: door, displayMaxAgeMs: 15 });
+const rivalList = (am) => { syncAsks.stall = true; const r = countSync(() => am.list()); syncAsks.stall = false; return r.asks; };   // the push's own list, asked at will
+const statsReach = async (n, polls = 2000) => { for (let k = 0; k < polls; k++) { if (doorCount().stat >= n) return true; await sleep(1); } return false; };
+const windowOf = async (am, { counted }) => {
+  await am.displaySettled();
+  let b0 = counted ? doorCount() : null;   // the cured window opens HERE, before the rival
+  const aged0 = await agedOf(am, 15);
+  if (!aged0.ok) ck(`the race scene's rows never aged past 15 ms with no push pending (${aged0.dirs} folders, the ceiling of its polls)`, false);
+  const s0 = doorCount().stat; const staleAtRival = dirsOf(am).filter((d) => am._display.stale(d, 15)).length;   // (r5452) the rival re-reads exactly these: R = 2 stats each
+  const rivalAsks = rivalList(am);
+  if (!(await statsReach(s0 + 4))) ck('the race scene\'s rival list never had four of its stats asked (the ceiling of its polls)', false);
+  if (!counted) b0 = doorCount();          // the release's window opens HERE, after the rival
+  else { const aged1 = await agedOf(am, 15); if (!aged1.ok) ck(`the race scene's rows never aged again past 15 ms (${aged1.dirs} folders, the ceiling of its polls)`, false); }
+  // (主开发 r5448 / r5452) THE RED CONTROL's EXACT WITNESS, read in the SAME synchronous step as the window's own list. The door counts
+  // a stat at its ASK (door.call), a folder whose read is in flight is never asked again (the keeper's stale() is false for it), so:
+  // R = the rival's re-read (2 stats for each folder stale at the rival's list), B = the stats asked between the rival and the
+  // window, S = the folders stale at the window's list (each asked again: 2 stats) — the window counts R − B + 2S. Judged only when
+  // that is under 24; otherwise (a process held past the stated age meanwhile, a starved runner) the scene did not form
+  const dirsW = counted ? null : dirsOf(am), fresh = counted ? null : dirsW.filter((d) => !am._display.stale(d, 15)).length;
+  const wit = counted ? null : { R: 2 * staleAtRival, B: b0.stat - s0, S: dirsW.length - fresh, fresh, folders: dirsW.length };
+  if (wit) wit.expect = wit.R - wit.B + 2 * wit.S;
+  syncAsks.stall = true; const r = countSync(() => am.list()); syncAsks.stall = false;
+  await am.displaySettled(); const b1 = doorCount();
+  return { stats: b1.stat - b0.stat, text: b1.readText - b0.readText, asks: r.asks + rivalAsks, wit };
+};
+const rr = await windowOf(raceStore(), { counted: false });
+const w = rr.wit, said = `R ${w.R} (the rival's re-read), B ${w.B} (asked before the window), S ${w.S} (stale at its list), R − B + 2S = ${w.expect}; ${w.fresh} of ${w.folders} kept folders not stale`;
+if (!(w.expect < 24)) console.log(`  ⊘ SKIP RED CONTROL — the race scene did not form: ${said} — the window would count 24 or more by its own arithmetic (the process held past the stated age meanwhile); counted ${rr.stats}, text reads ${rr.text} — not judged`);
+else ck(`RED CONTROL (witnessed: ${said}): the release's window, opened just after a rival list (the store's own push), counts FEWER than 24 stats — and reads no text (the race, at will)`, rr.stats < 24 && rr.text === 0, `counted ${rr.stats}, text reads ${rr.text}, synchronous asks ${rr.asks}; ${said}`);
+const rc = await windowOf(raceStore(), { counted: true });
+ck('the cured window under the same placement counts every asker: at least 24 stats, no text read, nothing asked on the loop', rc.stats >= 24 && rc.text === 0 && rc.asks === 0, `stats ${rc.stats}, text reads ${rc.text}, synchronous asks ${rc.asks}`);
 console.log(`    THE COUNT (this stand-in): a list call = 0 file asks on the loop; behind the shown rows at most one confirmation a folder per stated age (60 s on the hub: ≤ ${13 * 2} stats a minute through the door, off the loop), whatever the list cadence`);
 
 // ── ③ a start ────────────────────────────────────────────────────────────────────────────────────────────────────────
