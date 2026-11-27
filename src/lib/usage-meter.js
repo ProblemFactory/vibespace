@@ -177,7 +177,7 @@ export function installUsageMeter(App, ctx = {}) {
   _usageKeyName(key) { return key === '__global__' ? t('CLI login') : ((this._accounts?.accounts || []).find((a) => a.id === key)?.name || key); },
   _capNameOf(key, lane, o = null) { return (o && o.name) || null; },   // the server hands the cap's own name with its lane (quotaModel.lanesOfReading)
   /** «I RESET THIS ON ANTHROPIC'S SITE» — one lane where it is drawn (`lanes` = [lane]) or the whole account ('all'). A claim
-   *  (it bills nothing, asks no vendor); then the SAME ⟳ for that one account, so a reading confirms or corrects it at once.
+   *  (the claim itself bills nothing; its ONE test, if a stopped conversation waits, is the person's own act — B-9a24 U1); then the SAME ⟳ for that one account, so a reading confirms or corrects it at once.
    *  A wall that is not a quota (the CLI not measured, the vault, the login) is said at the press — the claim stands. */
   async _resetClaim(key, lanes, { capName = null } = {}) {
     const name = this._usageKeyName(key);

@@ -224,6 +224,7 @@ export const ROWS = Object.freeze([
   ['fireIdentity@src/server/auto-resume.js', 'src/server/auto-resume.js', 'identityFor', 'pile', 1],
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'attemptFire', 'spend', 1],
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'deliver', 'spend', 1],
+  ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'fireNowOnClaim', 'spend', 1],   // B-9a24 U1 follow (r5474): the press's test asks the breaker its own reason on the identity it lands on
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'resumeBatch', 'spend', 2],
   ['identityFor@src/server/auto-resume.js', 'src/server/auto-resume.js', 'stoppedRows', 'pile', 1],
   ['identityFor@src/server/spend-guard.js', 'src/server/spend-guard.js', 'authorize', 'pile', 1],
@@ -579,6 +580,7 @@ export const CONSUMERS = Object.freeze({
   "fallbackFactOf": {"file": "src/server/usage-pool-engine.js", "fields": ["provider", "back"], "why": "B-d578 r3918: the conversation's own strip fact: provider = the member heldPoolMemberFor names (a provider id), back = the member fallbackBackVerdict names now; reads only, moves nothing."},
   "crossVerdictNow": {"file": "src/server/usage-pool-engine.js", "fields": ["curFor"], "why": "B-d578 F2: the ONE re-judgement under allow of a conversation (the cross card's answer through crossMoveNow, the fallback queue's move through fallbackJudge): sessionBillingMember/poolCurrentFor give its currentId, returned as curFor beside the verdict so the caller moves FROM that member."},
   "deliver": {"file": "src/server/auto-resume.js", "fields": [], "why": "attemptFire's post-gate closure: re-resolves identityFor, authorizes and charges the continue inside; returns only a boolean delivered."},
+  "fireNowOnClaim": {"file": "src/server/auto-resume.js", "fields": [], "why": "B-9a24 U1 follow: the press's one test; resolves identityFor only to ask the loop breaker (canFire) its own reason before attemptFire, and returns sent / why / the breaker's reason word, never an account."},
   "deliverToConversation": {"file": "src/server/conversation-deliver.js", "fields": ["identity"], "why": "delivers a message after the spend check; a refusal's object echoes the verdict's identity for the refusal's words and the stash"},
   "dispatch": {"file": "src/server/worker-dispatch.js", "fields": [], "why": "the worker dispatch's spend check before it sends; returns {ok, code, error} — no account in its return"},
   "askOwedCompaction": {"file": "src/server/worker-dispatch.js", "fields": [], "why": "B-ef83 unit 1 (i): the compaction a held gate refused, asked ONCE at that hold's lift — the same peer-compact check before it compacts; returns nothing (its end is the ledger's row and the journal)"},

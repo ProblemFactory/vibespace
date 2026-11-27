@@ -745,7 +745,8 @@ function poolReadReading({ group = true } = {}) {
     // own readings decide; ONLY the press's gate lays it on (withClaimDoor: that member, that one call), through the claims store's
     // SETTLED view (viewOf settles a stored refusal, the seven-day age and a gone account's claims first — r5330 (1))
     if (!raw || !_claimDoor || id !== _claimDoor) return raw;
-    try { return resetClaimsStore().viewOf(id, raw); } catch { return raw; }
+    // …and WITHOUT the mark's model-cap lanes (r5474): a cap's lane never decides the test (a reading of that cap opens its waits)
+    try { const st = resetClaimsStore(); st.viewOf(id, raw); const c = st.get(id); const plan = c && c.lanes ? Object.fromEntries(Object.entries(c.lanes).filter(([l]) => !String(l).startsWith('model:'))) : {}; return Object.keys(plan).length ? quotaModel.withResetClaim(raw, { ...c, lanes: plan }) : raw; } catch { return raw; }
   };
 }
 let _resetClaims = null;
@@ -4229,17 +4230,35 @@ function claimPressTest(key, lanes, { pressed = null } = {}) {
     console.log(`[reset-claim] a person's mark names a model's cap: no test (the law of 2026-11-18) — ${cands.length} conversation(s) wait for a reading of that cap`);
     return { code: 'cap', n: cands.length, cap };
   }
-  const outs = (() => { try { return ar.firesOutOn?.(key, now) || []; } catch { return []; } })();
-  if (outs.length) { const at = Math.max(...outs.map((o) => Number(o.at) || 0)); return { code: 'out', at, until: at + 10 * 60e3 }; }
+  // ONE TEST AN ACCOUNT WHILE ONE IS IN FLIGHT (r5474 (3)): a conversation landing on `key` whose gate is still out counts as out, beside a
+  // continue recorded and not answered (its bound: auto-resume's own FIRE_PENDING_MS)
+  const pendMs = Number(ar.firePendingMs) || 0;
+  const flying = live.filter(([, s]) => s._arFiring && lands(s) === key).map(([id]) => ({ id, at: now, until: now + pendMs }));
+  const outs = [...flying, ...((() => { try { return ar.firesOutOn?.(key, now) || []; } catch { return []; } })())];
+  if (outs.length) { const o = outs.reduce((x, y) => ((Number(y.at) || 0) > (Number(x.at) || 0) ? y : x)); return { code: 'out', at: Number(o.at) || now, until: Number(o.until) || (Number(o.at) || now) + pendMs }; }
+  // A TEST THAT CAN BILL PROVES NOTHING (r5474 (1)), so it is not sent — before the door, for this press only: none where the account's
+  // paid overage is IN USE (whatever the instance's overage setting), none where its paying state cannot be read (the reading unread, the
+  // overage fact not stated again after damaged bytes, or the record stating no present overage state at all). The spend authorizer's
+  // one reader (overageState) answers; neither guard file changes.
+  const payRaw = readRawReading(key);
+  const payUnread = payRaw === usageWrite.UNREAD_READING || !payRaw || (typeof payRaw === 'object' && (payRaw.held === 'unread' || (typeof usageWrite.restartUnknowns === 'function' && usageWrite.restartUnknowns(payRaw).includes('overage'))));
+  const pay = payUnread ? null : overageState(payRaw);
+  if (pay && pay.inUse === 'yes') { console.log(`[reset-claim] a person's mark: no test — the account is billing paid overage now, so a test would be paid for (it proves no reset)`); return { code: 'overage-in-use' }; }
+  if (!pay || pay.inUse !== 'no') { console.log(`[reset-claim] a person's mark: no test — whether the account would pay for one cannot be read (${payUnread ? 'its reading is not read' : `overage ${pay.evidence}`})`); return { code: 'paying-unknown' }; }
   const v = withClaimDoor(key, () => quotaVerdictFor(key, { now }));
   if (v && v.usable === false) { console.log(`[reset-claim] a person's mark: no test — the account is still spent on another limit with the mark laid on (${String(v.reason || '').slice(0, 160)})`); return { code: 'other-limit' }; }
+  const held = [];   // the breaker's own reasons (r5474: a quarantine or the hourly cap says its own reason)
   for (const [id] of open) {
     let r = null;
     try { r = ar.fireNowOnClaim(id, '按你的重置声明试着继续（未确认）', { cause: 'claim-test', pressed, on: key }); } catch { r = null; }
-    if (r && r.sent) { console.log(`[reset-claim] a person's mark: ${id} is tried on it (one of ${open.length} waiting) — its reading confirms or refutes the reset`); return { code: 'tried', n: open.length }; }
+    if (r && r.why === 'breaker') held.push(r.chkWhy || null);
+    if (r && r.sent) { console.log(`[reset-claim] a person's mark: ${id} is checked, then tried on it (one of ${open.length} waiting) — its reading confirms or refutes the reset`); return { code: 'tried', n: open.length }; }
     if (r && r.why === 'not-pressed') return { code: 'not-pressed' };
     if (r && r.why === 'spend') return { code: 'refused', why: r.spendWhy || null };
   }
+  const by = (w) => held.filter((x) => x === w).length;
+  if (held.length && by('same-identity') === held.length) return { code: 'quarantined', n: open.length };
+  if (held.length && by('hourly-cap') === held.length) return { code: 'loop-cap', n: open.length };
   return { code: 'recent', n: open.length };
 }
 /** B-9a24 U1: the press's test's gate, wired beside beforeAutoResumeFire (server.js picks it for a fire whose `claimOn` names the marked

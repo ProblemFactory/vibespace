@@ -93,7 +93,7 @@ export function claimConfirmWords({ t = id, name = null, lane = null, capName = 
   const what = lane ? laneWords(lane, { t, capName }) : t('every limit of {name}', { name: name || t('this account') });
   return {
     title: lane ? t('Did you reset {what} on Anthropic’s site?', { what }) : t('Did you reset {name} on Anthropic’s site?', { name: name || t('this account') }),
-    message: t('VibeSpace then shows {what} as reset — unconfirmed — and the pool may use it. The next refresh of this account reads it and confirms or corrects it; a wrong mark ends at that reading.', { what }),
+    message: t('VibeSpace marks {what} as reset — unconfirmed — and, if a stopped conversation waits on this account, checks it and continues ONE now as a test. The next reading (a refresh of this account, or the test\'s own) confirms or corrects the mark; a wrong mark ends at that reading.', { what }),
     confirmText: t('Mark as reset'),
   };
 }
@@ -109,21 +109,25 @@ export function notOnDiskWords(r, { t = id } = {}) {
 /** B-9a24 U1 (主开发 r4778 / r5330) — WHAT THE PRESS's ONE TEST DID, said in one sentence from the claim's answer `test` (facts on
  *  record, never a promise: «being tried» only once its continue was asked inside the press). `test.code` →
  *  'tried' {n} · 'out' {at, until} (a continue onto this account recorded, not answered) · 'recent' {n} (each tried in the last
- *  minutes) · 'cap' {n, cap} (a mark on a model's cap: no test, the law of 2026-11-18) · 'nobody' {m} (none lands on it; m parked
- *  elsewhere) · 'other-limit' · 'restoring' (the hub's restore not settled) · 'refused' {why: the attended door's code} ·
+ *  minutes) · 'quarantined' {n} · 'loop-cap' {n} (the breaker's own reasons) · 'cap' {n, cap} (a mark on a model's cap: no test, the law
+ *  of 2026-11-18) · 'nobody' {m} (none lands on it; m parked elsewhere) · 'other-limit' · 'overage-in-use' · 'paying-unknown' (a test that can
+ *  bill proves nothing: r5474) · 'refused' {why: the attended door's code} ·
  *  'not-pressed' (the continue could not start inside the press: NOTHING was sent). `when(ms)` words a time. No account name. */
 export function claimTestWords(test, { t = id, when = clockOf } = {}) {
   const c = test && typeof test === 'object' ? String(test.code || '') : '';
   const n = Math.max(0, Math.floor(Number(test && test.n) || 0)), m = Math.max(0, Math.floor(Number(test && test.m) || 0));
   const cap = String((test && test.cap) || '').slice(0, 60);
   switch (c) {
-    case 'tried': return n > 1 ? t('One of {n} stopped conversations is being tried on it now; the others continue once a reading confirms the reset.', { n }) : t('The stopped conversation waiting on it is being tried now.');
+    case 'tried': return n > 1 ? t('One of {n} stopped conversations is being checked on it, then tried; the others continue once a reading confirms the reset.', { n }) : t('The stopped conversation waiting on it is being checked, then tried.');
     case 'out': return t('A continue on this account was recorded at {at} and has not answered. If nothing has started by {until}, mark it again.', { at: when(test.at), until: when(test.until) });
     case 'recent': return n > 1 ? t('None of the {n} stopped conversations could be tried now: each was tried in the last minutes.', { n }) : t('The stopped conversation could not be tried now: it was tried in the last minutes.');
     case 'cap': return n > 1 ? t('{n} conversations were stopped by the {cap} limit. A mark alone does not continue them; they continue when a reading shows that limit reset. Refresh reads it now.', { n, cap }) : t('The conversation was stopped by the {cap} limit. A mark alone does not continue it; it continues when a reading shows that limit reset. Refresh reads it now.', { cap });
     case 'nobody': return m > 1 ? t('No stopped conversation is waiting on this account right now; {m} it stopped are parked on other accounts and move here once a reading confirms.', { m }) : m === 1 ? t('No stopped conversation is waiting on this account right now; one it stopped is parked on another account and moves here once a reading confirms.') : t('No stopped conversation is waiting on this account right now.');
     case 'other-limit': return t('Nothing was sent: another limit of this account is still used up.');
-    case 'restoring': return t('VibeSpace is still restoring conversations — mark it again in a minute.');
+    case 'quarantined': return n > 1 ? t('None of the {n} stopped conversations is tried now: this account refused them in the last minutes.', { n }) : t('The stopped conversation is not tried now: this account refused it in the last minutes.');
+    case 'loop-cap': return n > 1 ? t('None of the {n} stopped conversations is tried now: their automatic continues for this hour are used up.', { n }) : t('The stopped conversation is not tried now: its automatic continues for this hour are used up.');
+    case 'overage-in-use': return t('Nothing was sent: this account is paying for overage now, so a test there would be paid for instead of showing a reset. Read the account\'s usage first, then mark it again.');
+    case 'paying-unknown': return t('Nothing was sent: whether this account would pay for a test cannot be read. Read the account\'s usage first, then mark it again.');
     case 'refused': {   // the attended door's own refusals (spend-authorizer.js: a press still never pays overage, nor buys a refused request)
       const w = String((test && test.why) || '');
       const why = w === 'identity-cannot-serve' ? t('its sign-in cannot serve a request right now') : w === 'spend-control-reached' ? t('the account has reached its spend control') : w === 'overage-in-use' ? t('the account is billing paid overage, and a press never opts in to paying it') : w === 'identity-unknown' ? t('the account a continue would bill could not be told') : t('it could not be authorized right now');
@@ -138,7 +142,7 @@ export function claimAnsweredWords(r, { t = id, what = '', name = null, when = c
   if (r && r.wall) { const w = wallWords(r.wall, { t, name }); return { text: t('Marked {what} as reset — unconfirmed. It still cannot be used now: {why}', { what, why: w.text }), type: 'error', duration: 10000, door: w.door, disk }; }
   // B-9a24 U1: the press's one test said beside the mark (a refusal or nothing sent reads as an error); no test ⇒ the release's sentence
   const tw = r && r.test ? claimTestWords(r.test, { t, when }) : '';
-  if (tw) return { text: `${t('Marked {what} as reset — unconfirmed.', { what })} ${tw}`, type: /^(refused|not-pressed|other-limit)$/.test(String(r.test.code)) ? 'error' : null, duration: 10000, door: null, disk };
+  if (tw) return { text: `${t('Marked {what} as reset — unconfirmed.', { what })} ${tw}`, type: /^(refused|not-pressed|other-limit|overage-in-use|paying-unknown)$/.test(String(r.test.code)) ? 'error' : null, duration: 10000, door: null, disk };
   return { text: t('Marked {what} as reset — unconfirmed until its next reading', { what }), type: null, duration: 7000, door: null, disk };
 }
 

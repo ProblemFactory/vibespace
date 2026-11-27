@@ -1,6 +1,7 @@
 {
  "//": "B-4829 (lane lg-leak-census): per script, the printed literals that say SKIP / SKIPPED only inside a sentence ABOUT a skip — the launcher (scripts/ci.mjs isSkipLine) does not count them. ONE-WAY (test-ci-gate-tiers §8h): a file that adds one is red by name (a skip leads with SKIP or says «SKIPPED: why»; a sentence raises its row here); a fall is only said.",
  "files": {
+  "scripts/test-account-reset-door.mjs": 1,
   "scripts/test-agy-wall-signal.mjs": 1,
   "scripts/test-architecture.mjs": 7,
   "scripts/test-auto-resume.mjs": 1,

@@ -246,10 +246,13 @@ function continueNoticeFor({ kind, armReason, label, moved = false, cause = null
 }
 /** PURE (lane account-reset-door r4): the card of a continue that rests on a person's reset claim — it says so, and that the
  *  claim is unconfirmed. Laid over continueNoticeFor's verdict by attemptFire (fireNowOnClaim's road), so every shape of
- *  continueNoticeFor stays master's. */
-function claimContinueNotice({ label, cause = null }) {
-  const who = label || '可用账号';
-  return { cls: 'switched', text: cause === 'member-usable' ? `账号 ${who} 按你的重置声明可用（未确认），已自动继续这个任务。` : `账号池已切换到 ${who}（按你的重置声明，未确认），已自动继续这个任务。` };
+ *  continueNoticeFor stays master's. B-9a24 U1 follow (r5474): fireNowOnClaim's ONE caller is the press's test, and the pool
+ *  never moves on a mark, so the card says what happened — the person's mark, this conversation continued as its test, its
+ *  reply confirms or corrects it — never «the pool switched» nor «continued by itself». `cls` stays 'switched': the agent's
+ *  continue then says the pool serves it from that account (true), never that its limit lifted (unconfirmed). */
+function claimContinueNotice({ label }) {
+  const who = label ? `账号 ${label} ` : '这个账号';
+  return { cls: 'switched', text: `按你对${who}的重置标记（未确认），这个会话作为测试继续；它的回复会确认或更正这个标记。` };
 }
 
 /** THE MODEL'S CAP STILL STANDS (主开发's law 2026-11-18): the wall that stopped the conversation was a MODEL's cap (the stop
@@ -1602,7 +1605,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // WHAT UNBLOCKED US decides both the journal line and the card, from the
       // ARMED RECORD (one source, one wording) — see continueNoticeFor
       const note = continueNoticeFor({ kind, armReason: a2.reason, label: label2, moved, cause });
-      if (claim) Object.assign(note, claimContinueNotice({ label: label2, cause }));   // a continue on a reset claim says so (fireNowOnClaim)
+      if (claim) Object.assign(note, claimContinueNotice({ label: label2 }));   // a continue on a reset claim says so (fireNowOnClaim)
       if (!(origin && origin.via === 'reading') && capHeld(id, session, key2)) return false;   // THE MODEL'S CAP STILL STANDS (modelCapHold): every door but the armed lane's own reading edge — nothing reserved yet
       // THE CEILING, on the identity the continue actually lands on. The gate
       // can have moved us onto a member whose budget is spent — charging the
@@ -1611,6 +1614,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // the send: nothing between them spends, and test-auto-resume-loop's
       // round-2 pin measures the distance from `moved` to `continueNoticeFor`.
       const charge = {};
+      if (pressPaid && on && key2 !== on) { log(`[auto-resume] ${id}: the press's test is not sent — it would land on another account than the marked one`); return false; }   // r5474: never spent on another member
       if (pressPaid ? !pressSpend(id, session, ident2, pressPaid, out) : !spendOk(id, session, ident2, kind, charge, { hold: true })) return false;
       // AUTHORIZED, NOT SPENT (r5): from here on, EVERY exit that does not
       // deliver gives the reservation back. The arm survives each of them, so
@@ -1855,6 +1859,10 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       if (!a || a.fired) return { sent: false, why: 'not-armed' };
       const session = activeSessions.get(id);
       if (!session || !enabledFor(session) || session._isStreaming) return { sent: false, why: 'not-idle' };
+      if (session._arFiring) return { sent: false, why: 'in-flight' };
+      // the breaker's own reason, asked as attemptFire asks it (r5474: a quarantine or the hourly cap is said as itself)
+      const ib = identityFor(id, session), chk = canFire(id, ib ? ib.key : null, 'now', Date.now());
+      if (!chk.ok) return { sent: false, why: 'breaker', chkWhy: chk.reason || null };
       const out = {};
       const sent = attemptFire(id, session, a, 'now', why, cause, null, { claim: true, pressed, on, out });
       return sent ? { sent: true } : { sent: false, why: out.why || 'refused', spendWhy: out.spendWhy || null };
@@ -1863,7 +1871,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   /** B-9a24 U1: the continues onto `key` recorded and not answered yet (a fire's `last` inside FIRE_PENDING_MS) → [{ id, at }] */
   function firesOutOn(key, now = Date.now()) {
     const outs = [];
-    for (const [id, r] of fires) { const l = r && r.last; if (l && key && l.key === key && now - (Number(l.at) || 0) < FIRE_PENDING_MS) outs.push({ id, at: Number(l.at) || 0 }); }
+    for (const [id, r] of fires) { const l = r && r.last; if (l && key && l.key === key && now - (Number(l.at) || 0) < FIRE_PENDING_MS) outs.push({ id, at: Number(l.at) || 0, until: (Number(l.at) || 0) + FIRE_PENDING_MS }); }
     return outs;
   }
 
@@ -1884,7 +1892,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } hold.stop(); };
 
   return {
-    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, firesOutOn, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
+    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, firesOutOn, firePendingMs: FIRE_PENDING_MS, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
     refreshStatus: (id) => emit(id), // lane cli-self-measure: a check that ended re-says every armed conversation's status (its chip drops «checking»)
     bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, stopBatch, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
