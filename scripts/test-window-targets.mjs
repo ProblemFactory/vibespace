@@ -992,6 +992,7 @@ console.log('§4 the engine over a fake keeper + the routes');
       // B-a38d: `type` with no ref on the window attach resolved to pixels (keys), then a RESTART — a second engine over
       // the same data dir keeps the share and the lease, never the resolution — and the same type again
       const typeBefore = await err(() => eR.act('da-rs2', f2, { verb: 'type', text: 'x' }));
+      eR.storesLanded();   // a restart in one process: the last life's owed window writes land first (the store writer's own door — r5361)
       eR.shutdown();
       const eR2 = mkR();
       const typeAfter = await err(() => eR2.act('da-rs2', f2, { verb: 'type', text: 'x' }));

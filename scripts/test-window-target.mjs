@@ -249,6 +249,7 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   ok(e2.inputSummaryFor('s1') === null && (e2.attach('da-one', f1), e2.inputSummaryFor('s1').input === 'agent') && (e2.takeover({ handle: 'da-one', viewerId: 'v1' }), e2.inputSummaryFor('s1').input === 'user'), 'inputSummaryFor: null / agent / user for one session');
   e2.detach('da-one', f1);
   ok(e2.boot().leases === 0 && typeof e2.tick().idle === 'number', 'boot and tick answer their counts');
+  e2.storesLanded();   // a restart in one process: the last life's owed window writes land first (the store writer's own door — r5361)
   e2.shutdown();
 
   // the ONE announcer taking a window handback

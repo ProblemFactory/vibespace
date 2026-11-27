@@ -296,6 +296,7 @@ console.log('§3 THE ENGINE over a fake keeper + a fake helper + the routes, and
   c = await cli(['watch', H]);
   ok(c.code === 1 && /no_live_view/.test(c.stderr) && /no live pane/.test(c.stderr), 'the CLI spells no_live_view');
   // persistence across a rebuild, then the switch OFF
+  engine.storesLanded();   // a restart in one process: the last life's owed window writes land first (the store writer's own door — r5361)
   const engine2 = mk();
   ok(engine2.leases().some((v) => v.handle === H && v.origin === 'desktop' && v.sessionId === 'sess-a'), 'a second engine over the same data dir still holds the desktop lease with its origin');
   r = await caught(() => engine2.snapshot(H, A));
@@ -313,6 +314,7 @@ console.log('§3 THE ENGINE over a fake keeper + a fake helper + the routes, and
   await engine2.list(A); await caught(() => engine2.attach(H, A));
   ok(engine2.leases().some((v) => v.handle === H), 're-attached with the switch on');
   settings[DESK.SETTING_KEY] = false;
+  engine2.storesLanded();   // a restart in one process: the last life's owed window writes land first (the store writer's own door — r5361)
   const engine3 = mk();
   const b = engine3.boot();
   ok(!engine3.leases().some((v) => v.handle === H) && b.leases === 0, 'boot with the switch OFF drops the persisted desktop lease before anything else');
