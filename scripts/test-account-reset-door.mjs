@@ -134,7 +134,7 @@ const capOf = (q, v) => (v && Array.isArray(v.scopedWeekly) ? v.scopedWeekly.fin
 const capState = (q, v) => { const b = capOf(q, v); return b ? q.windowDisplay(b, Date.now()).state : 'none'; };
 
 // ── the REAL pool engine (the storm harness shape): two members, Fable 100 % on both, the pool default on B ──────────────
-function engineWorld(T, { def = 'B', fableA = 1.0, fableB = 1.0 } = {}) {
+function engineWorld(T, { def = 'B', fableA = 1.0, fableB = 1.0, ar = null, probe = null } = {}) {
   const r = reqOf(T);
   const engMod = r('./src/server/usage-pool-engine.js'), { AccountManager } = r('./src/accounts.js'), { ClaudeCodeAdapter } = r('./src/adapters/claude-code.js');
   let claimMod = null; try { claimMod = r('./src/usage-reset-claim.js'); } catch { }
@@ -149,14 +149,14 @@ function engineWorld(T, { def = 'B', fableA = 1.0, fableB = 1.0 } = {}) {
   fs.writeFileSync(path.join(cacheDir, id.A + '.json'), JSON.stringify(rd(fableA, 4)));
   fs.writeFileSync(path.join(cacheDir, id.B + '.json'), JSON.stringify(rd(fableB, 3)));
   const sessions = new Map(), arms = [];
-  const autoResume = { armIfEnabled: (sid, s, until, why) => arms.push({ sid, why: String(why || '').slice(0, 80) }), noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget(sid, n, reason) { arms.push({ noPoolTarget: reason, sid }); }, statusFor: () => null, enabledFor: () => false, fireNow() { } };
+  const autoResume = { armIfEnabled: (sid, s, until, why) => arms.push({ sid, why: String(why || '').slice(0, 80) }), noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget(sid, n, reason) { arms.push({ noPoolTarget: reason, sid }); }, statusFor: () => null, enabledFor: () => false, fireNow() { }, ...(ar || {}) };   // B-9a24 U1: a leg's own auto-resume seams
   const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
   const eng = engMod.create({
     app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { },
     serverNotice: () => { }, serverSetting: () => undefined, getAccounts: () => am,
     getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
     getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
-    getAutoResume: () => autoResume, getQuotaProbe: () => null, getSessionMetaStore: () => null,
+    getAutoResume: () => autoResume, getQuotaProbe: () => probe, getSessionMetaStore: () => null,
   });
   const mkSession = (sid, member) => { const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _isStreaming: false, _turnState: 'idle', _spawnModel: 'claude-fable-5-1' }; sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, id[member], { why: 'drill' }); return s; };
   const tagOf = (x) => Object.keys(id).find((k) => id[k] === x) || x;
@@ -208,13 +208,12 @@ function basisWorld(T, { learning = 'C', pool2 = false, onProbe = null, tags = [
   const learnLands = () => { st.learning = null; est.basisGen = (est.basisGen || 0) + 1; };
   return { r, eng, am, P, P2, extra, id, sessions, arms, mkSession, mkDirect, tagOf, viewOf, st, est, learnLands, linkOf: (sid) => tagOf(am.poolCurrentFor(P, sid)), defaultOf: () => tagOf(am.poolCurrent(P)) };
 }
-async function enginePass(T, { switchFirst }) {
+async function enginePass(T, { switchFirst, claim = true }) {
   const w = engineWorld(T);
   const lines = [];
   const run = async (fn) => { const q = await quiet(fn); lines.push(...q.lines); return q.r; };
   await run(() => w.eng.sweepUsageAnchors());          // the production state: every reading anchored (boot + 20 s, then each minute)
-  const c = w.claim('A', [K(T).fable]);
-  if (!c.ok) return { ok: false, detail: `the claim on ${K(T).fable} was refused: ${c.code}` };
+  if (claim) { const c = w.claim('A', [K(T).fable]); if (!c.ok) return { ok: false, detail: `the claim on ${K(T).fable} was refused: ${c.code}` }; }
   const out = { links: [] };
   const tick = async () => { await run(() => w.eng.maybePoolAutoSwitchForPool(w.P, { force: true })); out.links.push(w.linkOf('s1')); };
   const choose = async () => { out.chooser = w.tagOf(await run(() => w.eng.poolChooserForModel(w.P, { model: 'claude-fable-5-1' }))); if (!w.sessions.has('s1')) w.mkSession('s1', out.chooser === 'A' || out.chooser === 'B' ? out.chooser : 'B'); };
@@ -224,9 +223,10 @@ async function enginePass(T, { switchFirst }) {
   const view = w.eng.poolReadCache(w.P)(w.id.A);
   const fab = capOf(null, view);
   out.estFable = fab ? Math.round((Number(fab.utilization) || 0) * 100) : null;
-  out.spawnSaid = lines.filter((l) => /spawn on .*on your reset claim/.test(l)).length;
-  out.movedSaid = lines.filter((l) => /per-session switch .*on your reset claim/.test(l)).length;
-  out.defaultSaid = lines.filter((l) => /auto-switch .*on your reset claim/.test(l)).length;
+  // B-9a24 U1: an absence check — the pool says nothing «on your reset claim» any more (stale-pins: kept)
+  out.spawnSaid = lines.filter((l) => /spawn on .*on your reset claim/.test(l)).length;   // stale-pins: kept
+  out.movedSaid = lines.filter((l) => /per-session switch .*on your reset claim/.test(l)).length;   // stale-pins: kept
+  out.defaultSaid = lines.filter((l) => /auto-switch .*on your reset claim/.test(l)).length;   // stale-pins: kept
   out.noTarget = w.arms.filter((a) => a.noPoolTarget).length;
   out.w = w;
   return out;
@@ -331,15 +331,18 @@ const LEGS = {
       && allStates.every((s) => s === 'reset-unconfirmed') && q.memberProofState(all, NOW) === 'reset-unconfirmed' && capState(q, newer) === 'reset-unconfirmed' && capState(q, refusal) === 'read' && stored,
     detail: `lanes ${lanes}; a Fable claim: cap ${capState(q, v)}, weekly ${q.windowDisplay(v.sevenDay, NOW).state}; the whole account: ${allStates.join('/')}; a cap whose stored age is after the claim (the store settles a claim, not an age): ${capState(q, newer)}; a cap the vendor refused after the claim: ${capState(q, refusal)}; the stored reading untouched: ${stored}` };
   },
-  // ROOT 1 — the real engine after its own anchor sweep, the switch pass FIRST and the chooser first
+  // ROOT 1, RESTATED by B-9a24 U1 (主开发 r4778 ruling 1): THE POOL NEVER READS A MARK — the real engine after its own anchor sweep, the
+  // switch pass FIRST and the chooser first: a claim on A's Fable cap changes NO decision (the chooser, the verdict, the link over three
+  // ticks and the decision's estimate are those of the same world with no claim), and nothing is said «on your reset claim»
   async 'engine'(T) {
     const a = await enginePass(T, { switchFirst: false }), b = await enginePass(T, { switchFirst: true });
     if (a.ok === false) return a;
-    const stays = (p) => p.links.every((l) => l === 'A');
-    const good = (p) => p.chooser === 'A' && p.verdict === 'usable via A' && stays(p) && p.movedSaid === 0 && p.noTarget === 0 && p.estFable != null && p.estFable < 5;
-    const once = (p) => p.spawnSaid <= 1 && p.defaultSaid <= 1 && p.spawnSaid + p.defaultSaid >= 1;   // each act the claim decided said once — never per tick
-    return { ok: good(a) && good(b) && once(a) && once(b) && a.spawnSaid === 1,
-      detail: ['chooser first', 'switch first'].map((k, i) => { const p = [a, b][i]; return `${k}: chooser ${p.chooser} · verdict ${p.verdict} · link over 3 ticks ${p.links.join('→')} · spawn said ${p.spawnSaid}× · moves said ${p.movedSaid}× · default moved on the claim said ${p.defaultSaid}× · «no member» told ${p.noTarget}× · A's Fable estimate ${p.estFable}%`; }).join(' | ') };
+    if (b.ok === false) return b;
+    const a0 = await enginePass(T, { switchFirst: false, claim: false }), b0 = await enginePass(T, { switchFirst: true, claim: false });
+    const sameAs = (p, q) => p.chooser === q.chooser && p.verdict === q.verdict && p.links.join() === q.links.join() && p.estFable === q.estFable;
+    const silent = (p) => p.spawnSaid === 0 && p.movedSaid === 0 && p.defaultSaid === 0;
+    return { ok: sameAs(a, a0) && sameAs(b, b0) && silent(a) && silent(b) && a.estFable != null && a.estFable >= 95,
+      detail: ['chooser first', 'switch first'].map((k, i) => { const p = [a, b][i], q = [a0, b0][i]; return `${k}: with the claim chooser ${p.chooser} · verdict ${p.verdict} · links ${p.links.join('→')} · Fable ${p.estFable} % — with none: ${q.chooser} · ${q.verdict} · ${q.links.join('→')} · ${q.estFable} % · said «on your reset claim» ${p.spawnSaid + p.movedSaid + p.defaultSaid}×`; }).join(' || ') };
   },
   // THE ESTIMATE AT THE CLAIM (the GO's notes): an anchor line is never written from a view; a claimed lane is estimated
   // from its claim; a reading NEWER than the claim is the anchor as it is; the memo never hands a view's answer to the bare
@@ -367,7 +370,8 @@ const LEGS = {
     await quiet(() => w.r('./src/usage-cache-write.js').writeCacheObject({ cacheDir: w.cacheDir, key: w.id.A, obj: { ...raw, limits: undefined, fetchedAt: now + 1000, scopedFetchedAt: now + 1000, scopedWeekly: [{ ...rawFable, utilization: 0.5 }] }, measuredAt: now + 1000, source: 'on-demand', backend: 'claude', stated: [K(T).fable] }));
     await quiet(() => w.eng.sweepUsageAnchors());
     const after = fabOf(w.eng.poolReadCache(w.P)(w.id.A));
-    return { ok: anchorRaw && viewed === 0 && bare === 100 && viewedAgain === 0 && after === 50,
+    // B-9a24 U1 (主开发 r4778 ruling 1): the decision's estimate is the BARE reading's — the claim is no view of the pool's door
+    return { ok: anchorRaw && viewed === 100 && bare === 100 && viewedAgain === 100 && after === 50,
       detail: `the anchor swept after the claim is the READING (Fable ${fabAnchor ? Math.round(fabAnchor.u * 100) + ' %, its own reset ' + (Number(fabAnchor.resetsAt) === Number(rawFable.resetsAt)) : 'none'}); the decision's estimate under the claim ${viewed} %; the bare reading's in the same second ${bare} %; the claim's again ${viewedAgain} %; after a 50 % reading newer than the claim ${after} %` };
   },
   // MUST 8 — the placement line only when the claim decided it: the default A already serves (nobody else can) ⇒ no line
@@ -378,7 +382,7 @@ const LEGS = {
     if (!c.ok) return { ok: false, detail: `claim refused: ${c.code}` };
     // B is also spent; with the claim A serves; without it nobody does and the chooser keeps its default A — the SAME place
     const q = await quiet(() => w.eng.poolChooserForModel(w.P, { model: 'claude-fable-5-1' }));
-    const said = q.lines.filter((l) => /on your reset claim/.test(l)).length;
+    const said = q.lines.filter((l) => /on your reset claim/.test(l)).length;   // stale-pins: kept (an absence check since B-9a24 U1)
     return { ok: w.tagOf(q.r) === 'A' && said === 0, detail: `default A, everyone spent, a claim on A: placed on ${w.tagOf(q.r)}, «on your reset claim» said ${said}× (the readings would have placed it there too)` };
   },
   // MUST 3 — a seen reset lifts only the walls from ITS lane
@@ -541,7 +545,9 @@ const LEGS = {
     await quiet(() => cap.captureRateLimitEvent({ cacheDir: w.cacheDir, key: w.id.A, identityIds: [w.id.A], ev: { kind: 'scoped', scopedName: 'fable', status: 'rejected', utilization: null, resetsAt: RC, overage: {} }, now: Date.now() + 1000 }));
     const v2 = (await quiet(() => w.eng.quotaVerdictFor(w.P, { model: 'claude-fable-5-1', session: w.sessions.get('s1') }))).r;
     const chooser2 = w.tagOf((await quiet(() => w.eng.poolChooserForModel(w.P, { model: 'claude-fable-5-1' }))).r);
-    const engOk = cl.ok && v1 && v1.usable && w.tagOf(v1.viaId) === 'A' && !(v2 && v2.usable && w.tagOf(v2.viaId) === 'A') && chooser2 !== 'A';
+    // B-9a24 U1 (主开发 r4778 ruling 1): the POOL's verdict reads no mark — A, walled before the claim, stays unusable to the pool under the
+    // claim and after the refusal (the claim itself ends at the refusal: the rows above); only the press's own gate lays a mark on
+    const engOk = cl.ok && !(v1 && v1.usable && w.tagOf(v1.viaId) === 'A') && !(v2 && v2.usable && w.tagOf(v2.viaId) === 'A') && chooser2 !== 'A';
     return { ok: rows.every((r) => r.ok) && engOk, detail: rows.map((r) => (r.ok ? '' : '✗ ') + r.text).join(' | ') + ` | the REAL engine, A walled before the claim: under the claim ${v1 && v1.usable ? 'usable via ' + w.tagOf(v1.viaId) : 'unusable'}; after ONE refused turn ${v2 && v2.usable ? 'usable via ' + w.tagOf(v2.viaId) : 'unusable'}, a new Fable spawn on ${chooser2}` };
   },
   // MUST 2 — A REJECTION'S 100 % IS A MARK, FROM EVERY WRITER: each rejection writer, then a real reading in the same window
@@ -684,6 +690,92 @@ const LEGS = {
     let zh = {}, ja = {}; try { zh = (await esm(T, 'src/lib/i18n-zh.js')).default || {}; ja = (await esm(T, 'src/lib/i18n-ja.js')).default || {}; } catch { }
     const missing = [...seen].filter((k) => !(k in zh) || !(k in ja));
     return { ok: ok1 && ok2 && missing.length === 0 && seen.size >= 20, detail: `${Object.keys(rows).length} cases, ${seen.size} keys said${missing.length ? ` — no zh/ja for ${missing.map((k) => `«${k.slice(0, 40)}»`).join(', ')}` : ', each with zh and ja'} · toast «${a1.text.slice(0, 80)}»` };
+  },
+  // B-9a24 U1 (主开发 r4778 §1.2–1.4, r5330): THE PRESS's ONE TEST, chosen by the real engine — a world where A is spent on its 5-hour window
+  // (Fable open), two armed conversations on A and one on B. The first that auto-resume accepts is asked through fireNowOnClaim, on the
+  // press, for A; every other answer of the test said by its code; nothing asked on a model's cap mark, a continue out, another limit
+  async 'press-test'(T) {
+    const mk = (fire, { outs = [], sessions = [['s1', 'A'], ['s2', 'A'], ['s3', 'B']], stops = {} } = {}) => {
+      const calls = [];
+      const w = engineWorld(T, { ar: { armedIds: () => sessions.map(([sid]) => sid), firesOutOn: () => outs, fireNowOnClaim: (sid, why, o) => { calls.push({ sid, on: o && o.on, pressed: o && o.pressed }); return fire(sid, calls.length); } } });
+      const raw = JSON.parse(fs.readFileSync(path.join(w.cacheDir, w.id.A + '.json'), 'utf8'));
+      fs.writeFileSync(path.join(w.cacheDir, w.id.A + '.json'), JSON.stringify({ ...raw, fiveHour: { ...raw.fiveHour, utilization: 1.0 }, scopedWeekly: [{ ...raw.scopedWeekly[0], utilization: 0.1 }] }));
+      for (const [sid, m] of sessions) { const ss = w.mkSession(sid, m); if (stops[sid]) ss._stoppedBy = { kind: 'quota', bucket: stops[sid].bucket || 'fiveHour', memberId: w.id[stops[sid].member || m] }; }
+      return { w, calls };
+    };
+    const PRESS = Object.freeze({ reqId: 7 });
+    const run = async (fire, lanes, o) => { const x = mk(fire, o); const c = x.w.claim('A', lanes); if (!c.ok) return { refusedClaim: c.code }; const t = (await quiet(() => x.w.eng.claimPressTest(x.w.id.A, c.lanes || lanes, { pressed: PRESS }))).r; return { t, calls: x.calls, A: x.w.id.A }; };
+    const sent = () => ({ sent: true });
+    const tried = await run(sent, [K(T).five]);
+    const second = await run((sid, n) => (n === 1 ? { sent: false, why: 'refused' } : { sent: true }), [K(T).five]);
+    const recent = await run(() => ({ sent: false, why: 'refused' }), [K(T).five]);
+    const refused = await run(() => ({ sent: false, why: 'spend', spendWhy: 'overage-in-use' }), [K(T).five]);
+    const unpressed = await run(() => ({ sent: false, why: 'not-pressed' }), [K(T).five]);
+    const out = await run(sent, [K(T).five], { outs: [{ id: 's9', at: NOW - 60e3 }] });
+    const cap = await run(sent, [K(T).fable]);
+    const capStopped = await run(sent, [K(T).five], { stops: { s1: { bucket: 'scoped' }, s2: { bucket: 'scoped' } } });
+    const other = await run(sent, [K(T).week]);
+    const nobody = await run(sent, [K(T).five], { sessions: [['s3', 'B']], stops: { s3: { member: 'A' } } });
+    const okTried = tried.t && tried.t.code === 'tried' && tried.t.n === 2 && tried.calls.length === 1 && tried.calls[0].on === tried.A && tried.calls[0].pressed === PRESS && tried.calls[0].sid === 's1';
+    const ok = okTried && second.t && second.t.code === 'tried' && second.calls.length === 2 && recent.t && recent.t.code === 'recent' && recent.t.n === 2 && recent.calls.length === 2
+      && refused.t && refused.t.code === 'refused' && refused.t.why === 'overage-in-use' && refused.calls.length === 1 && unpressed.t && unpressed.t.code === 'not-pressed'
+      && out.t && out.t.code === 'out' && out.t.until === out.t.at + 600000 && out.calls.length === 0 && cap.t && cap.t.code === 'cap' && cap.calls.length === 0
+      && capStopped.t && capStopped.t.code === 'cap' && capStopped.calls.length === 0 && other.t && other.t.code === 'other-limit' && other.calls.length === 0
+      && nobody.t && nobody.t.code === 'nobody' && nobody.t.m === 1 && nobody.calls.length === 0;
+    const said = (x) => (x.refusedClaim ? `claim refused (${x.refusedClaim})` : `${JSON.stringify(x.t)} · ${x.calls.length} asked`);
+    return { ok, detail: `tried ${said(tried)} · second accepted ${said(second)} · each refused ${said(recent)} · the door refused ${said(refused)} · not pressed ${said(unpressed)} · a continue out ${said(out)} · a model's cap mark ${said(cap)} · every candidate cap-stopped ${said(capStopped)} · another limit spent ${said(other)} · nobody on A ${said(nobody)}` };
+  },
+  // B-9a24 U1 (主开发 r4778 §1.3, r5330 (10c)): THE PRESS's GATE — no pool switch; the probe of THAT member through the tree's one probe (the
+  // usage read's door: under Off row B-5279's fence refuses it and nothing starts — here a probe that answers the fence's refusal); that
+  // member's own verdict with the mark laid on for that call only; a conversation that lands elsewhere is vetoed; no mark ⇒ no send
+  async 'press-gate'(T) {
+    const probed = [];
+    const probe = Object.assign(async (t) => { probed.push(t); return false; }, { refusal: () => ({ code: 'refresh-off', message: 'usage reads are off in Settings' }) });
+    const w = engineWorld(T, { probe });
+    const raw = JSON.parse(fs.readFileSync(path.join(w.cacheDir, w.id.A + '.json'), 'utf8'));
+    fs.writeFileSync(path.join(w.cacheDir, w.id.A + '.json'), JSON.stringify({ ...raw, fiveHour: { ...raw.fiveHour, utilization: 1.0 }, scopedWeekly: [{ ...raw.scopedWeekly[0], utilization: 0.1 }] }));
+    const s1 = w.mkSession('s1', 'A'), s4 = w.mkSession('s4', 'B');
+    if (typeof w.eng.beforeClaimFire !== 'function') return { ok: false, detail: 'no beforeClaimFire (the press\'s own gate)' };
+    const before = (await quiet(() => w.eng.beforeClaimFire('s1', s1, { claimOn: w.id.A }))).r;   // no mark yet: A is spent
+    const c = w.claim('A', [K(T).five]);
+    if (!c.ok) return { ok: false, detail: `claim refused: ${c.code}` };
+    const q = await quiet(() => w.eng.beforeClaimFire('s1', s1, { claimOn: w.id.A }));
+    const moved = (await quiet(() => w.eng.beforeClaimFire('s4', s4, { claimOn: w.id.A }))).r;
+    const poolAfter = (await quiet(() => w.eng.quotaVerdictFor(w.id.A, {}))).r;   // the pool's own verdict, the mark NOT laid on
+    const switched = q.lines.filter((l) => /per-session switch|auto-switch/.test(l)).length;
+    const ok = before === false && q.r === true && moved === false && switched === 0 && w.linkOf('s1') === 'A' && probed.length >= 1 && probed.every((t) => t === w.id.A) && poolAfter && poolAfter.usable === false;
+    return { ok, detail: `no mark: ${before} · with the mark on A: ${q.r} (${switched} switch line(s), the link ${w.linkOf('s1')}) · a conversation landing on B: ${moved} · probes ${probed.length}, each of A ${probed.every((t) => t === w.id.A)} (refused by the fence: nothing started) · the pool's own verdict on A after the gate: ${poolAfter && poolAfter.usable}` };
+  },
+  // B-9a24 U1 (主开发 r5330 (4)): THE PRESS IS MINTED IN THE ROUTE by the tree's press verdict (no bearer AND the strict page verdict) and the
+  // test is asked inside that request's own chain (isPress holds in the call); a request the page verdict refuses asks no test (`not-pressed`)
+  async 'press-route'(T) {
+    const r = reqOf(T);
+    const { AccountManager } = r('./src/accounts.js');
+    const usageMod = r('./src/usage-routes.js'), WO = r('./src/write-origin.js');
+    const root = fs.mkdtempSync(path.join(ROOT, 'hubp-')), dataDir = path.join(root, 'data'), cacheDir = path.join(dataDir, 'usage-cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const am = new AccountManager({ dataDir });
+    const id = am.createSubscription({ name: 'acct-press' }).id;
+    fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 });
+    fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify(reading()));
+    const routes = {};
+    const app = { get: (pth, ...f) => { routes['GET ' + pth] = f[f.length - 1]; }, post: (pth, ...f) => { routes['POST ' + pth] = f[f.length - 1]; }, put() { }, delete() { }, use() { }, locals: {} };
+    const seen = [];
+    await quiet(() => usageMod.setupUsage({
+      app, accounts: am, hosts: null, usageHistory: null, activeSessions: new Map(), serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
+      USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'codex'), META_DIR: path.join(dataDir, 'session-meta'),
+      AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(dataDir, 'buffers'), probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: '/bin/false',
+      claimPressTest: (key, lanes, o) => { seen.push({ key, lanes, press: WO.isPress(o && o.pressed) }); return { code: 'tried', n: 3 }; },
+    }));
+    const post = routes['POST /api/accounts/:id/reset-claim'];
+    if (typeof post !== 'function') return { ok: false, detail: 'no POST /api/accounts/:id/reset-claim' };
+    const call = (fn, req) => new Promise((res) => { const out = { code: 200 }; try { fn({ headers: {}, params: {}, body: {}, ...req }, { status(cd) { out.code = cd; return this; }, json(b) { out.body = b; res(out); return this; } }); } catch (e) { res({ code: 0, err: e.message }); } });
+    const page = await call(post, { headers: { 'sec-fetch-site': 'same-origin' }, params: { id }, body: { lanes: [K(T).five] } });
+    const n1 = seen.length;
+    const bare = await call(post, { headers: {}, params: { id }, body: { lanes: [K(T).five] } });
+    const ok = page.body && page.body.ok && page.body.test && page.body.test.code === 'tried' && n1 === 1 && seen[0].press === true && seen[0].key === id && Array.isArray(seen[0].lanes)
+      && bare.body && bare.body.ok && bare.body.test && bare.body.test.code === 'not-pressed' && seen.length === 1 && !WO.isPress(seen[0] && seen[0].pressed);
+    return { ok, detail: `a page's press: the test asked ${n1}× (a press inside the call: ${seen[0] && seen[0].press}), answer ${JSON.stringify(page.body && page.body.test)} · no page verdict: asked ${seen.length - n1}×, answer ${JSON.stringify(bare.body && bare.body.test)}` };
   },
   // ── ROUND 4 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
   // MUST — THE STAMP TRAVELS WITH THE REFUSAL: a rejection mirrored onto the identity TWIN (the capture's sibling loop) is a
@@ -1040,7 +1132,8 @@ const LEGS = {
     const card = typeof AR.claimContinueNotice === 'function' ? AR.claimContinueNotice({ label: 'acct-a' }).text : '(no claim card)';
     const ur = fs.readFileSync(path.join(T, 'src/usage-routes.js'), 'utf8'), eng = fs.readFileSync(path.join(T, 'src/server/usage-pool-engine.js'), 'utf8');
     const tooLow = /r\.code === 'too-low' \? 'that limit reads under 5 % used/.test(ur);
-    const honest = !/the spend authorizer judged it/.test(eng) && /the spend authorizer decides whether it is sent/.test(eng);
+    // B-9a24 U1: the claim's continue is the press's ONE test — its journal line says it is TRIED (never «continued» before a delivery)
+    const honest = !/the spend authorizer judged it/.test(eng) && /is tried on it \(one of \$\{open\.length\} waiting\) — its reading confirms or refutes the reset/.test(eng);
     return { ok: r6.ok && o6 === 'confirmed' && o2.state === 'confirmed' && o2.claimedAt > 0 && /按你的重置声明/.test(card) && tooLow && honest,
       detail: `a claim at 6 % read again at 2 % ⇒ ${o6}; a confirmed claim whose write also shows the reset ⇒ ${o2.state} (claimedAt ${o2.claimedAt ? 'kept' : 'lost'}); the continue card «${card}»; «too low» worded ${tooLow}; the journal says the authorizer decides ${honest}` };
   },
@@ -1349,11 +1442,16 @@ const LEGS = {
       const orig = fs.existsSync(path.join(T, f)) ? fs.readFileSync(path.join(T, f), 'utf8') : '';
       fs.writeFileSync(copy, orig + '\nasync function plantedRead(k, cacheDir, d) {\n  ' + line + '\n  return k;\n}\n');   // the scratch copy, read in its file's place
       return cacheReadCensus(T, { [f]: copy }).bad.length > 0; });
+    // B-9a24 U1: how many CALLS of a function src/ holds (its own definition left out)
+    const srcCalls = (needle) => { let n = 0; const walk = (d) => { for (const e of fs.readdirSync(path.join(T, d), { withFileTypes: true })) { const rel = path.join(d, e.name); if (e.isDirectory()) walk(rel); else if (/\.(c?js|mjs)$/.test(e.name)) n += fs.readFileSync(path.join(T, rel), 'utf8').split(needle).length - 1; } }; walk('src'); return n - 1; };
     const pins = {
       oneDoor: !unrowed.length && plantedRed.every(Boolean),
       switchPassOnTheDoor: /poolBasisRaw\(poolId, \{ pass: !only \}\);[^\n]*\n    const readCache = poolReadCache\(poolId, now\); \/\/ THE ONE DOOR/.test(eng),   // B-f4a1 cure: a WHOLE pass decides the flip it finds (a stop's run reads as any reader)   // the door on the pool's basis, decided again at the pass's start (K1)
       sealedOrdersOnTheDoor: /const ownFileReading = poolReadReading\(\{ group: false \}\);/.test(eng) && /readCache: ownFileReading,/.test(eng),
-      placementWhenDecided: /claimDecided\(/.test(eng) && /moved onto \$\{nameOf\(ds\.to\)\} on your reset claim/.test(eng),
+      // B-9a24 U1 (主开发 r4778 ruling 1, r5330 (1)–(3)): THE POOL NEVER READS A MARK — the door reads bare save the press's gate (one member,
+      // one call, the settled view); no decision «on your reset claim»; the engine's lawful reads of a mark are SETTLED reads
+      noMarkInThePool: !/claimDecided\(/.test(eng) && !/on your reset claim/.test(eng) && /if \(!raw \|\| !_claimDoor \|\| id !== _claimDoor\) return raw;\n    try \{ return resetClaimsStore\(\)\.viewOf\(id, raw\); \}/.test(eng) && /const claimed = \(settledClaimOf\(key, storedRaw\) \|\| \{\}\)\.lanes \|\| \{\};/.test(eng) && /withClaimDoor\(member, \(\) => quotaVerdictFor\(scope, \{ model, session, now: at, only: member \}\)\)/.test(eng)   // stale-pins: kept (absence checks)
+        && (eng.match(/resetClaimsStore\(\)\./g) || []).length === 3,   // the door's settled view, the store's write of a held fall, a claim's wall lift (settledClaimOf holds its own `st`)
       wallsByLane: /lane && lanes\.has\(lane\) && m\.delete\(id\)/.test(eng),
       refreshWorded: /r\.wall\) \{ const w = wallWords\(r\.wall/.test(um) && /_wallDoorAction\(w\.door(?:, \w+)?\)/.test(um),   // + the account the toast names (lane oat-add-door: the guided door opens on its row)
       laneActs: /claimBtn\(quotaModel\.laneOfBucket\(rl, 'scoped', sc\.name\)/.test(um) && /claimBtn\('plan:5h', v5\)/.test(um) && /I reset this account on Anthropic’s site…/.test(ma),
@@ -1366,7 +1464,9 @@ const LEGS = {
       onTheStoreWriter: /storeWriter\(\)/.test(rc) && /\.durable\(file\)/.test(rc) && !/\b(writeSync|renameSync|fsyncSync|openSync)\(|fs\.promises/.test(rc) && (ur.match(/resetClaims\.persisted\(\)/g) || []).length === 2,   // K2: the claims store writes through the store writer; both acts answer after it
       producersState: /backend: .claude., stated: cliPanel,/.test(ur) && /stated: u \}\);/.test(ur) && /stated: bannerLanes, refused: bannerLanes/.test(eng) && /stated: \[wallLane\], refused: \[wallLane\]/.test(rd('src/server/stream-wall.js')) && /passiveAnswer: passive, stated, refused,/.test(rd('src/rate-limit-capture.js')),
       statuslineStamps: /fiveHour: \{ \.\.\.five, asOf: now \}/.test(rd('data/bin/vibespace-usage')),
-      continueSaysClaim: /a continue on \$\{toName\} was asked on your reset claim/.test(eng) && /按你的重置声明可用/.test(eng) && /fireNowOnClaim\?\.\(/.test(eng),
+      // B-9a24 U1 (r5330 (3)): THE CLAIM's ONE DOOR — fireNowOnClaim is called from ONE site of src/, the press's (claimPressTest); the member
+      // wake fires on the member's own reading only
+      pressOneDoor: srcCalls('fireNowOnClaim(') === 1 && /r = ar\.fireNowOnClaim\(id, /.test(eng) && !/按你的重置声明可用/.test(eng),
       kbApiRows: /`POST \/api\/accounts\/:id\/reset-claim`/.test(kb) && /`POST \/api\/accounts\/:id\/reset-claim\/dismiss`/.test(kb),
     };
     const bad = Object.entries(pins).filter(([, v]) => !v).map(([k]) => k);
@@ -1427,7 +1527,8 @@ if (CONTROLS) {
     ['page-unsaid', 'K2: the page says only «Marked … as reset» over a not-durable answer', "return r && r.code === 'not-durable' ? t('", "return r && r.code === 'never' ? t('", 'route', 'src/lib/account-wall-words.js'],
     ['units-raw', 'K3: the age mark\'s units raw', "return min < 120 ? t('{n}m', { n: min }) : min < 48 * 60 ? t('{n}h', { n: Math.round(min / 60) }) : t('{n}d', { n: Math.round(min / 1440) });", "return min < 120 ? `${min}m` : min < 48 * 60 ? `${Math.round(min / 60)}h` : `${Math.round(min / 1440)}d`;", 'page-k3', 'src/lib/account-wall-words.js'],
     ['flip-silent', 'a flip said by nobody', "    console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", "    if (0) console.log(`[pool] ${(p && p.name) || pid}: ${raw ?", 'pool-own'],
-    ['local-copy', 'relearn\'s side alone: the pass\'s own reader (the bare file + the estimate — no claim view)', 'const readCache = poolReadCache(poolId, now); // THE ONE DOOR (ROOT 1) on the pool\'s basis', "const readCache = (id) => { let raw = null; try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { } try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; } };", 'engine'],
+    // B-9a24 U1 (主开发 r4778 ruling 1): 'local-copy' RETIRED — its plant (the pass's reader with no claim view) IS the law now (the pool never
+    // reads a mark), so it can never turn the engine leg red; that the pass reads THE ONE DOOR stays pinned (the wiring leg's switchPassOnTheDoor)
   ];
   say('RED CONTROLS — the merged switch pass\'s wrong sides (patches the suite carries on a copy of src/)');
   for (const [tag, what, from, to, leg, rel = 'src/server/usage-pool-engine.js'] of WRONG) {

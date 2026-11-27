@@ -107,6 +107,7 @@ export const ROWS = Object.freeze([
   ['fireIdentityFor', 'server.js', 'fireIdentity', 'spend', 1],   // auto-resume's dependency row on server.js's wiring line
   ['fireIdentityFor', 'src/server/usage-pool-engine.js', 'identityOf', 'spend', 1],
   ['fireIdentityFor', 'src/server/usage-pool-engine.js', 'onMemberReadingFresh', 'spend', 2],
+  ['fireIdentityFor', 'src/server/usage-pool-engine.js', 'lands', 'spend', 2],   // B-9a24 U1: the press's gate and its one test ask where a conversation's continue lands
   ['sessionBillingMember', 'src/server/usage-pool-engine.js', 'beforeAutoResumeFire', 'spend', 2],
   // ── the census cure (主开发 2026-11-19 04:09Z): the nine names the list lacked, every call a row (derived by this suite's scan) ──
   ['accountOfSession', 'src/routes/provider-models.js', 'cliTarget', 'routes', 1],
@@ -187,10 +188,12 @@ export const ROWS = Object.freeze([
   // ── the census cure 2 (主开发 2026-11-19 05:27Z / 05:43Z): the answers' own calls, every one a row ──
   ['_resolveHomeSpawn', 'src/accounts.js', 'resolveForSpawn', 'pile', 1],
   ['_wallScope', 'src/server/usage-pool-engine.js', 'beforeAutoResumeFire', 'spend', 1],
+  ['_wallScope', 'src/server/usage-pool-engine.js', 'beforeClaimFire', 'spend', 1],   // B-9a24 U1: the press's own gate
   ['_wallScope', 'src/server/usage-pool-engine.js', 'holdRemoved', 'pool', 1],
   ['_wallScope', 'src/server/usage-pool-engine.js', 'onWalledTurn', 'readings', 1],
   ['_wallScope', 'src/server/usage-pool-engine.js', 'sessionWallVerdict', 'readings', 1],
   ['authorizeSpendBatch', 'src/server/auto-resume.js', 'resumeBatch', 'spend', 2],
+  ['authorizeSpendBatch', 'src/server/auto-resume.js', 'pressSpend', 'spend', 1],   // B-9a24 U1: the press's one test asks the bulk resume's attended door
   ['authorizeSpend', 'src/server/auto-resume.js', 'spendOk', 'spend', 1],   // auto-resume charges the continue to the verdict's identity
   ['authorizeSpend', 'src/server/conversation-deliver.js', 'attemptRetry', 'spend', 1],
   ['authorizeSpend', 'src/server/conversation-deliver.js', 'deliverToConversation', 'spend', 1],
@@ -561,6 +564,9 @@ export const CONSUMERS = Object.freeze({
   "attach": {"file": "src/server/stdout/claude-stream-json.js", "fields": [], "why": "Stream parser: prices each assistant usage record under resolveUsageKey and notes it live; the function itself returns nothing."},
   "attemptFire": {"file": "src/server/auto-resume.js", "fields": [], "why": "Fires one auto-resume continue on identityFor's slot (check, authorize and charge happen inside); returns only a boolean fired/not."},
   "attemptRetry": {"file": "src/server/conversation-deliver.js", "fields": [], "why": "retries a held delivery through the spend authorizer; returns nothing — the identity stays inside the retry"},
+  "beforeClaimFire": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-9a24 U1: the press's own gate: _wallScope names the scope of the marked account's own verdict; it returns only a boolean go/no-go."},
+  "lands": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "B-9a24 U1: the press's gate and its one test ask fireIdentityFor where a conversation's continue lands, only to compare it with the marked account; nothing is returned as an account."},
+  "pressSpend": {"file": "src/server/auto-resume.js", "fields": [], "why": "B-9a24 U1: the press's one test asks the bulk resume's attended door (authorizeSpendBatch) for one conversation; it returns only a boolean and the door's refusal code for the reply."},
   "beforeAutoResumeFire": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Pre-fire gate: sessionBillingMember and _wallScope pick the probe target and the verdict scope; it returns only a boolean go/no-go."},
   "cacheFactsOf": {"file": "src/server/usage-pool-engine.js", "fields": [], "why": "Returns prompt-cache facts (TTL, lost, inFlight); usageCacheKeyFor only reads overage state and linkMemberOf only yields the lost boolean."},
   "claudeSideEffects": {"file": "src/server/session-brain.js", "fields": [], "why": "Device-feed twin of the stream parser: prices each usage record under resolveUsageKey and notes it live; returns nothing."},

@@ -702,8 +702,10 @@ function poolReadCache(poolId, now = Date.now()) {
 // anchor sweep (it persists readings; a claim is none), the api-window sidecar, readRawUsageCache (overage facts), the
 // wall's demotion line (the reset its own write stored), onMemberReadingFresh's freshness gate and ownReading (lapse
 // evidence). scripts/test-account-reset-door.mjs pins every read to one of these rows.
-let _bareDoor = false;   // THE COUNTERFACTUAL (MUST 8): «did the claim decide this?» — the same decision, the claim left out
-function withBareDoor(fn) { const was = _bareDoor; _bareDoor = true; try { return fn(); } finally { _bareDoor = was; } }
+// B-9a24 U1 (主开发 r4778 ruling 1, r5330 (1)): THE MARK IS READ AT THE PRESS's GATE ONLY — the member it is laid on, for ONE synchronous
+// call (withClaimDoor), through the claims store's SETTLED view; every other reader of this door reads the member's own readings
+let _claimDoor = null;
+function withClaimDoor(member, fn) { const was = _claimDoor; _claimDoor = member || null; try { return fn(); } finally { _claimDoor = was; } }
 // B-6a92 (主开发 r2688 (2)): a row HELD by the same-instant check reads NONE — its file froze (every later reading on the held instant
 // is archived) and may be the other account's numbers; unknown, as the person sees it. The answer is a MARK with no numbers,
 // { held: 'same-instant' }, so the chooser tells it apart from a member never read (never proved, never a target, never a reason
@@ -739,26 +741,19 @@ function poolReadReading({ group = true } = {}) {
         if (g.accountIds.includes(id) && g.cache && g.cacheOwner !== id && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
       }
     } catch { }
-    // A PERSON'S RESET CLAIM IS A VIEW (lane account-reset-door): a claimed lane older than its claim reads as reset — the
-    // verdicts below (bucketRemaining, memberProofState) see it with no branch of their own; the stored file is untouched
-    if (_bareDoor || !raw) return raw;
+    // B-9a24 U1 (主开发 r4778 ruling 1): THE POOL NEVER READS A MARK — a person's reset claim is no view of this door, the member's
+    // own readings decide; ONLY the press's gate lays it on (withClaimDoor: that member, that one call), through the claims store's
+    // SETTLED view (viewOf settles a stored refusal, the seven-day age and a gone account's claims first — r5330 (1))
+    if (!raw || !_claimDoor || id !== _claimDoor) return raw;
     try { return resetClaimsStore().viewOf(id, raw); } catch { return raw; }
   };
 }
 let _resetClaims = null;
 function resetClaimsStore() { return _resetClaims || (_resetClaims = require('../usage-reset-claim.js').at(path.dirname(USAGE_CACHE_DIR))); }
-/** THE CLAIM DECIDED IT (lane account-reset-door r2, MUST 8): `on` = the member a placement or a move lands on; `rerun` = the
- *  same decision again (its target). Only when `on` is claimed AND the decision over the bare reading names another member
- *  did the claim decide it → the claimed lanes in words; else null (a placement the readings make says nothing new). */
-function claimDecided(on, rerun) {
-  try {
-    if (!on || !resetClaimsStore().anyClaimed([on])) return null;
-    const view = poolReadReading()(on);
-    const claimed = view && view.resetClaims ? Object.keys(view.resetClaims) : [];
-    if (!claimed.length || withBareDoor(rerun) === on) return null;
-    const names = new Map(quotaModel.lanesOfReading(view).map((x) => [x.lane, x.name || null]));
-    return claimed.map((l) => quotaModel.laneText(l, names.get(l))).join(', ');
-  } catch { return null; }
+/** B-9a24 U1: ONE SETTLED READ OF A MARK (r5330 (1)) — the claim the store holds for `key` once its stored reading settled it (a stored
+ *  refusal after the claim, the seven-day age, a gone account): the engine's lawful reads of a mark ask HERE, never the bare get(). */
+function settledClaimOf(key, raw) {
+  try { const st = resetClaimsStore(); if (raw) st.viewOf(key, raw); return st.get(key) || null; } catch { return null; }   // `raw` = the caller's own stored reading (no read of its own)
 }
 // ── THE PROOFS IN FLIGHT (lane reset-unproven, owner ruling «B吧»): memberId → sinceMs — a spawn the chooser placed to
 // turn a member's guess into a reading (account-pool-auto PROVING_HOLD_MS). ONE map for the whole hub, keyed by MEMBER
@@ -1073,18 +1068,13 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDef
     // the decision (B-87fd (1), r4986): on a PAYING default such a start is placed too, and a start that moved is never told it stays
     if (!(d && d.to) && !fam && !staleDefault && heldForPool(cur) && !_heldPlacedSaid.has(`nofam|${poolId}|${cur}`)) { _heldPlacedSaid.add(`nofam|${poolId}|${cur}`); if (_heldPlacedSaid.size > 256) _heldPlacedSaid.delete(_heldPlacedSaid.values().next().value); console.log(`[pool] spawn on "${a.name || poolId}": stays on the pool's default ${personNameOf(cur)}, held on another account's weekly instant (its numbers unknown until its own read) — the start names no model family to choose another member by`); }
     if (!d && !fam && !staleDefault) return cur;   // no identity, the default not paying: the pool's default (the release)
-    if (verdictOnly) { if (d && d.reason === 'proving') return null; const placed = (d && d.to) || (staleDefault ? null : cur); return placed && !claimDecided(placed, () => { const b = chooseNow(); return (b && b.to) || cur; }) ? placed : null; }   // (B-d578 F3a) a member read as reset but unconfirmed is no place to come back to
-    // THE POOL SAYS IT (lane account-reset-door r2, MUST 8): a placement the CLAIM decided — the same decision over the bare
-    // reading names another member — is said, once, at the spawn; one the readings make says nothing new (asked BEFORE the
-    // proving mark below, so the counterfactual weighs the same inputs)
-    const byClaim = claimDecided((d && d.to) || cur, () => { const b = chooseNow(); return (b && b.to) || cur; });
+    if (verdictOnly) { if (d && d.reason === 'proving') return null; const placed = (d && d.to) || (staleDefault ? null : cur); return placed || null; }   // (B-d578 F3a) a member read as reset but unconfirmed is no place to come back to
     // THE PROVING SPAWN (lane reset-unproven): the member it lands on is marked in flight and the placement is said
     if (d && d.reason === 'proving' && d.to) {
       provingInFlight().set(d.to, Date.now());
       const { provingText } = require('../account-pool-auto.js');
       console.log(`[pool] spawn on "${a.name || poolId}": ${provingText(d, { when: (ms) => OF.when(ms) })}`);
     }
-    if (byClaim) console.log(`[pool] spawn on "${a.name || poolId}": placed on ${nameOf((d && d.to) || cur)} on your reset claim (${byClaim}) — unconfirmed until its first reading`);
     // B-6a92 (r2688 (2)): a start moved off a default held on another account's instant — said once a pool and default
     if (d && d.reason === 'held-same-instant' && d.to && !_heldPlacedSaid.has(`${poolId}|${cur}`)) { _heldPlacedSaid.add(`${poolId}|${cur}`); if (_heldPlacedSaid.size > 256) _heldPlacedSaid.delete(_heldPlacedSaid.values().next().value); console.log(`[pool] spawn on "${a.name || poolId}": placed on ${personNameOf(d.to)} — the pool's default ${personNameOf(cur)} is held on another account's weekly instant, its numbers unknown until its own read`); }
     // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
@@ -4196,6 +4186,75 @@ function linkHold(session, scope, model, v, at) {
   const lv = on && on !== v.viaId ? quotaVerdictFor(scope, { model, session, now: at, only: on }) : null;
   return lv && lv.usable === false ? lv : null;
 }
+/** B-9a24 U1 (主开发 r4778 §1.3, r5330): THE PRESS's GATE — one test of one person's mark. NO pool switch; the shared probe of THAT member
+ *  (row B-5279's fence answers a refusal under Off: nothing is started); then that member's OWN verdict with the mark laid on for that one
+ *  synchronous call (withClaimDoor: the store's settled view); a veto when the conversation no longer lands on that member. A veto re-arms
+ *  nothing: the wait stays exactly as it was. → true (send) | false */
+async function claimGate(id, session, { scope, model, member }) {
+  if (!member) return false;
+  await preFireProbe(member, session);
+  await gateTurn();
+  const lands = (() => { try { const f = fireIdentityFor(session); return f ? f.key : null; } catch { return null; } })();
+  if (lands !== member) { console.log(`[auto-resume] ${id}: the press's test is not sent — the conversation no longer lands on the marked account`); return false; }
+  const at = Date.now();
+  const v = withClaimDoor(member, () => quotaVerdictFor(scope, { model, session, now: at, only: member }));
+  if (!v || v.usable !== true) { console.log(`[auto-resume] ${id}: the press's test is not sent — the marked account cannot serve on its reading with the mark laid on (${String((v && v.reason) || 'unknown').slice(0, 200)})`); return false; }
+  return true;
+}
+/** B-9a24 U1 (主开发 r4778 §1.2 and §1.4, r5330 (4)): THE PRESS's ONE TEST — the claim route's one call, inside the press's own request.
+ *  Of the armed, live, idle conversations whose continue lands on `key` NOW, the first auto-resume accepts is fired through
+ *  fireNowOnClaim: asked AND charged by the bulk resume's attended door on the press (a test the press no longer holds is NOT SENT).
+ *  Nothing is asked when a continue onto `key` is out and unanswered, when `key` is still spent on another limit with the mark laid on,
+ *  or when the mark names only a model's cap (the law of 2026-11-18: no test — a reading of that cap opens its waits). → the answer's
+ *  `test` (account-wall-words claimTestWords says it); no line names an account. */
+function claimPressTest(key, lanes, { pressed = null } = {}) {
+  const ar = getAutoResume();
+  if (!key || !ar || typeof ar.fireNowOnClaim !== 'function') return null;
+  const now = Date.now();
+  const marked = (Array.isArray(lanes) ? lanes : []).map(String);
+  const ids = (() => { try { return ar.armedIds?.() || []; } catch { return []; } })();
+  const lands = (s) => { try { const f = fireIdentityFor(s); return f ? f.key : null; } catch { return null; } };
+  const capStop = (s) => { const f = s && s._stoppedBy; return !!(f && f.kind === 'quota' && f.bucket === 'scoped'); };
+  const live = ids.map((id) => [id, activeSessions.get(id)]).filter(([, s]) => s && !s._isStreaming);
+  const cands = live.filter(([, s]) => lands(s) === key);
+  if (!cands.length) {
+    const m = live.filter(([, s]) => s._stoppedBy && s._stoppedBy.memberId === key && lands(s) !== key).length;
+    return { code: 'nobody', m };
+  }
+  const capOnly = marked.length > 0 && marked.every((l) => l.startsWith('model:'));
+  const open = cands.filter(([, s]) => !capStop(s));
+  if (capOnly || !open.length) {
+    const lane = marked.find((l) => l.startsWith('model:')) || null;
+    const cap = (() => { try { return lane ? quotaModel.laneText(lane) : ''; } catch { return ''; } })();
+    console.log(`[reset-claim] a person's mark names a model's cap: no test (the law of 2026-11-18) — ${cands.length} conversation(s) wait for a reading of that cap`);
+    return { code: 'cap', n: cands.length, cap };
+  }
+  const outs = (() => { try { return ar.firesOutOn?.(key, now) || []; } catch { return []; } })();
+  if (outs.length) { const at = Math.max(...outs.map((o) => Number(o.at) || 0)); return { code: 'out', at, until: at + 10 * 60e3 }; }
+  const v = withClaimDoor(key, () => quotaVerdictFor(key, { now }));
+  if (v && v.usable === false) { console.log(`[reset-claim] a person's mark: no test — the account is still spent on another limit with the mark laid on (${String(v.reason || '').slice(0, 160)})`); return { code: 'other-limit' }; }
+  for (const [id] of open) {
+    let r = null;
+    try { r = ar.fireNowOnClaim(id, '按你的重置声明试着继续（未确认）', { cause: 'claim-test', pressed, on: key }); } catch { r = null; }
+    if (r && r.sent) { console.log(`[reset-claim] a person's mark: ${id} is tried on it (one of ${open.length} waiting) — its reading confirms or refutes the reset`); return { code: 'tried', n: open.length }; }
+    if (r && r.why === 'not-pressed') return { code: 'not-pressed' };
+    if (r && r.why === 'spend') return { code: 'refused', why: r.spendWhy || null };
+  }
+  return { code: 'recent', n: open.length };
+}
+/** B-9a24 U1: the press's test's gate, wired beside beforeAutoResumeFire (server.js picks it for a fire whose `claimOn` names the marked
+ *  account): one gate turn, the accounts list read, then claimGate. Fail closed. */
+async function beforeClaimFire(id, session, { claimOn = null } = {}) {
+  try {
+    await gateTurn();
+    const listHeld = session && session._accountId ? accountsHeld() : null;
+    if (listHeld) { sayHeldOnce('fire:' + id, listHeld, `[auto-resume] ${id}: the press's test is not sent — the accounts list could not be read (${listHeld.code || 'unread'})`); return false; }
+    return await claimGate(id, session, { scope: _wallScope(session), model: sessionModelFor(session), member: claimOn ? String(claimOn) : null });
+  } catch (e) {
+    console.warn(`[auto-resume] the press's gate failed for ${id} — not sent (fail closed): ${e && e.message}`);
+    return false;
+  }
+}
 async function beforeAutoResumeFire(id, session) {
   try {
     // ONE GATE PER TURN (acceptance r4, the burst — repro/accept-r3/skeptic-r3a-gate-burst-fs.mjs): a tick fires every due
@@ -5176,14 +5235,15 @@ function heldFallOf(session, key, ev, now = Date.now()) {
     // default member to the member it was placed on (a resumed one's too — the kill path drops its link), and a new process
     // never sent a request on another member — holding its fall defends nothing and leaves the number stale
     if (row.why === 'spawn') return null;
-    const stored = new Map(quotaModel.lanesOfReading(usageWrite.readCacheObject(USAGE_CACHE_DIR, key)).filter((l) => !l.mark).map((l) => [l.lane, l]));
+    const storedRaw = usageWrite.readCacheObject(USAGE_CACHE_DIR, key);
+    const stored = new Map(quotaModel.lanesOfReading(storedRaw).filter((l) => !l.mark).map((l) => [l.lane, l]));
     const lanes = [];
     const sd = ev.kind === 'sevenDay' ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : (ev.windows && ev.windows.sevenDay);
     if (sd && sd.utilization != null) lanes.push({ lane: 'plan:7d', u: sd.utilization, r: sd.resetsAt, rep: ev.kind === 'sevenDay', win: 'sevenDay' });
     const cap = ev.modelCap ? { utilization: ev.utilization, resetsAt: ev.resetsAt } : (ev.windows && ev.windows.modelCap);
     if (cap && cap.utilization != null && ev.modelCapName) lanes.push({ lane: 'model:' + ev.modelCapName, u: cap.utilization, r: cap.resetsAt, rep: !!ev.modelCap, win: 'modelCap' });
     const falls = [];
-    let claimed = {}; try { claimed = (resetClaimsStore().get(key) || {}).lanes || {}; } catch { }
+    const claimed = (settledClaimOf(key, storedRaw) || {}).lanes || {};   // B-9a24 U1 (r5330 (1)): ONE settled read of the mark, on the reading read above
     for (const x of lanes) {
       if (claimed[x.lane]) continue;   // a person's press confirms this lane's fall
       const s = stored.get(x.lane);
@@ -7168,8 +7228,8 @@ function onMemberReadingFresh(memberId, why = 'reading', { at = Date.now(), plac
       const why2 = landsOn !== memberId ? 'lands-elsewhere' : before !== memberId ? 'the wake moved it' : cold ? 'cold pool — it restarts instead' : null;
       if (why2) { out.skipped.push({ id, landsOn, before, why: why2 }); continue; }
       try {
-        const onClaim = (() => { try { return !!resetClaimsStore().get(memberId); } catch { return false; } })();   // usable through a person's claim (r3, small 1)
-        if (onClaim ? ar.fireNowOnClaim?.(id, `${nameOf(memberId)} 按你的重置声明可用（未确认）`, { cause: 'member-usable' }) : ar.fireNow(id, `${nameOf(memberId)} 已恢复可用`, { cause: 'member-usable' })) { out.fired.push(id); if (onClaim) console.log(`[auto-resume] ${id}: a continue on ${nameOf(memberId)} was asked on your reset claim — unconfirmed; the spend authorizer decides whether it is sent`); }
+        // B-9a24 U1 (主开发 r5330 (3)): no claim branch — a wake serves on the member's own reading; the claim's one door is the press's
+        if (ar.fireNow(id, `${nameOf(memberId)} 已恢复可用`, { cause: 'member-usable' })) out.fired.push(id);
       } catch (e) { console.warn('[auto-resume] wake fire failed:', e.message); }
     }
     for (const k of out.skipped) {
@@ -9724,8 +9784,6 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       };
       const ds = decideSession();
       { const t = _poolDecisions.get(poolId) || { session: 0, pool: 0 }; t.session++; _poolDecisions.set(poolId, t); }   // B-f4a1: counted
-      // a MOVE the claim decided is said too (lane account-reset-door r2, MUST 8): the same decision over the bare reading stays
-      const moveByClaim = ds && ds.to && ds.to !== linkCur ? claimDecided(ds.to, () => { const b = decideSession(); return (b && b.to) || curFor; }) : null;
       if (!ds || !ds.to) {
         // (q-053 P0b, decision ①) only ANOTHER provider could take it and the pool's setting is 'never': ONE For-you card asks
         // the owner (nothing moves); the blocked outcome below still speaks as today
@@ -9819,17 +9877,13 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
         else if (ds.reason === 'spare-lane' && ds.to !== linkCur) spareLaneNotice(poolId, sid, s2, ds, curFor); // B-8a65 S5: an idle conversation moved off a member rich in a cap it does not use
         else if (ds.to !== linkCur) { const mw = sessionMoveWords({ pool: a.name, title: convName(s2, sid), target: toName, from: ds.reason === 'overage' || ds.escape === 'held-walled' ? memberWord(poolId, curFor) : null, priorityRank: ds.priorityRank, overage: ds.reason === 'overage', heldWhy: ds.escape === 'held-walled' ? heldWallWhy(curFor, readCache) : null, fam, fromRemaining: ds.fromRemaining, early: early ? { label: pc.label, line: pc.line, inMin: Math.max(1, Math.round(pc.inSec / 60)), rate: pc.pctPerMin } : null, leadMin: Math.round(lead / 60), hot: a.hot, last: { toLoginNear: ds.toLoginNear, toCredits: ds.toCredits, toOverage: ds.toOverage } }); serverNotice(`pool-sess-${sid}-${now}`, mw.text, { i18n: mw.i18n }); }   // B-9369: the conversation's move in the page's language
         console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})${ds.placedBy === 'priority' ? ` — ${ds.reason === 'priority-return' ? 'priority return' : 'priority'} #${ds.priorityRank ?? '-'}` : ''}${ds.reason === 'pin-return' ? ' — pin return (pinned)' : ds.pinExhausted && ds.to === ds.pinned ? ' — onto its pin (pinned)' : ds.pinExhausted ? ` — pin kept (${nameOf(ds.pinned)}: ${ds.pinWhy})` : ''}`);
-        if (moveByClaim) console.log(`[pool] per-session switch ${poolId}/${sid}: moved onto ${nameOf(ds.to)} on your reset claim (${moveByClaim}) — unconfirmed until its first reading`);
         // a hot re-point does not move an idle limit-blocked session by itself
         // (c1206711: the pool switched back and the session stayed dead) —
         // an ARMED session gets its continue NOW. Hot only: a cold switch
         // restarts the conversation through the client instead.
         // …never for a REMOVED member's eviction (2026-09-28): a removal starts no turn, on
         // this path exactly as through memberRemoved — the arm's own timer re-decides it
-        // A move made on a reset claim fires its own continue (the card says it rests on an
-        // unconfirmed claim); every other move fires master's, byte for byte.
-        if (a.hot && ds.reason !== 'not-a-member' && moveByClaim) { try { if (getAutoResume()?.fireNowOnClaim?.(sid, `账号池已切换到 ${toName}（按你的重置声明，未确认）`)) console.log(`[auto-resume] ${sid}: a continue on ${toName} was asked on your reset claim (${moveByClaim}) — unconfirmed; the spend authorizer decides whether it is sent`); } catch { } }
-        else if (a.hot && ds.reason !== 'not-a-member') { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
+        if (a.hot && ds.reason !== 'not-a-member') { try { getAutoResume()?.fireNow?.(sid, `账号池已切换到 ${toName}`); } catch { } }
         if (!a.hot) {
           sendColdRestart(poolId, [{ serverId: sid, backend: s2.backend || 'claude', backendSessionId: s2.claudeSessionId || s2.backendSessionId || null, cwd: s2.cwd || null, name: s2.name || null, host: s2.host || null }], now);
         }
@@ -9868,7 +9922,6 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
     const decideDefault = () => decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: nowSecOf(now), proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(now), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, payingIds, warm: defaultWarm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
     const d = decideDefault();
     { const t = _poolDecisions.get(poolId) || { session: 0, pool: 0 }; t.pool++; _poolDecisions.set(poolId, t); }   // B-f4a1: counted
-    const defaultByClaim = d && d.to && d.to !== currentId ? claimDecided(d.to, () => { const b = decideDefault(); return (b && b.to) || currentId; }) : null; // MUST 8: the pool's own move, said when the claim decided it
     if (!d) return;
     if (d.to || !['stuck', 'no-members', 'no-settleable', 'all-lapsed', 'all-logins-expired'].includes(d.reason)) poolBlockedTodoEnd(poolId, now); // the pool can serve again (r3); B-5e0d: on the evaluation's own clock
     if (!d.to) {
@@ -9975,7 +10028,6 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       last: { toLoginNear: d.toLoginNear, toCredits: d.toCredits, toOverage: d.toOverage } });
     serverNotice(`pool-auto-${poolId}-${now}`, dw.text, { i18n: dw.i18n });
     console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left${dEarly ? `; ${dEarly}` : ''}, hot=${hot}, affected=${affected.length})`);
-    if (defaultByClaim) console.log(`[pool] auto-switch ${poolId}: moved onto ${nameOf(d.to)} on your reset claim (${defaultByClaim}) — unconfirmed until its first reading`);
     if (!hot && affected.length) {
       // ONE client only — every client acting would race duplicate restarts.
       sendColdRestart(poolId, affected, now);
@@ -10052,11 +10104,11 @@ function maybeStopOnFallback(session, id, from, to) {
     pinAllPlan, pinAll, clearPinsTo, // B-2083 unit B: the member row's one press (a pin per conversation through the one writer)
     memberRemoved, decideDefaultTarget, fallbackDefaultTarget, removalTargetFor, sweepNonMemberLinks, holdRemoved, _removedHoldOwed, // THE REMOVED-MEMBER WALL (2026-09-28): the one entry point, the default's decision (updatePool's chooser), the stale-link sweep every pool tick runs first
     memberServeLapsed, noteMemberServeFailure, // a LAPSED subscription (2026-10-08): the auto-cli loop's pacing + the probe's answer
-    onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
+    onMemberReadingFresh, claimPressTest, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, projectionBillingIndex, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
     _memberWakeAt, _loginReadAt, MEMBER_WAKE_FLOOR_MS, MEMBER_READING_FRESH_MS, LOGIN_READ_FLOOR_MS, // the wake's floors are WALL-CLOCK: a suite winds them back instead of sleeping through them (same seam as _poolAutoLast)
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,
-    noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire,
+    noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, beforeClaimFire,
     noteStoppedBy, clearStoppedBy, noteTurnRunning, noteTurnStart, noteTurnError, sessionWallVerdict, // lane auto-resume-bulk: WHY a session stopped — the fact's writer/clearer, the turn-start + typed-error hooks the stdout consumers call, and the pool's live answer the bulk resume skips by
     noteStreamRecord, recordIsLate, liveFactVerdict, // a LATE record is not a live fact (lane-hot-switch): both feeds show every record to noteStreamRecord first
     laneIsProvisional, laneFromBanner, laneByEvidence, settleTurnLane, pendingLaneDeferrals, deferTurnLane, // the per-turn LANE decision (2026-09-13): a model-cap rejection arrives on the unscoped weekly lane (r3 exports `deferTurnLane` so its CAP — which drops a wall — can be driven; see the reachability note at LANE_DEFER_MAX)

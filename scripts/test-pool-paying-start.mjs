@@ -149,9 +149,7 @@ let pinTip = null;   // 8a1ade3b7's pin block in a copy (scene 5 builds it; the 
     ['return fallbackDefaultTarget(poolId, cur);', 'the lapsed-default guard, before the entry'],
     ['return cur;', "the entry's null: no family on a default that does not pay (the release)"],
     ['return null;', 'the move back: a proving pick is no place to come back to'],
-    ['return placed && !claimDecided(placed, () => { const b = chooseNow();', "the move back: decideStart's target, unless a claim decided it"],
-    ['return (b && b.to) || cur;', "the move back's counterfactual: decideStart over the bare door"],
-    ['return (b && b.to) || cur;', "the spawn's counterfactual: decideStart over the bare door"],
+    ['return placed || null;', "the move back: decideStart's target (B-9a24 U1, 主开发 r4778: the pool never reads a mark, so no claim decides it and there is no counterfactual)"],
     ['return (d && d.to) || (staleDefault ? ((d && d.holdTo) || fallbackDefaultTarget(poolId, cur) || null) : cur);', "the entry's decision (decideStart)"],
     ['return null;', 'the chooser failed: the default target'],
   ];

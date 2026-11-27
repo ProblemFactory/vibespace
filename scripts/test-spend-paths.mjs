@@ -1041,6 +1041,7 @@ const CONTROL_DOORS = [
   ['src/routes/browser.js', "router.post('/api/browser/proposals/:id/approve'"],   // r3: the person's Approve (tellProposal) — r1's row, dropped by r2 (accept-r2 confirmed[1])
   ['server.js', "app.post('/api/user-todos/:id'"],   // r2: the 15th door (accept-r1 claim run (a))
   ['src/server/bulk-resume-routes.js', "app.post('/api/sessions/resume-stopped'"],   // the bulk press (the owner's ruling 2026-11-18: attended)
+  ['src/usage-routes.js', "app.post('/api/accounts/:id/reset-claim'"],   // B-9a24 U1 (主开发 r4778 (a), r5330 (4)): a reset mark's ONE test — the press minted in the route, asked and charged by the bulk door
   ['src/server/browser-stream.js', 'onViewerMessage'],   // r2: the live view's own socket (its Hand back) — r3: the MESSAGE mints, never the handshake
 ];
 // A door refuses EVERY bearer when its first act (after `try {` and the host guard — `refuseHost` / `forHost`, which only

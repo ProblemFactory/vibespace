@@ -49,6 +49,12 @@ const { windowOpened } = require('../auto-resume-signal.js'); // PURE: does this
 const harnesses = require('../harnesses');                    // the descriptor registry: THE resume verb lives there
 const { toAgentText } = require('../peer-text.js');          // PURE: the one belt on a name an agent reads (the account label)
 const { isPress } = require('../write-origin.js');           // the bulk press is ATTENDED only on a press its door minted (the owner's ruling 2026-11-18)
+/** THE BULK RESUME's ONE SPELLING OF ITS REASON (the owner's ruling 2026-11-18): a press its door minted ⇒ the attended 'bulk-resume',
+ *  else the gated twin. B-9a24 U1: the press's one test asks under the same spelling (the attended reason is spelled at ONE site). */
+function reasonOf(pressed) {
+    const paid = isPress(pressed) ? { spendReason: 'bulk-resume' } : { spendReason: 'auto-resume' };
+  return paid;
+}
 const { familyOfModel, projectCacheForFamily } = require('../model-family.js');   // PURE: does a request's model draw a model cap (capDrawnBy — the ONE family door)
 
 // THE CONTINUE AN AGENT READS (lane resume-words, the owner 2026-10-29: «agent 都会优先理解那个 claude 自己的 reset
@@ -420,7 +426,7 @@ function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
  * @param deps.onListChange () => void — ONE list broadcast per bulk act (never one per session).
  */
 function create({ dataDir, activeSessions, sendToSession, serverSetting, broadcast = () => { }, notify = null, beforeFire = null, fireIdentity = null, resumeVerb = null, authorizeSpend = null, noteSpend = null, releaseSpend = null, resetCreditOffer = null, notifyDelayMs = 90000, log = () => { },
-  modelOf = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, restoreSettled = () => true, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS, storeWriter = null }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
+  modelOf = null, beforeClaim = null, previewSpendBatch = null, notePress = null, notePressEnd = null, workflowRunAtWall = null, restoreSettled = () => true, authorizeSpendBatch = null, noteBatchSpend = null, renewSpend = null, wallVerdict = null, clearStopped = null, persistFlag = null, onListChange = null, bulkPaceMs = BULK_PACE_MS, bulkGateWaitMs = BULK_GATE_WAIT_MS, bulkGateHoldMs = BULK_GATE_HOLD_MS, storeWriter = null }) {   // clearStopped: the engine's clear of the stop fact (at a continue's delivery — U1 restack cure; the bulk resume's too)
   const file = path.join(dataDir, 'auto-resume.json');
   // r3004 (lane bl-loop-b): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure of this file as «nothing armed,
   // nothing refused» and the next save wrote it over: a promised continue AND the loop-breaker's memory (its quarantines, the edges
@@ -840,7 +846,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // unattended caps, no stamp; every slot still asked before each continue (paid overage refused by name). A batch no door
     // pressed is N automatic continues: its gated twin, each counted like any auto-resume
     if (hold.held()) return { ok: false, why: 'held', code: 'auto_resume_unread', error: hold.words() };   // r3004: N automatic continues on a guess — they wait; r4812 REQUIRED 1: a person's press too — refused up front by name, the hold's own words (no row can land its record while the file is unread)
-    const paid = isPress(pressed) ? { spendReason: 'bulk-resume' } : { spendReason: 'auto-resume' };
+    const paid = reasonOf(pressed);
     const now = Date.now();
     const plan = stoppedPlan(now);
     let take = plan.eligible;
@@ -1512,8 +1518,31 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     const f = sb ? normalizeStoppedBy(sb) : null;
     return !f || f.kind !== 'quota';
   };
-  function attemptFire(id, session, a, kind, why, cause = null, origin = null, { claim = false } = {}) {
+  /** B-9a24 U1 (主开发 r4778 (a), r5330 (4)): THE PRESS's ONE TEST IS A PERSON's ACT — asked by the bulk resume's own door under its
+   *  attended reason ('bulk-resume': none counted, no hold; an unknown identity, a sign-in that cannot serve, the spend control and paid
+   *  overage in use still refused), and ONLY while the press that asked it still holds (isPress: that request's own chain). A test the
+   *  press no longer holds is NOT SENT — never sent as an unattended turn in a press's name. → true | false (`out` says why not) */
+  function pressSpend(id, session, ident, ask, out) {
+    if (!ask) { if (out) out.why = 'not-pressed'; log(`[auto-resume] ${id}: the press's test is not sent — it is not inside the press that asked it`); return false; }
+    let v = null;
+    try { v = authorizeSpendBatch ? authorizeSpendBatch([{ id, session, identity: ident || null }], ask.spendReason) : { ok: false, why: 'no-gate' }; } catch (e) { v = { ok: false, why: 'gate-error' }; }
+    const skipped = v && v.ok !== false && Array.isArray(v.skipped) && v.skipped.length ? v.skipped[0] : null;
+    if (!v || v.ok === false || skipped || v.attended !== true) {
+      if (v && Array.isArray(v.holds) && releaseSpend) for (const h of v.holds) { try { releaseSpend(h.sessionId, null, h.hold); } catch { } }
+      const why = (skipped && skipped.why) || (v && v.why) || 'refused';
+      if (out) { out.why = 'spend'; out.spendWhy = why; }
+      log(`[auto-resume] ${id}: the press's test is not sent — the attended door refused it (${why})`);
+      return false;
+    }
+    return true;
+  }
+  function attemptFire(id, session, a, kind, why, cause = null, origin = null, { claim = false, pressed = null, on = null, out = null } = {}) {
     const now = Date.now();
+    // B-9a24 U1: the press's test notes ONE press row (its ask, its charge, its end) — never the single road's counted stamp
+    const pressId = pressed ? `rc-${pressed.reqId || 0}-${now.toString(36)}` : null;
+    const pressPaid = pressed && isPress(pressed) ? reasonOf(pressed) : null;   // the attended reason, selected on the press that asked (its ask, its re-ask, its charge, its press row)
+    let pressNoted = false, pressEnded = false;
+    const pressEnd = (n) => { if (pressNoted && !pressEnded && notePressEnd) { pressEnded = true; try { notePressEnd(pressId, n); } catch (e) { log('[auto-resume] recording the press end failed: ' + e.message); } } };
     // r3004: the loop-breaker's memory unread = «assume it was broken» — no automatic continue on a guess: it waits (the arm stays)
     if (hold.held()) { if (!heldSaid.has('fire:' + id)) { heldSaid.add('fire:' + id); log(`[auto-resume] ${id}: not continued — ${hold.words()}`); } return false; }
     if (outlived(session, a)) { noteRecovered(id, 'its stop is over: a turn ran after the promise', { worked: false }); return false; }   // r3196 (1): never a continue into a conversation that went on
@@ -1539,7 +1568,9 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // so a budget that is already spent must stop us before we pay for that
     // work, and the identity the continue actually LANDS on must be checked
     // again once the gate has had its say.
-    if (!spendOk(id, session, ident, kind, null, { hold: false })) return false;
+    if (pressed && !pressSpend(id, session, ident, pressPaid, out)) return false;   // B-9a24 U1: the press's test asks the attended door
+    if (!pressed) { if (!spendOk(id, session, ident, kind, null, { hold: false })) return false; }
+    if (pressPaid && notePress) { try { notePress(pressId, 1, pressPaid.spendReason); pressNoted = true; } catch (e) { log('[auto-resume] recording the press failed: ' + e.message); } }
     const deliver = () => {
       const a2 = armed.get(id);
       if (!a2 || a2.fired || a2.resetsAt !== a.resetsAt) return false;   // re-armed/disarmed while gating
@@ -1580,7 +1611,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // the send: nothing between them spends, and test-auto-resume-loop's
       // round-2 pin measures the distance from `moved` to `continueNoticeFor`.
       const charge = {};
-      if (!spendOk(id, session, ident2, kind, charge, { hold: true })) return false;
+      if (pressPaid ? !pressSpend(id, session, ident2, pressPaid, out) : !spendOk(id, session, ident2, kind, charge, { hold: true })) return false;
       // AUTHORIZED, NOT SPENT (r5): from here on, EVERY exit that does not
       // deliver gives the reservation back. The arm survives each of them, so
       // this session is going to ask again — a hold left booked would keep
@@ -1625,7 +1656,8 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // refuse, and an authorization that never became a turn must not eat an
       // identity's hourly budget. `charge.hold` is the reservation opened by
       // the call above — `note()` CONVERTS it rather than adding to it.
-      if (noteSpend) { try { noteSpend(id, session, charge.identity || ident2 || null, charge.hold || null); } catch (e) { log('[auto-resume] spend accounting failed: ' + e.message); } }
+      if (pressPaid) { if (noteBatchSpend) { try { noteBatchSpend(id, session, ident2 || null, null, pressPaid.spendReason, pressId); } catch (e) { log('[auto-resume] spend accounting failed: ' + e.message); } } pressEnd(1); }   // B-9a24 U1: the attended tally, no stamp; the press row ends delivered
+      else if (noteSpend) { try { noteSpend(id, session, charge.identity || ident2 || null, charge.hold || null); } catch (e) { log('[auto-resume] spend accounting failed: ' + e.message); } }
       save(); landFire();
       _cancelArmNotify(id);
       log(kind === 'now'
@@ -1660,7 +1692,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
     // (30 s) asks again.
     session._arFiring = true;
     let gate = true;
-    try { gate = beforeFire ? beforeFire(id, session) : true; }
+    try { gate = on ? (beforeClaim ? beforeClaim(id, session, { claimOn: on }) : false) : beforeFire ? beforeFire(id, session) : true; }   // B-9a24 U1: the press's test is judged by ITS OWN gate (none wired ⇒ not sent)
     catch (e) { gateFailedClosed(id, 'threw', e); gate = false; }
     if (gate && typeof gate.then === 'function') {
       // TWO-ARG `then`, deliberately: the rejection handler must see ONLY the
@@ -1679,10 +1711,12 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       )
         .catch((e) => { log(`[auto-resume] ${id}: delivering the continue threw after the gate allowed it: ${(e && e.message) || e}`); })
         .finally(() => { session._arFiring = false; });
+      if (pressed) Promise.resolve(gate).then(() => { }, () => { }).then(() => pressEnd(0));   // B-9a24 U1: after the gate's own reactions — a delivery ended the press row with 1 first
       return true;
     }
     if (gate === false) noteGateRefusal(id, kind, origin);
     const done = gate === false ? false : deliver();
+    pressEnd(0);   // B-9a24 U1: a press's test not delivered ends its press row with 0 (a delivery ended it with 1 already)
     session._arFiring = false;
     return done;
   }
@@ -1811,14 +1845,26 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   /** lane account-reset-door r4: a continue the pool asks ON A PERSON'S RESET CLAIM — fireNow's road exactly (the
    *  breaker, the gate, the spend authorizer), its card saying it rests on an unconfirmed claim. A separate door so
    *  fireNow stays master's, byte for byte. */
-  function fireNowOnClaim(id, why, { cause = null } = {}) {
+  /** B-9a24 U1 (主开发 r4778, r5330 (3)): THE PRESS's ONE TEST — its ONE caller is the engine's claimPressTest, inside the press's request.
+   *  `pressed` = the claim route's press (write-origin pressOf); `on` = the marked account (its own gate judges it). → { sent } |
+   *  { sent: false, why: 'not-pressed' | 'spend' (spendWhy: the attended door's code) | 'not-armed' | 'not-idle' | 'refused' } */
+  function fireNowOnClaim(id, why, { cause = null, pressed = null, on = null } = {}) {
     try {
+      if (!isPress(pressed)) return { sent: false, why: 'not-pressed' };
       const a = armed.get(id);
-      if (!a || a.fired) return false;
+      if (!a || a.fired) return { sent: false, why: 'not-armed' };
       const session = activeSessions.get(id);
-      if (!session || !enabledFor(session) || session._isStreaming) return false;
-      return attemptFire(id, session, a, 'now', why, cause, null, { claim: true });
-    } catch (e) { log('[auto-resume] fireNowOnClaim failed: ' + e.message); return false; }
+      if (!session || !enabledFor(session) || session._isStreaming) return { sent: false, why: 'not-idle' };
+      const out = {};
+      const sent = attemptFire(id, session, a, 'now', why, cause, null, { claim: true, pressed, on, out });
+      return sent ? { sent: true } : { sent: false, why: out.why || 'refused', spendWhy: out.spendWhy || null };
+    } catch (e) { log('[auto-resume] fireNowOnClaim failed: ' + e.message); return { sent: false, why: 'refused' }; }
+  }
+  /** B-9a24 U1: the continues onto `key` recorded and not answered yet (a fire's `last` inside FIRE_PENDING_MS) → [{ id, at }] */
+  function firesOutOn(key, now = Date.now()) {
+    const outs = [];
+    for (const [id, r] of fires) { const l = r && r.last; if (l && key && l.key === key && now - (Number(l.at) || 0) < FIRE_PENDING_MS) outs.push({ id, at: Number(l.at) || 0 }); }
+    return outs;
   }
 
   /** WHO IS WAITING. The new-member wake (2026-09-08) has to re-examine the
@@ -1838,7 +1884,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } hold.stop(); };
 
   return {
-    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
+    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, firesOutOn, fireNow, fireNowOnClaim, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
     refreshStatus: (id) => emit(id), // lane cli-self-measure: a check that ended re-says every armed conversation's status (its chip drops «checking»)
     bulkCounts, setEnabledAll, stoppedPlan, resumeBatch, batchStatus, stopBatch, // lane auto-resume-bulk: the two bulk acts + the plan the dialog shows first
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW

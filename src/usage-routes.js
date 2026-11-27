@@ -21,7 +21,7 @@ const { execFileSync } = require('child_process');
 // bottom for current callers (tests, the engine) so nothing drifts.
 const harnesses = require('./harnesses');
 const { oauthUsageAccount } = require('./backend-caps.js'); // PURE: caps.oauthUsage — the OAuth usage-poll accounts
-const { pressBearer } = require('./write-origin.js'); // a person's door: any Bearer is refused (the reset claim, lane account-reset-door)
+const { pressBearer, pressOf } = require('./write-origin.js'); // a person's door: any Bearer is refused (the reset claim, lane account-reset-door)
 // THE ONE WRITE PATH (src/usage-cache-write.js, design-account-hardening §4.2):
 // every producer in this file reaches data/usage-cache/*.json through it. It
 // merges each reading into the file's typed `limits` PER limitId and rewrites
@@ -193,7 +193,7 @@ function getOAuthToken(callback) {
   return token;
 }
 
-function setupUsage({ app, accounts, hosts, spendGuard = null, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {
+function setupUsage({ app, accounts, hosts, spendGuard = null, claimPressTest = null, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD, cliCmds = null }) {
 const https = require('https');
 function readUsageCache() {
   try {
@@ -1811,6 +1811,12 @@ app.post('/api/accounts/:id/reset-claim', (req, res) => {
   // it (applied: in memory, the pool reads it) — the page says both (account-wall-words claimAnsweredWords)
   // B-5279 (主开发 r4942 (3)): `refresh` promises the page a read — false while the door refuses (Off, or the settings held)
   const body = { ok: true, lanes: r.lanes, at: r.at, wall, refresh: odMode !== 'off' && !panelDoorRefusal(serverSetting) };
+  // B-9a24 U1 (主开发 r4778 / r5330 (4)): THE PRESS's ONE TEST, made in THIS request's own chain — the press minted here, in the door, by the
+  // tree's press verdict (write-origin pressOf: no bearer AND the strict page verdict); a page the verdict refuses gets no test (`not-pressed`)
+  if (!isGlobal && typeof claimPressTest === 'function') {
+    const press = pressOf(req, 'POST /api/accounts/:id/reset-claim');   // the door's press (test-spend-paths §2b reads a door's `press` const as its mint)
+    try { body.test = press ? claimPressTest(key, r.lanes, { pressed: press }) || undefined : { code: 'not-pressed' }; } catch (e) { console.warn(`[reset-claim] the press's test threw: ${e && e.message}`); }
+  }
   const notDurable = () => res.status(503).json({ ...body, code: 'not-durable', error: NOT_DURABLE_WORDS });
   resetClaims.persisted().then((durable) => {
   console.log(`[reset-claim] ${keyName(key)}: a person says ${r.lanes.join(', ')} ${r.lanes.length === 1 ? 'was' : 'were'} reset on the vendor's site — reset, unconfirmed until ${r.lanes.length === 1 ? 'its' : 'their'} next reading${wall ? ` (and it stays unplaceable: ${unplaceableText(wall)})` : ''}`);
