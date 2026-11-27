@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { anchored } from './scratch.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, cpuMs = 0;
@@ -366,6 +367,13 @@ else if (plan === 'json') {   // r116 (lane hub-loop-stalls): the parse SIZED by
   later(1500, () => { H.jsonHog(s); done(); }); }
 else if (plan === 'jsonMany') { const s = '[' + new Array(1300000).fill('{"a":1,"b":"vvvvvv"}').join(',') + ']'; let k = 0;   // round 5 (law B): many parse holds in one child
   const next = () => { if (k++ >= (cfg.n || 12)) return done(); H.jsonHog(s); setTimeout(next, 400); }; later(700, next); }
+else if (plan === 'zlibRand') {   // r5456: node's zlib returns from a native call every ~0.4 ms. SIZED by a calibration gzip so the hold
+  // lasts ~4 holdMs whatever the runner's speed (a fixed 6 MB held 0.1 s on the heavy box: at the bar, caught in one run of two); one
+  // random MB repeated stays incompressible (deflate looks back 32 KB) and costs no long random turn
+  const r1 = require('crypto').randomBytes(1 << 20), c0 = kmono(); require('zlib').gzipSync(r1, { level: 9 }); const cal = Math.max(0.5, kmono() - c0);
+  const mb = cfg.mb || Math.max(4, Math.min(64, Math.ceil(400 / cal))), b = Buffer.concat(new Array(mb).fill(r1));
+  out.checks.zlibRandPlan = { mb, calibrationMs: +cal.toFixed(1) };
+  later(700, () => { H.zlibHog(b); done(); }); }
 else if (plan === 'zlib') { const b = Buffer.alloc(40 << 20); for (let i = 0; i < b.length; i += 4096) b.writeUInt32LE((i * 2654435761) >>> 0, i); later(700, () => { H.zlibHog(b); done(); }); }
 else if (plan === 'regex') later(600, () => { H.regexHog(cfg.n || 23); done(); });
 else if (plan === 'sleep') later(600, () => { H.sleepHog(0.35); done(); });
@@ -567,6 +575,32 @@ async function legNamed(tag, node) {
     ok(zlibTrue(BOX) && zlibTrue(nat) && !zlibTrue(jsAlone) && !zlibTrue(BOX.split('zlibHog (src/hogs.js:6)').join('somethingElse (src/other.js:1)')),
       `RED CONTROL (the zlib leg's own law): the box's tie line and a native line pass; the same line saying «${LH.V.js}» alone is refused, and so is one without its driver`);
   }
+  // r5456 (lane hub-loop-stalls — the placement of this leg's red on 2.369.422's hosted proof): A FAST ANSWER IN NODE's OWN CODE IS
+  // NO PROOF OF JAVASCRIPT. Incompressible data: node's zlib returns from a native call every ~0.4 ms, so EVERY ask is answered «at
+  // JavaScript speed» in node's own frame (the release said «JavaScript» alone there, 8 of 8 in the probe). The hold now says THE TIE
+  // — the leg's own law (zlibTrue) — every run. RED CONTROL: the release's fold (a copy without the node-own count) says «JavaScript»
+  // alone there, by name. A hold in the suite's own JavaScript (busyHog) still says «JavaScript»
+  const jsAt = (l) => new RegExp(` — ${reEsc(LH.V.js)}${WAITED}: `).test(String(l || ''));
+  const zr = await run({ plan: 'zlibRand' }, { node });
+  const zrl = lineWith(zr, /zlibHog \(src\/hogs\.js:6\)/);
+  const zPlan = (r) => JSON.stringify(r.out && r.out.checks && r.out.checks.zlibRandPlan);
+  ok(zlibTrue(zrl) && !jsAt(zrl), `r5456: a sync zlib of incompressible data (a native call returning every ~0.4 ms; ${zPlan(zr)}): node's own fast answers say THE TIE (or native), never «${LH.V.js}» alone; zlibHog named: ${zrl}`, zr.lines);
+  const relTree = (() => {
+    const t = path.join(ROOT, 'mut-r5456-release-fold'); if (!fs.existsSync(t)) fs.cpSync(path.join(REPO, 'src'), path.join(t, 'src'), { recursive: true });
+    const f = path.join(t, 'src/loop-hold.js');
+    fs.writeFileSync(f, anchored(fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), "  const nv = nodeOwnJs ? { ...n, native: (n.native || 0) + js } : n;\n", "  const nv = n;   /* MUTANT: the release's fold — a fast answer is JavaScript wherever it stood */\n", 'r5456-release-fold'));
+    return t;
+  })();
+  const zx = await run({ plan: 'zlibRand', tree: relTree }, { node });
+  const zxl = lineWith(zx, /zlibHog \(src\/hogs\.js:6\)/);
+  // its PLANT, witnessed in the copy's own line: every sample a fast answer in node's own zlib (a native call past JS_FAST_MS under
+  // load gives a native sample, and the release says the tie there too — no lie to be red on: a named, counted skip)
+  const plantZ = !!zxl && /\d+ samples?: node’s own code — zlib, driven by zlibHog \(src\/hogs\.js:6\) ×\d+(; |$)/.test(zxl) && !/not in JavaScript \(native code/.test(zxl);
+  site(); if (!plantZ) skip('CONTROL r5456 (the release\'s fold, in a copy)', `its plant did not land: the copy's hold holds a sample outside node's zlib, or none (${zPlan(zx)}): ${zxl}`);
+  else ok(jsAt(zxl) && !zlibTrue(zxl), `CONTROL r5456 (the release's fold, in a copy) on that hold: «${LH.V.js}» alone — red by name: ${zxl}`, zx.lines);
+  const jb5456 = await run({ plan: 'busy' }, { node });
+  const jl5456 = lineWith(jb5456, /busyHog \(src\/hogs\.js:2\)/);
+  ok(jsAt(jl5456), `r5456: a hold in the suite's OWN JavaScript (busyHog) still says «${LH.V.js}»: ${jl5456}`, jb5456.lines);
   const rx = await run({ plan: 'regex' });
   const r = lineWith(rx, /regexHog \(src\/hogs\.js:7\)/);
   ok(r && new RegExp(` — JavaScript${WAITED}: `).test(r) && /\(built-in\) ← regexHog \(src\/hogs\.js:7\)/.test(r), `a catastrophic regex: the built-in under regexHog: ${r}`, rx.lines);
@@ -1270,7 +1304,11 @@ async function legGcLies(node, tag) {
     // r147: sT counts the tail asks the product can never call the hold's edge (JS_SURE ms or more left) — the lie is «native» on those
     const sN = j.filter((a) => !a.gc && a.x >= fast + 1 && !a.asleepAsk), sT = j.filter((a) => !a.gc && !a.asleepAsk && a.x <= -1 && (Number.isFinite(a.left) ? a.left : a.tail + a.x) >= LH.SESSION_MS + fast + 1);
     const gN = j.filter((a) => a.gc && a.x >= fast + 1 && !a.asleepAsk), gT = j.filter((a) => a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
-    return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict === LH.V.native).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, gN: gN.length, sT: sT.length };
+    // r5456: the lie is «JavaScript» ALONE (an answer in a frame of ours) or THE TIE (in node's own code — pbkdf2Sync's wrapper: each fast
+    // sample there counts as native too). One ask a hold, posted fast+1 ms or more before the call's end: the true product answers
+    // it late — native ALONE, never a tie; the tie is the mutant's
+    const saidJs = (v) => v === LH.V.js || v === LH.V.tie;
+    return { strictNativeSaidJs: sN.filter((a) => saidJs(a.verdict)).length, strictTailNotJs: sT.filter((a) => a.verdict === LH.V.native).length, gcNativeSaidJs: gN.filter((a) => saidJs(a.verdict)).length, n: j.length, sN: sN.length, gN: gN.length, sT: sT.length };
   };
   const alwaysTree = mutTree('always', -1);
   let always = judge(await sweepA(node, tag, alwaysTree, ALWAYS_SETS));   // its OWN set (derived from the first ask): its tail asks are what this lie fails on
@@ -1283,7 +1321,7 @@ async function legGcLies(node, tag) {
   let never = judge(await sweepA(node, tag, neverTree, SETS));
   if (never.sN + never.gN === 0) never = judge(await sweepA(node, tag, neverTree, SETS));   // B-1409: once more when the box fed it no ask inside the native call
   site(); if (never.sN + never.gN === 0) skip('MUTANT «never garbage collection» (JS_FAST_MS 10⁹)', `the watchdog was late on this box: 0 asks inside the native call in 2 sweeps — the mutant has nothing to be red on (${JSON.stringify(never)})`);
-  else ok(never.strictNativeSaidJs + never.gcNativeSaidJs > 0, `MUTANT «never garbage collection» (JS_FAST_MS 10⁹) is RED by name: ${never.strictNativeSaidJs + never.gcNativeSaidJs} asks posted while the native call ran said «JavaScript» (${never.gcNativeSaidJs} of them with a collection in their window)`, never);
+  else ok(never.strictNativeSaidJs + never.gcNativeSaidJs > 0, `MUTANT «never garbage collection» (JS_FAST_MS 10⁹) is RED by name: ${never.strictNativeSaidJs + never.gcNativeSaidJs} asks posted while the native call ran said «JavaScript» — alone, or in r5456's tie (${never.gcNativeSaidJs} of them with a collection in their window)`, never);
 }
 
 const LEGS = String(process.env.VS_LH_LEGS || '').split(',').filter(Boolean), leg = (n) => !LEGS.length || LEGS.includes(n);

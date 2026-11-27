@@ -961,9 +961,32 @@ console.log('⑭ B-fe0b — the ask\'s own delivery names no hold; node\'s own c
   // the ask's own delivery: posted inside the hold, answered in its LAST beat once the held code returned (an empty
   // answer earlier in a hold is a promise flood's — read as the hold's end too, round 4's law, kept here)
   const mixed = holdOf([at(0, ud), at(1, ud), at(2, null)]), gz = holdOf([at(0, zl), at(1, zl)]), idle = holdOf([{ postedAt: TO - 100, answeredAt: TO - 99.95, state: 'running', answer: del, beat: B0 }]);
+  // r5456 (A FAST ANSWER IN NODE's OWN CODE THAT DRIVES NATIVE CALLS IS NO PROOF OF JAVASCRIPT): zlib's two fast samples alone are
+  // THE TIE. undici is node's own JAVASCRIPT (no native driver): its two keep «JavaScript», as B-1409's ruling said. The samples are
+  // said as before (whose), word for word
   ok(mixed.fo.verdict === LH.V.js && mixed.line.includes(`node’s own code — undici, ${NO}: `) && mixed.line.includes(' ×2') && mixed.fo.frame === '(node’s own code — undici)',
     `undici's load inside a hold: JavaScript for the verdict, and the hold says whose — ${mixed.line}`, mixed);
-  ok(gz.fo.verdict === LH.V.js && gz.line.includes('node’s own code — zlib, driven by zlibHog (src/hogs.js:9) ×2') && gz.fo.frame === 'zlibHog (src/hogs.js:9)', `a zlib hold: ${gz.line}`, gz);
+  ok(gz.fo.verdict === LH.V.tie && gz.line.includes(`${LH.V.js} ×2 and ${LH.V.native} ×2 (a tie, in the order they came)`) && gz.line.includes('node’s own code — zlib, driven by zlibHog (src/hogs.js:9) ×2') && gz.fo.frame === 'zlibHog (src/hogs.js:9)', `a zlib hold (two fast answers in node's own code): THE TIE, never «JavaScript» alone (r5456): ${gz.line}`, gz);
+  { // r5456's RED: the release's fold (a fast answer is JavaScript wherever it stood) says «JavaScript» alone for that zlib hold — and
+    // a fast answer in the person's OWN code (a frame of the repo) keeps «JavaScript»
+    const SRC5456 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), A5456 = "  const nv = nodeOwnJs ? { ...n, native: (n.native || 0) + js } : n;\n";
+    ok(SRC5456.split(A5456).length === 2, 'control setup: the fold\'s node-own count is found once in src/loop-hold.js');
+    const LHX = (() => { const m = { exports: {} }; vm.compileFunction(anchored(SRC5456, A5456, "  const nv = n;   /* MUTANT: the release's fold */\n", 'r5456-release-fold'), ['module', 'exports', 'require'], { filename: 'loop-hold-r5456-release-fold-mutant.js' })(m, m.exports, require); return m.exports; })();
+    const gzx = LHX.foldHold({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1500, samples: LH.judgeAsks([at(0, zl), at(1, zl)], { beat0: B0, holdEnd: TO }).samples, outside: {}, d: null });
+    ok(gzx.verdict === LH.V.js, `CONTROL r5456 (the release's fold, in a copy) on that zlib hold: «${LH.V.js}» alone — red by name`, gzx.verdict);
+    const own = { kind: 'js', words: 'ourHog (src/x.js:3)', key: 'src/x.js:3', keyWords: 'ourHog (src/x.js:3)' };
+    const oh = holdOf([at(0, own), at(1, own)]);
+    ok(oh.fo.verdict === LH.V.js, `r5456: two fast answers in the person's OWN code keep «${LH.V.js}»: ${oh.line}`, oh.fo.verdict);
+    // node's own GLUE: the clock read a JavaScript hog of ours calls in its loop (the heavy box's round 4 tail and its late-watchdog hog
+    // answered there: «node’s own code — bootstrap, driven by pbkdfHog») keeps «JavaScript»; RED: the rule over EVERY node module
+    // (a first form of this cure, in a copy) ties it
+    const clk = A([['hrtimeBigInt', 'node:internal/bootstrap/node', 120], ['busyHog', ROOT + '/src/hogs.js', 2]]), ck2 = holdOf([at(0, clk), at(1, clk)]);
+    ok(clk.module === 'bootstrap' && clk.words === 'node\u2019s own code \u2014 bootstrap, driven by busyHog (src/hogs.js:2)' && ck2.fo.verdict === LH.V.js, `r5456: two fast answers in node's own glue (a clock read under busyHog) keep «${LH.V.js}»: ${ck2.line}`, { clk, v: ck2.fo.verdict });
+    const AN = "  const nodeOwnJs = js > 0 && samples.every((x) => clsOf(x) !== 'js' || NATIVE_DRIVERS.has(x.module));\n";
+    const LHA = SRC5456.split(AN).length === 2 ? (() => { const m = { exports: {} }; vm.compileFunction(anchored(SRC5456, AN, "  const nodeOwnJs = js > 0 && samples.every((x) => clsOf(x) !== 'js' || !!x.module);   /* MUTANT: every node module */\n", 'r5456-any-module'), ['module', 'exports', 'require'], { filename: 'loop-hold-r5456-any-module-mutant.js' })(m, m.exports, require); return m.exports; })() : null;
+    const ckx = LHA ? LHA.foldHold({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1500, samples: LH.judgeAsks([at(0, clk), at(1, clk)], { beat0: B0, holdEnd: TO }).samples, outside: {}, d: null }) : null;
+    ok(!!LHA && ckx && ckx.verdict === LH.V.tie, `CONTROL r5456 (the rule over every node module, in a copy) on that clock hold: the tie — red by name (${ckx && ckx.verdict})`, ckx && ckx.verdict);
+  }
   // an inspector frame ABOVE a frame of ours is never the delivery (the batch-78 readers' should): the thread's own session,
   // and the dispatch's frames over our caller — both name the hold, driven by ours
   const overOurs = A([...INSPECTOR_ONLY, ['askSelf', ROOT + '/src/x.js', 7]]), insp = holdOf([at(0, osn), at(1, overOurs)]);
@@ -1214,8 +1237,15 @@ console.log('⑱ 主开发 2026-11-18 12:20Z — a stack that ends in the runtim
   const JA = LH.judgeAsks([q(300, true)], { beat0: B0, holdEnd: TO });
   const fa = LH.foldHold({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1400, samples: JA.samples, outside: JA.outside, d: null, after: JA.after && JA.after.words, afterKey: JA.after && JA.after.key, afterKeyWords: JA.after && JA.after.keyWords, afterModule: JA.after && JA.after.module });
   const ours = LH.foldHold({ from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1400, samples: LH.judgeAsks([{ ...q(300), answer: ans([['busyHog', ROOT + '/src/hogs.js', 38]]) }], { beat0: B0, holdEnd: TO }).samples, outside: {}, d: null });
-  ok(fo.verdict === LH.V.js && fo.noOurs === true && line.includes(`node’s own code — fs, ${NO}: `) && !/loop-blame/.test(line) && fa.frameKey === '(node’s own code — fs) (after)' && fa.noOurs === false && ours.noOurs === false,
-    `the hold says it — ${line}; its fold is marked for the day report (noOurs); an «after» row from the same answer (read only when no ask found JavaScript: «${fa.verdict}») keeps that verdict as its cause, unmarked (its second reader's S1); a hold of our own code never`, { fo: { v: fo.verdict, k: fo.frameKey, n: fo.noOurs }, fa: { k: fa.frameKey, n: fa.noOurs }, ours: ours.noOurs });
+  ok(fo.verdict === LH.V.tie && fo.noOurs === true && line.includes(`node’s own code — fs, ${NO}: `) && !/loop-blame/.test(line) && fa.frameKey === '(node’s own code — fs) (after)' && fa.noOurs === false && ours.noOurs === false,
+    `the hold says it — ${line}; its fold is marked for the day report (noOurs — under r5456's tie too: the class changed, never the frame); an «after» row from the same answer (read only when no ask found JavaScript: «${fa.verdict}») keeps that verdict as its cause, unmarked (its second reader's S1); a hold of our own code never`, { fo: { v: fo.verdict, k: fo.frameKey, n: fo.noOurs }, fa: { k: fa.frameKey, n: fa.noOurs }, ours: ours.noOurs });
+  { // r5456's RED for the mark: the release's mark line (the verdict «JavaScript» alone) drops it on that tie — the day report would
+    // count the runtime's own hold under the tie's cause, never «no frame of ours»
+    const M5456 = '  const noOurs = (v === V.js || (nodeOwnJs && v === V.tie)) && !!jsTop && samples.every((x) => clsOf(x) !== \'js\' || x.key !== jsTop.key || x.noOurs === true);\n';
+    const mr = mutantLH('r5456-mark-js-alone', M5456, '  const noOurs = v === V.js && !!jsTop && samples.every((x) => clsOf(x) !== \'js\' || x.key !== jsTop.key || x.noOurs === true);\n');   // stale-pins: kept — the release's mark line, this RED's replacement (gone from the product on purpose)
+    const fr = mr ? mr.foldHold(hj) : null;
+    ok(fr && fr.verdict === LH.V.tie && fr.noOurs === false, `CONTROL r5456 (the release's mark line, in a copy) on that tie: the mark is lost — red by name (${fr && fr.verdict}, noOurs ${fr && fr.noOurs})`, fr && { v: fr.verdict, n: fr.noOurs });
+  }
   { // the main thread hands the fold's mark to the day report; the watchdog thread carries none for an «after» row
     const WK = fs.readFileSync(path.join(REPO, 'src/server/sync-fs-witness-worker.js'), 'utf8'), HL = fs.readFileSync(path.join(REPO, 'src/server/loop-holds.js'), 'utf8');
     ok(!/afterNoOurs/.test(WK) && /f\(\{ ms: h\.ms, verdict: h\.fold\.verdict, frame: h\.fold\.frame, boot: !!h\.boot, noOurs: !!h\.fold\.noOurs \}\)/.test(HL),
@@ -1240,7 +1270,7 @@ console.log('⑱ 主开发 2026-11-18 12:20Z — a stack that ends in the runtim
   // a plugin's stack topped by a built-in shares the key «(built-in)» with a stack of built-ins alone and never marks the hold
   const WAITD = { wallMs: 1400, ranMs: 300, waitMs: 1000 };
   const fw = LH.foldHold({ ...hj, d: WAITD });
-  const MARK = '  const noOurs = v === V.js && !!jsTop && samples.every((x) => clsOf(x) !== \'js\' || x.key !== jsTop.key || x.noOurs === true);\n';
+  const MARK = '  const noOurs = (v === V.js || (nodeOwnJs && v === V.tie)) && !!jsTop && samples.every((x) => clsOf(x) !== \'js\' || x.key !== jsTop.key || x.noOurs === true);\n';
   const mv = mutantLH('any-verdict', MARK, '  const noOurs = !!jsTop && samples.every((x) => clsOf(x) !== \'js\' || x.key !== jsTop.key || x.noOurs === true);\n');
   const fwRed = mv ? mv.foldHold({ ...hj, d: WAITD }) : null;
   ok(fw.verdict === LH.V.waiting && fw.frameKey === '(node’s own code — fs)' && fw.noOurs === false && fwRed && fwRed.verdict === LH.V.waiting && fwRed.noOurs === true,
@@ -1249,7 +1279,7 @@ console.log('⑱ 主开发 2026-11-18 12:20Z — a stack that ends in the runtim
   const pa = ans(PLUG), ba = ans(BUILT);
   const hp = { from: FROM, to: TO, fromM: FROM, toM: TO, ms: 1400, samples: LH.judgeAsks([{ ...q(200), answer: pa }, { ...q(500), answer: pa }, { ...q(800), answer: ba }], { beat0: B0, holdEnd: TO }).samples, outside: {}, d: null };
   const fp = LH.foldHold(hp);
-  const msm = mutantLH('one-sample', MARK, '  const noOurs = v === V.js && !!jsTop && samples.some((x) => clsOf(x) === \'js\' && x.key === jsTop.key && x.noOurs === true);\n');
+  const msm = mutantLH('one-sample', MARK, '  const noOurs = (v === V.js || (nodeOwnJs && v === V.tie)) && !!jsTop && samples.some((x) => clsOf(x) === \'js\' && x.key === jsTop.key && x.noOurs === true);\n');
   const fpRed = msm ? msm.foldHold(hp) : null;
   ok(pa.key === '(built-in)' && !pa.noOurs && ba.key === '(built-in)' && ba.noOurs === true && fp.verdict === LH.V.js && fp.frameKey === '(built-in)' && fp.noOurs === false && fpRed && fpRed.noOurs === true,
     `a plugin's hold topped by a built-in (key «${fp.frameKey}», shared with a stack of built-ins alone) is never marked; RED CONTROL (one marked sample of the row marks it): noOurs ${fpRed && fpRed.noOurs}`, { pa, ba, fp: { v: fp.verdict, k: fp.frameKey, n: fp.noOurs }, red: fpRed && fpRed.noOurs });
@@ -1331,10 +1361,10 @@ console.log('r116 + r147 (lane hub-loop-stalls): an ask at the hold\'s EDGE is i
   const f3 = LH.foldHold(h3), l3 = LH.holdLine(h3);
   ok(f3.verdict === LH.V.tie && l3.includes(` — ${LH.V.runnable} ×1 and ${LH.V.js} ×1 and ${LH.V.notJs} ×1 (a tie, in the order they came): `), `a three-way tie with no window names all three, in order (the whole line read — the three words run past the short excerpt): «${words(l3).slice(0, 150)}…»`, l3);
   { // its RED CONTROL: the copy that words a no-window tie over the CPU classes first names two of the three
-    const SRC3 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), A3 = "(h.d && h.d.wallMs > 0 ? tieWords(n, CPU_CLS, fa, gcShare) : tieWords(n, ['js', 'native', 'runnable', 'notJs'], fa, false))";
+    const SRC3 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), A3 = "(h.d && h.d.wallMs > 0 ? tieWords(nv, CPU_CLS, fa, gcShare) : tieWords(nv, ['js', 'native', 'runnable', 'notJs'], fa, false))";   // r5456: the fold's counts are `nv` (a node-own fast sample counts as native too)
     let red3 = null;
     if (SRC3.split(A3).length !== 2) ok(false, `the anchor of the control «tie-two-of-three» is not in src/loop-hold.js (once)`);
-    else { const m = { exports: {} }; vm.compileFunction(anchored(SRC3, A3, "(tieWords(n, CPU_CLS, fa, gcShare) || tieWords(n, ['js', 'native', 'runnable', 'notJs'], fa, false))", 'tie-two-of-three'), ['module', 'exports', 'require'], { filename: 'loop-hold-tie-two-of-three-mutant.js' })(m, m.exports, require); red3 = m.exports.holdLine(h3); }   // stale-pins: kept (the RED's copy of the old wording, deliberately absent from the product)
+    else { const m = { exports: {} }; vm.compileFunction(anchored(SRC3, A3, "(tieWords(nv, CPU_CLS, fa, gcShare) || tieWords(nv, ['js', 'native', 'runnable', 'notJs'], fa, false))", 'tie-two-of-three'), ['module', 'exports', 'require'], { filename: 'loop-hold-tie-two-of-three-mutant.js' })(m, m.exports, require); red3 = m.exports.holdLine(h3); }   // stale-pins: kept (the RED's copy of the old wording, deliberately absent from the product)
     ok(!!red3 && !red3.includes(` — ${LH.V.runnable} ×1 and ${LH.V.js} ×1 and ${LH.V.notJs} ×1 (a tie, in the order they came): `), `RED CONTROL (the CPU classes first): the three-way no-window tie names two of three («${red3 && words(red3).slice(0, 110)}…»)`, red3);
   }
   // (its read 3 S1) the tie's native word names a collection only on the verdict's own rule (its SHARE), never the observer merely on

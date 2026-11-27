@@ -371,6 +371,10 @@ const INSPECTOR_FILE = /^node:(?:inspector(?:\/promises)?|internal\/inspector(?:
 const LOADER_FILE = /^node:internal\/bootstrap\/(?:realm|loaders)$/;
 const DEPS_FILE = /^node:internal\/deps\//;
 const HELPER_MODULE = new Set(['buffer', 'util', 'validators', 'errors', 'priority_queue', 'per_context', 'diagnostics_channel']);   // B-7c97: a spawn answers first in diagnostics_channel ⇒ child_process
+// r5456 form (a): node's own code THAT DRIVES NATIVE CALLS — its JavaScript a thin loop over a binding's work (zlib's processChunkSync,
+// crypto's sync calls, buffer's, fs's sync calls): a fast answer there is no proof of JavaScript. node's own GLUE (the clock read a
+// hog of ours calls — «bootstrap» — timers, undici's JavaScript, the inspector's dispatch …) keeps «JavaScript»
+const NATIVE_DRIVERS = new Set(['zlib', 'crypto', 'buffer', 'fs']);
 /** PURE: is this sample the ask's own delivery (nothing of the thread's own work on its stack)? */
 function isDelivery(frames) {
   if (!Array.isArray(frames) || !frames.length) return true;
@@ -652,7 +656,7 @@ function askOf({ postedAt = null, answeredAt = null, state = 'unknown', kernel =
     const readable = !answer.deep && !answer.failed && answer.key !== KEYS.unreadable;
     return { cls: 'edge', ...(readable ? { last: { words: answer.words, key: answer.key, keyWords: answer.keyWords } } : {}) };
   }
-  if (fast) return !ranInside || !framed ? { cls: 'end' } : { cls: 'js', words: answer.words, key: answer.key, keyWords: answer.keyWords, ...(answer.noOurs ? { noOurs: true } : {}) };
+  if (fast) return !ranInside || !framed ? { cls: 'end' } : { cls: 'js', words: answer.words, key: answer.key, keyWords: answer.keyWords, ...(answer.noOurs ? { noOurs: true } : {}), ...(answer.module ? { module: answer.module } : {}) };   // r5456: a sample in node's own code says so (its module)
   // round 5 (smaller 3): stat R is «running OR runnable» — only a scheduler window covering the hold tells the two apart
   if (state === 'running' && !windowed) return { cls: 'runnable', words: ASK_WORDS.runnable, key: '(running or waiting for a CPU)', keyWords: '(running or waiting for a CPU)', after };
   if (state === 'running') return { cls: 'native', words: ASK_WORDS.native, key: '(native)', keyWords: '(native)', after };
@@ -807,18 +811,27 @@ function foldHold(h) {
   const n = {};
   for (const x of samples) { const c = clsOf(x); n[c] = (n[c] || 0) + 1; }
   const js = n.js || 0, none = samples.length - js;
+  // r5456 (lane hub-loop-stalls — the placement of test-loop-hold-live round 4's sync zlib red): A FAST ANSWER IN NODE's OWN CODE
+  // IS NO PROOF OF JAVASCRIPT. node's sync wrappers (zlib, buffer, crypto …) are its own JavaScript looping over NATIVE calls, and
+  // an ask is answered at a native call's return: posted in a call's last JS_FAST_MS it is answered «at JavaScript speed» in node's
+  // frame. So when the hold's fast samples ALL stand in node's own code that drives native calls (NATIVE_DRIVERS), each counts in
+  // the CLASSES as native too: the hold is THE TIE (or native, when native samples outnumber them), never «JavaScript» alone. The
+  // samples are said as before, word for word; a fast sample in the person's own code, or in node's own glue, keeps «JavaScript».
+  // No bound moves
+  const nodeOwnJs = js > 0 && samples.every((x) => clsOf(x) !== 'js' || NATIVE_DRIVERS.has(x.module));
+  const nv = nodeOwnJs ? { ...n, native: (n.native || 0) + js } : n;
   const gc = gcOf(h.gc, h.fromM != null ? h.fromM : h.from, h.toM != null ? h.toM : h.to);
   const firstAt = (ks) => { let t = null; for (const x of samples) if (ks.includes(clsOf(x)) && Number.isFinite(x.at) && (t == null || x.at < t)) t = x.at; return t; };
   const tc = firstAt(CPU_CLS), ts = firstAt(SLEEP_CLS), order = tc != null && ts != null && ts < tc ? 'sleep' : 'cpu';
   const spanMs = Number.isFinite(h.msHi) ? h.msHi : Number.isFinite(h.ms) ? h.ms : null;
   const fa = {}; for (const k of [...CPU_CLS, 'runnable']) { const t = firstAt([k]); if (t != null) fa[k] = t; }   // r116 (b): a tie says its classes in the order they came
-  const v = verdict({ d: h.d, n, gcMs: h.gc ? gc.ms : null, lateMs: h.lateMs || 0, order, spanMs, firstAt: fa });
+  const v = verdict({ d: h.d, n: nv, gcMs: h.gc ? gc.ms : null, lateMs: h.lateMs || 0, order, spanMs, firstAt: fa });
   const gcShare = !!(h.gc && gc.ms != null && h.d && h.d.wallMs > 0 && gc.ms >= GC_SHARE * h.d.wallMs);   // the verdict's own rule: a collection's SHARE, never the observer merely on
   // the counted words, in order — over the classes the verdict itself tied: the CPU classes with a window, every not-asleep class
   // without one (r237's should: a no-window tie of JavaScript, «running or waiting for a CPU» and «not in JavaScript» named two of three)
-  const tieLine = v.includes(V.tie) ? (h.d && h.d.wallMs > 0 ? tieWords(n, CPU_CLS, fa, gcShare) : tieWords(n, ['js', 'native', 'runnable', 'notJs'], fa, false)) : null;
+  const tieLine = v.includes(V.tie) ? (h.d && h.d.wallMs > 0 ? tieWords(nv, CPU_CLS, fa, gcShare) : tieWords(nv, ['js', 'native', 'runnable', 'notJs'], fa, false)) : null;
   const W = h.d && h.d.wallMs > 0 ? h.d.wallMs : 0;
-  const parts = W && h.d.ranMs != null && v.includes(', then ') ? partsOf({ d: h.d, n, gc: !!(h.gc && gc.ms != null && gc.ms >= GC_SHARE * W), order, spanMs, firstAt: fa }) : null;
+  const parts = W && h.d.ranMs != null && v.includes(', then ') ? partsOf({ d: h.d, n: nv, gc: !!(h.gc && gc.ms != null && gc.ms >= GC_SHARE * W), order, spanMs, firstAt: fa }) : null;
   // the follow-up (minor 3): parts that INTERLEAVE (JavaScript, asleep, JavaScript …) are said as both, never one «then»
   const seq = samples.filter((x) => Number.isFinite(x.at)).slice().sort((p, q) => p.at - q.at).map((x) => (CPU_CLS.includes(clsOf(x)) ? 'c' : SLEEP_CLS.includes(clsOf(x)) ? 's' : '')).filter(Boolean).join('').replace(/(.)\1+/g, '$1');
   const interleaved = !!parts && seq.length > 2;
@@ -849,7 +862,9 @@ function foldHold(h) {
   // booked it — so an «(after)» row, read only when no ask found JavaScript, never marks one. And EVERY sample of the row says
   // so (S2): a plugin's stack topped by a built-in shares the key «(built-in)» with a stack of built-ins alone
   const jsTop = topOf('js');
-  const noOurs = v === V.js && !!jsTop && samples.every((x) => clsOf(x) !== 'js' || x.key !== jsTop.key || x.noOurs === true);
+  // r5456: the TIE that rule makes (every fast sample in node's code that drives native calls, no native one beside them: the release's «JavaScript»)
+  // keeps the mark — the class changed, never the frame; a hold r5456 makes native keeps that verdict as its cause (S1)
+  const noOurs = (v === V.js || (nodeOwnJs && v === V.tie)) && !!jsTop && samples.every((x) => clsOf(x) !== 'js' || x.key !== jsTop.key || x.noOurs === true);
   return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts, interleaved, noOurs, ...(tieLine ? { tieLine } : {}) };
 }
 /** B-7c97: the words and key of a hold asleep while starting a child process (fork + exec: the parent waits on the exec-status
