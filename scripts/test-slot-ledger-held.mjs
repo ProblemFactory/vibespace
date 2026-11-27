@@ -20,6 +20,8 @@
 // THE REQUIRED FOLLOW (主开发 r5188), each red at 5b42f5226:
 //   ⑥ THE TURN's START ends the turn before's held mark (claude's init through the brain's one opener; codex task_started; ACP
 //      prompt_start — never a backlog's): a turn the wrapper's death ended (no result record) no longer silences the next turn's wall.
+//   ⑥b (主开发 r5371) the device feed ahead of the parse: a device-first start never clears the mark, so the parse's end of the
+//      turn before is the held verdict on it (the order where the parse's own copies were dropped late and its result read live).
 //   ⑦ the banner asks «the ledger is held now» of a POOLED conversation only: a login of its own is marked by its banner.
 //   ⑧ THE CODEX WALL ROAD: an unstamped codex process whose held member is unknown because the ledger is held — its refusal is filed
 //      nowhere (it never stamps a request-out instant, so the release filed it on the link), the turn's mark is set, no switch is
@@ -291,6 +293,47 @@ console.log('⑥ r5188 (1): THE TURN\'s START ends the turn before\'s held mark 
   ok(!cthrew && !!ac && ac.keptLate && ac.clearedLive, `⑥ ACP: a LIVE prompt_start ends the held mark, a backlog's (by its own stamp) leaves it — the real acp-events consumer (${cthrew ? cthrew.message : JSON.stringify(ac)})`, ac);
 }
 
+console.log('⑥b r5371: THE DEVICE FEED AHEAD OF THE PARSE — a device-first start never clears the held mark: the parse runs the turn before\'s end on it');
+{
+  const w = world();
+  const BR = require(path.join(REPO, 'src/server/session-brain.js'));
+  BR.create({ engine: { noteTurnStart: w.eng.noteTurnStart }, applyTaskToolUpdate() { }, updateSessionTodos() { }, getUsageHistory: () => null });
+  const initRec = (n) => ({ type: 'system', subtype: 'init', uuid: `dinit-${n}-${Date.now()}`, session_id: w.s.claudeSessionId });
+  const before = w.caches();
+  const q = quietLog();
+  const events = []; const origEvent = global.__vsEvent; global.__vsEvent = (name, v) => { events.push(String(name)); try { origEvent && origEvent(name, v); } catch { } };
+  let threw = null, planted = false, opened = false, kept = false;
+  const next = initRec(2);
+  try {
+    BR.noteTurnOpener(w.s, initRec(1), 'parse');   // turn N opens (the parse took its init first)
+    await sleep(3); w.s._lastRequestOutAt = Date.now(); await sleep(3);   // its request went out (on B)
+    refuse = ledgerOnly; w.eng.slotTransitions._cache = null;
+    // turn N's wall while the ledger cannot be read, run off the DEVICE feed ahead of the parse (the engine's calls are the same for
+    // either feed): its rejection and its banner — the turn's held mark is set
+    w.eng.recordRateLimitEvent(w.s, { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resets_at: w.R5, resetsAt: w.R5 } });
+    w.eng.markLimitBanner(w.s, "You've reached your 5-hour limit");
+    planted = !!w.s._turnLedgerHeld;   // WITNESS: the product read the placed refusal (its own mark is there)
+    // THE STALL, PLACED (never load): the parse stops before turn N's result, and the device brings turn N+1's init first
+    BR.noteTurnOpener(w.s, next, 'device');
+    opened = w.s._turnLive === true;   // WITNESS: the opener took the device's init (turn N+1 runs by its records)
+    kept = !!w.s._turnLedgerHeld;
+    // the parse resumes at turn N's result, its own copies of the rejection and the banner dropped as late (r5371's order: none of
+    // them sets the mark again), the result itself judged live
+    w.eng.noteTurnEnd(w.s, { type: 'result', result: "You've reached your 5-hour limit" });
+    BR.noteTurnOpener(w.s, next, 'parse');   // …then the parse's copy of turn N+1's init (the device took it first)
+  } catch (e) { threw = e; }
+  q.done(); global.__vsEvent = origEvent; refuse = null;
+  const after = w.caches();
+  const judged = events.filter((e) => e === 'wall-demote' || e === 'wall-demote-held' || e === 'wall-refuted');
+  const heldVerdict = q.said.filter((l) => /a walled turn is not judged on any account — the slot ledger \(slot-transitions\.jsonl\)/.test(l));
+  ok(!threw, `⑥b no throw reaches the caller (${threw ? threw.message : 'none'})`);
+  if (!(planted && opened)) console.log(`  ⊘ SKIP ⑥b the device feed ahead of the parse — the plant was not read (the held mark set by turn N's wall: ${planted}; turn N+1's device init taken by the opener: ${opened})`);
+  else {
+    ok(kept, '⑥b turn N+1\'s DEVICE-first init, ahead of the parse\'s result of turn N, leaves the held mark (only an init the parse takes first clears it) — RED at a52bd1d9b: it cleared the mark');
+    ok(heldVerdict.length === 1 && !judged.length && after[w.A] === before[w.A] && after[w.B] === before[w.B], `⑥b the parse's end of turn N is the held verdict on it: judged on no account (${JSON.stringify(heldVerdict.slice(0, 1))}), no demotion (${judged.join(', ') || 'no wall event'}), neither member's numbers moved — RED at a52bd1d9b: the banner's signal with no stated reset was judged «write» and the turn demoted Member B on a guess`, { judged, changed: [w.A, w.B].filter((id) => after[id] !== before[id]) });
+  }
+}
+
 console.log('⑦ r5188 (2): the banner asks «the ledger is held now» of a POOLED conversation only — a login of its own is marked by its banner');
 {
   const w = world();
@@ -387,7 +430,7 @@ console.log('⑧ r5188 (3): the CODEX wall road under a hold — its refusal fil
   const after = w.caches(), ringAfter = [ring(w.A), ring(w.B)];
   let cur = null; try { cur = w.am.poolCurrent(w.P); } catch { cur = null; }
   const named = q.said.slice(fromWall).filter((l) => /^\[(wall|usage|reset-credit|codex-quota)\]/.test(l) && (l.includes(w.A) || l.includes(w.B) || /Cx (Alpha|Beta)/.test(l)));   // the wall road's own lines
-  const wallSaid = q.said.filter((l) => /a codex usage-limit wall is marked on no account — the slot ledger \(slot-transitions\.jsonl\)/.test(l));
+  const wallSaid = q.said.filter((l) => /a codex usage-limit wall is marked on no account — the slot ledger \(slot-transitions\.jsonl\) could not be read — no move is read from it until it reads again — the wall's road asks no switch$/.test(l));   // r5230: the words say only what the wall's road keeps (the turn's end keeps its own pass)
   const wrongCause = q.said.filter((l) => /no spawn stamp|started before the pool stamped/.test(l));
   const ledgerCause = q.said.filter((l) => /which login this process holds is not read — the slot ledger \(slot-transitions\.jsonl\)/.test(l));
   ok(!threw, `⑧ no throw reaches the caller (${threw ? threw.message : 'none'})`);

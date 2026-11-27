@@ -3250,9 +3250,10 @@ function clearStoppedBy(session, why = 'ran again') {
 function noteTurnRunning(session) { try { clearStoppedBy(session, 'a turn started'); } catch { } }
 /** B-f276 (主开发 r5188 (1)): A TURN's START ENDS THE TURN BEFORE's HELD MARK. The turn's end clears it too — but a turn that ends
  *  with no result record (the wrapper died) never reaches noteTurnEnd, and its mark silenced the NEXT turn's real wall (no account
- *  marked, no switch asked, its end no demotion). Called at the turn's own start, never a backlog's: claude's init (session-brain,
- *  either feed, once a turn), codex's task_started, an ACP prompt_start. Never noteTurnRunning: a claude turn's first output says
- *  that, and it comes AFTER the rejection whose mark it would clear. */
+ *  marked, no switch asked, its end no demotion). Called at the turn's own start, never a backlog's: claude's init when the PARSE
+ *  takes it first (session-brain; a device-first init never clears: the parse, which runs the turn's end, may not have reached the
+ *  turn before's end — 主开发 r5363), codex's task_started, an ACP prompt_start. Never noteTurnRunning: a claude turn's first output
+ *  says that, and it comes AFTER the rejection whose mark it would clear. */
 function noteTurnStart(session) { if (session && session._turnLedgerHeld) session._turnLedgerHeld = null; }
 /** A TYPED error on the turn's main thread (claude: the assistant record's `error`; codex: task_failed's
  *  codexErrorInfo, `final` — its task_failed IS the turn's end). The turn's LAST one is what its end reads; a later
@@ -6618,7 +6619,7 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
         // only the conversation's own wall signal stays, and the turn ends on it (its end is the held verdict: noteTurnEnd)
         if (w2 && w2.why === 'ledger-held') {
           try { session._turnLedgerHeld = session._turnLedgerHeld || { at: Date.now() }; } catch { }
-          console.log(`[wall] ${session._webuiId}: a codex usage-limit wall is marked on no account — ${LEDGER_HELD_WORDS} — no switch is asked and no credit is spent on it`);
+          console.log(`[wall] ${session._webuiId}: a codex usage-limit wall is marked on no account — ${LEDGER_HELD_WORDS} — the wall's road asks no switch`);   // 主开发 r5230: the turn's end keeps its own pass
           try { noteWallSignal(session, { resetsAtMs: resets > nowSec ? resets * 1000 : 0, bucket: 'sevenDay', key: liveQuotaKeyFor(session), lane: arSignal.laneOf(snap) }); noteTurnEnd(session); } catch { }
           return;
         }

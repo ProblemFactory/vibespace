@@ -23,9 +23,9 @@ const { noteRequestSent, sendsRequest, noteSubRequestSent, sendsSubRequest } = r
 // (claudeSideEffects: the records the parse has not seen). Both feeds carry the same ordered stream, so taking each record at
 // its first appearance keeps the order. The state lives on the SESSION (`_turnOpen`); an attach makes the opener UNKNOWN
 // until a turn starts in its sight (as-if-must (1)): a gap can never leave the previous turn's «you» standing.
-// B-f276 (主开发 r5188 (1)): THE TURN's START, told to the pool engine ONCE a turn (its init, from whichever feed brings it first —
-// never a backlog's, never one already taken): the engine ends the turn before's held mark there (a turn the wrapper's death ended
-// reached no result). Set by create from its engine; none (a harness without it) tells nothing.
+// B-f276 (主开发 r5188 (1) / r5363): THE TURN's START, told to the pool engine at an init the PARSE takes first (never a backlog's,
+// never one already taken, never a device-first one): the engine ends the turn before's held mark there (a turn the wrapper's death
+// ended reached no result). Set by create from its engine; none (a harness without it) tells nothing.
 let turnStartHook = null;
 const TURN_SEEN_MAX = 600;   // the reader's should: the same bound as sbSeenFirst's SB_SEEN_MAX (a feed lagging past it is caught by the order rule below)
 function turnStateOf(session) {
@@ -144,7 +144,10 @@ function takeTurnRecord(session, msg, feed) {
   if (msg.type === 'system' && msg.subtype === 'init' && key) { if (st.opened.has(key)) return; st.opened.add(key); if (st.opened.size > 2000) st.opened.delete(st.opened.values().next().value); }
   if (msg.type === 'system' && msg.subtype === 'init') {
     st.live = true; session._turnLive = true;   // B-02a3: the turn the CLI is running, by its own records (either feed)
-    if (!msg.parent_tool_use_id && !msg.isSidechain) { try { turnStartHook?.(session); } catch { } }   // B-f276 r5188 (1): the main thread's turn starts here
+    // B-f276 r5188 (1), GUARDED (主开发 r5363): the main thread's turn start ends the held mark ONLY when the PARSE takes the init first —
+    // the parse runs the turn's end (noteTurnEnd), so its own init comes after the turn before's end; a device-first init (the device feed
+    // ahead of the parse) never clears it: the turn before's end, or this turn's walls the device already ran, may still be waiting on it
+    if (feed === 'parse' && !msg.parent_tool_use_id && !msg.isSidechain) { try { turnStartHook?.(session); } catch { } }
     const cmd = st.cmd;
     st.cmd = null; st.first = null; st.waitCmd = null;
     const names = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : [];
