@@ -286,15 +286,17 @@ function startChild() {
   });
 }
 
-/** Restart agy on the same conversation with the current flags (a model / effort / mode switch, or Stop). */
-function restartChild(why) {
+/** Restart agy on the same conversation with the current flags (a model / effort / mode switch, or Stop). `now`: a person's
+ *  Stop (law 6, 主开发 r5494) — the old process's stdin is CLOSED at once: end() reaches the kernel only at the loop's next
+ *  turn, so a disk call held after it (this wrapper's log append is synchronous) would hold the EOF too. */
+function restartChild(why, now = false) {
   if (restarting) return;   // the restart in flight reads the flags when it starts the next process
   if (!child) { if (!childEnding) startChild(); return; }   // B-bba6: a process still saying its last words ends this wrapper
   restarting = true;
   const old = child;
   if (!turnOpenOn.has(old)) lateErrorOf.set(old, servedModel());   // B-bba6: replaced after its own turn ended — its late error is said once, under ITS model
   old.once('exit', () => { restarting = false; if (!shuttingDown) startChild(); });
-  try { old.stdin.end(); } catch { }
+  try { if (now) old.stdin.destroy(); else old.stdin.end(); } catch { }
   setTimeout(() => { try { old.kill('SIGTERM'); } catch { } }, 300).unref();
   setTimeout(() => { try { old.kill('SIGKILL'); } catch { } }, 5000).unref();
   log(`restart (${why}) on conversation ${meta.sessionId || '(new)'}`);
@@ -1020,6 +1022,10 @@ async function handleInput(msg) {
       return;
     }
     case 'interrupt': {
+      // LAW 6 (主开发 r5494): THE FORWARD FIRST — a dispatched turn's process is told before any record, queue write or log line
+      // of this Stop (restartChild's `now`: its stdin closed at once); what the Stop says comes after, as the steer's stop does it
+      const fwd = activePrompt && activePrompt.dispatched ? activePrompt : null;
+      if (fwd) { fwd.cancelled = true; restartChild('stop', true); }
       stopEpoch++;
       if (stopCheckAbort) { try { stopCheckAbort.abort(new Error('interrupted by Stop')); } catch { } }
       const dropped = promptQueue.splice(0, promptQueue.length);
@@ -1037,17 +1043,14 @@ async function handleInput(msg) {
       // STOP CLEARS THE QUEUE (the owner's law, 2026-09-07 — codex-chat-wrapper / acp-wrapper) and PUTS IT BACK (2026-10-24,
       // the queue_dropped record above): the client's ONE toast says how many came back into the composer, so the count
       // agy-harness-fixes (bug 4) added to the Stop line — «send again what should still run» — is retired (no longer true)
-      if (activePrompt) {
-        const cur = activePrompt;
-        cur.cancelled = true;
-        if (cur.dispatched) {
-          // no cancel in agy's stream: the process is restarted on the same conversation (what it already did is kept)
-          endPrompt(cur, 'cancelled', null, cur.opts || {});
-          notice('info', 'Stopped — Antigravity has no cancel in its stream, so its process was restarted on the same conversation; what the turn already did stays.', 'stop-restart');
-          restartChild('stop');
-          return;
-        }
+      if (fwd) {
+        // no cancel in agy's stream: the process is restarted on the same conversation (what it already did is kept) — that
+        // restart was started above, FIRST; `restarting` holds endPrompt's own drain, so nothing is written to the old process
+        endPrompt(fwd, 'cancelled', null, fwd.opts || {});
+        notice('info', 'Stopped — Antigravity has no cancel in its stream, so its process was restarted on the same conversation; what the turn already did stays.', 'stop-restart');
+        return;
       }
+      if (activePrompt) activePrompt.cancelled = true;   // not yet dispatched (a Stop inside its context-prefix / sign-in await): runPrompt ends it
       return;
     }
     case 'read-permission-rules':

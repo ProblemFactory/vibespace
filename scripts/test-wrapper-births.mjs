@@ -163,7 +163,7 @@ try {
         "restartChild(wantBypass ? 'allow and retry' : 'the retry\\'s bypass ends');": 'a retry\'s bypass',
         "else { notice('info', words + '.', 'command_applied'); restartChild(`${key} ${v}`); }": 'a setting applied',
         "if (retryBypass && !activePrompt?.opts?.retry) { retryBypass = false; restartChild('stop: the dropped retry\\'s bypass ends'); }": 'the Stop (a dropped retry\'s bypass) — restartChild: its spawn waits for the old child\'s exit',
-        "restartChild('stop');": 'the Stop — restartChild: its spawn waits for the old child\'s exit',
+        "if (fwd) { fwd.cancelled = true; restartChild('stop', true); }": 'the Stop, FIRST (law 6) — restartChild closes the old child\'s stdin at once; its spawn waits for that child\'s exit',
       } },
     };
     const sitesOf = (src, fns) => {
@@ -187,9 +187,9 @@ try {
           `${file}: its Stop (${STOPS[file].trim()}) starts no child itself${file.endsWith('agy-wrapper.js') ? ' — only restartChild, whose spawn waits for the old child\'s exit' : ''}`, { spawns, restarts });
       }
     }
-    const rs = blockAt(read('data/bin/agy-wrapper.js'), 'function restartChild(why) {') || '';
-    ok(sitesOf(rs, ['startChild']).length === 2 && rs.includes("old.once('exit', () => { restarting = false; if (!shuttingDown) startChild(); });") && rs.includes("try { old.stdin.end(); } catch { }"),
-      'agy-wrapper.js restartChild: the old child\'s stdin closed (the forward), its spawn only on that child\'s exit — or at once when there is no child to end');
+    const rs = blockAt(read('data/bin/agy-wrapper.js'), 'function restartChild(why, now = false) {') || '';
+    ok(sitesOf(rs, ['startChild']).length === 2 && rs.includes("old.once('exit', () => { restarting = false; if (!shuttingDown) startChild(); });") && rs.includes("try { if (now) old.stdin.destroy(); else old.stdin.end(); } catch { }"),
+      'agy-wrapper.js restartChild: the old child\'s stdin closed (the forward; a Stop\'s at once — test-agy-stop-forward), its spawn only on that child\'s exit — or at once when there is no child to end');
     const planted = read('data/bin/acp-wrapper.js').replace("    case 'interrupt': {", "    case 'interrupt': { startChild();");
     ok(sitesOf(blockAt(planted, "    case 'interrupt': {") || '', ['startChild']).length === 1 && sitesOf(planted, ['startChild']).length === 2, 'RED: a spawn planted in acp-wrapper\'s Stop handler is seen there, and as a census site with no road');
     ok(['pty-wrapper.js', 'acp-wrapper.js', 'agy-wrapper.js', 'codex-chat-wrapper.js'].every((f) => { const s = read('data/bin/' + f); return s.includes(BIRTH_LINE) && s.split('birthOf(child.pid)').length === 2 && s.split('birthOf(process.pid)').length === 2 && s.includes("meta.childStart = b ? b.start : ''; meta.childBoot = b ? b.boot : '';"); }),
