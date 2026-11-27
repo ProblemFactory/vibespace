@@ -243,10 +243,14 @@ try {
   // «441077234-00:18:40» — its start a tick past ps's clock); the product's age gate then rightly holds a row it cannot place
   const WRAPPED_ETIME = '441077234-00:18:40';
   const etimeOf = (pid) => { try { return CP.execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf8', timeout: 3000 }).trim(); } catch { return null; } };
+  // THE STRANGER's LIFE, read AFTER THE SETTLE (r5444): up to 1 s for it to be gone, the same read whatever the copy (the product's signal is
+  // synchronous, its death is not); the window runs BESIDE the next scenes (it starts at the connect's end, the legs await it) and the
+  // stranger is ended only after its own window — the suite's time stays the scene's, not 1 s more a copy
+  const lifeOf = (kid) => until(() => !alive(kid.pid), 1000).then((gone) => !gone).finally(() => { try { kid.kill('SIGKILL'); } catch { } });
   const discDuring = async (M, tag, { lost = false, mounted = false, again = false, twice = false, noProc = false, stranger = false, wrapPs = false, ageNever = false } = {}) => {
     const R = { id: 'mds-' + tag, name: 'mds ' + tag, type: 'sftp', desired: 'mounted' };
     const mm = mmOf(M, tag, R), mp = mm.pathOf(R); let release; const gate = new Promise((r) => { release = r; });
-    const started = [], after = []; let released = false, mountedNow = false, strangerKid = null, notFormed = null, startLate = false;
+    const started = [], after = []; let released = false, mountedNow = false, strangerKid = null, notFormed = null, startLate = false, life = null;
     // THE SCENE's FACTS (B-3dbd, 主开发 r5363): the starter's first answer awaited as itself; every ps row the PRODUCT reads through its
     // starter (the pid it asked, what came back) and every /proc walk it made (finished, or cut by its own bound) — the legs read them
     let firstAnswered = null; const firstStart = new Promise((x) => { firstAnswered = x; });
@@ -281,6 +285,7 @@ try {
       // and read what had come: with no /proc the end reads the daemon's identity through a ps child, slower than 2 s on the loaded pod)
       // the daemon runs, its starter's answer not yet heard: the starter's own first answer, awaited AS ITSELF (30 s): an answer that comes
       // only after it is «the scene did not form» (its order lost); one that never comes is the product's own act missing: a red (⑧ THE STARTER)
+      // — its bound is the product's own DAEMON_ASK_MS guard inside the child starter (15 s); behind it, only the gate's suite ceiling
       startLate = await lateOf(firstStart, 30000);
       if (mounted) mountedNow = true;                 // …and it mounted meanwhile
       await mm.unmount(R.id);                         // the person's Disconnect, meanwhile
@@ -293,10 +298,10 @@ try {
       if (M === MOUNTS && !stranger) await until(() => !(d0 && alive(d0)) || !!(mm._lostStart && mm._lostStart.has(mp)), 30000);
       const rec = mm._state.mounts.find((x) => x.id === R.id) || {};
       return { r, r2, desired: rec.desired, alive: !!(d0 && alive(d0)), starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
-        lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length, strangerAlive: strangerKid ? (M === MOUNTS ? alive(strangerKid.pid) : !(await until(() => !alive(strangerKid.pid), 1000))) : null,   // a red's kill waited on (its read: never read in the signal's own instant)
+        lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length, strangerAlive: null, strangerLife: (life = strangerKid ? lifeOf(strangerKid) : null),   // EVERY copy's stranger read the same way, AFTER the settle (r5444: never in the signal's own instant) — the legs await it
         startNever: started.length === 0, notFormed: started.length === 0 ? 'the starter never answered the stand-in daemon\'s start (⑧ THE STARTER reds it)' : startLate ? 'the starter answered the stand-in daemon\'s start only after its 30 s ceiling: the scene\'s order was lost' : notFormed,
         psD: psReads.filter((x) => d0 && x.pid === Number(d0)), psS: psReads.filter((x) => strangerKid && x.pid === strangerKid.pid), walks };
-    } finally { release(); CS.setChildStarter(S); if (strangerKid) { try { strangerKid.kill('SIGKILL'); } catch { } } }
+    } finally { release(); CS.setChildStarter(S); if (strangerKid && !life) { try { strangerKid.kill('SIGKILL'); } catch { } } }   // (a stranger whose life is being read is ended by its own read)
   };
   // THE LEGS' THREE ROADS (主开发 r5363 / r5413, the round's must). (1) THE KILL LAW IS JUDGED ALWAYS, outside every skip: a stranger that
   // died after the product acted is RED whatever the load and whatever else could not be read — its death is a fact, not a timing.
@@ -308,7 +313,7 @@ try {
   // product never read at all stays judged. Every skip line carries the reads it stands on.
   const etimeIn = (x) => (x && x.code === 0 ? (x.out.split(/\s+/)[1] || '') : '');
   const readTrue = (reads) => { const x = reads[reads.length - 1]; return !x ? null : x.code === 0 && /^(?:\d+:)?\d+:\d+$/.test(etimeIn(x)); };   // null: never read
-  const readWhy = (reads, what) => { const x = reads[reads.length - 1]; return x.code === 0 ? `the product's own ps row of ${what} read etime ${etimeIn(x)} (wrapped: a row read within a tick of its birth)` : `the product's own ps read of ${what} did not answer (${x.unknown ? 'no answer from its starter' : 'code ' + x.code})`; };
+  const readWhy = (reads, what) => { const x = reads[reads.length - 1]; return x.code === 0 ? `the product's own ps row of ${what} read etime ${etimeIn(x)} (wrapped: a row read within a tick of its birth)` : x.code === 1 && !x.out ? `the product's own ps read of ${what} answered «no such process» (code 1: the product reads it as gone)` : `the product's own ps read of ${what} did not answer (${x.unknown ? 'no answer from its starter' : 'code ' + x.code})`; };
   const cut = (x) => x.walks.some((w) => w.done === false) && !x.walks.some((w) => w.done);
   const readsOf = (runs) => JSON.stringify(runs.map((x) => ({ psD: x.psD, psS: x.psS, walks: x.walks })));
   const half = (name, runs, why, judge) => {   // one half of a leg: skipped by name on ITS OWN runs' facts only, else judged
@@ -375,6 +380,7 @@ try {
   // stranger dies, and the kill law reads it RED there, never a skip
   const KILLER = MC.load('src/mounts.js', anchored(MSRC, "const ours = !!row && path.basename(row.comm || '').slice(0, 15) === prog && Number.isFinite(age) && Math.abs(Date.now() - age * 1000 - askAt) <= 120000;", 'const ours = !!row;', 'B-3dbd a copy that signals any row it read'), 'kill-any');
   const dnSk = await discDuring(KILLER, 'disc-np-stranger-killer-wrap', { noProc: true, stranger: true, wrapPs: true, ageNever: true });   // both roads at once: the suite's wait «ran out», the product's read wrapped
+  await Promise.all([dnS, dnSR, dnSw, dnSRw, dnSk].map(async (x) => { x.strangerAlive = x.strangerLife ? await x.strangerLife : null; delete x.strangerLife; }));   // every stranger's life, after its settle
   const law = [dnS, dnSw].filter((x) => x.strangerAlive !== null);
   for (const [n, x] of [['⑧n2', dnS], ['PLACED ⑧n2', dnSw]]) if (x.strangerAlive === null) console.log(`  ⊘ SKIP ${n} the kill law — the scene did not form: no stranger was answered (${x.notFormed || 'no start'})`);
   if (law.length) ok(killLaw(law), `⑧n2 THE KILL LAW, judged whatever the load: a pid freed and taken by a STRANGER inside the window is never signalled by the product — it lives (${law.map((x) => x.strangerAlive).join(', ')} in ${law.length} run(s), its row read true and read wrapped)`, { dnS, dnSw });
