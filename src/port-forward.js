@@ -346,7 +346,7 @@ class PortForwardManager {
       ownerGone: gone(r.ownerJob),   // r3327: its background job is gone (the engine can say so) — the Ports panel says it; unknown is never «gone»
       // B-73c4: a public address whose removal the relay has not CONFIRMED (the row stays until it is), and the rows that are nothing
       // else: a forward already removed (forwardGone; its machine removed: machineGone) or a relay file of this hub no forward names (orphan)
-      unpublishOwed: r.unpublishOwed ? { code: r.unpublishOwed.code || null, reason: r.unpublishOwed.reason || '', since: r.unpublishOwed.since || null, ownerJob: r.unpublishOwed.ownerJob || null } : null,
+      unpublishOwed: r.unpublishOwed ? { code: r.unpublishOwed.code || null, reason: r.unpublishOwed.reason || '', since: r.unpublishOwed.since || null, ownerJob: r.unpublishOwed.ownerJob || null, ownerSet: !!r.unpublishOwed.ownerSet } : null,
       forwardGone: !!r.forwardGone, machineGone: !!r.machineGone, orphan: !!r.orphan,
     }));
   }
@@ -616,7 +616,7 @@ class PortForwardManager {
       delete rec.forwardGone; delete rec.machineGone; if (owner) rec.ownerJob = owner; else delete rec.ownerJob; rec.label = label;
       // a NEW owner: the old one's name preferences (its subdomain, port, protocol choice) never pass to it; the old address — owed — stays
       // its old owner's (its card still says it is up)
-      if ((rec.ownerJob || null) !== was) { rec.publicSub = null; rec.publicPort = null; delete rec.protoOverride; if (rec.unpublishOwed && was) rec.unpublishOwed.ownerJob = was; }
+      if ((rec.ownerJob || null) !== was) { rec.publicSub = null; rec.publicPort = null; delete rec.protoOverride; if (rec.unpublishOwed) { rec.unpublishOwed.ownerJob = was; rec.unpublishOwed.ownerSet = true; } }   // r5421: the old owner named even when it was a person (none)
       this._persist({ now });
     }
     if (!rec) {
@@ -990,7 +990,7 @@ class PortForwardManager {
     } catch (e) {
       const code = (e && e.code) || 'relay_unpublish_failed', reason = String((e && e.message) || code).slice(0, 300), was = rec.unpublishOwed;
       if (!owe) { rec.error = 'the old public address could not be taken down: ' + reason; this.log(`[ports] the old public address of ${rec.id} could not be taken down (${code}): ${reason}`); return false; }   // a cleanup: said, never owed
-      rec.unpublishOwed = { code, reason, since: (was && was.since) || Date.now() };
+      rec.unpublishOwed = { code, reason, since: (was && was.since) || Date.now(), ...(was && was.ownerSet ? { ownerJob: was.ownerJob || null, ownerSet: true } : {}) };   // r5421: a refused retry keeps whose old address it is
       if (!was || was.code !== code) this.log(`[ports] the public address of ${rec.id} could not be taken down (${code}) — kept in Ports, owed: ${reason}`);
       return false;
     }

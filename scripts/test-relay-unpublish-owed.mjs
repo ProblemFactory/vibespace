@@ -21,7 +21,10 @@
 //         no owner (P9), a service over a person's removed row is accepted and takes it (P10), each RED on bee1c1b8f's revival; ONE
 //         orphan row a file however often it is judged (P11); a never-published row's unpublish never asks the relay (P12); a removed
 //         machine's removals join the owed pass's one-out (P13); an orphan's mark read once more before its removal (P14)
-//   I  the instance address (src/server/instance-url.js): a refused removal is OWED and retried at a start (I1)
+//      P9b / P10b (r5421): a refused retry (the pass, «Try again») keeps whose old address it is; a service over a person's row is
+//         never told that person's address is its own
+//   I  the instance address (src/server/instance-url.js): a refused removal is OWED and retried at a start (I1), on the pace (I2),
+//      a Publish waits for a retry out (I3), and a retry refused the same way writes nothing (I4)
 //   D  the «Try again» route (src/server/ports-relay-routes.js) is a PERSON's door: a bearer refused (human_only), a cross-site press
 //      refused (cross_site), a same-origin press answered; the unmarked files' route answers the list
 //   J  an agent's service: the job card says its public address is still up (jobs-layout publishBlockedNote; JobManager _stillUpOf)
@@ -343,6 +346,29 @@ const PFrevive = copyOf(PF_REL, [["    const gone = rec && rec.forwardGone ? rec
   judged(red.busy, red.calls.length === 1 && red.left.length === 2, 'P13 RED CONTROL (an ask while a pass runs lost, in a copy): the removed machine\'s addresses wait for the next sweep', red);
 }
 
+{
+  const scene = async (PFM) => {
+    const rl = relay({ code: 'relay_held_elsewhere' }), w = worldOf(PFM, [pub(29, { ownerJob: 'jb-a', label: 'service: a', forwardGone: true, unpublishOwed: { code: 'relay_held_elsewhere', reason: 'r', since: 1 } })], rl);
+    await w.pf.forward('__local__', 7129, {});   // a person's forward over the job's removed row (the old address the job's)
+    const of = () => { const x = w.pf.list().find((y) => y.id === pub(29).id); return x && x.unpublishOwed ? x.unpublishOwed.ownerJob : 'no mark'; };
+    const atRevive = of();
+    w.pf._healRetryAt.delete(pub(29).id); await w.pf._owedPass('a leg'); const afterPass = of(), n1 = rl.calls.length;
+    await w.pf.unpublishAgain(pub(29).id).catch(() => null); const afterTry = of(), n2 = rl.calls.length;
+    return { atRevive, afterPass, afterTry, asked: [n1, n2] };
+  };
+  const t = await scene(PFm);
+  judged(t.asked[0] === 1 && t.asked[1] === 2, t.atRevive === 'jb-a' && t.afterPass === 'jb-a' && t.afterTry === 'jb-a', 'P9b a refused retry — the owed pass\'s and a person\'s «Try again» — keeps whose old address it is (the old job\'s card still says it is up)', t);
+  const red = await scene(copyOf(PF_REL, [["      rec.unpublishOwed = { code, reason, since: (was && was.since) || Date.now(), ...(was && was.ownerSet ? { ownerJob: was.ownerJob || null, ownerSet: true } : {}) };", "      rec.unpublishOwed = { code, reason, since: (was && was.since) || Date.now() };   // RED: the catch as at ce6b3b443"]], 'p-owner-lost').PortForwardManager);
+  judged(red.asked[0] === 1, red.atRevive === 'jb-a' && red.afterPass === null, 'P9b RED CONTROL (the catch rebuilds the record, in a copy): the old job\'s mark is gone at the first refused retry', red);
+}
+{
+  const rl = relay(), w = worldOf(PFm, [pub(30, { forwardGone: true, unpublishOwed: { code: 'x', reason: 'r', since: 1 } })], rl);
+  await w.pf.forward('__local__', 7130, { owner: 'jb-c', label: 'service: c' });   // a service over a PERSON's removed row
+  const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+  const up = JobManager.prototype._stillUpOf.call({ d: { getPorts: () => w.pf } }, { id: 'jb-c' }), row = w.pf.list().find((x) => x.id === pub(30).id);
+  ok(up === false && !!(row && row.ownerJob === 'jb-c' && row.unpublishOwed && row.unpublishOwed.ownerSet && row.unpublishOwed.ownerJob === null), 'P10b a service over a person\'s removed row: its card never says the person\'s old address is its own (the mark names no job)', { up, row: row && row.unpublishOwed });
+}
+
 console.log('I the instance address: a refused removal is owed and retried at a start (r5334)');
 {
   const IU_REL = 'src/server/instance-url.js';
@@ -399,6 +425,21 @@ console.log('I the instance address: a refused removal is owed and retried at a 
   const [t3, red3] = await Promise.all([race(require(path.join(REPO, IU_REL))), race(copyOf(IU_REL, [['    if (owedOut) await owedOut;\n', '    // RED: a retry out is not waited for\n']], 'iu-race'))]);
   judged(t3.out, t3.pub === true && t3.ev.join(',') === 'unpublish+,unpublish-,unpublish+,unpublish-,publish' && t3.published === true && !t3.owed, 'I3 a Publish while a retry is OUT: it waits for the removal, then writes its file — published, nothing owed', t3);
   judged(red3.out, red3.ev.indexOf('publish') < red3.ev.lastIndexOf('unpublish-'), 'I3 RED CONTROL (the retry out not waited for, in a copy): the publish writes its file while the removal is still out — the removal lands after it', red3);
+  // I4 (r5421): a press refused, then two paced retries refused the SAME way: ONE write of the file (the press's) — none on the pace
+  const quiet = async (IU) => {
+    const FC = require(path.join(REPO, 'src/fd-close.js')), real = FC.renameSynced; let writes = 0;
+    FC.renameSynced = function (from, to, ...a) { if (String(to).endsWith('instance-url.json')) writes++; return real.call(this, from, to, ...a); };
+    try {
+      const w = world(IU, { refusals: 99, paceMs: 15 }); writes = 0;
+      await w.iu.unpublish();
+      for (let i = 0; i < 100 && w.ev.filter((x) => x === 'unpublish-').length < 3; i++) await tick(10);
+      const r = { asks: w.ev.filter((x) => x === 'unpublish-').length, writes, owed: !!w.disk().unpublishOwed }; done(w); return r;
+    } finally { FC.renameSynced = real; }
+  };
+  const t4 = await quiet(require(path.join(REPO, IU_REL)));
+  const red4 = await quiet(copyOf(IU_REL, [["        if (state.unpublishOwed && !state.desired && (code !== state.unpublishOwed.code || words !== state.error)) {", "        if (state.unpublishOwed && !state.desired) { /* RED: every refused retry written */"]], 'iu-pace-writes'));
+  judged(t4.asks >= 3, t4.writes === 1 && t4.owed, 'I4 a refused press, then two paced retries refused the same way: the file written ONCE (the press) — never a synced write on the pace', t4);
+  judged(red4.asks >= 3, red4.writes >= 3, 'I4 RED CONTROL (every refused retry written, in a copy): the file rewritten on the pace', red4);
 }
 
 console.log('J2 the jobs engine never takes a person\'s forward by the job\'s own row id (r5334)');

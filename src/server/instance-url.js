@@ -172,6 +172,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
 
   async function unpublish() {
     hold.refuse('unpublishing this VibeSpace');   // r3009: held — refused by name, the relay's proxy left as it is
+    if (owedOut) await owedOut;   // r5421: a retry already out at the relay is waited for — never a second ask beside it
     let refused = null;
     try { if (plugins) await plugins.frpUnpublish(PROXY_NAME); } catch (e) { refused = e; log('[instance-url] unpublish: ' + e.message); }
     // B-73c4 (law 1, no silent failure): NOT confirmed — this VibeSpace's public address is still up: kept as it is and SAID on its row
@@ -204,7 +205,10 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
         await plugins.frpUnpublish(PROXY_NAME);
         if (state.unpublishOwed && !state.desired) { state.url = null; state.proto = null; state.at = null; state.error = null; delete state.unpublishOwed; log('[instance-url] its public address is down now (the relay confirmed its removal)'); save(); emit(); }
       } catch (e) {
-        if (state.unpublishOwed && !state.desired) { state.unpublishOwed = { code: (e && e.code) || 'relay_unpublish_failed', since: state.unpublishOwed.since }; state.error = stillUp(e); save(); emit(); }
+        // r5421: written and told only when its code or words CHANGED (the record is on disk since the refusing press) — never a synced
+        // write of the file on the pace while the relay keeps refusing the same way
+        const code = (e && e.code) || 'relay_unpublish_failed', words = stillUp(e);
+        if (state.unpublishOwed && !state.desired && (code !== state.unpublishOwed.code || words !== state.error)) { state.unpublishOwed = { code, since: state.unpublishOwed.since }; state.error = words; save(); emit(); }
       } finally { owedOut = null; done(); }
       retryOwed();
     }, delayMs);

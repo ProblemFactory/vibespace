@@ -3932,7 +3932,7 @@ class JobManager {
   _stillUpOf(job) {   // the Ports list read at most once a second for every card (a snapshot of many jobs asks once)
     try {
       const now = Date.now();
-      if (!this._stillUpMemo || now - this._stillUpMemo.at > 1000) { const pf = this.d.getPorts && this.d.getPorts(); this._stillUpMemo = { at: now, owners: new Set(pf && typeof pf.list === 'function' ? pf.list().filter((r) => r.unpublishOwed && (r.unpublishOwed.ownerJob || r.ownerJob)).map((r) => r.unpublishOwed.ownerJob || r.ownerJob) : []) }; }
+      if (!this._stillUpMemo || now - this._stillUpMemo.at > 1000) { const pf = this.d.getPorts && this.d.getPorts(); this._stillUpMemo = { at: now, owners: new Set(pf && typeof pf.list === 'function' ? pf.list().map((r) => r.unpublishOwed ? (r.unpublishOwed.ownerSet ? r.unpublishOwed.ownerJob : r.ownerJob) : null).filter(Boolean) : []) }; }   // r5421: a revived row's old address is its OLD owner's (none: a person's)
       return this._stillUpMemo.owners.has(job.id);
     } catch { return false; }
   }
