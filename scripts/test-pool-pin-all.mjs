@@ -170,8 +170,10 @@ console.log('§8 THE MONEY, SAID BEFORE THE ACT (r5294 MUST 1) — the target me
   // status (the measured shape of the 14 h credits incident: the vendor leaves the status out of about a third of its events)
   const noRecord = (who, txt) => (who !== 'B' ? txt : J((({ overage, ...rest }) => rest)(JSON.parse(txt))));
   const silent = (who, txt) => (who !== 'B' ? txt : J({ ...JSON.parse(txt), overage: { inUse: false, asOf: Date.now() } }));
+  const undated = (who, txt) => (who !== 'B' ? txt : J({ ...JSON.parse(txt), overage: { inUse: true } }));   // a claim of money in use with no date: it cannot claim the present (r5390)
   const STATES = [['overage', inUse, 'paid overage in use now'], ['credits', credits, 'usage credits past its quota'], ['unknown', none, 'not known yet: no reading'],
-    ['unknown', noRecord, 'not known yet: a reading with no overage record'], ['unknown', silent, 'not known yet: in use false and no status — the 14 h shape']];
+    ['unknown', noRecord, 'not known yet: a reading with no overage record'], ['unknown', silent, 'not known yet: in use false and no status — the 14 h shape'],
+    ['unknown', undated, 'not known yet: in use true with no date']];
   for (const [state, readingOf, said] of STATES) {
     const w = world(engMod, { readingOf }); if (!w) break;
     w.mk('m-1'); w.mk('m-2', { agoMs: 30e3 });
@@ -183,6 +185,8 @@ console.log('§8 THE MONEY, SAID BEFORE THE ACT (r5294 MUST 1) — the target me
   const OLD = copyOf('silence-is-none', "  return mode === 'disabled' ? null : 'unknown';\n", "  return null;\n");
   const mo = world(OLD, { readingOf: silent });
   if (mo) { mo.mk('m-1'); ok(quiet(() => mo.eng.pinAllPlan(mo.P, mo.B)).pays === null, 'RED: the old rule (a reading that says nothing of overage read as «bills nothing») — the 14 h shape\'s plan is silent'); }
+  const mo2 = world(OLD, { readingOf: noRecord });
+  if (mo2) { mo2.mk('m-1'); ok(quiet(() => mo2.eng.pinAllPlan(mo2.P, mo2.B)).pays === null, 'RED: the old rule on a reading with no overage record — silent too'); }
   const PAYS = copyOf('pays-blind', "  const out = { ok: true, member: memberId, pays: pinAllPaysOf(memberId), ...pinAllTally() };\n  for (const [sid, s] of activeSessions) {",
     "  const out = { ok: true, member: memberId, pays: null, ...pinAllTally() };\n  for (const [sid, s] of activeSessions) {");
   const mp = world(PAYS, { readingOf: credits });
@@ -214,6 +218,25 @@ console.log('§9 ONE RULE FOR THE PLAN AND THE PRESS (r5294 MUST 2) — a cold p
     const f = await pair(fol, fol.C, ['f-1', 'f-2']);
     ok(Object.values(f.plan.waits || {}).reduce((x, y) => x + y, 0) === 2 && counts(f.r) === counts(f.plan) && f.r.restart === 0,
       'a hot pool\'s followers (no link of their own), the press on C: plan and press count the same', { plan: counts(f.plan), press: counts(f.r) });
+  }
+  // r5390: THE COLD ROAD's RESTART, placed — a road that sees «now» where the writer's cold road answers «at restart» (a codex process
+  // held on its spawn member: the two read the member differently); the witness is the plan's own «now» on a cold pool
+  const ROAD = "  return { kind: hotNow || onNow === memberId ? 'now' : 'restart', elsewhere };\n", PLACED = "  return { kind: 'now', elsewhere };\n";
+  const NOWCOLD = M.load(ENG_REL, anchored(SRC, ROAD, PLACED, 'road-now-cold'), 'road-now-cold');
+  const nc = world(NOWCOLD, { hot: false });
+  if (nc) {
+    nc.mk('n-1'); nc.mk('n-2');
+    const c = await pair(nc, nc.B, ['n-1', 'n-2']);
+    if (c.plan.now !== 2) { console.log('  ⊘ SKIP the cold road\'s restart — the placed road was not in force (the plan said ' + J(counts(c.plan)) + ')'); }
+    else ok(c.r.restart === 2 && c.r.now === 0 && Object.keys(c.r.waits).length === 0, 'the witness (the plan said «2 now» on a cold pool): the writer answered «at restart» and the press counts them so — never «waits: not usable»', { plan: counts(c.plan), press: counts(c.r) });
+  }
+  const OLDCOUNT = M.load(ENG_REL, anchored(anchored(SRC, ROAD, PLACED, 'road-now-cold'), "if (r.reason === 'applies-at-restart') out.restart++; else { const w = r.reason || 'pin-member-unknown'; out.waits[w] = (out.waits[w] || 0) + 1; }",
+    "const w = r.reason || 'pin-member-unknown'; out.waits[w] = (out.waits[w] || 0) + 1;", 'old-cold-count'), 'old-cold-count');
+  const oc = world(OLDCOUNT, { hot: false });
+  if (oc) {
+    oc.mk('n-1'); oc.mk('n-2');
+    const c = await pair(oc, oc.B, ['n-1', 'n-2']);
+    ok(c.plan.now === 2 && (c.r.waits || {})['applies-at-restart'] === 2 && c.r.restart === 0, 'RED (witness: the plan said «2 now»): the old count says them «waiting: not usable» where they move at their next restart', { plan: counts(c.plan), press: counts(c.r) });
   }
   const WRITER = copyOf('counts-by-writer', "      if (road.kind === 'waits') out.waits[road.why] = (out.waits[road.why] || 0) + 1;\n      else if (road.kind === 'now' && !r.placed) {",
     "      if (r.placed) out.now++;\n      else if (r.reason === 'applies-at-restart') out.restart++;\n      else if (road.kind === 'now' && !r.placed) {");
@@ -260,13 +283,16 @@ console.log('§10 THE LOOP\'s LAW (r5294 MUST 3) — one pin a turn of the loop;
     const second = await quietA(() => w.eng.pinAll(w.P, w.C, { by: 'user' }));
     const clear = await quietA(() => w.eng.clearPinsTo(w.P, w.B, { by: 'user' }));
     const done = await first;
+    w.mk('l-6', { pin: w.C }); w.mk('l-7', { pin: w.C });   // two pinned to ANOTHER member: this clear is not about them
     const afterP = quietA(() => w.eng.clearPinsTo(w.P, w.B, { by: 'user' }));
     quiet(() => w.eng.setConversationPin('l-3', w.C, { by: 'user' }));   // another page pins l-3 to C while «Back to automatic» runs
+    w.sessions.delete('l-4'); w.sessions.delete('l-6');   // one pinned to B and one pinned to C end while it runs
     const after = await afterP;
     ok(second.ok === false && second.code === 'press_running' && second.status === 409 && clear.ok === false && clear.code === 'press_running' && done.ok === true && done.now === SIDS.length - 1 && done.ended === 1 && Object.keys(done.refused).length === 0,
       'a second press (and a «Back to automatic») while one runs is refused by name (press_running, 409); the first answers when all are done — the one that ended meanwhile counted apart (ended 1), never a refusal', { second: second.code, clear: clear.code, first: { now: done.now, ended: done.ended, refused: done.refused } });
-    ok(after.ok === true && after.cleared === SIDS.length - 2 && (w.sessions.get('l-3')._poolPin || {}).memberId === w.C,
-      '«Back to automatic» reads each pin AFTER its turn of the loop: the pin another page made to C meanwhile is the person\'s newest act and stays (r5333)', { cleared: after.cleared, l3: (w.sessions.get('l-3')._poolPin || {}).memberId === w.C });
+    ok(after.ok === true && after.cleared === 2 && (w.sessions.get('l-3')._poolPin || {}).memberId === w.C && (w.sessions.get('l-7')._poolPin || {}).memberId === w.C,
+      '«Back to automatic» reads each pin AFTER its turn of the loop: the pin another page made meanwhile TO ANOTHER MEMBER (C) stays (r5333); pins to C are not touched', { cleared: after.cleared });
+    ok(after.ended === 1, '«ended» counts only the conversation whose pin was to THIS member (the one pinned to C that ended is not this clear\'s) (r5390)', { ended: after.ended });
   }
 }
 

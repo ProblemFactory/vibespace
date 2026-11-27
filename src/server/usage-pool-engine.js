@@ -9040,10 +9040,14 @@ async function clearPinsTo(poolId, memberId, { by = 'user', now = Date.now() } =
     let turns = 0;
     for (const [sid, was] of list) {
       const s = activeSessions.get(sid);
-      if (!s || s !== was || s._accountId !== poolId || !poolPinOf(s, poolId)) continue;   // nothing pinned: nothing to clear, no turn spent
+      const toThis = (x) => { const p = x ? poolPinOf(x, poolId) : null; return !!p && p.memberId === memberId; };
+      if (!s || s !== was || s._accountId !== poolId) { if (toThis(was)) ended++; continue; }   // «ended» only for one this clear was about (r5390): its pin as the list saw it
+      if (!poolPinOf(s, poolId)) continue;   // nothing pinned: nothing to clear, no turn spent
+      const wasThis = toThis(s);
       if (turns++) await pinAllLoopTurn();
-      if (activeSessions.get(sid) !== s || s._accountId !== poolId) { ended++; continue; }
-      // r5333 (should): the pin read AFTER the turn — one another page made meanwhile is the person's newest act, never cleared here
+      if (activeSessions.get(sid) !== s || s._accountId !== poolId) { if (wasThis) ended++; continue; }
+      // r5333 (should): the pin read AFTER the turn — one another page made meanwhile TO ANOTHER MEMBER is the person's newest act and
+      // stays; a hand-made pin to THIS member is cleared (the clear's own words say every pin to it is placed automatically again)
       const pin = poolPinOf(s, poolId);
       if (!pin || pin.memberId !== memberId) continue;
       const r = setConversationPin(sid, null, { by, now, quiet: true });
