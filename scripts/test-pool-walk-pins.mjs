@@ -26,6 +26,9 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
+// r5535, A LEG NEVER RESTS ON A COMMIT THE CLONE MAY NOT HOLD: a leg that needs a reference this clone does not hold (the hosted runner's
+// depth-1 checkout) is a NAMED, COUNTED skip — said where it is skipped and in the closing line — never a leg that reads empty and judges 0
+let skipped = 0; const skip = (n, why) => { skipped += n; console.log(`  · SKIP ${n}: ${why} — COUNTED, not passed`); };
 const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck() was handed a ${typeof c} as its condition: ${n}`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 const SRC = 'src/account-pool-auto.js';
 const P = require(path.join(REPO, SRC));
@@ -112,13 +115,16 @@ function* scenes() {
 // THE TWO REFERENCES: the release (eb7608d5, 2.369.419) and the unit's own base (a92ccc273 — B-87fd item (1)'s paying tier in it).
 // The pins are EXACT against the base: B-d74f's own roads. Against the release they are printed beside, road by road: what is there and
 // not against the base is B-87fd item (1)'s taken paying tier (its device list's last tier, its removed decision's last-resort paying move)
-// (the pins and the REDs SKIP on a SHALLOW clone — the hosted mirror's depth-1 checkout reads the «⊘ SKIP»; the green that counts is a
-// full-clone run, the test machine's kit)
-const pre = await preFixCopy('eb7608d5', SRC, 'release'), preB = await preFixCopy('a92ccc273', SRC, 'unit-base'), preF = await preFixCopy('f1043de8e', SRC, 'pre-cure');
+// (the pins and the REDs are a COUNTED skip on a SHALLOW clone — the hosted runner's depth-1 checkout — said where skipped and in the
+// closing line (r5535); the green that counts is a full-clone run, the test machine's kit)
+// (主开发 r5527: a suite reads only commits its tree's own history holds — each reference below is the TRAIN's pick that holds the very
+// bytes of src/account-pool-auto.js the round read, blob for blob: a92ccc273 = a217f54fb, f1043de8e = 6614bfd9f, 3a6814e85 = 979ae3d05,
+// fd4356ca6 = 8f33fcabd; every pin below was measured on these bytes)
+const pre = await preFixCopy('eb7608d5', SRC, 'release'), preB = await preFixCopy('a217f54fb', SRC, 'unit-base'), preF = await preFixCopy('6614bfd9f', SRC, 'pre-cure');
 const rel = pre.mod, base = preB.mod, F = preF.mod;
-const preL = await preFixCopy('3a6814e85', SRC, 'lined'), LINED = preL.mod;   // r5441: the form the round took — what this follow changes, pinned by kind
+const preL = await preFixCopy('979ae3d05', SRC, 'lined'), LINED = preL.mod;   // r5441: the form the round took — what this follow changes, pinned by kind
 const CHG = new Map(); const chg = (road, sp, a, b) => { if (a === b) return; const A = a ? sp.st.get(a) : null, B = b ? sp.st.get(b) : null; const k = `${road} · ${fmt(A)} where the lined form named ${fmt(B)}`; CHG.set(k, (CHG.get(k) || 0) + 1); };
-if ((!base && preB.why === 'shallow') || (!rel && pre.why === 'shallow')) console.log('  ⊘ SKIP the pins — the references are not in this SHALLOW clone (the mirror\'s depth-1 checkout)');
+if ((!base && preB.why === 'shallow') || (!rel && pre.why === 'shallow')) skip(14, 'the pins against the unit\'s base and the release, the follow\'s and the cure\'s REDs, and the cost oracle beside them — the references (eb7608d5 and the train\'s picks) are not in this clone (a depth-1 checkout)');
 else if (!base || !rel || !F) ck(`the three references loaded (eb7608d5, a92ccc273, f1043de8e)${[pre, preB, preF].map((x) => x.why).filter(Boolean).map((w) => ` — ${w}`).join('')}`, false);
 else {
   { const ROWS = M.load(SRC, anchored(fs.readFileSync(path.join(REPO, SRC), 'utf8'), '  if (rows.length && rows[0].signDead) {\n', '  if (arguments[0] && arguments[0].__rows) return rows;\n  if (rows.length && rows[0].signDead) {\n', 'the cost field\'s copy'), 'rows');
@@ -343,6 +349,8 @@ if (rel) for (const sc of shScenes()) {
 const SH_PIN = { fbLive: 448, fbHeals: 52, holdOrder: 0, holdRefused: 940, listOrder: 72, kept: 14124 };   // measured at the cure (r5279), both zones alike, run cda91e34f-20261126220945-both
 console.log(`  · the shapes space asked in ${Math.round(performance.now() - SH_T0)} ms`);   // { fbLive, holdOrder, holdRefused, listOrder } — measured at the cure, written here
 const shCount = (k) => (SH_DIFF.get(k) || { n: 0 }).n;
+if (!rel) skip(5, 'the shapes space against the release (its law, its money pin over the hold, another provider\'s live member, the kept park, I6 by kind) — the release eb7608d5 is not in this clone (a depth-1 checkout)');
+else {
 console.log(`  · the shapes space (r5279): ${shPools} pools — the difference set against the release (eb7608d5): ` + Object.keys(SH_KINDS).map((k) => `${k} ${shCount(k)}`).join(' · '));
 for (const [k, g] of SH_DIFF) { console.log(`      [${SH_KINDS[k]}] ${g.n}`); for (const e of g.ex) console.log('        ' + e); }
 ck(`r5279 THE ONE LAW over the shapes: no walk goes where the decision refuses or cannot know (${SH_LAW.length})`, SH_LAW.length === 0);
@@ -354,10 +362,11 @@ ck(`r5279 another provider's live member: the removed decision moves the convers
 ck(`r5279 the kept park among refused: where the decision refused EVERY listed candidate, the hold keeps the release's own park — never the removed member, never a new bill (${shKept} pools)`, !!SH_PIN && shKept === SH_PIN.kept);
 ck(`r5279 I6 over the shapes, the removed decision asked with membership: every difference from the release is a named kind, each count pinned (${Object.keys(SH_KINDS).map((k) => `${k} ${shCount(k)}`).join(', ')}; ${shI6} unexplained)`, shI6 === 0 && !!SH_PIN && Object.keys(SH_KINDS).every((k) => shCount(k) === SH_PIN[k]));
 for (const s of shI6Ex) console.log('    I6: ' + s);
+}
 // THE THREE MUSTS' REDs on fd4356ca6's own code (the commit the round read), each with its witness
-{ const pre6 = await preFixCopy('fd4356ca6', 'src/account-pool-auto.js', 'fd4356ca6');
+{ const pre6 = await preFixCopy('8f33fcabd', 'src/account-pool-auto.js', 'shapes-musts');   // fd4356ca6's bytes, the train's pick (r5527); the copy's tag is a word, never a sha
   const F6 = pre6.mod;
-  if (!F6 && pre6.why === 'shallow') console.log('  ⊘ SKIP the three REDs on fd4356ca6 — the ref is not in this SHALLOW clone');
+  if (!F6 && pre6.why === 'shallow') skip(3, 'the three musts\' REDs on fd4356ca6\'s code — its bytes (the train\'s pick 8f33fcabd) are not in this clone (a depth-1 checkout)');
   else if (!F6 || !rel) ck(`the copy of fd4356ca6 loaded for the three REDs${pre6.why ? ` — ${pre6.why}` : ''}`, false);
   else {
     let m1 = 0, m1w = 0, m2 = 0, m2w = 0, m3 = 0, m3w = 0; const M2X = [];
@@ -380,5 +389,5 @@ for (const s of shI6Ex) console.log('    I6: ' + s);
 }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel && base && F ? 6 : 0, label: 'walk-pins: ' })) ck(r.name, r.pass);
 
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `; ${skipped} SKIPPED — the references are not in this clone` : ''})`);
 process.exit(fail ? 1 : 0);

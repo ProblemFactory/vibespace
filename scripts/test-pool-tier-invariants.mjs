@@ -19,6 +19,9 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
+// r5535, A LEG NEVER RESTS ON A COMMIT THE CLONE MAY NOT HOLD: a leg that needs a reference this clone does not hold (the hosted runner's
+// depth-1 checkout) is a NAMED, COUNTED skip — said where it is skipped and in the closing line — never a leg that reads empty and judges 0
+let skipped = 0; const skip = (n, why) => { skipped += n; console.log(`  · SKIP ${n}: ${why} — COUNTED, not passed`); };
 const ck = (n, c) => { if (typeof c !== 'boolean') throw new TypeError(`ck() was handed a ${typeof c} as its condition: ${n}`); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 const P = require(path.join(REPO, 'src/account-pool-auto.js'));
 const { projectCacheForFamily } = require(path.join(REPO, 'src/model-family.js'));
@@ -109,7 +112,7 @@ for (let a = 0; a < STATES.length; a++) { multisets.push([a]); for (let b = a; b
 
 const pre = await preFixCopy('eb7608d5', 'src/account-pool-auto.js', 'release');
 const rel = pre.mod;
-if (!rel && pre.why === 'shallow') console.log('  ⊘ SKIP I6 against eb7608d5 — the ref is not in this SHALLOW clone (the mirror\'s depth-1 checkout)');
+if (!rel && pre.why === 'shallow') skip(1, 'the release copy (eb7608d5) loaded for I6 — it is not in this clone (a depth-1 checkout); every leg that reads it is counted below');
 else ck(`the release copy (eb7608d5) loaded for I6${pre.why ? ` — ${pre.why}` : ''}`, !!rel && typeof rel.decidePoolSwitch === 'function');
 
 // B-6a92's HELD mark on a PAYING current member (the engine's { held: 'same-instant' }: its reading reads NONE; it pays by its raw
@@ -248,12 +251,14 @@ for (const against of [false, true]) for (const cur of STATES) for (const ms of 
   if (!pool.paying) {
     if (setting) continue;   // with nobody paying the setting hands nothing: one pass is the space
     pools++; plainPools++;
-    if (!rel) continue;
-    // I6: with no member paying, every answer equals the release's module, byte for byte
-    same('decision', decide(P, pool, 'm0'), decide(rel, pool, 'm0'));
-    for (const w of IN_TURN) same('decision in a turn', decide(P, pool, 'm0', { warm: w }), decide(rel, pool, 'm0', { warm: w }));
-    if (hot) for (const [n, k] of START_KINDS) same(`a start (${n})`, startOf(P, pool, k) ?? null, releaseStart(rel, pool, k));
-    walkDiff(pool, scene, same);   // r5239: the two walks — the difference set, each difference of its kind
+    // I6: with no member paying, every answer equals the release's module, byte for byte (r5535: only where the clone holds the release;
+    // the plain checks below read this tree alone and run in every clone)
+    if (rel) {
+      same('decision', decide(P, pool, 'm0'), decide(rel, pool, 'm0'));
+      for (const w of IN_TURN) same('decision in a turn', decide(P, pool, 'm0', { warm: w }), decide(rel, pool, 'm0', { warm: w }));
+      if (hot) for (const [n, k] of START_KINDS) same(`a start (${n})`, startOf(P, pool, k) ?? null, releaseStart(rel, pool, k));
+      walkDiff(pool, scene, same);   // r5239: the two walks — the difference set, each difference of its kind
+    }
     plainChecks(pool, cur, others, scene);
     continue;
   }
@@ -336,6 +341,7 @@ for (const c of STATES) for (const m of multisets) { if (c.kind === 'p' || m.som
 ck(`the space was built whole: ${payingPools} pools with a member paying, ${plainPools} with none (counted apart: ${wantPaying} and ${wantPlain})`, payingPools === wantPaying && plainPools === wantPlain && wantPaying > 0 && wantPlain > 0);
 const WHAT = { I1: 'the walks stand in the same place of the one order', I2: 'nothing lands on a member that cannot serve while one can; a voluntary move only past the settle bar; never billed onto billed', I3: 'no ping-pong', I4: 'never blocked while a paying member can take a turn', I5: 'a paying member only when no earlier tier can serve — EVERY START included (a model sent, a hint, no family; a guess judged fail closed)', I6: 'with nobody paying (and for the walks where only the current member pays), byte for byte the release', I7: 'in a turn nothing moves off or onto a paying member while the current can serve', I8: 'the same readings give the same answer, on every pool', I9: 'a paying member beside a member that settles (under the reserve floor too) leaves it: out of a turn it moves, in one it is owed', I10: 'a landing on a paying member is marked (toPaying), whatever the setting' , I11: 'the avoid-overage setting is read by the two walks as the decision reads it: its set changes neither walk\'s order' };
 for (const k of INV) {
+  if (k === 'I6' && !rel) { skip(1, 'I6 — with nobody paying every answer equals the release\'s, byte for byte — the release eb7608d5 is not in this clone (a depth-1 checkout)'); continue; }
   const b = bad[k];
   ck(`${k} — ${WHAT[k]}: ${b.n} failing decisions in ${b.shapes.size} shapes`, b.n === 0);
   for (const [kind, g] of b.kinds) { console.log(`      [${kind}] ${g.n} in ${g.shapes.size} shapes`); for (const e of g.ex) console.log('        ' + e); }
@@ -344,6 +350,8 @@ for (const k of INV) {
 // of difference, or one more of a kind, is a change of the release's answers to read again)
 const DIFF_PIN = { list: 2024, fbLive: 2288, fbBill: 0, kept: 352 };   // measured at the cure (r5239 / r5252): RUN 606a0f752-20261126203032-box for list and fbLive, the kept shape = that run's fbBill
 const diffCount = (k) => (DIFF.get(k) || { n: 0 }).n;
+if (!rel) skip(2, 'I6 restated against the release and its money pin — the release eb7608d5 is not in this clone (a depth-1 checkout)');
+else {
 console.log('  · I6 restated, the difference set against the release (eb7608d5): ' + Object.keys(KINDS).map((k) => `${k} ${diffCount(k)}`).join(' · '));
 for (const [k, g] of DIFF) { console.log(`      [${KINDS[k]}] ${g.n} in ${g.shapes.size} shapes`); for (const e of g.ex) console.log('        ' + e); }
 ck(`I6 restated: the two walks differ from the release only by the named kinds, each count pinned (${Object.keys(KINDS).map((k) => `${k} ${diffCount(k)}`).join(', ')})`, !!DIFF_PIN && Object.keys(KINDS).every((k) => diffCount(k) === DIFF_PIN[k]) && [...DIFF.keys()].every((k) => k in KINDS));
@@ -351,10 +359,12 @@ ck(`I6 restated: the two walks differ from the release only by the named kinds, 
 // every conversation off one — a NEW SPEND, the owner's to decide: the unit STOPS on it (each one written out below)
 ck(`I6 restated — THE MONEY PIN: no new spend (${NEW_SPEND.length} states where a walk names a billing member the release's own decision there does not)`, NEW_SPEND.length === 0);
 for (const s of NEW_SPEND.slice(0, 12)) console.log('    NEW SPEND: ' + s);
+}
 // r5252: under READING A the money pin names its 80 states (pinned: the page msgs/bl-accounts-B-d74f-money-pin-stop.md), all inside the
 // kept shape — where this tree keeps the release's park
 const A_SPEND_PIN = 80;
-ck(`r5252 reading A (a copy without the kept park) is read, and its money pin names ${A_SPEND.length} states, the page's ${A_SPEND_PIN}, all in the kept shape`, !!READ_A && A_SPEND.length === A_SPEND_PIN);
+if (!rel) skip(1, 'r5252 reading A\'s money pin against the release — the release eb7608d5 is not in this clone (a depth-1 checkout)');
+else ck(`r5252 reading A (a copy without the kept park) is read, and its money pin names ${A_SPEND.length} states, the page's ${A_SPEND_PIN}, all in the kept shape`, !!READ_A && A_SPEND.length === A_SPEND_PIN);
 console.log(`  · r5252, the kept shape: ${keptApart} fallback answers where nobody pays and no candidate can serve — the release's park, the walks' fallback checks named apart there`);
 console.log("  · r5252, the clock just past the walled ordinary member's weekly reset, in those states:");
 for (const [k, label] of [['i', '(i) the RELEASE starts a new conversation on'], ['ii', "(ii) reading A's tree starts it on"], ['iii', "(iii) reading A's own default pass (maybePoolAutoSwitchForPool → decideDefault)"]]) console.log(`    ${label}: ` + [...RESET[k]].map(([w, n]) => `${w} ×${n}`).join(' · '));
@@ -428,5 +438,5 @@ const plainWalks = (mod) => {
   ck('THE PIN: the chooser\'s decision is decideStart\'s, called as this leg calls it (family, hint, stale default, bare reading, hot: true, no placing of its own), and the pin road asks it too (r5067): no decidePoolSwitch or decidePinnedPlacement of the chooser\'s own', typeof P.decideStart === 'function' && /decideStart\(\{ family: fam, hinted, defaultStale: staleDefault, baseReadCache: base, currentId: cur,/.test(call) && /hot: true/.test(call) && !/placing:/.test(call) && !/decidePoolSwitch\(/.test(body) && !/decidePinnedPlacement\(/.test(body) && /decideStart\(\{ family: fam, hinted, baseReadCache: base, pin, currentId: cur,/.test(body)); }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: rel ? 6 : 5, label: 'tier-invariants: ' })) ck(r.name, r.pass);
 
-console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? `, ${skipped} skipped` : ''})` : `\nALL PASS (${pass}${skipped ? `; ${skipped} SKIPPED — the release is not in this clone` : ''})`);
 process.exit(fail ? 1 : 0);
