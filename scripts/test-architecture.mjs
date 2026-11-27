@@ -7998,16 +7998,16 @@ await section(async () => {
     && script107.indexOf('agentd-bundle-strip.mjs') < script107.indexOf('scripts/agentd-release.mjs');
   const shipped107 = (r) => (strips107 ? strip107(r.outputFiles[0].text, undefined, { check: false }) : r.outputFiles[0].text);   // a size reading (the build's own step checks)
   // THE LAW (the coordinator's, 2026-11-20): the base is the LAST RELEASE's SIGNED device bundle size, restated at each cut to the size
-  // that cut signs. Restated at the 2.369.421 cut (int361): 2.369.421's signed bundle, 5331485 bytes (its manifest's sha256 47647c03…);
+  // that cut signs. Restated at the 2.369.422 cut (int361): 2.369.422's signed bundle, 5329341 bytes (its manifest's sha256 d1d6cf7b…);
   // the 2 % margin holds the next block's DEVICE code over it. WHICH lines of a block change the bundle is COMPUTED at the cut, never
   // remembered: the files changed between the release and the tip that are in this build's own input list (the metafile below), each
   // mapped to its list line — the bundle carries chat-pipeline files too (message-manager.js, record-shape.js, permission-outcome.js…).
-  // Was 5331485, 2.369.420's signed bundle (5323400 before it, 2.369.419's; 5230200, 2.369.418's; 5229020, 2.369.417's; 5213537, 2.369.416's; 5112402, 2.369.415's and 2.369.414's).
+  // Was 5331485, 2.369.421's signed bundle (5331485 before it, 2.369.420's; 5323400, 2.369.419's; 5230200, 2.369.418's; 5229020, 2.369.417's; 5213537, 2.369.416's; 5112402, 2.369.415's and 2.369.414's).
   // 主开发 r2602 (§107's own words: the coordinator's to rule): 4 % WAS FOR THE BLOCK 2.369.416 ONLY, and ended at its cut (r3161). This block carries two device units ruled
   // onto the machine, both measured as shipped by their lanes: the codex rollout index (lane mask-value-shape: 12,140 bytes) and the
   // paired listing's collector with its three disk operations (lane bl-chat-c: 36,940 bytes), on top of the 94,995 of 102,248 bytes the
   // block had already used at 5b5fb7a9d. At the cut the base was restated to the signed size and THE MARGIN RETURNED TO 0.02 (2 %).
-  const RELEASE_BUNDLE_BYTES = 5331485, DEVICE_BUNDLE_MARGIN = 0.02;
+  const RELEASE_BUNDLE_BYTES = 5329341, DEVICE_BUNDLE_MARGIN = 0.02;
   ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
@@ -8049,7 +8049,7 @@ await section(async () => {
   const reach107 = { name: 'reach-107', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]dir-collect\.js$/ }, (a) => (a.path === DC107 ? { contents: fs.readFileSync(a.path, 'utf8') + "\nrequire('./safe-fs-worker.js');\n", loader: 'js', resolveDir: path.dirname(a.path) } : undefined)); } };
   const rr107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107.filter((x) => x !== 'xlsx'), preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [reach107] });
   ok(has107(Object.keys(rr107.metafile.inputs), 'src/safe-fs-worker.js') && libs107(rr107).includes('xlsx'), `§107 r1636 CONTROL: the collector reaching the SafeFs worker (the ops' place before the cut) carries it and node_modules/xlsx into the device bundle — the leg above goes red on it`);
-  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of ${RELEASE_BUNDLE_BYTES} bytes — the 2.369.421 release's signed device bundle, plus ${DEVICE_BUNDLE_MARGIN * 100} % for this block's device code — as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code over the margin is the coordinator\'s to rule — the base is the last release\'s signed size, restated only at a cut' : ''}`, size107);
+  ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of ${RELEASE_BUNDLE_BYTES} bytes — the 2.369.422 release's signed device bundle, plus ${DEVICE_BUNDLE_MARGIN * 100} % for this block's device code — as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code over the margin is the coordinator\'s to rule — the base is the last release\'s signed size, restated only at a cut' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
   // libraries' legal notices stay, every line keeps its own spacing, a second pass changes nothing
