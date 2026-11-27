@@ -10,6 +10,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Agents can keep a file in the vault (an SSH key, a certificate, a kubeconfig, up to 1 MB); a command they run gets it as a private file, never its contents.
 - A command can carry vault files of up to 24 KB in all; a larger file stays in the vault and a run that names it is refused, saying why.
 - The Vault window keeps files: add one with Add… › File…, download it after your second password; one too large for a command says so on its row.
+- A message the agent never received now offers «Send again» and «Dismiss» right where it stands in the conversation.
 
 ### Changed
 - If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
