@@ -16127,4 +16127,5 @@ export default {
   "Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read": "不知道 VibeSpace 的记录（{folder}）位于哪里：无法读取挂载表",
   "The folder is a {view} view of a {shows} file system: the program that serves the view is what can stop answering.": "该文件夹是一个 {shows} 文件系统的 {view} 视图：可能停止响应的，是提供这个视图的程序。",   // B-8797 follow (lane hub-loop-stalls, r5244): a view over a local file system; a looping path
   "Where VibeSpace keeps its own records ({folder}) is not known: the folder's path loops on its own links": "不知道 VibeSpace 的记录（{folder}）位于哪里：该文件夹的路径在自己的链接上绕圈",
+  "That address is its earlier owner's and is still being taken down.": "这个地址属于此前的所有者，仍在下线中。",   // B-73c4 (lane nl-mounts, r5486): a revived row's old address
 };

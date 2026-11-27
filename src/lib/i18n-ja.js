@@ -16126,4 +16126,5 @@ export default {
   "Where VibeSpace keeps its own records ({folder}) is not known: the mount table could not be read": "VibeSpace の記録（{folder}）がどこにあるか分かりません：マウント表を読み取れませんでした",
   "The folder is a {view} view of a {shows} file system: the program that serves the view is what can stop answering.": "このフォルダは {shows} ファイルシステムの {view} ビューです：応答しなくなるおそれがあるのは、そのビューを提供しているプログラムです。",   // B-8797 follow (lane hub-loop-stalls, r5244): a view over a local file system; a looping path
   "Where VibeSpace keeps its own records ({folder}) is not known: the folder's path loops on its own links": "VibeSpace の記録（{folder}）がどこにあるか分かりません：フォルダのパスが自身のリンクで循環しています",
+  "That address is its earlier owner's and is still being taken down.": "このアドレスは以前の所有者のもので、まだ停止処理中です。",   // B-73c4 (lane nl-mounts, r5486): a revived row's old address
 };

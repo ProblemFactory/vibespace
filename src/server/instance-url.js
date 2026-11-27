@@ -38,6 +38,7 @@ const SR = require('../store-read.js');
 
 const PROXY_NAME = 'vibespace-instance';
 const SUB_RE = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const OWED_WAIT_MS = 20000;   // r5486: a press waits at most this long for a retry already out at the relay (the forwards' own relay bound), then asks itself
 const OWED_PACE_MS = 5 * 60000;   // B-73c4 (r5334): a refused removal of this VibeSpace's address is asked again on this pace
 
 // B-574d «mounts-and-forwards» (主开发 r4751, lane nl-mounts): a SYNCED replace through the tree's one door (src/fd-close.js
@@ -49,7 +50,7 @@ function writeJsonAtomic(file, obj) {
   require('../fd-close.js').renameSynced(file + '.tmp', file, JSON.stringify(obj, null, 2), { where: 'instance-url.json', say: (w) => { if (!noSyncSaid) { noSyncSaid = true; console.warn(`[instance-url] ${w}`); } } });
 }
 
-function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, authEnabled = () => true, broadcast = () => { }, log = () => { }, owedPaceMs = OWED_PACE_MS }) {
+function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, authEnabled = () => true, broadcast = () => { }, log = () => { }, owedPaceMs = OWED_PACE_MS, owedWaitMs = OWED_WAIT_MS }) {
   const file = path.join(dataDir, 'instance-url.json');
   let state = { desired: false, auto: false, sub: null, url: null, proto: null, at: null, error: null };
   // r3009 (B-f276 family, lane bl-machines-a): THE STORE-READ LAW (src/store-read-hold.js). The release read ANY failure as «not
@@ -139,7 +140,7 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     const preferSub = state.sub || f.selfDialSub || '';
     // our own server speaks plaintext http locally; the relay terminates TLS
     if (owedTimer) { clearTimeout(owedTimer); owedTimer = null; }   // r5334: wanted again — no retry asked from now; one already OUT is waited for first
-    if (owedOut) await owedOut;
+    if (owedOut && (await within(owedOut)).late) throw Object.assign(new Error(stillOutWords().replace('try again then', 'publish again then')), { code: 'relay_removal_out' });   // r5486: never a new file under a removal still out
     const r = await plugins.frpPublish(PROXY_NAME, Number(port), { preferSub, proto: 'http' });
     if (!r || !r.url) throw new Error('the relay did not return a URL');
     state.url = r.url; state.proto = r.proto || 'http'; state.at = Date.now(); state.error = null;
@@ -172,21 +173,20 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
 
   async function unpublish() {
     hold.refuse('unpublishing this VibeSpace');   // r3009: held — refused by name, the relay's proxy left as it is
-    if (owedOut) await owedOut;   // r5421: a retry already out at the relay is waited for — never a second ask beside it
-    let refused = null;
-    try { if (plugins) await plugins.frpUnpublish(PROXY_NAME); } catch (e) { refused = e; log('[instance-url] unpublish: ' + e.message); }
-    // B-73c4 (law 1, no silent failure): NOT confirmed — this VibeSpace's public address is still up: kept as it is and SAID on its row
-    // (its error), never cleared; pressing Unpublish again asks the relay again
-    if (refused) {
-      state.desired = false; state.auto = false; state.error = stillUp(refused);
-      state.unpublishOwed = { code: (refused && refused.code) || 'relay_unpublish_failed', since: (state.unpublishOwed && state.unpublishOwed.since) || Date.now() };   // r5334: owed — retried at a start and on the pace
-      save(); emit(); retryOwed();
-      return { status: status(), error: state.error, code: state.unpublishOwed.code };
+    // r5486 (own read): a removal ALREADY OUT at the relay is waited for at most owedWaitMs; past it the press is ANSWERED BY NAME — never a
+    // second ask beside it (one out), never held without end; that removal's answer is applied when it comes
+    if (owedOut && (await within(owedOut)).late) return { status: status(), error: stillOutWords(), code: 'relay_removal_out' };
+    if (!plugins) { state.url = null; state.proto = null; state.desired = false; state.auto = false; state.at = null; state.error = null; delete state.unpublishOwed; save(); emit(); return { status: status() }; }
+    // B-73c4 (law 1, no silent failure): until the relay CONFIRMS, this VibeSpace's public address is still up — kept and said on its row
+    // (its error), never cleared; owed in memory until the answer, written once the answer says what it is
+    state.desired = false; state.auto = false;
+    state.unpublishOwed = { code: 'relay_unpublish_pending', since: (state.unpublishOwed && state.unpublishOwed.since) || Date.now() };
+    const a = await within(askRelay());
+    if (a.late) {   // the press's own ask past its bound: still OUT (its answer applied when it comes) — the address said as still up
+      state.unpublishOwed = { code: 'relay_unanswered', since: state.unpublishOwed.since }; state.error = stillUp({ code: 'relay_unanswered' }); save(); emit();
+      return { status: status(), error: state.error, code: 'relay_unanswered' };
     }
-    // the SUBDOMAIN is kept: republishing should land on the same URL
-    state.url = null; state.proto = null; state.desired = false; state.auto = false; state.at = null; state.error = null;
-    delete state.unpublishOwed;
-    save(); emit();
+    if (a.e) return { status: status(), error: state.error, code: (state.unpublishOwed && state.unpublishOwed.code) || 'relay_unpublish_failed' };
     return { status: status() };
   }
   const stillUp = (e) => `its public address is still up — the relay did not confirm its removal (${(e && e.code) || (e && e.message) || 'an error'})`;
@@ -194,31 +194,34 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
    *  at a time, off the loop (the relay's async verb). Confirmed ⇒ cleared as by Unpublish; refused ⇒ kept, said on its row, asked again
    *  on the pace; a Publish meanwhile wants the address again (no removal owed) */
   let owedTimer = null, owedOut = null, stopped = false;   // owedOut: the ask out at the relay (a publish waits for it)
+  // r5486 (own read): ONE DOOR for every ask of the relay to remove this address — a press's, the pace's, a start's: ONE ask out at a time
+  // (owedOut), its answer APPLIED when it comes however late (confirmed ⇒ cleared as by Unpublish; refused ⇒ owed and said — written
+  // only when its code or words change, r5421), the pace re-armed after it. A PRESS never waits past owedWaitMs: the relay's removal is
+  // an async unlink plus a reload bounded at 6 s, and an unlink on a hung home folder has no bound of its own
+  const within = (p) => { let t = null; return Promise.race([Promise.resolve(p).then((v) => v || {}, (e) => ({ e })), new Promise((r) => { t = setTimeout(() => r({ late: true }), owedWaitMs); if (t.unref) t.unref(); })]).finally(() => { if (t) clearTimeout(t); }); };
+  const stillOutWords = () => `a removal of its public address is still out at the relay and has not answered in ${Math.round(owedWaitMs / 1000)} s — its answer is applied when it comes; try again then`;
+  function applyAnswer(e) {
+    if (!state.unpublishOwed || state.desired) return;   // wanted again meanwhile (a Publish): nothing is owed
+    if (!e) { state.url = null; state.proto = null; state.at = null; state.error = null; delete state.unpublishOwed; log('[instance-url] its public address is down now (the relay confirmed its removal)'); save(); emit(); return; }
+    const code = (e && e.code) || 'relay_unpublish_failed', words = stillUp(e);
+    if (code !== state.unpublishOwed.code || words !== state.error) { state.unpublishOwed = { code, since: state.unpublishOwed.since }; state.error = words; save(); emit(); }
+  }
+  function askRelay() {
+    let done; owedOut = new Promise((r) => { done = r; });
+    return Promise.resolve().then(() => plugins.frpUnpublish(PROXY_NAME))
+      .then(() => { applyAnswer(null); return { ok: true }; }, (e) => { log('[instance-url] unpublish: ' + ((e && e.message) || e)); applyAnswer(e); return { e }; })
+      .finally(() => { owedOut = null; done(); retryOwed(); });
+  }
   function retryOwed(delayMs = owedPaceMs) {
     if (stopped || owedTimer || owedOut || !state.unpublishOwed || state.desired || !plugins) return;
-    owedTimer = setTimeout(async () => {
+    owedTimer = setTimeout(() => {
       owedTimer = null;
       if (!state.unpublishOwed || state.desired) return;
       if (hold.held()) { retryOwed(); return; }
-      let done; owedOut = new Promise((r) => { done = r; });
-      try {
-        await plugins.frpUnpublish(PROXY_NAME);
-        if (state.unpublishOwed && !state.desired) { state.url = null; state.proto = null; state.at = null; state.error = null; delete state.unpublishOwed; log('[instance-url] its public address is down now (the relay confirmed its removal)'); save(); emit(); }
-      } catch (e) {
-        // r5421: written and told only when its code or words CHANGED (the record is on disk since the refusing press) — never a synced
-        // write of the file on the pace while the relay keeps refusing the same way
-        const code = (e && e.code) || 'relay_unpublish_failed', words = stillUp(e);
-        if (state.unpublishOwed && !state.desired && (code !== state.unpublishOwed.code || words !== state.error)) { state.unpublishOwed = { code, since: state.unpublishOwed.since }; state.error = words; save(); emit(); }
-      } finally { owedOut = null; done(); }
-      retryOwed();
+      askRelay();   // its answer applied, the pace re-armed by the door
     }, delayMs);
     if (owedTimer.unref) owedTimer.unref();
   }
-
-  /** Boot: a mapping the user asked for must come back by itself. The relay /
-   *  frpc may not be up yet, so failures retry instead of silently vanishing.
-   *  ONE cycle at a time; `ifFailed` (the vault's unlock — lane fleet-instance-publish) re-tries only a restore that FAILED:
-   *  a cycle waiting on its timer has its next try pulled forward, none running ⇒ a new cycle. */
   function restore({ retries = 6, delayMs = 20000, firstMs = 3000, ifFailed = false } = {}) {
     if (hold.held()) { restoreAsked = restoreAsked && !restoreAsked.ifFailed ? restoreAsked : { retries, delayMs, firstMs, ifFailed }; return; }   // r3174: the STRONGER ask kept (a vault unlock's «only if it failed» never replaces the start's)   // r3009: held — unread, not «not desired»: the restore runs at the lift
     if (state.unpublishOwed && !state.desired) retryOwed(firstMs);   // r5334: a start retries a refused removal of its address

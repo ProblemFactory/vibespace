@@ -22,9 +22,11 @@
 //         orphan row a file however often it is judged (P11); a never-published row's unpublish never asks the relay (P12); a removed
 //         machine's removals join the owed pass's one-out (P13); an orphan's mark read once more before its removal (P14)
 //      P9b / P10b (r5421): a refused retry (the pass, «Try again») keeps whose old address it is; a service over a person's row is
-//         never told that person's address is its own
+//         never told that person's address is its own; P9c (r5486) a second change of owner never moves the mark; P15 (r5486, S6) a
+//         confirmed removal on a job's live row asks the jobs engine ONCE — the waiting service published with no restart
 //   I  the instance address (src/server/instance-url.js): a refused removal is OWED and retried at a start (I1), on the pace (I2),
-//      a Publish waits for a retry out (I3), and a retry refused the same way writes nothing (I4)
+//      a Publish waits for a retry out (I3), a retry refused the same way writes nothing (I4), and a press waits for a retry out
+//      only as long as its bound (I5, r5486)
 //   D  the «Try again» route (src/server/ports-relay-routes.js) is a PERSON's door: a bearer refused (human_only), a cross-site press
 //      refused (cross_site), a same-origin press answered; the unmarked files' route answers the list
 //   J  an agent's service: the job card says its public address is still up (jobs-layout publishBlockedNote; JobManager _stillUpOf)
@@ -369,6 +371,54 @@ const PFrevive = copyOf(PF_REL, [["    const gone = rec && rec.forwardGone ? rec
   ok(up === false && !!(row && row.ownerJob === 'jb-c' && row.unpublishOwed && row.unpublishOwed.ownerSet && row.unpublishOwed.ownerJob === null), 'P10b a service over a person\'s removed row: its card never says the person\'s old address is its own (the mark names no job)', { up, row: row && row.unpublishOwed });
 }
 
+{
+  // P9c (r5486): job A's removed row, a person's forward over it, removed again while the relay refuses, then job B's over it: the mark stays A's
+  const scene = async (PFM) => {
+    const rl = relay({ code: 'relay_held_elsewhere' }), w = worldOf(PFM, [pub(31, { ownerJob: 'jb-a', label: 'service: a', forwardGone: true, unpublishOwed: { code: 'relay_held_elsewhere', reason: 'r', since: 1 } })], rl);
+    const of = () => { const x = w.pf.list().find((y) => y.id === pub(31).id); return x && x.unpublishOwed ? x.unpublishOwed.ownerJob : 'no mark'; };
+    await w.pf.forward('__local__', 7131, {}); const one = of();
+    await w.pf.unforward(pub(31).id, { now: true }); const gone = !!(w.pf._state.forwards.find((x) => x.id === pub(31).id) || {}).forwardGone;
+    await w.pf.forward('__local__', 7131, { owner: 'jb-b', label: 'service: b' }); const two = of(), rec = w.pf._state.forwards.find((x) => x.id === pub(31).id);
+    return { one, gone, two, owner: rec && rec.ownerJob };
+  };
+  const t = await scene(PFm);
+  judged(t.one === 'jb-a' && t.gone, t.two === 'jb-a' && t.owner === 'jb-b', 'P9c a SECOND change of owner while the same removal is owed (a person, then a service): the mark still names the FIRST old owner — the address being taken down is still its', t);
+  const red = await scene(copyOf(PF_REL, [['if (rec.unpublishOwed && !rec.unpublishOwed.ownerSet) { rec.unpublishOwed.ownerJob = was;', 'if (rec.unpublishOwed) { rec.unpublishOwed.ownerJob = was;']], 'p-mark-moves').PortForwardManager);
+  judged(red.one === 'jb-a' && red.gone, red.two === null, 'P9c RED CONTROL (the mark written at every change, in a copy): it moves to the person — the first owner\'s address is no longer said', red);
+}
+{
+  // P15 (r5486, S6): a service over a removed row waits (its publish refused while the old address is up); the removal CONFIRMED ⇒ the jobs engine asked to reconcile ONCE and the service's own address is up — no restart, no unlock, no timer
+  const scene = async (PFM) => {
+    const rl = relay(); rl.refuse = false;
+    rl.frpPublish = async (name) => { rl.published.push(name); return { url: 'https://its-own-new.relay.example.test/', proto: 'http', name }; };
+    const w = worldOf(PFM, [pub(32, { ownerJob: 'jb-s', label: 'service: s', unpublishOwed: { code: 'relay_held_elsewhere', reason: 'r', since: 1, ownerJob: null, ownerSet: true } })], rl);
+    const asks = []; w.pf.getJobs = () => ({ forwardsReconcile: async (why) => { asks.push(why); await w.pf.publish(pub(32).id).catch(() => null); } });   // the engine's reconcile publishes a service that asks
+    w.pf._healRetryAt.delete(pub(32).id); await w.pf._owedPass('a leg');
+    for (let i = 0; i < 100 && !(w.pf.list().find((x) => x.id === pub(32).id) || {}).publicUrl; i++) await tick(5);
+    await tick(20);   // (no second ask may follow: there is no timer)
+    const row = w.pf.list().find((x) => x.id === pub(32).id);
+    return { removed: rl.calls.length, asks: asks.length, url: row && row.publicUrl, owed: !!(row && row.unpublishOwed) };
+  };
+  const t = await scene(PFm);
+  judged(t.removed === 1, t.asks === 1 && t.url === 'https://its-own-new.relay.example.test/' && !t.owed, 'P15 a confirmed removal on a job\'s live row: the jobs engine asked to reconcile ONCE — the waiting service\'s own address up with no restart', t);
+  const red = await scene(copyOf(PF_REL, [["    if (rec.ownerJob) this._reconcileOwed = true;\n", "    if (false) this._reconcileOwed = true;   /* RED: nobody asked */\n"]], 'p-no-ask').PortForwardManager);
+  judged(red.removed === 1, red.asks === 0 && !red.url, 'P15 RED CONTROL (no ask after the confirm, in a copy): the service stays unpublished until a restart or an unlock', red);
+}
+{
+  // P15b (r5486 own read): ONE confirm settled twice — its late answer (a removal that had not answered in time) and the pass — asks ONCE, after the pass
+  const scene = async (PFM) => {
+    const rl = relay(); rl.refuse = false;
+    const w = worldOf(PFM, [pub(33, { ownerJob: 'jb-u', label: 'service: u', unpublishOwed: { code: 'relay_unanswered', reason: 'r', since: 1, ownerJob: null, ownerSet: true } })], rl);
+    const asks = []; let busyAtAsk = null; w.pf.getJobs = () => ({ forwardsReconcile: async (why) => { asks.push(why); busyAtAsk = !!w.pf._owedBusy; } });
+    w.pf._healRetryAt.delete(pub(33).id); await w.pf._owedPass('a leg'); await tick(20);
+    return { removed: rl.calls.length, asks: asks.length, busyAtAsk };
+  };
+  const t = await scene(PFm);
+  judged(t.removed === 1, t.asks === 1 && t.busyAtAsk === false, 'P15b one confirm settled twice (its late answer, then the pass): the jobs engine asked ONCE, after the pass — never in its middle', t);
+  const red = await scene(copyOf(PF_REL, [["    if (rec.ownerJob) this._reconcileOwed = true;\n", "    if (rec.ownerJob) { const jm = this.getJobs && this.getJobs(); if (jm) jm.forwardsReconcile('red'); }   /* RED: an ask at every settle */\n"]], 'p-two-asks').PortForwardManager);
+  judged(red.removed === 1, red.asks === 2, 'P15b RED CONTROL (an ask at every settle, in a copy): two asks for one confirm, in the middle of the pass', red);
+}
+
 console.log('I the instance address: a refused removal is owed and retried at a start (r5334)');
 {
   const IU_REL = 'src/server/instance-url.js';
@@ -410,7 +460,7 @@ console.log('I the instance address: a refused removal is owed and retried at a 
     for (let i = 0; i < 60 && (w.ev.filter((x) => x === 'unpublish-').length < 3 || w.iu.status().published); i++) await tick(10);
     const r = { asks: w.ev.filter((x) => x === 'unpublish-').length, published: w.iu.status().published, owed: !!w.disk().unpublishOwed }; done(w); return r;
   };
-  const [t2, red2] = await Promise.all([pace(require(path.join(REPO, IU_REL))), pace(copyOf(IU_REL, [['      } finally { owedOut = null; done(); }\n      retryOwed();\n', '      } finally { owedOut = null; done(); }\n      // RED: a refused retry never asks again\n']], 'iu-no-rearm'))]);
+  const [t2, red2] = await Promise.all([pace(require(path.join(REPO, IU_REL))), pace(copyOf(IU_REL, [['      askRelay();   // its answer applied, the pace re-armed by the door', '      if (stopped) return; askRelay().then(() => { stopped = true; });   /* RED: a refused retry never asks again */']], 'iu-no-rearm'))]);
   judged(t2.asks >= 2, t2.asks === 3 && t2.published === false && !t2.owed, 'I2 the instance address on the PACE: a refused retry is asked again; confirmed ⇒ cleared', t2);
   judged(red2.asks >= 2, red2.asks === 2 && red2.published === true && red2.owed, 'I2 RED CONTROL (no re-arm after a refused retry, in a copy): owed for good', red2);
   // I3: a Publish while a retry is OUT at the relay waits for it: its file is written after the removal, never removed under it
@@ -422,7 +472,7 @@ console.log('I the instance address: a refused removal is owed and retried at a 
     await tick(80);
     const r = { out, pub, ev: w.ev.slice(), published: w.iu.status().published, owed: !!w.disk().unpublishOwed }; done(w); return r;
   };
-  const [t3, red3] = await Promise.all([race(require(path.join(REPO, IU_REL))), race(copyOf(IU_REL, [['    if (owedOut) await owedOut;\n', '    // RED: a retry out is not waited for\n']], 'iu-race'))]);
+  const [t3, red3] = await Promise.all([race(require(path.join(REPO, IU_REL))), race(copyOf(IU_REL, [["    if (owedOut && (await within(owedOut)).late) throw Object.assign(new Error(stillOutWords().replace('try again then', 'publish again then')), { code: 'relay_removal_out' });", "    /* RED: a retry out is not waited for */"]], 'iu-race'))]);
   judged(t3.out, t3.pub === true && t3.ev.join(',') === 'unpublish+,unpublish-,unpublish+,unpublish-,publish' && t3.published === true && !t3.owed, 'I3 a Publish while a retry is OUT: it waits for the removal, then writes its file — published, nothing owed', t3);
   judged(red3.out, red3.ev.indexOf('publish') < red3.ev.lastIndexOf('unpublish-'), 'I3 RED CONTROL (the retry out not waited for, in a copy): the publish writes its file while the removal is still out — the removal lands after it', red3);
   // I4 (r5421): a press refused, then two paced retries refused the SAME way: ONE write of the file (the press's) — none on the pace
@@ -437,9 +487,52 @@ console.log('I the instance address: a refused removal is owed and retried at a 
     } finally { FC.renameSynced = real; }
   };
   const t4 = await quiet(require(path.join(REPO, IU_REL)));
-  const red4 = await quiet(copyOf(IU_REL, [["        if (state.unpublishOwed && !state.desired && (code !== state.unpublishOwed.code || words !== state.error)) {", "        if (state.unpublishOwed && !state.desired) { /* RED: every refused retry written */"]], 'iu-pace-writes'));
+  const red4 = await quiet(copyOf(IU_REL, [['    if (code !== state.unpublishOwed.code || words !== state.error) { state.unpublishOwed = { code, since: state.unpublishOwed.since }; state.error = words; save(); emit(); }', '    { state.unpublishOwed = { code, since: state.unpublishOwed.since }; state.error = words; save(); emit(); }   /* RED: every refused answer written */']], 'iu-pace-writes'));
   judged(t4.asks >= 3, t4.writes === 1 && t4.owed, 'I4 a refused press, then two paced retries refused the same way: the file written ONCE (the press) — never a synced write on the pace', t4);
   judged(red4.asks >= 3, red4.writes >= 3, 'I4 RED CONTROL (every refused retry written, in a copy): the file rewritten on the pace', red4);
+  // I5 (r5486): a person's Unpublish while a retry is OUT and never answers (a hung home folder): it waits at most its bound, then asks the relay itself
+  const hung = async (IU) => {
+    const d = dirOf('iurl'), f = path.join(d, 'instance-url.json');
+    fs.writeFileSync(f, JSON.stringify({ desired: true, auto: false, sub: 'made-sub', url: 'https://made-sub.relay.example.test/', proto: 'http', at: 1, error: null }));
+    let n = 0; const plugins = { relayStatus: () => ({ configured: true }), frpUnpublish: async () => { n++; if (n === 1) throw Object.assign(new Error('a made-up refusal'), { code: 'relay_held_elsewhere' }); if (n === 2) return new Promise(() => { }); return { ok: true, confirmed: true }; } };
+    const iu = IU.create({ dataDir: d, plugins, port: 1, serverSetting: () => null, log: () => { }, owedPaceMs: 5, owedWaitMs: 60 });
+    await iu.unpublish();
+    for (let i = 0; i < 100 && n < 2; i++) await tick(5);   // the pace's retry is OUT and hangs
+    const out = n === 2;
+    const press = await Promise.race([iu.unpublish().then((x) => 'answered:' + ((x && x.code) || 'ok'), () => 'answered:threw'), tick(400).then(() => 'still waiting')]);   // the bound is 60 ms: 400 ms is past it many times over
+    const r = { out, press, asks: n, published: iu.status().published }; try { iu.stop(); iu._hold && iu._hold.stop && iu._hold.stop(); } catch { } return r;
+  };
+  const [t5, red5] = await Promise.all([hung(require(path.join(REPO, IU_REL))), hung(copyOf(IU_REL, [["    if (owedOut && (await within(owedOut)).late) return { status: status(), error: stillOutWords(), code: 'relay_removal_out' };", "    if (owedOut) await owedOut;   /* RED: the wait unbounded */"]], 'iu-wait-unbounded'))]);
+  judged(t5.out, t5.press === 'answered:relay_removal_out' && t5.asks === 2 && t5.published === true, 'I5 a person\'s Unpublish while a retry hangs at the relay: answered BY NAME once its bound passes — never held without end, never a second ask beside the one out (the address still said up)', t5);
+  judged(red5.out, red5.press === 'still waiting', 'I5 RED CONTROL (the wait unbounded, in a copy): the press is held as long as the hung retry', red5);
+  // I6 (r5486 own read): the press's OWN ask slow past its bound: answered at its bound (still up, relay_unanswered), the late answer APPLIED when it comes
+  const slow = async (IU) => {
+    const d = dirOf('iurl'), f = path.join(d, 'instance-url.json');
+    fs.writeFileSync(f, JSON.stringify({ desired: true, auto: false, sub: 'made-sub', url: 'https://made-sub.relay.example.test/', proto: 'http', at: 1, error: null }));
+    let asked = 0, answered = false; const plugins = { relayStatus: () => ({ configured: true }), frpUnpublish: async () => { asked++; await tick(250); answered = true; return { ok: true, confirmed: true }; } };
+    const iu = IU.create({ dataDir: d, plugins, port: 1, serverSetting: () => null, log: () => { }, owedPaceMs: 99999, owedWaitMs: 50 });
+    const r = await iu.unpublish(); const answeredAtPress = answered, atPress = iu.status().published;   // the FACT, never a wall clock: had the relay answered when the press returned?
+    for (let i = 0; i < 100 && iu.status().published; i++) await tick(10);
+    const out = { asked, answeredAtPress, code: r && r.code, atPress, after: iu.status().published, owed: !!JSON.parse(fs.readFileSync(f, 'utf8')).unpublishOwed }; try { iu.stop(); iu._hold && iu._hold.stop && iu._hold.stop(); } catch { } return out;
+  };
+  const [t6, red6] = await Promise.all([slow(require(path.join(REPO, IU_REL))), slow(copyOf(IU_REL, [['    const a = await within(askRelay());', '    const a = await askRelay();   /* RED: the press\'s own ask unbounded */']], 'iu-press-unbounded'))]);
+  judged(t6.asked === 1, t6.code === 'relay_unanswered' && t6.answeredAtPress === false && t6.atPress === true && t6.after === false && !t6.owed, 'I6 a press whose OWN ask has not answered in its bound: answered then (still up, relay_unanswered) — and the late confirmation is applied when it comes', t6);
+  judged(red6.asked === 1, red6.answeredAtPress === true, 'I6 RED CONTROL (the press\'s own ask unbounded, in a copy): the press held as long as the relay', red6);
+  // I3b (r5486 own read): a Publish while a removal hangs at the relay: refused BY NAME at its bound — never a new file written under a removal still out
+  const pubOver = async (IU) => {
+    const d = dirOf('iurl'), f = path.join(d, 'instance-url.json');
+    fs.writeFileSync(f, JSON.stringify({ desired: true, auto: false, sub: 'made-sub', url: 'https://made-sub.relay.example.test/', proto: 'http', at: 1, error: null }));
+    let n = 0, pubs = 0; const plugins = { relayStatus: () => ({ configured: true }), frpPublish: async () => { pubs++; return { url: 'https://made-sub.relay.example.test/', proto: 'http' }; },
+      frpUnpublish: async () => { n++; if (n === 1) throw Object.assign(new Error('a made-up refusal'), { code: 'relay_held_elsewhere' }); return new Promise(() => { }); } };
+    const iu = IU.create({ dataDir: d, plugins, port: 1, serverSetting: () => null, log: () => { }, owedPaceMs: 5, owedWaitMs: 60 });
+    await iu.unpublish(); for (let i = 0; i < 100 && n < 2; i++) await tick(5);
+    const out = n === 2;
+    const r = await Promise.race([iu.publish({}).then(() => 'published', (e) => 'refused:' + (e && e.code)), tick(1500).then(() => 'still waiting')]);
+    const o = { out, r, pubs }; try { iu.stop(); iu._hold && iu._hold.stop && iu._hold.stop(); } catch { } return o;
+  };
+  const [t3b, red3b] = await Promise.all([pubOver(require(path.join(REPO, IU_REL))), pubOver(copyOf(IU_REL, [["    if (owedOut && (await within(owedOut)).late) throw Object.assign(new Error(stillOutWords().replace('try again then', 'publish again then')), { code: 'relay_removal_out' });", "    /* RED: a removal out not waited for */"]], 'iu-publish-under'))]);
+  judged(t3b.out, t3b.r === 'refused:relay_removal_out' && t3b.pubs === 0, 'I3b a Publish while a removal hangs at the relay: refused BY NAME at its bound — no file written under a removal still out', t3b);
+  judged(red3b.out, red3b.pubs === 1, 'I3b RED CONTROL (the removal out not waited for, in a copy): the new file written while the removal is still out — it can land after it', red3b);
 }
 
 console.log('J2 the jobs engine never takes a person\'s forward by the job\'s own row id (r5334)');
@@ -486,6 +579,14 @@ console.log('J an agent\'s service: its card says its address is still up');
   const t = (s) => s;
   const note = JL.publishBlockedNote({ publish: true, publishedUrl: null, publishStillUp: true }, t), none = JL.publishBlockedNote({ publish: true, publishedUrl: null, publishStillUp: false }, t);
   ok(up1 === true && up2 === false && /still up/.test(note) && !/remove (it|the file)/i.test(note) && none === '', 'J the job card says its public address is still up (kept in Ports) — never tells an agent to remove a file', { up1, up2, note, none });
+}
+
+console.log('R the Ports row of a revived row says whose its shown address is (r5486)');
+{
+  const K = "That address is its earlier owner's and is still being taken down.";
+  const SR = srcOf('src/lib/sidebar-rail.js'), ZH = srcOf('src/lib/i18n-zh.js'), JA = srcOf('src/lib/i18n-ja.js');
+  ok(SR.includes("tr('That address is its earlier owner\\'s and is still being taken down.')") && SR.includes('const earlier = !!o.ownerSet && (o.ownerJob || null) !== (f.ownerJob || null);') && ZH.includes(JSON.stringify(K) + ':') && JA.includes(JSON.stringify(K) + ':'),
+    'R the owed row of a revived row (its mark names an owner other than the row\'s) says the shown address is its earlier owner\'s, still being taken down — en, zh, ja through the translator');
 }
 
 console.log('L nothing synchronous on the loop in the relay\'s removal, listing and hub-id read');

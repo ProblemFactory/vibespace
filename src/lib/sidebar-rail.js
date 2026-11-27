@@ -1346,7 +1346,9 @@ export function installSidebarRail(Sidebar) {
         : c === 'relay_orphan' ? tr('no forward of this instance names it')
         : c === 'relay_unpublish_pending' ? tr('its removal is being asked of the relay')
         : String(o.reason || '');
-      return tr('Its public address is still up: {reason}', { reason: why });
+      // r5486: a revived row still showing the old address says whose it is (the earlier owner's, still being taken down)
+      const earlier = !!o.ownerSet && (o.ownerJob || null) !== (f.ownerJob || null);
+      return tr('Its public address is still up: {reason}', { reason: why }) + (earlier ? ' ' + tr('That address is its earlier owner\'s and is still being taken down.') : '');
     },
     /** B-73c4: «Try again» on a row whose public address is still up — a person's press (the route refuses an agent's) */
     _owedRetryBtn(f, api, render, btn) {

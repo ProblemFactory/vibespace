@@ -616,7 +616,7 @@ class PortForwardManager {
       delete rec.forwardGone; delete rec.machineGone; if (owner) rec.ownerJob = owner; else delete rec.ownerJob; rec.label = label;
       // a NEW owner: the old one's name preferences (its subdomain, port, protocol choice) never pass to it; the old address — owed — stays
       // its old owner's (its card still says it is up)
-      if ((rec.ownerJob || null) !== was) { rec.publicSub = null; rec.publicPort = null; delete rec.protoOverride; if (rec.unpublishOwed) { rec.unpublishOwed.ownerJob = was; rec.unpublishOwed.ownerSet = true; } }   // r5421: the old owner named even when it was a person (none)
+      if ((rec.ownerJob || null) !== was) { rec.publicSub = null; rec.publicPort = null; delete rec.protoOverride; if (rec.unpublishOwed && !rec.unpublishOwed.ownerSet) { rec.unpublishOwed.ownerJob = was; rec.unpublishOwed.ownerSet = true; } }   // r5421: the old owner named even when it was a person (none); r5486: named ONCE — a second change of owner never moves it (the address being taken down is still the first one's)
       this._persist({ now });
     }
     if (!rec) {
@@ -983,7 +983,7 @@ class PortForwardManager {
       const call = this.plugins.frpUnpublish(rec.publicName || rec.id);
       // still OUT at the relay until it answers (even past the bound); a LATE confirmation settles the row at once (never 5 more minutes)
       this._unpubOut = (this._unpubOut || 0) + 1;
-      Promise.resolve(call).then(() => 'ok', () => 'no').then((how) => { this._unpubOut--; if (how === 'ok' && owe && rec.unpublishOwed && rec.unpublishOwed.code === 'relay_unanswered') { delete rec.unpublishOwed; this._settleConfirmed(rec); this._persist(); this._emit(); } });
+      Promise.resolve(call).then(() => 'ok', () => 'no').then((how) => { this._unpubOut--; if (how === 'ok' && owe && rec.unpublishOwed && rec.unpublishOwed.code === 'relay_unanswered') { delete rec.unpublishOwed; this._settleConfirmed(rec); this._persist(); this._emit(); this._askOwedReconcile(); } });
       if (bounded) await this._relayBounded(call, rec, 'unpublish'); else await call;   // unbounded: a person's / the jobs engine's road (its caller judges lateness, as at the release)
       // r5550: these lines never name the row's id — a LAN forward's id holds the target host a person typed, an orphan's its file's name
       if (rec.unpublishOwed) { delete rec.unpublishOwed; this.log('[ports] a forward\'s public address is down now (its relay removal confirmed)'); }
@@ -1000,6 +1000,16 @@ class PortForwardManager {
   _settleConfirmed(rec) {
     if (rec.forwardGone || rec.orphan) { this._state.forwards = this._state.forwards.filter((r) => r !== rec); this._healRetryAt.delete(rec.id); return; }
     rec.publicUrl = null; rec.publicName = null; delete rec.protoPending; this._published.delete(rec.id);
+    // r5486 (S6): a service waiting on this row (its publish refused while the old address was up) is published NOW — a reconcile of the
+    // jobs engine is OWED; it is asked ONCE, after the caller's own save and broadcast, never in the middle of the owed pass and never
+    // on a timer (two settles of one confirm — its late answer and the pass — ask once)
+    if (rec.ownerJob) this._reconcileOwed = true;
+  }
+  /** r5486: the ONE ask of a reconcile owed by confirmed removals (see _settleConfirmed) — none while the owed pass runs (its end asks) */
+  _askOwedReconcile() {
+    if (!this._reconcileOwed || this._owedBusy) return;
+    this._reconcileOwed = false;
+    try { const jm = this.getJobs && this.getJobs(); if (jm && typeof jm.forwardsReconcile === 'function') Promise.resolve(jm.forwardsReconcile('an earlier public address confirmed down')).catch((e) => this.log('[ports] the jobs reconcile after a confirmed removal: ' + ((e && e.message) || e))); } catch (e) { this.log('[ports] the jobs reconcile after a confirmed removal: ' + ((e && e.message) || e)); }
   }
   /** B-73c4: «Try again» on a row whose public address is still up — a PERSON's press only (the route's door: src/server/ports-relay-routes.js) */
   async unpublishAgain(id) {
@@ -1009,6 +1019,7 @@ class PortForwardManager {
     const ok = await this._relayUnpublish(rec, { bounded: false });
     if (ok) this._settleConfirmed(rec);
     this._persist({ now: true }); this._emit();   // a person's act: on disk when the route replies
+    this._askOwedReconcile();
     return { ok: true, confirmed: ok, ...(ok ? {} : { owed: rec.unpublishOwed }) };
   }
   /** B-73c4: the relay files of this home with NO owner mark and no row (written before this unit) — shown once in Ports as words, never
@@ -1042,6 +1053,7 @@ class PortForwardManager {
     finally { this._owedBusy = false; }
     if (changed) { this._persist(); this._emit(); }
     if (this._owedAgain) { this._owedAgain = false; await this._owedPass(why + ', once more'); }
+    this._askOwedReconcile();   // r5486: after the pass's own save and broadcast — one ask for every confirm the pass made
   }
   /** r5334: an orphan's relay file read once more just before its removal (the judgement may be minutes old, or from before a restart):
    *  still THIS hub's mark, or the file gone already (its removal's reload confirms the address down) ⇒ 'mine'; another hub's mark or none
