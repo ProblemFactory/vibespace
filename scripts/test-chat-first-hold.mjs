@@ -710,6 +710,60 @@ const OWED_UNTIL = (kind) => `(() => { const R = window.__ral; if (!R) return fa
     return false;`}
   }
   return R.step < 0 || R.step === 4; })()`;
+// B-bc22's round (主开发 r5413): TWO MORE LEGS. kind 'down' — an eager picture held (it owes), a 300 px scroll up, then 150 ms later the
+// person scrolls DOWN 100 px (a new burst: the hold's reason is gone), the picture released 400 ms after the first scroll: its growth is
+// answered for where the person IS — the card at the top after the down scroll stands, painted; its control hands the answer the line
+// from before the first scroll (kept as a distance from the card read then): that card moves. kind 'paysame' — an eager picture whose
+// box is reserved by its size (width 100, height 258), so its load changes no height: the row is paid two frames after its fact with no
+// size change; then, the rows the scroll brought in owing nothing by the leg's own read, the card at the top grows 258 px: answered by
+// the clock, the card at the top stands; its control holds the owed set (owing → true, its reads counted): the card at the top moves
+const OWED2_UNTIL = (kind) => `(() => { const R = window.__ral; if (!R) return false; R.armed = 1; if (!R.landed) return false;
+  const v = window.__v, list = v._messageList, now = performance.now(), top = ${TOP_CARD}, pos = (e) => e.getBoundingClientRect().top - list.getBoundingClientRect().top;
+  const isRow = (el) => { const cl = el && el.classList; return !!cl && !el._isSeekSentinel && cl.contains('chat-msg') && !cl.contains('chat-run-header') && !cl.contains('chat-run-footer') && el.offsetParent !== null && el.offsetHeight >= 8; };
+  const above = (el) => { for (let e = el ? el.previousElementSibling : null; e; e = e.previousElementSibling) if (isRow(e)) return e; return null; };
+  const painted = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));
+  const red = (why) => { R.step = -1; R.why = why; return true; }, skip = (why) => { R.step = -1; R.skip = 1; R.why = why; return true; };
+  const owing = (el) => { if (el.children.length && ![...el.children].some((k) => k.checkVisibility({ contentVisibilityAuto: true }))) return true; for (const im of el.getElementsByTagName('img')) if (!im.complete && !im.closest('details:not([open])')) return true; return false; };
+  if (R.step === 0 && (!R.natural || now - R.landedAt < 600) && now - R.landedAt < 1500) return false;
+  if (R.step === 0) { const held = top(list, list.getBoundingClientRect().top), row = above(held);
+    if (!held || !row) return skip(!held ? 'no card at the top' : 'no row above the card at the top');
+    if (!v._gapSettle) return red('the watch had ended before the scene');
+    R.held = held; R.row = row; R.ans = []; R.plantReads = 0; R.readsAtFact = null;
+    const tr = v._trace; v._trace = function (tag, d) { if (tag === 'gapUp:settle' && R.step >= 2 && R.step < 4) R.ans.push(Math.round((d && d.px) || 0)); return tr.apply(this, arguments); };
+    R.untrace = () => { v._trace = tr; };
+    const img = document.createElement('img'); img.className = 'chat-img'; img.alt = ''; img.loading = 'eager';${kind === 'paysame' ? " img.width = 100; img.height = 258;   // its box reserved: the load changes no height" : ''}
+    img.addEventListener('load', () => { R.factAt = Math.round(performance.now() - R.t0); }); img.addEventListener('error', () => { R.errAt = Math.round(performance.now() - R.t0); });
+    img.src = '/vs-bc22-held.svg?' + Math.random().toString(36).slice(2); row.appendChild(img); R.img = img;
+    R.step = 1; R.at = now; return false; }
+  if (R.step === 1) {   // the plant in force before the scroll: the request paused (its witness)
+    if (!(R.paused && R.img && !R.img.complete)) { if (now - R.at < 2000) return false; return skip('the browser had not asked for the eager picture by the 2 s deadline before the scroll (paused ' + (R.paused || 0) + ' at the deadline; complete ' + (R.img ? R.img.complete : '?') + ')'); }
+    if (!v._gapSettle) return red('the watch had ended before the scroll (its own end: ' + (R.endWhy || 'before the scene') + ')');
+    if (!R.held.isConnected || !R.row.isConnected) return skip('the card at the top or the row was detached or drawn again before the scroll');
+    R.lineOff = list.scrollTop - R.held.offsetTop; R.pausedAtScroll = R.paused || 0;
+    R.t0 = performance.now(); list.scrollTop = list.scrollTop - 300; R.step = 2;
+    painted(() => { R.hP = pos(R.held); R.rowP = R.row.offsetHeight; R.inView = pos(R.row) < pos(R.held) && pos(R.row) + R.row.offsetHeight > -1; R.ck = top(list, list.getBoundingClientRect().top);
+      ${kind === 'down' ? `setTimeout(() => { list.scrollTop = list.scrollTop + 100; R.downAt = Math.round(performance.now() - R.t0);   // THE PERSON's MOVE DOWN: a new burst
+        painted(() => { R.ckD = top(list, list.getBoundingClientRect().top); R.cD = R.ckD ? pos(R.ckD) : null; R.owingAfterDown = !!v._gapSettle && v._gapSettle.owing();
+          if (R.control && v._gapSettle) { const g = v._gapSettle; g.line = () => { R.plantReads++; return R.held.offsetTop + R.lineOff; }; }   // the control: the line from before the first scroll
+          R.readsAtFact = R.plantReads; }); }, 150);` : ''}
+      setTimeout(() => { R.wantRelease = 1; }, 400); });
+    return false; }
+  if (R.step === 2) {
+    if (R.factAt == null && R.errAt == null) { if (performance.now() - R.t0 < 3000) return false; return skip('the fact never came within 3 s of the scroll (paused ' + (R.paused || 0) + ', released at ' + R.releasedAt + ' ms)'); }
+    ${kind === 'down'
+      ? "R.step = 3; requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { const live = !!R.ckD && R.ckD.isConnected; R.heldLive = live; R.dMoved = live && R.cD != null ? Math.round(pos(R.ckD) - R.cD) : null; R.g = R.row.isConnected ? R.row.offsetHeight - R.rowP : null; R.alive = !!v._gapSettleRO; R.inForce = R.control ? R.plantReads > R.readsAtFact : null; R.untrace(); R.step = 4; }, 0))); return false;"
+      : "if (performance.now() - R.t0 - R.factAt < 300) return false;   // two frames and more after the fact\n" +
+        "    let owe = 0; if (R.ck && R.held.isConnected) for (let el = R.ck; el && el !== R.held; el = el.nextElementSibling) if (el.offsetHeight > 0 && owing(el)) owe++;\n" +
+        "    if (owe) { if (performance.now() - R.t0 - R.factAt < 3000) return false; return skip('the rows the scroll brought in still owe 3 s after the fact (' + owe + ' row(s)): the clock floor did not form'); }\n" +
+        "    if (!R.ck || !R.ck.isConnected) return skip('the card at the top was detached or drawn again before its growth');\n" +
+        "    R.gLoad = R.row.isConnected ? R.row.offsetHeight - R.rowP : null; R.owingBefore = !!v._gapSettle && v._gapSettle.owing();\n" +
+        "    if (R.control && v._gapSettle) { const g = v._gapSettle; g.owing = () => { R.plantReads++; return true; }; }   // the control: the pay never came (owing held true)\n" +
+        "    R.readsAtFact = R.plantReads; R.step = 3;\n" +
+        "    painted(() => { R.c0 = pos(R.ck); const pd = document.createElement('div'); pd.style.height = '258px'; R.ck.appendChild(pd); R.padAt = Math.round(performance.now() - R.t0);\n" +
+        "      requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { R.heldLive = R.ck.isConnected; R.tMoved = R.heldLive ? Math.round(pos(R.ck) - R.c0) : null; R.alive = !!v._gapSettleRO; R.inForce = R.control ? R.plantReads > R.readsAtFact : null; R.untrace(); R.step = 4; }, 0))); });\n" +
+        "    return false;"}
+  }
+  return R.step < 0 || R.step === 4; })()`;
 const withPlant = (blind) => `(${RUNS_PLANTED(false)}, ${blind})`;   // the placed hold's flags (landed, natural) beside the control's own blind
 const BLIND = {
   'late row': `(() => { window.__lateRow = { at: 3, px: 258, n: 0 }; return { placed: 'a row taking its height late in the gap of the third notch past the landing' }; })()`,
@@ -923,6 +977,13 @@ const searchScene = async (tail) => {
   const oL = await owedHold('a lazy picture the scroll brings in is asked for and loads 400 ms after it', 'lazy', false), oLc = await owedHold('a lazy picture the scroll brings in is asked for and loads 400 ms after it, control', 'lazy', true);
   const oS = await owedHold('a row the scroll brought in is laid out for real 400 ms after it', 'skipped', false), oSc = await owedHold('a row the scroll brought in is laid out for real 400 ms after it, control', 'skipped', true);
   const oN = await owedHold('a picture the scroll brought in never loads', 'never', false);
+  const owed2Hold = async (label, kind, control) => {
+    globalThis.__firstNotchUntil = OWED2_UNTIL(kind); globalThis.__firstNotchUntilMs = 8000; const stop = releaseLoop();
+    try { return await firstHold(label, control ? 'window placed, control' : 'window placed', { after: OWED2, cadence: 'shortHold' }); } finally { await stop(); globalThis.__firstNotchUntil = null; globalThis.__firstNotchUntilMs = null; }
+  };
+  const OWED2 = '(() => { const R = window.__ral; return R ? { landed: R.landed, step: R.step, why: R.why || null, skip: !!R.skip, paused: R.paused || 0, inView: R.inView ?? null, factAt: R.factAt ?? null, releasedAt: R.releasedAt ?? null, downAt: R.downAt ?? null, padAt: R.padAt ?? null, g: R.g ?? null, gLoad: R.gLoad ?? null, dMoved: R.dMoved ?? null, tMoved: R.tMoved ?? null, owingAfterDown: R.owingAfterDown ?? null, owingBefore: R.owingBefore ?? null, heldLive: R.heldLive ?? null, answered: R.ans || null, alive: !!R.alive, inForce: R.inForce ?? null, plantReads: R.plantReads ?? null, readsAfterFact: R.readsAtFact != null ? R.plantReads - R.readsAtFact : null } : null; })()';
+  const oD = await owed2Hold('an owed picture, then the person scrolls down, then it loads', 'down', false), oDc = await owed2Hold('an owed picture, then the person scrolls down, then it loads, control', 'down', true);
+  const oY = await owed2Hold('a picture paid with no size change, then the card at the top grows', 'paysame', false), oYc = await owed2Hold('a picture paid with no size change, then the card at the top grows, control', 'paysame', true);
   await cdp('Fetch.disable');
   const owedScene = (h, kind) => !!h.after && h.after.landed === 1 && h.after.step === 4 && h.after.inView === true && (kind === 'lazy' ? h.after.pausedAtScroll === 0 && h.after.paused >= 1 : true) && (kind === 'never' ? h.after.lineHeld != null : h.after.heldLive === true && h.after.g >= 200 && (h.after.factAt ?? h.after.errAt) >= WINDOW_MS + 200);
   const owedJudge = (h, kind, name, text, ok, legName) => {
@@ -937,6 +998,17 @@ const searchScene = async (tail) => {
   owedJudge(oS, 'skipped', 'A ROW THE SCROLL BROUGHT IN IS LAID OUT FOR REAL PAST THE CLOCK (B-bc22, r5206)', `held skipped, laid out at ${oS.after?.factAt} ms, ${oS.after?.g} px taller: what the person sees of the card read before the scroll stands (${oS.after?.hMoved} px as painted; the watch answered ${JSON.stringify(oS.after?.answered)}; ± ${NOTCH_TOL_PX})`, (a) => Math.abs(a.hMoved) <= NOTCH_TOL_PX, 'THE ROW LAID OUT LATE');
   owedJudge(oSc, 'skipped', 'CONTROL', `the owed set blinded (the clock alone) ⇒ the card read before the scroll drops by the row (${oSc.after?.hMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red (the plant read ${oSc.after?.readsAfterFact ?? '?'} time(s) from the fact on)`, (a) => a.inForce === true && a.hMoved > NOTCH_TOL_PX, 'THE ROW LAID OUT LATE');
   owedJudge(oN, 'never', 'A PICTURE THAT NEVER LOADS HOLDS THE LINE NO LONGER THAN THE WATCH (B-bc22, r5206 law 1)', `the product's line still the one before the scroll 1 s after it (${oN.after?.lineHeld}); the watch ended by its own ceiling (${oN.after?.endWhy}) and that end moved what the person sees by ${oN.after?.endMoved} px as painted (± ${NOTCH_TOL_PX}; the card read ${oN.after?.hMid} px before the end)`, (a) => a.lineHeld === true && a.endWhy === 'ceiling' && !a.alive && Math.abs(a.endMoved) <= NOTCH_TOL_PX && Math.abs(a.hMid) <= NOTCH_TOL_PX, 'THE PICTURE THAT NEVER LOADS');
+  const owed2Scene = (h, kind) => !!h.after && h.after.landed === 1 && h.after.step === 4 && h.after.inView === true && h.after.heldLive === true && (h.after.factAt ?? -1) >= WINDOW_MS + 200
+    && (kind === 'down' ? h.after.downAt != null && h.after.downAt < h.after.factAt && h.after.g >= 200 : h.after.gLoad != null && Math.abs(h.after.gLoad) <= 1 && h.after.padAt - h.after.factAt >= 200);
+  const owed2Judge = (h, kind, name, text, ok, legName) => {
+    if (h.after?.skip) { console.log(`  ⊘ SKIP §4h ${name}: the scene did not form (${h.after.why}) — the leg ${legName} is PARTIAL in this run`); return; }
+    if (h.after?.inForce === false && owed2Scene(h, kind)) { console.log(`  ⊘ SKIP §4h ${name}: the plant was never read by the product from the fact on (${h.after.plantReads} read(s), ${h.after.readsAfterFact} after it) — the leg ${legName} is PARTIAL in this run`); return; }
+    check(`§4h ${name}: ${owed2Scene(h, kind) ? '' : 'PRECONDITION NOT MET (' + (h.after?.why || 'the scene: the row in view, its fact past the clock, the person moved first / the load changed no height') + ') — '}${text}`, owed2Scene(h, kind) && ok(h.after), JSON.stringify(h.after));
+  };
+  owed2Judge(oD, 'down', 'AN OWED PICTURE, THEN THE PERSON SCROLLS DOWN, THEN IT LOADS (B-bc22 law 2, r5413): a move of the person ends the hold', `the person scrolled down at ${oD.after?.downAt} ms (the product owing after it: ${oD.after?.owingAfterDown}), the picture loaded at ${oD.after?.factAt} ms, the row ${oD.after?.g} px taller: the card at the top where the person IS stands (${oD.after?.dMoved} px as painted; the watch answered ${JSON.stringify(oD.after?.answered)}; ± ${NOTCH_TOL_PX})`, (a) => Math.abs(a.dMoved) <= NOTCH_TOL_PX, 'THE MOVE DOWN');
+  owed2Judge(oDc, 'down', 'CONTROL', `the answer handed the line from before the first scroll ⇒ the card at the top where the person is moves by the picture (${oDc.after?.dMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red (the plant read ${oDc.after?.readsAfterFact ?? '?'} time(s) from the fact on)`, (a) => a.inForce === true && Math.abs(a.dMoved) > NOTCH_TOL_PX, 'THE MOVE DOWN');
+  owed2Judge(oY, 'paysame', 'A PICTURE PAID WITH NO SIZE CHANGE (B-bc22, r5413: the pay road two frames after the fact)', `its box reserved, loaded at ${oY.after?.factAt} ms with ${oY.after?.gLoad} px of change; the product owing before the growth: ${oY.after?.owingBefore}; then the card at the top grew 258 px at ${oY.after?.padAt} ms: answered by the clock, it stands (${oY.after?.tMoved} px as painted; the watch answered ${JSON.stringify(oY.after?.answered)}; ± ${NOTCH_TOL_PX})`, (a) => a.owingBefore === false && Math.abs(a.tMoved) <= NOTCH_TOL_PX, 'THE PAY ROAD');
+  owed2Judge(oYc, 'paysame', 'CONTROL', `the owed set held (owing → true: the pay never came) ⇒ the card at the top moves by its growth (${oYc.after?.tMoved} px; more than ${NOTCH_TOL_PX}) — the leg can go red (the plant read ${oYc.after?.readsAfterFact ?? '?'} time(s) from the fact on)`, (a) => a.inForce === true && Math.abs(a.tMoved) > NOTCH_TOL_PX, 'THE PAY ROAD');
   const c1 = await heldOn("control (1')", "(1')", LANDED_UNTIL, PAIRF);
   const c1Scene = c1.slabs >= 1 && c1.carries >= 1 && c1.reader.length === 0 && !!c1.after && c1.after.landed === 1;
   check(`§4h CONTROL (1'): ${c1Scene ? '' : 'PRECONDITION NOT MET (the first notch held until the slab landed, carried into it, no reader read: slabs ' + c1.slabs + ', carried landings ' + c1.carries + ', reader traces ' + c1.reader.length + ') — '}with no reader read at the insert the carried notch lands whole and the card misses at the landing by more than ${NOTCH_TOL_PX} px (${c1.law.carried} px)`, c1Scene && Math.abs(c1.law.carried ?? 0) > NOTCH_TOL_PX, JSON.stringify({ law: c1.law, after: c1.after }));

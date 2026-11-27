@@ -256,6 +256,11 @@ export function installChatSeek(ChatView) {
     // and that end writes nothing (the browser's anchoring is back, as when the clock ran out). A browser whose checkVisibility
     // lacks contentVisibilityAuto reads a skipped row as laid out (the clock, as before); a picture's state is read in every browser.
     const owed = new Set();
+    // a row whose fact came is PAYING until its next measure is answered (or two frames pass with no size change); the rows of the
+    // answer under way are ANSWERING (the RO records a row's new height before it answers, so owes() alone would let go of the very
+    // growth the hold is for); the fact's two-frame callbacks are this watch's own, cancelled at its end (B-bc22's round, r5413)
+    const paying = new Set(), factFrames = new Set();
+    let answering = null;
     const owes = (el) => {
       if (!el.isConnected) return false;
       const kids = el.children;
@@ -280,8 +285,8 @@ export function installChatSeek(ChatView) {
     const record = () => {
       const was = fr.moved, f = asFrame(); fr.at = f.at; fr.before = f.before; fr.moved = f.moved; if (rebaseQueued) stW = f.st;
       if (f.moved !== was) {   // a move recorded: its burst's rows that owe a first real measure (B-bc22); a new burst replaces the set
-        if (was === -Infinity || f.moved - was > GAP_SETTLE_BURST_MS) owed.clear();
-        if (f.before > f.st) noteOwed(f.st, f.before);
+        if (was === -Infinity || f.moved - was > GAP_SETTLE_BURST_MS) { owed.clear(); paying.clear(); }
+        if (f.before > f.st) noteOwed(f.st, Math.min(f.before, f.st + list.clientHeight));   // what the scroll brought INTO VIEW: never a row below the view (a held PageUp, the Home key, a drag would else put rows that stay skipped into the set, and ask each of them every frame)
       }
       return f;
     };
@@ -298,7 +303,7 @@ export function installChatSeek(ChatView) {
       if (!changed.length || this._disposed) return;
       changed.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
       record();   // a notch not yet recorded is recorded first — the answer's own write below must not swallow it (r4397 (2))
-      const st = list.scrollTop, line = H.line();
+      answering = changed; const st = list.scrollTop, line = H.line(); answering = null;
       let before = 0, d = 0;
       for (const c of changed) {
         const oldTop = c.el.offsetTop - before;
@@ -306,11 +311,12 @@ export function installChatSeek(ChatView) {
         before += c.h - c.was;
       }
       if (d) { this._traceExpect?.('gapUp:settle'); list.scrollTop = st + d; fr.at = list.scrollTop; fr.before += d; if (rebaseQueued) stW = list.scrollTop; this._trace?.('gapUp:settle', { px: Math.round(d), rows: changed.length, line: Math.round(line - st), owed: owed.size }); }
-      for (const c of changed) if (owed.has(c.el) && !owes(c.el)) owed.delete(c.el);   // its fact came and this measure answered it (B-bc22)
+      for (const c of changed) if (owed.has(c.el) && !owes(c.el)) { owed.delete(c.el); paying.delete(c.el); }   // its fact came and this measure answered it (B-bc22)
     };
     // a row's fact (a picture's load or error; the browser laying a skipped row out): it is paid once its next measure was answered —
     // by answer() above, or two frames later if its size did not change (B-bc22)
-    const onFact = (e) => { let r = e.target; while (r && r.parentNode !== list) r = r.parentNode; if (!r || !owed.has(r)) return; requestAnimationFrame(() => requestAnimationFrame(() => { if (owed.has(r) && !owes(r)) owed.delete(r); })); };
+    const onFact = (e) => { let r = e.target; while (r && r.parentNode !== list) r = r.parentNode; if (!r || !owed.has(r)) return; paying.add(r);
+      const a = requestAnimationFrame(() => { factFrames.delete(a); const b = requestAnimationFrame(() => { factFrames.delete(b); paying.delete(r); if (owed.has(r) && !owes(r)) owed.delete(r); }); factFrames.add(b); }); factFrames.add(a); };
     for (const type of ['load', 'error', 'contentvisibilityautostatechange']) list.addEventListener(type, onFact, true);
     const ro = new ResizeObserver((entries) => {
       const late = this._disposed || performance.now() - t0 > GAP_SETTLE_CEIL_MS, changed = [];
@@ -322,6 +328,7 @@ export function installChatSeek(ChatView) {
         if (was === undefined || h === was) continue;
         changed.push({ el, was, h });
       }
+      if (late) { owed.clear(); paying.clear(); }   // past the ceiling the hold is over: this last batch is answered by the clock (law 1)
       answer(changed);
       if (late) this._stopGapSettle(this._disposed ? 'disposed' : 'ceiling');
     });
@@ -346,8 +353,14 @@ export function installChatSeek(ChatView) {
       },
       wrote: (by) => { if (by === 'gapUp:settle' || rebaseQueued) return; rebaseQueued = true; stW = list.scrollTop; queueMicrotask(rebase); },   // (stamped BEFORE its write)
       swap: (oldEl, newEl) => { const w = last.get(oldEl); if (w !== undefined) last.set(newEl, w); ro.observe(newEl); },
-      nav: () => { fr.before = fr.at = list.scrollTop; fr.moved = -Infinity; fr.seed = null; owed.clear(); },
-      owing: () => { for (const el of owed) if (el.isConnected) return true; return false; },   // a row the latest burst brought in still owes (B-bc22)
+      nav: () => { fr.before = fr.at = list.scrollTop; fr.moved = -Infinity; fr.seed = null; owed.clear(); paying.clear(); },
+      owing: () => {   // a row of the latest burst still owes its first real measure: its fact not come, being paid, in the answer under way, or its new height not yet delivered
+        for (const el of owed) {
+          if (!el.isConnected) { owed.delete(el); paying.delete(el); continue; }
+          if (owes(el) || paying.has(el) || (answering && answering.some((c) => c.el === el)) || el.offsetHeight !== last.get(el)) return true;
+          owed.delete(el);   // its fact came with no event and no size change: paid
+        }
+        return false; },   // a row the latest burst brought in still owes (B-bc22)
       // THE CARD BEING READ, for a runs rebuild while the slab settles (B-3e8b's remainder, 主开发 r3822 — measured: 267 ms after
       // a landing the rebuild put ITS anchor, the topmost element, back, and the card being read moved 27 px): the slab's own
       // reader card until the person scrolls again; then, as this watch's law reads it, the card read before the latest notch up
@@ -363,7 +376,7 @@ export function installChatSeek(ChatView) {
     };
     const mo = typeof MutationObserver === 'function' ? new MutationObserver((recs) => { for (const r of recs) { for (const n of r.addedNodes) if (n.nodeType === 1) ro.observe(n); for (const n of r.removedNodes) if (n.nodeType === 1 && !n.isConnected) ro.unobserve(n); } }) : null;
     this._gapSettleRO = ro; this._gapSettleMO = mo;
-    this._gapSettleOff = () => { list.removeEventListener('scroll', onScroll); for (const type of ['load', 'error', 'contentvisibilityautostatechange']) list.removeEventListener(type, onFact, true); owed.clear(); if (fr.raf) cancelAnimationFrame(fr.raf); };
+    this._gapSettleOff = () => { list.removeEventListener('scroll', onScroll); for (const type of ['load', 'error', 'contentvisibilityautostatechange']) list.removeEventListener(type, onFact, true); owed.clear(); paying.clear(); for (const id of factFrames) cancelAnimationFrame(id); factFrames.clear(); if (fr.raf) cancelAnimationFrame(fr.raf); };
     list.style.overflowAnchor = 'none';   // ONE authority while the slab settles (B-59ff's property, for the slab's life only)
     for (const el of list.children) { if (el._isSeekSentinel) continue; last.set(el, el.offsetHeight); ro.observe(el); }
     mo?.observe(list, { childList: true });
