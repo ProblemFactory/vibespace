@@ -1152,6 +1152,8 @@ app.post('/api/accounts/home-subscription/:id/usage', async (req, res) => {
 function pinRoad({ engine, activeSessions, accounts, broadcastActiveSessions = () => { } }) {
   return (sid, memberId, { by, guard = null } = {}) => {
     if (!engine || typeof engine.setConversationPin !== 'function') return { ok: false, code: 'not_ready', why: 'the pool engine is not available yet' };
+    // the round's small (主开发 r5244 / r5363): FAIL CLOSED for a later caller — the road called for anyone but a person with no money guard handed is refused by name, nothing written
+    if (by !== 'user' && typeof guard !== 'function') return { ok: false, code: 'no_money_guard', why: 'the pin road was called with no money guard — a pin for anyone but a person is judged by the money law first; nothing was written' };
     const s = sid && activeSessions ? activeSessions.get(sid) : null;
     if (memberId != null && typeof guard === 'function' && s && !s.host && s._accountId) {
       let members = [];

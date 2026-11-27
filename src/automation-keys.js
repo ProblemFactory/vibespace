@@ -270,6 +270,8 @@ const CODES = Object.freeze({
   // machine · the member is not in its pool · it ended between the reach and the pin · the pin's record could not be written
   // (nothing changed) — and the money law: a member that bills usage credits or paid overage, or whose paying state is unknown
   not_pooled: 400, remote_session: 400, not_member: 400, no_session: 404, pin_not_saved: 503, paid_member: 403,
+  // the round's small (r5244 / r5363): the pin road called for anyone but a person with no money guard handed (a wiring fault: fail closed)
+  no_money_guard: 503,
   // the manager design's piece 6 (browsers.stop, round wztkervx5 (b)): the browser registry could not be read just now — the keeper refuses
   // by name while it is held (as the browser routes answer it: 503); nothing was stopped, call again
   store_unread: 503,

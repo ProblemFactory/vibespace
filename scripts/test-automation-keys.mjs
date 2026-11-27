@@ -2345,22 +2345,77 @@ console.log('㉓ B-2083 unit A — conversations.pin: the person\'s pin road for
     && pinLines.filter((l) => l.ok).length === 2 && pinLines.filter((l) => l.code === 'paid_member').length === 5 && !JSON.stringify(pinLines).includes('worker p') && !JSON.stringify(pinLines).includes('coordinator'),
     'every use is ONE journal line under the key — the conversation and the member by their ids, nothing more (no name): 2 ok, 5 paid_member, each refusal by its code', pinLines.map((l) => [l.ok, l.code, l.args]));
   // ── RED CONTROLS (copies) ──
-  // (a) a body that passes the person's road through (no money law): the paying member is PINNED
+  // (a) a body that passes the person's road through (its guard judges no money): the paying member is PINNED; and the body that
+  // hands NO guard at all is now stopped by the road itself (the round's fail-closed, r5363) — end to end through the engine
   const OSRC = fs.readFileSync(path.join(ROOT, 'src/server/conversation-ops.js'), 'utf8');
-  const OPSX = M.load('src/server/conversation-ops.js', editAnchor(OSRC, "const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}`, guard });", "const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}` });", 'src/server/conversation-ops.js'), 'pin-no-money');
-  OPSX.provide({ pin: road(), spendGuard: { overageFor } });
-  const wx = await mkWorld('pin-x', { verbs: OPSX.automationVerbs({ activeSessions: sessions, groupsOf: () => [] }) });
-  const mx = wx.engine.mint({ name: 'pinner', scopes: [PIN], limits: OPEN_LIMITS, by: 'user' });
-  wx.engine.grant(mx.key.id, ['session:coord-p'], { by: 'user' });
-  wx.engine.setReach(wx.engine.list().keys[0].grants[0].id, 'instance', { by: 'user' });
-  const xr = await wx.engine.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-credits' } });
-  ok(xr.ok === true && writes.at(-1)[1] === 'sub-credits', 'RED CONTROL (the person\'s road passed through, no money law — in a copy): a key pins the conversation onto a member billing usage credits — the MONEY LAW legs above tell the two apart', xr);
+  const PIN_CALL = "const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}`, guard });";
+  const bodyCopy = async (to, tag) => {
+    const OPSX = M.load('src/server/conversation-ops.js', editAnchor(OSRC, PIN_CALL, to, 'src/server/conversation-ops.js'), tag);
+    OPSX.provide({ pin: road(), spendGuard: { overageFor } });
+    const wx = await mkWorld(tag, { verbs: OPSX.automationVerbs({ activeSessions: sessions, groupsOf: () => [] }) });
+    const mx = wx.engine.mint({ name: 'pinner', scopes: [PIN], limits: OPEN_LIMITS, by: 'user' });
+    wx.engine.grant(mx.key.id, ['session:coord-p'], { by: 'user' });
+    wx.engine.setReach(wx.engine.list().keys[0].grants[0].id, 'instance', { by: 'user' });
+    return wx;
+  };
+  const wPass = await bodyCopy("const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}`, guard: () => ({ ok: true }) });", 'pin-no-money');
+  const nWa = writes.length;
+  const xr = await wPass.engine.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-credits' } });
+  ok(xr.ok === true && writes.length === nWa + 1 && writes.at(-1)[1] === 'sub-credits', 'RED CONTROL (the person\'s road passed through, a guard that judges no money — in a copy): a key pins the conversation onto a member billing usage credits — the MONEY LAW legs above tell the two apart', xr);
+  const wNone = await bodyCopy("const r = O().pinConversation(t.id, member, { by: `automation:${ctx.keyId}` });", 'pin-no-guard');
+  const nWb = writes.length;
+  const xn = await wNone.engine.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-credits' } });
+  ok(xn.ok === false && xn.code === 'no_money_guard' && writes.length === nWb, 'FAIL CLOSED end to end: a verb body that hands NO money guard (in a copy) is refused by the road itself — 503 no_money_guard, nothing written', xn);
+  sessions.get('sess-p-2')._poolPin = null;
   // (b) the hand-over that asks the money of ANY id: a stranger is answered paid_member instead of the writer's not_member
   const RSRC2 = fs.readFileSync(path.join(ROOT, 'src/server/account-usage-routes.js'), 'utf8');
   const AURX = M.load('src/server/account-usage-routes.js', editAnchor(RSRC2, 'if (members.includes(memberId)) { const g = guard(memberId);', 'if (true) { const g = guard(memberId);', 'src/server/account-usage-routes.js'), 'pin-guard-any');
   const rx = AURX.pinRoad({ engine: { setConversationPin }, activeSessions: sessions, accounts })('sess-p-2', 'sub-stranger', { by: 'automation:x', guard: (id) => A.pinMoneyVerdict(overageFor(id), id) });
   ok(rx.code === 'paid_member', 'RED CONTROL (the money asked of any id — in a copy): a stranger id is answered paid_member — the «writer\'s own refusals by name» leg above tells the two apart', rx);
   sessions.get('sess-p-2')._poolPin = null;
+  // ── THE ROUND's TWO SMALLS (主开发 r5244 / r5363) ──
+  // (1) FAIL CLOSED for a later caller: the handed road, called for anyone but a person with no money guard, refuses by name
+  const nW = writes.length;
+  const ng = road()('sess-p-2', 'sub-credits', { by: 'automation:ak-0000000000ff' }), ngAuto = road()('sess-p-2', null, { by: 'automation:ak-0000000000ff' });
+  ok(ng.ok === false && ng.code === 'no_money_guard' && /no money guard/.test(ng.why) && ngAuto.code === 'no_money_guard' && writes.length === nW && A.CODES.no_money_guard === 503,
+    'FAIL CLOSED: the pin road called for anyone but a person with NO money guard ⇒ 503 no_money_guard, a member or automatic alike — nothing written', { ng, ngAuto });
+  const pu = road()('sess-p-2', 'sub-free', { by: 'user' });
+  ok(pu.ok === true && writes.length === nW + 1 && writes.at(-1)[2] === 'user', 'the line names who it stops: a person\'s call (by «user») is not refused by it', pu);
+  const RSRC3 = fs.readFileSync(path.join(ROOT, 'src/server/account-usage-routes.js'), 'utf8');
+  const AURN = M.load('src/server/account-usage-routes.js', editAnchor(RSRC3, "    if (by !== 'user' && typeof guard !== 'function') return { ok: false, code: 'no_money_guard',", "    if (false) return { ok: false, code: 'no_money_guard',", 'src/server/account-usage-routes.js'), 'pin-unguarded');
+  const nW2 = writes.length;
+  const nx = AURN.pinRoad({ engine: { setConversationPin }, activeSessions: sessions, accounts })('sess-p-2', 'sub-credits', { by: 'automation:ak-0000000000ff' });
+  ok(nx.ok === true && writes.length === nW2 + 1 && writes.at(-1)[1] === 'sub-credits', 'RED CONTROL (the road without its fail-closed line — in a copy): an unguarded caller pins the conversation onto a member billing usage credits — the FAIL CLOSED leg above tells the two apart', nx);
+  sessions.get('sess-p-2')._poolPin = null;
+  // (2) THE OWNER'S NOTICE of a refused call (r5244: «say it, or bound it»), SAID: paid_member files none; a cause the owner acts on
+  // files ONE a key × verb × reason an hour (src/server/vault-hooks.js over src/vault-inventory.js USE_FAIL_CAUSES)
+  const VH = R('src/server/vault-hooks.js');
+  const notices = (wn) => (wn.userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'vault-use-failed');
+  const noticeWorld = async (tag, att) => {
+    const wn = await mkWorld(tag, { verbs });
+    const en = ENG.create({ dataDir: wn.dir, vault: wn.vault, userTodos: wn.userTodos, now: wn.now, verbs, attention: att(wn) });
+    const mk = en.mint({ name: 'pinner', scopes: [PIN], limits: OPEN_LIMITS, by: 'user' });
+    en.grant(mk.key.id, ['session:coord-p'], { by: 'user' });
+    return { wn, en, mk };
+  };
+  const nw = await noticeWorld('pin-notice', (wn) => VH.createVaultAttention({ userTodos: wn.userTodos, now: wn.now }));
+  const opened = [], paid = [];
+  for (let i = 0; i < 3; i++) opened.push(await nw.en.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-free' } }));   // the grant's reach (opened) does not reach it: not_granted
+  const afterReach = notices(nw.wn);
+  nw.en.setReach(nw.en.list().keys[0].grants[0].id, 'instance', { by: 'user' });
+  for (let i = 0; i < 3; i++) paid.push(await nw.en.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-credits' } }));
+  const afterPaid = notices(nw.wn);
+  ok(opened.every((r) => r.code === 'not_granted') && afterReach.length === 1 && paid.every((r) => r.code === 'paid_member') && afterPaid.length === 1 && afterPaid[0].id === afterReach[0].id,
+    'THE OWNER\'S NOTICE, said: three not_granted calls of one key ⇒ ONE notice (a key × verb × reason an hour); three paid_member refusals ⇒ none more (no cause the owner is told about: the caller acts on it)', { reach: afterReach.map((i) => i.text), paid: afterPaid.length, codes: [...opened, ...paid].map((r) => r.code) });
+  const VISRC = fs.readFileSync(path.join(ROOT, 'src/vault-inventory.js'), 'utf8');
+  const viMut = M.write('src/vault-inventory.js', editAnchor(VISRC, "  asks_open: 'asks-open',", "  asks_open: 'asks-open', paid_member: 'not-granted',", 'src/vault-inventory.js'), 'pin-paid-counted');
+  const VHSRC = fs.readFileSync(path.join(ROOT, 'src/server/vault-hooks.js'), 'utf8');
+  const VHX = M.load('src/server/vault-hooks.js', editAnchor(VHSRC, "const VI = require('../vault-inventory.js');", `const VI = require(${JSON.stringify(viMut)});`, 'src/server/vault-hooks.js'), 'pin-paid-counted');
+  const nx2 = await noticeWorld('pin-notice-x', (wn) => VHX.createVaultAttention({ userTodos: wn.userTodos, now: wn.now }));
+  nx2.en.setReach(nx2.en.list().keys[0].grants[0].id, 'instance', { by: 'user' });
+  const px = [];
+  for (let i = 0; i < 3; i++) px.push(await nx2.en.use({ caller: CP(), verb: PIN, args: { target: 'worker-p', member: 'sub-credits' } }));
+  ok(px.every((r) => r.code === 'paid_member') && notices(nx2.wn).length === 1, 'RED CONTROL (paid_member counted as a cause — in a copy of the rule): the money refusals file an owner notice — the «none more» leg above tells the two apart', { n: notices(nx2.wn).length, codes: px.map((r) => r.code) });
   OPS.provide(null); OPS.provide(before);
   // THE CLI's typed verb and its usage lines (vibespace-api ships alone: by hand)
   const CLI = R('data/bin/vibespace-api');
