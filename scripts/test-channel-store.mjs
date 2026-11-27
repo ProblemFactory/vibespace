@@ -1311,14 +1311,21 @@ console.log('\n⑬ the incremental index write (B-f32b verify r1): an async upda
   ok(head.reborn && head.early, `⑬ the incremental file = the whole-file bytes when a row is removed + re-born (${head.reborn}) and when a row is touched before its birth (${head.early})`);
   const DONE = "const done = () => { curTouch = null; if (t.all) { touchAll('update reached the whole map'); } else for (const k of t) { dirtyKeys.add(k); fire(k); } };";
   const CYCLE = /\n    \/\/ verify r1: a row BORN outside `entry\(\)`[^\n]*\n    const bornOutside = [^\n]*\n    if \(bornOutside !== undefined\) \{[^\n]*\n[^\n]*\n[^\n]*\n    \}/;   // B-360d unit 1: the check found beside the rows owed to the next write
-  const REBORN = /\n      if \(layout && layout\.chunkOf\.has\(key\)\) touchAll\([^\n]*/;
+  // B-360d found holder 4's follow (lane bl-loop-b, 主开发 r5065 / r5544): entry()'s re-birth guard has TWO halves since that
+  // follow: the row's old place in the laid-out chunks, or in a sliced apply's Set still in flight (warm.keys). The order control
+  // below cuts the WHOLE line, both halves, and its witness says so. Its legs (c) reach the laid-out half: a 600-row index is laid
+  // out in its own turn (WALK_SYNC_ROWS 4 000), so no sliced apply runs. The sliced apply's half has its own leg and red control
+  // in test-channel-index-births ②b («a guard that knows the chunks only»)
+  const REBORN = /\n      if \(layout && \(layout\.chunkOf\.has\(key\) \|\| \(warm && warm\.keys && warm\.keys\.has\(key\)\)\)\) touchAll\([^\n]*/;
   const TOUCH = /  function touch\(key\) \{[^\n]*/;
   ok(src.includes(DONE) && CYCLE.test(src) && REBORN.test(src) && TOUCH.test(src), '⑬ fixture: the three rules are where the controls cut them');
   const ma = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(src, DONE, 'const done = () => { curTouch = null; if (t.all) fire(null); else for (const k of t) fire(k); };', "src/channel-store.js"), 'ir1-nore-mark')), 'm-async');
   ok(ma.async === 1, `⑬ CONTROL: the rows NOT marked again at the update's end — the disk keeps the row as the await left it (v=${ma.async}) — red`);
   const mb = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(src, CYCLE, '', "src/channel-store.js"), 'ir1-nocount')), 'm-born');
   ok(!mb.born, '⑬ CONTROL: the sweep without the cycle-end count — the row born past the door never reaches the disk — red');
-  const mc = await legs(require(MUTCS.write('src/channel-store.js', editAnchor(editAnchor(src, REBORN, '', "src/channel-store.js"), TOUCH, '  function touch(key) { touchKey(String(key)); }', "src/channel-store.js"), 'ir1-noorder')), 'm-order');
+  const noOrder = editAnchor(editAnchor(src, REBORN, '', "src/channel-store.js"), TOUCH, '  function touch(key) { touchKey(String(key)); }', "src/channel-store.js");
+  ok(!noOrder.includes("touchAll('a row re-born") && !noOrder.includes('layout.chunkOf.has(key)') && !noOrder.includes('warm.keys.has(key)'), '⑬ fixture: the order control\'s copy cuts the WHOLE re-birth rule: both halves of entry()\'s guard (the laid-out chunk, the sliced apply\'s Set) are gone from it');
+  const mc = await legs(require(MUTCS.write('src/channel-store.js', noOrder, 'ir1-noorder')), 'm-order');
   ok(!mc.reborn && !mc.early, `⑬ CONTROL: without the re-birth / missing-row touch rules the file's order departs from the whole-file bytes (re-born ${mc.reborn}, touched early ${mc.early}) — red`);
   if (verifyEnv !== undefined) process.env.VIBESPACE_CHANNELS_INDEX_VERIFY = verifyEnv;
 }
