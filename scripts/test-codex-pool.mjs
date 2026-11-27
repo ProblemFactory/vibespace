@@ -706,6 +706,10 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     { const held = (backend, hot) => { const fake = Object.create(AccountManager.prototype); fake.get = (id) => (id === 'P' ? { id: 'P', type: 'pooled', backend } : id === 'A' ? { id: 'A' } : null); fake.poolCurrentFor = () => 'B'; return fake.poolMemberOfSession('P', { _accountId: 'P', _webuiId: 'w', _heldPoolMember: 'A', backend }); };
       ok('R13 …a codex pool session with a stamp holds it; a claude pool session with the same stamp bills its link', held('codex').id === 'A' && held('codex').held === true && held('claude').id === 'B' && held('claude').held === false, JSON.stringify({ codex: held('codex'), claude: held('claude') })); }
   }
+  // A WAIT FOR A FACT (主开发 r5312, lane bl-tests-e — the reset-credit legs' fixed waits cured): polled every 2 ms; its ceiling is a
+  // FAILURE BY NAME (never a fixed sleep a loaded machine outruns, never one that pays its whole length on a quiet one); the ceiling
+  // counts polls (about 10 s of them on a quiet machine), never the wall clock
+  const until = async (fact, what, polls = 5000) => { for (let n = 0; !fact(); n++) { if (n >= polls) { ok(`the wait for ${what} reached its ceiling of ${polls} polls, 2 ms apart — the fact never came`, false); return false; } await new Promise((r) => setTimeout(r, 2)); } return true; };   // the ceiling is a COUNT of polls: no clock read in a verdict
   // ── §R r3 (2026-09-22 round-2 verifier findings, each reproduced on this real
   //    engine BEFORE its fix; every leg has its pre-fix negative control) ─────
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -721,11 +725,12 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       quietly(() => w.wall(sOther)); // another conversation's wall moves the default A→B
       spin();
       sHeld._isStreaming = false; sHeld._turnState = 'idle'; // the walled turn ended — auto-resume fires only at an idle session
-      await quietlyAsync(async () => { w.wall(sHeld, w.nowS + 9000); await sleep(50); });
+      const armWas = w.ar._armed.get('cx1');
+      await quietlyAsync(async () => { w.wall(sHeld, w.nowS + 9000); await until(() => !!w.ar._armed.get('cx1') && w.ar._armed.get('cx1') !== armWas, 'the held wall\'s arm on cx1'); });   // (r5312) was sleep(50): a wait FOR the arm (the wall's last step: noteWallSignal, after its snapshot and any switch)
       const arm = w.ar._armed.get('cx1');
       const armInfo = arm ? { reason: arm.reason, inSec: Math.round((arm.resetsAt - Date.now()) / 1000) } : null;
       if (arm) arm.resetsAt = Date.now() - 5 * 60e3; // due, past GRACE_MS (the wall-clock seam)
-      const lt = await quietlyAsync(async () => { w.ar.tick(); await sleep(300); });
+      const lt = await quietlyAsync(async () => { w.ar.tick(); await until(() => !sHeld._arFiring, 'the pre-fire gate\'s decision on cx1'); });   // (r5312) was sleep(300): a wait FOR the gate's decision (tick fires synchronously; the gate's finally drops _arFiring after it delivers or refuses)
       w.ar.stop();
       return { w, sHeld, armInfo, lt };
     };
@@ -776,11 +781,12 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const setup = w.current() === w.B && !w.wam.poolMembers(w.P).some((m) => m.id === w.A) && w.eng.heldPoolMemberFor(w.s1) === w.A;
       w.s1._isStreaming = false; w.s1._turnState = 'idle';
       w.s1.stubLimits = () => ({ type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 100, window_minutes: 10080, resets_at: w.nowS + 9000 }, secondary: null } });
-      const lw = await quietlyAsync(async () => { w.wall(w.s1, w.nowS + 9000); await sleep(80); });
+      const armWas = w.ar._armed.get('cx1');
+      const lw = await quietlyAsync(async () => { w.wall(w.s1, w.nowS + 9000); await until(() => !!w.ar._armed.get('cx1') && w.ar._armed.get('cx1') !== armWas, 'the held wall\'s arm on cx1'); });   // (r5312) was sleep(80): a wait FOR the arm (the demotion and the snapshot come before it in the wall's road)
       const v = w.eng.quotaVerdictFor(w.P, { model: null, session: w.s1 });
       const arm = w.ar._armed.get('cx1');
       if (arm) arm.resetsAt = Date.now() - 5 * 60e3; // due, past GRACE_MS
-      const lt = await quietlyAsync(async () => { w.ar.tick(); await sleep(300); });
+      const lt = await quietlyAsync(async () => { w.ar.tick(); await until(() => !w.s1._arFiring, 'the pre-fire gate\'s decision on cx1'); });   // (r5312) was sleep(300): a wait FOR the gate's decision
       w.ar.stop();
       return { w, setup, lw, v, lt, aSpent: Math.round(Number(w.cacheOf(w.A)?.sevenDay?.utilization) * 100) };
     };
@@ -815,9 +821,10 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const R = w.nowS + 9000;
       const spent = () => ({ type: 'rate_limits_updated', onDemand: true, rateLimits: { primary: { used_percent: 100, window_minutes: 10080, resets_at: R }, secondary: null } });
       w.s1.stubLimits = spent;
-      await quietlyAsync(async () => { w.wall(w.s1, R); await sleep(120); });
+      const armWas = w.ar._armed.get('cx1');
+      await quietlyAsync(async () => { w.wall(w.s1, R); await until(() => !!w.ar._armed.get('cx1') && w.ar._armed.get('cx1') !== armWas, 'the held wall\'s arm on cx1'); });   // (r5312) was sleep(120): a wait FOR the arm
       const wind = () => { const a = w.ar._armed.get('cx1'); if (a) a.resetsAt = Date.now() - 5 * 60e3; };
-      wind(); await quietlyAsync(async () => { w.ar.tick(); await sleep(300); });
+      wind(); await quietlyAsync(async () => { w.ar.tick(); await until(() => !w.s1._arFiring, 'the pre-fire gate\'s decision on cx1 (before A\'s reset)'); });   // (r5312) was sleep(300): a wait FOR the gate's decision
       const before = w.sent.length;
       // A's stated reset PASSED (+ the 60 s grace): its cache's resets are in the past, its app-server answers open
       const cf = path.join(w.cacheDir, w.A + '.json'); const c = JSON.parse(fs.readFileSync(cf, 'utf8')); const past = Math.floor(Date.now() / 1000) - 61;
@@ -828,7 +835,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       const sw = w.eng._sessionWalls.get('cx1'); if (sw) for (const k of [...sw.keys()]) sw.set(k, Date.now() - w.eng.SESSION_WALL_MS - 1); // the 10-min session-wall memory expired
       const v = w.eng.quotaVerdictFor(w.P, { model: null, session: w.s1 });
       wind();
-      const lt = await quietlyAsync(async () => { w.ar.tick(); await sleep(300); });
+      const lt = await quietlyAsync(async () => { w.ar.tick(); await until(() => !w.s1._arFiring, 'the pre-fire gate\'s decision on cx1 (after A\'s reset)'); });   // (r5312) was sleep(300): a wait FOR the gate's decision
       w.ar.stop();
       return { w, v, lt, before };
     };
