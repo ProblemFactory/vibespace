@@ -40,6 +40,9 @@
 //   past the rebuild line (cut 3c's) → (c6) red; one budget for the touched-since and the pending rows (cut 3c's) → (c7) red.
 //   r829 (after cut 4): (h8) THE BOUND — the route's reader and a broadcast asked during a held warm-up answered at the bound,
 //       whole; (h9) a slice that throws — waiters released, a broadcast at once, the first read whole; three red controls.
+//   B-dfa4 r5450 (hold (iii), 2026-11-27): (j) AT THE BOUND THE READER FINISHES THE ROWS LEFT of a stalled warm-up in its own turn —
+//       counted as rows (the census walk's left, or a walk's left plus those not begun; never the row facts again), the same answer, a
+//       write during the stall re-read; (h8) now reads the reader answered «landed» at the bound; RED: the bound finishes nothing (whole).
 //   B-dfa4 r5450 (hold (ii), 2026-11-27): (i) THE ROW FACTS' RE-SUM AFTER A VOID, in slices: the reader meanwhile answered the sums as they
 //       stood (0 rows read in its turn), one row a slice, the landing pushed once, a write between two slices re-read, a second whole
 //       touch restarts it, three of them stop it (said once) and the next reader re-sums whole; RED: the void re-summed whole in the reader's turn.
@@ -838,7 +841,7 @@ async function boundLeg(EM, tag, { only = null } = {}) {   // `only`: 'ready' / 
 }
 {
   const r = await boundLeg(ENG, 'bound');
-  ok(r.armed === 2 && r.ready === false && r.before === 1 && r.after === 1 && r.same, `(h8) THE BOUND: the warm-up held, the bound's passing placed (${r.armed} timers armed: the route's reader's and the broadcast's) — the reader answered at it (${r.ready}), the digest it read is a whole build's; the broadcast asked meanwhile went out at it (${r.before}), none again at the landing (${r.after})`, r);
+  ok(r.armed === 2 && r.ready === true && r.stats.finished === 1 && r.before === 1 && r.after === 1 && r.same, `(h8) THE BOUND: the warm-up held, the bound's passing placed (${r.armed} timers armed: the route's reader's and the broadcast's) — B-dfa4 r5450 (iii): the bound FINISHED the warm-up's rows left (${r.stats.finished}) and the reader was answered «landed» at it (${r.ready}), the digest it read is a whole build's; the broadcast asked meanwhile went out at it (${r.before}), none again at the landing (${r.after})`, r);
   const EMr = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '    if (!Number.isFinite(boundMs)) return landed;', '    return landed;', 'the bound ignored'), 'bound-ignored');
   const rr = await boundLeg(EMr, 'bound-red', { only: 'ready' });
   ok(rr.ready === 'waiting', `(h8) RED CONTROL: the bound ignored — the reader still waits after the bound passed (${rr.ready}) — the leg above would go red`, rr);
@@ -970,6 +973,52 @@ async function resumLeg(EM, tag, { place = null, wholeTouches = 0 } = {}) {
   const EMw = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), "      if (!resum && rowKept.built && !rowKept.wholeNext && (rowKept.resum || rowResumStart())) return rowKept.by;\n", '', 'the void re-summed whole in the reader\'s turn'), 'resum-whole');
   const rr = await resumLeg(EMw, 'red-whole');
   ok(rr.readerRows >= 1000, `(i1) RED CONTROL: the void re-summed whole in the reader's turn — that reader read ${rr.readerRows} rows (the leg above would go red)`, { readerRows: rr.readerRows });
+}
+
+// ═══ (j) AT THE BOUND THE READER FINISHES THE ROWS LEFT (B-dfa4, 主开发 r5450, hold (iii): 1.1–1.3 s five seconds after a start) ═══
+// The warm-up STALLED behind its bound — placed by a gate in a slice's seam, never load — and the bound's passing placed through the
+// timer seam: the reader the route is FINISHES the warm-up's rows left in its own turn (the current walk from its next row, the walks
+// not begun) over the attempt's own stated snapshot and lands them: never a second whole pass. Counted as rows (digestWarmStats
+// finishRows; the row facts' own reads, rowResumStats().rowsRead), never timed.
+console.log('(j) the bound passed on a stalled warm-up: the reader finishes the rows left in its turn — counted — the same answer, a write meanwhile re-read');
+async function finishLeg(EM, tag, { at = 'census', stallAt = 700, place = null } = {}) {
+  const bc = [], timers = [];
+  const turns = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((z) => setImmediate(z)); };
+  let release = null, stalledAt = null;
+  const gate = new Promise((r) => { release = r; });
+  const e = mkEng(EM, copyOf(TPL_D, `j-${tag}`), { syncRows: 500, sliceMs: 0, digestTimer: (fn) => { const h = { fn, live: true }; timers.push(h); return { cancel: () => { h.live = false; } }; }, onSlice: async (i, what) => { if (what === at && i === stallAt && stalledAt === null) { stalledAt = i; if (place) await place(e); await gate; } } }, quiet, null, (m) => bc.push(m));
+  const warm = e.digestWarm();
+  await until('the warm-up stalled at its placed row', () => stalledAt !== null);
+  let ready = 'waiting';
+  e.digestReady().then((v) => { ready = v; });   // the route's reader: its bound armed
+  await turns();
+  const r0 = e.rowResumStats().rowsRead, s0 = e.digestWarmStats();
+  for (const h of timers.splice(0)) if (h.live) h.fn();   // THE BOUND PASSES — placed
+  await turns();
+  const readyAtBound = ready;
+  const got = digestOf(e);   // what the reader reads after the bound
+  const rowsAtBound = e.rowResumStats().rowsRead - r0, s1 = e.digestWarmStats();
+  release();
+  await warm;
+  await turns();
+  const s2 = e.digestWarmStats(), fkBuilds = e.firstReadParity().stats.builds;
+  e.stop();
+  let whole = null;
+  if (place) { const w = mkEng(ENG, copyOf(TPL_D, `j-${tag}-whole`), { syncRows: 1e9 }); await place(w); whole = digestOf(w); w.stop(); }
+  else whole = plainDigest();
+  return { ready: readyAtBound, stalledAt, finished: s1.finished - s0.finished, finishRows: s1.finishRows - s0.finishRows, rowsAtBound, same: got === whole, fkBuilds, slicedAfter: s2.sliced, restarts: s2.restarts };
+}
+{
+  const r = await finishLeg(ENG, 'census-late');
+  ok(r.ready === true && r.finished === 1 && r.finishRows === ND - 700 && r.rowsAtBound === 0 && r.same && r.fkBuilds === 1 && r.slicedAfter === 0 && r.restarts === 0, `(j1) THE ROWS LEFT: the warm-up stalled in its census walk at row ${r.stalledAt}; at the bound the reader was answered «landed» (${r.ready}) after its turn finished ${r.finishRows} row(s) — the census walk's rows left, ${ND} − 700 — and read 0 of the row facts (${r.rowsAtBound}); the first read built once (${r.fkBuilds}: the landed one, no second whole pass), the digest a whole build's; the stalled walk then stopped by itself (no restart, no second landing)`, r);
+  const rf = await finishLeg(ENG, 'first-read', { at: 'first-read', stallAt: 400 });
+  ok(rf.ready === true && rf.finished === 1 && rf.finishRows === (ND - 400) + ND && rf.rowsAtBound === 0 && rf.same, `(j2) a stall in the first-read walk at row ${rf.stalledAt}: the reader's turn finished ${rf.finishRows} row(s) — that walk's rows left and the census walk not begun, (${ND} − 400) + ${ND} — never the row facts again (${rf.rowsAtBound}); the digest a whole build's`, rf);
+  const rp = await finishLeg(ENG, 'placed', { place: async (e) => { await e.store.index.update(() => { e.store.index.entry(A, 'm-0', { create: false }).unread = 6; Object.assign(e.store.index.entry(A, 'm-born-j'), rowShape(0), { lastAt: T, unread: 2 }); }); } });
+  ok(rp.ready === true && rp.finished === 1 && rp.same, `(j3) THE STATED SNAPSHOT KEPT, THE ROWS TOUCHED MEANWHILE RE-READ: a write during the stall (a row behind the walk, a row born) — the finished landing's digest equals a whole build's after the same writes`, rp);
+  // RED CONTROL: the release's bound — the reader answered false and builds every index WHOLE in its turn (the warm-up's slices thrown away)
+  const EMr = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '    if (!job || digestWarm !== job || stopped || job.finished || job.whole || !job.state || !job.state.land) return false;', '    return false;', 'the bound finishes nothing'), 'bound-whole');
+  const rr = await finishLeg(EMr, 'red-whole');
+  ok(rr.ready === false && rr.finished === 0 && rr.rowsAtBound >= ND, `(j1) RED CONTROL: the bound finishes nothing — the reader answered ${rr.ready} and its digest re-summed ${rr.rowsAtBound} rows of the row facts alone in its turn (a whole pass, the slices thrown away) — the leg above would go red`, rr);
 }
 
 report();

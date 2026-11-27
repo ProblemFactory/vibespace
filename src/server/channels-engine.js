@@ -4905,7 +4905,7 @@ function create(deps = {}) {
   // /api/channels awaits digestReady() (bounded); a broadcast asked meanwhile is made ONCE at the landing (the changed keys
   // merged); a synchronous digest() before the landing builds whole — the release's road, never a partial answer.
   const DIGEST_WARM_RESTARTS = 3;
-  const digestWarmStats = { sliced: 0, slices: 0, maxSliceMs: 0, walkMs: 0, restarts: 0, gaveUp: 0, deferred: 0, reread: 0, landMs: 0, notifyMs: 0, boundPassed: 0 };   // landMs / notifyMs: the landing turn's own cost (its sorts; the deferred broadcast)
+  const digestWarmStats = { sliced: 0, slices: 0, maxSliceMs: 0, walkMs: 0, restarts: 0, gaveUp: 0, deferred: 0, reread: 0, landMs: 0, notifyMs: 0, boundPassed: 0, finished: 0, finishRows: 0, finishMs: 0 };   // landMs / notifyMs: the landing turn's own cost (its sorts; the deferred broadcast)
   let digestWarm = null;   // { touched: Set<key>, whole, promise, pending: {changed: Set, full} }
   store.index.onTouch((k) => { if (!digestWarm) return; if (k === null) digestWarm.whole = true; else digestWarm.touched.add(String(k)); });
   /** Resolves when the first digest's indexes are warm (at once when no warm-up runs). */
@@ -4924,8 +4924,32 @@ function create(deps = {}) {
     if (boundMs === null) boundMs = Math.max(0, digestWarm.startedAt + DIGEST_WAIT_MS - Date.now());   // ONE deadline: the warm-up's start + the bound
     if (!Number.isFinite(boundMs)) return landed;
     let tm = null;
-    return Promise.race([landed, new Promise((r) => { tm = digestTimer(() => r(false), boundMs); })]).finally(() => { if (tm) tm.cancel(); });
+    const job = digestWarm;   // B-dfa4 r5450 hold (iii): AT THE BOUND the reader FINISHES the warm-up's rows left in its own turn (never a second whole pass)
+    return Promise.race([landed, new Promise((r) => { tm = digestTimer(() => r(digestWarm !== job ? !!job.finished : digestWarmFinish(job)), boundMs); })]).finally(() => { if (tm) tm.cancel(); });
   };
+  /** B-dfa4 (主开发 r5450, hold (iii): 1.1–1.3 s five seconds after a start on the owner's hub): AT THE BOUND THE READER FINISHES THE
+   *  WARM-UP's ROWS LEFT in its own turn — the current walk from its next row, then the walks not begun, each over the attempt's own
+   *  STATED SNAPSHOT — and lands them (the rows touched since the snapshot each index's dirty rows, as the async landing): never a
+   *  second whole pass, the same answer. The broadcasts asked meanwhile go out at once, on the landed indexes. → true when it landed;
+   *  false (the release's road: the reader builds whole) when no attempt stands or a whole touch has staled its snapshot. */
+  function digestWarmFinish(job) {
+    if (!job || digestWarm !== job || stopped || job.finished || job.whole || !job.state || !job.state.land) return false;
+    const st = job.state, f0 = Date.now();
+    let n = 0;
+    for (let p = st.phase; p < st.phases.length; p++) {
+      const ph = st.phases[p];
+      for (let i = p === st.phase ? st.next : 0; i < st.keys.length; i++) { ph.fn(st.keys[i]); n++; }
+    }
+    st.phase = st.phases.length; st.next = 0;
+    job.finished = true;
+    st.land();
+    digestWarm = null;   // the readers read the landed indexes now; the async walk stops at its next look (alive)
+    digestWarmStats.finished++; digestWarmStats.finishRows += n; digestWarmStats.finishMs = Date.now() - f0;
+    if (job.boundTimer) { job.boundTimer.cancel(); job.boundTimer = null; }
+    const p = job.pending; job.pending = null;
+    if (p && !stopped) notify([...p.changed], { full: p.full ? true : (p.asked || !p.changed.size ? null : false) });   // the broadcasts asked meanwhile: ONE, now
+    return true;
+  }
   function digestWarmStart({ syncRows = WALK.syncRows, sliceMs = WALK.sliceMs, onSlice = WALK.onSlice } = {}) {
     if (digestWarm) return digestWarm.promise;
     let n = 0; for (const k in store.index.rows()) if (++n > syncRows) break;
@@ -4943,41 +4967,55 @@ function create(deps = {}) {
           job.whole = false; job.touched = new Set(); job.dueOnly = new Set();   // each attempt walks a fresh snapshot
           const t0 = now(), ctx = viewCtx(t0), T = tiers();
           const rows = store.index.rows(), keys = Object.keys(rows);
-          const alive = () => !stopped && digestWarm === job && !job.whole;
+          const alive = () => !stopped && digestWarm === job && !job.whole && !job.finished;
           const opts = (what) => ({ what, sliceMs, onSlice, stats: digestWarmStats, alive });
-          // (1) the row facts' sums (rowFactsNow's re-sum)
+          // the three indexes' builds over this attempt's own snapshot; each account's census index (clockIndexed's build) set up
+          // here, at the attempt's start (B-dfa4 r5450 hold (iii): a reader at the bound may finish any walk of the three)
           const rf = new Map(), by = new Map();
-          let done = (await walkSliced(keys, (k) => { const f = rowFacts(rows[k]); if (f) { rf.set(k, f); addFacts(f, 1, by); } }, opts('row-facts'))).done;
-          // (2) the first read's kept facts (firstFacts' build)
           const fk2 = { facts: new Set(), heads: new Map(), at: new Map(), odd: new Set() };
-          if (done) done = (await walkSliced(keys, (mk) => fkPlace(fk2, mk, rows[mk], ctx, t0), opts('first-read'))).done;
-          // (3) each account's census index (clockIndexed's build): ONE walk over this attempt's own snapshot, each row to its
-          // account's index (the round wv9avukxt (15) + its fresh read: never the store's keysOf — before its per-account keys
-          // land, or after a whole touch voided them, a synchronous keysOf builds every account's keys in its own turn)
           const cxs = new Map(), recOf = new Map();
-          if (done) for (const rec of adapterRecords().adapters) { const lane = laneOrScan(rec, {}); cxs.set(rec.id, { sig: censusSig(T, lane), t: t0, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false }); recOf.set(rec.id, rec); }
-          if (done) done = (await walkSliced(keys, (k) => { const en = rows[k]; const cx = en && cxs.get(en.adapterId); if (cx) censusAdd(recOf.get(en.adapterId), cx, en, t0, T); }, opts('census'))).done;
-          if (!done) { if (stopped || digestWarm !== job) return false; digestWarmStats.restarts++; continue; }   // a whole touch: AGAIN
+          for (const rec of adapterRecords().adapters) { const lane = laneOrScan(rec, {}); cxs.set(rec.id, { sig: censusSig(T, lane), t: t0, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false }); recOf.set(rec.id, rec); }
+          // (1) the row facts' sums (rowFactsNow's re-sum); (2) the first read's kept facts (firstFacts' build); (3) each account's
+          // census index: ONE walk over this attempt's own snapshot, each row to its account's index (the round wv9avukxt (15) + its
+          // fresh read: never the store's keysOf — before its per-account keys land, or after a whole touch voided them, a
+          // synchronous keysOf builds every account's keys in its own turn)
+          const st = job.state = { keys, phase: 0, next: 0, phases: [
+            { what: 'row-facts', fn: (k) => { const f = rowFacts(rows[k]); if (f) { rf.set(k, f); addFacts(f, 1, by); } } },
+            { what: 'first-read', fn: (mk) => fkPlace(fk2, mk, rows[mk], ctx, t0) },
+            { what: 'census', fn: (k) => { const en = rows[k]; const cx = en && cxs.get(en.adapterId); if (cx) censusAdd(recOf.get(en.adapterId), cx, en, t0, T); } },
+          ], land: null };
           // THE LANDING, one turn: each index installed unless a reader built it whole meanwhile; the rows touched since the
-          // snapshot are each index's dirty rows (re-read at its first read)
-          const l0 = Date.now(), touched = job.touched, dueOnly = job.dueOnly;
-          digestWarmStats.reread += touched.size + [...dueOnly].filter((k) => !touched.has(k)).length;
-          if (rowKept.stale === null) { rowKept.rows = rf; rowKept.by = by; rowKept.at = t0; rowKept.stale = new Set(touched); rowKept.built = true; }
-          if (!firstKept.built) {
-            for (const arr of fk2.heads.values()) arr.sort(headCmp);
-            firstKept.facts = fk2.facts; firstKept.heads = fk2.heads; firstKept.at = fk2.at; firstKept.odd = fk2.odd;
-            firstKept.ob = new Map(); for (const [k, ob] of ctx.outbox) firstKept.ob.set(k, obFact(ob));   // the snapshot's outbox: a change since is re-checked at the read
-            firstKept.dirty = new Set(touched); firstKept.t = t0; firstKept.built = true; firstKept.stats.builds++;
+          // snapshot are each index's dirty rows (re-read at its first read) — the async road's and the bound's finish alike
+          st.land = () => {
+            const l0 = Date.now(), touched = job.touched, dueOnly = job.dueOnly;
+            digestWarmStats.reread += touched.size + [...dueOnly].filter((k) => !touched.has(k)).length;
+            if (rowKept.stale === null) { rowKept.rows = rf; rowKept.by = by; rowKept.at = t0; rowKept.stale = new Set(touched); rowKept.built = true; }
+            if (!firstKept.built) {
+              for (const arr of fk2.heads.values()) arr.sort(headCmp);
+              firstKept.facts = fk2.facts; firstKept.heads = fk2.heads; firstKept.at = fk2.at; firstKept.odd = fk2.odd;
+              firstKept.ob = new Map(); for (const [k, ob] of ctx.outbox) firstKept.ob.set(k, obFact(ob));   // the snapshot's outbox: a change since is re-checked at the read
+              firstKept.dirty = new Set(touched); firstKept.t = t0; firstKept.built = true; firstKept.stats.builds++;
+            }
+            for (const [id, cx] of cxs) {
+              const cur = censusIx.get(id);
+              if (cur && !cur.stale) continue;   // a reader built it meanwhile
+              cx.order.sort(Census.untilCmp);
+              for (const k of touched) if (k.startsWith(id + '/')) cx.dirty.add(k);
+              for (const k of dueOnly) if (k.startsWith(id + '/')) cx.dirty.add(k);   // r829 (2): the due signals — the census's alone
+              censusIx.set(id, cx); censusIxStats.builds++;
+            }
+            digestWarmStats.landMs = Date.now() - l0;
+          };
+          let done = true;
+          for (let p = 0; p < st.phases.length && done; p++) {
+            st.phase = p; st.next = 0;
+            const ph = st.phases[p];
+            done = (await walkSliced(keys, (k, i) => { ph.fn(k); st.next = i + 1; }, opts(ph.what))).done;
           }
-          for (const [id, cx] of cxs) {
-            const cur = censusIx.get(id);
-            if (cur && !cur.stale) continue;   // a reader built it meanwhile
-            cx.order.sort(Census.untilCmp);
-            for (const k of touched) if (k.startsWith(id + '/')) cx.dirty.add(k);
-            for (const k of dueOnly) if (k.startsWith(id + '/')) cx.dirty.add(k);   // r829 (2): the due signals — the census's alone
-            censusIx.set(id, cx); censusIxStats.builds++;
-          }
-          digestWarmStats.sliced++; digestWarmStats.walkMs = Date.now() - w0; digestWarmStats.landMs = Date.now() - l0;
+          if (job.finished) return true;   // a reader at the bound finished the rows left and landed them (digestWarmFinish)
+          if (!done) { if (stopped || digestWarm !== job) return false; digestWarmStats.restarts++; continue; }   // a whole touch: AGAIN
+          st.land();
+          digestWarmStats.sliced++; digestWarmStats.walkMs = Date.now() - w0;
           return true;
         }
       } finally {
@@ -4996,7 +5034,7 @@ function create(deps = {}) {
     if (digestWarm && !extra && !digestWarm.boundPassed) {
       if (!digestWarm.pending) {   // r829 (1): the first deferred ask arms the bound — past it the asks go out now (whole), the rest unwaited
         const job = digestWarm;
-        job.boundTimer = digestTimer(() => { if (digestWarm !== job) return; job.boundPassed = true; digestWarmStats.boundPassed++; const q = job.pending; job.pending = null; if (q && !stopped) notify([...q.changed], { full: q.full ? true : (q.asked || !q.changed.size ? null : false) }); }, Math.max(0, job.startedAt + DIGEST_WAIT_MS - Date.now()));
+        job.boundTimer = digestTimer(() => { if (digestWarm !== job) return; digestWarmStats.boundPassed++; if (digestWarmFinish(job)) return; job.boundPassed = true; const q = job.pending; job.pending = null; if (q && !stopped) notify([...q.changed], { full: q.full ? true : (q.asked || !q.changed.size ? null : false) }); }, Math.max(0, job.startedAt + DIGEST_WAIT_MS - Date.now()));
       }
       const p = digestWarm.pending || (digestWarm.pending = { changed: new Set(), full: false, asked: false });
       for (const c of Array.isArray(changed) ? changed : []) if (c) p.changed.add(String(c));
