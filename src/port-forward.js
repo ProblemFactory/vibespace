@@ -985,13 +985,14 @@ class PortForwardManager {
       this._unpubOut = (this._unpubOut || 0) + 1;
       Promise.resolve(call).then(() => 'ok', () => 'no').then((how) => { this._unpubOut--; if (how === 'ok' && owe && rec.unpublishOwed && rec.unpublishOwed.code === 'relay_unanswered') { delete rec.unpublishOwed; this._settleConfirmed(rec); this._persist(); this._emit(); } });
       if (bounded) await this._relayBounded(call, rec, 'unpublish'); else await call;   // unbounded: a person's / the jobs engine's road (its caller judges lateness, as at the release)
-      if (rec.unpublishOwed) { delete rec.unpublishOwed; this.log(`[ports] the public address of ${rec.id} is down now (its relay removal confirmed)`); }
+      // r5550: these lines never name the row's id — a LAN forward's id holds the target host a person typed, an orphan's its file's name
+      if (rec.unpublishOwed) { delete rec.unpublishOwed; this.log('[ports] a forward\'s public address is down now (its relay removal confirmed)'); }
       return true;
     } catch (e) {
       const code = (e && e.code) || 'relay_unpublish_failed', reason = String((e && e.message) || code).slice(0, 300), was = rec.unpublishOwed;
-      if (!owe) { rec.error = 'the old public address could not be taken down: ' + reason; this.log(`[ports] the old public address of ${rec.id} could not be taken down (${code}): ${reason}`); return false; }   // a cleanup: said, never owed
+      if (!owe) { rec.error = 'the old public address could not be taken down: ' + reason; this.log(`[ports] an old public address could not be taken down (${code}): ${reason}`); return false; }   // a cleanup: said, never owed
       rec.unpublishOwed = { code, reason, since: (was && was.since) || Date.now(), ...(was && was.ownerSet ? { ownerJob: was.ownerJob || null, ownerSet: true } : {}) };   // r5421: a refused retry keeps whose old address it is
-      if (!was || was.code !== code) this.log(`[ports] the public address of ${rec.id} could not be taken down (${code}) — kept in Ports, owed: ${reason}`);
+      if (!was || was.code !== code) this.log(`[ports] a forward's public address could not be taken down (${code}) — kept in Ports, owed: ${reason}`);
       return false;
     }
   }
@@ -1029,7 +1030,7 @@ class PortForwardManager {
         if (rec.orphan && this._namedFiles(rec).has(rec.publicName)) { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; continue; }   // a row names that file now: no longer an orphan, never removed
         const still = rec.orphan ? await this._orphanStill(rec) : 'mine';   // r5334: an orphan's mark read once more, just before its removal
         if (rec.orphan && (!this._state.forwards.includes(rec) || this._namedFiles(rec).has(rec.publicName))) { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; continue; }   // the re-read awaited: a row may name its file now — never removed
-        if (still === 'drop') { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; this.log(`[ports] the relay file ${rec.publicName} no longer carries this hub's mark — never removed; its row leaves`); continue; }
+        if (still === 'drop') { this._state.forwards = this._state.forwards.filter((r) => r !== rec); changed = true; this.log('[ports] a relay file no longer carries this hub\'s mark — never removed; its row leaves');   /* r5550: its name never in the journal (it can hold a host a person typed) */ continue; }
         if (still === 'wait') { this._healRetryAt.set(rec.id, Date.now() + 5 * 60000); continue; }   // its folder not read now: nothing removed, asked on the pace
         if (this._unpubOut > 0) break;   // (the re-read awaited: a removal asked meanwhile is out — still ONE)
         this._healRetryAt.set(rec.id, Date.now() + 5 * 60000);
@@ -1074,7 +1075,7 @@ class PortForwardManager {
       if (f.mark === 'mine' && !/^[\w-]{1,60}$/.test(f.name)) { unmarked.push(f.name); continue; }   // a name the relay never writes: a hand's — listed, never touched
       if (f.mark === 'mine') {
         this._state.forwards.push({ id: 'pf-orphan-' + f.name, hostId: null, remotePort: null, label: f.name, orphan: true, publicName: f.name, unpublishOwed: { code: 'relay_orphan', reason: 'no forward of this instance names this public address', since: Date.now() } });
-        added = true; this.log(`[ports] a relay file of this hub no forward names (${f.name}) — kept in Ports, owed its removal`);
+        added = true; this.log('[ports] a relay file of this hub that no forward names — kept in Ports, owed its removal');   // r5550: never its NAME in the journal — the file is named from the forward's id, which holds a target host a person typed (Ports shows it)
       } else if (f.mark === 'none') unmarked.push(f.name);   // 'other': another hub's — never touched, never listed
     }
     const was = JSON.stringify(this._unmarked || null);
