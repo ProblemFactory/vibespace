@@ -2008,8 +2008,9 @@ export function installSessionLifecycle(App, ctx = {}) {
               showToast(memberId ? t('Pinned to {name} — applies when the conversation resumes', { name }) : t('Automatic again — applies when the conversation resumes'));
               return;
             }
+            this.sidebar?.pinFence?.(cfgKey, memberId || null);   // B-2083's carrier follow (r5367): an older list never undoes this press — fenced until a list carries it
             const r = await fetchJson(`/api/accounts/${encodeURIComponent(a.id)}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: live.webuiId, memberId }) });
-            if (!r || r.error) { showToast(r?.error || t('Pin failed'), { type: 'error' }); return; }
+            if (!r || r.error) { this.sidebar?.pinFence?.(cfgKey, undefined); showToast(r?.error || t('Pin failed'), { type: 'error' }); return; }
             saveCfg(r.pinned ? { memberId: r.pinned.memberId, at: r.pinned.at || Date.now(), poolId: a.id } : null); // the resume carrier (it names the pool the pin was made on); the server's notice says what happened
           };
           items.push({

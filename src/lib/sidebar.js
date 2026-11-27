@@ -460,7 +460,7 @@ class Sidebar {
 
     this._sessionDigest = '';
     app.ws.onGlobal((msg) => {
-      if (msg.type === 'active-sessions') { this._webuiSessions = msg.sessions; this._mergeAndRender(); patchStashHints(this.listEl, msg.sessions); try { this.app?._followResumed?.(msg.sessions); } catch { } }   // the "N waiting" hint: patched in place, never a re-render; the manager design's piece 4: an ENDED window turns live in its row when its conversation runs again (session-lifecycle _followResumed)
+      if (msg.type === 'active-sessions') { this._webuiSessions = msg.sessions; this._mergeAndRender(); patchStashHints(this.listEl, msg.sessions); try { this._followPins(msg.sessions); } catch { } try { this.app?._followResumed?.(msg.sessions); } catch { } }   // the "N waiting" hint: patched in place, never a re-render; the manager design's piece 4: an ENDED window turns live in its row when its conversation runs again (session-lifecycle _followResumed)
     });
     this._poll();
   }

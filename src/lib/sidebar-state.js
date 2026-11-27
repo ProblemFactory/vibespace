@@ -10,6 +10,7 @@ import { showToast, showInputDialog } from './utils.js';
 import { t as tr } from './i18n.js';
 import { reportOwnerPage } from './owner-facts.js'; // lane agent-context-owner-facts (B-7960 b): what this page tells the hub about the owner's screen
 import { sessionRowOf, placeOf, settingsPolicy } from '../attention-model.js'; // PURE: THE attention list (lane attention-predicate-shared) — the rank reads a session's band
+import { carrierPatches } from './pool-pin-carrier.js'; // PURE (B-2083's carrier follow, lane lg-rewind): the live rows' pins into the resume carrier
 import { diffOps, viewOf, createSync } from '../user-state-ops.js'; // PURE CJS (lane sidebar-echo-order, inc-mwbn2xp8-ks0b): the page's user state = the server's newest + its own acts not yet confirmed; a push carries the person's ops
 
 export function installSidebarState(SidebarClass) {
@@ -626,6 +627,23 @@ export function installSidebarState(SidebarClass) {
     this._configBatch = true;
     try { for (const [s, patch] of pairs || []) this.setSessionConfig(s, { ...(this.getSessionConfig(s) || {}), ...patch }); } finally { this._configBatch = false; }
     this._pushUserState();
+  };
+  /** B-2083's carrier follow (lane lg-rewind, 主开发 r5180 / r5367): the live rows' pins into the resume carrier — PURE
+   *  src/lib/pool-pin-carrier.js carrierPatches decides (an edge only; this page's own press a fence until a list carries it); its
+   *  writes are ONE batch, ONE user-state push; nothing to write ⇒ nothing pushed. The sidebar's 'active-sessions' handler calls it. */
+  proto._followPins = function(rows) {
+    const fences = this._pinFences || (this._pinFences = new Map());
+    const r = carrierPatches(rows, { configOf: (k) => this.getSessionConfig(k), seen: this._pinSeen || new Map(), fences });
+    this._pinSeen = r.seen;
+    for (const k of r.lifted) fences.delete(k);
+    if (r.patches.length) this.setSessionConfigs(r.patches);
+  };
+  /** THIS PAGE's OWN PIN PRESS (src/lib/session-lifecycle.js pinTo): from its send, `want` = the member pressed | null («Back to
+   *  automatic») until a list carries it; `undefined` = the press was refused (the fence lifts: nothing changed). */
+  proto.pinFence = function(key, want) {
+    if (!key) return;
+    const fences = this._pinFences || (this._pinFences = new Map());
+    if (want === undefined) fences.delete(key); else fences.set(key, want == null ? null : String(want));
   };
 
   proto.renameSession = async function(sessionOrKey, currentName) {

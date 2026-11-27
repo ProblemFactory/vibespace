@@ -154,7 +154,7 @@ console.log('— ⑥ THE FOLLOW IS QUIET');
 console.log('— ⑤ the wiring');
 {
   const sb = read('src/lib/sidebar.js'), uta = read('src/lib/user-todos-actions.js'), sl = read('src/lib/session-lifecycle.js');
-  ok(/if \(msg\.type === 'active-sessions'\) \{ this\._webuiSessions = msg\.sessions; this\._mergeAndRender\(\); patchStashHints\(this\.listEl, msg\.sessions\); try \{ this\.app\?\._followResumed\?\.\(msg\.sessions\); \} catch \{ \} \}/.test(sb), 'sidebar.js: the live list every page receives asks the follow (no new frame)');
+  ok(/if \(msg\.type === 'active-sessions'\) \{ this\._webuiSessions = msg\.sessions; this\._mergeAndRender\(\); patchStashHints\(this\.listEl, msg\.sessions\); try \{ this\._followPins\(msg\.sessions\); \} catch \{ \} try \{ this\.app\?\._followResumed\?\.\(msg\.sessions\); \} catch \{ \} \}/.test(sb), 'sidebar.js: the live list every page receives asks the follow (no new frame; B-2083\'s carrier follow rides the same list)');
   ok(/row = app\._reopenRowOf\(c, r\.sessionId\)/.test(uta) && !/for \(const \[winId, term\] of \[\.\.\.app\.sessions\]\)/.test(uta) && (sl.match(/\} else this\._closeSecondView\(winId, \{ backend: c\.backend \|\| 'claude', cid: c\.backendSessionId \}\);/g) || []).length === 1,   // stale-pins: kept — a deliberate «gone» check: piece 4 took the walk over app.sessions out of user-todos-actions.js
     'the For-you reply\'s reopen and the follow share ONE row loop (_reopenRowOf) — not a copy');
 }

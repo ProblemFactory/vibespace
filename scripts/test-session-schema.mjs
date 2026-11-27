@@ -170,6 +170,7 @@ ok(bh && bh.persisted === null && bh.owner === 'stdout' && writes.has('_browserH
     .replace(/^import \{ reportOwnerPage \} from '\.\/owner-facts\.js';.*$/m, 'const reportOwnerPage = () => null;')   // lane agent-context-owner-facts: the page's report (never used by the store)
     // lane attention-predicate-shared: the rank's PURE attention functions (never used by the store) — stubbed like the rest
     .replace(/^import \{ sessionRowOf, placeOf, settingsPolicy \} from '\.\.\/attention-model\.js';.*$/m, 'const sessionRowOf = () => null, placeOf = () => 0, settingsPolicy = () => null;')
+    .replace(/^import \{ carrierPatches \} from '\.\/pool-pin-carrier\.js';.*$/m, 'const carrierPatches = () => ({ patches: [], seen: new Map(), lifted: [] });')   // B-2083's carrier follow: the live pins' rule (PURE, never used by setSessionConfig)
     .replace(/^import \{[^}]*\} from '\.\.\/user-state-ops\.js';.*$/m, 'const diffOps = () => [], viewOf = (v) => v, createSync = () => ({}), createTabStore = () => ({});')   // lane sidebar-echo-order: the user-state engine (never used by setSessionConfig — _pushUserState is stubbed);
   const storeSrc = src('src/lib/sidebar-state.js');
   ok(!/^import /m.test(domFree(storeSrc)), 'the store\'s scratch copy is DOM-free (every import of sidebar-state.js stubbed)');
