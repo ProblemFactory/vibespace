@@ -4854,6 +4854,7 @@ export default {
   "all messages": "すべてのメッセージ",
   "any rule": "いずれかのルール",
   "arrives between (HH:MM–HH:MM)": "到着時刻が(HH:MM–HH:MM)の間",
+  "the whole day": "終日",
   "contains keyword": "キーワードを含む",
   "digest every {m} min": "{m} 分ごとにダイジェスト",
   "does not contain": "含まない",

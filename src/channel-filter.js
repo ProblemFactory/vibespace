@@ -228,6 +228,12 @@ const str = (v) => (v === null || v === undefined ? '' : String(v));
 
 // ── rules ──────────────────────────────────────────────────────────────────
 
+/** r5409: a time window whose two times are the same — the whole day (both minutes inside: one full turn of the clock). */
+function windowWhole(rule) { const from = hhmm(rule && rule.from); return from !== null && from === hhmm(rule && rule.to); }
+/** r5409: a time window in a person's words, said under its two times in the editor: «the whole day» when both are the same time,
+ *  else '' (the two times say it themselves: both minutes inside). `t` = the caller's translator. */
+function windowWords(rule, t = (s) => s) { return windowWhole(rule) ? t('the whole day') : ''; }
+
 /** `HH:MM` → minutes since midnight, or null. */
 function hhmm(v) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(str(v).trim());
@@ -640,7 +646,7 @@ function ruleWhy(rule) {
     case 'fact': return `fact ${rule.key} == "${rule.value}"`;
     case 'has-attachment': return 'has attachment';
     case 'not-contains': return `does not contain "${rule.value}"`;
-    case 'time-window': return `within ${rule.from}-${rule.to}`;
+    case 'time-window': return `within ${rule.from}-${rule.to}${windowWhole(rule) ? ' (the whole day)' : ''}`;
     case 'reply-to-mine': return WHY_REPLY;
     case 'in-thread-with-me': return WHY_THREAD;
     case 'reply-to-sent': return rule.infer === true ? `${WHY_SENT} (plain messages judged)` : WHY_SENT;
@@ -905,7 +911,12 @@ function ruleHits(rule, record, ctx) {
       const minutes = Math.floor((local % DAY_MS + DAY_MS) % DAY_MS / 60000);
       const from = hhmm(rule.from), to = hhmm(rule.to);
       if (from === null || to === null) return false;
-      return from <= to ? (minutes >= from && minutes < to) : (minutes >= from || minutes < to);   // a window past midnight wraps
+      // r5409 (lane bl-loop-a): A WINDOW MEANS WHAT ITS WORDS SAY — «arrives between A and B» of whole minutes holds BOTH minutes a
+      // person names, and past midnight it wraps the same way; the same time twice is one full turn of the clock: THE WHOLE DAY. The
+      // release left the end minute out (00:00–23:59 missed 23:59 every day) and an equal-times window matched nothing. Read at match
+      // time: a stored rule means this at once, nothing rewritten
+      if (from === to) return true;
+      return from < to ? (minutes >= from && minutes <= to) : (minutes >= from || minutes <= to);   // both minutes inside; a window past midnight wraps
     }
     case 'reply-to-mine': case 'in-thread-with-me': case 'reply-to-sent': return placeHit(rule, rec, ctx) !== null;
     case 'fact': return factValuesOf(rec, rule.key).some((x) => x === lower(rule.value));
@@ -1990,7 +2001,7 @@ module.exports = {
   RULE_KINDS, PLACE_RULE_KINDS, SENT_WINDOW_MS, SENT_MAX, SENT_WHYS, WHY_SENT, sentHit, INFER, INFER_WHY, INFER_WHY_BETWEEN, TURN_KINDS, turnKindOf, inferBetween, inferBetweenLine, inferKeyOf, inferRuleOf, inferCandidate, inferHit, inferWorth, threadOnlyCaps, hasSentRule, splitFilter, MATCH_MODES, PRINCIPAL_KINDS, ASSIGN_MODES, NOTIFY_MODES, AUTHORITIES,
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
-  validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, placeHit, PLACE_WHYS, matchRecord, estimate,
+  validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, windowWords, placeHit, PLACE_WHYS, matchRecord, estimate,
   // lane decision-rule: the `decision` kind — its bounds, the pre-judge's key + question, the verdict, the cost line
   DECISION, decisionKeyOf, decisionQuestion, decisionHit, decisionRulesOf, isRouteRule, routeNames, decisionThreshold, decisionPerHour, decisionCost,
   validateAssignment, ASSIGN_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, digestCap, pruneLedger, countSince,

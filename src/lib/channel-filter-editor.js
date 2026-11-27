@@ -834,7 +834,14 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       case 'sender-in-group': bind(textInput(Array.isArray(rule.members) ? rule.members.join(', ') : (rule.value || ''), t('ids or names, comma-separated')), 'members', (v) => v.split(',').map((x) => x.trim()).filter(Boolean)); break;
       case 'has-attachment': case 'reply-to-mine': case 'in-thread-with-me': break;
       case 'reply-to-sent': fields.appendChild(noteEl(t('Set this on a group to cover each of its agents for their own sends — a reply notifies only the agent whose message it answers.'))); row._extra = inferBlock(rule, { changed }).el; break;   // + the judged road (lane dm-reply-infers)
-      case 'time-window': bind(textInput(rule.from || '09:00', 'HH:MM'), 'from'); bind(textInput(rule.to || '18:00', 'HH:MM'), 'to'); break;
+      case 'time-window': {   // r5409: both minutes inside; the same time twice is the whole day — said in words under the two times
+        const words = noteEl(F.windowWords(rule, t));
+        const say = () => { words.textContent = F.windowWords(rule, t); words.hidden = !words.textContent; };
+        const tw = (inp, k) => { inp.oninput = () => { rule[k] = inp.value; say(); changed(); }; fields.appendChild(inp); };
+        tw(textInput(rule.from || '09:00', 'HH:MM'), 'from'); tw(textInput(rule.to || '18:00', 'HH:MM'), 'to');
+        say(); fields.appendChild(words);
+        break;
+      }
       case 'fact': bind(textInput(rule.key, t('key, e.g. event')), 'key', (v) => v.trim()); bind(textInput(rule.value, t('value, e.g. deploy.failed')), 'value'); break;
       case 'decision': { const d = decisionBlock(rule, { principals, changed }); row._extra = d.el; decisionRows.add(d); if (decisionEst) d.onEstimate(decisionEst); break; }   // lane decision-rule
       default: break;

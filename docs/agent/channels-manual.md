@@ -313,7 +313,8 @@ The user gives you two DIFFERENT things, in this order:
     `--sender-in-group id[,id]` · `--has-attachment` · `--not-contains w[,w]` ·
     `--fact key=value` (a message FACT equals the value — a webhook path's mapped field, its
     `sender` / `subject` / `event`; never the raw body) ·
-    `--time-window HH:MM-HH:MM [--tz-offset ±minutes]` · `--reply-to-mine` ·
+    `--time-window HH:MM-HH:MM [--tz-offset ±minutes]` (both minutes inside; the same time twice is the whole day) ·
+    `--reply-to-mine` ·
     `--in-thread-with-me` · `--reply-to-sent` (a quote of a message YOU sent,
     a reply in its thread, or a reply in its mail thread — the vendor's own
     reply marker, never "any message after yours"; refused as

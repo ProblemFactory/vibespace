@@ -4855,6 +4855,7 @@ export default {
   "all messages": "全部消息",
   "any rule": "任一规则",
   "arrives between (HH:MM–HH:MM)": "到达时间在(HH:MM–HH:MM)",
+  "the whole day": "全天",
   "contains keyword": "包含关键词",
   "digest every {m} min": "每 {m} 分钟一份摘要",
   "does not contain": "不包含",

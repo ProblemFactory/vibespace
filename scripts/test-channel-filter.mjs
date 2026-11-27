@@ -100,6 +100,42 @@ console.log('② every rule kind, hit and miss');
   ok(one({ kind: 'time-window', from: '09:00', to: '18:00' }, at10) && !one({ kind: 'time-window', from: '09:00', to: '18:00' }, at22), 'time-window: inside / outside (UTC)');
   ok(one({ kind: 'time-window', from: '21:00', to: '02:00' }, at22) && !one({ kind: 'time-window', from: '21:00', to: '02:00' }, at10), 'time-window: a window past midnight wraps');
   ok(one({ kind: 'time-window', from: '11:00', to: '12:00', tzOffsetMinutes: 60 }, at10), 'time-window: tzOffsetMinutes shifts the clock (10:30Z = 11:30 at +60)');
+  // r5409 (lane bl-loop-a): A WINDOW MEANS WHAT ITS WORDS SAY («arrives between A and B», in three languages) — BOTH minutes a person
+  // names are inside; past midnight the same; the same time twice is THE WHOLE DAY; a rule in its STORED shape (never validated again)
+  // reads the same at once (nothing rewritten). Every instant from NOW's own day boundary. RED: the release's half-open line in a copy
+  const at = (h, m, sec = 30) => rec(9, { at: day0 + h * H + m * 60e3 + sec * 1e3 });
+  const raw = (FF, rule, r) => FF.matchRecord({ match: 'any', rules: [rule] }, r).hit;   // the stored shape: no validateRule
+  const W918 = { kind: 'time-window', from: '09:00', to: '18:00' }, ALLD = { kind: 'time-window', from: '00:00', to: '23:59', tzOffsetMinutes: 0 };
+  const WRAP = { kind: 'time-window', from: '21:00', to: '02:00' }, SAME = { kind: 'time-window', from: '09:00', to: '09:00' };
+  const SAMEAT = [[0, 0, 0], [8, 59], [9, 0, 0], [13, 30], [23, 59]];
+  const lawOf = (FF) => ({
+    end: raw(FF, W918, at(18, 0)) && !raw(FF, W918, at(18, 1, 0)) && raw(FF, W918, at(9, 0, 0)),
+    allDay: raw(FF, ALLD, at(23, 59)) && raw(FF, ALLD, at(0, 0, 0)) && raw(FF, { ...ALLD, tzOffsetMinutes: 60 }, at(22, 59)),
+    wrap: raw(FF, WRAP, at(2, 0)) && !raw(FF, WRAP, at(2, 1, 0)) && raw(FF, WRAP, at(21, 0, 0)),
+    same: SAMEAT.every(([h, m, sec]) => raw(FF, SAME, at(h, m, sec))),
+  });
+  const L = lawOf(F);
+  ok(L.end && one(W918, at(18, 0)) && !one(W918, at(18, 1, 0)), 'time-window: BOTH minutes it names are inside — 18:00:30 in 09:00–18:00, 18:01 not, 09:00:00 in (r5409)', L);
+  ok(L.allDay && one(ALLD, at(23, 59)), 'time-window: 00:00–23:59 is the whole day — 23:59:30 in (in UTC and at +60), 00:00:00 in; a rule in its stored shape the same (r5409)', L);
+  ok(L.wrap, 'time-window: past midnight the same — 02:00:30 in 21:00–02:00, 02:01 not, 21:00:00 in (r5409)', L);
+  ok(L.same && F.validateRule(SAME).ok && SAMEAT.every(([h, m, sec]) => one(SAME, at(h, m, sec))), 'time-window: the same time twice (09:00–09:00) is THE WHOLE DAY — 00:00, 08:59, 09:00, 13:30, 23:59 in; validateRule takes it, so a stored one stays readable (r5409)', L);
+  {
+    const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    ok(F.windowWords(SAME) === 'the whole day' && F.windowWords({ ...SAME, from: '9:00' }) === 'the whole day' && F.windowWords(W918) === '' && F.windowWords(SAME, (x) => `«${x}»`) === '«the whole day»'
+      && F.ruleWhy(SAME) === 'within 09:00-09:00 (the whole day)' && F.ruleWhy(W918) === 'within 09:00-18:00' && zh.includes('"the whole day": "全天"') && ja.includes('"the whole day": "終日"'),
+      'the words: windowWords says «the whole day» for the same time twice (else nothing; through the caller\'s translator, its zh and ja rows), ruleWhy «within 09:00-09:00 (the whole day)» (r5409)');
+  }
+  {
+    const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+    const M = mutantCopies('chan-filter-window', REPO);
+    const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf8');
+    const CURE = "      if (from === to) return true;\n      return from < to ? (minutes >= from && minutes <= to) : (minutes >= from || minutes <= to);   // both minutes inside; a window past midnight wraps\n";
+    const FR = M.load('src/channel-filter.js', editAnchor(FSRC, CURE, "      return from <= to ? (minutes >= from && minutes < to) : (minutes >= from || minutes < to);   /* RED: the release's half-open window */\n", "src/channel-filter.js"), 'half-open-window');
+    const R = lawOf(FR), witness = raw(FR, W918, at10) && !raw(FR, W918, at22);   // law 1: the copy's own window branch answers (its plant read)
+    if (!witness) console.log('  ⊘ SKIP: RED (the release\'s half-open window, in a copy) — NOT JUDGED: its plant was not read (the copy\'s window branch did not answer 10:30 in, 22:00 out; 主开发 r5135 law 1)');
+    else ok(!R.end && !R.allDay && !R.wrap && !R.same, `RED (the release's half-open window, in a copy): the end minute, 00:00–23:59 at 23:59, the wrap's end and the same time twice all read OUT — each leg above red (${JSON.stringify(R)})`, R);
+    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+  }
   // lane channel-threads (spec §5.4): the two PLACE rules read `ctx.mine` (the owner's + this principal's sent ids),
   // THE classifier `ctx.kindOf(record)` and `ctx.threadOf(record)`; without that context they never hit (fail closed —
   // a wake is money). The full owner-decision-A table is ⑬.

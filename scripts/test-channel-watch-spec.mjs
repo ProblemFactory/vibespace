@@ -51,6 +51,14 @@ const ROWS = [
   [['--condition', 'what kind of message', '--choice', 'bug, question'], { rules: [{ kind: 'decision', condition: 'what kind of message', question: 'choice', choices: [{ value: 'bug', description: '' }, { value: 'question', description: '' }], threshold: 0.7, perHour: 20 }] }],
   [['--keyword', 'invoice', '--kind', 'decision', '--condition', 'asks me to pay it', '--match', 'every'], { match: 'every', rules: [{ kind: 'keyword', value: 'invoice' }, { kind: 'decision', condition: 'asks me to pay it', question: 'predicate', threshold: 0.7, perHour: 20 }] }],
 ];
+// r5409 (lane bl-loop-a): THE SAME TIME TWICE IS THE WHOLE DAY — the flag takes it (validateRule does: a stored one stays readable) and
+// the watch's own words say it
+{
+  const r = WS.watchSpecFromArgs(['--time-window', '09:00-09:00']);
+  const ru = r.spec && r.spec.filter && Array.isArray(r.spec.filter.rules) ? r.spec.filter.rules[0] : null;
+  const words = r.spec ? WS.watchWhatWords({ mode: 'filtered', filter: r.spec.filter }) : '';
+  ok(!!ru && ru.kind === 'time-window' && ru.from === '09:00' && ru.to === '09:00' && words.includes('within 09:00-09:00 (the whole day)'), `--time-window 09:00-09:00 is taken — the same time twice, the whole day — and the watch's words say it («${words}»)`, JSON.stringify(r).slice(0, 300));
+}
 const OKS = [];
 for (const [argv, want] of ROWS) {
   const r = WS.watchSpecFromArgs(argv);

@@ -11403,6 +11403,12 @@ route accepts. Invariants, one sentence each:
   `sender-in-group`, `from-address`, `subject`, `has-attachment`,
   `not-contains`, `time-window`); `validateRule`/`validateFilter` refuse by
   name, and a null or empty filter never hits (a wake is money — fail closed).
+- **A time window means what its words say (r5409, lane bl-loop-a):** «arrives between A and B» holds BOTH minutes
+  it names (09:00–18:00 includes 18:00; 00:00–23:59 is the whole day), past midnight the same (21:00–02:00 includes
+  02:00), and the same time twice is THE WHOLE DAY — said under the two times in the editor (`windowWords`) and in
+  `ruleWhy`. It is read at match time: a stored rule means it at once, nothing rewritten; `validateRule` takes equal
+  times (a refusal would make a stored watcher unreadable where the boot completes a grain write). Pin:
+  test-channel-filter ②.
 - **A refusal is STRUCTURE beside its sentence (a3 r4):** `{ok:false, code,
   error, kind?, max?}` — `error` stays the route's English contract (the CLI
   prints it), `code` (value-required / members-required / time-format /

@@ -323,6 +323,7 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
                                                      (billed turns) ask the user, who approves with one click. rules: --keyword w[,w]
                                                      --regex "pat" --mention name --from addr --subject "w" --sender-in-group id[,id]
                                                      --has-attachment --not-contains w --time-window HH:MM-HH:MM [--tz-offset ±min]
+                                                     (a time window holds both minutes it names; the same time twice is the whole day)
                                                      --reply-to-mine --in-thread-with-me --reply-to-sent [--infer]
                                                      (a word list: a comma between two digits stays in its word — 4,995 — and \\, is a comma)
                                                      (--infer: a plain message after your send, no quote / thread, is judged once
