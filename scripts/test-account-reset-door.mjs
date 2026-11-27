@@ -694,7 +694,7 @@ const LEGS = {
       && /this account refused it in the last minutes/.test(rows.quarantined1) && /^None of the 3 stopped conversations is tried now: this account refused them/.test(rows.quarantined3) && /automatic continues for this hour are used up/.test(rows.loopCap)
       && /paying for overage now, so a test there would be paid for/.test(rows.overageIn) && /Wait for the reset time shown, or turn the paid extra usage off at the vendor; the next limit report from a conversation on this account then says so\.$/.test(rows.overageIn)
       && /^Nothing was sent: this account pays for usage past its limit, so a test cannot tell a reset from a paid turn\. Wait for the reset time shown, or turn the paid extra usage off/.test(rows.overageAllowed)
-      && /cannot be read\. Only a conversation's own limit report on this account says it, and none has yet\. Wait for the reset time shown\.$/.test(rows.payUnknown)
+      && /cannot be read\. Only a conversation's own limit report on this account can say that it cannot bill, and none has said so yet\. Wait for the reset time shown\.$/.test(rows.payUnknown)
       && rows.checking === 'A stopped conversation on this account is being checked now; nothing more is sent until that check answers.'
       && ![rows.overageIn, rows.overageAllowed, rows.payUnknown].some((x) => /Read the account's usage first/.test(x)) && rows.restoring === ''   // r5505 (3): no remedy names a road that cannot state the fact (stale-pins: kept — an absence check)
       && rows.out === 'A continue on this account was recorded at T1000 and has not answered. If nothing has started by T601000, mark it again.'
@@ -721,13 +721,14 @@ const LEGS = {
   // (Fable open), two armed conversations on A and one on B. The first that auto-resume accepts is asked through fireNowOnClaim, on the
   // press, for A; every other answer of the test said by its code; nothing asked on a model's cap mark, a continue out, another limit
   async 'press-test'(T) {
-    // B-9a24 U1 follow (主开发 r5474): the paying state is read BEFORE the door — a world states «overage not in use» unless a leg plants
+    // B-9a24 U1 follow (主开发 r5474 / r5517): the paying state is read BEFORE the door — a world states that the account CANNOT bill (its overage
+    // rejected, a disabled reason: the one positive fact) unless a leg plants
     // otherwise; a gate in flight is out; the breaker's own reasons; a mark on several limits lets no cap lane decide
-    const mk = (fire, { outs = [], sessions = [['s1', 'A'], ['s2', 'A'], ['s3', 'B']], stops = {}, overage = 'off', fable = 0.1, tree = T, flying = [] } = {}) => {
+    const mk = (fire, { outs = [], sessions = [['s1', 'A'], ['s2', 'A'], ['s3', 'B']], stops = {}, overage = 'disabled', fable = 0.1, tree = T, flying = [] } = {}) => {
       const calls = [];
       const w = engineWorld(tree, { ar: { firePendingMs: 600000, armedIds: () => sessions.map(([sid]) => sid), firesOutOn: () => outs, fireNowOnClaim: (sid, why, o) => { calls.push({ sid, on: o && o.on, pressed: o && o.pressed }); return fire(sid, calls.length); } } });
       const raw = JSON.parse(fs.readFileSync(path.join(w.cacheDir, w.id.A + '.json'), 'utf8'));
-      const ov = overage === 'off' ? { overage: { inUse: false, asOf: Date.now() } } : overage === 'in-use' ? { overage: { inUse: true, asOf: Date.now(), resetsAt: S + 20 * 86400 } }
+      const ov = overage === 'off' ? { overage: { inUse: false, asOf: Date.now() } } /* r5517: a BARE «not in use», no state — unknown */ : overage === 'in-use' ? { overage: { inUse: true, asOf: Date.now(), resetsAt: S + 20 * 86400 } }
         : overage === 'allowed' ? { overage: { inUse: false, status: 'allowed', asOf: Date.now() } }   // r5505 (2): extra usage on, not in use yet
         : overage === 'disabled' ? { overage: { status: 'rejected', disabledReason: 'org_level_disabled', asOf: Date.now() } } : {};   // r5505 (3): the vendor says it cannot bill
       fs.writeFileSync(path.join(w.cacheDir, w.id.A + '.json'), JSON.stringify({ ...raw, ...ov, fiveHour: { ...raw.fiveHour, utilization: 1.0 }, scopedWeekly: [{ ...raw.scopedWeekly[0], utilization: fable }] }));
@@ -751,6 +752,7 @@ const LEGS = {
     const payUnknown = await run(sent, [K(T).five], { overage: 'none' });
     const overageAllowed = await run(sent, [K(T).five], { overage: 'allowed' });
     const overageDisabled = await run(sent, [K(T).five], { overage: 'disabled' });
+    const bareNo = await run(sent, [K(T).five], { overage: 'off' });   // r5517: «not in use» and nothing more is no fact that it cannot bill
     const cap = await run(sent, [K(T).fable]);
     const mixed = await run(sent, [K(T).five, K(T).fable], { fable: 1.0 });
     const capStopped = await run(sent, [K(T).five], { stops: { s1: { bucket: 'scoped' }, s2: { bucket: 'scoped' } } });
@@ -763,7 +765,7 @@ const LEGS = {
       && code(refused) === 'refused' && refused.t.why === 'overage-in-use' && refused.calls.length === 1 && code(unpressed) === 'not-pressed'
       && code(out) === 'out' && out.t.until === out.t.at + 600000 && none(out) && code(flight) === 'checking' && none(flight)
       && code(overageIn) === 'overage-in-use' && none(overageIn) && code(payUnknown) === 'paying-unknown' && none(payUnknown)
-      && code(overageAllowed) === 'overage-allowed' && none(overageAllowed) && code(overageDisabled) === 'tried' && overageDisabled.calls.length === 1
+      && code(overageAllowed) === 'overage-allowed' && none(overageAllowed) && code(overageDisabled) === 'tried' && overageDisabled.calls.length === 1 && code(bareNo) === 'paying-unknown' && none(bareNo)
       && code(cap) === 'cap' && none(cap) && code(mixed) === 'other-limit' && none(mixed) && code(capStopped) === 'cap' && none(capStopped)
       && code(other) === 'other-limit' && none(other) && code(nobody) === 'nobody' && nobody.t.m === 1 && none(nobody);
     // RED CONTROL (r5474 (1); law 1: judged on its witness): the base's door — the engine with no paying-state refusal — SENDS the test on an
@@ -778,18 +780,23 @@ const LEGS = {
       fs.mkdirSync(path.join(M, 'src', 'server'), { recursive: true });
       for (const e of fs.readdirSync(path.join(T, 'src'))) if (e !== 'server') lnk(path.join('src', e));
       for (const e of fs.readdirSync(path.join(T, 'src', 'server'))) if (e !== 'usage-pool-engine.js') lnk(path.join('src', 'server', e));
-      const mut = editAnchor(ENG, PLANT_FROM, "  const pay = { inUse: 'no', mode: 'unknown' };   // the plant: no paying state read (the base's door)", 'src/server/usage-pool-engine.js');
+      const mut = editAnchor(ENG, PLANT_FROM, "  const pay = { inUse: 'no', mode: 'disabled' };   // the plant: no paying state read, every test sent (the base's door)", 'src/server/usage-pool-engine.js');
       fs.writeFileSync(path.join(M, 'src/server/usage-pool-engine.js'), mut);
       planted = mut.includes("the plant: no paying state read");
       red = await run(sent, [K(T).five], { overage: 'in-use', tree: M });
       redAllowed = await run(sent, [K(T).five], { overage: 'allowed', tree: M });   // r5505 (2): the base's door sends on extra usage on, too
     }
     const said = (x) => (x.refusedClaim ? `claim refused (${x.refusedClaim})` : `${JSON.stringify(x.t)} · ${x.calls.length} asked`);
-    const detail = `tried ${said(tried)} · second accepted ${said(second)} · fire pending ${said(recent)} · quarantined ${said(quarantined)} · its hourly cap ${said(loopCap)} · the door refused ${said(refused)} · not pressed ${said(unpressed)} · a continue out ${said(out)} · a gate in flight ${said(flight)} · paid overage in use ${said(overageIn)} · paying state unread ${said(payUnknown)} · extra usage on, not in use ${said(overageAllowed)} · overage disabled by the vendor ${said(overageDisabled)} · a model's cap mark ${said(cap)} · a mark on the 5h AND the spent cap ${said(mixed)} · every candidate cap-stopped ${said(capStopped)} · another limit spent ${said(other)} · nobody on A ${said(nobody)}`;
+    const detail = `tried ${said(tried)} · second accepted ${said(second)} · fire pending ${said(recent)} · quarantined ${said(quarantined)} · its hourly cap ${said(loopCap)} · the door refused ${said(refused)} · not pressed ${said(unpressed)} · a continue out ${said(out)} · a gate in flight ${said(flight)} · paid overage in use ${said(overageIn)} · paying state unread ${said(payUnknown)} · extra usage on, not in use ${said(overageAllowed)} · overage disabled by the vendor ${said(overageDisabled)} · a bare «not in use» ${said(bareNo)} · a model's cap mark ${said(cap)} · a mark on the 5h AND the spent cap ${said(mixed)} · every candidate cap-stopped ${said(capStopped)} · another limit spent ${said(other)} · nobody on A ${said(nobody)}`;
     if (!mine) return { ok, detail };
     if (!planted || !red || !redAllowed) { skip(`press-test RED CONTROL (the base's door): its plant was not in force (anchor ${ENG.split(PLANT_FROM).length - 1}×) — not judged`); return { ok, detail }; }
     const redOk = code(red) === 'tried' && red.calls.length === 1 && code(redAllowed) === 'tried' && redAllowed.calls.length === 1;
-    return { ok: ok && redOk, detail: `${detail} || RED CONTROL, the base's door (no paying state read): paid overage in use ⇒ ${said(red)} · extra usage on, not in use ⇒ ${said(redAllowed)} (${redOk ? 'both sent, as the base sends them' : 'NOT the base\'s answer'})` };
+    // r5517's RED (law 1, on its witness): TODAY's reader (dbbb0d4d0's: a stated «no» read as cannot-bill) SENDS the bare «not in use» world's test
+    const cp17 = engineCopyOf(T, "  if (pay && pay.mode === 'disabled') return null;", "  if (pay && (pay.mode === 'disabled' || pay.inUse === 'no')) return null;   // the plant: today's reader (a bare «not in use» sends)", 'bareno');
+    const redBare = cp17.planted ? await run(sent, [K(T).five], { overage: 'off', tree: cp17.M }) : null;
+    if (!redBare) skip('press-test RED CONTROL (today\'s reader on a bare «not in use»): its plant was not in force — not judged');
+    const redBareOk = !redBare || (code(redBare) === 'tried' && redBare.calls.length === 1);
+    return { ok: ok && redOk && redBareOk, detail: `${detail} || RED CONTROL, the base's door (no paying state read): paid overage in use ⇒ ${said(red)} · extra usage on, not in use ⇒ ${said(redAllowed)} (${redOk ? 'both sent, as the base sends them' : 'NOT the base\'s answer'}) || RED CONTROL, today's reader: a bare «not in use» ⇒ ${redBare ? said(redBare) : 'not judged'} (${redBare ? (redBareOk ? 'sent, as today\'s reader sends it' : 'NOT today\'s answer') : 'skipped'})` };
   },
   // B-9a24 U1 (主开发 r4778 §1.3, r5330 (10c)): THE PRESS's GATE — no pool switch; the probe of THAT member through the tree's one probe (the
   // usage read's door: under Off row B-5279's fence refuses it and nothing starts — here a STAND-IN probe that answers the fence's refusal;
@@ -802,8 +809,8 @@ const LEGS = {
     const world = (tree) => {
       const x = engineWorld(tree, { probe });
       const raw = JSON.parse(fs.readFileSync(path.join(x.cacheDir, x.id.A + '.json'), 'utf8'));
-      // the world states «overage not in use» (r5474 / r5505: a paying state that cannot be read sends no test)
-      fs.writeFileSync(path.join(x.cacheDir, x.id.A + '.json'), JSON.stringify({ ...raw, overage: { inUse: false, asOf: Date.now() }, fiveHour: { ...raw.fiveHour, utilization: 1.0 }, scopedWeekly: [{ ...raw.scopedWeekly[0], utilization: 0.1 }] }));
+      // the world states that A CANNOT bill (r5517: the one positive fact — its overage rejected, a disabled reason)
+      fs.writeFileSync(path.join(x.cacheDir, x.id.A + '.json'), JSON.stringify({ ...raw, overage: { status: 'rejected', disabledReason: 'org_level_disabled', asOf: Date.now() }, fiveHour: { ...raw.fiveHour, utilization: 1.0 }, scopedWeekly: [{ ...raw.scopedWeekly[0], utilization: 0.1 }] }));
       return x;
     };
     const w = world(T);
@@ -851,7 +858,7 @@ const LEGS = {
       const x = engineWorld(tree, { probe, ar: { firePendingMs: 600000, armedIds: () => real.armedIds(), firesOutOn: (k, n) => real.firesOutOn(k, n), fireNowOnClaim: (...a) => real.fireNowOnClaim(...a) } });
       if (typeof x.eng.claimPressTest !== 'function' || typeof x.eng.beforeClaimFire !== 'function' || typeof AR.create !== 'function') return null;
       const raw = JSON.parse(fs.readFileSync(path.join(x.cacheDir, x.id.A + '.json'), 'utf8'));
-      fs.writeFileSync(path.join(x.cacheDir, x.id.A + '.json'), JSON.stringify({ ...raw, overage: { inUse: false, asOf: Date.now() }, fiveHour: { ...raw.fiveHour, utilization: 1.0 }, scopedWeekly: [{ ...raw.scopedWeekly[0], utilization: 0.1 }] }));
+      fs.writeFileSync(path.join(x.cacheDir, x.id.A + '.json'), JSON.stringify({ ...raw, overage: { status: 'rejected', disabledReason: 'org_level_disabled', asOf: Date.now() }, fiveHour: { ...raw.fiveHour, utilization: 1.0 }, scopedWeekly: [{ ...raw.scopedWeekly[0], utilization: 0.1 }] }));
       const s1 = x.mkSession('s1', 'A'), s2 = x.mkSession('s2', 'A');
       s1._autoResume = true; s2._autoResume = true;
       const sent = [], gates = [];

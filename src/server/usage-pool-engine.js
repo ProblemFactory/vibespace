@@ -4189,21 +4189,22 @@ function linkHold(session, scope, model, v, at) {
 }
 /** B-9a24 U1 follow (主开发 r5474 (1), r5505 (1)–(3)): A TEST THAT CAN BILL PROVES NOTHING — this press's paying verdict on `key`, by the spend
  *  authorizer's one reader (overageState; neither guard file changes), asked BEFORE the door (claimPressTest) and AGAIN inside the gate
- *  after its wait (claimGate). → null (the test may go: overage stated not in use, or the vendor's record says overage is rejected /
- *  disabled for this account — it cannot bill) | { code, why }: 'overage-in-use' · 'overage-allowed' (extra usage on, not in use yet:
- *  past the limit a turn is PAID by the vendor's rule) · 'paying-unknown' (the reading unread, the fact not stated again after damaged
- *  bytes, or no overage state at all). WHO STATES THIS FACT: only a turn's own limit report (src/rate-limit-capture.js, the CLI's
- *  rate_limit_event: isUsingOverage / overageStatus / overageDisabledReason); a usage read never writes it (the usage answer's money
- *  figure is `spend`, a different field). A «no» is read at any age (the undated «no» stays: nothing refreshes it at a wall). */
+ *  after its wait (claimGate). → null ONLY ON A POSITIVE FACT THAT THE ACCOUNT CANNOT BILL (主开发 r5517): the record itself says why — its
+ *  overage rejected or a disabled reason (overageState mode «disabled»; read at any age, an org's setting) | { code, why }:
+ *  'overage-in-use' · 'overage-allowed' (extra usage on, not in use yet: past the limit a turn is PAID by the vendor's rule) ·
+ *  'paying-unknown' (the reading unread, the fact not stated again after damaged bytes, no overage state at all, OR a bare «not in use»
+ *  with no state — it fits an account with paid extra usage switched on; the pool's «does not bill» is said on a positive fact only, the
+ *  same rule: r5294 / r5333). WHO STATES THIS FACT: only a turn's own limit report (src/rate-limit-capture.js, the CLI's
+ *  rate_limit_event: isUsingOverage / overageStatus / overageDisabledReason); a usage read never writes it. The usage answer's money
+ *  figure (`spend`) is NO evidence either way: it is carried through rebuilds and can outlive the setting. */
 function pressPayingRefusal(key) {
   const raw = readRawReading(key);
   const unread = raw === usageWrite.UNREAD_READING || !raw || (typeof raw === 'object' && (raw.held === 'unread' || (typeof usageWrite.restartUnknowns === 'function' && usageWrite.restartUnknowns(raw).includes('overage'))));
   const pay = unread ? null : overageState(raw);
   if (pay && pay.inUse === 'yes') return { code: 'overage-in-use', why: 'the account is billing paid overage now' };
   if (pay && pay.mode === 'allowed') return { code: 'overage-allowed', why: 'the account pays for usage past its limit (extra usage on, not in use yet)' };
-  if (pay && pay.mode === 'disabled') return null;   // the vendor's own record: overage rejected / disabled here — the account cannot bill a test
-  if (!pay || pay.inUse !== 'no') return { code: 'paying-unknown', why: `whether the account would pay for one cannot be read (${unread ? 'its reading is not read' : `overage ${pay.evidence}`})` };
-  return null;
+  if (pay && pay.mode === 'disabled') return null;   // THE ONE POSITIVE FACT: the vendor's own record says overage is rejected / disabled here — it cannot bill a test
+  return { code: 'paying-unknown', why: `whether the account would pay for one cannot be read (${unread ? 'its reading is not read' : pay.inUse === 'no' ? 'its record says «not in use» but not why it cannot bill' : `overage ${pay.evidence}`})` };
 }
 /** B-9a24 U1 (主开发 r4778 §1.3, r5330): THE PRESS's GATE — one test of one person's mark. NO pool switch; the shared probe of THAT member
  *  (row B-5279's fence answers a refusal under Off: nothing is started); then that member's OWN verdict with the mark laid on for that one
