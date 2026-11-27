@@ -20,7 +20,12 @@
 //   first reading of this leg took the _arranged line out alone and the block still held them — the red takes out both.)
 // PICTURES: USAGE_READS_OFF_PNG_DIR (default: the scratch dir) readsoff-<off|held>-<lang>-<width>.png (the strip) and
 // …-pressed.png (the strip and what opened below it); each is ALSO printed into the suite's output as base64 lines
-// («PICTURE <name> <i>/<n> <chunk>»), so they come back wherever the whole output is kept (the test machine's heavy part).
+// («PICTURE <name> <i>/<n> <chunk>»), so they come back wherever the whole output is kept (the test machine's heavy part) — printed
+// only when no folder is named (a named folder holds them).
+// THE PICTURES RECIPE (主开发 r5350: the strip and the mark at each width, in en, zh and ja, stand-in data only): two knobs widen the
+// run — USAGE_READS_OFF_LANGS (a comma list of en, zh, ja; default en,zh) and USAGE_READS_OFF_WIDTHS (a comma list of window widths,
+// 240–1600; default 1200,390; 430 and under is a phone: mobile emulation at 2×). Every law is judged at every width asked; the red
+// controls stay at 1200 and 390 px.
 // No hub, no network, no sign-in, no vendor program: a stub app around the real modules; every other /api read answers {}.
 // 主开发 r5135: LAW 1 — each red control is judged on a WITNESS that the page read its plant (a counter the planted text bumps; the
 // stylesheet's plant read off the computed style); a plant never read is a NAMED SKIP, never a red, never a green. LAW 2 — the mark
@@ -47,8 +52,11 @@ const ROOT = scratch('usage-reads-off-chrome'); fs.mkdirSync(ROOT, { recursive: 
 const PNG_DIR = process.env.USAGE_READS_OFF_PNG_DIR || path.join(ROOT, 'png'); fs.mkdirSync(PNG_DIR, { recursive: true });
 const ROW = 'accounts.onDemandQuotaRefresh';
 const REASONS = [{ code: 'refresh-off', tag: 'off' }, { code: 'refresh-held', tag: 'held' }];
-const LANGS = ['en', 'zh'];
-const SIZES = [{ w: 1200, phone: false, vw: 1300, vh: 900, dsf: 1, winW: 760, winH: 600 }, { w: 390, phone: true, vw: 390, vh: 844, dsf: 2, winW: 390, winH: 660 }];
+const LANGS = String(process.env.USAGE_READS_OFF_LANGS || 'en,zh').split(',').map((s) => s.trim()).filter((l) => ['en', 'zh', 'ja'].includes(l));
+/** a window width → its page: a phone (≤ 430 px: mobile emulation at 2×, the Settings window as wide as the screen) or a desk window */
+const sizeOf = (w) => (w <= 430 ? { w, phone: true, vw: w, vh: 844, dsf: 2, winW: w, winH: 660 } : { w, phone: false, vw: w + 100, vh: 900, dsf: 1, winW: Math.min(760, w), winH: 600 });
+const SIZES = String(process.env.USAGE_READS_OFF_WIDTHS || '1200,390').split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n) && n >= 240 && n <= 1600).map(sizeOf);
+const PRINT = !process.env.USAGE_READS_OFF_PNG_DIR;   // the PICTURE lines: only when no folder is named
 // the mark's words (src/lib/chat-status-bar.js): [its face, its title]
 const WORDS = {
   'refresh-off': ['Usage reads are off', 'Usage reads are off, so this conversation continues when you resume it — press to open the setting.'],
@@ -161,7 +169,7 @@ async function pageServer(reason) {
   web.get('/api/settings', GET_SETTINGS[reason]);
   web.all(/^\/api\//, (req, res) => res.json({}));   // every other read of the page: nothing known (hides nothing)
   web.get('/', (req, res) => {
-    const lang = req.query.lang === 'zh' ? 'zh' : 'en', phone = req.query.phone === '1', w = Number(req.query.w) || 1200, pad = phone ? 0 : 12;
+    const lang = ['zh', 'ja'].includes(req.query.lang) ? req.query.lang : 'en', phone = req.query.phone === '1', w = Number(req.query.w) || 1200, pad = phone ? 0 : 12;
     const winW = Number(req.query.ww) || 760, winH = Number(req.query.wh) || 600, bundle = ['nodoor', 'noownrow'].includes(req.query.b) ? req.query.b : 'page';
     res.type('html').send(`<!doctype html><html data-theme="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <script>try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {}</script>
@@ -218,7 +226,7 @@ const shot = async (name, clip) => {
   const d = s.result && s.result.data;
   if (!d) { console.log(`    (no picture for ${name})`); return false; }
   const f = path.join(PNG_DIR, name); fs.writeFileSync(f, Buffer.from(d, 'base64')); pictures.push(f);
-  const n = Math.ceil(d.length / 4000); for (let i = 0; i < n; i++) console.log(`    PICTURE ${name} ${i + 1}/${n} ${d.slice(i * 4000, (i + 1) * 4000)}`);
+  const n = PRINT ? Math.ceil(d.length / 4000) : 0; for (let i = 0; i < n; i++) console.log(`    PICTURE ${name} ${i + 1}/${n} ${d.slice(i * 4000, (i + 1) * 4000)}`);
   return true;
 };
 const frameOf = (sel, m = 6) => ev(`(() => { const r = document.querySelector(${J(sel)}).getBoundingClientRect(); return { x: Math.max(0, r.left - ${m}), y: Math.max(0, r.top - ${m}), width: Math.min(innerWidth, r.width + ${2 * m}), height: r.height + ${2 * m} }; })()`);
@@ -252,7 +260,7 @@ try {
     }
   }
   // RED CONTROL — the bar without its door: a press on the same mark opens nothing; the real bar (above) opened it
-  const S = SIZES[0];
+  const S = sizeOf(1200);
   if (await open('refresh-off', 'en', S, 'nodoor')) {
     const m = await ev('window.painted().then(() => window.mark())');
     const landed = !!m && !!m.mid && (await press(MARK));   // (the red control's mark, measured painted below its press)
@@ -264,7 +272,7 @@ try {
   } else ok(false, 'the red control\'s page booted');
   // RED CONTROL — THE CURE TAKEN OUT (the bar without the mark's own row AND chat.css without its whole-words block): at 390 px its
   // words are cut again, as in the first pictures
-  if (await open('refresh-off', 'en', SIZES[1], 'noownrow', 'pre')) {
+  if (await open('refresh-off', 'en', sizeOf(390), 'noownrow', 'pre')) {
     const m = await ev('window.painted().then(() => window.mark())'), pl = await ev('window.plants()');
     if (!(pl && pl.ownRow >= 1 && pl.flexBasis !== '100%' && pl.whiteSpace === 'nowrap')) skip(`RED CONTROL (the cure taken out): its plant was not in force (the planted _arranged line passed ${pl && pl.ownRow} times; the mark's flex-basis ${pl && pl.flexBasis}, its words' white-space ${pl && pl.whiteSpace}) — not judged`);
     else ok(!!m && m.chip && m.twoRows && !m.wordsWhole, 'RED CONTROL: the cure taken out (the bar without the mark\'s own row AND chat.css without its whole-words block) — at 390 px the words are cut again, so ② goes red (witness: the planted _arranged line passed, the mark drawn on the release\'s rules)', { m, pl });
