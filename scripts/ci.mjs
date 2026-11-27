@@ -2813,11 +2813,53 @@ export const FAST_RERUNS = 'data/ci-fast/reruns.jsonl';
 export const FAST_NO_RETRY = Object.freeze([
   { name: 'test-chat-e2e', why: 'the one real turn: a retry would bill a second one (§ban-safety)' },
 ]);
+/** PURE (lane bl-ci, 主开发 r5490 / r5501 — U1a): the names of a --fast-only list, or the refusal that NAMES its fault: an empty list, a list
+ *  that parses to no name, a name twice, a heavy suite, a name no fast row of the table carries (unknown or excluded). It never falls
+ *  back to the whole tier and never drops a name in silence (the trap of an --only that falls through to the tier). */
+export function fastOnlyNames(spec, suites = SUITES) {
+  if (typeof spec !== 'string' || !spec.trim()) return { refusal: 'the list is empty (name the fast suites: --fast-only=test-a,test-b)' };
+  const names = spec.split(',').map((x) => x.trim()).filter(Boolean);
+  if (!names.length) return { refusal: `the list «${spec}» parses to no name` };
+  const twice = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
+  if (twice.length) return { refusal: `named twice: ${twice.join(', ')}` };
+  const row = new Map(suites.map((x) => [x.name, x]));
+  const heavy = names.filter((n) => row.has(n) && row.get(n).tier === 'heavy');
+  if (heavy.length) return { refusal: `a heavy suite is no fast suite: ${heavy.join(', ')}` };
+  const none = names.filter((n) => !row.has(n) || row.get(n).tier !== 'fast');
+  if (none.length) return { refusal: `no fast row of the table names: ${none.join(', ')}` };
+  return { names };
+}
+/** PURE (U1a): the dispatcher's reading of --fast-only BEFORE anything runs: not given; or refused by name (the switch twice, a list
+ *  missing, any other mode beside it, any fault of the list); or the names. */
+export function fastOnlyArgs(argv, suites = SUITES) {
+  const is = (a) => a === '--fast-only' || a.startsWith('--fast-only=');
+  const at = argv.findIndex(is);
+  if (at < 0) return { given: false };
+  if (argv.filter(is).length > 1) return { given: true, refusal: 'the switch is given twice' };
+  const raw = argv[at] === '--fast-only' ? (argv[at + 1] && !argv[at + 1].startsWith('--') ? argv[at + 1] : '') : argv[at].slice('--fast-only='.length);
+  const MODES = ['heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'check-heavy', 'shard', 'fast-part', 'list-affected', 'census', 'hosts', 'status', 'reap', 'false-rows', 'shard-timings', 'only', 'affected'];
+  const other = MODES.filter((m) => argv.some((a) => a === '--' + m || a.startsWith('--' + m + '=')));
+  if (other.length) return { given: true, refusal: `it runs the named fast set alone and does not combine with ${other.map((m) => '--' + m).join(', ')}` };
+  const v = fastOnlyNames(raw, suites);
+  return v.refusal ? { given: true, refusal: v.refusal } : { given: true, names: v.names };
+}
+/** PURE (U1a): the named set's OWN lines — never a whole tier's («release gate — FAST tier …», «ALL GREEN — fast gate …»,
+ *  «release gate is RED»): no reader of a whole tier's line can take them for one, and each names what it ran. */
+export const fastOnlyOpening = ({ names, tierSize, isolate, sha, gapHead = '' }) =>
+  `named fast set — NOT the fast tier: build + ${names.length} suites by name (${names.join(', ')}; the tier holds ${tierSize})${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}${gapHead ? ` · ${gapHead}` : ''}`;
+export const fastOnlyGreen = ({ ran, secs, sha, isolate, gapTail = '', skippedLegs = [] }) =>
+  '\nONLY GREEN — the named fast set of ' + ran.length + ' suite(s) passed in ' + secs + 's ' + (isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)')
+  + (gapTail ? ' — BUT ' + gapTail : '') + skipCount(skippedLegs) + ' — NOT the fast tier: ' + ran.join(', ');
+const fastOnlyRed = (reds, skippedLegs = [], gap = '') => `\n✗ ${reds.join(', ')}${gap ? ` — apart from these reds, ${gap}` : ''} — the NAMED fast set is RED (not the fast tier), do not push${skipCount(skippedLegs)}\n`;
+/** PURE (U1a): a named set that ran SHORT — a named suite absent at the gated commit, or skipped by name — is no green and no «no verdict»:
+ *  its own red line names what did not run (r5501: it never runs a subset silently). */
+export const fastOnlyShort = ({ short, named, sha, gap = '' }) =>
+  `\n✗ the named fast set is SHORT at ${shortSha(sha)}: ${short.join(', ')} did not run (absent at the gated commit, or skipped by name) — ${named - short.length} of its ${named} named suites ran${gap ? ` — ${gap}` : ''} (not the fast tier), do not push\n`;
 /** THE FAST TIER'S CLOSING (B-d24c (3)'s follow-up) — PURE: the lines a run that ended prints and its exit code. Every red is
  *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
  *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
  *  → { out: [['log' | 'err', line]], code: 1 | null } (null: no red — the caller goes on to its other checks) */
-export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env, gap = '' } = {}) {
+export function fastClosing({ only = null, reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env, gap = '' } = {}) {
   if (!Array.isArray(reds)) throw new TypeError('fastClosing: reds is not a list — a closing never reads a missing fact as «no red»');   // (the verdict's own fact has no default: the run crashes, exit 1)
   const out = [];
   if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`]);
@@ -2826,6 +2868,7 @@ export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = fa
   // a workflow command's message escapes %, CR and LF (GitHub's rule); suite names hold none, the escape keeps it so
   const ghEsc = (t) => String(t).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
   if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}`)}`]);
+  if (reds.length && only) { out.push(['err', fastOnlyRed(reds, skippedLegs, gap)]); return { out, code: 1 }; }   // U1a: the named set's red is of its own kind
   if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')}${gap ? ` — apart from these reds, ${gap}` : ''} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; }   // gap: an isolated run's rows not run (fastGapWords) // (B-4829: the verdict line carries the skip count)
   return { out, code: null };
 }
@@ -5332,7 +5375,7 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
  * and printed ALL GREEN. The closing line now NAMES its subject either way, so
  * "ALL GREEN" can never again be a sentence about a tree nobody is publishing.
  */
-async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null } = {}) {
+async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null, only = null } = {}) {
   const t0 = Date.now(), l0 = load1();
   markCiRun('fast');
   const tier = SUITES.filter((s) => s.tier === 'fast');
@@ -5357,11 +5400,13 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     // THE GATED COMMIT's OWN TABLE (主开发 r3754 / r3758): an isolated run reads it as TEXT (fastTableGapAt) and SAYS the fast rows the
     // running table does not run, in its opening line, by name under it, and on every closing line below; in place it is one table
     const gapW = fastGapWords(isolate ? fastTableGapAt(repo, sha) : null);
-    const lanes = fastLaneCount();
+    const lanes = only ? 1 : fastLaneCount();   // U1a: a named set runs ONE suite at a time, whatever VIBESPACE_CI_FAST_LANES says
     const sourceOf = (name) => { try { return fs.readFileSync(path.join(runRoot, 'scripts', name + '.mjs'), 'utf-8'); } catch { return ''; } };
     if (part) fast = fastPartPlan(tier, part.n, { sourceOf }).parts[part.i - 1];
+    if (only) fast = tier.filter((s) => only.includes(s.name));   // U1a --fast-only: the named set, in the table's order (main refused every fault of its list)
     const plan = scheduleFastLanes(fast, { sourceOf });
-    console.log(`release gate — FAST tier${part ? ` PART ${part.i}/${part.n} (${fast.length} of its ${tier.length} suites)` : ''}: build + ${fast.length} suites (heavy tier: ${SUITES.filter((s) => s.tier === 'heavy').length} suites, runs after the push)${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}${gapW.head ? ` · ${gapW.head}` : ''}`);
+    if (only) console.log(fastOnlyOpening({ names: fast.map((s) => s.name), tierSize: tier.length, isolate, sha, gapHead: gapW.head }));
+    else console.log(`release gate — FAST tier${part ? ` PART ${part.i}/${part.n} (${fast.length} of its ${tier.length} suites)` : ''}: build + ${fast.length} suites (heavy tier: ${SUITES.filter((s) => s.tier === 'heavy').length} suites, runs after the push)${isolate ? ` — ISOLATED worktree at ${shortSha(sha)}` : ''}${gapW.head ? ` · ${gapW.head}` : ''}`);
     if (gapW.list) console.log(gapW.list);
     if (!runBuild({ cwd: runRoot }).ok) { console.error(`\n✗ build FAILED — release gate is RED, do not push${gapW.tail ? ` — ${gapW.tail}` : ''}\n`); return 1; }
     if (!runSecretScan({ cwd: runRoot, sha }).ok) { console.error(`\n✗ secret-scan RED — release gate is RED, do not push (GitHub push protection refuses these shapes: build token shapes at runtime by concatenation)${gapW.tail ? ` — ${gapW.tail}` : ''}\n`); return 1; }
@@ -5388,7 +5433,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
       },
     });
     dirPace.boundary("the fast tier's end"); // B-9ec9: whatever the pace left since its last sweep
-    const closing = fastClosing({ reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env, gap: gapW.tail });
+    const closing = fastClosing({ only, reds, flaky, skippedLegs, keepGoing, ran: fast.length - absent.length - skippedByName.length, hangDir, part, env: process.env, gap: gapW.tail });
     for (const [w, l] of closing.out) (w === 'err' ? console.error : console.log)(l);
     if (closing.code === 1) return 1;
     // NOTHING RAN IS NOT A PASS. An old tag or a commit that predates the gate
@@ -5397,6 +5442,10 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     // typo guard already refuses elsewhere. It does NOT block the push — an
     // absence is not evidence of breakage, and blocking every old ref is the
     // defect this round is fixing — it just refuses to claim anything.
+    if (only && (absent.length || skippedByName.length)) {   // U1a: a named set that ran SHORT is red, in its own words — never green, never «no verdict»
+      console.error(fastOnlyShort({ short: [...absent, ...skippedByName], named: fast.length, sha, gap: gapW.tail }));
+      return 1;
+    }
     if (absent.length === fast.length) {
       console.log(`\nNO VERDICT — the fast tier could not gate ${shortSha(sha)}: none of its ${fast.length} suites exist at that commit (an old tag, or a commit that predates them). Nothing ran, so nothing is claimed; the push is not blocked by an absence.${gapW.tail ? ` — ${gapW.tail}` : ''}`);
       return 0;
@@ -5408,6 +5457,12 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null 
     const sum = timings.reduce((n, t) => n + t.ms, 0);
     console.log(`[ci] lanes: ${lanes} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round(serMs / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     for (const line of fastTimingReport(timings)) console.log(line);
+    if (only) {   // --fast-only (U1a): ITS OWN closing and NO marker — it returns before a whole tier's readings record, its ALL GREEN line and its green marker
+      const ranNames = fast.map((s) => s.name).filter((n) => !absent.includes(n) && !skippedByName.includes(n));
+      console.log(fastOnlyGreen({ ran: ranNames, secs: Math.round((Date.now() - t0) / 1000), sha, isolate, gapTail: gapW.tail, skippedLegs }));
+      console.log('[ci] green marker not written: a named fast set is not the whole fast tier');
+      return 0;
+    }
     if (!absent.length && !isolate && !part) { // a WHOLE in-place tier only (B-eedd; a part is no whole tier — B-7353): its readings recorded, its false rows SAID (the red is --false-rows)
       const falseRows = judgeFastReadings(fast, timings, sha, { load0: l0 });
       for (const f of falseRows) console.log(`[ci] WARNING: ${falseRowLine(f)} — not a red here (the verdict may not depend on load); \`node scripts/ci.mjs --false-rows\` is`);
@@ -6265,9 +6320,9 @@ export function exitFlushed(code) {
 // THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
 // flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
 // --help included — prints the usage and exits 2 before a suite starts.
-const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'fast-part', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'rules', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'tier', 'why']);
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'fast-only', 'fast-part', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'rules', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'tier', 'why']);
 const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
-  (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first · --fast-part=<i>/<n>: one part, the hosted fast jobs)
+  (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first · --fast-part=<i>/<n>: one part, the hosted fast jobs · --fast-only=<a,b>: a NAMED set of fast suites through the same lane — its own lines, never the tier, no marker)
   --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
   --heavy-launch <x>   a heavy run handed to a background child · --check-heavy / --status: the markers' verdict
   --heavy-verdict <sha> --gh-run <id> --markers=<dir>   the CI mirror's green run of exactly <sha>, verified through gh, as the HOSTED half's listed green (B-e381)
@@ -6299,6 +6354,11 @@ function main(argv) {
   const dir = str('markers') ? path.resolve(str('markers')) : undefined;
   const head = str('head') || undefined;
   const only = str('only') ? str('only').split(',').map((x) => x.trim()).filter(Boolean) : null;
+  // --fast-only=<a,b> (U1a, lane bl-ci, 主开发 r5490 / r5501): a NAMED set of fast suites through the fast gate's own road — the build, the
+  // tree's secret scan, the same lane, one suite at a time — step A's set on the production checkout. Every fault is refused BY NAME here,
+  // before anything runs: it never falls back to the whole tier, never runs beside another mode, and its lines are of their own kind.
+  const fastOnly = fastOnlyArgs(argv);
+  if (fastOnly.refusal) { console.error(`✗ --fast-only: ${fastOnly.refusal} — nothing started (a named set never falls back to the whole tier)`); return exitFlushed(2); }
   // The machine lock is real infrastructure, so a TEST must be able to drive
   // its own instead of contending with (or waiting 40 minutes for) the box's
   // actual heavy run — scripts/test-ci-heavy-launch.mjs passes both.
@@ -6353,6 +6413,11 @@ function main(argv) {
   const partArg = str('fast-part') !== null ? str('fast-part') : (argv.includes('--fast-part') ? (argv[argv.indexOf('--fast-part') + 1] || '') : null);
   const part = partArg === null ? null : parseShard(partArg);
   if (partArg !== null && !part) { console.error(`✗ --fast-part wants <i>/<n> with 1 ≤ i ≤ n (got «${partArg}») — nothing started`); return exitFlushed(2); }
+  if (fastOnly.names) {   // U1a: the named fast set's OWN call — the tier's call below stays as it is
+    fastGate({ sha: str('sha'), isolate: !!arg('isolate'), keepGoing: !!arg('keep-going'), only: fastOnly.names })
+      .then((code) => exitFlushed(code), (e) => { console.error('[ci] crashed: ' + (e && e.stack || e)); exitFlushed(1); });
+    return;
+  }
   fastGate({ sha: str('sha'), isolate: !!arg('isolate'), keepGoing: !!arg('keep-going'), part })
     .then((code) => exitFlushed(code), (e) => { console.error('[ci] crashed: ' + (e && e.stack || e)); exitFlushed(1); });
 }

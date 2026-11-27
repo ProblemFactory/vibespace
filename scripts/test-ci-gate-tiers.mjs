@@ -805,7 +805,7 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
   const wiredClosing = (x) => {
     const a = x.indexOf('} = await runFastLanes(plan, {'), b = x.indexOf('const closing = fastClosing(', a);
     return a > 0 && b > a && !/\breturn\b/.test(x.slice(a, b))
-      && /\n\s*const closing = fastClosing\(\{ reds, flaky, skippedLegs, keepGoing, ran: fast\.length - absent\.length - skippedByName\.length, hangDir, part, env: process\.env, gap: gapW\.tail \}\);\n\s*for \(const \[w, l\] of closing\.out\) \(w === 'err' \? console\.error : console\.log\)\(l\);\n\s*if \(closing\.code === 1\) return 1;\n/.test(x)
+      && /\n\s*const closing = fastClosing\(\{ only, reds, flaky, skippedLegs, keepGoing, ran: fast\.length - absent\.length - skippedByName\.length, hangDir, part, env: process\.env, gap: gapW\.tail \}\);\n\s*for \(const \[w, l\] of closing\.out\) \(w === 'err' \? console\.error : console\.log\)\(l\);\n\s*if \(closing\.code === 1\) return 1;\n/.test(x)
       && /\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), part \}\)\n\s*\.then\(\(code\) => exitFlushed\(code\), /.test(x);
   };
   ok(wiredClosing(src), 'WIRING: fastGate hands every fact to fastClosing (env, part and an isolated run\'s gap included), nothing returns between the lanes\' end and it, its 1 is returned, and main() exits with fastGate\'s code');
@@ -816,7 +816,7 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
     ['the annotation\'s env dropped', 'hangDir, part, env: process.env, gap: gapW.tail });', 'hangDir, part, env: {}, gap: gapW.tail });'],
     ['the part dropped', 'hangDir, part, env: process.env, gap: gapW.tail });', 'hangDir, part: null, env: process.env, gap: gapW.tail });'],
     ['the isolated run\'s gap dropped from the RED line (主开发 r3758 hold 2)', 'hangDir, part, env: process.env, gap: gapW.tail });', 'hangDir, part, env: process.env });'],
-    ['the skipped legs dropped (B-4829 meets the closing here)', 'fastClosing({ reds, flaky, skippedLegs, keepGoing,', 'fastClosing({ reds, flaky, keepGoing,'],
+    ['the skipped legs dropped (B-4829 meets the closing here)', 'fastClosing({ only, reds, flaky, skippedLegs, keepGoing,', 'fastClosing({ only, reds, flaky, keepGoing,'],   // U1a: the call carries the named set first
     ['main() swallowing a part\'s 1', "part })\n    .then((code) => exitFlushed(code), ", "part })\n    .then((code) => exitFlushed(part ? 0 : code), "],
   ];
   for (const [what, from, to] of wiringMutants) {
@@ -1321,6 +1321,75 @@ console.log('\n§8j an isolated fast run NAMES the gated commit\'s own fast rows
     && !wired(CI_TEXT.replace('if (gapW.list) console.log(gapW.list);', '')) && !wired(CI_TEXT.replace(', gap: gapW.tail });', ' });')),
     'CONTROL: the step that never reads the gated table, an ALL GREEN line without the gap, a run without the list line, or a red closing without the gap is refused by the anchor');
 }
+// ── §8k THE NAMED FAST SET (--fast-only; lane bl-ci, 主开发 r5490 / r5499 / r5501 — U1a): step A's set on the production checkout runs through
+// the fast gate's own road — the build, the tree's secret scan, the same lane, one suite at a time. Every fault of its list is refused BY
+// NAME before anything runs (it never falls back to the whole tier); its opening, green and red lines are of their own kind, so no reader of
+// a whole tier's line or marker takes them for one; it writes no green marker; and with the switch absent the gate's own lines stand byte
+// for byte. Each law a leg and a computed red (an implementation planted wrong, or the reader handed the wrong line).
+console.log('\n§8k the named fast set (--fast-only): refused by name before anything runs, its own lines, no marker, nothing changed without it');
+{
+  const C = await import('./ci.mjs');
+  const fastRows = SUITES.filter((r) => r.tier === 'fast'), heavyRow = SUITES.find((r) => r.tier === 'heavy'), excluded = EXCLUDED[0] && EXCLUDED[0].name;
+  const [f1, f2] = [fastRows[0].name, fastRows[1].name];
+  // (1) THE LIST: each fault refused BY NAME, a good list taken whole — a checker over an implementation, so a planted one is red
+  const faultsOf = (impl) => {
+    const out = [], want = [['', /empty/], [' , ,', /parses to no name/], [`${f1},${f1}`, /named twice/], [heavyRow.name, /heavy suite/], ['test-zz-no-such-suite', /no fast row/]];
+    if (excluded) want.push([excluded, /no fast row/]);
+    for (const [spec, re] of want) { const r = impl(spec); if (!r || !r.refusal || !re.test(r.refusal) || r.names) out.push(`«${spec}» not refused by name`); }
+    const good = impl(`${f2}, ${f1}`);
+    if (!good || good.refusal || JSON.stringify(good.names) !== JSON.stringify([f2, f1])) out.push('a good list not taken whole');
+    return out;
+  };
+  const real = faultsOf((x) => C.fastOnlyNames(x, SUITES));
+  const fallsBack = faultsOf((x) => { const r = C.fastOnlyNames(x, SUITES); return r.refusal && /empty|parses/.test(r.refusal) ? { names: fastRows.map((y) => y.name) } : r; });   // PLANTED: an empty list runs the whole tier
+  const dropsHeavy = faultsOf((x) => { const r = C.fastOnlyNames(x, SUITES); return r.refusal && /heavy/.test(r.refusal) ? { names: [] } : r; });   // PLANTED: a heavy name dropped in silence
+  ok(!real.length, `--fast-only's list: an empty one, one that parses to no name, a name twice, a heavy name, an unknown or an excluded name — each refused BY NAME; a good list taken whole${real.length ? ' — ' + real.join(' · ') : ''}`);
+  ok(fallsBack.length === 2 && dropsHeavy.length === 1, `CONTROL: a list that falls back to the whole tier is red by name (${fallsBack.length} of 2), and a heavy name dropped in silence (${dropsHeavy.length} of 1)`);
+  // (2) THE DISPATCHER refuses BEFORE anything runs: beside any other mode, the switch twice, the switch with no list
+  const A = (...a) => C.fastOnlyArgs(a, SUITES);
+  const combos = [['--fast-only=' + f1, '--heavy'], ['--fast-only=' + f1, '--fast-part=1/2'], ['--fast-only=' + f1, '--only=' + heavyRow.name], ['--fast-only=' + f1, '--fast-only=' + f2], ['--fast-only'], ['--fast-only', '--isolate']];
+  const missed = combos.filter((a) => !A(...a).refusal);
+  ok(!missed.length && A('--isolate').given === false && JSON.stringify(A('--isolate', '--fast-only', `${f1},${f2}`).names) === JSON.stringify([f1, f2]),
+    `the dispatcher refuses a named set beside another mode, given twice, or with no list, before anything runs; without it nothing is given${missed.length ? ' — NOT refused: ' + missed.map((a) => a.join(' ')).join(' | ') : ''}`);
+  const MAIN = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8'), mainBody = MAIN.slice(MAIN.indexOf('function main(argv) {'));
+  const refuseAt = mainBody.indexOf('const fastOnly = fastOnlyArgs(argv);'), firstMode = mainBody.search(/if \(arg\('(?:heavy|list-affected|census|status|hosts|reap)'\)\)/);
+  const OWN_CALL = /\n {2}if \(fastOnly\.names\) \{[^\n]*\n {4}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), only: fastOnly\.names \}\)\n[^\n]*exitFlushed\(code\)[^\n]*\n {4}return;\n {2}\}\n {2}fastGate\(\{ sha: str\('sha'\), isolate: !!arg\('isolate'\), keepGoing: !!arg\('keep-going'\), part \}\)\n/;
+  ok(refuseAt > 0 && firstMode > refuseAt && OWN_CALL.test(mainBody) && /if \(fastOnly\.refusal\) \{[^\n]*return exitFlushed\(2\); \}/.test(mainBody),
+    "main reads the named set before its first mode branch and refuses with exit 2; the set has its OWN call, which returns before the tier's call, and the tier's call stands as it was");
+  // (3) ITS OWN KIND: today's readers of a whole tier's lines and marker (the push road's step A and push script, quoted) take none of them
+  const green = C.fastOnlyGreen({ ran: [f1, f2], secs: 12, sha: 'abcdef1234567890', isolate: true });
+  const opening = C.fastOnlyOpening({ names: [f1, f2], tierSize: fastRows.length, isolate: true, sha: 'abcdef1234567890' });
+  const red = C.fastClosing({ only: [f1, f2], reds: [f1], env: {}, gap: '2 fast row(s) of the gated commit are not run here' });
+  const short = C.fastOnlyShort({ short: ['test-zz-gone'], named: 3, sha: 'abcdef1234567890', gap: '' });
+  const WHOLE = [["step A's green", (t) => /^ALL GREEN — fast gate passed in [0-9]+s for /m.test(t)], ["step A's count", (t) => /release gate — FAST tier: build \+ [0-9]+ suites/.test(t)],
+    ["the push script's marker check", (t) => String(t).trimStart().startsWith('ALL GREEN — fast gate passed')], ['a red reader', (t) => /release gate is RED/.test(t)]];
+  const lines = [green, opening, short, ...red.out.map(([, l]) => l)];
+  const taken = WHOLE.filter(([, r]) => lines.some((l) => r(l))).map(([k]) => k);
+  const setReader = /^ONLY GREEN — the named fast set of [0-9]+ suite\(s\) passed in [0-9]+s for /m;   // the step-A set twin's own reader
+  ok(!taken.length && setReader.test(green) && green.trimEnd().endsWith(`— NOT the fast tier: ${f1}, ${f2}`) && red.code === 1 && red.out.some(([k, l]) => k === 'err' && /apart from these reds, 2 fast row\(s\) of the gated commit are not run here — the NAMED fast set is RED \(not the fast tier\)/.test(l))
+    && /SHORT at abcdef12: test-zz-gone did not run[^\n]* 2 of its 3 named suites ran/.test(short) && !setReader.test(short),
+    `the named set's opening, green, red and SHORT lines are of their own kind: no whole-tier reader takes one (${taken.join(', ') || 'none'}), the set's own reader takes its green alone; the green names what it ran, the red carries the gap words, the short line names what did not run`);
+  const tierLines = ['\nALL GREEN — fast gate passed in 12s for abcdef12 (isolated worktree at the commit being pushed)', 'release gate — FAST tier: build + 925 suites', '\n✗ test-a — release gate is RED, do not push\n'];
+  const blind = WHOLE.filter(([, r]) => !tierLines.some((l) => r(l))).map(([k]) => k);
+  ok(!blind.length && !setReader.test(tierLines[0]), `CONTROL: every whole-tier reader takes a whole tier's own line (none blind: ${blind.join(', ') || 'none'}), and the set's reader takes none of them`);
+  // (4) NO MARKER, and NOTHING CHANGED without the switch: the set's branch returns before the readings record, the ALL GREEN line and the
+  // marker; the gate's own lines stand byte for byte; the fast closing without the switch is the tier's own
+  const gate = MAIN.slice(MAIN.indexOf('async function fastGate('), MAIN.indexOf('function writeGreenMarker()'));
+  const onlyAt = gate.indexOf('if (only) {   // --fast-only (U1a)'), readingsAt = gate.indexOf('if (!absent.length && !isolate && !part) {'), allGreenAt = gate.indexOf('ALL GREEN — fast gate');
+  const KEPT = ['if (part) fast = fastPartPlan(tier, part.n, { sourceOf }).parts[part.i - 1];', 'if (!absent.length && !isolate && !part) {', 'else writeGreenMarker();',
+    "console.log(`\\nALL GREEN — fast gate${part ? ` part ${part.i}/${part.n}` : ''} passed in", 'hangDir, part, env: process.env, gap: gapW.tail });',
+    "console.log(`release gate — FAST tier${part ? ` PART ${part.i}/${part.n}", "    for (const [w, l] of closing.out) (w === 'err' ? console.error : console.log)(l);",
+    "if (!runBuild({ cwd: runRoot }).ok) { console.error(`\\n✗ build FAILED — release gate is RED, do not push", 'if (absent.length === fast.length) {'];
+  const changed = KEPT.filter((x) => !gate.includes(x)), branch = onlyAt > 0 ? gate.slice(onlyAt, readingsAt) : '';
+  const shortAt = gate.indexOf('if (only && (absent.length || skippedByName.length)) {'), tierNoVerdictAt = gate.indexOf('if (absent.length === fast.length) {');
+  ok(shortAt > 0 && shortAt < tierNoVerdictAt && /fastOnlyShort\([^\n]*\);\n\s*return 1;/.test(gate.slice(shortAt, tierNoVerdictAt)) && gate.includes('const lanes = only ? 1 : fastLaneCount();'),
+    "a named set that ran SHORT is red (exit 1) before the tier's own NO VERDICT paths, and a named set runs ONE suite at a time whatever the lanes' variable says");
+  ok(onlyAt > 0 && onlyAt < readingsAt && readingsAt < allGreenAt && /\n\s*return 0;\n\s*\}\n/.test(branch) && !branch.includes('writeGreenMarker') && !changed.length,
+    `the named set returns before a whole tier's readings record, its ALL GREEN line and its green marker; the gate's own lines stand byte for byte${changed.length ? ' — CHANGED: ' + changed.join(' | ') : ''}`);
+  ok(JSON.stringify(C.fastClosing({ reds: ['test-a'], env: {} }).out) === JSON.stringify([['err', '\n✗ test-a — release gate is RED, do not push\n']]) && C.fastClosing({ reds: [], env: {} }).code === null,
+    "without the switch the fast closing is the tier's own, byte for byte");
+}
+
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
