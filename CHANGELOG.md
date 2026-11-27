@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.422 — 2026-11-27
+
+### Fixed
+- Accounts whose weekly limits reset in the same hour are no longer shown as unknown or left out of the pool; one held that way is freed when VibeSpace starts.
+- An account held that way shows its usage again at its next reading at the latest.
+
 ## 2.369.421 — 2026-11-26
 
 ### Fixed

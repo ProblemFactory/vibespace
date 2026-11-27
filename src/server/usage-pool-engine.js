@@ -1593,8 +1593,6 @@ let _ownWinAt = 0, _ownWin = null;
 const _stampOnly = new Map();
 const holdStamp = (key, w) => { _stampOnly.delete(key); _stampOnly.set(key, w && typeof w === 'object' ? w : null); if (_stampOnly.size > 512) _stampOnly.delete(_stampOnly.keys().next().value); };
 windowStamp.onStampWritten((dir, key, w) => { try { if (_stampOnly.has(key) && path.resolve(dir) === path.resolve(USAGE_CACHE_DIR)) holdStamp(key, w); } catch { } });
-// B-6a92 (r2543): an anchor just written (any road: the ring, the panel, the repair's seed) is checked against the others' instants
-windowStamp.onStampWritten((dir, key, w) => { try { if (path.resolve(dir) === path.resolve(USAGE_CACHE_DIR)) queueMicrotask(() => holdSameInstants('an anchor written', { [key]: w })); } catch { } });
 function establishedWindows() {
   const now = Date.now();
   if (_ownWin && now - _ownWinAt < OWN_WINDOW_TTL_MS) return _ownWin;
@@ -1696,36 +1694,25 @@ function warmHeldWindows(list) {
   const keys = new Set();
   for (const a of (list || [])) if (a && typeof a.id === 'string' && a.id) keys.add(a.id);
   try { for (const fn of usageWrite.listCacheDir(USAGE_CACHE_DIR)) if (fn.endsWith('.json') && !fn.startsWith('__models__') && !fn.startsWith('.')) keys.add(fn.slice(0, -5)); } catch { }
-  for (const k of keys) { try { const w = readApiWitnessFile(k); noteHeldWindow(k, w && w.foreign); noteWitnessInstant(k, w); } catch { } }
+  for (const k of keys) { try { const w = releaseClockHold(k, readApiWitnessFile(k)); noteHeldWindow(k, null); noteWitnessInstant(k, w); } catch { } }
   try { _ownWin = null; _ownWinAt = 0; establishedWindows(); } catch { }
-  holdSameInstants('the start');   // B-6a92 (r2543): a row that ARRIVED on another account's instant is held here
   return keys.size;
 }
-/** B-6a92 (主开发 r2540 / r2543) — THE STANDING CHECK: a row whose ANCHOR stands on another known account's instant, to the second
- *  (reading-lag sameInstantHolds: never by nearness; never a proven anchor; the later of two unproven), is HELD — its own window
- *  unknown by that account's name, exactly as the witness ring's hold: nothing re-anchored, nothing filed (the guard archives its
- *  readings on that instant), the pool reads its own last reading with its age, its own proven read the one door out. Run at the
- *  start's warm (the boot's, the hourly run's) and at every anchor write; memory only, but the held row's own sidecar, read once
- *  to carry its fields. A row already held is left as it is. `fresh`: a stamp just written (the memo may not have it yet). */
-function holdSameInstants(why, fresh = null) {
-  try {
-    const wins = { ...establishedWindows(), ...(fresh || {}) };
-    const keys = new Set([...Object.keys(wins), ..._witnessInst.keys()]);
-    const rows = [...keys].map((k) => { const a = wins[k]; return { key: k, own: [...ownGroupOf(k)], anchor: a && Number(a.sevenDay) > 0 ? { sevenDay: Number(a.sevenDay), at: Number(a.at) || 0, proven: readingLag.provenOwnStamp(a), exact: readingLag.eventPreciseStamp(a) } : null, witness: _witnessInst.get(k) || null }; });
-    const saidPairs = new Set();   // r2561: the journal says it ONCE a pair — two rows held against each other make one line
-    for (const h of readingLag.sameInstantHolds(rows)) {
-      if (_heldWin.get(h.key)) continue;
-      const raw = readApiWitnessFile(h.key) || {};
-      if (heldFactOf(h.key, raw.foreign)) { noteHeldWindow(h.key, raw.foreign); continue; }
-      const foreign = { names: othersOf(h.key, h.names).slice(0, 4), phase: h.phase, at: Date.now(), n: 0, by: 'same-instant' };
-      if (!foreign.names.length) continue;
-      if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(h.key), { sevenDay: null, scoped: {}, ring: [], ...raw, foreign })) continue;
-      noteHeldWindow(h.key, foreign);
-      const pair = [h.key, ...foreign.names].sort().join('|');
-      if (!saidPairs.has(pair)) { saidPairs.add(pair); console.log(`[usage] window held (${why}): ${personNameOf(h.key)} and ${foreign.names.map(personNameOf).join(', ')} stand on one weekly instant to the second — ${personNameOf(h.key)} is held (its own read has not proven it): not re-anchored, nothing filed, its own window unknown until its own read proves it; nothing here asks for that read`); }
-      try { global.__vsEvent?.('usage-window-held-same-instant', `${h.key}:${foreign.names.join(',')}`); } catch { }
-    }
-  } catch (e) { console.warn('[usage] window hold: the same-instant check failed:', (e && e.message) || e); }
+/** 2.369.422 hotfix (主开发 r5407 / r5410, the owner's hub) — NO ROW IS HELD BECAUSE TWO ACCOUNTS' WEEKLY RESETS COINCIDE. The vendor
+ *  states a weekly reset on a WHOLE HOUR (measured on a real hub: every weekly reset instant the event stream stated there was on a
+ *  whole hour, and a panel's statement on a whole minute), so two honest accounts often share one instant and a clock cannot tell a
+ *  copied window from a neighbour. The standing check (2.369.419, B-6a92 r2540 / r2543) and the ring's hold at a move (2.369.418,
+ *  B-6a92 r541 / r560, 6d6e4d3e7) held such rows: their readings archived, the pool never placing on them, until
+ *  a person's press. Both are gone; a hold either wrote is RELEASED here, by the start's own warm (and the hourly one): the row
+ *  shows its window again and the pool may place on it at once. The readings archived while it was held stay in the archive; the
+ *  row is read again at its next reading. Idempotent: nothing writes a hold any more. → the witness as it now stands */
+function releaseClockHold(key, w) {
+  if (!w || typeof w !== 'object' || !w.foreign) return w;
+  const { foreign, ...rest } = w;
+  if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), rest)) { console.warn(`[usage] window hold: ${personNameOf(key)}'s hold could not be released at this start — its next reading releases it`); return w; }
+  console.log(`[usage] window hold released: ${personNameOf(key)}'s weekly window is shown again — a weekly reset shared with ${(Array.isArray(foreign.names) ? foreign.names : []).map(personNameOf).join(', ') || 'another account'} is not another account's window (the vendor states resets on the hour)`);
+  try { global.__vsEvent?.('usage-window-hold-released', key); } catch { }
+  return rest;
 }
 function heldWindowOf(key, w0) {
   if (!key) return null;
@@ -1771,8 +1758,8 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
     ring.push(entry);
     let run = 0;
     for (let i = ring.length - 1; i >= 0 && readingLag.weeklyNear(ring[i].resetsAt, entry.resetsAt) === true; i--) run++;
-    // B-6a92 r5: a HOLD is carried by every rewrite (a run shorter than K, one stray reading) — only the roads below end it
-    const next = { sevenDay: Number(raw.sevenDay) > 0 ? Number(raw.sevenDay) : null, scoped: { ...(raw.scoped || {}) }, at: raw.at || null, sessionId: raw.sessionId || null, source: raw.source || null, n: raw.n, ring, ringAt: entry.at, ...(heldFactOf(key, raw.foreign) ? { foreign: { ...raw.foreign, names: heldFactOf(key, raw.foreign).names } } : {}) };
+    // 2.369.422 hotfix (主开发 r5410): no hold is carried — the ring writes none (a hold left on disk is dropped at its next write)
+    const next = { sevenDay: Number(raw.sevenDay) > 0 ? Number(raw.sevenDay) : null, scoped: { ...(raw.scoped || {}) }, at: raw.at || null, sessionId: raw.sessionId || null, source: raw.source || null, n: raw.n, ring, ringAt: entry.at };
     const res = { run, k: API_WITNESS_K, established: false, moved: false };
     if (run >= API_WITNESS_K) {
       const agreeing = ring.slice(ring.length - run);
@@ -1782,30 +1769,10 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
       const phaseRefOf = (w) => (w ? (Number(w.sevenDay) > 0 ? Number(w.sevenDay) : (Number(Object.values(w.scoped || {})[0]) || null)) : null);
       const ref = phaseRefOf(anchor) || phaseRefOf(next);
       const moved = ref ? readingLag.weeklyNear(ref, entry.resetsAt) === false : false;
-      // B-6a92 (主开发 r560) — A MOVE ONTO A WINDOW ANOTHER KNOWN ACCOUNT HOLDS IS NOT THIS SLOT'S TO MAKE: the guard found each of
-      // these readings to name that account's window (`names`), and a run of the conversation's own live readings cannot tell a
-      // login holding the other account from an honest plan change. NOTHING MOVES and nothing is filed (the readings stay archived);
-      // the row's own window is UNKNOWN, by name, until a proven read of this slot's OWN credential stamps it through its own road
-      // (the panel's /usage read, the approved usage read on its own schedule, a captured login) — nothing here starts a read.
-      // Honest sharing converges there: once the row's own stamp names that phase, its readings agree and write.
-      // A run the row's own long-lived TOKEN produced (oat:<gen>) keeps today's road: the stamp carries the row's identity and the
-      // token's identity check (B-3102) marks a token that is another account's, by name — the hold is for a run whose producer is
-      // the row's sign-in folder (whose credential may be another account's) or unknown
-      // r5 (a small): judged over EVERY reading of the run — one token reading inside a run of the sign-in folder's lifts nothing
-      const byToken = agreeing.length > 0 && agreeing.every((e) => (typeof e.producer === 'string' && e.producer.startsWith('oat:')) || e.oat === true);
-      const heldBy = moved && !byToken ? othersOf(key, [...new Set(agreeing.flatMap((e) => (Array.isArray(e.names) ? e.names : [])))]) : [];   // r8 rule 1: the row's own group is the row
-      if (moved && heldBy.length) {
-        const was = raw.foreign && Array.isArray(raw.foreign.names) ? raw.foreign.names.join(',') + '@' + raw.foreign.phase : null;
-        next.foreign = { names: heldBy.slice(0, 4), phase: entry.resetsAt, at: entry.at, n: run };
-        res.held = { names: next.foreign.names, phase: entry.resetsAt };
-        if (was !== next.foreign.names.join(',') + '@' + entry.resetsAt) console.log(`[usage] window held: ${labelOf(key)}'s readings name ${next.foreign.names.map(labelOf).join(', ')}'s weekly window (${run} in a row) — not re-anchored, nothing filed; ${labelOf(key)}'s own window is unknown until its own read proves it`);
-        const ok0 = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next);
-        if (ok0) noteHeldWindow(key, next.foreign);
-        return ok0 ? res : null;
-      }
-      // B-6a92 (r2543): a run ON a same-instant hold's instant agrees with the very anchor that is held — it never ends that hold
-      const keepSame = !!(next.foreign && next.foreign.by === 'same-instant' && readingLag.weeklyNear(next.foreign.phase, entry.resetsAt) === true);
-      if (!keepSame) delete next.foreign;   // the run agrees with the row's own window, or moves onto a phase no known account holds: no longer unknown
+      // 2.369.422 hotfix (主开发 r5407 / r5410 / r5442): A MOVE ONTO A WINDOW ANOTHER KNOWN ACCOUNT HOLDS RE-ANCHORS, as before 6d6e4d3e7
+      // (through 2.369.417; this hold came with 2.369.418). The vendor states weekly resets on the hour, so a phase that moves lands on
+      // another known account's hour by a clock's chance — at a vendor-wide reset every row but the first to move; a clock that agrees proves nothing
+      // about whose readings these are (B-6a92 r560's hold here held an honest row until a press — no longer)
       const w = moved ? { sevenDay: null, scoped: {} } : { sevenDay: next.sevenDay, scoped: { ...next.scoped } };
       for (const e of agreeing) { if (e.kind === 'sevenDay') w.sevenDay = e.resetsAt; else if (e.name) w.scoped[e.name] = e.resetsAt; }
       // B-6a92 (r2855): the weekly instant is EXACT only when this run's own weekly readings set it — a kept value (a lift's or a
@@ -1942,15 +1909,7 @@ function guardReadingTarget(key, readingWindow, { session = null, what = 'readin
   try {
     d = readingLag.decideReadingTarget({ key, readingWindow, windows: establishedWindows(), groupOf: windowGroupOf });
   } catch (e) { console.warn('[usage] window guard failed (writing as asked):', e.message); return key; }
-  if (d.action === 'write') {
-    // B-6a92 (r2543): a row HELD on another account's instant (the standing check) agrees with its own anchor — the anchor that is held:
-    // its readings on that instant are archived by name, never filed (memory only: the held fact, no file read on the reading's road)
-    const h0 = _heldWin.get(key);
-    let w0 = null; try { w0 = readingWindow && readingWindow.scoped ? readingWindow : readingLag.windowOf(readingWindow); } catch { w0 = null; }
-    const r7 = w0 && (Number(w0.sevenDay) > 0 ? Number(w0.sevenDay) : Number(Object.values(w0.scoped || {})[0]) || null);
-    if (!(h0 && h0.by === 'same-instant' && Number(r7) > 0 && readingLag.weeklyNear(h0.phase, r7) === true)) return key;
-    d = { action: 'archive', key: null, matched: h0.names.slice(), reason: `${personNameOf(key)} is held: its weekly window is ${h0.names.map(personNameOf).join(', ')}'s to the second and its own read has not proven it` };
-  }
+  if (d.action === 'write') return key;   // 2.369.422 hotfix (主开发 r5410): no row is held on a shared instant, so none of its readings is archived for it
   // A READING WHOSE REQUEST IS KNOWN (P1, law 1: «on a mismatch the reading is HELD or ARCHIVED BY NAME, never re-filed by
   // guess onto another account»): the account its request went out on is a fact; a window that says otherwise is a second
   // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
