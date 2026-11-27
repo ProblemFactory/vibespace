@@ -2079,12 +2079,21 @@ console.log('§4 the next-turn drain through the REAL prompt-context route — a
   ok(Buffer.byteLength(direct.text, 'utf-8') <= 4096, `reportsForTurn with 40 long-named pending groups stays ≤ its budget (${Buffer.byteLength(direct.text, 'utf-8')} ≤ 4096)`);
   const d1000 = f.eng.reportsForTurn(B, { budget: 1000 });
   ok(Buffer.byteLength(d1000.text, 'utf-8') <= 1000, `…and ≤ a 1000 B budget (${Buffer.byteLength(d1000.text, 'utf-8')})`);
+  // THE MARKS ARE A WRITE (lane bl-mail, 主开发 r5479): the route stages the shown groups' marks at its answer's close —
+  // commitReports, one groups.json write per shown group, awaited in turn (src/server/groups-engine.js). The leg read them after
+  // a FIXED 50 ms, and one gate (2026-11-27, load 26 → 29) read a shown group still pending. It waits on the FACT instead: every
+  // commit the route started has settled, polled each millisecond under a counted ceiling, red by its own line; then the marks are read.
+  const MARK_POLLS_MAX = 10000, commits = [], commitOf = f.eng.commitReports;
+  f.eng.commitReports = (...a) => { const c = { done: false }; commits.push(c); const p = commitOf(...a); Promise.resolve(p).then(() => { c.done = true; }, () => { c.done = true; }); return p; };
   sB._userInputAt = Date.now() + 5;
   const big = await ask();
   const ctx = String(big.context || '');
   const shownIds = [...ctx.matchAll(/#### Group "[^"]*" \((g-[0-9a-f]{8})\)/g)].map((m) => m[1]);
   ok(!/context trimmed/.test(ctx) && Buffer.byteLength(ctx, 'utf-8') <= 9600 && shownIds.length >= 1, `the REAL prompt-context with 40 pending long-named groups: no "context trimmed" pointer, ≤ 9600 B (${Buffer.byteLength(ctx, 'utf-8')} B, ${shownIds.length} reports shown)`);
-  await new Promise((r) => setTimeout(r, 50));
+  let markPolls = 0;
+  for (; (!commits.length || commits.some((c) => !c.done)) && markPolls < MARK_POLLS_MAX; markPolls++) await new Promise((r) => setTimeout(r, 1));
+  f.eng.commitReports = commitOf;
+  ok(commits.length >= 1 && commits.every((c) => c.done), `harness: the route's report marks settled before they are read — ${commits.length} commit(s) started, ${commits.filter((c) => c.done).length} settled, ${markPolls} poll(s) of 1 ms (ceiling ${MARK_POLLS_MAX})`);
   const pendingAfter = new Set(f.eng.listFor(B).filter((g) => g.unread > 0).map((g) => g.id));
   ok(shownIds.every((id) => ctx.includes(`Reply: vibespace-msg send ${id} "..."`)), '…every report shown is WHOLE (its closing Reply line is there — a report is never cut after its marker moves)');
   ok(shownIds.every((id) => !pendingAfter.has(id)) && many.filter((id) => !shownIds.includes(id)).every((id) => pendingAfter.has(id)),
