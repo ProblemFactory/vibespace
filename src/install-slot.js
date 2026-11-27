@@ -24,7 +24,7 @@ const SHELL_OP = /[|&;<>(){}`$]/;
 const SHELL_ONLY = /^(?:[.:[!]|printf|echo|cd|export|set|unset|exit|exec|eval|read|trap|umask|wait|command|type|test|if|for|while|until|case)(?:\s|$)/;
 const simpleCommand = (l) => !SHELL_OP.test(l) && !SHELL_ONLY.test(l);
 function planLines(steps, { plain = [] } = {}) {
-  const script = ['set -e', ...steps.map((l) => `echo '+ ${l.replace(/'/g, '\'"\'"\'')}'; ${l}`)].join('\n');
+  const script = ['set -e', ...steps.map((l) => `echo '+ ${l.split(SYNC_FILE).join('sync_form() {...}; sync_file() {...}').replace(/'/g, '\'"\'"\'')}'; ${l}`)].join('\n');   // r5458: a step carrying the ONE helper (the xpra key step) is LOGGED with its two names, run whole
   const commands = steps.map((l) => (plain.includes(l) ? l : simpleCommand(l) ? `sudo ${l}` : `sudo sh -c ${shq(l)}`));
   return { script, commands };
 }
@@ -140,9 +140,10 @@ const INSTALL_LOCK_PREFIX = 'vibespace-xpra-install-';
  *  --help ONCE per run (sync_form, the C locale; a data form named — `--data`, or BusyBox's `[-df]`): none named, NO sync, said
  *  there, once. A caller whose sync_file runs in a subshell primes the form in its own shell first (SYS_SCRIPT's put()), so a subshell
  *  inherits it and never reads or says it again. A failed sync answers 1 with its words said; one its file system does not do (EINVAL,
- *  ENOTSUP, ENOSYS) lands, said. Its words are held in vs_e, a name no caller uses. ONE line, used by every root string of the app
+ *  ENOTSUP, ENOSYS) lands, said. Its words are held in vs_e, a name no caller uses. A said line never ends a run (r5458: «|| true»
+ *  behind the «no data form» printf, which can be the last command of a list under -e: a closed stderr must not stop a put). ONE line, used by every root string of the app
  *  family: APP_SCRIPT, SYS_SCRIPT, INSTALL_SCRIPT, INSTALL_RUNNER and the xpra key step. */
-const SYNC_FILE = 'sync_form() { case $(LC_ALL=C sync --help 2>&1) in *--data*|*\'[-df]\'*) VS_SD=data ;; *) VS_SD=none; printf \'this machine has no data-only sync (sync -d): new bytes take their names unsynced\\n\' >&2 ;; esac; }; sync_file() { [ -n "${VS_SD-}" ] || sync_form; if [ "$VS_SD" = none ]; then return 0; fi; vs_e=$(LC_ALL=C sync -d -- "$1" 2>&1) && return 0; case $vs_e in *\'Invalid argument\'*|*\'not supported\'*|*\'Function not implemented\'*) printf \'%s - its file system does not do a sync: its new bytes take their name unsynced\\n\' "$vs_e" >&2; return 0 ;; esac; printf \'%s\\n\' "$vs_e" >&2; return 1; }';
+const SYNC_FILE = 'sync_form() { case $(LC_ALL=C sync --help 2>&1) in *--data*|*\'[-df]\'*) VS_SD=data ;; *) VS_SD=none; printf \'this machine has no data-only sync (sync -d): new bytes take their names unsynced\\n\' >&2 || true ;; esac; }; sync_file() { [ -n "${VS_SD-}" ] || sync_form; if [ "$VS_SD" = none ]; then return 0; fi; vs_e=$(LC_ALL=C sync -d -- "$1" 2>&1) && return 0; case $vs_e in *\'Invalid argument\'*|*\'not supported\'*|*\'Function not implemented\'*) printf \'%s - its file system does not do a sync: its new bytes take their name unsynced\\n\' "$vs_e" >&2; return 0 ;; esac; printf \'%s\\n\' "$vs_e" >&2; return 1; }';
 const INSTALL_RUNNER = [
   'P=$1; L=$2; X=$3; K=$4; shift 4',
   'st() { sed \'s/^.*) //\' "/proc/$1/stat" 2>/dev/null | cut -d\' \' -f20; }',

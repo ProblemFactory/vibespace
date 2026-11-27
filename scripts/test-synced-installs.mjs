@@ -131,6 +131,18 @@ try {
   const q1 = put2(PUT, { SYNC_OLD: '1' }), q2 = put2(PUT), q0 = put2(NO_PRIME, { SYNC_OLD: '1' });
   ok(q1.rc === 0 && q1.files === 'a.conf,b.conf' && q1.helps === 1 && q1.said === 1 && q2.rc === 0 && q2.helps === 1 && q2.log.filter((l) => /^sync -d -- /.test(l)).length === 2 && q0.helps === 2 && q0.said === 2,
     `② over TWO puts the form is read once (${q1.helps} help, ${q2.helps} with a data form) and «no data-only sync» said once (${q1.said}); RED (put() without its prime, in a copy): ${q0.helps} helps, said ${q0.said} times`, { q1, q2, q0 });
+  // 主开发 r5458: a SAID line never ends a run — put()'s prime is the last command of its list under -e, so a «no data form» printf to
+  // a CLOSED stderr would stop the script there; RED: that printf without «|| true», in a copy (the run ends at the first put)
+  const closed = (sf, env = {}) => {
+    const d = fs.mkdtempSync(path.join(T0, 'closed-')), dir = path.join(d, 'etc'); fs.mkdirSync(dir);
+    const src = path.join(d, 'src.conf'); fs.writeFileSync(src, 'new\n');
+    const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }\n${sf}\n${PUT}\nexec 2>&-\nput ${shq(src)} ${shq(fs.realpathSync(dir))} a.conf; put ${shq(src)} ${shq(fs.realpathSync(dir))} b.conf; say put-done`, env);
+    return { ...r, files: fs.readdirSync(dir).sort().join() };
+  };
+  const NO_TRUE = anchored(SF_S, " >&2 || true ;; esac", " >&2 ;; esac", 'sync_form\'s «|| true»');
+  const z1 = closed(SF_S, { SYNC_OLD: '1' }), z0 = closed(NO_TRUE, { SYNC_OLD: '1' });
+  ok(z1.rc === 0 && /= put-done/.test(z1.out) && z1.files === 'a.conf,b.conf' && z0.rc !== 0 && !/= put-done/.test(z0.out) && z0.files === '',
+    `② a closed stderr where no data form is named: both puts land and the run goes on (rc ${z1.rc}, ${z1.files}); RED (the printf without «|| true», in a copy): the run ENDS at the first put (rc ${z0.rc}, files «${z0.files}»)`, { z1, z0 });
   // 主开发 r5364: put() under the uutils stand-in — its data, never the machine; RED: unit A's put (`sync -- "./.$3.vs"`), in a copy
   const pu = put(PUT, { SYNC_UUTILS: '1' }), pu0 = put(UNIT_A(PUT), { SYNC_UUTILS: '1' });
   ok(pu.rc === 0 && pu.file === 'new\n' && whole(pu) === 0 && UNIT_A(PUT) !== PUT && whole(pu0) === 1 && pu0.file === 'new\n',
@@ -150,6 +162,17 @@ try {
   ok(k1.rc === 0 && kept1 && k1.log.join() === `sync -d -- ${k}` && k2.rc === 3 && !fs.existsSync(k) && /could not be written to disk/.test(k2.err) && !/could not be written to disk/.test(k2.out.slice(0, k2.out.length - k2.err.length)), `③ the key's sync: its DATA (${k1.log.join().split(k).join('K')}); on its success the checked file stays for the move; on a failure it is removed, said ON STDERR like its two neighbours («${k2.err.trim().slice(0, 80)}»), exit 3`, { k1, k2 });
   fs.writeFileSync(k, 'key'); const kn = sh(`${HEAD_P}; ${keySync}`, { SYNC_NOTDONE: '1' });
   ok(kn.rc === 0 && fs.existsSync(k) && /its file system does not do a sync/.test(kn.err), `③ the key step where the file system does not do a sync (EINVAL): the key stays for the move, said on stderr — the helper's law, where unit A refused`, kn);
+  // 主开发 r5458: the install log's echoed line of the key step names the helper (sync_form, sync_file) instead of its 600 characters;
+  // the step itself runs whole; every other step is echoed as it is. RED: the release's echo (the whole step), in a copy
+  {
+    const pl = DA.xpraInstallPlan({ platform: 'linux', apt: '/usr/bin/apt-get', distro: 'debian', like: [], codename: 'bookworm', sudo: true, aptXpra: '3.2' });
+    const q = (l) => l.replace(/'/g, `'"'"'`), keyLine = String(pl.script).split('\n').find((l) => l.endsWith(`; ${steps[iSync]}`)) || '';
+    const said = keyLine.slice(0, keyLine.length - steps[iSync].length - 2), echoed = sh(said);
+    const others = steps.filter((l, i) => i !== iSync).every((l) => String(pl.script).includes(`echo '+ ${q(l)}'; ${l}`));
+    const relEcho = `echo '+ ${q(steps[iSync])}'`;   // the release's planLines echo of the same step
+    ok(!!keyLine && !/VS_SD/.test(said) && said.includes('sync_form() {...}; sync_file() {...}; sync_file "$K"') && echoed.rc === 0 && echoed.out.trim().split('\n').length === 1 && others && /VS_SD/.test(relEcho),
+      `③ the key step's logged line: «${echoed.out.trim().slice(0, 90)}…» (${said.length} characters, one line); the step runs whole; every other step echoed as it is; RED (the release's echo, in a copy): it carries the helper's body (${relEcho.length} characters)`, { said, echoed: echoed.out });
+  }
   // 主开发 r5364: the key step under the uutils stand-in — no whole-machine sync; RED: unit A's step (`sync -- "$K"`), in a copy
   fs.writeFileSync(k, 'key'); const ku = sh(`${HEAD_P}; ${keySync}`, { SYNC_UUTILS: '1' });
   const KEY_A = '(K=/usr/share/keyrings/xpra.asc.new; sync -- "$K" || { rm -f "$K"; echo "the key file could not be written to disk (its sync failed) - nothing was changed" >&2; exit 3; })';   // stale-pins: kept (unit A's key step, the RED)
@@ -278,6 +301,8 @@ try {
     ok(c5.rc === 0 && whole(c5) === 0, `⑥ no whole-machine sync on uutils (${rel(c5)})`, c5);
     const c6 = sys(C, { SYNC_BUSYBOX: '1' });
     ok(c6.rc === 0 && c6.root === 'rootfs.new' && rel(c6) === 'sync -f -- D/rootfs.new · mv D/rootfs.new D/rootfs' && !/no file-system sync/.test(c6.err), `⑥ BusyBox's help («[-df]»): the tree's file-system sync taken (${rel(c6)})`, c6);
+    const c7 = sys(`  exec 2>&-\n${C}`, { SYNC_OLD: '1' });
+    ok(c7.rc === 0 && c7.root === 'rootfs.new', `⑥ a closed stderr where no file-system form is named: the tree moves (r5458's «|| true»; the call stands left of «||», where -e is ignored, so no red can be built)`, c7);
     const c60 = sys(C, { SYNC_BUSYBOX: '1' }, anchored(ST, "|*'[-df]'*", '', 'sync_tree\'s BusyBox arm'));
     ok(rel(c60) === 'mv D/rootfs.new D/rootfs' && /no file-system sync/.test(c60.err), `⑥ RED (sync_tree's «[-df]» arm cut, in a copy): no sync of the tree on BusyBox (${rel(c60)})`, c60);
     const r1 = sys(REBASE), r2 = sys(REBASE, { SYNC_FAIL_ON: 'rootfs.next' });
