@@ -1093,6 +1093,30 @@ console.log('§1e the PACE rules (PURE) — r3 findings 4 + 5');
 }
 
 // ── the engine fixture: the REAL store + the REAL ladder + a recording authorizer
+// THE MARKS ARE A WRITE (lane bl-mail, 主开发 r5479 / r5502): a route stages the shown groups' marks — commitReports, one groups.json
+// write per shown group, awaited in turn (src/server/groups-engine.js) — at its answer's close, or at the confirm. Every fixture's engine
+// counts the commits started on it (trackCommits, installed by fixture(); the wrapper hands back the same promise). A leg that reads
+// the marks waits until EVERY commit started has settled — polled each millisecond under a counted ceiling, RED BY ITS OWN LINE — and
+// THEN judges; a negative leg (a marker that must NOT move) judges that nothing moved only once nothing is in flight. Never a fixed sleep.
+const MARK_POLLS_MAX = 10000;
+const commitsOf = new WeakMap();
+function trackCommits(eng) {
+  let tr = commitsOf.get(eng);
+  if (tr) return tr;
+  tr = { started: 0, settled: 0 };
+  const commitOf = eng.commitReports;
+  eng.commitReports = (...a) => { tr.started++; const p = commitOf(...a); Promise.resolve(p).then(() => { tr.settled++; }, () => { tr.settled++; }); return p; };
+  commitsOf.set(eng, tr);
+  return tr;
+}
+async function marksSettled(eng, what, { since = null, atLeast = 0 } = {}) {
+  const tr = trackCommits(eng);
+  let polls = 0;
+  for (; tr.settled < tr.started && polls < MARK_POLLS_MAX; polls++) await new Promise((r) => setTimeout(r, 1));
+  const by = since === null ? null : tr.started - since;
+  ok(tr.settled === tr.started && (by === null || by >= atLeast), `harness: ${what} — every report commit started has settled before the marks are judged: ${tr.started} started${by === null ? '' : ` (${by} by this step)`}, ${tr.settled} settled, ${polls} poll(s) of 1 ms (ceiling ${MARK_POLLS_MAX})`);
+  return { started: tr.started, settled: tr.settled, polls };
+}
 function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info() {}, warn() {}, log() {} }, onCleared = undefined, ge = GE, heldRetry = null, liveness = undefined } = {}) {
   const dataDir = path.join(ROOT, name);
   fs.mkdirSync(dataDir, { recursive: true });
@@ -1116,6 +1140,7 @@ function fixture(name, { refuse = new Set(), paceClock = undefined, log = { info
   });
   let t = T0;
   const eng = ge.create({ store, deliver, broadcast: (m) => bcasts.push(m), now: () => (t += 1000), roster: () => roster, groupSetting: () => 'none', log, ...(paceClock ? { paceClock } : {}), ...(onCleared ? { onCleared } : {}), ...(liveness ? { liveness } : {}) });
+  trackCommits(eng);   // the marks' commits counted (r5502): marksSettled waits on them
   return { store, eng, deliver, sessions, auths, posts, cards, bcasts, dataDir, roster, close: () => { try { deliver.flush(); } catch {} store.close(); } };
 }
 
@@ -2038,7 +2063,7 @@ console.log('§4 the next-turn drain through the REAL prompt-context route — a
     await start();
     if (machine) ok(Number(sB._machineInputAt) > Number(sB._userInputAt), `${label}: the REAL ladder stamps the live session — a turn nobody typed`);
     const got = String((await askVia()).context || '');
-    await new Promise((r) => setTimeout(r, 30));   // the marker commit is async
+    await marksSettled(f.eng, `${label}: the drain`);   // the marker commit is a write: wait on it (r5502)
     const again = String((await askVia()).context || '');
     return { text, got, again };
   };
@@ -2064,7 +2089,7 @@ console.log('§4 the next-turn drain through the REAL prompt-context route — a
     sB._userInputAt = Date.now() + 1;
     const drained = String((await ask()).context || '');   // the real route drains it on the next turn: the fixture moves on clean
     ok(drained.includes(c.text), '…and the real route hands it over on the next turn');
-    await new Promise((r) => setTimeout(r, 30));
+    await marksSettled(f.eng, 'the CONTROL\'s next-turn drain');   // the fixture moves on clean: its commit landed (r5502)
   }
 
   // MANY long-named pending groups: the section is budgeted WHOLE (trailer included) — capInline never trims it
@@ -2079,21 +2104,13 @@ console.log('§4 the next-turn drain through the REAL prompt-context route — a
   ok(Buffer.byteLength(direct.text, 'utf-8') <= 4096, `reportsForTurn with 40 long-named pending groups stays ≤ its budget (${Buffer.byteLength(direct.text, 'utf-8')} ≤ 4096)`);
   const d1000 = f.eng.reportsForTurn(B, { budget: 1000 });
   ok(Buffer.byteLength(d1000.text, 'utf-8') <= 1000, `…and ≤ a 1000 B budget (${Buffer.byteLength(d1000.text, 'utf-8')})`);
-  // THE MARKS ARE A WRITE (lane bl-mail, 主开发 r5479): the route stages the shown groups' marks at its answer's close —
-  // commitReports, one groups.json write per shown group, awaited in turn (src/server/groups-engine.js). The leg read them after
-  // a FIXED 50 ms, and one gate (2026-11-27, load 26 → 29) read a shown group still pending. It waits on the FACT instead: every
-  // commit the route started has settled, polled each millisecond under a counted ceiling, red by its own line; then the marks are read.
-  const MARK_POLLS_MAX = 10000, commits = [], commitOf = f.eng.commitReports;
-  f.eng.commitReports = (...a) => { const c = { done: false }; commits.push(c); const p = commitOf(...a); Promise.resolve(p).then(() => { c.done = true; }, () => { c.done = true; }); return p; };
+  const c40 = trackCommits(f.eng).started;   // the marks are a write (r5479): the suite's one wait, marksSettled (r5502)
   sB._userInputAt = Date.now() + 5;
   const big = await ask();
   const ctx = String(big.context || '');
   const shownIds = [...ctx.matchAll(/#### Group "[^"]*" \((g-[0-9a-f]{8})\)/g)].map((m) => m[1]);
   ok(!/context trimmed/.test(ctx) && Buffer.byteLength(ctx, 'utf-8') <= 9600 && shownIds.length >= 1, `the REAL prompt-context with 40 pending long-named groups: no "context trimmed" pointer, ≤ 9600 B (${Buffer.byteLength(ctx, 'utf-8')} B, ${shownIds.length} reports shown)`);
-  let markPolls = 0;
-  for (; (!commits.length || commits.some((c) => !c.done)) && markPolls < MARK_POLLS_MAX; markPolls++) await new Promise((r) => setTimeout(r, 1));
-  f.eng.commitReports = commitOf;
-  ok(commits.length >= 1 && commits.every((c) => c.done), `harness: the route's report marks settled before they are read — ${commits.length} commit(s) started, ${commits.filter((c) => c.done).length} settled, ${markPolls} poll(s) of 1 ms (ceiling ${MARK_POLLS_MAX})`);
+  await marksSettled(f.eng, 'the forty groups\' ask', { since: c40, atLeast: 1 });
   const pendingAfter = new Set(f.eng.listFor(B).filter((g) => g.unread > 0).map((g) => g.id));
   ok(shownIds.every((id) => ctx.includes(`Reply: vibespace-msg send ${id} "..."`)), '…every report shown is WHOLE (its closing Reply line is there — a report is never cut after its marker moves)');
   ok(shownIds.every((id) => !pendingAfter.has(id)) && many.filter((id) => !shownIds.includes(id)).every((id) => pendingAfter.has(id)),
@@ -2153,7 +2170,7 @@ console.log('§4d a restart\'s first prompt: the re-delivered full context never
   ok(Buffer.byteLength(first, 'utf-8') <= 9600 && first.slice(0, 400).includes('# Task Group "3D house" (T-house)') && /context trimmed to stay inline — run `vibespace-task show --full`/.test(first),
     '…the full context keeps its HEAD and gives up its TAIL (the show --full pointer), the whole delivery ≤ 9600 B', `${Buffer.byteLength(first, 'utf-8')} B`);
   ok(/Reply: vibespace-msg send g-[0-9a-f]{8} "\.\.\."/.test(first.slice(first.indexOf('### Group messages since your last turn'))), '…and the report rides WHOLE (its closing Reply line is there)');
-  await new Promise((r) => setTimeout(r, 30));
+  await marksSettled(f.eng, 'the restart\'s first delivery');
   sB._userInputAt = Date.now() + 1;
   const second = String((await ask()).context || '');
   ok(!second.includes('news that waited across the restart'), '…exactly ONCE (its marker moved with it)');
@@ -2645,7 +2662,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   ok(String(onMachine.context || '').includes('news for beta via the route') && gcards.length === 1 && gcards[0].cid === B && gcards[0].text === 'news for beta via the route' && gcards[0].group.id === g6,
     'the REAL prompt-context route on a MACHINE turn (a job notification\'s wake — lane stash-any-turn): the report is injected AND its card is drawn in B\'s chat (the injection point)', gcards);
   sB._userInputAt = Date.now() + 1;
-  await new Promise((r) => setTimeout(r, 30));
+  await marksSettled(f6.eng, 'the machine turn\'s report');
   const onUser = await ask();
   ok(!String(onUser.context || '').includes('news for beta via the route') && f6.cards.filter((c) => c.kind === 'group').length === 1, '…and the owner\'s next turn: neither the report nor a second card');
 
@@ -3183,8 +3200,9 @@ console.log('§R confirm, then mark — the group report, through the REAL promp
   const marker = () => G.memberOf(f.eng.get(gid), B).reportedUpTo;
   const stateOfB = () => G.deliveryOf(f.eng.get(gid), { at, author: { id: A } }, { log: f.store.readTail('groups', gid, { limit: 50 }) }).find((x) => x.member === B).state;
   const cards0 = f.cards.length;
+  const cN = trackCommits(f.eng).started;
   const { v: r1, said } = await quietLog(() => ask('vsst_beta'));
-  await new Promise((r) => setTimeout(r, 30));
+  await marksSettled(f.eng, 'the confirming caller (its marker must NOT move: judged once nothing is in flight)', { since: cN });
   ok(r1.context.includes('the answer to your question') && /^dl_/.test(r1.delivery || '') && marker() === null && f.cards.length === cards0 && stateOfB() === 'waiting',
     'a confirming caller: the reply rides — its marker does NOT move and no card is drawn; the sender still reads «waiting» for beta', { marker: marker(), cards: f.cards.length - cards0, state: stateOfB() });
   const g1 = await msgGet('/api/agent/msg/groups', 'vsst_beta');
@@ -3196,8 +3214,9 @@ console.log('§R confirm, then mark — the group report, through the REAL promp
     'never confirmed: the next turn carries the reply AGAIN under «sent again — the previous turn did not confirm it», the hub journal says «[inject] not carried» (no content) — the marker still unmoved', said2.filter((l) => /inject/.test(l)));
   const bad = await carried('vsst_alpha', r2.delivery);
   ok(bad.status === 403 && bad.code === 'not-yours' && marker() === null, "the door: the sender's bearer cannot confirm the receiver's delivery (403 not-yours)", bad);
+  const cC = trackCommits(f.eng).started;
   const good = await carried('vsst_beta', r2.delivery);
-  await new Promise((r) => setTimeout(r, 30));
+  await marksSettled(f.eng, 'the confirm', { since: cC, atLeast: 1 });
   ok(good.success && JSON.stringify(good.carried) === '["group-report"]' && marker() === at && f.cards.length === cards0 + 1 && f.cards[f.cards.length - 1].group && f.cards[f.cards.length - 1].group.id === gid && stateOfB() === 'handed',
     'the confirm: THEN the marker moves to the reply and its card is drawn — the sender reads «read by beta»', { marker: marker(), at, cards: f.cards.length - cards0, state: stateOfB() });
   const g2 = await msgGet('/api/agent/msg/groups', 'vsst_beta');
