@@ -32,6 +32,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After a sudden power loss, remote conversations keep their tools and browsers keep reaching your Tailscale devices.
 - If VibeSpace stops suddenly just after you remove a machine, its port forwards, and a paired machine's mounts, no longer come back at the next start.
 - When a public address cannot be taken down, Ports now keeps it as a row with the reason and Try again, instead of leaving it serving unseen.
+- With Claude usage refresh set to Off, VibeSpace no longer reads usage by itself at a usage limit or in a pool's checks; a waiting conversation says so.
 
 ## 2.369.422 — 2026-11-27
 
