@@ -103,8 +103,10 @@ const PERMISSION_OUTCOMES = Object.freeze(['allowed', 'denied', 'cancelled', 'st
  *  2.1.321 → 2.1.322 (B-9ff2, lane bl-tests-e): the 2.1.322 dump's `sentences` — the SAME 16 texts on the same lists, renamed again, no `until`.
  *  2.1.322 → 2.1.328 (B-9ff2 step 2, lane bl-ci — the hosted runner's build, its dump taken on the runner): the 16 and FIVE more —
  *  pBe / w5e / b5e / k5e on both lists, `cancelled` (b5e and k5e say the approval request is still OPEN; the coordinator's ruling r140 (d):
- *  not run, nobody decided — true when written), and rHn on the is_error set, `stopped` (ww + a correction: files may have reached a connector). */
-const PERMISSION_OUTCOME_CLI_VERSION = '2.1.328';
+ *  not run, nobody decided — true when written), and rHn on the is_error set, `stopped` (ww + a correction: files may have reached a connector).
+ *  2.1.328 → 2.1.332 (主开发 r5510, lane cli-update-needs-nothing — the hub's machine's build, its dump taken by the integrator's box row
+ *  r5513): the 2.1.332 dump's `sentences` — the SAME 21 texts on the same lists, every name renamed (pBe is G6e …), no `until`. */
+const PERMISSION_OUTCOME_CLI_VERSION = '2.1.332';
 
 const row = (id, outcome, match, text, since, binary, evidence) => Object.freeze({ id, outcome, match, text, since, binary, evidence });
 

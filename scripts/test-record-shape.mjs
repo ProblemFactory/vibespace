@@ -856,7 +856,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314, 2.1.319, 2.1.321, 2.1.322 and 2.1.328 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314,2.1.319,2.1.321,2.1.322,2.1.328' && R.SCHEMA_CLI_VERSION === '2.1.328', R.SCHEMA_CLI_VERSIONS);
+  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312, 2.1.314, 2.1.319, 2.1.321, 2.1.322, 2.1.328 and 2.1.332 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307,2.1.308,2.1.312,2.1.314,2.1.319,2.1.321,2.1.322,2.1.328,2.1.332' && R.SCHEMA_CLI_VERSION === '2.1.332', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -966,7 +966,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const texts = (d, drop = []) => JSON.stringify(d.sentences.rows.map((x) => x.text).filter((t) => !drop.includes(t)).sort());
     const M9T = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t'), d314s = dumps.find((d) => d.version === '2.1.314');
     const OU9 = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'OU'), d319s = dumps.find((d) => d.version === '2.1.319'), d321s = dumps.find((d) => d.version === '2.1.321'), d322s = dumps.find((d) => d.version === '2.1.322');
-    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307 → 2.1.308 → 2.1.312: the same 14 sentences (none added, none vanished — no row needs `until`); 2.1.314 = those 14 + ONE (m9t, since 2.1.314); 2.1.319 = those 15 + ONE (OU, since 2.1.319); 2.1.321 = those 16, renamed — none vanished; 2.1.322 = those 16, renamed again (B-9ff2); 2.1.328 = those 16 + FIVE (pBe, w5e, b5e, k5e, rHn — since 2.1.328, B-9ff2 step 2); PERMISSION_OUTCOME_CLI_VERSION 2.1.328 (the newest pinned)', dumps.filter((d) => vcmp(d.version, '2.1.312') <= 0).every((d) => texts(d) === texts(dumps[0])) && !!d314s && !!M9T && M9T.since === '2.1.314' && d314s.sentences.rows.some((x) => x.text === M9T.text) && texts(d314s, [M9T.text]) === texts(dumps[0]) && !!d319s && !!OU9 && OU9.since === '2.1.319' && d319s.sentences.rows.some((x) => x.text === OU9.text) && texts(d319s, [OU9.text]) === texts(d314s) && !!d321s && texts(d321s) === texts(d319s) && !!d322s && texts(d322s) === texts(d321s) && (() => { const d328s = dumps.find((d) => d.version === '2.1.328'), N5 = PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.since === '2.1.328'); return !!d328s && N5.map((r) => r.id).join() === 'pBe,w5e,b5e,k5e,rHn' && texts(d328s, N5.map((r) => r.text)) === texts(d322s); })() && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.328' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
+    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307 → 2.1.308 → 2.1.312: the same 14 sentences (none added, none vanished — no row needs `until`); 2.1.314 = those 14 + ONE (m9t, since 2.1.314); 2.1.319 = those 15 + ONE (OU, since 2.1.319); 2.1.321 = those 16, renamed — none vanished; 2.1.322 = those 16, renamed again (B-9ff2); 2.1.328 = those 16 + FIVE (pBe, w5e, b5e, k5e, rHn — since 2.1.328, B-9ff2 step 2); 2.1.332 = those 21, renamed (主开发 r5510); PERMISSION_OUTCOME_CLI_VERSION 2.1.332 (the newest pinned)', dumps.filter((d) => vcmp(d.version, '2.1.312') <= 0).every((d) => texts(d) === texts(dumps[0])) && !!d314s && !!M9T && M9T.since === '2.1.314' && d314s.sentences.rows.some((x) => x.text === M9T.text) && texts(d314s, [M9T.text]) === texts(dumps[0]) && !!d319s && !!OU9 && OU9.since === '2.1.319' && d319s.sentences.rows.some((x) => x.text === OU9.text) && texts(d319s, [OU9.text]) === texts(d314s) && !!d321s && texts(d321s) === texts(d319s) && !!d322s && texts(d322s) === texts(d321s) && (() => { const d328s = dumps.find((d) => d.version === '2.1.328'), N5 = PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.since === '2.1.328'); return !!d328s && N5.map((r) => r.id).join() === 'pBe,w5e,b5e,k5e,rHn' && texts(d328s, N5.map((r) => r.text)) === texts(d322s) && (() => { const d332s = dumps.find((d) => d.version === '2.1.332'); return !!d332s && texts(d332s) === texts(d328s); })(); })() && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.332' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
     // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
     const z = dumps[1].zod || {};
     const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
@@ -1517,6 +1517,82 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const full28 = drawn21(recs28(C28), C28), stripped28 = drawn21(bare28, C28);
     ok('«nothing, by design» is MEASURED: the same conversation with the three records and the new fields, and without them, draws the same messages word for word', full28.length >= 2 && JSON.stringify(full28) === JSON.stringify(stripped28) && bare28.length === 3 && full28.join().includes('Started it.'), { full: full28.length, bare: stripped28.length });
     ok('the 2.1.328 copies live outside the tree', M28.files.every((f) => !f.startsWith(REPO)));
+    // THE 2.1.332 PIN (主开发 r5510, lane cli-update-needs-nothing, 2026-11-27) — the hub's machine's build since 2026-11-26: its dump taken by
+    // the INTEGRATOR's box row r5513 (the tree's dump script over the file — strings, never run) and handed over, with the zod literal of every
+    // shape whose fields changed (a driver over the same module; user, result and system/init run past its walker's bound). Against 2.1.328:
+    // no new subtype, no sentence; 18 fields on nine stream shapes (FIELDS_332), three off a stream shape (FIELDS_332_ELSEWHERE), one zod
+    // non-record (page_texts), three non-record keys gone (array, audio, boolean: never declared). Each classified; nothing draws for a person.
+    const d332 = dumps.find((d) => d.version === '2.1.332');
+    const diff32 = d332 && d328 ? dumpDiff(d328, d332) : null;
+    const f32 = (diff32 && diff32.fields) || {};
+    ok('2.1.332 against 2.1.328 (the dump diff, recomputed): 26 changes — ONE new key (page_texts), three gone (array, audio, boolean), 22 fields added on 13 keys and none gone, no nested key, no sentence added or gone',
+      !!diff32 && diff32.changes === 26 && diff32.newKeys.join() === 'page_texts' && diff32.goneKeys.join() === 'array,audio,boolean' && Object.keys(f32).length === 13
+        && Object.values(f32).every((f) => f.gone.length === 0) && Object.values(f32).reduce((s, f) => s + f.add.length, 0) === 22 && Object.keys(diff32.nested).length === 0
+        && diff32.sentencesAdded.length === 0 && diff32.sentencesGone.length === 0,
+      diff32 && { changes: diff32.changes, newKeys: diff32.newKeys, goneKeys: diff32.goneKeys, fields: Object.keys(f32), nested: diff32.nested });
+    ok('…its dump names the build its own stamp says, by the tree\'s method, with no draft and no path, machine or person in it', !!d332 && d332.version === '2.1.332' && /^strings -n 8 <binary>/.test(d332.method) && !('draft' in d332) && !/\/(home|Users|var|tmp)\//.test(JSON.stringify(d332)));
+    const isStream32 = (k) => !!R.SHAPES['claude:stream:' + (k === 'result/success' ? 'result' : k)];
+    const NON_STREAM32 = Object.keys(f32).filter((k) => !isStream32(k)).sort();
+    const streamAdds32 = [...new Set(Object.entries(f32).filter(([k]) => isStream32(k)).flatMap(([k, f]) => f.add.map((x) => 'claude:stream:' + (k === 'result/success' ? 'result' : k) + '.' + x)))].sort();
+    const fl332 = Object.entries(R.FIELDS_332 || {}).flatMap(([k, m]) => Object.keys(m).map((x) => k + '.' + x)).sort();
+    ok(`FIELDS_332: the ${fl332.length} fields on nine stream shapes ARE the dump diff's stream fields, computed (result/success's twins on result), each IGNORED with a reason naming 2.1.332, never known (no reader in the tree)`,
+      fl332.length === 18 && JSON.stringify(fl332) === JSON.stringify(streamAdds32) && fl332.every((n) => { const i = n.lastIndexOf('.'), sp = R.SHAPES[n.slice(0, i)], f = n.slice(i + 1); return !!sp && !sp.known.has(f) && /\(2\.1\.332/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 80; }),
+      { fl332, streamAdds32 });
+    const off32 = Object.entries(f32).filter(([k]) => NON_STREAM32.includes(k)).flatMap(([k, f]) => f.add.map((x) => k + '.' + x)).sort();
+    ok('…and what the diff grew off a stream shape is named, never a stream row: ' + NON_STREAM32.join(', ') + ' — FIELDS_332_ELSEWHERE holds exactly their ' + off32.length + ' added fields, each with its reason',
+      NON_STREAM32.join() === 'command,evaluated,sdk' && JSON.stringify(Object.keys(R.FIELDS_332_ELSEWHERE || {}).sort()) === JSON.stringify(off32) && Object.values(R.FIELDS_332_ELSEWHERE).every((v) => /^ignored — \(2\.1\.332\)/.test(v)), { NON_STREAM32, off32 });
+    const pt = (d332 && d332.union.page_texts) || [];
+    ok('page_texts: no uuid + session_id (never a stream record), a zod literal in the dump, ONE ZOD_NON_RECORDS row naming 2.1.332 — and the three keys gone (array, audio, boolean) were declared nowhere: nothing to retire',
+      pt.length > 0 && !(pt.includes('uuid') && pt.includes('session_id')) && typeof (d332.zod || {}).page_texts === 'string' && /^ignored — \(2\.1\.332\)/.test(R.ZOD_NON_RECORDS.page_texts || '') && !R.ATTACHMENT_PAYLOADS.page_texts
+        && ['array', 'audio', 'boolean'].every((k) => !(k in R.ZOD_NON_RECORDS) && !(k in R.ATTACHMENT_PAYLOADS) && !R.SHAPES['claude:stream:' + k]), { pt, zod: (d332 && d332.zod) || null });
+    const c32 = d332 && outcomeCensus(d332.sentences.rows, PO.PERMISSION_OUTCOME_ROWS, '');
+    ok('the sentences: the SAME 21 texts as 2.1.328 on the same lists (every name renamed), so the census classifies every one — and it names the build it was read from (PERMISSION_OUTCOME_CLI_VERSION = 2.1.332)',
+      !!d332 && d332.sentences.rows.length === 21 && JSON.stringify(d332.sentences.rows.map((r) => r.text + '|' + r.from).sort()) === JSON.stringify(d328.sentences.rows.map((r) => r.text + '|' + r.from).sort()) && !!c32 && c32.unclassified.length === 0 && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.332', c32 && c32.unclassified);
+    const nj32 = d332 ? [...judgeDump(R, d332), ...nestedUndeclared(R, d332.nested)] : null;
+    ok('the lists and shapes of THIS tree judge the 2.1.332 dump clean, nested objects too (the strict oracle the hub\'s machine runs: 2.1.332 is pinned)', !!nj32 && nj32.length === 0, nj32);
+    // CONTROL (主开发 r5135 law 1: judged on a WITNESS that its plant was in force — the copy's shapes really lack every FIELDS_332 entry)
+    const F332 = R.FIELDS_332 || {}, no332 = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).map(([k, sp]) => [k, F332[k] ? { ...sp, ignored: new Map([...sp.ignored].filter(([f]) => !(f in F332[k]))) } : sp])) };
+    const plant332 = Object.entries(F332).every(([k, m]) => Object.keys(m).every((f) => !no332.SHAPES[k].ignored.has(f) && !no332.SHAPES[k].known.has(f)));
+    const n332 = d332 && plant332 ? judgeDump(no332, d332) : null;
+    const wantU32 = Object.entries(f32).filter(([k]) => isStream32(k)).flatMap(([k, f]) => f.add.map((x) => 'UNDECLARED ' + k + '.' + x)).sort();
+    if (!plant332) skip('CONTROL (a copy without FIELDS_332)', 'its plant was not in force — the copy still declares a FIELDS_332 field; not judged');
+    else ok(`CONTROL: a copy without FIELDS_332 (witness: its shapes declare none of them) is red on the 2.1.332 dump — every stream field the diff added named (${wantU32.length}, result/success's twins included) — and green on 2.1.328`, !!n332 && JSON.stringify(n332.slice().sort()) === JSON.stringify(wantU32) && judgeDump(no332, d328).length === 0, n332);
+    // what the person sees: nothing, measured — a 2.1.332 conversation whose records carry the new fields
+    const recs32 = (conv) => [
+      { type: 'user', session_id: conv, uuid: 'u-332-u', message: { role: 'user', content: 'Run the tests' }, client_content_width: 88, refusal_retry: false },
+      { type: 'assistant', session_id: conv, uuid: 'u-332-a', message: { id: 'm-332', role: 'assistant', content: [{ type: 'text', text: 'Ran them.' }] } },
+      { type: 'system', subtype: 'informational', session_id: conv, uuid: 'u-332-i', content: 'Saved two files', level: 'info', saved_from: { files: 2, app: 'app-word-332' } },
+      { type: 'system', subtype: 'informational', session_id: conv, uuid: 'u-332-n', content: 'A note was left', level: 'info', agent_note: { to: { kind: 'main' }, about: { kind: 'agent' }, text: 'note-word-332', source: 'plugin-332@builtin' } },
+      { type: 'system', subtype: 'model_refusal_fallback', session_id: conv, uuid: 'u-332-f', original_model: 'model-a-332', fallback_model: 'model-b-332', served_notice: { text: 'served-word-332 {model}', learn_more_url: 'https://example.invalid/served-332' } },
+      { type: 'result', subtype: 'success', session_id: conv, uuid: 'u-332-r', is_error: false, num_turns: 1, result: 'ok', duration_ms: 1, duration_api_ms: 1, stop_reason: 'end_turn', total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], begun_message_ids: ['m-332'], tool_hold_detail: 'hold-word-332' },
+    ];
+    const NEW32 = ['client_content_width', 'refusal_retry', 'saved_from', 'agent_note', 'served_notice', 'begun_message_ids', 'tool_hold_detail'];
+    const C32 = 'e2e00000-0000-4000-8000-000000000332';
+    const mm32 = createMessageManager('claude', C32); for (const r of recs32(C32)) mm32.processLive(JSON.parse(JSON.stringify(r)));
+    const all32 = JSON.stringify(mm32.messages);
+    ok('the REAL normalizer on a 2.1.332 conversation (a user record, two informational lines, a refusal fallback and a result, each with its new fields) ⇒ no unknown card, no drift card, no ledger row, and none of the new fields\' words appear',
+      unknownCards(mm32).length === 0 && driftCards(mm32).length === 0 && ledgerOf(C32).length === 0 && !/app-word-332|note-word-332|served-word-332|hold-word-332/.test(all32), { unknown: unknownCards(mm32).length, drift: driftCards(mm32).map((m) => m.content[0].shape), rows: ledgerOf(C32).length });
+    const C32b = 'e2e00000-0000-4000-8000-000000000333';
+    const bare32 = recs32(C32b).map((r) => { const c = { ...r }; for (const f of NEW32) delete c[f]; return c; });
+    const full32 = drawn21(recs32(C32b), C32b), stripped32 = drawn21(bare32, C32b);
+    ok('«nothing, by design» is MEASURED: the same conversation with the new fields and without them draws the same messages word for word', full32.length >= 4 && JSON.stringify(full32) === JSON.stringify(stripped32) && bare32.every((r) => NEW32.every((f) => !(f in r))), { full: full32.length, stripped: stripped32.length });
+    // THE DOORS CENSUS (as 2.1.328's): every name the diff added is a door of NOTHING (no reader); each searchable name is SEARCHED — one
+    // fixed-string whole-word git grep over src/, server.js and data/bin, comment lines and the declaring file left out
+    const named32 = diff32 ? [...new Set([...diff32.newKeys, ...Object.entries(f32).flatMap(([, f]) => f.add)])].sort() : [];
+    const COMMON32 = { preview: 'a common word (previews of files, pages and designs)', unhooked: 'an English word (the tree\'s own listeners «unhooked» in comments; a class name of the live view)' };
+    const searched32 = named32.filter((n) => !(n in COMMON32));
+    const readers32 = (grepOut) => String(grepOut || '').split('\n').filter(Boolean).flatMap((l) => {
+      const m = /^([^:]+):(\d+):(.*)$/.exec(l); if (!m) return [];
+      const [, file, line, text] = m, t = text.trim();
+      if (file === 'src/record-shape.js' || t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) return [];
+      return searched32.filter((n) => new RegExp('(^|[^\\w$])' + n + '([^\\w$]|$)').test(text)).map((n) => `${n} @ ${file}:${line}`);
+    });
+    const gg32 = spawnSync('git', ['-C', REPO, 'grep', '-n', '-F', '-w', ...searched32.flatMap((n) => ['-e', n]), '--', 'src', 'server.js', 'data/bin'], { encoding: 'utf8', maxBuffer: 64 << 20 });
+    const found32 = readers32(gg32.stdout);
+    ok(`the doors census: every one of the ${named32.length} names the 2.1.332 diff added is a door of NOTHING, and each of the ${searched32.length} searchable ones has NO reader in the code (${Object.keys(COMMON32).length} common words listed unsearched: ${Object.keys(COMMON32).join(', ')})`,
+      named32.length === 22 && gg32.status !== null && gg32.status <= 1 && found32.length === 0, found32);
+    const planted32 = readers32(String(gg32.stdout || '') + '\nsrc/lib/chat-renderers.js:1:    if (rec.served_notice) showNotice(rec.served_notice.text);\nsrc/server/x.js:2:  // a comment naming tool_hold_detail is no reader\n');
+    ok('CONTROL: a planted reader (a renderer reading served_notice) is NAMED by the same judge — and a comment naming another is not', planted32.length === 1 && planted32[0] === 'served_notice @ src/lib/chat-renderers.js:1', planted32);
   }
 }
 

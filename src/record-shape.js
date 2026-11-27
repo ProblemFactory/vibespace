@@ -29,7 +29,7 @@
 // the design's census; since 2.1.281 the minifier spells it `d({type:R(…)`, so the extractor reads the
 // helper names off an anchor instead of spelling them); the fields 2.1.280 and 2.1.281 added sit in each
 // shape's `ignored` map with a reason (a shape NEW in a later build carries that build's declaration as
-// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312 / FIELDS_319 / FIELDS_321 / FIELDS_328; 2.1.314 added none), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
+// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312 / FIELDS_319 / FIELDS_321 / FIELDS_328 / FIELDS_332; 2.1.314 added none), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
 // the stream envelope and are omitted per row. Corpus-
 // only fields (seen live, undeclared upstream) are appended in CORPUS_KNOWN with a note.
 
@@ -491,6 +491,60 @@ const FIELDS_328_ELSEWHERE = Object.freeze({
   'sdk.dataFlowServer': 'ignored — (2.1.328) on an MCP server CONFIG of type sdk (the SDK host\'s, not a record), by its name; VibeSpace writes no such config',
   'sdk.onPersonsMachine': 'ignored — (2.1.328) on an MCP server CONFIG of type sdk (the SDK host\'s, not a record), by its name: the server runs on the person\'s machine; VibeSpace writes no such config',
 });
+// The fields 2.1.332 added to shapes 2.1.328 already declared (2026-11-27, 主开发 r5510, lane cli-update-needs-nothing: the hub's machine
+// moved to 2.1.332 on 2026-11-26; its dump taken by the INTEGRATOR's box row r5513, the tree's dump script over the file — strings, never
+// run — and handed over; minus the 2.1.328 dump). Where the shape's literal was read (the row's second part: each changed shape's zod
+// literal) a note says what its own `.describe()` says; user, result and system/init run past the dump walker's 8000-character bound, so
+// their six fields were read by the row's third part (主开发 r5522: a reader of the file as data, the 600 characters after each name) —
+// five carry their describe's words; result's begun_message_ids names a shared text (its describe is a constant), so it is noted by its
+// name. A grep of src/ server.js data/bin found NO reader for any of them: each is an `ignored` row.
+const NEW_332 = (what) => what + ' (2.1.332) — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const NAME_332 = (what) => what + ' (2.1.332; by its name — its describe is a shared constant the read did not resolve) — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const FIELDS_332 = Object.freeze({
+  'claude:stream:conversation_reset': {
+    user_message_from_human: NEW_332('@internal beside user_message_uuid only: a person sent that message (origin human, e.g. from a Remote Control client), so a host that did not send it can follow the reset as the person\'s — the normalizer re-keys on new_conversation_id'),
+  },
+  'claude:stream:result': {
+    begun_message_ids: NAME_332('the ids of the messages the turn began — the result card reads is_error / subtype / the text'),
+    tool_hold_detail: NEW_332('@internal sent only by an internal build a self-hosted runner started: the timings of the tool calls the launcher held while its hooks fetched the session\'s files ({first_result_ms, holds}) — the result card reads is_error / subtype / the text'),
+  },
+  'claude:stream:system/informational': {
+    agent_note: NEW_332('@internal on the line by which a plugin says it left a note for an agent about another\'s work ({to, about, text, source}), so a host can draw the note itself instead of `content` — the dim card shows `content`'),
+    saved_from: NEW_332('@internal on a connector_files line that only says a connector\'s files were saved ({files, file?, app?}), so a host can word it itself — the dim card shows `content`'),
+  },
+  'claude:stream:system/init': {
+    sandbox_enabled: NEW_332('@internal whether this process runs its shell commands in the CLI\'s command sandbox (true | false | unknown; absent means no claim, never off) — the init reader takes model / tools / version'),
+    served_by_anthropic: NEW_332('@internal true when the session\'s model requests go to Anthropic\'s own API (the first-party provider, no other base URL or socket); it tells routing alone — the init reader takes model / tools / version'),
+  },
+  'claude:stream:system/model_refusal_fallback': {
+    served_notice: NEW_332('@internal the refusal\'s wording as the model list serves it ({text, learn_more_url?}, {model} where the name goes), for a consumer that composes its own notice — the fallback notice is drawn from original_model / fallback_model'),
+  },
+  'claude:stream:system/peer_message_hold': {
+    hold_id: NEW_332('the handle for decide_held_peer_message, minted by this session and never sent over a remote transport — VibeSpace decides no held message by it'),
+    can_deliver: NEW_332('state held, with hold_id: whether a person may deliver it now (false where a setting holds it or it waits for room in the queue)'),
+    always_scope: NEW_332('with can_deliver: the narrowest «always» (mine | anyone) that covers this sender'),
+    session_class: NEW_332('state held, with hold_id: whether this session asks before acting (prompting | bypass), the risk to show beside Always'),
+    verified_pid: NEW_332('state held, with hold_id: the pid the kernel reported for a socket sender'),
+    preview: NEW_332('the held message\'s preview {text, total_chars, other_blocks, is_whole, …}'),
+  },
+  'claude:stream:system/task_notification': {
+    mcp_task: NEW_332('@internal where an MCP task\'s entry in the CLI\'s task list ended: with tool_use_id and status it tells a host that missed task_started what ended and how long it ran — the task card reads status and the summary'),
+  },
+  'claude:stream:system/ui_invalidate': {
+    unhooked: NEW_332('@internal on a push with no instances: the list the ui_attach answer carries under this name, as it stands now — the plugin UI host\'s wire, card-less'),
+  },
+  'claude:stream:user': {
+    client_content_width: NEW_332('@internal the width, in CSS pixels, of the chat column of the client that sent the message — the chat draws a user record from its message'),
+    refusal_retry: NEW_332('@internal output only: on each synthetic message the CLI writes to re-ask the same model after a refusal (the re-ask, and the tool_result of each call the refused response left unfinished) — the chat draws a user record from its message'),
+  },
+});
+// …and what the diff grew OFF a stream shape (a config or a body the CLI parses, never a record): named, never a stream row. array, audio and
+// boolean went from the union (2.1.328 had them; nothing declared them, nothing to retire).
+const FIELDS_332_ELSEWHERE = Object.freeze({
+  'command.holdsTools': 'ignored — (2.1.332) on a hook of type command (a settings entry, not a record), its describe: «@internal UserPromptSubmit and PostToolUse hooks of the official security-guidance plugin only» — the prompt or the next request goes without waiting for that hook; VibeSpace writes no such hook',
+  'evaluated.judged_as': 'ignored — (2.1.332) on an `evaluated` body {judged_as?} the CLI parses (its literal carries no describe), by its name; never a stream record',
+  'sdk.remoteControlMetaKeys': 'ignored — (2.1.332) on an MCP server CONFIG of type sdk (the SDK host\'s, not a record), by its name; VibeSpace writes no such config',
+});
 // (filled BEFORE the CORPUS_KNOWN line: test-record-shape §5's control clears every ignored map at that line)
 for (const [key, fields] of Object.entries(FIELDS_288)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_296)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
@@ -500,6 +554,7 @@ for (const [key, fields] of Object.entries(FIELDS_312)) for (const [f, note] of 
 for (const [key, fields] of Object.entries(FIELDS_319)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_321)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_328)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
+for (const [key, fields] of Object.entries(FIELDS_332)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(CORPUS_KNOWN)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 
 
@@ -730,6 +785,8 @@ const ZOD_NON_RECORDS = Object.freeze({
   resource_link: 'ignored — (2.1.328) {type: resource_link, name, uri, description?, title?, mimeType?, size?, annotations?}: an MCP tool result\'s link to a resource (the MCP content type); content inside a tool result, which the chat draws as the result\'s text; never a stream record',
   server_tool_use: 'known — (2.1.328, parsed with no field) the API\'s server-tool content block: CONTENT_BLOCK_TYPES, the renderer folds it under its search card; content inside a message, never a stream record',
   web_search_tool_result: 'known — (2.1.328) {type: web_search_tool_result, tool_use_id, content: [{title, url}] | {error_code}}: the API\'s web-search result block, CONTENT_BLOCK_TYPES — the renderer folds it under its search card; never a stream record',
+  // 2.1.332 (主开发 r5510, lane cli-update-needs-nothing): one more, read on its literal in the 2.1.332 dump's `zod` (no uuid / session_id)
+  page_texts: 'ignored — (2.1.332) {type: page_texts, file_uuid}: a body naming a file by its uuid (by its literal alone); never a stream record',
 });
 
 // ── carrier + shape key ──────────────────────────────────────────────────────────────────────────
@@ -898,12 +955,15 @@ function unknownFieldsSample(record) {
 // on no machine of ours: three new subtypes (late_allow_not_run, shell_cwd, task_list_statuses), card-less (late_allow_not_run HANDLED since
 // B-9ff2's remainder: the late-Allow card); 26 fields on twelve shapes: FIELDS_328 (25; control_cancel_request.takes_late_allow KNOWN since
 // the same remainder, read by message-manager); six off a stream shape: FIELDS_328_ELSEWHERE; one nested key (rate_limit_info.memberSpendLimit); nine zod non-records +
-// queued_command, an attachment payload message-manager already reads; five more sentences, src/permission-outcome.js). Each
+// queued_command, an attachment payload message-manager already reads; five more sentences, src/permission-outcome.js) + 2.1.332
+// (2026-11-27, 主开发 r5510, lane cli-update-needs-nothing — the hub's machine's build since 2026-11-26, dumped by the integrator's box row
+// r5513, the file READ, never run: no new subtype, no sentence; 18 fields on nine stream shapes: FIELDS_332; three off a stream shape:
+// FIELDS_332_ELSEWHERE; one zod non-record, page_texts; array / audio / boolean gone, never declared). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314', '2.1.319', '2.1.321', '2.1.322', '2.1.328']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314', '2.1.319', '2.1.321', '2.1.322', '2.1.328', '2.1.332']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
-module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, FIELDS_319, FIELDS_319_ELSEWHERE, FIELDS_321, FIELDS_321_ELSEWHERE, FIELDS_328, FIELDS_328_ELSEWHERE, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, FIELDS_319, FIELDS_319_ELSEWHERE, FIELDS_321, FIELDS_321_ELSEWHERE, FIELDS_328, FIELDS_328_ELSEWHERE, FIELDS_332, FIELDS_332_ELSEWHERE, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
