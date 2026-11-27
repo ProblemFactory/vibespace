@@ -380,8 +380,7 @@ const SHELL_ROWS = [
 ];
 // THE REGIONS' OWED SITES: an EQUALITY like OWED_MAX and kept beside it (a src/ cure lowers OWED_MAX, a region's cure this one);
 // a rise above the kept baseline is red by name unless REGION_RISES names it with its row
-const REGION_OWED_MAX = 21;   // B-bcb8 unit D, group one (lane bl-scratch, 主开发 r5214): 25 → 21 — the channels, design and OpenCode tools' writes and the statusline's slot state are synced (the slot state when what it holds changes)
-const REGION_OWED_MAX = 15;   // B-bcb8 unit D, group two (lane bl-scratch, 主开发 r5214): 25 → 15 — the app manifest's six, the app system's two trees and the install slot's two records are synced in their own strings
+const REGION_OWED_MAX = 11;   // B-bcb8 unit D, group one (lane bl-scratch, 主开发 r5214): 25 → 21 — the channels, design and OpenCode tools' writes and the statusline's slot state are synced (the slot state when what it holds changes); B-bcb8 unit D, group two (lane bl-scratch, 主开发 r5214): 25 → 15 — the app manifest's six, the app system's two trees and the install slot's two records are synced in their own strings — the union (int361, 主开发 r5521): 25 − 4 − 10 = 11
 const REGION_OWED_BASELINE = 25;   // kept at the regions' judging (B-bcb8's first unit)
 const REGION_RISES = [];           // [n, row, why] — a named rise of the regions' owed count (none)
 
