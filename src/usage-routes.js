@@ -730,7 +730,7 @@ function panelSays(key, v) {
   if (key === '__global__' || !v || v.code === 'login' || v.code === 'unprobeable' || v.code === 'sign-in-unknown' || DOOR_CODES.includes(v.code)) return v;   // B-5279 (r4932 M1): + the door's refusals — nothing was asked // the door's refusal is no failed probe either (acceptance r2; B-360d: a sign-in not read asked nothing)
   try {
     if (v.outcome === 'written') accounts.noteProbe?.(key, null);
-    else accounts.noteProbe?.(key, { at: v.at, ok: false, why: probeWhyText(v.why) || v.outcome });
+    else accounts.noteProbe?.(key, { at: v.at, ok: false, why: probeWhyText(v.why) || v.outcome, ...(v.door ? { door: v.door } : {}) });   // r5516 (1): the door's code persists with the row's probe
   } catch { } // an account removed meanwhile — nothing to keep
   return v;
 }

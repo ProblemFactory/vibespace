@@ -970,7 +970,8 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   // tree's, which the hotfix did not touch. A SHALLOW CLONE (the hosted runner's: a checkout with no history, 主开发 r5481 (1)) holds no
   // 1a4abf716: the release-read reds are then a NAMED SKIP the gate counts (as test-billing-pick), and the release's three rules stand in
   // as small IN-TREE PLANTS in a copy of this tree's engine — so a shallow clone still holds three reds that can fail; the run says which
-  const relOf = (f) => { try { return execFileSync('git', ['show', '1a4abf716:' + f], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+  let relWhy = null;
+  const relOf = (f) => { try { return execFileSync('git', ['show', '1a4abf716:' + f], { cwd: REPO, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { relWhy = relWhy || String((e && (e.stderr || e.message)) || e).split('\n').filter(Boolean)[0] || 'unknown'; return null; } };
   const relRL = relOf('src/reading-lag.js'), relRR = relOf('src/reading-repair.js'), relENG = relOf(ENG);
   const rlRelPath = relRL ? MUT.write('src/reading-lag.js', relRL, 'rel421-reading-lag') : null, rrRelPath = relRR ? MUT.write('src/reading-repair.js', relRR, 'rel421-reading-repair') : null;
   const mRelease = relENG && rlRelPath && rrRelPath ? require(MUT.write(ENG, relENG.split("require('../reading-lag.js')").join(`require(${J(rlRelPath)})`).split("require('../reading-repair.js')").join(`require(${J(rrRelPath)})`), 'rel421-engine')) : null;
@@ -983,7 +984,12 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const MOVE_PLANT = MOVE_AT + "      { const heldBy0 = moved ? othersOf(key, [...new Set(agreeing.flatMap((e) => (Array.isArray(e.names) ? e.names : [])))]) : []; if (heldBy0.length) { next.foreign = { names: heldBy0.slice(0, 4), phase: entry.resetsAt, at: entry.at, n: run }; const ok0 = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next); if (ok0) noteHeldWindow(key, next.foreign); return ok0 ? res : null; } }\n";
   const WARM_LOOP = "releaseClockHold(k, readApiWitnessFile(k)); noteHeldWindow(k, null);";
   let skipped = 0;
-  if (!mRelease) { skipped++; globalThis.__rtSkipped = skipped; console.log('  - SKIP the three reds read from the release itself (the release 1a4abf716 is not in this clone\'s history) — its three rules stand in as in-tree plants in a copy of this engine'); }
+  if (!mRelease) {
+    // r5516 (4): «shallow» only when git says so; any other cause by its own first line
+    let shallow = null; try { shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { shallow = null; }
+    skipped++; globalThis.__rtSkipped = skipped;
+    console.log(`  - SKIP the three reds read from the release itself (${shallow === 'true' ? 'this clone is shallow: the release 1a4abf716 is not in its history' : `git could not read the release 1a4abf716: ${relWhy}`}) — its three rules stand in as in-tree plants in a copy of this engine`);
+  }
   const mStanding = mRelease || (esrcH.includes(WARM_END) ? require(MUT.write(ENG, esrcH.split(WARM_END).join(STANDING_PLANT), 'hot422-standing-check-planted')) : null);
   const mMove = mRelease || (esrcH.includes(MOVE_AT) ? require(MUT.write(ENG, esrcH.split(MOVE_AT).join(MOVE_PLANT), 'hot422-move-hold-planted')) : null);
   const mKeep = mRelease || (esrcH.includes(WARM_LOOP) ? require(MUT.write(ENG, esrcH.split(WARM_LOOP).join('const w = readApiWitnessFile(k); noteHeldWindow(k, w && w.foreign);'), 'hot422-start-keeps-holds')) : null);
@@ -1124,6 +1130,46 @@ console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER
   const mNoEdit = esrc.includes(EDIT1) && esrc.includes(EDIT2) ? require(MUT.write(ENG, esrc.split(EDIT1).join('').split(EDIT2).join('return c || r || null; };'), 'a423-no-edit-door')) : null;   // stale-pins: kept (the red puts dcffa2828's rule back)
   const e1r = mNoEdit ? await editDoor(mNoEdit, { act: true }) : null;
   ok('2.369.423 (A) r5481 (4) RED CONTROL (the row\'s identity its file\'s alone, as dcffa2828 read it, in a copy): the person\'s own re-sign is refused at every press — the leg above can fail', !!e1r && e1r.v === false && SIGNED.test(e1r.why), e1r);
+  // r5516 (4) — THE RE-SIGN THROUGH THE REAL ROAD: a sign-in a person finished on Vela whose BEFORE is lost (a start between the press and
+  // the sign-in, or one another process wrote) — the door ASKS (reloginResolve «ask»), the person answers «same» (reloginAnswer): from
+  // that act Vela is that account, its read written; red: the row's identity its file's alone (the same copy as above)
+  const realRoad = async (engMod) => {
+    const W = held(engMod, { ro: roP, cli: binHeld, logins: { V: VELA, O: ORIN }, rowOrg: VELA.org });
+    W.am.finalizeSubscription(W.V);            // Vela's own sign-in through the product
+    await W.am.signinFactsSettled();
+    putLogin(W, W.V, 'vela-asked', ORIN);       // the person signed Vela in again — into Orin's account
+    let asked = null, answered = null;
+    try { asked = quiet(() => W.am.reloginResolve(W.V)); } catch (e) { asked = { outcome: 'threw: ' + e.message }; }
+    if (asked && asked.outcome === 'ask') { try { answered = quiet(() => W.am.reloginAnswer(W.V, 'same')); } catch (e) { answered = { outcome: 'threw: ' + e.message }; } }
+    await W.am.signinFactsNow([W.V]);
+    const rec = W.am.identityRecordOf(W.V, { since: 0 }) || {};
+    await run6(W);
+    const r = await hush(() => W.api.refreshViaCliPanel(W.V));
+    return { asked: asked && asked.outcome, answered: answered && answered.outcome, tie: rec.tie || null, recOrg: rec.org === ORIN.org ? 'orin' : rec.org ? 'other' : null, v: r.v, why: wordsOf(W) };
+  };
+  const rr1 = await realRoad(realEng), rr1r = mNoEdit ? await realRoad(mNoEdit) : null;
+  console.log(`    the real road: ${J(rr1)}`);
+  ok('2.369.423 (A) r5516 (4) THE RE-SIGN THROUGH THE REAL ROAD (a lost before: the door asks, the person answers «same»): from that act Vela is Orin\'s account — its tie proven, its record Orin\'s, its read WRITTEN, never refused', rr1.asked === 'ask' && rr1.answered === 'same' && rr1.tie === 'proven' && rr1.recOrg === 'orin' && rr1.v === true && !SIGNED.test(rr1.why), rr1);
+  ok('2.369.423 (A) r5516 (4) RED CONTROL (the same road, the row\'s identity its file\'s alone, in a copy): refused — the leg above can fail', !!rr1r && rr1r.asked === 'ask' && rr1r.v === false && SIGNED.test(rr1r.why), rr1r);
+  // r5516 (3) — THE REFUSAL NEVER NAMES A ROW OF ANOTHER HARNESS: Vela (its own organisation on file) holds a login no row has; a row of
+  // ANOTHER harness (Cora: its kept record a codex one) carries that login's address — never «the other account»; red: every row compared
+  const ELSE = { email: 'mail-else-0001', org: 'org-else-0001' };   // invented
+  const harnessScene = async (engMod) => {
+    const W = held(engMod, { ro: roP, cli: binHeld, logins: { V: ELSE, O: ORIN }, rowOrg: VELA.org });
+    const C = W.am.createSubscription({ name: 'Cora' }).id;
+    const real = W.am.identityRecordOf.bind(W.am);
+    W.am.identityRecordOf = (id, o) => (id === C ? { harness: 'codex', seat: null, address: ELSE.email, org: 'ws-cora-0001', conflict: false, tie: null } : real(id, o));   // the kept record of another harness's row (a stand-in)
+    await W.am.signinFactsSettled();
+    await run6(W);
+    const r = await hush(() => W.api.refreshViaCliPanel(W.V));
+    return { v: r.v, why: wordsOf(W) };
+  };
+  const HARN = "        if (!r || r.harness !== ownHarness) return null;\n";
+  const mAnyHarness = esrc.includes(HARN) ? require(MUT.write(ENG, esrc.split(HARN).join('        if (!r) return null;\n'), 'a423-any-harness')) : null;
+  const hs1 = await harnessScene(realEng), hs1r = mAnyHarness ? await harnessScene(mAnyHarness) : null;
+  console.log(`    another harness's row: ${J(hs1)}; every row compared (red): ${J(hs1r)}`);
+  ok('2.369.423 (A) r5516 (3) ANOTHER HARNESS\'s ROW sharing the address is NEVER named: Vela\'s read is not refused «signed in as Cora»', !SIGNED.test(hs1.why), hs1);
+  ok('2.369.423 (A) r5516 (3) RED CONTROL (every row compared, its harness unasked, in a copy): the refusal names Cora — the leg above can fail', !!hs1r && hs1r.v === false && /signed in as Cora/.test(hs1r.why), hs1r);
   // THE CAPTURE's AND THE BANNER's IDENTITY (the door unit's (B) must, r5302 / r5326): a row's file never takes another account's
   // organisation through a sibling's base — judged on the files (no hold any more), each with its red
   const freshV = (W) => { const vf = path.join(W.cacheDir, W.V + '.json'), o = JSON.parse(fs.readFileSync(vf, 'utf8')); fs.writeFileSync(vf, J({ ...o, fetchedAt: Date.now() })); const of = path.join(W.cacheDir, W.O + '.json'), oo = JSON.parse(fs.readFileSync(of, 'utf8')); fs.writeFileSync(of, J({ ...oo, fetchedAt: Date.now() - 3600e3 })); };

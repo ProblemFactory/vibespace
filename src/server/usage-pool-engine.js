@@ -7564,10 +7564,13 @@ function liftHeldWindow(key, idv, ctx = null) {
       const answer = answeringLogin(idv);
       const addr = answer && typeof answer.email === 'string' && answer.email.trim() ? answer.email.trim().toLowerCase() : null;
       if (!addr) return false;
+      // r5516 (3): ONLY ROWS OF THE ROW's OWN HARNESS are compared — another harness's row that shares an address is never «the other account»
+      const ownHarness = (() => { let r = null; try { r = accounts.identityRecordOf(key, { since: 0 }); } catch { r = null; } if (r && r.harness) return r.harness; try { const a = ((accounts.list() || {}).accounts || []).find((x) => x && x.id === key); return (a && a.backend) || 'claude'; } catch { return 'claude'; } })();
       const keptLogin = (n) => {
-        if (n === '__global__') { const m = ctx && ctx.machineLogin; return m && (m.email || m.orgUuid) ? { email: m.email || null, orgUuid: m.orgUuid || null } : null; }
+        if (n === '__global__') { if (globalUsageKey(ownHarness) !== '__global__') return null; const m = ctx && ctx.machineLogin; return m && (m.email || m.orgUuid) ? { email: m.email || null, orgUuid: m.orgUuid || null } : null; }
         let r = null; try { r = accounts.identityRecordOf(n, { since: 0 }); } catch { r = null; }
-        return r && (r.address || r.org) ? { email: r.address || null, orgUuid: r.org || null } : null;
+        if (!r || r.harness !== ownHarness) return null;
+        return r.address || r.org ? { email: r.address || null, orgUuid: r.org || null } : null;
       };
       let others = [];
       try { others = ((accounts.list() || {}).accounts || []).map((a) => a && a.id).filter((id) => typeof id === 'string' && id && id !== key); } catch { others = []; }

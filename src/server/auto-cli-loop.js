@@ -214,9 +214,13 @@ function createAutoCliLoop(d) {
     let pv = null;
     if (!ok) { try { pv = d.usage.panelVerdictFor?.(key); } catch { pv = null; } }
     const door = !!(pv && pv.at >= now && pv.code === 'identity' && pv.door);
-    if (door) idRefused.set(key, now); else idRefused.delete(key);
+    if (door) idRefused.set(key, pv.at); else idRefused.delete(key);   // r5516 (2): from the refusal's own moment (the release's write landed there)
     return door;
   };
+  /** r5516 (1) — A PERSON's REFUSED PRESS paces the loop from the press's own moment (at the release that press WROTE, so the automatic
+   *  read waited a whole cadence from it): the row's own probe record (accounts noteProbe — persisted by the accounts store, a restart
+   *  keeps it; a read that writes clears it) carries the door's code. → that moment, or 0 */
+  const pressAt = (a) => (a && a.probe && a.probe.door && Number.isFinite(Number(a.probe.at)) ? Number(a.probe.at) : 0);
   const { attempts, fails, projReads, said } = st;
   const jitter = 1 + rand() * 0.4; // per-boot 45–63min active-burn cap
   // AN UNPROBEABLE ACCOUNT (lane auto-cli-oat-unprobeable): true ⇒ skipped with no attempt and no failure; what the
@@ -369,7 +373,8 @@ function createAutoCliLoop(d) {
         // back off to hours: the next read after a renewal is the evidence that re-admits it (memberServeLapsed)
         const lapsed = !!(d.memberServeLapsed && d.memberServeLapsed(a.id));
         if (st.unknownAt != null) continue;   // the state unread: «unknown — wait the longest» (the ban-safety law; the tick above ends it)
-        if (idRefused.has(a.id) && now - (attempts.get(a.id) || 0) < Math.max(idleMaxAgeMs, 45 * 60e3 * jitter)) continue;   // r5481 (3)
+        const doorAt = Math.max(idRefused.get(a.id) || 0, pressAt(a));   // r5516 (1): the loop's own refusal or a person's
+        if (doorAt && now - doorAt < Math.max(idleMaxAgeMs, 45 * 60e3 * jitter)) continue;   // r5481 (3) / r5516 (2): from the refusal's own moment
         if (lapsed ? now - (attempts.get(a.id) || 0) < idleMaxAgeMs : (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6)))) continue;
         let est = null; try { est = raw ? d.usageEstimator.estimateFor(a.id, raw, now) : null; } catch { }
         // B-a5c0: a raw bucket whose window already reset is NO control for the

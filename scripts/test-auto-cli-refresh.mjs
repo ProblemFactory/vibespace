@@ -193,7 +193,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     while (t <= end) { out.push({ t, cost, fam }); t += poisson ? -Math.log(1 - rnd()) * everyMs : everyMs; }
     return out;
   };
-  const makeWorld = ({ members, sessions, loopFile = REAL_LOOP, poolFile = REAL_POOL, seed = 1, stateFile = null, wakeThrows = false, groups = null, storeWriter = null, landingMs = 200 }) => {
+  const makeWorld = ({ members, sessions, loopFile = REAL_LOOP, poolFile = REAL_POOL, seed = 1, stateFile = null, wakeThrows = false, groups = null, storeWriter = null, landingMs = 200, probeMs = 0 }) => {
     const pool = require(poolFile), { createAutoCliLoop } = require(loopFile);
     const dir = path.join(scratchDir, 'w' + (++dirN)), cacheDir = path.join(dir, 'usage-cache'), dataDir = path.join(dir, 'data');
     fs.mkdirSync(cacheDir, { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
@@ -224,7 +224,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
       if (!best) return null;
       return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(Math.max(0, ...Object.values(burn).map((v) => (Number(v) || 0) * 100)) * 100) / 100 };
     };
-    const spawns = [], logs = [], said = {};
+    const spawns = [], logs = [], said = {}, probes = {};   // probes: the rows' persisted probe records (accounts noteProbe)
     // B-574d: the loop's store writer, a stand-in — durable() writes the produced bytes at once (the release's synchronous timing, so every
     // leg reads the file as before) and answers true; `refuse` (placed) answers false with nothing written
     // `later`: the landing comes a turn after the call (the real writer's latency, placed); `hang`: it never comes (a lost thread, a hung mount)
@@ -242,11 +242,11 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const deps = {
       now: () => T, rand, dataDir, USAGE_CACHE_DIR: cacheDir, metric: () => {},
       serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
-      accounts: (() => { const l = () => ({ accounts: members.map((m) => ({ id: m.id, type: 'subscription', loggedIn: true, pooled: false, backend: 'claude' })) }); return { list: l, decisionList: l, signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }; })(),   // B-360d: the tick reads the decision road
+      accounts: (() => { const l = () => ({ accounts: members.map((m) => ({ id: m.id, type: 'subscription', loggedIn: true, pooled: false, backend: 'claude', ...(probes[m.id] ? { probe: { ...probes[m.id] } } : {}) })) }); return { list: l, decisionList: l, signinFactsSettled: async () => ({ since: 0, facts: new Map() }) }; })(),   // B-360d: the tick reads the decision road
       autoCliReady: () => true, usageEstimator, projectionRereadFor, lastMemberReadAt: () => 0, storeWriter: storeWriter || writer, stampLandingMs: landingMs,
       // an org-merged identity (the engine's usageIdentityGroups): the freshest cache file of the group wins for every id
       usageIdentityGroupsCached: () => (groups ? new Map(groups.map((ids, i) => [`org-${i}`, { accountIds: ids, cache: ids.map((id) => readCache(id)).filter(Boolean).sort((a, b) => (b.fetchedAt || 0) - (a.fetchedAt || 0))[0] || null }])) : []),
-      usage: { refreshViaCliPanel(key) { spawns.push({ t: T, key, mode, stampOnDisk: stampOnDisk(key) }); if (mode === 'hang') return new Promise(() => {}); if (mode === 'lie') return Promise.resolve(true); if (mode === 'fail') return Promise.resolve(false); if (mode === 'door') { said[key] = { at: T, outcome: 'write-refused', code: 'identity', door: 'signed-in-as' }; return Promise.resolve(false); } writeCache(byId.get(key), T); return Promise.resolve(true); }, panelVerdictFor: (key) => said[key] || null },
+      usage: { refreshViaCliPanel(key) { spawns.push({ t: T, key, mode, stampOnDisk: stampOnDisk(key) }); if (probeMs) T += probeMs; if (mode === 'hang') return new Promise(() => {}); if (mode === 'lie') return Promise.resolve(true); if (mode === 'fail') return Promise.resolve(false); if (mode === 'door') { said[key] = { at: T, outcome: 'write-refused', code: 'identity', door: 'signed-in-as' }; probes[key] = { at: T, ok: false, why: 'refused', door: 'signed-in-as' }; return Promise.resolve(false); } writeCache(byId.get(key), T); delete probes[key]; return Promise.resolve(true); }, panelVerdictFor: (key) => said[key] || null },
       onMemberReadingFresh: () => { if (wakeThrows) throw new Error('wake threw'); }, log: (l) => logs.push(l), warn: (l) => logs.push('WARN ' + l),
     };
     let loop = createAutoCliLoop(deps);
@@ -255,6 +255,7 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     const lineAt = (id, key = 'fiveHour', line = 5) => { const m = byId.get(id); for (let t = T0; t <= T0 + 600 * MIN; t += MIN) if ((1 - truthOf(m, key, t)) * 100 < line) return (t - T0) / MIN; return null; };
     return {
       spawns, logs, dataDir, writeCache, byId, deps, lineAt, readCache, writer, setMode(x) { mode = x; },
+      press(key, how) { if (how === 'written') { writeCache(byId.get(key), T); said[key] = { at: T, outcome: 'written' }; delete probes[key]; } else { said[key] = { at: T, outcome: 'write-refused', code: 'identity', door: 'signed-in-as' }; probes[key] = { at: T, ok: false, why: 'refused', door: 'signed-in-as' }; } },   // a person's ⟳ (r5516 (1)): the route's verdict and the row's probe record
       state() { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'auto-cli-state.json'), 'utf8')); } catch { return null; } },
       get now() { return T; }, advance(ms) { T += ms; },
       async tick() { await loop.tick(); },
@@ -278,12 +279,33 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   {
     const idleRow = () => ({ id: 'm1', buckets: { fiveHour: { u0: 0.2, resetsAt: T0 / 1000 + 4 * 3600 }, sevenDay: { u0: 0.3, resetsAt: T0 / 1000 + 5 * 86400 } }, rates: {}, ledger: [] });
     const asks = async (loopFile, mode, seed) => { const w = makeWorld({ members: [idleRow()], sessions: [], loopFile, seed }); w.setMode(mode); await run(w, 120); return w.spawns.length; };
-    const LADDER = patched('loop-door-as-failure.js', REAL_LOOP, [["        if (doorMark(key, ok, now)) fails.delete(key);   // r5481 (3): no failure\n", ""]]);
+    const LADDER = patched('loop-door-as-failure.js', REAL_LOOP, [["        if (doorMark(key, ok, now)) fails.delete(key);   // r5481 (3): no failure\n", ""], ["Math.max(idRefused.get(a.id) || 0, pressAt(a))", "0"]]);
     for (const seed of [5, 11]) {
       const rel = await asks(REAL_LOOP, 'ok', seed), cure = await asks(REAL_LOOP, 'door', seed), red = await asks(LADDER, 'door', seed);
       console.log(`    r5481 (3) seed ${seed}: asks in 2 h — the release ${rel}, the door's refusal ${cure}, the failure ladder (red) ${red}`);
       ok(cure >= 1 && cure <= rel, `r5481 (3) THE DOOR's REFUSAL, seed ${seed}: ${cure} automatic asks in two hours, never more than the release's ${rel} (the idle cadence, never the failure ladder)`);
       ok(red > rel, `r5481 (3) RED CONTROL, seed ${seed} (the refusal booked as a failure, in a copy): ${red} asks in two hours, more than the release's ${rel} — the leg above can fail`);
+    }
+    // r5516 (1) — A PERSON's REFUSED PRESS DOES NOT BRING THE NEXT AUTOMATIC ASK SOONER: the row's last write 40 min old, a person's ⟳ at
+    // t0 — the release's WROTE (its age restarts there), the tip's is refused. Every automatic ask after it (minutes from t0) comes no
+    // sooner than the release's ask of the same rank, and no more of them; red: the loop that ignores the press's refusal (in a copy)
+    const J = (x) => JSON.stringify(x);
+    const PRESSLESS = patched('loop-no-press-mark.js', REAL_LOOP, [["Math.max(idRefused.get(a.id) || 0, pressAt(a))", "(idRefused.get(a.id) || 0)"]]);
+    const after = async (loopFile, how, seed) => { const w = makeWorld({ members: [idleRow()], sessions: [], loopFile, seed }); w.setMode(how === 'written' ? 'ok' : 'door'); w.advance(40 * MIN); w.press('m1', how); const t0 = w.now; await run(w, 150); return w.spawns.map((s) => Math.round((s.t - t0) / MIN)); };
+    for (const seed of [5, 11]) {
+      const rel = await after(REAL_LOOP, 'written', seed), cure = await after(REAL_LOOP, 'refused', seed), red = await after(PRESSLESS, 'refused', seed);
+      console.log(`    r5516 (1) seed ${seed}: the automatic asks after a person's press (min from it) — the release ${J(rel)}, the refused press ${J(cure)}, the press ignored (red) ${J(red)}`);
+      ok(rel.length >= 1 && cure.length <= rel.length && cure.every((t, i) => t >= rel[i]), `r5516 (1) A REFUSED PRESS, seed ${seed}: each automatic ask after it comes no sooner than the release's of the same rank, and no more of them (${J(cure)} against ${J(rel)})`);
+      ok(red.length >= 1 && rel.length >= 1 && red[0] < rel[0], `r5516 (1) RED CONTROL, seed ${seed} (the press's refusal ignored, in a copy): its first automatic ask at ${red[0]} min, sooner than the release's at ${rel[0]} — the leg above can fail`);
+    }
+    // r5516 (2) — THE PACING COUNTS FROM THE SAME MOMENT THE RELEASE's DID (the refusal's own, a probe's length after the attempt): a
+    // BURNING row (the release's active cadence) over SIX hours, each probe 90 s long — the door's refusals ask no more often than the
+    // release's writes
+    for (const seed of [5, 11]) {
+      const asks6 = async (mode) => { const w = makeWorld({ members: [slowMember({ minutes: 420 })], sessions: [{ on: 'm1', model: 'claude-opus-5-5' }], seed, probeMs: 90e3 }); w.setMode(mode); await run(w, 360); return w.spawns.length; };
+      const rel = await asks6('ok'), cure = await asks6('door');
+      console.log(`    r5516 (2) seed ${seed}: asks in 6 h of a burning row, 90 s probes — the release ${rel}, the door's refusal ${cure}`);
+      ok(cure >= 1 && cure <= rel, `r5516 (2) A BURNING ROW, seed ${seed}: ${cure} automatic asks in six hours, never more than the release's ${rel} (the mark from the refusal's own moment)`);
     }
   }
 

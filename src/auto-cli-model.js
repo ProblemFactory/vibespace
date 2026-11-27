@@ -141,7 +141,9 @@ function probeRecordOf(raw) {
   const at = Number(raw.at);
   if (!(at > 0)) return null;
   const why = probeWhyText(raw.why);
-  return why ? { at, ok: false, why } : null;
+  // B-6a92 (主开发 r5516 (1)): the door's refusal code rides the record (a short code, never words) — the auto-cli loop paces on it
+  const door = typeof raw.door === 'string' && /^[a-z-]{1,40}$/.test(raw.door) ? raw.door : null;
+  return why ? { at, ok: false, why, ...(door ? { door } : {}) } : null;
 }
 
 module.exports = { SIGNIN_UNKNOWN, PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL, NO_LOGIN, PROBE_ELIGIBILITY, OAT_KINDS, PROFILE_SCOPE, NOT_PROBED_SAY_MS, WHY_MAX, probeEligibility, isUnprobeable, notProbedWords, probeWhyText, panelAnswerClass, probeFailWhy, probeRecordOf };
