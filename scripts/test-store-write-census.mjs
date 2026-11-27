@@ -2052,7 +2052,7 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
   // B-574d browser-stores 8/8 (lane nl-migrations): the browser keeper's records door (forgetRecord) — an install's running marker and a CLI's
   // verified witness, forgotten where the install removes the file — and browser-env's orphan sweep of a C rung's .cwd sidecar (a
   // record on the writer since 7/8) with its suite stand-in for a sidecar never written (_cwdDrop): a late landing never brings any back
-  const FORGET_CALLERS = { 'src/server/browser-env.js': 2, 'src/server/browser-keeper.js': 1, 'src/server/boot-restore.js': 3, 'src/server/session-stdout.js': 2, 'src/task-groups.js': 1, 'src/usage-history.js': 1 };
+  const FORGET_CALLERS = { 'src/server/boot-restore.js': 3, 'src/server/browser-env.js': 2, 'src/server/browser-keeper.js': 1, 'src/server/session-stdout.js': 2, 'src/task-groups.js': 1, 'src/usage-history.js': 1 };
   const fc = forgetCensus(files);
   ok(JSON.stringify(fc) === JSON.stringify(FORGET_CALLERS), `⑫ the census: the product calls the writer's forget ONLY where a file's owner removes the file (${Object.entries(fc).map(([f, n]) => `${f} ${n}`).join(', ') || 'none'}) — never as a drop`, fc);
   const UH = files.get('src/usage-history.js') || '';
