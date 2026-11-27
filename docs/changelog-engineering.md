@@ -4,7 +4,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
-## 2.369.423 — 2026-11-26
+## 2.369.423 — 2026-11-27
 
 ### bl-machines-b — B-93e7: the device agent's own files take their name only after ONE sync (主开发 r4381 / r4387)
 - THE CURE: src/agentd/durable-file.js (NEW, a DEVICE input) `writeDurable`. It removes a stale temp, opens the temp exclusive at its mode, writes it whole, syncs it ONCE, closes it and renames it. The 13 RECORDS go through it: agentd.js 10 (writeDialStatus, the allow list, the dial file at the start and in learnHub, pinTrust, writeFloor, pinHub, the orders' _persist, the secret file the hub hands, the socket witness), self-retire's hook rewrite and the mac helper's state and version. A record's refused sync is SAID once a file in the agent's own log, and the record still lands.
