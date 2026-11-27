@@ -639,11 +639,24 @@ export function installSidebarState(SidebarClass) {
     if (r.patches.length) this.setSessionConfigs(r.patches);
   };
   /** THIS PAGE's OWN PIN PRESS (src/lib/session-lifecycle.js pinTo): from its send, `want` = the member pressed | null («Back to
-   *  automatic») until a list carries it; `undefined` = the press was refused (the fence lifts: nothing changed). */
+   *  automatic») until a list carries it → the press's own MARK (主开发 r5500: its reply writes the carrier only while this mark still
+   *  stands). A want that is neither (undefined) fences nothing: a refused press lifts its own fence through pinFenceLift. */
   proto.pinFence = function(key, want) {
-    if (!key) return;
+    if (!key || want === undefined) return null;
     const fences = this._pinFences || (this._pinFences = new Map());
-    if (want === undefined) fences.delete(key); else fences.set(key, want == null ? null : String(want));
+    const mark = (this._pinMarks = (this._pinMarks || 0) + 1);
+    fences.set(key, { want: want === null ? null : String(want), mark });
+    return mark;
+  };
+  /** Does THIS press's fence still stand? (a later press replaced it, or a list carried it ⇒ no — its late reply writes nothing) */
+  proto.pinFenceStands = function(key, mark) {
+    const f = this._pinFences && this._pinFences.get(key);
+    return !!(f && mark != null && f.mark === mark);
+  };
+  /** A refused or failed press lifts ITS OWN fence — never a later press's that replaced it. */
+  proto.pinFenceLift = function(key, mark) {
+    const f = this._pinFences && this._pinFences.get(key);
+    if (f && mark != null && f.mark === mark) this._pinFences.delete(key);
   };
 
   proto.renameSession = async function(sessionOrKey, currentName) {

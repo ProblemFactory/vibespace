@@ -312,7 +312,7 @@ console.log('§r1 the pin\'s resume carrier (the real setSessionConfig)');
     const text = fs.readFileSync(path.resolve('src/lib', f), 'utf8').split('\n');
     text.forEach((l, i) => { const c = l.replace(/(^|\s)\/\/.*$/, ''); if (/setSessionConfig\??\.?\(/.test(c) && !/proto\.setSessionConfig/.test(c)) writers.push({ f, n: i + 1, l: c.trim(), prev: (text[i - 1] || '') + (text[i - 2] || '') + (text[i - 3] || '') }); });
   }
-  const carries = (w) => /\{ \.\.\.\(?[\w.?]*(getSessionConfig|cfg|cur)\b/.test(w.l) || /const next = \{ \.\.\.cfg \}/.test(w.l);
+  const carries = (w) => /\{ \.\.\.\(?[\w.?]*(getSessionConfig|cfg|cur)\b/.test(w.l);   // (r5500: pinTo's saveCfg spreads the config as it stands when it writes — `{ ...(this.sidebar?.getSessionConfig?.(cfgKey) || {}) }`; the old `{ ...cfg }` form is gone)
   ok(writers.length >= 8 && writers.every(carries), `CENSUS: every setSessionConfig writer in src/lib (${writers.length}) writes OVER the saved config`, writers.filter((w) => !carries(w)).map((w) => `${w.f}:${w.n} ${w.l}`));
 }
 

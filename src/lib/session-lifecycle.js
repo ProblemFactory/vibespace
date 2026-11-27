@@ -2001,17 +2001,18 @@ export function installSessionLifecycle(App, ctx = {}) {
           const fmtTime = (ms) => when(ms);
           const memUsage = (id) => (id ? usageHint(accountUsageStore(this, backend)?.[id] || null, bill.estimates ? (this._usageEstimates?.[id] || null) : null) : '');
           const pinTo = async (memberId, name) => {
-            const cfg = this.sidebar?.getSessionConfig?.(cfgKey) || {};
-            const saveCfg = (pin) => { const next = { ...cfg }; if (pin) next.poolPin = pin; else delete next.poolPin; this.sidebar?.setSessionConfig?.(cfgKey, next); };
+            const saveCfg = (pin) => { const next = { ...(this.sidebar?.getSessionConfig?.(cfgKey) || {}) }; if (pin) next.poolPin = pin; else delete next.poolPin; this.sidebar?.setSessionConfig?.(cfgKey, next); };   // the config as it stands when written (a reply comes later)
             if (!isLive) { // a stopped conversation: the pin rides its next resume
               saveCfg(memberId ? { memberId, at: Date.now(), poolId: a.id } : null);
               showToast(memberId ? t('Pinned to {name} — applies when the conversation resumes', { name }) : t('Automatic again — applies when the conversation resumes'));
               return;
             }
-            this.sidebar?.pinFence?.(cfgKey, memberId || null);   // B-2083's carrier follow (r5367): an older list never undoes this press — fenced until a list carries it
+            const mark = this.sidebar?.pinFence?.(cfgKey, memberId || null);   // B-2083's carrier follow (r5367): an older list never undoes this press — fenced, with its own mark, until a list carries it
             const r = await fetchJson(`/api/accounts/${encodeURIComponent(a.id)}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: live.webuiId, memberId }) });
-            if (!r || r.error) { this.sidebar?.pinFence?.(cfgKey, undefined); showToast(r?.error || t('Pin failed'), { type: 'error' }); return; }
-            saveCfg(r.pinned ? { memberId: r.pinned.memberId, at: r.pinned.at || Date.now(), poolId: a.id } : null); // the resume carrier (it names the pool the pin was made on); the server's notice says what happened
+            if (!r || r.error) { this.sidebar?.pinFenceLift?.(cfgKey, mark); showToast(r?.error || t('Pin failed'), { type: 'error' }); return; }   // its own fence only (a later press's stands)
+            // THE LATEST CHOICE IS THE ONE A RESUME CARRIES (主开发 r5500): the reply writes the carrier only while ITS fence still stands — a
+            // later press, or a list that carried this one first (the follow wrote it at the lift), has the word
+            if (typeof this.sidebar?.pinFenceStands !== 'function' || this.sidebar.pinFenceStands(cfgKey, mark)) saveCfg(r.pinned ? { memberId: r.pinned.memberId, at: r.pinned.at || Date.now(), poolId: a.id } : null); // the resume carrier (it names the pool the pin was made on); the server's notice says what happened
           };
           items.push({
             labelHtml: rowHtml('✓ ' + a.name, model.parent.member ? ` → ${model.parent.member}` : ' ' + t('· pool'), memUsage(model.parent.memberId)),
