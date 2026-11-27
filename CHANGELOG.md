@@ -11,6 +11,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A command can carry vault files of up to 24 KB in all; a larger file stays in the vault and a run that names it is refused, saying why.
 - The Vault window keeps files: add one with Add… › File…, download it after your second password; one too large for a command says so on its row.
 - A message the agent never received now offers «Send again» and «Dismiss» right where it stands in the conversation.
+- A website login's row in the Vault has «Change password…», and «Use the previous password» when one is kept; Add says first when it would change a saved login.
+- An agent whose stored website login stopped working can ask you for the new one; the card says it is the agent's claim, and you may answer «It still works».
 
 ### Changed
 - If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
@@ -38,6 +40,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When a public address cannot be taken down, Ports now keeps it as a row with the reason and Try again, instead of leaving it serving unseen.
 - With Claude usage refresh set to Off, VibeSpace no longer reads usage by itself at a usage limit or in a pool's checks; a waiting conversation says so.
 - Where the system's basic tools are the Rust ones (Ubuntu 25.10 and later), setting up or installing desktop apps no longer waits on every drive's writes.
+- In the Vault window every button of a row stays inside the window at any width; a website login showing all its buttons no longer runs off its side.
+- An agent's ask whose words hold a password is refused before any card is made, and the agent is told how to say it instead.
+- An agent's ask for a login's new password shows «Change password» and «It still works» in the Vault's «Needs you» strip too; the card says what you pressed.
 
 ## 2.369.422 — 2026-11-27
 
