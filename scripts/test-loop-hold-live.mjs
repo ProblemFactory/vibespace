@@ -221,6 +221,9 @@ let evals = 0;
 if (cfg.countEvals) { const g = Object.getOwnPropertyDescriptor; Object.getOwnPropertyDescriptor = function (o, k) { if (o === Error && k === 'prepareStackTrace') evals++; return g.call(Object, o, k); }; }
 // a watchdog that is LATE on its own (its procfs reads block on a FIFO for a while) while this loop beats on
 let fproc = null, feeder = null;
+// r5404 (the placement of 2.369.422's hosted red): a late watchdog's window starts where IT took its last baseline — the arm. The
+// stamp: the main thread's own schedstat pair and monotonic ms at the arm, and until when a span still lies in that window
+let ARMED = null;
 if (cfg.plan === 'lateWatchdog' || cfg.fifo) {
   fproc = ${JSON.stringify(ROOT)} + '/fproc-' + process.pid; const td = fproc + '/self/task/' + process.pid, real = '/proc/' + process.pid + '/task/' + process.pid + '/';
   fs.mkdirSync(td, { recursive: true }); fs.mkdirSync(fproc + '/pressure', { recursive: true });
@@ -228,7 +231,8 @@ if (cfg.plan === 'lateWatchdog' || cfg.fifo) {
   for (const f of ['schedstat', 'wchan', 'syscall']) fs.symlinkSync(real + f, td + '/' + f);
   for (const f of ['status', 'cgroup']) fs.symlinkSync('/proc/' + process.pid + '/' + f, fproc + '/self/' + f);
   // the release, ONCE: a read-write open of the FIFO lets the blocked reader through, the path becomes the real file's symlink, the close ends its read
-  const arm = (inS) => { cp.execFileSync('mkfifo', [td + '/stat.fifo']); fs.renameSync(td + '/stat.fifo', td + '/stat');
+  const armStamp = (inS) => { let ss = [0, 0]; try { const t = fs.readFileSync('/proc/self/task/' + process.pid + '/schedstat', 'utf8').split(' '); ss = [Number(t[0]), Number(t[1])]; } catch (e) { } const h = process.hrtime(), m = h[0] * 1e3 + h[1] / 1e6; return { m, ss, until: m + Math.max(0, inS) * 1000 + 100 }; };
+  const arm = (inS) => { cp.execFileSync('mkfifo', [td + '/stat.fifo']); fs.renameSync(td + '/stat.fifo', td + '/stat'); ARMED = armStamp(inS);
     feeder = cp.spawn('bash', ['-c', 'sleep ' + Math.max(0, inS).toFixed(3) + '; ln -s ' + real + 'stat stat.lnk; exec 3<>stat; mv -T stat.lnk stat; sleep 0.1; exec 3>&-'], { cwd: td, stdio: 'ignore' }); feeder.unref(); };
   if (cfg.fifoAt) { fs.symlinkSync(real + 'stat', td + '/stat'); setTimeout(() => arm((cfg.blockS || 1.6) - cfg.fifoAt / 1000), cfg.fifoAt); } else arm(cfg.blockS || 1.6);
   process.on('exit', () => { try { feeder && feeder.kill('SIGKILL'); } catch { } });
@@ -242,7 +246,9 @@ const SS0 = () => { try { const t = require('fs').readFileSync('/proc/self/task/
 const kmono0 = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
 for (const k of ['busyHog', 'bootHog', 'monoHog', 'pbkdfHog', 'parseHog', 'jsonHog', 'zlibHog', 'regexHog', 'gcHog']) if (typeof H[k] === 'function') {   // bootHog: its readers' M3 (a starved boot needs its span)
   const f = H[k];
-  H[k] = function (...a) { const s0 = SS0(), w0 = Date.now(), m0 = kmono0(); try { return f.apply(this, a); } finally { const s1 = SS0(); SPANS.push({ fn: k, wall: w0, ms: kmono0() - m0, waitMs: (s1[1] - s0[1]) / 1e6, ranMs: (s1[0] - s0[0]) / 1e6 }); } };
+  // r5404: a span that starts inside a late watchdog's window (after the arm, before the release) also carries that window's
+  // own run-queue wait — from the arm to the span's end, plus one beat (the product's window runs up to a beat past the span)
+  H[k] = function (...a) { const s0 = SS0(), w0 = Date.now(), m0 = kmono0(); try { return f.apply(this, a); } finally { const s1 = SS0(), m1 = kmono0(), A = ARMED, win = A && m0 >= A.m && m0 < A.until ? { winMs: m1 - A.m + (cfg.beatMs || 20), winWaitMs: (s1[1] - A.ss[1]) / 1e6 } : null; SPANS.push({ fn: k, wall: w0, ms: m1 - m0, waitMs: (s1[1] - s0[1]) / 1e6, ranMs: (s1[0] - s0[0]) / 1e6, ...(win || {}) }); } };
 }
 const make = () => require((cfg.tree || ${JSON.stringify(REPO)}) + '/src/server/sync-fs-witness.js').create({ rootDir: ${JSON.stringify(ROOT)}, armed: true, readMountinfo: () => '', fresh: true,
   beatMs: cfg.beatMs || 20, holdMs: 100, noAnswerMs: 50, liveMs: cfg.liveMs || 250, askBudgetMs: cfg.budget == null ? 36000 : cfg.budget, samplingOn: () => cfg.sampling !== false, ...(cfg.samplesPerHold ? { samplesPerHold: cfg.samplesPerHold } : {}),
@@ -410,7 +416,7 @@ else if (plan === 'deepSoak') later(300, () => { const P0 = Error.prepareStackTr
 else if (plan === 'heapRefuse') later(300, () => { out.checks.refusal = W.holds().startProfile(); done(100); });
 else if (plan === 'heapStop') later(300, () => { W.holds().startProfile(); setTimeout(() => done(100), 2500); });
 // ── round 3 ──
-else if (plan === 'lateJs') { const tw = {}; later(cfg.hogAt || 500, () => { tw.start = Date.now(); H.monoHog(cfg.hogMs || 300); tw.end = Date.now(); out.checks.truth = tw; done(700); }); }
+else if (plan === 'lateJs') { const tw = {}; later(cfg.hogAt || 500, () => { tw.start = Date.now(); if (cfg.spin) for (let i = 0; i < cfg.spin.n; i++) cp.spawn('taskset', ['-c', String(cfg.spin.cpu), process.execPath, '-e', 'const t = Date.now(); while (Date.now() - t < ' + cfg.spin.ms + ');'], { stdio: 'ignore' }).unref(); H.monoHog(cfg.hogMs || 300); tw.end = Date.now(); out.checks.truth = tw; done(700); }); }
 else if (plan === 'idleStep') later(cfg.idleMs || 1400, () => done(100));
 else if (plan === 'monoAcrossStep') later(500, () => { const t0 = Date.now(), m0 = process.hrtime.bigint(); H.monoHog(300); out.checks.truthMs = Number(process.hrtime.bigint() - m0) / 1e6; out.checks.wall0 = t0; done(700); });
 else if (plan === 'heapEvals') later(300, () => { global.gc(); global.gc(); out.checks.h0 = process.memoryUsage().heapUsed; const e0 = evals;
@@ -451,22 +457,31 @@ else if (plan === 'profile') later(400, () => { W.holds().startProfile(); setTim
 // (A)'s 8 of ~12–39 holds in native code — stay reachable, and the box's measured 2 % leaves a wide margin); under it the
 // child reruns ONCE, then it is red by name «the box starved the suite: N of M». The count is printed every run.
 const SUITE_STARVED = 0.25, SUITE_CLEAR = 0.1, ASKED_FLOOR = 0.7;
-const STARVE = { holds: 0, waiting: 0, outside: 0, measured: 0, measuredStarved: 0, band: 0, disagree: [], reruns: [], red: [] };
+// r5404 (2.369.422's first hosted proof, run 45914950208: «lateJs: the suite measured 31 % run-queue wait, … nothing of a wait»):
+// the bounds hold for a hold whose product window is the span plus a beat. A LATE watchdog by plan (lateJs, twoUnseen: the
+// stat FIFO armed before the hog) takes its window from its last baseline, the ARM, so a wait of a quarter of the SPAN can be a
+// fifth of the WINDOW. Such a span is judged over the window the product has (the child's stamp at the arm, to the span's end
+// plus one beat). A span starved over itself but not over that window is THE LATE BAND: counted and printed every run.
+// No bound moves; every other span is judged as before
+const STARVE = { holds: 0, waiting: 0, outside: 0, measured: 0, measuredStarved: 0, band: 0, lateBand: 0, disagree: [], reruns: [], red: [] };
 /** each hold of a child with the suite's own measure of its span (null: no measured hog in it) */
-function starveOf(r) {
+function starveOf(r, { span: spanOnly = false } = {}) {   // spanOnly: the release's form (the share over the span alone) — r5404's RED
   const holds = (r.out && r.out.report && r.out.report.holds) || [], spans = (r.out && r.out.spans) || [];
   return holds.map((h) => {
     const s = spans.filter((x) => x.wall >= h.at - 60 && x.wall <= h.at + 10 + (h.msHi || h.ms || 0)).sort((a, b) => b.ms - a.ms)[0] || null;
-    const share = s && s.ms > 0 ? s.waitMs / s.ms : null, waiting = h.verdict === LH.V.waiting;
+    const spanShare = s && s.ms > 0 ? s.waitMs / s.ms : null, waiting = h.verdict === LH.V.waiting;
+    const share = spanShare == null ? null : !spanOnly && s.winMs > 0 ? s.winWaitMs / s.winMs : spanShare;
     // B-1409: a hold that waited ≥ 20 % but RAN more is said by its parts with «it also waited N s for a CPU» — the wait said
     const also = /; it also waited [\d.]+ s for a CPU/.test(h.line || '');
-    return { h, share, waiting, also, outside: waiting && share != null && share >= SUITE_CLEAR };
+    return { h, share, spanShare, window: !spanOnly && !!(s && s.winMs > 0), waiting, also, outside: waiting && share != null && share >= SUITE_CLEAR };
   });
 }
 // (its second reader's M1 / S3) THE BOOT'S HOLD IS LEFT OUT of the agreement and the floor: its span (bootHog, wrapped since
 // 2.369.412 so ② can say a starved boot) starts before the watchdog thread has booted, so the product's window cannot cover it
 // (before, it had no span at all); ② judges it alone, and a starved boot is ②'s named non-verdict — never a red here
 const notBoot = (rs) => rs.filter((x) => !(x.h && x.h.boot));
+/** the closing agreement's one «must say» red, in its own words (the leg and r5404's RED both say it so) */
+const unsaidWords = (plan, x) => `${plan}: the suite measured ${(100 * x.share).toFixed(0)} % run-queue wait, the product said «${x.h.verdict}» and nothing of a wait`;
 function account(rows0, plan) {
   const rows = notBoot(rows0);
   for (const x of rows) {
@@ -474,7 +489,8 @@ function account(rows0, plan) {
     if (x.share == null) continue;
     STARVE.measured++;
     const pc = (100 * x.share).toFixed(0);
-    if (x.share >= SUITE_STARVED) { STARVE.measuredStarved++; if (!x.waiting && !x.also) STARVE.disagree.push(`${plan}: the suite measured ${pc} % run-queue wait, the product said «${x.h.verdict}» and nothing of a wait`); }
+    if (x.window && x.spanShare >= SUITE_STARVED && x.share < SUITE_STARVED) STARVE.lateBand++;   // r5404: starved over the span, not over the window
+    if (x.share >= SUITE_STARVED) { STARVE.measuredStarved++; if (!x.waiting && !x.also) STARVE.disagree.push(unsaidWords(plan, x)); }
     else if (x.share >= SUITE_CLEAR) STARVE.band++;
     else if (x.waiting) STARVE.disagree.push(`${plan}: the product said «waiting for a CPU», the suite measured ${pc} %`);
   }
@@ -1206,6 +1222,31 @@ async function legStarved() {
   const always = await run1({ plan: 'busy', tree: mutTree('always', 'if (waitedMuch(d) && d.waitMs >= d.ranMs) return V.waiting;', 'if (d.waitMs != null) return V.waiting;') });
   const ab = agreeOf(starveOf(always));
   ok(ab.length > 0 && /said «waiting for a CPU», measured/.test(ab[0]), `MUTANT «always waiting» (any wait the verdict) on a calm scene is RED by name: ${ab[0] || 'no disagreement found'}`);
+  // r5404 THE LATE WATCHDOG's WINDOW, placed AT WILL (no machine load): a lateJs child pinned to one cpu, its stat FIFO armed at
+  // 350 ms, its 300 ms hog at 650 ms (the product's window ≈ 620 ms: from the arm to the span's end plus a beat), and spinners
+  // pinned to the SAME cpu, started by the child at its hog's start. ONE spinner for ~150 ms (plus its own start) puts ~75–120 ms
+  // of run-queue wait in the hog: ≥ 25 % of the SPAN, under 20 % of the window (the product silent) — the first try's band. The RELEASE's form of the leg
+  // (the share over the span) is RED there with the first try's words; the cured form (over the window) is not. TWO spinners for
+  // the hog's whole length: ≥ 25 % of the window too — the words still REQUIRED, and «never waiting» red there. Each scene's plant
+  // is WITNESSED (a share in its band): a plant that missed is a named, counted skip, never a green
+  const late = (spin, tree = null) => run1({ plan: 'lateJs', fifo: true, fifoAt: 350, blockS: 1.1, hogAt: 650, hogMs: 300, spin: { cpu, ...spin }, ...(tree ? { tree } : {}) }, { pin: cpu });
+  const hogRow = (rows) => notBoot(rows).find((x) => x.share != null && x.window) || null;
+  const A1 = await late({ n: 1, ms: 150 }), cured1 = starveOf(A1), rel1 = starveOf(A1, { span: true }), c1 = hogRow(cured1);
+  const relRed = notBoot(rel1).filter((x) => x.share != null && x.share >= SUITE_STARVED && !x.waiting && !x.also).map((x) => unsaidWords('lateJs', x));
+  say(`⑭b one spinner into a late watchdog's hog (cpu ${cpu}): the span ${c1 ? (100 * c1.spanShare).toFixed(0) : '?'} %, the window ${c1 ? (100 * c1.share).toFixed(0) : '?'} %; the product said «${c1 ? c1.h.verdict : '?'}»${c1 && c1.also ? ' (it also waited)' : ''}`);
+  site(); if (!c1 || !(c1.spanShare >= SUITE_STARVED && c1.share < SUITE_STARVED) || c1.waiting || c1.also) skip('⑭b the late band, placed: the release\'s form red, the cured form green', `the plant missed its band: the span ${c1 ? (100 * c1.spanShare).toFixed(0) : '?'} % (≥ 25 % wanted), the window ${c1 ? (100 * c1.share).toFixed(0) : '?'} % (< 25 % wanted), the product silent wanted — it said «${c1 ? c1.h.verdict : '?'}»${c1 && c1.also ? ' and it also waited' : ''}`);
+  else {
+    ok(relRed.length > 0 && /^lateJs: the suite measured \d+ % run-queue wait, the product said «.+» and nothing of a wait$/.test(relRed[0]), `CONTROL r5404 (the RELEASE's form: the share over the span) on a late watchdog's hold in the band, placed at will: RED by name with the first try's words — ${relRed[0] || 'no disagreement'}`);
+    ok(!agreeOf(notBoot(cured1)).length, `r5404: the cured form judges that hold over the window the product has (${(100 * c1.share).toFixed(0)} % < ${100 * SUITE_STARVED} %): neither side asserted — the band, no red`, agreeOf(notBoot(cured1)));
+  }
+  const A2 = await late({ n: 2, ms: 340 }), cured2 = starveOf(A2), c2 = hogRow(cured2);
+  say(`⑭b two spinners for a late watchdog's whole hog: the span ${c2 ? (100 * c2.spanShare).toFixed(0) : '?'} %, the window ${c2 ? (100 * c2.share).toFixed(0) : '?'} %; the product said «${c2 ? c2.h.verdict : '?'}»${c2 && c2.also ? ' (it also waited)' : ''}`);
+  site(); if (!c2 || !(c2.share >= SUITE_STARVED)) skip('⑭b a late watchdog\'s hold starved over its window: the words required', `the plant missed: the window ${c2 ? (100 * c2.share).toFixed(0) : '?'} % (≥ 25 % wanted)`);
+  else {
+    ok((c2.waiting || c2.also) && !agreeOf(notBoot(cured2)).length, `r5404: a late watchdog's hold starved over its WINDOW (${(100 * c2.share).toFixed(0)} %): the words are still REQUIRED, and said (${c2.waiting ? 'the verdict' : 'it also waited'})`, cured2.map((x) => ({ share: x.share, v: x.h.verdict, also: x.also })));
+    const N2 = agreeOf(notBoot(starveOf(await late({ n: 2, ms: 340 }, mutTree('never-late', 'WAIT_SHARE = 0.2,', 'WAIT_SHARE = 99,')))));
+    ok(N2.length > 0 && /said «/.test(N2[0]), `MUTANT «never waiting» on a late watchdog's starved hold is RED by name (the cured form judges it): ${N2[0] || 'no disagreement found'}`);
+  }
 }
 
 // ── ⑮ THE COLLECTOR'S TWO LIES (主开发's ruling 08:30Z), beside ⑭'s: a product that ALWAYS says «native code or garbage
@@ -1277,12 +1318,12 @@ try {
     rep4.round4n22 = await legRound4(n22, 'Node 22');
   } else console.log('⑧ not run: no Node 22 given (VS_NODE22=/path/to/node22)');
   // the starved ledger kept OUTSIDE the suite (ci.mjs keeps nothing of a green suite): the report's counts, every run
-  rep4.starve = { holds: STARVE.holds, waiting: STARVE.waiting, outside: STARVE.outside, measured: STARVE.measured, measuredStarved: STARVE.measuredStarved, band: STARVE.band, reruns: STARVE.reruns.slice(), red: STARVE.red.slice(), disagree: STARVE.disagree.length };
+  rep4.starve = { holds: STARVE.holds, waiting: STARVE.waiting, outside: STARVE.outside, measured: STARVE.measured, measuredStarved: STARVE.measuredStarved, band: STARVE.band, lateBand: STARVE.lateBand, reruns: STARVE.reruns.slice(), red: STARVE.red.slice(), disagree: STARVE.disagree.length };
   if (process.env.LH_REPORT) { try { fs.writeFileSync(process.env.LH_REPORT, JSON.stringify(rep4, null, 1)); } catch { } }
 } finally {
   fs.rmSync(ROOT, { recursive: true, force: true });
 }
-console.log(`\nTHE BOX AND THE SUITE: ${STARVE.waiting} of ${STARVE.holds} holds judged «waiting for a CPU» (${STARVE.outside} outside the asks' law, the suite's own count agreeing); measured by the suite ${STARVE.measured}: starved (≥ ${100 * SUITE_STARVED} %) ${STARVE.measuredStarved}, the band (${100 * SUITE_CLEAR}–${100 * SUITE_STARVED} %) ${STARVE.band}; children rerun once: ${STARVE.reruns.length ? STARVE.reruns.join(', ') : 'none'}`);
+console.log(`\nTHE BOX AND THE SUITE: ${STARVE.waiting} of ${STARVE.holds} holds judged «waiting for a CPU» (${STARVE.outside} outside the asks' law, the suite's own count agreeing); measured by the suite ${STARVE.measured}: starved (≥ ${100 * SUITE_STARVED} %) ${STARVE.measuredStarved}, the band (${100 * SUITE_CLEAR}–${100 * SUITE_STARVED} %) ${STARVE.band}; THE LATE BAND (r5404: a late watchdog's span starved over itself, not over the product's window) ${STARVE.lateBand}; children rerun once: ${STARVE.reruns.length ? STARVE.reruns.join(', ') : 'none'}`);
 if (!process.env.VS_LH_TREE && process.argv.indexOf('--tree') < 0) {
   ok(!STARVE.disagree.length, `the product's «waiting for a CPU» agrees with the suite's OWN count of each hold's run-queue wait: ${STARVE.measuredStarved} measured starved (≥ ${100 * SUITE_STARVED} %), every one said so (the verdict, or «it also waited» beside its parts — B-1409); no hold said starved under ${100 * SUITE_CLEAR} % measured`, STARVE.disagree.slice(0, 5));
   ok(!STARVE.red.length, `the box starved the suite: ${STARVE.red.length ? STARVE.red.join(', ') : 'no child under the floor after its one rerun'} (the floor: ${100 * ASKED_FLOOR} % of a child's holds judged by its asks)`, STARVE.red);
