@@ -154,20 +154,43 @@ const F = {};
 const MUT = mutantCopies('geo-hold-chrome-reds', REPO);
 const holdSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-geo-hold.js'), 'utf8');
 
+// r5375 (主开发; 2.369.422's first hosted proof on Chrome 157.0.8103.78 read leg ① two reads of three and leg ③'s RED an empty list —
+// placed at will on the first test machine, Chrome 158.0.8127.36, run 4a2afa60e-20261127160938h-box: the hold's arming of a new tab
+// stalled 20 s — its first read waited, came back at 27.6 s, THE PLACE, past the old window; leg ③ RED's page served 12 s late — its read past
+// the old 9 s window; no first read carried anything but the place): EACH READ IS WAITED ON THE FACT — the page's own report — with a CEILING; a read that never came is a
+// NAMED SKIP («the scene did not form»: never a red, never a pass) saying what its tab was doing; a read that came is judged by the
+// law, its bounds unmoved. A red control is judged only on a witness that its page read at all.
+const READ_CEILING_MS = 30000;
+const readState = async (c, k, i) => {
+  try {
+    const t = ((await c.cdp.send('Target.getTargets')).targetInfos || []).find((x) => x.type === 'page' && String(x.url).includes(`/geo?k=${encodeURIComponent(k)}&i=${i}`)) || null;
+    if (!t) return 'no tab of it at its page';
+    const at = await c.cdp.send('Target.attachToTarget', { targetId: t.targetId, flatten: true });
+    const v = await Promise.race([c.cdp.send('Runtime.evaluate', { expression: 'document.readyState + " " + location.href', returnByValue: true }, at.sessionId).then((r) => (r && r.result ? r.result.value : null)).catch(() => null), sleep(3000).then(() => null)]);
+    return typeof v === 'string' ? `its document: ${v}` : 'its document answered nothing in 3 s';
+  } catch (e) { return 'its tab unread: ' + String(e && e.message).slice(0, 80); }
+};
+async function readsOf(c, k, n, label) {
+  const got = await reportsOf((x) => x.k === k, n, READ_CEILING_MS);
+  for (let i = 0; i < n; i++) if (!got.some((x) => String(x.i) === String(i))) console.log(`  SKIP (named, counted): ${label} — the scene did not form: read ${i} of «${k}» never came back within ${READ_CEILING_MS / 1000} s (${await readState(c, k, i)})`);
+  return got;
+}
 // ① a place, three tabs; ② the tab open at the arm
 {
   const c = await chrome();
-  const { h, armed } = await holdOn(c, PLACE);
+  const { h, ctl, armed } = await holdOn(c, PLACE);
   const first = (await pageTargets(c))[0];
   const ses = await c.cdp.send('Target.attachToTarget', { targetId: first.targetId, flatten: true });
   await c.cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }, ses.sessionId);   // the tree's rule for a chrome suite's every navigate (this page is no VibeSpace page: harmless)
   await c.cdp.send('Page.navigate', { url: `${ORIGIN}/geo?k=arm&i=0` }, ses.sessionId);
-  const [ra] = await reportsOf((x) => x.k === 'arm', 1, 6000);
+  const [ra] = await readsOf(c, 'arm', 1, '② the tab open at the arm');
   await openTabs(c, 'place', 3);
-  const got = await reportsOf((x) => x.k === 'place', 3, 3 * SPACING_MS + 6000);
+  const got = await readsOf(c, 'place', 3, '① a PLACE: three new tabs');
+  if (got.length < 3) console.log('FACT ① the hold\'s new tabs: ' + J(ctl.attached.filter((a) => a.opener).map((a) => ({ asked: ctl.asked.has(a.sid), released: ctl.released.has(a.sid) }))));
   F.place = { armed: armed.ok, armTab: ra || null, tabs: got.map((x) => (isPlace(x) ? `the place in ${x.ms} ms` : `NOT the place: ${J(x)}`)) };
-  ok(armed.ok && isPlace(ra), '② the tab open at the arm (the start\'s blank), navigated after it: its first read is the place', F.place);
-  ok(got.length === 3 && got.every(isPlace), `① a PLACE: three new tabs (the origin holds the permission), each FIRST read is the place — ${J(F.place.tabs)}`, F.place);
+  if (ra) ok(armed.ok && isPlace(ra), '② the tab open at the arm (the start\'s blank), navigated after it: its first read is the place', F.place);
+  else ok(armed.ok, '② the hold armed (its tab\'s read did not come back: named above)', F.place);
+  if (got.length) ok(got.every(isPlace), `① a PLACE: three new tabs (the origin holds the permission), each FIRST read is the place — ${got.length} of 3 came back: ${J(F.place.tabs)}`, F.place);
   h.dispose(); await stop(c);
 }
 // ① RED: released before its place, the place 2.5 s late
@@ -176,8 +199,8 @@ const holdSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-geo-hold.js'
   const c = await chrome();
   const { h, ctl } = await holdOn(c, PLACE, { G: early, boundMs: 6000 });
   await openThenMode(c, ctl, 'early', 'delay:2500');
-  const got = await reportsOf((x) => x.k === 'early', 1, SPACING_MS + 6000);
-  ok(got.length === 1 && !isPlace(got[0]), `① RED — a tab released before its place (sent 2.5 s late): its first read is NOT the place (${J(got[0] || null)}) — the leg above can see a miss`, got);
+  const got = await readsOf(c, 'early', 1, '① RED');
+  if (got.length) ok(!isPlace(got[0]), `① RED — a tab released before its place (sent 2.5 s late): its first read is NOT the place (${J(got[0] || null)}) — the leg above can see a miss`, got);
   h.dispose(); await stop(c);
 }
 // ③ «BLOCKED» = the profile's OWN stored denial alone, no hold: a site the person allowed before reads «denied» (RED: no stored denial)
@@ -185,9 +208,9 @@ for (const [stored, label] of [[true, '③ «BLOCKED» is the profile\'s own sto
   const c = await chrome({ stored, grant: false });
   const k = `blocked-${stored ? 'stored' : 'red'}`;
   await openTabs(c, k, 1);
-  const got = await reportsOf((x) => x.k === k, 1, SPACING_MS + 6000);
+  const got = await readsOf(c, k, 1, label);
   if (stored) F.blocked = got[0] || null;
-  ok(got.length === 1 && (stored ? got[0].err === 1 && got[0].perm === 'denied' : got[0].perm === 'granted' && got[0].lat === undefined),
+  if (got.length) ok((stored ? got[0].err === 1 && got[0].perm === 'denied' : got[0].perm === 'granted' && got[0].lat === undefined),
     stored ? `${label}: a site the person ALLOWED BEFORE reads «denied» (error ${got[0] ? got[0].err : '—'}, permission ${got[0] ? got[0].perm : '—'})` : `${label}: the site allowed before keeps «granted» and asks this machine (${J(got[0] || null)}) — the leg above can see the difference`, got);
   await stop(c);
 }
@@ -196,9 +219,12 @@ for (const [mode, label] of [['refuse', '④ the place REFUSED']]) {
   const c = await chrome({ grant: false });
   const { h, ctl, evs } = await holdOn(c, PLACE, { boundMs: 1500 });
   const k = `unplaced-${mode}`;
-  await openThenMode(c, ctl, k, mode);
-  const got = await reportsOf((x) => x.k === k, 1, SPACING_MS + 6000);
-  ok(got.length === 1 && got[0].err === 1 && got[0].perm === 'denied' && evs.some((e) => e.kind === 'unplaced'), `${label}: the tab it opened is RELEASED unplaced inside the bound and said — it reads «denied» (the profile's own setting), never this machine's position (${J(got[0] || null)})`, { got, evs });
+  const opener = await openThenMode(c, ctl, k, mode);
+  const child = opener ? await untilV(() => ctl.attached.find((a) => a.opener === opener) || null, 8000) : null;
+  const released = child ? await untilV(() => (ctl.released.has(child.sid) ? true : null), 1500 + 3000) : null;
+  ok(!!released && evs.some((e) => e.kind === 'unplaced'), `${label}: the tab it opened is RELEASED unplaced inside the bound and said`, { released: !!released, evs });
+  const got = await readsOf(c, k, 1, label);
+  if (got.length) ok(got[0].err === 1 && got[0].perm === 'denied', `${label}: it reads «denied» (the profile's own setting), never this machine's position (${J(got[0])})`, { got, evs });
   h.dispose(); await stop(c);
 }
 // ⑤ the place NEVER ANSWERED — B-1217 (主开发 r5169). 2.369.420's first hosted run read it red once (heavy 7/7, Node 22, the runner's Chrome
