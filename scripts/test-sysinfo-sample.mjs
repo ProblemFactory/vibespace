@@ -20,8 +20,15 @@
 // SLICE's START (a stat read started inside it: the tree's own turn) is a HOLD, and so are gaps over it at half the slices or more — RED; a gap
 // over it with no read started inside it is a STRAY STALL of the machine: printed, counted by name, judged nothing — more than STRAY_MAX of
 // them in one run is NO READING (a skip the gate counts, never a green). The old single number (the longest gap alone) is gone, and with it the
-// second clause «under half its own wall» (a stray stall crossed both). RED (new): a copy whose slices read SYNCHRONOUSLY, 1200 a slice —
+// second clause «under half its own wall» (a stray stall crossed both). RED (new): a copy whose slices read SYNCHRONOUSLY, 1200 a slice (r5412: half the scene's rows) —
 // a hold at each slice's start — is a hold by the rule, so the leg did not become blind
+// r5412 (the coordinator's ruling on that rule's two reds on the first test machine — the tree's own slice turn of ~3 ms against a third of
+// a 9 ms release hold: the law ILL-CONDITIONED on a fast machine, the product holding nothing): neither the product's slice nor the law's numbers
+// move (a third of the release's hold; under half its own time) — THE SCENE IS SIZED BY ITS OWN YARDSTICK: the rows double from 2 400, the
+// release copy measured again at each size, until its hold is at least FLOOR_MS (a third of it then three times a slice's own turn), up to
+// ROWS_MAX; a run that cannot reach the floor at the ceiling is a named NO READING (a skip the gate counts). The RED control's synchronous
+// slice is HALF THE ROWS reached, a hold at every size; and r5360's dropped second clause comes back as the hold rule's third arm: a gap of
+// half the sample's own time or more in which a read started is a HOLD (the law's second number, unmoved; a stray stall still judges nothing)
 // r4212 (the 2.369.419 candidate's hosted run 45584145109: ② red on BOTH tries in the Node 24 fast job, one of four parallel lanes
 // at load 6.1 on a four-core runner; green in the Node 22 job): ② judges two clocks, so the suite runs in the fast tier's SERIAL
 // lane (scripts/ci.mjs FAST_SERIAL: after the parallel lanes drain, alone); its number is unchanged; and ② PRINTS what tells a
@@ -82,7 +89,7 @@ const RELEASE_FN = `function sampleProcCpu(rows) {
   return any;
 }   /* MUTANT: the release's synchronous sample */`;
 
-say('② OFF THE LOOP — at the owner\'s 2 400 processes');
+say('② OFF THE LOOP — from the owner\'s 2 400 processes up (r5412: the scene sized by the release\'s hold)');
 WD.section('②');
 if (!LINUX) { skipped++; say('  · SKIP ②: no /proc on this platform — COUNTED, not passed'); }
 else {
@@ -90,7 +97,8 @@ else {
   const M = mutantCopies('sysinfo-sample', ROOT);
   const REL = require(M.write('src/sysinfo.js', anchored(SRC, ASYNC_FN, RELEASE_FN, 'release-sample'), 'release-sample'));
   const pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number);
-  const ROWS = 2400;
+  const ROWS0 = 2400, FLOOR_MS = 30, ROWS_MAX = ROWS0 * 32;   // r5412: the scene's start, the release hold's floor, the rows' ceiling
+  let ROWS = ROWS0;
   const rowsOf = () => Array.from({ length: ROWS }, (_, i) => ({ pid: pids[i % pids.length], rss: i, pcpu: 0 }));
   // r4212's prints: every stat read counted on the shared fs.promises.readFile (as ⑤ does; the product reads through it), every
   // gap the meter takes kept with the reads started when it closed, the collector's pauses observed over this tree's run
@@ -101,16 +109,19 @@ else {
   const gcs = [], gcObs = new PerformanceObserver((list) => { for (const e of list.getEntries()) gcs.push({ start: e.startTime, end: e.startTime + e.duration }); });
   const gapOf = async (fn) => { const r0 = statReads, gaps = []; let last = performance.now(), max = 0; const t = setInterval(() => { const n = performance.now(); gaps.push({ ms: n - last, reads: statReads - r0, at: n }); max = Math.max(max, n - last); last = n; }, 1); const t0 = performance.now(); let out; try { out = await fn(); } finally { clearInterval(t); } const tail = performance.now(); gaps.push({ ms: tail - last, reads: statReads - r0, at: tail }); max = Math.max(max, tail - last); return { max: +max.toFixed(1), took: +(performance.now() - t0).toFixed(1), out, gaps, from: t0 }; };
   const run = async (Mod) => { const a = rowsOf(); await Mod.sampleProcCpu(a); await new Promise((r) => setTimeout(r, 30)); const b = rowsOf(); const g = await gapOf(() => Promise.resolve(Mod.sampleProcCpu(b))); return { max: g.max, took: g.took, sampled: g.out, live: b.filter((r) => typeof r.pcpuNow === 'number').length, gaps: g.gaps, from: g.from }; };
-  let rel, mine;
+  let rel, mine; const sizes = [];
   try {
-    rel = await run(REL);
+    // r5412: THE SCENE's SIZE — the release copy's hold measured at each size, doubling from ROWS0 until it reaches FLOOR_MS or ROWS_MAX
+    for (;;) { rel = await run(REL); sizes.push(`${ROWS} rows: ${rel.max} ms`); if (rel.max >= FLOOR_MS || ROWS >= ROWS_MAX) break; ROWS *= 2; }
     gcObs.observe({ entryTypes: ['gc'] });
     mine = await run(SI);
     await new Promise((r) => setTimeout(r, 20));   // a pause's entry reaches the observer a turn or two after it (the prints only)
     for (const e of (typeof gcObs.takeRecords === 'function' ? gcObs.takeRecords() : [])) gcs.push({ start: e.startTime, end: e.startTime + e.duration });
   } finally { gcObs.disconnect(); }
   ok(rel.max >= rel.took * 0.8, `CONTROL (the release's synchronous sample, in a copy): the loop is HELD for the whole sample — its longest gap ${rel.max} ms of its ${rel.took} ms (one turn) over ${ROWS} stat files`);
+  say(`    the scene (r5412): ${ROWS} rows — the release's hold ${rel.max} ms against the floor ${FLOOR_MS} ms (sizes read: ${sizes.join(' · ')}; ceiling ${ROWS_MAX})`);
   say(`    the sample's wall time at ${ROWS} rows (slices of ${SI.SAMPLE_SLICE}): ${mine.took} ms off the loop; the release's ${rel.took} ms in one turn`);
+  const yardstick = rel.max >= FLOOR_MS;   // r5412: the law is judged only where its yardstick is long enough to mean something
   // r5360: THE HOLD RULE — «over» = the law's bound (a third of the release's hold in this run); a hold = a gap over it in which a stat read
   // started (a slice's start: the tree's own turn held the loop), or gaps over it at half the slices or more; any other gap over it is a stray
   // stall of the machine (counted, said, judged nothing); more than STRAY_MAX strays in one run is NO READING
@@ -118,12 +129,16 @@ else {
   const judge = (r, slice) => {
     const slices = Math.ceil(ROWS / slice), gaps = r.gaps.map((g, i) => ({ ms: g.ms, started: g.reads - (i ? r.gaps[i - 1].reads : 0), slice: Math.ceil(g.reads / slice) }));
     const over = gaps.filter((g) => g.ms > bound), atStart = over.filter((g) => g.started > 0), stray = over.filter((g) => g.started === 0), many = over.length >= Math.ceil(slices / 2);
-    return { slices, gaps: gaps.length, over: over.length, atStart: atStart.length, stray, many, verdict: atStart.length || many ? 'hold' : stray.length > STRAY_MAX ? 'no-reading' : 'pass' };
+    // the law's second number (r5412: it stays): a gap of half the sample's own time in which a read started (the tree's own turn) is a hold;
+    // a stray stall still judges nothing (the rule as built)
+    const half = gaps.filter((g) => g.started > 0 && g.ms >= r.took / 2).length;
+    return { slices, gaps: gaps.length, over: over.length, atStart: atStart.length, stray, many, half, verdict: atStart.length || many || half ? 'hold' : stray.length > STRAY_MAX ? 'no-reading' : 'pass' };
   };
-  const facts = (j) => `${j.over} of ${j.gaps} gaps over the bound ${bound.toFixed(1)} ms: ${j.atStart} at a slice's start (a read started inside it), ${j.stray.length} stray; ${j.slices} slices`;
+  const facts = (j) => `${j.over} of ${j.gaps} gaps over the bound ${bound.toFixed(1)} ms: ${j.atStart} at a slice's start (a read started inside it), ${j.stray.length} stray; ${j.half} of half its own time at a slice's start; ${j.slices} slices`;
   const J = judge(mine, SI.SAMPLE_SLICE);
-  if (J.verdict === 'no-reading') { skipped++; say(`  · NO READING ②: ${J.stray.length} stray stalls in one run (more than ${STRAY_MAX}) — the machine was too noisy to judge a hold; COUNTED, not passed — ${facts(J)}`); }
-  else ok(J.verdict === 'pass', `this tree: the reads off the loop, in slices of ${SI.SAMPLE_SLICE} — no gap over a third of the release's ${rel.max} ms held a slice's start, and not half the slices had one (${facts(J)}; the longest gap ${mine.max} ms of its ${mine.took} ms)`, { verdict: J.verdict, atStart: J.atStart, many: J.many });
+  if (!yardstick) { skipped++; say(`  · NO READING ②: the release's hold reached ${rel.max} ms at the ceiling of ${ROWS} rows, short of the floor ${FLOOR_MS} ms — the yardstick is too short to judge a hold here; COUNTED, not passed — ${facts(J)}`); }
+  else if (J.verdict === 'no-reading') { skipped++; say(`  · NO READING ②: ${J.stray.length} stray stalls in one run (more than ${STRAY_MAX}) — the machine was too noisy to judge a hold; COUNTED, not passed — ${facts(J)}`); }
+  else ok(J.verdict === 'pass', `this tree: the reads off the loop, in slices of ${SI.SAMPLE_SLICE} — no gap over a third of the release's ${rel.max} ms held a slice's start, not half the slices had one, and no gap held half its own time (${facts(J)}; the longest gap ${mine.max} ms of its ${mine.took} ms, ${ROWS} rows)`, { verdict: J.verdict, atStart: J.atStart, many: J.many, half: J.half });
   if (J.stray.length) say(`    stray stalls of the machine (judged nothing, counted: ${J.stray.length} of at most ${STRAY_MAX}): ${J.stray.map((g) => `${g.ms.toFixed(1)} ms while slice ${g.slice} was out`).join(' · ')}`);
   {   // r4212: what tells a hold from a stray stall (they judge nothing): a hold shows at EVERY slice's start, a stray stall in one gap
     const slices = Math.ceil(ROWS / SI.SAMPLE_SLICE), bound = rel.max / 3;
@@ -133,15 +148,15 @@ else {
     const gcIn = gcs.map((e) => inside(e, mine.from, mine.from + mine.took)).filter(Boolean), gcTop = gcs.reduce((s, e) => s + inside(e, top.at - top.ms, top.at), 0);
     say(`    what tells a hold from a stray stall (r4212, ${process.version}): the longest gap ${top.ms.toFixed(1)} ms closed while slice ${top.slice} of ${slices} was out, ${top.started} stat reads started inside it (${top.started ? (top.slice > 1 ? `the turn that parsed slice ${top.slice - 1} and started slice ${top.slice}` : 'the call that started slice 1') : 'no slice started in it'}); ${over.length} of ${gaps.length} gaps over the bound ${bound.toFixed(1)} ms, ${over.filter((g) => g.started).length} of them at a slice\'s start; the collector inside the timed window: ${gcIn.length} pause(s), ${gcIn.reduce((s, x) => s + x, 0).toFixed(1)} ms, ${gcTop.toFixed(1)} ms of them inside the longest gap`);
   }
-  {   // r5360 (5) RED: a copy whose slices read SYNCHRONOUSLY, 1200 a slice — each slice's start holds the loop — is a hold by the rule
-    const SYNC_SRC = anchored(anchored(SRC, 'const SAMPLE_SLICE = 128;', 'const SAMPLE_SLICE = 1200;   /* MUTANT: big slices */', 'sync-slices size'),
+  {   // r5360 (5) RED: a copy whose slices read SYNCHRONOUSLY, half the scene's rows a slice (r5412) — each slice's start holds the loop — is a hold by the rule
+    const SYNC_SRC = anchored(anchored(SRC, 'const SAMPLE_SLICE = 128;', `const SAMPLE_SLICE = ${ROWS / 2};   /* MUTANT: big slices — half the scene's rows (r5412) */`, 'sync-slices size'),
       "    const texts = await Promise.all(slice.map((pid) => fs.promises.readFile('/proc/' + pid + '/stat', 'utf8').catch(() => null)));",
       "    const texts = slice.map((pid) => { try { return fs.readFileSync('/proc/' + pid + '/stat', 'utf8'); } catch { return null; } }); await null;   /* MUTANT: the slice read synchronously */", 'sync-slices read');
     const SYNC = require(M.write('src/sysinfo.js', SYNC_SRC, 'sync-slices'));
     countSync(true);
     let sy; try { sy = await run(SYNC); } finally { countSync(false); fs.promises.readFile = rfm; }
     const JS = judge(sy, SYNC.SAMPLE_SLICE);
-    ok(SYNC.SAMPLE_SLICE === 1200 && JS.verdict === 'hold' && JS.atStart > 0, `RED (a copy whose slices read synchronously, ${SYNC.SAMPLE_SLICE} a slice): a HOLD by the rule — ${facts(JS)}; the longest gap ${sy.max} ms (the old single number: ${sy.max < bound ? 'under' : 'over'} the bound)`, JS);
+    ok(SYNC.SAMPLE_SLICE === ROWS / 2 && JS.verdict === 'hold' && JS.atStart > 0, `RED (a copy whose slices read synchronously, ${SYNC.SAMPLE_SLICE} a slice — half the scene's ${ROWS} rows): a HOLD by the rule — ${facts(JS)}; the longest gap ${sy.max} ms (the old single number: ${sy.max < bound ? 'under' : 'over'} the bound)`, JS);
   }
   ok(mine.sampled === true && rel.sampled === true && mine.live > 0 && rel.live > 0, `both sample the table (${mine.live} / ${rel.live} rows carry a live CPU %: a pid's FIRST row of a run reads the last run's — the rows cycle ${pids.length} pids, and a process may end between the runs)`);
   for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 2, label: 'B-360d sample ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
