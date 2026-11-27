@@ -1530,7 +1530,11 @@ console.log('§7 lane D (a) (docs/design-desktop-apps-seamless §3.4 — the own
     ok(R.cv.height === 600 && R.el.style.height === '600px', `the app snapped itself to 800x480 and the belt re-fitted it in the same task (element ${R.el.style.height}): the backing is untouched (${R.cv.width}x${R.cv.height}) — no rows lost`);
     R.view.client.resize(700, 500);
     ok(R.el.style.height === '500px' && R.cv.height === 600 && R.cv.style.height === '600px', `a real shrink (the pane) moves the element box at once (${R.el.style.width}×${R.el.style.height}); the backing (${R.cv.width}x${R.cv.height}) is clipped by it until BACKING_SHRINK_MS`);
-    await sleep(V.BACKING_SHRINK_MS + 60);
+    // B-54a9 (主开发 r5432): the follow is waited FOR, never waited out — the backing follows once the shrink's own timer
+    // (BACKING_SHRINK_MS) fires; a ceiling of thirty shrink spans, and a backing that never follows is red BY NAME (HARNESS), never
+    // read after a fixed span. The leg above still reads the backing untouched at once, right after the shrink
+    const tF = Date.now(), followed = await until(() => R.cv.width === 700 && R.cv.height === 500 && R.cv.style.height === '500px', 30 * V.BACKING_SHRINK_MS, 5);
+    if (!followed) ok(false, `HARNESS: the backing never followed the shrink within ${30 * V.BACKING_SHRINK_MS} ms (waited ${Date.now() - tF} ms)`);
     ok(R.cv.width === 700 && R.cv.height === 500 && R.cv.style.height === '500px', `…then it follows (${R.cv.width}x${R.cv.height})`);
     void winObj;
     R.view.dispose();
