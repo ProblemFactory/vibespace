@@ -7,7 +7,8 @@
 //   ① HELD: a local extraction is refused by name (extract_journal_unread) before anything starts; a mark writes nothing over
 //      the file; a read again off the loop lifts it with no restart — the marks are back and answer again
 //   ② TORN BYTES: held while their copy is made, then kept aside ONCE and it starts empty — for the rest of this run only a new
-//      or empty folder goes on (extract_journal_torn for a folder that holds something, or one whose listing failed)
+//      or empty folder goes on (extract_journal_torn for a folder that holds something, or one whose listing failed); r5478: the leg
+//      waits on the copy's own fact (the hold lifted with its copy named, the copy in the folder), at most 500 polls of 10 ms
 //   ③ THE ROUTE asks the hold before any folder, mark or spawn (its order pinned) — and the page words both codes (zh / ja)
 //   RED: the release's read and write planted back — the unreadable journal goes on, and the next mark writes over every other
 //   ④ B-574d (lane nl-journals): THE MARK IS ON DISK BEFORE ITS NAME POINTS AT IT — the temp opened, SYNCED, closed, then renamed
@@ -36,6 +37,19 @@ const MARKED = JSON.stringify({ ['/a/one.zip\n/a/out']: 1795000000000, ['/a/two.
 const world = (name, text) => { const d = path.join(ROOT, name); fs.mkdirSync(d, { recursive: true }); const f = path.join(d, 'extract-journal.json'); if (text !== null) fs.writeFileSync(f, text); return f; };
 const refused = (file, fn) => { const real = fs.readFileSync; fs.readFileSync = function (p0, ...a) { if (String(p0) === file) throw Object.assign(new Error(`EIO: a placed refusal of the read, '${p0}'`), { code: 'EIO' }); return real.call(this, p0, ...a); }; try { return fn(); } finally { fs.readFileSync = real; } };
 const turns = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+/** 主开发 r5478: ② WAITS ON THE COPY's OWN FACT, never a fixed time (a fixed 60 ms read red on a loaded machine: the copy is made off
+ *  the loop). The fact: the journal's hold (src/store-read-hold.js holds(): its one row, `at` stops the one before) LIFTED from torn
+ *  bytes with its copy NAMED, and that copy in the folder — the copy is linked into its name whole, then the hold lifts. Polled every
+ *  POLL_MS, at most COPY_POLLS polls (5 s): a copy that never comes is red by its own line. */
+const COPY_POLLS = 500, POLL_MS = 10;
+const copyCame = async (dir) => {
+  for (let poll = 1; poll <= COPY_POLLS; poll++) {
+    const row = SRH.holds().find((e) => e.file === 'extract-journal.json' && e.torn && e.held === false && e.copy);
+    if (row && fs.existsSync(path.join(dir, row.copy))) return { came: true, poll, copy: row.copy };
+    await turns(POLL_MS);
+  }
+  return { came: false, polls: COPY_POLLS, rows: SRH.holds().filter((e) => e.file === 'extract-journal.json') };
+};
 
 console.log('① the journal HELD');
 {
@@ -53,7 +67,8 @@ console.log('② torn bytes');
   const torn = MARKED.slice(0, 20), f = world('torn', torn);
   J.at(f);
   const first = await quiet(() => J.refusal());
-  await quiet(() => turns(60));
+  const waited = await quiet(() => copyCame(path.dirname(f)));
+  ok(waited.came, '② the torn bytes\' copy CAME (made off the loop): waited on its own fact — the hold lifted with its copy named, and the copy in the folder — at most 500 polls of 10 ms, never a fixed time', waited);
   const copies = fs.readdirSync(path.dirname(f)).filter((n) => n.startsWith('extract-journal.json.corrupt-'));
   const afterLift = J.refusal();
   const full = J.torn(['a.txt']), empty = J.torn([]), unread = J.torn(null);
