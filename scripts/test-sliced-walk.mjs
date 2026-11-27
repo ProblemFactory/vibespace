@@ -40,6 +40,9 @@
 //   past the rebuild line (cut 3c's) → (c6) red; one budget for the touched-since and the pending rows (cut 3c's) → (c7) red.
 //   r829 (after cut 4): (h8) THE BOUND — the route's reader and a broadcast asked during a held warm-up answered at the bound,
 //       whole; (h9) a slice that throws — waiters released, a broadcast at once, the first read whole; three red controls.
+//   B-dfa4 r5450 (hold (ii), 2026-11-27): (i) THE ROW FACTS' RE-SUM AFTER A VOID, in slices: the reader meanwhile answered the sums as they
+//       stood (0 rows read in its turn), one row a slice, the landing pushed once, a write between two slices re-read, a second whole
+//       touch restarts it, three of them stop it (said once) and the next reader re-sums whole; RED: the void re-summed whole in the reader's turn.
 //   cut 3d: (c7) the turn's cap during a merge (more said, the three budgets held — a pending row served while the rows
 //       touched since spend theirs — nothing not due served; the waiting count printed) and a deletion (a whole touch) during a merge — rebuilt in slices, then the whole build's;
 //       (c5) now judges every phase of each merge and the landing, with a row touched again, one unlisted and one born.
@@ -782,7 +785,7 @@ const placeWarm = async (e) => { await e.store.index.update(() => { e.store.inde
   const dW = plainDigest();
   ok(tb === 3 && wbOk === false && sb.gaveUp === 1 && saidB === 1 && dB === dW, `(h5) THE BOUND: three whole touches during the warm-up — it stops (said ONCE: ${saidB}), the first read builds whole and answers the whole build's digest`, { sb, wb: wb.slice(0, 2) });
   const SRC4 = engineSource(REPO);
-  const EMh = M.load('src/server/channels-engine.js', anchored(SRC4, 'rowKept.at = t0; rowKept.stale = new Set(touched); }', 'rowKept.at = t0; rowKept.stale = new Set(); }', 'the warm-up forgets the rows touched during it'), 'warm-forget');
+  const EMh = M.load('src/server/channels-engine.js', anchored(SRC4, 'rowKept.at = t0; rowKept.stale = new Set(touched); rowKept.built = true; }', 'rowKept.at = t0; rowKept.stale = new Set(); rowKept.built = true; }', 'the warm-up forgets the rows touched during it'), 'warm-forget');
   const rh = await warmLeg(EMh, 'write-red', { place: placeWarm });
   ok(!rh.same, '(h2) RED CONTROL: a landing that forgets the rows touched during the warm-up answers a digest that is NOT the whole build\'s (the placed unread lost) — the leg above would go red', { same: rh.same });
 }
@@ -903,6 +906,70 @@ async function manyLeg(EM, tag) {
   const EMs = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '      if (i < arr.length && gone && gone.has(arr[i])) { i++; continue; }\n', '', 'a merge that keeps the moved rows\' old entries'), 'merge-keeps-gone');
   const rs = await manyLeg(EMs, 'many-red');
   ok(rs.headMerges >= 1 && (!rs.same || !rs.parity || !rs.same2 || !rs.parity2), `(h6) RED CONTROL: a merge that keeps the moved rows' old entries — the digest ${rs.same ? 'equal' : 'NOT equal'} to a whole build's, the kept first read ${rs.parity ? 'equal' : 'NOT equal'} to the walk's — the leg above would go red`, rs);
+}
+
+// ═══ (i) THE ROW FACTS' RE-SUM AFTER A VOID (B-dfa4, 主开发 r5450, hold (ii): 1.6–1.8 s on the owner's hub) ═══
+// After the first sums, a whole-map touch voided the row facts and the next digest's account cards re-summed EVERY row in that
+// reader's one turn. Now the re-sum runs the warm-up's own road (walkSliced over a stated snapshot) and a reader meanwhile is
+// answered the sums AS THEY STOOD; the landing re-reads the rows touched since the snapshot and pushes the result ONCE; a second
+// whole touch RESTARTS it (three times, then the next reader re-sums whole, said once). The rows each turn reads are COUNTED
+// (rowResumStats().rowsRead: one count a row read), never timed: sliceMs 0 = one row a slice.
+console.log('(i) the row facts re-summed in slices after a whole-map touch — the sums as they stood meanwhile, the landing pushed once, a whole touch restarts it');
+const reachMap = (s) => s.index.update((x) => { x.conversations; });   // an update that reaches the map: a whole-map touch
+// THE ROW FACTS' OWN FIELDS in a digest (what this road sums): each account card's counts from the kept row facts and the totals.
+// A leg that places a write compares these: the card's clock census beside them (hot / warm / cold / due) is kept by its own pace
+// (censusEveryMs, its trail a no-op in mkEng, the clock fixed), so a whole digest compared after a write would judge that pace, not this road
+const rowFactsOf = (dStr) => { const d = JSON.parse(dStr); const pick = (sc) => sc ? { conversations: sc.conversations, unread: sc.unread, paused: sc.paused, overridden: sc.overridden, unlisted: sc.unlisted, firstIngest: sc.firstIngest } : null; return JSON.stringify({ adapters: (d.adapters || []).map((a) => [a.id, pick(a.scheduler)]), unreadTotal: d.unreadTotal, counts: d.counts }); };
+async function resumLeg(EM, tag, { place = null, wholeTouches = 0 } = {}) {
+  const bc = [], perSlice = [], warns = [];
+  let e = null, last = null, touched = 0, placedAt = null;
+  e = mkEng(EM, copyOf(TPL_D, `i-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
+    if (what !== 'row-facts-resum') return;
+    const n = e.rowResumStats().rowsRead;
+    if (last !== null) perSlice.push(n - last);
+    last = n;
+    if (i === 2 && place && placedAt === null) { placedAt = i; await place(e); last = e.rowResumStats().rowsRead; }   // a write between two slices (its own rows not a slice's)
+    if (i === 3 && touched < wholeTouches) { touched++; await reachMap(e.store); last = e.rowResumStats().rowsRead; }
+  } }, { log() { }, info() { }, warn: (x) => warns.push(String(x)), error() { } }, null, (m) => bc.push(m));
+  const warmed = await e.digestWarm();   // THE FIRST SUMS: the start's warm-up road
+  const d0 = digestOf(e);
+  const pushes = () => bc.filter((m) => m && m.type === 'channels-updated').length;
+  await reachMap(e.store);   // THE VOID: a whole-map touch after the first sums
+  const r0 = e.rowResumStats().rowsRead, p0 = pushes();
+  const dVoid = digestOf(e);   // the reader meanwhile
+  const readerRows = e.rowResumStats().rowsRead - r0;
+  const runningAfterReader = e.rowResumStats().running;
+  await until('the re-sum landed', () => !e.rowResumStats().running);
+  for (let k = 0; k < 5; k++) await new Promise((z) => setImmediate(z));
+  const pushed = pushes() - p0;
+  const dAfter = digestOf(e), stats = e.rowResumStats();
+  e.stop();
+  let whole = null;
+  if (place) { const w = mkEng(ENG, copyOf(TPL_D, `i-${tag}-whole`), { syncRows: 1e9 }); await place(w); whole = digestOf(w); w.stop(); }
+  else whole = plainDigest();
+  let at = 0; while (at < dAfter.length && dAfter[at] === whole[at]) at++;   // where the landed digest and the whole build's part, said when they do
+  const diff = dAfter === whole ? null : { at, mine: dAfter.slice(Math.max(0, at - 120), at + 200), whole: whole.slice(Math.max(0, at - 120), at + 200) };
+  return { warmed, asStood: dVoid === d0, same: dAfter === whole, factsSame: rowFactsOf(dAfter) === rowFactsOf(whole), facts: rowFactsOf(dAfter), wholeFacts: rowFactsOf(whole), diff, readerRows, runningAfterReader, pushed, perSlice: perSlice.length, maxSliceRows: perSlice.length ? Math.max(...perSlice) : null, stats, warns, placedAt, touched };
+}
+{
+  const r = await resumLeg(ENG, 'parity');
+  ok(r.warmed === true && r.runningAfterReader === true && r.readerRows === 0 && r.asStood, `(i1) THE READER MEANWHILE: a whole-map touch after the first sums, then a digest — the reader read ${r.readerRows} row(s) of the row facts in its turn and was answered the sums AS THEY STOOD (its digest equals the one before the touch: ${r.asStood}), the re-sum running in slices`, r);
+  ok(r.stats.started === 1 && r.stats.sliced === 1 && r.perSlice > 3 && r.maxSliceRows === 1 && r.same && r.pushed === 1 && r.stats.pushed === 1, `(i1) THE SLICES AND THE LANDING: ${r.perSlice + 1} slices, no slice read more than ${r.maxSliceRows} row (the slice's own, sliceMs 0), the landed digest equals a whole build's, and the landing pushed the recomputed result ONCE (${r.pushed} broadcast)`, r);
+  info(`(i1) LAW 4, printed — the re-sum's longest slice ${r.stats.maxSliceMs} ms over ${r.stats.slices} slices`);
+  const rp = await resumLeg(ENG, 'placed', { place: async (e) => { await e.store.index.update(() => { e.store.index.entry(A, 'm-0', { create: false }).unread = 7; Object.assign(e.store.index.entry(A, 'm-born-i'), rowShape(0), { lastAt: T, unread: 4 }); }); } });
+  ok(rp.placedAt !== null && rp.factsSame && rp.stats.reread >= 2 && rp.pushed === 1 && /"unread":11/.test(rp.facts), `(i2) A CHANGE DURING THE SLICES (a row's unread behind the walk, a row born): the landing re-read the ${rp.stats.reread} row(s) touched since the snapshot, and the row facts it landed (each card's counts, the totals) equal a whole build's after the same writes, pushed once`, { factsSame: rp.factsSame, facts: rp.facts, wholeFacts: rp.wholeFacts, reread: rp.stats.reread, pushed: rp.pushed });
+  const EMf = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), 'rowKept.stale = new Set(job.touched); rowResumStats.reread += job.touched.size;', 'rowKept.stale = new Set(); rowResumStats.reread += 0;', 'the re-sum\'s landing forgets the rows touched during it'), 'resum-forgets');
+  const rf = await resumLeg(EMf, 'red-forgets', { place: async (e) => { await e.store.index.update(() => { e.store.index.entry(A, 'm-0', { create: false }).unread = 7; Object.assign(e.store.index.entry(A, 'm-born-i'), rowShape(0), { lastAt: T, unread: 4 }); }); } });
+  ok(rf.placedAt !== null && !rf.factsSame, `(i2) RED CONTROL: a landing that forgets the rows touched during the slices lands row facts that are NOT a whole build's (${rf.facts.slice(0, 160)}) — the leg above would go red`, { facts: rf.facts, wholeFacts: rf.wholeFacts });
+  const rw = await resumLeg(ENG, 'whole-again', { wholeTouches: 1 });
+  ok(rw.touched === 1 && rw.stats.restarts === 1 && rw.stats.sliced === 1 && rw.same && rw.pushed === 1, `(i3) A SECOND WHOLE-MAP TOUCH between two slices RESTARTS the re-sum over a fresh snapshot (restarts: ${rw.stats.restarts}) — the landed digest equals a whole build's`, rw);
+  const rg = await resumLeg(ENG, 'give-up', { wholeTouches: 3 });
+  const saidG = rg.warns.filter((x) => /the row facts' re-sum was started again 3 times by whole-map writes/.test(x)).length;
+  ok(rg.touched === 3 && rg.stats.gaveUp === 1 && saidG === 1 && rg.same, `(i3) THE BOUND: three whole touches — the re-sum stops (said ONCE: ${saidG}) and the next reader re-sums whole: the digest equals a whole build's, never the old sums for good`, rg);
+  // RED CONTROL: the release's road — a void re-summed WHOLE in the reader's turn
+  const EMw = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), "      if (!resum && rowKept.built && !rowKept.wholeNext && (rowKept.resum || rowResumStart())) return rowKept.by;\n", '', 'the void re-summed whole in the reader\'s turn'), 'resum-whole');
+  const rr = await resumLeg(EMw, 'red-whole');
+  ok(rr.readerRows >= 1000, `(i1) RED CONTROL: the void re-summed whole in the reader's turn — that reader read ${rr.readerRows} rows (the leg above would go red)`, { readerRows: rr.readerRows });
 }
 
 report();

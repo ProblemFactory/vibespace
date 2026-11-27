@@ -3785,9 +3785,23 @@ function create(deps = {}) {
    *  re-sum is gone — 100 ms of every minute's pass at 90 298 rows; the door's touch is the one signal, as for the due
    *  and census indexes (test-channel-census holds the kept facts to the walk after every step). */
   const FACTS = ['conversations', 'unread', 'unlisted', 'paused', 'overridden', 'reading', 'walked'];
-  const rowKept = { stale: null, rows: new Map(), by: new Map(), at: 0 };   // stale null = re-sum
-  store.index.onTouch((k) => { if (k === null) rowKept.stale = null; else if (rowKept.stale) rowKept.stale.add(k); });
+  const rowKept = { stale: null, rows: new Map(), by: new Map(), at: 0, built: false, resum: null, wholeNext: false };   // stale null = re-sum
+  // B-dfa4 (主开发 r5450, hold (ii): 1.6–1.8 s on the owner's hub): A VOID AFTER THE FIRST SUMS IS RE-SUMMED IN SLICES. A whole-map
+  // touch voided these sums and the next reader (every digest's account cards: schedulerOf) re-summed EVERY row in its one turn.
+  // Now, once the sums were built and on an index of more than WALK.syncRows rows, a void starts the warm-up's own road — walkSliced
+  // over a STATED SNAPSHOT of the keys, the file's own slice budget (WALK.sliceMs) — and a reader meanwhile is answered the sums AS
+  // THEY STOOD, whole (never zeros, never half a sum, never a wait). THE LANDING (one turn) installs the new sums, re-reads the rows
+  // touched since the snapshot by the incremental road, and PUSHES THE RECOMPUTED RESULT ONCE (notify: the adapters and the totals
+  // read again). A SECOND WHOLE-MAP TOUCH during the slices RESTARTS the walk over a fresh snapshot — the warm-up's own rule,
+  // DIGEST_WARM_RESTARTS times — and then the next reader re-sums whole in its turn (said once): old sums never stand for good.
+  // Before the first sums (a start) the release's road is unchanged: the warm-up's slices, else a whole re-sum.
+  const rowResumStats = { started: 0, sliced: 0, restarts: 0, gaveUp: 0, slices: 0, maxSliceMs: 0, reread: 0, pushed: 0, rowsRead: 0 };
+  store.index.onTouch((k) => {
+    if (k === null) { rowKept.stale = null; if (rowKept.resum) rowKept.resum.whole = true; }
+    else { if (rowKept.stale) rowKept.stale.add(k); if (rowKept.resum) rowKept.resum.touched.add(k); }
+  });
   function rowFacts(en) {
+    rowResumStats.rowsRead++;   // B-dfa4 r5450: the rows a turn reads, counted (the re-sum's legs judge a count, never a clock)
     if (!en) return null;
     if (en.unlistedAt) return { a: en.adapterId, unlisted: 1 };
     // the census's own reading of the cadence's override (caps.cadenceFor: 'paused' / a valid refresh = source override)
@@ -3806,8 +3820,12 @@ function create(deps = {}) {
   function rowFactsNow(resum = false) {
     const liveIx = store.index.live(), t = now();
     if (resum || !rowKept.stale) {
+      // B-dfa4 (r5450, hold (ii)): a void after the first sums — the sums as they stood, the re-sum in slices (rowResumStart)
+      if (!resum && rowKept.built && !rowKept.wholeNext && (rowKept.resum || rowResumStart())) return rowKept.by;
+      rowKept.wholeNext = false;
       rowKept.rows = new Map(); rowKept.by = new Map(); rowKept.at = t;
       for (const k of Object.keys(liveIx)) { const f = rowFacts(liveIx[k]); if (f) { rowKept.rows.set(k, f); addFacts(f, 1); } }
+      rowKept.built = true;
     } else {
       for (const k of rowKept.stale) {
         const was = rowKept.rows.get(k), f = rowFacts(liveIx[k]);
@@ -3817,6 +3835,48 @@ function create(deps = {}) {
     }
     rowKept.stale = new Set();
     return rowKept.by;
+  }
+  /** B-dfa4 (r5450, hold (ii)): the row facts' re-sum after a void, in slices over a stated snapshot → true while it runs (the
+   *  reader is answered the sums as they stood), false for a small index (the reader re-sums whole in its turn, as before). */
+  function rowResumStart() {
+    if (stopped) return false;
+    let n = 0; for (const k in store.index.rows()) if (++n > WALK.syncRows) break;   // a small index: the reader re-sums whole, as before
+    if (n <= WALK.syncRows) return false;
+    const job = rowKept.resum = { touched: new Set(), whole: false };
+    rowResumStats.started++;
+    (async () => {
+      try {
+        for (let attempt = 0; ; attempt++) {
+          if (stopped || rowKept.resum !== job) return;
+          if (attempt >= DIGEST_WARM_RESTARTS) {   // the road's own bound: then the next reader re-sums whole (never old sums for good)
+            rowResumStats.gaveUp++; rowKept.wholeNext = true;
+            log.warn(`[channels] the row facts' re-sum was started again ${attempt} times by whole-map writes — the next read re-sums them whole`);
+            return;
+          }
+          job.whole = false; job.touched = new Set();   // each attempt walks a fresh snapshot
+          const rows = store.index.rows(), keys = Object.keys(rows), t0 = now();
+          const rf = new Map(), by = new Map();
+          const r = await walkSliced(keys, (k) => { const f = rowFacts(rows[k]); if (f) { rf.set(k, f); addFacts(f, 1, by); } },
+            { what: 'row-facts-resum', sliceMs: WALK.sliceMs, onSlice: WALK.onSlice, stats: rowResumStats, alive: () => !stopped && rowKept.resum === job && !job.whole });
+          if (!r.done) { if (stopped || rowKept.resum !== job) return; rowResumStats.restarts++; continue; }   // a whole touch: AGAIN
+          // THE LANDING, one turn: the new sums installed (unless a reader re-summed whole meanwhile), the rows touched since the
+          // snapshot re-read now by the incremental road, the result pushed once
+          if (rowKept.stale === null) {
+            rowKept.rows = rf; rowKept.by = by; rowKept.at = t0; rowKept.built = true;
+            rowKept.stale = new Set(job.touched); rowResumStats.reread += job.touched.size;
+          }
+          rowKept.resum = null;
+          if (rowKept.stale && rowKept.stale.size) rowFactsNow();
+          rowResumStats.sliced++;
+          if (!stopped) { rowResumStats.pushed++; notify([], { full: false }); }   // THE RECOMPUTED RESULT, ONCE (the cache law)
+          return;
+        }
+      } catch (e) {
+        rowKept.wholeNext = true;   // the next reader re-sums whole: never old sums for good
+        log.warn('[channels] the row facts\' re-sum failed:', (e && e.message) || e, '— the next read re-sums them whole');
+      } finally { if (rowKept.resum === job) rowKept.resum = null; }
+    })();
+    return true;
   }
   /** THE TOTALS' unread: the kept facts of every listed row of an account that exists (the old loop's rule). */
   function unreadTotalOf(liveIx, byId, resum = false) {
@@ -4902,7 +4962,7 @@ function create(deps = {}) {
           // snapshot are each index's dirty rows (re-read at its first read)
           const l0 = Date.now(), touched = job.touched, dueOnly = job.dueOnly;
           digestWarmStats.reread += touched.size + [...dueOnly].filter((k) => !touched.has(k)).length;
-          if (rowKept.stale === null) { rowKept.rows = rf; rowKept.by = by; rowKept.at = t0; rowKept.stale = new Set(touched); }
+          if (rowKept.stale === null) { rowKept.rows = rf; rowKept.by = by; rowKept.at = t0; rowKept.stale = new Set(touched); rowKept.built = true; }
           if (!firstKept.built) {
             for (const arr of fk2.heads.values()) arr.sort(headCmp);
             firstKept.facts = fk2.facts; firstKept.heads = fk2.heads; firstKept.at = fk2.at; firstKept.odd = fk2.odd;
@@ -10631,6 +10691,7 @@ function create(deps = {}) {
     digestReady: ['allow', 'async', 'whether the first digest’s warm-up has landed (a promise of true) — reads no family; the digest itself says paused'],
     digestWarm: ['paused', 'async', 'the first digest’s sliced warm-up over the index rows (B-dfa4 cut 4): boot work — while paused it does nothing'],
     digestWarmStats: ['allow', 'sync', 'the warm-up counters (slices, the longest slice, restarts) — reads no family'],
+    rowResumStats: ['allow', 'sync', 'the row facts’ sliced re-sum counters after a void (slices, restarts, the rows re-read at the landing) — reads no family'],
     digestWaitMs: ['allow', 'const', 'a constant: how long GET /api/channels waits for the first digest’s warm-up before it builds whole (DIGEST_WAIT_MS, 5 s; a suite’s walk.digestWaitMs) — answers the same held or not; the digest itself says paused'],
     rejudgeConvCaps: ['refused', 'async', 'refused while paused (no allow row): re-judges the conversations of an account — writes rows of the held list'],
     rejudgeStats: ['allow', 'sync', 'the sliced re-judge counters (slices, the longest slice) — reads no family'],
@@ -11005,6 +11066,7 @@ function create(deps = {}) {
     releaseStaleReservations, capZeroDigests,
     bootSweep, bootSweepStats: () => ({ ...bootSweepStats }), rejudgeConvCaps, rejudgeStats: () => ({ ...rejudgeStats }),   // B-dfa4 cut 3: the boot's one sweep (its legs: parity, a write between two slices)
     digestReady, digestWaitMs: DIGEST_WAIT_MS, digestWarm: digestWarmStart, digestWarmStats: () => ({ ...digestWarmStats }),   // B-dfa4 cut 4: the first digest's warm-up (its legs: test-sliced-walk (h))
+    rowResumStats: () => ({ ...rowResumStats, running: !!rowKept.resum }),   // B-dfa4 r5450 hold (ii): the row facts' sliced re-sum after a void (its legs: test-sliced-walk (i))
     pendingWindows: () => [...wakeTimers.entries()].map(([k, w]) => { const i = k.lastIndexOf('|'); return { key: i > 0 ? k.slice(0, i) : k, principal: i > 0 ? k.slice(i + 1) : null, kind: w.kind, startedAt: w.startedAt }; }),
     REQUESTS_PER_MINUTE, RECONCILE_SECONDS, PAGE, MAX_PAGES, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PENDING_CAP, ESTIMATE_CAP,
     DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS,
