@@ -1418,15 +1418,25 @@ console.log('§4 the engine over a fake keeper + the routes');
       ];
       const lineAt = (i) => srcE.slice(0, i).split('\n').length;
       const lineText = (i) => srcE.slice(srcE.lastIndexOf('\n', i) + 1, srcE.indexOf('\n', i));
-      const sites = [], defs = [];
+      // r5385 (lane nl-migrations): a `held()` called ON a store-read hold — an engine const bound to HOLD.create, lane lg-recovery's
+      // held-store law over window-leases.json / window-reach.json — is that hold's OWN check, not a lease re-check: its law and its reds
+      // are test-window-stores-held's (the save, the broadcast, the reconcile and the kill path blind to the hold). Listed and counted
+      // apart, never mutated here (its neuter would ask the hold object for a lease map it does not have); the count is pinned below, so
+      // a new one is said, never folded in unseen. Every other `held()` (the verbs' own re-check, the keeper's store hold) stays a site
+      const HOLD_NAMES = new Set([...srcE.matchAll(/\bconst (\w+) = HOLD\.create\(/g)].map((x) => x[1]));
+      const sites = [], defs = [], holdChecks = [];
       for (const kind of SITE_KINDS) for (let m; (m = kind.re.exec(srcE));) {
         const before = srcE.slice(Math.max(0, m.index - 12), m.index);
         const lt = lineText(m.index);
         if (/function $/.test(before) || /return $/.test(before) || /const held = \(\) => /.test(lt)) { defs.push(`L${lineAt(m.index)}`); continue; }
+        const recv = /(\w+)\.$/.exec(srcE.slice(Math.max(0, m.index - 40), m.index));
+        if (m[0] === 'held()' && recv && HOLD_NAMES.has(recv[1])) { holdChecks.push(`L${lineAt(m.index)} ${recv[1]}.held()`); continue; }
         sites.push({ index: m.index, text: m[0], line: lineAt(m.index), neuter: kind.neuter, annotated: /\/\/ no-await-before\b/.test(lt) });
       }
       sites.sort((x, y) => x.index - y.index);
       console.log(`    re-check sites in the engine (grep-derived): ${sites.map((s0) => `L${s0.line} ${s0.text.replace(/rec, facts, /, '…')}${s0.annotated ? ' [no-await-before]' : ''}`).join(' · ')}; definitions skipped: ${defs.join(', ')}`);
+      console.log(`    the store-read holds' own checks (on ${[...HOLD_NAMES].join(', ') || 'none'}; counted apart, never mutated here — test-window-stores-held owns their law): ${holdChecks.join(' · ') || 'none'}`);
+      ok(HOLD_NAMES.size === 2 && holdChecks.length === 5, `the store-read holds' own checks are counted APART from the lease re-check sites: ${holdChecks.length} on ${[...HOLD_NAMES].join(', ')} (pinned: a new one is said here, never mutated as a lease re-check)`, holdChecks);
       ok(sites.length >= 15 && sites.some((x) => x.neuter === 'first'), `the census found the re-check sites (${sites.length}, list's own among them — r3 F4) — a census that finds none judges nothing`);
       for (const s0 of sites.filter((x) => x.annotated)) {
         // the claim: no `await` between the nearest preceding re-check and this one (definitions do not count)
