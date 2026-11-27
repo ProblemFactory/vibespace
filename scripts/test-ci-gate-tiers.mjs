@@ -1236,6 +1236,86 @@ console.log('\n§8i a heavy census of the tree carries the everyGate mark, and a
   const localFn = one({ 'test-zz-census.mjs': L('function trackedFiles() { return []; }', 'console.log(trackedFiles().length);') });
   ok(said(localFn, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: a local function named trackedFiles is no listing, only a helper's binding is (${localFn.problems[0] || 'no problem'})`);
 }
+// ── §8l THE PLACED REDS (the release pipeline's U2, lane bl-ci, 主开发 r5490 line 5 / r5499): a LINE of a suite — never a suite — whose red is
+// placed as the environment's or the leg's own sits in scripts/fixtures/placed-reds.json with its record, its owner and the release it was
+// first read red at. A ✗ line it names is a NAMED SKIP of that line for the gate; a suite whose only ✗ lines are placed is judged green and
+// NOT retried; anything else is red as ever. The table's census is red at the third release. Each law a leg and a computed red.
+console.log('\n§8l the placed reds: a placed LINE is a named skip, a suite whose only reds are placed is not retried, the census reds at the third release');
+{
+  const C = await import('./ci.mjs');
+  const S = { name: 'test-zz-placed', tier: 'fast', budgetMs: 60000 }, LINE = 'the planted scene control line reads its own number at its bound';
+  const E = [{ suite: 'test-zz-placed', line: LINE, placed: 'a lane line by name', owner: 'lane zz, row B-0000', since: '2.369.423' }];
+  const red = (full, extra = {}) => ({ ok: false, ms: 5, load: [1, 1], full, lines: [`\n✗ ${extra.name || 'x'} FAILED (5ms${extra.sig ? ', ' + extra.sig : ''})`, full, ''], ...extra });
+  const closed = (n, t) => `${t}\n${n} FAILED (3 passed)\n`;   // the suite's own closing: a run that ended by itself
+  // (1) THE VERDICT — placed only when EVERY ✗ line is a placed line of THIS suite and the run ended by itself
+  const cases = {
+    'all its ✗ lines placed': [C.placedVerdict(S, red(closed(1, `  ✓ a\n  ✗ ${LINE} −516 px`)), E), (v) => !!v && v.n === 1 && v.first.startsWith(LINE)],
+    'two placed lines': [C.placedVerdict(S, red(closed(2, `  ✗ ${LINE} 1\n  ✗ ${LINE} 2`)), E), (v) => !!v && v.n === 2],
+    'the other closing («m passed, n failed»)': [C.placedVerdict(S, red(`  ✗ ${LINE} 1\n3 passed, 1 failed\n`), E), (v) => !!v && v.n === 1],
+    'one line not placed': [C.placedVerdict(S, red(closed(2, `  ✗ ${LINE} 1\n  ✗ another leg the table does not name`)), E), (v) => v === null],
+    'a crash AFTER a placed line (no closing)': [C.placedVerdict(S, red(`  ✗ ${LINE} 1\nTypeError: x is not a function\n    at file:///x.mjs:1:1\n`), E), (v) => v === null],
+    'a closing that counts more failures than ✗ lines': [C.placedVerdict(S, red(closed(2, `  ✗ ${LINE} 1`)), E), (v) => v === null],
+    'a signal on its FAILED line': [C.placedVerdict(S, red(closed(1, `  ✗ ${LINE} 1`), { sig: 'SIGKILL' }), E), (v) => v === null],
+    'a socket past the loopback': [C.placedVerdict(S, red(closed(1, `  ✗ ${LINE} 1`), { egress: [{ host: 'api.example.invalid' }] }), E), (v) => v === null],
+    'a scene that did not form': [C.placedVerdict(S, red(closed(1, `  ✗ ${LINE} — PRECONDITION NOT MET`)), E), (v) => v === null],
+    'a crash with no ✗ line': [C.placedVerdict(S, red('  ✓ a\nTypeError: x is not a function\n'), E), (v) => v === null],
+    'a hang': [C.placedVerdict(S, red(closed(1, `  ✗ ${LINE}`), { hangReport: '/x' }), E), (v) => v === null],
+    'an outside kill': [C.placedVerdict(S, red(closed(1, `  ✗ ${LINE}`), { killedFromOutside: 'SIGTERM' }), E), (v) => v === null],
+    'another suite\'s entry': [C.placedVerdict({ name: 'test-zz-other' }, red(closed(1, `  ✗ ${LINE}`)), E), (v) => v === null],
+    'an empty table': [C.placedVerdict(S, red(closed(1, `  ✗ ${LINE}`)), []), (v) => v === null],
+    'a green': [C.placedVerdict(S, { ok: true, full: `  ✗ ${LINE}\n` }, E), (v) => v === null],
+    'a line too short to name one leg': [C.placedVerdict(S, red(closed(1, '  ✗ a shorter line than forty chars')), [{ ...E[0], line: 'a shorter line than forty chars' }]), (v) => v === null],
+  };
+  const wrong = Object.entries(cases).filter(([, [v, want]]) => !want(v)).map(([k]) => k);
+  ok(!wrong.length, `placedVerdict: a red is a named skip only when EVERY ✗ line is a placed line of THIS suite and the run ended by itself — never for ${Object.keys(cases).slice(3).join(', ')}${wrong.length ? ' — WRONG: ' + wrong.join(', ') : ''}`);
+  // (2) THE LANES: only-placed is NOT red and NOT retried and its skip is named; one unplaced line is red and retried; without the table both are red
+  const OUT = { 'test-zz-placed': closed(1, `  ✗ ${LINE} 1`), 'test-zz-mixed': closed(2, `  ✗ ${LINE} 1\n  ✗ another leg the table does not name`) };
+  const E2 = [E[0], { ...E[0], suite: 'test-zz-mixed' }];
+  const drive = async (placed) => {
+    const runs = [], said = [];
+    const res = await C.runFastLanes({ parallel: ['test-zz-placed', 'test-zz-mixed'].map((name) => ({ ...S, name })), serial: [] }, {
+      placed, lanes: 1, keepGoing: true, log: (l) => said.push(l),
+      run: async (s, { attempt = 1 } = {}) => { runs.push(`${s.name}#${attempt}`); return red(OUT[s.name], { name: s.name }); },
+      after: async () => {},
+    });
+    return { ...res, runs, said };
+  };
+  const w = await drive((s, r) => C.placedVerdict(s, r, E2)), wo = await drive(null);
+  ok(JSON.stringify(w.reds) === JSON.stringify(['test-zz-mixed']) && w.runs.join(' ') === 'test-zz-placed#1 test-zz-mixed#1 test-zz-mixed#2'
+    && w.skippedLegs.some((x) => x.name === 'test-zz-placed' && x.n === 1 && /^PLACED: /.test(x.first)) && w.said.some((l) => /⊘ test-zz-placed: 1 ✗ line\(s\) PLACED/.test(l)),
+    `the lanes: the suite whose only red is a placed line is NOT red, NOT retried and named among the skipped legs; the one with an unplaced line is red and retried (${w.runs.join(' ')} · red: ${w.reds.join(', ')})`);
+  ok(wo.reds.slice().sort().join(',') === 'test-zz-mixed,test-zz-placed' && wo.runs.join(' ') === 'test-zz-placed#1 test-zz-placed#2 test-zz-mixed#1 test-zz-mixed#2' && !wo.skippedLegs.length,
+    `CONTROL: the same run without the table is red twice and retried twice (${wo.runs.join(' ')})`);
+  // (3) THE WIRING: both gates read the GATED tree's own table and ask it before a retry; nothing else reads it
+  const CI = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
+  const fastG = CI.slice(CI.indexOf('async function fastGate('), CI.indexOf('function writeGreenMarker(')), heavyG = CI.slice(CI.indexOf('async function heavyGate('));
+  const heavyAsk = heavyG.indexOf('const pl = !r.ok ? placedVerdict(s, r, placedTable) : null;'), heavyRetry = heavyG.indexOf('RETRY ONCE.');
+  const lanes = CI.slice(CI.indexOf('export async function runFastLanes('), CI.indexOf('export async function runFastLanes(') + 6000);
+  ok(/const placedTable = placedRedsAt\(runRoot\);/.test(fastG) && /placed: \(s, r\) => placedVerdict\(s, r, placedTable\),/.test(fastG)
+    && /const placedTable = placedRedsAt\(runRoot\);/.test(heavyG) && heavyAsk > 0 && heavyAsk < heavyRetry
+    && lanes.indexOf('if (failDir) writeFailLog(failDir, sha, s, r, 1);') > 0 && lanes.indexOf('if (failDir) writeFailLog(failDir, sha, s, r, 1);') < lanes.indexOf('const pl = placed ? placed(s, r) : null;')
+    && lanes.indexOf('const pl = placed ? placed(s, r) : null;') < lanes.indexOf('const no = stoppedBy ?')
+    && (CI.match(/placedRedsAt\(/g) || []).length === 3,
+    "the fast and the heavy gate read the GATED tree's own table (placedRedsAt(runRoot)) and ask it before the retry — the fast lanes after the first fail log (its whole output kept); nothing else reads it");
+  // (4) THE CENSUS: the tree's own table, and every fault of an entry by name; red at the THIRD release, said at the second
+  const ver = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8')).version;
+  const table = JSON.parse(fs.readFileSync(path.join(REPO, C.PLACED_REDS_FILE), 'utf8'));
+  const real = C.placedRedsFindings(table.entries, { suites: SUITES, version: ver });
+  for (const n of real.notes) console.log('    ' + n);
+  ok(Array.isArray(table.entries) && !real.problems.length, `the placed-reds table (${C.PLACED_REDS_FILE}): ${table.entries.length} entr${table.entries.length === 1 ? 'y' : 'ies'}, every one whole, of a row of the table, a LINE, and not past its second release at ${ver}${real.problems.length ? ' — ' + real.problems.join(' · ') : ''}`);
+  // the controls are planted against a FIXED release (2.369.10), so a minor's first patch never breaks them
+  const fast0 = SUITES.find((x) => x.tier === 'fast' && !/^test-ci-gate/.test(x.name)).name, V = '2.369.10';
+  const base = { suite: fast0, line: LINE, placed: 'a lane line by name', owner: 'lane zz, row B-0000', since: '2.369.10' };
+  const planted = {
+    'a field missing': [{ ...base, owner: '' }], 'a suite no row names': [{ ...base, suite: 'test-zz-no-such-suite' }], 'a line too short (a suite, not a line)': [{ ...base, line: 'short' }],
+    'a since that is no version': [{ ...base, since: 'soon' }], 'the same line twice': [base, { ...base }], 'red at the third release': [{ ...base, since: '2.369.8' }],
+    'placed at an earlier minor': [{ ...base, since: '2.368.40' }], 'a since in the future': [{ ...base, since: '2.369.11' }], 'the gate\'s own suite (it would place its census)': [{ ...base, suite: 'test-ci-gate-tiers' }],
+  };
+  const missed = Object.entries(planted).filter(([, es]) => !C.placedRedsFindings(es, { suites: SUITES, version: V }).problems.length).map(([k]) => k);
+  const second = C.placedRedsFindings([{ ...base, since: '2.369.9' }], { suites: SUITES, version: V });
+  ok(!missed.length && !second.problems.length && second.notes.length === 1 && !C.placedRedsFindings([base], { suites: SUITES, version: V }).problems.length,
+    `CONTROL: every fault of an entry is red by name (${Object.keys(planted).join(', ')}${missed.length ? ' — NOT RED: ' + missed.join(', ') : ''}); the second release is said, not red; a whole entry of this release passes`);
+}
 console.log('\n§8j an isolated fast run NAMES the gated commit\'s own fast rows that the running table does not run (主开发 r3754 / r3758)');
 // An isolated fast tier takes its ROWS from the running table and its SOURCES from the gated commit: a release pushed from an
 // older production checkout ran 850 of the release's 881 fast rows (2.369.418). The step now reads the gated commit's own table as

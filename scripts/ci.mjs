@@ -2857,6 +2857,61 @@ const fastOnlyRed = (reds, skippedLegs = [], gap = '') => `\n✗ ${reds.join(', 
  *  its own red line names what did not run (r5501: it never runs a subset silently). */
 export const fastOnlyShort = ({ short, named, sha, gap = '' }) =>
   `\n✗ the named fast set is SHORT at ${shortSha(sha)}: ${short.join(', ')} did not run (absent at the gated commit, or skipped by name) — ${named - short.length} of its ${named} named suites ran${gap ? ` — ${gap}` : ''} (not the fast tier), do not push\n`;
+// THE PLACED REDS (the release pipeline's U2, lane bl-ci, 主开发 r5490 line 5 / r5499): a LINE of a suite — never a suite — whose red is
+// PLACED as the environment's or the leg's own (made at will, its record named), with the lane that cures it and the release it was first
+// read red at. A matching ✗ line is a NAMED SKIP of that line for the gate: counted and printed with the skipped legs, its whole output kept;
+// the suite is judged green only when EVERY ✗ line it printed is placed, it ended by itself (no outside kill, no hang) — and then it is
+// not retried (a placed line's retry is the same line again: 8.4 min of 2.369.422's mirror). The table is the gated tree's own
+// scripts/fixtures/placed-reds.json; test-ci-gate-tiers §8l holds its census (red at the third release: the cure is owed by then).
+export const PLACED_REDS_FILE = 'scripts/fixtures/placed-reds.json';
+export function placedRedsAt(root = repo) {
+  try { const t = JSON.parse(fs.readFileSync(path.join(root, PLACED_REDS_FILE), 'utf-8')); return Array.isArray(t.entries) ? t.entries : []; } catch { return []; }
+}
+/** PURE: a red suite's result as a NAMED SKIP of its placed lines — { n, first } — or null (red, as ever). Only a run that ENDED BY ITSELF
+ *  ON ITS OWN CLOSING: no outside kill, no hang, no signal or error code on its FAILED line, no socket past the loopback; it printed at least
+ *  one ✗ line, EVERY one of which starts with the fixed text of an entry of THIS suite and none says its scene did not form; and its own
+ *  closing count («N FAILED (M passed)» / «M passed, N failed») is exactly that many — a crash, a throw or a kill after a placed line never
+ *  prints that closing, so it stays red. */
+export function placedVerdict(s, r, entries = []) {
+  if (!s || !r || r.ok || r.absent || r.killedFromOutside || r.hangReport || (Array.isArray(r.egress) && r.egress.length) || !Array.isArray(entries) || !entries.length) return null;
+  if (/ FAILED \(\d+ms, /.test(String((r.lines || [])[0] || ''))) return null;   // a signal or an error code beside its time: it did not end by itself
+  const mine = entries.filter((e) => e && e.suite === s.name && typeof e.line === 'string' && e.line.trim().length >= PLACED_LINE_MIN);
+  if (!mine.length) return null;
+  const full = String(r.full || ''), xs = full.split('\n').filter((l) => /^\s*✗ /.test(l)).map((l) => l.replace(/^\s*✗ /, '').trimEnd());
+  if (!xs.length || xs.some((x) => /PRECONDITION NOT MET|NOT FORMED|did not form/.test(x)) || !xs.every((x) => mine.some((e) => x.startsWith(e.line.trim())))) return null;
+  const close = [...full.matchAll(/^\s*(\d+) FAILED \(\d+ passed\)|^\s*\d+ passed, (\d+) failed/gm)].pop();
+  if (!close || Number(close[1] || close[2]) !== xs.length) return null;
+  return { n: xs.length, first: xs[0].slice(0, 160) };
+}
+export const PLACED_LINE_MIN = 40;   // a placed LINE names ONE leg by its fixed words (two legs of one suite may share 24 characters) — never a suite
+/** PURE: the census of the table — each entry's fault, by name: a field missing, a suite no row of the table names, a line shorter than
+ *  PLACED_LINE_MIN, a since that is no version, the same line twice, and RED at the third release (since + 2 on its minor): the cure owed.
+ *  At the second release (since + 1) the entry is SAID (its cure goes to the front of its lane), not red. → { problems, notes } */
+export function placedRedsFindings(entries, { suites = SUITES, version = '' } = {}) {
+  const problems = [], notes = [];
+  if (!Array.isArray(entries)) return { problems: ['the table holds no entries list'], notes };
+  const v = /^(\d+)\.(\d+)\.(\d+)$/.exec(version || ''), seen = new Set();
+  entries.forEach((e, i) => {
+    const at = `entry ${i + 1}${e && e.suite ? ` (${e.suite})` : ''}`;
+    for (const k of ['suite', 'line', 'placed', 'owner', 'since']) if (!e || typeof e[k] !== 'string' || !e[k].trim()) problems.push(`${at}: no ${k}`);
+    if (!e || typeof e.suite !== 'string') return;
+    if (!suites.some((x) => x.name === e.suite)) problems.push(`${at}: no row of the table names ${e.suite}`);
+    if (/^test-ci-gate(?:-|$)/.test(e.suite)) problems.push(`${at}: the gate's own suites are never placed (${e.suite}: it would place the census itself)`);
+    if (typeof e.line === 'string' && e.line.trim().length < PLACED_LINE_MIN) problems.push(`${at}: its line «${e.line.trim()}» is under ${PLACED_LINE_MIN} characters — a line names one leg, never a suite`);
+    const key = `${e.suite}\t${String(e.line || '').trim()}`;
+    if (seen.has(key)) problems.push(`${at}: the same line twice`); seen.add(key);
+    const s = /^(\d+)\.(\d+)\.(\d+)$/.exec(e.since || '');
+    if (typeof e.since === 'string' && e.since.trim() && !s) problems.push(`${at}: since «${e.since}» is no version x.y.z`);
+    if (s && v) {
+      const cmp = Number(s[1]) - Number(v[1]) || Number(s[2]) - Number(v[2]);
+      const age = cmp === 0 ? Number(v[3]) - Number(s[3]) : cmp < 0 ? Infinity : -Infinity;   // an earlier minor is past its third release; a later one is the future
+      if (age < 0) problems.push(`${at}: since ${e.since} is after this release ${version}`);
+      else if (age >= 2) problems.push(`${at}: red at the THIRD release — placed at ${e.since}, still in the table at ${version}: its cure is owed (${e.owner || 'no owner'})`);
+      else if (age === 1) notes.push(`${at}: the second release with this line placed (${e.since} → ${version}) — its cure goes to the front of its lane (${e.owner || 'no owner'})`);
+    }
+  });
+  return { problems, notes };
+}
 /** THE FAST TIER'S CLOSING (B-d24c (3)'s follow-up) — PURE: the lines a run that ended prints and its exit code. Every red is
  *  named (with --keep-going: the count of what ran, then the red line); on the hosted runner (GITHUB_ACTIONS) ONE `::error`
  *  annotation names every red on the run page; and ANY red is exit 1 — a keep-going part that ran to its end is never a green.
@@ -5315,7 +5370,7 @@ function falseRowsVerb() {
  * line goes to `ledger` (rerunRecord) and the log says it; green again = FLAKY (counted, not red), red again = red.
  * → { reds, flaky, absent, skipped, timings, parMs, serMs, stoppedBy }
  */
-export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, ledger = null, sha = '', log = console.log, refusal = fastRetryRefusal } = {}) {
+export async function runFastLanes(plan, { placed = null, lanes = 1, keepGoing = false, run, after = async () => {}, skip = () => '', inflight = new Set(), failDir = null, ledger = null, sha = '', log = console.log, refusal = fastRetryRefusal } = {}) {
   const reds = [], flaky = [], absent = [], skipped = [], timings = [], skippedLegs = [];
   let stoppedBy = null; // fail-fast only: the red that stopped the tier
   // B-4829: a green that skipped a leg is named (its count, its first reason) and its whole output kept beside the reds'
@@ -5336,6 +5391,12 @@ export async function runFastLanes(plan, { lanes = 1, keepGoing = false, run, af
       if (r.absent) { absent.push(s.name); continue; }
       if (r.ok) { timings.push({ name: s.name, ms: r.ms, lane: String(lane) }); noteSkips(s, r, 1); continue; }
       if (failDir) writeFailLog(failDir, sha, s, r, 1); // its whole output — ci.yml's fast job uploads it (test-ci-gate §2i)
+      const pl = placed ? placed(s, r) : null;   // U2: EVERY ✗ line placed — a named skip of those lines (its fail log kept above, its skip log below), NOT retried
+      if (pl) {
+        log(`  ⊘ ${s.name}: ${pl.n} ✗ line(s) PLACED (${PLACED_REDS_FILE}) — skipped by name, not retried: ${pl.first}`);
+        const asSkip = { ...r, ok: true, skips: { n: pl.n, first: `PLACED: ${pl.first}` } };
+        timings.push({ name: s.name, ms: r.ms, lane: String(lane) }); noteSkips(s, asSkip, 1); continue;
+      }
       const no = stoppedBy ? `${stoppedBy} is red — the tier is stopping` : refusal(s, r);
       if (no) log(`  · ${s.name} is not retried — ${no}`);
       else {
@@ -5399,6 +5460,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null,
   });
   try {
     if (isolate) { wt = addScratchWorktree(sha, 'fast'); runRoot = wt; }
+    const placedTable = placedRedsAt(runRoot);   // U2: the gated tree's own placed reds
     // THE GATED COMMIT's OWN TABLE (主开发 r3754 / r3758): an isolated run reads it as TEXT (fastTableGapAt) and SAYS the fast rows the
     // running table does not run, in its opening line, by name under it, and on every closing line below; in place it is one table
     const gapW = fastGapWords(isolate ? fastTableGapAt(repo, sha) : null);
@@ -5419,6 +5481,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null,
     const pruned = pruneFailLogs(hangDir); // B-c327: the newest FAIL_LOGS_KEEP commits' logs stay, nothing else of ours
     if (pruned.length) console.log(`[ci] fail logs: ${pruned.length} file(s) of commits older than the newest ${FAIL_LOGS_KEEP} removed from ${hangDir}`);
     const { reds, flaky, absent, skipped: skippedByName, skippedLegs, timings, parMs, serMs } = await runFastLanes(plan, {
+      placed: (s, r) => placedVerdict(s, r, placedTable),   // U2
       lanes, keepGoing, inflight, failDir: hangDir, sha, ledger: path.join(repo, ...FAST_RERUNS.split('/')),
       // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
       // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
@@ -5719,6 +5782,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // read) — so every failed run is kept whole in <markers>/fail-logs/<sha8>.<suite>.<try>.log (writeFailLog, the fast
     // tier's door too), said on its own line
     const keepFailLog = (s, r, attempt) => { writeFailLog(path.join(d, 'fail-logs'), sha, s, r, attempt, { tag: '[ci:heavy]' }); };
+    const placedTable = placedRedsAt(runRoot);   // U2: the gated tree's own placed reds
     const keepSkipLog = (s, r, attempt) => writeSkipLog(path.join(d, 'fail-logs'), sha, s, r, attempt, { tag: '[ci:heavy]' }); // B-4829: beside the reds'
     // the parallel lanes' in-flight count, for --serial-overlap (the serial lane may start beside the last ≤ n of them)
     let parInFlight = 0, parQueue = null, overlapGo = () => {};
@@ -5745,6 +5809,8 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
         // not counted in `timings` — a marker that named 97 suites when 42 of
         // them do not exist at that sha is a claim nobody made.
         if (r.absent) { absent.push(s.name); if (par) { parInFlight--; overlapCheck(); } continue; }
+        const pl = !r.ok ? placedVerdict(s, r, placedTable) : null;   // U2: EVERY ✗ line placed — a named skip of those lines, NOT retried
+        if (pl) { console.log(`  ⊘ ${s.name}: ${pl.n} ✗ line(s) PLACED (${PLACED_REDS_FILE}) — skipped by name, not retried: ${pl.first}`); r = { ...r, ok: true, skips: { n: pl.n, first: `PLACED: ${pl.first}` } }; }
         if (!r.ok) {
           // …BUT NEVER RETRY A SUITE WE OURSELVES KILLED. Supersession SIGTERMs
           // the process GROUP, so the suite in flight dies with the runner's
