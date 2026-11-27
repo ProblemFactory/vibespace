@@ -19,7 +19,7 @@
 //     stderr line — and the row shows it. Measured: at boot the loop was held (canary 7450 ms) past execFile's 10 s
 //     `timeout`, whose kill destroys the UNREAD stdout first — an answer the child had given in ms came back as
 //     `code 0, out ''` ⇒ "Tailscale is not running". runChild keeps its own timer and never discards an answer.
-//   · THE TIMER ANSWERS (B-92a4, lane boot-probes-unkillable — the boot restore's fuser / pgrep / fd-scan questions ride
+//   · THE TIMER ANSWERS (B-92a4, lane boot-probes-unkillable — the boot restore's fuser / pgrep questions ride
 //     runChild too): a child that cannot die on TERM (a `fuser` in D state on an NFS fd walk) never fired execFile's
 //     callback, so the promise never settled and production's hub did not listen for 96 s. At its bound runChild now
 //     settles TIMEOUT with whatever the child wrote, KILLs it 1 s later if it is still there and lets it go.
@@ -74,7 +74,7 @@ function runChild(bin, args, timeout) {
     };
     const child = execFile(bin, args, { maxBuffer: 4 * 1024 * 1024 }, (e, o, se) => {
       clearTimeout(bound); clearTimeout(killer);
-      settle({ code: e ? (e.code === 'ENOENT' ? 'ENOENT' : timedOut && e.signal ? 'TIMEOUT' : e.code || e.signal || 1) : 0, out: String(o || ''), err: String(se || (e && e.message) || '') });
+      settle({ code: e ? (e.code === 'ENOENT' ? 'ENOENT' : timedOut && e.signal ? 'TIMEOUT' : e.code || e.signal || 1) : 0, out: String(o || ''), err: String(se || (e && e.message) || ''), stderr: String(se || '') });   // stderr: what the program itself said (err falls back to execFile's «Command failed» — B-b2d3's births follow: a silent exit 1 says nothing)
     });
     if (child.stdout) { child.stdout.on('data', (d) => { out += d; }); child.stdout.on('end', () => { ended = true; }); }
     if (child.stderr) child.stderr.on('data', (d) => { err += d; });

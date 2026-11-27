@@ -8,6 +8,12 @@ const path = require('path');
 // B-15ac (lane lg-store-writes): the ONE close of a written file — src/fd-close.js, required at the start as kept-copies.js is (the
 // build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
 let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
+// ITS OWN BIRTH AND ITS CHILD'S, beside each pid (row B-b2d3's births follow, lane nl-starts, 主开发 r5032 / r5367 — chat-wrapper's form,
+// B-03af / B-5ee1): proc-identity's startToken (the kernel's start ticks) + the boot id, in the write that already carries the pid — no new
+// write. Taken only where /proc exists (no program is started for it); a failed require or read leaves the birth-less record, which the hub
+// judges UNKNOWN and never signals. A child's birth is written WITH its pid at each spawn ('' when unread), never left from an older child.
+let PI = null; try { PI = require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')); if (!PI.hasProc()) PI = null; } catch { PI = null; }
+const birthOf = (pid) => { try { const start = PI && pid ? PI.startToken(pid) : ''; return start ? { start, boot: PI.bootToken() } : null; } catch { return null; } };
 const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
 const os = require('os');
 
@@ -44,6 +50,7 @@ if (!bufferFile || !cmd) {
 // Write initial metadata
 try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
 const meta = { pid: process.pid, startedAt: Date.now() };
+{ const b = birthOf(process.pid); if (b) { meta.pidStart = b.start; meta.pidBoot = b.boot; } }   // its own birth, in its first record
 try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch (e) { log(`meta write failed: ${e.message}`); }
 
 // REMOTE RETRY (2.124.0, env VIBESPACE_REMOTE_RETRY set by the server for
@@ -81,6 +88,7 @@ function spawnChild() {
   log(`Spawned child PID=${child.pid}${REMOTE_RETRY ? ` retry=${retries}` : ''}`);
   // Update metadata with child PID — server reads this for direct PID matching
   meta.childPid = child.pid;
+  { const b = birthOf(child.pid); meta.childStart = b ? b.start : ''; meta.childBoot = b ? b.boot : ''; }   // its child's birth, with the pid
   try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch {}
   child.onData(onChildData);
   child.onExit(onChildExit);

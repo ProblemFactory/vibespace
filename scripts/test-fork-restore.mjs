@@ -221,7 +221,11 @@ console.log('② NEGATIVE CONTROL: the pre-fix dedup (every meta with an id is a
   // wrongly counts as its duplicate — so the defect is reproduced by BOTH halves of the release: the pre-fix loop AND its decision
   // (the newer always won: the live-conversation scan answered «nobody» for every claude)
   const wt = makeTree('wt-control', [{ file: 'src/server/boot-restore.js', from: '    if (ownsItsId(m)) dedupMetas.push({ sockFile, m });\n', to: '    if (m && m.claudeSessionId) dedupMetas.push({ sockFile, m });\n' },
-    { file: 'src/server/boot-restore.js', from: "  const dead = rows.filter((r) => r.program === 'dead');\n", to: '  const dead = rows;   // the release: the newer always won\n' }]);
+    { file: 'src/server/boot-restore.js', from: "  const dead = rows.filter((r) => r.program === 'dead');\n", to: '  const dead = rows;   // the release: the newer always won\n' },
+    { file: 'src/server/boot-restore.js', from: '    if (recheck) {', to: '    if (false) { /* the release read no program at its retire either (B-b2d3\'s births follow) */' },
+    // the start adopts before it retires since B-b2d3's births follow: the decision moved onto the re-probe's road, which feeds only metas
+    // that own their id too — the pre-fix loop there as well
+    { file: 'src/server/boot-restore.js', from: '.filter((r) => r.m && ownsItsId(r.m));', to: '.filter((r) => r.m && r.m.claudeSessionId);   /* the pre-fix feed */' }]);
   const r = await scenario('control', wt);
   ok(r.retired && r.socketsGone.length > 0 && (!r.aAlive || !r.bAlive), 'control: a parent is retired as the "stale duplicate" of its own pending fork (its socket unlinked, its CLI SIGTERMed) — the reproduced defect', JSON.stringify({ retired: r.retired, gone: r.socketsGone, aAlive: r.aAlive, bAlive: r.bAlive }));
 }

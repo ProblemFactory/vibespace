@@ -8,6 +8,12 @@ const path = require('path');
 // B-15ac (lane lg-store-writes): the ONE close of a written file — src/fd-close.js, required at the start as kept-copies.js is (the
 // build this wrapper shipped with); a tree without it: the SAME words inline (test-fd-close-census ⑤ pins the two spellings equal)
 let FC = null; try { FC = require(path.join(__dirname, '..', '..', 'src', 'fd-close.js')); } catch { FC = null; }
+// ITS OWN BIRTH AND ITS CHILD'S, beside each pid (row B-b2d3's births follow, lane nl-starts, 主开发 r5032 / r5367 — chat-wrapper's form,
+// B-03af / B-5ee1): proc-identity's startToken (the kernel's start ticks) + the boot id, in the write that already carries the pid — no new
+// write. Taken only where /proc exists (no program is started for it); a failed require or read leaves the birth-less record, which the hub
+// judges UNKNOWN and never signals. A child's birth is written WITH its pid at each spawn ('' when unread), never left from an older child.
+let PI = null; try { PI = require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')); if (!PI.hasProc()) PI = null; } catch { PI = null; }
+const birthOf = (pid) => { try { const start = PI && pid ? PI.startToken(pid) : ''; return start ? { start, boot: PI.bootToken() } : null; } catch { return null; } };
 const closeWritten = FC ? FC.closeWritten : (fd, where, say) => { if (fd === null || fd === undefined) return null; try { fs.closeSync(fd); } catch (e) { try { say(`${where}: the file could not be closed (${(e && e.code) || 'error'}) — what was written may not be on disk`); } catch { } } return null; };
 const renameSynced = FC && FC.renameSynced ? FC.renameSynced : (tmp, final, bytes, { mode, where, say, sync = true } = {}) => { const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes)); let fd = fs.openSync(tmp, 'w', mode === undefined ? 0o666 : mode), failed = null; try { for (let o = 0; o < b.length;) { const n = fs.writeSync(fd, b, o, b.length - o); if (!(n > 0)) throw Object.assign(new Error('a short write'), { code: 'ESHORT' }); o += n; } if (sync) { try { fs.fsyncSync(fd); } catch (e) { if (!['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS'].includes(e && e.code)) throw e; try { if (typeof say === 'function') say(`${where}: its file system does not do a sync (${e.code}) — its new bytes took their name unsynced`); } catch { } } } } catch (e) { failed = e; } try { fs.closeSync(fd); } catch (e) { if (!failed) failed = e; } fd = null; if (failed) { try { fs.unlinkSync(tmp); } catch { } throw failed; } try { fs.renameSync(tmp, final); } catch (e) { try { fs.unlinkSync(tmp); } catch { } throw e; } };   // B-bcb8 unit B: src/fd-close.js renameSynced, the same words inline (test-fd-close-census ⑥)
 const { spawn } = require('child_process');
@@ -473,6 +479,7 @@ const meta = {
   // consumer is the queue_changed event).
   queue: [],
 };
+{ const b = birthOf(process.pid); if (b) { meta.pidStart = b.start; meta.pidBoot = b.boot; } }   // its own birth, in its first record
 
 let buffer = '';
 const MAX_BUFFER = 800000;
@@ -3661,6 +3668,7 @@ function startChild() {
   }
 
   meta.childPid = child.pid;
+  { const b = birthOf(child.pid); meta.childStart = b ? b.start : ''; meta.childBoot = b ? b.boot : ''; }   // its child's birth, with the pid
   childExit = null;
   scheduleMeta();
   log(`spawned ${cmd} ${spawnArgs.length !== args.length ? '(offset-substituted) ' : ''}pid=${child.pid}${REMOTE_SID ? ` offset=${remoteOffset} attempt=${reconnectAttempts}` : ''}`);

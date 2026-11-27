@@ -349,7 +349,7 @@ try {
       // (e) THE THREE ROADS of the pass, read from its text: the alive rung, a remote member's fuser, the duplicate retire (ONE road
       // since B-b2d3 step 2: a decided pair's losers and an undecided pair's proven-ended members) —
       // each names the starter's runner (a remote member's leg needs a machine; this reads it), none runChild
-      const rpAt = brSrc.indexOf('async function reprobePass() {'), rpEnd = rpAt >= 0 ? brSrc.indexOf('\n}\n', rpAt) : -1, rp = rpAt >= 0 && rpEnd > rpAt ? brSrc.slice(rpAt, rpEnd) : '';
+      const rpAt = brSrc.indexOf('async function reprobePass(onlyKeys = null) {'), rpEnd = rpAt >= 0 ? brSrc.indexOf('\n}\n', rpAt) : -1, rp = rpAt >= 0 && rpEnd > rpAt ? brSrc.slice(rpAt, rpEnd) : '';
       const roads = (t) => ({ starter: t.split('starterP').length - 1, runChild: t.split('runChildP').length - 1, asks: t.split('ownedP(').length - 1 + t.split('retireDuplicate(').length - 1 });
       const rr = roads(rp), red5 = roads(editAnchor(rp, 'ownedP(path.join(SOCKETS_DIR, r.sockFile), false, undefined, undefined, starterP)', 'ownedP(path.join(SOCKETS_DIR, r.sockFile), false)', 'src/server/boot-restore.js reprobePass'));   // stale-pins: kept (the release's call, put back in a RED text)
       ok(rp !== '' && rr.starter === 3 && rr.runChild === 0 && rr.asks === 3, `the pass's three asking calls name starterP (${rr.starter}), none runChildP (${rr.runChild})`, rr);
@@ -375,7 +375,7 @@ try {
     ok(rdAt >= 0 && rdEnd > rdAt, 'the RED copies\' slice of the tip\'s retire is found (its doc head to its end)', { rdAt, rdEnd });
     const RELEASE_RETIRE = "function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = runChildP) {\n  console.log(`  ⤫ Duplicate of ${claudeSessionId} — retiring stale ${sockFile}`);\n  run('pgrep', ['-f', socketPath], 2000).then((r) => {\n    for (const p of r.code === 0 ? r.out.split('\\n') : []) {\n      const pid = Number(p.trim());\n      if (pid > 1 && pid !== process.pid) { try { process.kill(pid, 'SIGTERM'); } catch {} }\n    }\n  }, () => { });\n  try { fs.unlinkSync(socketPath); } catch {}\n  require('./wrapper-files.js').removeWrapperFiles(BUFFERS_DIR, id);\n  deleteSessionMeta(sockFile);\n}\n";   // stale-pins: kept (the release's retire, put back in a RED copy)
     const OLDRET = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, RD, RELEASE_RETIRE, 'src/server/boot-restore.js'), 'b2d3s2-release-retire'));
-    const OLDDEC = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, "  const dead = rows.filter((r) => r.program === 'dead');\n", '  const dead = rows;   // the release: the newer always wins\n', 'src/server/boot-restore.js'), 'b2d3s2-newer-wins'));
+    const OLDDEC = require(M.write('src/server/boot-restore.js', editAnchor(editAnchor(brSrc, "  const dead = rows.filter((r) => r.program === 'dead');\n", '  const dead = rows;   // the release: the newer always wins\n', 'src/server/boot-restore.js'), '    if (recheck) {', '    if (false) { /* the release read no program at its retire either */', 'src/server/boot-restore.js'), 'b2d3s2-newer-wins'));
     const W_FIRST = "    for (const h of wrapper) PIB.signalIdentity(h.ident, 'SIGTERM', { what: h.what });\n";
     const BOTHNOW = require(M.write('src/server/boot-restore.js', editAnchor(brSrc, W_FIRST, "    for (const h of [...wrapper, ...masters]) PIB.signalIdentity(h.ident, 'SIGTERM', { what: h.what });   // RED: both at once\n", 'src/server/boot-restore.js'), 'b2d3s2-both-at-once'));
     try {
@@ -398,7 +398,8 @@ try {
       // (b) ONE PROVEN DEAD RETIRES — by its held records only: its master (the fuser answer's pid, by its birth) and its wrapper (pid +
       // birth); a «person's attach» whose command line names the socket's path is never signalled; the socket and its files go only
       // after the kernel says both are gone. RED: the release's retire SIGTERMs the person's attach (its pgrep matched the path)
-      const person = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e5)', 'vs-person-attach'], { stdio: 'ignore' }); kids.push(person);
+      const personSock = path.join(ROOT, 'b2d3s2-dead', 'sockets', `cw-141-${1760480000000 + 141 * 1000}`);   // the older socket's path (add()'s naming): the command line a `pgrep -f` matches — its round's should: the leg says what it tests
+      const person = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e5)', 'vs-person-attach', personSock], { stdio: 'ignore' }); kids.push(person);
       const m1 = master(), wr = liveChild();
       const b1 = await boot(BR, 'b2d3s2-dead', (X) => { const p = pairOf(X, 141, deadChild(), liveChild()); programAs(p.older, { pid: wr.childPid, pidStart: wr.childStart, pidBoot: wr.childBoot }); return p; });
       await until(() => !fs.existsSync(b1.p.older.sockPath), 6000);
@@ -442,13 +443,14 @@ try {
       mode(c1.p.older.sock, 'alive');
       const m3 = master(); mode('pgrep-cw-153-' + (1760480000000 + 153 * 1000), 'hang');
       const r3 = await boot(OLDRET, 'b2d3s2-red-early', (X) => pairOf(X, 153, deadChild(), liveChild()));
+      await until(() => !fs.existsSync(r3.p.older.sockPath), 3000);   // the retire rides the re-probe's road at once since the births follow (its pair adopted first)
       ok(!fs.existsSync(r3.p.older.sockPath), 'RED: the release removes the socket before its pgrep answers (one that never answers here)', r3.lines.filter((l) => /Duplicate/.test(l)));
       // (e) A LIVING OLDER PROGRAM IS NEVER ENDED BECAUSE OF A PAIR: both alive ⇒ both kept, said as a pair by their names, nothing signalled.
       // RED: the release's decision (the newer always wins) ends the older
       const s0 = signals.length;
       const e1 = await boot(BR, 'b2d3s2-both-alive', (X) => pairOf(X, 161, liveChild(), liveChild()));
       ok(signals.length === s0 && e1.X.activeSessions.has(e1.p.older.id) && e1.X.activeSessions.has(e1.p.newer.id) && fs.existsSync(e1.p.older.sockPath) && !e1.lines.some((l) => l.includes('Duplicate of'))
-        && e1.X.notes.includes(PAIR_WORDS)
+        && e1.X.notes.filter((l) => l === PAIR_WORDS).length === 1
         && !e1.X.api.probePending().has(e1.p.older.sock),
         'BOTH ALIVE ⇒ BOTH KEPT: two cards of one conversation, said ONCE in Diagnostics by their names (never a path), nothing signalled, nothing left to ask', e1.X.notes);
       const m4 = master();
@@ -486,6 +488,10 @@ try {
     const SYNC = /\b(?:execFileSync|spawnSync|execSync)\b/g;
     const sites = (src) => [...src.matchAll(SYNC)].length;
     ok(sites(brSrc) === 0, `src/server/boot-restore.js: ${sites(brSrc)} execFileSync / spawnSync / execSync site(s) — none allowed`);
+    // pinned here too, in a fast suite (B-b2d3's births follow, its round's should); test-writer-sweep §11 keeps its own (its advertised assert
+    // count stands in an INDEX line held verbatim)
+    ok(!/fdScanShellFns|vs_fd_scan/.test(brSrc.split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n')), 'boot-restore asks NO fd scan (B-b2d3 step 2) — neither the shared one nor a copy of it');
+    ok(!/live-conversation fd scan failed/.test(brSrc), 'the restore\'s «fd scan failed» line left with its scan (B-b2d3 step 2: no pair waits on it)');   // stale-pins: kept (the line's absence, on purpose)
     for (const plant of ["require('child_process').execFileSync('fuser', [socketPath], { timeout: 2000 });", "require('child_process').spawnSync('pgrep', ['-f', socketPath]);", "require('child_process').execSync('true');"])
       ok(sites(brSrc.replace('function restoreSessions() {\n', `function restoreSessions() {\n  try { ${plant} } catch { }\n`)) === 1, `CONTROL: a planted ${plant.split('(')[1].split('.')[1] || plant.slice(0, 30)} in restoreSessions is RED`);
   }
