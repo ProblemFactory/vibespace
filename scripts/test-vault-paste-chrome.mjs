@@ -135,10 +135,11 @@ await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map();
 const VAULT_READS = new Map();   // lane vp393: the page's GET /api/vault/state — requestId → {loaderId, answered, done} (reload())
 const WS_FRAMES = [];   // every WebSocket frame the PAGE saw (received and sent) — the multi-client broadcasts included
+const WS_DIRS = [];     // r5380: each frame's direction, beside it (a red names a frame by direction and index, never by its payload)
 ws.on('message', (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
-  if (m.method === 'Network.webSocketFrameReceived' || m.method === 'Network.webSocketFrameSent') WS_FRAMES.push(String((m.params.response && m.params.response.payloadData) || ''));
+  if (m.method === 'Network.webSocketFrameReceived' || m.method === 'Network.webSocketFrameSent') { WS_FRAMES.push(String((m.params.response && m.params.response.payloadData) || '')); WS_DIRS.push(m.method === 'Network.webSocketFrameSent' ? 'sent' : 'received'); }
   if (m.method === 'Network.requestWillBeSent' && /\/api\/vault\/state(\?|$)/.test(String(m.params.request && m.params.request.url))) VAULT_READS.set(m.params.requestId, { loaderId: m.params.loaderId, answered: false, done: false });
   if (m.method === 'Network.responseReceived' && VAULT_READS.has(m.params.requestId)) VAULT_READS.get(m.params.requestId).answered = true;
   if ((m.method === 'Network.loadingFinished' || m.method === 'Network.loadingFailed') && VAULT_READS.has(m.params.requestId)) VAULT_READS.get(m.params.requestId).done = m.method === 'Network.loadingFinished' ? 'finished' : 'failed';
@@ -158,6 +159,22 @@ const pageApi = (method, p, body) => evalJs(`fetch(${JSON.stringify(p)}, { metho
 /** every place a value could show on the page: the markup, the rendered text, every field's value */
 const pageText = () => evalJs(`document.documentElement.outerHTML + '\\n' + (document.body ? document.body.innerText : '') + '\\n' + [...document.querySelectorAll('input, textarea')].map((i) => i.value).join('\\n')`);
 const cli = (args, token) => new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-vault'), ...args], { env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: `http://127.0.0.1:${PORT}`, VIBESPACE_SESSION_TOKEN: token } }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); const k = setTimeout(() => c.kill('SIGKILL'), 20000); c.on('close', (code) => { clearTimeout(k); resolve({ code, out }); }); });
+// WHERE A VALUE STANDS (主开发 r5380 (c)): by KIND of place and a count — a DOM node by its own selector (an input's value, an
+// attribute, a text node), a WebSocket frame by its direction and index, a server log line by its number — NEVER the value, so a red
+// can be read from a job's log alone. The judgement stays the page's text, the frames and the log (hitsIn); this only says where
+const domPlacesOf = (v) => evalJs(`(() => { const forms = ${JSON.stringify(formsOf(v))}; const has = (s) => forms.some((f) => String(s || '').includes(f));
+  const sel = (e) => { if (!e || !e.tagName) return '?'; let s = e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + [...e.classList].slice(0, 3).map((c) => '.' + c).join(''); for (const a of ['data-req', 'data-leg-pick', 'name', 'type']) if (e.getAttribute(a)) s += '[' + a + '=' + e.getAttribute(a) + ']'; const box = e.closest && e.closest('.ut-secret'); if (box && box !== e && box.dataset.req) s = '.ut-secret[data-req=' + box.dataset.req + '] ' + s; return s; };
+  const out = {}; const add = (k) => { out[k] = (out[k] || 0) + 1; };
+  for (const i of document.querySelectorAll('input, textarea')) if (has(i.value)) add('the value of ' + sel(i));
+  for (const e of document.querySelectorAll('*')) for (const a of e.attributes) if (has(a.value)) add('the attribute ' + a.name + ' of ' + sel(e));
+  const w = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) if (has(n.nodeValue)) add('a text node in ' + sel(n.parentElement));
+  return Object.entries(out).map(([k, n]) => k + ' ×' + n); })()`);
+const whereOf = async (v, { dom = true } = {}) => ({
+  dom: dom ? (await domPlacesOf(v)) || [] : [],
+  ws: WS_FRAMES.map((f, i) => (hitsIn(f, v) ? `a ${WS_DIRS[i] || 'seen'} frame #${i}` : null)).filter(Boolean),
+  log: fs.readFileSync(LOG, 'utf8').split('\n').map((l, i) => (hitsIn(l, v) ? `line ${i + 1}` : null)).filter(Boolean),
+});
+const whereSaid = (pl) => `DOM: ${pl.dom.join('; ') || 'none'} · WebSocket: ${pl.ws.length ? pl.ws.length + ' (' + pl.ws.slice(0, 6).join(', ') + (pl.ws.length > 6 ? ', …' : '') + ')' : 'none'} · server log: ${pl.log.length ? pl.log.length + ' (' + pl.log.slice(0, 6).join(', ') + (pl.log.length > 6 ? ', …' : '') + ')' : 'none'}`;
 const nextTurn = async (token) => { const r = await fetch(`http://127.0.0.1:${PORT}/api/agent/prompt-context`, { headers: { Authorization: 'Bearer ' + token } }); const j = await r.json().catch(() => ({})); return String(j.context || ''); };
 const TRAY = '#user-todos-popup';
 const boxOf = (id) => `${TRAY} .ut-secret[data-req="${id}"]`;
@@ -675,16 +692,24 @@ try {
     const cr = await until(`(() => { const c = ${C(l2.id)}; return c && c.state === 'ready' ? c : null; })()`, { timeout: 15000 });
     check('unlocked ⇒ the box is ready, its fields as typed', !!cr && cr.user === 'forum-user' && cr.pw === V_LOGIN2, cr);
     check('a tap on Save only', (await tap(boxOf(l2.id) + ' .ut-secret-save')) === true);
-    const gone9 = await until(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, { timeout: 10000 });   // lane vp393: on a red, what the card held when the wait ended (the password as its length only) — hosted try 1 of the .393 prep mirror
+    // r5380 (a): the four «stored» lines wait ON THE FACT — the card's own resolved state (its box gone), then the store's own entry — under
+    // ONE ceiling, never a count of tries: a slow landing (a loaded runner) is waited for; one that never comes is red by its own line
+    const STORE_CEIL = 30000;
+    const gone9 = await until(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, { timeout: STORE_CEIL });   // lane vp393: on a red, what the card held when the wait ended (the password as its length only) — hosted try 1 of the .393 prep mirror
     check('stored ⇒ the phone\'s card resolved', !!gone9, gone9 ? undefined : await evalJs(`(() => { let c = null; try { c = ${C(l2.id)}; } catch (e) { c = { err: String(e) }; } if (c && 'pw' in c) c.pw = 'len ' + String(c.pw || '').length; const b = document.querySelector(${JSON.stringify(boxOf(l2.id))}); const sv = b && b.querySelector('.ut-secret-save'); return { at: new Date().toISOString(), card: c, save: sv ? { text: sv.textContent, disabled: sv.disabled, hidden: sv.hidden } : null, busy: b ? b.dataset.busy || null : null, error: b ? b.dataset.error || null : null, toasts: [...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).slice(-6) }; })()`));
-    check('…and the SECOND client\'s card resolved LIVE (no reload)', !!(await until2(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, 10000)));
-    const wl2 = await pageApi('GET', '/api/vault/web-logins');
-    const e2 = ((wl2.json && wl2.json.entries) || []).find((e) => e.name === 'web-login:https://forum.example.test#forum-user');
+    check('…and the SECOND client\'s card resolved LIVE (no reload)', !!(await until2(`!document.querySelector(${JSON.stringify(boxOf(l2.id))})`, STORE_CEIL)));
+    let e2 = null;   // THE STORE's WITNESS: its own entry, read back by the list the page reads (waited on, the same ceiling)
+    for (const t0 = Date.now(); ;) { const wl2 = await pageApi('GET', '/api/vault/web-logins'); e2 = ((wl2.json && wl2.json.entries) || []).find((e) => e.name === 'web-login:https://forum.example.test#forum-user') || null; if (e2 || Date.now() - t0 > STORE_CEIL) break; await sleep(250); }
     check('stored with NO grant (Save only)', !!e2 && (e2.grants || []).length === 0, e2);
     const turn9 = await nextTurn(TOKEN);
     check('the agent\'s next turn: STORED, not allowed yet (where the owner allows it) — and it names NO user', /STORED — a website login for https:\/\/forum\.example\.test is in the vault/.test(turn9) && /did not let this conversation sign in with it/.test(turn9) && !turn9.includes('forum-user') && hitsIn(turn9, V_LOGIN2) === 0, turn9.slice(0, 900));
     await sleep(600);
-    check('the two passwords are in no DOM, WebSocket frame or server log line', [V_LOGIN, V_LOGIN2].every((v) => WS_FRAMES.every((f) => hitsIn(f, v) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), v) === 0) && hitsIn(await pageText(), V_LOGIN2) === 0, WS_FRAMES.length);
+    // r5380 (b): the secrecy leg is judged ONLY on a witness that the store landed (its entry read back): where it did not, the paste box
+    // still holds what the person typed, the scene did not form, and a NAMED skip (the gate counts it) says so with where the values stand
+    const where9 = async () => [['the first password', await whereOf(V_LOGIN, { dom: false })], ['the second password', await whereOf(V_LOGIN2)]].map(([n, pl]) => `${n}: ${whereSaid(pl)}`).join(' | ');
+    if (!e2) console.log(`  ⊘ SKIP: the two passwords' secrecy is NOT judged — the store did not land inside its ceiling (${STORE_CEIL / 1000} s: no entry read back), so the paste box still holds what was typed; where they stand: ${await where9()}`);
+    else { const clean = [V_LOGIN, V_LOGIN2].every((v) => WS_FRAMES.every((f) => hitsIn(f, v) === 0) && hitsIn(fs.readFileSync(LOG, 'utf8'), v) === 0) && hitsIn(await pageText(), V_LOGIN2) === 0;
+      check('the two passwords are in no DOM, WebSocket frame or server log line', clean, clean ? undefined : `where they stand (kind and count, never the value; ${WS_FRAMES.length} frames): ${await where9()}`); }
     try { ws2.close(); await cdp('Target.closeTarget', { targetId: t2.targetId }); } catch { }
     // ⑨ the phone's page — the same leg by taps
     const sP = await askS('phone-page');
@@ -755,7 +780,9 @@ try {
   check('Enter in the box saves it (the panel\'s Enter rule — no click)', !!(await until(`!document.querySelector(${JSON.stringify(boxOf(a4.id))})`, { timeout: 10000 })));
   await sleep(800);
   const red = { log: hitsIn(fs.readFileSync(LOG, 'utf8'), V_RED), dom: hitsIn(await pageText(), V_RED), ws: WS_FRAMES.filter((f) => hitsIn(f, V_RED) > 0).length };
+  const redAt = await whereOf(V_RED);   // r5380 (c)/(d): where — by the same helper the secrecy leg reports through
   check('RED: the same checks find the mutant\'s leak — in the server log, the DOM (its item) and a WebSocket frame (the For-you broadcast)', red.log > 0 && red.dom > 0 && red.ws > 0, red);
+  check('RED: …and the report names each place by its kind and a count, never the value (DOM node, frame, log line)', redAt.dom.length > 0 && redAt.ws.length > 0 && redAt.log.length > 0 && !whereSaid(redAt).includes(V_RED), whereSaid(redAt));
   fs.writeFileSync(doorFile, src);
 } catch (e) {
   check('the run did not throw', false, e && e.stack);
