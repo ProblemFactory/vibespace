@@ -99,14 +99,20 @@ console.log('④ the wiring (text pins)');
   const handler = SB.split('\n').find((l) => l.includes("if (msg.type === 'active-sessions') { this._webuiSessions = msg.sessions;")) || '';
   ok(handler.includes('try { this._followPins(msg.sessions); } catch { }') && SB.split('_followPins(').length === 2, 'the sidebar\'s \'active-sessions\' handler makes the ONE call (_followPins, once a list)');
   const fp = ST.slice(ST.indexOf('proto._followPins = function(rows) {'), ST.indexOf('proto.pinFence = function(key, want) {'));
-  ok(fp.length > 100 && fp.split('carrierPatches(').length === 2 && fp.split('this.setSessionConfigs(').length === 2 && /if \(r\.patches\.length\) this\.setSessionConfigs\(r\.patches\);/.test(fp) && /for \(const k of r\.lifted\) fences\.delete\(k\);/.test(fp),
-    '_followPins: ONE rule call, ONE batch write (one user-state push) and only when there is something to write; the lifted fences dropped');
+  ok(fp.length > 100 && fp.split('carrierPatches(').length === 2 && fp.split('this.setSessionConfigs(').length === 2 && /if \(r\.patches\.length\) this\.setSessionConfigs\(r\.patches\);/.test(fp) && /for \(const k of r\.lifted\) fences\.delete\(k\);/.test(fp) && /this\._pinSeen = r\.seen;/.test(fp),
+    '_followPins: ONE rule call, ONE batch write (one user-state push) and only when there is something to write; the lifted fences dropped; what this list showed is STORED (the next list\'s edge is judged against it — r5496 (3))');
   ok(/if \(config\?\.poolPin && typeof config\.poolPin === 'object' && typeof config\.poolPin\.memberId === 'string' && config\.poolPin\.memberId\)/.test(ST), 'the carrier\'s writer keeps a pin only when it has a member: a {poolPin: null} patch removes it');
   const pinTo = SL.slice(SL.indexOf('const pinTo = async (memberId, name) => {'), SL.indexOf('items.push({', SL.indexOf('const pinTo = async (memberId, name) => {')));
-  const iFence = pinTo.indexOf('const mark = this.sidebar?.pinFence?.(cfgKey, memberId || null);'), iFetch = pinTo.indexOf('await fetchJson(`/api/accounts/'), iLift = pinTo.indexOf('if (!r || r.error) { this.sidebar?.pinFenceLift?.(cfgKey, mark);');
-  const iWrite = pinTo.indexOf("if (typeof this.sidebar?.pinFenceStands !== 'function' || this.sidebar.pinFenceStands(cfgKey, mark)) saveCfg(r.pinned ?");
-  ok(iFence > 0 && iFetch > iFence && iLift > iFetch && iWrite > iLift && pinTo.indexOf('if (!isLive) {') < iFence && pinTo.split('saveCfg(r.pinned').length === 2,
-    'the press (pinTo): its fence, with its own mark, set BEFORE its request (a live conversation only); a refused or failed reply lifts ITS OWN fence; the reply writes the carrier ONLY while its fence stands — the harness of ⑤ is this text, step for step', { iFence, iFetch, iLift, iWrite });
+  const iKey = pinTo.indexOf("const fenceKey = (typeof live?.sessionKey === 'string' && live.sessionKey) || cfgKey;");
+  const iFence = pinTo.indexOf('const mark = this.sidebar?.pinFence?.(fenceKey, memberId || null);'), iFetch = pinTo.indexOf('await fetchJson(`/api/accounts/'), iLift = pinTo.indexOf('if (!r || r.error) { this.sidebar?.pinFenceLift?.(fenceKey, mark);');
+  const iWrite = pinTo.indexOf("if (typeof this.sidebar?.pinFenceStands !== 'function' || this.sidebar.pinFenceStands(fenceKey, mark)) saveCfg(r.pinned ?"), iAns = pinTo.indexOf('this.sidebar?.pinFenceAnswered?.(fenceKey, mark);');
+  ok(iKey > 0 && iFence > iKey && iFetch > iFence && iLift > iFetch && iWrite > iLift && iAns > iWrite && pinTo.indexOf('if (!isLive) {') < iFence && pinTo.split('saveCfg(r.pinned').length === 2 && pinTo.split('fenceKey').length === 6,
+    'the press (pinTo): the fence names the conversation by the LIVE ROW\'s own key (as the follow does); its fence, with its own mark, set BEFORE its request (a live conversation only); a refused or failed reply lifts ITS OWN fence; the reply writes the carrier ONLY while its fence stands, then marks it answered — the harness of ⑤ is this text, step for step', { iKey, iFence, iFetch, iLift, iWrite, iAns });
+  // r5496 (3): THE FENCE's NAME AND THE ROW's NAME ARE ONE — the follow keys by the row's `sessionKey` (the hub's getSessionKey), pinTo
+  // fences by the live row's own `sessionKey`; its fallback (cfgKey) is built from the same three ids in the same order on both sides
+  const SRV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8'), AM = fs.readFileSync(path.join(ROOT, 'src/lib/agent-meta.js'), 'utf8'), RULE_SRC = fs.readFileSync(path.join(ROOT, 'src/lib/pool-pin-carrier.js'), 'utf8');
+  ok(/sessionKey: getSessionKey\(s\),/.test(SRV) && SRV.includes('const backendSessionId = session.backendSessionId || session.sessionId || session.claudeSessionId || null;') && AM.includes('return source.backendSessionId || source.sessionId || source.claudeSessionId || null;') && RULE_SRC.includes('const key = row.sessionKey,'),
+    'THE ONE NAME: the hub names each list row by getSessionKey (backend : backendSessionId || sessionId || claudeSessionId), the page\'s getSessionKey reads the same three ids in the same order, the follow keys by the row\'s sessionKey and the press fences by it');
   ok(/const saveCfg = \(pin\) => \{ const next = \{ \.\.\.\(this\.sidebar\?\.getSessionConfig\?\.\(cfgKey\) \|\| \{\}\) \};/.test(pinTo), 'the reply\'s write reads the config as it stands WHEN it writes (the reply comes later than the press)');
 }
 
@@ -140,10 +146,11 @@ console.log('⑤ THE LATEST CHOICE IS THE ONE A RESUME CARRIES (r5500) — the r
   const press = (pg, want) => ({ want, mark: pg.pinFence(KEY, want) });
   const reply = (pg, p, { ok: good = true, at = 0, unconditional = false } = {}) => {
     if (!good) { pg.pinFenceLift(KEY, p.mark); return 'lifted'; }
-    if (!unconditional && !pg.pinFenceStands(KEY, p.mark)) return 'skipped';
+    if (!unconditional && !pg.pinFenceStands(KEY, p.mark)) { pg.pinFenceAnswered(KEY, p.mark); return 'skipped'; }
     const next = { ...(pg.getSessionConfig(KEY) || {}) };
     if (p.want) next.poolPin = { memberId: p.want, at, poolId: 'pool-a' }; else delete next.poolPin;
     pg.setSessionConfig(KEY, next);
+    pg.pinFenceAnswered(KEY, p.mark);
     return 'written';
   };
   const NOFENCE = M.write('src/lib/pool-pin-carrier.js', anchored(SRC, '    if (fences.has(key)) {', '    if (false) {', 'no-fence'), 'page-no-fence');
@@ -200,6 +207,25 @@ console.log('⑤ THE LATEST CHOICE IS THE ONE A RESUME CARRIES (r5500) — the r
     const r3 = await run3(RULE), x3 = await run3(LIFTONLY);
     ok(r3.lifted && r3.end === 'sub-x', 'ORDER 5c — THE REPLY NEVER COMES, the hub applied it: the list that carries the press lifts the fence and writes it — no reply needed, no timer', r3);
     ok(x3.end === null, 'RED (computed — 40f58aff2\'s lift): without the reply the carrier never holds the press', x3);
+  }
+  // r5496 (3): WHAT THE PAGE SAW IS STORED — another page's pin (synced into this carrier) is not undone by a list repeating the old fact
+  {
+    const NOSEEN = anchored(STATE, '    this._pinSeen = r.seen;\n', '', 'no-seen-store');
+    const run = async (text) => { const pg = await loadPage(RULE, text); list(pg, PIN('sub-x', 100)); pg.setSessionConfig(KEY, { poolPin: { memberId: 'sub-y', at: 130, poolId: 'pool-a' } }); list(pg, PIN('sub-x', 100)); return { end: held(pg) }; };
+    const r = await run(STATE), x = await run(NOSEEN);
+    ok(r.end === 'sub-y', 'THE STORED VIEW: another page\'s pin (sub-y, synced by user-state) stands when the next list repeats the old fact (no edge)', r);
+    ok(x.end === 'sub-x', 'RED (computed — a store that does not keep what it saw): every list is an edge and the older fact overwrites the other page\'s pin', x);
+  }
+  // r5496 (4): A FENCE WHOSE CONVERSATION LEFT THE LIST — dropped once its reply came (the follow is never silenced when it returns);
+  // an UNANSWERED fence stays (its reply is the latest choice) and is dropped after its reply
+  {
+    const NODROP = M.write('src/lib/pool-pin-carrier.js', anchored(SRC, '  for (const [key, f] of fences) if (!present.has(key) && f && typeof f === \'object\' && f.answered === true && !lifted.includes(key)) lifted.push(key);\n', '', 'no-drop'), 'page-no-drop');
+    const run = async (rule) => { const pg = await loadPage(rule); list(pg, null); const p = press(pg, 'sub-x'); reply(pg, p, { at: 140 }); pg._followPins([]); const dropped = !pg._pinFences.has(KEY); list(pg, null); return { dropped, end: held(pg) }; };
+    const r = await run(RULE), x = await run(NODROP);
+    ok(r.dropped && r.end === null, 'LEFT THE LIST, ANSWERED: its fence is dropped; when the conversation returns on automatic its row is followed (the carrier clears)', r);
+    ok(!x.dropped && x.end === 'sub-x', 'RED (computed — a rule that never drops it): the fence of the ended conversation holds and its follow stays silent when it returns', x);
+    const pg = await loadPage(); list(pg, null); const p = press(pg, 'sub-x'); pg._followPins([]); const kept = pg._pinFences.has(KEY); const w = reply(pg, p, { at: 150 }); pg._followPins([]);
+    ok(kept && w === 'written' && held(pg) === 'sub-x' && !pg._pinFences.has(KEY), 'LEFT THE LIST, UNANSWERED: the fence stays while its request is open; its reply then writes the latest choice, and the next list drops the fence', { kept, w, held: held(pg) });
   }
 }
 

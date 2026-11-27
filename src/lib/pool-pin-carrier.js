@@ -20,8 +20,9 @@
 //     THIS rule writes the carried fact at the lift. A superseded press's late reply never writes: it could have left a member that
 //     bills in the carrier while the live row is back on automatic. WHAT LIFTS A FENCE (no timer): a list that carries the press; the
 //     press's own failed or refused reply (its own mark only — never a later press's fence); the page's next press on that
-//     conversation (it replaces the fence); a reload. A fence holds only while its own request is open, and a list carrying the press
-//     lifts it without the reply.
+//     conversation (it replaces the fence); a list the conversation has LEFT, once the press's reply has come (r5496 (4): an answered
+//     fence of an ended conversation never silences its follow when it returns; an UNANSWERED one stays — its reply is the latest
+//     choice); a reload. A fence holds only while its own request is open, and a list carrying the press lifts it without the reply.
 //   · never touched: a stopped conversation's carrier (it has no live row: a pin pressed while stopped rides its next resume), a
 //     remote row (never pinned), a row that bills no pool, a row with no conversation id yet.
 // NOT HERE (r5500): the resume's own road (src/ws-create.js resumePoolPin) keeps honouring a carried pin as the person's own choice,
@@ -46,7 +47,8 @@ export const wantOf = (fence) => (fence && typeof fence === 'object' ? fence.wan
  * @param {(key: string) => object|null} o.configOf   the carrier as it stands (the sidebar's getSessionConfig)
  * @param {Map<string,string>} [o.seen]               each followed conversation's pin signature in the PREVIOUS list
  * @param {Map<string,*>} [o.fences]                  this page's own presses not yet carried: key → the member pressed | null, or {want, mark}
- * → { patches: [[key, {poolPin}]], seen: Map (this list's), lifted: [key] (fences this list carries — their carried fact is in patches) }
+ * → { patches: [[key, {poolPin}]], seen: Map (this list's), lifted: [key] (fences this list carries — their carried fact is in patches —
+ *   and answered fences of conversations this list no longer holds) }
  */
 export function carrierPatches(rows, { configOf, seen = new Map(), fences = new Map() } = {}) {
   const patches = [], lifted = [], now = new Map();
@@ -65,5 +67,9 @@ export function carrierPatches(rows, { configOf, seen = new Map(), fences = new 
       patches.push([key, { poolPin: { memberId: pin.memberId, at: Number(pin.at) || null, poolId: row.accountId } }]);
     } else if (c && (!c.poolId || c.poolId === row.accountId)) patches.push([key, { poolPin: null }]);   // cleared on this pool
   }
+  // r5496 (4): a conversation that LEFT the list drops its fence once the press's reply has come (`answered`); an unanswered fence
+  // stays — its request is open and its reply is the person's latest choice
+  const present = new Set((Array.isArray(rows) ? rows : []).map((r) => (r && typeof r.sessionKey === 'string' ? r.sessionKey : null)).filter(Boolean));
+  for (const [key, f] of fences) if (!present.has(key) && f && typeof f === 'object' && f.answered === true && !lifted.includes(key)) lifted.push(key);
   return { patches, seen: now, lifted };
 }

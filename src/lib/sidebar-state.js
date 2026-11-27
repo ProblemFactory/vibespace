@@ -653,6 +653,12 @@ export function installSidebarState(SidebarClass) {
     const f = this._pinFences && this._pinFences.get(key);
     return !!(f && mark != null && f.mark === mark);
   };
+  /** The press's reply came (and wrote, its fence standing): from now its fence is dropped when its conversation leaves the list
+   *  (r5496 (4)); until the reply comes, an open request keeps it. */
+  proto.pinFenceAnswered = function(key, mark) {
+    const f = this._pinFences && this._pinFences.get(key);
+    if (f && mark != null && f.mark === mark) f.answered = true;
+  };
   /** A refused or failed press lifts ITS OWN fence — never a later press's that replaced it. */
   proto.pinFenceLift = function(key, mark) {
     const f = this._pinFences && this._pinFences.get(key);
