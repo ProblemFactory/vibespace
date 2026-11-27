@@ -21,7 +21,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The model menu no longer loses the models it learned when their list could not be read for a moment.
 - If VibeSpace cannot read an older mounts list while upgrading it, it keeps it and reads it again; those mounts are no longer lost.
 - A notice about a folder that stopped answering now says when it could not read who uses the folder, instead of saying that no process has a file open there.
-- After a restart, when the check of which of two windows of one conversation is still running fails, VibeSpace keeps both open instead of closing the older one.
+- After a restart, two windows of one conversation on this machine stay open unless one's program has ended; a running one is no longer ended as a duplicate.
 - Removing an account from a Codex pool now moves the pool to a member that is signed in, instead of leaving it on the removed account.
 - In For you, sign-in notices are grouped under «Accounts and sign-ins», and a long-lived token's identity notice no longer offers a reply it cannot take.
 - A file copied between machines or across disks, uploaded over WebDAV or exported from a Task Group is now on disk before VibeSpace says it is saved.
