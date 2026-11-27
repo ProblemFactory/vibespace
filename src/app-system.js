@@ -61,7 +61,7 @@ const SYS_RUN_ID = 'sysroot';
 const SAFE_PATH_RE = /^\/[A-Za-z0-9._+\/-]{1,255}$/;
 const NONCE_RE = /^[a-z0-9]{8,32}$/;
 const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const { PKG_RE, APT_LOCK_WAIT_S } = require('./install-slot'); // PURE — Debian's name rule + apt's lock wait: ONE home (lane dc-apps-rows, F-I3)
+const { PKG_RE, APT_LOCK_WAIT_S, SYNC_FILE } = require('./install-slot'); // PURE — Debian's name rule + apt's lock wait: ONE home (lane dc-apps-rows, F-I3)
 
 const SUDOERS_TEXT = '# VibeSpace app system (docs/design-app-persistence.zh.md §3.2) — installed by the server after listen.\n'
   + '# Grants nothing new (the user is already NOPASSWD: ALL): sudo EXECs the helper on the caller\'s pid and keeps the X environment.\n'
@@ -251,8 +251,12 @@ const SYS_SCRIPT = [
   // B-bcb8 unit D (主开发 r5211 / r5214 / r5309): a new tree takes its name after a sync of ITS FILE SYSTEM (`sync -f`: syncfs — GNU
   // coreutils src/sync.c MODE_FILE_SYSTEM, uutils sync.rs --file-system, BusyBox's SYNC_FANCY -f), never of the machine; where this
   // machine's sync has no file-system form NO sync is made, said; a failed one refuses by name; one not done lands, said (legs:
-  // test-synced-installs ⑥)
-  "sync_tree() { [ -n \"${VS_SF-}\" ] || case $(LC_ALL=C sync --help 2>&1) in *--file-system*|*'[-df]'*) VS_SF=fs ;; *) VS_SF=none ;; esac; if [ \"$VS_SF\" = none ]; then printf '%s - this machine has no file-system sync (sync -f): the tree takes its name unsynced\\n' \"$1\" >&2; return 0; fi; e=$(LC_ALL=C sync -f -- \"$1\" 2>&1) && return 0; case $e in *'Invalid argument'*|*'not supported'*|*'Function not implemented'*) printf '%s - its file system does not do a sync: its new bytes take their name unsynced\\n' \"$e\" >&2; return 0 ;; esac; printf '%s\\n' \"$e\" >&2; return 1; }",
+  // test-synced-installs ⑥). ITS WAIT is that of the file system the create or rebase has just written a whole tree to (the person's
+  // home): a longer «installing» there, never a new way to hang on another mount. ITS ASSUMPTION: a build whose --help names the
+  // file-system form has the call (GNU's main takes MODE_SYNC — the whole machine — where it was built without syncfs; uutils and
+  // BusyBox call syncfs where the form exists)
+  "sync_tree() { [ -n \"${VS_SF-}\" ] || case $(LC_ALL=C sync --help 2>&1) in *--file-system*|*'[-df]'*) VS_SF=fs ;; *) VS_SF=none ;; esac; if [ \"$VS_SF\" = none ]; then printf '%s - this machine has no file-system sync (sync -f): the tree takes its name unsynced\\n' \"$1\" >&2; return 0; fi; vs_e=$(LC_ALL=C sync -f -- \"$1\" 2>&1) && return 0; case $vs_e in *'Invalid argument'*|*'not supported'*|*'Function not implemented'*) printf '%s - its file system does not do a sync: its new bytes take their name unsynced\\n' \"$vs_e\" >&2; return 0 ;; esac; printf '%s\\n' \"$vs_e\" >&2; return 1; }",
+  SYNC_FILE,   // B-bcb8 unit D (主开发 r5364): put()'s file through the ONE helper (src/install-slot.js): its data, never the machine; put() primes its form (sync_form) in this shell, its ( cd … ) subshell inherits it
   "pkgok() { case $1 in [a-z0-9]?*) ;; *) return 1 ;; esac; case $1 in *[!a-z0-9+.-]*) return 1 ;; esac; [ ${#1} -le 64 ]; }",
   "case $ID in \"\"|-*|*[!a-z0-9-]*) refuse bad-id ;; esac",
   "case $NONCE in \"\"|*[!a-z0-9]*) refuse bad-nonce ;; esac",
@@ -287,7 +291,7 @@ const SYS_SCRIPT = [
   "q() { dpkg-query --admindir=\"$1/var/lib/dpkg\" -W -f='${db:Status-Abbrev} ${Package}:${Architecture} ${Version}\\n' 2>/dev/null | awk 'substr($1, 2, 1) == \"i\" { print $2 \" \" $3 }' | sort -u; }",
   "sysok() { [ -d \"$1\" ] && [ ! -L \"$1\" ] || refuse no-system \"$1\"; [ \"$(stat -c %u \"$1\")\" = 0 ] || refuse not-root-owned \"$1\"; m=$(stat -c %a \"$1\"); [ $(( 0$m & 02 )) -eq 0 ] || refuse world-writable \"$1\"; [ -f \"$1/etc/vibespace-sysroot.json\" ] || refuse no-identity \"$1\"; }",
   "rdir() { p=${1%/*}; ( cd \"$p\" && [ \"$(pwd -P)\" = \"$p\" ] && [ \"$(stat -c %u .)\" = 0 ] ) || refuse link-in-userland \"$p\"; if [ ! -e \"$1\" ] && [ ! -L \"$1\" ]; then install -d -m 0755 -o root -g root \"$1\"; fi; ( cd \"$1\" && [ \"$(pwd -P)\" = \"$1\" ] && [ \"$(stat -c %u .)\" = 0 ] && [ $(( 0$(stat -c %a .) & 022 )) -eq 0 ] ) || refuse link-in-userland \"$1\"; }",
-  "put() { ( cd \"$2\" && [ \"$(pwd -P)\" = \"$2\" ] && [ \"$(stat -c %u .)\" = 0 ] && [ $(( 0$(stat -c %a .) & 022 )) -eq 0 ] && install -m 0644 -o root -g root \"$1\" \"./.$3.vs\" && { sync -- \"./.$3.vs\" || { rm -f \"./.$3.vs\"; exit 3; }; } && mv -fT \"./.$3.vs\" \"./$3\" ) || { r=$?; [ $r != 3 ] || refuse not-synced \"$2/$3\"; refuse link-in-userland \"$2/$3\"; }; }",
+  "put() { [ -n \"${VS_SD-}\" ] || sync_form; ( cd \"$2\" && [ \"$(pwd -P)\" = \"$2\" ] && [ \"$(stat -c %u .)\" = 0 ] && [ $(( 0$(stat -c %a .) & 022 )) -eq 0 ] && install -m 0644 -o root -g root \"$1\" \"./.$3.vs\" && { sync_file \"./.$3.vs\" || { rm -f \"./.$3.vs\"; exit 3; }; } && mv -fT \"./.$3.vs\" \"./$3\" ) || { r=$?; [ $r != 3 ] || refuse not-synced \"$2/$3\"; refuse link-in-userland \"$2/$3\"; }; }",
   "stage() { ( cd \"$1\" && [ \"$(pwd -P)\" = \"$1\" ] && [ \"$(stat -c %u .)\" = 0 ] && [ $(( 0$(stat -c %a .) & 022 )) -eq 0 ] || exit 1; for f in *; do if [ -f \"$f\" ] && [ ! -L \"$f\" ]; then dd if=\"./$f\" of=\"$2/$f\" iflag=nofollow,nonblock bs=64k count=16 2>/dev/null || exit 1; fi; done ) || refuse link-in-userland \"$1\"; }",
   "cpin() { rm -f \"$T/cp\"; ( cd \"$1\" && [ \"$(pwd -P)\" = \"$1\" ] && [ -f \"./$2\" ] && [ ! -L \"./$2\" ] && dd if=\"./$2\" of=\"$T/cp\" iflag=nofollow,nonblock bs=1M count=4096 2>/dev/null ) && put \"$T/cp\" \"$3\" \"$2\"; }",
   "rmchild() { case $1 in rootfs.prev|rootfs.next|rootfs.new|rootfs.swap) ;; *) refuse unsafe-removal \"$1\" ;; esac; ( cd \"$S\" && [ \"$(pwd -P)\" = \"$S\" ] && [ -d \"./$1\" ] && [ ! -L \"./$1\" ] && [ \"$(stat -c %u \"./$1\")\" = 0 ] && rm -rf --one-file-system \"./$1\" ) || refuse unsafe-removal \"$S/$1\"; }",
@@ -428,6 +432,7 @@ const SYS_SCRIPT = [
 const INSTALL_SCRIPT = [
   "set -eu",
   "say() { printf '= %s\\n' \"$*\"; }",
+  SYNC_FILE,   // B-bcb8 unit D (主开发 r5364): the helper and the sudoers through the ONE helper (src/install-slot.js)
   "H=/usr/local/libexec/vibespace/vs-sysroot-enter; SD=/etc/sudoers.d/~vibespace-sysroot",
   "[ \"$(id -u)\" = 0 ] || { say refused not-root; exit 125; }",
   "case ${SUDO_UID:-} in \"\"|0|*[!0-9]*) say refused no-sudo-uid; exit 125 ;; esac",
@@ -441,9 +446,9 @@ const INSTALL_SCRIPT = [
   "visudo -cf \"$T/s\" > /dev/null || { say refused sudoers-invalid; exit 125; }",
   "grep -qxF \"#$SUDO_UID ALL=(root) NOPASSWD:NOSETENV: $H\" \"$T/s\" || { say refused no-setenv-rule; exit 125; }",
   "install -d -m 0755 -o root -g root /usr/local/libexec/vibespace",
-  "if cmp -s \"$T/h\" \"$H\"; then say helper same; else install -m 0755 -o root -g root \"$T/h\" \"$H.new\" && [ \"$(sha256sum < \"$H.new\" | cut -d\" \" -f1)\" = \"$3\" ] && sync -- \"$H.new\" && mv -f \"$H.new\" \"$H\" || { rm -f \"$H.new\"; say refused helper-not-installed; exit 125; }; say helper installed; fi",
+  "if cmp -s \"$T/h\" \"$H\"; then say helper same; else install -m 0755 -o root -g root \"$T/h\" \"$H.new\" && [ \"$(sha256sum < \"$H.new\" | cut -d\" \" -f1)\" = \"$3\" ] && sync_file \"$H.new\" && mv -f \"$H.new\" \"$H\" || { rm -f \"$H.new\"; say refused helper-not-installed; exit 125; }; say helper installed; fi",
   "chown root:root \"$H\"; chmod 0755 \"$H\"",
-  "if cmp -s \"$T/s\" \"$SD\"; then say sudoers same; else install -m 0440 -o root -g root \"$T/s\" \"$SD.new\" && visudo -cf \"$SD.new\" > /dev/null && sync -- \"$SD.new\" && mv -f \"$SD.new\" \"$SD\" || { rm -f \"$SD.new\"; say refused sudoers-not-installed; exit 125; }; say sudoers installed; fi",
+  "if cmp -s \"$T/s\" \"$SD\"; then say sudoers same; else install -m 0440 -o root -g root \"$T/s\" \"$SD.new\" && visudo -cf \"$SD.new\" > /dev/null && sync_file \"$SD.new\" && mv -f \"$SD.new\" \"$SD\" || { rm -f \"$SD.new\"; say refused sudoers-not-installed; exit 125; }; say sudoers installed; fi",
   "chown root:root \"$SD\"; chmod 0440 \"$SD\"",
   "say ok",
 ].join('\n');

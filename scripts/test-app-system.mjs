@@ -155,7 +155,7 @@ const sysRules = (mod) => {
   const t = mod.SYS_SCRIPT, i = mod.INSTALL_SCRIPT;
   return {
     staged: /^stage\(\) \{ \( cd "\$1" && \[ "\$\(pwd -P\)" = "\$1" \]/m.test(t) && /dd if="\.\/\$f" of="\$2\/\$f" iflag=nofollow,nonblock/.test(t) && /stage "\$d" "\$T\/src"; if \[ -d "\$A\/sys\/keys" \]; then stage "\$A\/sys\/keys" "\$T\/src"; fi/.test(t),
-    put: /^put\(\) \{ \( cd "\$2" && \[ "\$\(pwd -P\)" = "\$2" \]/m.test(t) && /install -m 0644 -o root -g root "\$1" "\.\/\.\$3\.vs" && \{ sync -- "\.\/\.\$3\.vs" \|\| \{ rm -f "\.\/\.\$3\.vs"; exit 3; \}; \} && mv -fT/.test(t) && !/install -m 0644 -o root -g root "[^"]*" "\$(R|1|NX|EN|E)\//.test(t) && !/> "\$(R|E|1|NX)\//.test(t) && !/\bcp "/.test(t),
+    put: /^put\(\) \{ \[ -n "\$\{VS_SD-\}" \] \|\| sync_form; \( cd "\$2" && \[ "\$\(pwd -P\)" = "\$2" \]/m.test(t) && /install -m 0644 -o root -g root "\$1" "\.\/\.\$3\.vs" && \{ sync_file "\.\/\.\$3\.vs" \|\| \{ rm -f "\.\/\.\$3\.vs"; exit 3; \}; \} && mv -fT/.test(t) && !/install -m 0644 -o root -g root "[^"]*" "\$(R|1|NX|EN|E)\//.test(t) && !/> "\$(R|E|1|NX)\//.test(t) && !/\bcp "/.test(t),
     removal: (t.match(/rm -rf --one-file-system/g) || []).length === 1 && /^rmchild\(\) \{ case \$1 in rootfs\.prev\|rootfs\.next\|rootfs\.new\|rootfs\.swap\) ;;.*\( cd "\$S" && \[ "\$\(pwd -P\)" = "\$S" \] && \[ -d "\.\/\$1" \] && \[ ! -L "\.\/\$1" \] && \[ "\$\(stat -c %u "\.\/\$1"\)" = 0 \] && rm -rf --one-file-system "\.\/\$1" \)/m.test(t),
     digest: /\[ "\$\(sha256sum < "\$T\/h" \| cut -d" " -f1\)" = "\$3" \] && \[ "\$\(sha256sum < "\$T\/s0" \| cut -d" " -f1\)" = "\$4" \] \|\| \{ say refused digest-mismatch/.test(i) && i.indexOf('sha256sum < "$T/h"') > i.indexOf('cp "$1" "$T/h"') && i.indexOf('sha256sum < "$T/h"') < i.indexOf('visudo -cf'),
   };

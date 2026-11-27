@@ -58,7 +58,7 @@ const MANIFEST_V = 1;
 /** Where a machine keeps its apps, relative to the user's home. */
 const APPS_REL = '.vibespace/apps';
 /** Debian's package-name rule + how long apt waits for another apt's lock: ONE home, the machine's package slot. */
-const { PKG_RE, APT_LOCK_WAIT_S } = require('./install-slot'); // PURE (lane dc-apps-rows, F-I3)
+const { PKG_RE, APT_LOCK_WAIT_S, SYNC_FILE } = require('./install-slot'); // PURE (lane dc-apps-rows, F-I3)
 const ENTRY_ID_RE = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const NONCE_RE = /^[a-z0-9]{8,32}$/;
 const SHA256_RE = /^[0-9a-f]{64}$/;
@@ -706,7 +706,7 @@ const APP_SCRIPT = [
   // the machine: a plain `sync FILE` is a whole-system sync() on uutils. Where this machine's sync has no data-only form (its
   // --help names none: coreutils before 8.24, BusyBox without its fancy options) NO sync is made, said once. A failed sync of the
   // file is a failed write, said; a sync its file system does not do lands, said — sync_file, ONE spelling with INSTALL_RUNNER's
-  'sync_file() { [ -n "${VS_SD-}" ] || case $(LC_ALL=C sync --help 2>&1) in *--data*|*\'[-df]\'*) VS_SD=data ;; *) VS_SD=none ;; esac; if [ "$VS_SD" = none ]; then [ -n "${VS_SD_SAID-}" ] || { VS_SD_SAID=1; printf \'this machine has no data-only sync (sync -d): new bytes take their names unsynced\\n\' >&2; }; return 0; fi; e=$(LC_ALL=C sync -d -- "$1" 2>&1) && return 0; case $e in *\'Invalid argument\'*|*\'not supported\'*|*\'Function not implemented\'*) printf \'%s - its file system does not do a sync: its new bytes take their name unsynced\\n\' "$e" >&2; return 0 ;; esac; printf \'%s\\n\' "$e" >&2; return 1; }',
+  SYNC_FILE,   // the ONE helper (src/install-slot.js)
   ': > "$T/from"',
   `LOCK="-o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S}"`,
   'CACHE="-o Dir::Cache::archives=$D/ -o APT::Keep-Downloaded-Packages=true -o APT::Sandbox::User=root"', // P15: apt's _apt user cannot enter a 0700 ~/.vibespace

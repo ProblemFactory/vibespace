@@ -1273,7 +1273,7 @@ console.log('§xpra-repo the image and the machine plan read ONE xpra.org row (l
   // B-bcb8 unit A's follow (r1716 (5)): THE COUNT of the copied commands lives HERE, with the pure function's own suite (the heavy
   // test-desktop-serve keeps its own pin): xpra.org's plan is ten steps — the keyring folder, the key's fetch, its pinned check,
   // its SYNC, its move, the source, the pin, apt-get update, the install, xpra --version — each one copied line
-  ok(pl.commands.length === 10 && pl.commands.some((c) => /sync -- /.test(c)) && pl.commands.findIndex((c) => /sha256sum -c/.test(c)) < pl.commands.findIndex((c) => /sync -- /.test(c)) && pl.commands.findIndex((c) => /sync -- /.test(c)) < pl.commands.findIndex((c) => /mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/.test(c)), `xpra.org's plan copies TEN commands, the key synced between its check and its move (${pl.commands.length})`, pl.commands);
+  ok(pl.commands.length === 10 && pl.commands.some((c) => /sync_file "\$K"/.test(c)) && pl.commands.findIndex((c) => /sha256sum -c/.test(c)) < pl.commands.findIndex((c) => /sync_file "\$K"/.test(c)) && pl.commands.findIndex((c) => /sync_file "\$K"/.test(c)) < pl.commands.findIndex((c) => /mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/.test(c)), `xpra.org's plan copies TEN commands, the key synced between its check and its move (${pl.commands.length})`, pl.commands);
 }
 
 { // lane app-display-portal: a sandboxed app's own bus + portal — the PURE plan

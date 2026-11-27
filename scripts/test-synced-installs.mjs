@@ -28,12 +28,13 @@ try {
   const stub = (name, body) => { fs.writeFileSync(path.join(BIN, name), `#!/bin/sh\n${body}\n`); fs.chmodSync(path.join(BIN, name), 0o755); };
   stub('install', 'while [ $# -gt 2 ]; do shift; done; echo "install $2" >> "$LOG"; [ -z "$INSTALL_FAIL" ] || exit 1; cp "$1" "$2"');
   stub('visudo', 'echo "visudo $*" >> "$LOG"; [ -z "$VISUDO_FAIL" ]');
-  stub('sync', 'if [ "$1" = --help ]; then if [ -n "$SYNC_OLD" ]; then echo "Usage: sync [OPTION]"; else echo "  -d, --data             sync only file data, no unneeded metadata"; echo "  -f, --file-system      sync the file systems that contain the files"; fi; exit 0; fi; echo "sync $*" >> "$LOG"; if [ -n "$SYNC_UUTILS" ] && [ "$1" != -d ] && [ "$1" != -f ]; then echo "WHOLE-MACHINE" >> "$LOG"; exit 0; fi; if [ -n "$SYNC_OLD" ]; then [ $# -eq 0 ] || { echo "sync: invalid option" >&2; exit 1; }; exit 0; fi; if [ -n "$SYNC_NOTDONE" ] && [ $# -gt 0 ]; then echo "sync: error syncing x: Invalid argument" >&2; exit 1; fi; if [ -n "$SYNC_FAIL_ON" ]; then case "$*" in *"$SYNC_FAIL_ON"*) echo "sync: error syncing x: Input/output error" >&2; exit 1 ;; esac; fi; [ -z "$SYNC_FAIL" ]');   // B-bcb8 unit D: --help names the data and file-system forms (none: SYNC_OLD, a sync before coreutils 8.24); SYNC_UUTILS = a plain operand is a WHOLE-MACHINE sync (uutils sync.rs: no flag → sync()); SYNC_NOTDONE = EINVAL; SYNC_FAIL_ON = EIO on one file
+  stub('sync', 'if [ "$1" = --help ]; then [ -z "$HELP_LOG" ] || echo help >> "$HELP_LOG"; if [ -n "$SYNC_OLD" ]; then echo "Usage: sync [OPTION]"; elif [ -n "$SYNC_BUSYBOX" ]; then echo "Usage: sync [-df] [FILE]..."; else echo "  -d, --data             sync only file data, no unneeded metadata"; echo "  -f, --file-system      sync the file systems that contain the files"; fi; exit 0; fi; echo "sync $*" >> "$LOG"; if [ -n "$SYNC_UUTILS" ] && [ "$1" != -d ] && [ "$1" != -f ]; then echo "WHOLE-MACHINE" >> "$LOG"; exit 0; fi; if [ -n "$SYNC_OLD" ]; then [ $# -eq 0 ] || { echo "sync: invalid option" >&2; exit 1; }; exit 0; fi; if [ -n "$SYNC_NOTDONE" ] && [ $# -gt 0 ]; then echo "sync: error syncing x: Invalid argument" >&2; exit 1; fi; if [ -n "$SYNC_FAIL_ON" ]; then case "$*" in *"$SYNC_FAIL_ON"*) echo "sync: error syncing x: Input/output error" >&2; exit 1 ;; esac; fi; [ -z "$SYNC_FAIL" ]');   // B-bcb8 unit D: --help names the data and file-system forms (none: SYNC_OLD, a sync before coreutils 8.24; SYNC_BUSYBOX = BusyBox 1.36.1's own usage line, «[-df] [FILE]...»); SYNC_UUTILS = a plain operand is a WHOLE-MACHINE sync (uutils sync.rs: no flag → sync()); SYNC_NOTDONE = EINVAL; SYNC_FAIL_ON = EIO on one file
   stub('mv', `echo "mv $*" >> "$LOG"; [ -z "$MV_FAIL" ] || exit 1; exec ${real('mv')} "$@"`);
   stub('dpkg-deb', 'echo "Package: hello"');   // B-bcb8 unit D: index()'s stanza reads a .deb's control fields; dash refuses a function named dpkg-deb
   stub('stat', `case "$*" in *%u*) echo 0 ;; *%a*) echo 755 ;; *) exec ${real('stat')} "$@" ;; esac`);
   const sh = (script, env = {}) => { const log = path.join(T0, `log-${Math.random().toString(36).slice(2)}`); fs.writeFileSync(log, ''); const r = cp.spawnSync('sh', ['-c', script], { encoding: 'utf8', env: { ...process.env, PATH: `${BIN}:${process.env.PATH}`, LOG: log, ...env } }); return { rc: r.status, out: r.stdout + r.stderr, err: r.stderr, log: fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean) }; };
   const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const whole = (scene) => scene.log.filter((l) => l === 'WHOLE-MACHINE').length;   // a WHOLE-MACHINE sync, as the uutils stand-in logs one
 
   // ① THE SUDOERS DROP-IN AND THE ROOT HELPER (INSTALL_SCRIPT's two install lines)
   console.log('① the sudoers drop-in and the root helper: the file that takes the name checked, synced, then moved');
@@ -42,7 +43,8 @@ try {
   const HEAD_I = String(AS.INSTALL_SCRIPT).split('\n')[0], HEAD_S = String(AS.SYS_SCRIPT).split('\n')[0];
   ok(/^set -[a-z]*e[a-z]*$/.test(HEAD_I) && /^set -[a-z]*e[a-z]*$/.test(HEAD_S) && HEAD_I.includes('u') && HEAD_S.includes('u'), `the scenes run under the scripts' own heads (${HEAD_I} · ${HEAD_S})`, { HEAD_I, HEAD_S });
   const HELPER = lineOf(AS.INSTALL_SCRIPT, /^if cmp -s "\$T\/h" "\$H"/), SUDOERS = lineOf(AS.INSTALL_SCRIPT, /^if cmp -s "\$T\/s" "\$SD"/);
-  ok(!!HELPER && !!SUDOERS, 'the install script\'s two install lines are found', { HELPER: !!HELPER, SUDOERS: !!SUDOERS });
+  const SF_I = lineOf(AS.INSTALL_SCRIPT, /^sync_form\(\) \{/);   // B-bcb8 unit D (主开发 r5364): the install script's own sync_file
+  ok(!!HELPER && !!SUDOERS && !!SF_I, 'the install script\'s two install lines and its sync_file are found', { HELPER: !!HELPER, SUDOERS: !!SUDOERS, SF_I: !!SF_I });
   const install = (lines, { helperSame = false, oldHelper = null, oldSudoers = null, digest = null, env = {} } = {}) => {
     const d = fs.mkdtempSync(path.join(T0, 'inst-')), T = path.join(d, 't'); fs.mkdirSync(T); fs.mkdirSync(path.join(d, 'sudoers.d'));
     fs.writeFileSync(path.join(T, 'h'), '#!/bin/sh\necho helper\n'); fs.writeFileSync(path.join(T, 's'), '#1000 ALL=(root) NOPASSWD:NOSETENV: /h\n');
@@ -51,12 +53,12 @@ try {
     if (oldHelper !== null) fs.writeFileSync(H, oldHelper);
     if (oldSudoers !== null) fs.writeFileSync(SD, oldSudoers);
     const hd = cp.spawnSync('sh', ['-c', `sha256sum < ${shq(path.join(T, 'h'))} | cut -d" " -f1`], { encoding: 'utf8' }).stdout.trim();
-    const r = sh(`${HEAD_I}; say() { printf '= %s\\n' "$*"; }; T=${shq(T)}; H=${shq(H)}; SD=${shq(SD)}; set -- x y ${digest || hd} 0; ${lines.join('\n')}`, env);
+    const r = sh(`${HEAD_I}; say() { printf '= %s\\n' "$*"; }; T=${shq(T)}; H=${shq(H)}; SD=${shq(SD)}; set -- x y ${digest || hd} 0\n${SF_I}\n${lines.join('\n')}`, env);
     return { ...r, sd: fs.existsSync(SD) ? fs.readFileSync(SD, 'utf8') : null, sdNew: fs.existsSync(SD + '.new'), hNew: fs.existsSync(H + '.new'), h: fs.existsSync(H) ? fs.readFileSync(H, 'utf8') : null, H, SD };
   };
   const a = install([HELPER, SUDOERS]);
   const order = (r) => r.log.map((l) => l.split(r.SD).join('SD').split(r.H).join('H')).join(' · ');   // every path of the scene named, each time
-  ok(a.rc === 0 && /= helper installed/.test(a.out) && /= sudoers installed/.test(a.out) && order(a) === 'install H.new · sync -- H.new · mv -f H.new H · install SD.new · visudo -cf SD.new · sync -- SD.new · mv -f SD.new SD', `① the helper's copy checked by its digest and synced, the drop-in checked by visudo ON THE FILE THAT TAKES THE NAME and synced, each before its move (${order(a)})`, { out: a.out, log: a.log });
+  ok(a.rc === 0 && /= helper installed/.test(a.out) && /= sudoers installed/.test(a.out) && order(a) === 'install H.new · sync -d -- H.new · mv -f H.new H · install SD.new · visudo -cf SD.new · sync -d -- SD.new · mv -f SD.new SD', `① the helper's copy checked by its digest and its DATA synced, the drop-in checked by visudo ON THE FILE THAT TAKES THE NAME and its data synced, each before its move (${order(a)})`, { out: a.out, log: a.log });
   const b = install([HELPER, SUDOERS], { helperSame: true, oldSudoers: 'the old drop-in\n', env: { SYNC_FAIL: '1' } });
   ok(b.rc === 125 && /= refused sudoers-not-installed/.test(b.out) && b.sd === 'the old drop-in\n' && !b.sdNew && !b.log.some((l) => /^mv /.test(l)), `① a failed SYNC: refused by name (sudoers-not-installed), the old drop-in kept, the new one removed, nothing moved (${order(b)})`, { out: b.out, log: b.log, sd: b.sd });
   const c = install([HELPER, SUDOERS], { helperSame: true, oldSudoers: 'the old drop-in\n', env: { VISUDO_FAIL: '1' } });
@@ -84,18 +86,27 @@ try {
   const OLD_SUDOERS = 'if cmp -s "$T/s" "$SD"; then say sudoers same; else install -m 0440 -o root -g root "$T/s" "$SD.new"; mv -f "$SD.new" "$SD"; say sudoers installed; fi';   // stale-pins: kept (the release's line, the RED)
   const r0 = install([OLD_HELPER, OLD_SUDOERS]);
   ok(r0.rc === 0 && order(r0) === 'install H.new · mv -f H.new H · install SD.new · mv -f SD.new SD', `① RED (the release's lines): the drop-in took its name unchecked and unsynced (${order(r0)})`, r0.log);
+  // the fresh read's S3: a sync the file system does not do (EINVAL) LANDS, said on stderr — the helper's law (unit A refused it)
+  const nd = install([HELPER, SUDOERS], { oldHelper: OLD_H, oldSudoers: OLD_SD, env: { SYNC_NOTDONE: '1' } });
+  ok(nd.rc === 0 && /= helper installed/.test(nd.out) && /= sudoers installed/.test(nd.out) && nd.h !== OLD_H && nd.sd !== OLD_SD && (nd.err.match(/its file system does not do a sync/g) || []).length === 2,
+    `① a sync its file system does not do (EINVAL), at the helper and the drop-in: each installed, said on stderr twice — the helper's law, where unit A refused (${order(nd)})`, { out: nd.out, err: nd.err, log: nd.log });
+  // 主开发 r5364: THAT FILE's DATA, never the machine — under the stand-in that models the Rust tools (a plain operand = sync())
+  const UNIT_A = (l) => l.split(/sync_file ("[^"]+")/).map((p, k) => (k % 2 ? `sync -- ${p}` : p)).join('');   // unit A's spelling (76821ddea, in every release from 2.369.416 to 2.369.421)
+  const ua = install([HELPER, SUDOERS], { env: { SYNC_UUTILS: '1' } }), ua0 = install([UNIT_A(HELPER), UNIT_A(SUDOERS)], { env: { SYNC_UUTILS: '1' } });
+  ok(ua.rc === 0 && whole(ua) === 0 && /= helper installed/.test(ua.out) && /= sudoers installed/.test(ua.out) && ua.log.filter((l) => /^sync -d -- /.test(l)).length === 2 && UNIT_A(HELPER) !== HELPER && UNIT_A(SUDOERS) !== SUDOERS && whole(ua0) === 2,
+    `① PINNED under the uutils stand-in: the helper and the drop-in sync their DATA, no whole-machine sync (${whole(ua)}); RED (unit A's \`sync -- <file>\`, in copies): ${whole(ua0)} whole-machine syncs`, { tip: order(ua), red: order(ua0) });
 
   // ② put() INTO A ROOT FOLDER (SYS_SCRIPT)
   console.log('② put() into a root folder: synced before its move; a failed sync refused by name, the old file kept');
-  const PUT = lineOf(AS.SYS_SCRIPT, /^put\(\) \{/);
+  const PUT = lineOf(AS.SYS_SCRIPT, /^put\(\) \{/), SF_S = lineOf(AS.SYS_SCRIPT, /^sync_form\(\) \{/);   // B-bcb8 unit D (主开发 r5364): the system script's own sync_file
   const put = (line, env = {}) => {
     const d = fs.mkdtempSync(path.join(T0, 'put-')), dir = path.join(d, 'etc'); fs.mkdirSync(dir);
     const src = path.join(d, 'src.conf'); fs.writeFileSync(src, 'new\n'); fs.writeFileSync(path.join(dir, 'app.conf'), 'old\n');
-    const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }; ${line}\nput ${shq(src)} ${shq(fs.realpathSync(dir))} app.conf; say put-done`, env);
+    const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }\n${SF_S}\n${line}\nput ${shq(src)} ${shq(fs.realpathSync(dir))} app.conf; say put-done`, env);
     return { ...r, file: fs.readFileSync(path.join(dir, 'app.conf'), 'utf8'), vs: fs.existsSync(path.join(dir, '.app.conf.vs')), order: r.log.map((l) => l.replace(/ \S*\//g, ' ')).join(' · ') };
   };
   const p1 = put(PUT), p2 = put(PUT, { SYNC_FAIL: '1' });
-  ok(!!PUT && p1.rc === 0 && /= put-done/.test(p1.out) && p1.file === 'new\n' && p1.order === 'install .app.conf.vs · sync -- .app.conf.vs · mv -fT .app.conf.vs app.conf', `② put(): synced before its move (${p1.order})`, p1);
+  ok(!!PUT && !!SF_S && p1.rc === 0 && /= put-done/.test(p1.out) && p1.file === 'new\n' && p1.order === 'install .app.conf.vs · sync -d -- .app.conf.vs · mv -fT .app.conf.vs app.conf', `② put(): its DATA synced before its move (${p1.order})`, p1);
   ok(p2.rc === 125 && /= refused not-synced \S*app\.conf/.test(p2.out) && p2.file === 'old\n' && !p2.vs, `② put()'s failed sync: refused by name (not-synced), the old file kept, the temp removed (${p2.order})`, p2);
   // r1716 (3): a failure that is NOT the sync (here the install) is still said link-in-userland — never «not-synced»
   const p3 = put(PUT, { INSTALL_FAIL: '1' });
@@ -106,11 +117,29 @@ try {
   const OLD_PUT = 'put() { ( cd "$2" && [ "$(pwd -P)" = "$2" ] && [ "$(stat -c %u .)" = 0 ] && [ $(( 0$(stat -c %a .) & 022 )) -eq 0 ] && install -m 0644 -o root -g root "$1" "./.$3.vs" && mv -fT "./.$3.vs" "./$3" ) || refuse link-in-userland "$2/$3"; }';   // stale-pins: kept (the release's line, the RED)
   const p0 = put(OLD_PUT);
   ok(p0.rc === 0 && p0.order === 'install .app.conf.vs · mv -fT .app.conf.vs app.conf', `② RED (the release's put): moved unsynced (${p0.order})`, p0);
+  const pn = put(PUT, { SYNC_NOTDONE: '1' });
+  ok(pn.rc === 0 && /= put-done/.test(pn.out) && pn.file === 'new\n' && /its file system does not do a sync/.test(pn.err), `② put() where the file system does not do a sync (EINVAL): it lands, said — the helper's law, where unit A refused (${pn.order})`, pn);
+  // the fresh read's S1: put()'s sync_file runs in its ( cd … ) subshell — put() primes the form in its own shell, so over TWO puts
+  // the help is read once and «no data-only sync» said once; RED: put() without its prime, in a copy (read and said at each put)
+  const put2 = (line, env = {}) => {
+    const d = fs.mkdtempSync(path.join(T0, 'put2-')), dir = path.join(d, 'etc'), help = path.join(d, 'help'); fs.mkdirSync(dir); fs.writeFileSync(help, '');
+    const src = path.join(d, 'src.conf'); fs.writeFileSync(src, 'new\n');
+    const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }\n${SF_S}\n${line}\nput ${shq(src)} ${shq(fs.realpathSync(dir))} a.conf; put ${shq(src)} ${shq(fs.realpathSync(dir))} b.conf; say put-done`, { ...env, HELP_LOG: help });
+    return { ...r, helps: fs.readFileSync(help, 'utf8').split('\n').filter(Boolean).length, said: (r.err.match(/no data-only sync/g) || []).length, files: fs.readdirSync(dir).sort().join() };
+  };
+  const NO_PRIME = anchored(PUT, '[ -n "${VS_SD-}" ] || sync_form; ', '', 'put()\'s prime');
+  const q1 = put2(PUT, { SYNC_OLD: '1' }), q2 = put2(PUT), q0 = put2(NO_PRIME, { SYNC_OLD: '1' });
+  ok(q1.rc === 0 && q1.files === 'a.conf,b.conf' && q1.helps === 1 && q1.said === 1 && q2.rc === 0 && q2.helps === 1 && q2.log.filter((l) => /^sync -d -- /.test(l)).length === 2 && q0.helps === 2 && q0.said === 2,
+    `② over TWO puts the form is read once (${q1.helps} help, ${q2.helps} with a data form) and «no data-only sync» said once (${q1.said}); RED (put() without its prime, in a copy): ${q0.helps} helps, said ${q0.said} times`, { q1, q2, q0 });
+  // 主开发 r5364: put() under the uutils stand-in — its data, never the machine; RED: unit A's put (`sync -- "./.$3.vs"`), in a copy
+  const pu = put(PUT, { SYNC_UUTILS: '1' }), pu0 = put(UNIT_A(PUT), { SYNC_UUTILS: '1' });
+  ok(pu.rc === 0 && pu.file === 'new\n' && whole(pu) === 0 && UNIT_A(PUT) !== PUT && whole(pu0) === 1 && pu0.file === 'new\n',
+    `② PINNED under the uutils stand-in: put() syncs its file's data, no whole-machine sync (${pu.order}); RED (unit A's put, in a copy): ${whole(pu0)} whole-machine sync (${pu0.order})`, { pu, pu0 });
 
   // ③ THE XPRA APT KEY: checked, synced, then moved
   console.log('③ the xpra apt key: checked, synced, then moved; a failed sync changes nothing');
   const steps = DA.xpraRepoSteps('bookworm'), at = (re) => steps.findIndex((l) => re.test(l));
-  const iCheck = at(/sha256sum -c --status/), iSync = at(/sync -- "\$K"/), iMove = at(/^mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/);
+  const iCheck = at(/sha256sum -c --status/), iSync = at(/sync_file "\$K"/), iMove = at(/^mv -f \/usr\/share\/keyrings\/xpra\.asc\.new/);
   ok(iCheck >= 0 && iSync > iCheck && iMove > iSync, `③ the key's steps: the pinned check (${iCheck}), its sync (${iSync}), then the move (${iMove})`, steps);
   const k = path.join(T0, 'xpra.asc.new'), keySync = steps[iSync].split('/usr/share/keyrings/xpra.asc.new').join(k);
   // r1716 (4): the plan's own head (planLines: its script's first line)
@@ -118,7 +147,14 @@ try {
   ok(/^set -[a-z]*e/.test(HEAD_P), `the key's scene runs under the plan's own head (${HEAD_P})`, HEAD_P);
   fs.writeFileSync(k, 'key'); const k1 = sh(`${HEAD_P}; ${keySync}`); const kept1 = fs.existsSync(k);
   const k2 = sh(`${HEAD_P}; ${keySync}`, { SYNC_FAIL: '1' });
-  ok(k1.rc === 0 && kept1 && k2.rc === 3 && !fs.existsSync(k) && /could not be written to disk/.test(k2.err) && !/could not be written to disk/.test(k2.out.slice(0, k2.out.length - k2.err.length)), `③ the key's sync: on its success the checked file stays for the move; on a failure it is removed, said ON STDERR like its two neighbours («${k2.err.trim().slice(0, 80)}»), exit 3`, { k1, k2 });
+  ok(k1.rc === 0 && kept1 && k1.log.join() === `sync -d -- ${k}` && k2.rc === 3 && !fs.existsSync(k) && /could not be written to disk/.test(k2.err) && !/could not be written to disk/.test(k2.out.slice(0, k2.out.length - k2.err.length)), `③ the key's sync: its DATA (${k1.log.join().split(k).join('K')}); on its success the checked file stays for the move; on a failure it is removed, said ON STDERR like its two neighbours («${k2.err.trim().slice(0, 80)}»), exit 3`, { k1, k2 });
+  fs.writeFileSync(k, 'key'); const kn = sh(`${HEAD_P}; ${keySync}`, { SYNC_NOTDONE: '1' });
+  ok(kn.rc === 0 && fs.existsSync(k) && /its file system does not do a sync/.test(kn.err), `③ the key step where the file system does not do a sync (EINVAL): the key stays for the move, said on stderr — the helper's law, where unit A refused`, kn);
+  // 主开发 r5364: the key step under the uutils stand-in — no whole-machine sync; RED: unit A's step (`sync -- "$K"`), in a copy
+  fs.writeFileSync(k, 'key'); const ku = sh(`${HEAD_P}; ${keySync}`, { SYNC_UUTILS: '1' });
+  const KEY_A = '(K=/usr/share/keyrings/xpra.asc.new; sync -- "$K" || { rm -f "$K"; echo "the key file could not be written to disk (its sync failed) - nothing was changed" >&2; exit 3; })';   // stale-pins: kept (unit A's key step, the RED)
+  fs.writeFileSync(k, 'key'); const ku0 = sh(`${HEAD_P}; ${KEY_A.split('/usr/share/keyrings/xpra.asc.new').join(k)}`, { SYNC_UUTILS: '1' });
+  ok(ku.rc === 0 && whole(ku) === 0 && steps[iSync].includes(IS.SYNC_FILE) && whole(ku0) === 1, `③ PINNED under the uutils stand-in: the key step syncs the key's data (the ONE helper, its own copy inside the step), no whole-machine sync (${whole(ku)}); RED (unit A's step, in a copy): ${whole(ku0)} whole-machine sync`, { ku: ku.log, ku0: ku0.log });
 
   // ④ THE AGY WRAPPER'S ALLOW RULE (a wrapper boots at load: its function is driven from its own text, with a recording fs)
   console.log('④ the agy wrapper\'s allow rule: the account\'s settings synced before they take the name');
@@ -154,11 +190,19 @@ try {
   // machine whose sync names no data or file-system form in its --help (coreutils before 8.24) makes NO sync, said once. A sync its
   // file system does not do (EINVAL) lands, said. The pid record is a live run's: no sync. RED: 64fafc5be's spelling (a plain `sync --`:
   // a whole-machine sync on uutils) and each release line, in copies.
-  const SF = (script) => lineOf(script, /^sync_file\(\) \{/);
-  const SFs = [SF(AM.APP_SCRIPT), SF(IS.INSTALL_RUNNER)], ST = lineOf(AS.SYS_SCRIPT, /^sync_tree\(\) \{/);
-  ok(!!SFs[0] && SFs[0] === SFs[1] && /sync -d -- "\$1"/.test(SFs[0]) && /sync -f -- "\$1"/.test(ST), `⑤ ONE SPELLING: sync_file is the same ONE line in the app script and the install runner, and it syncs a file's DATA (sync -d); sync_tree syncs a tree's file system (sync -f)`, { SFs, ST });
+  const SF = (script) => lineOf(script, /^sync_form\(\) \{/);   // the ONE helper's line: sync_form, then sync_file
+  const SFs = [SF(AM.APP_SCRIPT), SF(IS.INSTALL_RUNNER), SF(AS.SYS_SCRIPT), SF(AS.INSTALL_SCRIPT)], ST = lineOf(AS.SYS_SCRIPT, /^sync_tree\(\) \{/);
+  const KEY_STEP = DA.xpraRepoSteps('bookworm').find((l) => /sync_file "\$K"/.test(l)) || '';
+  ok(!!IS.SYNC_FILE && SFs.every((x) => x === IS.SYNC_FILE) && KEY_STEP.includes(`; ${IS.SYNC_FILE}; sync_file "$K"`) && /sync -d -- "\$1"/.test(IS.SYNC_FILE) && /sync -f -- "\$1"/.test(ST),
+    `⑤ ONE SPELLING (主开发 r5364): sync_file is install-slot's ONE line (SYNC_FILE) in the app script, the install runner, the system script, the install script and the xpra key step, and it syncs a file's DATA (sync -d); sync_tree syncs a tree's file system (sync -f)`, { SFs: SFs.map((x) => x === IS.SYNC_FILE), KEY_STEP: !!KEY_STEP, ST });
+  {   // the fresh read's S2: the helpers hold their words in vs_e — a caller's e (the entry loops' name) is never touched
+    const d = fs.mkdtempSync(path.join(T0, 'e-')), f = path.join(d, 'f.tmp'); fs.writeFileSync(f, 'x');
+    const keep = (sf, st, env) => sh(`${HEAD_S}\n${sf}\n${st}\ne=entry1; sync_file ${shq(f)} || :; sync_tree ${shq(d)} || :; echo "e=$e"`, env);
+    const IN_E = (l) => l.split('vs_e').join('e');   // 64fce0aaf's helpers: their words in e
+    const e1 = keep(SFs[0], ST, { SYNC_FAIL: '1' }), e2 = keep(SFs[0], ST, { SYNC_NOTDONE: '1' }), e0 = keep(IN_E(SFs[0]), IN_E(ST), { SYNC_FAIL: '1' });
+    ok(/^e=entry1$/m.test(e1.out) && /^e=entry1$/m.test(e2.out) && !/vs_e/.test(IN_E(SFs[0])) && !/^e=entry1$/m.test(e0.out), `⑤ the helpers never touch a caller's e (a failed sync, one not done); RED (their words in e, in a copy): «${(e0.out.match(/^e=.*$/m) || [''])[0]}»`, { e1: e1.out, e2: e2.out, e0: e0.out });
+  }
   const rel = (scene) => scene.log.map((l) => l.trim().split(scene.d).join('D')).join(' · ');   // every path of the scene named from its folder
-  const whole = (scene) => scene.log.filter((l) => l === 'WHOLE-MACHINE').length;
   const SAID = /its file system does not do a sync: its new bytes take their name unsynced/;
   console.log('⑤ the app manifest\'s records, stanzas and renamed .debs: their data synced before they take their names');
   const HEAD_A = String(AM.APP_SCRIPT).split('\n')[0];
@@ -202,6 +246,12 @@ try {
     const ur = [app([OLD_SPELL(FIN)], 'finish', { SYNC_UUTILS: '1' }, ND), app([OLD_SPELL(LIST)], 'list', { SYNC_UUTILS: '1' }, ND)];
     ok(u.every((x) => whole(x) === 0) && u.reduce((n, x) => n + x.log.filter((l) => /^sync -d -- /.test(l)).length, 0) === 7 && ur.every((x) => whole(x) > 0),
       `⑤ PINNED: every sync of these strings is \`sync -d -- <file>\` — NO whole-machine sync on uutils (${u.map(whole).join(', ')}); RED (64fafc5be's plain \`sync -- <file>\`, in copies): ${ur.map(whole).join(' + ')} whole-machine syncs`, { tip: u.map((x) => rel(x)), red: ur.map((x) => rel(x)) });
+    // 主开发 r5364: a sync whose help is BusyBox's own («Usage: sync [-df] [FILE]...»: FEATURE_SYNC_FANCY) — the second arm of the
+    // help's pattern takes the data form there; RED: that arm cut, in a copy, makes no sync at all on BusyBox
+    const bb = app([FIN], 'finish', { SYNC_BUSYBOX: '1' }), NO_BB = anchored(SFs[0], "|*'[-df]'*", '', 'sync_file\'s BusyBox arm');
+    const bb0 = app([FIN], 'finish', { SYNC_BUSYBOX: '1' }, NO_BB);
+    ok(bb.rc === 0 && bb.list === 'hello:amd64 1.0\n' && rel(bb) === 'sync -d -- D/V/last-dpkg.list.tmp · mv -f D/V/last-dpkg.list.tmp D/V/last-dpkg.list' && !/no data-only sync/.test(bb.err) && rel(bb0) === 'mv -f D/V/last-dpkg.list.tmp D/V/last-dpkg.list' && /no data-only sync/.test(bb0.err),
+      `⑤ BusyBox's help («[-df]»): the data form taken (${rel(bb)}); RED (that arm cut, in a copy): no sync at all (${rel(bb0)})`, { bb, bb0 });
     const relFin = anchored(FIN, ' && sync_file "$V/last-dpkg.list.tmp"', '', 'the release\'s finish()');
     const relList = anchored(LIST, / && sync_file "[^"]+"/, '', 'the release\'s list()', { count: 3 });
     const relDeb = '    if [ "${f##*/}" != "$n" ]; then mv -f "$f" "$D/$n"; f=$D/$n; fi';   // stale-pins: kept (the release's .deb rename, the RED)
@@ -213,9 +263,9 @@ try {
   {
     const CREATE = lineOf(AS.SYS_SCRIPT, /^ {2}sync_tree "\$S\/rootfs\.new" \|\| refuse not-synced/), REBASE = lineOf(AS.SYS_SCRIPT, /^ {2}sync_tree "\$NX" \|\| refuse not-synced/);
     ok(!!CREATE && !!REBASE && !!ST, 'the system script\'s create and rebase moves, and its sync_tree, are found', { CREATE, REBASE, ST });
-    const sys = (line, env = {}) => {
+    const sys = (line, env = {}, st = ST) => {
       const d = fs.mkdtempSync(path.join(T0, 'sys-')); for (const x of ['rootfs.new', 'rootfs.next', 'rootfs']) { fs.mkdirSync(path.join(d, x)); fs.writeFileSync(path.join(d, x, 'who'), x); }
-      const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }; S=${shq(d)}; R=${shq(path.join(d, 'rootfs'))}; P=${shq(path.join(d, 'rootfs.prev'))}; NX=${shq(path.join(d, 'rootfs.next'))}; bad=0\n${ST}\ncase x in x)\n${line}\nesac`, env);
+      const r = sh(`${HEAD_S}; say() { printf '= %s\\n' "$*"; }; refuse() { say refused "$@"; exit 125; }; S=${shq(d)}; R=${shq(path.join(d, 'rootfs'))}; P=${shq(path.join(d, 'rootfs.prev'))}; NX=${shq(path.join(d, 'rootfs.next'))}; bad=0\n${st}\ncase x in x)\n${line}\nesac`, env);
       const who = (x) => (fs.existsSync(path.join(d, x, 'who')) ? fs.readFileSync(path.join(d, x, 'who'), 'utf8') : null);
       return { ...r, d, root: who('rootfs'), prev: who('rootfs.prev'), next: who('rootfs.next') };
     };
@@ -226,6 +276,10 @@ try {
     ok(c3.rc === 0 && c3.root === 'rootfs.new' && rel(c3) === 'mv D/rootfs.new D/rootfs' && /no file-system sync/.test(c3.err), `⑥ a sync whose --help names no file-system form: NO sync made — never the machine's — said, the tree moves (${rel(c3)})`, c3);
     ok(c4.rc === 0 && c4.root === 'rootfs.new' && SAID.test(c4.err), `⑥ a file system that does not do a sync: said, the tree moves (${c4.err.trim()})`, c4);
     ok(c5.rc === 0 && whole(c5) === 0, `⑥ no whole-machine sync on uutils (${rel(c5)})`, c5);
+    const c6 = sys(C, { SYNC_BUSYBOX: '1' });
+    ok(c6.rc === 0 && c6.root === 'rootfs.new' && rel(c6) === 'sync -f -- D/rootfs.new · mv D/rootfs.new D/rootfs' && !/no file-system sync/.test(c6.err), `⑥ BusyBox's help («[-df]»): the tree's file-system sync taken (${rel(c6)})`, c6);
+    const c60 = sys(C, { SYNC_BUSYBOX: '1' }, anchored(ST, "|*'[-df]'*", '', 'sync_tree\'s BusyBox arm'));
+    ok(rel(c60) === 'mv D/rootfs.new D/rootfs' && /no file-system sync/.test(c60.err), `⑥ RED (sync_tree's «[-df]» arm cut, in a copy): no sync of the tree on BusyBox (${rel(c60)})`, c60);
     const r1 = sys(REBASE), r2 = sys(REBASE, { SYNC_FAIL_ON: 'rootfs.next' });
     ok(r1.rc === 0 && r1.root === 'rootfs.next' && r1.prev === 'rootfs' && rel(r1) === 'sync -f -- D/rootfs.next · mv D/rootfs D/rootfs.prev · mv D/rootfs.next D/rootfs', `⑥ rebase: the rebased tree synced, then the swap (${rel(r1)})`, r1);
     ok(r2.rc === 125 && /= refused not-synced/.test(r2.out) && r2.root === 'rootfs' && r2.next === 'rootfs.next' && !r2.log.some((l) => /^mv /.test(l)), `⑥ rebase's sync FAILED: refused, the live system as it was, the new one beside it (${rel(r2)})`, r2);

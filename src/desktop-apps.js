@@ -499,7 +499,7 @@ const XPRA_KEY_CHECK = `(K=/usr/share/keyrings/xpra.asc.new; echo '${XPRA_KEY_SH
 /** The key fetch: curl, else wget; a fetch that fails leaves nothing in the keyring folder (wget creates its -O file first). */
 // B-bcb8 unit A (lane lg-store-writes, 主开发 r1366): the checked key is SYNCED before it takes the keyring's name — a power loss
 // after the move can never leave apt a torn key file; a failed sync removes the new file and changes nothing, said
-const XPRA_KEY_SYNC = '(K=/usr/share/keyrings/xpra.asc.new; sync -- "$K" || { rm -f "$K"; echo "the key file could not be written to disk (its sync failed) - nothing was changed" >&2; exit 3; })';
+const XPRA_KEY_SYNC = `(K=/usr/share/keyrings/xpra.asc.new; ${S.SYNC_FILE}; sync_file "$K" || { rm -f "$K"; echo "the key file could not be written to disk (its sync failed) - nothing was changed" >&2; exit 3; })`;   // B-bcb8 unit D (主开发 r5364): the key's data through the ONE helper (src/install-slot.js), never the machine
 const XPRA_KEY_FETCH = `{ (command -v curl >/dev/null && curl -fsSL ${XPRA_KEY_URL} -o /usr/share/keyrings/xpra.asc.new) || wget -qO /usr/share/keyrings/xpra.asc.new ${XPRA_KEY_URL}; } || { rm -f /usr/share/keyrings/xpra.asc.new; echo "the key at ${XPRA_KEY_URL} could not be fetched - nothing was changed" >&2; exit 3; }`;
 /** What the rung installs beside xpra: the default registry's first row, the fit/enumeration tools, the X cookie
  *  tool and the X server the xpra recipe starts (measured on the paired test box, 2026-09-25: noble's xpra 6.5.3

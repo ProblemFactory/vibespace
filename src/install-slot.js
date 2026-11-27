@@ -134,10 +134,19 @@ const INSTALL_LOCK_PREFIX = 'vibespace-xpra-install-';
  * Pidfile "<pid> <starttime> <lock>", exit file "<code> <unix nanoseconds> <lock>".
  * Runner: $1 pidfile, $2 log, $3 exit file, $4 the lock file (held as fd 9), "$@" the install argv.
  */
+/** B-bcb8 unit D (主开发 r5309 / r5364): A COMMAND STRING THAT RUNS AS ROOT SYNCS THAT FILE's DATA ONLY, OR DOES NOT SYNC. `sync_file <file>`:
+ *  `sync -d -- <file>` (fdatasync of that one file: GNU coreutils src/sync.c MODE_DATA; uutils sync.rs --data at 0.2.2, 0.10.0 and
+ *  main; BusyBox's FEATURE_SYNC_FANCY -d), never a plain `sync <file>`, which is a WHOLE-SYSTEM sync() on uutils. It reads the sync's
+ *  --help ONCE per run (sync_form, the C locale; a data form named — `--data`, or BusyBox's `[-df]`): none named, NO sync, said
+ *  there, once. A caller whose sync_file runs in a subshell primes the form in its own shell first (SYS_SCRIPT's put()), so a subshell
+ *  inherits it and never reads or says it again. A failed sync answers 1 with its words said; one its file system does not do (EINVAL,
+ *  ENOTSUP, ENOSYS) lands, said. Its words are held in vs_e, a name no caller uses. ONE line, used by every root string of the app
+ *  family: APP_SCRIPT, SYS_SCRIPT, INSTALL_SCRIPT, INSTALL_RUNNER and the xpra key step. */
+const SYNC_FILE = 'sync_form() { case $(LC_ALL=C sync --help 2>&1) in *--data*|*\'[-df]\'*) VS_SD=data ;; *) VS_SD=none; printf \'this machine has no data-only sync (sync -d): new bytes take their names unsynced\\n\' >&2 ;; esac; }; sync_file() { [ -n "${VS_SD-}" ] || sync_form; if [ "$VS_SD" = none ]; then return 0; fi; vs_e=$(LC_ALL=C sync -d -- "$1" 2>&1) && return 0; case $vs_e in *\'Invalid argument\'*|*\'not supported\'*|*\'Function not implemented\'*) printf \'%s - its file system does not do a sync: its new bytes take their name unsynced\\n\' "$vs_e" >&2; return 0 ;; esac; printf \'%s\\n\' "$vs_e" >&2; return 1; }';
 const INSTALL_RUNNER = [
   'P=$1; L=$2; X=$3; K=$4; shift 4',
   'st() { sed \'s/^.*) //\' "/proc/$1/stat" 2>/dev/null | cut -d\' \' -f20; }',
-  'sync_file() { [ -n "${VS_SD-}" ] || case $(LC_ALL=C sync --help 2>&1) in *--data*|*\'[-df]\'*) VS_SD=data ;; *) VS_SD=none ;; esac; if [ "$VS_SD" = none ]; then [ -n "${VS_SD_SAID-}" ] || { VS_SD_SAID=1; printf \'this machine has no data-only sync (sync -d): new bytes take their names unsynced\\n\' >&2; }; return 0; fi; e=$(LC_ALL=C sync -d -- "$1" 2>&1) && return 0; case $e in *\'Invalid argument\'*|*\'not supported\'*|*\'Function not implemented\'*) printf \'%s - its file system does not do a sync: its new bytes take their name unsynced\\n\' "$e" >&2; return 0 ;; esac; printf \'%s\\n\' "$e" >&2; return 1; }',   // B-bcb8 unit D (主开发 r5309): THAT FILE's data synced, never the machine — sync_file, ONE spelling with APP_SCRIPT's (test-synced-installs ⑤)
+  SYNC_FILE,   // B-bcb8 unit D (主开发 r5309 / r5364): THAT FILE's data synced, never the machine — the ONE helper (test-synced-installs ⑤)
   'w=; fin() { echo "$1 $(date +%s%N) $K" > "$X.tmp" && sync_file "$X.tmp" && mv -f "$X.tmp" "$X"; [ -z "$w" ] || rm -f "$P"; exit "$1"; }', // r5 L1: nanoseconds
   'flock -n 9 2>/dev/null || { echo "+ [vibespace] this install does not hold the install lock ($K) - it was not run" >> "$L"; exit 125; }', // FIRST: the inherited lock, re-asserted; not held ⇒ the slot's files are another install's: untouched
   's=$(st $$); [ -n "$s" ] || { sleep 0.05; s=$(st $$); }', // one retry: a refusal is for a /proc that cannot be read, never a blip
@@ -232,5 +241,5 @@ function installLauncherArgv(argv, { stateDir = '', mode = 'start' } = {}) {
 
 module.exports = {
   planLines, PKG_RE, APT_LOCK_WAIT_S, packageInstallPlan, installArgv, // §7.9: the generalised install plan + the argv that runs it
-  INSTALL_FILES, INSTALL_UNRECORDED_EXIT, INSTALL_LOCK_PREFIX, INSTALL_RUNNER, INSTALL_LAUNCHER, installLauncherArgv, // lane C verify r2 (F3 + F4), r4 (the kernel-held lock)
+  INSTALL_FILES, INSTALL_UNRECORDED_EXIT, INSTALL_LOCK_PREFIX, INSTALL_RUNNER, INSTALL_LAUNCHER, installLauncherArgv, SYNC_FILE, // lane C verify r2 (F3 + F4), r4 (the kernel-held lock)
 };
