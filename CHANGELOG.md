@@ -13,7 +13,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
 - A kept sign-in folder shows in Manage agents with a Clear it button, which deletes it once no pool reads it.
-- A text value an agent stores in the vault holds up to 8192 characters; anything longer is stored as a file.
 
 ### Fixed
 - After a sudden power cut, VibeSpace no longer loses its record of an archive extraction cut short, or the warning that Claude could not save its work.
