@@ -234,14 +234,16 @@ console.log('④ the record of the claude builds said (data/cli-registration.jso
     const reg = Mod.create({ dataDir: dir, rootDir: REPO, pinned: PIN, log: (l) => lines.push(String(l)), event: (k, d) => events.push(d), now: () => at });
     return { reg, events, lines };
   };
-  const world = () => { const dir = dataDir('clireg'), file = path.join(dir, 'cli-registration.json'); const r = rig(fresh(REL), dir, T1); r.reg.note(V, 'hub'); return { dir, file, bytes: bytesOf(file), said: r.events.length }; };
+  // B-574d (lane lg-text-legs-3, moved onto the 2.369.422 candidate by 主开发 r5340): the record is written by the STORE WRITER, off the
+  // loop — each read of the file below waits for its landing (`landed()`, the registry's own answer)
+  const world = async () => { const dir = dataDir('clireg'), file = path.join(dir, 'cli-registration.json'); const r = rig(fresh(REL), dir, T1); r.reg.note(V, 'hub'); await r.reg.landed(); return { dir, file, bytes: bytesOf(file), said: r.events.length }; };
   {
-    const wd = world();
+    const wd = await world();
     const r = rig(fresh(REL), wd.dir, T1 + 1000); const a = r.reg.note(V, 'hub');
     ok(wd.said === 1 && r.events.length === 0 && a.said === false, 'control: a readable record — the next start does not say the same build again', { world: wd.said, now: r.events });
   }
   {
-    const wd = world();
+    const wd = await world();
     REFUSED.add(wd.file);
     const r = rig(fresh(REL), wd.dir, T1 + 1000);
     const a = r.reg.note(V, 'hub'), b = r.reg.note(V2, 'conversation');
@@ -249,6 +251,7 @@ console.log('④ the record of the claude builds said (data/cli-registration.jso
     ok(a.held === true && b.held === true && r.events.length === 0 && bytesOf(wd.file) === wd.bytes && heldNamed('cli-registration.json') === 1 && !!st.held && st.held.code === 'cli_registration_unread',
       'HELD (EIO): neither the build already said nor a new one is said, nothing is written over the record; the status and the family\'s list name the hold', { events: r.events, held: st.held });
     const lifted = await liftOf(wd.file);
+    await r.reg.landed();   // the lift's one write, on disk
     const rec = JSON.parse(bytesOf(wd.file));
     ok(lifted === true && r.events.length === 1 && r.events[0].includes(V2) && rec.seen[V].firstSeen === T1 && rec.seen[V2].firstSeen === T1 + 1000 && heldNamed('cli-registration.json') === 0,
       'LIFTED by the family\'s read again: merged — ONLY the build the record never had is said, the older first-seen kept, written once', { lifted, events: r.events, seen: rec.seen });
@@ -259,18 +262,19 @@ console.log('④ the record of the claude builds said (data/cli-registration.jso
     const r = rig(fresh(REL), dir, T1);
     r.reg.note(V, 'hub');
     const lifted = await liftedTorn('cli-registration.json');
+    await r.reg.landed();   // the lift's one write, on disk
     const aside = asideOf(file);
     const rec = (() => { try { return JSON.parse(bytesOf(file)); } catch { return null; } })();
     ok(lifted && aside.length === 1 && bytesOf(path.join(dir, aside[0])) === TORN && r.events.length === 1 && !!rec && !!rec.seen[V],
       'TORN: kept aside ONCE (byte for byte), then an empty start — the build seen meanwhile said once at the lift and written', { aside, events: r.events });
   }
   {
-    const wd = world();
+    const wd = await world();
     REFUSED.add(wd.file);
     const NEW = "  { let read; try { read = { text: fs.readFileSync(stateFile, 'utf8') }; } catch (error) { read = { error }; }\n    const a = SR.storeAnswer(read, { valid: isRecord });   // the record of the builds said: THE ANCHOR (test-data-store-census)\n    if (hold.start(a) === 'data') seen = prune(isRecord(a.value.seen) ? a.value.seen : {}); }\n";
     const OLD = "  try { const j = JSON.parse(fs.readFileSync(stateFile, 'utf8')); if (j && j.seen && typeof j.seen === 'object') seen = j.seen; } catch { }\n  prune(seen);\n";   // stale-pins: kept (the tip's read, planted back as the red)
     const Red = M.load(REL, anchored(read(REL), NEW, OLD, 'the tip\'s read'), 'tip-read');
-    const r = rig(Red, wd.dir, T1 + 5000); r.reg.note(V, 'hub');
+    const r = rig(Red, wd.dir, T1 + 5000); r.reg.note(V, 'hub'); await r.reg.landed();   // the copy's write over the record, on disk
     REFUSED.delete(wd.file);
     const rec = JSON.parse(bytesOf(wd.file));
     ok(r.events.length === 1 && rec.seen[V].firstSeen === T1 + 5000, `RED (the tip's read planted back, in a copy): «no build seen» — the build said AGAIN (${r.events.length}) and the record written over (its first-seen reset: ${T1} → ${rec.seen[V].firstSeen})`, r.events);
