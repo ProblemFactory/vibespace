@@ -1339,6 +1339,67 @@ console.log('R  A FILE ENTRY (lane lg-vault-file, B-0830): sealed beside the rec
         const noReask = MO.load('src/server/vault-engine.js', anchored(ESo, "    const keep = (id) => state() !== 'unlocked' || !record || !!recordBad || fileLive(id);", '    const keep = (id) => fileLive(id);', 'test-vault-engine the removal that does not ask again'), 'noreask');
         const lkr = await lockLeg(noReask);
         ok(lkr.left === 0, 'red control: «a removal that does not ask again» goes on past the lock and shreds all three', JSON.stringify(lkr));
+        // 主开发 r5497 — the follow (each leg with its computed red)
+        const engMut = (from, to, tag, why) => MO.load('src/server/vault-engine.js', anchored(ESo, from, to, `test-vault-engine U1c follow: ${why}`), tag);
+        const STAYED = "    keptNow = stayed;   // 主开发 r5497 (1): the files that STAYED — a re-list that fails keeps THIS, never the list from before the act\n";
+        const QUEUE = '    const run = (keptRemoving || Promise.resolve()).then(() => keptRemoveOnce(o));';
+        const LIFT = "      if (record) track(refreshKept());   // 主开发 r5497 (3): a record lifted from its hold — the kept files' line is said now, not at the next start (a listing only: nothing is shredded)\n";
+        const KEEP = "    const keep = (id) => state() !== 'unlocked' || !record || !!recordBad || fileLive(id);";
+        // (1) a TRUE count: the listing after the removal fails ⇒ `left` is the files that STAYED; a second press acts on nothing
+        const relistLeg = async (E) => {
+          const d = await keptScene('relist', ['00000000d1', '00000000d2', '00000000d3'], [20, 20, 20]);
+          let lists = 0;
+          VFSm.create = (o) => { const st = realC(o); return { ...st, keptList: async (...a) => (++lists === 1 ? st.keptList(...a) : null) }; };   // the start's listing answers; every later one fails
+          let r = null, r2 = null, e = null;
+          try { e = mkE(E, d); await e.unlock(PW); await e.filesSettled(); r = await e.keptRemove({ who: 'test' }); r2 = await e.keptRemove({ who: 'test' }); await e.filesSettled(); e.close(); }
+          finally { VFSm.create = realC; }
+          return { r, r2, lines: auditOf(d).filter((l) => l.event === 'vault-files-kept-removed').length, onDisk: ['00000000d1', '00000000d2', '00000000d3'].filter((id) => vfile(d, id)).length };
+        };
+        const rl = await relistLeg(VE);
+        ok(rl.r && rl.r.ok && rl.r.removed === 3 && rl.r.left === 0 && rl.r2 && rl.r2.removed === 0 && rl.r2.left === 0 && rl.lines === 1 && rl.onDisk === 0,
+          'U1c follow (r5497 (1)): the listing after the removal FAILS — the answer says the files that stayed (left 0, never the list from before); a second press removes nothing and writes no audit line', JSON.stringify(rl));
+        const rlr = await relistLeg(engMut(STAYED, '', 'nostayed', 'the list from before kept'));
+        ok(rlr.r && rlr.r.left === 3, `red control: «the list from before kept» answers left ${rlr.r && rlr.r.left} for files that are gone`, JSON.stringify(rlr));
+        // (2) ONE removal at a time: two presses together remove the files once and write ONE audit line
+        const twoLeg = async (E) => {
+          const d = await keptScene('two', ['00000000e1', '00000000e2', '00000000e3'], [20, 20, 20]);
+          const e = mkE(E, d); await e.unlock(PW); await e.filesSettled();
+          const [a, b] = await Promise.all([e.keptRemove({ who: 'page-a' }), e.keptRemove({ who: 'page-b' })]); await e.filesSettled(); e.close();
+          return { a, b, lines: auditOf(d).filter((l) => l.event === 'vault-files-kept-removed').map((l) => l.removed) };
+        };
+        const tw = await twoLeg(VE);
+        ok(tw.a.ok && tw.a.removed === 3 && tw.b.ok && tw.b.removed === 0 && tw.lines.length === 1 && tw.lines[0] === 3,
+          'U1c follow (r5497 (2)): two presses at once — the files are removed ONCE (3, then 0) and ONE audit line says 3', JSON.stringify(tw));
+        const twr = await twoLeg(engMut(QUEUE, '    const run = keptRemoveOnce(o);', 'noqueue2', 'two removals at once'));
+        ok(twr.b && twr.b.removed === 3 && twr.lines.length === 2, `red control: «two removals at once» counts the same files twice (${JSON.stringify(twr.lines)})`, JSON.stringify(twr));
+        // (3) a record HELD at the start and lifted later: the kept files' line is said at the lift, not at the next start
+        const liftLeg = async (E) => {
+          const d = await keptScene('lift', ['00000000a7', '00000000a8'], [20, 30]);
+          const cfs = require('fs'), keepRead = cfs.readFileSync; let placed = 0;
+          cfs.readFileSync = function (f, ...a) { if (!placed && String(f) === path.join(d, 'vault.json')) { placed++; throw Object.assign(new Error('EIO: placed'), { code: 'EIO' }); } return keepRead.call(this, f, ...a); };
+          let e = null; try { e = mkE(E, d); } finally { cfs.readFileSync = keepRead; }
+          await e.filesSettled(); const held = e.keptFacts().count;
+          const u = await e.unlock(PW); await e.filesSettled(); const after = e.keptFacts().count; e.close();
+          return { placed, held, unlocked: !!(u && u.ok), after };
+        };
+        const lf = await liftLeg(VE);
+        ok(lf.placed === 1 && lf.held === 0 && lf.unlocked && lf.after === 2, 'U1c follow (r5497 (3)): vault.json HELD at the start (a placed EIO) lists nothing; the unlock\'s read lifts it and the kept files\' line says the two at once', JSON.stringify(lf));
+        const lfr = await liftLeg(engMut(LIFT, '', 'nolift', 'the lift says nothing'));
+        ok(lfr.unlocked && lfr.after === 0, 'red control: «the lift says nothing» keeps the line silent until the next start', JSON.stringify(lfr));
+        // (4) a record that NAMES a kept file AT THE PRESS (written between the count shown and the press): that file stays, the others go
+        const namedLeg = async (E) => {
+          const d = await keptScene('named', ['00000000b5', '00000000b6', '00000000b7'], [20, 20, 20]);
+          const e = mkE(E, d); await e.unlock(PW); await e.filesSettled();
+          const shown = e.keptFacts().count;
+          const w = e.secretPut('keyfile:0e1e2e3e4e', crypto.randomBytes(32), { prov: 'uploaded', label: 'Named at the press', file: { id: '00000000b6', name: 'named.bin', size: 20, lines: 0, kind: 'binary', encrypted: false } });   // the record's ONE writer names b6
+          const r = await e.keptRemove({ who: 'test' }); await e.filesSettled(); e.close();
+          return { shown, named: !!(w && w.ok), r, b6: vfile(d, '00000000b6'), others: ['00000000b5', '00000000b7'].filter((id) => vfile(d, id)).length };
+        };
+        const nm = await namedLeg(VE);
+        ok(nm.shown === 3 && nm.named && nm.r.ok && nm.r.removed === 2 && nm.b6 && nm.others === 0,
+          'U1c follow (r5497 (4)): a record that names a kept file AT THE PRESS (named after the count was shown) — that file stays, the other two go', JSON.stringify(nm));
+        const nmr = await namedLeg(engMut(KEEP, "    const keep = (id) => state() !== 'unlocked' || !record || !!recordBad;", 'nolive', 'the keep check without the live read'));
+        ok(nmr.named && !nmr.b6, 'red control: «the keep check without the live read» shreds the file the record names at the press', JSON.stringify(nmr));
       }
     }
   }

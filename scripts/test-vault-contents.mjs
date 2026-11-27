@@ -353,7 +353,7 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
     './i18n.js': 'export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);',
     './utils.js': 'const P = () => globalThis.__vfr; export const createModalShell = (o) => (P() && P().shell ? P().shell(o) : { dialog: null, body: null, close() {}, raised: true }); export const fetchJson = async (u, o) => (P() && P().fetch ? P().fetch(u, o) : { ok: false }); export const showToast = (m, o) => P().toast(String(m), o); export const showConfirmDialog = async (o) => (P() && P().confirm ? P().confirm(o) : false);',
     './vault-reveal.js': 'const P = () => globalThis.__vfr; export const revealValue = (id) => P().reveal(id); export const revealWords = () => "refused"; export const revealLeftMs = () => (P() && P().leftMs ? P().leftMs() : 0); export const revealHeaders = () => (P() && P().headers ? P().headers() : {}); export const askRevealPassword = async () => (P() && P().askPw ? P().askPw() : false); export const noteRevealLeft = () => {}; export const forgetReveal = () => {};',
-    './page-time.js': 'export const stampAt = (ms) => "at " + ms;',
+    './page-time.js': 'export const stampAt = (ms, o) => (o && o.words ? "at " + ms : "NOWORDS " + ms);',   // a date in a sentence asks the words form (the leg below reads «at …» only then)
     './vault-paste-box.js': 'export const wordsRefusalWords = () => "";',
   };
   const SRC = fs.readFileSync(path.join(REPO, 'src/lib/vault-file-row.js'), 'utf8');
@@ -456,6 +456,22 @@ console.log('㉒ THE FILE ROW\'s SMALLS (主开发 r5043): the download is an oc
         'U1c: then a confirm that lists each file\'s size and date ONLY and says once that removal cannot be undone; ONE POST with the page\'s window; the window refreshed', { items, message: seen.confirm && seen.confirm.message, posts: seen.posts.map((p) => p.u) });
       ok(REAL.keptLineWords(2).startsWith('2 sealed files are kept') && /Put the right vault record back to open them, or remove them\.$/.test(REAL.keptLineWords(2)) && /open it, or remove it\.$/.test(REAL.keptLineWords(1)),
         'U1c: the line names the gentler road FIRST — «Put the right vault record back to open them, or remove them»', REAL.keptLineWords(2));
+      // 主开发 r5497 (6): the busy guard — two presses before the first resolves: the second is ignored at once, ONE POST
+      let release = null; const held = new Promise((res) => { release = res; });
+      const posts2 = [];
+      globalThis.__vfr = { toast: (m) => toasts.push(m), leftMs: () => 1000, askPw: async () => true, confirm: async () => { await held; return true; }, headers: () => ({}), fetch: async (u) => { posts2.push(u); return { ok: true, removed: 2, left: 0, leftMs: 1000 }; } };
+      const first = REAL.removeKeptFiles(kept, {});
+      const second = await REAL.removeKeptFiles(kept, {});
+      release(); const firstR = await first;
+      ok(second === false && firstR === true && posts2.length === 1, 'U1c follow (r5497 (6)): two presses before the first resolves — the second is ignored at once, ONE POST', JSON.stringify({ second, firstR, posts: posts2.length }));
+      // 主开发 r5497 (5): a LONG list — every file is a row of the confirm (no «show more»), and the confirm's list scrolls inside the dialog
+      const many = { count: 300, files: Array.from({ length: 300 }, (_, k) => ({ size: 1024 + k, at: 1700000000000 + k })) };
+      let seenItems = null;
+      globalThis.__vfr = { toast: () => {}, leftMs: () => 1000, askPw: async () => true, confirm: async (o) => { seenItems = o.items; return false; }, headers: () => ({}), fetch: async () => ({ ok: true }) };
+      await REAL.removeKeptFiles(many, {});
+      const listRule = (fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8').match(/^\.dialog-list \{[^}]*\}/m) || [''])[0];
+      ok(Array.isArray(seenItems) && seenItems.length === 300 && !seenItems.some((x) => /more/i.test(x)) && /max-height:\s*[^;]+;/.test(listRule) && /overflow-y:\s*auto/.test(listRule),
+        'U1c follow (r5497 (5)): a long kept list — all 300 files are rows of the confirm (no «show more»), and the confirm\'s list scrolls inside the dialog (.dialog-list: max-height, overflow-y auto)', JSON.stringify({ n: seenItems && seenItems.length, listRule }));
     }
   } finally {
     for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; }

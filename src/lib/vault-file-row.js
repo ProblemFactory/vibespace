@@ -73,10 +73,15 @@ export function keptLineWords(n) {
 }
 /** «Remove them…» (U1c): 验证是你 first (the second password), then a confirm that lists their sizes and dates only and says once
  *  that it cannot be undone; the hub removes them, each asked again at its own turn. → true when the hub removed them */
+let keptBusy = false;   // 主开发 r5497 (6): a second press while one runs is ignored (nothing greyed — test-vault-inventory)
 export async function removeKeptFiles(kept, opts = {}) {
   const refresh = typeof opts.refresh === 'function' ? opts.refresh : () => {};
   const n = (kept && kept.count) || 0;
-  if (!n) return false;
+  if (!n || keptBusy) return false;
+  keptBusy = true;
+  try { return await removeKeptOnce(kept, n, refresh); } finally { keptBusy = false; }
+}
+async function removeKeptOnce(kept, n, refresh) {
   if (!revealLeftMs() && !(await askRevealPassword())) return false;
   const items = ((kept && kept.files) || []).map((f) => t('{size} · sealed {when}', { size: sizeWords(f.size), when: stampAt(f.at, { words: true }) }));
   const ok = await showConfirmDialog({

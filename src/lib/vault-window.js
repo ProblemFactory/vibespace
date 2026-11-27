@@ -573,7 +573,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     if (!keptBox) {
       keptBox = vwEl('div', 'vw-empty vw-kept'); keptBox.dataset.key = 'kept-files';
       const b = vwEl('button', 'vw-btn vw-kept-remove'); b.type = 'button';
-      b.onclick = async () => { if (keptBox._busy) return; keptBox._busy = true; try { await removeKeptFiles(keptBox._kept, { refresh: () => refresh() }); } finally { keptBox._busy = false; } };   // nothing greyed (test-vault-inventory): a second press while one runs is ignored
+      b.onclick = () => removeKeptFiles(keptBox._kept, { refresh: () => refresh() });   // a second press while one runs is ignored there (nothing greyed: test-vault-inventory)
       keptBox.append(vwEl('span', 'vw-kept-text'), b);
     }
     keptBox._kept = kept;

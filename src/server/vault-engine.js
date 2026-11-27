@@ -177,6 +177,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       else if (f && f.setAside) { record = null; recordBad = 'not-a-record'; }   // torn bytes met on the re-read: damaged, never «not set up»
       else { record = null; recordBad = null; }   // the file is gone (ENOENT twice): as a start that finds no record
       announce();
+      if (record) track(refreshKept());   // 主开发 r5497 (3): a record lifted from its hold — the kept files' line is said now, not at the next start (a listing only: nothing is shredded)
     },
   });
   const recordHeld = () => !!recordHold.held();
@@ -632,18 +633,28 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
    *  turn (named by no entry of the record in force, held by no put, not dropped, the vault still unlocked: a lock in the middle
    *  stops the walk), then shredded; ONE audit line with the counts. Never automatic, never on a timer; its ONE caller is the
    *  contents door (a person inside the window 验证是你 opened). → { ok, removed, left } | { ok: false, code } */
-  async function keptRemove({ who = null, ip = null } = {}) {
+  // 主开发 r5497 (2): ONE REMOVAL AT A TIME — a second press (another page) waits for the first and acts on what stayed
+  let keptRemoving = null;
+  function keptRemove(o = {}) {
+    const run = (keptRemoving || Promise.resolve()).then(() => keptRemoveOnce(o));
+    keptRemoving = run.then(() => null, () => null);
+    return run;
+  }
+  async function keptRemoveOnce({ who = null, ip = null } = {}) {
     if (state() !== 'unlocked') return { ok: false, code: lockedCode() };
     if (!record || recordBad) return { ok: false, code: badCode() };
+    if (!keptNow.length) return { ok: true, removed: 0, left: 0 };   // nothing kept (a press after another took them): no act, no audit line
     const keep = (id) => state() !== 'unlocked' || !record || !!recordBad || fileLive(id);
-    let removed = 0, stayed = 0;
+    let removed = 0;
+    const stayed = [];
     for (const f of keptNow.slice()) {
       let g = false;
       try { g = await files.shredKept(f.id, keep, fileDropped); } catch { g = false; }
-      if (g === 'gone') removed++; else stayed++;
+      if (g === 'gone') removed++; else stayed.push(f);
     }
+    keptNow = stayed;   // 主开发 r5497 (1): the files that STAYED — a re-list that fails keeps THIS, never the list from before the act
     await refreshKept();
-    audit('vault-files-kept-removed', { who, ip, removed, stayed });
+    audit('vault-files-kept-removed', { who, ip, removed, stayed: stayed.length });
     contentsChanged();
     return { ok: true, removed, left: keptNow.length };
   }
