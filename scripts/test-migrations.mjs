@@ -1706,11 +1706,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const warns = [];
       const resE = runMigrations({ ledgerPath: path.join(dE, 'migrations.json'), migrations: create({ rootDir: rE, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eE }).MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: (m) => warns.push(String(m)) }).find((x) => x.id === ID);
       const lg = answer ? await waitLedger(dE, ID) : null;
-      if (!answer) await untilFact(() => warns.some((w) => w.includes(ID)), 'the stepped run SAID its failure (a warn naming it)');   // r4456 (主开发's word): its fact, its expiry named (was a silent 250 × 20 ms)
+      const failedSaid = () => warns.some((w) => /FAILED/.test(w) && /index\.json is not on disk yet/.test(w));   // (line 1045's round) THE fact the judge reads
+      if (!answer) await untilFact(failedSaid, 'the stepped run SAID its failure (its FAILED warn: index.json is not on disk yet)');   // r4456 (主开发's word): its fact, its expiry named — now the judge's own (an earlier warn naming the id no longer ends it)
       let applied = false; try { applied = !!(JSON.parse(fs.readFileSync(path.join(dE, 'migrations.json'), 'utf-8')).applied || {})[ID]; } catch { applied = false; }
       eE.store.index.durable = real;
       try { eE.stop(); } catch { }
-      return { status: resE && resE.status, failedSaid: warns.some((w) => /FAILED/.test(w) && /index\.json is not on disk yet/.test(w)), applied, lg: !!(lg && lg.applied) };
+      return { status: resE && resE.status, failedSaid: failedSaid(), applied, lg: !!(lg && lg.applied) };
     };
     const notLanded = await indexLeg('held', false);
     ok(notLanded.status === 'started' && notLanded.failedSaid && !notLanded.applied, 'B-a09e small: the index NOT landing (its ordering write answers false) fails the stepped run BY NAME — NOT recorded, the next boot runs it again', notLanded);

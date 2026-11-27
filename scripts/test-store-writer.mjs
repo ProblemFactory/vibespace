@@ -529,7 +529,7 @@ if (mode === 'scene') {
       // held generously late (18 s), never by WHEN (the keeper's grace-less-slack timer ran late on a loaded box: past the driver's
       // old 3.9 s kill the mutant read green)
       const km = await runScene({ grace: 3000, road: 'stop', moved: 1, unmoved: 0, hang: true, movedMs: 50 }, { killAt: 3000 + 15000, env: { VS_KEEPER_PATH: KM }, tag: 'mutant-kills' });
-      ok(!km.killedByDriver && km.sig === 'SIGKILL', `MUTANT «the keeper kills after a stop signal» is RED by name: its own keeper KILLED the process (SIGKILL, ${km.ms} ms after the stop; not the driver's, whose kill waits to 18 s) — the manager's time cut short`, { sig: km.sig, ms: km.ms, killed: km.killedByDriver });
+      ok(!km.killedByDriver && km.sig === 'SIGKILL', `MUTANT «the keeper kills after a stop signal» is RED by name: its own keeper KILLED the process (SIGKILL, ${km.ms} ms after the stop; not the driver's, whose kill waits to 18 s) — any self-kill cuts the manager's grace short; WHEN it kills is pinned by the keeper-line rows (its line at lineMs in [2600, 3000)), this row judges WHO`, { sig: km.sig, ms: km.ms, killed: km.killedByDriver });
       // r4456 (1) PLACED: the mutant's own kill HELD (the leg's hold, let go by removing its file) — under the driver's old 3.9 s kill the
       // old verdict misses the fault at will (the driver kills first); the verdict on who killed, the driver's kill held late, reads it
       // once the hold is let go at the keeper's line

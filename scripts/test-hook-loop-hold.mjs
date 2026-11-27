@@ -12,7 +12,8 @@
 //      loop past the law
 //   ③ the off-thread road (a SafeFs pool whose WORKERS' fs is slowed the same way): the same prompt holds nothing; the
 //      answer comes when the read landed and tells byte for byte what the control told
-//   ④ a root slower than the bound: the answer at the bound (≤ 1 s, inside the hook's 3 s), that group deferred
+//   ④ a root slower than the bound: the answer comes BY its bound (it waits it) and BEFORE the read lands, that group deferred
+//      (the ORDER, line 1045's round: the hook's own 3 s — the wrappers' AbortSignal.timeout(3000) — is not judged here)
 //      (sigStale), the loop still free; once the read lands the next turn tells it
 // The report quotes the printed numbers (the hook path's main-thread ms over a slow root, base vs now).
 // Run: node scripts/test-hook-loop-hold.mjs
@@ -154,7 +155,8 @@ const late = await measure('late', () => rigS.prompt('B'));
 const sB = rigS.activeSessions.get('B');
 console.log(`    the prompt answered at ${late.ms} ms; the loop's worst gap ${gapWords(late.j.top)}`);
 // r4456: no upper time bound in the verdict (a late timer on a loaded box passed it): the ORDER — the answer came by its bound (it
-// waited it: ≥ 900 ms) and BEFORE the read landed (the group not told, sigStale marked) — the hook's 3 s is the bound's own (≤ 1 s)
+// waited it: ≥ 900 ms) and BEFORE the read landed (the group not told, sigStale marked). The hook's own 3 s is NOT judged here: the bound
+// (src/task-groups.js SIG_BOUND_MS) sits under it, and the order caps the answer by the read's own time (line 1045's round)
 ok(late.j.ok && late.ms >= 900 && !late.r.includes(gid) && sB._sigStale && gid in sB._sigStale, `the answer at the BOUND (${late.ms} ms: it waited the bound, and came before the read landed), the group DEFERRED (nothing told, sigStale), the loop free (${late.j.maxHeld} ms at most)`, { ms: late.ms, stale: sB._sigStale, over: late.j.over });
 // r4456: the read LANDED after the mark (the group's signature newer than the session's sigStale) — its fact, never a fixed span
 const landedFor = (sess) => { const t = tasks._groupOf(gid), h = t && tasks._sigCache && tasks._sigCache.get(tasks._sigKey(t)), m = sess && sess._sigStale ? sess._sigStale[gid] : null; return m != null && !!h && (h.gen || 0) > m; };
