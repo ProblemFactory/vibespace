@@ -28,6 +28,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A published page and a design's tweak values are also on disk before VibeSpace says so, and when the disk refuses you are told the file was not saved.
 - On storage that cannot sync files to disk, VibeSpace saves its own records again instead of retrying every save forever and losing them at a restart.
 - After a sudden power loss, your storage list, your machines' mounts, plugins, port forwards and the publish setting no longer come back empty.
+- After a sudden power loss, remote conversations keep their tools and browsers keep reaching your Tailscale devices.
 
 ## 2.369.422 — 2026-11-27
 
