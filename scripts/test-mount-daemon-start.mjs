@@ -293,11 +293,16 @@ try {
       if (twice) await mm.unmount(R.id);              // …and a Disconnect again: the last word
       released = true; release(); const r = await conn; const r2 = conn2 ? await conn2 : null;
       const d0 = started[0] && started[0].pid;
-      // its end waited on, as the fact it is — OR the product's other road, the next start held for it (a lost answer with no /proc:
-      // the daemon is left to the next start, its mark set) — whichever the product chose; a red's daemon lives (nothing ends it): read at once
-      if (M === MOUNTS && !stranger) await until(() => !(d0 && alive(d0)) || !!(mm._lostStart && mm._lostStart.has(mp)), 30000);
+      // its end waited on AS THE FACT IT IS (主开发 r5538, the hosted ⑧b red: the wait read the daemon not alive, the verdict's own SECOND read
+      // an instant later alive — a process signalled and not yet gone): ONE read of its end, settled — gone on two reads in a row, 20 ms
+      // apart (a death is for good; one read in the signal's instant is no fact) — OR the product's other road, the next start held for it
+      // (a lost answer with no /proc, its mark set); the wait's own end IS the verdict, never a second read; its 30 s ceiling counted and
+      // said in the leg's line; a red's daemon lives (nothing ends it): read at once
+      let goneRuns = 0, endBy = null, endMs = null;
+      const goneNow = () => { if (!alive(d0)) goneRuns++; else goneRuns = 0; return goneRuns >= 2; };
+      if (M === MOUNTS && !stranger && d0) { const t0 = Date.now(); const done = await until(() => (goneNow() && !!(endBy = 'gone')) || (!!(mm._lostStart && mm._lostStart.has(mp)) && !!(endBy = 'held')), 30000); if (!done) endBy = 'ceiling'; endMs = Date.now() - t0; }
       const rec = mm._state.mounts.find((x) => x.id === R.id) || {};
-      return { r, r2, desired: rec.desired, alive: !!(d0 && alive(d0)), starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
+      return { r, r2, desired: rec.desired, alive: endBy === 'gone' ? false : !!(d0 && alive(d0)), endBy, endMs, starts: started.length, second: !!(started[1] && started[1].pid && alive(started[1].pid)),
         lostMark: !!(mm._lostStart && mm._lostStart.has(mp)), unmountAsked: after.filter((c) => c === 'fusermount3').length, strangerAlive: null, strangerLife: (life = strangerKid ? lifeOf(strangerKid) : null),   // EVERY copy's stranger read the same way, AFTER the settle (r5444: never in the signal's own instant) — the legs await it
         startNever: started.length === 0, notFormed: started.length === 0 ? 'the starter never answered the stand-in daemon\'s start (⑧ THE STARTER reds it)' : startLate ? 'the starter answered the stand-in daemon\'s start only after its 30 s ceiling: the scene\'s order was lost' : notFormed,
         psD: psReads.filter((x) => d0 && x.pid === Number(d0)), psS: psReads.filter((x) => strangerKid && x.pid === strangerKid.pid), walks };
@@ -321,32 +326,33 @@ try {
     if (!w) return judge();
     console.log(`  ⊘ SKIP ${name} — ${w} — that half is PARTIAL in this run (its reads: ${readsOf(runs)})`);
   };
+  const endWords = (x) => (x.endBy === 'ceiling' ? ` — its end NOT SEEN within the 30 s ceiling (${x.endMs} ms)` : '');   // r5538: the counted ceiling, said in the leg's own line
   const killLaw = (runs) => runs.every((x) => x.strangerAlive !== false);   // THE KILL LAW: no stranger signalled — a fact, judged whatever the load
   const dd = await discDuring(MOUNTS, 'disc-during');
   const NORECHECK = MC.load('src/mounts.js', anchored(MSRC, "    if (this._mountGen?.get(id) !== myGen || !this._state.mounts.some((x) => x.id === id)) {\n      if (st && st.started && st.pid) await this._endStartedDaemon(mp, st, askAt);\n", "    if (false) {\n      if (st && st.started && st.pid) await this._endStartedDaemon(mp, st, askAt);\n", 'B-323e the generation not read again after the start'), 'no-recheck');
   const ddR = await discDuring(NORECHECK, 'disc-during-red');
   half('⑧ (the product)', [dd], null, () => ok(dd.r === false && dd.desired === 'unmounted' && !dd.alive,
-    `⑧ a person's Disconnect while the start waits on its starter's answer: the connect ends with nothing wanted again (${dd.desired}) and the daemon that started meanwhile is ended (${!dd.alive})`, dd));
+    `⑧ a person's Disconnect while the start waits on its starter's answer: the connect ends with nothing wanted again (${dd.desired}) and the daemon that started meanwhile is ended (${!dd.alive})${endWords(dd)}`, dd));
   half('⑧ (its red control)', [ddR], null, () => ok(ddR.desired === 'mounted' && ddR.alive,
     `⑧ RED the generation not read again: wanted again (${ddR.desired}), the daemon left running (${ddR.alive})`, ddR));
   const dl = await discDuring(MOUNTS, 'disc-lost', { lost: true }), dlN = await discDuring(MOUNTS, 'disc-lost-np', { lost: true, noProc: true });
   const NOLOSTEND = MC.load('src/mounts.js', anchored(MSRC, '      else if (st && st.unknown && !unasked(st)) {', '      else if (false) {', 'B-323e a lost answer not read after a Disconnect'), 'no-lost-end');
   const dlR = await discDuring(NOLOSTEND, 'disc-lost-red', { lost: true }), dlNR = await discDuring(NOLOSTEND, 'disc-lost-np-red', { lost: true, noProc: true });
   half('⑧b (the product)', [dl, dlN], dl.alive && cut(dl) ? `the product's own /proc walk (its answer lost) was cut by its bound before it named the daemon` : null, () => ok(dl.r === false && dl.desired === 'unmounted' && !dl.alive && dlN.desired === 'unmounted' && dlN.lostMark,
-    `⑧b its answer LOST, the person's Disconnect meanwhile: with /proc its walk ends the daemon (${!dl.alive}); with none the next start on that mount point waits for it (${dlN.lostMark})`, { dl, dlN }));
+    `⑧b its answer LOST, the person's Disconnect meanwhile: with /proc its walk ends the daemon (${!dl.alive})${endWords(dl)}; with none the next start on that mount point waits for it (${dlN.lostMark})${endWords(dlN)}`, { dl, dlN }));
   half('⑧b (its red control)', [dlR, dlNR], null, () => ok(dlR.alive && !dlNR.lostMark,
     `⑧b RED the lost answer not read there: the daemon left running (${dlR.alive}), nothing held (${!dlNR.lostMark})`, { dlR, dlNR }));
   const dm = await discDuring(MOUNTS, 'disc-mounted', { mounted: true });
   const NORELEASE = MC.load('src/mounts.js', anchored(MSRC, '      if (this._state.mounts.some((x) => x.id === id) && this.isMounted(m)) await Promise.resolve(this.unmount(id, { internal: true })).catch(() => { });', '', 'B-323e the dead endpoint left'), 'no-release');
   const dmR = await discDuring(NORELEASE, 'disc-mounted-red', { mounted: true });
   half('⑧s (the product)', [dm], null, () => ok(dm.r === false && !dm.alive && dm.desired === 'unmounted' && dm.unmountAsked >= 1,
-    `⑧s it MOUNTED before it was ended: its dead endpoint released by an internal unmount (${dm.unmountAsked} asked), the person's word unchanged (${dm.desired})`, dm));
+    `⑧s it MOUNTED before it was ended: its dead endpoint released by an internal unmount (${dm.unmountAsked} asked), the person's word unchanged (${dm.desired})${endWords(dm)}`, dm));
   half('⑧s (its red control)', [dmR], null, () => ok(dmR.unmountAsked === 0, `⑧s RED that release cut: ${dmR.unmountAsked} asked`, dmR));
   const dc = await discDuring(MOUNTS, 'disc-again', { again: true });
   const NOAGAIN = MC.load('src/mounts.js', anchored(MSRC, "      if (j && (this._connWord?.get(id) || 0) !== w) return j.catch(() => { }).then(() => ((this._word?.get(id) || 0) !== w || !this._state.mounts.some((x) => x.id === id) ? false : this.mount(id)));", '      if (false) return j;', 'B-323e a Connect after the Disconnect read as a join'), 'no-again');   // stale-pins: kept (a red control plants the old road back)
   const dcR = await discDuring(NOAGAIN, 'disc-again-red', { again: true });
   half('⑧c (the product)', [dc], null, () => ok(dc.r === false && dc.desired === 'mounted' && dc.starts === 2 && !dc.alive && dc.second,
-    `⑧c Connect → Disconnect → Connect during one start: the last word stands — the first start ended (${!dc.alive}), a connect anew (${dc.starts} starts, the second alive: ${dc.second}, wanted: ${dc.desired})`, dc));
+    `⑧c Connect → Disconnect → Connect during one start: the last word stands — the first start ended (${!dc.alive}), a connect anew (${dc.starts} starts, the second alive: ${dc.second}, wanted: ${dc.desired})${endWords(dc)}`, dc));
   half('⑧c (its red control)', [dcR], null, () => ok(dcR.r2 === false && dcR.desired === 'unmounted' && dcR.starts === 1,
     `⑧c RED the join read as before: ${dcR.r2}, ${dcR.desired}, ${dcR.starts} start`, dcR));
   // ⑧e its second read (MUST): Connect → Disconnect → Connect → Disconnect during one start — the LAST word stands: no connect anew —
@@ -355,7 +361,7 @@ try {
   const NOWORD = MC.load('src/mounts.js', anchored(MSRC, "((this._word?.get(id) || 0) !== w || !this._state.mounts.some((x) => x.id === id) ? false : this.mount(id))", '(this.mount(id))', 'B-323e the later Disconnect not read'), 'no-word');
   const deR = await discDuring(NOWORD, 'disc-twice-red', { again: true, twice: true });
   half('⑧e (the product)', [de], null, () => ok(de.r2 === false && de.desired === 'unmounted' && de.starts === 1 && !de.alive,
-    `⑧e Connect → Disconnect → Connect → Disconnect during one start: the last word stands — no connect anew (${de.starts} start, ${de.desired})`, de));
+    `⑧e Connect → Disconnect → Connect → Disconnect during one start: the last word stands — no connect anew (${de.starts} start, ${de.desired})${endWords(de)}`, de));
   half('⑧e (its red control)', [deR], null, () => ok(deR.desired === 'mounted' && deR.starts === 2, `⑧e RED the later Disconnect not read: ${deR.starts} starts, ${deR.desired}`, deR));
   // ⑧n its second read (SHOULD): with NO /proc the answered daemon is ended by its ps identity, proven ours by a start no earlier than
   // the ask — RED that proof cut (never ended; the next start held for it)
@@ -363,7 +369,7 @@ try {
   const NOPS = MC.load('src/mounts.js', anchored(MSRC, "target = ours ? { pid: ident.pid, starttime: null, lstart: row.lstart, bootId: '' } : null;", 'target = null;', 'B-323e no /proc: no end by ps'), 'no-ps');
   const dnR = await discDuring(NOPS, 'disc-np-red', { noProc: true });
   half('⑧n (the product)', [dn], readTrue(dn.psD) === false ? readWhy(dn.psD, 'the daemon') : null, () => ok(dn.r === false && dn.desired === 'unmounted' && !dn.alive && !dn.lostMark,
-    `⑧n with NO /proc the daemon started for a mount disconnected meanwhile is ended by its ps identity (${!dn.alive}), nothing held (${!dn.lostMark}) — the product's reads: ${JSON.stringify(dn.psD)}`, dn));
+    `⑧n with NO /proc the daemon started for a mount disconnected meanwhile is ended by its ps identity (${!dn.alive}), nothing held (${!dn.lostMark})${endWords(dn)} — the product's reads: ${JSON.stringify(dn.psD)}`, dn));
   half('⑧n (its red control)', [dnR], null, () => ok(dnR.alive && dnR.lostMark, `⑧n RED that proof cut: left running (${dnR.alive}), the next start held for it (${dnR.lostMark})`, dnR));
   // ⑧n2 line 385's small follow (主开发 r2259 (1)): the answered pid freed and taken by a STRANGER inside the window (a fresh start, another
   // program): never signalled — the next start held for it, said — RED the program not read (the stranger killed)
