@@ -533,6 +533,23 @@ console.log('I the instance address: a refused removal is owed and retried at a 
   const [t3b, red3b] = await Promise.all([pubOver(require(path.join(REPO, IU_REL))), pubOver(copyOf(IU_REL, [["    if (owedOut && (await within(owedOut)).late) throw Object.assign(new Error(stillOutWords().replace('try again then', 'publish again then')), { code: 'relay_removal_out' });", "    /* RED: a removal out not waited for */"]], 'iu-publish-under'))]);
   judged(t3b.out, t3b.r === 'refused:relay_removal_out' && t3b.pubs === 0, 'I3b a Publish while a removal hangs at the relay: refused BY NAME at its bound — no file written under a removal still out', t3b);
   judged(red3b.out, red3b.pubs === 1, 'I3b RED CONTROL (the removal out not waited for, in a copy): the new file written while the removal is still out — it can land after it', red3b);
+  // I7 (r5515): the pace's timer, armed before a person's press, fires DURING that press's ask (held by a placed gate): the door RETURNS the ask out — ONE call reaches the relay
+  const beside = async (IU) => {
+    const d = dirOf('iurl'), f = path.join(d, 'instance-url.json');
+    fs.writeFileSync(f, JSON.stringify({ desired: true, auto: false, sub: 'made-sub', url: 'https://made-sub.relay.example.test/', proto: 'http', at: 1, error: null }));
+    let n = 0, held = false, open = null; const gate = new Promise((r) => { open = r; });
+    const plugins = { relayStatus: () => ({ configured: true }), frpUnpublish: async () => { n++; if (n === 2) { held = true; await gate; held = false; } throw Object.assign(new Error('a made-up refusal'), { code: 'relay_held_elsewhere' }); } };
+    const iu = IU.create({ dataDir: d, plugins, port: 1, serverSetting: () => null, log: () => { }, owedPaceMs: 30, owedWaitMs: 5000 });
+    await iu.unpublish();                       // refused: owed, the pace's timer ARMED (30 ms)
+    const press = iu.unpublish();               // a person's press at once: its own ask (the 2nd call) is held at the gate
+    for (let i = 0; i < 100 && !held; i++) await tick(2);
+    const heldAcross = held; await tick(150);   // the pace's 30 ms pass five times over while that ask is held
+    const during = n; open(); await press;
+    const o = { heldAcross, during }; try { iu.stop(); iu._hold && iu._hold.stop && iu._hold.stop(); } catch { } return o;
+  };
+  const [t7, red7] = await Promise.all([beside(require(path.join(REPO, IU_REL))), beside(copyOf(IU_REL, [['    if (owedOut) return owedAsk;', '    /* RED: a second ask beside the one out */']], 'iu-ask-beside'))]);
+  judged(t7.heldAcross, t7.during === 2, 'I7 the pace\'s timer firing while a press\'s ask is out: the door RETURNS the ask out — ONE call at the relay (the refusing press, then the held one), never a second beside it', t7);
+  judged(red7.heldAcross, red7.during >= 3, 'I7 RED CONTROL (the door starts a second ask beside the one out, in a copy): asks at the relay beside the one out — and, the «out» record overwritten, the pace asking again and again', red7);
 }
 
 console.log('J2 the jobs engine never takes a person\'s forward by the job\'s own row id (r5334)');

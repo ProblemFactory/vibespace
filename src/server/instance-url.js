@@ -206,11 +206,13 @@ function create({ dataDir, plugins, port, serverSetting, httpsUrl = () => null, 
     const code = (e && e.code) || 'relay_unpublish_failed', words = stillUp(e);
     if (code !== state.unpublishOwed.code || words !== state.error) { state.unpublishOwed = { code, since: state.unpublishOwed.since }; state.error = words; save(); emit(); }
   }
+  let owedAsk = null;   // the ask itself while it is out (its answer), returned to anyone who asks meanwhile
   function askRelay() {
+    if (owedOut) return owedAsk;   // r5515: an ask already OUT is RETURNED, never joined by a second (a paced timer armed before a press, firing during its ask)
     let done; owedOut = new Promise((r) => { done = r; });
-    return Promise.resolve().then(() => plugins.frpUnpublish(PROXY_NAME))
+    return (owedAsk = Promise.resolve().then(() => plugins.frpUnpublish(PROXY_NAME))
       .then(() => { applyAnswer(null); return { ok: true }; }, (e) => { log('[instance-url] unpublish: ' + ((e && e.message) || e)); applyAnswer(e); return { e }; })
-      .finally(() => { owedOut = null; done(); retryOwed(); });
+      .finally(() => { owedOut = null; owedAsk = null; done(); retryOwed(); }));
   }
   function retryOwed(delayMs = owedPaceMs) {
     if (stopped || owedTimer || owedOut || !state.unpublishOwed || state.desired || !plugins) return;
