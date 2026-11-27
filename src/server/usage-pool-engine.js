@@ -93,7 +93,7 @@ const { feedPeerCard } = require('../normalizers'); // the rebuild-gated chat-ca
 // rate-limit-capture and read by nobody). PURE; the spend authorizer and
 // the two panels ask the same function.
 const { overageState } = require('../spend-authorizer.js');
-const { captureRateLimitEvent, resolveModelCapLane, lanesSnapshot, lanesOf } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line). The PARSE now reaches the engine through the claude harness's quota.signalFromStream (S4) — one classifier per harness.
+const { captureRateLimitEvent, keepOwnIdentity, resolveModelCapLane, lanesSnapshot, lanesOf } = require('../rate-limit-capture.js'); // was a FREE IDENTIFIER since extraction #5 — passive rate_limit_event capture silently dead for 3 days (5th lost binding; the try/catch swallowed the ReferenceError into a log line). The PARSE now reaches the engine through the claude harness's quota.signalFromStream (S4) — one classifier per harness.
 // ── THE harness registry (S4, docs/design-harness-plugins.md §2.4): each
 // harness declares its QuotaSignalSource = normalize / signalFromStream /
 // probe rung / classifyAuthFailure. The engine asks the registry, never a
@@ -281,10 +281,10 @@ function usageIdentityGroups() {
   const groups = new Map(); // identityKey → {accountIds:[], cache, accountId}
   let files = [];
   try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR, { via: usageFolder.via }).filter((f) => f.endsWith('.json') && !f.startsWith('__models__') && !f.startsWith('host-') && f !== 'rates.json'); } catch { return groups; }
-  // THE RELEASE's KEY (B-360d, 主开发 r1221 — the timer row): the decision road's rows confirmed within two of this memo's lives
-  // (60 s; a confirmation asked behind at 30 s) — an account not confirmed is its own identity (no merge). Since unit 4 it keys
-  // only the RELEASE's grouping the B-6a92 door still reads (`released` below) — and its read asks the confirmations behind
-  const roster = accounts.decisionList({ withinMs: 60000 }).accounts || [];
+  // THE DECISION ROAD's CONFIRMATIONS (B-360d, 主开发 r1221 — the timer row): this read asks the rows' confirmations behind (60 s;
+  // a confirmation asked behind at 30 s). B-6a92 (主开发 r5264): its rows key nothing any more — the release's grouping it keyed for
+  // the door is gone, the door and the hold read ONE notion (`ownOf` below)
+  accounts.decisionList({ withinMs: 60000 });
   // THE KEPT FACTS AT ANY AGE (主开发 r3311 MUST 1: «landed» = landed ONCE, never «confirmed in the last 60 s»): `since: 0` — a
   // row the keeper has landed keeps its address, so its today's key and its record, while its confirmation ages (a seat does not
   // change in a minute; a sign-in change lands the row again, the confirmation asked behind above). A row never landed has none
@@ -300,7 +300,7 @@ function usageIdentityGroups() {
       const accountId = (fn === '__global__.json' || gOwner) ? null : fn.slice(0, -5);
       const cache = usageWrite.readCacheJson(path.join(USAGE_CACHE_DIR, fn), { via: usageFolder.via });
       if (!cache?.fetchedAt) continue;
-      const acctRec = accountId ? kept.find((x) => x.id === accountId) : null, relRec = accountId ? roster.find((x) => x.id === accountId) : null;
+      const acctRec = accountId ? kept.find((x) => x.id === accountId) : null;
       // A DELETED account's cache file is a zombie (nothing removes the file
       // with the record) and it kept poisoning org→account resolution: it
       // stays in the identity group, OTel's resolveOrg picked the dead id
@@ -320,7 +320,6 @@ function usageIdentityGroups() {
       const ownBe = gOwner || (acctRec?.backend && globalUsageKey(acctRec.backend) !== '__global__' ? acctRec.backend : null);
       const key = gOwner ? gOwner + ':__global__'
         : groupKeyOf({ accountId, cache, email: acctRec?.email, ownBe });   // B-6a92 r9: the ONE keying (module-level, the door's table runs it too)
-      const relKey = gOwner ? key : groupKeyOf({ accountId, cache, email: relRec?.email, ownBe });   // the release's: confirmed within 60 s
       // LANDED (r3022 (2)(c), 主开发 r3311 MUST 1): the keeper has EVER landed the row's folder — read, or found unreadable, at ANY
       // age (`since: 0`: this run's kept facts) — only then is it judged, its record from the kept facts; a row never landed keeps its
       // today's name's group as the release had it (its seed comes WITH that landing). A confirmation that aged is no new landing
@@ -329,7 +328,7 @@ function usageIdentityGroups() {
         try { const f = accounts.signinFacts(accountId, { since: 0 }); landed = f.state === 'read' || f.why !== 'not-read-yet'; } catch { landed = false; }
         if (landed) { try { rec = accounts.identityRecordOf(accountId, { since: 0 }); } catch { rec = null; } }
       }
-      members.push({ id: gOwner ? fn.slice(0, -5) : (accountId || '__global__'), accountId, cache, today: key, released: relKey, backend: ownBe || 'claude', rec, landed, createdAt: accountId ? ((accounts.get(accountId) || {}).createdAt || 0) : 0 });
+      members.push({ id: gOwner ? fn.slice(0, -5) : (accountId || '__global__'), accountId, cache, today: key, backend: ownBe || 'claude', rec, landed, createdAt: accountId ? ((accounts.get(accountId) || {}).createdAt || 0) : 0 });
     } catch { }
   }
   const judged = identityGroupsOf(members);
@@ -350,11 +349,13 @@ function usageIdentityGroups() {
   Object.defineProperty(groups, 'splits', { value: judged.splits || [], enumerable: false });
   // …the PACING MEMORY of the automatic check (主开发 r3311 MUST 2, §ban-safety): the auto-cli loop's, for its pacing alone
   Object.defineProperty(groups, 'pacing', { value: judged.pacing || null, enumerable: false });
-  // …and the RELEASE's grouping (every member under the release's key, confirmed within 60 s): the B-6a92 door's facts read it, the
-  // door's own move onto the one comparison being its own unit (its r6 must: a row whose folder signs in as another account is
-  // NOT that account's group)
-  const released = new Map(); for (const m of members) { if (!released.has(m.released)) released.set(m.released, []); released.get(m.released).push(m.id); }
-  Object.defineProperty(groups, 'released', { value: released, enumerable: false });
+  // …and B-6a92 (主开发 r5264, law 1) — THE ROW's OWN ACCOUNT, the ONE notion the HOLD and its DOOR read (rowOwnAccountIds): the
+  // row's group above, except that two of its rows whose ORGANISATIONS are both known and differ stand apart. A row's organisation
+  // is the one its own usage cache names (the account on file), else its landed sign-in's. So a row with an account of its own on
+  // file whose folder is signed in as ANOTHER account is never that account's own (r6 — landed or not), while a row with no account
+  // of its own whose folder holds another row's login IS that account (BOUND 1: one quota, as the groups say). The pool's grouping
+  // (the groups themselves, usageIdentityAccountIds: row B-87fd's) is not changed by it
+  Object.defineProperty(groups, 'ownOf', { value: rowOwnOf(judged), enumerable: false });
   return groups;
 }
 // Dead-reckoning estimator (B-fcff v2): learned per-identity per-bucket rates
@@ -1458,6 +1459,13 @@ function probeUsageViaSession(session, timeoutMs = 8000) {
     } catch { resolve(null); }
   });
 }
+/** B-6a92 (主开发 r5264, law 1) — THE ONE NOTION of «the row's own account» that the hold (its names, its carry, the standing check),
+ *  the window guard's groups, the identity repair's own group and the door's verdict all read (usageIdentityGroups `ownOf`): [key]
+ *  when the row is in no group. Never the pool's: that is usageIdentityAccountIds, below. */
+function rowOwnAccountIds(key) {
+  try { const own = usageIdentityGroupsCached().ownOf; const ids = own && own.get(key); if (Array.isArray(ids) && ids.length) return ids; } catch { }
+  return [key];
+}
 // Every account key in `key`'s IDENTITY group (org-merged logins span
 // '__global__' + named subs — one real account, several keys). Falls back to
 // just [key] when the identity is unknown.
@@ -1706,20 +1714,17 @@ function readApiWitnessFile(key) {
 const _heldWin = new Map();
 const HELD_MAX = 4096;   // r6: far past any roster; the oldest key is dropped beyond it
 // B-6a92 r8 (主开发 r873, rule 1) — A ROW IS NEVER HELD ON A NAME OF ITS OWN ACCOUNT: every name in the row's own identity group
-// (usageIdentityAccountIds — the ONE notion of «the same account») is the row itself and is dropped wherever held names are
+// (rowOwnAccountIds — r5264: the ONE notion of «the row's own account», read by the hold and its door alike) is the row itself and is dropped wherever held names are
 // built (the guard's verdict, the ring's entry, the run) AND wherever a hold is read (memory, the warm, the carry): a hold on disk
 // naming only the row's own group is no hold
 // r9 (a small): this unit's journal lines name rows by LABEL — a name holding «@» (an address) is said by its id
 const labelOf = (id) => { const n = nameOf(id); return typeof n === 'string' && n && !n.includes('@') ? n : String(id || '?'); };
 // B-6a92 (r2688, a should): the same-instant hold's words name a row only by the name a person gave it — «another account» else
 const personNameOf = (id) => { const n = nameOf(id); return typeof n === 'string' && n && !n.includes('@') && n !== id ? n : 'another account'; };
-const ownGroupOf = (key) => { try { return new Set(usageIdentityAccountIds(key)); } catch { return new Set([key]); } };
+const ownGroupOf = (key) => { try { return new Set(rowOwnAccountIds(key)); } catch { return new Set([key]); } };   // r5264: the ONE notion (the hold's and its door's)
 const othersOf = (key, names) => { const own = ownGroupOf(key); return (Array.isArray(names) ? names : []).filter((k) => typeof k === 'string' && k && !own.has(k)); };
 const heldFactOf = (key, f) => { if (!(f && Array.isArray(f.names) && Number(f.phase) > 0)) return null; const names = othersOf(key, f.names).slice(0, 4); return names.length ? { names, phase: Number(f.phase), at: Number(f.at) || null, ...(f.by === 'same-instant' ? { by: 'same-instant' } : {}) } : null; };
-// B-6a92 (主开发 r2543) — EACH ROW'S WITNESS INSTANT IN MEMORY (its `.apiwin-` sevenDay and when it was established), as the start's warm
-// read it and the writers here last wrote it: the standing check reads memory only (no poll reads a file)
-const _witnessInst = new Map();
-function noteWitnessInstant(key, w) { if (!key) return; _witnessInst.delete(key); if (w && Number(w.sevenDay) > 0) _witnessInst.set(key, { sevenDay: Number(w.sevenDay), at: Number(w.at) || 0, exact: readingLag.eventPreciseWitness(w) }); if (_witnessInst.size > HELD_MAX) _witnessInst.delete(_witnessInst.keys().next().value); }
+// 2.369.423 (主开发 r5442's should): the witness-instants memory that fed only the standing check is gone with it
 function noteHeldWindow(key, f) { _heldWin.delete(key); _heldWin.set(key, heldFactOf(key, f)); if (_heldWin.size > HELD_MAX) _heldWin.delete(_heldWin.keys().next().value); }
 /** r6 (主开发 r814, ruled 3) — WARMED AT THE START, OFF THE POLL: every roster account's and every cache key's held window, and the
  *  stamp-only members' stamps (the window list), read once by the identity repair's run (the boot's, then hourly and the route's,
@@ -1728,7 +1733,7 @@ function warmHeldWindows(list) {
   const keys = new Set();
   for (const a of (list || [])) if (a && typeof a.id === 'string' && a.id) keys.add(a.id);
   try { for (const fn of usageWrite.listCacheDir(USAGE_CACHE_DIR)) if (fn.endsWith('.json') && !fn.startsWith('__models__') && !fn.startsWith('.')) keys.add(fn.slice(0, -5)); } catch { }
-  for (const k of keys) { try { const w = releaseClockHold(k, readApiWitnessFile(k)); noteHeldWindow(k, null); noteWitnessInstant(k, w); } catch { } }
+  for (const k of keys) { try { releaseClockHold(k, readApiWitnessFile(k)); noteHeldWindow(k, null); } catch { } }
   try { _ownWin = null; _ownWinAt = 0; establishedWindows(); } catch { }
   return keys.size;
 }
@@ -1750,7 +1755,7 @@ function releaseClockHold(key, w) {
 }
 function heldWindowOf(key, w0) {
   if (!key) return null;
-  if (!_heldWin.has(key)) { const w = w0 === undefined ? readApiWitnessFile(key) : w0; noteHeldWindow(key, w && w.foreign); }
+  if (!_heldWin.has(key)) noteHeldWindow(key, null);   // 2.369.423 (主开发 r5442's should): never a hold from disk — the start's warm released every one; nothing writes one
   const h = _heldWin.get(key);
   return h ? { ...h, names: h.names.slice() } : null;
 }
@@ -1850,7 +1855,7 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
       }
     }
     const ok = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next);
-    if (ok) { noteHeldWindow(key, next.foreign); noteWitnessInstant(key, next); }
+    if (ok) noteHeldWindow(key, next.foreign);
     return ok ? res : null;
   } catch { return null; }
 }
@@ -1894,7 +1899,7 @@ function repairIdentityAnchors(why = 'boot', { since } = {}) {
     // `since` (boot and hourly: the timer's settle; the person's press: read now within the person's bound) — a row not
     // confirmed carries no email and is never grouped by one
     list = (accounts.decisionList && accounts.decisionList(since != null ? { since } : {}).accounts) || [];
-    const rep = repairSidecarsByApiPhase({ dataDir: path.join(rootDir, 'data'), accounts: list, id: 'identity-repair:' + why, ownIdsOf: usageIdentityAccountIds });   // B-6a92 r8: the row's own group is the row
+    const rep = repairSidecarsByApiPhase({ dataDir: path.join(rootDir, 'data'), accounts: list, id: 'identity-repair:' + why, ownIdsOf: rowOwnAccountIds });   // B-6a92 r8: the row's own group is the row (r5264: the ONE notion)
     _ownWin = null; _ownWinAt = 0;
     const c = rep.counts || {};
     const changed = !!(c.restamped || c.replaced || c.emptied || c.stripped || c.readmitted || c.stamped);
@@ -1919,7 +1924,7 @@ function repairIdentityAnchors(why = 'boot', { since } = {}) {
 /** The identity GROUP a cache key belongs to, as ONE representative — an
  *  org-merged login spans '__global__' + the named sub and must never read as
  *  two different accounts matching one window. */
-function windowGroupOf(id) { try { return usageIdentityAccountIds(id).slice().sort()[0] || id; } catch { return id; } }
+function windowGroupOf(id) { try { return rowOwnAccountIds(id).slice().sort()[0] || id; } catch { return id; } }   // B-6a92 r5264: the row's own account — the hold's notion, never the pool's
 
 /** ② THE WINDOW IDENTITY GUARD, the ONE place every value producer asks
  *  "may this reading be written for this member". Returns the key to write on,
@@ -3159,7 +3164,7 @@ function resolveTurnLane(session, verdict, why) {
       resetsAt: d.resetsAt || null, overage: {},
     };
     try {
-      const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: d.key, identityIds: usageIdentityAccountIds(d.key), ev });
+      const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: d.key, identityIds: usageIdentityAccountIds(d.key), ownIds: rowOwnAccountIds(d.key), ev });   // r5302: the row's own account (identity is never copied from another)
       if (!r.ok) console.warn(`[wall] lane write failed for ${nameOf(d.key)}: ${r.error || 'unknown'}`);
     } catch (e) { console.warn('[wall] lane write failed:', e.message); }
     console.log(`[wall] ${session._webuiId}: unscoped weekly rejection on ${nameOf(d.key)} → ${scoped ? 'the ' + verdict.name + ' model cap' : 'the plan weekly lane'} (${why})`);
@@ -3757,7 +3762,7 @@ function demoteWalledAccount(session, sigs) {
   for (const b of buckets.values()) {
     const dest = b.dest;
     const ev = { kind: b.kind, scopedName: b.scopedName, status: 'rejected', utilization: null, resetsAt: b.resetsAtMs > now ? Math.floor(b.resetsAtMs / 1000) : null, overage: {}, ...(b.guessed ? { guessed: true } : {}) };
-    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: dest.id, identityIds: usageIdentityAccountIds(dest.id), ev, now, source: 'wall' });
+    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: dest.id, identityIds: usageIdentityAccountIds(dest.id), ownIds: rowOwnAccountIds(dest.id), ev, now, source: 'wall' });
     if (!r.ok) { console.warn(`[wall] demotion write failed for ${dest.name}: ${r.error || 'unknown'}`); continue; }
     // THE DEMOTION FOLLOWS THE WRITE. The incident's money half was this: the
     // pinned member was held out of the pool for three hours on somebody
@@ -4429,7 +4434,7 @@ function recordRateLimitEventNow(session, msg) {
         ev = held.ev;
       }
     }
-    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, hint: capHint, producer: session._webuiId ? 'ev:' + session._webuiId : null });
+    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ownIds: rowOwnAccountIds(writeKey), ev, hint: capHint, producer: session._webuiId ? 'ev:' + session._webuiId : null });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); postCheck(); return; }
     // THE LANE DECISION IS SAID, like resolveTurnLane says its own: a model-cap
     // rejection names the cap it marked (or the placeholder) and which rung
@@ -6806,11 +6811,14 @@ function markLimitBannerNow(session, text) {
     // FRESHEST file, and mark the same bucket dead in every sibling WITHOUT
     // touching its fetchedAt (a stale file must never gain freshness here).
     const ids = usageIdentityAccountIds(key);
-    let base = null, baseAt = -1, ownFile = null;
+    let base = null, baseAt = -1, baseId = null, ownFile = null, ownHad = false;
     for (const id of ids) {
-      try { const c = usageWrite.readCacheJson(fileFor(id)) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch {}
+      try { const c0 = usageWrite.readCacheJson(fileFor(id)), c = c0 || {}; if (id === key) { ownFile = c; ownHad = !!c0; } if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; baseId = id; } } catch {}
     }
     const cache = applyHit(base ? { ...base } : {}, ownFile); // judged on the file it MARKS (`key`, after a proven re-file)
+    // B-6a92 (主开发 r5326, a must): THE CAPTURE's TWIN — a limit banner never copies a row's identity from a sibling that is not its
+    // own account (keepOwnIdentity: the capture's one rule, src/rate-limit-capture.js); `ids` stays the pool's group (the sibling marks)
+    keepOwnIdentity(cache, { ownFile, ownHad, base, baseId, ownIds: rowOwnAccountIds(key), ids });
     // NOTE (r2): this write used to have to rescue `ownWindow` by hand — the
     // freshest-sibling base is chosen for its READINGS, so writing it through
     // would have carried another file's window here. The established window now
@@ -7512,11 +7520,10 @@ function reanchorLapsedMember(key, idv) {
 /** B-6a92 r8/r9 — THE FACTS the door's ONE PURE VERDICT is judged on: the engine's own builder (heldLiftFactsOf, module level)
  *  over this engine's READERS — the row's identity group, its cache and roster record, and THE ONE READER of a name's login. */
 /** the account ids the RELEASE grouped `key` with (its today's key) — the B-6a92 door's own notion until its unit moves it */
-function releasedGroupIdsOf(key) { try { for (const [, ids] of (usageIdentityGroupsCached().released || new Map())) if (ids.includes(key)) return ids; } catch { } return [key]; }
 function heldLiftFacts(key, idv, h) {
   let rec = null; try { rec = (accounts.list().accounts || []).find((a) => a && a.id === key) || null; } catch { rec = null; }
   let cache = null; try { cache = usageWrite.readCacheJson(usageWrite.cacheFileFor(USAGE_CACHE_DIR, key)); } catch { cache = null; }
-  return heldLiftFactsOf({ key, idv, h, sameAccountIds: releasedGroupIdsOf(key), rowCache: cache, rowEmail: rec && rec.email, loginOf: (n) => probeLog.loginOfAccount(n, { accounts }) });
+  return heldLiftFactsOf({ key, idv, h, sameAccountIds: rowOwnAccountIds(key), rowCache: cache, rowEmail: rec && rec.email, loginOf: (n) => probeLog.loginOfAccount(n, { accounts }) });
 }
 /** B-6a92 — A HELD ROW'S OWN READ IS ITS DOOR (r5, 主开发 r677 ruled in 1; r8: one pure verdict). The row says its own window is
  *  unknown «until its own read proves it»; the person's ⟳ on that row — or the approved automatic usage read on its own schedule
@@ -7529,7 +7536,20 @@ function heldLiftFacts(key, idv, h) {
 function liftHeldWindow(key, idv) {
   try {
     const h = heldWindowOf(key);
-    if (!h || !idv) return false;
+    if (!idv) return false;
+    // 2.369.423 (主开发 r5410 (A)) — IDENTITY AT EVERY PRESS, never a clock: with no row held, the press of a row whose own read
+    // answers as ANOTHER known row's login — outside the row's own account (rowOwnAccountIds, the one notion) and not the row's —
+    // is refused, nothing written, by the release's own words (signed-in-as). A twin of the row's own account (its group), a row
+    // with no identity on file (no key) and two seats of one organisation (the reply is the row's own address: proven first) are
+    // never refused by it — heldLiftVerdict's own order over every other known account as the names it judges
+    if (!h) {
+      let others = [];
+      try { others = ((accounts.list() || {}).accounts || []).map((a) => a && a.id).filter((id) => typeof id === 'string' && id && id !== key); } catch { others = []; }
+      if (key !== '__global__') others.push('__global__');   // the hub's own login (r7): judged like any other — never refused when it is the row's own account
+      if (!others.length) return false;
+      const v = readingLag.heldLiftVerdict(heldLiftFacts(key, idv, { names: others, phase: null, at: 0 }));
+      return v && v.act === 'refuse' && v.code === 'signed-in-as' ? v : false;
+    }
     const v = readingLag.heldLiftVerdict(heldLiftFacts(key, idv, h));
     const now = Date.now();
     if (v.act === 'lift') {
@@ -7544,7 +7564,6 @@ function liftHeldWindow(key, idv) {
       // was empty, the hold memory still holds), a failed put-back said once
       const raw0 = readApiWitnessFile(key);
       if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), { sevenDay, scoped, at: now, sessionId: null, source: 'own-panel', n: 1, ring: [], ringAt: now })) return { act: 'none' };
-      noteWitnessInstant(key, { sevenDay, at: now, source: 'own-panel' });   // B-6a92 (r2543): the witness follows the row's own read (a panel's: not compared, r2688)
       if (!windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, stamp, producer)) {
         const back = raw0 || { sevenDay: null, scoped: {}, at: h.at, sessionId: null, source: null, ring: [], foreign: { names: h.names.slice(), phase: h.phase, at: h.at } };
         if (!usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), back)) console.warn(`[usage] window hold: ${labelOf(key)}'s stamp could not be written and its witness could not be put back — the hold stands in memory only until the next start`);
@@ -10017,6 +10036,15 @@ function maybeStopOnFallback(session, id, from, to) {
  *  the engine's grouping and the door's table both run it. */
 function groupKeyOf({ accountId = null, cache = null, email = null, ownBe = null } = {}) {
   return (ownBe ? ownBe + ':' : '') + require('../usage-anchors.js').identityKeyFor({ accountId, cache, email });
+}
+/** B-6a92 (主开发 r5264, law 1) — THE ROW's OWN ACCOUNT, PURE over identityGroupsOf's answer: every member's ids of its own account
+ *  — its group, except the rows whose organisation and its own are both known and differ (a member's organisation: its cache's
+ *  `orgUuid`, else its landed record's `org`). → Map(id → [ids]) */
+function rowOwnOf(groups) {
+  const orgOf = (m) => { const c = m && m.cache && m.cache.orgUuid ? String(m.cache.orgUuid).toLowerCase() : null; const r = m && m.rec && m.rec.org ? String(m.rec.org).toLowerCase() : null; return c || r || null; };
+  const out = new Map();
+  for (const [, ms] of (groups || new Map())) for (const m of ms) { const om = orgOf(m); out.set(m.id, ms.filter((x) => { const ox = orgOf(x); return !(om && ox && om !== ox); }).map((x) => x.id)); }
+  return out;
 }
 /** B-87fd identity unit 4 (主开发 r3011) — THE ENGINE'S GROUPS, PURE over its members ({ id, accountId, today, rec, createdAt }):
  *  - two ROWS are one group iff their records are «same» (src/account-identity.js sameAccount: «different» and «unproven» stand

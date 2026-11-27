@@ -4,14 +4,15 @@
 // this pins the parse + the identity-group cache discipline that the server
 // wiring depends on. Real captured-sample shapes + the anti-poison fetchedAt
 // rule (a resetsAt-only event must not promote a stale file to "freshest").
-import './scratch.mjs';
+import { anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-const { parseRateLimitEvent, captureRateLimitEvent, lanesOf, lanesSnapshot } = require(REPO + '/src/rate-limit-capture.js');
+const { parseRateLimitEvent, captureRateLimitEvent, keepOwnIdentity, lanesOf, lanesSnapshot } = require(REPO + '/src/rate-limit-capture.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
@@ -405,6 +406,80 @@ fs.rmSync(dir, { recursive: true, force: true });
   ok(cap.length === 1 && /MODEL_CAP_TYPE = 'seven_day_overage_included'/.test(cap[0]), '⑩ …the parse spells it ONCE, as MODEL_CAP_TYPE (the window key reuses it)', JSON.stringify(cap));
   const tool = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-usage'), 'utf8');
   ok(!tool.includes('seven_day_overage_included') && /rl\.model_scoped/.test(tool), '⑩ the statusline twin never sees the type (2.1.274 ships the bucket NAMED, as rate_limits.model_scoped[]) and reads that list instead');
+}
+
+// ── B-6a92 (主开发 r5302, a must): A ROW's IDENTITY IS NEVER COPIED FROM A SIBLING THAT IS NOT ITS OWN ACCOUNT — at a rebuild from such a
+// sibling's base (outside `ownIds`, the engine's rowOwnAccountIds) the row's own identity fields stay as they are, present or absent; a
+// sibling of its own account, a row with no file yet and a caller with no `ownIds` inherit as today ──
+{
+  const idWorld = (capMod) => {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rle-id-'));
+    const rd = (id) => { try { return JSON.parse(fs.readFileSync(path.join(d2, id + '.json'), 'utf8')); } catch { return null; } };
+    const put = (id, o) => fs.writeFileSync(path.join(d2, id + '.json'), JSON.stringify(o));
+    const ev7 = parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.5, resetsAt: 1786999999 } });
+    const cap = (key, identityIds, ownIds, now) => capMod.captureRateLimitEvent({ cacheDir: d2, key, identityIds, ...(ownIds ? { ownIds } : {}), ev: ev7, now });
+    put('row-A', { fetchedAt: 100, source: 'cli-usage', sevenDay: { utilization: 0.2, resetsAt: 1786999999 }, orgUuid: 'org-a-0001' });   // its own account on file (invented)
+    put('row-B', { fetchedAt: 900, source: 'cli-usage', sevenDay: { utilization: 0.8, resetsAt: 1786999999 }, orgUuid: 'org-b-0001', email: 'mail-b-0001' });   // the FRESHER sibling, another account
+    cap('row-A', ['row-A', 'row-B'], ['row-A'], 2000);
+    put('row-C', { fetchedAt: 100, source: 'cli-usage', sevenDay: { utilization: 0.1, resetsAt: 1786999999 } });   // no identity of its own on its file
+    put('row-D', { fetchedAt: 900, source: 'cli-usage', sevenDay: { utilization: 0.7, resetsAt: 1786999999 }, orgUuid: 'org-d-0001' });
+    cap('row-C', ['row-C', 'row-D'], ['row-C'], 3000);
+    cap('row-E', ['row-E', 'row-D'], ['row-E'], 4000);   // a row with NO file yet
+    put('row-F', { fetchedAt: 100, source: 'cli-usage', sevenDay: { utilization: 0.1, resetsAt: 1786999999 } });   // a twin of ITS OWN account (one notion)
+    put('row-G', { fetchedAt: 900, source: 'cli-usage', sevenDay: { utilization: 0.6, resetsAt: 1786999999 }, orgUuid: 'org-g-0001' });
+    cap('row-F', ['row-F', 'row-G'], ['row-F', 'row-G'], 5000);
+    put('row-H', { fetchedAt: 100, source: 'cli-usage', sevenDay: { utilization: 0.1, resetsAt: 1786999999 }, orgUuid: 'org-h-0001' });
+    put('row-I', { fetchedAt: 900, source: 'cli-usage', sevenDay: { utilization: 0.6, resetsAt: 1786999999 }, orgUuid: 'org-i-0001' });
+    cap('row-H', ['row-H', 'row-I'], null, 6000);   // a caller that hands no ownIds
+    // r5326's should: a SPLIT group whose freshest file names NO organisation, inside the row's own set (a machine login: an org-less
+    // member counts inside every row's own set) — the row's own organisation stays; the same base in a group that is NOT split inherits
+    put('row-J', { fetchedAt: 100, source: 'cli-usage', sevenDay: { utilization: 0.1, resetsAt: 1786999999 }, orgUuid: 'org-j-0001' });
+    put('row-K', { fetchedAt: 900, source: 'cli-usage', sevenDay: { utilization: 0.6, resetsAt: 1786999999 }, email: 'mail-k-0001', orgEmail: 'mail-k-0001' });   // the org-less machine login
+    put('row-L', { fetchedAt: 500, source: 'cli-usage', sevenDay: { utilization: 0.6, resetsAt: 1786999999 } });   // the row the split keeps apart
+    cap('row-J', ['row-J', 'row-K', 'row-L'], ['row-J', 'row-K'], 7000);
+    put('row-M', { fetchedAt: 100, source: 'cli-usage', sevenDay: { utilization: 0.1, resetsAt: 1786999999 }, orgUuid: 'org-m-0001' });
+    put('row-N', { fetchedAt: 900, source: 'cli-usage', sevenDay: { utilization: 0.6, resetsAt: 1786999999 }, email: 'mail-n-0001' });
+    cap('row-M', ['row-M', 'row-N'], ['row-M', 'row-N'], 8000);   // not split: the release's rebuild
+    const out = { a: rd('row-A'), b: rd('row-B'), c: rd('row-C'), e: rd('row-E'), f: rd('row-F'), h: rd('row-H'), j: rd('row-J'), m: rd('row-M') };
+    fs.rmSync(d2, { recursive: true, force: true });
+    return out;
+  };
+  const w = idWorld({ captureRateLimitEvent });
+  ok(!!w.a && w.a.orgUuid === 'org-a-0001' && !('email' in w.a) && !!w.a.sevenDay && w.a.sevenDay.utilization === 0.5, 'B-6a92 (r5302): a row rebuilt from the FRESHER base of a sibling that is NOT its own account keeps its OWN identity (its organisation present, the address it never had absent) and takes the reading', JSON.stringify(w.a));
+  ok(!!w.c && !('orgUuid' in w.c), 'B-6a92 (r5302): …a file with no identity of its own GAINS none from such a sibling (absent stays absent)', JSON.stringify(w.c));
+  ok(!!w.e && w.e.orgUuid === 'org-d-0001', 'B-6a92 (r5302): …a row with NO file yet inherits its sibling\'s identity as today (BOUND 1\'s world)', JSON.stringify(w.e));
+  ok(!!w.f && w.f.orgUuid === 'org-g-0001', 'B-6a92 (r5302): …a twin of its OWN account inherits as today (the machine login\'s join, OTel\'s org→account and the machine-login link read it: nothing moves for a pool that is not the r6 shape)', JSON.stringify(w.f));
+  ok(!!w.h && w.h.orgUuid === 'org-i-0001', 'B-6a92 (r5302): …a caller that hands no ownIds rebuilds as today', JSON.stringify(w.h));
+  ok(!!w.b && w.b.orgUuid === 'org-b-0001' && w.b.email === 'mail-b-0001', 'B-6a92 (r5302): …and the sibling\'s own identity stands', JSON.stringify(w.b));
+  ok(!!w.j && w.j.orgUuid === 'org-j-0001' && !('email' in w.j) && !('orgEmail' in w.j) && !!w.j.sevenDay && w.j.sevenDay.utilization === 0.5, 'B-6a92 (r5326 should): in a SPLIT group the row whose organisation is known keeps it when the freshest base names none (an org-less machine login inside its own set) — and takes the reading', JSON.stringify(w.j));
+  ok(!!w.m && !('orgUuid' in w.m) && w.m.email === 'mail-n-0001', 'B-6a92 (r5326 should): …the same base in a group that is NOT split rebuilds as the release did (a twin of its own account)', JSON.stringify(w.m));
+  // THE ONE RULE, pure (r5326: one helper for both rebuild sites — this capture and the engine's limit banner)
+  {
+    const K = (cache, o) => { const c = { ...cache }; const r = keepOwnIdentity(c, o); return { r, c }; };
+    const own = { orgUuid: 'org-x-0001', email: 'mail-x-0001' }, sib = { orgUuid: 'org-y-0001', orgName: 'y' }, bare = { email: 'mail-z-0001' };
+    const k1 = K(sib, { ownFile: own, ownHad: true, base: sib, baseId: 'y', ownIds: ['x'], ids: ['x', 'y'] });
+    const k2 = K(bare, { ownFile: own, ownHad: true, base: bare, baseId: 'z', ownIds: ['x', 'z'], ids: ['x', 'y', 'z'] });
+    const k3 = K(bare, { ownFile: own, ownHad: true, base: bare, baseId: 'z', ownIds: ['x', 'z'], ids: ['x', 'z'] });
+    const k4 = K(sib, { ownFile: own, ownHad: false, base: sib, baseId: 'y', ownIds: ['x'], ids: ['x', 'y'] });
+    const k5 = K(sib, { ownFile: own, ownHad: true, base: sib, baseId: 'y', ownIds: null, ids: ['x', 'y'] });
+    ok(k1.r && k1.c.orgUuid === 'org-x-0001' && k1.c.email === 'mail-x-0001' && !('orgName' in k1.c)
+      && k2.r && k2.c.orgUuid === 'org-x-0001' && k2.c.email === 'mail-x-0001'
+      && !k3.r && !('orgUuid' in k3.c) && !k4.r && k4.c.orgUuid === 'org-y-0001' && !k5.r && k5.c.orgUuid === 'org-y-0001',
+      'B-6a92 (r5326) keepOwnIdentity, the ONE rule: kept for a base outside the own account and for an org-less base in a split group; as today when not split, with no file of its own, or with no ownIds', JSON.stringify({ k1, k2, k3, k4, k5 }));
+  }
+  // RED CONTROL: the capture as it was (the copy without the line): another account's identity lands on the row's file, a file with none gains one
+  const M = mutantCopies('rate-limit-capture-identity', REPO);
+  const SRC = fs.readFileSync(path.join(REPO, 'src/rate-limit-capture.js'), 'utf8');
+  const CALL = '    keepOwnIdentity(cache, { ownFile, ownHad, base, baseId, ownIds, ids });\n';
+  const Mx = require(M.write('src/rate-limit-capture.js', anchored(SRC, CALL, '', 'the identity copied from another account\'s sibling'), 'identity-copied'));
+  const wr = idWorld(Mx);
+  ok(!!wr.a && wr.a.orgUuid === 'org-b-0001' && wr.a.email === 'mail-b-0001' && !!wr.c && wr.c.orgUuid === 'org-d-0001', 'B-6a92 (r5302) RED CONTROL (the capture as it was at a2921f055: no rule): the row\'s file takes another account\'s organisation and address, and a file with none gains one — the legs above can fail', JSON.stringify({ a: wr.a, c: wr.c }));
+  // RED CONTROL (r5326's should): the rule as it was at af6c47b07 — only a base outside the own account — the org-less machine login's
+  // base takes the row's organisation off in a split group
+  const BCL = '  if (!outside && !(split && !!ownFile.orgUuid && !base.orgUuid)) return false;';
+  const My = require(M.write('src/rate-limit-capture.js', anchored(SRC, BCL, '  if (!outside) return false;', 'the org-less base in a split group'), 'identity-orgless-base'));
+  const wy = idWorld(My);
+  ok(!!wy.j && !('orgUuid' in wy.j) && wy.j.email === 'mail-k-0001' && !!wy.a && wy.a.orgUuid === 'org-a-0001', 'B-6a92 (r5326) RED CONTROL (the rule as it was at af6c47b07): the org-less base takes the row\'s organisation off in a split group (a base outside the own account still kept) — the should\'s leg can fail', JSON.stringify({ j: wy.j, a: wy.a }));
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

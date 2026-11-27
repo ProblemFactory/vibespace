@@ -1378,7 +1378,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   if (!ids && accounts) ids = accounts.filter((a) => a && a.id && oauthUsageAccount(a)).map((a) => a.id);
   ids = (ids || []).filter((k) => { const a = rec(k); return !a || oauthUsageAccount(a); });
   const nameOf = (k) => (rec(k) && rec(k).name) || k;
-  const report = { id, at: now, ms: 0, identities: [], counts: { evidence: 0, noEvidence: 0, stamped: 0, restamped: 0, confirmed: 0, kept: 0, replaced: 0, emptied: 0, stripped: 0, readmitted: 0, sameInstant: 0 } };
+  const report = { id, at: now, ms: 0, identities: [], counts: { evidence: 0, noEvidence: 0, stamped: 0, restamped: 0, confirmed: 0, kept: 0, replaced: 0, emptied: 0, stripped: 0, readmitted: 0 } };   // 2.369.423: the same-instant count is gone with its skips
   const archived = [];
   // 2.369.422 hotfix (主开发 r5407 / r5410): NO ROW IS SKIPPED BECAUSE ITS PHASE IS ANOTHER ACCOUNT'S INSTANT — the vendor states a
   // weekly reset on the hour, so two honest accounts share one; the repair seeds, restamps and confirms as it did at 2.369.418
@@ -1427,7 +1427,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     if (!apiwin || !(Number(apiwin.sevenDay) > 0) || weeklyNear(apiwin.sevenDay, api) === false) {
       // the live ring of candidates is carried (it is evidence the engine keeps, not a verdict)
       // …and a HOLD (B-6a92: the row's own window unknown, by the other account) is carried: nothing here is the row's own read
-      _writeAtomic(apiwinPath, JSON.stringify({ sevenDay: api, scoped: {}, at: now, sessionId: null, source: 'repair', n: ev.top.n, of: ev.total, ring: Array.isArray(apiwin && apiwin.ring) ? apiwin.ring : [], ...(apiwin && apiwin.foreign && typeof apiwin.foreign === 'object' ? { foreign: apiwin.foreign } : {}) }));
+      _writeAtomic(apiwinPath, JSON.stringify({ sevenDay: api, scoped: {}, at: now, sessionId: null, source: 'repair', n: ev.top.n, of: ev.total, ring: Array.isArray(apiwin && apiwin.ring) ? apiwin.ring : [] }));   // 2.369.423 (主开发 r5442's should): no hold is carried — nothing holds a row by a clock any more
       row.apiwin = apiwin ? 'restamped' : 'stamped';
     }
     // ② THE CACHE SNAPSHOT — what the roster row and the pool read

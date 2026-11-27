@@ -244,6 +244,28 @@ function lanesSnapshot(ev, { named = false } = {}) {
   return out;
 }
 
+/** B-6a92 (主开发 r5302): a usage-cache file's IDENTITY fields — never copied onto a file that exists from the base of a sibling that is not its own account */
+const IDENTITY_FIELDS = Object.freeze(['orgUuid', 'orgName', 'orgEmail', 'email']);
+/** B-6a92 (主开发 r5302 / r5326) — ONE RULE FOR EVERY REBUILD OF A ROW's FILE FROM A SIBLING's BASE: this capture and its twin, the
+ *  engine's limit banner (markLimitBannerNow) — the only two places in src/ that spread the freshest sibling's file as the base of
+ *  another row's write. The freshest sibling is chosen for its READINGS; the key's OWN file keeps its identity fields as they are,
+ *  present or absent, when
+ *   (a) the base is a sibling OUTSIDE the row's own account (`ownIds`: the engine's rowOwnAccountIds, the hold's one notion), or
+ *   (b) (r5326's should) the row's own organisation is known, the base names none and the group is SPLIT (`ids` holds a row outside
+ *       `ownIds`): a machine login whose file names no organisation counts inside every row's own set, so as the freshest base it
+ *       must not take the row's organisation off.
+ *  A key with no file yet (BOUND 1's world), a caller that hands no `ownIds` (the device) and every pool that is not split (a twin of
+ *  its own account) rebuild as the release did, byte for byte — the machine login's join, OTel's org→account and the machine-login
+ *  link read those fields. Mutates `cache`; → true when the row's own fields were kept */
+function keepOwnIdentity(cache, { ownFile = null, ownHad = false, base = null, baseId = null, ownIds = null, ids = null } = {}) {
+  if (!cache || !ownHad || !ownFile || !base || base === ownFile || !Array.isArray(ownIds)) return false;
+  const outside = !ownIds.includes(baseId);
+  const split = Array.isArray(ids) && ids.some((id) => !ownIds.includes(id));
+  if (!outside && !(split && !!ownFile.orgUuid && !base.orgUuid)) return false;
+  for (const f of IDENTITY_FIELDS) { if (Object.prototype.hasOwnProperty.call(ownFile, f)) cache[f] = ownFile[f]; else delete cache[f]; }
+  return true;
+}
+
 /**
  * Write one parsed event into the usage cache with the SAME identity-group
  * discipline markLimitBanner earned in 2.267.0 (anchor-poison root cause):
@@ -271,7 +293,7 @@ function lanesSnapshot(ev, { named = false } = {}) {
  * @returns {ok, dead, wroteReading} — dead=true when the bucket is exhausted
  *   (caller should treat it like a limit banner: immediate pool evaluation).
  */
-function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(), source = 'rate-limit-event', corroborated = undefined, familyOf = null, hint = null, producer = null }) {
+function captureRateLimitEvent({ cacheDir, key, identityIds, ownIds = null, ev, now = Date.now(), source = 'rate-limit-event', corroborated = undefined, familyOf = null, hint = null, producer = null }) {
   if (!ev || (ev.kind !== 'fiveHour' && ev.kind !== 'sevenDay' && ev.kind !== 'scoped')) {
     // unknown bucket types: surface, never silently drop (the api_retry lesson)
     return { ok: false, dead: false, wroteReading: false, unknownType: ev?.rawType || null };
@@ -410,11 +432,14 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   // the cached FUTURE one, and a set built from the raw event alone would
   // carry `resetsAt: null` and win the merge with it.
   try {
-    let base = null, baseAt = -1, ownFile = null;
+    let base = null, baseAt = -1, baseId = null, ownFile = null, ownHad = false;
     for (const id of ids) {
-      try { const c = usageWriteMod().readCacheJson(fileFor(id)) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch { }
+      try { const c0 = usageWriteMod().readCacheJson(fileFor(id)), c = c0 || {}; if (id === key) { ownFile = c; ownHad = !!c0; } if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; baseId = id; } } catch { }
     }
     const cache = applyTo(base ? { ...base } : {}, ownFile);
+    // B-6a92 (主开发 r5302 / r5326, a must) — A ROW's IDENTITY IS NEVER COPIED FROM A SIBLING THAT IS NOT ITS OWN ACCOUNT: keepOwnIdentity
+    // (above), the ONE rule this capture and the limit banner's write share. Readings, limits and the window bookkeeping as before
+    keepOwnIdentity(cache, { ownFile, ownHad, base, baseId, ownIds, ids });
     // The freshest SIBLING was chosen for its READINGS; its `limits` describe a
     // different account's window set, so they must not travel with it.
     delete cache.limits;
@@ -471,4 +496,4 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   }
 }
 
-module.exports = { parseRateLimitEvent, captureRateLimitEvent, resolveModelCapLane, lanesOf, lanesSnapshot, MODEL_CAP_TYPE };
+module.exports = { parseRateLimitEvent, captureRateLimitEvent, keepOwnIdentity, IDENTITY_FIELDS, resolveModelCapLane, lanesOf, lanesSnapshot, MODEL_CAP_TYPE };
