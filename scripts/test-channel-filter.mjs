@@ -11,9 +11,15 @@
 // ≤6 records, "(N older elided)", and a vendor body carrying our own frame
 // markers or heading coming out INERT.
 //
-// Clock hygiene: every instant is relative to `Date.now()` at start; nothing
-// pins a calendar date or a time of day (time-window legs build instants
-// from the day boundary of the SAME clock they test against).
+// Clock hygiene (主开发 r5373, lane bl-loop-a): every instant is relative to ONE
+// FIXED instant the suite names (NOW below: 2026-11-25 12:00 UTC — never the
+// machine's «today»); the time-window legs build their instants from NOW's own
+// day boundary. Until r5373 NOW was the machine's clock at the start: a run that
+// started in the first minute after 00:00 UTC put ⑱'s scene at 23:59 UTC, the
+// one minute its all-day window («arrives between 00:00 and 23:59») leaves out —
+// three lines red, in either zone (placed at will: the probe of the r5373 line).
+// A scene whose instant falls outside its window does not form: its legs say a
+// named SKIP (counted by the gate), never a red and never a pass.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -37,7 +43,7 @@ function editAnchor(text, from, to, file, mode = 'one') {
 const F = require(path.join(REPO, 'src/channel-filter.js'));
 const { makeRecord, carriesFrame } = require(path.join(REPO, 'src/channel-record.js'));
 
-const NOW = Date.now();
+const NOW = Date.parse('2026-11-25T12:00:00.000Z');   // r5373: the suite's ONE clock, a fixed instant it names (noon UTC: 04:00 in America/Los_Angeles)
 const J2 = (x) => JSON.stringify(x);
 const H = 3600e3, D = 24 * H;
 const rec = (i, over = {}) => makeRecord({
@@ -1078,6 +1084,10 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   ok(sys.kind === 'system' && sys.author.isSystem === true && !sys.author.id, 'setup: the notice is a system record (no author id)');
   const missing = F.RULE_KINDS.filter((k) => !RULE_FOR[k]);
   ok(!missing.length, `the census covers EVERY rule kind (${F.RULE_KINDS.length})`, missing.join(','));
+  // r5373: THE TIME SCENE's WITNESS — the scene's instant T inside the all-day window by the rule's own words («arrives between
+  // 00:00 and 23:59»: the end minute is outside), read from T alone; a scene that did not form is a named skip, never a red
+  const tMin = Math.floor(((T % D) + D) % D / 60e3), twFormed = tMin >= 0 && tMin < 23 * 60 + 59;
+  const twSkip = (what) => { if (!twFormed) console.log(`  ⊘ SKIP: ${what} — its time-window part NOT JUDGED: the scene did not form (T at minute ${tMin} of its UTC day, outside 00:00–23:59)`); };
   const sysHits = [], peerMiss = [];
   for (const k of F.RULE_KINDS) {
     const f = { rules: [RULE_FOR[k]] };
@@ -1085,7 +1095,8 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
     if (!F.matchRecord(f, peer, ctx).hit && !F.PLACE_RULE_KINDS.includes(k)) peerMiss.push(k);
   }
   ok(!sysHits.length, 'RULE_KINDS × a system record: NO kind hits it (no wake, no stash, no For-you)', sysHits.join(','));
-  ok(!peerMiss.length, 'non-vacuous: every word / sender / file / time rule hits the PEER twin with the same words', peerMiss.join(','));
+  twSkip('non-vacuous: the time rule hits the PEER twin');
+  ok(!peerMiss.filter((k) => twFormed || k !== 'time-window').length, `non-vacuous: every word / sender / file / time rule hits the PEER twin with the same words (the time scene ${twFormed ? `formed: T at minute ${tMin}` : 'did not form: its rule not judged'})`, peerMiss.join(','));
   ok(F.matchRecord({ match: 'every', rules: F.RULE_KINDS.filter((k) => !F.PLACE_RULE_KINDS.includes(k) && k !== 'sender-in-group' && k !== 'from-address').map((k) => RULE_FOR[k]) }, sys, ctx).hit === false, "match 'every' over the word rules: no hit either");
   ok(F.sentHit(sys, ctx) === null && F.PLACE_RULE_KINDS.every((k) => F.placeHit(RULE_FOR[k], sys, ctx) === null), 'sentHit / placeHit answer null for a notice before anything else');
   const est = F.estimate(null, [sys, peer], { days: 7, now: NOW });
@@ -1100,7 +1111,8 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   ok(FSRC.split(G1).length === 2 && FSRC.split(G2).length === 2, 'control setup: each guard is one line');
   const FX = M.load('src/channel-filter.js', editAnchor(editAnchor(FSRC, G1, '', "src/channel-filter.js"), G2, '', "src/channel-filter.js"), 'no-system-guard');
   const xHits = F.RULE_KINDS.filter((k) => FX.matchRecord({ rules: [RULE_FOR[k]] }, sys, ctx).hit);
-  ok(xHits.includes('keyword') && xHits.includes('not-contains') && xHits.includes('time-window'), 'CONTROL: a copy without the system guard lets the notice match (keyword / not-contains / time-window) — the census goes RED', xHits.join(','));
+  twSkip('CONTROL: a copy without the system guard lets the notice match by its time rule');
+  ok(xHits.includes('keyword') && xHits.includes('not-contains') && (!twFormed || xHits.includes('time-window')), 'CONTROL: a copy without the system guard lets the notice match (keyword / not-contains / time-window) — the census goes RED', xHits.join(','));
   // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): the account's unsent DRAFT is nobody's message either — the SAME census over a draft
   // carrying the peer twin's very words, mention, file and place (a draft sits in its thread): NO kind hits it (no wake, no stash, no
   // For-you, no judge), sentHit / placeHit / inferCandidate null, the estimate never counts it. CONTROL: a copy without the two draft
@@ -1116,7 +1128,8 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   ok(FSRC.split(DG1).length === 2 && FSRC.split(DG2).length === 2, 'control setup: each draft guard is one line');
   const FD = M.load('src/channel-filter.js', editAnchor(editAnchor(FSRC, DG1, '', "src/channel-filter.js"), DG2, '', "src/channel-filter.js"), 'no-draft-guard');
   const dHits = F.RULE_KINDS.filter((k) => FD.matchRecord({ rules: [RULE_FOR[k]] }, draft, dctx).hit);
-  ok(dHits.includes('keyword') && dHits.includes('mention') && dHits.includes('time-window'), 'CONTROL: a copy without the draft guards lets the draft match (keyword / mention / time-window) — the census goes RED', dHits.join(','));
+  twSkip('CONTROL: a copy without the draft guards lets the draft match by its time rule');
+  ok(dHits.includes('keyword') && dHits.includes('mention') && (!twFormed || dHits.includes('time-window')), 'CONTROL: a copy without the draft guards lets the draft match (keyword / mention / time-window) — the census goes RED', dHits.join(','));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
 
