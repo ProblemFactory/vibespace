@@ -714,6 +714,21 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
   const tmpOf = (dir, f) => path.join(dir, `${f}.${process.pid}.tmp`);
   // r1387 (8): wait on the EFFECT — the held list asks the desktops their read (the verdict starts), then the verdict's own promise
   const stopOf = async (H) => { await H.call('get', '/api/stores/held'); await H.R.layoutsStopJudged(); await settle(2); return (await H.call('get', '/api/stores/held')).body.stop; };
+  // r5536 (lane hub-loop-stalls — the placement of the hosted red of 2.369.423's second candidate, r1595 (6) {va: null, vb: null}): a
+  // scene's EARLIER run stays alive in this process with its start work still running — its read of the last run's mark (off the loop)
+  // and, after its own landing, the REMOVAL of that mark (oldMarkAfterLanding: an unlink on its mark chain), queued only when the loop
+  // turns. A mark the scene plants for the NEXT run before that work settles is removed by it whenever the removal beats the next run's
+  // own read of the mark (a slow pool: the hosted runner at load 8): the next start reads «absent», the start after it too. A real
+  // earlier run is gone before the next run's facts exist, so the scene WAITS ON THAT FACT — the earlier run's verdict, then its mark
+  // chain — under a counted ceiling, red by its own line. No law's number moves
+  const SETTLE_CEIL_MS = 10000;
+  const settledRun = async (H, what) => {
+    const t0 = Date.now(); let tm = null;
+    const done = await Promise.race([(async () => { await H.R.layoutsStopJudged(); await H.R.layoutsMarkSettled(); return true; })(), new Promise((r) => { tm = ST(() => r(false), SETTLE_CEIL_MS); })]);
+    clearTimeout(tm);
+    if (!done) ok(false, `${what}: the earlier run's start work (its verdict, then its mark chain) settles within ${SETTLE_CEIL_MS / 1000} s, before the next run's mark is planted — it did not (${Date.now() - t0} ms)`);
+    return H;
+  };
   /** a run that reads, changes and lands, then (owe) a change the storage refuses — the mark written (or not: markFails) — and a stop
    *  that cannot land; else a clean stop (clean) or none (a kill) */
   const runOne = async (dir, { owe = false, markFails = false, clean = false, src = null } = {}) => {
@@ -1001,7 +1016,7 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     ok(!!markB && !!markB.base && markB.base.run === stampA.run && markB.base.seq === stampA.seq && stampA.stop === true && !!vC && vC.kind === 'known' && vC.cause === 'refused',
       '(3) a run whose EVERY desktops write was refused (the mark lands, the file keeps the older run\'s CLEAN stamp): the mark names that stamp as its base ⇒ the next start says KNOWN — never «all saved»', J({ markB, stampA, vC }));
     // a stale mark (its base no longer the file's stamp) stays silent
-    const d2 = scratch(); await runOne(d2, { clean: true });
+    const d2 = scratch(); await settledRun(await runOne(d2, { clean: true }), '(3) the stale mark');   // r5536: else «silent» may be the earlier run's removal
     fs.writeFileSync(path.join(d2, 'layouts.owed.json'), J({ run: 'old', seq: 2, since: 1, base: { run: 'gone-run', seq: 7 }, code: 'EIO' }));
     const D = hub(d2); still(() => D.R.readLayouts());
     ok((await stopOf(D)) === null, '…and a mark whose base is no longer the file\'s own stamp (a later run landed over it) stays SILENT');
@@ -1012,7 +1027,7 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
   }
   // (6) the KNOWN words by cause: a mark whose code says «queued» is told «not reached the disk in time», never «refused»
   {
-    const d = scratch(); await runOne(d, { clean: true });
+    const d = scratch(); await settledRun(await runOne(d, { clean: true }), '(6)');   // r5536
     const st = PZ.stampOfRead(JSON.parse(fs.readFileSync(path.join(d, 'layouts.json'), 'utf8')), fs.readFileSync(path.join(d, 'layouts.json'), 'utf8')).stamp;
     fs.writeFileSync(path.join(d, 'layouts.owed.json'), J({ run: 'x', seq: 9, since: 1, base: { run: st.run, seq: st.seq }, code: 'queued' }));
     const H = hub(d); still(() => H.R.readLayouts());
@@ -1021,20 +1036,30 @@ console.log('§9 B-225b\'s remainder: the rollback points\' failed save is said;
     ok(!!v && v.cause === 'late' && /had not reached the disk in time/.test(words) && !/refused/.test(words) && /⚙ → System → Restore a previous layout…/.test(words),
       '(6) a write only LATE at the stop is told «had not reached the disk in time» (never «refused»), and the words say WHERE the earlier layouts are (⚙ → System → Restore a previous layout…)', words);
     // r1595 (6), the MUST: THE CARRIED ROAD keeps the cause — nobody presses «Understood», a clean stop, a second restart: still «late»
-    const cc = async (src) => {
-      const dd = scratch(); await runOne(dd, { clean: true });
+    // r5536: the earlier run settles BEFORE the mark is planted (the fact waited on); `earlierLate` = the hosted order, at will: it
+    // settles AFTER the plant, before the next start reads (`gone`: its removal took the planted mark — the placement's witness)
+    const cc = async (src, { earlierLate = false } = {}) => {
+      const dd = scratch(); const H0 = await runOne(dd, { clean: true });
+      if (!earlierLate) await settledRun(H0, 'r1595 (6) the carried road');
       const t0 = fs.readFileSync(path.join(dd, 'layouts.json'), 'utf8'), s0 = PZ.stampOfRead(JSON.parse(t0), t0).stamp;
       fs.writeFileSync(path.join(dd, 'layouts.owed.json'), J({ run: 'x', seq: 9, since: 1, base: { run: s0.run, seq: s0.seq }, code: 'queued' }));
+      let gone = null;
+      if (earlierLate) { await settledRun(H0, 'r5536 the placement'); gone = !fs.existsSync(path.join(dd, 'layouts.owed.json')); }
       const A = hub(dd, src); still(() => A.R.readLayouts()); const va = await stopOf(A);
       still(() => A.R.flushLayouts({ stop: true }));   // a clean stop; nobody pressed «Understood»
       const B = hub(dd); still(() => B.R.readLayouts());
-      return { va, vb: await stopOf(B) };
+      return { va, vb: await stopOf(B), ...(earlierLate ? { gone } : {}) };
     };
     const C1 = await cc(null);
     ok(!!C1.va && C1.va.cause === 'late' && !!C1.vb && C1.vb.kind === 'known' && C1.vb.cause === 'late' && !/refused/.test(U.storeStopWords(C1.vb, '')),
       'r1595 (6), THE CARRIED ROAD: a write only LATE, nobody pressing «Understood», a clean stop, a second restart — still told «had not reached the disk in time», never «refused»', J(C1));
     const C1x = await cc(cut('carried-cause-dropped', 'savedAt: _stopFact.savedAt, cause: _stopFact.cause }', 'savedAt: _stopFact.savedAt }'));   // stale-pins: kept (the red control puts the line as taken back)
     ok(!!C1x.vb && C1x.vb.cause === 'refused', 'CONTROL (the carried fact without its cause, in a copy — the line as taken): the second restart tells the late write «refused» — red', J(C1x.vb));
+    // r5536's PLACEMENT, at will (no load): the hosted order — the earlier run's start work settles AFTER the planted mark — removes it
+    // (witnessed: `gone`), and both starts read NO verdict: the hosted red's two empty values, by name
+    const C1p = await cc(null, { earlierLate: true });
+    ok(C1p.gone === true && C1p.va === null && C1p.vb === null,
+      'PLACEMENT r5536 (the earlier run\'s start work settling after the planted mark — the hosted order, at will): its removal takes the mark, and both starts read no verdict ({"va":null,"vb":null}, the hosted red\'s values) — red by name', J(C1p));
   }
   // (7) a mark that cannot be READ is «unknown» (the journal), never «may not» by itself; a landing before the verdict never removes it
   {
