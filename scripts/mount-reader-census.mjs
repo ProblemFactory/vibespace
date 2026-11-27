@@ -247,7 +247,7 @@ export const ROWS = [
   ['src/said-journal.js', 'own-tree', 1, null, 'B-cd4b (the wrapper\'s hold): the chat WRAPPER appends a said line to its own data/session-buffers/<id>.buf (its own process); the hub reads nothing through it'],
   ['src/kept-copies.js', 'own-tree', 5, null, 'lane claude-steer-inject r6: a claude restart copy\'s kept pictures in data/session-buffers/<id>.img — the WRAPPER writes them (writeKept / capDir: its own process); the restore preloads them async (fs.promises stat + readFile, ≤ 32 MB a file, 3 s in all) — the instance\'s own tree, the folder derived from the session id, never a record\'s path'],
   ['src/sessions-assemble.js', 'user-path', 1, 'DOOR\\.blocked\\(', 'B-891e: a session cwd realpath (sync — in the sessions sweep worker; on the main thread only in its inline fallback): null, not cached'],
-  ['src/slot-transitions.js', 'own-tree', 5, null, `${DATA}; B-f276 slot-ledger-gap +3: the held ledger reads itself again OFF the loop (the archive folder\'s list, each shard and the live file, fs.promises)`],   // B-574d «usage-readings» (主开发 r5072) +1: the trim's archive shard opened for its synced append
+  ['src/slot-transitions.js', 'own-tree', 8, null, `${DATA}; B-f276 slot-ledger-gap +3: the held ledger reads itself again OFF the loop (the archive folder\'s list, each shard and the live file, fs.promises)`],   // B-574d «usage-readings» (主开发 r5072) +1: the trim's archive shard opened for its synced append
   ['src/sock-path.js', 'own-tree', 4, null, DATA],
   ['src/ssh-key.js', 'own-tree', 1, null, DATA],
   ['src/sync-store.js', 'own-tree', 2, null, DATA],
