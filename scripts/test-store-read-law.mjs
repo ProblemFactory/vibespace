@@ -630,6 +630,7 @@ console.log('§2c the legacy mount stores (host-mounts.json, device-mounts.json 
   // name until a start's verified save), the mark kept for that start
   const C = await migrating(MM, 'legacy-c');
   const lifted = holdsOf(C.M).length ? await holdsOf(C.M)[0].again() : false;
+  try { require(path.join(ROOT, 'src/store-writer.js')).storeWriter().flushSync([path.join(C.d, 'machine-mounts.json')]); } catch { }   // the lift's save is the store writer's (B-574d «mounts-and-forwards», r4796): the file is read once it LANDED (the writer's own door, never a sleep) — the train's r4985 leg meeting lane nl-mounts' chain
   const savedC = savedOf(C.d);
   ok(lifted === true && ids(C.M) === 'mm-0101,mm-0201' && C.hmStands && stands(C.d, 'host-mounts.json') && !!savedC && savedC.legacyOwed === true && savedC.mounts.some((m) => m.id === 'mm-0101'),
     '(c) A LIFT MID-LIFE: host-mounts.json read again off the loop — its push record listed at once and saved, the file STILL under its own name (nothing renamed while the ingest is not a start\'s), the mark kept', { lifted, listed: ids(C.M), saved: savedC && { owed: savedC.legacyOwed, ids: (savedC.mounts || []).map((m) => m.id) } });
