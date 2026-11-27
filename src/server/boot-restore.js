@@ -716,7 +716,21 @@ const RETIRE_POLL_MS = Math.min(100, Math.max(10, Math.round(RETIRE_WAIT_MS / 20
 const retireSaid = new Set();
 async function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = runChildP, adopted = null, recheck = false, onUnadopt = null, card = null) {   // card: the card's words for ⚙ Diagnostics (its reader's find: a socket file name is no card a person can find)   // recheck: a LOCAL member's program read again; onUnadopt: the re-probe's unadopt of `adopted`, run only once every check passed   // run: the re-probe hands its starter's runner; adopted: the re-probe's own (already unadopted) session of it
   console.log(`  ⤫ Duplicate of ${claudeSessionId} — retiring stale ${sockFile}`);
-  const leave = (why) => { if (!retireSaid.has(sockFile)) { retireSaid.add(sockFile); const line = `${sockFile}: not retired — ${why}; the socket and its files left as they are (no stronger signal on this road; the next start judges again)`; console.warn(`[boot-restore] ${line}`); try { note(card ? `${card} (${sockFile}): not retired — ${why}; nothing more is done to it on this road, the next start judges again` : line); } catch { } } return { retired: false, why }; };   // said once — in ⚙ Diagnostics too (its reader's find)
+  let touched = false;   // set at the first touch: after it, a leave on the re-probe's road has no card left to keep
+  const leave = (why) => {
+    if (!retireSaid.has(sockFile)) {
+      retireSaid.add(sockFile);
+      const line = `${sockFile}: not retired — ${why}; the socket and its files left as they are (no stronger signal on this road; the next start judges again)`;
+      console.warn(`[boot-restore] ${line}`);
+      // said once — in ⚙ Diagnostics too, by the card's words (its reader's find); a leave AFTER the first touch says the card is gone and what stays
+      const head = card ? `${card} (${sockFile}): not retired — ${why}` : `${sockFile}: not retired — ${why}`;
+      const words = touched && adopted
+        ? `${head}; its card is already gone (its program was proven ended before the first touch); the socket and what still holds it stay until the next start judges again`
+        : card ? `${head}; nothing more is done to it on this road, the next start judges again` : line;
+      try { note(words); } catch { }
+    }
+    return { retired: false, why };
+  };
   // (c) the kernel's word, waited for at most the bound — a number with no birth is WATCHED (proved gone), never signalled
   const waitGone = async (held, watched = []) => {
     const left = async () => { const out = []; for (const h of held) if (!(await heldGone(h.ident))) out.push(h.what); for (const w of watched) if (!(await procGone(w.pid))) out.push(w.what); return out; };
@@ -767,6 +781,7 @@ async function retireDuplicate(sockFile, socketPath, id, claudeSessionId, run = 
     // restart landing there is seen): a LOCAL member's program (programOf — a child ended beside a wrapper that has a living child reads
     // unknown) no longer proven ended ⇒ LEFT, nothing of it touched, its card kept
     if (recheck) { const p = await programOf(id, socketPath); if (p !== 'dead') return leave(`its program is no longer proven ended at the retire (${p})`); }
+    touched = true;   // THE FIRST TOUCH: from here a leave keeps no card (its program proven ended just above)
     if (adopted) {   // the hub's own attach of it: its session unadopted FIRST (the re-probe hands that step in), then ended by its own handle
       if (onUnadopt) { try { onUnadopt(); } catch { } }
       if (adopted.pty) { try { adopted.pty.kill(); } catch { } }

@@ -17,7 +17,10 @@
 //      masters, bounded, off the loop, nothing signalled at its bound (r5367 (2); RED: a copy that signals it); a wrapper birth that is not
 //      `same` LEAVES everything (RED: the step-2 reading); the decision READ AGAIN at the retire (RED: a copy without it); fuser's exit 1
 //      WITH words, its exit 2, an unreadable holder's birth, no /proc, an EMFILE that is not ENOENT — each LEAVES (REDs: exit 1 read as
-//      nobody, exit 2 read as nobody, any failure read as gone); the hub's own attach ended AFTER its unadopt (RED: the kill first); two
+//      nobody, exit 2 read as nobody, any failure read as gone); the hub's own attach ended AFTER its unadopt (RED: the kill first); the
+//      follow (r5494): leg ①'s reds read from RUNNING copies; computed reds for the silent exit (driven through runChild's road too), the
+//      socket already gone and the unreadable record; the groups-only pass clears what it answered (two REDs); a leave after the first
+//      touch says its card is gone; two
 //      unnamed cards told apart by their harness and start, never a path.
 // The legs signal only their own children (a grandchild — a wrapper's stand-in CLI — only while its recorded birth reads `same`).
 import fs from 'node:fs';
@@ -56,6 +59,9 @@ const env0 = (() => { const e = { ...process.env }; for (const k of Object.keys(
 const STANDIN = [process.execPath, ['-e', 'setInterval(() => { }, 1e5)', 'vs-births-standin']];
 const recOf = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const verdict = (pid, start, boot) => PIt.tokenVerdict(Number(pid), typeof start === 'string' ? start : '', typeof boot === 'string' ? boot : '');
+const kidsOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).map(Number).filter((n) => n > 1); } catch { return []; } };
+// a grandchild is kept for the exit sweep only while the kernel lists it as a child of a process this suite HOLDS — its birth read then (the round's should, K7)
+const holdGrandkid = (holder, pid) => { if (holder && kidsOf(holder.pid).includes(Number(pid))) grandkids.push([Number(pid), PIt.startToken(Number(pid)), PIt.bootToken()]); };
 
 try {
   console.log('① THE FOUR WRAPPERS KEEP THEIR OWN BIRTH AND THEIR CHILD\'S, beside each pid, in the write that already carries it');
@@ -75,20 +81,22 @@ try {
   };
   const greens = WRAPPERS.map((w, i) => ({ w, ...run(path.join(REPO, w.file), w, `g${i}`) }));
   const reds = WRAPPERS.map((w, i) => ({ w, ...run(M.write(w.file, editAnchor(read(w.file), BIRTH_LINE, NO_BIRTH, w.file), `no-birth-${i}`), w, `r${i}`) }));
-  await until(() => [...greens, ...reds].every((x) => { const r = recOf(x.meta); return r && Number(r.childPid) > 1; }), 8000);
+  const started = await until(() => [...greens, ...reds].every((x) => { const r = recOf(x.meta); return r && Number(r.childPid) > 1; }), 8000);
+  ok(started === true, 'every copy STARTED and wrote its record naming a child (green and red alike — a red is read from a running copy)');
   const shapes = {};
   for (const g of greens) {
     const r = recOf(g.meta) || {};
-    if (r.childPid) grandkids.push([Number(r.childPid), r.childStart, r.childBoot]);
+    holdGrandkid(g.k, r.childPid);
     shapes[g.w.file] = Object.keys(r);
     ok(r.pid === g.k.pid && verdict(r.pid, r.pidStart, r.pidBoot) === 'same' && Number(r.childPid) > 1 && verdict(r.childPid, r.childStart, r.childBoot) === 'same',
       `${g.w.file}: its record names its own pid with a birth that reads \`same\` for it, and its child's pid with ITS birth (\`same\`) — the hub can prove both by one clock`, { rec: { pid: r.pid, pidStart: r.pidStart, childPid: r.childPid, childStart: r.childStart }, wrapper: g.k.pid });
   }
   for (const x of reds) {
     const r = recOf(x.meta) || {};
-    if (r.childPid) grandkids.push([Number(r.childPid), PIt.startToken(Number(r.childPid)), PIt.bootToken()]);   // ours: started by a wrapper we started, its birth read now
-    ok(!r.pidStart && !r.childStart && verdict(r.pid, r.pidStart, r.pidBoot) === 'unknown-identity' && verdict(r.childPid, r.childStart, r.childBoot) === 'unknown-identity',
-      `RED (${x.w.file}): a copy with the release's record keeps no birth — its pid and its child's read \`unknown-identity\` (never signalled)`, { pidStart: r.pidStart, childStart: r.childStart });
+    const running = r.pid === x.k.pid && x.k.exitCode === null && x.k.signalCode === null && Number(r.childPid) > 1 && kidsOf(x.k.pid).includes(Number(r.childPid));   // its OWN number, and a child the kernel lists as its own
+    holdGrandkid(x.k, r.childPid);
+    ok(running && !r.pidStart && !r.childStart && verdict(r.pid, r.pidStart, r.pidBoot) === 'unknown-identity' && verdict(r.childPid, r.childStart, r.childBoot) === 'unknown-identity',
+      `RED (${x.w.file}): a RUNNING copy with the release's record — its own pid and a child of its own named — keeps no birth: both read \`unknown-identity\` (never signalled)`, { running, pid: r.pid, wrapper: x.k.pid, childPid: r.childPid, pidStart: r.pidStart, childStart: r.childStart });
   }
   for (const x of [...greens, ...reds]) { try { x.k.kill('SIGTERM'); } catch { } }
 
@@ -102,15 +110,15 @@ try {
         env: { ...env0, HOME: d, AGY_WEBUI_CWD: d, AGY_WEBUI_BACKEND: 'antigravity', AGY_WEBUI_AUTH_GRACE_MS: '400', AGY_STUB_SLOW_MS: String(TURN_MS), AGY_STUB_EXIT_DELAY_MS: String(STALL_MS), AGY_STUB_LOG: path.join(d, 'stub.log') } });
       kids.push(k);
       await until(() => { const r = recOf(meta); return r && Number(r.childPid) > 1 && r.childStart; }, 8000);
-      { const r0 = recOf(meta) || {}; grandkids.push([Number(r0.childPid), r0.childStart, r0.childBoot]); }
+      { const r0 = recOf(meta) || {}; holdGrandkid(k, r0.childPid); }
       k.stdin.write(JSON.stringify({ type: 'chat-input', text: 'run the slow driver', msgId: 'u-slow' }) + '\n');   // a dispatched turn that ends (600 ms): the old child's EOF exit then waits 800 ms
       await until(() => fs.existsSync(path.join(d, 'stub.log')) && /slow driver/.test(fs.readFileSync(path.join(d, 'stub.log'), 'utf8')), 5000);   // the turn reached a child
       // THE child that holds the turn (the wrapper may have started another than its first by now): read from its record once it names a
       // living child by its own birth — that is the process the Stop's restart must end before the next one starts
-      await until(() => { const r = recOf(meta); return r && alive(Number(r.childPid)) && verdict(r.childPid, r.childStart, r.childBoot) === 'same'; }, 3000);
-      await sleep(250);   // past the record's 200 ms debounce: the record names the turn's child
+      // …proven, not waited for: the record names the child the kernel lists as the wrapper's own NOW (the round's should: no settle)
+      await until(() => { const r = recOf(meta); return r && kidsOf(k.pid).includes(Number(r.childPid)) && verdict(r.childPid, r.childStart, r.childBoot) === 'same'; }, 3000);
       const old = recOf(meta) || {};
-      grandkids.push([Number(old.childPid), old.childStart, old.childBoot]);
+      holdGrandkid(k, old.childPid);
       const t0 = Date.now();
       k.stdin.write(JSON.stringify({ type: 'interrupt' }) + '\n');   // the person's Stop: the old child's stdin is closed (the forward); it ends its turn, then stalls 800 ms
       const inWindow = [];
@@ -123,7 +131,7 @@ try {
         await sleep(25);
       }
       const now = recOf(meta) || {};
-      if (now.childPid) grandkids.push([Number(now.childPid), now.childStart, now.childBoot]);
+      holdGrandkid(k, now.childPid);
       try { k.kill('SIGTERM'); } catch { }
       return { old, now, inWindow, exitAt, t0 };
     };
@@ -242,7 +250,7 @@ try {
     const boot = async (p, between = null, after = null) => { console.log = () => { }; try { await p.X.api.probeSockets(); if (between) await between(); p.X.api.restoreSessions(); if (after) after(); } finally { console.log = log0; } };
     // a side file's reads from the Nth on answer `rec` (a string, or a function that throws): the probe's read is the first, the pair's
     // decision on the re-probe's road the second, the retire's record read the third, its recheck (right before the first touch) the fourth
-    const reads = (side, from, rec) => { const n = { k: 0 }, rf0 = fs.promises.readFile; fs.promises.readFile = async (f, ...r) => { if (f === side && ++n.k >= from) return typeof rec === 'function' ? rec() : rec; return rf0.call(fs.promises, f, ...r); }; return () => { fs.promises.readFile = rf0; return n.k; }; };
+    const reads = (side, from, rec, upto = Infinity) => { const n = { k: 0 }, rf0 = fs.promises.readFile; fs.promises.readFile = async (f, ...r) => { if (f === side && ++n.k >= from && n.k <= upto) return typeof rec === 'function' ? rec() : rec; return rf0.call(fs.promises, f, ...r); }; return () => { fs.promises.readFile = rf0; return n.k; }; };
     const childRec = (v) => ({ childPid: v.pid, childStart: birth(v.pid).start, childBoot: birth(v.pid).boot });
     const wrapRec = (v) => ({ pid: v.pid, pidStart: birth(v.pid).start, pidBoot: birth(v.pid).boot });
     const ended = () => ({ childPid: freshGone(), childStart: 'l1', childBoot: PIt.bootToken() });   // a birth that is not its own: proven ended
@@ -334,8 +342,8 @@ try {
     } finally { fs.promises.access = access0; }
     // (i) A CHILD PROVEN ENDED BESIDE A WRAPPER THAT HAS A LIVING CHILD (agy's restart: the new child spawned, its record not yet written):
     // its program started again — NOT ended: the pair kept, asked again, nothing signalled. RED: a copy that reads the dead child alone
-    const childrenOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).map(Number).filter((n) => n > 1); } catch { return []; } };
-    const withKid = async () => { const v = spawn('sh', ['-c', 'sleep 60 & wait'], { stdio: 'ignore' }); kids.push(v); await until(() => childrenOf(v.pid).length > 0, 3000); for (const p of childrenOf(v.pid)) grandkids.push([p, PIt.startToken(p), PIt.bootToken()]); return v; };
+    const childrenOf = kidsOf;
+    const withKid = async () => { const v = spawn('sh', ['-c', 'sleep 60 & wait'], { stdio: 'ignore' }); kids.push(v); await until(() => childrenOf(v.pid).length > 0, 3000); for (const p of childrenOf(v.pid)) holdGrandkid(v, p); return v; };
     const wk = await withKid(), mi = master();
     const i1 = pair(BR, { ...wrapRec(wk), ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
     await boot(i1); await sleep(100);
@@ -363,6 +371,58 @@ try {
     const undoL = reads(l1.o.side, 3, () => { const e = new Error('EMFILE: too many open files'); e.code = 'EMFILE'; throw e; });
     try { await boot(l1); await until(() => said(l1.o.sock).length > 0, 3000); } finally { undoL(); }
     ok(said(l1.o.sock).length === 1 && /its record could not be read \(EMFILE\)/.test(said(l1.o.sock)[0]) && termsTo(ml.pid) === 0 && l1.X.activeSessions.has(l1.o.id), 'a record that cannot be read at the retire (EMFILE): LEFT — no master signalled while a wrapper may be unseen, its card kept, said once', said(l1.o.sock));
+    // (j2) THE SILENT EXIT DRIVEN THROUGH runChild's ROAD (the start-time retire of a REMOTE pair's older transport, L4): nobody — retired, the
+    // newer kept. RED: a retire that reads runChild's `err` (execFile's «Command failed») as the program's words leaves a socket nobody holds
+    const remotePair = (BRm) => { const n = 100 + (seq += 2), X = instance(BRm, path.join(ROOT, 'r' + n)), cid = `5f0c2a8e-7d41-4b9a-9e36-0c1d2b3b0${n}`;
+      const o = X.add(n, { claudeSessionId: cid, name: 'remote older', host: 'h-test' }, {}), w = X.add(n + 1, { claudeSessionId: cid, name: 'remote newer', host: 'h-test' }, {}); return { X, o, w }; };
+    const j2 = remotePair(BR);
+    await boot(j2, async () => { mode(`fuser-${j2.o.sock}`, 'dead'); }); await until(() => !fs.existsSync(j2.o.meta), 3000);
+    ok(!fs.existsSync(j2.o.sockPath) && !fs.existsSync(j2.o.meta) && fs.existsSync(j2.w.sockPath) && !said(j2.o.sock).length, 'a REMOTE pair\'s older transport at the start (runChild\'s road): fuser\'s SILENT exit 1 = nobody — retired, the newer kept');
+    const ERR_AS_WORDS = copy("      const said = String(typeof f.stderr === 'string' ? f.stderr : f.err || '').trim();", "      const said = String(f.err || '').trim();   // RED: execFile's «Command failed» read as the program's words", 'err-as-words');
+    const j3 = remotePair(ERR_AS_WORDS);
+    await boot(j3, async () => { mode(`fuser-${j3.o.sock}`, 'dead'); }); await until(() => said(j3.o.sock).length > 0, 3000);
+    ok(fs.existsSync(j3.o.sockPath) && said(j3.o.sock).length === 1 && /Command failed/.test(said(j3.o.sock)[0]), 'RED: a retire that reads runChild\'s `err` as the program\'s words leaves a socket nobody holds — its «Command failed» taken for an answer', said(j3.o.sock));
+    // (k2) RED for (k): a retire that never asks whether the socket is gone leaves the files and meta of a socket its master already removed
+    const NO_GONE_CHECK = copy('      if (said && !(await pathGone(socketPath))) return leave(', '      if (said) return leave(', 'no-gone-check');
+    const k2 = pair(NO_GONE_CHECK, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
+    await boot(k2, async () => { mode(`fuser-${k2.o.sock}`, 'blind'); }, () => { fs.unlinkSync(k2.o.sockPath); });
+    await until(() => said(k2.o.sock).length > 0, 3000);
+    ok(fs.existsSync(k2.o.meta) && said(k2.o.sock).length === 1, 'RED: a retire that never asks whether the socket is gone leaves its meta and files ORPHANED (its master had removed the socket)', said(k2.o.sock));
+    // (l2) RED for (l): the release's read of the record (a bare catch) goes on past an unreadable record and SIGTERMs the master — the
+    // read fails ONCE (a transient EMFILE, a torn write): the decision read again just after it reads the record whole, so only the
+    // ENOENT-only catch stands between the unseen wrapper and the master's signal (failing every read, (b1)'s re-read leaves first)
+    const RELEASE_CATCH = copy("    catch (e) { if (!(e && e.code === 'ENOENT')) return leave(`its record could not be read (${(e && (e.code || e.name)) || 'unreadable'})`); }", '    catch { }   /* RED: the release\'s read */', 'release-catch');
+    const ml2 = master();
+    const l2 = pair(RELEASE_CATCH, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
+    const undoL2 = reads(l2.o.side, 3, () => { const e = new Error('EMFILE: too many open files'); e.code = 'EMFILE'; throw e; }, 3);
+    try { await boot(l2); await until(() => termsTo(ml2.pid) > 0, 3000); } finally { undoL2(); }
+    ok(termsTo(ml2.pid) === 1, 'RED: the release\'s bare catch reads an unreadable record as «no wrapper» and SIGTERMs the master while a wrapper may be unseen');
+    // (m2) THE GROUPS-ONLY PASS CLEARS WHAT IT ANSWERED: after a deferred pair's retire the surviving member is out of the pending list, and the
+    // start's «no answer» line names none of the pair. REDs: a pass that keeps what it answered; a line that counts the deferred members
+    const n3check = async (BRm) => {
+      master();
+      const p = pair(BRm, { ...ended() }, { ...wrapRec(live()), ...childRec(live()) });
+      await boot(p); await until(() => !fs.existsSync(p.o.meta), 3000); await until(() => !p.X.api.probePending().has(p.w.sock), 1000);
+      return { pending: p.X.api.probePending().has(p.w.sock), line: p.X.notes.some((l) => /adopted probe-pending — no answer/.test(l)), retired: !fs.existsSync(p.o.meta) };
+    };
+    const m3 = await n3check(BR);
+    ok(m3.retired && !m3.pending && !m3.line, 'the groups-only pass clears what it answered: the surviving member is out of the pending list, and the start\'s «no answer» line names none of the pair', m3);
+    const KEEPS = copy('  if (onlyKeys) { for (const [sockFile, p] of [...pendingProbes]) if (!p.q.size) pendingProbes.delete(sockFile); return tally; }', '  if (onlyKeys) return tally;   /* RED: what it answered kept */', 'keeps-answered');
+    const m4 = await n3check(KEEPS);
+    ok(m4.retired && m4.pending, 'RED: a pass that keeps what it answered leaves the surviving member pending — the next ladder pass counts it «alive», never unanswered', m4);
+    const ASKED_ALL = copy('    const asked = [...pendingProbes].filter(([sockFile]) => !deferredSocks.has(sockFile));', '    const asked = [...pendingProbes];   /* RED */', 'asked-all');
+    const m5 = await n3check(ASKED_ALL);
+    ok(m5.line, 'RED: a start line that counts the deferred members says «no answer» of sockets that were answered', m5);
+    // (n) A LEAVE AFTER THE FIRST TOUCH (a wrapper, by its birth, deaf to its SIGTERM): its card is ALREADY gone — said so in Diagnostics, with what stays
+    const lvN = live(), wsN = stubborn(); master();
+    const n2 = pair(BR, { childPid: lvN.pid }, { ...wrapRec(live()), ...childRec(live()) });   // the older's number still there: undecided at the start
+    await boot(n2);
+    fs.writeFileSync(n2.o.side, JSON.stringify({ mode: 'terminal', ...wrapRec(wsN), ...ended() }));   // since: its program ended, its wrapper still there
+    try { lvN.kill('SIGKILL'); } catch { }   // by its handle
+    console.log = () => { }; try { await n2.X.api.reprobePending(); } finally { console.log = log0; }
+    const nl = n2.X.notes.find((l) => l.includes(`(${n2.o.sock}): not retired — `)) || '';
+    ok(/its card is already gone/.test(nl) && /stay until the next start/.test(nl) && !n2.X.activeSessions.has(n2.o.id) && termsTo(wsN.pid) === 1,
+      'a leave AFTER the first touch (its wrapper outlived its SIGTERM): Diagnostics says its card is already gone (its program proven ended first) and that the socket and what holds it stay', nl);
     // (g) THE HUB'S OWN ATTACH: on the re-probe's road its session is unadopted FIRST, then its pty ended by its own handle
     const order = (BRm, tag) => async () => {
       const lv = live();
@@ -370,7 +430,7 @@ try {
       master(); await boot(g1);
       const steps = [], s = g1.X.activeSessions.get(g1.o.id);
       if (s) s.pty = { kill: () => steps.push(g1.X.activeSessions.get(g1.o.id) === s ? 'killed while adopted' : 'killed after its unadopt') };
-      try { realKill(lv.pid, 'SIGKILL'); } catch { }
+      try { lv.kill('SIGKILL'); } catch { }   // by its handle
       await until(() => !alive(lv.pid), 2000);
       console.log = () => { }; try { await g1.X.api.reprobePending(); } finally { console.log = log0; }
       await until(() => steps.length > 0, 3000);
