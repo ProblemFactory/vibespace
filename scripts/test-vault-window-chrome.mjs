@@ -72,6 +72,9 @@ const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[proce
 for (const d of [FIXTURE, SHOTS, SHIM_DIR]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 800) : ''}`); } };
+// r5604: a named, counted skip in the suite's own form; a run with one closes PARTIAL (never ALL PASS) and names each
+const SKIPPED = [];
+const skip = (label, why) => { SKIPPED.push(label); console.log(`  ~ SKIP (named, counted): ${label} — ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SIGN_IN = 'window-leg-sign-in-7';
 const SECOND = 'window leg second password';
@@ -669,38 +672,52 @@ const relogin9 = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 
 // lane vault-locked-loud: 立即锁定 is a LOCK ACT — the hub filed THE urgent For-you item at that moment (nobody refused yet),
 // and the load behind the new sign-in asks at once (a NEW lock: an earlier 「稍后」 set aside another one), the ⚙ red
 const items9 = ((((await api('GET', '/api/user-todos')).json || {}).todos || {}).open || []).filter((i) => i.sessionKey === 'vault' && i.action && i.action.type === 'vault-unlock');
-// r5589 (主开发): THE ORDER IS NOT THE LEG'S. The lock act files THE row in the lock's own words; a refusal AFTER it re-files the SAME
-// row in that refusal's words (vault-hooks onBlocked: by design). The lock act's own refusals (the integrations store, read inside the
-// act, before its words: placed by a probe of the hub's refusals at a952ac17a and at f0bfe2822) never change them. A later reader can
-// come first on a slow box: the hub's token sync (the accounts store, accounts.js _syncOatFileNow, once, 2 to 3 s after the lock).
-// So the judge takes the lock's own words, or (only when a refusal beyond the lock act's own came before the read) that refusal's
-// words naming it. A lock act that filed nothing leaves at once the row of its own refusal alone: red (the control below).
+// r5589 + r5604 (主开发): THE ORDER IS NOT THE LEG'S, AND A LEG SAYS GREEN ONLY FOR WHAT IT SAW. The lock act files THE row in the
+// lock's own words; a refusal AFTER it re-files the SAME row in that refusal's words (vault-hooks onBlocked: by design). The lock act's
+// own read (the integrations store) is refused INSIDE the act, before its words, and never changes them. A later reader can come first
+// on a slow box: the hub's token sync (the accounts store, accounts.js _syncOatFileNow, once, 2 to 3 s after the lock). Then the lock's
+// own words are NOT OBSERVABLE in this run (a lock act that filed nothing reads the same by then: its own refusal files the row, the
+// token sync's then names both stores), so that half is a named, counted skip naming who came first, and the run closes PARTIAL by it.
+// Judged on both roads: ONE row, an action, urgent. The lock act's own refusal alone, or any other words: red.
+// The law itself is held in process by scripts/test-vault-loud.mjs («a LOCK ACT files it again AT ONCE», with its red «the base
+// files NOTHING at a lock act»).
 const LOCK_WORDS9 = 'The vault is locked — agents that need a credential will be refused until you unlock it. Enter the second password to unlock.';
 const WAIT_WORDS9 = 'The vault is locked — waiting on it: {who}. Enter the second password to unlock.';
 const LOCK_ACT_OWN9 = { actor: 'VibeSpace', verbs: ['the integrations store'] };   // what the lock act itself reads (the probe's placing)
-/** → { ok, read } over the vault's open rows of one read: ONE row, an action, urgent, in the lock's words or in a later refusal's */
+/** → { shape, road, read, first } over the vault's open rows of one read. shape: ONE row, an action, urgent. road: 'seen' (the lock's
+ *  own words) · 'unseen' (a later refusal's words: the callers beyond the lock act's own in `first`) · 'red' (anything else) */
 const judge9L = (rows) => {
-  if (rows.length !== 1) return { ok: false, read: `${rows.length} rows` };
-  const r = rows[0];
-  if (r.kind !== 'action' || r.urgency !== 'urgent') return { ok: false, read: `a ${r.kind} row, ${r.urgency}` };
+  const r = rows.length === 1 ? rows[0] : null;
+  const shape = !!r && r.kind === 'action' && r.urgency === 'urgent';
+  if (!shape) return { shape, road: 'red', read: r ? `a ${r.kind} row, ${r.urgency}` : `${rows.length} rows` };
   const key = r.i18n && r.i18n.text && r.i18n.text.key;
-  if (key === LOCK_WORDS9) return { ok: true, read: 'the lock’s own words' };
-  if (key !== WAIT_WORDS9) return { ok: false, read: `other words: ${String(key).slice(0, 90)}` };
+  if (key === LOCK_WORDS9) return { shape, road: 'seen', read: 'the lock’s own words' };
+  if (key !== WAIT_WORDS9) return { shape, road: 'red', read: `other words: ${String(key).slice(0, 90)}` };
   const who = String((r.i18n.text.params && r.i18n.text.params.who) || '');
-  // the words' callers, each «actor (verb, verb)» (src/vault-blocked.js itemWords); «…» = more callers, never the lock act's own
-  const later = who.split(' · ').filter((part) => { const m = /^(.*) \((.*)\)$/.exec(part); return !(m && m[1] === LOCK_ACT_OWN9.actor && m[2].split(', ').every((v) => LOCK_ACT_OWN9.verbs.includes(v))); });
-  return later.length ? { ok: true, read: `a later refusal’s words: ${who}` } : { ok: false, read: `the lock act’s own refusal alone: ${who || '(no one named)'}` };
+  // the words' callers, each «actor (verb, verb)» (src/vault-blocked.js itemWords), the lock act's own read taken out; «…» = more callers
+  const first = who.split(' · ').map((part) => {
+    const m = /^(.*) \((.*)\)$/.exec(part);
+    if (!m) return part;
+    const verbs = m[2].split(', ').filter((v) => !(m[1] === LOCK_ACT_OWN9.actor && LOCK_ACT_OWN9.verbs.includes(v)));
+    return verbs.length ? `${m[1]} (${verbs.join(', ')})` : null;
+  }).filter(Boolean);
+  return first.length ? { shape, road: 'unseen', read: `a later refusal’s words: ${who}`, first: first.join(' · ') } : { shape, road: 'red', read: `the lock act’s own refusal alone: ${who || '(no one named)'}` };
 };
 const j9 = judge9L(items9);
+const rows9 = items9.map((i) => ({ kind: i.kind, urgency: i.urgency, i18n: i.i18n }));
 console.log(`  ⑨L the read: ${j9.read}`);
-check('⑨L lane vault-locked-loud: the lock act filed THE urgent For-you item at once — an action row, urgent, the lock’s own words (or a later refusal’s, when one came before the read: r5589)', relogin9 === 200 && j9.ok === true, { relogin9, read: j9.read, rows: items9.map((i) => ({ kind: i.kind, urgency: i.urgency, i18n: i.i18n })) });
-// the judge's two roads, each fed the row it names: the slow box's reading takes the later-refusal road (the probe's words, 20 s
-// after the sign-in); the row a lock act that filed nothing leaves at once is refused
-const row9 = (who) => [{ kind: 'action', urgency: 'urgent', i18n: { text: { key: WAIT_WORDS9, params: { who } } } }];
-const late9 = judge9L(row9('VibeSpace (the integrations store, the accounts store)'));
-check('⑨L … the judge takes the slow box’s reading: the accounts store refused after the lock act, its words naming it', late9.ok === true && late9.read.startsWith('a later refusal'), late9);
-const ctl9 = judge9L(row9('VibeSpace (the integrations store)'));
-check('red control: «a lock act that filed nothing» — the row of the lock act’s own refusal alone (the integrations store) — is refused by the same judge', ctl9.ok === false && ctl9.read.startsWith('the lock act'), ctl9);
+check('⑨L lane vault-locked-loud: the lock act filed THE urgent For-you item at once — ONE row, an action, urgent (judged on both roads)', relogin9 === 200 && j9.shape === true, { relogin9, read: j9.read, rows: rows9 });
+if (j9.road === 'unseen') skip('⑨L the lock’s own words', `not observable in this run: ${j9.first} was refused before the read, so the row reads that refusal’s words (by design); a lock act that filed nothing would read the same by then (the law is held in process by scripts/test-vault-loud.mjs)`);
+else check('⑨L … in the lock’s own words: the law seen (a later refusal’s words are a named skip; the lock act’s own refusal alone or any other words: red)', j9.road === 'seen', { read: j9.read, rows: rows9 });
+// the judge's three roads, each fed the row it names: the slow box's reading (the probe's words, 20 s after the sign-in) is the
+// not-observable road, never a pass; the row a lock act that filed nothing leaves at once is refused; the lock's own words are the law seen
+const row9 = (key, who) => [{ kind: 'action', urgency: 'urgent', i18n: { text: { key, ...(who ? { params: { who } } : {}) } } }];
+const late9 = judge9L(row9(WAIT_WORDS9, 'VibeSpace (the integrations store, the accounts store)'));
+check('⑨L … the judge sends the slow box’s reading to the not-observable road, naming who came first (the accounts store), never to a pass', late9.road === 'unseen' && late9.first === 'VibeSpace (the accounts store)', late9);
+const seen9 = judge9L(row9(LOCK_WORDS9));
+check('⑨L … the judge takes the lock’s own words as the law seen', seen9.road === 'seen' && seen9.shape === true, seen9);
+const ctl9 = judge9L(row9(WAIT_WORDS9, 'VibeSpace (the integrations store)'));
+check('red control: «a lock act that filed nothing» — the row of the lock act’s own refusal alone (the integrations store) — is refused by the same judge', ctl9.road === 'red' && ctl9.read.startsWith('the lock act'), ctl9);
 await cdp('Page.navigate', { url: URL });
 // wait-for-effect, staged (lane vault-unlock-modal-race): the same shape as ⑥a — the on-load unlock modal is gated behind
 // the serial /api/home → /api/vault/state boot, so wait for the /api/home pass (app._localHome), then the modal's OWN 10 s.
@@ -787,5 +804,6 @@ console.log('⑩ SAY THE WAIT (lane vault-slow-load — inc-mvk5jyv3; zh): from 
 }
 
 await stopServer();
+if (SKIPPED.length && !failed) { console.log(`\nPARTIAL (${passed} passed; ${SKIPPED.length} named skip(s), each said above: ${SKIPPED.join('; ')})`); process.exit(0); }
 console.log(failed ? `\nFAILED (${passed} passed, ${failed} failed)` : `\nALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);
