@@ -97,7 +97,22 @@ const PRED = F.validateRule({ kind: 'decision', condition: 'the sender asks me t
 const ROUTE = F.validateRule({ kind: 'decision', condition: 'which desk should take this message', question: 'choice', threshold: 0.6, choices: [{ value: 'billing', description: 'money, invoices, refunds', to: GA }, { value: 'tech', description: 'outages, bugs, servers', to: GB }] }).rule;
 const LIVE = [{ cid: 'agent-1', name: 'One', groups: ['T-a'] }, { cid: 'agent-2', name: 'Two', groups: ['T-b'] }, { cid: 'agent-3', name: 'Ledger', groups: [] }];
 
-async function world(name, { watchers, decisionEngine = D.eng, ENGM = ENG }) {
+// THE DAY EDGE (lane bl-mail, 主开发 r5556): a world's clock is the wall clock at its start plus 61 s at each ingest, and the engine
+// counts «skipped today» by the LOCAL day (src/server/channels-engine.js dayOfNow / noteSkips / judgedRoadFor). A run that started in
+// the last minutes of its zone's day crossed the edge inside a world: the hosted run at 23:57Z UTC skipped section C's second record on
+// one day and its third on the next (the door read 1 where the leg wants 2; the skip said twice where it wants one line). THE LAW: no
+// world of this suite lets its own clock cross its zone's day edge inside a run. The base stays the wall clock (the records, the caps
+// and the estimates read the wall clock beside it), STEPPED BACK only when the suite's whole span would cross the edge. THE SPAN, as
+// measured: the longest world ingests 3 records (3 × 61 s = 183 s; sections C and D), and the suite ran 5.1 s and 6.7 s on the hosted
+// runner (both tries) — RUN_BOUND_MS bounds it at 60 s. Every world's crossing is witnessed (one line at the end, red by name).
+const INGEST_STEP_MS = 61e3, MAX_INGESTS = 3, RUN_BOUND_MS = 60e3;
+const SPAN_MS = MAX_INGESTS * INGEST_STEP_MS + RUN_BOUND_MS;
+const dayEdgeAfter = (t) => { const d = new Date(t); d.setHours(24, 0, 0, 0); return d.getTime(); };   // the next local midnight
+const localDay = (t) => new Date(t).toDateString();
+const T0 = Date.now(), EDGE0 = dayEdgeAfter(T0);
+const STEP_MS = T0 + SPAN_MS >= EDGE0 ? T0 + SPAN_MS - EDGE0 + 1000 : 0;
+const crossed = [];
+async function world(name, { watchers, decisionEngine = D.eng, ENGM = ENG, base: baseAt = null }) {
   const A = 'dr', OPS = 'ops';
   const recs = [];
   const mint = (vid, text) => makeRecord({ adapterId: A, convId: OPS, vendorId: vid, at: Date.now() + recs.length, author: { id: 'u-ada', name: 'Ada', isSelf: false, isBot: false }, text, mentions: [], attachments: [], replyTo: null, threadKey: OPS, raw: {} });
@@ -131,13 +146,13 @@ async function world(name, { watchers, decisionEngine = D.eng, ENGM = ENG }) {
   fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: A, kind: A, label: 'DR chat', enabled: true, linkedAt: 1, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: null, scan: null }] }));
   const registry = CH.createChannelRegistry(); registry.register(mod);
-  const base = Date.now(); let offset = 0;
+  const base = baseAt !== null ? baseAt : Date.now() - STEP_MS; let offset = 0;   // a PLACED base (the day edge's control) or the wall clock, stepped back by STEP_MS only near the edge
   const e = ENGM.create({ dataDir, env: {}, registry, broadcast: () => {}, log, deliver: ladder, userTodos: { add() { return { id: 'x' }; }, get() { return null; }, setStatus() {} }, serverSetting: () => undefined, liveSessions: () => LIVE, now: () => base + offset, decisionEngine });
   await e.pass(A, { force: true });
   const OPSC = { kind: 'conversation', convId: OPS };
   const a = await e.setAccess(A, OPSC, [{ principal: AG3, authority: 'draft' }, { principal: GA, authority: 'draft' }, { principal: GB, authority: 'draft' }]);
   const s = await e.setWatchers(A, OPSC, watchers);
-  const ingest = async (vid, text) => { offset += 61e3; recs.push(mint(vid, text)); await e.pass(A, { force: true }); await e.settleWakes(); };
+  const ingest = async (vid, text) => { offset += INGEST_STEP_MS; if (baseAt === null && localDay(base + offset) !== localDay(base)) crossed.push(name); recs.push(mint(vid, text)); await e.pass(A, { force: true }); await e.settleWakes(); };
   return { e, ladder, lines, ingest, set: { a, s }, stop: () => { try { e.stop && e.stop(); } catch { } } };
 }
 const W = (principal, rules) => ({ principal, notify: 'wake', delivery: 'wake', mode: 'filtered', filter: { match: 'any', rules } });
@@ -191,6 +206,25 @@ console.log('C the rule\'s hour cap spent ⇒ no call + ONE journal line');
   const hr = w.e.judgedRoadFor({ match: 'any', rules: [P1] }, { cid: 'agent-3' });
   ok(hl.length === 1 && /^1 message matched nothing today because your judged rules could not run: the rule used its judgments for this hour\./.test(hl[0].text) && hr && hr.state.why === 'hour-cap' && /\(1 an hour\) — the rule is saved and starts in the next hour \(the rule's own --per-hour cap\) — 2 messages matched nothing today because of it$/.test(hr.line),
     'lane judged-watch-state: the hour cap is SAID — agent 3 gets ONE not-a-hit line (the second skip counted, not said); the door reads hour-cap with today\'s 2', { hl: hl.map((s) => s.text), hr });
+  w.stop();
+}
+
+console.log('C2 THE DAY EDGE, PLACED (主开发 r5556 / r5560): section C\'s world with the local midnight between its second and third records');
+{
+  // CONTROL: the same rule and three records, the local midnight placed BETWEEN the second record (base + 2 steps) and the third
+  // (base + 3 steps) — the only window where the leg goes red (主开发 r5560: a base 183 s to 122 s before midnight; a later base puts
+  // both skips on the new day): the base 2.5 steps before it. The second skip is on one day, the third on the next: the door counts
+  // today's 1, and the third skip is the new day's first, said again
+  const P1 = { ...PRED, perHour: 1 };
+  const edge = dayEdgeAfter(Date.now());
+  const w = await world('c-edge', { watchers: [W(AG3, [P1])], base: edge - 2.5 * INGEST_STEP_MS });   // midnight halfway between the 2nd and 3rd records
+  await w.ingest('dr-e1', 'Invoice 17 is due Friday.');
+  await w.ingest('dr-e2', 'Invoice 18 is due Monday.');
+  await w.ingest('dr-e3', 'Invoice 19 is due Tuesday.');
+  const hl = w.ladder.stash.filter((s) => s.cid === 'agent-3' && /matched nothing today/.test(s.text));
+  const hr = w.e.judgedRoadFor({ match: 'any', rules: [P1] }, { cid: 'agent-3' });
+  ok(hl.length === 2 && hr && hr.state.why === 'hour-cap' && /— 1 message matched nothing today because of it$/.test(hr.line),
+    `C2 CONTROL, THE DAY EDGE PLACED: a world whose clock crosses its local midnight inside section C's three records — the stash holds ${hl.length} not-a-hit lines and the door reads «1 message matched nothing today»: section C's two wants both broken, red by name`, { hl: hl.map((s) => s.text), hr });
   w.stop();
 }
 
@@ -430,6 +464,7 @@ const ROW = `(() => {
   D.pm.setEnabled('llm', true);
   convRules = null;
 }
+ok(crossed.length === 0, `harness: no world's own clock crossed its zone's day edge inside the run (the base stepped back ${STEP_MS} ms: the span ${SPAN_MS / 1000} s from ${new Date(T0).toTimeString().slice(0, 8)} local) — the crossed worlds: ${JSON.stringify(crossed)}`);
 finish();
 function finish() {
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
