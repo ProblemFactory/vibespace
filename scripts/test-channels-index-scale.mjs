@@ -11,8 +11,10 @@
 //      read the account's clock census inside its 5 s window (r2, the coordinator's ruling: walked at most once per
 //      5 s per account — that walk and its trailing edge are test-channels-census-pace's): 0 walks in the opens.
 //      CONTROL: the base's known() (a lookup through the whole-index copy) reads ×2 — red.
-//      An update that reached the whole map just before: BOUNDED too (B-dfa4 r5450 hold (ii): the kept row facts answered as
-//      they stood, their re-sum in slices; the release's re-sum in the reader's turn is test-sliced-walk (i1)'s red control).
+//      An update that reached the whole map just before (B-dfa4 r5450 hold (ii)): the open's OWN TURN reads 0 rows of the row facts —
+//      the kept row facts answered as they stood, their re-sum in slices — COUNTED in rows (主开发 r5545: its work's ratio is SAID, not
+//      judged: the re-sum's first slice, bounded by its own clock, may fall inside the measured window). CONTROL: the release's road
+//      (the re-sum ended by a placed throw, the next reader re-sums whole) — that open's turn reads every row — red.
 //      CONTROL: the base's mark-read broadcast named a bare id — notify then scans every key of the index — red.
 //   ② THE INDEX WRITE after one row changed: bounded at 50 274 vs 100 548 rows. CONTROL: the whole-file write.
 //   ③ THE BYTES: the incremental write equals `JSON.stringify(ix, RUNTIME_KEYS, 1)` byte for byte through a walk (a row
@@ -99,8 +101,11 @@ const events = [];
 // answered the sums AS THEY STOOD. The walk's own seam HOLDS that re-sum past a measured open (its first slice, bounded by its own
 // clock, may run before the hold); a leg that reads the kept total waits for the re-sum's LANDING first (a fact, bounded, red by name)
 let resumHold = null;
+// 主开发 r5545: the seam also SAYS where the re-sum's walk stands (`resumSeam`: its rows walked, of which re-sum) — the rows a reader's
+// turn walked are every row the row facts read in the window minus the walk's own; `resumThrow` places one throw in it (the red control)
+let resumSeam = null, resumThrow = false;
 const holdResum = () => { let release; const p = new Promise((r) => { release = r; }); resumHold = { p, release }; };
-const eng = ENG.create({ dataDir: path.join(ROOT, 'eng'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: (m) => events.push(m), now, log: quiet, censusTimer: () => ({ cancel() {} }), walk: { onSlice: async (i, what) => { if (what === 'row-facts-resum' && resumHold) await resumHold.p; } } });
+const eng = ENG.create({ dataDir: path.join(ROOT, 'eng'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: (m) => events.push(m), now, log: quiet, censusTimer: () => ({ cancel() {} }), walk: { onSlice: async (i, what) => { if (what !== 'row-facts-resum') return; resumSeam = { i, started: eng.rowResumStats().started }; if (resumThrow) { resumThrow = false; throw new Error('a throw placed in the re-sum\'s seam (the red control\'s)'); } if (resumHold) await resumHold.p; } } });
 async function resumLanded(what) {
   for (let i = 0; eng.rowResumStats().running; i++) { if (i > 400000) { ok(false, `harness: the row facts' re-sum never landed (${what})`); return; } await new Promise((r) => setImmediate(r)); }
 }
@@ -174,6 +179,16 @@ const walks = () => Object.values(eng.censusStats()).reduce((s, n) => s + n, 0);
 // a broadcast naming `cid` bare (the base's mark-read) vs by its key (the head's)
 const notifyWork = (name) => { measure(() => eng.notify([name]), FILES); return measure(() => eng.notify([name]), FILES).total; };
 async function measureOpen(cid) { let good = false; const w0 = walks(); const m = await measureAsync(async () => { good = await open(cid); }, FILES); return { ...m, good, walks: walks() - w0 }; }
+// THE COUNT (主开发 r5545): the rows of the row facts THE READER's TURN walked in a measured open — every row the row facts read in the
+// window (rowResumStats().rowsRead) minus the rows the re-sum's own walk read there (its seam's count: its first slice, bounded by its own
+// clock, may fall inside the window; those rows are the walk's, never the reader's)
+async function measureOpenRows(cid) {
+  const s0 = eng.rowResumStats(), seam0 = resumSeam;
+  const m = await measureOpen(cid);
+  const s1 = eng.rowResumStats(), seam1 = resumSeam;
+  const walked = !seam1 ? 0 : seam1.started > s0.started ? seam1.i : (seam0 && seam0.started === seam1.started ? seam1.i - seam0.i : 0);
+  return { ...m, rowsRead: s1.rowsRead - s0.rowsRead, walked, readerRows: s1.rowsRead - s0.rowsRead - walked, started: s1.started - s0.started };
+}
 function oneRowWrite(full) {
   // one row changed through the door, then the write measured (sync — no timer can land inside)
   return ix.update(() => { const en = ix.entry(A, 'thr_000000000007', { create: false }); en.unread = (Number(en.unread) || 0) + 1; })
@@ -252,7 +267,7 @@ async function firstReadAt(rowsN) {
   };
 }
 console.log(`① one window open over ${N} rows, then ${2 * N} (work, never the clock)`);
-for (const c of ['t-warm', 't-h1', 't-cwarm', 't-c1', 't-rwarm', 't-r1', 't-warm2', 't-h2', 't-cwarm2', 't-c2', 't-rwarm2', 't-r2']) await target(c);
+for (const c of ['t-warm', 't-h1', 't-cwarm', 't-c1', 't-rwarm', 't-r1', 't-warm2', 't-h2', 't-cwarm2', 't-c2', 't-rwarm2', 't-r2', 't-rred']) await target(c);
 await fill(0, N);
 const rows1 = Object.keys(ix.live()).length;
 ok((await measureOpen('t-warm')).good, `fixture: a window opens on a ${rows1}-row index (watch ok, 40 messages, marked read) — measured once and discarded (the meter's first take of a function reads a constant more)`);
@@ -260,7 +275,7 @@ await resumLanded('the first index\'s warm open');   // B-dfa4 r5450 (ii): a re-
 const h1 = await measureOpen('t-h1');
 baseKnown(true); await measureOpen('t-cwarm'); const c1 = await measureOpen('t-c1'); baseKnown(false);
 holdResum(); await ix.update((x) => { void x.conversations; }); ix.flush(); await measureOpen('t-rwarm'); await letResum('the first index\'s warm open after a whole-map update');
-holdResum(); await ix.update((x) => { void x.conversations; }); ix.flush(); const r1 = await measureOpen('t-r1'); await letResum('the first index\'s open after a whole-map update');
+holdResum(); await ix.update((x) => { void x.conversations; }); ix.flush(); const r1 = await measureOpenRows('t-r1'); await letResum('the first index\'s open after a whole-map update');
 const nb1 = notifyWork('t-h1'), nk1 = notifyWork(`${A}/t-h1`);
 const fr1 = await firstReadAt(rows1);
 console.log('② the index write after one row changed');
@@ -272,7 +287,7 @@ await resumLanded('the second index\'s warm open');   // the second fill voided 
 const h2 = await measureOpen('t-h2');
 baseKnown(true); await measureOpen('t-cwarm2'); const c2 = await measureOpen('t-c2'); baseKnown(false);
 holdResum(); await ix.update((x) => { void x.conversations; }); ix.flush(); await measureOpen('t-rwarm2'); await letResum('the second index\'s warm open after a whole-map update');
-holdResum(); await ix.update((x) => { void x.conversations; }); ix.flush(); const r2 = await measureOpen('t-r2'); await letResum('the second index\'s open after a whole-map update');
+holdResum(); await ix.update((x) => { void x.conversations; }); ix.flush(); const r2 = await measureOpenRows('t-r2'); await letResum('the second index\'s open after a whole-map update');
 const f2 = await oneRowWrite(false), ff2 = await oneRowWrite(true);
 const nb2 = notifyWork('t-h1'), nk2 = notifyWork(`${A}/t-h1`);
 const fr2 = await firstReadAt(rows2);
@@ -280,13 +295,28 @@ const row = (m) => `${m.total} (blocks ${m.blocks} + natives ${m.native})`;
 ok(h1.good && h2.good && bounded(h1.total, h2.total), `① a window open: ${row(h1)} at ${rows1} rows, ${row(h2)} at ${rows2}: ×${(h2.total / h1.total).toFixed(3)} ≤ ${BOUNDED_RATIO} — the index's size is not in it`);
 ok(h1.walks === 0 && h2.walks === 0, `① its two broadcasts read the account census inside its 5 s window: ${h1.walks + h2.walks} walks of the rows (the paced walk itself: test-channels-census-pace)`);
 ok(c1.good && c2.good && !bounded(c1.total, c2.total) && c1.total > 20 * h1.total, `① CONTROL: the base's known() (the whole index copied per lookup) reads ${row(c1)} → ${row(c2)}: ×${(c2.total / c1.total).toFixed(2)}, ${Math.round(c1.total / h1.total)}× the head — red`);
-ok(r1.good && r2.good && bounded(r1.total, r2.total), `① AN UPDATE THAT REACHED THE WHOLE MAP just before (B-dfa4 r5450 hold (ii)): the open reads ${row(r1)} → ${row(r2)}: ×${(r2.total / r1.total).toFixed(3)} ≤ ${BOUNDED_RATIO} — its kept row facts answered AS THEY STOOD, their re-sum in slices of its own (held past the open by the walk's seam); the release's re-sum in the reader's turn is test-sliced-walk (i1)'s red control, counted in rows`);
+ok(r1.good && r2.good && r1.readerRows === 0 && r2.readerRows === 0, `① AN UPDATE THAT REACHED THE WHOLE MAP just before (B-dfa4 r5450 hold (ii)): the open's OWN TURN read ${r1.readerRows} / ${r2.readerRows} row(s) of the row facts at ${rows1} / ${rows2} rows — its kept row facts answered AS THEY STOOD, their re-sum in slices of its own (its walk read ${r1.walked} / ${r2.walked} row(s) inside the window: its first slice, bounded by its own clock, held past the open by the walk's seam). SAID, NOT JUDGED (主开发 r5545: that slice's clock is in it): the open's work ${row(r1)} → ${row(r2)}, ×${(r2.total / r1.total).toFixed(3)}`, { r1: { readerRows: r1.readerRows, walked: r1.walked, rowsRead: r1.rowsRead, started: r1.started }, r2: { readerRows: r2.readerRows, walked: r2.walked, rowsRead: r2.rowsRead, started: r2.started } });
 ok(bounded(nk1, nk2) && !bounded(nb1, nb2), `① CONTROL: a broadcast naming the conversation by its key reads ${nk1} → ${nk2} (×${(nk2 / nk1).toFixed(3)}); by a bare id (the base's mark-read) ${nb1} → ${nb2} (×${(nb2 / nb1).toFixed(2)}) — red`);
 ok(bounded(f1.total, f2.total), `② the write after one row changed: ${row(f1)} at ${rows1} rows, ${row(f2)} at ${rows2}: ×${(f2.total / f1.total).toFixed(3)} (a ${S.INDEX_CHUNK}-row chunk re-serialized, the rest copied from cache)`);
 ok(!bounded(ff1.total, ff2.total) && ff1.total > 20 * f1.total, `② CONTROL: the whole-file write (the base's every 2 s) reads ${row(ff1)} → ${row(ff2)}: ×${(ff2.total / ff1.total).toFixed(2)}, ${Math.round(ff1.total / f1.total)}× the incremental one — red`);
 {
   const disk = fs.readFileSync(eng.store.indexFile, 'utf8');
   ok(disk === JSON.stringify(ix.snapshot(), RUNTIME_KEYS, 1), `② …and the ${(disk.length / 1e6).toFixed(1)} MB on disk equals the whole-file serialization byte for byte`);
+}
+
+// RED CONTROL (主开发 r5545): the release's road — the void re-summed WHOLE in the reader's turn — reached through the product's own fallback:
+// a throw placed in the re-sum's seam ends it (its catch: the next reader re-sums whole). ONE synchronous reader starts the re-sum (a
+// one-key digest: answered as they stood); the wait lets its first slice reach the seam and throw; nothing else reads before the measured
+// open, whose own turn then reads every row. After ②'s disk check, so its writes never meet it (flushed at the end)
+{
+  resumThrow = true; await ix.update((x) => { void x.conversations; }); ix.flush();
+  const st0 = eng.rowResumStats();
+  eng.digest({ keys: [`${A}/t-h1`] });   // the ONE reader that starts the re-sum
+  await resumLanded('the red control\'s re-sum, ended by its placed throw');
+  const st1 = eng.rowResumStats(), rowsNowRed = Object.keys(ix.live()).length;
+  const rRed = await measureOpenRows('t-rred');
+  ix.flush();
+  ok(rRed.good && !resumThrow && st1.started > st0.started && rRed.readerRows >= rowsNowRed, `① RED CONTROL: the release's road (the re-sum ended by a throw placed in its seam, so the next reader re-sums whole) — that open's own turn read ${rRed.readerRows} row(s) of the row facts at ${rowsNowRed} rows: the count above would go red`, { readerRows: rRed.readerRows, walked: rRed.walked, rowsRead: rRed.rowsRead, thrown: !resumThrow, started: st1.started - st0.started, rowsBeforeTheOpen: st1.rowsRead - st0.rowsRead });
 }
 
 console.log('③ the bytes: incremental = the whole-file serialization');
