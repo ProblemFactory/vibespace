@@ -553,22 +553,33 @@ try {
     });
     await new Promise((res) => pageSrv.listen(0, '127.0.0.1', res));
     const tcpSrv = nodeNet.createServer((c) => c.end()); await new Promise((res) => tcpSrv.listen(0, '127.0.0.1', res));
-    const gone = nodeNet.createServer(); await new Promise((res) => gone.listen(0, '127.0.0.1', res)); const gonePort = gone.address().port; await new Promise((res) => gone.close(res));
     const certDir = path.join(dir, 'b74f5-cert'); fs.mkdirSync(certDir, { recursive: true });
     const ssl = spawnS('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', path.join(certDir, 'k.pem'), '-out', path.join(certDir, 'c.pem'), '-days', '1', '-subj', '/CN=127.0.0.1'], { stdio: 'ignore', timeout: 20000 });
     const tlsSrv = !ssl.error && ssl.status === 0 ? nodeHttps.createServer({ key: fs.readFileSync(path.join(certDir, 'k.pem')), cert: fs.readFileSync(path.join(certDir, 'c.pem')) }, (q, r) => r.end('ok')) : null;
     if (tlsSrv) await new Promise((res) => tlsSrv.listen(0, '127.0.0.1', res));
     const P1 = pageSrv.address().port, base = `http://127.0.0.1:${P1}`;
+    // r5624 A CLOSED PORT OF ITS OWN (once red in a gate at load 50: «a closed port does not» read a port that ANSWERED). The release's
+    // closed port was a listen(0) port released ~20 s before its look (the certificate in between): another suite's listen(0) on the
+    // machine could take it. Now a CHILD holds the port BOUND and never listening, without SO_REUSEADDR, for the looks' whole span:
+    // nothing else on the machine can bind it, and a connect to it is refused. Its port is waited FOR under a counted ceiling (5 s);
+    // a refused connect to it is the WITNESS, read before the look; a scene that did not form is a NAMED SKIP, never a judgement
+    const holder = require('child_process').spawn('python3', ['-c', "import socket,sys,time\ns=socket.socket()\ns.bind(('127.0.0.1',0))\nsys.stdout.write('%d\\n'%s.getsockname()[1]); sys.stdout.flush()\ntime.sleep(600)"], { stdio: ['ignore', 'pipe', 'ignore'] });
+    process.once('exit', () => { try { holder.kill('SIGKILL'); } catch { } });   // a leg that throws first leaves no holder behind
+    let gonePort = null; holder.on('error', () => { }); holder.stdout.on('data', (d) => { const m = /(\d+)/.exec(String(d)); if (m && gonePort === null) gonePort = Number(m[1]); });
+    const HOLD_MS = 5000, h0 = Date.now();
+    while (gonePort === null && Date.now() - h0 < HOLD_MS && holder.exitCode === null) await new Promise((res) => setTimeout(res, 20));
+    const refused = gonePort !== null && await new Promise((res) => { const s = nodeNet.connect(gonePort, '127.0.0.1'); s.once('connect', () => { s.destroy(); res(false); }); s.once('error', (e) => res(!!e && e.code === 'ECONNREFUSED')); });
+    if (!refused) console.log(`  · SKIP B-74f5 the closed port's look: its scene did not form — ${gonePort === null ? `no holder said its port within ${HOLD_MS} ms (python3 absent, or it ended)` : `a connect to the held port ${gonePort} was not refused`} (r5624, named, counted)`);
     const realLooks = async (JM, tag) => {
       const E = mk(JM, path.join(dir, 'b74f5-looks-' + tag), pf, { urlLookMs: 150 }); // (no urlAnswers: the real look)
       const at = async (u) => E._urlAnswers(u);
       const out = { ok: await at(base + '/ok'), frp404: await at(base + '/frp404'), plain404: await at(base + '/plain404'), bad: await at(base + '/bad'), stream404: await at(base + '/stream404'), hang: await at(base + '/hang'),
-        tcp: await at(`tcp://127.0.0.1:${tcpSrv.address().port}`), tcpGone: await at(`tcp://127.0.0.1:${gonePort}`), tls: tlsSrv ? await at(`https://127.0.0.1:${tlsSrv.address().port}/`) : null };
+        tcp: await at(`tcp://127.0.0.1:${tcpSrv.address().port}`), tcpGone: refused ? await at(`tcp://127.0.0.1:${gonePort}`) : 'skip', tls: tlsSrv ? await at(`https://127.0.0.1:${tlsSrv.address().port}/`) : null };
       stopEngine(E); return out;
     };
     const r1 = await realLooks(JobManager, 'real');
-    ok(r1.ok === true && r1.frp404 === false && r1.plain404 === true && r1.bad === false && r1.stream404 === true && r1.hang === false && r1.tcp === true && r1.tcpGone === false,
-      'B-74f5 follow-up (4): THE REAL LOOK over loopback — a 200 answers; the relay\'s own 404 page does not, another 404 does; a 502 does not; a never-ending 404 decides at its 4 KB bound; a silent server is a no at the look\'s bound; a tcp connect answers, a closed port does not', JSON.stringify(r1));
+    ok(r1.ok === true && r1.frp404 === false && r1.plain404 === true && r1.bad === false && r1.stream404 === true && r1.hang === false && r1.tcp === true && (r1.tcpGone === false || r1.tcpGone === 'skip'),
+      'B-74f5 follow-up (4): THE REAL LOOK over loopback — a 200 answers; the relay\'s own 404 page does not, another 404 does; a 502 does not; a never-ending 404 decides at its 4 KB bound; a silent server is a no at the look\'s bound; a tcp connect answers, a closed port (one of its own, held bound and never listening) does not', JSON.stringify(r1));
     if (tlsSrv) ok(r1.tls === true, 'B-74f5 follow-up (4): a self-signed https backend ANSWERS — its certificate is not judged', JSON.stringify(r1.tls));
     else console.log('  · SKIP B-74f5 the certificate look: no openssl on this machine to make a self-signed certificate');
     const FRP404 = '          if (st !== 404) { fin(st > 0 && st < 500); return; }';
@@ -582,6 +593,7 @@ try {
     const rb = await realLooks(JMunbound, 'unbound');
     ok(rb.stream404 === false && rb.plain404 === true, 'RED CONTROL (B-74f5 follow-up (4)): a look without the body bound waits out a 404 that never ends and calls it a no (its own bound) — another 404 still answers', JSON.stringify(rb));
     for (const sv of [pageSrv, tcpSrv, tlsSrv].filter(Boolean)) { try { sv.closeAllConnections?.(); } catch { } sv.close(); }
+    try { holder.kill('SIGKILL'); } catch { }   // the closed port's holder, this suite's own child
   }
 
   // (j) the wiring: the vault's unlock calls relayChanged; the Ports manager's adopt calls relayPublished
