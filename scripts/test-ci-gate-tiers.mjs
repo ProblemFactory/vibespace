@@ -1344,6 +1344,23 @@ console.log('\n§8l the placed reds: L1 its own counted red · L2 never milder t
     && !!C.placedInNotes(notes('heavy 2/7 (1): test-a=1', 'heavy 2/7 (1): test-b=1'), 'heavy 2/7').err && !!C.placedInNotes(notes('heavy 2/7 (3): test-a=1'), 'heavy 2/7').err
     && !!C.placedInNotes(notes('heavy 2/7 (1):'), 'heavy 2/7').err && !!C.placedInNotes({}, 'heavy 2/7').err,
     'the mirror\'s reading of a job\'s note: none = none placed, another job\'s note is not this one\'s; two notes, a count its names do not make, an empty list or no list is a job it cannot verify');
+  // U2 FOLLOW (主开发 r5594): with ENTRIES every job prints its ONE note — «(0):» too — and the writer REQUIRES it (a copy with none: cannot verify),
+  // reading every page; an EMPTY table prints nothing (the release's run page) and the writer asks nothing
+  const pages = (n) => { const asked = []; const gh = (p) => { asked.push(p); const k = Number((/&page=(\d+)$/.exec(p) || [])[1]); return k && k <= n ? { json: Array.from({ length: k < n ? 100 : 3 }, (_, i) => ({ title: 'x', message: `p${k}-${i}` })) } : { json: [] }; };
+    return { r: C.annotationPages(gh, 'repos/o/r/check-runs/1/annotations', Array.from({ length: 100 }, (_, i) => ({ title: 'x', message: `p1-${i}` }))), asked }; };
+  const p3 = pages(3), short1 = C.annotationPages(() => ({ err: 'never asked' }), 'repos/o/r/check-runs/1/annotations', [{ title: 'x', message: 'one' }]), endless = pages(99);
+  ok(C.placedAnnotation('fast 1/2', [], { always: true }) === '::notice title=ci-placed-reds::fast 1/2 (0):' && C.placedAnnotation('fast 1/2', []) === ''
+    && JSON.stringify(C.placedInNotes(notes('fast 1/2 (0):'), 'fast 1/2', { required: true })) === JSON.stringify({ placed: [] })
+    && /no «ci-placed-reds» annotation for fast 2\/2 .*a re-run copy carries none/.test(C.placedInNotes(notes('fast 1/2 (0):'), 'fast 2/2', { required: true }).err || '')
+    && C.placedInNotes(notes('fast 1/2 (0):'), 'fast 2/2').placed.length === 0
+    && !!p3.r.json && p3.r.json.length === 203 && p3.asked.length === 2 && !!short1.json && short1.json.length === 1 && /more than 3000 annotations/.test(endless.r.err || '') && endless.asked.length === 29,
+    'U2 FOLLOW: with entries every job\'s note is printed («(0):» too) and REQUIRED — none is a copy the writer cannot verify; without, none = none placed; every page is read (a page of 100 asks the next), bounded at 30 pages');
+  { const CI8 = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
+    ok(CI8.includes("placedAnnotation(part ? `fast ${part.i}/${part.n}` : 'fast', skippedLegs, { always: placedTable.entries.length > 0 })")
+      && CI8.includes("placedAnnotation(shard ? `heavy ${shard.i}/${shard.n}` : 'heavy', placedLegs, { always: placedTable.entries.length > 0 })")
+      && CI8.includes('  const placedOn = placedAt.entries.length > 0;\n') && CI8.includes('  if (placedOn) for (const job of (j.json.jobs || []).filter(')
+      && CI8.includes('      const pn = placedInNotes(a.json, job.name, { required: true });') && CI8.includes('    const pn = placedInNotes(pg.json, job.name, { required: true });'),
+      'WIRING: both runners print the always-on note when their table holds entries; the writer reads the COMMIT\'s table and asks the placed notes — and the other jobs — only when it holds entries, each REQUIRED'); }
   const HX = 'a'.repeat(40), hm = { kind: 'green', sha: HX, mtimeMs: 2000, scope: 'full', placed: [{ name: 'test-zz-h', n: 2, lines: [] }] };
   const ag = C.heavyAlreadyGreen({ markers: [hm], sha: HX, full: HX, commitTimeMs: 1000, scope: 'full', now: 3000 }), agBare = C.heavyAlreadyGreen({ markers: [{ ...hm, placed: undefined }], sha: HX, full: HX, commitTimeMs: 1000, scope: 'full', now: 3000 });
   const vrec = { sha: 'b'.repeat(40), attempt: 1, selected: ['test-zz-x'], jobs: ['heavy 1/7'] };

@@ -2992,21 +2992,44 @@ export const closingSay = (all, say) => (line) => say(placedClosingOf(line, all)
 export const placedMarkField = (all) => { const legs = (all || []).filter((x) => x && x.placed); return legs.length ? `placed:${legs.reduce((a, x) => a + x.n, 0)}:${legs.map((x) => `${x.name}=${x.n}`).join(',')}` : ''; };
 // THE HOSTED JOB'S WORD (U2 L4): a job that used a placed line prints ONE `::warning` annotation titled PLACED_TITLE — its job's own name
 // first (`fast i/n`, `heavy i/n`; a node axis job's runner names the part only), then «(<lines>): <suite>=<n> …» — on the run page, and
-// the mirror's verdict writer reads it from every job it vouches for (placedInNotes). No placed line: no note.
+// the mirror's verdict writer reads it from every job it vouches for (placedInNotes). No placed line: no note — unless the tree's table
+// holds ENTRIES (`always`): then every job prints its ONE note, «(0):» too, so the writer can tell «none placed» from «a copy with none»
+// (主开发 r5594); an EMPTY table prints nothing and the writer asks nothing (the release's reads, byte for byte).
 export const PLACED_TITLE = 'ci-placed-reds';
-export const placedAnnotation = (job, all) => { const legs = (all || []).filter((x) => x && x.placed); return legs.length ? `::warning title=${PLACED_TITLE}::${job} (${legs.reduce((a, x) => a + x.n, 0)}):${legs.map((x) => ` ${x.name}=${x.n}`).join('')}` : ''; };
-/** PURE: a job's annotations → { placed: [{ name, n }] } | { err } — at most ONE note of THIS job (its part's name first); none = none placed. */
-export function placedInNotes(notes, jobName) {
+export const placedAnnotation = (job, all, { always = false } = {}) => { const legs = (all || []).filter((x) => x && x.placed); return legs.length ? `::warning title=${PLACED_TITLE}::${job} (${legs.reduce((a, x) => a + x.n, 0)}):${legs.map((x) => ` ${x.name}=${x.n}`).join('')}` : always ? `::notice title=${PLACED_TITLE}::${job} (0):` : ''; };
+/** PURE: a job's annotations → { placed: [{ name, n }] } | { err } — at most ONE note of THIS job (its part's name first); none = none placed,
+ *  unless `required` (the commit's table holds entries: its runner printed one, «(0):» too — none is a copy the writer cannot verify). */
+export function placedInNotes(notes, jobName, { required = false } = {}) {
   if (!Array.isArray(notes)) return { err: 'its annotations are not a list' };
   const base = String(jobName || '').replace(/ node \d+$/, '');
   const mine = notes.filter((x) => x && x.title === PLACED_TITLE && String(x.message || '').trim().startsWith(`${base} (`));
-  if (!mine.length) return { placed: [] };
+  if (!mine.length) return required ? { err: `no «${PLACED_TITLE}» annotation for ${jobName} — its runner prints one whenever the table holds entries (a re-run copy carries none): cannot verify` } : { placed: [] };
   if (mine.length > 1) return { err: `${mine.length} «${PLACED_TITLE}» annotations for ${jobName}` };
-  const m = /^\((\d+)\):((?: [\w.-]+=\d+)+)$/.exec(String(mine[0].message || '').trim().slice(base.length + 1));
+  const m = /^\((\d+)\):((?: [\w.-]+=\d+)*)$/.exec(String(mine[0].message || '').trim().slice(base.length + 1));
   if (!m) return { err: `an unreadable «${PLACED_TITLE}» annotation for ${jobName}` };
-  const placed = m[2].trim().split(' ').map((x) => { const [name, n] = x.split('='); return { name, n: Number(n) }; });
+  const placed = m[2].trim() ? m[2].trim().split(' ').map((x) => { const [name, n] = x.split('='); return { name, n: Number(n) }; }) : [];
   const sum = placed.reduce((a, x) => a + x.n, 0);
   return sum === Number(m[1]) ? { placed } : { err: `«${PLACED_TITLE}» for ${jobName} counts ${m[1]} but names ${sum}` };
+}
+/** The placed-reds table of a COMMIT, read by git (the verdict writer's question, 主开发 r5594) → { entries } | { err }; no file = none. */
+export function placedEntriesAtCommit(repoRoot, sha) {
+  if (gitIn(repoRoot, ['cat-file', '-e', `${sha}:${PLACED_REDS_FILE}`]) === null) return { entries: [] };
+  const text = gitIn(repoRoot, ['show', `${sha}:${PLACED_REDS_FILE}`]);
+  try { const tab = JSON.parse(text); return Array.isArray(tab.entries) ? { entries: tab.entries } : { err: `${PLACED_REDS_FILE} at ${String(sha).slice(0, 9)} holds no entries list` }; }
+  catch { return { err: `${PLACED_REDS_FILE} at ${String(sha).slice(0, 9)} cannot be read` }; }
+}
+/** Every page of a check run's annotations (100 a page; the first already read) → { json } | { err } — bounded by ANNOTATION_PAGES_MAX. */
+export const ANNOTATION_PAGES_MAX = 30;
+export function annotationPages(ghJson, apiPath, first) {
+  if (!Array.isArray(first)) return { err: 'its annotations are not a list' };
+  const all = [...first];
+  for (let page = 2, last = first; last.length >= 100; page++) {
+    if (page > ANNOTATION_PAGES_MAX) return { err: `more than ${ANNOTATION_PAGES_MAX * 100} annotations — not every page can be read` };
+    const r = ghJson(`${apiPath}?per_page=100&page=${page}`);
+    if (!r || r.err || !Array.isArray(r.json)) return { err: `its annotations' page ${page} could not be read (${(r && r.err) || 'gh gave nothing'})` };
+    all.push(...r.json); last = r.json;
+  }
+  return { json: all };
 }
 /** A heavy marker's placed suites — the box's `placed` or the mirror's `placedOnRunner` → [{ name, n }]. */
 export const heavyPlacedOf = (m) => [].concat(Array.isArray(m && m.placed) ? m.placed : [], Array.isArray(m && m.placedOnRunner) ? m.placedOnRunner : [])
@@ -5160,6 +5183,11 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
     return { attempt, job };
   };
   const skipped = new Set(), vouchedBy = {}, placedOnRunner = [];   // U2 L4: every job's PLACED lines (its runner's note), said by the verdict
+  // U2 follow (主开发 r5594): the COMMIT's table — EMPTY (or none): the writer asks exactly what the release asked (no placed note read, no
+  // other job read, no new reason to refuse); ENTRIES: every job it vouches for must carry ONE placed note, read through every page
+  const placedAt = placedEntriesAtCommit(repoRoot, full);
+  if (placedAt.err) return no(`cannot verify: ${placedAt.err}`);
+  const placedOn = placedAt.entries.length > 0;
   for (const job of (j.json.jobs || []).filter((x) => x && /^heavy \d+\/\d+$/.test(x.name || ''))) {
     const { attempt: at, job: src } = ranIn(job);
     const cr = (/\/check-runs\/(\d+)$/.exec(String(src.check_run_url || '')) || [])[1] || src.id;   // an Actions job IS a check run
@@ -5167,24 +5195,29 @@ export function heavyVerdict({ sha, runId, repoRoot = repo, dir, ghJson = ghApiJ
     const a = ghJson(`repos/${slug}/check-runs/${cr}/annotations?per_page=100`);
     const where = `read at attempt ${at}${at === attempt ? '' : ', where it ran'}`;
     if (!a || a.err || a.json === undefined) return no(`cannot verify ${job.name}'s suites (${where}): its annotations could not be read (${(a && a.err) || 'gh gave nothing'})`);
+    if (placedOn) { const pg = annotationPages(ghJson, `repos/${slug}/check-runs/${cr}/annotations`, a.json); if (pg.err) return no(`cannot verify ${job.name}'s suites (${where}): ${pg.err}`); a.json = pg.json; }   // with entries: every page
     const sk = selfSkippedInNotes(a.json, job.name);
     if (sk.err) return no(`cannot verify ${job.name}'s suites (${where}): ${sk.err}`);
     for (const n of sk.names) skipped.add(n);
-    const pn = placedInNotes(a.json, job.name);
-    if (pn.err) return no(`cannot verify ${job.name}'s suites (${where}): ${pn.err}`);
-    for (const p of pn.placed) placedOnRunner.push({ job: job.name, ...p });
+    if (placedOn) {
+      const pn = placedInNotes(a.json, job.name, { required: true });
+      if (pn.err) return no(`cannot verify ${job.name}'s suites (${where}): ${pn.err}`);
+      for (const p of pn.placed) placedOnRunner.push({ job: job.name, ...p });
+    }
     // the marker's record is by JOB NAME: two jobs of one name (the judge passes them only when every one is a success) keep the last one read
     vouchedBy[job.name] = { attempt: at, job: Number(src.id) || null };
   }
-  // …and every OTHER job that ran suites — the fast parts (each node major) and the heavy shards of another node major: one bounded
-  // annotations read each, for their PLACED note only (U2 L4: a job that used a placed line passed with it, and the verdict says so)
-  for (const job of (j.json.jobs || []).filter((x) => x && /^fast(?: \d+\/\d+)?(?: node \d+)?$|^heavy \d+\/\d+ node \d+$/.test(x.name || ''))) {
+  // …and, WITH ENTRIES only, every OTHER job that ran suites — the fast parts (each node major) and the heavy shards of another node major:
+  // their annotations through every page, for their PLACED note only (U2 L4: a job that used a placed line passed with it, and the verdict says so)
+  if (placedOn) for (const job of (j.json.jobs || []).filter((x) => x && /^fast(?: \d+\/\d+)?(?: node \d+)?$|^heavy \d+\/\d+ node \d+$/.test(x.name || ''))) {
     const read = ranIn(job), at = read.attempt, src = read.job;   // where it RAN, as the shards above are read
     const cr = (/\/check-runs\/(\d+)$/.exec(String(src.check_run_url || '')) || [])[1] || src.id;
     const a = ghJson(`repos/${slug}/check-runs/${cr}/annotations?per_page=100`);
     const where = `read at attempt ${at}${at === attempt ? '' : ', where it ran'}`;
     if (!a || a.err || a.json === undefined) return no(`cannot verify ${job.name}'s placed lines (${where}): its annotations could not be read (${(a && a.err) || 'gh gave nothing'})`);
-    const pn = placedInNotes(a.json, job.name);
+    const pg = annotationPages(ghJson, `repos/${slug}/check-runs/${cr}/annotations`, a.json);
+    if (pg.err) return no(`cannot verify ${job.name}'s placed lines (${where}): ${pg.err}`);
+    const pn = placedInNotes(pg.json, job.name, { required: true });
     if (pn.err) return no(`cannot verify ${job.name}'s placed lines (${where}): ${pn.err}`);
     for (const p of pn.placed) placedOnRunner.push({ job: job.name, ...p });
   }
@@ -5689,7 +5722,7 @@ async function fastGate({ sha: wantSha, isolate, keepGoing = false, part = null,
     closingSay(skippedLegs, console.log)(`\nALL GREEN — fast gate${part ? ` part ${part.i}/${part.n}` : ''} passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${gapW.tail ? ` — BUT ${gapW.tail}` : ''}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}${skippedByName.length ? ` — SKIPPED by name, not run and not passed: ${skippedByName.join(', ')}` : ''}${skipCount(skippedLegs)}`);   // B-e381 (主开发 r1037): a skip is not a green — the push's own closing line counts it
     if (absent.length) console.log(`[ci] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
     for (const n of placedTable.notes) console.log(`[ci] placed reds: ${n}`);   // U2: the second release stands UNDER the closing (a green suite's inner lines reach nobody)
-    { const a = placedAnnotation(part ? `fast ${part.i}/${part.n}` : 'fast', skippedLegs); if (a && process.env.GITHUB_ACTIONS) console.log(a); }   // U2 L4: the hosted job says it; the mirror's verdict reads it
+    { const a = placedAnnotation(part ? `fast ${part.i}/${part.n}` : 'fast', skippedLegs, { always: placedTable.entries.length > 0 }); if (a && process.env.GITHUB_ACTIONS) console.log(a); }   // U2 L4: the hosted job says it; the mirror's verdict reads it
     // The marker's contract is "HEAD, clean, passed", so an isolated run at
     // some other commit must not write one — it proves nothing about the tree
     // the next push would skip the tier for (⑫: say so, do not go quiet).
@@ -6047,7 +6080,7 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     if (!abandonedWhy) {
       console.log(`${SELF_SKIP_TAG} ${selfSkipBody(selfSkipped)}`);
       if (process.env.GITHUB_ACTIONS) console.log(`::notice title=${SELF_SKIP_TITLE}::${shard ? `heavy ${shard.i}/${shard.n}` : 'heavy'} ${selfSkipBody(selfSkipped)}`);   // the job's own name first: the writer matches it
-      { const a = placedAnnotation(shard ? `heavy ${shard.i}/${shard.n}` : 'heavy', placedLegs); if (a && process.env.GITHUB_ACTIONS) console.log(a); }   // U2 L4: the hosted job says its placed lines
+      { const a = placedAnnotation(shard ? `heavy ${shard.i}/${shard.n}` : 'heavy', placedLegs, { always: placedTable.entries.length > 0 }); if (a && process.env.GITHUB_ACTIONS) console.log(a); }   // U2 L4: the hosted job says its placed lines
     }
     const rec = {
       sha, result: failed.length ? 'red' : 'green', failed,
