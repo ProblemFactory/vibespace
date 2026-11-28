@@ -221,7 +221,9 @@ app.get('/api/ci-heavy', (req, res) => {
         // so a green row cannot read as the full tier when it was not. A marker
         // written before the field is a full run. `lanes` = the parallel lane
         // count the run used (0 = written before lanes existed).
-        scope: rec.scope === 'affected' ? 'affected' : 'full', selected: Array.isArray(rec.selected) ? rec.selected.length : 0, lanes: Number(rec.lanes) || 0 };
+        scope: rec.scope === 'affected' ? 'affected' : 'full', selected: Array.isArray(rec.selected) ? rec.selected.length : 0, lanes: Number(rec.lanes) || 0,
+        // U2 L4 (主开发 r5567): a green that PASSED WITH PLACED LINES (scripts/fixtures/placed-reds.json) says how many — the report never reads it GREEN
+        placed: Array.isArray(rec.placed) ? rec.placed.reduce((a, x) => a + (Number(x && x.n) || 0), 0) : 0 };
       if (m[2] === 'pid') { let live = false; try { process.kill(row.pid, 0); live = true; } catch {} if (live) running.push(row); }
       else runs.push(row);
     }

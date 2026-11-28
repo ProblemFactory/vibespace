@@ -47,7 +47,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, workflowHeavyNodesAt, heavyNodesFor, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, passedCountOf, wholeSkipOf, heavyVerdictSaid } from './ci.mjs';
+import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, workflowHeavyNodesAt, heavyNodesFor, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, passedCountOf, wholeSkipOf, heavyVerdictSaid, PLACED_TITLE } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report, GIT_ENV } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import './scratch.mjs';   // its re-home at import, as before (the B-737b release reader's `anchored` moved to the heavy twin)
@@ -225,9 +225,10 @@ const reTwin = () => { const fx = reClone(), end = reJob(fx, '1', 'heavy 4/7').c
     && JSON.stringify(rec.skippedOnRunner) === JSON.stringify(['test-graduate-dial', 'test-vault-run-wire']),
     `the RECORDED two-attempt run verifies: each copy read at attempt 1, where it ran, heavy 3/7 at attempt 2, its re-run; the marker names which attempt vouches for which shard (${v.ok ? JSON.stringify(vb) : v.why})`);
   const anns = calls.map((p) => (/\/check-runs\/(\d+)\/annotations\?/.exec(p) || [])[1]).filter(Boolean).sort();
-  const want = ['heavy 1/7', 'heavy 2/7', 'heavy 4/7', 'heavy 5/7', 'heavy 6/7', 'heavy 7/7'].map((n) => String(reJob(RE_FX, '1', n).id)).concat(String(reJob(RE_FX, '2', 'heavy 3/7').id)).sort();
+  // U2 L4: the fast parts' annotations too (their PLACED notes), each read where it RAN — attempt 2's are copies of attempt 1's
+  const want = ['heavy 1/7', 'heavy 2/7', 'heavy 4/7', 'heavy 5/7', 'heavy 6/7', 'heavy 7/7', 'fast 1/2', 'fast 2/2'].map((n) => String(reJob(RE_FX, '1', n).id)).concat(String(reJob(RE_FX, '2', 'heavy 3/7').id)).sort();
   ok(calls.filter((p) => /\/actions\/runs\/44368748819\/attempts\/1\/jobs\?per_page=100$/.test(p)).length === 1 && !calls.some((p) => /\/attempts\/2\/jobs/.test(p)) && JSON.stringify(anns) === JSON.stringify(want),
-    `…its GETs: attempt 1's job list once; SEVEN annotation reads, one per shard, each at the job that ran it — never a copy's empty check run (${anns.length} reads)`);
+    `…its GETs: attempt 1's job list once; NINE annotation reads — one per shard and one per fast part (U2 L4: its PLACED note) — each at the job that ran it, never a copy's empty check run (${anns.length} reads)`);
   const three = reThree(), c3 = [], v3 = reWrite(three, c3).v, vb3 = v3.ok ? v3.rec.vouchedBy : {};
   const planted = three.attempts['3'].jobs.filter((x) => /^heavy \d/.test(x.name)).every((x) => { const o = reJob(three, '2', x.name); return o.conclusion === 'success' && o.started_at === x.started_at && o.completed_at === x.completed_at; });
   ok(planted && v3.ok && v3.rec.attempt === 3 && Object.entries(vb3).every(([n, w]) => n === 'heavy 3/7' ? w.attempt === 2 && w.job === reJob(three, '2', n).id : w.attempt === 1 && w.job === reJob(three, '1', n).id)
@@ -290,8 +291,25 @@ const reTwin = () => { const fx = reClone(), end = reJob(fx, '1', 'heavy 4/7').c
     'the marker LISTS what the mirror ran — { scope: hosted, source: mirror, selected = partial = the hosted names } — never «full»; `partial` keeps a reader that predates the union from counting it');
   const notesAsked = calls.slice(2);
   ok(calls[0] === `repos/${SLUG}/actions/runs/42745258349` && calls[1] === `repos/${SLUG}/actions/runs/42745258349/jobs?filter=latest&per_page=100`
-    && notesAsked.length === N && notesAsked.every((c) => new RegExp(`^repos/${SLUG}/check-runs/[^/]+/annotations\\?per_page=100$`).test(c)),
-    `bounded GETs on THIS repository's path: the run, its jobs (filter=latest), then ONE annotations read per heavy shard job (B-479e: ${notesAsked.length} of ${N}) — ${calls.length} in all`); }
+    && notesAsked.length === N + FAST_JOBS.length && notesAsked.every((c) => new RegExp(`^repos/${SLUG}/check-runs/[^/]+/annotations\\?per_page=100$`).test(c)),
+    `bounded GETs on THIS repository's path: the run, its jobs (filter=latest), then ONE annotations read per heavy shard job (B-479e) and per fast job (U2 L4: its PLACED note) — ${notesAsked.length} of ${N} + ${FAST_JOBS.length}, ${calls.length} in all`); }
+// U2 L4 (主开发 r5567): A JOB THAT USED A PLACED LINE IS NEVER VOUCHED FOR AS A BARE GREEN — every job's «ci-placed-reds» note is read (the
+// heavy shards' in the read B-479e already makes, every fast part's and every other node major's in one read each), the marker lists them
+// by job, the verdict's line says PASSED WITH PLACED LINES; two notes for one job, or a count its names do not make, is a job it cannot verify
+{ const pnote = (message) => ({ title: PLACED_TITLE, message, annotation_level: 'warning' });
+  const withNotes = (...extra) => () => [...NOTE0, ...extra];
+  const d = scratch('mk-placed'), v = heavyVerdict({ sha: tip, runId: '13', repoRoot: R, dir: d, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(), null, undefined, withNotes(pnote(`heavy 2/${N} (2): ${HOSTED[0]}=2`), pnote('fast 1/2 (1): test-zz-f=1'))) });
+  const pr = v.ok ? v.rec.placedOnRunner || [] : [], said = v.ok ? heavyVerdictSaid(v.rec, '13', v.file) : '';
+  ok(v.ok && pr.some((x) => x.job === `heavy 2/${N}` && x.name === HOSTED[0] && x.n === 2) && pr.some((x) => x.job === 'fast 1/2' && x.name === 'test-zz-f' && x.n === 1)
+    && pr.some((x) => x.job === 'fast 1/2 node 24' && x.name === 'test-zz-f') && /PASSED WITH PLACED LINES \(not a green of those suites\)/.test(said) && !/ is green for /.test(said),
+    `U2 L4: a job's PLACED note reaches the mirror's marker by job, suite and count, and its line says PASSED WITH PLACED LINES, never «is green» (${v.ok ? JSON.stringify(pr) : v.why})`);
+  const d0 = scratch('mk-placed-none'), v0 = heavyVerdict({ sha: tip, runId: '14', repoRoot: R, dir: d0, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf()) });
+  ok(v0.ok && v0.rec.placedOnRunner === undefined && / is green for /.test(heavyVerdictSaid(v0.rec, '14', v0.file)), 'CONTROL: with no placed note the marker carries none and the line says «is green» as before');
+  const no2 = (extra) => { const dd = scratch('mk-placed-no'); const vv = heavyVerdict({ sha: tip, runId: '15', repoRoot: R, dir: dd, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(), null, undefined, withNotes(...extra)) }); return { vv, empty: empty(dd) }; };
+  const twice = no2([pnote(`heavy 2/${N} (1): ${HOSTED[0]}=1`), pnote(`heavy 2/${N} (1): ${HOSTED[1]}=1`)]), badCount = no2([pnote('fast 2/2 (3): test-zz-f=1')]);
+  ok(!twice.vv.ok && new RegExp(`cannot verify heavy 2/${N}'s suites .*2 «ci-placed-reds» annotations`).test(twice.vv.why) && twice.empty
+    && !badCount.vv.ok && /cannot verify fast 2\/2's placed lines .*counts 3 but names 1/.test(badCount.vv.why) && badCount.empty,
+    `CONTROLS: two placed notes for one job, or a note whose count its names do not make, is a job the writer cannot verify — it refuses and writes nothing (${twice.vv.why} · ${badCount.vv.why})`); }
 // B-479e (1) A SUITE THAT SKIPPED ITSELF ON THE RUNNER IS NOT ON THE LIST: every shard job's «ci-heavy-self-skipped» note is read
 { const notesWith = (names) => () => [{ title: 'another note', message: 'x' }, ...NOTE0.slice(1), { title: SELF_SKIP_TITLE, message: `heavy 1/${N} ${selfSkipBody(names)}` }];
   const d1 = scratch('mk-skip'), v1 = heavyVerdict({ sha: tip, runId: '11', repoRoot: R, dir: d1, hosted: HOSTED, ghJson: ghFor(runOf({ head_sha: tip }), jobsOf(), null, undefined, notesWith([HOSTED[1]])) });

@@ -15,6 +15,9 @@
 //      3 with its reason; RED CONTROL: the release's line (the green branch's return inside its trailing comment) exits 3 on a green run;
 //   §7d THE DIFFERENTIAL ON REAL GIT — one fast-import history, both readers asking git through their own doors; master's reader is
 //      the fast file's §7c copy (verbatim from 2056c98de), held byte for byte by the fast file's §T pin.
+//   §9 U2's PLACED REDS through real children (主开发 r5567): L1 in a real node — a teardown's throw, a rejection, a late exit code, an
+//      exit handler's closing after a throw, a line after the closing (RED CONTROL: a mutant copy without the two L1 guards); the heavy
+//      lane itself in a stub repository (the placed run once, PLACED by name in its closing and marker; --status and --check-heavy say it).
 // The fast file's §T pins that this file holds these legs, that it runs none of them, and that this row is heavy. Its host is the
 // derivation's own: hosted (node and git; no desktop program, no binary the hosted image lacks). Every scratch path of this run
 // lives under ROOT, removed at exit (the fast file's §8 judges its own); the mutant copies remove themselves.
@@ -25,8 +28,8 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { heavyBlocker, markerShapeWhy, runSuiteAsync, markerCommitsOf, resolveShortNames, SELF_SKIP_TITLE } from './ci.mjs';
-import { REPO, ok, git, report, GIT_ENV } from './ci-gate-kit.mjs';
+import { heavyBlocker, markerShapeWhy, runSuiteAsync, markerCommitsOf, resolveShortNames, SELF_SKIP_TITLE, placedVerdict } from './ci.mjs';
+import { REPO, ok, git, report, GIT_ENV, stubGateRepo, STUB_SLICE } from './ci-gate-kit.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';
 
@@ -159,6 +162,7 @@ console.log('§6b THE VERDICT THROUGH THE REAL COMMAND (主开发 r4344): a gree
       [`repos/${SLUG}/actions/runs/${runId}/jobs?filter=latest&per_page=100`]: { total_count: jobs.length, jobs },
     };
     for (const j of jobs.filter((x) => /^heavy \d+\/7$/.test(x.name))) out[`repos/${SLUG}/check-runs/${j.id}/annotations?per_page=100`] = [{ title: SELF_SKIP_TITLE, message: `${j.name} (0):`, annotation_level: 'notice' }];
+    for (const j of jobs.filter((x) => /^fast \d+\/2$/.test(x.name))) out[`repos/${SLUG}/check-runs/${j.id}/annotations?per_page=100`] = [];   // U2 L4: the writer reads every fast part's notes too (a PLACED note; none here)
     return out;
   };
   const BIN = scratch('fake-gh-bin');
@@ -391,6 +395,73 @@ console.log('§6b THE VERDICT THROUGH THE REAL COMMAND (主开发 r4344): a gree
       ok(tallyG.loosened > 0 && tallyG.tightened > 0, `both directions are reached on real git (looser by an honest union: ${tallyG.loosened} · stricter: ${tallyG.tightened}) — the leg is not vacuous`);
     }
   }
+}
+
+console.log('§9 U2 (主开发 r5567) — the PLACED REDS through real children: L1 in a real node, and the heavy lane in a stub repository');
+{
+  const LINE = 'the planted scene control line reads its own number at its bound';
+  const CLOSE = `console.log('  ✓ a leg that passes'); console.log('  ✗ ${LINE} (read 516 px)'); console.log('\\n1 FAILED (1 passed)');`;
+  const PLANTS = {
+    'test-zz-pl-ok': `${CLOSE} process.exitCode = 1;`,
+    'test-zz-pl-teardown': `${CLOSE} process.exitCode = 1; setTimeout(() => { throw new Error('teardown'); }, 0);`,
+    'test-zz-pl-reject': `${CLOSE} process.exitCode = 1; Promise.reject(new Error('a late rejection'));`,
+    'test-zz-pl-exitcode': `${CLOSE} process.exitCode = 3;`,
+    'test-zz-pl-onexit': `process.on('exit', () => { ${CLOSE} }); throw new TypeError('a leg threw — the later legs never ran');`,
+    'test-zz-pl-after': `${CLOSE} console.log('cleanup: 2 dirs left behind'); process.exitCode = 1;`,
+    'test-zz-pl-stderr-after': `${CLOSE} console.error('cleanup failed: EBUSY, resource busy or locked'); process.exitCode = 1;`,
+    'test-zz-pl-exitlistener': `process.on('exit', () => { ${CLOSE} process.exit(1); }); throw new TypeError('a leg threw — the later legs never ran');`,
+  };
+  const sr = scratch('placed'); fs.mkdirSync(path.join(sr, 'scripts'), { recursive: true });
+  for (const [n, body] of Object.entries(PLANTS)) fs.writeFileSync(path.join(sr, 'scripts', n + '.mjs'), body + '\n');
+  const E = Object.keys(PLANTS).map((suite) => ({ suite, line: LINE, placed: 'a lane line by name', owner: 'lane zz, row B-0000', since: '2.369.423' }));
+  const got = {};
+  for (const n of Object.keys(PLANTS)) { const r = await runSuiteAsync({ name: n, tier: 'heavy', why: 'slow — 1 s' }, { root: sr }); got[n] = { r, v: placedVerdict({ name: n }, r, E) }; }
+  const plant = got['test-zz-pl-ok'], REDS = ['test-zz-pl-teardown', 'test-zz-pl-reject', 'test-zz-pl-exitcode', 'test-zz-pl-onexit', 'test-zz-pl-after', 'test-zz-pl-stderr-after', 'test-zz-pl-exitlistener'];
+  ok(plant.r.ok === false && plant.r.exit && plant.r.exit.status === 1 && plant.r.exit.lastOut === '1 FAILED (1 passed)' && !!plant.v && plant.v.n === 1,
+    `THE PLANT: a real node suite that prints a placed ✗ line and its own closing, exit 1 by itself, is PLACED — its red result carries how it ended (${JSON.stringify(plant.r.exit)})`);
+  const wrong = REDS.filter((n) => got[n].v !== null), st = (n) => (got[n].r.exit || {}).status;
+  ok(!wrong.length && st('test-zz-pl-teardown') === 1 && st('test-zz-pl-reject') === 1 && st('test-zz-pl-onexit') === 1 && st('test-zz-pl-exitcode') === 3 && st('test-zz-pl-stderr-after') === 1 && st('test-zz-pl-exitlistener') === 1
+    && /^\[ci-uncaught\] (?:uncaughtException|unhandledRejection): a leg threw/m.test(got['test-zz-pl-exitlistener'].r.full) && got['test-zz-pl-exitlistener'].r.exit.lastAny === '1 FAILED (1 passed)',   // an ES module's top-level throw reaches the monitor as a rejection
+    `L1 in a real node: a teardown's throw after the closing, a rejection after it, a late exit 3, a closing an exit handler printed after a throw, a line after the closing, a line on STDERR after a closing on stdout, an exit listener's process.exit after a throw (node prints no report: the suite process's own mark says it) — each RED, though most exit 1 as the plant does (${REDS.map((n) => `${n} exit ${st(n)}`).join(', ')}; the exit listener's mark «${((got['test-zz-pl-exitlistener'].r.full || '').split('\n').find((l) => l.startsWith('[ci-uncaught]')) || 'none').slice(0, 90)}», its last line «${(got['test-zz-pl-exitlistener'].r.exit || {}).lastAny}»)${wrong.length ? ' — PLACED, WRONGLY: ' + wrong.join(', ') : ''}`);
+  const G1 = '  if (UNCAUGHT_TRACE.test(full)) return null;', G2 = '  if (ex.status !== 1 || ex.signal || ex.error) return null;', G3 = "  const m = PLACED_CLOSE.exec(String(ex.lastAny || ''));";
+  ok(SRC.split(G1).length === 2 && SRC.split(G2).length === 2 && SRC.split(G3).length === 2, 'the three L1 guards are each ONE line of placedVerdict (the mutant\'s anchors)');
+  const UNG = await import(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(G1, '  // (the trace guard, gone)').replace(G2, '  // (the exit guard, gone)').replace(G3, "  const m = PLACED_CLOSE.exec(String(ex.lastOut || ''));"), 'u2-l1-unguarded')).href);
+  const placedOld = REDS.filter((n) => UNG.placedVerdict({ name: n }, got[n].r, E) !== null);
+  ok(placedOld.join() === 'test-zz-pl-teardown,test-zz-pl-reject,test-zz-pl-exitcode,test-zz-pl-onexit,test-zz-pl-stderr-after,test-zz-pl-exitlistener',
+    `RED CONTROL: without the three guards (the trace, the exit status, the run's last line in arrival order — stdout's last line in its place) the same real runs are PLACED (${placedOld.join(', ') || 'none'}) — the line after the closing on stdout stays red by the closing rule alone`);
+  const bare = await runSuiteAsync({ name: 'test-zz-pl-exitlistener', tier: 'heavy', why: 'slow — 1 s' }, { root: sr, egress: false });
+  ok(!!placedVerdict({ name: 'test-zz-pl-exitlistener' }, bare, E) && !/\[ci-uncaught\]/.test(bare.full || ''),
+    `RED CONTROL: the same exit listener's run WITHOUT the runner's reader (no egress sampler, so no mark) prints no trace at all and would be PLACED — the suite process's own mark is what reds it (${JSON.stringify(bare.exit || {})})`);
+  // THE HEAVY LANE, for real: a stub repository (ci-gate-kit: the tree's own ci.mjs, a build of `node -e 0`, one heavy row's stub)
+  const lane = (lineOf, tag) => {
+    const s = stubGateRepo('placed-' + tag), mdir = scratch('placed-m-' + tag);
+    fs.writeFileSync(path.join(s.root, 'scripts', STUB_SLICE + '.mjs'), ["import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';",
+      "fs.appendFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.git', 'placed-runs.txt'), 'run\\n');", CLOSE, 'process.exitCode = 1;', ''].join('\n'));
+    fs.mkdirSync(path.join(s.root, 'scripts', 'fixtures'), { recursive: true });
+    fs.writeFileSync(path.join(s.root, 'scripts', 'fixtures', 'placed-reds.json'), JSON.stringify({ entries: [{ suite: STUB_SLICE, line: lineOf, placed: 'a lane line by name', owner: 'lane zz, row B-0000', since: '0.0.0' }] }, null, 1) + '\n');
+    git(s.root, ['add', '-A']); git(s.root, ['commit', '-q', '-m', 'a placed line']);
+    const sha = git(s.root, ['rev-parse', 'HEAD']), ci = path.join(s.root, 'scripts', 'ci.mjs');
+    const run = spawnSync(process.execPath, [ci, '--heavy', `--markers=${mdir}`, `--only=${STUB_SLICE}`, `--lock=${path.join(mdir, 'lock')}`, '--lock-wait-ms=20000'], { cwd: s.root, encoding: 'utf-8', env: GIT_ENV, timeout: 120000 });
+    const runs = (() => { try { return fs.readFileSync(path.join(s.root, '.git', 'placed-runs.txt'), 'utf-8').trim().split('\n').length; } catch { return 0; } })();
+    const marker = (k) => { try { return JSON.parse(fs.readFileSync(path.join(mdir, `${sha}.${k}`), 'utf-8')); } catch { return null; } };
+    return { s, sha, mdir, ci, run, out: (run.stdout || '') + (run.stderr || ''), runs, green: marker('green'), red: marker('red') };
+  };
+  const on = lane(LINE, 'on'), off = lane('a line the stub never prints, long enough to name one leg of it', 'off');
+  const heavyLine = (on.out.split('\n').find((l) => /^HEAVY (?:GATE|TIER) /.test(l)) || '');
+  ok(on.run.status === 0 && on.runs === 1 && new RegExp(`⊘ ${STUB_SLICE}: 1 ✗ line\\(s\\) PLACED`).test(on.out)
+    && new RegExp(`^HEAVY (?:GATE|TIER) PLACED for [0-9a-f]{7,12} .* · PLACED 1 line\\(s\\) in 1 suite\\(s\\): ${STUB_SLICE} \\(1\\) — NOT a green`).test(heavyLine) && !/^HEAVY (?:GATE|TIER) GREEN/m.test(on.out)
+    && !!on.green && Array.isArray(on.green.placed) && on.green.placed.length === 1 && on.green.placed[0].name === STUB_SLICE && on.green.placed[0].lines[0].since === '0.0.0' && !on.green.skippedLegs,
+    `THE HEAVY LANE, for real: the stub's only red is a placed line — run ONCE (not retried), its closing PLACED by name and count (never «HEAVY GATE GREEN»), its marker lists it as placed, never as a skipped leg (exit ${on.run.status}, ${on.runs} run(s): ${heavyLine.slice(0, 160)})`);
+  ok(off.run.status === 1 && off.runs === 2 && !/⊘ /.test(off.out) && !!off.red,
+    `CONTROL: the same stub whose entry names a line it never prints is RED, retried once, a red marker (exit ${off.run.status}, ${off.runs} runs)`);
+  const status = spawnSync(process.execPath, [on.ci, '--status', `--markers=${on.mdir}`], { cwd: on.s.root, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
+  const check = spawnSync(process.execPath, [on.ci, '--check-heavy', `--markers=${on.mdir}`, `--head=${on.sha}`], { cwd: on.s.root, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
+  const row = (status.stdout || '').split('\n').find((l) => l.includes(on.sha.slice(0, 8))) || '';
+  ok(/ PLACED /.test(row) && !/ GREEN /.test(row) && new RegExp(`PLACED 1 line\\(s\\) in 1 suite\\(s\\): ${STUB_SLICE} \\(1\\)`).test(row),
+    `--status: the run's row is PLACED by name and count, never GREEN (${row.trim().slice(0, 200)})`);
+  ok(check.status === 0 && new RegExp(`heavy verdict: not blocked — but 1 heavy run\\(s\\) on this line PASSED WITH PLACED LINES .*${STUB_SLICE} \\(1\\)`).test(check.stderr || ''),
+    `--check-heavy: not blocked, and it SAYS the placed run on this line by name and count — never a silent clear (exit ${check.status}: ${(check.stderr || '').trim().slice(0, 200)})`);
+  for (const x of [on, off]) { try { fs.rmSync(x.s.root, { recursive: true, force: true }); } catch { } }
 }
 
 report();

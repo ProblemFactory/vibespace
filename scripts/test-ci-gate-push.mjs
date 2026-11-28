@@ -323,6 +323,17 @@ console.log('\n§4 the pre-push hook, end to end');
     fs.writeFileSync(path.join(repo, '.git', 'ci-green'), `${F} ${Date.now()}\n`);
     const r14 = runHookRefs(`refs/heads/marked ${G} refs/heads/marked ${SIDE}\n`);
     ok(r14.calls.some((c) => c.mode === 'fast'), '…and a marker naming some OTHER commit does not skip this push either');
+    // U2 L4 (主开发 r5567): A MARKER OF A RUN THAT USED PLACED LINES says so — the shortcut names them by count, never «already GREEN»;
+    // a third field of another shape is a marker the hook cannot read (no shortcut)
+    fs.writeFileSync(path.join(repo, '.git', 'ci-green'), `${G} ${Date.now()} placed:3:test-zz-a=2,test-zz-b=1\n`);
+    const r15 = runHookRefs(`refs/heads/marked ${G} refs/heads/marked ${SIDE}\n`);
+    ok(r15.status === 0 && /fast gate PLACED on this exact tree \([0-9a-f]{8}, \d+ min ago\): 3 placed line\(s\) in test-zz-a \(2\), test-zz-b \(1\) — NOT a green/.test(r15.out)
+      && !/already GREEN/.test(r15.out) && !r15.calls.some((c) => c.mode === 'fast'),
+      'U2 L4: a marker naming PLACED lines skips the in-hook run SAYING them by name and count — never «already GREEN»');
+    fs.writeFileSync(path.join(repo, '.git', 'ci-green'), `${G} ${Date.now()} placed-by-hand\n`);
+    const r16 = runHookRefs(`refs/heads/marked ${G} refs/heads/marked ${SIDE}\n`);
+    ok(r16.calls.some((c) => c.mode === 'fast') && !/already GREEN|fast gate PLACED/.test(r16.out),
+      'CONTROL: a third field of another shape is a marker the hook cannot read — no shortcut, the fast tier runs');
     try { fs.unlinkSync(path.join(repo, '.git', 'ci-green')); } catch {}
   }
 

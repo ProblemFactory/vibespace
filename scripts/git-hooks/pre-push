@@ -340,6 +340,10 @@ skip_fast=0
 marker="$(git rev-parse --git-dir)/ci-green"
 if [ -f "$marker" ]; then
   m_sha=$(awk '{print $1}' "$marker"); m_ts=$(awk '{print $2}' "$marker"); now_ms=$(( $(date +%s) * 1000 ))
+  # U2 L4 (主开发 r5567): a run that used PLACED lines writes a third field «placed:<lines>:<suite>=<n>,…» — the shortcut says it by
+  # name and count, never «GREEN»; a third field of any other shape is a marker this hook cannot read: no shortcut
+  m_pl=$(awk '{print $3}' "$marker"); m_pl_ok=0
+  case "$m_pl" in '') m_pl_ok=1 ;; placed:[0-9]*:?*) m_pl_ok=1 ;; esac
   pushed_all_marked=1; pushed_n=0
   for sha in "${PUSHED_SHAS[@]:-}"; do
     [ -z "$sha" ] && continue
@@ -347,8 +351,13 @@ if [ -f "$marker" ]; then
     [ "$sha" = "$m_sha" ] || pushed_all_marked=0
   done
   [ "$pushed_n" = "0" ] && pushed_all_marked=0
-  if [ "$m_sha" = "$(git rev-parse HEAD)" ] && [ "$pushed_all_marked" = "1" ] && [ -z "$(git status --porcelain)" ] && [ $(( now_ms - ${m_ts:-0} )) -lt 3600000 ]; then
-    echo "[ci] fast gate already GREEN on this exact tree ($(echo "$m_sha" | cut -c1-8), $(( (now_ms - m_ts) / 60000 )) min ago) — skipping the in-hook run" >&2
+  if [ "$m_sha" = "$(git rev-parse HEAD)" ] && [ "$pushed_all_marked" = "1" ] && [ "$m_pl_ok" = "1" ] && [ -z "$(git status --porcelain)" ] && [ $(( now_ms - ${m_ts:-0} )) -lt 3600000 ]; then
+    if [ -n "$m_pl" ]; then
+      m_pl_rest="${m_pl#placed:}"; m_pl_names="${m_pl_rest#*:}"; m_pl_names="${m_pl_names//=/ (}"; m_pl_names="${m_pl_names//,/), })"
+      echo "[ci] fast gate PLACED on this exact tree ($(echo "$m_sha" | cut -c1-8), $(( (now_ms - m_ts) / 60000 )) min ago): ${m_pl_rest%%:*} placed line(s) in ${m_pl_names} — NOT a green: each placed line is still red, owed by its lane (scripts/fixtures/placed-reds.json) — skipping the in-hook run" >&2
+    else
+      echo "[ci] fast gate already GREEN on this exact tree ($(echo "$m_sha" | cut -c1-8), $(( (now_ms - m_ts) / 60000 )) min ago) — skipping the in-hook run" >&2
+    fi
     skip_fast=1
   fi
 fi

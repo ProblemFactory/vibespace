@@ -299,7 +299,15 @@ function sayUnreadAtExit(file = FILE) {
   });
 }
 
+// U2 L1 (主开发 r5567): A THROW OR A REJECTION NOTHING CAUGHT, said by the suite's OWN process the moment it happens — node emits 'exit'
+// BEFORE it prints its fatal report, so an exit listener that calls process.exit() would end the run with no trace at all. One line on
+// stderr (fd 2, synchronous); scripts/ci.mjs placedVerdict reads it as an uncaught trace. A child carries no copy (SUITE_PROCESS).
+function sayUncaught() {
+  if (!SUITE_PROCESS) return;
+  process.on('uncaughtExceptionMonitor', (e, origin) => { try { fs.writeSync(2, `\n[ci-uncaught] ${origin}: ${String((e && e.message) || e).split('\n')[0].slice(0, 200)}\n`); } catch { /* never the suite's */ } });
+}
 install();
 installChildren();
 sayUnreadAtExit();
+sayUncaught();
 module.exports = { install, installChildren, carry, childVerdict, withoutReader, binKind, NODE_BIN, LOOPBACK, LOCAL, target, verdict, answered, LOST_MARK, CENSUS_ROW, SUITE_NAME };
