@@ -117,10 +117,23 @@ const KILL_BIT = 1n << 8n;   // signal 9 (SIGKILL) in a /proc pending mask
 const killPending = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/status`, 'utf8'); return ['SigPnd', 'ShdPnd'].some((k) => { const m = st.match(new RegExp('^' + k + ':\\s*([0-9a-f]+)', 'm')); return !!m && (BigInt('0x' + m[1]) & KILL_BIT) !== 0n; }); } catch { return false; } };
 const taskFacts = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); return { state: f[0], pgrp: Number(f[2]), session: Number(f[3]), killPending: killPending(pid) }; } catch { return { state: 'gone' }; } };
 const KILLED_NOT_RUN = new Set();   // the pids whose wait ended on a pending SIGKILL (the kill delivered, the kernel had not run them yet)
+// r5613 (主开发 2026-11-28 — the fourth candidate's once-red at LOW load, machine 1's box zone: «child … ALIVE 5000 ms after the bound
+// answered … (state gone …)»: not gone and no SIGKILL pending through the whole wait, GONE a moment later): THE WAIT SAYS ITS OWN LOOKS.
+// Each look of a pid's wait is kept (the first twenty, then the last): ms after the bound's answer, the task's state, whether the
+// kernel marks it EXITING (PF_EXITING, 0x4 in /proc/<pid>/stat's flags: the task took a fatal signal and is on its exit path — a
+// state the old words read as «never signalled»), a pending SIGKILL, its process group and session — said at a red, the verdict
+// and the bound unchanged
+const PF_EXITING = 0x4;
+const lookAt = (pid, t0) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); const fl = Number(f[6]); return `+${Date.now() - t0} ${f[0]}${(fl & PF_EXITING) ? ' EXITING' : ''}${killPending(pid) ? ' KILL-PENDING' : ''} pg ${f[2]} sid ${f[3]}`; } catch { return `+${Date.now() - t0} gone`; } };
+const LOOKS = new Map();   // pid → { first: [the first twenty looks], last, n }
+const looksOf = (pid) => { const l = LOOKS.get(pid); return l ? `${l.n} looks; the first ${l.first.length}: ${l.first.join(' · ')}${l.n > l.first.length ? ` … the last: ${l.last}` : ''}` : 'no looks'; };
 const diedWithin = async (pid, t0, bound = DEATH_MS) => {
   if (!(pid > 1)) return null;
   const ended = () => !alive(pid) || killPending(pid);
-  while (!ended() && Date.now() - t0 < bound) await new Promise((r) => setTimeout(r, 10));
+  const L = { first: [], last: '', n: 0 }; LOOKS.set(pid, L);
+  const look = () => { const x = lookAt(pid, t0); L.n++; L.last = x; if (L.first.length < 20) L.first.push(x); };
+  look();
+  while (!ended() && Date.now() - t0 < bound) { await new Promise((r) => setTimeout(r, 10)); look(); }
   if (!ended()) return null;
   if (alive(pid)) KILLED_NOT_RUN.add(pid);
   return Date.now() - t0;
@@ -511,7 +524,7 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
       // once) and its time is the leg's own fact; a process the product never signalled stays alive past the bound: red (⑦'s mutant)
       const [dS, dC] = a.kind !== 'GUARD' ? await Promise.all([diedWithin(sp, at, deathMs), diedWithin(sc, at, deathMs)]) : [null, null]; // the guard ended it ⇒ nobody killed them: red, reaped below
       const dead = dS !== null && dC !== null;
-      const said = (pid, d) => (a.kind === 'GUARD' ? `${pid > 1 ? pid : '(no pid written)'} not waited for (the guard answered, not the bound)` : !(pid > 1) ? 'no pid written' : `${pid} ${d === null ? (() => { const f = taskFacts(pid); return `ALIVE ${deathMs} ms after the bound answered, never signalled (state ${f.state}, process group ${f.pgrp}, session ${f.session}${f.pgrp > 1 && sp > 1 && f.pgrp !== sp ? ` — NOT the probe's own group ${sp}: the product's group kill cannot reach it` : ''})`; })() : KILLED_NOT_RUN.has(pid) ? `killed ${d} ms after the bound answered (SIGKILL delivered, pending: the kernel had not run it yet — state ${taskFacts(pid).state})` : `died ${d} ms after the bound answered`}`);
+      const said = (pid, d) => (a.kind === 'GUARD' ? `${pid > 1 ? pid : '(no pid written)'} not waited for (the guard answered, not the bound)` : !(pid > 1) ? 'no pid written' : `${pid} ${d === null ? (() => { const f = taskFacts(pid); return `ALIVE ${deathMs} ms after the bound answered: not gone and no SIGKILL pending at the last look (read after the wait: state ${f.state}, process group ${f.pgrp}, session ${f.session}${f.pgrp > 1 && sp > 1 && f.pgrp !== sp ? ` — NOT the probe's own group ${sp}: the product's group kill cannot reach it` : ''}) — THE PRODUCT'S KILL at the bound (the starter answered ${a.kind}:${a.why}): SIGKILL to the shell ${sp} by its own handle and to its group −${sp} (child-starter-proc.js, the session's group); the child's group at its first look: ${(() => { const m = /pg (\d+)/.exec((LOOKS.get(pid) || { first: [''] }).first[0] || ''); return m ? m[1] + (Number(m[1]) === sp ? ' (IN the signalled group)' : ' (NOT in the signalled group)') : 'not read'; })()} — ITS LOOKS: ${looksOf(pid)}`; })() : KILLED_NOT_RUN.has(pid) ? `killed ${d} ms after the bound answered (SIGKILL delivered, pending: the kernel had not run it yet — state ${taskFacts(pid).state})` : `died ${d} ms after the bound answered`}`);
       leg('…the shell (its pid) AND its rc\'s leftover child (its own session) are dead — or KILLED, the product\'s SIGKILL delivered and pending (a loaded kernel had not run them yet)', sp > 1 && sc > 1 && dead, `shell ${said(sp, dS)} · child ${said(sc, dC)}`);
       if (printDeaths) console.log(`    [the rc that never returns] the shell died ${dS === null ? 'NOT' : dS + ' ms'} and its leftover child ${dC === null ? 'NOT' : dC + ' ms'} after the bound answered (waited up to ${deathMs} ms)`);
       if (!dead) {   // nobody's kill ended them (a mutant, the guard): reaped here — after the shell had a bounded moment to write its pids
