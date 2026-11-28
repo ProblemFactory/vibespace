@@ -14,7 +14,8 @@
 //      An update that reached the whole map just before (B-dfa4 r5450 hold (ii)): the open's OWN TURN reads 0 rows of the row facts —
 //      the kept row facts answered as they stood, their re-sum in slices — COUNTED in rows (主开发 r5545: its work's ratio is SAID, not
 //      judged: the re-sum's first slice, bounded by its own clock, may fall inside the measured window). CONTROL: the release's road
-//      (the re-sum ended by a placed throw, the next reader re-sums whole) — that open's turn reads every row — red.
+//      (the re-sum ended by a placed throw; its catch tells the clients once, and that told push's own turn re-sums whole) — that turn
+//      reads every row, the open after it its own one row — red.
 //      CONTROL: the base's mark-read broadcast named a bare id — notify then scans every key of the index — red.
 //   ② THE INDEX WRITE after one row changed: bounded at 50 274 vs 100 548 rows. CONTROL: the whole-file write.
 //   ③ THE BYTES: the incremental write equals `JSON.stringify(ix, RUNTIME_KEYS, 1)` byte for byte through a walk (a row
@@ -304,19 +305,26 @@ ok(!bounded(ff1.total, ff2.total) && ff1.total > 20 * f1.total, `② CONTROL: th
   ok(disk === JSON.stringify(ix.snapshot(), RUNTIME_KEYS, 1), `② …and the ${(disk.length / 1e6).toFixed(1)} MB on disk equals the whole-file serialization byte for byte`);
 }
 
-// RED CONTROL (主开发 r5545): the release's road — the void re-summed WHOLE in the reader's turn — reached through the product's own fallback:
-// a throw placed in the re-sum's seam ends it (its catch: the next reader re-sums whole). ONE synchronous reader starts the re-sum (a
-// one-key digest: answered as they stood); the wait lets its first slice reach the seam and throw; nothing else reads before the measured
-// open, whose own turn then reads every row. After ②'s disk check, so its writes never meet it (flushed at the end)
+// RED CONTROL (主开发 r5545; its form by r5587): the release's road — the void re-summed WHOLE in one turn — reached through the product's
+// own fallback: a throw placed in the re-sum's seam ends it. ONE synchronous reader starts the re-sum (a one-key digest, answered as they
+// stood); the wait lets its first slice reach the seam and throw. THE SUBJECT IS THE TOLD PUSH's TURN (the holds follow's item four,
+// 主开发 r5495 (4)): the re-sum's catch tells the clients once, and that push's digest is the first reader after the throw — its own turn
+// takes the release's road and reads every row (the count, minus the walk's own rows at its seam); the open measured after it reads its
+// own one touched row. After ②'s disk check, so its writes never meet it (flushed at the end)
 {
   resumThrow = true; await ix.update((x) => { void x.conversations; }); ix.flush();
   const st0 = eng.rowResumStats();
   eng.digest({ keys: [`${A}/t-h1`] });   // the ONE reader that starts the re-sum
+  const stA = eng.rowResumStats();   // that reader read the sums as they stood
   await resumLanded('the red control\'s re-sum, ended by its placed throw');
-  const st1 = eng.rowResumStats(), rowsNowRed = Object.keys(ix.live()).length;
+  const st1 = eng.rowResumStats(), seamRed = resumSeam, rowsNowRed = Object.keys(ix.live()).length;
+  const walkedRed = seamRed && seamRed.started === st1.started ? seamRed.i : 0;   // the walk's own rows before its seam threw
+  const pushRows = st1.rowsRead - stA.rowsRead - walkedRed;   // the told push's own turn
   const rRed = await measureOpenRows('t-rred');
   ix.flush();
-  ok(rRed.good && !resumThrow && st1.started > st0.started && rRed.readerRows >= rowsNowRed, `① RED CONTROL: the release's road (the re-sum ended by a throw placed in its seam, so the next reader re-sums whole) — that open's own turn read ${rRed.readerRows} row(s) of the row facts at ${rowsNowRed} rows: the count above would go red`, { readerRows: rRed.readerRows, walked: rRed.walked, rowsRead: rRed.rowsRead, thrown: !resumThrow, started: st1.started - st0.started, rowsBeforeTheOpen: st1.rowsRead - st0.rowsRead });
+  ok(rRed.good && !resumThrow && st1.started > st0.started && st1.told - st0.told === 1 && pushRows >= rowsNowRed && rRed.readerRows === 1,
+    `① RED CONTROL (THE TOLD PUSH's TURN, by the holds follow's item four): the re-sum ended by a throw placed in its seam; its catch told the clients once (${st1.told - st0.told}) and that push's own turn took the release's road — it read ${pushRows} row(s) of the row facts at ${rowsNowRed} rows: the count above would go red; the open measured after it read its own ${rRed.readerRows} row`,
+    { pushRows, walked: walkedRed, told: st1.told - st0.told, starterRows: stA.rowsRead - st0.rowsRead, openRows: rRed.readerRows, thrown: !resumThrow });
 }
 
 console.log('③ the bytes: incremental = the whole-file serialization');
