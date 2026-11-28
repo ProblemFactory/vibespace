@@ -10,31 +10,37 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Agents can keep a file in the vault (an SSH key, a certificate, a kubeconfig, up to 1 MB); a command they run gets it as a private file, never its contents.
 - A command can carry vault files of up to 24 KB in all; a larger file stays in the vault and a run that names it is refused, saying why.
 - The Vault window keeps files: add one with Add… › File…, download it after your second password; one too large for a command says so on its row.
-- A message the agent never received now offers «Send again» and «Dismiss» right where it stands in the conversation.
+- In a running conversation, a message the agent never received offers «Send again» (if it has words) and «Dismiss» in place; a stopped one says to resume first.
 - A website login's row in the Vault has «Change password…», and «Use the previous password» when one is kept; Add says first when it would change a saved login.
 - An agent whose stored website login stopped working can ask you for the new one; the card says it is the agent's claim, and you may answer «It still works».
-- A file in the vault can be replaced on its own row (Replace file…): it keeps its name, its description and who may use it, and the next run gets the new file.
+- A file you added to the vault can be replaced on its row (Replace file…): it keeps its name, description and who may use it; the next run gets the new file.
 - The Vault window says when it keeps sealed files its record does not name, and lets you remove them after your second password.
+- In a pool's Members & placement…, a member's ⋯ menu has «Move every conversation of this pool here now»; it first says what moves, waits or may be billed.
+- If VibeSpace keeps its own records on a network or user-space drive, For you now says so once, and Settings shows where they are kept.
 
 ### Changed
 - If a pool can't be moved off an account you remove, its sign-in folder is kept and the notice says so.
 - A kept sign-in folder shows in Manage agents with a Clear it button, which deletes it once no pool reads it.
+- A pool now uses an account billing paid overage last, and moves a conversation off it at its next stop when another account can take it.
+- «Mark as reset» no longer moves conversations by itself; it may continue one stopped conversation on that account as a test, and says what it did or why not.
+- A Channels rule's time window now includes both times it names, and the same time twice means the whole day, as the editor says.
+- An iPhone home-screen app gets a launch image in your theme's background (add it again to see it); on a Duo held landscape the bar sits in the left column.
 
 ### Fixed
-- After a sudden power cut, VibeSpace no longer loses its record of an archive extraction cut short, or the warning that Claude could not save its work.
-- If VibeSpace cannot read its record of notices already given (hooks, HTTPS, sign-in reminders, new Claude Code builds), it no longer repeats them.
+- After a sudden power cut, the record of an archive extraction cut short, and the warning that Claude could not save its work, no longer come back empty.
+- While VibeSpace cannot read its record of notices given (hooks, HTTPS, sign-in reminders, new Claude Code builds), it no longer repeats them or overwrites it.
 - A conversation's window no longer turns read-only when the server is slow to reconnect it; it says it is still attaching and keeps your typed message.
-- VibeSpace no longer pauses while it trims the browser action history every hour, and the Sweep now button says how many profiles it could not sweep.
+- VibeSpace no longer pauses during its hourly cleanup of the Agent browser's screenshots and recordings; «Sweep now» says how many profiles it could not sweep.
 - An Antigravity account's own settings, with the rules you allowed there, are no longer replaced by this computer's copy when VibeSpace briefly cannot read them.
 - If VibeSpace cannot read that you removed its hooks from your CLIs, it no longer puts them back; Install and Remove say so when they cannot save your choice.
 - The model menu no longer loses the models it learned when their list could not be read for a moment.
 - If VibeSpace cannot read an older mounts list while upgrading it, it keeps it and reads it again; those mounts are no longer lost.
 - A notice about a folder that stopped answering now says when it could not read who uses the folder, instead of saying that no process has a file open there.
 - After a restart, two windows of one conversation on this machine stay open unless one's program has ended; a running one is no longer ended as a duplicate.
-- Removing an account from a Codex pool now moves the pool to a member that is signed in, instead of leaving it on the removed account.
-- In For you, sign-in notices are grouped under «Accounts and sign-ins», and a long-lived token's identity notice no longer offers a reply it cannot take.
-- A file copied between machines or across disks, uploaded over WebDAV or exported from a Task Group is now on disk before VibeSpace says it is saved.
-- A published page and a design's tweak values are also on disk before VibeSpace says so, and when the disk refuses you are told the file was not saved.
+- Removing an account from a Codex pool no longer leaves the pool on it: the pool moves to a signed-in member of the same provider when one is left.
+- In For you, the «Login expiry» group is now named «Accounts and sign-ins», and a long-lived token's identity notice no longer offers a reply it cannot take.
+- Files copied here from another machine, new copies or moves to another disk here, WebDAV uploads and Task Group exports are on disk before VibeSpace says so.
+- A published page, and a design's tweak values on this machine, are on disk before VibeSpace says so; when the disk refuses, you are told.
 - On storage that cannot sync files to disk, VibeSpace saves its own records again instead of retrying every save forever and losing them at a restart.
 - After a sudden power loss, your storage list, your machines' mounts, plugins, port forwards and the publish setting no longer come back empty.
 - After a sudden power loss, remote conversations keep their tools and browsers keep reaching your Tailscale devices.
@@ -43,14 +49,29 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - With Claude usage refresh set to Off, VibeSpace no longer reads usage by itself at a usage limit or in a pool's checks; a waiting conversation says so.
 - Where the system's basic tools are the Rust ones (Ubuntu 25.10 and later), setting up or installing desktop apps no longer waits on every drive's writes.
 - In the Vault window every button of a row stays inside the window at any width; a website login showing all its buttons no longer runs off its side.
-- An agent's ask whose words hold a password is refused before any card is made, and the agent is told how to say it instead.
+- An agent's Vault request whose words look like a secret (a word right after «password», a token or a key) is refused before any card, with how to word it.
 - An agent's ask for a login's new password shows «Change password» and «It still works» in the Vault's «Needs you» strip too; the card says what you pressed.
 - After a restart, a duplicate terminal, OpenCode, Antigravity or Codex window started after this update is closed at once if its program ended, kept if it runs.
-- Stop in an Antigravity chat reaches Antigravity at once, even while this machine's disk is slow to write.
-- After a restart, closing a duplicate window ends only programs VibeSpace started for it; another VibeSpace on the same data folder keeps running.
+- Stop in a Claude or Antigravity chat reaches the CLI before VibeSpace writes its own records of the Stop, so a slow disk no longer delays it by those writes.
+- On restart, a duplicate of a conversation is ended only by stopping programs proven its own; if another program holds it, it stays and Diagnostics names it.
 - A refresh that reads an account by itself no longer saves another account's usage as its own when its folder holds that login; it says why and how to fix it.
-- After 2.369.419–2.369.422, an account whose folder held another's sign-in may show that account's usage (one quota); sign it in again with its own account.
+- An account whose folder holds another account's sign-in can still show that account's usage through its conversations; sign it in again with its own account.
 - An account whose weekly window moved onto another account's hour no longer has its usage filed under that account; it re-anchors on its own readings.
+- When a pool's default account is removed or lapses, new conversations no longer start on an account out of quota while another member can serve.
+- Resuming a pool's conversation uses your latest choice of member, or automatic, even when it was changed on another page while the conversation ran.
+- A conversation waiting to continue at its limit's reset still continues if VibeSpace restarted meanwhile and the conversation came back late.
+- A setting whose save failed no longer takes effect anyway; VibeSpace keeps using the value that was saved.
+- Scrolling up as older messages load, what you are reading no longer drops when a picture or message above it takes its real height late.
+- With many Channels conversations, VibeSpace no longer freezes for a second or two while it re-counts the account cards after a large update.
+- A pool's notices that a conversation moved or that its default account switched, and the Delivery log's reason for a held wake, now appear in your language.
+- A desktop app you relaunch at another scale now opens once at its final size, instead of opening at the old size and being refit a moment later.
+- A folder you just made in the folder field shows up in its parent at once, and «Choose this folder» picks it instead of the parent.
+- Removing a Slack account from Channels erases its conversations' fetch times from disk before saying done; if it cannot yet, its row says so, with Try again.
+- Handing the Agent browser back now warns when your note could not be saved for the agent; before the agent's first reply, it says to hand it back after.
+- An Agent browser you just finished using no longer stops early; its idle time counts from when you left it.
+- Records VibeSpace briefly cannot read are no longer lost or written over: window holds, machine agent updates, link tokens, Background Work runs, System charts.
+- Turning a plugin on or off says so when it could not be saved, and the switch stays as it was; «Let an agent help…» says why it could not mark its helper.
+- A Channels message line damaged by a crash is no longer deleted when older messages load or old ones are trimmed.
 
 ## 2.369.422 — 2026-11-27
 
