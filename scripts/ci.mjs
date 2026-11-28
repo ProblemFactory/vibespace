@@ -4078,6 +4078,26 @@ export function everyGatePlan(suites, { read = () => null } = {}) {
 export function everyGateNames(suites = SUITES) {
   return suites.filter((s) => s.tier === 'heavy' && s.everyGate !== undefined).map((s) => s.name).sort();
 }
+/** U3a (主开发 r5594 (3)): the everyGate rows among `names`, sorted — PURE (everyGateFor's last step). */
+export function everyGateSelected(names, suites = SUITES) {
+  const mark = new Set(everyGateNames(suites));
+  return [...new Set((names || []).filter((n) => mark.has(n)))].sort();
+}
+/** U3a (主开发 r5594 (3)): THE MARKED CENSUSES A RANGE CAN TURN RED → { names, summary }. The marked rows only, by the scope's PATH rule
+ *  (affectedSuites with `reach: false`: the suite and its imports, the files it names, its reads, and — for a suite that boots the
+ *  product, as a whole-tree census does by its server.js — src/, data/bin/, server.js and package.json), NEVER the static reach: the
+ *  reach keeps a file a suite spells, and a census that walks src/** spells almost none (the U3a read round: a src/server file only
+ *  server.js requires, a data/bin CLI no module spawns, were dropped). A lane's gate runs exactly these (`ci.mjs --every-gate`). Measured
+ *  at a952ac17a, alone on the second test machine (box / UTC): test-record-clear-census-interp 9 743 / 9 829 ms (test-egress-census,
+ *  the other marked row, states 3.9 s), its inputs touched by 278 of the 486 units lined in three days (57 %); a split under the fast
+ *  line reads 8 420 / 8 587 ms (its census) + 8 631 / 8 721 ms (its controls, cold: their first one pays the 7.6 s pass the census's
+ *  own one leg pays as 7.35 s) — 17 s a zone at every gate and on the fast cap. */
+export function everyGateFor({ range, changed, root = repo, suites = SUITES } = {}) {
+  const marked = suites.filter((s) => s.tier === 'heavy' && s.everyGate !== undefined);
+  if (!marked.length) return { names: [], summary: '[ci] no row carries the everyGate mark' };
+  const a = affectedSuites({ range, suites: marked, root, changed, reach: false });
+  return { names: everyGateSelected(a.selected.map((s) => s.name), suites), summary: a.summary };
+}
 
 // ── IMPACT SCOPE (2026-09-15) ────────────────────────────────────────────────
 // The push-time tier runs only the suites whose INPUTS the pushed range
@@ -6603,7 +6623,7 @@ export function exitFlushed(code) {
 // THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
 // flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
 // --help included — prints the usage and exits 2 before a suite starts.
-const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'false-rows', 'fast-only', 'fast-part', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'placed-delta', 'range', 'reap', 'rules', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'tier', 'why']);
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'every-gate', 'false-rows', 'fast-only', 'fast-part', 'gh-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'heavy-verdict', 'host', 'hosts', 'isolate', 'keep-going', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'placed-delta', 'range', 'reap', 'rules', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'tier', 'why']);
 const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
   (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit · --keep-going: every red listed, not the first · --fast-part=<i>/<n>: one part, the hosted fast jobs · --fast-only=<a,b>: a NAMED set of fast suites through the same lane — its own lines, never the tier, no marker)
   --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
@@ -6612,6 +6632,7 @@ const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
   --list-affected      the heavy suites a --range touches (--tier=fast: the fast ones · --rules: each with the rule that selected it) · --census · --hosts · --shard-timings <files…>
   --false-rows         the fast rows read ≥ 10 s at ≥ ×1.5 their statement in this checkout's two newest whole tiers (exit 1 names them)
   --placed-delta       --range=<base>..<tip>: what the range did to scripts/fixtures/placed-reds.json (the entries that came, went, or moved their since)
+  --every-gate         --range=<base>..<tip>: the everyGate-marked heavy censuses the range can turn red (the kit's whole-tree rows run them)
   --reap [--dry-run]   the scratch reaper
   ops: --markers=<dir> --head=<sha> --lock=<file> --lock-wait-ms=<n> --pid-file=<f> --serial-overlap=<n> --dirty-ok --allow-hub-full
   env: VS_NO_REAL_CLI=1 — the two rows that may talk to the vendor (test-chat-e2e's real turn, test-stdout-registry's wire leg)
@@ -6667,6 +6688,13 @@ function main(argv) {
   if (arg('census')) return exitFlushed(census());
   if (arg('hosts')) return exitFlushed(hostsReport());
   if (arg('shard-timings') !== undefined) return exitFlushed(writeShardTimings(argv.filter((a) => !a.startsWith('--'))));
+  if (arg('every-gate')) {   // U3a: the marked censuses this range can turn red — the kit's whole-tree rows run them at every lane's gate
+    if (!rangeArg) { console.error('✗ --every-gate wants --range=<base>..<tip> — nothing listed'); return exitFlushed(2); }
+    const { names } = everyGateFor({ range: rangeArg });   // the PATH rule over the marked rows (never the static reach)
+    console.error(`[ci] every-gate rows over ${rangeArg}: ${names.length} of the ${everyGateNames().length} marked — ${names.join(', ') || 'none (the range touches none of their inputs)'}`);
+    console.log(names.join(','));
+    return exitFlushed(0);
+  }
   if (arg('list-affected')) { const l = listAffected({ range: rangeArg || null, shard, dir, why: !!arg('why'), host, tier: str('tier') === 'fast' ? 'fast' : 'heavy', rules: !!arg('rules') }); console.error(l.summary); if (l.ruleLines) { console.error(`[ci] rules: ${Object.entries(l.ruleCount).sort((x, y) => y[1] - x[1]).map(([r, n]) => `${r} ${n}`).join(' · ')}`); console.log(l.ruleLines.join('\n')); } else console.log(l.names.join(',')); return exitFlushed(0); }
   if (arg('status')) return exitFlushed(status({ dir, head }));
   if (arg('check-heavy')) return exitFlushed(checkHeavy({ dir, head }));

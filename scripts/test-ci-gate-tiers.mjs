@@ -1234,6 +1234,29 @@ console.log('\n§8i a heavy census of the tree carries the everyGate mark, and a
   const bareWord = one({ 'test-zz-census.mjs': L("const args = ['ls-files', '-z'];", "console.log(args.includes('ls-files'));") });
   ok(said(bareWord, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: the word 'ls-files' that no git child is handed is no listing (${bareWord.problems[0] || 'no problem'})`);
   const localFn = one({ 'test-zz-census.mjs': L('function trackedFiles() { return []; }', 'console.log(trackedFiles().length);') });
+  // U3a (主开发 r5594 (3)): THE MARKED ROWS A RANGE CAN TURN RED — the everyGate rows among the heavy names the tree's own scope selects,
+  // and nothing else: a heavy row with no mark, a fast row, a name twice, a name no row carries; the verb hands the kit exactly these
+  { const ci = await import('./ci.mjs'), marked = ci.everyGateNames(), heavy0 = SUITES.find((x) => x.tier === 'heavy' && x.everyGate === undefined).name;
+    const fast0 = SUITES.find((x) => x.tier === 'fast').name, sel = ci.everyGateSelected([heavy0, marked[0], fast0, marked[0], 'test-zz-no-row', ...marked.slice(1)]);
+    ok(marked.includes('test-record-clear-census-interp') && JSON.stringify(sel) === JSON.stringify(marked.slice().sort()) && ci.everyGateSelected([heavy0, fast0]).length === 0 && ci.everyGateSelected(undefined).length === 0,
+      `U3a: the marked rows a range can turn red are the everyGate rows among the heavy names the tree's own scope selects — ${marked.join(', ')} — never an unmarked heavy row, a fast row, a name twice or a name no row carries`);
+    const CIX = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf8');
+    ok(CIX.includes('    const { names } = everyGateFor({ range: rangeArg });') && CIX.includes("'dry-run', 'every-gate', 'false-rows',")
+      && CIX.includes('  const a = affectedSuites({ range, suites: marked, root, changed, reach: false });')
+      && CIX.indexOf("if (arg('every-gate')) {") < CIX.indexOf("if (arg('list-affected')) {") && /if \(!rangeArg\) \{ console\.error\('✗ --every-gate wants --range/.test(CIX),
+      'WIRING: `ci.mjs --every-gate --range=<base>..<tip>` is a verb of the CLI (a known flag) — the marked rows by the scope\'s PATH rule (reach off); no range is refused, never the whole tier');
+    // THE READ ROUND'S SCENES, driven in process over the real table (changed files handed in — no git): a src/server file only server.js
+    // requires and a data/bin CLI no module spawns select the census; a docs file selects none; RED CONTROL: the static reach — the
+    // verb's first form — drops the census for the src/server file the census walks but never spells
+    // (over the real table: ~3.6 s alone — the heavy twin's, as §8's real-table selections are; the fast row keeps the pure legs)
+    if (!DEEP) inTwin('U3a\'s every-gate selection over the real table — the read round\'s scenes and the static reach as their red');
+    else {
+      const CEN = 'test-record-clear-census-interp', at = (changed) => ci.everyGateFor({ range: 'a..b', changed }).names;
+      const boot = at(['src/server/boot-phase.js']), bin = at(['data/bin/vibespace-job']), docs = at(['docs/kb-api.md']);
+      const reached = ci.affectedSuites({ range: 'a..b', suites: SUITES.filter((x) => x.name === CEN), changed: ['src/server/boot-phase.js'] }).selected.map((x) => x.name);
+      ok(boot.includes(CEN) && bin.includes(CEN) && !docs.includes(CEN) && !reached.includes(CEN),
+        `U3a: a change the census can turn red selects it — a src/server file only server.js requires (${boot.join(', ') || 'none'}), a data/bin CLI no module spawns (${bin.join(', ') || 'none'}); a docs file does not (${docs.join(', ') || 'none'}); RED CONTROL: the static reach (the first form) drops it for the src/server file (${reached.join(', ') || 'none'})`);
+    } }
   ok(said(localFn, /marked everyGate, but it lists no tracked file of the tree/), `CONTROL: a local function named trackedFiles is no listing, only a helper's binding is (${localFn.problems[0] || 'no problem'})`);
 }
 // ── §8l THE PLACED REDS (the release pipeline's U2, lane bl-ci, 主开发 r5490 line 5 / r5499; its laws L1–L4, r5567): a LINE of a suite —
