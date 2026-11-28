@@ -3,6 +3,7 @@
 // red controls by 主开发 r5537, lane nl-starts: that suite read 11.05 s alone, past the 10 s bound). The setup below is the old suite's own,
 // copied as it is (its fakes, its scratch data dir, its session stand-ins, its signal recorder); nothing in the legs is changed.
 // ONE helper line differs: ok() refuses a name that is not a string (test-ci-gate-tiers §7b: a new file's helper is guarded) — its verdicts as before.
+// The exit hook is the suite's own end since r5595 (endAll below: by handle and by birth, on every exit road), and its last leg counts it.
 //   ③d A PAIR IS DECIDED BY EACH SOCKET'S OWN PROGRAM, NOTHING IS SIGNALLED BY A PATTERN, THE SOCKET LEAVES LAST (B-b2d3 step 2,
 //     主开发 r5028 / r5032): (a) the kernel's answer for one socket's file (the REAL fuser over a real socket of the leg's own) names
 //     its listener, never a person's attach or the hub's own; (b) one proven dead retires by its held records only (its master by the
@@ -40,12 +41,7 @@ const until = async (fn, ms) => { const end = Date.now() + ms; while (!fn() && D
 const kids = [];
 const SESS = [];   // [pid, start] of each session's wrapper stand-in (a grandchild, read from its master's children list): swept at exit only while its birth reads the same
 let PIDS = null; // every hanging fake appends its pid: the exit sweep ends what a bound has not — registered BEFORE scratch(), whose own exit hook removes the root (and this file) first otherwise
-process.on('exit', () => {
-  let pids = []; try { pids = fs.readFileSync(PIDS, 'utf8').split('\n').map((l) => Number(l.split(' ')[0])).filter((n) => n > 1); } catch { }
-  const isOurs = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').startsWith('sleep\u0000'); } catch { return false; } }; // still the fake's sleep (a recorded pid is never trusted blind)
-  for (const pid of [...pids, ...kids.map((k) => k.pid)]) if (isOurs(pid)) { try { process.kill(pid, 'SIGKILL'); } catch { } }
-  try { for (const [pid, st] of SESS) if (st && PIt.startToken(pid) === st) { try { process.kill(pid, 'SIGKILL'); } catch { } } } catch { }
-});
+process.on('exit', () => { try { endAll(); } catch { } });   // r5595: the last word — the suite's own end (children by their handles, the rest by birth)
 const ROOT = scratch('boot-probes-pairs');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(path.join(ROOT, 'bin'), { recursive: true });
 PIDS = path.join(ROOT, 'pids');
@@ -106,6 +102,17 @@ const PAIR_WORDS = "two cards of one conversation: «claude older» and «claude
 const programAs = (x, rec) => { const f = x.buf.replace(/\.buf$/, '.json'); let cur = {}; try { cur = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { } const { proc, ...keep } = rec || {}; fs.writeFileSync(f, JSON.stringify({ ...cur, ...keep })); };
 const logged = async (fn) => { const lines = [], log = console.log, warn = console.warn; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); try { return { r: await fn(), lines }; } finally { console.log = log; console.warn = warn; } };
 const signals = []; const realKill = process.kill.bind(process);
+// THE SUITE ENDS WHAT IT STARTED (主开发 r5595: two `sleep`s outlived it on the third candidate — the husk's wrapper stand-in, never on record
+// here, orphaned when the exit hook ended the husk): every child by the HANDLE this suite holds; every process the kernel lists under this
+// one (a session's wrapper, a hanging fake) and every session wrapper on record by the BIRTH read while it was listed — never by a name.
+// On every exit road: the suite's end (counted by its last leg), a throw (the same end), the gate's stop (SIGTERM / SIGINT), the exit hook.
+const treeOf = (pid) => kidsOfP(pid).flatMap((c) => [[c, PIt.startToken(c)], ...treeOf(c)]);
+function endAll(under = null) {
+  const tree = under || treeOf(process.pid);   // births read NOW, while each is listed under this process
+  for (const k of kids) if (k.exitCode === null && k.signalCode === null) { try { k.kill('SIGKILL'); } catch { } }
+  for (const [pid, st] of [...SESS, ...tree]) if (st && PIt.startToken(pid) === st) { try { realKill(pid, 'SIGKILL'); } catch { } }
+}
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { try { endAll(); } catch { } process.exit(sig === 'SIGTERM' ? 143 : 130); });   // the gate's stop: the same end, then out
 process.kill = (pid, sig) => { if (sig !== 0 && sig !== undefined) signals.push([pid, sig]); return realKill(pid, sig); };
 const brSrc = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
 
@@ -236,6 +243,17 @@ try {
     } finally { console.warn = warnD; console.log(`  (③d: ${Date.now() - t3d} ms)`); for (const f of ['alive-pid']) { try { fs.writeFileSync(path.join(ROOT, f), String(victim.pid)); } catch { } } }
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }
+
+// THE LAST LEG (r5595), after every road above — a red leg or a throw lands here too: what this suite started is COUNTED gone
+{
+  const under = treeOf(process.pid), held = kids.filter((k) => k.exitCode === null && k.signalCode === null).length;
+  endAll(under);
+  const gone = (pid, st) => !st || PIt.startToken(pid) !== st || PIt.stateOf(pid) === 'Z';
+  const left = () => [...kids.filter((k) => k.exitCode === null && k.signalCode === null).map((k) => `child ${k.pid}`),
+    ...[...SESS, ...under].filter(([pid, st]) => !gone(pid, st)).map(([pid]) => `pid ${pid} (${cmdOf(pid).split('\u0000')[0] || '?'})`)];
+  await until(() => left().length === 0, 3000);
+  ok(under.length > 0 && left().length === 0, `THE SUITE ENDS WHAT IT STARTED (r5595): ${held} children by their handles, ${under.length} processes listed under this one and ${SESS.length} session wrappers by their births — none left`, left());
+}
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
