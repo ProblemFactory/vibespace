@@ -100,7 +100,7 @@ const NOCMD = mkShell('nocmd-shell', RUN_C("command() { echo 'command: Command n
 const ZSH = ['/usr/bin/zsh', '/bin/zsh'].find((p) => fs.existsSync(p)) || null;
 const ZALIAS = ZSH ? mkShell('zalias-shell', `while [ $# -gt 0 ]; do case "$1" in -c) shift; exec ${ZSH} -f -c "alias vs-al-cli=ls; $1";; *) shift;; esac; done`) : null;
 const asks = () => { try { return fs.readFileSync(F('asks.log'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
-const alive = (pid) => { if (!(pid > 1)) return false; try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return !/^\d+ \(.*\) Z /.test(st); } catch { return false; } };
+const alive = (pid) => { if (!(pid > 1)) return false; try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return !/^\d+ \(.*\) [ZX] /.test(st); } catch { return false; } };   // Z (a zombie) and X (dead: one its reaper is releasing) are gone (r5613's placement)
 const readPid = (n) => { try { return Number(fs.readFileSync(F(n), 'utf8').trim()) || 0; } catch { return 0; } };
 // THE DEATH, MEASURED (主开发 2026-11-20 08:58Z — the .413 cut's box-zone red: «…the shell AND its rc's leftover child are dead» judged
 // through ~1 s of 5 ms looks (the deadSoon it replaces), at load 5–6, and both were dead a moment later): the WALL CLOCK bounds the wait
@@ -124,19 +124,27 @@ const KILLED_NOT_RUN = new Set();   // the pids whose wait ended on a pending SI
 // state the old words read as «never signalled»), a pending SIGKILL, its process group and session — said at a red, the verdict
 // and the bound unchanged
 const PF_EXITING = 0x4;
-const lookAt = (pid, t0) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); const fl = Number(f[6]); return `+${Date.now() - t0} ${f[0]}${(fl & PF_EXITING) ? ' EXITING' : ''}${killPending(pid) ? ' KILL-PENDING' : ''} pg ${f[2]} sid ${f[3]}`; } catch { return `+${Date.now() - t0} gone`; } };
-const LOOKS = new Map();   // pid → { first: [the first twenty looks], last, n }
+const LOOKS = new Map();   // pid → { first: [the first twenty looks], last, n, lastMs }
 const looksOf = (pid) => { const l = LOOKS.get(pid); return l ? `${l.n} looks; the first ${l.first.length}: ${l.first.join(' · ')}${l.n > l.first.length ? ` … the last: ${l.last}` : ''}` : 'no looks'; };
+// ONE READ DECIDES EACH LOOK (r5613's PLACEMENT, 2026-11-28 — the red printed its words at 5c986db0d-20261128041155c-both: the only
+// look found a KILLED ZOMBIE «+1 Z EXITING KILL-PENDING», the wait's loop read «ended», then a SECOND read of the same look said
+// alive with nothing pending — the zombie's reaper releasing it (state X for an instant), which `alive` counted alive — and the wait
+// answered «alive» for a task the kill had ended; the line then said «ALIVE 5000 ms» from the constant, the facts a moment later
+// «gone»: the once-red of 6303f0aac and of 6931b7c9b). Each look is ONE /proc read of the task (its stat, then its status) and the
+// verdict is that look's: gone (unreadable, Z or X), or its SIGKILL pending — never read again after the loop
+const readTask = (pid) => { let st; try { st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); } catch { return { gone: true, state: 'gone' }; } const f = st.slice(st.lastIndexOf(')') + 2).split(' '); const state = f[0]; if (state === 'Z' || state === 'X') return { gone: true, state, flags: Number(f[6]), pgrp: f[2], sid: f[3] }; return { gone: false, state, flags: Number(f[6]), pgrp: f[2], sid: f[3], pending: killPending(pid) }; };
 const diedWithin = async (pid, t0, bound = DEATH_MS) => {
   if (!(pid > 1)) return null;
-  const ended = () => !alive(pid) || killPending(pid);
-  const L = { first: [], last: '', n: 0 }; LOOKS.set(pid, L);
-  const look = () => { const x = lookAt(pid, t0); L.n++; L.last = x; if (L.first.length < 20) L.first.push(x); };
-  look();
-  while (!ended() && Date.now() - t0 < bound) { await new Promise((r) => setTimeout(r, 10)); look(); }
-  if (!ended()) return null;
-  if (alive(pid)) KILLED_NOT_RUN.add(pid);
-  return Date.now() - t0;
+  const L = { first: [], last: '', n: 0, lastMs: 0 }; LOOKS.set(pid, L);
+  for (;;) {
+    const ms = Date.now() - t0, t = readTask(pid);
+    const x = t.state === 'gone' ? `+${ms} gone` : `+${ms} ${t.state}${(t.flags & PF_EXITING) ? ' EXITING' : ''}${t.pending ? ' KILL-PENDING' : ''} pg ${t.pgrp} sid ${t.sid}`;
+    L.n++; L.last = x; L.lastMs = ms; if (L.first.length < 20) L.first.push(x);
+    if (t.gone) return ms;
+    if (t.pending) { KILLED_NOT_RUN.add(pid); return ms; }
+    if (ms >= bound) return null;
+    await new Promise((r) => setTimeout(r, 10));
+  }
 };
 // a try's leftovers BY ITS OWN GROUP (the read: a try whose child pid was never written left its `sleep 60` to outlive the suite): every
 // process whose process group is that try's sleepy shell — its pid read from the file the try's own shell just wrote — AND whose command
@@ -524,7 +532,7 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
       // once) and its time is the leg's own fact; a process the product never signalled stays alive past the bound: red (⑦'s mutant)
       const [dS, dC] = a.kind !== 'GUARD' ? await Promise.all([diedWithin(sp, at, deathMs), diedWithin(sc, at, deathMs)]) : [null, null]; // the guard ended it ⇒ nobody killed them: red, reaped below
       const dead = dS !== null && dC !== null;
-      const said = (pid, d) => (a.kind === 'GUARD' ? `${pid > 1 ? pid : '(no pid written)'} not waited for (the guard answered, not the bound)` : !(pid > 1) ? 'no pid written' : `${pid} ${d === null ? (() => { const f = taskFacts(pid); return `ALIVE ${deathMs} ms after the bound answered: not gone and no SIGKILL pending at the last look (read after the wait: state ${f.state}, process group ${f.pgrp}, session ${f.session}${f.pgrp > 1 && sp > 1 && f.pgrp !== sp ? ` — NOT the probe's own group ${sp}: the product's group kill cannot reach it` : ''}) — THE PRODUCT'S KILL at the bound (the starter answered ${a.kind}:${a.why}): SIGKILL to the shell ${sp} by its own handle and to its group −${sp} (child-starter-proc.js, the session's group); the child's group at its first look: ${(() => { const m = /pg (\d+)/.exec((LOOKS.get(pid) || { first: [''] }).first[0] || ''); return m ? m[1] + (Number(m[1]) === sp ? ' (IN the signalled group)' : ' (NOT in the signalled group)') : 'not read'; })()} — ITS LOOKS: ${looksOf(pid)}`; })() : KILLED_NOT_RUN.has(pid) ? `killed ${d} ms after the bound answered (SIGKILL delivered, pending: the kernel had not run it yet — state ${taskFacts(pid).state})` : `died ${d} ms after the bound answered`}`);
+      const said = (pid, d) => (a.kind === 'GUARD' ? `${pid > 1 ? pid : '(no pid written)'} not waited for (the guard answered, not the bound)` : !(pid > 1) ? 'no pid written' : `${pid} ${d === null ? (() => { const f = taskFacts(pid); return `ALIVE at the bound: not gone and no SIGKILL pending at its last look, +${(LOOKS.get(pid) || { lastMs: '?' }).lastMs} ms after the bound answered (read after the wait: state ${f.state}, process group ${f.pgrp}, session ${f.session}${f.pgrp > 1 && sp > 1 && f.pgrp !== sp ? ` — NOT the probe's own group ${sp}: the product's group kill cannot reach it` : ''}) — THE PRODUCT'S KILL at the bound (the starter answered ${a.kind}:${a.why}): SIGKILL to the shell ${sp} by its own handle and to its group −${sp} (child-starter-proc.js, the session's group); the child's group at its first look: ${(() => { const m = /pg (\d+)/.exec((LOOKS.get(pid) || { first: [''] }).first[0] || ''); return m ? m[1] + (Number(m[1]) === sp ? ' (IN the signalled group)' : ' (NOT in the signalled group)') : 'not read'; })()} — ITS LOOKS: ${looksOf(pid)}`; })() : KILLED_NOT_RUN.has(pid) ? `killed ${d} ms after the bound answered (SIGKILL delivered, pending: the kernel had not run it yet — state ${taskFacts(pid).state})` : `died ${d} ms after the bound answered`}`);
       leg('…the shell (its pid) AND its rc\'s leftover child (its own session) are dead — or KILLED, the product\'s SIGKILL delivered and pending (a loaded kernel had not run them yet)', sp > 1 && sc > 1 && dead, `shell ${said(sp, dS)} · child ${said(sc, dC)}`);
       if (printDeaths) console.log(`    [the rc that never returns] the shell died ${dS === null ? 'NOT' : dS + ' ms'} and its leftover child ${dC === null ? 'NOT' : dC + ' ms'} after the bound answered (waited up to ${deathMs} ms)`);
       if (!dead) {   // nobody's kill ended them (a mutant, the guard): reaped here — after the shell had a bounded moment to write its pids
