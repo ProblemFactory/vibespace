@@ -22,6 +22,9 @@
 //     pending()): the fetch's own forget answers it while the copy still flies — its landing makes the folder again. (c) (r4154 (3)) a row
 //     whose only job in flight is the UNLINK after a forgotten landing: the removal does not wait for it. RED: the wait that asks
 //     before it looks (its end settles no waiter: answered by the timer, here a placed 1.2 s).
+//     (r5586) Every scene is judged where the removal LOOKS (its first stats() after hosts.json landed on the process's writer):
+//     one whose order did not form there while hosts.json's landing outlasted its placed hold is a named skip. PLACEMENT (c), kept
+//     as a control: hosts.json held 1.5 s at will reads the old judgment's red with the product unchanged, and the cured one's named skip.
 //   ⑥ the ssh rung (its whole `cat`) under ①'s placed stall: no main-thread write. RED: the release's write on that rung.
 //   ⑦ the record only after its bytes, on both rungs: a copy whose write FAILS leaves no record. RED: the failure swallowed.
 //   ⑧ a ~9 MB copy (above PIECE_BYTES, 4 MB) handed by reference in pieces, verifyByRef on: byte-equal on disk (no red control).
@@ -305,6 +308,25 @@ console.log('⑤ r4006 law E: a REMOVED machine\'s owed copy never lands its byt
   const HOLD_MS = 500;
   const R0 = Buffer.concat([lawHead, turns(0, 4, 300)]);
   const filesUnder = (dir) => { const out = []; const walk = (d) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch { return; } for (const e of es) { const q = path.join(d, e.name); if (e.isDirectory()) walk(q); else out.push(path.relative(dir, q)); } }; walk(dir); return out; };
+  // r5586 (lane bl-loop-b): WHERE THE REMOVAL LOOKS. remove() tears the machine's files down only once hosts.json LANDED on the
+  // process's own store writer (a real fsync'd write: the kit's load can hold it past a scene's placed holds), and that teardown
+  // runs in one chain of microtasks (its stats() read, the forget, the landing waits that return at once, the folder's rm): no
+  // message of the writer's thread is read inside it. So each scene is judged where the removal LOOKS: its first stats() after
+  // hosts.json landed notes each named row as the writer holds it then (in flight, dirty, owed), the durable() waits it asks for
+  // them are counted, and hosts.json's landing is timed (only calls made after the scene arms the removal)
+  const COPY_BASE = TIDR + '.jsonl';
+  const watchRemoval = (hm, W, files) => {
+    const seen = { at: null, asks: 0, saveMs: null }, inner = hm._writer;
+    let armed = false, saved = false;
+    hm._writer = new Proxy(inner, { get: (t, k) => {
+      if (k === 'stats') return () => { const rows = t.stats(); if (armed && saved && !seen.at) seen.at = Object.fromEntries(files.map((f) => { const r = rowOf(W, f); return [path.basename(f), { inflight: !!r && !!r.inflight, dirty: !!r && !!r.dirty, owed: !!W.pending(f) }]; })); return rows; };
+      if (k === 'durable') return (f, o) => { if (armed && files.includes(f)) seen.asks++; return t.durable(f, o); };
+      const x = t[k]; return typeof x === 'function' ? x.bind(t) : x;
+    } });
+    const persisted = hm.persisted.bind(hm);
+    hm.persisted = async () => { if (!armed) return persisted(); const a = performance.now(); try { return await persisted(); } finally { if (seen.saveMs === null) seen.saveMs = Math.round(performance.now() - a); saved = true; } };
+    return { seen, arm: () => { armed = true; } };
+  };
   const removedScene = async ({ shape, red = false, oneAnswer = false }) => {
     const { S, W, ctl } = standWriter();
     try {
@@ -318,10 +340,11 @@ console.log('⑤ r4006 law E: a REMOVED machine\'s owed copy never lands its byt
       if (oneAnswer) { const W0 = hm._writer; hm._writer = new Proxy(W0, { get: (t, k) => (k === 'pending' ? undefined : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) }); }
       const said = [], bytesLand = hm._landCacheBytes;
       hm._landCacheBytes = async function (...a) { try { return await bytesLand.apply(this, a); } catch (e) { said.push(`${path.basename(a[0])}: ${(e && (e.code || e.message)) || e}`); throw e; } };
+      const b1 = path.join(ctl, 'blocker-1.json'), b2 = path.join(ctl, 'blocker-2.json');
+      const watch = watchRemoval(hm, W, shape === 'queued' ? [copy, b1] : [copy]);   // r5586: read where the removal looks
       const v = {};
       let fp;
       if (shape === 'queued') {
-        const b1 = path.join(ctl, 'blocker-1.json'), b2 = path.join(ctl, 'blocker-2.json');
         S.hold('blocker-1.json', HOLD_MS);
         W.dirty(b1, { name: 'blocker-1.write', urgent: true, produce: () => '{"b":1}' });
         v.b1 = await until(() => { const r = rowOf(W, b1); return !!r && r.inflight; });
@@ -329,52 +352,86 @@ console.log('⑤ r4006 law E: a REMOVED machine\'s owed copy never lands its byt
         v.b2 = await until(() => { const r = rowOf(W, b2); return !!r && r.inflight; });
         fp = fetchR(hm);
         v.owed = await until(() => { const r = rowOf(W, copy); return !!r && r.dirty && !r.inflight; });
-        v.removed = await hm.remove('hw');
+        watch.arm(); v.removed = await hm.remove('hw');
         v.inside = (() => { const r = rowOf(W, b1); return !!r && r.inflight; })();   // blocker 1 still held: the copy was never taken
         v.ended = await until(() => { const r = rowOf(W, b2); return !!r && r.writes >= 1 && !r.inflight; }, HOLD_MS + 3000);
       } else {
         S.hold(base, HOLD_MS);
         fp = fetchR(hm);
         v.flying = await until(() => { const r = rowOf(W, copy); return !!r && r.inflight; });
-        v.removed = await hm.remove('hw');
+        watch.arm(); v.removed = await hm.remove('hw');
         v.inside = (() => { const r = rowOf(W, copy); return !!r && r.inflight; })();   // the removal ran while the copy's write was held
         v.ended = await until(() => { const r = rowOf(W, copy); return !r || (!r.inflight && r.writes >= 1); }, 2 * HOLD_MS + 3000);
       }
       const f = await Promise.race([fp, sleep(3000).then(() => ({ p: null, e: new Error('no answer in 3 s') }))]);
       await sleep(50);
       const folder = path.join(dataDir, 'remote-jsonl', 'hw');
-      return { ...v, answer: answerOf(f, copy), said, folderBack: fs.existsSync(folder), files: filesUnder(folder), rows: rowsFor(W, [copy, meta]) };
+      return { ...v, answer: answerOf(f, copy), said, folderBack: fs.existsSync(folder), files: filesUnder(folder), rows: rowsFor(W, [copy, meta]), at: watch.seen.at, asks: watch.seen.asks, saveMs: watch.seen.saveMs };
     } finally { W.stop(); }
   };
   // (c) r4154 (3): a copy's write handed to the writer (its own row, no fetch: no record follows it), forgotten IN FLIGHT by the suite
   // (as when a fetch's bound passes), lands, then its UNLINK is held as long; the removal comes while only that unlink flies: stats()
   // shows the row in flight, but nothing is owed — the removal does not wait
-  const unlinkScene = async ({ red = false } = {}) => {
+  // r5586: `holdU` the copy's write and unlink holds; `slowSave` = THE PLACEMENT's plant (hosts.json through a stand-in writer that
+  // holds it that long: the kit's load, made at will)
+  const unlinkScene = async ({ red = false, holdU = 600, slowSave = 0 } = {}) => {
     const { S, W } = standWriter();
+    const save = slowSave ? standWriter() : null;
     try {
-      const R = remote(R0, 5000), HOLD_U = 600;
+      const R = remote(R0, 5000), HOLD_U = holdU;
       const { hm, copy, base } = lawScene(HMR, { R, writer: W, ssh: async () => { throw new Error('the machine is removed'); } });
+      if (save) { hm._storeWriter = save.W; save.S.hold('hosts.json', slowSave); }
       // the RED: the cure's first wait (it asks durable() before it looks at pending()), its bound placed at 1.2 s for the suite's time
       if (red) hm._cacheLanded = async function (W2, file, until0) { const u = Math.min(until0, Date.now() + 1200); for (let k = 0; k < 8 && Date.now() < u; k++) { try { await W2.durable(file, { timeoutMs: Math.max(1, u - Date.now()) }); } catch { return; } if (typeof W2.pending !== 'function' || !W2.pending(file)) return; } };
+      const watch = watchRemoval(hm, W, [copy]);   // r5586: read where the removal looks
       S.hold(base, HOLD_U);
       W.dirty(copy, { name: 'remote-jsonl.write', urgent: true, makeDir: true, produce: () => R0 });
       const flying = await until(() => { const r = rowOf(W, copy); return !!r && r.inflight; });
       W.forget(copy);
       const unlinking = await until(() => { const r = rowOf(W, copy); return !!r && r.inflight && !W.pending(copy); }, HOLD_U + 3000);
+      watch.arm();
       const t0 = performance.now(); const removed = await hm.remove('hw'); const ms = Math.round(performance.now() - t0);
       const inside = (() => { const r = rowOf(W, copy); return !!r && r.inflight; })();   // the unlink still flying: the removal ran beside it
-      await until(() => !rowOf(W, copy), HOLD_U + 2000);
-      return { flying, unlinking, removed, ms, inside };
-    } finally { W.stop(); }
+      // the unlink's OWN landing, a fact: its row leaves the writer, waited under a stated ceiling (its hold + 5 s), red by name
+      const landed = await until(() => !rowOf(W, copy), HOLD_U + 5000);
+      return { flying, unlinking, removed, ms, inside, landed, holdU: HOLD_U, at: watch.seen.at, asks: watch.seen.asks, saveMs: watch.seen.saveMs, plant: save ? save.S.applied('hosts.json') : null };
+    } finally { W.stop(); if (save) save.W.stop(); }
   };
-  const [Ea, EaX, Eb, EbX, EbY, Ec, EcX] = await Promise.all([removedScene({ shape: 'queued' }), removedScene({ shape: 'queued', red: true }), removedScene({ shape: 'flying' }), removedScene({ shape: 'flying', red: true }), removedScene({ shape: 'flying', oneAnswer: true }), unlinkScene(), unlinkScene({ red: true })]);
-  ok(Ea.b1 && Ea.b2 && Ea.owed && Ea.removed === true && Ea.inside && Ea.ended && !Ea.folderBack && Ea.rows.length === 0, `⑤ LAW E (a), the copy QUEUED at the removal: forgotten, never written — remote-jsonl/hw does not exist after the writer's queue ran`, Ea);
-  ok(EaX.owed && EaX.inside && EaX.folderBack && EaX.files.length > 0, `⑤ RED control (a) (the release's removal: it forgets nothing and waits for nothing): the queued copy landed after the removal — the folder is back with ${EaX.files.join(', ')} (red)`, EaX);
-  ok(Eb.flying && Eb.removed === true && Eb.inside && Eb.ended && Eb.files.length === 0 && !Eb.folderBack && Eb.rows.length === 0, `⑤ LAW E (b), the copy IN FLIGHT at the removal: the removal waits for its landing (bounded), then the folder goes — remote-jsonl/hw does not exist`, Eb);
-  ok(EbX.inside && EbX.files.length > 0, `⑤ RED control (b) (the release's removal: it forgets nothing and waits for nothing): the in-flight copy stays — ${EbX.files.join(', ')} (red)`, EbX);
-  ok(EbY.flying && EbY.removed === true && EbY.inside && EbY.folderBack, `⑤ RED control (b) (the removal waiting on ONE durable() answer: the fetch's own forget answers it while the copy flies): the landing made remote-jsonl/hw again (red)`, EbY);
-  ok(Ec.flying && Ec.unlinking && Ec.removed === true && Ec.inside, `⑤ LAW E (c), only the UNLINK in flight at the removal: nothing owed — the removal ENDED WITH THE UNLINK STILL FLYING (${Ec.ms} ms; it never waits for an unlink: its end settles no waiter)`, Ec);
-  ok(EcX.unlinking && EcX.removed === true && !EcX.inside, `⑤ RED control (c) (the wait that asks before it looks): the removal ended only AFTER the unlink was over (${EcX.ms} ms), waiting to its placed bound (red)`, EcX);
+  const [Ea, EaX, Eb, EbX, EbY, Ec, EcX, Pc] = await Promise.all([removedScene({ shape: 'queued' }), removedScene({ shape: 'queued', red: true }), removedScene({ shape: 'flying' }), removedScene({ shape: 'flying', red: true }), removedScene({ shape: 'flying', oneAnswer: true }), unlinkScene(), unlinkScene({ red: true }), unlinkScene({ holdU: 200, slowSave: 1500 })]);
+  // r5586: EACH SCENE IS JUDGED WHERE ITS ORDER FORMED, at the removal's look (watchRemoval). One that did not form while hosts.json's
+  // landing outlasted the scene's placed hold is a named skip (the kit's load ran the clock past the scene: never a red, never a
+  // green); one that did not form with hosts.json landed inside that hold is RED (the order failed, not the load)
+  const look = (e, f) => (e.at && e.at[f]) || { inflight: false, dirty: false, owed: false };
+  const FORMED = {
+    queued: (e) => { const c = look(e, COPY_BASE), b = look(e, 'blocker-1.json'); return c.dirty && !c.inflight && b.inflight; },   // the copy owed behind blocker 1, still held
+    flying: (e) => { const c = look(e, COPY_BASE); return c.inflight && c.owed; },   // the copy's own write still flying
+    unlink: (e) => { const c = look(e, COPY_BASE); return c.inflight && !c.owed; },   // only its unlink flying: nothing owed
+  };
+  const WHAT = { queued: 'blocker 1 had landed (the copy no longer queued behind it)', flying: 'the copy\'s write had landed', unlink: 'the copy\'s unlink was over' };
+  const formOf = (e, shape, hold) => (FORMED[shape](e) ? 'formed' : e.saveMs !== null && e.saveMs >= hold ? 'skip' : 'red');
+  const judged = (e, shape, hold, label, setup, cond, name) => {
+    if (!setup) return ok(false, `${label}: the scene's own setup did not hold (its placed holds never showed the rows they hold)`, e);
+    const f = formOf(e, shape, hold);
+    if (f === 'formed') return ok(cond, name, e);
+    if (f === 'skip') { console.log(`  ⊘ SKIP ${label}: the scene did not form where the removal looks — hosts.json landed in ${e.saveMs} ms, past the scene's placed ${hold} ms hold, so its teardown read the writer after ${WHAT[shape]} (${JSON.stringify(e.at)})`); return null; }
+    return ok(false, `${label}: the scene did not form where the removal looks, though hosts.json landed in ${e.saveMs} ms, inside the scene's placed ${hold} ms hold — the order failed, not the load (${JSON.stringify(e.at)})`, e);
+  };
+  judged(Ea, 'queued', HOLD_MS, '⑤ LAW E (a)', Ea.b1 && Ea.b2 && Ea.owed, Ea.removed === true && Ea.inside && Ea.ended && !Ea.folderBack && Ea.rows.length === 0, `⑤ LAW E (a), the copy QUEUED at the removal: forgotten, never written — remote-jsonl/hw does not exist after the writer's queue ran`);
+  judged(EaX, 'queued', HOLD_MS, '⑤ RED control (a)', EaX.owed, EaX.inside && EaX.folderBack && EaX.files.length > 0, `⑤ RED control (a) (the release's removal: it forgets nothing and waits for nothing): the queued copy landed after the removal — the folder is back with ${EaX.files.join(', ')} (red)`);
+  judged(Eb, 'flying', HOLD_MS, '⑤ LAW E (b)', Eb.flying, Eb.removed === true && Eb.inside && Eb.ended && Eb.files.length === 0 && !Eb.folderBack && Eb.rows.length === 0, `⑤ LAW E (b), the copy IN FLIGHT at the removal: the removal waits for its landing (bounded), then the folder goes — remote-jsonl/hw does not exist`);
+  judged(EbX, 'flying', HOLD_MS, '⑤ RED control (b)', EbX.flying, EbX.inside && EbX.files.length > 0, `⑤ RED control (b) (the release's removal: it forgets nothing and waits for nothing): the in-flight copy stays — ${EbX.files.join(', ')} (red)`);
+  judged(EbY, 'flying', HOLD_MS, '⑤ RED control (b), one answer', EbY.flying, EbY.removed === true && EbY.inside && EbY.folderBack, `⑤ RED control (b) (the removal waiting on ONE durable() answer: the fetch's own forget answers it while the copy flies): the landing made remote-jsonl/hw again (red)`);
+  judged(Ec, 'unlink', Ec.holdU, '⑤ LAW E (c)', Ec.flying && Ec.unlinking, Ec.removed === true && Ec.asks === 0 && Ec.inside && Ec.landed, `⑤ LAW E (c), only the UNLINK in flight at the removal: nothing owed — its teardown met the unlink in flight, asked no wait of it (${Ec.asks}), and the removal ENDED WITH THE UNLINK STILL FLYING (${Ec.ms} ms, ${Ec.saveMs} ms of them hosts.json's landing); the unlink then landed by itself (its stated ceiling: its hold + 5 s)`);
+  judged(EcX, 'unlink', EcX.holdU, '⑤ RED control (c)', EcX.flying && EcX.unlinking, EcX.removed === true && EcX.asks >= 1 && !EcX.inside, `⑤ RED control (c) (the wait that asks before it looks): its teardown met the unlink in flight and asked ${EcX.asks} wait(s) of it; the removal ended only AFTER the unlink was over (${EcX.ms} ms), waiting to its placed bound (red)`);
+  // THE PLACEMENT, made at will and kept as a control (r5586): a952ac17a-20261128013515-both's red («the removal ENDED WITH THE UNLINK
+  // STILL FLYING» false at 1325 ms, box zone, load 33 to 37) is hosts.json's landing on the process's writer outlasting the scene's
+  // holds. Here hosts.json lands through a stand-in writer that holds it 1 500 ms, the copy's write and unlink held 200 ms each: the
+  // removal's teardown reads the writer after the unlink is over. The judgment before r5586 reads that red, the product unchanged;
+  // the judgment above names it a skip
+  const oldC = (e) => e.flying && e.unlinking && e.removed === true && e.inside;
+  const plantRead = Array.isArray(Pc.plant) && Pc.plant.includes('hold');
+  if (plantRead && FORMED.unlink(Pc)) console.log(`  ⊘ SKIP ⑤ PLACEMENT (c): the plant did not take — the copy's unlink was still in flight after hosts.json's planted 1 500 ms (${JSON.stringify(Pc.at)})`);
+  else ok(plantRead && Pc.flying && Pc.unlinking && Pc.removed === true && !oldC(Pc) && formOf(Pc, 'unlink', Pc.holdU) === 'skip' && Pc.asks === 0, `⑤ PLACEMENT (c), made at will: hosts.json held 1 500 ms on a stand-in writer (its applied: ${(Pc.plant || []).join(' ') || 'nothing'}), the copy's write and unlink 200 ms each — the removal's teardown read the writer after the unlink was over (hosts.json landed in ${Pc.saveMs} ms), so the judgment before r5586 reads it red («ended with the unlink still flying» false, ${Pc.ms} ms) while the removal asked no wait (${Pc.asks}); the judgment above names it a skip`, Pc);
 }
 
 console.log('⑥ B-0248 unit 4 on THE SSH RUNG: its whole `cat` copy is the store writer\'s too — no main-thread write under the placed stall');
