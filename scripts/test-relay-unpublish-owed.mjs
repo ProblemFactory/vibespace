@@ -456,6 +456,16 @@ console.log('U the owed row, as a person reads it (r5561)');
   const BASE_PRESS = "    _owedRetryBtn(f, api, render, btn) {\n      return btn(PORT_ICONS.globeOff, tr('Try again'), async () => {";
   ok(pressHasWords(SR), 'U4 «Try again» carries its WORDS on the button (not only a tooltip) at every width');
   ok(!pressHasWords(BASE_PRESS), 'U4 RED CONTROL (the base\'s press: an icon whose only words are its tooltip): no words on the button');
+  // U5 (r5572): the address is a LINK only when it is http(s) — a stored string of any other scheme is said as text, never an href
+  const SCHEMES = ['javascript:alert(1)', 'data:text/html,made-up', 'tcp://made-up.relay.example.test:7000', 'https://made-up-ok.relay.example.test/'];
+  const links = (M) => SCHEMES.map((u) => M.owedRowText({ forwardGone: true, hostId: '__local__', remotePort: 7150, stillUpUrl: u, unpublishOwed: { code: 'x' } }, { nameOf }));
+  const got = links(PO);
+  ok(got[0].link === null && got[1].link === null && got[2].link === null && got[3].link === SCHEMES[3] && got.every((w, i) => w.url === SCHEMES[i]),
+    'U5 the address is a LINK only when it is http(s): a javascript:, data: or tcp:// string is said as TEXT (never an href); an https address is a link', got.map((w) => w.link));
+  const POSRC = srcOf('src/lib/ports-owed.js'), poRed = path.join(dirOf('po'), 'ports-owed-any.mjs');
+  fs.writeFileSync(poRed, anchored(POSRC, "  const link = /^https?:\\/\\/[^\\s\"'<>`]+$/i.test(String(url || '')) ? url : null;", "  const link = url;   /* RED: any string a link */", 'po-any-scheme'));
+  const redLinks = links(await import(pathToFileURL(poRed).href));
+  ok(redLinks[0].link === SCHEMES[0], 'U5 RED CONTROL (every stored string a link, in a copy): a javascript: address becomes an href', redLinks.map((w) => w.link));
 }
 
 console.log('I the instance address: a refused removal is owed and retried at a start (r5334)');

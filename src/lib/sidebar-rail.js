@@ -1369,7 +1369,8 @@ export function installSidebarRail(Sidebar) {
     /** r5561: why its address is still up, then THE ADDRESS (to open) — its own line of the row, never a dim centred hint */
     _owedDetailHtml(f, nameOf) {
       const w = owedRowText(f, { nameOf, tr, why: this._owedPortWords(f), service: this._owedSvc(f) });
-      const addr = w.url ? `${escHtml(w.addressLead)} <a class="ports-owed-url" href="${escHtml(w.url)}" target="_blank" rel="noopener noreferrer">${escHtml(w.url)}</a>` : escHtml(w.addressLead);
+      const addr = w.link ? `${escHtml(w.addressLead)} <a class="ports-owed-url" href="${escHtml(w.link)}" target="_blank" rel="noopener noreferrer">${escHtml(w.url)}</a>`
+        : w.url ? `${escHtml(w.addressLead)} <span class="ports-owed-url">${escHtml(w.url)}</span>` : escHtml(w.addressLead);   // r5572: never an href but http(s)
       return `<div class="ports-owed-detail"><div class="ports-owed-why">${escHtml(w.why)}</div><div class="ports-owed-addr">${addr}</div></div>`;
     },
     /** B-73c4: a row that is nothing but an owed removal: its name, why its address is still up, «Try again» */

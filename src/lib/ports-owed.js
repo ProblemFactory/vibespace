@@ -7,5 +7,6 @@ export function owedRowText(f, { nameOf = (h) => String(h || ''), tr = fill, why
   const name = f.orphan ? tr('A relay file of this hub: {name}', { name: f.label || f.publicName || '' })
     : `${nameOf(f.hostId)}${f.targetHost ? '→' + f.targetHost : ''}:${f.remotePort}${service ? ' — ' + service : ''}`;
   const url = f.stillUpUrl || f.publicUrl || null;
-  return { name, url, addressLead: url ? tr('Its address:') : tr('Its address is written in that relay file.'), why, press: tr('Try again') };
+  const link = /^https?:\/\/[^\s"'<>`]+$/i.test(String(url || '')) ? url : null;   // r5572: a LINK only when http(s) — any other string the relay answered is said as text
+  return { name, url, link, addressLead: url ? tr('Its address:') : tr('Its address is written in that relay file.'), why, press: tr('Try again') };
 }
