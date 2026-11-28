@@ -93,7 +93,7 @@ if (P) {
     ['scripts/test-settings-view.mjs', 'the installed-CLI facts + the (h.acp || h.exe) pin + the advanced bound'], ['scripts/test-codex-pool.mjs', 'the .sort(rosterSort) count'],
     ['scripts/test-harness-spawn.mjs', 'the spawn-form leg'], ['scripts/test-quota-source.mjs', 'the registry roster + its count pin'], ['scripts/test-agent-env.mjs', 'the keyEnvVars strip (HOME guarded)'],
     ['scripts/ci.mjs', 'the fast row for the harness suite (and the real-program names)'], ['scripts/test-channels-egress.mjs', 'the host-literal rule'], ['scripts/test-record-clear-census-interp.mjs', 'the alias pass (§I, its heavy twin since B-e601 r2)'],
-    ['scripts/test-ci-gate.mjs', 'the Date.now() rule'], ['scripts/test-changelog-style.mjs', 'the bullet caps'], [`public/brand/${PROBE.id}.svg`, 'the brand svg'], ['public/index.html', 'the backend option'],
+    ['scripts/test-ci-gate-scripts.mjs', 'the Date.now() rule'], ['scripts/test-changelog-style.mjs', 'the bullet caps'], [`public/brand/${PROBE.id}.svg`, 'the brand svg'], ['public/index.html', 'the backend option'],
     ['src/lib/i18n-zh.js', 'the zh label key'], ['src/lib/i18n-ja.js', 'the ja label key'], ['docs/kb-features.md', 'the Harnesses tables + entry'],
   ];
   const absent = TRAPS.filter(([f]) => !P.text.includes(f));
@@ -138,7 +138,7 @@ const mutant = (override, exempt) => census({ repo: REPO, descriptors: DESCS, bu
   ok(!m.ok && m.missing.length === 0 && m.dead.length === 1 && m.dead[0].ids[0] === 'codex' && m.checklist.some((l) => /DEAD exemption/.test(l)), '(e) RED: a dead exemption is named (an exemption that hides nothing would hide the next gap)', m.dead);
 }
 { // (f) a rule whose needle died
-  const rel = 'scripts/test-ci-gate.mjs', src = read(rel), cut = src.split('Date.now() delta').join('a renamed rule');
+  const rel = 'scripts/test-ci-gate-scripts.mjs', src = read(rel), cut = src.split('Date.now() delta').join('a renamed rule');
   const m = mutant({ [rel]: cut });
   const r = m.rules.find((x) => x.suite === rel);
   ok(!m.ok && r && !r.alive && m.checklist.some((l) => l.includes(rel) && /NEEDLE IS GONE/.test(l)), '(f) RED: a rule whose needle moved or died is named (the checklist never lists a rule that is no longer checked)', m.checklist.filter((l) => /NEEDLE/.test(l)));

@@ -242,9 +242,9 @@ for (const m of MUTANTS) {
   const src = orig[m.file];
   if (!anchorsHold(src, m)) { console.log(`  ?? ${m.name}: PATCH DID NOT APPLY (the anchor moved — this mutation proved nothing)`); bad++; continue; }
   fs.writeFileSync(m.file, mutate(src, m));
-  // `test-ci-gate` = the gate's own gate, which is seven parts since lane fast-tier-ratchet (2026-10-20), eight since B-e381 r6: the mutation is
+  // `test-ci-gate` = the gate's own gate, which is seven parts since lane fast-tier-ratchet (2026-10-20), eight since B-e381 r6, nine since B-54a9 (r4734): the mutation is
   // held when ANY part goes red (each part runs until one does)
-  const GATE_PARTS = ['test-ci-gate', 'test-ci-gate-push', 'test-ci-gate-tiers', 'test-ci-gate-shards', 'test-ci-gate-reaper', 'test-ci-gate-hang', 'test-ci-gate-watchdog', 'test-ci-gate-hook-env', 'test-ci-gate-push-deep', 'test-ci-gate-tiers-deep'];   // the two HEAVY twins run their fast file whole with its deep legs
+  const GATE_PARTS = ['test-ci-gate', 'test-ci-gate-push', 'test-ci-gate-tiers', 'test-ci-gate-shards', 'test-ci-gate-reaper', 'test-ci-gate-hang', 'test-ci-gate-watchdog', 'test-ci-gate-hook-env', 'test-ci-gate-scripts', 'test-ci-gate-push-deep', 'test-ci-gate-tiers-deep'];   // the two HEAVY twins run their fast file whole with its deep legs
   let r = null;
   for (const name of m.suite === 'test-ci-gate' ? GATE_PARTS : [m.suite]) {
     r = spawnSync(process.execPath, [path.join(REPO, 'scripts', name + '.mjs')], { cwd: REPO, encoding: 'utf-8', timeout: 600000 });

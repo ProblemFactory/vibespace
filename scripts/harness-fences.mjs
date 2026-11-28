@@ -421,7 +421,7 @@ export const RULES = Object.freeze([
   { suite: 'scripts/test-agent-env.mjs', needle: 'keyEnvVars', what: 'every creds.keyEnvVars name is stripped from agents AND jobs — a leg per harness that declares any; never put HOME in a *EnvVar field (it would strip HOME from everything: the census guards it)' },
   { suite: 'scripts/test-channels-egress.mjs', needle: 'host literal', what: 'a vendor host literal in a wrapper / adapter that makes requests is an undecided egress: a redacted pointer, or an EXPLAINED row' },
   { suite: 'scripts/test-record-clear-census-interp.mjs', needle: 'one-level alias pass', what: 'a peer-text field copied into a local and read at a sink (even a truthiness test inside a notice) is judged — belt it or declare it. The suite is HEAVY since B-e601 r2 (§I of test-record-clear-census, moved): a lane that runs only the fast tier meets this rule at the integrator\'s heavy run, so read it before then' },
-  { suite: 'scripts/test-ci-gate.mjs', needle: 'Date.now() delta', what: 'a fast suite carries no wall-clock bound (`Date.now()` / `performance.now()` deltas): a complexity claim is a COUNT' },
+  { suite: 'scripts/test-ci-gate-scripts.mjs', needle: 'Date.now() delta', what: 'a fast suite carries no wall-clock bound (`Date.now()` / `performance.now()` deltas): a complexity claim is a COUNT' },
   { suite: 'scripts/test-changelog-style.mjs', needle: 'en 160 / zh 90 / ja 90', what: 'changelog bullets: one line each, en ≤ 160 / zh ≤ 90 / ja ≤ 90 code points, no engineering words, the next-patch heading' },
 ]);
 
